@@ -23,7 +23,7 @@ import {
   COMP_TYPES, LEASE_PERIODS, LEASE_EXPENSE_BASES, isCompType, partyLabels,
   landPricePerSf, buildingPricePerSf, leaseTotalAnnualRent, compFieldRows, compHeadline,
   compsSummaryBits, validateComp, emptyDraft, draftToComp, compToDraft, anchorCountyFlag,
-  resolveCapTriangle, sortCompsByRecency, compDateLabel,
+  resolveCapTriangle, sortCompsByRecency, compDateLabel, anchorTeamConflict,
 } from "../lib/comps.js";
 import { compMarkerColor } from "../lib/compMarkerIcon.js";
 import { collectPartyNames } from "../lib/partySuggest.js";
@@ -635,6 +635,10 @@ export default function CompsPanel({
   const save = async () => {
     const comp = draftToComp(draft);
     const errs = validateComp(comp);
+    // NEW-5 — refuse to share a comp anchored to a site plan that isn't shared with the same
+    // team, rather than silently sharing the plan out from under its owner (see anchorTeamConflict).
+    const teamConflict = anchorTeamConflict(comp, overlaysById);
+    if (teamConflict) errs.push(teamConflict);
     if (errs.length) { setErrors(errs); return; }
     setSaving(true);
     const result = draft.id ? await updateComp(draft.id, comp) : await insertComp(comp);
@@ -685,16 +689,33 @@ export default function CompsPanel({
   const closeGrid = () => { setView("list"); setArmedRowId(null); };
   const saveGridRows = async (readyRows) => {
     if (!readyRows.length) return;
+    // NEW-5 — same refusal as the single-comp form's save(), applied per row: a row pinned to a
+    // site plan that isn't shared with the row's own chosen team is held back rather than shared
+    // out from under the plan's owner. Rows without a conflict still save normally.
+    const conflictRows = readyRows.filter((r) => anchorTeamConflict(draftToComp(r.draft), overlaysById));
+    const toSave = readyRows.filter((r) => !conflictRows.includes(r));
+    if (!toSave.length) {
+      setGridSaveError(conflictRows.length === 1
+        ? "That row is pinned to a site plan that isn't shared with the chosen team — share the site plan first, or leave it unshared."
+        : `${conflictRows.length} rows are pinned to a site plan that isn't shared with the chosen team — share the site plan first, or leave them unshared.`);
+      return;
+    }
     setGridSaving(true);
     setGridSaveError(null);
-    const result = await insertComps(readyRows.map((r) => draftToComp(r.draft)));
+    const result = await insertComps(toSave.map((r) => draftToComp(r.draft)));
     setGridSaving(false);
     if (result.error) { setGridSaveError(result.error.message || "Save failed"); return; }
-    const savedIds = new Set(readyRows.map((r) => r._id));
+    const savedIds = new Set(toSave.map((r) => r._id));
     const remaining = gridRows.filter((r) => !savedIds.has(r._id));
     setGridRows(remaining);
     await reload();
-    if (remaining.length === 0) closeGrid();
+    if (conflictRows.length) {
+      setGridSaveError(conflictRows.length === 1
+        ? "1 row wasn't saved — it's pinned to a site plan that isn't shared with the chosen team."
+        : `${conflictRows.length} rows weren't saved — pinned to a site plan that isn't shared with the chosen team.`);
+    } else if (remaining.length === 0) {
+      closeGrid();
+    }
   };
 
   // B849233/NEW-2 — the KML-import path. Hand entry (openGrid above) never reaches this;

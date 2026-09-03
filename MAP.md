@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-03 @ `7e958252` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-03 @ `b1ca3977` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -287,7 +287,7 @@ _653 source files mapped._
 - **`src/shared/comps/lib/compParse.js`** — comp entry parsing (B849232): prose-line + tab-delimited spreadsheet block parsing into typed draft rows, with blocking-vs-soft uncertainty flags per cell (a lease rate with no period blocks; a k/m-suffixed number never does)
   - _exports_: `detectCompType`, `detectPasteShape`, `findDateToken`, `looksLikeSpreadsheetPaste`, `parseMagnitudeNumber`, `parsePaste`, `parsePasteBlock`, `parseProseLine`, `parseSingleRecord`, `rowHasBlockingFlags`, `splitPasteLines`
 - **`src/shared/comps/lib/comps.js`** — Leasing Comps pure model: $/SF derivation for land/building sale, lease basis normalization (annual NNN default, NNN/gross never blended), compFieldRows (the one empty-field-hides choke point), anchor validation, row<->model mapping
-  - _exports_: `ANCHOR_KINDS`, `anchorCountyFlag`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compDateLabel`, `compFieldRows`, `compHeadline`, `compsSummaryBits`, `compToDraft`, `compToRow`, `draftToComp`, `emptyDraft`, `isCompType`, `landPricePerAreaUnit`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `leaseTotalAnnualRent`, `netEffectiveLeaseRate`, `parseLeaseTermYears`, `partyLabels`, `resolveCapTriangle`, `rowToComp`, `sortCompsByRecency`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
+  - _exports_: `ANCHOR_KINDS`, `anchorCountyFlag`, `anchorTeamConflict`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compDateLabel`, `compFieldRows`, `compHeadline`, `compsSummaryBits`, `compToDraft`, `compToRow`, `draftToComp`, `emptyDraft`, `isCompType`, `landPricePerAreaUnit`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `leaseTotalAnnualRent`, `netEffectiveLeaseRate`, `parseLeaseTermYears`, `partyLabels`, `resolveCapTriangle`, `rowToComp`, `sortCompsByRecency`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
 - **`src/shared/comps/lib/compSheetColumns.js`** — pure column model for the comp-entry spreadsheet: per-cell get/set, polymorphic fields, display formatting, fill-down/paste-spill
   - _exports_: `applyCellEdit`, `BASIS_OPTIONS`, `cellPlaceholder`, `cellState`, `columnIndex`, `computeFlexWidths`, `fillDownColumn`, `formatNumberDisplay`, `frozenLeftOffsets`, `GROUPS`, `PERIOD_OPTIONS`, `sanitizeNumericInput`, `SHEET_COLUMNS`, `spillPaste`, `TYPE_OPTIONS`, `UNIT_OPTIONS`, `visibleColumnIndices`, `widthFor`
 - **`src/shared/comps/lib/compsStore.js`** — Supabase CRUD for public.comps (team-visible read, owner-only write); every call returns {data,error}, never swallows a failure
@@ -865,7 +865,7 @@ _653 source files mapped._
   - _exports_: `combineDepthToWater`, `pondGroundwaterScreen`
 - **`src/workspaces/site-planner/lib/groupCas.js`** — B1341 stage 2: the group-CAS kill switch (ships OFF; `VITE_GROUP_CAS` or the `planarfit:groupCas` device key, read at call time).
   - _exports_: `GROUP_CAS_KEY`, `groupCasEnabled`
-- **`src/workspaces/site-planner/lib/harrisTaxRates.js`** — Harris County's real, dated combined tax rate from the Comptroller's published Rates and Levies data + the same live city/ISD jurisdiction lookup the header badge uses
+- **`src/workspaces/site-planner/lib/harrisTaxRates.js`** — Harris County's real tax-rate source (NEW-1): combines `/api/taxrates` (the Comptroller's published rates) with `identifyJurisdiction`'s live city/ISD lookup into a dated, coverage-noted total. Never sums a MUD/special district it can't match to a rate.
   - _exports_: `resolveHarrisTaxRates`
 - **`src/workspaces/site-planner/lib/hcfcdWse.js`** — HCFCD MAAPnext model WSE sampler (B882, Harris County): registry-driven ImageServer getSamples for the 1% + 0.2% WSE rasters; no-op until the provisional endpoints are confirmed live. `sampleMaapnextWse`/`maapnextEndpoints`/`clearMaapnextCache`.
   - _exports_: `clearMaapnextCache`, `maapnextEndpoints`, `maapnextOutage`, `sampleMaapnextWse`

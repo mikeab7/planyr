@@ -66,6 +66,13 @@
 
 const NUM_SUFFIX = { k: 1e3, m: 1e6, mm: 1e6, thousand: 1e3, million: 1e6 };
 
+// A flat ceiling on the RAW quoted lease rate, regardless of period — $200/SF is already far
+// above any realistic industrial/office/retail figure whether quoted monthly ($2,400/yr
+// equivalent) or annually, so one number catches a missing decimal point or a unit mixup either
+// way without having to know the period first (SEVERITY-1 finding, live report: "999999999/SF/yr"
+// saved with no ceiling at all).
+const RATE_IMPLAUSIBLE_CEILING = 200;
+
 const MONTHS = {
   jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4, may: 5,
   jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8, sep: 9, sept: 9, september: 9,
@@ -265,7 +272,44 @@ function scanField(text, valueThenLabelRe, labelThenValueRe, toValue) {
   return null;
 }
 
+/** True when a captured numeric string mixes decimal and thousands separators ambiguously — a
+ * comma-group that isn't exactly 3 digits (e.g. "234,56") is almost certainly a EUROPEAN decimal
+ * ("234,56" = 234.56) misread as US thousands grouping, corrupting the value by orders of
+ * magnitude while looking perfectly plausible (SEVERITY-1 live report: "1.234,56" read as
+ * 23,456 — ~19,000x too high, with the malformed reading fully believable on its own). Never
+ * guessed either way — the caller refuses the number rather than picking a reading. */
+function hasAmbiguousGrouping(rawNumStr) {
+  const s = String(rawNumStr || "");
+  if (!s.includes(",")) return false;
+  // Validate only the INTEGER portion's comma groups — a genuine US-formatted number can carry a
+  // decimal tail after its last group ("4,150,000.00"), which is not itself a grouping digit and
+  // must not be checked as one.
+  const dot = s.indexOf(".");
+  const intPart = dot === -1 ? s : s.slice(0, dot);
+  const groups = intPart.split(",");
+  for (let i = 1; i < groups.length; i++) {
+    if (!/^\d{3}$/.test(groups[i])) return true;
+  }
+  return false;
+}
+
+/** True when the numeric token matched at `index` within `text` is immediately (TIGHTLY, no
+ * whitespace) preceded by a bare "-" its own regex doesn't capture — a DROPPED negative sign
+ * (SEVERITY-1 live report: "-5.00/SF/yr" silently read as $5). Deliberately does NOT skip
+ * whitespace: this corpus's own convention for separating clauses is a spaced dash
+ * ("3.2 AC land - $850k - Jan 2026"), which is not a sign and must never be read as one — only a
+ * "-" glued directly onto the digits is. `text` is always position-aligned with the record's
+ * original line — `blank()` only ever replaces an already-claimed span with spaces of equal
+ * length, never removes characters — so an index into a partially-blanked working copy is still
+ * a valid index into the original text. Also excludes a "-" sandwiched between two digits (a
+ * date or a range, not a sign). */
+function precededByDroppedMinus(text, index) {
+  if (index <= 0 || text[index - 1] !== "-") return false;
+  return !/\d/.test(text[index - 2] || "");
+}
+
 function moneyVal(rawNum, rawSuffix) {
+  if (hasAmbiguousGrouping(rawNum)) return { value: null, soft: false, invalid: true };
   const n = Number(String(rawNum).replace(/,/g, ""));
   if (!Number.isFinite(n)) return null;
   const suffix = rawSuffix?.toLowerCase();
@@ -273,6 +317,13 @@ function moneyVal(rawNum, rawSuffix) {
   // Round off float dust (4.15 * 1e6 is 4150000.0000000005 in IEEE 754) — every dollar figure
   // here is currency, never needs sub-cent precision.
   return { value: Math.round(n * mult * 100) / 100, soft: !!suffix };
+}
+
+/** Wraps a successful money-regex match with the shared negative-sign and ambiguous-grouping
+ * checks, so every rate/price call site gets both for free rather than each reimplementing them. */
+function wrapMoneyMatch(t, m) {
+  const mv = moneyVal(m[1], m[2]);
+  return { ...mv, working: blank(t, m), negative: precededByDroppedMinus(t, m.index), rawMatch: m[0] };
 }
 
 /* ---- TI (tenant-improvement allowance) ----------------------------------------------------- */
@@ -421,15 +472,17 @@ function findTermBare(text) {
 const SIZE_RE = /(?<![\d.])(?<!\$\s{0,3})\b([\d,]*\.?\d+)\s*(k|m|mm)?\s*(ac|acres?|sf|square\s*feet)\b/i;
 
 function findSizeToken(text) {
-  const m = String(text || "").match(SIZE_RE);
+  const t = String(text || "");
+  const m = t.match(SIZE_RE);
   if (!m) return null;
+  if (hasAmbiguousGrouping(m[1])) return { value: null, unit: null, invalid: true, working: blank(t, m), rawMatch: m[0] };
   let n = Number(m[1].replace(/,/g, ""));
   if (!Number.isFinite(n)) return null;
   const suffix = m[2]?.toLowerCase();
   const soft = !!suffix;
   if (suffix) n *= NUM_SUFFIX[suffix];
   const unit = m[3].toLowerCase().startsWith("ac") ? "ac" : "sf";
-  return { value: n, unit, soft, working: blank(text, m) };
+  return { value: n, unit, soft, working: blank(t, m), negative: precededByDroppedMinus(t, m.index), rawMatch: m[0] };
 }
 
 /* ---- rate + price (the ambiguous, low-priority detectors — run LAST) ------------------------ */
@@ -470,16 +523,19 @@ const RATE_MAGNITUDE_FALLBACK_RE = /(?<![\d.])\$?\s*(\d{0,3}\.\d+)\b(?!\s*%)(?!\
 function findRateToken(text) {
   const t = String(text || "");
   let m = t.match(RATE_SF_RE);
-  if (m) return { ...moneyVal(m[1], m[2]), working: blank(t, m) };
+  if (m) return wrapMoneyMatch(t, m);
   m = t.match(CENTS_RE);
-  if (m) return { value: round2(Number(m[1]) / 100), soft: false, working: blank(t, m) };
+  if (m) return { value: round2(Number(m[1]) / 100), soft: false, working: blank(t, m), negative: precededByDroppedMinus(t, m.index), rawMatch: m[0] };
   m = t.match(RATE_BARE_MONTHLY_RE);
-  if (m) return { ...moneyVal(m[1], m[2]), working: blank(t, m) };
+  if (m) return wrapMoneyMatch(t, m);
   m = t.match(RATE_DOLLAR_PERIOD_RE);
-  if (m) return { ...moneyVal(m[1], m[2]), working: blank(t, m) };
+  if (m) return wrapMoneyMatch(t, m);
   if (LEASE_WORDS.test(t) || BASIS_RE.test(t)) {
     m = t.match(RATE_BARE_CONTEXT_RE);
-    if (m) return { value: round2(Number(m[1].replace(/,/g, ""))), soft: false, working: blank(t, m) };
+    if (m) {
+      if (hasAmbiguousGrouping(m[1])) return { value: null, soft: false, invalid: true, working: blank(t, m), rawMatch: m[0] };
+      return { value: round2(Number(m[1].replace(/,/g, ""))), soft: false, working: blank(t, m), negative: precededByDroppedMinus(t, m.index), rawMatch: m[0] };
+    }
   }
   m = t.match(RATE_MAGNITUDE_FALLBACK_RE);
   if (m) {
@@ -487,6 +543,7 @@ function findRateToken(text) {
     if (n >= 0.10 && n < 5) {
       return {
         value: round2(n), soft: true, working: blank(t, m),
+        negative: precededByDroppedMinus(t, m.index), rawMatch: m[0],
         reason: "Read as a bare number with no $ sign or unit — assumed a monthly $/SF rate by its size. Check it.",
       };
     }
@@ -517,16 +574,37 @@ function findSaleUnitPrice(text, context) {
   return null;
 }
 
+// A bare comma-integer with a "price" label nearby ("1,200,000 price", "price: 1,200,000",
+// "sale price of $1,200,000", "sold for 1.2M") is corroborated by the WORD even with no "$" and
+// no magnitude suffix — the same "label is corroboration" treatment TI/NOI/cap rate already get
+// below, closing the gap where a labelled price fell all the way through to
+// `findPriceToken`'s bare-number refusal and was lost to notes (SEVERITY-1 live report).
+const PRICE_LABEL_RE = /(?:sale\s*price|purchase\s*price|asking\s*price|list\s*price|sold\s*for|\bprice\b)/i;
+const PRICE_VALUE_THEN_LABEL_RE = new RegExp(`\\$?\\s*([\\d,]*\\.?\\d+)\\s*(k|m|mm|thousand|million)?\\s*(?:${PRICE_LABEL_RE.source})`, "i");
+const PRICE_LABEL_THEN_VALUE_RE = new RegExp(`(?:${PRICE_LABEL_RE.source})\\s*(?:of|:|is|was)?\\s*\\$?\\s*([\\d,]*\\.?\\d+)\\s*(k|m|mm|thousand|million)?`, "i");
+
+/** A "price"-labelled number, both directions — the one corroboration `findPriceToken`'s own
+ * bare-number path deliberately refuses to accept on its own. Returns the same shape
+ * `wrapMoneyMatch` does, or null. */
+function findLabeledPrice(text) {
+  const t = String(text || "");
+  const m = t.match(PRICE_VALUE_THEN_LABEL_RE) || t.match(PRICE_LABEL_THEN_VALUE_RE);
+  return m ? wrapMoneyMatch(t, m) : null;
+}
+
 function findPriceToken(text) {
-  // A price needs SOME corroboration beyond a bare number — an explicit "$" or a magnitude
-  // suffix (k/m/mm/thousand/million). A totally bare comma-integer with neither is exactly the
-  // "genuinely ambiguous" case the disambiguation rule says to leave blank rather than guess
-  // (it reads identically to an unlabeled SIZE).
-  const m = String(text || "").match(/\$\s*([\d,]*\.?\d+)\s*(k|m|mm|thousand|million)?\b|\b([\d,]*\.?\d+)\s*(k|m|mm|thousand|million)\b/i);
+  // A price needs SOME corroboration beyond a bare number — an explicit "$", a magnitude suffix
+  // (k/m/mm/thousand/million), or a "price" label (findLabeledPrice, tried first by the caller).
+  // A totally bare comma-integer with none of those is exactly the "genuinely ambiguous" case the
+  // disambiguation rule says to leave blank rather than guess (it reads identically to an
+  // unlabeled SIZE).
+  const t = String(text || "");
+  const m = t.match(/\$\s*([\d,]*\.?\d+)\s*(k|m|mm|thousand|million)?\b|\b([\d,]*\.?\d+)\s*(k|m|mm|thousand|million)\b/i);
   if (!m) return null;
   const rawNum = m[1] ?? m[3];
   const rawSuffix = m[2] ?? m[4];
-  return { ...moneyVal(rawNum, rawSuffix), working: blank(text, m) };
+  const mv = moneyVal(rawNum, rawSuffix);
+  return { ...mv, working: blank(t, m), negative: precededByDroppedMinus(t, m.index), rawMatch: m[0] };
 }
 
 /* ---- dates: execution vs commencement -------------------------------------------------------- */
@@ -595,6 +673,22 @@ function addNote(g, text) {
 function addRecognizedNote(g, text) {
   addNote(g, text);
   g.hadRecognizedNote = true;
+}
+
+/** SEVERITY-1 finding (live report, 2026-09-02): a dropped negative sign ("-5.00/SF/yr" ->
+ * silently $5) or an ambiguous decimal/thousands grouping ("1.234,56" -> silently 23,456, a
+ * ~19,000x error) must never populate a field with a value that LOOKS fine but silently isn't —
+ * the textbook BLOCKING case (the risk isn't visible in the shown value). Neither is guessed:
+ * the field is left genuinely blank, the exact raw text is preserved in notes so nothing
+ * vanishes, and a blocking flag keeps the row out of "ready to save" until a person re-enters
+ * the number by hand. */
+function flagUnreadableNumber(generic, flags, fieldKey, hit, label) {
+  addRecognizedNote(generic, hit.invalid
+    ? `${label}: couldn't read "${hit.rawMatch}" safely — ambiguous number format (mixed decimal/thousands separators). Enter it manually.`
+    : `${label}: read "${hit.rawMatch}" — a negative amount isn't valid here and the sign was dropped. Enter the correct number manually.`);
+  mergeFlag(flags, fieldKey, "blocking", hit.invalid
+    ? "Ambiguous number format (decimal vs. thousands separator) — check and re-enter."
+    : "A negative sign was found and dropped — check and re-enter.");
 }
 
 /** The scavenger core, shared by every unlabeled line in every shape (single-record AND the
@@ -678,9 +772,13 @@ function extractUnlabeledLine(generic, flags, rawLine, recordContext) {
   if (generic.sizeValue == null) {
     const sizeHit = findSizeToken(working);
     if (sizeHit) {
-      generic.sizeValue = sizeHit.value;
-      generic.sizeUnit = sizeHit.unit;
-      if (sizeHit.soft) mergeFlag(flags, "sizeValue", "soft", "Had a k/m suffix — check the expanded value.");
+      if (sizeHit.invalid || sizeHit.negative) {
+        flagUnreadableNumber(generic, flags, "sizeValue", sizeHit, "Size");
+      } else {
+        generic.sizeValue = sizeHit.value;
+        generic.sizeUnit = sizeHit.unit;
+        if (sizeHit.soft) mergeFlag(flags, "sizeValue", "soft", "Had a k/m suffix — check the expanded value.");
+      }
       working = sizeHit.working;
       claimedAnything = true;
     }
@@ -703,23 +801,32 @@ function extractUnlabeledLine(generic, flags, rawLine, recordContext) {
   if (generic.rate == null) {
     const rateHit = findRateToken(working);
     if (rateHit) {
-      generic.rate = rateHit.value;
-      if (rateHit.soft) mergeFlag(flags, "rate", "soft", rateHit.reason || "Had a k/m suffix — check the expanded value.");
-      generic.ratePeriod = generic.ratePeriod || detectPeriod(line);
-      const basisWord = generic.rateBasis ? null : working.match(BASIS_NNN_RE) || working.match(BASIS_GROSS_RE);
-      // B986096 (owner report, 2026-09-02) — detectPeriod reads the ORIGINAL `line` to set
-      // ratePeriod, but that alone never removes the matched word from `working`. When the period
-      // is part of a COMPOUND rate match (".56/SF/mo") it's already blanked via `rateHit.working`
-      // below; a STANDALONE period word elsewhere on the line (".56/SF NNN annual") never was,
-      // and leaked verbatim into Notes even though it was genuinely recognized and consumed. Same
-      // "claim it, blank it" contract as basisWord right above — a consumed token must not also
-      // survive in Notes.
-      const periodWord = working.match(PERIOD_RE);
-      generic.rateBasis = generic.rateBasis || detectBasis(line);
-      working = rateHit.working;
-      if (basisWord) working = blank(working, basisWord);
-      if (periodWord) working = blank(working, periodWord);
-      claimedAnything = true;
+      if (rateHit.invalid || rateHit.negative) {
+        // Deliberately does NOT also claim period/basis words here — with no rate value to pair
+        // them with, they're more useful left visible in notes so a person re-entering the rate
+        // by hand has the full original context ("NNN annual") in front of them.
+        flagUnreadableNumber(generic, flags, "rate", rateHit, "Rate");
+        working = rateHit.working;
+        claimedAnything = true;
+      } else {
+        generic.rate = rateHit.value;
+        if (rateHit.soft) mergeFlag(flags, "rate", "soft", rateHit.reason || "Had a k/m suffix — check the expanded value.");
+        generic.ratePeriod = generic.ratePeriod || detectPeriod(line);
+        const basisWord = generic.rateBasis ? null : working.match(BASIS_NNN_RE) || working.match(BASIS_GROSS_RE);
+        // B986096 (owner report, 2026-09-02) — detectPeriod reads the ORIGINAL `line` to set
+        // ratePeriod, but that alone never removes the matched word from `working`. When the period
+        // is part of a COMPOUND rate match (".56/SF/mo") it's already blanked via `rateHit.working`
+        // below; a STANDALONE period word elsewhere on the line (".56/SF NNN annual") never was,
+        // and leaked verbatim into Notes even though it was genuinely recognized and consumed. Same
+        // "claim it, blank it" contract as basisWord right above — a consumed token must not also
+        // survive in Notes.
+        const periodWord = working.match(PERIOD_RE);
+        generic.rateBasis = generic.rateBasis || detectBasis(line);
+        working = rateHit.working;
+        if (basisWord) working = blank(working, basisWord);
+        if (periodWord) working = blank(working, periodWord);
+        claimedAnything = true;
+      }
     }
   }
 
@@ -734,10 +841,14 @@ function extractUnlabeledLine(generic, flags, rawLine, recordContext) {
   }
 
   if (generic.price == null && generic.rate == null) {
-    const priceHit = findPriceToken(working);
+    const priceHit = findLabeledPrice(working) || findPriceToken(working);
     if (priceHit) {
-      generic.price = priceHit.value;
-      if (priceHit.soft) mergeFlag(flags, "price", "soft", "Had a k/m suffix — check the expanded value.");
+      if (priceHit.invalid || priceHit.negative) {
+        flagUnreadableNumber(generic, flags, "price", priceHit, "Price");
+      } else {
+        generic.price = priceHit.value;
+        if (priceHit.soft) mergeFlag(flags, "price", "soft", "Had a k/m suffix — check the expanded value.");
+      }
       working = priceHit.working;
       claimedAnything = true;
     }
@@ -788,10 +899,24 @@ function finalizeGenericRow(generic, rawFlags, raw) {
   const flags = {};
   for (const [k, v] of Object.entries(rawFlags)) flags[remapFlagKey(k, generic.compType)] = v;
 
-  if (generic.compType === "lease" && generic.rate != null) {
-    if (!generic.ratePeriod) {
-      mergeFlag(flags, "leaseRatePeriod", "blocking",
-        `No monthly/annual period was given — $${generic.rate} means something 12x different either way. Pick one before saving.`);
+  if (generic.compType === "lease") {
+    if (generic.rate != null) {
+      if (!generic.ratePeriod) {
+        mergeFlag(flags, "leaseRatePeriod", "blocking",
+          `No monthly/annual period was given — $${generic.rate} means something 12x different either way. Pick one before saving.`);
+      }
+      // SEVERITY-1 finding (live report, 2026-09-02): a $0 rate and an implausibly huge one both
+      // saved silently, with no ceiling at all ("999999999/SF/yr" went straight through). Both
+      // are SOFT, not blocking — the shown number IS what was typed, correctable at a glance, not
+      // a hidden-risk case like the dropped-sign/ambiguous-grouping ones below — but neither may
+      // pass through unremarked: a genuine $0 deal (an incentive/abated comp) and a fat-fingered
+      // decimal point look identical to a machine, so both get a visible amber note.
+      if (generic.rate === 0) {
+        mergeFlag(flags, "leaseRate", "soft", "Rate reads $0 — confirm this is correct (e.g. an incentive/abated deal), not a missing value.");
+      } else if (generic.rate > RATE_IMPLAUSIBLE_CEILING) {
+        mergeFlag(flags, "leaseRate", "soft",
+          `$${generic.rate}/SF/${generic.ratePeriod === "monthly" ? "mo" : "yr"} is far above a realistic rate — check for a missing decimal point or a unit mismatch.`);
+      }
     }
     // ⛔ B986096 ×9 (owner amendment, 2026-09-02) — BASIS defaults to NNN when the text doesn't
     // say, because industrial leases are overwhelmingly triple-net and a gross deal is the
@@ -801,7 +926,10 @@ function finalizeGenericRow(generic, rawFlags, raw) {
     // collapsing the two into one rule would be exactly the mistake this distinction exists to
     // prevent. No flag, no note, no marker: a defaulted NNN renders identically to a stated one
     // (the owner has already rejected an unexplained asterisk/badge once, and a live soft flag
-    // here would render exactly the tooltip/ProblemsList sentence he ruled out).
+    // here would render exactly the tooltip/ProblemsList sentence he ruled out). Applies whenever
+    // the row is typed as a lease — independent of whether a rate was successfully read — so
+    // `genericToDraft`'s unconditional `d.leaseRateExpense = generic.rateBasis` never regresses
+    // to a raw `null` (rather than the blank-string convention every other unset field uses).
     if (!generic.rateBasis) generic.rateBasis = "nnn";
   }
   // ⛔ B986096-HARDENING-8 (owner correction, reversing HARDENING-6's stand-in) — EXECUTION and

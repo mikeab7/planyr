@@ -5,7 +5,7 @@ import {
   validAnchor, validateComp, rowToComp, compToRow,
   landPricePerAreaUnit, parseLeaseTermYears, netEffectiveLeaseRate,
   anchorCountyFlag, resolveCapTriangle, emptyDraft, draftToComp, compToDraft,
-  sortCompsByRecency, compDateLabel,
+  sortCompsByRecency, compDateLabel, anchorTeamConflict,
 } from "../src/shared/comps/lib/comps.js";
 import { collectPartyNames, matchPartyNames } from "../src/shared/comps/lib/partySuggest.js";
 import { todayIso } from "../src/shared/comps/lib/compDates.js";
@@ -551,6 +551,31 @@ describe("comps: create/edit validation", () => {
     expect(validateComp({ compType: "land", anchor: { kind: "pin", lat: 1, lon: 1 } })).toEqual([]);
     expect(validateComp({ compType: "land", compDate: "", anchor: { kind: "pin", lat: 1, lon: 1 } })).toEqual([]);
     expect(validateComp({ compType: "land", compDate: null, anchor: { kind: "pin", lat: 1, lon: 1 } })).toEqual([]);
+  });
+});
+
+describe("comps: anchorTeamConflict — a shared comp pinned to an unshared site plan (adversarial review NEW-5)", () => {
+  const siteplanComp = (teamId) => ({
+    teamId,
+    anchor: { kind: "site_plan", sitePlanOverlayId: "ov1", sitePlanPoint: { x: 1, y: 2 } },
+  });
+  const overlaysById = { ov1: { id: "ov1", teamId: "team-a" } };
+
+  it("blocks sharing a comp whose overlay isn't shared with the same team", () => {
+    expect(anchorTeamConflict(siteplanComp("team-b"), overlaysById)).toMatch(/isn't shared/);
+  });
+  it("allows it once the overlay is shared with the SAME team", () => {
+    expect(anchorTeamConflict(siteplanComp("team-a"), overlaysById)).toBeNull();
+  });
+  it("never blocks an unshared (private) comp — teamId null means nothing to conflict over", () => {
+    expect(anchorTeamConflict(siteplanComp(null), overlaysById)).toBeNull();
+  });
+  it("never blocks a pin/parcel-anchored comp — the conflict only exists for a site-plan anchor", () => {
+    expect(anchorTeamConflict({ teamId: "team-b", anchor: { kind: "pin", lat: 1, lon: 1 } }, overlaysById)).toBeNull();
+  });
+  it("never guesses when the overlay isn't in the loaded map — no false positive from missing information", () => {
+    expect(anchorTeamConflict(siteplanComp("team-b"), {})).toBeNull();
+    expect(anchorTeamConflict(siteplanComp("team-b"), null)).toBeNull();
   });
 });
 

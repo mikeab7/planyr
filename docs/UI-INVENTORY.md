@@ -395,8 +395,8 @@ look aligned because they float over the same surface.
 | 6px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Sites1 ×1 | unattributed (no source match — best-effort text search) |
 | 6px | 22px | 12px | 700 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Comps0 ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 25px | 10.5px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | + Upload site plan ×1 | src/shared/sitePlans/components/SitePlansSection.jsx:742:        {!flow && <Button size="sm" variant="ghost" onClick={startNewUpload}>+ Upload site plan</Button>} |
-| 6px | 24px | 10.5px | 700 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Paste comps from a broker email or spreadsheet ×1 | src/shared/comps/components/CompsPanel.jsx:760:                <button onClick={openGrid} title="Paste comps from a broker email or spreadsheet" |
-| 6px | 24px | 10.5px | 700 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Import a Google My Maps export ×1 | src/shared/comps/components/CompsPanel.jsx:766:                <label title="Import a Google My Maps export" |
+| 6px | 24px | 10.5px | 700 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Paste comps from a broker email or spreadsheet ×1 | src/shared/comps/components/CompsPanel.jsx:781:                <button onClick={openGrid} title="Paste comps from a broker email or spreadsheet" |
+| 6px | 24px | 10.5px | 700 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Import a Google My Maps export ×1 | src/shared/comps/components/CompsPanel.jsx:787:                <label title="Import a Google My Maps export" |
 | 8px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Imagery & layers ×1 | src/shared/ui/controls.jsx:44: * chip — the account pill, "Drop a pin", the collapsed "Imagery & layers" pill, the nav tabs' (+5 more matches, best-effort) |
 
@@ -428,8 +428,8 @@ look aligned because they float over the same surface.
 | 6px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Sites1 ×1 | unattributed (no source match — best-effort text search) |
 | 6px | 22px | 12px | 700 | `rgb(29, 32, 39)` | `0px none rgb(232, 235, 240)` | Comps0 ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 25px | 10.5px | 600 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | + Upload site plan ×1 | src/shared/sitePlans/components/SitePlansSection.jsx:742:        {!flow && <Button size="sm" variant="ghost" onClick={startNewUpload}>+ Upload site plan</Button>} |
-| 6px | 24px | 10.5px | 700 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Paste comps from a broker email or spreadsheet ×1 | src/shared/comps/components/CompsPanel.jsx:760:                <button onClick={openGrid} title="Paste comps from a broker email or spreadsheet" |
-| 6px | 24px | 10.5px | 700 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Import a Google My Maps export ×1 | src/shared/comps/components/CompsPanel.jsx:766:                <label title="Import a Google My Maps export" |
+| 6px | 24px | 10.5px | 700 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Paste comps from a broker email or spreadsheet ×1 | src/shared/comps/components/CompsPanel.jsx:781:                <button onClick={openGrid} title="Paste comps from a broker email or spreadsheet" |
+| 6px | 24px | 10.5px | 700 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Import a Google My Maps export ×1 | src/shared/comps/components/CompsPanel.jsx:787:                <label title="Import a Google My Maps export" |
 | 8px | 30px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Imagery & layers ×1 | src/shared/ui/controls.jsx:44: * chip — the account pill, "Drop a pin", the collapsed "Imagery & layers" pill, the nav tabs' (+5 more matches, best-effort) |
 
