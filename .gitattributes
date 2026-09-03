@@ -1,15 +1,54 @@
 # MAP.md and BACKLOG_OPEN.md are fully GENERATED (scripts/build-map.mjs / build-backlog-index.mjs)
 # and are regenerated on nearly every PR, so they conflict by construction on a busy day (NEW-1).
-# `merge=planyr-ledger` hands any 3-way merge of these two paths to a custom driver that
-# reconciles both sides and regenerates, instead of asking a human to.
 #
-# The driver's actual COMMAND lives in local git config (`merge.planyr-ledger.driver`), not here —
-# `.gitattributes` is committed, but merge.<name>.driver is a per-clone setting git refuses to
-# store in the repo. It is wired automatically by `npm install` / `npm run hooks:install`
-# (scripts/install-hooks.mjs — the same self-installer that arms the mint-gate pre-push hook).
+# ⛔ B1102688 (2026-09-03) — THE LINES BELOW USED TO NAME `merge=planyr-ledger` DIRECTLY. That name
+# is a CUSTOM driver: git refuses to let `.gitattributes` carry the actual command (`merge.<name>
+# .driver` is local-only config — a repo cannot be allowed to make an arbitrary clone execute an
+# arbitrary command with zero action from whoever is cloning it), so a clone that has never run
+# `npm install` — every fresh agent container, every fresh CI checkout — silently fell back to an
+# ORDINARY 3-way text merge, with no warning at all. Both files are wholly rewritten on nearly
+# every regeneration, so that fallback conflicts by construction. Measured cost the night this was
+# fixed: two real PRs sat with `mergeable_state: dirty`, GitHub withholding every required check
+# ("Expected — waiting for status to be reported") indefinitely — reading exactly like a CI outage.
 #
-# If a conflict on either file ever shows ordinary git markers instead of resolving itself, the
-# local config is missing: run `npm run hooks:install` (or `node scripts/install-hooks.mjs --check`
-# to confirm) and see scripts/merge-driver-ledgers.mjs.
-MAP.md merge=planyr-ledger
-BACKLOG_OPEN.md merge=planyr-ledger
+# THE FIX, two layers:
+#   1. The line below now names git's own BUILT-IN `union` driver (gitattributes(5) — no local
+#      config, works in a bare fresh clone; proved in test/freshCloneMerge.test.js). Since both
+#      files are wholly DERIVED from other inputs, a union merge can never be wrong in a way that
+#      matters: whatever it leaves is corrected the instant the real generator runs again, which
+#      `scripts/post-merge-regen.mjs` (the `.githooks/post-merge` hook) already does after every
+#      merge, unconditionally, regardless of which driver produced the merged content.
+#   2. `npm install` (or `npm run hooks:install`) UPGRADES this invisibly: `scripts/install-hooks.
+#      mjs` writes a LOCAL, uncommitted `.git/info/attributes` override pointing these same two
+#      paths at the smarter custom driver instead (`merge=planyr-ledger` — inline regeneration
+#      during the merge itself, the B384432 hand-authored-description safety check, and the
+#      ability to leave a REAL conflict for a human if regeneration fails outright, which the
+#      built-in `union` default can never do). `.git/info/attributes` takes precedence over this
+#      file for exactly the same reason `merge.<name>.driver` is local-only: it is per-clone,
+#      uncommitted config, so writing to it needs no different trust boundary than the merge
+#      driver command this repo already relies on installers to wire up.
+#
+# So: no install → safe, zero-config `union` (this file, alone, is sufficient — no conflict is
+# ever shown). Installed → the exact same smart behavior this repo already had, unchanged, proven
+# by test/mergeDriverE2E.test.js. See scripts/install-hooks.mjs for the override-writing code.
+MAP.md merge=union
+BACKLOG_OPEN.md merge=union
+
+# docs/archive/BACKLOG-DONE.md is hand-authored, APPEND-ONLY history (never derived from anything,
+# unlike the pair above), so it gets git's zero-config `union` driver directly — no local-override
+# upgrade exists or is planned for it. Two branches each ARCHIVING a different newly-shipped item
+# (the overwhelming majority of its conflicts, and the only kind git ever showed a raw conflict for
+# before this fix) union safely: both entries land, nothing is lost, no config needed anywhere.
+# The one case union cannot get right — two branches editing the exact SAME already-closed entry,
+# rather than each adding a new one — is rare for a file nothing acts on further, and is caught
+# LOUDLY rather than silently: `test/idUniqueness.test.js`'s cross-file collision guard scans this
+# file's B#/V# headings and fails the build on any duplicate, naming the id. That is a materially
+# different, and better, failure mode than the raw conflict this replaces: before, GitHub withheld
+# every required check indefinitely with no clear cause; now, the PR merges and either passes, or
+# fails on a specific, named, fixable line.
+#
+# BACKLOG.md / VERIFICATION.md / docs/archive/VERIFICATION-DONE.md deliberately stay OFF this —
+# see scripts/resolve-ledgers.mjs's header for why a silent duplicate is a correctness failure in
+# the file that is the single source of truth for what is still OPEN, in a way it is not for
+# already-closed history. Do not widen this file to cover them without re-reading that reasoning.
+docs/archive/BACKLOG-DONE.md merge=union

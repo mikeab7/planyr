@@ -6,17 +6,21 @@
  * day any PR open more than ~20 minutes conflicts on them by construction — PR #1245 hit it twice
  * in one session. The fix has TWO layers (see scripts/merge-driver-ledgers.mjs's header for why
  * neither alone is both safe and complete):
- *   - `scripts/merge-driver-ledgers.mjs`, wired via `.gitattributes` + local git config, so
- *     MAP.md/BACKLOG_OPEN.md never SHOW a conflict in the common case;
+ *   - `scripts/merge-driver-ledgers.mjs`, wired via a LOCAL `.git/info/attributes` override +
+ *     local git config on top of the committed `.gitattributes`' zero-config `union` floor
+ *     (B1102688 — see that file's header for why the smart driver can never be config-free by
+ *     itself), so MAP.md/BACKLOG_OPEN.md never SHOW a conflict in the common case, installed or not;
  *   - `scripts/post-merge-regen.mjs`, wired via the `.githooks/post-merge` hook, which corrects
  *     the driver's necessarily-partial mid-merge view once the merge has fully resolved and the
  *     working tree is complete — staging the fix (never amending; see that script's header for
  *     why an amend from inside the hook itself is unsafe) so it is a `git status` away.
  * `test/mergeDriverLedgers.test.js` pins the driver's own decision core against stub generators;
- * this file proves the COMPOSED path — real `.gitattributes`, real local git config, a real
+ * this file proves the COMPOSED path on a clone with the FULL install run (`installAll` below) —
+ * real `.gitattributes`, real local git config, a real local attributes override, a real
  * `.githooks/post-merge`, a real `git merge`, the REAL `build-map.mjs` / `build-backlog-index.mjs`
  * — actually reaches both layers and leaves the working tree in the state a person merging a real
- * PR would see.
+ * PR would see. `test/freshCloneMerge.test.js` proves the OTHER end: the same conflicts, on a
+ * clone that has run NONE of this, still merge cleanly via the committed `union` floor alone.
  *
  * HERMETIC ANYWAY. Every repo here is a fresh `git init` in a temp dir; nothing pushes to or reads
  * from this repo's own remote. The generator + driver + hook scripts are copied byte-for-byte from
@@ -42,7 +46,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmo
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { installMergeDriver, installHooks, HOOKS_DIR, REQUIRED_HOOKS } from "../scripts/install-hooks.mjs";
+import { installMergeDriver, installHooks, installAttributesOverride, HOOKS_DIR, REQUIRED_HOOKS } from "../scripts/install-hooks.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const INSTALL_CLI = join(REPO, "scripts", "install-hooks.mjs");
@@ -75,9 +79,9 @@ function seedHooks(dir) {
   }
 }
 
-/** A fresh repo with scripts + `.gitattributes` + hooks seeded, and BOTH the merge driver AND the
- *  post-merge backstop wired via the real installers — exactly the state a real `npm install`
- *  leaves a clone in. */
+/** A fresh repo with scripts + `.gitattributes` + hooks seeded — `.gitattributes` matches the REAL
+ *  committed content post-B1102688 (the zero-config `union` floor, not the custom driver's name
+ *  directly). Call `installAll(dir)` below to additionally simulate a real `npm install` clone. */
 function initRepo(dir, { withHooks = true } = {}) {
   mkdirSync(dir, { recursive: true });
   git(dir, "init", "-q", "-b", "main");
@@ -85,9 +89,20 @@ function initRepo(dir, { withHooks = true } = {}) {
   git(dir, "config", "user.name", "Merge Driver E2E");
   seedScripts(dir);
   if (withHooks) seedHooks(dir);
-  writeFileSync(join(dir, ".gitattributes"), "MAP.md merge=planyr-ledger\nBACKLOG_OPEN.md merge=planyr-ledger\n");
+  writeFileSync(join(dir, ".gitattributes"), "MAP.md merge=union\nBACKLOG_OPEN.md merge=union\n");
   writeFileSync(join(dir, ".gitignore"), ".planyr-ledger-merges.log\n"); // matches the real repo's own .gitignore
   return dir;
+}
+
+/** The full "as if `npm install` ran here" state (B1102688): the post-merge backstop hook, the
+ *  merge driver's actual command, AND the local `.git/info/attributes` override that makes the
+ *  committed `union` floor above actually resolve to that command for MAP.md/BACKLOG_OPEN.md. All
+ *  three are the REAL install path — omitting any one of them is a different, deliberately-tested
+ *  scenario elsewhere in this file, not an oversight. */
+function installAll(dir) {
+  installHooks(dir);
+  installMergeDriver(dir);
+  installAttributesOverride(dir);
 }
 
 function commitAll(dir, message) {
@@ -124,8 +139,7 @@ describe("(1)+(3) MAP.md — a genuine conflict, resolved, with the B384432 surv
     writeSrcFile(dir, "src/old.js", "export function old() {}\n");
     generate(dir, "build-map.mjs");
     commitAll(dir, "base");
-    installHooks(dir);        // the post-merge backstop
-    installMergeDriver(dir);  // the merge driver itself — both are the REAL install path
+    installAll(dir);  // post-merge backstop + merge driver + its local attributes override — the REAL install path
 
     git(dir, "checkout", "-q", "-b", "adds-b");
     writeSrcFile(dir, "src/b.js", "export function b() {}\n");
@@ -198,8 +212,7 @@ describe("(2) BACKLOG_OPEN.md — a genuine conflict from two independent backlo
     ].join("\n"));
     generate(dir, "build-backlog-index.mjs");
     commitAll(dir, "base");
-    installHooks(dir);
-    installMergeDriver(dir);
+    installAll(dir);
 
     git(dir, "checkout", "-q", "-b", "backlog-x");
     insertAfter(dir, "BACKLOG.md",
@@ -243,8 +256,7 @@ describe("(4) a regeneration failure leaves the conflict UNRESOLVED and non-zero
     writeFileSync(join(dir, "scripts", "build-map.mjs"), "#!/usr/bin/env node\nprocess.stderr.write('boom\\n');\nprocess.exit(1);\n");
     writeFileSync(join(dir, "MAP.md"), "# MAP.md\n\n## infra\n\n- **`src/old.js`** — old file\n  - _exports_: `old`\n\n");
     commitAll(dir, "base");
-    installHooks(dir);
-    installMergeDriver(dir);
+    installAll(dir);
 
     git(dir, "checkout", "-q", "-b", "x1");
     writeFileSync(join(dir, "MAP.md"), readFileSync(join(dir, "MAP.md"), "utf8") + "\n<!-- x1 edit -->\n");
@@ -275,15 +287,16 @@ describe("(4) a regeneration failure leaves the conflict UNRESOLVED and non-zero
   });
 });
 
-describe("(5) .gitattributes naming the driver with the local config NOT installed is DETECTED", () => {
-  it("`install-hooks.mjs --check` reports the merge driver as NOT ARMED, by name", () => {
+describe("(5) the smart-driver UPGRADE with neither local-config half installed is DETECTED", () => {
+  it("`install-hooks.mjs --check` reports the ledger merge driver as NOT ARMED, by name", () => {
     const dir = join(ROOT, "unarmed");
     mkdirSync(dir, { recursive: true });
     git(dir, "init", "-q", "-b", "main");
-    writeFileSync(join(dir, ".gitattributes"), "MAP.md merge=planyr-ledger\nBACKLOG_OPEN.md merge=planyr-ledger\n");
-    // Deliberately no `installMergeDriver(dir)` call — the local-config half is missing, which is
-    // exactly the gap `.gitattributes` alone cannot close (git falls back to an ordinary merge
-    // with no error at all when this happens for real).
+    writeFileSync(join(dir, ".gitattributes"), "MAP.md merge=union\nBACKLOG_OPEN.md merge=union\n");
+    // Deliberately no installMergeDriver()/installAttributesOverride() call — the local-config
+    // upgrade is missing on both halves. Post-B1102688 this is SAFE (the committed `union` line
+    // above still merges these files with no shown conflict, unlike before this fix) — `--check`
+    // still reports the upgrade as not armed, by name, so the gap is visible rather than silent.
     const r = spawnSync(process.execPath, [INSTALL_CLI, `--repo=${dir}`, "--check"], { encoding: "utf8" });
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(/LEDGER MERGE DRIVER NOT ARMED/);
@@ -300,8 +313,7 @@ describe("(6) KNOWN-GOOD ARM — an ordinary merge touching NEITHER generated fi
     writeSrcFile(dir, "src/old.js", "export function old() {}\n");
     generate(dir, "build-map.mjs");
     commitAll(dir, "base");
-    installHooks(dir);
-    installMergeDriver(dir);
+    installAll(dir);
 
     git(dir, "checkout", "-q", "-b", "p");
     writeFileSync(join(dir, "README.md"), "p was here\n");
@@ -330,7 +342,8 @@ describe("(7) the backstop hook is NECESSARY, not decorative", () => {
     writeSrcFile(dir, "src/old.js", "export function old() {}\n");
     generate(dir, "build-map.mjs");
     commitAll(dir, "base");
-    installMergeDriver(dir); // the driver only — no installHooks() call
+    installMergeDriver(dir); // the driver + its local attributes override — no installHooks() call
+    installAttributesOverride(dir);
 
     git(dir, "checkout", "-q", "-b", "adds-b");
     writeSrcFile(dir, "src/b.js", "export function b() {}\n");

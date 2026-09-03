@@ -57,13 +57,19 @@
  * destroyed 48 of them on PR #978 (B384432). The same seeding function is reused here, so that fix
  * cannot regress independently in two places.
  *
- * HOW GIT INVOKES THIS. `.gitattributes` names `merge=planyr-ledger` for these two paths; the
- * actual command lives in LOCAL git config (`merge.planyr-ledger.driver`), wired by
- * `scripts/install-hooks.mjs` (the same self-installer that arms the mint-gate pre-push hook and
- * the post-merge backstop hook above) — `.gitattributes` is committed, but
- * `merge.<name>.driver` is local-only config, so a clone with the hook installer never run
- * silently gets NO merge driver at all (git falls back to an ordinary merge with no error). See
- * install-hooks.mjs for the loud detection of that gap.
+ * HOW GIT INVOKES THIS. ⛔ UPDATED (B1102688, 2026-09-03): the COMMITTED `.gitattributes` names the
+ * zero-config, built-in `merge=union` driver for these two paths directly, NOT this driver's name —
+ * a bare fresh clone gets a safe, no-config merge with no install step at all. `scripts/install-
+ * hooks.mjs` upgrades this: it writes a LOCAL, uncommitted `.git/info/attributes` override pointing
+ * these same two paths at `merge=planyr-ledger` instead (which DOES take precedence over the
+ * committed file), and separately configures the actual command that name refers to
+ * (`merge.planyr-ledger.driver` — LOCAL git config, the same self-installer that arms the mint-gate
+ * pre-push hook and the post-merge backstop hook above). Both `.git/info/attributes` and
+ * `merge.<name>.driver` are local-only, uncommitted config for the same reason: a repo cannot be
+ * allowed to make an arbitrary clone execute an arbitrary command with zero action from whoever is
+ * cloning it. So a clone with the installer never run simply keeps the committed `union` floor —
+ * safe, if less smart — rather than the silent, unguarded "no merge driver at all" gap this used to
+ * be. See install-hooks.mjs for the override-writing code and .gitattributes for the full story.
  *
  * Git calls it as:  <this file> %O %A %B %P   (ancestor, ours, theirs, path) and takes WHATEVER IS
  * LEFT IN %A as the merged result, regardless of exit status — a non-zero exit only marks the path

@@ -24,22 +24,34 @@
  *
 
  * ALSO WIRES THE LEDGER MERGE DRIVER (NEW-1, a second independent concern this same installer now
- * carries). `.gitattributes` names `merge=planyr-ledger` for MAP.md / BACKLOG_OPEN.md, but
- * `merge.<name>.driver` is LOCAL git config — git refuses to let a repo commit an arbitrary shell
- * command that runs on every clone — so a `.gitattributes` line with nobody having run this
- * installer makes git fall back to an ordinary merge SILENTLY (no error, just no self-resolution).
- * The same five requirements above apply to it: fresh-clone install, idempotent, never a silent
- * no-op, never clobbers somebody's own `merge.planyr-ledger.driver`, never fails `npm install`.
- * See `scripts/merge-driver-ledgers.mjs` for what the driver itself does — and its OWN header for
- * why that driver alone cannot always be correct. The `post-merge` hook that closes that gap
- * (`scripts/post-merge-regen.mjs`) is just another entry in `REQUIRED_HOOKS` below, so it is armed
- * by the exact same `core.hooksPath` wiring the mint gate already relies on — no separate concern.
+ * carries). `.gitattributes` names the zero-config, built-in `union` driver for MAP.md /
+ * BACKLOG_OPEN.md directly — so a bare fresh clone with no installer run ever already merges these
+ * two files without a shown conflict (git's `union` needs no local config at all: it is not a
+ * custom driver). This installer's job is the UPGRADE on top of that floor: it writes a LOCAL,
+ * uncommitted `.git/info/attributes` override pointing the same two paths at a smarter custom
+ * driver instead (`merge=planyr-ledger` — inline regeneration during the merge itself, with the
+ * B384432 hand-authored-description safety check, and the ability to leave a REAL conflict for a
+ * human when regeneration fails outright, which the committed `union` default can never do), AND
+ * configures the actual command that name refers to (`merge.planyr-ledger.driver` — LOCAL git
+ * config; git refuses to let a repo commit an arbitrary shell command that runs on every clone).
+ * `.git/info/attributes` takes precedence over the committed `.gitattributes` (gitattributes(5);
+ * proved in test/freshCloneMerge.test.js) and is itself local/uncommitted, exactly like
+ * `merge.<name>.driver` — writing to it needs no different trust boundary than the driver command
+ * this file already writes. Skipping this installer is therefore NOT the silent, unguarded gap it
+ * used to be (B1102688): the committed `union` default is always there underneath. The same five
+ * requirements above still apply to both new pieces: fresh-clone install, idempotent, never a
+ * silent no-op, never clobbers somebody's own local customization (report + `--force` to opt in),
+ * never fails `npm install`. See `scripts/merge-driver-ledgers.mjs` for what the driver itself does
+ * — and its OWN header for why that driver alone cannot always be correct. The `post-merge` hook
+ * that closes that gap (`scripts/post-merge-regen.mjs`) is just another entry in `REQUIRED_HOOKS`
+ * below, so it is armed by the exact same `core.hooksPath` wiring the mint gate already relies on —
+ * no separate concern, and it corrects the result of EITHER driver identically.
  *
- *   node scripts/install-hooks.mjs            → install/verify both; always exit 0 (safe in `prepare`)
- *   node scripts/install-hooks.mjs --check    → verify only, no writes; exit 1 if either is not armed
+ *   node scripts/install-hooks.mjs            → install/verify all three; always exit 0 (safe in `prepare`)
+ *   node scripts/install-hooks.mjs --check    → verify only, no writes; exit 1 if the hook or the merge driver isn't armed
  *   node scripts/install-hooks.mjs --quiet     → suppress the one-line success notes (still loud on failure)
  */
-import { existsSync, statSync, chmodSync, constants } from "node:fs";
+import { existsSync, statSync, chmodSync, constants, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve, isAbsolute } from "node:path";
@@ -258,6 +270,99 @@ export function installMergeDriver(repo = REPO_DEFAULT, { write = true, force = 
   return fail || plan;
 }
 
+// ---- the local .git/info/attributes override (B1102688, NEW-1) -----------------------------
+/** The two paths the committed `.gitattributes` hands to the zero-config `union` driver, but that
+ *  get upgraded to the smarter `planyr-ledger` driver once this installer has run. */
+export const OVERRIDE_PATHS = ["MAP.md", "BACKLOG_OPEN.md"];
+const overrideLine = (path) => `${path} merge=${MERGE_DRIVER_NAME}`;
+
+/** Find the `merge=<value>` a `.git/info/attributes`-style text currently sets for an EXACT path
+ *  (our two paths are plain filenames at the repo root, so a simple first-token match is correct
+ *  — no need for general gitattributes glob matching here). Returns the value, or `null` if unset. */
+export function attrMergeValue(text, path) {
+  for (const raw of (text || "").split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const [pattern, ...attrs] = line.split(/\s+/);
+    if (pattern !== path) continue;
+    for (const a of attrs) {
+      const m = /^merge=(.+)$/.exec(a);
+      if (m) return m[1];
+    }
+  }
+  return null;
+}
+
+/** Drop every line whose first token is one of `paths`, keeping everything else (blank lines,
+ *  comments, unrelated attributes) untouched and in order. Used only on the explicit `--force`
+ *  path, so a stale or foreign override can be replaced without depending on gitattributes' own
+ *  same-file precedence rules to make the replacement take effect. */
+export function stripPathLines(text, paths) {
+  return (text || "").split("\n").filter((raw) => {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) return true;
+    const [pattern] = line.split(/\s+/);
+    return !paths.includes(pattern);
+  }).join("\n");
+}
+
+/**
+ * PURE decision for the local attributes override — same shape as `hooksPlan` / `mergeDriverPlan`.
+ * `existingText` is the current `.git/info/attributes` content (empty string if the file is absent).
+ */
+export function attributesOverridePlan({ existingText = "" } = {}) {
+  const current = Object.fromEntries(OVERRIDE_PATHS.map((p) => [p, attrMergeValue(existingText, p)]));
+  const missing = OVERRIDE_PATHS.filter((p) => current[p] == null);
+  const foreign = OVERRIDE_PATHS.filter((p) => current[p] != null && current[p] !== MERGE_DRIVER_NAME);
+
+  if (missing.length === 0 && foreign.length === 0)
+    return { action: "already", armed: true, ok: true, message: `.git/info/attributes already overrides ${OVERRIDE_PATHS.join(", ")} → merge=${MERGE_DRIVER_NAME} — nothing to do.` };
+
+  if (foreign.length)
+    return {
+      action: "foreign", armed: false, ok: false,
+      message:
+        `.git/info/attributes already sets ${foreign.map((p) => `${p} → merge=${current[p]}`).join(", ")} — LEFT UNTOUCHED.\n` +
+        `   That is somebody's deliberate choice. ${foreign.join("/")} still merge${foreign.length > 1 ? "" : "s"} safely via the committed\n` +
+        `   zero-config \`union\` default either way — this override only upgrades that to the smarter inline\n` +
+        `   regenerating driver. Opt in with:  npm run hooks:install -- --force`,
+    };
+
+  return { action: "install", armed: true, ok: true, message: `wired a local .git/info/attributes override for ${missing.join(", ")} → merge=${MERGE_DRIVER_NAME}.` };
+}
+
+/**
+ * Install (or verify) the local attributes override. Mirrors `installHooks` / `installMergeDriver`'s
+ * shape and guarantees: idempotent, never clobbers a foreign customization for these exact paths
+ * without `--force`, never throws, and `write:false` makes it a pure inspection for `--check`.
+ */
+export function installAttributesOverride(repo = REPO_DEFAULT, { write = true, force = false } = {}) {
+  const attrsPath = join(repo, ".git", "info", "attributes");
+  const existingText = existsSync(attrsPath) ? readFileSync(attrsPath, "utf8") : "";
+  const plan = attributesOverridePlan({ existingText });
+
+  if (plan.action === "already") return plan;
+  if (plan.action === "foreign" && !force) return plan;
+  if (!write)
+    return {
+      ...plan, armed: false, ok: false, action: "would-install",
+      message: `local .git/info/attributes override is not wired for ${OVERRIDE_PATHS.join(", ")} — Run: npm install (or npm run hooks:install${plan.action === "foreign" ? " -- --force" : ""})`,
+    };
+
+  // Rewrite cleanly on --force (drop any existing line for our exact paths, foreign or a stale
+  // prior version of our own, then append fresh ones) rather than relying on gitattributes' own
+  // "later pattern wins" precedence within one file to make a --force replacement take effect.
+  const base = plan.action === "foreign" ? stripPathLines(existingText, OVERRIDE_PATHS) : existingText;
+  const toAdd = plan.action === "foreign" ? OVERRIDE_PATHS : OVERRIDE_PATHS.filter((p) => attrMergeValue(existingText, p) == null);
+  mkdirSync(dirname(attrsPath), { recursive: true });
+  const sep = base && !base.endsWith("\n") ? "\n" : "";
+  writeFileSync(attrsPath, base + sep + toAdd.map(overrideLine).join("\n") + "\n");
+
+  return plan.action === "foreign"
+    ? { ok: true, armed: true, action: "install", message: `replaced the foreign .git/info/attributes line(s) for ${OVERRIDE_PATHS.join(", ")} with merge=${MERGE_DRIVER_NAME} (--force).` }
+    : plan;
+}
+
 // ---- CLI -------------------------------------------------------------------------------
 /** Print one concern's outcome to the right stream and return whether it is armed. */
 function report(label, res, effect, quiet) {
@@ -287,16 +392,35 @@ function main(argv) {
 
   // The merge driver needs the same usable git work tree the hooks check already probed — reuse
   // ITS verdict for a broken/absent repo rather than re-probing and risking a different answer.
-  let mergeRes;
+  let mergeRes, attrsRes;
   if (hooksRes.action === "not-a-repo" || hooksRes.action === "git-unusable") {
     mergeRes = { ok: false, armed: false, action: hooksRes.action, message: `(same repo problem reported above) ${hooksRes.message}` };
+    attrsRes = mergeRes;
   } else {
     try {
       mergeRes = installMergeDriver(repo, { write: !check, force });
     } catch (e) {
       mergeRes = { ok: false, armed: false, action: "failed", message: `unexpected error — ${e?.message || e}` };
     }
+    try {
+      attrsRes = installAttributesOverride(repo, { write: !check, force });
+    } catch (e) {
+      attrsRes = { ok: false, armed: false, action: "failed", message: `unexpected error — ${e?.message || e}` };
+    }
   }
+
+  // Both pieces are needed for the SMART driver to actually take effect on this clone (the
+  // command it runs, and something pointing at it) — combine into one verdict for reporting.
+  // Either piece missing is safe, never broken: `.gitattributes` alone already gives every clone
+  // the zero-config `union` floor (B1102688), so this combined verdict only ever gates the upgrade.
+  const ledgerRes = {
+    ok: mergeRes.ok && attrsRes.ok,
+    armed: mergeRes.armed && attrsRes.armed,
+    action: mergeRes.armed && attrsRes.armed ? "already" : (mergeRes.armed ? attrsRes.action : mergeRes.action),
+    message: mergeRes.armed && attrsRes.armed
+      ? "merge.planyr-ledger.driver configured and the local .git/info/attributes override wired — MAP.md/BACKLOG_OPEN.md conflicts self-resolve with full inline regeneration on merge."
+      : [mergeRes, attrsRes].filter((r) => !(r.ok && r.armed)).map((r) => r.message).join("\n   "),
+  };
 
   const hooksOk = report(
     "Mint-gate hook", hooksRes,
@@ -305,9 +429,11 @@ function main(argv) {
     quiet,
   );
   const mergeOk = report(
-    "Ledger merge driver", mergeRes,
-    "Effect: MAP.md / BACKLOG_OPEN.md conflicts will fall back to an ordinary git merge instead of\n" +
-    "   self-resolving — resolve them by hand (regenerate + `node scripts/resolve-ledgers.mjs`), as before. (NEW-1)",
+    "Ledger merge driver", ledgerRes,
+    "Effect: MAP.md / BACKLOG_OPEN.md still merge safely with no shown conflict either way — the\n" +
+    "   committed `.gitattributes` already gives every clone git's zero-config `union` driver as a\n" +
+    "   floor (B1102688). This only upgrades that to the smarter inline-regenerating driver, with the\n" +
+    "   B384432 hand-authored-description safety check and a real abort-on-failure. (NEW-1)",
     quiet,
   );
 
