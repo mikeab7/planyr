@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-03 @ `996d067b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-03 @ `624086046` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -206,7 +206,7 @@ _649 source files mapped._
 - **`src/workspaces/notes/lib/notesQuickOpen.js`** — PURE fuzzy ranking for quick open, plus the shortcut's spelling and chord test.
   - _exports_: `fuzzyScore`, `isQuickOpenChord`, `QUICK_OPEN_KEY`, `quickOpenResults`, `rankQuickOpen`, `stepIndex`
 - **`src/workspaces/notes/lib/notesRedline.js`** — pure redline diff between two note bodies — one document, changes marked in place
-  - _exports_: `buildRedline`, `flattenBlocks`, `nestByPath`
+  - _exports_: `buildComparison`, `buildRedline`, `flattenBlocks`, `nestByPath`
 - **`src/workspaces/notes/lib/notesSaveState.js`** — this module status → the ONE app-wide CloudSyncBadge state. Notes was the last module rendering its own save chips; this is it joining the convention.
   - _exports_: `notesSaveState`
 - **`src/workspaces/notes/lib/notesScan.js`** — the integrity pass, lazily imported: `scanNoteDuplicates` (the same note in two projects, bin included) and `unreachableNotes` (a note filed nowhere at all).
