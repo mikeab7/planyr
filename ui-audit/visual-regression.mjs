@@ -116,23 +116,45 @@ const NOISE_FLOOR_NOTE =
   "0 differing pixels on all 8 surface/theme baselines, captured twice in a row against the " +
   "identical build with nothing changed (`node ui-audit/measure-visual-noise.mjs`, 2026-09-01).";
 
-/* ⛔ TEMPORARY, NAMED, REMOVABLE (NEW-2, 2026-09-03) — the phone viewport's PIXEL diff is
- * advisory-only (reported, never fails the build); the STRUCTURAL check (narrowWidthAudit.mjs) is
- * completely unaffected and still hard-fails as always. See `Blocker: playwright-install` in
- * BACKLOG.md/B1096016 for the full story; short version: this session's sandbox cannot reach
- * either GitHub's artifact storage or Playwright's browser CDN (both blocked by egress policy),
- * so the 8 phone baselines it approved were captured with a Chromium build one point-release off
- * CI's own pinned revision. MEASURED on the real CI run (not assumed): all 8 pre-existing DESKTOP
- * baselines matched byte-for-byte (proving CI's renderer is internally consistent and this PR's
- * code changed nothing there), while all 8 new PHONE baselines differed 1.7-5.5% — antialiasing-
- * class drift (the same B1026272 class), not a real rendering regression. Hard-failing the build
- * on a baseline this session could not have verified against CI's real renderer would be
- * indistinguishable from a real regression to the next person who touches phone-width UI — worse
- * than catching nothing, since it teaches "phone pixel-diff failures are noise, ignore them."
- * Advisory-only is the honest middle ground until a session with real network access re-approves
- * these 8 PNGs with CI's exact Chromium (`npx playwright install chromium` there, then
- * `node ui-audit/visual-regression.mjs --viewport=phone --approve --reason="..."`) — flip this
- * back to `false` in that same commit; do not leave it flipped longer than that one fix needs. */
+/* ⛔ B1096017's CLOSURE WAS WRONG — RECURRENCE (×2, 2026-09-03, same session that closed it a few
+ * hours earlier — see BACKLOG.md's `## ⏳ Verify` section, not a new B#, per this repo's Recurrence
+ * rule). The closure below assumed "pin the exact CI Chromium revision (1228) and the sandbox
+ * becomes CI-accurate," re-approved all 8 phone baselines with it, confirmed clean LOCALLY, and
+ * shipped. **The very next real CI run failed all 16 pairs anyway — phone AND desktop, including
+ * two surfaces (site-planner-header, site-planner-left-rail) never touched by that closure at
+ * all.**
+ *
+ * ⛔ THIS COMMENT WAS ITSELF WRONG ONCE, IN THIS SAME SESSION, AND THE CORRECTION IS LOAD-BEARING.
+ * The first draft of this fix ran a vanilla-`origin/main`-vs-committed-baseline comparison INSIDE
+ * THIS SANDBOX, found a mismatch on `site-planner-header`/`site-planner-left-rail`/`library` even
+ * on unmodified code, and concluded "this sandbox's rendering stack can't reproduce CI, so these 3
+ * are pre-existing/environment-only and safe to downgrade to advisory-only inside this same PR."
+ * **That conclusion does not follow from the evidence and was never checked against the one thing
+ * that actually answers it: was `origin/main`'s OWN real CI run passing on these exact baselines?**
+ * It was — `run 33717394337` (`origin/main` @ `44e00dcf`, the commit immediately before this
+ * branch) reports `conclusion: success` on the whole Build workflow, visual-regression included.
+ * So the correct reading of the sandbox test is narrower than the first draft claimed: it proves
+ * THIS SANDBOX cannot byte-reproduce those 3 baselines — it does NOT prove GitHub's own CI runner
+ * would also fail on unmodified code, and the actual evidence says the opposite. Given that, the
+ * far more likely explanation for this branch's real CI failure on those 3 surfaces is the same
+ * one already established for `map-landing` below: this PR's own `--surface-page`/`--success-text`
+ * token move is a real, visible change that ripples into the chrome (`AppHeader`, the Site
+ * Planner's left rail, the Library page background) around those surfaces too, not sandbox noise.
+ * **A gate's sensitivity is not something this PR gets to loosen to make itself pass — reverted:
+ * there is no `DESKTOP_PIXEL_DIFF_ADVISORY_SURFACES` any more.** The fix instead is what it always
+ * should have been: re-approve the real, current-code pixels for the surfaces this PR's token move
+ * actually touches, with the CI-exact rev-1228 Chromium and double-capture-agreement (two
+ * independent captures, byte-identical to each other) as the only local confidence check available
+ * — and then let the next real CI run be the actual verifier, not a softened local gate. If CI
+ * still disagrees with a rev-1228 sandbox capture after that, that is new evidence of a genuine
+ * sandbox-vs-CI environment gap worth its own investigation — filed separately, not routed around
+ * inside this PR.
+ *
+ * Phone stays under the SAME advisory flag `origin/main` already ships (`PHONE_PIXEL_DIFF_ADVISORY_ONLY`,
+ * introduced by B1096016, already `true` on `origin/main` before this branch existed) — restored to
+ * that value after this branch's own earlier commit incorrectly flipped it to `false`. That is a
+ * revert of this branch's own over-reach back to what `main` already has, not new leniency beyond
+ * it. Nothing below widens what surfaces or viewports the gate treats leniently relative to `main`. */
 const PHONE_PIXEL_DIFF_ADVISORY_ONLY = true;
 const ADDED_CI_TIME_NOTE =
   "MEASURED against a real GitHub Actions run, not estimated (PR #1311, run 33572020616, job " +
@@ -398,7 +420,8 @@ async function run() {
           const verdict = evaluateDiff(stats, manifest.tolerance || TOLERANCE);
           // Structural failures are NEVER downgraded, on any viewport — only a pure pixel-diff
           // failure on the phone viewport gets the temporary advisory treatment (see
-          // PHONE_PIXEL_DIFF_ADVISORY_ONLY's own header above for why).
+          // PHONE_PIXEL_DIFF_ADVISORY_ONLY's own header above for why). Desktop is never advisory —
+          // every desktop pixel diff is a hard fail, same as origin/main.
           const pixelAdvisoryOnly = PHONE_PIXEL_DIFF_ADVISORY_ONLY && v.id === "phone" && !auditFail && !verdict.pass;
           const status = auditFail ? "fail" : pixelAdvisoryOnly ? "warn" : (verdict.pass ? "pass" : "fail");
           const detail = auditFail

@@ -442,13 +442,27 @@ export default function ModelApp({
               bleeding into it — with a single hairline divider marking the seam between the two
               rows inside it. `overflow: hidden` is load-bearing: it's what clips the ribbon's own
               square content to the card's rounded top corners (CHROME-NEVER-EATS-A-PRESS is not
-              at issue here — nothing inside is chrome floating OVER content). */}
+              at issue here — nothing inside is chrome floating OVER content).
+              ⛔ Round 4 — MEASURED live that this card and the sheet card below it were flush,
+              0px gap, not detached. Round 3's own bottom margin here was 0 (see the sibling
+              comment in SheetView.jsx, corrected in the same commit as this one) on the theory
+              that the sheet card's own top margin would supply the seam — but these two cards are
+              siblings inside ModelApp's ROOT FLEX COLUMN, and flex items never collapse margins
+              against each other the way ordinary block siblings do, so two zeros summed to a real,
+              visible zero: doubled hairlines pressed edge to edge, not two objects. The gap is now
+              carried entirely by THIS card's own bottom margin (SPACE.md) — the sheet card's own
+              top margin stays 0, so there is still exactly one gap, never a doubled one. */}
           <div
             data-testid="model-toolbar-card"
             style={{
-              flex: "none", margin: "8px 8px 0", overflow: "hidden",
+              flex: "none", margin: 8, overflow: "hidden", // SPACE.md literal (all four sides) — see designTokens.js note above
               background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: RADIUS.lg,
-              boxShadow: "0 1px 3px rgba(0,0,0,0.07)", // design-exempt: no shadow-color token yet repo-wide — matches SheetView.jsx's own card (same reasoning, its header)
+              // Round 4 — the LIGHTER of the module's two card shadow levels (design-exempt: no
+              // shadow-color token yet repo-wide). Round 3 gave this card and the sheet card
+              // below it the SAME shadow, which reads as one flat weight rather than "tools you
+              // are holding, floating above the paper" — the sheet card (SheetView.jsx, same
+              // reasoning) now carries the stronger of the two.
+              boxShadow: "0 1px 3px rgba(0,0,0,0.07)", // design-exempt: no shadow-color token yet repo-wide
             }}
           >
           <Ribbon
