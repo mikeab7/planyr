@@ -12,7 +12,8 @@ import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideB
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
 import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./lib/mapStack.js";
 import { tileCacheLimit } from "./lib/tileBudget.js";
-import { boundTileCache, capTileCache, releaseLayer } from "./lib/tileLifecycle.js";
+import { boundTileCache, capTileCache, releaseLayer, armBlankTileHeal } from "./lib/tileLifecycle.js";
+import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { BASEMAPS, FINDER_BASEMAP_CHOICES } from "./lib/basemaps.js";
 // B427410 (×2) — the ONE gate for the "Road names" overlay below, shared with LayerPanel's
 // dormant note so the map's opacity switch and the panel's explanation can't disagree.
@@ -53,6 +54,7 @@ import { MAP_CHROME_Z, panelMaxHeight, ZOOM_CONTROL_CLEARANCE_PX, MAP_OVERLAY_TO
 // B848496 — site-plan overlays (upload a site plan, place it on the map, pin comps to it).
 import { useSitePlanOverlayLayers } from "./lib/useSitePlanOverlayLayers.js";
 import { latLonToImagePoint, suggestFtPerPx, feetBetween } from "../../shared/sitePlans/lib/overlayGeoref.js";
+import { overlayPlaced } from "../../shared/sitePlans/lib/sitePlanOverlays.js";
 // Reused (never a new raw hex literal) for text on the fixed COMP_ACCENT blue below — that
 // accent doesn't change with theme, so the LIGHT palette's on-accent value is correct in both.
 import { PALETTES } from "../../shared/theme/palette.js";
@@ -252,6 +254,20 @@ const MAP_KEEP_BUFFER = 2;
  * under display:none). A hidden map needs no ring of look-ahead tiles at all, and everything shed
  * re-fetches the moment it is shown again — the visible result is identical. */
 const HIDDEN_TILE_CAP = 16;
+
+/* B844704 — the onHeal callback armBlankTileHeal fires for this map's tile layers. Reports the
+ * layer, the tile's on-screen rect, the live zoom and how long it sat blank, via the same
+ * `event:` channel every other non-error telemetry note here uses (public.client_errors). Kept as
+ * one small factory so the imagery and labels layers report identically. */
+function reportBlankTileHealed(map, layerId) {
+  return ({ key, ageMs, coords, rect }) => {
+    let zoom = null;
+    try { zoom = map && map.getZoom(); } catch (_) {}
+    reportClientEvent("map-tile-blank-self-heal", `${layerId} tile blank ${ageMs}ms — reloaded`, {
+      layerId, key, coords: coords ? { x: coords.x, y: coords.y, z: coords.z } : null, rect, zoom, blankMs: ageMs,
+    });
+  };
+}
 
 // Parcel-outline display + the +/− cursors are shared with the in-planner "Add parcel"
 // tool (lib/parcelDisplay.js) so both surfaces light up parcels identically.
@@ -549,6 +565,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const addrTokRef = useRef(0); // B545: address-search generation — a newer search invalidates an older in-flight one
   const imageryCapRef = useRef(null); // NEW-6 — detach fn for the imagery layer's tile-cache cap
   const labelsCapRef = useRef(null);  // NEW-6 — ditto for the labels overlay
+  const imageryHealRef = useRef(null); // B844704 — detach fn for the imagery layer's blank-tile self-heal
+  const labelsHealRef = useRef(null);  // B844704 — ditto for the labels overlay
   const displaysRef = useRef({});    // county -> visible parcel-line layer (all CAD counties)
   /* NEW-2 — county -> { url, owner }: the RESOLVED endpoint behind that county's on-map layer, and
      which county key actually CREATED it. Two keys that resolve to the same endpoint (a county
@@ -779,6 +797,37 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     activeId: activeOverlayId, onSelect: selectOverlay, onCommitPlacement: commitOverlayPlacement,
     onRasterUnavailable,
   });
+
+  // B850432/NEW-1 — a site plan is gated off the map entirely below SITE_PLAN_MIN_ZOOM (it's
+  // meaningless zoomed all the way out), so ARMING an overlay for editing (a fresh "Place on
+  // map", or "Move / resize" on an existing one — both route through onActivateOverlay/
+  // selectOverlay) used to leave the map exactly where it was. On the owner's first try — the
+  // landing view defaults to the whole continental US for an account with no located sites yet
+  // — the plan was placed, armed, and permanently invisible: the Site plans list read opacity
+  // 0.85 / "Hide on map" (i.e. currently shown) while zero image layers ever reached the DOM,
+  // and "Pin comp here" had nothing rendered to click. Jump the map to the overlay's own anchor
+  // at a real site-plan viewing zoom whenever the live zoom can't show it, so arming a plan for
+  // editing always makes it visible immediately — this is the general fix; the SitePlansSection
+  // row also carries a passive "zoomed out too far" note + Zoom-in control (below) for the case
+  // where the map is later panned/zoomed back out from an already-placed, non-active plan.
+  const SITE_PLAN_VIEW_ZOOM = 17;
+  useEffect(() => {
+    if (!activeOverlayId) return;
+    const m = mapRef.current;
+    const o = overlaysById[activeOverlayId];
+    if (!m || !o || !overlayPlaced(o)) return;
+    if (zoom != null && zoom < SITE_PLAN_MIN_ZOOM) {
+      m.flyTo([o.centerLat, o.centerLon], SITE_PLAN_VIEW_ZOOM, { duration: 0.7 });
+    }
+  }, [activeOverlayId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Same jump, on demand — the Site plans list's own "Zoom in" control for a placed-but-not-
+  // active overlay the user has panned/zoomed away from (the passive half of the fix above).
+  const zoomToOverlay = (o) => {
+    const m = mapRef.current;
+    if (!m || !o || !overlayPlaced(o)) return;
+    m.flyTo([o.centerLat, o.centerLon], SITE_PLAN_VIEW_ZOOM, { duration: 0.7 });
+  };
 
   // "Open source brochure" from a comp's detail view (CompsPanel) — reuses the existing
   // cross-workspace open-review intent (Shell.openReviewInDocReview), the same one Library
@@ -1603,7 +1652,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       keepBuffer: MAP_KEEP_BUFFER,
     }));
     imageryCapRef.current = detachCap;
-    return () => { detachCap(); imageryCapRef.current = null; try { map.removeLayer(layer); } catch (_) {} };
+    // B844704 — see tileLifecycle.js armBlankTileHeal: a tile that errors past withTileRetry's
+    // own budget is left permanently invisible by Leaflet itself; this notices and reloads it.
+    const detachHeal = armBlankTileHeal(layer, { onHeal: reportBlankTileHealed(map, "map-finder-imagery") });
+    imageryHealRef.current = detachHeal;
+    return () => {
+      detachCap(); imageryCapRef.current = null;
+      detachHeal(); imageryHealRef.current = null;
+      try { map.removeLayer(layer); } catch (_) {}
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basemap]);
 
@@ -1645,7 +1702,14 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       keepBuffer: MAP_KEEP_BUFFER,
     }));
     labelsCapRef.current = detachCap;
-    return () => { detachCap(); labelsCapRef.current = null; try { map.removeLayer(layer); } catch (_) {} labelsRef.current = null; };
+    // B844704 — same self-heal as the imagery layer above; this layer errors independently.
+    const detachHeal = armBlankTileHeal(layer, { onHeal: reportBlankTileHealed(map, "map-finder-labels") });
+    labelsHealRef.current = detachHeal;
+    return () => {
+      detachCap(); labelsCapRef.current = null;
+      detachHeal(); labelsHealRef.current = null;
+      try { map.removeLayer(layer); } catch (_) {} labelsRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labels, basemap]);
 
@@ -3022,7 +3086,20 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                   fontSize: FONT_SIZE.micro, boxShadow: "none",
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}
-              >▾</Button>
+              >
+                {/* NEW-3 (map-finder split-button audit) — the same trailing caret `controls.jsx`'s
+                    shared `MenuTrigger` draws for every other "opens a menu" trigger in the app
+                    (the row-1 "File ▾" button, the account chip): aria-hidden span, opacity 0.6,
+                    a decorative-glyph size off the FONT_SIZE scale. This control already used the
+                    right CHARACTER (▾, matching MenuTrigger) — only the STRUCTURE drifted (a bare
+                    button-text child sized off the button's own fontSize). Deliberately NOT the ▼
+                    the Imagery & layers toggle uses below: that one is a PERSISTENT DISCLOSURE
+                    (rotates to show expanded/collapsed, like the Sites-panel header and each group's
+                    collapse arrow beside it) — a different affordance from a caret that opens a
+                    transient popover menu, so unifying it here would break its own consistency with
+                    those other two disclosure toggles. */}
+                <span aria-hidden="true" style={{ opacity: 0.6, fontSize: FONT_SIZE.micro }}>▾</span>
+              </Button>
             </div>
           )}
           {/* B848304 — the mode toggle's old "Comp" segment plus these two buttons said the same
@@ -3065,7 +3142,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                   fontSize: FONT_SIZE.micro, boxShadow: "none",
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}
-              >▾</Button>
+              >
+                {/* NEW-3 — see the matching caret on the "Select parcels" split button above. */}
+                <span aria-hidden="true" style={{ opacity: 0.6, fontSize: FONT_SIZE.micro }}>▾</span>
+              </Button>
             </div>
           )}
           {placingCompPin && (
@@ -3187,9 +3267,21 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
 
         {/* NEW-1 — the "Start blank" secondary option, off the "Select parcels" split button's
             caret. One item today; a MenuItem list rather than a bare popover so a future secondary
-            option (e.g. a saved-template start) has somewhere to go without another redesign. */}
+            option (e.g. a saved-template start) has somewhere to go without another redesign.
+            ⛔ NEW-1/NEW-2 (map-finder split-button audit) — TWO fixes, both measured live on
+            planyr.io: (a) `placement="below-right"`, not "-left" — AnchoredMenu's anchor is this
+            caret button, whose own right edge IS the split control's right edge (it's the trailing
+            flex segment), so "below-right" right-aligns the panel to the CONTROL, not just the
+            caret; "-left" anchored the panel's LEFT edge to the caret's left edge, hanging 178px of
+            it out past the control's right edge over open map with nothing under it. (b) `width`
+            148, not 200 — MenuItem is `width:"100%"`, so the panel width IS the item's width; 200px
+            for one short "Start blank" item was heavier than the thing it hides (matches the
+            148px compact-menu precedent already used elsewhere, e.g. `Ribbon.jsx`'s tool menu). The
+            caret+menu STRUCTURE stays — see B831780/NEW-1 above (do not "fix" this by giving
+            "Start blank" its own co-equal button beside "Select parcels" again; that is the
+            two-buttons-of-equal-weight problem this exact toolbar was already corrected out of). */}
         <AnchoredMenu open={startBlankMenuOpen} onClose={() => setStartBlankMenuOpen(false)}
-          anchorRef={startBlankMenuBtnRef} placement="below-left" width={200} gap={6}
+          anchorRef={startBlankMenuBtnRef} placement="below-right" width={148} gap={6}
           zIndex={MAP_CHROME_Z.panel} panelStyle={menuPanelStyle}>
           <MenuItem data-testid="map-start-blank-menu-item"
             title="Start a plan with no parcel, located where the map is looking — draw the boundary yourself"
@@ -3203,9 +3295,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             three unrelated commands instead of one action with three ways to anchor it). "On a
             site plan" always renders, never omitted, even when unreachable: a missing item
             teaches the user the capability doesn't exist, a disabled one with a reason teaches
-            them how to get it. */}
+            them how to get it.
+            ⛔ NEW-1 (map-finder split-button audit) — `placement="below-right"`, not "-left"; see
+            the matching fix + explanation on the "Select parcels" menu above (this caret's own
+            right edge is the split control's right edge, same as that one). Width stays 200 —
+            three items, unlike that one's single "Start blank" (NEW-2 doesn't apply here). */}
         <AnchoredMenu open={placeCompMenuOpen} onClose={() => setPlaceCompMenuOpen(false)}
-          anchorRef={placeCompMenuBtnRef} placement="below-left" width={200} gap={6}
+          anchorRef={placeCompMenuBtnRef} placement="below-right" width={200} gap={6}
           zIndex={MAP_CHROME_Z.panel} panelStyle={menuPanelStyle}>
           <MenuItem data-testid="map-place-comp-menu-item-map"
             title="Place a comp anywhere you click on the map"
@@ -3437,6 +3533,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                     onRejectFile={onRejectDroppedFile}
                     onCompPositionsChanged={() => setCompsReloadToken((t) => t + 1)}
                     rasterFailedIds={rasterFailedIds}
+                    zoomBelowGate={zoom != null && zoom < SITE_PLAN_MIN_ZOOM}
+                    onZoomToOverlay={zoomToOverlay}
                   />
                 </Suspense>
               </PanelErrorBoundary>
@@ -3710,9 +3808,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         {!err && selectMode && (
           <FloatingNotice maxWidth="min(420px, calc(100vw - 16px))">
             <div data-testid="select-parcels-tip" style={{ background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "6px 11px", fontSize: FONT_SIZE.control, color: PAL.ink, lineHeight: 1.4, pointerEvents: "none" }}>
+              {/* NEW-5 (B849588) — "Click a lot on the map" is the same phrase the Site Planner's
+                  empty state and its Parcel tools ▾ menu use for this same job (get a parcel from
+                  county records), so it reads as one door with one name across all three surfaces. */}
               {zoom != null && zoom < PARCEL_MINZOOM
-                ? "Click any lot to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
-                : "Click a lot to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}
+                ? "Click any lot on the map to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
+                : "Click a lot on the map to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}
             </div>
           </FloatingNotice>
         )}

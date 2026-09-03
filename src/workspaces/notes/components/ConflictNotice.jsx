@@ -62,8 +62,6 @@ export default function ConflictNotice({
           serverDoc={serverDoc}
           localUpdatedAt={localUpdatedAt}
           serverUpdatedAt={serverUpdatedAt}
-          keepMine={copy.keepMine}
-          keepTheirs={copy.keepTheirs}
           onKeepMine={() => choose(onKeepMine)}
           onKeepTheirs={() => choose(onKeepTheirs)}
           onClose={() => setOpen(false)}

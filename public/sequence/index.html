@@ -6487,6 +6487,10 @@ function App() {
   }, []);
   const [goToFocus,      setGoToFocus]      = useState(null); // {taskId, n} — grid scrolls to + pulses this row after a cross-view jump
   const [offlineFallback, setOfflineFallback] = useState(false);
+  // B778/NEW-1 — planar_data now requires sign-in + schedule ownership (RLS), so a signed-out
+  // visitor gets denied (42501), not a connectivity failure. Distinct from offlineFallback's
+  // "cloud unreachable" so the banner doesn't wrongly tell them to check their connection.
+  const [authRequired, setAuthRequired] = useState(false);
   const [driftNotice, setDriftNotice] = useState(null);   // B836 — non-pinned tasks whose saved start the load re-cascade corrected; surfaced loudly (banner)
   const [staleNotice, setStaleNotice] = useState(false);
   const didInitialLoad = useRef(false);
@@ -6793,6 +6797,7 @@ function App() {
             d.projects[pid] = {...d.projects[pid], tasks};
           });
         if (window.__planarCloudError) setOfflineFallback(true);
+        else if (window.__planarAuthRequired) setAuthRequired(true);
         setData(d);
       } catch {
         const d = normalizeToV8(ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(window.__PLANAR_DATA__ || SEED))))));
@@ -7980,6 +7985,22 @@ function App() {
   const pasteTaskAfter = useCallback((targetId) => {
     const cb = clipboardRef.current;
     if (!cb || targetId == null) return;
+    // NEW-4/B1080548 — cross-schedule paste (copy in one project, paste into another; the same
+    // clipboard already supports this, since `pid` below is read fresh at paste time, not pinned
+    // to the source). Precompute the "how many links can't survive" figure the same way `n` below
+    // already is — from `cb` alone, before setData — so the toast can report it without depending
+    // on updater-timing. A predecessor whose id is in the pasted set is INTERNAL and always
+    // survives (remapped below); one that isn't is EXTERNAL — it points at a task left behind in
+    // the source schedule. Same-project, that raw id still resolves to a real task and is kept
+    // (unchanged from before). Cross-project it CANNOT survive: the destination has its own,
+    // unrelated id space, so keeping the raw id risks silently rewiring onto whatever task happens
+    // to share that number there — exactly the danger the owner flagged. Drop it instead, and say
+    // so, rather than leaving that failure to renumberTasks' silent id-doesn't-exist prune.
+    const pastedOldIds = new Set(cb.tasks.map(t => t.id));
+    const crossProjectPaste = cb.sourceProjId !== dataRef.current?.aPid;
+    const droppedLinkCount = crossProjectPaste
+      ? cb.tasks.reduce((n, t) => n + (t.predecessors || []).filter(p => p && !pastedOldIds.has(p.id)).length, 0)
+      : 0;
     setData(d => {
       const pid = d.aPid;
       const tasks = d.projects[pid].tasks;
@@ -7992,6 +8013,7 @@ function App() {
       const idMap = {};
       cb.tasks.forEach((t, i) => { idMap[t.id] = baseTempId + i; });
 
+      const crossProject = cb.sourceProjId !== pid;
       const rootOldIds = new Set(cb.sourceRootIds || [cb.sourceRootId]); // sourceRootId: back-compat for a clipboard filled before this change
       const pasted = cb.tasks.map(t => ({
         ...t,
@@ -8000,11 +8022,15 @@ function App() {
         // relative order they were selected in; inner tasks keep their parent inside their own
         // subtree (remapped to the new IDs).
         parentId: rootOldIds.has(t.id) ? target.parentId : (idMap[t.parentId] ?? null),
-        // Predecessor rewiring: internal (within the pasted subtree) → new ID; external
-        // (points outside the subtree) → keep original ID, which still resolves in the
-        // same project. renumberTasks below will drop any external ID that no longer
-        // exists (e.g. cross-project paste, but we only support same-project here).
-        predecessors: (t.predecessors||[]).map(p => ({...p, id: idMap[p.id] ?? p.id})),
+        // Predecessor rewiring: internal (within the pasted subtree) → new ID, always. External
+        // (points outside the subtree) → same-project, keep the original ID (it still resolves to
+        // a real task there); cross-project, DROP it — the id space is unrelated in the
+        // destination and keeping it risks silently rewiring onto an unrelated task that happens
+        // to share that number (NEW-4/B1080548). renumberTasks below still prunes anything left
+        // dangling for any other reason, as a backstop.
+        predecessors: (t.predecessors || [])
+          .map(p => (idMap[p.id] != null ? { ...p, id: idMap[p.id] } : (crossProject ? null : p)))
+          .filter(Boolean),
       }));
 
       // Insert right after the target row in raw array order; sortByVisualOrder will
@@ -8042,7 +8068,13 @@ function App() {
       };
     });
     const n = cb.tasks.length;
-    showToast(`Pasted ${n} task${n > 1 ? "s" : ""}`, { duration: 1600 });
+    // NEW-4/B1080548 — LOUD-FAILURE: a paste that silently lost dependency logic is worse than one
+    // that was refused outright, so say exactly how many links didn't survive rather than leaving
+    // it to be discovered later as a schedule that "looks pasted" but doesn't cascade right.
+    const dropMsg = droppedLinkCount > 0
+      ? ` — ${droppedLinkCount} link${droppedLinkCount > 1 ? "s" : ""} to ${droppedLinkCount > 1 ? "tasks" : "a task"} left in the source schedule ${droppedLinkCount > 1 ? "were" : "was"} dropped`
+      : "";
+    showToast(`Pasted ${n} task${n > 1 ? "s" : ""}${dropMsg}`, { duration: droppedLinkCount > 0 ? 5000 : 1600 });
     // Cut is one-shot (move semantics); copy stays in the clipboard for repeated pastes.
     if (cb.mode === "cut") { clipboardRef.current = null; setClipboardTick(t => t + 1); }
   }, []);
@@ -8296,6 +8328,15 @@ function App() {
       } else if (m.type === "planar:nav-new") {
         addProject();
         setData(d => ({ ...d, section: "projects" }));
+      } else if (m.type === "planar:nav-duplicate" && m.id != null) {
+        // NEW-2/B1080546 — deep-copy from the shell breadcrumb's kebab menu (duplicateProject
+        // already exists and already strips linkedSiteId/linkedSiteName — see its own header —
+        // this was previously reachable only from the in-iframe project list, which the shell
+        // hides). duplicateProject also switches to the copy (sets aPid), so land on it directly.
+        if (latestData.current && latestData.current.projects && latestData.current.projects[m.id]) {
+          duplicateProject(m.id);
+          setData(d => ({ ...d, section: "projects" }));
+        }
       } else if (m.type === "planar:nav-rename" && m.id != null && typeof m.name === "string") {
         // B440 — rename from the shell breadcrumb. The breadcrumb already trimmed/validated;
         // guard once more so an empty name can never blank a project label.
@@ -8315,7 +8356,7 @@ function App() {
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [inShell, addProject, renameProject, deleteProject]);
+  }, [inShell, addProject, renameProject, deleteProject, duplicateProject]);
 
   // ── Embedded-mode TOOLBAR bridge (Planyr shell, B388) ──────────────────────
   // The shell hides our in-iframe action toolbar (`.in-iframe .app-header`) and re-renders
@@ -8341,6 +8382,8 @@ function App() {
       // on a failed initial cloud READ, offlineFallback is set while saveStatus still reads its
       // initial "saved" (no write has been attempted yet), which would otherwise map to synced.
       offlineFallback: !!offlineFallback,
+      // B778/NEW-1 — signed-out (or not on the schedule's team), distinct from offlineFallback.
+      authRequired: !!authRequired,
       activePanel: settingsOpen ? "settings" : automationOpen ? "automation"
         : contactsOpen ? "contacts" : formatOpen ? "format" : historyOpen ? "history" : null,
     };
@@ -8351,7 +8394,7 @@ function App() {
       window.parent.postMessage({ source: "planar-seq", type: "planar:toolbar-state", ...state }, window.location.origin);
     } catch (_) {}
   }, [inShell, data, isMobile, ganttPPD, reviewRows, reviewOpen, saveStatus, savePulse, fileLinked,
-      offlineFallback, settingsOpen, automationOpen, contactsOpen, formatOpen, historyOpen]);
+      offlineFallback, authRequired, settingsOpen, automationOpen, contactsOpen, formatOpen, historyOpen]);
 
   useEffect(() => {
     if (!inShell) return;
@@ -8624,7 +8667,17 @@ function App() {
           </button>
         </div>
       )}
-      {staleNotice && !offlineFallback && (
+      {authRequired && !offlineFallback && (
+        <div style={{background:"#fffbeb",borderBottom:"1px solid #fde68a",color:"#92400e",padding:"7px 14px",
+          display:"flex",alignItems:"center",gap:10,fontSize:12.5,lineHeight:1.45,flexShrink:0,zIndex:31}}>
+          <span style={{fontSize:14,flexShrink:0}}>🔒</span>
+          <span style={{flex:1}}>
+            <strong>Sign in to see this schedule.</strong>{" "}
+            Showing a blank starter copy — sign in above, then reload.
+          </span>
+        </div>
+      )}
+      {staleNotice && !offlineFallback && !authRequired && (
         <div style={{background:"#fffbeb",borderBottom:"1px solid #fde68a",color:"#92400e",padding:"7px 14px",
           display:"flex",alignItems:"center",gap:10,fontSize:12.5,lineHeight:1.45,flexShrink:0,zIndex:31}}>
           <span style={{fontSize:14,flexShrink:0}}>&#8635;</span>
@@ -16103,8 +16156,12 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
       try {
         const { data, error } = await sb.from(TABLE).select("value").eq("key", k).single();
         if (error || !data) {
-          // PGRST116 = "no rows" — a clean empty table, not an outage
-          if (error && error.code !== "PGRST116") window.__planarCloudError = true;
+          // PGRST116 = "no rows" — a clean empty table, not an outage.
+          // 42501 = RLS/grant denied this request — signed out or not on the schedule's
+          // team, not a connectivity problem (B778/NEW-1: planar_data now requires an
+          // authenticated, owner-or-team-scoped request).
+          if (error && error.code === "42501") window.__planarAuthRequired = true;
+          else if (error && error.code !== "PGRST116") window.__planarCloudError = true;
           return null;
         }
         const val = typeof data.value === "string" ? data.value : JSON.stringify(data.value);

@@ -23,6 +23,8 @@
  *   onNewProject    — () => void
  *   onRenameProject — (id, newName) => void  (B439; optional — uncontrolled falls back to the store)
  *   onDeleteProject — (id) => void           (B439; optional — uncontrolled falls back to the store)
+ *   onDuplicateProject — (id) => void        (NEW-2/B1080546; optional — no uncontrolled fallback,
+ *                                              only offered when a caller (Schedule) wires it)
  *   saveState       — "synced"|"saving"|"offline"|"error"|"local"|null  (current project)
  *
  * Per-row rename/delete (B439): every project row carries an ALWAYS-VISIBLE kebab (NEW-2 — it was
@@ -122,6 +124,16 @@ const PencilIcon = ({ size = 13 }) => (
     style={{ flex: "none", display: "block" }}>
     <path d="M4 20h4L20 8l-4-4L4 16z" />
     <path d="M14.5 5.5L18.5 9.5" />
+  </svg>
+);
+
+// NEW-2/B1080546 — Duplicate, same drawn-icon idiom as Pencil/Trash above (stroke, currentColor).
+const DuplicateIcon = ({ size = 13 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    style={{ flex: "none", display: "block" }}>
+    <rect x="9" y="9" width="12" height="12" rx="2" />
+    <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
   </svg>
 );
 
@@ -265,6 +277,7 @@ export default function ProjectBreadcrumb({
   onNewProject,
   onRenameProject,
   onDeleteProject,
+  onDuplicateProject,
   saveState,
   // When `projects` is supplied the breadcrumb is "controlled": the workspace owns the
   // list (e.g. the Schedule module feeds in its embedded scheduler's own projects).
@@ -316,7 +329,10 @@ export default function ProjectBreadcrumb({
   // when we're uncontrolled and can drive the site store directly (Site Planner / Markup). B439.
   const canRename = !!onRenameProject || !controlled;
   const canDelete = !!onDeleteProject || !controlled;
-  const canManage = canRename || canDelete;
+  // NEW-2/B1080546 — Duplicate has no uncontrolled fallback (only Schedule wires it so far), so
+  // unlike Rename/Delete it's offered ONLY when the caller explicitly supplies the handler.
+  const canDuplicate = !!onDuplicateProject;
+  const canManage = canRename || canDelete || canDuplicate;
 
   // B881666 — `refresh` (and everything that calls it — the storage-event listener registered
   // once at mount, an in-flight warm/reconcile promise resolving later) must always reconcile
@@ -934,6 +950,18 @@ export default function ProjectBreadcrumb({
                     style={menuItem()}
                   >
                     <PencilIcon /> Rename
+                  </button>
+                )}
+                {canDuplicate && (
+                  <button
+                    data-testid="project-duplicate"
+                    role="menuitem"
+                    onClick={() => { setMenuFor(null); onDuplicateProject(menuFor.id); }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--hover-ghost)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                    style={menuItem()}
+                  >
+                    <DuplicateIcon /> Duplicate
                   </button>
                 )}
                 {canDelete && (

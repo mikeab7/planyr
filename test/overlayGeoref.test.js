@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   validPlacement, overlayCornersFromPlacement, latLonToImagePoint, imagePointToLatLon, suggestFtPerPx,
-  scalePlacement, rotatePlacement,
+  scalePlacement, rotatePlacement, OVERLAY_SUGGEST_MIN_WIDTH_FT, OVERLAY_SUGGEST_MAX_WIDTH_FT,
 } from "../src/shared/sitePlans/lib/overlayGeoref.js";
 import { projectToGrid, gridToProject } from "../src/shared/coordinates/index.js";
 import { projectToZone } from "../src/shared/coordinates/statePlane.js";
@@ -103,6 +103,31 @@ describe("overlayGeoref — suggestFtPerPx", () => {
   it("falls back to a safe positive default for degenerate inputs", () => {
     expect(suggestFtPerPx(0, 500)).toBeGreaterThan(0);
     expect(suggestFtPerPx(1000, 0)).toBeGreaterThan(0);
+  });
+
+  // B850432/NEW-2 — measured live: an 800x600 image, placed while the map sat at a
+  // country-wide zoom, came out at "622,346 x 466,759 ft" (118 x 88 miles). A viewport that
+  // wide must never produce a wider-than-plausible overlay, regardless of image size.
+  it("clamps an absurdly wide viewport to a plausible overlay width", () => {
+    const imgW = 800, imgH = 600;
+    const viewWidthFt = 1_037_243; // roughly the owner's reported country-wide viewport
+    const ftPerPx = suggestFtPerPx(viewWidthFt, imgW);
+    const widthFt = imgW * ftPerPx, heightFt = imgH * ftPerPx;
+    expect(widthFt).toBeCloseTo(OVERLAY_SUGGEST_MAX_WIDTH_FT, 6);
+    expect(widthFt).toBeLessThan(3100);
+    expect(heightFt).toBeLessThan(3100);
+  });
+
+  it("clamps a tiny (zoomed-in) viewport to a plausible minimum overlay width", () => {
+    const ftPerPx = suggestFtPerPx(10, 800); // 10 ft view width * 0.6 fraction = 6 ft, well under the floor
+    expect(800 * ftPerPx).toBeCloseTo(OVERLAY_SUGGEST_MIN_WIDTH_FT, 6);
+  });
+
+  it("leaves an already-plausible viewport-derived size untouched", () => {
+    const imgW = 800;
+    const viewWidthFt = 2000; // typical building-scale zoom
+    const ftPerPx = suggestFtPerPx(viewWidthFt, imgW);
+    expect(imgW * ftPerPx).toBeCloseTo(viewWidthFt * 0.6, 6);
   });
 });
 

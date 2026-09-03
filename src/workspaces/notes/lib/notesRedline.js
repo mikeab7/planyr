@@ -34,13 +34,20 @@
  * "Attachment: <name>", "Table", "Sketch", "Box") carrying the same same/inserted/deleted/
  * changed status as any text block. Nothing throws on one; nothing is silently dropped.
  *
- * ⛔ WHICH SIDE IS "REVISED". Neither copy is more authoritative than the other (that is the
- * whole reason a conflict was raised), so a direction has to be picked to talk about insertions
- * vs deletions at all — this file always treats `localDoc` ("this window") as the REVISED
- * document and `serverDoc` ("the other window") as the ORIGINAL, matching Word's Compare
- * Documents convention (original → revised). A word present only in the local copy is an
- * INSERTION; a word present only in the server copy is a DELETION. The caller decides how to
- * caption that (see `ConflictReview.jsx`) — this file only computes it.
+ * ⛔ WHICH SIDE IS "REVISED" — DECIDED BY THE CALLER, ON RECENCY, NEVER BY THIS FILE (B849105,
+ * corrected from an earlier version that got this wrong). Neither copy is more authoritative
+ * than the other (that is the whole reason a conflict was raised), so a direction has to be
+ * picked to talk about insertions vs deletions at all — but the direction has to mean something
+ * a reader can trust. It used to always be "whichever copy is open in THIS browser tab", which
+ * silently inverts the moment that tab happens to hold the OLDER edit: the owner watched a
+ * table that had genuinely been converted-to-text (removed) render as "Table — added", because
+ * his "this window" copy was the one still holding the old table. `buildRedline`'s first
+ * argument is always treated as REVISED and its second as ORIGINAL (Word's Compare Documents
+ * convention) — it is purely positional and knows nothing about "local"/"server". The caller
+ * orders the two copies by recency first (`lib/notesVersionOrder.js`'s `orderConflictVersions`)
+ * and passes the NEWER one first, so "added"/"removed" reads as a true old → new story whenever
+ * that ordering is knowable. A word present only in the first (revised) argument is an
+ * INSERTION; a word present only in the second (original) argument is a DELETION.
  */
 import { lcsAlign } from "./notesConflictDiff.js";
 
@@ -96,7 +103,7 @@ function leafBlock(tag, attrs, runs, path) {
 }
 
 function opaqueBlock(tag, label, node, path) {
-  return { tag, opaque: true, label, path, sig: JSON.stringify(["opaque", tag, sigPath(path), node]) };
+  return { tag, opaque: true, label, node, path, sig: JSON.stringify(["opaque", tag, sigPath(path), node]) };
 }
 
 /** Walk one document model into a flat, in-order list of leaf blocks (paragraphs, headings,
@@ -235,14 +242,15 @@ function sameShape(a, b) {
 
 function renderedLeaf(status, block, spans) {
   return block.opaque
-    ? { status, path: block.path, tag: block.tag, opaque: true, label: block.label }
+    ? { status, path: block.path, tag: block.tag, opaque: true, label: block.label, node: block.node }
     : { status, path: block.path, tag: block.tag, attrs: block.attrs, spans };
 }
 
-/** The public entry. Returns `{ blocks, changed }` — `blocks` is a tree ready for
- *  `NoteRedline.jsx` to render (see `nestByPath`), `changed` is whether anything differs at
- *  all (an identical pair renders as plain "same" text with nothing to show). */
-export function buildRedline(localDoc, serverDoc) {
+/** The shared engine behind both `buildRedline` (one merged document) and `buildComparison`'s
+ *  two split panes — ONE LCS alignment, computed once, so the unified redline and the
+ *  side-by-side panes can never disagree about what changed. Returns the FLAT, pre-nesting
+ *  list `nestByPath` expects. */
+function computeFlat(localDoc, serverDoc) {
   const blocksA = flattenBlocks(localDoc);   // revised
   const blocksB = flattenBlocks(serverDoc);  // original
   const raw = lcsAlign(blocksA.map((b) => b.sig), blocksB.map((b) => b.sig));
@@ -282,8 +290,50 @@ export function buildRedline(localDoc, serverDoc) {
     }
     i = j;
   }
+  return flat;
+}
 
+/** The public entry. Returns `{ blocks, changed }` — `blocks` is a tree ready for
+ *  `NoteRedline.jsx` to render (see `nestByPath`), `changed` is whether anything differs at
+ *  all (an identical pair renders as plain "same" text with nothing to show). */
+export function buildRedline(localDoc, serverDoc) {
+  const flat = computeFlat(localDoc, serverDoc);
   return { blocks: nestByPath(flat), changed: flat.some((b) => b.status !== "same") };
+}
+
+/** Two independent, fully-formatted trees — the NEWER document's own shape (kept text plus
+ *  insertions) and the OLDER document's own shape (kept text plus deletions) — built from the
+ *  SAME block alignment `buildRedline` uses, never a second, separately-computed diff. Built
+ *  for `ConflictSideBySide.jsx` (the follow-up brief's NEW-2): a plain-text flatten
+ *  (`docToText`) cannot tell "a table" from "the same words typed as running text," so two
+ *  STRUCTURALLY different documents that happen to say the same words could render two
+ *  IDENTICAL-looking panes — exactly what the owner hit (a signature-block table on one side,
+ *  the same contact lines as plain paragraphs on the other; both panes read as flat, matching
+ *  text). Real block shape survives per pane instead — a table that only exists on the older
+ *  side renders as a real `<table>` there and is simply absent from the newer pane, where the
+ *  paragraphs that replaced it render instead — so the two panes can only look alike when the
+ *  documents genuinely do.
+ *
+ *  Each pane is rendered by the SAME `NoteRedline` component the unified view uses (a leaf's
+ *  `status`/`spans` already carry everything the renderer needs to tint "this is new here" /
+ *  "this is going away" within one pane, exactly as they do in the merged view) — so there is
+ *  one rendering engine for both surfaces, not two that can drift apart. */
+export function buildComparison(localDoc, serverDoc) {
+  const flat = computeFlat(localDoc, serverDoc);
+  const changed = flat.some((b) => b.status !== "same");
+
+  const paneFlat = (excludeStatus, keepSpanKinds) => flat
+    .filter((b) => b.status !== excludeStatus)
+    .map((b) => (b.spans ? { ...b, spans: b.spans.filter((s) => keepSpanKinds.has(s.kind)) } : b));
+
+  return {
+    blocks: nestByPath(flat),
+    changed,
+    panes: {
+      newer: nestByPath(paneFlat("deleted", new Set(["same", "ins"]))),
+      older: nestByPath(paneFlat("inserted", new Set(["same", "del"]))),
+    },
+  };
 }
 
 /** Group a flat, path-carrying list back into a nested tree — the inverse of flattening. Two

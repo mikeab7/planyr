@@ -14,14 +14,15 @@
  *
  * B408 consolidation (2026-07-11): the scheduler's planar_* tables now live in the SAME
  * (main) Supabase project as everything else — the old dedicated project is retired.
- * These constants keep using the ANON key on purpose (read path is anon-readable, same
- * as the shipped scheduler HTML, so baking it here as a fallback leaks nothing).
- * PLANYR_SEQ_URL / PLANYR_SEQ_ANON_KEY env vars still override for future rotation.
+ * ⛔ B778/NEW-1 (2026-09-02): planar_data is NO LONGER anon-readable — its RLS now requires an
+ * authenticated request from the schedule's own owner (private by default, no team sharing —
+ * see src/workspaces/scheduler/db/ and BACKLOG.md B778). Reads now go through `pgGet` like
+ * every other table here, so owner-scoping can't be forgotten — this connector's
+ * PLANYR_MCP_OWNER_ID is Michael's own account id, and planar_data's one row is owned by that
+ * same account.
  */
 import { summarizeSite } from "./_metrics.js";
 
-const SEQ_URL = "https://lyeqzkuiwngunutlkkmi.supabase.co";
-const SEQ_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5ZXF6a3Vpd25ndW51dGxra21pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEzNjc0NjMsImV4cCI6MjA5Njk0MzQ2M30.1jyFWeEPWDR4-YYu5azWbWQN8P48cgyZCBqfOwrAnlk";
 const SEQ_KEY = "hs-v1"; // the one planar_data row the scheduler reads/writes
 
 /** JSON-RPC "invalid params" — the transport surfaces this as -32602, not a tool error. */
@@ -48,16 +49,11 @@ async function pgGet(env, table, params) {
   return r.json();
 }
 
-/* Scheduler backend read (second Supabase project) → { <pid>: {id,name,tasks:[...]} }. */
+/* Scheduler read — same main Supabase project since B408; routed through the shared pgGet
+ * choke point (owner-scoped automatically, GET-only) now that planar_data carries a real
+ * user_id (B778/NEW-1). No second query path. */
 async function fetchScheduleData(env) {
-  const url = (env && env.PLANYR_SEQ_URL) || SEQ_URL;
-  const key = (env && env.PLANYR_SEQ_ANON_KEY) || SEQ_ANON;
-  const r = await fetch(`${url.replace(/\/+$/, "")}/rest/v1/planar_data?key=eq.${SEQ_KEY}&select=value`, {
-    method: "GET",
-    headers: { apikey: key, authorization: `Bearer ${key}` },
-  });
-  if (!r.ok) throw new Error(`Scheduler backend query failed: ${r.status} ${await r.text().catch(() => "")}`);
-  const rows = await r.json();
+  const rows = await pgGet(env, "planar_data", [["key", `eq.${SEQ_KEY}`], ["select", "value"]]);
   return (rows && rows[0] && rows[0].value && rows[0].value.projects) || {};
 }
 

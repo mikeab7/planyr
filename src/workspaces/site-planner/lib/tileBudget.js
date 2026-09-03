@@ -98,3 +98,30 @@ export function tilesToEvict(tiles, limit) {
   // current we simply hold more than the cap this frame rather than punch a hole.
   return evictable.slice(0, Math.min(evictable.length, list.length - cap)).map((t) => t.key);
 }
+
+/* Blank-tile self-heal (B844704) — see tileLifecycle.js's `armBlankTileHeal` for the full story
+ * and the owner report it answers (a lingering light-grey square over the dashboard aerial).
+ *
+ * WHY A TILE CAN GO BLANK FOREVER. Leaflet's `GridLayer._tileReady` marks a tile `loaded` (so its
+ * own grid update never asks for that tile again) whether the load succeeded OR errored, but only
+ * adds the `leaflet-tile-loaded` class — the ONE thing that takes a tile out of `visibility:
+ * hidden` (leaflet.css) — on success. `withTileRetry` (layers.js) gives a tile two quick retries
+ * and then stops listening. A retry that also fails (a rate limit, a DNS hiccup, a cold host) is
+ * therefore stuck: invisible, never revisited by Leaflet, revealing `.leaflet-container`'s own
+ * flat, hardcoded light-grey background through the gap — a borderless, textless, spinner-less
+ * grey square, exactly tile-sized. On a STATIC camera (the dashboard map, not being panned) nothing ever gives
+ * Leaflet a reason to ask for that tile again, so it can persist indefinitely.
+ *
+ * A tile is STUCK when it has sat retained ("current" — part of what the view actually wants to
+ * show) for at least `graceMs` and never gained the loaded/painted class. `graceMs` must clear
+ * ordinary load time by a wide margin (a real fetch settles in well under a second even on a slow
+ * connection) so this never interrupts a tile that is merely slow. Pure: takes plain records
+ * `{ key, current, painted, ageMs }`. */
+export const STUCK_TILE_GRACE_MS = 5000;
+
+export function stuckTiles(tiles, graceMs = STUCK_TILE_GRACE_MS) {
+  const list = Array.isArray(tiles) ? tiles : [];
+  return list
+    .filter((t) => t && t.current && !t.painted && Number(t.ageMs) >= graceMs)
+    .map((t) => t.key);
+}

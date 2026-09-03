@@ -16,7 +16,10 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { sanitizeProjects, parseNavState, deriveCurrentProject, findBySiteId, needsScheduleCarryIn, dashboardNavActions, isPickShowing } from "../src/workspaces/scheduler/lib/navState.js";
+import {
+  sanitizeProjects, parseNavState, deriveCurrentProject, findBySiteId, findAllBySiteId,
+  needsScheduleCarryIn, dashboardNavActions, isPickShowing, isGridMismatched, newProjectAction,
+} from "../src/workspaces/scheduler/lib/navState.js";
 
 const WELL_FORMED = [{ id: 1, name: "Goose Creek" }, { id: 3, name: "Grand Port Logistics" }];
 const navMsg = (over = {}) => ({ source: "planar-seq", type: "planar:nav-state", section: "projects", activeId: 3, projects: WELL_FORMED, ...over });
@@ -184,6 +187,102 @@ describe("needsScheduleCarryIn — re-drive the grid onto the routed site's sche
       expect(needsScheduleCarryIn(LINKED, "gc", 2, s)).toBe(true);
     }
   });
+
+  /* NEW-3/B1080547 — a site with TWO linked schedules: switching between them must never read as
+   * "needs carry-in" (which would fight the switch back to whichever one the carry-in defaults to). */
+  it("false for EITHER schedule once a site has two linked schedules — no fight between them", () => {
+    const TWO = sanitizeProjects([
+      { id: 1, name: "Richfield", linkedSiteId: "rf", linkedSiteName: "Richfield" },
+      { id: 9, name: "Richfield (2)", linkedSiteId: "rf", linkedSiteName: "Richfield" },
+    ]);
+    expect(needsScheduleCarryIn(TWO, "rf", 1)).toBe(false);
+    expect(needsScheduleCarryIn(TWO, "rf", 9)).toBe(false);
+    expect(needsScheduleCarryIn(TWO, "rf", 999)).toBe(true); // a third, unrelated id is still a real mismatch
+  });
+});
+
+describe("findAllBySiteId — every schedule linked to a site, not just the first (NEW-3/B1080547)", () => {
+  it("returns every match, in list order", () => {
+    const projects = sanitizeProjects([
+      { id: 1, name: "Richfield", linkedSiteId: "rf", linkedSiteName: "Richfield" },
+      { id: 2, name: "Other" },
+      { id: 9, name: "Richfield (2)", linkedSiteId: "rf", linkedSiteName: "Richfield" },
+    ]);
+    expect(findAllBySiteId(projects, "rf").map((p) => p.id)).toEqual([1, 9]);
+  });
+
+  it("[] when nothing is linked, or args are missing — findBySiteId still returns the first match", () => {
+    expect(findAllBySiteId([{ id: 1, name: "X" }], "rf")).toEqual([]);
+    expect(findAllBySiteId(null, "rf")).toEqual([]);
+    expect(findAllBySiteId([{ id: 1, name: "X" }], null)).toEqual([]);
+    const projects = sanitizeProjects([
+      { id: 1, name: "A", linkedSiteId: "rf", linkedSiteName: "A" },
+      { id: 2, name: "B", linkedSiteId: "rf", linkedSiteName: "A" },
+    ]);
+    expect(findBySiteId(projects, "rf").id).toBe(1);
+  });
+});
+
+/* NEW-5/B1080544 — THE PROVE-IT-RED CHECK the owner explicitly asked for: reproduce the reported
+ * mechanism (a global, drifted `aPid` disagreeing with the route) and confirm the render gate
+ * catches it — then confirm a LEGITIMATE state (the routed site's own schedule, or a deliberately
+ * picked cross-cutting one) never gets caught by it. Owner repro, verbatim from production: routed
+ * on Richfield (linkedSiteId "rf", its own schedule id 15), `aPid` reading 6 (Pappadoupolos, unrelated
+ * to "rf") — breadcrumb said Richfield, the grid rendered Pappadoupolos's 41 tasks. */
+describe("isGridMismatched — the route↔grid mismatch is made IMPOSSIBLE TO SEE (NEW-5/B1080544)", () => {
+  const RICHFIELD = sanitizeProjects([
+    { id: 6, name: "Pappadoupolos", linkedSiteId: "pap" },
+    { id: 15, name: "Richfield", linkedSiteId: "rf" },
+    { id: 5, name: "Pursuits" }, // unlinked, cross-cutting
+  ]);
+
+  it("RED: the exact production repro — routed on Richfield, a foreign aPid (Pappadoupolos) active", () => {
+    expect(isGridMismatched(RICHFIELD, "rf", 6, false)).toBe(true);
+  });
+
+  it("GREEN: the routed site's own schedule is active — never flagged", () => {
+    expect(isGridMismatched(RICHFIELD, "rf", 15, false)).toBe(false);
+  });
+
+  it("GREEN: a deliberately picked cross-cutting schedule is never flagged, even though its id doesn't match the route", () => {
+    expect(isGridMismatched(RICHFIELD, "rf", 5, /* pickShowing */ true)).toBe(false);
+  });
+
+  it("GREEN: no route, or the routed site has no schedule at all — the empty state owns that case, not this gate", () => {
+    expect(isGridMismatched(RICHFIELD, null, 6, false)).toBe(false);
+    expect(isGridMismatched(RICHFIELD, "unlinked-site", 6, false)).toBe(false);
+  });
+
+  it("RED persists across repeated checks — there is no latch that ever suppresses this (the defect this replaces)", () => {
+    // The OLD Scheduler.jsx latched a `carriedRef` the first time it successfully carried a routed
+    // project in, and never re-armed for that same project — so a LATER drift of `aPid` away from
+    // the correct link went uncorrected forever. These pure helpers carry no such memory: the same
+    // mismatch reads RED every single time it's asked, with no history dependence at all.
+    for (let i = 0; i < 5; i++) {
+      expect(isGridMismatched(RICHFIELD, "rf", 6, false)).toBe(true);
+    }
+  });
+});
+
+describe("newProjectAction — '+ New project' while routed links + names it, never mints an orphan (NEW-1/B1080545)", () => {
+  it("routed on a project with no schedule yet: create + link + name after the project", () => {
+    expect(newProjectAction({ projectId: "rf", routedSiteName: "Richfield", projects: [] }))
+      .toEqual({ type: "create-linked", name: "Richfield", siteId: "rf", siteName: "Richfield" });
+  });
+
+  it("routed on a project that ALREADY has a schedule (NEW-3): a disambiguated name, never a second identical one", () => {
+    const projects = sanitizeProjects([{ id: 1, name: "Richfield", linkedSiteId: "rf" }]);
+    expect(newProjectAction({ projectId: "rf", routedSiteName: "Richfield", projects }))
+      .toEqual({ type: "create-linked", name: "Richfield (2)", siteId: "rf", siteName: "Richfield" });
+  });
+
+  it("not routed (Operations/Pursuits-style, or org/dashboard): unchanged generic creation", () => {
+    expect(newProjectAction({ projectId: null, routedSiteName: null, projects: [] })).toEqual({ type: "new" });
+  });
+
+  it("routed but the site name hasn't resolved yet: falls back to generic rather than naming a raw id (B560 defence)", () => {
+    expect(newProjectAction({ projectId: "rf", routedSiteName: null, projects: [] })).toEqual({ type: "new" });
+  });
 });
 
 /* B748064 — the owner's report: on a project with no linked schedule (the empty-state screen),
@@ -223,11 +322,37 @@ describe("Scheduler.jsx — the ROUTE outranks the embed's section", () => {
   it("the carry-in passes `section` to needsScheduleCarryIn", () => {
     expect(SRC).toMatch(/needsScheduleCarryIn\(projects,\s*projectId,\s*activeId,\s*section\)/);
     // …and re-runs when the section changes, or a Dashboard→projects transition is never noticed.
-    expect(SRC).toMatch(/\[ready,\s*projectId,\s*projects,\s*activeId,\s*section\]/);
+    expect(SRC).toMatch(/\[ready,\s*projectId,\s*projects,\s*activeId,\s*section,\s*pickShowing\]/);
   });
 
-  it('the "already carried" latch is scoped to the projects section, so a return visit re-drives', () => {
-    expect(SRC).toMatch(/carriedRef\.current === projectId && section === "projects"/);
+  /* NEW-5/B1080544 — the `carriedRef` LATCH is GONE, not merely renamed. It used to suppress the
+   * carry-in forever after the first successful drive for a routed project, which is exactly what
+   * let a later drift of the shared/global `aPid` go uncorrected (the reported Richfield/
+   * Pappadoupolos mismatch). The ONLY thing allowed to suppress a re-drive now is a genuine
+   * deliberate pick (`pickShowing`) — never a "already did this once" memory. Both are asserted:
+   * the dead code is really gone, AND its replacement is the one true suppression signal. */
+  it("the carry-in latch is REMOVED — no `carriedRef` declaration or usage survives as live code", () => {
+    // A comment may still name it in prose (explaining what was removed and why); what must be
+    // gone is the LATCH ITSELF — the ref declaration and any `.current` read/write of it.
+    expect(SRC).not.toMatch(/const carriedRef = useRef/);
+    expect(SRC).not.toMatch(/carriedRef\.current/);
+  });
+
+  it("the carry-in's only suppression is a deliberate pick (`pickShowing`), computed before the effect", () => {
+    const i = SRC.indexOf("const pickShowing = isPickShowing(");
+    expect(i).toBeGreaterThan(-1);
+    const effectStart = SRC.indexOf("useEffect(() => {", i);
+    const block = SRC.slice(effectStart, effectStart + 300);
+    expect(block).toMatch(/if \(pickShowing\) return;/);
+    expect(block).toMatch(/if \(!needsScheduleCarryIn\(projects, projectId, activeId, section\)\) return;/);
+  });
+
+  it("a route↔grid mismatch hides the iframe (visibility) rather than ever rendering it — isGridMismatched wired into the iframe's style", () => {
+    expect(SRC).toMatch(/const gridMismatched = ready && isGridMismatched\(/);
+    const i = SRC.indexOf("<iframe\n");
+    expect(i).toBeGreaterThan(-1);
+    const block = SRC.slice(i, SRC.indexOf("/>", i));
+    expect(block).toMatch(/visibility:\s*\(showEmptyState \|\| gridMismatched\)\s*\?\s*"hidden"\s*:\s*"visible"/);
   });
 
   it("a routed project names the breadcrumb even while the embed reports its Dashboard", () => {
@@ -236,5 +361,21 @@ describe("Scheduler.jsx — the ROUTE outranks the embed's section", () => {
     // The routed-project branch must come FIRST; `section === "reports"` may only answer for a
     // route with no project (which is what pressing Dashboard leaves behind).
     expect(block.indexOf("if (projectId != null)")).toBeLessThan(block.indexOf('section === "reports"'));
+  });
+
+  // NEW-1/B1080545 — "+ New project" must route through newProjectAction (never a bare
+  // planar:nav-new post unconditionally) so a routed project can never mint an orphan.
+  it('onNewProject decides via newProjectAction, not a bare "planar:nav-new" post', () => {
+    const i = SRC.indexOf("onNewProject={() => {");
+    expect(i).toBeGreaterThan(-1);
+    const block = SRC.slice(i, i + 400);
+    expect(block).toMatch(/newProjectAction\(\{ projectId, routedSiteName, projects \}\)/);
+    expect(block).toMatch(/planar:nav-create-linked/);
+  });
+
+  // NEW-2/B1080546 — Duplicate is reachable from the shell breadcrumb (the in-iframe project list
+  // it used to depend on is hidden whenever the app runs inside the Planyr shell).
+  it("onDuplicateProject is wired to the embedded app's nav-duplicate bridge", () => {
+    expect(SRC).toMatch(/onDuplicateProject=\{\(id\) => post\(\{ type: "planar:nav-duplicate", id \}\)\}/);
   });
 });

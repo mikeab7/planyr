@@ -97,34 +97,98 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   small. **Its own lazy chunk**, same reasoning as `IntegrityBanner.jsx` — a real conflict is rare
   and the diff engine has no business on the route's critical path.
 - **`components/ConflictReview.jsx` — THE FULL-SCREEN REVIEW.** Opens on a REDLINE
-  (`components/NoteRedline.jsx` + `lib/notesRedline.js`) by default — NEW-2's ask, *"wouldn't a
+  (`components/NoteRedline.jsx` + `lib/notesRedline.js`) by default — the owner's ask, *"wouldn't a
   redline be better, so I can see the differences over each other"* — with the original two-card
   `components/ConflictSideBySide.jsx` one toggle away for a rewrite big enough that two
-  independent columns read easier. This is the ONLY place either "Keep this version" button
-  lives; closing (Esc/✕) never resolves anything, it just returns to the compact notice.
+  independent columns read easier. This is the ONLY place either resolve button lives; closing
+  (Esc / the "✕ Decide later" button) never resolves anything, it just returns to the compact
+  notice — see B849106 and the repo-root `test/` suite **notesConflictDefer** for the proof that
+  the SAME conflict, with both copies intact, reappears on a real reload.
   ⛔ **NEITHER CHOICE DESTROYS THE COPY IT DISCARDS, AND THAT IS SYMMETRIC.** B1391 only
   protected "Use the other" (parked this window's text first); "Keep this one" force-pushed
   straight over the other window's already-saved text with nothing kept. `Notes.jsx`'s
   `handleConflict` now parks whichever body is ABOUT to be discarded — read fresh via
   `notesConflictFor(pageId)` at click time, never off a stale render closure — for BOTH buttons.
-  ⛔ **NEW-1 — BOTH BUTTONS SAY "Keep this version", THE SAME STRING.** They used to read "Keep
-  this one" / "Use the other" — one self-referential verb and one other-referential verb for the
-  mechanically identical action. The owner: *"why does the right one only have an option to use
-  the other, think through how stupid this is."* `notesConflictLine` (`lib/notesStore.js`) now
-  returns one label for both; each button's `aria-label` still disambiguates which window it acts
-  on, for a screen reader.
+  ⛔ **SUPERSEDED TWICE OVER (B849104) — the buttons are no longer fixed strings at all.** Round
+  one had two DIFFERENT verbs ("Keep this one" / "Use the other") for one mechanical action; round
+  two "fixed" that by making both read the IDENTICAL "Keep this version" — and the owner came right
+  back: *"the two buttons... say the same thing... doing opposite things."* The button text is now
+  computed from `lib/notesVersionOrder.js`'s recency ordering ("Keep the newer version" / "Keep the
+  older version", with a window-based fallback only when neither copy's edit time is known) —
+  `notesConflictLine` no longer mints button text at all. `aria-label` still separately names the
+  window, for a screen reader.
+  ⛔ **AND THE REDLINE'S DIFF DIRECTION WAS BOUND TO THE WRONG AXIS (B849105) — data-safety, not
+  cosmetic.** `buildRedline` used to always treat `localDoc` as "revised" (green/added) — i.e.
+  whichever copy this browser tab happens to hold — regardless of which one was actually edited
+  more recently. The owner hit exactly the case that breaks: his older tab's copy still had a
+  table his newer tab had already converted to text (B649377), and the panel showed "Table —
+  added", backwards from what really happened. `ConflictReview.jsx` now orders the two copies by
+  recency FIRST and always passes the newer one as revised, so "added"/"removed" reads as a true
+  old → new story whenever recency is knowable — see `lib/notesVersionOrder.js`'s header for the
+  full mechanism and `docs/archive/BACKLOG-DONE.md`'s B1076177 for the reproduction.
+  ⛔ **AND THE LEGEND ONLY DOCUMENTED HALF THE ENCODINGS THE RENDERER EMITS (B849107).**
+  `NoteRedline.jsx`'s whole-block insert/delete already got a tint + border; an OPAQUE block (a
+  table) additionally carried a text suffix ("— added"/"— removed") but a whole PLAIN-TEXT
+  paragraph did not — colour and shape only, a WCAG 1.4.1 gap the owner hit directly. Fixed with a
+  shared `ChangeTag` ("+ Added"/"− Removed") used identically on every whole-block change, and a
+  rebuilt legend that is STICKY (stays on screen once scrolled into a long note), states the
+  old→new direction with real timestamps, covers both the inline underline/strikethrough AND the
+  block-level tag encoding, and states the CONSEQUENCE of each ("keeping the older version loses
+  it") rather than bare set membership. Two-round screenshot critique loop recorded in
+  `docs/notes-conflict-critique.md` — round 2 caught a real doubled-article grammar bug in the
+  edit-time-unknown fallback sentence, fixed by `rolePhrase()` (a mid-sentence-safe phrase form,
+  separate from the heading-form `roleLabel()`, so no caller ever wraps a label in its own
+  external article again).
+  ⛔ **AND AN OPAQUE BLOCK NOW SHOWS ITS OWN CONTENT, NOT JUST ITS TYPE NAME (B1077680, a
+  follow-up brief after PR #1363/B1076176-9 made the panel legible enough for the owner to see
+  what it was STILL not telling him).** *"if we're going to show that we removed a table, why
+  are we not showing the table."* A removed/added table used to render as the bare word "Table"
+  in a tinted pill; `NoteRedline.jsx`'s `OpaqueContent` now renders the real thing for every
+  opaque kind except the two that genuinely have nothing more to show (a divider; an attachment,
+  whose one fact — its filename — is already in the label): a **real `<table>`** (rows, cells,
+  bold header cells, merged-cell colspan/rowspan), a **box's (`noteAnchor`) actual content**
+  (recursed via `PlainNode` — text or a picture, per that node's own design), a **sketch's box
+  labels**, and a **picture's real thumbnail** once its bytes load. A picture's bytes are not in
+  the document (they live in IndexedDB), so `ConflictReview.jsx` loads them asynchronously once
+  the review is actually open — never on the compact notice's mount — via a new `images` prop
+  threaded to both views. **B1077681 fixed the twin bug this exposed in side by side**: it used
+  to diff `docToText(doc)` (a plain-text flatten built for search), which cannot tell "a table"
+  from "the same words typed as running text" — the owner's exact case rendered two
+  IDENTICAL-looking panes with no table anywhere ("here's the side by side but where is the
+  table"). `lib/notesRedline.js`'s `buildComparison()` now derives `panes.newer`/`panes.older`
+  (two fully-formatted block trees — kept text + insertions / kept text + deletions) from the
+  SAME alignment the unified redline uses, and `ConflictSideBySide.jsx` renders each pane through
+  the SAME `NoteRedline` component the unified view does — real structure survives in both views,
+  so the two panes can only look alike when the documents genuinely do. **B1077682 checked the
+  reported side-by-side clipping at the owner's exact viewport (1600 CSS px) and could not
+  reproduce it** — reported as most likely his screenshot being cropped, not a real defect; see
+  that item in `docs/archive/BACKLOG-DONE.md` for the full headless proof.
+- `lib/notesVersionOrder.js` — PURE: `orderConflictVersions()` decides which of the two
+  conflicting copies is NEWER (both timestamps known and different), returning `{comparable,
+  newer, older}` with `which: "mine"|"theirs"` on each side so a caller can still wire the right
+  resolve callback. `comparable: false` (a tie, or either timestamp missing) is a real return
+  value a caller MUST check before rendering "newer"/"older" in a word a person reads — see its
+  own header for why an unranked pair must never be labelled as ranked.
 - `lib/notesRedline.js` — PURE: flattens a document's raw ProseMirror JSON into leaf blocks
-  (paragraph/heading/code, plus an OPAQUE placeholder for a picture/attachment/sketch/box/table —
-  diffing inside one of those is out of scope, and it says so rather than silently mishandling
-  it), block-matches the two sides with `lib/notesConflictDiff.js`'s `lcsAlign` (the shared LCS
-  primitive both files now use — one DP, not two copies), and runs a WORD-level diff (marks
-  preserved) inside a matched pair so a one-word edit inside a long paragraph reads as one
-  underlined/struck-through word, never the whole paragraph replaced twice over.
-- `components/ConflictSideBySide.jsx` — the original B842624 two-card layout (word-highlight
-  diff over `docToText`, not the redline's rich formatting), now `ConflictReview`'s secondary
-  view. The diff itself is `lib/notesConflictDiff.js` — PURE, unit-tested, a capped word-level
-  LCS with a line-level and then a linear prefix/suffix fallback so it can never build an
-  unbounded table on an outsized document.
+  (paragraph/heading/code, plus an OPAQUE node — a picture/attachment/sketch/box/table — carrying
+  its real content through to the renderer; diffing INSIDE one of those stays out of scope, and
+  it says so rather than silently mishandling it), block-matches the two sides with
+  `lib/notesConflictDiff.js`'s `lcsAlign` (the shared LCS primitive both files now use — one DP,
+  not two copies), and runs a WORD-level diff (marks preserved) inside a matched pair so a
+  one-word edit inside a long paragraph reads as one underlined/struck-through word, never the
+  whole paragraph replaced twice over. **`buildRedline()`** returns the one merged tree the
+  redline view renders; **`buildComparison()`** (B1077681) runs the identical alignment ONCE and
+  additionally returns `panes.newer`/`panes.older` — two independently-nested trees for
+  `ConflictSideBySide.jsx` — so the two views are structurally guaranteed to agree.
+- `components/ConflictSideBySide.jsx` — the original B842624 two-card layout, now
+  `ConflictReview`'s secondary view. **Since B1077681 it no longer runs its own word-highlight
+  diff over `docToText`** (a plain-text flatten that could not tell a table from the same words
+  as running text, and produced two identical-looking panes on exactly that case) — each card now
+  renders its `buildComparison()` pane through `NoteRedline.jsx`, the SAME renderer the unified
+  redline view uses, so real formatting (a table, a picture, a list) shows in both views.
+  `lib/notesConflictDiff.js`'s capped word-level LCS (line-level, then a linear prefix/suffix
+  fallback so it can never build an unbounded table on an outsized document) is still the shared
+  primitive `notesRedline.js`'s `lcsAlign` calls — it just no longer has a second caller here.
 - `components/NoteToolbar.jsx` — formatting bar, **grouped by frequency**: what you reach for while
   writing on the row, the long tail behind **More**. Every active state is read from
   `editor.isActive(...)`, never mirrored into React state; every control cancels `mousedown` so the

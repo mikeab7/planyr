@@ -55,6 +55,15 @@ export function parseTypedDate(raw) {
   return null;
 }
 
+/** Today, in this app's canonical storage format (ISO, local calendar day) — the one-click
+ * "Today" quick-set button in the comp entry sheet's Executed cell (NEW-5, owner decision,
+ * 2026-09-02) reads this rather than `new Date().toISOString()`, which is UTC and can name the
+ * WRONG calendar day for hours around midnight in any zone behind UTC. */
+export function todayIso() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 /** ISO -> mm/dd/yy, this app's own display convention (never the raw ISO string). Built from the
  * string parts, not `new Date(iso)` directly — a bare ISO date carries no time, so parsing it as
  * UTC and displaying in a behind-UTC local zone can print the wrong day (the same reason

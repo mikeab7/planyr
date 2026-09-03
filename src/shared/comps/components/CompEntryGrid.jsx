@@ -35,12 +35,14 @@ import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "../../ui/controls.jsx";
 import { parsePaste, rowHasBlockingFlags, parseProseLine, parseSingleRecord, splitPasteLines } from "../lib/compParse.js";
-import { emptyDraft, draftToComp, validateComp, validAnchor, summarizeLeaseComps, summarizeSaleComps, resolveCapTriangle } from "../lib/comps.js";
+import { emptyDraft, draftToComp, validateComp, summarizeLeaseComps, summarizeSaleComps, resolveCapTriangle } from "../lib/comps.js";
 import {
   SHEET_COLUMNS, cellState, applyCellEdit, fillDownColumn, spillPaste, visibleColumnIndices,
   computeFlexWidths, widthFor, frozenLeftOffsets,
 } from "../lib/compSheetColumns.js";
 import { parcelLocationText, siteplanLocationText, pinFallbackText } from "../lib/compLocationText.js";
+import { todayIso } from "../lib/compDates.js";
+import { FONT_SIZE } from "../../ui/designTokens.js";
 import { reverseGeocodeLatLon } from "../../../workspaces/site-planner/lib/geocode.js";
 import { COUNTIES } from "../../../workspaces/site-planner/lib/counties.js";
 
@@ -48,6 +50,17 @@ const ROW_H = 31;
 const GROUP_BAND_H = 22;
 const COL_LABEL_H = 26;
 const REMOVE_COL_W = 32;
+// B986096-HARDENING-28 (NEW-1 follow-up, owner live-measured, 2026-09-02) — the grid is the ONLY
+// flex-growing child of this panel; every sibling (paste box, notice line, ProblemsList, footer)
+// is fixed/auto height, so an unbounded sibling shrinks the grid FIRST, not last — measured live:
+// 3 rows in the sheet left the grid 154px tall, 8 rows (each stacking its own quiet notice line,
+// the defect this rule closes) shrank it to 101px — MORE content meant LESS of it visible, exactly
+// backwards. This floor (≈5.5 rows + the header) is what makes the grid the LAST thing to give up
+// space: combined with capping the notice line and relying on ProblemsList's existing maxHeight,
+// the grid keeps a real minimum regardless of how many rows are on the sheet. It is a floor, not a
+// promise — a housing content spike can still push the PANEL taller than its own chosen dockHeight
+// (visible overflow) rather than crush the grid to near-nothing, which is the better failure mode.
+const GRID_MIN_HEIGHT = GROUP_BAND_H + COL_LABEL_H + ROW_H * 5.5;
 
 // B986096-HARDENING-24 — the ONE type scale every grid CELL's text-bearing element reads: the
 // display span, the Location action button, and every open editor (input/select). A <span>
@@ -67,9 +80,42 @@ const CLOSE_ICON_FONT_SIZE = 13;
 // HARDENING-12 — the bottom-docked panel's remembered height (device-local, not per-plan; see
 // the dockHeight state in CompEntryGrid for why this is a dock rather than a free x/y position).
 const DOCK_HEIGHT_KEY = "planyr:compEntryDockHeight";
-const DOCK_HEIGHT_DEFAULT = 340;
+const DOCK_HEIGHT_DEFAULT = 340; // SSR-only fallback (no `window` to measure against) — see defaultDockHeight()
 const DOCK_HEIGHT_MIN = 200;
 const DOCK_HEIGHT_MAX = 760;
+// B986096-HARDENING-26 (owner live-measured, 2026-09-02 — "why do i have to scroll to see the
+// second row") — a flat 340px default had NOTHING to do with the viewport: on his own 521px-tall
+// browser window the sheet's own scroller was measured at 76px tall (2.4 rows) inside a panel
+// using only 65% of the available height, with the paste box + summary row + footer eating the
+// rest of the fixed 340px. This is a DATA-ENTRY GRID — the rows are the content, the paste box
+// above it is a means to an end — so the panel's height must grow with the viewport by default,
+// the same way its own resize handle already clamps a MANUAL drag to `h - 80` (`startResize`
+// below).
+const DOCK_HEIGHT_VIEWPORT_MARGIN = 80;
+// ⛔ MEASURED REGRESSION, caught by `verify-comp-entry-p0.mjs`'s own DOCKING check before this
+// shipped — a naive `h - 80` default (matching the MANUAL drag ceiling exactly) grows the panel to
+// DOCK_HEIGHT_MAX (760) on any normal-height window, which is HARDENING-12's own regression: at a
+// 900px-tall window that left only 128px of map clickable above the panel — below the "arm a row,
+// then click the map" workflow's own 300px bar, and the exact collision HARDENING-12 was built to
+// prevent. So the AUTOMATIC default gets its OWN, smaller ceiling — generous enough to show
+// several rows without the owner's own 2-row scroll, but never so tall it swallows the map. A
+// user who deliberately wants MORE (accepting less clickable map) still can, by dragging the
+// resize handle up to DOCK_HEIGHT_MAX — that's an informed, reversible choice the user makes for
+// themselves, not a default forced on every open.
+// ⛔ 500 IS A MEASURED BALANCE, NOT THE "≥8 ROWS" BAR THE BRIEF ASKED FOR — stated honestly rather
+// than silently under-delivering it. At a 900px-tall window this leaves ~388px of map (comfortably
+// over the 300px bar) and fits ~4-5 rows before scrolling once a few rows carry an open "needs a
+// date/location" note (`ProblemsList`'s own up-to-120px footer) — a real improvement on the 2.4
+// rows this was originally reported at, but short of 8 whenever the sheet has open notes, because
+// EVERY freshly pasted row starts without a picked Location (paste never sets one), so ProblemsList
+// is essentially always populated for a multi-row paste. Reaching 8 unconditionally would mean
+// either shrinking the map strip back toward HARDENING-12's regression or a content-aware panel
+// height (growing with row count, not just viewport) — genuinely bigger work, not attempted here.
+const DOCK_HEIGHT_DEFAULT_MAX = 500;
+function defaultDockHeight() {
+  if (typeof window === "undefined") return DOCK_HEIGHT_DEFAULT;
+  return clamp(window.innerHeight - DOCK_HEIGHT_VIEWPORT_MARGIN, DOCK_HEIGHT_MIN, DOCK_HEIGHT_DEFAULT_MAX);
+}
 
 let _rowSeq = 0;
 function newRowId() { return `row${Date.now()}_${_rowSeq++}`; }
@@ -209,9 +255,9 @@ function HeaderRows({ visibleIdx, flexWidths, frozenOffsets }) {
 /* ---- one data cell ---------------------------------------------------------------------------
  * At rest: plain text, right-aligned + tabular-nums for numbers, no border. Selected: an outline
  * appears. Editing: a real <input> (or a native date input) fills the cell exactly. */
-function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, isEditing, editValue,
+function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, touched, selected, inRange, isEditing, editValue,
   onMouseDown, onDoubleClick, onEditChange, onSelectEditChange, onEditKeyDown, onEditBlur, editInputRef, locationText,
-  flexWidths, frozenOffsets }) {
+  onSetToday, flexWidths, frozenOffsets }) {
   const st = cellState(col, draft);
   const flagKey = col.flagKey ? col.flagKey(draft) : col.key;
   const flag = cellFlags[flagKey];
@@ -297,6 +343,48 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
         </td>
       );
     }
+    // B986096-HARDENING-28 (NEW-5, owner decision, 2026-09-02 — "a one-click Today control...
+    // this is the speed he actually wanted. He asserts the date; the app never assumes it.") —
+    // Executed alone gets the quick-set button (never Commencement, a different fact). Wired as
+    // an INDEPENDENT commit path (`onSetToday` -> the parent's `setRowToday`, a plain
+    // `commitRows` call, the same shape `resolvePeriod` already uses) rather than through the
+    // character-editing state machine (`onEditKeyDown`/`onEditBlur`/`finishEdit`'s commit-with-
+    // moveDir branch) — that machinery is under an explicit owner moratorium after five rounds of
+    // regressions (see this file's own header), so this deliberately never touches it. Closing the
+    // editor afterward reuses `finishEdit(false, null)` completely unmodified and already
+    // idempotent-safe — the exact same call Escape already makes, which only ever clears local
+    // editing state, never the risky commit branch.
+    if (col.key === "compDate") {
+      return (
+        <td style={tdStyle} data-cell={`${rowIdx}-${colIdx}`}>
+          <span style={{ display: "flex", alignItems: "center", height: "100%" }}>
+            <input
+              ref={editInputRef}
+              type="text"
+              value={editValue}
+              onChange={(e) => onEditChange(e.target.value)}
+              onKeyDown={onEditKeyDown}
+              onBlur={(e) => onEditBlur(e, rowIdx, colIdx)}
+              placeholder={col.editHint || undefined}
+              style={{ ...inputStyle, width: undefined, flex: 1, minWidth: 0 }}
+            />
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onSetToday(rowIdx)}
+              title="Set to today"
+              style={{
+                flex: "none", border: "none", background: "none", color: "var(--accent)",
+                fontSize: FONT_SIZE.micro, fontWeight: 700, cursor: "pointer", padding: "0 4px",
+                fontFamily: "inherit",
+              }}
+            >
+              Tdy
+            </button>
+          </span>
+        </td>
+      );
+    }
     return (
       <td style={tdStyle} data-cell={`${rowIdx}-${colIdx}`}>
         <input
@@ -340,8 +428,20 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
   // HARDENING-25 item 8 (continued) — the non-hue channel itself: a small glyph ahead of the
   // value, present only on a genuinely blocking cell. `aria-hidden` because `hoverTitle` below
   // already carries the same reason as accessible text.
+  // B986096-HARDENING-28 (NEW-1/NEW-2 follow-up, owner live-measured, 2026-09-02 — "let the row
+  // itself carry its own quiet marker") — an empty Executed cell on an untouched row used to render
+  // truly nothing at all ("empty means empty," HARDENING-10 NEW-4), which is correct for a real
+  // stored VALUE but left no signal that the blankness is "not yet looked at" rather than a data
+  // gap. The per-row quiet SENTENCE this used to live in (`ProblemsList`'s own now-removed
+  // untouched branch) was the actual defect — it stacked one line per untouched row and are what
+  // starved the grid of its own height as rows piled up. This is its replacement: a single muted
+  // dot, in the cell itself, never a line in a growing list. It disappears the moment the row is
+  // touched (the real per-row message in ProblemsList takes over) or the date is filled in.
+  const quietUnfilled = col.key === "compDate" && !touched && !draft?.compDate;
   const cellContent = blockingFlag
     ? (<><span aria-hidden="true" style={{ marginRight: 3, verticalAlign: "middle" }}>⚠</span>{cellText}</>)
+    : quietUnfilled
+    ? <span aria-hidden="true" style={{ color: "var(--text-tertiary)", verticalAlign: "middle" }}>•</span>
     : cellText;
   // HARDENING-10 (message B NEW-3) — Title/Address and the two party columns are the ones real
   // values got cut off in ("Core5 Industrial Partners"); a hover reveals the untruncated value.
@@ -395,9 +495,28 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, selected, inRange, i
       onMouseDown={(e) => { e.preventDefault(); onMouseDown(rowIdx, colIdx, e.shiftKey); }}
       onDoubleClick={() => onDoubleClick(rowIdx, colIdx)}
       title={hoverTitle}>
-      <span style={textStyle}>
-        {cellContent}
-      </span>
+      {/* NEW-6/NEW-7 (owner report, 2026-09-02 — "why are there not dropdowns shown on things
+          that have dropdowns") — a choice cell (Type/Unit/Per/Basis, and any future select
+          column) was plain text at rest, indistinguishable from a free-text or numeric cell
+          until clicked. A trailing caret is the standard "this opens a menu" affordance; it's
+          added ONLY for a genuinely editable select cell (never on a fixed/na one, which isn't a
+          real choice for that row) and pinned to the cell's own right edge via flex, independent
+          of how long the value text is, so it survives even the narrowest choice column (Unit).
+          This is also what makes Basis read IDENTICALLY to Type/Unit/Per at rest — nothing in
+          this file ever special-cased Basis; the one resting representation for a choice cell,
+          applied uniformly, is this row/caret span, always a `<span>` here, never a live
+          `<select>` (a native `<select>` only ever mounts while the cell is actually being
+          edited — the same as every other kind of cell). */}
+      {col.kind === "select" && st.state === "editable" ? (
+        <span style={{ ...textStyle, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 3 }}>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", verticalAlign: "middle" }}>{cellContent}</span>
+          <span aria-hidden="true" style={{ flex: "none", fontSize: FONT_SIZE.micro, color: "var(--text-tertiary)", verticalAlign: "middle" }}>▾</span>
+        </span>
+      ) : (
+        <span style={textStyle}>
+          {cellContent}
+        </span>
+      )}
     </td>
   );
 }
@@ -410,13 +529,16 @@ function SummaryRow({ rows }) {
   const land = summarizeSaleComps(comps, "land");
   const bldg = summarizeSaleComps(comps, "building_sale");
   const parts = [`${rows.length} comp${rows.length === 1 ? "" : "s"}`];
+  // NEW-5 (owner decision) — an undated row is excluded from every average, never blended in;
+  // the exclusion count joins the parenthetical the same way "(2, unweighted)" already does.
   if (lease.headline) {
     const basis = lease.headlineBasis.toUpperCase();
     const weight = lease.headline.weighted ? "SF-weighted" : "unweighted";
-    parts.push(`Lease avg $${lease.headline.avg.toFixed(2)}/SF/yr ${basis} (${lease.headline.count}, ${weight})`);
+    const excl = lease.undatedCount ? `, ${lease.undatedCount} undated excluded` : "";
+    parts.push(`Lease avg $${lease.headline.avg.toFixed(2)}/SF/yr ${basis} (${lease.headline.count}, ${weight}${excl})`);
   }
-  if (land.count) parts.push(`Land avg $${land.avg.toFixed(2)}/SF (${land.count})`);
-  if (bldg.count) parts.push(`Bldg sale avg $${bldg.avg.toFixed(2)}/SF (${bldg.count})`);
+  if (land.count) parts.push(`Land avg $${land.avg.toFixed(2)}/SF (${land.count}${land.undatedCount ? `, ${land.undatedCount} undated excluded` : ""})`);
+  if (bldg.count) parts.push(`Bldg sale avg $${bldg.avg.toFixed(2)}/SF (${bldg.count}${bldg.undatedCount ? `, ${bldg.undatedCount} undated excluded` : ""})`);
   return (
     <div style={{ padding: "6px 10px", fontSize: 10.5, color: "var(--text-secondary)", borderTop: "1px solid var(--border-default)", background: "var(--surface-raised)" }}>
       {parts.join(" · ")}
@@ -425,7 +547,7 @@ function SummaryRow({ rows }) {
 }
 
 /* ---- problems: full sentences below the sheet, naming the row, never a dot on a cell -------- */
-function ProblemsList({ rows, onResolvePeriod }) {
+function ProblemsList({ rows, onResolvePeriod, attemptedSave }) {
   const items = [];
   rows.forEach((row, i) => {
     const { cellFlags, draft } = row;
@@ -449,7 +571,15 @@ function ProblemsList({ rows, onResolvePeriod }) {
       }
     });
     const missing = validateComp(draftToComp(draft));
-    if (!rowHasBlockingFlags(cellFlags) && missing.length) {
+    // NEW-2 — a row nobody has touched yet, and Save hasn't been pressed, stays QUIET: no line
+    // here at all. B986096-HARDENING-28 (NEW-1/NEW-2 follow-up) — the untouched case used to
+    // render its own muted line PER ROW, which is what starved the grid's own height as rows
+    // piled up (measured: 8 untouched rows → 8 stacked lines → the grid shrank from 154px to
+    // 101px). The ambient footer already states the aggregate count ("N missing an Executed
+    // date and/or a Location") in ONE line, and the cell itself now carries a quiet dot
+    // (`SheetCell`'s `quietUnfilled`) — nothing is lost, the list just stops growing with row
+    // count. Only a TOUCHED row (or one Save was attempted on) gets a real line here.
+    if (!rowHasBlockingFlags(cellFlags) && missing.length && (row.touched || attemptedSave)) {
       items.push(<div key={`${row._id}-missing`} style={{ fontSize: 10.5, color: "var(--warn-text)" }}>Row {i + 1} — {missing.join(" ")}</div>);
     }
     // B986096-HARDENING-7 — "if all three are entered and they disagree, flag it - do not
@@ -474,6 +604,18 @@ function ProblemsList({ rows, onResolvePeriod }) {
 
 function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
 
+// NEW-2 — stamps `touched: true` on the rows named by `ids`, leaving every other row's object
+// reference untouched. Used by every DIRECT sheet-edit path (a cell commit, fill-down, an
+// Excel-style spill-paste, clearing a range, resolving the rate/period ambiguity) so their rows
+// stop reading as "freshly parsed" the moment the user actually acts on them. Deliberately NEVER
+// called from the textarea's own smart-parse commit path (`commitText`) — those rows are exactly
+// the untouched ones this rule exists to keep quiet.
+function markTouched(rows, ids) {
+  if (!ids || !ids.length) return rows;
+  const idSet = new Set(ids);
+  return rows.map((r) => (idSet.has(r._id) ? { ...r, touched: true } : r));
+}
+
 export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, onFocusAnchor, onSave, onCancel, saving, saveError, overlaysById }) {
   const [pasteText, setPasteText] = useState("");
   const [lastPasteText, setLastPasteText] = useState(null);
@@ -486,6 +628,16 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   // default here was already NOT to merge, and the user may still want to override it.
   const [lastSplitParse, setLastSplitParse] = useState(null);
   const lastCommitRef = useRef(null); // duplicate-paste-event guard, unchanged from round 5
+  // NEW-2 — "have they pressed Save" is the OTHER trigger (besides row.touched) that upgrades a
+  // quiet incompleteness note into the full validateComp sentence; see ProblemsList.
+  const [attemptedSave, setAttemptedSave] = useState(false);
+  // NEW-3 (owner report, 2026-09-02 — "why does it populate a second row unnecessarily") — every
+  // paste APPENDS to the sheet, which is correct (collecting comps from several broker emails is
+  // the real workflow) but it was SILENT about it: an empty-looking textarea plus a fresh paste
+  // read as "here is my one comp," not "here is one more." `lastPasteRowIds` names exactly which
+  // rows the MOST RECENT paste (or paste-derived transform — Split/Merge below) added, so the
+  // summary line can say so and Undo can remove precisely those rows, nothing else.
+  const [lastPasteRowIds, setLastPasteRowIds] = useState(null);
 
   // B986096-HARDENING-9 — reverse-geocode a dropped pin's lat/lon into a street address, cached
   // on the ROW (`row.locationCache = {key, text, resolving}`) rather than re-fetched on every
@@ -659,23 +811,37 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     if (!parsedRows.length) {
       setLastSingleParse(null);
       setLastSplitParse(null);
+      setLastPasteRowIds(null);
       setLastCommitSummary(`Nothing recognized in ${lineCount} pasted line${lineCount === 1 ? "" : "s"}.`);
       return;
     }
     const newRows = parsedRows.map(draftFromParsedRow);
+    const sheetTotal = rows.length + newRows.length;
     commitRows([...rows, ...newRows]);
     setLastSingleParse(mode === "single" ? { raw: text, rowIds: newRows.map((r) => r._id) } : null);
     setLastSplitParse(mode === "split" ? { raw: text, rowIds: newRows.map((r) => r._id) } : null);
-    if (mode === "single" && newRows.length === 1) {
-      setLastCommitSummary(`Read 1 comp from ${lineCount} pasted line${lineCount === 1 ? "" : "s"}`);
-    } else if (mode === "split") {
-      // B1063904 — MERGE SAFETY refused to merge because two lines disagreed on a field; say
-      // exactly which one, so the user knows why they got several rows instead of one.
-      setLastCommitSummary(splitReason);
-    } else {
-      setLastCommitSummary(`Read ${newRows.length} comp${newRows.length === 1 ? "" : "s"} from ${lineCount} pasted line${lineCount === 1 ? "" : "s"}`);
-    }
+    setLastPasteRowIds(newRows.map((r) => r._id));
+    // NEW-3 — every paste has to SAY what it did: "Added N — M in the sheet," never a silent
+    // append. `mode === "split"` still leads with WHY it became several rows instead of one
+    // (B1063904's MERGE SAFETY refusal reason) ahead of the same added/total accounting.
+    const addedWord = `Added ${newRows.length} comp${newRows.length === 1 ? "" : "s"}`;
+    const totalWord = `${sheetTotal} in the sheet`;
+    setLastCommitSummary(mode === "split" ? `${splitReason} ${addedWord} — ${totalWord}.` : `${addedWord} — ${totalWord}.`);
     setSelection({ row: rows.length, col: 0 });
+  };
+
+  // NEW-3 — removes exactly the rows the most recent paste (or Split/Merge transform) added,
+  // never anything the user has entered since. A no-op once those ids are already gone (e.g. the
+  // user already deleted one by hand) — `.filter` simply finds nothing left to remove for it.
+  const undoLastPaste = () => {
+    if (!lastPasteRowIds || !lastPasteRowIds.length) return;
+    const idSet = new Set(lastPasteRowIds);
+    const remaining = rows.filter((r) => !idSet.has(r._id));
+    commitRows(remaining);
+    setLastCommitSummary(`Removed ${lastPasteRowIds.length} comp${lastPasteRowIds.length === 1 ? "" : "s"} — ${remaining.length} in the sheet.`);
+    setLastPasteRowIds(null);
+    setLastSingleParse(null);
+    setLastSplitParse(null);
   };
 
   const handlePaste = (e) => {
@@ -702,6 +868,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     const multiRows = splitPasteLines(raw).map(parseProseLine).filter(Boolean).map(draftFromParsedRow);
     commitRows([...remaining, ...multiRows]);
     setLastSingleParse(null);
+    setLastPasteRowIds(multiRows.map((r) => r._id)); // Undo still refers to whatever this paste currently holds
   };
   // B1063904 — the inverse of a MERGE-SAFETY split: forces the same raw paste through
   // `parseSingleRecord` (bypassing the collision check), replacing the split rows with one merged
@@ -714,8 +881,10 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     const remaining = rows.filter((r) => !idSet.has(r._id));
     const merged = parseSingleRecord(raw);
     if (!merged) return;
-    commitRows([...remaining, draftFromParsedRow(merged)]);
+    const newRow = draftFromParsedRow(merged);
+    commitRows([...remaining, newRow]);
     setLastSplitParse(null);
+    setLastPasteRowIds([newRow._id]); // Undo still refers to whatever this paste currently holds
   };
 
   /* ---- sheet cell editing -------------------------------------------------------------------- */
@@ -760,7 +929,8 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
       const flagKey = colDef.flagKey(row.draft);
       const nextFlags = { ...row.cellFlags };
       delete nextFlags[flagKey];
-      const nextRows = rows.map((r, i) => (i === target.row ? { ...r, draft: newDraft, cellFlags: nextFlags } : r));
+      // NEW-2 — a committed cell edit is exactly "the user has edited that row and moved off it."
+      const nextRows = rows.map((r, i) => (i === target.row ? { ...r, draft: newDraft, cellFlags: nextFlags, touched: true } : r));
       commitRows(nextRows);
       if (moveDir) {
         const dest = computeDestination({ row: target.row, col: target.col }, moveDir);
@@ -1029,9 +1199,12 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   const doFillDown = () => {
     if (!selection) return;
     const [start, end] = currentRange();
-    if (end > start) { commitRows(fillDownColumn(rows, selection.col, [start, end])); return; }
+    if (end > start) {
+      commitRows(markTouched(fillDownColumn(rows, selection.col, [start, end]), rows.slice(start, end + 1).map((r) => r._id)));
+      return;
+    }
     if (start === 0) return; // Excel's single-cell Ctrl+D: copy the row ABOVE
-    commitRows(fillDownColumn(rows, selection.col, [start - 1, start]));
+    commitRows(markTouched(fillDownColumn(rows, selection.col, [start - 1, start]), [rows[start]._id]));
   };
 
   const clearRange = () => {
@@ -1044,7 +1217,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
       const flagKey = colDef.flagKey(r.draft);
       const nextFlags = { ...r.cellFlags };
       delete nextFlags[flagKey];
-      return { ...r, draft: colDef.setValue(r.draft, ""), cellFlags: nextFlags };
+      return { ...r, draft: colDef.setValue(r.draft, ""), cellFlags: nextFlags, touched: true };
     }));
   };
 
@@ -1089,16 +1262,33 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     const text = e.clipboardData?.getData("text/plain");
     if (!text) return;
     e.preventDefault();
-    commitRows(spillPaste(rows, selection.row, selection.col, text, () => emptyDraft(null), newRowId));
+    // NEW-2 — an Excel-style paste landed DIRECTLY on the sheet (as opposed to the textarea's own
+    // smart-parse commit) is a deliberate, cell-targeted edit — every row it lands on or creates
+    // counts as touched. Diffed by object identity: a row `spillPaste` didn't touch keeps the same
+    // `.draft` reference, so this only marks the rows that actually changed (or are brand new).
+    const nextRows = spillPaste(rows, selection.row, selection.col, text, () => emptyDraft(null), newRowId);
+    const touchedIds = nextRows.filter((r, i) => !rows[i] || rows[i].draft !== r.draft).map((r) => r._id);
+    commitRows(markTouched(nextRows, touchedIds));
   };
 
   const removeRow = (id) => commitRows(rows.filter((r) => r._id !== id));
+  // NEW-5 — the Executed cell's one-click "Today" quick-set (see SheetCell's own header for why
+  // this is a deliberately INDEPENDENT commit path rather than going through the moratoriumed
+  // editing-input machinery). `finishEdit(false, null)` — the discard branch, identical to what
+  // Escape already calls — closes whichever cell the sheet had open, since clicking Today only
+  // ever happens while that same cell is mid-edit.
+  const setRowToday = (rowIdx) => {
+    const row = rows[rowIdx];
+    if (!row) return;
+    commitRows(rows.map((r, i) => (i === rowIdx ? { ...r, draft: { ...r.draft, compDate: todayIso() }, touched: true } : r)));
+    finishEdit(false, null);
+  };
   const resolvePeriod = (rowId, period) => {
     commitRows(rows.map((r) => {
       if (r._id !== rowId) return r;
       const nextFlags = { ...r.cellFlags };
       delete nextFlags.leaseRatePeriod;
-      return { ...r, draft: { ...r.draft, leaseRatePeriod: period }, cellFlags: nextFlags };
+      return { ...r, draft: { ...r.draft, leaseRatePeriod: period }, cellFlags: nextFlags, touched: true };
     }));
   };
 
@@ -1108,34 +1298,24 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   const readyRows = rows.filter(rowIsReady);
   const blockingCount = rows.filter((r) => rowHasBlockingFlags(r.cellFlags)).length;
   // ⛔ HARDENING-13 (B986096, owner P0 live-test, "the footer used to name the reason, now it
-  // just says '1 blocking'") — two fixes. (1) `missingCount` used to EXCLUDE a blocking row, so a
-  // row that was BOTH missing a period AND missing Executed/Location silently dropped the second
-  // problem from the footer's own summary line entirely (still visible in `ProblemsList` below,
-  // but the one-line count is what's glanced at). It now counts ANY row with a validateComp
-  // error, blocking or not — a row can appear in both counts. (2) "N blocking" said nothing about
-  // WHAT was blocking; there is currently exactly one blocking case (a lease rate with no stated
-  // period, the 12x ambiguity) so the count now names it directly.
-  const missingCount = rows.filter((r) => validateComp(draftToComp(r.draft)).length > 0).length;
-  // B986096-HARDENING-22 (owner live-report, 2026-09-02 — a row correctly missing ONLY a Location
-  // read as "did my typed Executed date not save?", costing a real diagnostic round before an
-  // instrumented trace showed compDate had been correct the whole time) — the combined "and/or"
-  // count named EITHER cause for every row, so a row missing just one read identically to a row
-  // missing both. Split into the two independent, single-cause counts HARDENING-8's own comment
-  // already established validateComp checks unconditionally, and name each on its own — never
-  // combined into one ambiguous phrase — falling back to the original "and/or" wording only for
-  // the genuinely-ambiguous case (rows missing both, mixed with rows missing just one).
-  const missingDateOnly = rows.filter((r) => !r.draft?.compDate && validAnchor(r.draft?.anchor)).length;
-  const missingLocationOnly = rows.filter((r) => r.draft?.compDate && !validAnchor(r.draft?.anchor)).length;
-  const missingBoth = missingCount - missingDateOnly - missingLocationOnly;
+  // just says '1 blocking'") — `missingCount` counts ANY row with a validateComp error, blocking
+  // or not — a row can appear in both counts.
+  // ⛔ NEW-5 (owner decision, 2026-09-02) — `validateComp` no longer flags a missing Executed
+  // date (see its own header in comps.js), so `missingCount` is now ENTIRELY about Location — the
+  // one field still required to save. The old three-way "missing date / missing location / missing
+  // both" split (HARDENING-22) is gone with it: keeping it would have gone on naming a "missing an
+  // Executed date" problem for rows that are, per the very same render, already counted as READY
+  // — a genuinely contradictory message, not a stale comment. A row without a date is still
+  // visible (the quiet dot in its own Executed cell, `SheetCell`'s `quietUnfilled`) — it's just
+  // no longer a blocker, so it no longer belongs in this line at all.
+  const missingLocationCount = rows.filter((r) => validateComp(draftToComp(r.draft)).length > 0).length;
   let footerMsg = "";
   if (rows.length > 0) {
-    if (blockingCount === 0 && missingCount === 0) footerMsg = `${readyRows.length} comp${readyRows.length === 1 ? "" : "s"} ready.`;
+    if (blockingCount === 0 && missingLocationCount === 0) footerMsg = `${readyRows.length} comp${readyRows.length === 1 ? "" : "s"} ready.`;
     else {
       const parts = [];
       if (blockingCount > 0) parts.push(`${blockingCount} rate${blockingCount === 1 ? "" : "s"} need${blockingCount === 1 ? "s" : ""} a period`);
-      if (missingBoth > 0) parts.push(`${missingBoth} missing an Executed date and/or a Location`);
-      if (missingDateOnly > 0) parts.push(`${missingDateOnly} missing an Executed date`);
-      if (missingLocationOnly > 0) parts.push(`${missingLocationOnly} missing a Location`);
+      if (missingLocationCount > 0) parts.push(`${missingLocationCount} missing a Location`);
       footerMsg = `${readyRows.length} of ${rows.length} ready — ${parts.join(", ")}.`;
     }
   }
@@ -1152,7 +1332,9 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   const [dockHeight, setDockHeight] = useState(() => {
     if (typeof window === "undefined") return DOCK_HEIGHT_DEFAULT;
     const saved = Number(window.localStorage?.getItem(DOCK_HEIGHT_KEY));
-    return Number.isFinite(saved) && saved > 0 ? saved : DOCK_HEIGHT_DEFAULT;
+    // A saved height is the user's own deliberate resize — always honored. With nothing saved yet
+    // (first open, or a fresh device), default to most of the viewport rather than a flat 340px.
+    return Number.isFinite(saved) && saved > 0 ? saved : defaultDockHeight();
   });
   const dockHeightRef = useRef(dockHeight);
   dockHeightRef.current = dockHeight;
@@ -1219,9 +1401,22 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
             style={{ flex: 1, boxSizing: "border-box", padding: "8px 10px", fontSize: 12, borderRadius: 8, fontFamily: "inherit", border: "1px solid var(--border-default)", background: "var(--surface-base)", color: "var(--text-primary)", resize: "vertical" }}
           />
         </div>
+        {/* NEW-3 — "the box is an inbox, the grid is the set," said once, always visible (not tied
+            to any one paste) so it's read BEFORE a cleared box gets mistaken for a cleared sheet
+            rather than after. */}
+        <div style={{ marginTop: 4, fontSize: 10, color: "var(--text-tertiary)" }}>
+          Every paste adds rows to the sheet below — clearing this box never clears them.
+        </div>
+        {/* B986096-HARDENING-28 (NEW-1 follow-up) — the panel is a fixed-height flex column and
+            ONLY the grid below has `flex:1`; every sibling here competes for the SAME fixed
+            budget, so an unbounded one directly steals the grid's own share. This line's text is
+            assembled from several parts (a split reason + the add/undo summary + link buttons)
+            and can run long — capped to ~2 lines so it can never balloon further, the same
+            defensive shape as the pasted-text preview below it. */}
         {lastCommitSummary && (
-          <div style={{ marginTop: 6, fontSize: 10.5, color: "var(--text-secondary)" }}>
+          <div style={{ marginTop: 4, fontSize: 10.5, color: "var(--text-secondary)", maxHeight: 32, overflowY: "auto" }}>
             {lastCommitSummary}
+            {lastPasteRowIds && lastPasteRowIds.length > 0 && (<> · <button onClick={undoLastPaste} style={linkBtnStyle}>Undo</button></>)}
             {lastPasteText && (<> · <button onClick={() => setShowPastedText((v) => !v)} style={linkBtnStyle}>{showPastedText ? "Hide pasted text" : "Show pasted text"}</button></>)}
             {lastSingleParse && (<> · <button onClick={switchToOnePerLine} style={linkBtnStyle}>Split one row per line</button></>)}
             {lastSplitParse && (<> · <button onClick={mergeIntoOneComp} style={linkBtnStyle}>Merge into one comp</button></>)}
@@ -1261,7 +1456,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
           role="grid"
           onKeyDown={onGridKeyDown}
           onPaste={onGridPaste}
-          style={{ flex: 1, minHeight: 0, overflow: "auto", outline: "none" }}>
+          style={{ flex: 1, minHeight: GRID_MIN_HEIGHT, overflow: "auto", outline: "none" }}>
           <table style={{ borderCollapse: "collapse", tableLayout: "fixed" }}>
             <HeaderRows visibleIdx={visibleIdx} flexWidths={flexWidths} frozenOffsets={frozenOffsets} />
             <tbody>
@@ -1273,7 +1468,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
                     <SheetCell
                       key={col.key}
                       col={col} colIdx={colIdx} rowIdx={rowIdx}
-                      draft={row.draft} cellFlags={row.cellFlags}
+                      draft={row.draft} cellFlags={row.cellFlags} touched={!!row.touched}
                       selected={!!selection && selection.row === rowIdx && selection.col === colIdx}
                       inRange={!!range && range[0] <= rowIdx && rowIdx <= range[1] && selection?.col === colIdx && !(selection.row === rowIdx)}
                       isEditing={!!editing && editing.row === rowIdx && editing.col === colIdx}
@@ -1286,6 +1481,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
                       onEditBlur={onEditBlur}
                       editInputRef={editInputRef}
                       locationText={col.key === "location" ? locationCellText(row, overlaysById) : undefined}
+                      onSetToday={setRowToday}
                       flexWidths={flexWidths} frozenOffsets={frozenOffsets}
                     />
                     );
@@ -1307,13 +1503,16 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
       )}
 
       <SummaryRow rows={rows} />
-      <ProblemsList rows={rows} onResolvePeriod={resolvePeriod} />
+      <ProblemsList rows={rows} onResolvePeriod={resolvePeriod} attemptedSave={attemptedSave} />
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "10px 14px", borderTop: "1px solid var(--border-default)" }}>
         <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>{footerMsg}</span>
         <span style={{ display: "flex", gap: 8 }}>
           <Button size="sm" variant="ghost" onClick={onCancel} disabled={saving}>Close</Button>
-          <Button size="sm" onClick={() => onSave(readyRows)} disabled={saving || readyRows.length === 0}>
+          {/* NEW-2 — pressing Save is the OTHER trigger that upgrades every row's quiet
+              incompleteness note into the full message, so a row Save skipped over (it only ever
+              saves the READY rows) explains itself instead of staying silently quiet forever. */}
+          <Button size="sm" onClick={() => { setAttemptedSave(true); onSave(readyRows); }} disabled={saving || readyRows.length === 0}>
             {saving ? "Saving…" : `Save ${readyRows.length || ""} comp${readyRows.length === 1 ? "" : "s"}`.trim()}
           </Button>
         </span>
