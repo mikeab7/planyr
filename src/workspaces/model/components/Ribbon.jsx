@@ -165,6 +165,51 @@ function IconAutoColor() {
 // read for "named range" available in this app's own hand-drawn convention (no text label — see
 // the file header's iconography rule).
 function IconTag() { return <Icon><path d="M3 11.5 12.5 2H21v8.5L11.5 21z" /><circle cx="16.5" cy="7.5" r="1.6" fill="currentColor" stroke="none" /></Icon>; }
+// STAGE 3 (NEW-1) — Trace Precedents: several small nodes converging into one, the plainest
+// literal read for "these feed this" in the icon set's hand-drawn convention. Trace Dependents
+// (below) is its mirror — one node radiating out to several.
+function IconTracePrecedents() {
+  return (
+    <Icon>
+      <circle cx="5" cy="6" r="2.2" />
+      <circle cx="5" cy="18" r="2.2" />
+      <circle cx="18" cy="12" r="2.6" fill="currentColor" stroke="none" />
+      <line x1="7" y1="7" x2="15.5" y2="11" />
+      <line x1="7" y1="17" x2="15.5" y2="13" />
+    </Icon>
+  );
+}
+function IconTraceDependents() {
+  return (
+    <Icon>
+      <circle cx="6" cy="12" r="2.6" fill="currentColor" stroke="none" />
+      <circle cx="19" cy="6" r="2.2" />
+      <circle cx="19" cy="18" r="2.2" />
+      <line x1="8.5" y1="11" x2="17" y2="7" />
+      <line x1="8.5" y1="13" x2="17" y2="17" />
+    </Icon>
+  );
+}
+function IconRemoveArrows() {
+  return (
+    <Icon>
+      <line x1="4" y1="18" x2="16" y2="6" />
+      <polyline points="10 6 16 6 16 12" />
+      <line x1="3" y1="3" x2="21" y2="21" />
+    </Icon>
+  );
+}
+// STAGE 3 (NEW-2) — a warning triangle, the same shape the per-cell corner flag
+// (SheetView.jsx) draws, so the ribbon button and the marker it opens a list of read as ONE idea.
+function IconInconsistency() {
+  return (
+    <Icon>
+      <path d="M12 3 L22 20 L2 20 Z" />
+      <line x1="12" y1="9.5" x2="12" y2="14" />
+      <circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none" />
+    </Icon>
+  );
+}
 function IconMore() {
   return (
     <Icon>
@@ -184,7 +229,7 @@ function DropdownButton({ label, title, width = 190, minWidth, children }) {
   return (
     <span style={{ position: "relative", display: "inline-flex" }}>
       <button
-        type="button" ref={anchorRef} title={title} aria-label={title}
+        type="button" ref={anchorRef} title={title} aria-label={title} aria-haspopup="true"
         onClick={() => setOpen((o) => !o)}
         style={ribbonBtnStyle(open, { minWidth: minWidth || CTRL_H, padding: "0 6px" })}
       >
@@ -207,7 +252,7 @@ function IconDropdownButton({ icon, title, width = 190, children }) {
   const anchorRef = useRef(null);
   return (
     <span style={{ position: "relative", display: "inline-flex" }}>
-      <button type="button" ref={anchorRef} title={title} aria-label={title} onClick={() => setOpen((o) => !o)} style={ribbonBtnStyle(open, { gap: 2 })}>
+      <button type="button" ref={anchorRef} title={title} aria-label={title} aria-haspopup="true" onClick={() => setOpen((o) => !o)} style={ribbonBtnStyle(open, { gap: 2 })}>
         {icon}
         <span aria-hidden="true" style={{ fontSize: 10, opacity: 0.7 }}>▾</span>
       </button>
@@ -232,7 +277,7 @@ function ColorSwatchButton({ label, icon, title, value, palette, onPick, default
   const anchorRef = useRef(null);
   return (
     <span style={{ position: "relative", display: "inline-flex" }}>
-      <button type="button" ref={anchorRef} title={title} aria-label={title} onClick={() => setOpen((o) => !o)} style={ribbonBtnStyle(false, { flexDirection: "column", gap: 0, padding: "1px 4px", width: CTRL_H })}>
+      <button type="button" ref={anchorRef} title={title} aria-label={title} aria-haspopup="true" onClick={() => setOpen((o) => !o)} style={ribbonBtnStyle(false, { flexDirection: "column", gap: 0, padding: "1px 4px", width: CTRL_H })}>
         {icon || <span style={{ fontSize: 10.5, fontWeight: 700, lineHeight: 1 }}>{label}</span>}
         <span aria-hidden="true" style={{ width: 15, height: 3, marginTop: 2, background: value || "var(--border-default)", border: value ? "none" : "1px solid var(--border-default)" }} />
       </button>
@@ -448,6 +493,66 @@ function NamesGroup({ ctx }) {
   );
 }
 
+// STAGE 3 (NEW-1/NEW-2, owner brief 2026-09-03) — Trace Precedents/Dependents/Remove Arrows +
+// the Inconsistencies list toggle. The trace buttons are TOGGLE-AND-STEP, matching Excel's own
+// behaviour: clicking the SAME button again on the SAME selected cell extends the trace one
+// level further (lib/traceAudit.js's `beginOrStepTrace` decides that from `ctx.traceMode`/
+// `ctx.traceLevel` vs. the click — this component only routes the click, it holds no state of
+// its own). The small "L2"/"L2+" readout next to the buttons is the ONLY visible trace status —
+// PANEL-BREVITY: a full sentence status line was considered and dropped in favour of a `title`
+// tooltip carrying the same detail (level, "no further precedents", a truncation note) on demand.
+function AuditGroup({ ctx }) {
+  const traceActive = !!ctx.traceMode;
+  const traceDetail = () => {
+    const bits = [`level ${ctx.traceLevel}`];
+    if (ctx.traceNoFurther) bits.push(ctx.traceMode === "precedents" ? "no further precedents" : "no further dependents");
+    if (ctx.traceTruncated) bits.push(`showing ${ctx.traceCellCount} cells — narrow the selection to see the rest`);
+    return `(${bits.join(", ")}) — click again to go one level further`;
+  };
+  return (
+    <span style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
+      <button
+        type="button" data-testid="ribbon-trace-precedents"
+        title={`Trace Precedents — show which cells feed the selected one${ctx.traceMode === "precedents" ? ` ${traceDetail()}` : ""}`}
+        aria-label="Trace Precedents" aria-pressed={ctx.traceMode === "precedents"}
+        onClick={ctx.onTracePrecedents} style={ribbonBtnStyle(ctx.traceMode === "precedents")}
+      ><IconTracePrecedents /></button>
+      <button
+        type="button" data-testid="ribbon-trace-dependents"
+        title={`Trace Dependents — show which cells the selected one feeds${ctx.traceMode === "dependents" ? ` ${traceDetail()}` : ""}`}
+        aria-label="Trace Dependents" aria-pressed={ctx.traceMode === "dependents"}
+        onClick={ctx.onTraceDependents} style={ribbonBtnStyle(ctx.traceMode === "dependents")}
+      ><IconTraceDependents /></button>
+      <button
+        type="button" data-testid="ribbon-trace-clear" title="Remove Arrows" aria-label="Remove Arrows"
+        onClick={ctx.onClearTrace} disabled={!traceActive} style={ribbonBtnStyle(false)}
+      ><IconRemoveArrows /></button>
+      {traceActive && (
+        <span
+          aria-hidden="true" title={`${ctx.traceMode === "precedents" ? "Trace Precedents" : "Trace Dependents"} ${traceDetail()}`}
+          style={{ fontSize: 10, fontWeight: 700, color: "var(--text-tertiary)", fontVariantNumeric: "tabular-nums", padding: "0 2px" }}
+        >L{ctx.traceLevel}{ctx.traceTruncated ? "+" : ""}</span>
+      )}
+      <button
+        type="button" data-testid="ribbon-inconsistencies"
+        title={ctx.inconsistencyCount === 0 ? "Inconsistent formulas — none flagged" : `Inconsistent formulas — ${ctx.inconsistencyCount} flagged`}
+        aria-label="Inconsistent formulas" aria-pressed={ctx.inconsistencyPanelOpen}
+        onClick={ctx.onToggleInconsistencyPanel} style={{ ...ribbonBtnStyle(ctx.inconsistencyPanelOpen), position: "relative" }}
+      >
+        <IconInconsistency />
+        {ctx.inconsistencyCount > 0 && (
+          <span aria-hidden="true" style={{
+            position: "absolute", top: -3, right: -3, minWidth: 14, height: 14, padding: "0 2px", borderRadius: RADIUS.pill,
+            background: "var(--warn-bg)", border: "1px solid var(--warn-border)", color: "var(--warn-text)",
+            fontSize: 10, fontWeight: 800, lineHeight: "12px", textAlign: "center", fontVariantNumeric: "tabular-nums", // FONT_SIZE.micro literal — designTokens.js note above
+
+          }}>{ctx.inconsistencyCount > 99 ? "99+" : ctx.inconsistencyCount}</span>
+        )}
+      </button>
+    </span>
+  );
+}
+
 function SortFilterGroup({ ctx }) {
   return (
     <span style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
@@ -461,7 +566,7 @@ function SortFilterGroup({ ctx }) {
 const GROUP_RENDER = {
   actions: ActionsGroup, fontface: FontFaceGroup, fontstyle: FontStyleGroup, color: ColorGroup,
   alignment: AlignmentGroup, number: NumberGroup, borders: BordersGroup, cells: CellsGroup,
-  names: NamesGroup, sortfilter: SortFilterGroup,
+  audit: AuditGroup, names: NamesGroup, sortfilter: SortFilterGroup,
 };
 
 /** The SINGLE overflow trigger — replaces the first cut's one-trigger-per-collapsed-group
@@ -479,16 +584,28 @@ function MoreMenu({ overflowKeys, ctx }) {
         <IconMore />
       </button>
       <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} placement="below-left" width={300} panelStyle={{ ...menuPanelStyle, padding: 10, maxHeight: "min(70vh, 520px)", overflowY: "auto" }}>
-        {overflowKeys.map((key, i) => {
-          const meta = RIBBON_GROUPS.find((g) => g.key === key);
-          const Content = GROUP_RENDER[key];
-          return (
-            <div key={key} style={i > 0 ? { marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border-default)" } : undefined}>
-              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-secondary)", marginBottom: 6 }}>{meta?.label}</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}><Content ctx={ctx} /></div>
-            </div>
-          );
-        })}
+        {/* ⛔ MEASURED LIVE (Stage 3, formula-auditing): picking a PLAIN action from this popover
+            (Undo, Bold, Trace Precedents, …) used to leave the popover floating open afterward —
+            harmless for a font/color/number-format pick, where staying open is what lets you
+            then choose from the picker it just opened, but wrong for a one-shot action, and
+            genuinely disruptive for Trace Precedents specifically: the whole point is to see the
+            arrows just drawn on the grid, and this popover (z-index above the grid) can sit right
+            over them. `aria-haspopup="true"` marks the three trigger shapes that open a NESTED
+            picker (DropdownButton/IconDropdownButton/ColorSwatchButton) — only those keep this
+            popover open; everything else closes it, matching Excel/Sheets' own overflow-menu
+            convention (pick a one-shot action from "…", it closes). */}
+        <div onClick={(e) => { if (e.target.closest("button")?.getAttribute("aria-haspopup") !== "true") setOpen(false); }}>
+          {overflowKeys.map((key, i) => {
+            const meta = RIBBON_GROUPS.find((g) => g.key === key);
+            const Content = GROUP_RENDER[key];
+            return (
+              <div key={key} style={i > 0 ? { marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border-default)" } : undefined}>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-secondary)", marginBottom: 6 }}>{meta?.label}</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}><Content ctx={ctx} /></div>
+              </div>
+            );
+          })}
+        </div>
       </AnchoredMenu>
     </span>
   );
@@ -504,6 +621,11 @@ export default function Ribbon({
   onSetFreezeTopRow, onSetFreezeFirstColumn, onSetFreezeAtSelection, onUnfreeze,
   onSort, onFilterToggle,
   nameManagerOpen, onToggleNameManager,
+  // STAGE 3 (NEW-1) — trace precedents/dependents. `traceMode` is `"precedents"|"dependents"|null`.
+  traceMode, traceLevel, traceTruncated, traceNoFurther, traceCellCount,
+  onTracePrecedents, onTraceDependents, onClearTrace,
+  // STAGE 3 (NEW-2) — inconsistent-formula flags.
+  inconsistencyCount, inconsistencyPanelOpen, onToggleInconsistencyPanel,
 }) {
   const outerRef = useRef(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -528,6 +650,9 @@ export default function Ribbon({
     onSetFreezeTopRow, onSetFreezeFirstColumn, onSetFreezeAtSelection, onUnfreeze,
     onSort, onFilterToggle,
     nameManagerOpen, onToggleNameManager,
+    traceMode, traceLevel, traceTruncated, traceNoFurther, traceCellCount,
+    onTracePrecedents, onTraceDependents, onClearTrace,
+    inconsistencyCount, inconsistencyPanelOpen, onToggleInconsistencyPanel,
   };
 
   const { visibleKeys, overflowKeys } = computeRibbonLayout(containerWidth, RIBBON_GROUPS, MORE_BUTTON_WIDTH);

@@ -43,6 +43,7 @@ import SheetView from "./components/SheetView.jsx";
 import FormulaBar from "./components/FormulaBar.jsx";
 import FindReplaceBar from "./components/FindReplaceBar.jsx";
 import NameManager from "./components/NameManager.jsx";
+import InconsistencyPanel from "./components/InconsistencyPanel.jsx";
 import Ribbon from "./components/Ribbon.jsx";
 import TabStrip from "./components/TabStrip.jsx";
 import { RADIUS } from "../../shared/ui/radius.js";
@@ -56,9 +57,12 @@ import {
   setColumnWidth, setRowHeight, setFreeze,
   styleAt, setCellStyle, applyBorder, clearFormatting,
   paintedStyleAt, applyPaintedStyle, mergeAt, mergeRange, unmergeAt, sortRange, usedRangeEnd,
+  isInconsistencyDismissed, setInconsistencyDismissed,
 } from "./lib/sheetModel.js";
 import { defineName, renameName, retargetName, deleteName } from "./lib/namedRanges.js";
 import { evaluateWorkbook, displayFor } from "./lib/sheetEngine.js";
+import { beginOrStepTrace, renderableTrace } from "./lib/traceAudit.js";
+import { findInconsistencies } from "./lib/formulaConsistency.js";
 import { copyRange, pasteRange, fillDown, replaceAll, replaceInCellText } from "./lib/sheetOps.js";
 import { increaseDecimals, decreaseDecimals, toggleThousands } from "./lib/numberFormats.js";
 import { modelSaveState } from "./lib/modelSaveState.js";
@@ -160,6 +164,17 @@ export default function ModelApp({
   // Stage 3 pt 2 (NEW-1) — the Name Manager panel's own open/closed state, the same "plain view
   // state, not sheet data" convention findOpen already uses one line above.
   const [nameManagerOpen, setNameManagerOpen] = useState(false);
+  // STAGE 3 (NEW-1) — trace precedents/dependents. Plain view state, like `zoom`/`painter` below
+  // — never through the undo stack, never synced to the cloud. `null` = no trace active; see
+  // lib/traceAudit.js's own header for the shape. Cleared on ANY real workbook edit (the effect
+  // below, keyed on `workbook`) since a trace's captured cell keys can be invalidated by a
+  // structural change (a row/column insert/delete moving or deleting the very cells it named).
+  const [trace, setTrace] = useState(null);
+  useEffect(() => { setTrace(null); }, [workbook]);
+  // STAGE 3 (NEW-2) — the Inconsistencies panel's own open/closed state, same convention as
+  // `nameManagerOpen` — mutually exclusive with Find/Replace and the Name Manager (see
+  // `onToggleInconsistencyPanel` below and the two other panels' own toggles).
+  const [inconsistencyPanelOpen, setInconsistencyPanelOpen] = useState(false);
   // B1007280 — sheet zoom is a per-project VIEW preference (like a browser's own zoom level),
   // never sheet DATA: it doesn't ride the undo stack and doesn't sync to the cloud, so two
   // people (or two tabs) looking at the same model have no reason to share a zoom level.
@@ -276,13 +291,28 @@ export default function ModelApp({
   useEffect(() => {
     if (!isActive) return undefined;
     const onKey = (e) => {
+      // STAGE 3 (NEW-1) — Esc clears an active trace, the "way to clear" the build brief asks
+      // for, alongside the ribbon's own Remove Arrows button. A no-op when no trace is active.
+      // ⛔ MEASURED LIVE: a ribbon control collapsed into the "More ▾" overflow (Ribbon.jsx's
+      // MoreMenu — common even at an ordinary desktop width, since this module's own ribbon is
+      // already dense) leaves that popover open after a click (pre-existing behavior — closed
+      // only by Escape, its own outside-click, or the trigger). Escape is the natural way to
+      // dismiss it, but this listener is a bare `window` one and would fire on the SAME
+      // keypress — clearing a trace the very click that opened More was reaching for. So: a
+      // floating menu/panel with current focus gets Escape FIRST (its own handler closes it);
+      // this only clears the trace when nothing else is already claiming the key.
+      if (e.key === "Escape" && !e.ctrlKey && !e.metaKey) {
+        if (e.target instanceof Element && e.target.closest('.menu, [role="dialog"]')) return;
+        setTrace((t) => (t ? null : t));
+        return;
+      }
       if (!(e.ctrlKey || e.metaKey)) return;
       const k = e.key.toLowerCase();
       if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
       else if ((k === "z" && e.shiftKey) || k === "y") { e.preventDefault(); redo(); }
       else if (k === "g") { e.preventDefault(); nameBoxRef.current?.focus(); }
-      else if (k === "f") { e.preventDefault(); setFindShowReplace(false); setFindOpen(true); setNameManagerOpen(false); }
-      else if (k === "h") { e.preventDefault(); setFindShowReplace(true); setFindOpen(true); setNameManagerOpen(false); }
+      else if (k === "f") { e.preventDefault(); setFindShowReplace(false); setFindOpen(true); setNameManagerOpen(false); setInconsistencyPanelOpen(false); }
+      else if (k === "h") { e.preventDefault(); setFindShowReplace(true); setFindOpen(true); setNameManagerOpen(false); setInconsistencyPanelOpen(false); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -383,7 +413,46 @@ export default function ModelApp({
   // each component's own header), so they never coexist: opening one closes the other, rather
   // than reserving a second screen position that would crowd the owner's real 729px-wide window.
   const onToggleNameManager = useCallback(() => {
-    setNameManagerOpen((o) => { if (!o) setFindOpen(false); return !o; });
+    setNameManagerOpen((o) => { if (!o) { setFindOpen(false); setInconsistencyPanelOpen(false); } return !o; });
+  }, []);
+
+  // STAGE 3 (NEW-1) — trace precedents/dependents. Clicking the SAME button again on the SAME
+  // selection extends the trace one level further (lib/traceAudit.js's `beginOrStepTrace`
+  // decides that from the existing `trace` vs. the new click); clicking the OTHER trace button,
+  // or a different cell, starts fresh. `graph` is sheetEngine.js's own read-only walk of the
+  // ALREADY-COMPUTED dependency graph (workbookEval, below) — tracing costs nothing beyond the
+  // recalc that already ran this render.
+  const graph = workbookEval.graph;
+  const onTracePrecedents = useCallback(() => {
+    setTrace((t) => beginOrStepTrace(t, "precedents", activeEntry.id, selRange.r1, selRange.c1, graph));
+  }, [activeEntry.id, selRange, graph]);
+  const onTraceDependents = useCallback(() => {
+    setTrace((t) => beginOrStepTrace(t, "dependents", activeEntry.id, selRange.r1, selRange.c1, graph));
+  }, [activeEntry.id, selRange, graph]);
+  const onClearTrace = useCallback(() => setTrace(null), []);
+  // A cross-sheet marker click (SheetView.jsx) — pure navigation, the same "plain tab click,
+  // never through commit" convention `onSelectSheetTab` above already uses.
+  const onNavigateTrace = useCallback((sheetId, row, col) => {
+    setActiveSheetId(sheetId);
+    setSelRange({ r1: row, r2: row, c1: col, c2: col });
+  }, []);
+  const renderedTrace = useMemo(() => renderableTrace(trace, graph, activeEntry.id), [trace, graph, activeEntry.id]);
+
+  // STAGE 3 (NEW-2) — inconsistent-formula flags for the ACTIVE sheet, recomputed fresh on every
+  // sheet change (pure, no persisted state of its own — see lib/formulaConsistency.js's header).
+  // `activeFlags` is what's actually drawn/listed — everything the FULL list holds minus what's
+  // been explicitly dismissed (`sheet.dismissedInconsistencies`, the one piece of state about
+  // these flags that DOES persist).
+  const allInconsistencies = useMemo(() => findInconsistencies(sheet), [sheet]);
+  const activeInconsistencies = useMemo(
+    () => allInconsistencies.filter((f) => !isInconsistencyDismissed(sheet, f.row, f.col)),
+    [allInconsistencies, sheet],
+  );
+  const onDismissInconsistency = useCallback((row, col) => {
+    commit((wb) => applyToActiveSheet(wb, setInconsistencyDismissed, row, col, true));
+  }, [commit]);
+  const onToggleInconsistencyPanel = useCallback(() => {
+    setInconsistencyPanelOpen((o) => { if (!o) { setFindOpen(false); setNameManagerOpen(false); } return !o; });
   }, []);
 
   const activeCol = selRange.c1;
@@ -589,6 +658,17 @@ export default function ModelApp({
             onFilterToggle={onFilterToggle}
             nameManagerOpen={nameManagerOpen}
             onToggleNameManager={onToggleNameManager}
+            traceMode={renderedTrace?.mode || null}
+            traceLevel={renderedTrace?.level ?? 0}
+            traceTruncated={!!renderedTrace?.truncated}
+            traceNoFurther={!!renderedTrace?.noFurther}
+            traceCellCount={renderedTrace?.cellCount ?? 0}
+            onTracePrecedents={onTracePrecedents}
+            onTraceDependents={onTraceDependents}
+            onClearTrace={onClearTrace}
+            inconsistencyCount={activeInconsistencies.length}
+            inconsistencyPanelOpen={inconsistencyPanelOpen}
+            onToggleInconsistencyPanel={onToggleInconsistencyPanel}
           />
           <FormulaBar sheet={sheet} row={selRange.r1} col={selRange.c1} onCommit={onCommitCell} onGoTo={onGoTo} nameBoxRef={nameBoxRef} />
           </div>
@@ -621,6 +701,9 @@ export default function ModelApp({
             columnFilters={columnFilters}
             onSetColumnFilter={onSetColumnFilter}
             autoColor={autoColor}
+            trace={renderedTrace}
+            onNavigateTrace={onNavigateTrace}
+            inconsistencies={activeInconsistencies}
           />
           <TabStrip
             sheets={workbook.sheets}
@@ -651,6 +734,13 @@ export default function ModelApp({
             onRenameName={onRenameName}
             onRetargetName={onRetargetName}
             onDeleteName={onDeleteName}
+          />
+          <InconsistencyPanel
+            open={inconsistencyPanelOpen}
+            flags={activeInconsistencies}
+            onClose={() => setInconsistencyPanelOpen(false)}
+            onGoTo={onGoTo}
+            onDismiss={onDismissInconsistency}
           />
         </>
       )}
