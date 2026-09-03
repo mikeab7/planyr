@@ -639,6 +639,18 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   instead of each separately hardcoding `12` — one source, so it can't drift a second time. The row
   delete `✕` and the panel's own header Close `✕` (13px/14px, two independent hand-typed literals)
   now share one named `CLOSE_ICON_FONT_SIZE` token instead.
+  **⛔ MOBILE LAYOUT (B1091712, owner rule 2026-09-03) — below `MOBILE_BREAKPOINT_PX`
+  (`lib/compMobileLayout.js`), `CompEntryGrid.jsx` renders `components/CompEntryMobileSheet.jsx`
+  INSTEAD of the table above — a transposed, one-comp-per-screen layout (pager + status dots, a
+  sticky identity strip, fields grouped into sections per comp type, a jump sheet for the whole
+  batch). The desktop table above the breakpoint is untouched. `compMobileLayout.js` is the pure
+  half deciding which fields show in which section per comp type, filtered off `SHEET_COLUMNS`'
+  own `appliesTo` — read its own header before changing field grouping. Every mutation on mobile
+  still routes through `CompEntryGrid.jsx`'s own `commitRows`/undo stack (`commitFieldEdit`,
+  `setRowToday`, `resolvePeriod` — all pre-existing, just exposed to the new component), so the
+  two layouts can never hold two different ideas of what a "comp" is. The paste box is shared
+  verbatim (`pasteBoxNode`, computed once, rendered in both branches) — mobile has no separate
+  create surface; rows land on a phone the same way they do on desktop (paste, or a map pick).**
   KML import (B849233) is a SEPARATE staging table, `db/comp_import_drafts.sql`
   (`public.comp_import_drafts`, owner-only RLS — no team visibility at all, unlike `comps` itself,
   until promoted) — `lib/kmlImport.js` is the pure, hand-rolled Placemark parser (a Point is a

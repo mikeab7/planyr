@@ -45,6 +45,27 @@ import { todayIso } from "../lib/compDates.js";
 import { FONT_SIZE } from "../../ui/designTokens.js";
 import { reverseGeocodeLatLon } from "../../../workspaces/site-planner/lib/geocode.js";
 import { COUNTIES } from "../../../workspaces/site-planner/lib/counties.js";
+import { MOBILE_BREAKPOINT_PX } from "../lib/compMobileLayout.js";
+import CompEntryMobileSheet from "./CompEntryMobileSheet.jsx";
+
+// B1091712 — below MOBILE_BREAKPOINT_PX this whole panel renders CompEntryMobileSheet
+// instead of the table below (a transposed, one-comp-per-screen layout — see that file's own
+// header). `window.innerWidth`, not a ResizeObserver on the panel's own element: the panel is
+// itself `position: fixed` at (nearly) full viewport width, so the two already move together,
+// and reading the viewport directly means the switch is driven by the SAME number a `resize`
+// listener/devtools device toolbar reports, which is what the acceptance check at 390/768px
+// actually measures.
+function useIsMobileViewport() {
+  const [mobile, setMobile] = useState(() => (typeof window === "undefined" ? false : window.innerWidth < MOBILE_BREAKPOINT_PX));
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const onResize = () => setMobile(window.innerWidth < MOBILE_BREAKPOINT_PX);
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return mobile;
+}
 
 const ROW_H = 31;
 const GROUP_BAND_H = 22;
@@ -139,7 +160,7 @@ function locationCacheKey(anchor) {
  * (`row.locationCache = {key, text, resolving}`, populated async by the effect in
  * CompEntryGrid), falling back to `pinFallbackText` (synchronous, never blank) while that's
  * pending or unavailable. */
-function locationCellText(row, overlaysById) {
+export function locationCellText(row, overlaysById) {
   const anchor = row.draft.anchor;
   if (!anchor) return null;
   if (anchor.kind === "parcel") return parcelLocationText(anchor, (key) => countyEntry(key)?.name);
@@ -617,6 +638,7 @@ function markTouched(rows, ids) {
 }
 
 export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, onFocusAnchor, onSave, onCancel, saving, saveError, overlaysById }) {
+  const isMobile = useIsMobileViewport();
   const [pasteText, setPasteText] = useState("");
   const [lastPasteText, setLastPasteText] = useState(null);
   const [lastCommitSummary, setLastCommitSummary] = useState(null);
@@ -1291,6 +1313,20 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
       return { ...r, draft: { ...r.draft, leaseRatePeriod: period }, cellFlags: nextFlags, touched: true };
     }));
   };
+  // B1091712 — the mobile sheet's one commit path for every field row, addressed by row id
+  // rather than the desktop cell-editing state machine's (row, col) grid coordinates (there's no
+  // grid selection/navigation to seed it from on a one-comp-per-screen layout). Same shape as
+  // `finishEdit`'s own commit branch above: apply, clear that cell's flag, mark the row touched,
+  // and go through `commitRows` so Ctrl/Cmd+Z on a desktop-resized-narrow session still works.
+  const commitFieldEdit = (rowId, col, rawValue) => {
+    const row = rows.find((r) => r._id === rowId);
+    if (!row) return;
+    const newDraft = applyCellEdit(col, row.draft, rawValue);
+    const flagKey = col.flagKey(row.draft);
+    const nextFlags = { ...row.cellFlags };
+    delete nextFlags[flagKey];
+    commitRows(rows.map((r) => (r._id === rowId ? { ...r, draft: newDraft, cellFlags: nextFlags, touched: true } : r)));
+  };
 
   function rowIsReady(row) {
     return !rowHasBlockingFlags(row.cellFlags) && validateComp(draftToComp(row.draft)).length === 0;
@@ -1360,6 +1396,75 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   const linkBtnStyle = { border: "none", background: "none", color: "var(--accent)", cursor: "pointer", padding: 0, textDecoration: "underline", fontSize: 10.5 };
   const range = currentRange();
 
+  // B1091712 — the paste box (the ONLY way rows land on this sheet by hand, rather than a
+  // map pick) is shared verbatim between the desktop table and the mobile transposed layout below
+  // — one implementation, so a paste behaves identically regardless of which layout is showing.
+  const pasteBoxNode = (
+    <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border-default)" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+        <textarea
+          value={pasteText}
+          onChange={handleChange}
+          onPaste={handlePaste}
+          onKeyDown={handleKeyDown}
+          placeholder="Paste a broker email or an Excel block — it parses immediately. Or type your own and press Enter (Shift+Enter for a new line)."
+          rows={2}
+          style={{ flex: 1, boxSizing: "border-box", padding: "8px 10px", fontSize: 12, borderRadius: 8, fontFamily: "inherit", border: "1px solid var(--border-default)", background: "var(--surface-base)", color: "var(--text-primary)", resize: "vertical" }}
+        />
+      </div>
+      {/* NEW-3 — "the box is an inbox, the grid is the set," said once, always visible (not tied
+          to any one paste) so it's read BEFORE a cleared box gets mistaken for a cleared sheet
+          rather than after. */}
+      <div style={{ marginTop: 4, fontSize: 10, color: "var(--text-tertiary)" }}>
+        Every paste adds rows to the sheet below — clearing this box never clears them.
+      </div>
+      {/* B986096-HARDENING-28 (NEW-1 follow-up) — the panel is a fixed-height flex column and
+          ONLY the grid below has `flex:1`; every sibling here competes for the SAME fixed
+          budget, so an unbounded one directly steals the grid's own share. This line's text is
+          assembled from several parts (a split reason + the add/undo summary + link buttons)
+          and can run long — capped to ~2 lines so it can never balloon further, the same
+          defensive shape as the pasted-text preview below it. */}
+      {lastCommitSummary && (
+        <div style={{ marginTop: 4, fontSize: 10.5, color: "var(--text-secondary)", maxHeight: 32, overflowY: "auto" }}>
+          {lastCommitSummary}
+          {lastPasteRowIds && lastPasteRowIds.length > 0 && (<> · <button onClick={undoLastPaste} style={linkBtnStyle}>Undo</button></>)}
+          {lastPasteText && (<> · <button onClick={() => setShowPastedText((v) => !v)} style={linkBtnStyle}>{showPastedText ? "Hide pasted text" : "Show pasted text"}</button></>)}
+          {lastSingleParse && (<> · <button onClick={switchToOnePerLine} style={linkBtnStyle}>Split one row per line</button></>)}
+          {lastSplitParse && (<> · <button onClick={mergeIntoOneComp} style={linkBtnStyle}>Merge into one comp</button></>)}
+        </div>
+      )}
+      {showPastedText && lastPasteText && (
+        <div style={{ marginTop: 4, fontSize: 10.5, color: "var(--text-secondary)", background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: 6, padding: "6px 8px", whiteSpace: "pre-wrap", maxHeight: 90, overflowY: "auto" }}>
+          {lastPasteText}
+        </div>
+      )}
+    </div>
+  );
+
+  if (isMobile) {
+    return createPortal(
+      <CompEntryMobileSheet
+        rows={rows}
+        overlaysById={overlaysById}
+        locationCellText={locationCellText}
+        onCommitField={commitFieldEdit}
+        onSetToday={setRowToday}
+        onResolvePeriod={resolvePeriod}
+        armedRowId={armedRowId}
+        onArm={onArm}
+        onFocusAnchor={onFocusAnchor}
+        onSave={(readyForSave) => { setAttemptedSave(true); onSave(readyForSave); }}
+        onCancel={onCancel}
+        saving={saving}
+        saveError={saveError}
+        readyRows={readyRows}
+        rowIsReady={rowIsReady}
+        pasteBox={pasteBoxNode}
+      />,
+      document.body,
+    );
+  }
+
   return createPortal(
     <div
       data-comp-entry-panel="1"
@@ -1389,45 +1494,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
           style={{ border: "none", background: "transparent", color: "var(--text-secondary)", fontFamily: "inherit", fontSize: CLOSE_ICON_FONT_SIZE, cursor: "pointer", padding: 2 }}>✕</button>
       </div>
 
-      <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border-default)" }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-          <textarea
-            value={pasteText}
-            onChange={handleChange}
-            onPaste={handlePaste}
-            onKeyDown={handleKeyDown}
-            placeholder="Paste a broker email or an Excel block — it parses immediately. Or type your own and press Enter (Shift+Enter for a new line)."
-            rows={2}
-            style={{ flex: 1, boxSizing: "border-box", padding: "8px 10px", fontSize: 12, borderRadius: 8, fontFamily: "inherit", border: "1px solid var(--border-default)", background: "var(--surface-base)", color: "var(--text-primary)", resize: "vertical" }}
-          />
-        </div>
-        {/* NEW-3 — "the box is an inbox, the grid is the set," said once, always visible (not tied
-            to any one paste) so it's read BEFORE a cleared box gets mistaken for a cleared sheet
-            rather than after. */}
-        <div style={{ marginTop: 4, fontSize: 10, color: "var(--text-tertiary)" }}>
-          Every paste adds rows to the sheet below — clearing this box never clears them.
-        </div>
-        {/* B986096-HARDENING-28 (NEW-1 follow-up) — the panel is a fixed-height flex column and
-            ONLY the grid below has `flex:1`; every sibling here competes for the SAME fixed
-            budget, so an unbounded one directly steals the grid's own share. This line's text is
-            assembled from several parts (a split reason + the add/undo summary + link buttons)
-            and can run long — capped to ~2 lines so it can never balloon further, the same
-            defensive shape as the pasted-text preview below it. */}
-        {lastCommitSummary && (
-          <div style={{ marginTop: 4, fontSize: 10.5, color: "var(--text-secondary)", maxHeight: 32, overflowY: "auto" }}>
-            {lastCommitSummary}
-            {lastPasteRowIds && lastPasteRowIds.length > 0 && (<> · <button onClick={undoLastPaste} style={linkBtnStyle}>Undo</button></>)}
-            {lastPasteText && (<> · <button onClick={() => setShowPastedText((v) => !v)} style={linkBtnStyle}>{showPastedText ? "Hide pasted text" : "Show pasted text"}</button></>)}
-            {lastSingleParse && (<> · <button onClick={switchToOnePerLine} style={linkBtnStyle}>Split one row per line</button></>)}
-            {lastSplitParse && (<> · <button onClick={mergeIntoOneComp} style={linkBtnStyle}>Merge into one comp</button></>)}
-          </div>
-        )}
-        {showPastedText && lastPasteText && (
-          <div style={{ marginTop: 4, fontSize: 10.5, color: "var(--text-secondary)", background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: 6, padding: "6px 8px", whiteSpace: "pre-wrap", maxHeight: 90, overflowY: "auto" }}>
-            {lastPasteText}
-          </div>
-        )}
-      </div>
+      {pasteBoxNode}
 
       {armedRowId && (
         <div style={{ fontSize: 12, color: "var(--warn-text)", background: "var(--warn-bg)", borderBottom: "1px solid var(--warn-border)", padding: "6px 14px" }}>
