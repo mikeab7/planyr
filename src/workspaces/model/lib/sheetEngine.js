@@ -160,6 +160,89 @@ function collectCellDeps(node, ownerSheetId, colNameToIndex, resolveSheetId, she
   }
 }
 
+/* ── STAGE 3 (NEW-1, owner brief 2026-09-03) — TRACE PRECEDENTS/DEPENDENTS AUDITING ──
+ * A READ-ONLY walk of the SAME AST `collectCellDeps` above already walks to build the per-cell
+ * dependency graph — this never adds an edge, it just groups the ones `collectCellDeps` would
+ * expand to individual cells back into the reference the user actually TYPED (a range, a name, a
+ * `[Column]`), so the UI can label a trace with "Revenue" instead of seven separate arrows to
+ * C4..C10. `collectRefHops` mirrors collectCellDeps's own node-type switch one-for-one; the only
+ * difference is the LEAF action — push a labeled, grouped "hop" instead of calling `addDep` once
+ * per cell. `idToName` resolves a target sheet id back to its display name, needed only to label a
+ * cross-sheet hop ("Sheet2!C4"); `cellAddressText` (this file, already used by SheetView) is reused
+ * for the address text so a hop's label can never disagree with what the formula bar itself shows. */
+function collectRefHops(node, ownerSheetId, colNameToIndex, resolveSheetId, idToName, sheetBounds, namesMap, out) {
+  if (!node || typeof node !== "object") return out;
+  switch (node.type) {
+    case "col": {
+      const idx = colNameToIndex(node.name);
+      const bounds = sheetBounds(ownerSheetId);
+      if (idx != null && bounds) {
+        const cells = [];
+        for (let r = 0; r < bounds.rows; r++) cells.push({ row: r, col: idx });
+        out.push({ kind: "column", sheetId: ownerSheetId, crossSheet: false, label: `[${node.name}]`, cells });
+      }
+      return out;
+    }
+    case "ref": {
+      const sheetId = node.sheet ? resolveSheetId(node.sheet) : ownerSheetId;
+      if (sheetId == null) return out;
+      const crossSheet = sheetId !== ownerSheetId;
+      const addr = cellAddressText(node.row - 1, node.col - 1);
+      out.push({ kind: "cell", sheetId, crossSheet, label: crossSheet ? `${idToName.get(sheetId) || node.sheet}!${addr}` : addr, cells: [{ row: node.row - 1, col: node.col - 1 }] });
+      return out;
+    }
+    case "range": {
+      const sheetId = node.sheet ? resolveSheetId(node.sheet) : ownerSheetId;
+      if (sheetId == null) return out;
+      const crossSheet = sheetId !== ownerSheetId;
+      const r1 = Math.min(node.from.row, node.to.row), r2 = Math.max(node.from.row, node.to.row);
+      const c1 = Math.min(node.from.col, node.to.col), c2 = Math.max(node.from.col, node.to.col);
+      const addr = `${cellAddressText(r1 - 1, c1 - 1)}:${cellAddressText(r2 - 1, c2 - 1)}`;
+      const cells = [];
+      for (let r = r1 - 1; r <= r2 - 1; r++) for (let c = c1 - 1; c <= c2 - 1; c++) cells.push({ row: r, col: c });
+      out.push({ kind: "range", sheetId, crossSheet, label: crossSheet ? `${idToName.get(sheetId) || node.sheet}!${addr}` : addr, cells });
+      return out;
+    }
+    // A NAMED RANGE reference — resolved against the OWNER sheet's own names table, same
+    // sheet-scoping evaluateWorkbook already uses below for the eval-time "name" case. The
+    // hop's label is the name's own display text ("Revenue"), which is the whole point: this
+    // is the ONE reference kind whose typed form is already more legible than its address.
+    case "name": {
+      const rect = namesMap && namesMap[node.name.toLowerCase()];
+      if (rect) {
+        const cells = [];
+        for (let r = rect.r1 - 1; r <= rect.r2 - 1; r++) for (let c = rect.c1 - 1; c <= rect.c2 - 1; c++) cells.push({ row: r, col: c });
+        out.push({ kind: "name", sheetId: ownerSheetId, crossSheet: false, label: rect.name, cells });
+      }
+      return out;
+    }
+    case "unary":
+    case "percent":
+      return collectRefHops(node.arg, ownerSheetId, colNameToIndex, resolveSheetId, idToName, sheetBounds, namesMap, out);
+    case "binary":
+      collectRefHops(node.left, ownerSheetId, colNameToIndex, resolveSheetId, idToName, sheetBounds, namesMap, out);
+      collectRefHops(node.right, ownerSheetId, colNameToIndex, resolveSheetId, idToName, sheetBounds, namesMap, out);
+      return out;
+    case "call":
+      node.args.forEach((a) => collectRefHops(a, ownerSheetId, colNameToIndex, resolveSheetId, idToName, sheetBounds, namesMap, out));
+      return out;
+    default:
+      return out; // num, str, bool, blankLiteral, errLiteral — leaves, nothing to trace
+  }
+}
+
+/** Merge hops that name the SAME reference more than once in one formula (`=A1+A1`, or a
+ *  function called with the same range twice) — same (kind, sheetId, label) signature — so a
+ *  trace draws ONE arrow per reference the user typed, not one per AST occurrence. */
+function dedupeHops(hops) {
+  const seen = new Map();
+  for (const h of hops) {
+    const sig = `${h.kind}|${h.sheetId}|${h.label}`;
+    if (!seen.has(sig)) seen.set(sig, h);
+  }
+  return [...seen.values()];
+}
+
 const EMPTY_SHEET_EVAL = { get: () => null };
 
 /** Evaluate every formula CELL of a WHOLE WORKBOOK, once, in ONE combined dependency order
@@ -178,7 +261,8 @@ const EMPTY_SHEET_EVAL = { get: () => null };
 export function evaluateWorkbook(workbook) {
   const entries = workbook.sheets;
   const nameToId = new Map();
-  for (const s of entries) nameToId.set(s.name.trim().toLowerCase(), s.id);
+  const idToName = new Map();
+  for (const s of entries) { nameToId.set(s.name.trim().toLowerCase(), s.id); idToName.set(s.id, s.name); }
   const resolveSheetId = (name) => (nameToId.has(String(name).trim().toLowerCase()) ? nameToId.get(String(name).trim().toLowerCase()) : null);
 
   const grids = {};          // sheetId -> grid[][]
@@ -248,6 +332,32 @@ export function evaluateWorkbook(workbook) {
     deps.set(key, set);
   }
 
+  // STAGE 3 (NEW-1) — every formula cell's own GROUPED, LABELED precedent hops (see
+  // collectRefHops's header above) plus the DEPENDENTS graph, which is nothing but `deps`
+  // reversed — the exact same edges, walked backwards, never a second graph built from the AST.
+  // Both are O(formula cell count) / O(edge count) — the same cost class `deps` itself already
+  // pays — so tracing a cell costs nothing extra beyond the recalc that already ran this pass.
+  const hopsByKey = new Map();
+  for (const [key, cell] of formulaCells) {
+    const colNameToIndex = nameToIndexFor(cell.sheetId);
+    hopsByKey.set(key, cell.ast ? dedupeHops(collectRefHops(cell.ast, cell.sheetId, colNameToIndex, resolveSheetId, idToName, sheetBounds, namesBySheet[cell.sheetId], [])) : []);
+  }
+  // ⛔ Built from `hopsByKey`, NOT from `deps` above — `deps` exists purely to order EVAL (a
+  // literal cell needs no ordering, so `addDep` there only ever records an edge INTO another
+  // FORMULA cell), so inverting it would silently drop "trace dependents" starting from an
+  // ordinary INPUT cell — exactly the classic case ("who uses this number"). Every cell a hop's
+  // own `cells` list names is a genuine dependent target, formula or literal alike.
+  const dependents = new Map(); // key -> Set<formulaKey>
+  for (const [key, hops] of hopsByKey) {
+    for (const hop of hops) {
+      for (const c of hop.cells) {
+        const dk = `${hop.sheetId}:${c.row}:${c.col}`;
+        if (!dependents.has(dk)) dependents.set(dk, new Set());
+        dependents.get(dk).add(key);
+      }
+    }
+  }
+
   // Topological order + cycle detection — 3-color DFS, unchanged shape from evaluateSheet
   // below, now walking the combined sheetId:row:col key space so a cycle THROUGH another
   // sheet is caught exactly like one that never leaves the current sheet.
@@ -295,7 +405,17 @@ export function evaluateWorkbook(workbook) {
 
   const bySheet = new Map();
   for (const s of entries) bySheet.set(s.id, { get: (rowIndex, colIndex) => results.get(`${s.id}:${rowIndex}:${colIndex}`) || null });
-  return { get: (sheetId) => bySheet.get(sheetId) || EMPTY_SHEET_EVAL };
+
+  // STAGE 3 (NEW-1) — the trace-audit surface (lib/traceAudit.js is the pure stepping/rendering
+  // layer over this; it never re-derives any of it). `hopsFor` returns `null` for a non-formula
+  // cell (nothing to trace FROM) vs. `[]` for a formula with no references (SUM of literals) —
+  // the two are deliberately distinct so a caller can tell "not a formula" from "a formula that
+  // reads nothing."
+  const graph = {
+    hopsFor: (sheetId, rowIndex, colIndex) => hopsByKey.get(`${sheetId}:${rowIndex}:${colIndex}`) ?? null,
+    dependentsOf: (sheetId, rowIndex, colIndex) => dependents.get(`${sheetId}:${rowIndex}:${colIndex}`) || new Set(),
+  };
+  return { get: (sheetId) => bySheet.get(sheetId) || EMPTY_SHEET_EVAL, graph };
 }
 
 /** Evaluate every formula CELL of a SINGLE sheet, once, in dependency order — the ORIGINAL,

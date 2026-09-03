@@ -17,6 +17,7 @@ import {
   evaluateSheet, evaluateWorkbook, displayFor, displayKindFor, displayColorFor, formulaBarText,
   literalTypedValue, kindOf, cellAddressText, cellColorKind,
 } from "../src/workspaces/model/lib/sheetEngine.js";
+import { defineName } from "../src/workspaces/model/lib/namedRanges.js";
 
 function sheetWithColumns(names) {
   let s = createSheet();
@@ -504,5 +505,84 @@ describe("cellColorKind", () => {
     let s = createSheet(); s = commitCellText(s, 0, 0, "=1+");
     expect(() => cellColorKind(s, "Sheet1", 0, 0)).not.toThrow();
     expect(cellColorKind(s, "Sheet1", 0, 0)).toBe("formula");
+  });
+});
+
+describe("evaluateWorkbook's graph — Stage 3, NEW-1 (owner brief 2026-09-03) trace-audit surface", () => {
+  function wb1(sheet, id = "sheet1", name = "Sheet1") {
+    return evaluateWorkbook({ sheets: [{ id, name, sheet }], activeSheetId: id });
+  }
+
+  it("hopsFor returns null for a non-formula cell, [] for a formula that reads nothing", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "5");
+    s = commitCellText(s, 0, 1, "=1+1");
+    const r = wb1(s);
+    expect(r.graph.hopsFor("sheet1", 0, 0)).toBeNull();
+    expect(r.graph.hopsFor("sheet1", 0, 1)).toEqual([]);
+  });
+
+  it("groups a RANGE reference into ONE labeled hop, not one per cell", () => {
+    let s = createSheet();
+    s = commitCellText(s, 0, 2, "=SUM(A1:A3)");
+    const r = wb1(s);
+    const hops = r.graph.hopsFor("sheet1", 0, 2);
+    expect(hops).toHaveLength(1);
+    expect(hops[0]).toMatchObject({ kind: "range", sheetId: "sheet1", crossSheet: false, label: "A1:A3" });
+    expect(hops[0].cells).toEqual([{ row: 0, col: 0 }, { row: 1, col: 0 }, { row: 2, col: 0 }]);
+  });
+
+  it("a NAMED RANGE hop is labeled with the NAME, never the raw address", () => {
+    let s = createSheet();
+    s = setRaw(s, 4, 1, "250000000");
+    s = defineName(s, "LandCost", { r1: 5, c1: 2, r2: 5, c2: 2 });
+    s = commitCellText(s, 0, 0, "=LandCost*2");
+    const r = wb1(s);
+    const hops = r.graph.hopsFor("sheet1", 0, 0);
+    expect(hops).toHaveLength(1);
+    expect(hops[0]).toMatchObject({ kind: "name", label: "LandCost", cells: [{ row: 4, col: 1 }] });
+  });
+
+  it("a [Column] structured reference hops to every row of that column, labeled with the column name", () => {
+    let s = createSheet();
+    s = renameColumn(s, 0, "Revenue");
+    s = commitCellText(s, 0, 1, "=[Revenue]"); // whole-column bracket ref, at-row semantics resolve at eval time
+    const r = wb1(s);
+    const hops = r.graph.hopsFor("sheet1", 0, 1);
+    expect(hops.some((h) => h.kind === "column" && h.label === "[Revenue]")).toBe(true);
+  });
+
+  it("a cross-sheet hop is labeled 'SheetName!Addr' and its own sheetId names the TARGET sheet", () => {
+    let s1 = createSheet();
+    let s2 = createSheet(); s2 = commitCellText(s2, 0, 0, "=Sheet1!B3");
+    const r = evaluateWorkbook({ sheets: [{ id: "sheet1", name: "Sheet1", sheet: s1 }, { id: "sheet2", name: "Sheet2", sheet: s2 }], activeSheetId: "sheet2" });
+    const hops = r.graph.hopsFor("sheet2", 0, 0);
+    expect(hops).toHaveLength(1);
+    expect(hops[0]).toMatchObject({ kind: "cell", sheetId: "sheet1", crossSheet: true, label: "Sheet1!B3" });
+  });
+
+  it("dedupes a reference used twice in the same formula into one hop", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "5");
+    s = commitCellText(s, 0, 1, "=A1+A1*2");
+    const r = wb1(s);
+    expect(r.graph.hopsFor("sheet1", 0, 1)).toHaveLength(1);
+  });
+
+  it("dependentsOf reaches a LITERAL (never-computed) cell, not just formula-to-formula edges — 'trace dependents' from an input", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "5"); // A1, a plain literal
+    s = commitCellText(s, 0, 1, "=A1*2"); // B1
+    s = commitCellText(s, 1, 1, "=A1+1"); // B2
+    const r = wb1(s);
+    const deps = [...r.graph.dependentsOf("sheet1", 0, 0)];
+    expect(deps.sort()).toEqual(["sheet1:0:1", "sheet1:1:1"]);
+  });
+
+  it("dependentsOf on a cell nothing reads is an empty Set, not undefined", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "5");
+    const r = wb1(s);
+    expect(r.graph.dependentsOf("sheet1", 0, 0)).toEqual(new Set());
   });
 });

@@ -17,6 +17,7 @@ import {
   isFormulaText, usedRangeEnd, padRowCount, sheetsDiverge,
   insertColumnAt, insertRowAt, deleteRowAt, setColumnWidth, setRowHeight, rowHeightAt, setFreeze,
   DEFAULT_ROW_H,
+  isInconsistencyDismissed, setInconsistencyDismissed,
 } from "../src/workspaces/model/lib/sheetModel.js";
 
 describe("createSheet", () => {
@@ -586,5 +587,72 @@ describe("migrateSheet — an old sheet's saved capacity is a FLOOR, never a sto
     const twice = migrateSheet(JSON.parse(JSON.stringify(once)));
     expect(twice.columns.length).toBe(26);
     expect(twice.rowCount).toBe(1000);
+  });
+});
+
+describe("dismissedInconsistencies — Stage 3, NEW-2 (owner brief 2026-09-03)", () => {
+  it("reads false on a fresh sheet, true once dismissed, and is a real no-op edit when unchanged", () => {
+    let s = createSheet();
+    expect(isInconsistencyDismissed(s, 2, 0)).toBe(false);
+    const next = setInconsistencyDismissed(s, 2, 0, true);
+    expect(next).not.toBe(s);
+    expect(isInconsistencyDismissed(next, 2, 0)).toBe(true);
+    // Setting it to the SAME value it already holds is a genuine no-op — same reference, no
+    // undo frame minted, matching every other setter in this file.
+    expect(setInconsistencyDismissed(next, 2, 0, true)).toBe(next);
+    expect(setInconsistencyDismissed(s, 2, 0, false)).toBe(s);
+  });
+
+  it("can be un-dismissed (deletes the key rather than storing `false`)", () => {
+    let s = createSheet();
+    s = setInconsistencyDismissed(s, 2, 0, true);
+    s = setInconsistencyDismissed(s, 2, 0, false);
+    expect(isInconsistencyDismissed(s, 2, 0)).toBe(false);
+    expect(Object.keys(s.dismissedInconsistencies)).toHaveLength(0);
+  });
+
+  it("relocates with the cell on a row insert/delete, exactly like styles", () => {
+    let s = createSheet();
+    s = setInconsistencyDismissed(s, 5, 1, true);
+    s = insertRowAt(s, 2); // above row 5 — the dismissed cell moves down to row 6
+    expect(isInconsistencyDismissed(s, 5, 1)).toBe(false);
+    expect(isInconsistencyDismissed(s, 6, 1)).toBe(true);
+    s = deleteRowAt(s, 0); // below the dismissed cell — it moves back up to row 5
+    expect(isInconsistencyDismissed(s, 5, 1)).toBe(true);
+  });
+
+  it("TOMBSTONE-DELETES: deleting the row itself drops its own dismissal, never resurrects on a later insert", () => {
+    let s = createSheet();
+    s = setInconsistencyDismissed(s, 3, 0, true);
+    s = deleteRowAt(s, 3);
+    expect(Object.keys(s.dismissedInconsistencies)).toHaveLength(0);
+    s = insertRowAt(s, 3); // a fresh blank row landing back at the same index
+    expect(isInconsistencyDismissed(s, 3, 0)).toBe(false);
+  });
+
+  it("TOMBSTONE-DELETES: deleting the column drops its own dismissals, keyed by colId not position", () => {
+    let s = createSheet();
+    s = setInconsistencyDismissed(s, 1, 2, true);
+    s = deleteColumn(s, 2);
+    expect(Object.keys(s.dismissedInconsistencies)).toHaveLength(0);
+  });
+
+  it("column insert/delete never relocates a dismissal — colId is stable across position moves", () => {
+    let s = createSheet();
+    s = setInconsistencyDismissed(s, 1, 2, true); // column c3 ("C")
+    s = insertColumnAt(s, 0); // c3 is now at display position 3, but it's still c3
+    expect(isInconsistencyDismissed(s, 1, 3)).toBe(true);
+  });
+
+  it("round-trips through migrateSheet, and a pre-Stage-3-NEW-2 blob defaults to an empty map", () => {
+    let s = createSheet();
+    s = setInconsistencyDismissed(s, 4, 0, true);
+    const round = migrateSheet(JSON.parse(JSON.stringify(s)));
+    expect(isInconsistencyDismissed(round, 4, 0)).toBe(true);
+
+    const legacy = createSheet();
+    delete legacy.dismissedInconsistencies;
+    const migratedLegacy = migrateSheet(legacy);
+    expect(migratedLegacy.dismissedInconsistencies).toEqual({});
   });
 });
