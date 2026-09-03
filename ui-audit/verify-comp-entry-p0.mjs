@@ -296,14 +296,22 @@ console.log("\n=== KEYBOARD-ONLY PATH — Tab into the grid, arrow to Location, 
   const page = await ctx.newPage();
   await openEntrySheet(page);
 
-  // From the paste textarea: Tab past "Show pasted text" and one more stop to reach the grid
-  // itself (a real `role="grid"` div, tabIndex 0) — no mouse click anywhere in this block.
+  // From the paste textarea: Tab past "Show pasted text" and one more stop to land INSIDE the
+  // grid — no mouse click anywhere in this block.
+  // NEW-6 — the grid's own wrapper `<div role="grid">` used to carry `tabIndex={0}`, making it a
+  // SECOND tab stop in front of the active cell's own roving tabIndex — Tab landed on this bare,
+  // unlabeled wrapper (a real regression this same block used to certify as correct) before ever
+  // reaching a data cell. The wrapper is `tabIndex={-1}` now (still `gridRef.current?.focus()`-able
+  // programmatically, still receives every bubbled keydown, just no longer a natural Tab stop), so
+  // Tab now lands directly on the active cell — a STRICTLY SHORTER, more direct keyboard path than
+  // this test's own name asks for. Detect "inside the grid" by `closest('[role="grid"]')` rather
+  // than requiring focus to sit ON the wrapper itself, so this check certifies the destination
+  // (a cell within the grid), not one specific stop along the way there.
   let reachedGrid = false;
   for (let i = 0; i < 6 && !reachedGrid; i++) {
     await page.keyboard.press("Tab");
     await pacedWait(page, 80);
-    const role = await page.evaluate(() => document.activeElement.getAttribute("role"));
-    if (role === "grid") reachedGrid = true;
+    reachedGrid = await page.evaluate(() => !!document.activeElement.closest('[role="grid"]'));
   }
   check("the grid itself is reachable via plain Tab (no click needed to start)", reachedGrid);
   if (reachedGrid) {

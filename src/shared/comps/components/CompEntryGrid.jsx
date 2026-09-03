@@ -38,7 +38,7 @@ import { parsePaste, rowHasBlockingFlags, parseProseLine, parseSingleRecord, spl
 import { emptyDraft, draftToComp, validateComp, summarizeLeaseComps, summarizeSaleComps, resolveCapTriangle } from "../lib/comps.js";
 import {
   SHEET_COLUMNS, cellState, applyCellEdit, fillDownColumn, spillPaste, visibleColumnIndices,
-  computeFlexWidths, widthFor, frozenLeftOffsets,
+  computeFlexWidths, widthFor, frozenLeftOffsets, saveButtonLabel,
 } from "../lib/compSheetColumns.js";
 import { parcelLocationText, siteplanLocationText, pinFallbackText } from "../lib/compLocationText.js";
 import { todayIso } from "../lib/compDates.js";
@@ -218,7 +218,7 @@ function HeaderRows({ visibleIdx, flexWidths, frozenOffsets }) {
     <thead>
       <tr>
         {groupRuns.map((run, i) => (
-          <th key={run.group + i} colSpan={run.span}
+          <th key={run.group + i} colSpan={run.span} scope="colgroup"
             style={{
               position: "sticky", top: 0, zIndex: i === 0 ? 3 : 2,
               height: GROUP_BAND_H, boxSizing: "border-box", padding: "0 5px", textAlign: run.align,
@@ -236,7 +236,7 @@ function HeaderRows({ visibleIdx, flexWidths, frozenOffsets }) {
             {run.showLabel ? run.group : null}
           </th>
         ))}
-        <th rowSpan={2} style={{
+        <th rowSpan={2} scope="col" style={{
           position: "sticky", top: 0, right: 0, zIndex: 4, width: REMOVE_COL_W, padding: 0,
           background: "var(--surface-raised)", border: "1px solid var(--border-default)",
           // Content-less spacer cell — pinned explicitly rather than left to the browser's own
@@ -250,7 +250,7 @@ function HeaderRows({ visibleIdx, flexWidths, frozenOffsets }) {
           const col = SHEET_COLUMNS[idx];
           const w = widthFor(col, flexWidths);
           return (
-            <th key={col.key}
+            <th key={col.key} scope="col"
               style={{
                 position: "sticky", top: GROUP_BAND_H, zIndex: col.frozen ? 4 : 2,
                 left: col.frozen ? frozenOffsets[col.key] : undefined, width: w, minWidth: w, maxWidth: w,
@@ -479,10 +479,22 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, touched, selected, i
   // harmless no-op.
   if (st.state === "action") {
     return (
-      <td style={{ ...tdStyle, padding: 0 }} data-cell={`${rowIdx}-${colIdx}`} title={hoverTitle}>
+      // NEW-6 (owner correction, 2026-09-03) — the roving tabIndex now lives on the <td> itself,
+      // same as every other cell kind, so the grid's "single tab stop" contract is uniform
+      // regardless of column: the OUTER cell is what Tab/Shift+Tab can ever land on natively, and
+      // it carries `aria-selected` too. The inner <button> stays PERMANENTLY tabIndex={-1} — never
+      // an independent tab stop of its own (that was the real bug: a plain, unconditionally
+      // tabbable "Set" would have put 122 of them in the native tab order at scale) — reachable
+      // from the focused cell instead: the "focus follows selection" effect below still moves real
+      // DOM focus onto this exact button when the Location cell becomes selected (tabIndex=-1
+      // still allows a PROGRAMMATIC `.focus()` call, it only excludes NATIVE sequential Tab), and
+      // onGridKeyDown's existing Enter/typed-character handling already activates an action cell
+      // by SELECTION, not by which element currently holds DOM focus, so keyboard activation is
+      // unchanged either way.
+      <td style={{ ...tdStyle, padding: 0 }} data-cell={`${rowIdx}-${colIdx}`} title={hoverTitle} tabIndex={selected ? 0 : -1} aria-selected={selected}>
         <button
           type="button"
-          tabIndex={selected ? 0 : -1}
+          tabIndex={-1}
           onMouseDown={(e) => onMouseDown(rowIdx, colIdx, e.shiftKey)}
           onDoubleClick={() => onDoubleClick(rowIdx, colIdx)}
           // B986096-HARDENING-24 — `...textStyle` carries the grid's real font-size/line-height/
@@ -513,6 +525,7 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, touched, selected, i
       // library with click-to-edit cells does this) — it suppresses the browser's own default
       // mousedown action WITHOUT touching our own explicit `.focus()` calls, which still run.
       tabIndex={selected ? 0 : -1}
+      aria-selected={selected}
       onMouseDown={(e) => { e.preventDefault(); onMouseDown(rowIdx, colIdx, e.shiftKey); }}
       onDoubleClick={() => onDoubleClick(rowIdx, colIdx)}
       title={hoverTitle}>
@@ -623,6 +636,34 @@ function ProblemsList({ rows, onResolvePeriod, attemptedSave }) {
   return <div style={{ padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6, borderTop: "1px solid var(--border-default)", maxHeight: 120, overflowY: "auto" }}>{items}</div>;
 }
 
+/* NEW-8 — the "discard unsaved rows?" confirmation, shared by the desktop sheet (`inset` covers
+ * only the docked panel's own box — this app's own rule against a full-viewport modal applies
+ * here too, so it never blocks the map underneath) and the mobile full-screen sheet (`inset`
+ * covers the whole screen, matching that sheet's own already-full-screen nature). No
+ * window.confirm — this app bans dialog boxes app-wide; this is the same inline-confirm shape
+ * `ReviewsBar.jsx`/`VisitPanel.jsx` already use for a destructive action elsewhere in the app. */
+function DiscardCloseConfirm({ rowCount, onDiscard, onKeepEditing, fullScreen }) {
+  return (
+    <div style={{
+      position: fullScreen ? "fixed" : "absolute", inset: 0, zIndex: 2900,
+      background: "var(--surface-raised)", borderRadius: fullScreen ? 0 : 12,
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      gap: 12, padding: 24, textAlign: "center",
+    }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>
+        Discard {rowCount} unsaved comp{rowCount === 1 ? "" : "s"}?
+      </div>
+      <div style={{ fontSize: 11, color: "var(--text-secondary)", maxWidth: 280 }}>
+        Nothing in this sheet has been saved yet — closing now loses {rowCount === 1 ? "it" : "all of it"}.
+      </div>
+      <span style={{ display: "flex", gap: 8 }}>
+        <Button size="sm" variant="ghost" onClick={onKeepEditing}>Keep editing</Button>
+        <Button size="sm" variant="danger" onClick={onDiscard}>Discard</Button>
+      </span>
+    </div>
+  );
+}
+
 function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
 
 // NEW-2 — stamps `touched: true` on the rows named by `ids`, leaving every other row's object
@@ -653,6 +694,16 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   // NEW-2 — "have they pressed Save" is the OTHER trigger (besides row.touched) that upgrades a
   // quiet incompleteness note into the full validateComp sentence; see ProblemsList.
   const [attemptedSave, setAttemptedSave] = useState(false);
+  // NEW-8 — Close (the footer button, the header ✕, and the mobile header's own ✕ — all three
+  // route through this ONE handler) used to call `onCancel` directly, silently discarding every
+  // unsaved row with no prompt at all: measured live, 123 pasted rows, none saved, one click on
+  // Close, all 123 gone. `requestClose` is the shared gate every close affordance now calls
+  // instead of `onCancel` — an empty sheet stays instant/silent (nothing to lose), a sheet holding
+  // rows arms this confirmation instead of discarding immediately.
+  const [confirmingClose, setConfirmingClose] = useState(false);
+  const requestClose = () => { if (rows.length > 0) setConfirmingClose(true); else onCancel(); };
+  const confirmDiscard = () => { setConfirmingClose(false); onCancel(); };
+  const keepEditing = () => setConfirmingClose(false);
   // NEW-3 (owner report, 2026-09-02 — "why does it populate a second row unnecessarily") — every
   // paste APPENDS to the sheet, which is correct (collecting comps from several broker emails is
   // the real workflow) but it was SILENT about it: an empty-looking textarea plus a fresh paste
@@ -996,7 +1047,19 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
         // cell; a same-cell clamp now closes normally, exactly like Tab wrapping to a non-editable
         // destination or Escape already do.
         const samecell = dest.row === target.row && dest.col === target.col;
-        if (!samecell && destRow && cellState(destColDef, destRow.draft).state === "editable") {
+        // NEW-6 — a Tab commit that WRAPS past the grid's own edge (forward from the last row's
+        // last column, or Shift+Tab backward from the first row's first column) lands on a
+        // DIFFERENT cell from the source — column 0 of the same last row, say — so `samecell`
+        // above doesn't catch it, and it kept reopening editing on that wrapped destination
+        // forever rather than ever letting a keyboard user leave the grid. Treated the same as
+        // `samecell`: close normally instead of reopening: purely additive, same shape as the
+        // existing check, touches no other `moveDir` (Enter's is a row move, never `wrap`).
+        const srcPos = visibleIdx.indexOf(target.col);
+        const atGridEdge = moveDir.axis === "col" && moveDir.wrap && (
+          (moveDir.delta > 0 && target.row === rows.length - 1 && srcPos === visibleIdx.length - 1) ||
+          (moveDir.delta < 0 && target.row === 0 && srcPos === 0)
+        );
+        if (!samecell && !atGridEdge && destRow && cellState(destColDef, destRow.draft).state === "editable") {
           beginEdit(dest.row, dest.col, null, true, destRow.draft);
           reopened = true;
         }
@@ -1229,6 +1292,24 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     commitRows(markTouched(fillDownColumn(rows, selection.col, [start - 1, start]), [rows[start]._id]));
   };
 
+  // NEW-6 — the row-remove ✕ button came OUT of the document tab order (it's mouse-only now, see
+  // its own comment below); this is the "reachable from the focused cell instead" replacement —
+  // Shift+Delete removes the row(s) the current selection/range covers, same undo-covered
+  // `commitRows` path the ✕ button already used, so Ctrl/Cmd+Z still recovers it.
+  const removeSelectedRows = () => {
+    if (!selection) return;
+    const [start, end] = currentRange();
+    const idsToRemove = new Set(rows.slice(start, end + 1).map((r) => r._id));
+    commitRows(rows.filter((r) => !idsToRemove.has(r._id)));
+    // The currently-focused cell sits inside the row(s) just removed from the DOM — the browser's
+    // own default is to drop focus to <body> when a focused element is removed, which would take
+    // every later keystroke (Ctrl/Cmd+Z included) out of the grid's own onKeyDown reach entirely.
+    // Re-claim focus on the (still-mounted) grid container so it lands back on the new selection
+    // via the existing focus-follows-selection effect, the same recovery `finishEdit` already does
+    // after a commit.
+    gridRef.current?.focus();
+  };
+
   const clearRange = () => {
     if (!selection) return;
     const [start, end] = currentRange();
@@ -1248,7 +1329,21 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     const meta = e.metaKey || e.ctrlKey;
     if (meta && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); return; }
     if (meta && e.key.toLowerCase() === "d") { e.preventDefault(); doFillDown(); return; }
-    if (e.key === "Tab") { e.preventDefault(); moveSelection({ axis: "col", delta: e.shiftKey ? -1 : 1, wrap: true }); return; }
+    if (e.key === "Tab") {
+      // NEW-6 — Tab used to be captured unconditionally here, so it wrapped forever inside the
+      // last row's last column (or the first row's first column going Shift+Tab backward) with no
+      // way for a keyboard user to ever leave the grid — a real Tab press could never reach the
+      // footer's Close/Save buttons. At the grid's own edge, let the key through unhandled so the
+      // browser's native Tab moves focus to whatever real control is next/previous in the
+      // document (the footer going forward, the paste box's own controls going backward).
+      const pos = visibleIdx.indexOf(selection.col);
+      const atLastCell = selection.row === rows.length - 1 && pos === visibleIdx.length - 1;
+      const atFirstCell = selection.row === 0 && pos === 0;
+      if ((e.shiftKey && atFirstCell) || (!e.shiftKey && atLastCell)) return;
+      e.preventDefault();
+      moveSelection({ axis: "col", delta: e.shiftKey ? -1 : 1, wrap: true });
+      return;
+    }
     if (e.key === "Enter") {
       const colDef = SHEET_COLUMNS[selection.col];
       if (colDef.kind === "action") { triggerAction(selection.row, selection.col); return; }
@@ -1270,6 +1365,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     if (e.key === "ArrowUp") { e.preventDefault(); if (e.shiftKey) extendRangeTo(selection.row - 1); else moveSelection({ axis: "row", delta: -1 }); return; }
     if (e.key === "ArrowRight") { e.preventDefault(); moveSelection({ axis: "col", delta: 1 }); return; }
     if (e.key === "ArrowLeft") { e.preventDefault(); moveSelection({ axis: "col", delta: -1 }); return; }
+    if (e.key === "Delete" && e.shiftKey) { e.preventDefault(); removeSelectedRows(); return; }
     if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); clearRange(); return; }
     if (e.key === "F2") { e.preventDefault(); beginEdit(selection.row, selection.col, null, true); return; }
     if (e.key.length === 1 && !meta && !e.altKey) {
@@ -1443,24 +1539,29 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
 
   if (isMobile) {
     return createPortal(
-      <CompEntryMobileSheet
-        rows={rows}
-        overlaysById={overlaysById}
-        locationCellText={locationCellText}
-        onCommitField={commitFieldEdit}
-        onSetToday={setRowToday}
-        onResolvePeriod={resolvePeriod}
-        armedRowId={armedRowId}
-        onArm={onArm}
-        onFocusAnchor={onFocusAnchor}
-        onSave={(readyForSave) => { setAttemptedSave(true); onSave(readyForSave); }}
-        onCancel={onCancel}
-        saving={saving}
-        saveError={saveError}
-        readyRows={readyRows}
-        rowIsReady={rowIsReady}
-        pasteBox={pasteBoxNode}
-      />,
+      <>
+        <CompEntryMobileSheet
+          rows={rows}
+          overlaysById={overlaysById}
+          locationCellText={locationCellText}
+          onCommitField={commitFieldEdit}
+          onSetToday={setRowToday}
+          onResolvePeriod={resolvePeriod}
+          armedRowId={armedRowId}
+          onArm={onArm}
+          onFocusAnchor={onFocusAnchor}
+          onSave={(readyForSave) => { setAttemptedSave(true); onSave(readyForSave); }}
+          onCancel={requestClose}
+          saving={saving}
+          saveError={saveError}
+          readyRows={readyRows}
+          rowIsReady={rowIsReady}
+          pasteBox={pasteBoxNode}
+        />
+        {confirmingClose && (
+          <DiscardCloseConfirm rowCount={rows.length} onDiscard={confirmDiscard} onKeepEditing={keepEditing} fullScreen />
+        )}
+      </>,
       document.body,
     );
   }
@@ -1490,7 +1591,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
         style={{ height: 6, margin: "-1px -1px 0", borderRadius: "12px 12px 0 0", cursor: "ns-resize", background: "var(--border-default)" }} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid var(--border-default)" }}>
         <span style={{ fontSize: 13, fontWeight: 700 }}>Paste comps</span>
-        <button onClick={onCancel} aria-label="Close"
+        <button onClick={requestClose} aria-label="Close"
           style={{ border: "none", background: "transparent", color: "var(--text-secondary)", fontFamily: "inherit", fontSize: CLOSE_ICON_FONT_SIZE, cursor: "pointer", padding: 2 }}>✕</button>
       </div>
 
@@ -1519,8 +1620,19 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
       ) : (
         <div
           ref={gridRef}
-          tabIndex={0}
+          // NEW-6 — this container used to carry `tabIndex={0}`, making it a SECOND tab stop
+          // sitting in front of the active cell's own roving `tabIndex={0}` (SheetCell) — Tab from
+          // the paste box landed here first, a bare, unlabeled stop that isn't a data cell, before
+          // ever reaching one. `-1` keeps it programmatically focusable (every `gridRef.current
+          // ?.focus()` call elsewhere in this file still works, and `onKeyDown` still receives every
+          // bubbled keydown from a focused descendant regardless of the container's own tabIndex)
+          // while taking it OUT of natural Tab traversal — so Tab now lands directly on the one
+          // active cell instead of on this wrapper.
+          tabIndex={-1}
           role="grid"
+          aria-label="Comp entry sheet"
+          aria-rowcount={rows.length + 1}
+          aria-colcount={visibleIdx.length + 1}
           onKeyDown={onGridKeyDown}
           onPaste={onGridPaste}
           style={{ flex: 1, minHeight: GRID_MIN_HEIGHT, overflow: "auto", outline: "none" }}>
@@ -1558,8 +1670,16 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
                     padding: 0, textAlign: "center", verticalAlign: "middle",
                     background: "var(--surface-raised)", border: "1px solid var(--border-default)",
                     scrollMarginTop: GROUP_BAND_H + COL_LABEL_H,
-                  }}>
-                    <button onClick={() => removeRow(row._id)} title="Remove" aria-label="Remove comp"
+                  }} tabIndex={-1}>
+                    {/* NEW-6 — this delete ✕ used to carry NO `tabIndex` at all, which left it
+                        natively tabbable (an implicit 0) on EVERY row regardless of selection — a
+                        one-way, no-undo-visible destructive control sitting in the middle of the
+                        document tab order, one Tab apart from a data cell. It's a real, one-way
+                        door for the user (no confirm, though `commitRows` does push an undo frame
+                        Ctrl/Cmd+Z can still recover), so it comes OUT of the tab order like every
+                        other non-active cell; Shift+Delete on the selected row's cell reaches it
+                        instead (onGridKeyDown below), the same undo-covered removeRow call. */}
+                    <button onClick={() => removeRow(row._id)} title="Remove" aria-label="Remove comp" tabIndex={-1}
                       style={{ border: "none", background: "transparent", color: "var(--danger-text)", fontFamily: "inherit", cursor: "pointer", fontSize: CLOSE_ICON_FONT_SIZE, padding: 0, height: ROW_H, lineHeight: CELL_LINE_HEIGHT, verticalAlign: "middle" }}>✕</button>
                   </td>
                 </tr>
@@ -1575,16 +1695,19 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "10px 14px", borderTop: "1px solid var(--border-default)" }}>
         <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>{footerMsg}</span>
         <span style={{ display: "flex", gap: 8 }}>
-          <Button size="sm" variant="ghost" onClick={onCancel} disabled={saving}>Close</Button>
+          <Button size="sm" variant="ghost" onClick={requestClose} disabled={saving}>Close</Button>
           {/* NEW-2 — pressing Save is the OTHER trigger that upgrades every row's quiet
               incompleteness note into the full message, so a row Save skipped over (it only ever
               saves the READY rows) explains itself instead of staying silently quiet forever. */}
           <Button size="sm" onClick={() => { setAttemptedSave(true); onSave(readyRows); }} disabled={saving || readyRows.length === 0}>
-            {saving ? "Saving…" : `Save ${readyRows.length || ""} comp${readyRows.length === 1 ? "" : "s"}`.trim()}
+            {saving ? "Saving…" : saveButtonLabel(readyRows.length)}
           </Button>
         </span>
       </div>
       {saveError && <div style={{ fontSize: 12, color: "var(--danger-text)", padding: "0 14px 10px" }}>{saveError}</div>}
+      {confirmingClose && (
+        <DiscardCloseConfirm rowCount={rows.length} onDiscard={confirmDiscard} onKeepEditing={keepEditing} />
+      )}
     </div>,
     document.body,
   );
