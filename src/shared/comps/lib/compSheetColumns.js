@@ -136,8 +136,11 @@ function optionLabel(options, value) {
 
 // Loose match for typing over a select cell (e.g. typing "y" or "yr" for Period) — matches by
 // value, by full label, or by label PREFIX, case-insensitively. Returns null (no change) rather
-// than guessing when nothing matches, same "never silently wrong" rule as compParse.js.
-function matchOption(options, typed) {
+// than guessing when nothing matches, same "never silently wrong" rule as compParse.js. Exported
+// (B844400/NEW-4) so CompEntryGrid.jsx's own beginEdit can jump a freshly opened select straight
+// to the first option whose label/value starts with the character that opened it — the same
+// prefix rule applyCellEdit already uses to resolve a fully-typed-over value.
+export function matchOption(options, typed) {
   const t = String(typed || "").trim().toLowerCase();
   if (!t) return "";
   const byValue = options.find((o) => o.value.toLowerCase() === t);

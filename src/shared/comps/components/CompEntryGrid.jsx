@@ -38,7 +38,7 @@ import { parsePaste, rowHasBlockingFlags, parseProseLine, parseSingleRecord, spl
 import { emptyDraft, draftToComp, validateComp, summarizeLeaseComps, summarizeSaleComps, resolveCapTriangle } from "../lib/comps.js";
 import {
   SHEET_COLUMNS, cellState, applyCellEdit, fillDownColumn, spillPaste, visibleColumnIndices,
-  computeFlexWidths, widthFor, frozenLeftOffsets, saveButtonLabel,
+  computeFlexWidths, widthFor, frozenLeftOffsets, saveButtonLabel, matchOption,
 } from "../lib/compSheetColumns.js";
 import { parcelLocationText, siteplanLocationText, pinFallbackText } from "../lib/compLocationText.js";
 import { todayIso } from "../lib/compDates.js";
@@ -71,17 +71,26 @@ const ROW_H = 31;
 const GROUP_BAND_H = 22;
 const COL_LABEL_H = 26;
 const REMOVE_COL_W = 32;
-// B986096-HARDENING-28 (NEW-1 follow-up, owner live-measured, 2026-09-02) — the grid is the ONLY
-// flex-growing child of this panel; every sibling (paste box, notice line, ProblemsList, footer)
-// is fixed/auto height, so an unbounded sibling shrinks the grid FIRST, not last — measured live:
-// 3 rows in the sheet left the grid 154px tall, 8 rows (each stacking its own quiet notice line,
-// the defect this rule closes) shrank it to 101px — MORE content meant LESS of it visible, exactly
-// backwards. This floor (≈5.5 rows + the header) is what makes the grid the LAST thing to give up
-// space: combined with capping the notice line and relying on ProblemsList's existing maxHeight,
-// the grid keeps a real minimum regardless of how many rows are on the sheet. It is a floor, not a
-// promise — a housing content spike can still push the PANEL taller than its own chosen dockHeight
-// (visible overflow) rather than crush the grid to near-nothing, which is the better failure mode.
-const GRID_MIN_HEIGHT = GROUP_BAND_H + COL_LABEL_H + ROW_H * 5.5;
+// B844400 (NEW-2, owner live-measured, 2026-09-03) — SUPERSEDES the ≈5.5-row floor HARDENING-28
+// set below: forcing the grid to a fixed 218.5px floor is exactly what left a 1-3 row sheet
+// sitting in a slab of dead white space (measured: 1 row's table is ~81px tall inside a
+// 218.5px-floored pane — 138px of blank space beneath the last row). THE PANEL NOW OWNS THE
+// HEIGHT BUDGET, NOT THE GRID: the panel's own height is `"auto"` up to `dockHeight` as a CEILING
+// (see the panel's own style below), so with few rows the whole panel simply shrinks to wrap its
+// content — there is no more "leftover flex space" for the grid to be stretched into. The grid's
+// `flex: "0 1 auto"` (see its own style below) makes it size to its ACTUAL content (header + N
+// rows) whenever that fits under the ceiling, and the one element that SHRINKS (scrolls) once
+// total content exceeds `dockHeight` — every sibling around it is pinned `flex: "none"` so it is
+// still the last (and only) thing to give up space under squeeze, same intent as HARDENING-28, just
+// no longer paid for with a floor taller than a 1-row sheet needs. The floor below is cut to
+// "header + one row" — the smallest floor that still lets a genuinely 1-row sheet render with zero
+// blank space (any larger and NEW-2's own case reappears), while still guaranteeing the sticky
+// header plus at least one data row stays visible even under the heaviest squeeze (many rows +
+// ProblemsList at its own 120px cap). This narrows HARDENING-28's specific 5.5-row guarantee for
+// a many-rows/crowded-ProblemsList sheet — that class (rows shrinking as ProblemsList grows) is
+// unaffected in its own right and remains a separate, already-filed concern; it is bounded here
+// only by the smaller 1-row floor rather than papered over by a floor that broke the common case.
+const GRID_MIN_HEIGHT = GROUP_BAND_H + COL_LABEL_H + ROW_H;
 
 // B986096-HARDENING-24 — the ONE type scale every grid CELL's text-bearing element reads: the
 // display span, the Location action button, and every open editor (input/select). A <span>
@@ -533,15 +542,23 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, touched, selected, i
           that have dropdowns") — a choice cell (Type/Unit/Per/Basis, and any future select
           column) was plain text at rest, indistinguishable from a free-text or numeric cell
           until clicked. A trailing caret is the standard "this opens a menu" affordance; it's
-          added ONLY for a genuinely editable select cell (never on a fixed/na one, which isn't a
-          real choice for that row) and pinned to the cell's own right edge via flex, independent
-          of how long the value text is, so it survives even the narrowest choice column (Unit).
-          This is also what makes Basis read IDENTICALLY to Type/Unit/Per at rest — nothing in
-          this file ever special-cased Basis; the one resting representation for a choice cell,
-          applied uniformly, is this row/caret span, always a `<span>` here, never a live
-          `<select>` (a native `<select>` only ever mounts while the cell is actually being
-          edited — the same as every other kind of cell). */}
-      {col.kind === "select" && st.state === "editable" ? (
+          added ONLY for a select cell showing a real, chosen-looking value — never on a "na"
+          (em-dash — genuinely not applicable to this row's type) one — and pinned to the cell's
+          own right edge via flex, independent of how long the value text is, so it survives even
+          the narrowest choice column (Unit). This is also what makes Basis read IDENTICALLY to
+          Type/Unit/Per at rest — nothing in this file ever special-cased Basis; the one resting
+          representation for a choice cell, applied uniformly, is this row/caret span, always a
+          `<span>` here, never a live `<select>` (a native `<select>` only ever mounts while the
+          cell is actually being edited — the same as every other kind of cell).
+          B844400/NEW-4 (owner report, 2026-09-03) — AMENDS the "never on a fixed one" clause
+          above: Unit on a non-land row is `state === "fixed"` (always SF, not a real per-row
+          choice — see compSheetColumns.js's own `editableFor`), and it used to be the one choice
+          column with no caret at rest, reading as inconsistent with Type/Per/Basis next to it.
+          The caret now also shows on a `"fixed"` select cell — purely a visual-parity signal
+          ("this is drawn from a fixed set of options"), not a claim of editability: clicking a
+          fixed cell still does nothing, same as before, since Unit genuinely isn't a choice
+          outside land. */}
+      {col.kind === "select" && (st.state === "editable" || st.state === "fixed") ? (
         <span style={{ ...textStyle, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 3 }}>
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", verticalAlign: "middle" }}>{cellContent}</span>
           <span aria-hidden="true" style={{ flex: "none", fontSize: FONT_SIZE.micro, color: "var(--text-tertiary)", verticalAlign: "middle" }}>▾</span>
@@ -555,14 +572,20 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, touched, selected, i
   );
 }
 
-/* ---- the count + averages footer — always names a lease average's basis --------------------- */
-function SummaryRow({ rows }) {
-  if (!rows.length) return null;
+/* ---- averages (Lease/Land/Bldg sale), folded into the ONE footer line, never a band of their
+ * own — NEW-3 (owner report, 2026-09-03): a bare "3 comps" strip directly under the grid repeated
+ * the count the footer already gives, more usefully, and on a short window clipped to a
+ * featureless white sliver with no readable text ("what is the white sliver at the bottom for" —
+ * the answer is it shouldn't exist as its own band). The averages themselves are real, computed
+ * facts and stay — they just ride the same status line as the ready/issue count now (built in the
+ * footerMsg computation below), rather than a second line. Always names a lease average's basis. */
+function compAverageParts(rows) {
+  if (!rows.length) return [];
   const comps = rows.map((r) => draftToComp(r.draft));
   const lease = summarizeLeaseComps(comps);
   const land = summarizeSaleComps(comps, "land");
   const bldg = summarizeSaleComps(comps, "building_sale");
-  const parts = [`${rows.length} comp${rows.length === 1 ? "" : "s"}`];
+  const parts = [];
   // NEW-5 (owner decision) — an undated row is excluded from every average, never blended in;
   // the exclusion count joins the parenthetical the same way "(2, unweighted)" already does.
   if (lease.headline) {
@@ -573,11 +596,7 @@ function SummaryRow({ rows }) {
   }
   if (land.count) parts.push(`Land avg $${land.avg.toFixed(2)}/SF (${land.count}${land.undatedCount ? `, ${land.undatedCount} undated excluded` : ""})`);
   if (bldg.count) parts.push(`Bldg sale avg $${bldg.avg.toFixed(2)}/SF (${bldg.count}${bldg.undatedCount ? `, ${bldg.undatedCount} undated excluded` : ""})`);
-  return (
-    <div style={{ padding: "6px 10px", fontSize: 10.5, color: "var(--text-secondary)", borderTop: "1px solid var(--border-default)", background: "var(--surface-raised)" }}>
-      {parts.join(" · ")}
-    </div>
-  );
+  return parts;
 }
 
 /* ---- problems: full sentences below the sheet, naming the row, never a dot on a cell -------- */
@@ -633,7 +652,7 @@ function ProblemsList({ rows, onResolvePeriod, attemptedSave }) {
     }
   });
   if (!items.length) return null;
-  return <div style={{ padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6, borderTop: "1px solid var(--border-default)", maxHeight: 120, overflowY: "auto" }}>{items}</div>;
+  return <div style={{ flex: "none", padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6, borderTop: "1px solid var(--border-default)", maxHeight: 120, overflowY: "auto" }}>{items}</div>;
 }
 
 /* NEW-8 — the "discard unsaved rows?" confirmation, shared by the desktop sheet (`inset` covers
@@ -798,15 +817,29 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
       // HTMLSelectElement has no .select() (text-selection) method — guard it, or opening a
       // TYPE/UNIT/PER/BASIS cell via double-click/F2 throws instead of opening the dropdown.
       if (editing.selectAll && typeof editInputRef.current.select === "function") editInputRef.current.select();
-      // HARDENING-10 NEW-3 — a single click now enters edit immediately; for a choice cell
-      // (Type/Unit/Per/Basis) "entering edit" has to mean the menu is already open, or it's still
-      // two clicks (focus, then open) to reach a value. `.showPicker()` is the real API for that —
-      // feature-detected (Safari < 16.4 lacks it; the select still works, just opens on a second
-      // click there) and wrapped, because it throws outside a user-activation window and a
-      // `useLayoutEffect` firing after an async commit is not guaranteed to still be inside one.
-      if (typeof editInputRef.current.showPicker === "function") {
-        try { editInputRef.current.showPicker(); } catch { /* not user-activated, or unsupported here — falls back to a focused, closed select */ }
-      }
+      // ⛔ B844400/NEW-4 (owner report, 2026-09-03) — REMOVES the HARDENING-10 NEW-3
+      // `.showPicker()` call this effect used to make unconditionally on every select-cell open.
+      // Root-caused with an instrumented probe (a capturing `window` keydown listener + a raw CDP
+      // keypress): once the native OS picker popup is open, a subsequent letter keystroke reaches
+      // NO page-level JS listener at all — not React's delegated handler, not the native
+      // AT_TARGET listener HARDENING-15 attaches, not even a capture-phase `window` listener. The
+      // browser's own popup owns the keystroke entirely as chrome-level UI, the same mechanism
+      // this file's own HARDENING-13 comment already named for the Tab-after-picking case. That
+      // makes "click a choice cell, then type" (the owner's exact repro) unfixable at the JS layer
+      // as long as the popup auto-opens: the keystroke the owner types never reaches this app at
+      // all, matching the reported "type 'A' — nothing, type '8' — nothing" precisely.
+      // Un-instrumented, the same probe against a FOCUSED-BUT-CLOSED select (`.focus()` alone, no
+      // `showPicker()`) shows the letter DOES reach the page and the native `<select>` changes its
+      // own value via its own built-in type-ahead — confirmed live, not reasoned: `onGridKeyDown`'s
+      // and `onEditKeyDown`'s own deliberate `matchOption` jump (added this same item) additionally
+      // guarantee the result rather than depend on that native behavior alone. The trade: a select
+      // cell no longer visually pops its list open on the FIRST click — it still enters edit mode
+      // (focused, outlined, immediately typeable/arrow-able) in that one click, same as before;
+      // seeing the list itself now takes one more click (a genuine click landing on the now-mounted,
+      // already-focused `<select>`, which is native, no JS needed) or Enter/F2 re-opening it. That
+      // is a real, deliberate narrowing of HARDENING-10 NEW-3's "one click reaches an editable
+      // state" win — argued because a swallowed keystroke silently discarding what the owner typed
+      // is worse than one extra click for a mouse user who wants to browse the list visually.
     }
   }, [editing]);
 
@@ -830,9 +863,12 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     // focus into the sheet, so a SECOND paste landed on the grid's own Excel-style spill-paste
     // instead of the textarea's smart-parse — breaking "paste several comps in a row."
     if (!editing && gridRef.current?.contains(document.activeElement)) {
-      // The Location cell's focusable element is the <button> nested inside its <td> (buttons are
-      // natively focusable without a tabIndex prop); every other cell's tabIndex lives on the <td>
-      // itself.
+      // NEW-6 — the roving tabIndex itself lives on the <td> for EVERY column now, Location
+      // included (its inner <button> is permanently tabIndex={-1}, never an independent tab
+      // stop — see SheetCell's own header). This still specifically FOCUSES that button when one
+      // exists, rather than the <td>, so a real click/Enter on the button itself works exactly as
+      // before (native Enter/Space activation) — a deliberate choice, not a leftover from when the
+      // button used to carry the roving tabIndex itself.
       const focusEl = cellEl?.querySelector("button") || cellEl;
       focusEl?.focus?.();
     }
@@ -976,9 +1012,16 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     if (colDef.kind === "derived" || colDef.kind === "action") return;
     const st = cellState(colDef, draftOverride || rows[row].draft);
     if (st.state !== "editable") return;
-    // A select's value is a fixed option, not typed text — a printable keypress opens the
-    // dropdown at its CURRENT value rather than seeding it with the pressed character.
-    const startValue = colDef.kind === "select" ? (st.raw ?? "") : initial != null ? initial : (st.raw ?? "");
+    // B844400/NEW-4 (owner report, 2026-09-03) — a select's value is a fixed option, not typed
+    // text, so a printable keypress can't seed it character-for-character the way a text/number
+    // cell does. It used to just ignore the keypress outright and open at the CURRENT value; now
+    // it jumps straight to the first option whose label/value starts with the pressed character
+    // (matchOption — the same prefix rule applyCellEdit already uses when a select cell is typed
+    // OVER), mirroring the spreadsheet type-ahead the rest of the grid already implies. A
+    // non-matching character (or no character at all — a click, F2, Enter) opens at the current
+    // value, same as before.
+    const matchedOption = colDef.kind === "select" && initial ? matchOption(colDef.options, initial) : null;
+    const startValue = colDef.kind === "select" ? (matchedOption ?? (st.raw ?? "")) : initial != null ? initial : (st.raw ?? "");
     editHandledRef.current = false;
     editingRef.current = { row, col };
     editValueRef.current = startValue;
@@ -1115,6 +1158,23 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     if (e.key === "Enter") { e.preventDefault(); finishEdit(true, { axis: "row", delta: 1 }); }
     else if (e.key === "Tab") { e.preventDefault(); finishEdit(true, { axis: "col", delta: e.shiftKey ? -1 : 1, wrap: true }); }
     else if (e.key === "Escape") { e.preventDefault(); finishEdit(false, null); }
+    // B844400/NEW-4 (owner report, 2026-09-03) — a select-kind cell that's ALREADY open (reached
+    // by a click, which enters edit immediately per HARDENING-10) relied entirely on the browser's
+    // OWN native `<select>` type-ahead for a further keypress to jump the value — measured
+    // unreliable (it silently did nothing, matching the owner's "type 'A' — nothing" report).
+    // Deliberate, matchOption-driven type-ahead closes it the same way `beginEdit`'s own initial
+    // seeding does (see its header): jump to the first option whose label/value starts with the
+    // typed character, then commit it exactly as `onSelectEditChange` already does for a real
+    // native change — picking an option IS the complete action here, same as any other route into
+    // it. A non-matching character is a no-op (never guesses), same "never silently wrong" rule
+    // `applyCellEdit`/`matchOption` already follow elsewhere in this sheet.
+    else if (editingRef.current && e.key.length === 1 && !(e.metaKey || e.ctrlKey) && !e.altKey) {
+      const colDef = SHEET_COLUMNS[editingRef.current.col];
+      if (colDef.kind === "select") {
+        const matched = matchOption(colDef.options, e.key);
+        if (matched != null) { e.preventDefault(); onSelectEditChange(matched); }
+      }
+    }
   };
   // ⛔ HARDENING-15 (B986096, owner cycle-5 P0, "Enter still discards, 5th cycle — root-caused
   // this time") — React's `onKeyDown` prop is BUBBLE-PHASE and ROOT-DELEGATED (React 17+ attaches
@@ -1266,7 +1326,9 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     // HARDENING-10 NEW-3 (owner measured: a single click only ever focused a bare, non-editable
     // DIV — a double-click was needed to reach an editor at all, "four clicks for one value").
     // ONE click now goes straight to edit for anything editable — a text cell gets a caret, a
-    // choice cell opens its menu (via the showPicker effect above).
+    // choice cell gets a focused, immediately typeable `<select>` (B844400/NEW-4 removed the
+    // auto-`showPicker()` this comment used to describe — see the edit-open layout effect's own
+    // header for why).
     // ⛔ HARDENING-12 (owner P0 live-test) — Location used to stay select-only on a single click,
     // requiring a double-click to arm the map-pick flow. The owner clicked it four times across
     // two page loads and nothing happened, because there was no visible affordance telling him a
@@ -1371,11 +1433,13 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     if (e.key.length === 1 && !meta && !e.altKey) {
       const colDef = SHEET_COLUMNS[selection.col];
       if (colDef.kind === "action") { triggerAction(selection.row, selection.col); return; }
-      // NEW-1 (B1113714) — every sibling branch above calls preventDefault() before acting;
-      // this one didn't. beginEdit() seeds the new input's React state with e.key and focuses it
-      // synchronously (the `editing` useLayoutEffect), all before this handler returns — so with
-      // the keydown's default action left unprevented, the browser's own native character-insertion
-      // then lands the SAME keystroke a second time into the now-focused input, doubling it.
+      // B1120976 (NEW-1/B1113714) — every sibling branch above calls preventDefault() before
+      // acting; this one didn't. beginEdit() seeds the new input's React state with e.key and
+      // focuses it synchronously (the `editing` useLayoutEffect), all before this handler
+      // returns — so with the keydown's default action left unprevented, the browser's own
+      // native character-insertion then lands the SAME keystroke a second time into the
+      // now-focused input, doubling it. (Independently identified in this same spot by B1119282's
+      // owner brief — one fix, landed here first via B1120976; the two sessions agreed.)
       e.preventDefault();
       beginEdit(selection.row, selection.col, e.key, false);
     }
@@ -1447,15 +1511,24 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   // visible (the quiet dot in its own Executed cell, `SheetCell`'s `quietUnfilled`) — it's just
   // no longer a blocker, so it no longer belongs in this line at all.
   const missingLocationCount = rows.filter((r) => validateComp(draftToComp(r.draft)).length > 0).length;
+  // NEW-3 — the count (and, when there's anything to say, the averages) now ride the SAME line as
+  // the ready/issue status — see compAverageParts's own header for why the separate "N comps"
+  // strip is gone. All-ready keeps the old, already-count-led phrasing verbatim; the issues case
+  // adds the count explicitly ahead of "N ready" since "N of M ready" no longer states the total.
   let footerMsg = "";
   if (rows.length > 0) {
-    if (blockingCount === 0 && missingLocationCount === 0) footerMsg = `${readyRows.length} comp${readyRows.length === 1 ? "" : "s"} ready.`;
-    else {
-      const parts = [];
-      if (blockingCount > 0) parts.push(`${blockingCount} rate${blockingCount === 1 ? "" : "s"} need${blockingCount === 1 ? "s" : ""} a period`);
-      if (missingLocationCount > 0) parts.push(`${missingLocationCount} missing a Location`);
-      footerMsg = `${readyRows.length} of ${rows.length} ready — ${parts.join(", ")}.`;
+    const countWord = `${rows.length} comp${rows.length === 1 ? "" : "s"}`;
+    const segments = [];
+    if (blockingCount === 0 && missingLocationCount === 0) {
+      segments.push(`${countWord} ready`);
+    } else {
+      const issues = [];
+      if (blockingCount > 0) issues.push(`${blockingCount} rate${blockingCount === 1 ? "" : "s"} need${blockingCount === 1 ? "s" : ""} a period`);
+      if (missingLocationCount > 0) issues.push(`${missingLocationCount} missing a Location`);
+      segments.push(`${countWord} · ${readyRows.length} ready — ${issues.join(", ")}`);
     }
+    segments.push(...compAverageParts(rows));
+    footerMsg = `${segments.join(" · ")}.`;
   }
 
   // ⛔ HARDENING-12 (B986096, owner P0 live-test) — this used to float near the TOP of the
@@ -1502,7 +1575,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   // map pick) is shared verbatim between the desktop table and the mobile transposed layout below
   // — one implementation, so a paste behaves identically regardless of which layout is showing.
   const pasteBoxNode = (
-    <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border-default)" }}>
+    <div style={{ flex: "none", padding: "10px 14px", borderBottom: "1px solid var(--border-default)" }}>
       <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
         <textarea
           value={pasteText}
@@ -1588,14 +1661,22 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
         // the point of a grid is that you can read every cell without the map's own imagery/street
         // labels bleeding through it. `--surface-raised` is the same token every header cell in
         // the grid already uses, opaque in both themes.
+        // NEW-2 — the panel now SHRINKS TO FIT its own content, `dockHeight` acting as a CEILING
+        // (`maxHeight`) rather than a fixed height: a 1-row sheet renders a 1-row-tall panel, and
+        // the panel only grows toward `dockHeight` as more rows genuinely need the room. See
+        // GRID_MIN_HEIGHT's own header above for the rest of the height-budget story.
         position: "fixed", left: 16, right: 16, bottom: 12, width: "auto",
-        height: dockHeight, zIndex: 2600, display: "flex", flexDirection: "column",
+        height: "auto", maxHeight: dockHeight, zIndex: 2600, display: "flex", flexDirection: "column",
         background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: 12,
         boxShadow: "0 -8px 28px rgba(28,25,20,0.18), 0 -2px 8px rgba(28,25,20,0.08)", // design-exempt: shadow points UP (the panel sits at the bottom of the viewport) — no shadow token exists yet
       }}>
+      {/* NEW-2 — every sibling around the grid is pinned `flex: "none"` (natural size, never
+          grow, never shrink) so the grid is the ONE element that absorbs a genuine squeeze once
+          total content exceeds `dockHeight` — same intent as HARDENING-28, now paid for by the
+          panel shrinking to content instead of a floor forced onto the grid regardless of row count. */}
       <div onPointerDown={startResize} title="Drag to resize"
-        style={{ height: 6, margin: "-1px -1px 0", borderRadius: "12px 12px 0 0", cursor: "ns-resize", background: "var(--border-default)" }} />
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid var(--border-default)" }}>
+        style={{ flex: "none", height: 6, margin: "-1px -1px 0", borderRadius: "12px 12px 0 0", cursor: "ns-resize", background: "var(--border-default)" }} />
+      <div style={{ flex: "none", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid var(--border-default)" }}>
         <span style={{ fontSize: 13, fontWeight: 700 }}>Paste comps</span>
         <button onClick={requestClose} aria-label="Close"
           style={{ border: "none", background: "transparent", color: "var(--text-secondary)", fontFamily: "inherit", fontSize: CLOSE_ICON_FONT_SIZE, cursor: "pointer", padding: 2 }}>✕</button>
@@ -1604,7 +1685,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
       {pasteBoxNode}
 
       {armedRowId && (
-        <div style={{ fontSize: 12, color: "var(--warn-text)", background: "var(--warn-bg)", borderBottom: "1px solid var(--warn-border)", padding: "6px 14px" }}>
+        <div style={{ flex: "none", fontSize: 12, color: "var(--warn-text)", background: "var(--warn-bg)", borderBottom: "1px solid var(--warn-border)", padding: "6px 14px" }}>
           {/* HARDENING-12 — "the map stays fully usable" was true only once the panel stopped
               covering the top of it (see the dock change above); now docked to the bottom, the
               map above this panel is clickable. Escape is now a real way out, not just Cancel.
@@ -1620,7 +1701,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
       )}
 
       {rows.length === 0 ? (
-        <div style={{ fontSize: 12, color: "var(--text-secondary)", padding: "24px 14px", textAlign: "center" }}>
+        <div style={{ flex: "none", fontSize: 12, color: "var(--text-secondary)", padding: "24px 14px", textAlign: "center" }}>
           Paste a few comps above to get started.
         </div>
       ) : (
@@ -1641,7 +1722,7 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
           aria-colcount={visibleIdx.length + 1}
           onKeyDown={onGridKeyDown}
           onPaste={onGridPaste}
-          style={{ flex: 1, minHeight: GRID_MIN_HEIGHT, overflow: "auto", outline: "none" }}>
+          style={{ flex: "0 1 auto", minHeight: GRID_MIN_HEIGHT, overflow: "auto", outline: "none" }}>
           <table style={{ borderCollapse: "collapse", tableLayout: "fixed" }}>
             <HeaderRows visibleIdx={visibleIdx} flexWidths={flexWidths} frozenOffsets={frozenOffsets} />
             <tbody>
@@ -1695,10 +1776,9 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
         </div>
       )}
 
-      <SummaryRow rows={rows} />
       <ProblemsList rows={rows} onResolvePeriod={resolvePeriod} attemptedSave={attemptedSave} />
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "10px 14px", borderTop: "1px solid var(--border-default)" }}>
+      <div style={{ flex: "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "10px 14px", borderTop: "1px solid var(--border-default)" }}>
         <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>{footerMsg}</span>
         <span style={{ display: "flex", gap: 8 }}>
           <Button size="sm" variant="ghost" onClick={requestClose} disabled={saving}>Close</Button>
