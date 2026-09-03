@@ -116,24 +116,19 @@ const NOISE_FLOOR_NOTE =
   "0 differing pixels on all 8 surface/theme baselines, captured twice in a row against the " +
   "identical build with nothing changed (`node ui-audit/measure-visual-noise.mjs`, 2026-09-01).";
 
-/* ⛔ TEMPORARY, NAMED, REMOVABLE (NEW-2, 2026-09-03) — the phone viewport's PIXEL diff is
- * advisory-only (reported, never fails the build); the STRUCTURAL check (narrowWidthAudit.mjs) is
- * completely unaffected and still hard-fails as always. See `Blocker: playwright-install` in
- * BACKLOG.md/B1096016 for the full story; short version: this session's sandbox cannot reach
- * either GitHub's artifact storage or Playwright's browser CDN (both blocked by egress policy),
- * so the 8 phone baselines it approved were captured with a Chromium build one point-release off
- * CI's own pinned revision. MEASURED on the real CI run (not assumed): all 8 pre-existing DESKTOP
- * baselines matched byte-for-byte (proving CI's renderer is internally consistent and this PR's
- * code changed nothing there), while all 8 new PHONE baselines differed 1.7-5.5% — antialiasing-
- * class drift (the same B1026272 class), not a real rendering regression. Hard-failing the build
- * on a baseline this session could not have verified against CI's real renderer would be
- * indistinguishable from a real regression to the next person who touches phone-width UI — worse
- * than catching nothing, since it teaches "phone pixel-diff failures are noise, ignore them."
- * Advisory-only is the honest middle ground until a session with real network access re-approves
- * these 8 PNGs with CI's exact Chromium (`npx playwright install chromium` there, then
- * `node ui-audit/visual-regression.mjs --viewport=phone --approve --reason="..."`) — flip this
- * back to `false` in that same commit; do not leave it flipped longer than that one fix needs. */
-const PHONE_PIXEL_DIFF_ADVISORY_ONLY = true;
+/* ⛔ CLOSED (B1096017, 2026-09-03, same day as it was opened) — this session had real network
+ * access (confirmed: `npx playwright install --with-deps chromium` resolved and downloaded CI's
+ * exact pinned revision 1228 while running `scripts/ci-parity.mjs` for an unrelated Model-module
+ * PR), so it re-approved all 8 phone baselines with that exact revision
+ * (`node ui-audit/visual-regression.mjs --viewport=phone --approve`) and flips this back to
+ * `false` in the same commit, per the closing instructions this comment used to carry. History,
+ * for the next time this class of gap opens: `PHONE_PIXEL_DIFF_ADVISORY_ONLY` downgraded the
+ * phone viewport's PIXEL diff from a hard fail to a reported warning (the STRUCTURAL check,
+ * `narrowWidthAudit.mjs`, was never affected and always hard-failed regardless) because the
+ * session that first added phone coverage (B1096016) could not reach Playwright's browser CDN and
+ * had to approve those 8 PNGs with a Chromium build one point-release off CI's pinned one —
+ * antialiasing-class drift, not a real regression, confirmed against a real CI run at the time. */
+const PHONE_PIXEL_DIFF_ADVISORY_ONLY = false;
 const ADDED_CI_TIME_NOTE =
   "MEASURED against a real GitHub Actions run, not estimated (PR #1311, run 33572020616, job " +
   "100067828486, 2026-09-01 — corrects the sandbox-only guess this note originally carried). Per-step, " +

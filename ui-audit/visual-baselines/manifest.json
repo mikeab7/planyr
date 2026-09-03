@@ -17,13 +17,13 @@
       },
       "light--phone": {
         "approvedAt": "2026-09-03",
-        "approvedCommit": "eafd8f31",
-        "note": "NEW-2: re-approve after fixing openPlan() prep to expand MapFinder's Sites panel at phone width first (it defaults collapsed under 760px) — first pass silently captured the map-landing screen instead of the opened demo plan."
+        "approvedCommit": "f94412eb",
+        "note": "Model Round 4 token move (--surface-page/--success-text) shifted phone baselines too; re-captured with CI's exact pinned Chromium (rev 1228, confirmed available this session) while here, closing B1096017's playwright-install blocker in the same commit."
       },
       "dark--phone": {
         "approvedAt": "2026-09-03",
-        "approvedCommit": "eafd8f31",
-        "note": "NEW-2: re-approve after fixing openPlan() prep to expand MapFinder's Sites panel at phone width first (it defaults collapsed under 760px) — first pass silently captured the map-landing screen instead of the opened demo plan."
+        "approvedCommit": "f94412eb",
+        "note": "Model Round 4 token move (--surface-page/--success-text) shifted phone baselines too; re-captured with CI's exact pinned Chromium (rev 1228, confirmed available this session) while here, closing B1096017's playwright-install blocker in the same commit."
       }
     },
     "site-planner-header": {
@@ -39,13 +39,13 @@
       },
       "light--phone": {
         "approvedAt": "2026-09-03",
-        "approvedCommit": "eafd8f31",
-        "note": "NEW-2: re-approve after fixing openPlan() prep to expand MapFinder's Sites panel at phone width first (it defaults collapsed under 760px) — first pass silently captured the map-landing screen instead of the opened demo plan."
+        "approvedCommit": "f94412eb",
+        "note": "Model Round 4 token move (--surface-page/--success-text) shifted phone baselines too; re-captured with CI's exact pinned Chromium (rev 1228, confirmed available this session) while here, closing B1096017's playwright-install blocker in the same commit."
       },
       "dark--phone": {
         "approvedAt": "2026-09-03",
-        "approvedCommit": "eafd8f31",
-        "note": "NEW-2: re-approve after fixing openPlan() prep to expand MapFinder's Sites panel at phone width first (it defaults collapsed under 760px) — first pass silently captured the map-landing screen instead of the opened demo plan."
+        "approvedCommit": "f94412eb",
+        "note": "Model Round 4 token move (--surface-page/--success-text) shifted phone baselines too; re-captured with CI's exact pinned Chromium (rev 1228, confirmed available this session) while here, closing B1096017's playwright-install blocker in the same commit."
       }
     },
     "site-planner-left-rail": {
@@ -61,13 +61,13 @@
       },
       "light--phone": {
         "approvedAt": "2026-09-03",
-        "approvedCommit": "eafd8f31",
-        "note": "NEW-2: re-approve after fixing left-rail prep to tap the phone-only 'Show Land/Analysis/Yield/...' Sections pill before selecting Yield — the rail itself is off-screen (translateX(-100%)) at narrow width until summoned."
+        "approvedCommit": "f94412eb",
+        "note": "Model Round 4 token move (--surface-page/--success-text) shifted phone baselines too; re-captured with CI's exact pinned Chromium (rev 1228, confirmed available this session) while here, closing B1096017's playwright-install blocker in the same commit."
       },
       "dark--phone": {
         "approvedAt": "2026-09-03",
-        "approvedCommit": "eafd8f31",
-        "note": "NEW-2: re-approve after fixing left-rail prep to tap the phone-only 'Show Land/Analysis/Yield/...' Sections pill before selecting Yield — the rail itself is off-screen (translateX(-100%)) at narrow width until summoned."
+        "approvedCommit": "f94412eb",
+        "note": "Model Round 4 token move (--surface-page/--success-text) shifted phone baselines too; re-captured with CI's exact pinned Chromium (rev 1228, confirmed available this session) while here, closing B1096017's playwright-install blocker in the same commit."
       }
     },
     "library": {
@@ -83,13 +83,13 @@
       },
       "light--phone": {
         "approvedAt": "2026-09-03",
-        "approvedCommit": "eafd8f31",
-        "note": "NEW-2: re-approve after fixing openPlan() prep to expand MapFinder's Sites panel at phone width first (it defaults collapsed under 760px) — first pass silently captured the map-landing screen instead of the opened demo plan."
+        "approvedCommit": "f94412eb",
+        "note": "Model Round 4 token move (--surface-page/--success-text) shifted phone baselines too; re-captured with CI's exact pinned Chromium (rev 1228, confirmed available this session) while here, closing B1096017's playwright-install blocker in the same commit."
       },
       "dark--phone": {
         "approvedAt": "2026-09-03",
-        "approvedCommit": "eafd8f31",
-        "note": "NEW-2: re-approve after fixing openPlan() prep to expand MapFinder's Sites panel at phone width first (it defaults collapsed under 760px) — first pass silently captured the map-landing screen instead of the opened demo plan."
+        "approvedCommit": "f94412eb",
+        "note": "Model Round 4 token move (--surface-page/--success-text) shifted phone baselines too; re-captured with CI's exact pinned Chromium (rev 1228, confirmed available this session) while here, closing B1096017's playwright-install blocker in the same commit."
       }
     }
   }
