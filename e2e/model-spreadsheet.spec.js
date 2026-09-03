@@ -899,7 +899,9 @@ test.describe("Model workspace — B1106256 (a click next to an open menu is no 
 
   test("(3) clicking empty ribbon background while the font-family menu is open just dismisses it — nothing else fires", async ({ page }) => {
     const id = "e2e-b1106256-emptyspace";
-    await page.setViewportSize({ width: 1600, height: 900 }); // real blank trailing space in the ribbon row
+    // Stage 3 (formula-auditing) widened the ribbon by one more group (~150px) — 1600px no
+    // longer leaves reliable blank trailing space once every group fits inline; 2200px does.
+    await page.setViewportSize({ width: 2200, height: 900 }); // real blank trailing space in the ribbon row
     await seedProject(page, id);
     await page.goto(`/#/project/${id}/model`);
     const menu = await openFontFamilyMenu(page);

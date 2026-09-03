@@ -75,6 +75,13 @@ export const RIBBON_GROUPS = [
   { key: "number", label: "Number", width: 237 + DIVIDER_FOOTPRINT, priority: 6 },
   { key: "borders", label: "Borders", width: 87 + DIVIDER_FOOTPRINT, priority: 5 },
   { key: "cells", label: "Cells", width: 90 + DIVIDER_FOOTPRINT, priority: 1 },
+  // Stage 3, formula-auditing (NEW-1/NEW-2, owner brief 2026-09-03) — Trace Precedents/
+  // Dependents/Remove Arrows (3 icon buttons + an occasional "L2" level readout, sized into the
+  // width for the widest state) + the Inconsistencies toggle (1 icon button + its own count
+  // badge, which overlays rather than adding width). Priority 2, tied with Alignment: a real
+  // auditing tool the owner asked for by name ("the single most useful auditing tool in Excel"),
+  // so it survives longer than the structural-editing/naming groups as the window narrows.
+  { key: "audit", label: "Formula Auditing", width: 130 + DIVIDER_FOOTPRINT, priority: 2 },
   // Stage 3 pt 2 (NEW-1) — a single icon button opening the Name Manager (list/search/jump,
   // rename, retarget, delete, plus the "define from selection" fast path — see
   // components/NameManager.jsx). Placed after Cells: a real spreadsheet's structural-editing

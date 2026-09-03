@@ -176,6 +176,15 @@ export default function SheetView({
   filterOn = false, columnFilters = null, onSetColumnFilter,
   // STAGE 3 (NEW-2) — input (blue) / formula (black) / cross-sheet link (green), ON by default.
   autoColor = true,
+  // STAGE 3 (NEW-1) — trace precedents/dependents. `trace` is lib/traceAudit.js's own
+  // `renderableTrace(...)` output for THIS sheet (or `null` when no trace is active) —
+  // ModelApp.jsx owns the trace state itself; this component only turns it into pixels.
+  // `onNavigateTrace(sheetId, row, col)` fires when a cross-sheet marker is clicked.
+  trace = null, onNavigateTrace,
+  // STAGE 3 (NEW-2) — inconsistent-formula flags for THIS sheet, already filtered to
+  // non-dismissed ones (ModelApp.jsx applies `isInconsistencyDismissed`) — a plain array of
+  // `{row, col, kind, axes, message}` from lib/formulaConsistency.js.
+  inconsistencies = null,
 }) {
   const outerRef = useRef(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -330,6 +339,59 @@ export default function SheetView({
     return offs;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sheet.rowHeights, totalRows, rowResizePreview, zoom, hiddenRows]);
+
+  // STAGE 3 (NEW-1/NEW-2) — pixel geometry for the trace-precedents/dependents overlay and the
+  // inconsistency markers, built from the SAME colOffsets/rowOffsets every cell already renders
+  // from, so an arrow can never land somewhere the grid itself doesn't agree with — correct at
+  // any zoom level, since both offset arrays are already zoom-scaled. `null` when the cell named
+  // falls outside the sheet's current bounds — defensive only; ModelApp.jsx clears `trace`
+  // outright on every real edit (STRUCTURAL changes can move/delete the very cells a trace
+  // named), so this should never actually trigger in practice.
+  const cellCenterPx = useCallback((r, c) => {
+    if (r < 0 || r >= totalRows || c < 0 || c >= cols.length) return null;
+    return { x: colOffsets[c] + renderColW(c) / 2, y: headerH + rowOffsets[r] + renderRowH(r) / 2 };
+  }, [colOffsets, rowOffsets, renderColW, renderRowH, headerH, totalRows, cols.length]);
+  const rectEdgePx = useCallback((r1, c1, r2, c2) => {
+    if (r1 < 0 || c1 < 0 || r2 >= totalRows || c2 >= cols.length) return null;
+    return { left: colOffsets[c1], top: headerH + rowOffsets[r1], right: colOffsets[c2 + 1], bottom: headerH + rowOffsets[r2 + 1] };
+  }, [colOffsets, rowOffsets, headerH, totalRows, cols.length]);
+
+  const traceGeometry = useMemo(() => {
+    if (!trace) return null;
+    const arrows = [];
+    for (const a of trace.arrows) {
+      const rect = rectEdgePx(a.fromRect.r1, a.fromRect.c1, a.fromRect.r2, a.fromRect.c2);
+      const to = cellCenterPx(a.toCell.row, a.toCell.col);
+      if (!rect || !to) continue;
+      const cx = (rect.left + rect.right) / 2, cy = (rect.top + rect.bottom) / 2;
+      // Start the line from whichever edge of the source rect sits nearest the target cell, so
+      // a long vertical/horizontal precedent range doesn't draw a line slicing diagonally
+      // through its own middle cells — Excel's own convention for a range precedent arrow.
+      let sx = cx, sy = cy;
+      if (to.y < rect.top) sy = rect.top; else if (to.y > rect.bottom) sy = rect.bottom;
+      if (to.x < rect.left) sx = rect.left; else if (to.x > rect.right) sx = rect.right;
+      arrows.push({ rect, sx, sy, tx: to.x, ty: to.y, label: a.label, kind: a.kind });
+    }
+    const byCell = new Map();
+    for (const mk of trace.markers) {
+      const rect = rectEdgePx(mk.atCell.row, mk.atCell.col, mk.atCell.row, mk.atCell.col);
+      if (!rect) continue;
+      const key = `${mk.atCell.row}:${mk.atCell.col}`;
+      const list = byCell.get(key) || [];
+      list.push({ ...mk, rect });
+      byCell.set(key, list);
+    }
+    return { arrows, markerGroups: [...byCell.values()] };
+  }, [trace, rectEdgePx, cellCenterPx]);
+
+  // STAGE 3 (NEW-2) — a plain lookup, keyed the same way `rowCells` below indexes a cell, so the
+  // per-cell render loop can ask "does THIS cell carry an inconsistency flag" in O(1).
+  const inconsistencyByCell = useMemo(() => {
+    if (!inconsistencies || inconsistencies.length === 0) return null;
+    const map = new Map();
+    for (const f of inconsistencies) map.set(`${f.row}:${f.col}`, f);
+    return map;
+  }, [inconsistencies]);
 
   const { startIdx, endIdx } = visibleRowRange(rowOffsets, scrollTop, viewportH, BUF, freezeRows);
   const visibleRowIdxs = [];
@@ -866,6 +928,22 @@ export default function SheetView({
                   style={{ position: "absolute", top: 0, bottom: 0, right: -RESIZE_HANDLE_PX / 2, width: RESIZE_HANDLE_PX, cursor: "col-resize" }}
                 />
               )}
+              {/* STAGE 3 (NEW-2) — the inconsistent-formula flag: a small unobtrusive corner
+                  triangle, `pointerEvents:"none"` so it can never intercept a press (CHROME-
+                  NEVER-EATS-A-PRESS) — dismissing or inspecting a flag happens through the
+                  Inconsistencies panel's list, never by clicking the marker itself. */}
+              {inconsistencyByCell && inconsistencyByCell.has(`${r}:${c}`) && (
+                <span
+                  aria-hidden="true"
+                  data-testid="model-inconsistency-marker"
+                  title={inconsistencyByCell.get(`${r}:${c}`).message}
+                  style={{
+                    position: "absolute", top: 0, right: 0, width: 0, height: 0, pointerEvents: "none",
+                    borderStyle: "solid", borderWidth: `${7 * zoom}px ${7 * zoom}px 0 0`,
+                    borderColor: "var(--warn-text) transparent transparent transparent",
+                  }}
+                />
+              )}
               {/* The fill handle — Stage 2 visual pass. Lives at the SELECTION's bottom-right
                   corner (r2,c2), not every cell's, and only when nothing is being edited (a live
                   edit has its own input box occupying the cell). */}
@@ -1062,6 +1140,63 @@ export default function SheetView({
             row's real offset; a row past the real sheet.rowCount is blank PADDING: typing into
             it is what grows the sheet, mirroring GridView's emptyPad. */}
         {visibleRowIdxs.map((r) => renderRowCells(r, { position: "absolute", top: headerH + rowOffsets[r] }, "auto"))}
+
+        {/* STAGE 3 (NEW-1) — trace precedents/dependents, drawn on the SAME coordinate space
+            every cell above renders from (colOffsets/rowOffsets, already zoom-scaled), so an
+            arrow always lands exactly on the cell it names. Sits ABOVE the data cells (z-index 2
+            — below the sticky header/frozen bands at 3, so it never paints over chrome) but is
+            `pointerEvents:"none"` on the SVG itself: an arrow is a READ-ONLY audit overlay, never
+            a hit target — selecting/editing the cells underneath it must keep working exactly as
+            before (CHROME-NEVER-EATS-A-PRESS). Cross-sheet markers are a SEPARATE, small,
+            corner-positioned layer with real pointer events (like the fill/resize handles this
+            file already uses) — deliberately not part of the SVG. */}
+        {traceGeometry && (
+          <svg
+            data-testid="model-trace-overlay"
+            width={totalW} height={headerH + rowOffsets[totalRows]}
+            style={{ position: "absolute", top: 0, left: 0, zIndex: 2, pointerEvents: "none", overflow: "visible" }}
+          >
+            <defs>
+              <marker id="model-trace-arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="var(--accent-model)" />
+              </marker>
+            </defs>
+            {traceGeometry.arrows.map((a, i) => (
+              <g key={i}>
+                <rect
+                  x={a.rect.left + 1} y={a.rect.top + 1} width={Math.max(0, a.rect.right - a.rect.left - 2)} height={Math.max(0, a.rect.bottom - a.rect.top - 2)}
+                  fill="none" stroke="var(--accent-model)" strokeDasharray="4 3" strokeWidth={1.25} rx={2}
+                />
+                <circle cx={a.sx} cy={a.sy} r={3} fill="var(--accent-model)" />
+                <line x1={a.sx} y1={a.sy} x2={a.tx} y2={a.ty} stroke="var(--accent-model)" strokeWidth={1.5} markerEnd="url(#model-trace-arrowhead)" />
+              </g>
+            ))}
+          </svg>
+        )}
+        {traceGeometry && traceGeometry.markerGroups.map((group) => {
+          const { rect } = group[0];
+          return (
+            <div
+              key={`${group[0].atCell.row}:${group[0].atCell.col}`}
+              style={{ position: "absolute", left: rect.right, top: rect.top, transform: "translate(-100%, 0)", zIndex: 4, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1, pointerEvents: "none" }}
+            >
+              {group.map((mk, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  data-testid="model-trace-cross-sheet-marker"
+                  title={`${mk.direction === "in" ? "Precedent on another sheet" : "Feeds a cell on another sheet"} — ${mk.label}. Click to go there.`}
+                  onClick={() => onNavigateTrace && onNavigateTrace(mk.targetSheetId, mk.targetCell.row, mk.targetCell.col)}
+                  style={{
+                    pointerEvents: "auto", border: "1px solid var(--accent-model)", borderRadius: RADIUS.pill,
+                    background: "var(--accent-model)", color: "var(--on-accent-model)", font: "inherit", fontSize: 10 * Math.max(zoom, 0.6), // FONT_SIZE.micro literal — designTokens.js note above (SheetView.jsx file header)
+                    lineHeight: 1, padding: "2px 5px", cursor: "pointer", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}
+                >{mk.direction === "in" ? "← " : "→ "}{mk.label}</button>
+              ))}
+            </div>
+          );
+        })}
       </div>
 
       {contextMenu && <ContextMenu point={contextMenu.point} items={contextMenu.items} onClose={closeMenu} />}

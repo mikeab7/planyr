@@ -135,6 +135,14 @@ export function createSheet() {
     freezeCols: 0,   // count of frozen LEFT columns
     merges: [],      // [{ r, c1Id, c2Id }] — horizontal-only spans, see file header
     names: {},       // lowercased name -> { name, r1, c1, r2, c2 } — see file header (Stage 3 pt 2)
+    // STAGE 3 (NEW-2, owner brief 2026-09-03) — "colId:rowIndex" (same cellKey shape as
+    // `styles`/`formats`) -> true, for a cell whose inconsistent-formula flag was explicitly
+    // dismissed (lib/formulaConsistency.js finds the flags fresh on every render; this is the
+    // one piece of state about them that has to persist — otherwise a deliberate exception the
+    // modeller already reviewed would re-flag on every reload). Relocated/cascaded on row/column
+    // insert/delete exactly like `styles` (see insertRowAt/deleteRowAt/insertColumnAt/
+    // deleteColumn below).
+    dismissedInconsistencies: {},
   };
 }
 
@@ -186,10 +194,12 @@ export function migrateSheet(raw) {
     // Stage 3 pt 2 — a pre-named-ranges blob simply has no `names` at all, same defaulting
     // shape as every other field a later build added (rowHeights/freezeRows/styles/merges above).
     const names = raw.names && typeof raw.names === "object" ? { ...raw.names } : {};
+    // Stage 3 (NEW-2) — same defaulting shape again for a pre-audit-tools blob.
+    const dismissedInconsistencies = raw.dismissedInconsistencies && typeof raw.dismissedInconsistencies === "object" ? { ...raw.dismissedInconsistencies } : {};
     const migrated = {
       version: SHEET_VERSION, nextColId: raw.nextColId || columns.length + 1, columns,
       rowCount: Math.max(Number(raw.rowCount) || 0, DEFAULT_ROW_COUNT), cells: { ...raw.cells }, formats, styles,
-      rowHeights, freezeRows, freezeCols, merges, names,
+      rowHeights, freezeRows, freezeCols, merges, names, dismissedInconsistencies,
     };
     // Always float capacity up to the current floor — never a stored ceiling. Reuses
     // ensureColumnCount (already used by paste/fill to grow the sheet mid-session) so there is
@@ -725,6 +735,9 @@ export function insertColumnAt(sheet, colIndex, ownerSheetName = null, editedShe
   columns.splice(at, 0, makeColumn(id, colLetterName(at)));
   const cells = shiftAllFormulas(sheet.cells, "col", at + 1, 1, ownerSheetName, editedSheetName);
   const names = shiftNamesForStructuralChange(sheet.names, "col", at + 1, 1);
+  // A new column carries no dismissed flags of its own and touches no existing colId, so
+  // `dismissedInconsistencies` (keyed by colId, stable across insert — see the file header on
+  // why columns never need relocation) needs no update here, unlike the row case below.
   return { ...sheet, columns, cells, names, nextColId: sheet.nextColId + 1 };
 }
 
@@ -748,9 +761,14 @@ export function deleteColumn(sheet, colIndex, ownerSheetName = null, editedSheet
   // Same TOMBSTONE-DELETES cascade for the STAGE 2 per-cell style map.
   const styles = {};
   for (const [k, v] of Object.entries(sheet.styles || {})) if (!k.startsWith(prefix)) styles[k] = v;
+  // Same TOMBSTONE-DELETES cascade for a dismissed inconsistency flag (Stage 3, NEW-2) — a
+  // deleted column's own dismissals are gone with it, not resurrected if a later column happens
+  // to reuse the same id.
+  const dismissedInconsistencies = {};
+  for (const [k, v] of Object.entries(sheet.dismissedInconsistencies || {})) if (!k.startsWith(prefix)) dismissedInconsistencies[k] = v;
   const merges = mergesAfterColumnDelete(sheet, colIndex);
   const names = shiftNamesForStructuralChange(sheet.names, "col", colIndex + 1, -1);
-  return { ...sheet, columns, cells, formats, styles, merges, names };
+  return { ...sheet, columns, cells, formats, styles, dismissedInconsistencies, merges, names };
 }
 
 // Relocate a rowIndex-keyed map's entries (rowHeights) by the same rule cells/formats use
@@ -791,10 +809,18 @@ export function insertRowAt(sheet, rowIndex, ownerSheetName = null, editedSheetN
     const colId = k.slice(0, sep), r = Number(k.slice(sep + 1));
     styles[cellKey(colId, r >= at ? r + 1 : r)] = v;
   }
+  // Stage 3 (NEW-2) — relocate every dismissed-inconsistency flag the same way, so a row
+  // inserted above a deliberately-dismissed cell doesn't make it re-flag as new.
+  const dismissedInconsistencies = {};
+  for (const [k, v] of Object.entries(sheet.dismissedInconsistencies || {})) {
+    const sep = k.lastIndexOf(":");
+    const colId = k.slice(0, sep), r = Number(k.slice(sep + 1));
+    dismissedInconsistencies[cellKey(colId, r >= at ? r + 1 : r)] = v;
+  }
   const rowHeights = relocateRowMap(sheet.rowHeights, at, 1);
   const merges = relocateMergeRows(sheet.merges, at, 1);
   const names = shiftNamesForStructuralChange(sheet.names, "row", at + 1, 1);
-  return { ...sheet, cells, formats, styles, rowHeights, merges, names, rowCount: sheet.rowCount + 1 };
+  return { ...sheet, cells, formats, styles, dismissedInconsistencies, rowHeights, merges, names, rowCount: sheet.rowCount + 1 };
 }
 
 /** STAGE 1 — delete the row at `rowIndex` entirely (every cell/format stored on it), then
@@ -830,10 +856,19 @@ export function deleteRowAt(sheet, rowIndex, ownerSheetName = null, editedSheetN
     if (r === at) continue;
     styles[cellKey(colId, r > at ? r - 1 : r)] = v;
   }
+  // Stage 3 (NEW-2) — TOMBSTONE-DELETES: the deleted row's own dismissed flags vanish with it
+  // (a cell that no longer exists has nothing to be dismissed), everything below relocates up.
+  const dismissedInconsistencies = {};
+  for (const [k, v] of Object.entries(sheet.dismissedInconsistencies || {})) {
+    const sep = k.lastIndexOf(":");
+    const colId = k.slice(0, sep), r = Number(k.slice(sep + 1));
+    if (r === at) continue;
+    dismissedInconsistencies[cellKey(colId, r > at ? r - 1 : r)] = v;
+  }
   const rowHeights = relocateRowMap(sheet.rowHeights, at, -1);
   const merges = relocateMergeRows(sheet.merges, at, -1);
   const names = shiftNamesForStructuralChange(sheet.names, "row", at + 1, -1);
-  return { ...sheet, cells, formats, styles, rowHeights, merges, names, rowCount: Math.max(1, sheet.rowCount - 1) };
+  return { ...sheet, cells, formats, styles, dismissedInconsistencies, rowHeights, merges, names, rowCount: Math.max(1, sheet.rowCount - 1) };
 }
 
 /** How many rows the view should render past the real data, so typing never has to "add a
@@ -860,6 +895,28 @@ export function usedRangeEnd(sheet) {
     if (colIndex > maxCol) maxCol = colIndex;
   }
   return maxRow < 0 ? null : { row: maxRow, col: maxCol };
+}
+
+/** Was this cell's inconsistent-formula flag (lib/formulaConsistency.js) explicitly dismissed?
+ *  Pure reader, same shape as `styleAt`/`formatAt` above. */
+export function isInconsistencyDismissed(sheet, rowIndex, colIndex) {
+  const col = colAt(sheet, colIndex);
+  if (!col) return false;
+  return !!(sheet.dismissedInconsistencies && sheet.dismissedInconsistencies[cellKey(col.id, rowIndex)]);
+}
+
+/** Dismiss (or un-dismiss) one cell's inconsistent-formula flag — the "the tool flags, the
+ *  modeller decides" affordance the build brief asks for. A no-op that changes nothing never
+ *  mints an undo frame, matching every other setter in this file. */
+export function setInconsistencyDismissed(sheet, rowIndex, colIndex, dismissed) {
+  const col = colAt(sheet, colIndex);
+  if (!col) return sheet;
+  const key = cellKey(col.id, rowIndex);
+  const had = !!(sheet.dismissedInconsistencies && sheet.dismissedInconsistencies[key]);
+  if (!!dismissed === had) return sheet;
+  const dismissedInconsistencies = { ...sheet.dismissedInconsistencies };
+  if (dismissed) dismissedInconsistencies[key] = true; else delete dismissedInconsistencies[key];
+  return { ...sheet, dismissedInconsistencies };
 }
 
 /* ============================================================================================
