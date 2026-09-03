@@ -985,11 +985,27 @@ export function notesConflictLine(title) {
   const name = String(title || "").trim() || "Untitled";
   return {
     text: `“${name}” also changed in another of your windows. Nothing was overwritten — read both and pick which to keep.`,
-    /** What the un-picked copy is parked as, so choosing can never lose the other text. */
+    /** ⛔ B842944/NEW-1 — NAMES THE FALLBACK PATH ONLY. The discarded copy's primary home is
+     *  now this page's own version history (`snapshotPage`, see `Notes.jsx`'s `handleConflict`)
+     *  — no sibling page, no suffix visible anywhere in the ordinary case. These two strings
+     *  survive only to name the copy IF that write is ever refused and `handleConflict` falls
+     *  back to parking (and immediately binning) a sibling page instead. */
     parkedSuffix: "(this window’s copy)",
-    /** The mirror suffix, for the copy parked when "Keep this one" wins instead. */
+    /** The mirror suffix, for the fallback triggered by "Keep this one" instead. */
     otherParkedSuffix: "(the other window’s copy)",
   };
+}
+
+/** ⛔ B842944/NEW-1 (owner redlines, 2026-09-03) — REPLACES THE OLD "saved as a copy next to"
+ *  PROMISE. The owner, on the live panel: *"why are both copies safe? ... i dont care to keep
+ *  an old copy that much"* and *"isnt that wasted space"* — a permanent sibling page in his
+ *  tree for every resolved conflict was the wrong shape for "a working doc and an update to
+ *  it." The discarded copy now goes into THIS PAGE's own version history, not a new page, so
+ *  the promise has to say that and nothing else. One function, so `ConflictReview.jsx` and
+ *  `ConflictSideBySide.jsx` can't drift into two different claims about where it went — the
+ *  same reasoning `notesConflictLine` above already follows for the notice's own sentence. */
+export function notesConflictKeptLine() {
+  return "The version you don’t keep moves to Version history — nothing is deleted.";
 }
 
 /* ---- conflicts ------------------------------------------------------------------------
