@@ -61,6 +61,35 @@ export const SITUS_FIELD = new RegExp(SITUS_LADDER.map((r) => r.source).join("|"
 /** Is this key an owner-mailing column (by name or by being a numbered line)? Pure. */
 const isMailingKey = (key, rung) => MAILING_KEY_RE.test(key) || (rung === 2 && ADDR_LINE_RE.test(key));
 
+/* ---- SENTINEL / PLACEHOLDER TEXT (NEW-2) ---------------------------------------------------
+ *
+ * A county service can carry a real column with an unset value published as literal placeholder
+ * TEXT rather than a true null — measured on a live Harris record served through the TxGIO
+ * statewide fallback (`GEO_ID: "Null"`, `LEGAL_DESC: "Null"`, `SITUS_STRE: "Null"`): the four-
+ * character STRING "Null", not JS's own `null`. `String(null)` would read lowercase "null", so
+ * this is the SOURCE's own placeholder convention arriving verbatim, not something Planyr
+ * stringified on the way in. Every curated-field resolver must treat this exactly like a missing
+ * value — never display it as if it were data (LOUD-FAILURE's quieter cousin: an absent fact
+ * reads as absent, not as a four-letter word that looks like one). */
+const PLACEHOLDER_TEXT_RE = /^(null|none|n\/a|na|unk(nown)?|undefined|-{1,2})$/i;
+
+/** Is this value a real-looking placeholder rather than actual data? Pure. */
+export function isPlaceholderValue(v) {
+  if (v == null) return true;
+  const s = String(v).replace(/\s+/g, " ").trim();
+  return s === "" || PLACEHOLDER_TEXT_RE.test(s);
+}
+
+/* A "composed" situs key names the whole address in one field (SITUS_ADDR), as opposed to one of
+ * its own DECOMPOSED parts (SITUS_NUM, SITUS_STRE, SITUS_CITY, SITUS_ZIP, …) — a shape TxGIO's
+ * statewide schema publishes side by side. The bare `/situs/i` rung matches every one of these
+ * with no way to prefer among them, so the WINNER used to be whichever key the service happened
+ * to list first — on the Richfield Ranch record that is `SITUS_NUM` ("0"), so the whole "Situs
+ * address" row read as the bare house number "0" instead of "0 GRAND PKY, HOCKLEY, TX 77447".
+ * This is the SAME missing-precedence defect the module header already documents for the mailing
+ * address, one level deeper: a flat alternation cannot express "prefer the composed field." */
+const COMPOSED_ADDR_RE = /addr/i;
+
 /**
  * The KEY holding the parcel's situs address, or null when the record does not carry one.
  * `skip` lets a caller exclude keys another row has already claimed (see `apprRows`). Pure.
@@ -70,13 +99,21 @@ export function situsKey(attrs, { skip = null } = {}) {
   const keys = Object.keys(attrs);
   for (let rung = 0; rung < SITUS_LADDER.length; rung++) {
     const re = SITUS_LADDER[rung];
-    for (const key of keys) {
-      if (skip && skip.has(key)) continue;
-      if (isMailingKey(key, rung)) continue;
-      if (!re.test(key)) continue;
-      const v = attrs[key];
-      if (v == null) continue;
-      if (String(v).replace(/\s+/g, " ").trim()) return key;
+    // NEW-2 — within rung 0 only, a key that ALSO names itself a composed "addr" field is tried
+    // before any of the rung's decomposed sub-fields, so SITUS_ADDR beats SITUS_NUM regardless of
+    // which one the service happened to list first. Every other rung is a single pass, unchanged.
+    const passes = rung === 0 ? [true, false] : [null];
+    for (const wantComposed of passes) {
+      for (const key of keys) {
+        if (skip && skip.has(key)) continue;
+        if (isMailingKey(key, rung)) continue;
+        if (!re.test(key)) continue;
+        if (wantComposed === true && !COMPOSED_ADDR_RE.test(key)) continue;
+        if (wantComposed === false && COMPOSED_ADDR_RE.test(key)) continue; // already tried above
+        const v = attrs[key];
+        if (isPlaceholderValue(v)) continue;
+        if (String(v).replace(/\s+/g, " ").trim()) return key;
+      }
     }
   }
   return null;
@@ -173,9 +210,12 @@ export const apprRows = (attrs) => {
   for (const [re, label] of APPR_FIELDS) {
     // The situs row resolves through the ORDERED ladder, never "first key that matches" — that is
     // the whole point of `situsAddress` (a mailing column would otherwise win the row too).
+    // NEW-2 — every other row now skips a placeholder-TEXT value ("Null", "None", …) exactly like
+    // an absent one, so e.g. a GEO_ID of the literal string "Null" can never win the "Account / ID"
+    // row over a real PROP_ID sitting later in the same record.
     const k = label === "Situs address"
       ? situsKey(attrs, { skip: used })
-      : Object.keys(attrs).find((key) => !used.has(key) && re.test(key) && attrs[key] != null && attrs[key] !== "");
+      : Object.keys(attrs).find((key) => !used.has(key) && re.test(key) && !isPlaceholderValue(attrs[key]));
     if (k) { used.add(k); rows.push({ label, value: label === "Situs address" ? String(attrs[k]).replace(/\s+/g, " ").trim() : attrs[k] }); }
   }
   return rows;
@@ -267,12 +307,15 @@ export const ownerName = (attrs) => {
 };
 
 // Everything the county returned (minus geometry/system fields) — the "all fields" expander.
+// NEW-2 — a placeholder-text field ("Null", "None", …) is dropped here too: a raw-field debug
+// dump is still a PANEL, and printing the source's own null-sentinel as if it were a value is
+// exactly as misleading here as it would be in the curated rows above.
 export const apprAll = (attrs) => Object.entries(attrs || {})
-  .filter(([k, v]) => v != null && v !== "" && !/^(shape|objectid|globalid|geometry|st_area|st_length|shape_?area|shape_?len)/i.test(k))
+  .filter(([k, v]) => !isPlaceholderValue(v) && !/^(shape|objectid|globalid|geometry|st_area|st_length|shape_?area|shape_?len)/i.test(k))
   .map(([k, v]) => ({ label: prettyKey(k), value: v }));
 
 // Format a value, adding $ + thousands for the money fields.
 export const apprVal = (label, v) => (/value/i.test(label) && v !== "" && !isNaN(+v)) ? `$${(+v).toLocaleString()}` : String(v);
 
-// First attribute whose key matches `re` and has a non-empty value, as a string.
-export const findAttr = (attrs, re) => { const k = Object.keys(attrs || {}).find((key) => re.test(key) && attrs[key] != null && attrs[key] !== ""); return k ? String(attrs[k]) : null; };
+// First attribute whose key matches `re` and has a non-empty, non-placeholder value, as a string.
+export const findAttr = (attrs, re) => { const k = Object.keys(attrs || {}).find((key) => re.test(key) && !isPlaceholderValue(attrs[key])); return k ? String(attrs[k]) : null; };

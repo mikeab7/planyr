@@ -396,9 +396,17 @@ const ID_RE =
  * unit codes the CAD already returns and otherwise degrades gracefully. It NEVER
  * fabricates a rate. Returns { units:[{name,value}], rates|null, total|null,
  * connected:boolean, note }. When a rate endpoint is added for a county, fill in
- * rates/total and set connected:true. */
-export const TAX_RATE_SOURCES = { harris: null, fortbend: null, chambers: null };
-export async function resolveTaxRates(county, attrs) {
+ * rates/total and set connected:true.
+ *
+ * NEW-1 — Harris is wired, real, and dated: `resolveHarrisTaxRates` (lazy-imported so the
+ * planner's boot chunk never carries it) combines the Texas Comptroller's own published annual
+ * rates (via `/api/taxrates`, functions/api/taxrates.js) with the SAME live city/school-district
+ * spatial lookup the header jurisdiction badge uses. See that module's header for exactly what a
+ * Harris total does and doesn't cover. `lng`/`lat` are the parcel's own centroid — omit them and
+ * Harris degrades to "not connected" (LOUD-FAILURE: a spatial lookup needs a point). Every other
+ * county keeps the pre-existing graceful degrade unchanged. */
+export const TAX_RATE_SOURCES = { harris: "comptroller-live", fortbend: null, chambers: null };
+export async function resolveTaxRates(county, attrs, { lng, lat } = {}) {
   const units = [];
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v == null || v === "") continue;
@@ -407,7 +415,15 @@ export async function resolveTaxRates(county, attrs) {
   }
   const src = TAX_RATE_SOURCES[county];
   if (!src) return { units, rates: null, total: null, connected: false, note: `Rate source not connected for ${county || "this county"}.` };
-  // (future) fetch per-unit rates from `src`, sum to total, set connected:true.
+  if (county === "harris") {
+    if (lng == null || lat == null) return { units, rates: null, total: null, connected: false, note: "Location unavailable — can't look up taxing jurisdictions." };
+    try {
+      const { resolveHarrisTaxRates } = await import("./harrisTaxRates.js");
+      return await resolveHarrisTaxRates({ lng, lat });
+    } catch (e) {
+      return { units, rates: null, total: null, connected: false, note: `Rate source unavailable right now: ${e && e.message ? e.message : "fetch failed"}.` };
+    }
+  }
   return { units, rates: null, total: null, connected: false, note: "Rate source returned no data." };
 }
 

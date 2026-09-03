@@ -5835,7 +5835,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pc = sel?.kind === "parcel" ? parcels.find((p) => p.id === sel.id) : null;
     if (!pc || !pc.attrs) { setTaxInfo(null); return; }
     let live = true;
-    resolveTaxRates(siteCounty, pc.attrs).then((r) => { if (live) setTaxInfo(r); }).catch(() => { if (live) setTaxInfo(null); });
+    // NEW-1 — Harris's real rate source spatially resolves city/ISD, so it needs the parcel's own
+    // centroid (never the site origin) converted feet → lng/lat, the same conversion `jurActiveRings`
+    // uses. Missing/degenerate geometry just omits lng/lat — resolveTaxRates degrades gracefully.
+    let ll = null;
+    if (origin && pc.points?.length >= 3) {
+      const ring = pc.points.map((pt) => { const [la, ln] = feetToLatLng(pt, origin.lat, origin.lon); return [ln, la]; });
+      const c = ringCentroid(ring);
+      if (c) ll = { lng: c.lng, lat: c.lat };
+    }
+    resolveTaxRates(siteCounty, pc.attrs, ll || {}).then((r) => { if (live) setTaxInfo(r); }).catch(() => { if (live) setTaxInfo(null); });
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel?.kind, sel?.id]);
@@ -20031,11 +20040,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const county = m2 ? ca.acres * 10.7639 : ca.acres;
                 const diff = Math.abs(mine - county) / county;
                 const [color, mark] = diff <= 0.02 ? ["#2f7a3e", "✓"] : diff <= 0.05 ? ["var(--text-secondary)", "≈"] : ["#b45309", "▲"];
+                // NEW-2 — a split child still carries its PRE-split parent's whole-tract county
+                // record verbatim (performSplit copies attrs onto both children; nothing re-fetches
+                // a freshly subdivided CAD account). That is legitimate lineage, not a bad match, so
+                // telling the user to "check calibration/projection" here is actively wrong — the
+                // record is real, it just describes the larger tract this piece was cut from.
+                const inheritedParent = !!selParcel.parentId;
                 return (
                   <div style={{ fontSize: 11, color, marginBottom: 8, lineHeight: 1.5, background: "var(--planner-raised)", border: "1px solid var(--planner-border)", borderRadius: 8, padding: "6px 9px" }}>
                     <b>{mark} Geometry check</b> · county {f2(county)} AC vs {f2(mine)} AC ({f0(diff * 100)}% {diff <= 0.02 ? "match" : "off"})
                     {m2 && <div style={{ marginTop: 2, color: PAL.muted }}>County area field was in m² — converted to acres.</div>}
-                    {!m2 && diff > 0.05 && <div style={{ marginTop: 2, color: PAL.muted }}>County acreage is approximate; check calibration/projection.</div>}
+                    {inheritedParent && diff > 0.05 && (
+                      <div style={{ marginTop: 2, color: PAL.muted }}>This county record is inherited from the parcel's pre-split parent tract — it describes the larger original tract, not this piece.</div>
+                    )}
+                    {!m2 && !inheritedParent && diff > 0.05 && <div style={{ marginTop: 2, color: PAL.muted }}>County acreage is approximate; check calibration/projection.</div>}
                   </div>
                 );
               })()}
