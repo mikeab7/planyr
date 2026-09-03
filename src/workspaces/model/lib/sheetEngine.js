@@ -95,7 +95,7 @@ export function kindOf(value) {
  *  or null for an unknown column (the engine's own #REF! already covers reporting that at
  *  eval time — this walker just skips a dependency it can't resolve, over-depending on nothing
  *  is fine since the eval itself will raise the real error). */
-function collectCellDeps(node, rowCount, colNameToIndex, addDep) {
+function collectCellDeps(node, rowCount, colNameToIndex, namesMap, addDep) {
   if (!node || typeof node !== "object") return;
   switch (node.type) {
     case "col": {
@@ -112,16 +112,31 @@ function collectCellDeps(node, rowCount, colNameToIndex, addDep) {
       for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) addDep(r, c);
       return;
     }
+    // A NAMED RANGE reference (NEW-1) — the EXISTING per-cell graph, extended, per the build
+    // brief ("named-range edges go into the existing dependency graph — do not build a second
+    // graph"). Resolves the name via the sheet's own `names` table (the SAME table
+    // evaluateSheet below hands to evaluateFormula as ctx.names, so a formula that reads a
+    // name depends on exactly the cells that name's CURRENT target names — retargeting or
+    // renaming a name changes what this walks the very next time the sheet recomputes, which
+    // is every commit, so "changing what a name points at recalculates its dependents" falls
+    // out of this for free, no separate invalidation step needed). An undefined name adds no
+    // edge — the eval-time #NAME? (formula.js's own resolveNamedRange) is what reports it;
+    // over-depending on nothing is as harmless here as it already is for an unknown [Column].
+    case "name": {
+      const rect = namesMap && namesMap[node.name.toLowerCase()];
+      if (rect) for (let r = rect.r1 - 1; r <= rect.r2 - 1; r++) for (let c = rect.c1 - 1; c <= rect.c2 - 1; c++) addDep(r, c);
+      return;
+    }
     case "unary":
     case "percent":
-      collectCellDeps(node.arg, rowCount, colNameToIndex, addDep);
+      collectCellDeps(node.arg, rowCount, colNameToIndex, namesMap, addDep);
       return;
     case "binary":
-      collectCellDeps(node.left, rowCount, colNameToIndex, addDep);
-      collectCellDeps(node.right, rowCount, colNameToIndex, addDep);
+      collectCellDeps(node.left, rowCount, colNameToIndex, namesMap, addDep);
+      collectCellDeps(node.right, rowCount, colNameToIndex, namesMap, addDep);
       return;
     case "call":
-      node.args.forEach((a) => collectCellDeps(a, rowCount, colNameToIndex, addDep));
+      node.args.forEach((a) => collectCellDeps(a, rowCount, colNameToIndex, namesMap, addDep));
       return;
     default:
       return; // num, str, bool, blankLiteral, errLiteral — leaves, no cell deps
@@ -142,6 +157,10 @@ export function evaluateSheet(sheet) {
     const idx = cols.findIndex((c) => lower(c.name) === nk);
     return idx < 0 ? null : idx;
   };
+  // NEW-1 — the workbook's named ranges (lib/namedRanges.js's `sheet.names`), already stored
+  // keyed by lowercased name with a 1-based {r1,c1,r2,c2} rect — exactly the shape formula.js's
+  // own ctx.names contract expects, so it's handed straight through with no translation.
+  const namesMap = sheet.names || {};
 
   // ONE shared, mutable-during-eval representation of the sheet's current typed values —
   // grid[r][c] (0-based) for A1 refs, rowMaps[r][lowerColName] for [Column] refs. Seeded from
@@ -179,7 +198,7 @@ export function evaluateSheet(sheet) {
   for (const [key, cell] of formulaCells) {
     const set = new Set();
     if (cell.ast) {
-      collectCellDeps(cell.ast, rows, nameToIndex, (r, c) => {
+      collectCellDeps(cell.ast, rows, nameToIndex, namesMap, (r, c) => {
         if (r < 0 || r >= rows || c < 0 || c >= numCols) return; // off-sheet: nothing to depend on
         const dk = `${r}:${c}`;
         if (formulaCells.has(dk)) set.add(dk);
@@ -226,7 +245,7 @@ export function evaluateSheet(sheet) {
     // error" bar the brief holds this to.
     if (cell.parseErr) res = { ok: false, error: cell.parseErr.error || "#ERROR!", detail: cell.parseErr.detail };
     else if (cyclic.has(key)) res = { ok: false, error: "#CIRC!", detail: "circular reference between cells" };
-    else res = evaluateFormula(cell.src, { columns: rowMaps[cell.rowIndex], rows: rowMaps, rowIndex: cell.rowIndex, grid, calendar: DEFAULT_CALENDAR, today });
+    else res = evaluateFormula(cell.src, { columns: rowMaps[cell.rowIndex], rows: rowMaps, rowIndex: cell.rowIndex, grid, names: namesMap, calendar: DEFAULT_CALENDAR, today });
     const value = res.ok ? res.value : errVal(res.error);
     grid[cell.rowIndex][cell.colIndex] = value;
     rowMaps[cell.rowIndex][lower(cols[cell.colIndex].name)] = value;
