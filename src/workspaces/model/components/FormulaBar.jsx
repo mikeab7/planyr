@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { formulaBarText } from "../lib/sheetEngine.js";
 import { parseNameBoxAddress } from "../lib/sheetOps.js";
+import { RADIUS } from "../../../shared/ui/radius.js";
 
 function colLabel(colIndex) {
   let n = colIndex + 1, s = "";
@@ -53,7 +54,10 @@ export default function FormulaBar({ sheet, row, col, onCommit, onGoTo, nameBoxR
   };
 
   return (
-    <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", borderBottom: "1px solid var(--border-default)", background: "var(--surface-raised)" }}>
+    // Round 3 (B1087904) — sits as the SECOND row inside ModelApp's toolbar card now (the
+    // ribbon is the first, divided from this one by the ribbon's own bottom border); no border or
+    // background of its own any more, since the card supplies both.
+    <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "5px 10px" }}>
       <input
         ref={nameBoxRef}
         data-testid="model-name-box"
@@ -71,7 +75,7 @@ export default function FormulaBar({ sheet, row, col, onCommit, onGoTo, nameBoxR
           flex: "none", width: 64, textAlign: "center", fontSize: 11, fontWeight: 700,
           color: "var(--text-primary)", fontVariantNumeric: "tabular-nums",
           border: `1px solid ${invalid ? "var(--danger)" : "var(--border-default)"}`,
-          borderRadius: 4, padding: "3px 4px", background: "var(--surface-page)",
+          borderRadius: RADIUS.sm, padding: "3px 4px", background: "var(--surface-page)",
           transition: "border-color 0.15s ease",
         }}
       />
@@ -85,7 +89,7 @@ export default function FormulaBar({ sheet, row, col, onCommit, onGoTo, nameBoxR
           else if (e.key === "Escape") { e.preventDefault(); setValue(formulaBarText(sheet, row, col)); e.currentTarget.blur(); }
         }}
         onBlur={commit}
-        style={{ flex: 1, minWidth: 0, border: "1px solid var(--border-default)", borderRadius: 4, padding: "3px 8px", font: "inherit", fontSize: 12.5, fontVariantNumeric: "tabular-nums", background: "var(--surface-page)", color: "var(--text-primary)" }}
+        style={{ flex: 1, minWidth: 0, border: "1px solid var(--border-default)", borderRadius: RADIUS.sm, padding: "3px 8px", font: "inherit", fontSize: 12.5, fontVariantNumeric: "tabular-nums", background: "var(--surface-page)", color: "var(--text-primary)" }}
       />
     </div>
   );

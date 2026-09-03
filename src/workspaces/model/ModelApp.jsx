@@ -43,6 +43,7 @@ import SheetView from "./components/SheetView.jsx";
 import FormulaBar from "./components/FormulaBar.jsx";
 import FindReplaceBar from "./components/FindReplaceBar.jsx";
 import Ribbon from "./components/Ribbon.jsx";
+import { RADIUS } from "../../shared/ui/radius.js";
 import { useUndoableState } from "./lib/undoStack.js";
 import {
   createSheet, migrateSheet, commitCellText, blankRange, renameColumn, setNumberFormat,
@@ -430,6 +431,26 @@ export default function ModelApp({
         <EmptyProjectState onGoDashboard={onGoDashboard} />
       ) : (
         <>
+          {/* Round 3 visual pass (B1087904, owner verbatim: "rerun the loop to make it
+              pretty, also i dont like the square edging"). The ribbon and formula bar used to be
+              two full-bleed strips running edge to edge with 90-degree corners, separated by
+              hairline rules — the owner's own read: "reads as stacked strips bolted to a window,
+              not as a document inside an application." They are tightly coupled (the name box
+              and formula bar both act on whatever the ribbon is formatting), so they join into
+              ONE contained chrome card here — panel radius, inset from the window edges with the
+              SAME margin the sheet card below uses, sitting on the app background rather than
+              bleeding into it — with a single hairline divider marking the seam between the two
+              rows inside it. `overflow: hidden` is load-bearing: it's what clips the ribbon's own
+              square content to the card's rounded top corners (CHROME-NEVER-EATS-A-PRESS is not
+              at issue here — nothing inside is chrome floating OVER content). */}
+          <div
+            data-testid="model-toolbar-card"
+            style={{
+              flex: "none", margin: "8px 8px 0", overflow: "hidden",
+              background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: RADIUS.lg,
+              boxShadow: "0 1px 3px rgba(0,0,0,0.07)", // design-exempt: no shadow-color token yet repo-wide — matches SheetView.jsx's own card (same reasoning, its header)
+            }}
+          >
           <Ribbon
             activeFormat={activeFormat}
             activeStyle={activeStyle}
@@ -461,6 +482,7 @@ export default function ModelApp({
             onFilterToggle={onFilterToggle}
           />
           <FormulaBar sheet={sheet} row={selRange.r1} col={selRange.c1} onCommit={onCommitCell} onGoTo={onGoTo} nameBoxRef={nameBoxRef} />
+          </div>
           <SheetView
             sheet={sheet}
             evalResult={evalResult}

@@ -884,11 +884,25 @@ export default function SheetView({
       // should read as a document inside the app"). A contained card: the panel radius + a
       // border + a margin against the app's own page backdrop (ModelApp's root, `--surface-page`)
       // — the sheet itself (and its chrome bands) sit on `--surface-raised`, one tier up.
+      // ⛔ Round 3 (B1087904) — MEASURED live that this alone did not read as a card: the
+      // page/raised surface pair (`--surface-page` vs `--surface-raised`) is only ~4% apart in
+      // lightness in the light theme, so an 8px
+      // margin + a 1px border in that same near-white-on-near-white range was genuinely
+      // imperceptible in a real screenshot at working zoom (confirmed via computed-style — the
+      // rules WERE applied, margin:8/radius:12/border all present — the owner's "everything is
+      // square" read was right anyway, because a rule nobody can see is no different from one
+      // that isn't there). A soft shadow gives it real depth the flat border alone can't at this
+      // contrast — the same "design-exempt, no shadow-color token yet repo-wide" language this
+      // file's own zoom control already uses below, at half its strength (a floating control
+      // needs to visibly separate from the page it's ON TOP of; a panel just needs to look SET
+      // INTO the page, not hover above it). No top margin — it sits directly below the toolbar
+      // card (ModelApp.jsx) with one shared 8px gap between them, not two stacked ones.
       style={{
         flex: 1, minHeight: 0, overflow: "auto", position: "relative", outline: "none",
-        margin: 8, // SPACE.md literal — see designTokens.js note above
+        margin: "0 8px 8px", // SPACE.md literal — see designTokens.js note above
         background: "var(--surface-raised)",
         border: "1px solid var(--border-default)", borderRadius: RADIUS.lg,
+        boxShadow: "0 1px 3px rgba(0,0,0,0.07)", // design-exempt: no shadow-color token yet repo-wide (matches the zoom control's own shadow below, at half strength)
       }}
     >
       {/* Stage 2 visual pass — resize-handle hover affordance. A plain inline `style` prop can't
