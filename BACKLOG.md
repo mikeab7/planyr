@@ -5253,6 +5253,115 @@ defect along the way.
   `src/shared/comps/lib/compSheetColumns.js`, `ui-audit/verify-comp-entry-grid-consistency.mjs` (new),
   `package.json` (`verify:compentrygrid`).
 
+**Recurrence (×18) — HARDENING PASS 16 (B986096-HARDENING-28), owner "STATUS FROM LIVE — build
+`9b25522`" report, 2026-09-02: two of three prior fixes confirmed working live; the third (grid
+height) was WORSE, root-caused by the owner's own measurement to be CAUSED by the "fix" for the
+second (quiet pre-touch validation) — plus NEW-5 (Executed date requirement) is now DECIDED and
+built out in full.** Two independent pieces of work, shipped together because the owner's report
+covered both in one message and both touch the same file.
+1. **THE GRID-SHRINKS-AS-ROWS-GROW REGRESSION.** Owner's own measurement, same page/session: 3
+   rows → grid `clientH` 154px, no scroll; 8 rows → `clientH` SHRANK to 101px and started
+   scrolling — "more comps means less of them visible... backwards." His own diagnosis, verbatim:
+   "NEW-2 (premature errors) is not just cosmetic — it is causing NEW-1. Fix NEW-2 and a large part
+   of NEW-1 fixes itself." Root cause confirmed exactly as he named it: the prior round's NEW-2 fix
+   rendered ONE quiet `<div>` per untouched row in `ProblemsList`, an unbounded list competing with
+   the grid's own `flex: 1` share in a fixed-height flex column — 8 untouched rows stacked 8 lines
+   and starved the grid of the height it needed. **Fix, per his own stated rule ("the grid gets the
+   dialog's remaining height and is the LAST thing to give up space... per-row messages must not be
+   an unbounded vertical stack... let the row itself carry its own quiet marker"):** the per-row
+   quiet branch is REMOVED from `ProblemsList` entirely — a genuinely untouched row now shows
+   nothing there at all, only the footer's aggregate count. The quiet signal moved onto the row
+   itself — a single muted dot (`•`) in the Executed cell, visible only while the row is both
+   untouched AND blank, gone the instant the row is touched or a date is entered. The notice line
+   above the grid is capped (`maxHeight: 32, overflowY: "auto"`) so it can no longer grow
+   unbounded either. A new `GRID_MIN_HEIGHT` floor (5.5 data rows' worth, plus the header) is
+   applied to the grid wrapper so it never drops below a usable size regardless of row count.
+   **Verified against the owner's OWN exact reproduction** (paste 3, measure, paste 5 more to
+   reach 8, measure again, same session): grid now holds steady at 278px clientHeight for both 3
+   and 8 rows — it no longer shrinks at all — and never drops below the 200px floor. (Full ≥8 rows
+   visible is not reached at every viewport — reported honestly, not claimed as met; see
+   `GRID_MIN_HEIGHT`'s own header comment in `CompEntryGrid.jsx`.)
+2. **NEW-5 — THE EXECUTED-DATE REQUIREMENT ITSELF IS RELAXED, PER THE OWNER'S OWN DECISION.** He
+   first asked whether the app should just default Executed to today when left blank; pushed back
+   ("today is a fact about the typist, not the transaction — defaulting fabricates deal data and
+   defeats the recency filtering the requirement exists for"), he answered "sure, go ahead" —
+   deciding to relax the REQUIREMENT rather than add a silent default. Built out in full per his
+   six-item checklist, none skipped:
+   - **`public.comps.comp_date` DROP NOT NULL** — applied live to production (project
+     `lyeqzkuiwngunutlkkmi`) via `src/shared/comps/db/comps_optional_date.sql`, confirmed via
+     `information_schema.columns` before (`is_nullable: NO`) and after (`YES`); `get_advisors`
+     shows no new security/lint issues touching `comps`. **This answers his explicit ask** ("report
+     whether the Executed column is NOT NULL in the database or only enforced in the UI") — it was
+     BOTH: a real DB constraint, plus `validateComp`'s independent client-side check; both are now
+     relaxed in lockstep (an app-only relaxation with the DB constraint still in place would have
+     produced a real, confusing insert failure the first time anyone tried to save a dateless comp).
+   - **`validateComp` no longer lists a missing Executed date as a save-blocking error** — only
+     comp type and a valid anchor (Location) remain required. The footer's old three-way "missing
+     date / missing location / missing both" split is GONE — it would have gone on saying "N
+     missing an Executed date" for rows the very same render now counts as ready, a genuinely
+     contradictory message; replaced with a single Location-only count.
+   - **"Date entered" — automatic, never editable, the real DB `created_at` timestamp** (no new
+     column needed). Shown in the comp detail view (`compFieldRows`) as its own row, distinct from
+     Executed, per his "does not need a grid column; the detail view is enough."
+   - **A comp saves with no Executed date, shown as "Date unknown" in the panel's neutral text
+     color** — `compDateLabel`, used by the list row, the trash-list row, and the detail view; a
+     blank date used to make the field DISAPPEAR from the detail view entirely, which is now fixed
+     alongside this (its absence is a real fact worth showing, not nothing to report).
+   - **A one-click "Today" control lives in the Executed cell while it's being edited** — his own
+     words, "this is the speed he actually wanted; he asserts the date, the app never assumes it."
+     `todayIso()` (`compDates.js`) + `setRowToday` (`CompEntryGrid.jsx`, a fully independent commit
+     path mirroring the already-safe `resolvePeriod` pattern — this file carries a standing
+     moratorium on touching `onEditKeyDown`/`onGridKeyDown`/tabindex wiring after 5 rounds of
+     regressions on that exact commit-path logic, HARDENING-16; the Today button routes around it
+     entirely, reusing `finishEdit(false, null)`, the same discard-only branch Escape already uses).
+   - **Recency ordering falls back to Date entered when Executed is blank, and the fallback is a
+     genuinely distinct, interleaved sort key — never a silent mix.** `sortCompsByRecency`
+     (`comps.js`): dated comps sort by `compDate` DESC; an undated comp's sort key becomes its
+     `createdAt` date, so it lands wherever it was actually added relative to the dated comps —
+     never bucketed at either end. `CompsPanel.jsx`'s `reload()` now calls this instead of relying
+     on the raw DB order; `compsStore.js`'s own `.order("comp_date", ...)` gained `nullsFirst:
+     false` so the coarse DB-level order at least doesn't push every undated row to the very top
+     before the client-side sort takes over.
+   - **An undated comp is excluded from every average and recency-filtered set, and the exclusion
+     count is stated, matching the existing "(2, unweighted)" convention.** `summarizeLeaseComps`/
+     `summarizeSaleComps` now track `undatedCount` separately from the pre-existing "no computable
+     $/SF at all" exclusion (a genuinely different reason, never conflated); `compsSummaryBits`
+     appends ", N undated excluded" to the parenthetical only when non-zero.
+   - **A self-discovered bug caught before it could ship**: `draftToComp` was not converting an
+     empty `compDate` string to `null` before forwarding it toward `compToRow`/Postgres — dead code
+     until this change (validateComp always blocked a blank date from reaching a save before this),
+     now live and would have thrown a hard "invalid input syntax for type date" error on the first
+     real dateless save. Fixed to match the existing `leaseCommencementDate: d.leaseCommencementDate
+     || null` pattern already used one line below it.
+- **VERIFIED (sandbox + live headless).** `npx vitest run` — 688/688 files, 14,259/14,259 tests
+  green (13 new NEW-5 cases in `test/comps.test.js`: `todayIso`, `compDateLabel`'s "Date unknown"
+  fallback, `draftToComp`'s null conversion, `summarizeLeaseComps`/`summarizeSaleComps`'s
+  `undatedCount` exclusion kept distinct from the pre-existing no-$/SF exclusion,
+  `compsSummaryBits`'s undated-exclusion suffix appended/omitted correctly, `compFieldRows`'s
+  "Date unknown"/"Date entered" rows, and `sortCompsByRecency`'s dated-order/undated-fallback/
+  no-mutation/empty-list cases; plus every pre-existing fixture across
+  `summarizeLeaseComps`/`summarizeSaleComps`/`compsSummaryBits` updated to carry a real `compDate`
+  so they keep testing what they always tested, not the new exclusion by accident). Ran the real,
+  unmocked headless Chromium harness (`ui-audit/verify-comp-entry-defects-0902.mjs`) against a live
+  `npm run dev` server, signed out, fixture-seeded, no network — 66/66 checks green, including the
+  owner's own exact 3-row/8-row grid-height reproduction and a new NEW-5 section (the Today button
+  appears and commits correctly; the footer names only Location, never Executed, both before and
+  after the row is otherwise touched via a real map-click Location pick; the Save button reports
+  and enables a dateless-but-located row as ready). `npm run build` clean. `npx eslint` — 0 errors
+  (pre-existing warnings only, none in touched files). `node ui-audit/design-drift-audit.mjs
+  --check` clean. `node scripts/build-map.mjs --check` clean (regenerated for the three new
+  exports — `sortCompsByRecency`, `compDateLabel`, `todayIso`).
+- **Verify: live** — the real signed-in Supabase INSERT/SELECT for a dateless save, the detail
+  view's "Date unknown"/"Date entered" rendering against a real saved row, and the recency-sort
+  fallback against real multi-comp account data are LIVE-VERIFY classes (concurrency/persistence +
+  real-project-data repro). Parked as **V600496** in `VERIFICATION.md`'s `## 🔲 Needs verification`
+  section per STANDING RULE #2/ATTEMPT-BEFORE-YOU-PARK — everything Claude-doable headless and
+  signed-out was done this session (above), not deferred.
+- Files: `src/shared/comps/components/CompEntryGrid.jsx`, `src/shared/comps/components/CompsPanel.jsx`,
+  `src/shared/comps/lib/comps.js`, `src/shared/comps/lib/compDates.js`, `src/shared/comps/lib/compsStore.js`,
+  `src/shared/comps/db/comps_optional_date.sql` (new, applied to production),
+  `test/comps.test.js`, `ui-audit/verify-comp-entry-defects-0902.mjs`.
+
 ### B986097 — A draft staging table, reachable only by the KML import `[Site Planner / comps]` (feature) #comps #gis #persistence  *(owner chat block 2026-09-01, NEW-2, same decision doc as B986096 above. Minted **B986097 / V556721** from this branch's reserved block B986096–B986111 · V556720–V556735 against `origin/main` 8e42a14. DEDUPE-FIRST — searched Open/⏳Verify/Done for "KML", "My Maps", "import draft", "staging table", #comps: no prior item touches KML/My Maps import; net-new. Also searched for any prior `comp_import_drafts`/`comp_drafts` table — none exists.)*
 `[x]` **Shipped this session, including the schema — applied directly to production** (this session has Supabase MCP write access, unlike the read-only access a prior comps session flagged in this same module's folder pointer — that stale claim was corrected in the same commit).
 - Verify: live — GIS endpoint behavior (a real KML import, a real polygon centroid) + real production writes are mandatory LIVE-VERIFY classes. **V556721.**

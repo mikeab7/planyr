@@ -236,15 +236,21 @@ function leaseGroupAverage(entries) {
  * out, just for the other axis. The default DISPLAY basis is annual NNN: the headline reads
  * the NNN group when any exist, falling back to gross, and always names which one it is
  * showing. A comp missing its rate or basis counts toward `unknownCount`, never toward either
- * average. Each group's average is SF-weighted per `leaseGroupAverage` above. */
+ * average. Each group's average is SF-weighted per `leaseGroupAverage` above.
+ * ⛔ NEW-5 (owner decision, 2026-09-02) — a comp with no Executed date is EXCLUDED from every
+ * average, never silently blended in (an undated comp isn't wrong, it just can't be placed in
+ * time, and averaging it in would be exactly as dishonest as blending NNN into gross). Counted
+ * separately in `undatedCount`, reported the same way `unknownCount` already is. */
 export function summarizeLeaseComps(comps) {
   const nnnEntries = [], grossEntries = [];
   let unknownCount = 0;
+  let undatedCount = 0;
   for (const c of comps || []) {
     if (c?.compType !== "lease") continue;
     const annual = annualLeaseRate(c);
     const basis = c?.leaseRateExpense;
     if (annual == null || (basis !== "nnn" && basis !== "gross")) { unknownCount++; continue; }
+    if (!c?.compDate) { undatedCount++; continue; }
     const entry = { annual, sf: positiveNumber(c?.leaseSizeSf) };
     if (basis === "nnn") nnnEntries.push(entry); else grossEntries.push(entry);
   }
@@ -252,17 +258,41 @@ export function summarizeLeaseComps(comps) {
   const gross = leaseGroupAverage(grossEntries);
   const headlineBasis = nnn ? "nnn" : gross ? "gross" : null;
   const headline = headlineBasis === "nnn" ? nnn : headlineBasis === "gross" ? gross : null;
-  return { headlineBasis, headline, nnn, gross, unknownCount };
+  return { headlineBasis, headline, nnn, gross, unknownCount, undatedCount };
 }
 
 /** Mean $/SF for LAND or BUILDING_SALE comps — no basis ambiguity for these (a $/SF figure
  * means the same thing regardless of the underlying deal size), so this is a plain mean over
- * whichever comps have a computable $/SF. */
+ * whichever comps have a computable $/SF.
+ * ⛔ NEW-5 (owner decision, 2026-09-02) — same exclusion rule as `summarizeLeaseComps`: a comp
+ * with a real, computable $/SF but no Executed date is EXCLUDED from the average and counted in
+ * `undatedCount`, never silently averaged in. A comp with no computable $/SF at all (missing
+ * price/size) was already excluded before this and stays that way — `undatedCount` names only
+ * the NEW exclusion reason, not the pre-existing one. */
 export function summarizeSaleComps(comps, compType) {
   const psfFn = compType === "land" ? landPricePerSf : buildingPricePerSf;
-  const vals = (comps || []).filter((c) => c?.compType === compType).map(psfFn).filter((v) => v != null);
-  if (!vals.length) return { avg: null, count: 0 };
-  return { avg: vals.reduce((a, b) => a + b, 0) / vals.length, count: vals.length };
+  const typed = (comps || []).filter((c) => c?.compType === compType);
+  let undatedCount = 0;
+  const vals = [];
+  for (const c of typed) {
+    const v = psfFn(c);
+    if (v == null) continue;
+    if (!c?.compDate) { undatedCount++; continue; }
+    vals.push(v);
+  }
+  if (!vals.length) return { avg: null, count: 0, undatedCount };
+  return { avg: vals.reduce((a, b) => a + b, 0) / vals.length, count: vals.length, undatedCount };
+}
+
+/** Recency order for the comp list: newest EXECUTED date first. A comp with no Executed date
+ * sorts by its "Date entered" (`createdAt`, DB-assigned and immutable) instead — interleaved
+ * among the dated comps by when it was actually added, never bucketed at either end — and this
+ * IS the "falls back to Date entered" the owner asked for; the fallback is stated explicitly per
+ * comp in the UI (`CompRow`'s title tooltip, the detail view's own "Date entered" field) rather
+ * than a global banner, since it's a per-comp fact. Returns a NEW array; never mutates. */
+export function sortCompsByRecency(comps) {
+  const key = (c) => c?.compDate || (c?.createdAt ? String(c.createdAt).slice(0, 10) : "0000-00-00");
+  return [...(comps || [])].sort((a, b) => key(b).localeCompare(key(a)));
 }
 
 /** Text bits for the Comps rail's list-view summary strip — sale-comp (land/building) averages
@@ -271,12 +301,18 @@ export function summarizeSaleComps(comps, compType) {
  * average restates the single row directly beneath it, at the top of a narrow rail. This does
  * NOT touch `summarizeLeaseComps`: its NNN/gross basis-normalization and SF-weighting are
  * unchanged and still fully unit-tested above — they simply have no rail consumer today. */
+// NEW-5 — appended only when it's non-zero, matching the existing "(2, unweighted)" convention:
+// a new fact joins the parenthetical rather than growing a second sentence.
+function undatedSuffix(n) {
+  return n ? `, ${n} undated excluded` : "";
+}
+
 export function compsSummaryBits(comps) {
   const land = summarizeSaleComps(comps, "land");
   const bldg = summarizeSaleComps(comps, "building_sale");
   const bits = [];
-  if (land.count) bits.push(`Land avg $${land.avg.toFixed(2)}/SF (${land.count})`);
-  if (bldg.count) bits.push(`Bldg sale avg $${bldg.avg.toFixed(2)}/SF (${bldg.count})`);
+  if (land.count) bits.push(`Land avg $${land.avg.toFixed(2)}/SF (${land.count}${undatedSuffix(land.undatedCount)})`);
+  if (bldg.count) bits.push(`Bldg sale avg $${bldg.avg.toFixed(2)}/SF (${bldg.count}${undatedSuffix(bldg.undatedCount)})`);
   return bits;
 }
 
@@ -304,6 +340,15 @@ function fmtPsf(n) {
 // specifically (mm/dd/yy) rather than the longer form those other modules use.
 function fmtCompDate(iso) {
   return formatDateDisplay(iso) || null;
+}
+
+/** The Executed date's compact DISPLAY label, for the list row / map popup — the formatted date,
+ * or a neutral "Date unknown" when the comp was saved without one (NEW-5, owner decision,
+ * 2026-09-02: required-to-save was relaxed, so a genuinely blank date is a real, saveable state,
+ * never rendered as blank/missing). Exported separately from `compFieldRows` so a compact row
+ * doesn't have to build the whole field list just to read one label. */
+export function compDateLabel(compDate) {
+  return compDate ? formatDateDisplay(compDate) : "Date unknown";
 }
 
 /** The party-field axis, labeled per comp type (NEW-7 amended): one shared pair of columns — the
@@ -373,7 +418,16 @@ export function compFieldRows(comp) {
     if (net != null) push("netEffective", "Net effective", `$${net.toFixed(2)}/SF/yr`);
   }
 
-  push("date", "Date", fmtCompDate(comp?.compDate));
+  // ⛔ NEW-5 (owner decision, 2026-09-02) — a blank Executed date used to make this row DISAPPEAR
+  // entirely (the `push` helper skips a null/empty value), which was right for a field that's
+  // simply not part of a comp's type but wrong here: now that the date is genuinely optional,
+  // its absence is a real, visible fact about the comp, not nothing to report. "Date unknown" is
+  // neutral text, not an error — it renders in the same style as every other field row.
+  push("date", "Date", comp?.compDate ? fmtCompDate(comp.compDate) : "Date unknown");
+  // "Date entered" — metadata about the RECORD (when it was added), never a deal fact, always
+  // present, never editable. It's what recency ordering falls back to when Executed is unknown
+  // (`sortCompsByRecency`) — shown here so that fallback is never invisible.
+  if (comp?.createdAt) push("dateEntered", "Date entered", fmtCompDate(String(comp.createdAt).slice(0, 10)));
   push("notes", "Notes", comp?.notes || null);
   return rows;
 }
@@ -401,10 +455,23 @@ export function compHeadline(comp) {
 
 /* ---- validation for the create/edit form -------------------------------------------------- */
 
+// ⛔ B986096-HARDENING-28 (NEW-5, owner decision, 2026-09-02) — the Executed date is NO LONGER
+// required to save. His own 2026-08-21 decision ("Date is REQUIRED on all three types — a comp
+// that can't be filtered by recency goes stale invisibly") still holds AS A GOAL — what changed
+// is HOW that goal is met. Silently defaulting to today (his own first idea, which he then
+// rejected on reflection) would fabricate a deal fact that later can't be told apart from a real
+// one; requiring it up front was the friction he was actually reacting to. So: never guess it,
+// never require it — `created_at` ("Date entered," DB-level, immutable, never user-editable)
+// stands in for recency ordering and is stated as such wherever it's used (`sortCompsByRecency`,
+// `compsSummaryBits`/`summarizeLeaseComps`/`summarizeSaleComps` all exclude an undated comp from
+// an average rather than silently mixing in a comp with no real date), and the Executed cell
+// itself carries a one-click "Today" quick-set (`CompEntryGrid.jsx`) for when the user DOES want
+// to assert it fast. `comps.comp_date` was DB-level `not null` — relaxed by
+// `db/comps_optional_date.sql`, applied to production; this function is the client-side half of
+// the same relaxation, kept in lockstep with it (the DB would otherwise still reject the row).
 export function validateComp(draft) {
   const errors = [];
   if (!isCompType(draft?.compType)) errors.push("Pick a comp type.");
-  if (!draft?.compDate) errors.push("Executed date is required.");
   if (!validAnchor(draft?.anchor)) errors.push("Drop a pin or select a parcel.");
   return errors;
 }
@@ -570,6 +637,13 @@ export function draftToComp(d) {
     bldgCapRate: tri ? tri.capRate.value : num(d.bldgCapRate),
     leaseRate: num(d.leaseRate), leaseTi: num(d.leaseTi), leaseSizeSf: num(d.leaseSizeSf),
     leaseFreeRentMonths: num(d.leaseFreeRentMonths), leaseEscalationPct: num(d.leaseEscalationPct),
+    // ⛔ NEW-5 (owner decision, 2026-09-02) — an empty draft string must become `null`, never the
+    // literal `""` `compToRow` would otherwise forward straight into a Postgres `date` column
+    // (which rejects an empty string with a real error, not a null). This was DEAD CODE UNTIL
+    // NOW — `validateComp` always blocked a blank compDate from reaching a save before this
+    // change, so `""` never actually reached `compToRow` in practice. `leaseCommencementDate` on
+    // the line below already did this correctly; compDate now matches it.
+    compDate: d.compDate || null,
     leaseCommencementDate: d.leaseCommencementDate || null,
   };
 }

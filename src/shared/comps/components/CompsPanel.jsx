@@ -23,10 +23,9 @@ import {
   COMP_TYPES, LEASE_PERIODS, LEASE_EXPENSE_BASES, isCompType, partyLabels,
   landPricePerSf, buildingPricePerSf, leaseTotalAnnualRent, compFieldRows, compHeadline,
   compsSummaryBits, validateComp, emptyDraft, draftToComp, compToDraft, anchorCountyFlag,
-  resolveCapTriangle,
+  resolveCapTriangle, sortCompsByRecency, compDateLabel,
 } from "../lib/comps.js";
 import { compMarkerColor } from "../lib/compMarkerIcon.js";
-import { formatDateDisplay } from "../lib/compDates.js";
 import { collectPartyNames } from "../lib/partySuggest.js";
 import PartyNameField from "./PartyNameField.jsx";
 import {
@@ -128,7 +127,13 @@ export function CompRow({ comp, onOpen, overlaysById }) {
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
         <span style={{ fontSize: 13, fontWeight: 650, color: "var(--text-primary)" }}>{primary || compHeadline(comp)}</span>
-        <span style={{ fontSize: 11, color: "var(--text-secondary)", flex: "none" }}>{formatDateDisplay(comp.compDate)}</span>
+        {/* NEW-5 — a comp saved with no Executed date reads "Date unknown" rather than a blank
+            gap; the tooltip states what it's sorted by instead (its own "Date entered" field is
+            the full explanation, one click away in the detail view). */}
+        <span style={{ fontSize: 11, color: "var(--text-secondary)", flex: "none" }}
+          title={comp.compDate ? undefined : "No Executed date on file — sorted by the date this comp was entered"}>
+          {compDateLabel(comp.compDate)}
+        </span>
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 3 }}>
         <TypeChip type={comp.compType} />
@@ -147,7 +152,7 @@ function TrashRow({ comp, overlaysById, onRestore, onPurge }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 0", borderTop: "1px solid var(--border-default)" }}>
       <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={primary || undefined}>
-        {primary} <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>· {formatDateDisplay(comp.compDate)}</span>
+        {primary} <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>· {compDateLabel(comp.compDate)}</span>
       </div>
       <Button size="sm" variant="ghost" onClick={() => onRestore(comp)}>Restore</Button>
       <Button size="sm" variant="ghost" style={{ color: "var(--danger-text)" }} onClick={() => onPurge(comp)}>Delete forever</Button>
@@ -263,7 +268,9 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
           {COMP_TYPES.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
         </select>
       </Field>
-      <Field label="Executed date" stacked required>
+      {/* NEW-5 (owner decision, 2026-09-02) — no longer required to save; the native date input's
+          own picker already offers a "Today" shortcut in every browser that supports type=date. */}
+      <Field label="Executed date" stacked>
         <input type="date" value={draft.compDate} onChange={set("compDate")} style={inputStyle} />
       </Field>
       {draft.compType === "lease" && (
@@ -512,8 +519,13 @@ export default function CompsPanel({
     setLoading(false);
     if (error) { setLoadError(error.message || "Failed to load comps"); return; }
     setLoadError(null);
-    setComps(data);
-    notifiedRef.current?.(data);
+    // NEW-5 — the definitive recency order: newest Executed date first, an undated comp falling
+    // back to its own Date entered rather than the DB's raw `comp_date desc` order (which,
+    // post-migration, would otherwise put every undated comp first under Postgres's own NULLS
+    // FIRST default for a DESC sort — exactly backwards for a genuinely unset field).
+    const sorted = sortCompsByRecency(data);
+    setComps(sorted);
+    notifiedRef.current?.(sorted);
   };
 
   useEffect(() => { if (open) reload(); }, [open]);
