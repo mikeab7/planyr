@@ -32,6 +32,7 @@ import {
   fetchAllComps, insertComp, insertComps, updateComp, deleteComp,
   fetchDeletedComps, restoreComp, permanentlyDeleteComp,
 } from "../lib/compsStore.js";
+import { formatNumberDisplay, sanitizeNumericInput } from "../lib/compSheetColumns.js";
 import { listMyTeams, currentIdentity } from "../../../workspaces/site-planner/lib/teams.js";
 import CompEntryGrid, { draftFromParsedRow } from "./CompEntryGrid.jsx";
 import CompDraftsPanel from "./CompDraftsPanel.jsx";
@@ -89,6 +90,31 @@ const inputStyle = {
   width: "100%", padding: "6px 8px", fontSize: 12.5, borderRadius: 6, fontFamily: "inherit",
   border: "1px solid var(--border-default)", background: "var(--surface-base)", color: "var(--text-primary)",
 };
+
+/* NEW-13 (B1123425, owner report — "add a comma here by default" on the Leased SF input) — a
+ * thousands-grouped numeric input for the form's money/area fields. The read-only "$4,783,022/yr
+ * total (face)" line right under Leased SF already groups correctly; this input just wasn't
+ * using the same formatting. Reuses CompEntryGrid's own sheet-cell formatter/parser
+ * (`formatNumberDisplay`/`sanitizeNumericInput`, compSheetColumns.js — already unit-tested,
+ * "raw digits while focused, grouped at rest") rather than a second implementation, and
+ * deliberately does NOT touch compParse.js's paste parser, which has its own stricter,
+ * ambiguous-input-refusing reader (this repo's own number-parsing regression history — a
+ * European decimal read as a thousands separator, an acres value silently becoming square feet
+ * — is exactly why the two stay separate). Format-on-blur only, never while focused, so a digit
+ * typed into the middle of a number can never have its caret jumped by a live reformat.
+ * `sanitizeNumericInput` also strips a pasted "613,208"'s comma before it ever reaches state. */
+function NumField({ value, onChange, placeholder, style }) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <input
+      type="text" inputMode="decimal"
+      value={focused ? (value ?? "") : formatNumberDisplay(value)}
+      onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+      onChange={(e) => onChange(sanitizeNumericInput(e.target.value))}
+      placeholder={placeholder} style={style}
+    />
+  );
+}
 
 function TypeChip({ type }) {
   return (
@@ -217,10 +243,13 @@ export function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysBy
         <TypeChip type={comp.compType} />
       </div>
       {comp.title && <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6 }}>{comp.title}</div>}
+      {/* NEW-12 (B1123424) — `tight` rows: the label sits at its own width, never wrapped, with
+          the value close beside it, rather than the default label-left/value-right row that
+          stretches a short pair ("Term" / "126 mo") to opposite ends of the panel. */}
       <div style={{ marginTop: 10 }}>
-        {locationText && <Field label="Location"><span style={{ fontSize: 12.5 }}>{locationText}</span></Field>}
+        {locationText && <Field label="Location" tight><span style={{ fontSize: 12.5 }}>{locationText}</span></Field>}
         {rows.map((r) => (
-          <Field key={r.key} label={r.label}><span style={{ fontSize: 12.5 }}>{r.value}</span></Field>
+          <Field key={r.key} label={r.label} tight><span style={{ fontSize: 12.5 }}>{r.value}</span></Field>
         ))}
       </div>
       <SourceBrochureLink comp={comp} overlaysById={overlaysById} onOpenBrochure={onOpenBrochure} />
@@ -247,6 +276,8 @@ export function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysBy
 
 function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave, onCancel, saving }) {
   const set = (k) => (e) => setDraft((d) => ({ ...d, [k]: e.target.value }));
+  // NEW-13 — NumField's onChange hands back the plain (already-sanitized) value, not an event.
+  const setVal = (k) => (v) => setDraft((d) => ({ ...d, [k]: v }));
   const { provider: providerLabel, acquirer: acquirerLabel } = partyLabels(draft.compType);
   // NEW-9 — a parcel-anchored comp's Size arrives prefilled from the map selection; say so, and
   // say it stops being true the moment he edits it (STANDING RULE-driven honesty, not decoration).
@@ -304,10 +335,10 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
 
       {draft.compType === "land" && (
         <>
-          <Field label="Price" stacked><input type="number" value={draft.landPrice} onChange={set("landPrice")} placeholder="optional" style={inputStyle} /></Field>
+          <Field label="Price" stacked><NumField value={draft.landPrice} onChange={setVal("landPrice")} placeholder="optional" style={inputStyle} /></Field>
           <Field label="Size" stacked>
             <span style={{ display: "flex", gap: 6 }}>
-              <input type="number" value={draft.landSizeValue} onChange={set("landSizeValue")} placeholder="optional" style={{ ...inputStyle, flex: 1 }} />
+              <NumField value={draft.landSizeValue} onChange={setVal("landSizeValue")} placeholder="optional" style={{ ...inputStyle, flex: 1 }} />
               <select value={draft.landSizeUnit} onChange={set("landSizeUnit")} style={{ ...inputStyle, width: 68, flex: "none" }}>
                 <option value="ac">AC</option><option value="sf">SF</option>
               </select>
@@ -328,8 +359,8 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
 
       {draft.compType === "building_sale" && (
         <>
-          <Field label="Price" stacked><input type="number" value={draft.bldgPrice} onChange={set("bldgPrice")} placeholder="optional — derives from NOI + Cap" style={inputStyle} /></Field>
-          <Field label="Building SF" stacked><input type="number" value={draft.bldgSizeSf} onChange={set("bldgSizeSf")} placeholder="optional" style={inputStyle} /></Field>
+          <Field label="Price" stacked><NumField value={draft.bldgPrice} onChange={setVal("bldgPrice")} placeholder="optional — derives from NOI + Cap" style={inputStyle} /></Field>
+          <Field label="Building SF" stacked><NumField value={draft.bldgSizeSf} onChange={setVal("bldgSizeSf")} placeholder="optional" style={inputStyle} /></Field>
           {draft.bldgPrice && draft.bldgSizeSf && (
             <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: -4, marginBottom: 8 }}>
               {(() => { const psf = buildingPricePerSf(draftToComp(draft)); return psf != null ? `$${psf.toFixed(2)}/SF` : null; })()}
@@ -338,7 +369,9 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
           {/* B986096-HARDENING-7 — enter any two of Price/NOI/Cap, the third derives (never
               overwriting a typed value). Cap is typed and shown as a percentage (5.75) but held
               internally as a decimal fraction (0.0575) — see resolveCapTriangle's header. */}
-          <Field label="NOI ($)" stacked><input type="number" value={draft.bldgNoi} onChange={set("bldgNoi")} placeholder="optional — derives from Price + Cap" style={inputStyle} /></Field>
+          <Field label="NOI ($)" stacked><NumField value={draft.bldgNoi} onChange={setVal("bldgNoi")} placeholder="optional — derives from Price + Cap" style={inputStyle} /></Field>
+          {/* Cap rate is a PERCENTAGE (5.75), not a money/area value — NEW-13 deliberately leaves
+              it a plain number input; a thousands separator on a number under 100 is noise. */}
           <Field label="Cap rate (%)" stacked>
             <input
               type="number"
@@ -377,7 +410,10 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
         <>
           {/* Rate + its period read as ONE quantity ("$.65 MO") — a compact MO/YR control right
               after the rate input, not a separate full-width row (NEW-1). Still a real labelled
-              <select> (aria-label), just visually compact; stored values are untouched. */}
+              <select> (aria-label), just visually compact; stored values are untouched.
+              NEW-13 — Rate is a decimal $/SF figure (e.g. 0.65), never a money/area total, so it
+              deliberately keeps the plain number input; a thousands separator on a sub-$1 rate
+              is exactly the case the owner's own list of exclusions named. */}
           <Field label="Rate ($/SF)" stacked>
             <span style={{ display: "flex", gap: 6 }}>
               <input type="number" value={draft.leaseRate} onChange={set("leaseRate")} placeholder="optional" style={{ ...inputStyle, flex: 1 }} />
@@ -391,14 +427,17 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
               {LEASE_EXPENSE_BASES.map((b) => <option key={b} value={b}>{b.toUpperCase()}</option>)}
             </select>
           </Field>
-          <Field label="Leased SF" stacked><input type="number" value={draft.leaseSizeSf} onChange={set("leaseSizeSf")} placeholder="optional" style={inputStyle} /></Field>
+          <Field label="Leased SF" stacked><NumField value={draft.leaseSizeSf} onChange={setVal("leaseSizeSf")} placeholder="optional" style={inputStyle} /></Field>
           {draft.leaseRate && draft.leaseSizeSf && (
             <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: -4, marginBottom: 8 }}>
               {(() => { const rent = leaseTotalAnnualRent(draftToComp(draft)); return rent != null ? `${rent.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 })}/yr total (face)` : null; })()}
             </div>
           )}
-          <Field label="TI $/SF" stacked><input type="number" value={draft.leaseTi} onChange={set("leaseTi")} placeholder="optional" style={inputStyle} /></Field>
+          <Field label="TI $/SF" stacked><NumField value={draft.leaseTi} onChange={setVal("leaseTi")} placeholder="optional" style={inputStyle} /></Field>
           <Field label="Term" stacked><input value={draft.leaseTerm} onChange={set("leaseTerm")} placeholder="e.g. 5 yrs" style={inputStyle} /></Field>
+          {/* NEW-13 — Free rent is a small MONTH COUNT, not a money/area figure (never remotely
+              near 1,000), and Escalation is a PERCENTAGE — the owner's own two named exclusions.
+              Both deliberately stay plain number inputs. */}
           <Field label="Free rent (mo)" stacked><input type="number" value={draft.leaseFreeRentMonths} onChange={set("leaseFreeRentMonths")} placeholder="optional" style={inputStyle} /></Field>
           <Field label="Escalation %/yr" stacked><input type="number" value={draft.leaseEscalationPct} onChange={set("leaseEscalationPct")} placeholder="optional" style={inputStyle} /></Field>
         </>
