@@ -834,3 +834,116 @@ test.describe("Model workspace — B1076480 (context-menu chrome, positioning, d
     expect(topmostAtFrozenHeader).toBe("model-row-header-0");
   });
 });
+
+/* ⛔ B1106256 (owner report, 2026-09-03 — "a click next to an open menu is swallowed") — the
+ * ribbon's AnchoredMenu-based dropdowns (font family, font size, number format, borders, …) used
+ * to dismiss via a full-viewport interactive backdrop that itself intercepted the very press
+ * meant to reach whatever was underneath it (a different ribbon button, or a re-press of the
+ * SAME trigger). Two failure paths, both fixed by removing the backdrop entirely in favor of a
+ * document-level, capture-phase `mousedown` listener (shared/ui/AnchoredMenu.jsx):
+ *   - post-#1371: the backdrop closed on its own `onMouseDown`, unmounting between mousedown and
+ *     mouseup, so the underlying control's native `click` never fired at all (mousedown/mouseup
+ *     need a shared target).
+ *   - pre-#1371: the backdrop closed on `onClick` alone, so a right-click's mousedown landed ON
+ *     the backdrop and stayed there through mouseup (click never fires for the secondary button
+ *     per spec) — the backdrop, still topmost, then won the browser's own `contextmenu` hit-test.
+ * Raw `page.mouse` coordinate sequences are used throughout, never a bare `locator.click()`, for
+ * the same reason e2e/model-spreadsheet.spec.js's B1076480 suite above does: the whole bug is
+ * about whether a REAL mousedown→mouseup→click(or contextmenu) sequence resolves correctly once
+ * a menu starts closing mid-gesture, which a synthetic `element.click()` can't reproduce or
+ * disprove (Playwright's `locator.click()`/`page.mouse.*` dispatch real, CDP-level input and are
+ * not the "synthetic .click()" this concern is about — used here for full control over exactly
+ * where each down/up lands).
+ */
+test.describe("Model workspace — B1106256 (a click next to an open menu is no longer swallowed)", () => {
+  async function openFontFamilyMenu(page) {
+    await page.getByTitle("Font family").click();
+    const menu = page.locator(".menu", { hasText: "Arial" });
+    await expect(menu).toBeVisible();
+    return menu;
+  }
+
+  test("(1) left-clicking Bold while the font-family menu is open both dismisses the menu AND toggles Bold", async ({ page }) => {
+    const id = "e2e-b1106256-leftclick";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    const menu = await openFontFamilyMenu(page);
+
+    const bold = page.getByTestId("ribbon-bold");
+    await expect(bold).toHaveAttribute("aria-pressed", "false");
+    const box = await bold.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.up();
+
+    await expect(menu).toBeHidden();
+    await expect(bold).toHaveAttribute("aria-pressed", "true"); // the press reached Bold, not just the backdrop
+  });
+
+  test("(2) right-clicking a DIFFERENT column header while the font-family menu is open closes it and opens the header's own context menu", async ({ page }) => {
+    const id = "e2e-b1106256-rightclick";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    const menu = await openFontFamilyMenu(page);
+
+    const colHeader = page.getByTestId("model-col-header-3");
+    const box = await colHeader.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down({ button: "right" });
+    await page.mouse.up({ button: "right" });
+
+    await expect(menu).toBeHidden();
+    const contextMenu = page.locator(".menu", { hasText: "Insert column left" });
+    await expect(contextMenu).toBeVisible(); // the header's own contextmenu wasn't eaten by the old menu's backdrop
+  });
+
+  test("(3) clicking empty ribbon background while the font-family menu is open just dismisses it — nothing else fires", async ({ page }) => {
+    const id = "e2e-b1106256-emptyspace";
+    await page.setViewportSize({ width: 1600, height: 900 }); // real blank trailing space in the ribbon row
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    const menu = await openFontFamilyMenu(page);
+
+    const ribbon = page.getByTestId("model-ribbon");
+    const box = await ribbon.boundingBox();
+    const x = box.x + box.width - 15, y = box.y + box.height / 2;
+    // Sanity: this point really is blank ribbon background, not a control — a click here proves
+    // "empty space just dismisses", not "a control's own handler happened to do nothing".
+    const onAControl = await page.evaluate(([px, py]) => !!document.elementFromPoint(px, py)?.closest("button"), [x, y]);
+    expect(onAControl).toBe(false);
+
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.up();
+
+    await expect(menu).toBeHidden();
+    await expect(page.getByTestId("ribbon-bold")).toHaveAttribute("aria-pressed", "false"); // nothing else was activated
+  });
+
+  test("(4) press-trigger, drag onto a menu item, release: native click needs a shared mousedown/mouseup target, so nothing selects — unchanged by this fix", async ({ page }) => {
+    const id = "e2e-b1106256-dragrelease";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    const trigger = page.getByTitle("Font family");
+    const menu = await openFontFamilyMenu(page);
+    await expect(trigger).toHaveText(/Default/);
+
+    // Re-press the (already open) trigger and drag onto the "Arial" row without releasing.
+    const arialItem = menu.getByText("Arial", { exact: true });
+    const triggerBox = await trigger.boundingBox();
+    const itemBox = await arialItem.boundingBox();
+    await page.mouse.move(triggerBox.x + triggerBox.width / 2, triggerBox.y + triggerBox.height / 2);
+    await page.mouse.down();
+    // The trigger is the menu's own anchor, so AnchoredMenu's dismiss listener stands down for
+    // this mousedown (same exclusion that stops a re-press from double-toggling) — the menu stays
+    // open through the press and the drag.
+    await expect(menu).toBeVisible();
+    await page.mouse.move(itemBox.x + itemBox.width / 2, itemBox.y + itemBox.height / 2, { steps: 5 });
+    await page.mouse.up();
+
+    // mousedown landed on the trigger, mouseup on the Arial row — different targets, so no native
+    // `click` fires anywhere: neither the trigger's own open/close toggle nor Arial's onClick.
+    await expect(menu).toBeVisible();
+    await expect(trigger).toHaveText(/Default/); // nothing was selected
+  });
+});
