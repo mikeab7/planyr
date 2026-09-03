@@ -63,13 +63,21 @@ export function deriveCurrentProject(projects, activeId, section) {
   return projects.find((p) => p && p.id === activeId) || null;
 }
 
-// The schedule project linked to a given Site Planner project (group_id), or null. Drives the
-// project-aware header tabs: when the route carries #/project/<gid>/schedule, this finds which
-// schedule to activate. Pure + null-safe; returns the single match (a group_id maps to at most
-// one schedule), or null when nothing is linked yet → the shell shows the "create / link" panel.
+// Every schedule linked to a given Site Planner project (group_id), in list order. NEW-3
+// (B1080547) — a project may now carry MORE than one schedule (the owner explicitly asked for
+// this), so "the schedule for this site" is no longer guaranteed to be a single answer. Pure +
+// null-safe; [] when nothing is linked (the "create / link" empty state applies) or when either
+// arg is missing.
+export function findAllBySiteId(projects, siteId) {
+  if (siteId == null || !Array.isArray(projects)) return [];
+  return projects.filter((p) => p && p.linkedSiteId != null && p.linkedSiteId === siteId);
+}
+
+// The FIRST schedule linked to a given Site Planner project (group_id), or null. Used as the
+// carry-in's default target (which schedule to open when the route is first visited) and by
+// every caller that only ever expected one link. Pure + null-safe.
 export function findBySiteId(projects, siteId) {
-  if (siteId == null || !Array.isArray(projects)) return null;
-  return projects.find((p) => p && p.linkedSiteId != null && p.linkedSiteId === siteId) || null;
+  return findAllBySiteId(projects, siteId)[0] || null;
 }
 
 // True while the embedded app is NOT yet showing the routed site's schedule — i.e. the shell must
@@ -97,11 +105,14 @@ export function findBySiteId(projects, siteId) {
 //
 // Pure + null-safe; no siteId → nothing to carry. `section` is optional so an older caller keeps
 // the previous behaviour.
+// NEW-3 — checks membership in the FULL linked set, not just the first match, so switching
+// between two schedules the owner has linked to the SAME site never reads as "needs carry-in"
+// (which would fight the switch back to the first one every time).
 export function needsScheduleCarryIn(projects, siteId, activeId, section) {
   if (siteId == null) return false;
   if (section != null && section !== "projects") return true;
-  const linked = findBySiteId(projects, siteId);
-  if (linked && linked.id === activeId) return false;
+  const linked = findAllBySiteId(projects, siteId);
+  if (linked.some((p) => p.id === activeId)) return false;
   return true;
 }
 
@@ -195,4 +206,51 @@ export function shouldAdoptLinkedSiteIntoRoute({
   if (section !== "projects") return false;
   if (projectId != null) return false;  // route already carries a project → inert (loop-free)
   return !dashboardIntent;
+}
+
+/* ---- NEW-5 (B1080544) — make a route↔grid mismatch IMPOSSIBLE TO SEE, not merely self-healing ---
+ *
+ * Root cause, proven against production: `aPid` (which schedule the embedded app currently shows)
+ * is a single GLOBAL, MUTABLE field stored in the one shared hs-v1 blob — not scoped per route,
+ * per tab, or per session. The carry-in effect above re-drives the embed toward the routed site's
+ * linked schedule, but the OLD Scheduler.jsx latched a `carriedRef` the first time that succeeded
+ * and never re-armed it for the SAME routed project — so once `aPid` drifted away afterward (a
+ * second tab, a stale reconciliation, any other write to the shared field), the grid was stuck
+ * showing the WRONG project's tasks while the breadcrumb (which resolves straight from the route,
+ * never from `aPid`) kept reading correctly. Reproduced live: routed on Richfield (its own linked
+ * schedule has 1 task), `aPid` reading a different project (Pappadoupolos, 41 tasks) — breadcrumb
+ * said Richfield, the grid rendered Pappadoupolos's rows.
+ *
+ * The fix removes the latch (the carry-in effect now re-drives on EVERY genuine mismatch, forever,
+ * not once) AND adds this: a hard render gate. While the grid's active schedule isn't one of the
+ * routed site's own linked schedules (and the user hasn't deliberately picked an unrelated
+ * cross-cutting one — Pursuits/Operations, via isPickShowing), the iframe is HIDDEN and a brief
+ * "switching" state shows instead — so a mismatch can never be visibly rendered, only ever a
+ * transitional loader, regardless of what caused `aPid` to drift or how long the fix takes to
+ * re-converge it. */
+export function isGridMismatched(projects, siteId, activeId, pickShowing) {
+  if (siteId == null || pickShowing) return false;
+  const linked = findAllBySiteId(projects, siteId);
+  if (linked.length === 0) return false; // nothing linked yet — the empty state (not this gate) applies
+  return !linked.some((p) => p.id === activeId);
+}
+
+/* ---- NEW-1 (B1080545) — "+ New project" while routed must never mint an orphan --------------------
+ *
+ * Owner report: pressing the Schedule module's own "+ New project" while standing on a routed
+ * Planyr project created an unlinked, auto-named ("Project N") schedule and switched the grid to
+ * it, while the breadcrumb (route-derived) kept naming the project the user was already on — so it
+ * read as "nothing happened" even though a real, orphaned schedule object was minted (three of
+ * them survive in production: pids 12/13/14, all empty). Decision: while a Planyr project is
+ * routed, "+ New project" creates a SCHEDULE for THAT project — linked + named after it — never a
+ * bare unlinked object. NEW-3 (multiple schedules per project) is what makes this well-defined even
+ * when the project already has one: the new schedule gets a disambiguating name rather than
+ * silently becoming a second, indistinguishable "Pappadoupolos". Outside a routed project
+ * (Operations/Pursuits-style cross-cutting schedules, or the org/dashboard context) the generic
+ * unlinked behaviour is unchanged — that pattern is deliberate, not a bug. */
+export function newProjectAction({ projectId = null, routedSiteName = null, projects = [] } = {}) {
+  if (projectId == null || !routedSiteName) return { type: "new" };
+  const existing = findAllBySiteId(projects, projectId);
+  const name = existing.length === 0 ? routedSiteName : `${routedSiteName} (${existing.length + 1})`;
+  return { type: "create-linked", name, siteId: projectId, siteName: routedSiteName };
 }
