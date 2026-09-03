@@ -700,9 +700,9 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   `scope="col"`/`scope="colgroup"` on every header `<th>`, an accessible name +
   `aria-rowcount`/`aria-colcount` on the grid, `aria-selected` on every cell. **None of this touches
   `onEditKeyDown`'s commit/blur machinery** — the five-regression Enter/Tab-discards class prior
-  rounds closed stays exactly as HARDENING-15/17 left it. Guard:
-  `ui-audit/verify-comp-entry-a11y-close.mjs` (27 live checks, incl. a per-scale tabindex census and
-  a dispatch-directly-on-the-open-`<select>` technique for the Shift+Tab-backward case, which routes
+  rounds closed stays exactly as HARDENING-15/17 left it. Guard: the ui-audit harness
+  **verify-comp-entry-a11y-close** (27 live checks, incl. a per-scale tabindex census and a
+  dispatch-directly-on-the-open-`<select>` technique for the Shift+Tab-backward case, which routes
   around a headless-Chromium quirk — a native OS picker popup swallows a synthetic keypress meant
   for the underlying element — verified as a TEST artifact, not an app defect, by reproducing the
   identical symptom against an untouched build). Same round: the Save button's
