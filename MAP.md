@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-03 @ `65b07543` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-03 @ `bb201c16` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -206,7 +206,7 @@ _649 source files mapped._
 - **`src/workspaces/notes/lib/notesQuickOpen.js`** — PURE fuzzy ranking for quick open, plus the shortcut's spelling and chord test.
   - _exports_: `fuzzyScore`, `isQuickOpenChord`, `QUICK_OPEN_KEY`, `quickOpenResults`, `rankQuickOpen`, `stepIndex`
 - **`src/workspaces/notes/lib/notesRedline.js`** — pure redline diff between two note bodies — one document, changes marked in place
-  - _exports_: `buildRedline`, `flattenBlocks`, `nestByPath`
+  - _exports_: `buildComparison`, `buildRedline`, `flattenBlocks`, `nestByPath`
 - **`src/workspaces/notes/lib/notesSaveState.js`** — this module status → the ONE app-wide CloudSyncBadge state. Notes was the last module rendering its own save chips; this is it joining the convention.
   - _exports_: `notesSaveState`
 - **`src/workspaces/notes/lib/notesScan.js`** — the integrity pass, lazily imported: `scanNoteDuplicates` (the same note in two projects, bin included) and `unreachableNotes` (a note filed nowhere at all).
@@ -1249,7 +1249,7 @@ _649 source files mapped._
 - **`src/workspaces/scheduler/lib/gridColNav.js`** — Pure keyboard column-navigation that steps the grid cursor across VISIBLE columns in display order, skipping hidden ones
   - _exports_: `snapToVisible`, `stepVisibleCol`, `stepVisibleColByIdx`, `visibleColMasterIdxs`
 - **`src/workspaces/scheduler/lib/navState.js`** — Pure null-safe parse/sanitize of the embedded scheduler's postMessage nav-state and derive current/site-linked project for the breadcrumb
-  - _exports_: `dashboardNavActions`, `deriveCurrentProject`, `findBySiteId`, `isPickShowing`, `needsScheduleCarryIn`, `parseNavState`, `sanitizeProjects`, `shouldAdoptLinkedSiteIntoRoute`, `shouldShowLinkPanel`
+  - _exports_: `dashboardNavActions`, `deriveCurrentProject`, `findAllBySiteId`, `findBySiteId`, `isGridMismatched`, `isPickShowing`, `needsScheduleCarryIn`, `newProjectAction`, `parseNavState`, `sanitizeProjects`, `shouldAdoptLinkedSiteIntoRoute`, `shouldShowLinkPanel`
 - **`src/workspaces/scheduler/lib/saveState.js`** — Pure map of the embedded Gantt's reported save status (saving/error/offline/synced) onto the shared CloudSyncBadge, never a false-green
   - _exports_: `scheduleSaveState`
 - **`src/workspaces/scheduler/Scheduler.jsx`** — Scheduler workspace root: embeds the standalone Gantt iframe, bridges nav/toolbar/save/link over postMessage into the shell header
