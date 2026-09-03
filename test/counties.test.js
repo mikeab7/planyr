@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import {
   candidateCountiesForPoint, COUNTIES_MAP, countyKeyForName, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote,
@@ -244,5 +244,54 @@ describe("countyIdentity / noParcelSourceNote (B209502)", () => {
     const src = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
     expect(src).toMatch(/import \{[^}]*countyIdentity[^}]*\} from "\.\/lib\/counties\.js"/s);
     expect(src).toMatch(/noParcelSourceNote\(countyIdentity\(/);
+  });
+});
+
+// NEW-1 (2026-09-02) — Harris is wired to a real source; every other county keeps the exact
+// pre-existing graceful degrade (TAX_RATE_SOURCES.<county> === null → "not connected").
+describe("resolveTaxRates — Harris wired, everyone else unchanged (NEW-1)", () => {
+  beforeEach(() => { vi.resetModules(); });
+  afterEach(() => { vi.doUnmock("../src/workspaces/site-planner/lib/harrisTaxRates.js"); vi.clearAllMocks(); });
+
+  it("fortbend/chambers still report the honest not-connected note, byte-identical to before", async () => {
+    const { resolveTaxRates } = await import("../src/workspaces/site-planner/lib/counties.js");
+    const r1 = await resolveTaxRates("fortbend", { some_field: "x" });
+    expect(r1).toEqual({ units: [], rates: null, total: null, connected: false, note: "Rate source not connected for fortbend." });
+    const r2 = await resolveTaxRates("chambers", null);
+    expect(r2.connected).toBe(false);
+    expect(r2.note).toBe("Rate source not connected for chambers.");
+  });
+
+  it("harris with no lng/lat degrades honestly rather than guessing a location", async () => {
+    const { resolveTaxRates } = await import("../src/workspaces/site-planner/lib/counties.js");
+    const r = await resolveTaxRates("harris", { OWNER_NAME: "X" });
+    expect(r.connected).toBe(false);
+    expect(r.note).toMatch(/Location unavailable/);
+  });
+
+  it("harris with lng/lat delegates to resolveHarrisTaxRates and returns its result verbatim", async () => {
+    vi.doMock("../src/workspaces/site-planner/lib/harrisTaxRates.js", () => ({
+      resolveHarrisTaxRates: vi.fn(async ({ lng, lat }) => ({
+        units: [{ name: "Harris County", value: "0.38096 / $100" }],
+        rates: null, total: 0.38096, connected: true, taxYear: 2025, versionDate: "01/28/2026",
+        source: "Texas Comptroller of Public Accounts — Rates and Levies", note: "stub", lng, lat,
+      })),
+    }));
+    const { resolveTaxRates } = await import("../src/workspaces/site-planner/lib/counties.js");
+    const r = await resolveTaxRates("harris", {}, { lng: -95.78, lat: 29.99 });
+    expect(r.connected).toBe(true);
+    expect(r.taxYear).toBe(2025);
+    expect(r.total).toBeCloseTo(0.38096, 5);
+    expect(r.lng).toBe(-95.78); // proves the real lng/lat were threaded through, not swallowed
+  });
+
+  it("a thrown fetch failure from the harris resolver degrades to connected:false with the reason, never an uncaught rejection", async () => {
+    vi.doMock("../src/workspaces/site-planner/lib/harrisTaxRates.js", () => ({
+      resolveHarrisTaxRates: vi.fn(async () => { throw new Error("Comptroller upstream unreachable"); }),
+    }));
+    const { resolveTaxRates } = await import("../src/workspaces/site-planner/lib/counties.js");
+    const r = await resolveTaxRates("harris", {}, { lng: -95.78, lat: 29.99 });
+    expect(r.connected).toBe(false);
+    expect(r.note).toMatch(/Comptroller upstream unreachable/);
   });
 });

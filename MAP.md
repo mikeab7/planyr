@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-03 @ `624086046` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-03 @ `13459c558` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_649 source files mapped._
+_650 source files mapped._
 
 ## infra
 
@@ -640,7 +640,7 @@ _649 source files mapped._
 - **`src/workspaces/site-planner/lib/aerialVisibility.js`** — persisted aerial-backdrop visibility (`settings.aerialHidden`) and whether the live basemap tile layer should render, gating both the static underlay image and the Leaflet aerial on one fact so Hide/Remove actually take effect and persist.
   - _exports_: `isAerialTileActive`, `isAerialVisible`, `wantBasemapSrc`, `withAerialVisible`
 - **`src/workspaces/site-planner/lib/appraisal.js`** — Pure CAD-attribute curation: regex-maps raw county/TxGIO parcel columns to labelled owner/value/acreage/use rows for both panels
-  - _exports_: `ADDR_LINE_RE`, `APPR_FIELDS`, `apprAll`, `apprRows`, `apprVal`, `findAttr`, `MAILING_KEY_RE`, `mailingAddressValues`, `ownerName`, `PARCEL_CARD_PRIMARY_LABELS`, `PARCEL_PANEL_PRIMARY_LABELS`, `parcelCardRows`, `parcelPanelRows`, `prettyKey`, `siteNameFromParcel`, `SITUS_FIELD`, `SITUS_LADDER`, `situsAddress`, `situsKey`, `splitCuratedRows`
+  - _exports_: `ADDR_LINE_RE`, `APPR_FIELDS`, `apprAll`, `apprRows`, `apprVal`, `findAttr`, `isPlaceholderValue`, `MAILING_KEY_RE`, `mailingAddressValues`, `ownerName`, `PARCEL_CARD_PRIMARY_LABELS`, `PARCEL_PANEL_PRIMARY_LABELS`, `parcelCardRows`, `parcelPanelRows`, `prettyKey`, `siteNameFromParcel`, `SITUS_FIELD`, `SITUS_LADDER`, `situsAddress`, `situsKey`, `splitCuratedRows`
 - **`src/workspaces/site-planner/lib/apronElevation.js`** — NEW-9 dock apron / truck court elevation checked separately from the building pad: apron elevation from FFE + dock drop, exposure banding against the governing flood elevation (exposure language, never code language), and the pavement/court fill set the mitigation demand must include
   - _exports_: `APRON_FILL_TYPES`, `apronElevFt`, `apronFillIncluded`, `assessApron`, `DEFAULT_DOCK_DROP_FT`
 - **`src/workspaces/site-planner/lib/arcgis.js`** — Esri ArcGIS REST client: bounded parcel identify (query+identify fallback, multi-county eager race) and lon/lat↔State-Plane-feet conversion
@@ -859,6 +859,8 @@ _649 source files mapped._
   - _exports_: `combineDepthToWater`, `pondGroundwaterScreen`
 - **`src/workspaces/site-planner/lib/groupCas.js`** — B1341 stage 2: the group-CAS kill switch (ships OFF; `VITE_GROUP_CAS` or the `planarfit:groupCas` device key, read at call time).
   - _exports_: `GROUP_CAS_KEY`, `groupCasEnabled`
+- **`src/workspaces/site-planner/lib/harrisTaxRates.js`** — Harris County's real tax-rate source (NEW-1): combines `/api/taxrates` (the Comptroller's published rates) with `identifyJurisdiction`'s live city/ISD lookup into a dated, coverage-noted total. Never sums a MUD/special district it can't match to a rate.
+  - _exports_: `resolveHarrisTaxRates`
 - **`src/workspaces/site-planner/lib/hcfcdWse.js`** — HCFCD MAAPnext model WSE sampler (B882, Harris County): registry-driven ImageServer getSamples for the 1% + 0.2% WSE rasters; no-op until the provisional endpoints are confirmed live. `sampleMaapnextWse`/`maapnextEndpoints`/`clearMaapnextCache`.
   - _exports_: `clearMaapnextCache`, `maapnextEndpoints`, `maapnextOutage`, `sampleMaapnextWse`
 - **`src/workspaces/site-planner/lib/hiddenContentReads.js`** — the declaration table for every read of the raw element/parcel/markup/measure/callout collections: which call sites MUST filter by visibility (pictures, merged surfaces, the print crop, click targets, snap magnets, extents) and which are deliberately correct unfiltered (counts, saves, undo, ledgers, regulatory inferences), each with its reason. Plus `visibleEls`/`visibleParcels`/`visibleMeasures` consumers.

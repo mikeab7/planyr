@@ -81,9 +81,18 @@ export function ParcelAppraisal({ attrs, PAL }) {
 }
 
 /* Taxing jurisdictions + the combined rate — graceful-degrade until a rate source is wired for
- * the county. LOUD-FAILURE: "not wired" says so in amber, it never renders as a clean zero. */
+ * the county. LOUD-FAILURE: "not wired" says so in amber, it never renders as a clean zero.
+ *
+ * NEW-1 — a connected source (Harris) carries its own YEAR and AS-OF date, shown right beside
+ * the number every time, never only in a tooltip: tax rates are adopted annually and a figure
+ * with no vintage is worse than no figure at all in an underwriting. The coverage `note` (what
+ * IS and ISN'T summed into the total — see harrisTaxRates.js) is shown every time a real total
+ * renders too, not just on the not-connected path, so the number is never presented as more
+ * complete than it is. "Combined rate" (not "Total") is the deliberate word: it names what was
+ * actually added up, not a claim that nothing else could apply. */
 export function ParcelTaxes({ taxInfo, PAL }) {
   if (!taxInfo) return <div style={{ fontSize: 11.5, color: PAL.muted }}>Looking up taxing units…</div>;
+  const hasTotal = taxInfo.connected && taxInfo.total != null;
   return (
     <>
       {taxInfo.units.length > 0 ? taxInfo.units.map((u, i) => (
@@ -92,10 +101,22 @@ export function ParcelTaxes({ taxInfo, PAL }) {
           <span style={{ fontSize: 11.5, color: PAL.muted, fontFamily: MONO_FONT }}>{u.value}</span>
         </div>
       )) : <div style={{ fontSize: 11.5, color: PAL.muted }}>No taxing-unit fields in the county record.</div>}
-      {taxInfo.connected && taxInfo.total != null ? (
-        <div style={{ marginTop: 8, fontSize: 13, fontWeight: 700, color: PAL.ink }}>Total tax rate: {taxInfo.total} per $100</div>
+      {hasTotal ? (
+        <>
+          <div style={{ marginTop: 8, fontSize: 13, fontWeight: 700, color: PAL.ink }}>
+            Combined rate: {taxInfo.total.toFixed(5)} per $100
+            {taxInfo.taxYear && (
+              <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 600, color: PAL.muted }}>
+                · {taxInfo.taxYear} adopted rates{taxInfo.versionDate ? `, per the Comptroller as of ${taxInfo.versionDate}` : ""}
+              </span>
+            )}
+          </div>
+          {taxInfo.note && <div style={{ marginTop: 4, fontSize: 10.5, color: PAL.muted, lineHeight: 1.5 }}>{taxInfo.note}</div>}
+        </>
+      ) : taxInfo.connected ? (
+        <div style={{ marginTop: 8, fontSize: 10.5, color: PAL.warn, lineHeight: 1.5 }}>▲ {taxInfo.note || "No taxing-unit rate could be matched for this parcel."}</div>
       ) : (
-        <div style={{ marginTop: 8, fontSize: 11, color: PAL.warn, lineHeight: 1.5 }}>▲ {taxInfo.note} A total tax rate isn&apos;t shown until a rate source is wired for this county.</div>
+        <div style={{ marginTop: 8, fontSize: 10.5, color: PAL.warn, lineHeight: 1.5 }}>▲ {taxInfo.note} A total tax rate isn&apos;t shown until a rate source is wired for this county.</div>
       )}
     </>
   );

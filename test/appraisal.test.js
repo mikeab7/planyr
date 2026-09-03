@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { apprRows, apprVal, findAttr } from "../src/workspaces/site-planner/lib/appraisal.js";
+import { apprRows, apprVal, findAttr, apprAll, situsAddress, situsKey, isPlaceholderValue } from "../src/workspaces/site-planner/lib/appraisal.js";
 
 // A parcel answered by the statewide TxGIO backup must surface the SAME curated
 // appraisal rows as one from its home county — otherwise the backup looks broken even
@@ -110,5 +110,114 @@ describe("apprRows — CCAD (ChambersCADPublic) field mapping (B787)", () => {
 
   it("maps Legal1 → Legal (first legal line wins)", () => {
     expect(byLabel["Legal"]).toBe("ABST 100 J SMITH");
+  });
+});
+
+// NEW-2 (2026-09-02) — a real Harris parcel record served through the TxGIO statewide fallback
+// (site_planner/lib/counties.js — every county's own CAD is tried first; a point can still land
+// on this schema when the county's own service has no match at that spot). Field order matches
+// production exactly — SITUS_NUM precedes SITUS_ADDR, and GEO_ID precedes PROP_ID — because the
+// two defects this record exposed BOTH depend on object key order: "Account / ID" showed the
+// literal four-character string "Null" (GEO_ID) instead of the real PROP_ID, and "Situs address"
+// showed the bare house number "0" (SITUS_NUM) instead of the full address (SITUS_ADDR).
+const TXGIO_RICHFIELD = {
+  FIPS: "48201",
+  shape: "Polygon",
+  COUNTY: "HARRIS",
+  GEO_ID: "Null",
+  SOURCE: "HARRIS APPRAISAL DISTRICT",
+  PROP_ID: "0430680000001",
+  DATE_ACQ: "20250801",
+  GIS_AREA: "6113.823835462",
+  MAIL_ZIP: "77042-3140",
+  TAX_YEAR: "2025",
+  objectid: "7272174",
+  IMP_VALUE: "0",
+  MAIL_ADDR: "10001 WESTHEIMER RD STE 2888 , HOUSTON, TX 77042-3140",
+  MAIL_CITY: "HOUSTON",
+  MAIL_STAT: "TX",
+  MKT_VALUE: "8918152",
+  NAME_CARE: "RICHFIELD RANCH",
+  SITUS_NUM: "0",
+  SITUS_ZIP: "77447",
+  LAND_VALUE: "8918152",
+  LEGAL_AREA: "568.9304 AC",
+  LEGAL_DESC: "Null",
+  MAIL_LINE1: "10001 WESTHEIMER RD STE 2888",
+  MAIL_LINE2: "Null",
+  OWNER_NAME: "RICHFIELD RANCH",
+  SITUS_ADDR: "0 GRAND PKY, HOCKLEY, TX 77447",
+  SITUS_CITY: "HOCKLEY",
+  SITUS_STAT: "TX",
+  SITUS_STRE: "Null",
+  SITUS_ST_1: "GRAND",
+  SITUS_ST_2: "PKY",
+  YEAR_BUILT: "0",
+  LOC_LAND_USE: "Null",
+  GIS_AREA_UNIT: "Acres",
+  LGL_AREA_UNIT: "Acres",
+  STAT_LAND_USE: "1D1",
+  "st_area(shape)": "3074061.923948",
+  "st_perimeter(shape)": "7854.323667",
+};
+
+describe("isPlaceholderValue — the county's own null-sentinel text (NEW-2)", () => {
+  it("treats the literal string \"Null\" (and case/whitespace variants) as absent", () => {
+    expect(isPlaceholderValue("Null")).toBe(true);
+    expect(isPlaceholderValue("NULL")).toBe(true);
+    expect(isPlaceholderValue(" null ")).toBe(true);
+    expect(isPlaceholderValue("None")).toBe(true);
+    expect(isPlaceholderValue("N/A")).toBe(true);
+    expect(isPlaceholderValue("--")).toBe(true);
+    expect(isPlaceholderValue(null)).toBe(true);
+    expect(isPlaceholderValue("")).toBe(true);
+  });
+  it("does not flag real data, including a bare \"0\" (a legitimate value in many fields)", () => {
+    expect(isPlaceholderValue("0")).toBe(false);
+    expect(isPlaceholderValue("RICHFIELD RANCH")).toBe(false);
+    expect(isPlaceholderValue(0)).toBe(false);
+  });
+});
+
+describe("apprRows / situsAddress — the Richfield Ranch TxGIO record (NEW-2)", () => {
+  const rows = apprRows(TXGIO_RICHFIELD);
+  const byLabel = Object.fromEntries(rows.map((r) => [r.label, String(r.value)]));
+
+  it("never surfaces the literal \"Null\" text as a fact", () => {
+    for (const r of rows) expect(String(r.value)).not.toMatch(/^null$/i);
+  });
+
+  it("Account / ID skips GEO_ID's \"Null\" and resolves to the real PROP_ID", () => {
+    expect(byLabel["Account / ID"]).toBe("0430680000001");
+  });
+
+  it("Situs address resolves to the composed SITUS_ADDR, not the bare SITUS_NUM house number", () => {
+    expect(situsAddress(TXGIO_RICHFIELD)).toBe("0 GRAND PKY, HOCKLEY, TX 77447");
+    expect(byLabel["Situs address"]).toBe("0 GRAND PKY, HOCKLEY, TX 77447");
+    expect(situsKey(TXGIO_RICHFIELD)).toBe("SITUS_ADDR");
+  });
+
+  it("apprAll drops every placeholder-text field (GEO_ID, LEGAL_DESC, MAIL_LINE2, SITUS_STRE, LOC_LAND_USE)", () => {
+    const all = apprAll(TXGIO_RICHFIELD);
+    const labels = all.map((r) => r.label);
+    for (const dropped of ["GEO ID", "LEGAL DESC", "MAIL LINE2", "SITUS STRE", "LOC LAND USE"]) {
+      expect(labels).not.toContain(dropped);
+    }
+    // and the ones that ARE real still come through
+    expect(all.find((r) => r.label === "OWNER NAME")?.value).toBe("RICHFIELD RANCH");
+  });
+
+  it("findAttr also skips a placeholder-text match", () => {
+    expect(findAttr(TXGIO_RICHFIELD, /geo_?id/i)).toBeNull();
+    expect(findAttr(TXGIO_RICHFIELD, /prop_?id/i)).toBe("0430680000001");
+  });
+});
+
+// A plain single-field CAD (the common case — one "SITUS" column, no decomposed siblings) must
+// keep working exactly as before: the composed/decomposed split only matters when more than one
+// situs-flavored key exists.
+describe("situsAddress — single-field CAD schemas are unaffected by the composed-field rung", () => {
+  it("Fort Bend / Montgomery style: one plain SITUS column", () => {
+    expect(situsAddress({ SITUS: "4050 CR 50, JOHNSTOWN" })).toBe("4050 CR 50, JOHNSTOWN");
   });
 });
