@@ -6,8 +6,8 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  SURFACES, THEMES, NOT_COVERED, TOLERANCE,
-  surfaceIds, findSurface, baselineFile, evaluateDiff, buildStatusMarkdown,
+  SURFACES, THEMES, NOT_COVERED, TOLERANCE, VIEWPORTS,
+  surfaceIds, findSurface, baselineFile, evaluateDiff, buildStatusMarkdown, viewportIds, findViewport, themeViewportKey,
 } from "../ui-audit/lib/visualBaseline.mjs";
 
 describe("SURFACES — the coverage list", () => {
@@ -42,15 +42,59 @@ describe("findSurface / baselineFile", () => {
     expect(() => findSurface("nope")).toThrow(/unknown surface "nope"/);
     expect(() => findSurface("nope")).toThrow(/library/); // names a real id
   });
-  it("builds a stable filename per surface/theme pair", () => {
+  it("builds a stable filename per surface/theme pair, desktop viewport implicit and un-suffixed", () => {
     expect(baselineFile("library", "light")).toBe("library--light.png");
     expect(baselineFile("library", "dark")).toBe("library--dark.png");
+    expect(baselineFile("library", "light", "desktop")).toBe("library--light.png");
+  });
+  it("suffixes the filename for a non-desktop viewport — every already-approved desktop PNG stays addressable by its original name", () => {
+    expect(baselineFile("library", "light", "phone")).toBe("library--light--phone.png");
+    expect(baselineFile("library", "dark", "phone")).toBe("library--dark--phone.png");
   });
   it("throws on an unknown theme rather than silently building a bogus filename", () => {
     expect(() => baselineFile("library", "sepia")).toThrow(/unknown theme "sepia"/);
   });
   it("throws on an unknown surface before ever constructing a filename", () => {
     expect(() => baselineFile("nope", "light")).toThrow(/unknown surface "nope"/);
+  });
+  it("throws on an unknown viewport, naming the valid ids", () => {
+    expect(() => baselineFile("library", "light", "tablet")).toThrow(/unknown viewport "tablet"/);
+    expect(() => baselineFile("library", "light", "tablet")).toThrow(/phone/);
+  });
+});
+
+describe("VIEWPORTS / findViewport / themeViewportKey", () => {
+  it("names at least desktop and phone", () => {
+    expect(viewportIds()).toContain("desktop");
+    expect(viewportIds()).toContain("phone");
+  });
+  it("every viewport has a positive width/height and a deviceScaleFactor of 1 (matches every other capture's scale)", () => {
+    for (const v of VIEWPORTS) {
+      expect(v.width).toBeGreaterThan(0);
+      expect(v.height).toBeGreaterThan(0);
+      expect(v.deviceScaleFactor).toBe(1);
+    }
+  });
+  it("the phone viewport pairs isMobile with hasTouch (Chromium requires them together)", () => {
+    const phone = findViewport("phone");
+    expect(phone.isMobile).toBe(true);
+    expect(phone.hasTouch).toBe(true);
+  });
+  it("throws on an unknown viewport id, naming the valid ones", () => {
+    expect(() => findViewport("tablet")).toThrow(/unknown viewport "tablet"/);
+    expect(() => findViewport("tablet")).toThrow(/desktop/);
+  });
+  it("themeViewportKey leaves the desktop key bare — untouched, already-approved manifest entries stay valid", () => {
+    expect(themeViewportKey("light", "desktop")).toBe("light");
+    expect(themeViewportKey("dark", "desktop")).toBe("dark");
+  });
+  it("themeViewportKey suffixes any other viewport", () => {
+    expect(themeViewportKey("light", "phone")).toBe("light--phone");
+    expect(themeViewportKey("dark", "phone")).toBe("dark--phone");
+  });
+  it("themeViewportKey throws on an unknown theme or viewport", () => {
+    expect(() => themeViewportKey("sepia", "desktop")).toThrow(/unknown theme "sepia"/);
+    expect(() => themeViewportKey("light", "tablet")).toThrow(/unknown viewport "tablet"/);
   });
 });
 
@@ -136,12 +180,21 @@ describe("buildStatusMarkdown — the generated docs/VISUAL-REGRESSION.md conten
     expect(md).toContain("measured 11.4s locally.");
   });
 
-  it("emits one status-table row per surface x theme", () => {
+  it("emits one status-table row per surface x theme x viewport", () => {
     const md = buildStatusMarkdown({ manifest, noiseFloor: "x", addedCiTimeNote: "y" });
     const rows = md.split("\n").filter((l) => l.startsWith("| "));
     // header + separator are not "| surface |...|---|" style rows we count here since the table
-    // header itself also starts with "| " — assert at least SURFACES.length * THEMES.length data rows exist.
+    // header itself also starts with "| " — assert exactly SURFACES.length * THEMES.length *
+    // VIEWPORTS.length data rows exist (NEW-2 added the viewport dimension).
     const dataRows = rows.filter((l) => SURFACES.some((s) => l.includes(s.name)));
-    expect(dataRows.length).toBe(SURFACES.length * THEMES.length);
+    expect(dataRows.length).toBe(SURFACES.length * THEMES.length * VIEWPORTS.length);
+  });
+  it("names the viewport in each row, and reads the un-suffixed desktop manifest key for the desktop row", () => {
+    const md = buildStatusMarkdown({ manifest, noiseFloor: "x", addedCiTimeNote: "y" });
+    for (const v of VIEWPORTS) expect(md).toContain(`| ${v.id} |`);
+    // map-landing/light/desktop is the one approved entry in the fixture manifest above (a bare
+    // "light" key, no viewport suffix) — confirms desktop rows still read the pre-existing,
+    // un-suffixed manifest shape rather than expecting a "light--desktop" key that was never written.
+    expect(md).toMatch(/Map landing.*\| light \| desktop \| 2026-09-01 \| `abc1234` \| initial baseline \|/);
   });
 });

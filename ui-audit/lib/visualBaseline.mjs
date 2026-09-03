@@ -26,6 +26,53 @@
 
 export const THEMES = ["light", "dark"];
 
+/* ---------------------------------------------------------------------------------------------
+ * Viewports (NEW-2, 2026-09-03). Every surface below was, until now, screenshotted at exactly
+ * ONE size — 1440×900 — which is why a narrow-width layout defect (the update banner squeezed
+ * to a sliver on the owner's own iPhone, planyr.io, 2026-09-03) shipped with every visual gate
+ * green: nothing in this file's history ever rendered anything narrower than 1440px. `phone` is
+ * the owner's own device class — 390 CSS px is the convention this repo already uses everywhere
+ * else a phone width is asserted (`verify-phone-layout.mjs`'s iPhone-13-class emulation,
+ * `verify-mobile-mapfinder.mjs`, `verify-planner-pinch.mjs`) — captured here as a first-class,
+ * always-on pass rather than a one-off script someone has to remember to write for the next bug.
+ *
+ * `deviceScaleFactor: 1` on BOTH viewports, deliberately not the phone's real ~3x — matches the
+ * existing desktop capture's own reasoning (this file's `captureSurface` has always forced dpr:1
+ * regardless of the real desktop's dpr) and keeps every baseline PNG the same pixel-per-CSS-px
+ * scale, so the tolerance policy below (picked against dpr:1 desktop captures) doesn't need a
+ * second calibration. `isMobile`/`hasTouch` are set together (Chromium requires them paired) so
+ * any touch-vs-mouse-conditioned CSS/JS in the app renders the way it would on a real phone, not
+ * a narrow desktop window.
+ * ------------------------------------------------------------------------------------------- */
+export const VIEWPORTS = [
+  { id: "desktop", width: 1440, height: 900, deviceScaleFactor: 1, label: "Desktop (1440×900)" },
+  {
+    id: "phone", width: 390, height: 844, deviceScaleFactor: 1, isMobile: true, hasTouch: true,
+    label: "Phone (390×844, iPhone-class)",
+  },
+];
+
+export function viewportIds() {
+  return VIEWPORTS.map((v) => v.id);
+}
+
+export function findViewport(id) {
+  const v = VIEWPORTS.find((x) => x.id === id);
+  if (!v) throw new Error(`unknown viewport "${id}" — known: ${viewportIds().join(", ")}`);
+  return v;
+}
+
+/* The manifest/report key for one theme+viewport pair. `desktop` is the ORIGINAL, un-suffixed
+ * key (`"light"`/`"dark"`) so every already-approved desktop baseline — file name AND manifest
+ * entry — is untouched by this change; only the new `phone` viewport gets a suffix. Keeping the
+ * desktop key bare is what makes this additive rather than a forced re-approval of four PNGs
+ * that didn't change a pixel. */
+export function themeViewportKey(theme, viewportId) {
+  if (!THEMES.includes(theme)) throw new Error(`unknown theme "${theme}" — expected one of ${THEMES.join(", ")}`);
+  findViewport(viewportId);
+  return viewportId === "desktop" ? theme : `${theme}--${viewportId}`;
+}
+
 /* The four minimum surfaces the brief named, each captured in both themes. Each entry is
  * everything the DOC generator needs (id/name/note); the Playwright half
  * (`ui-audit/visual-regression.mjs`) attaches its own `prep(page)` function per id — kept out of
@@ -126,11 +173,15 @@ export function findSurface(id) {
   return s;
 }
 
-/** Baseline PNG filename for one surface/theme pair — the one place this naming is decided. */
-export function baselineFile(surfaceId, theme) {
+/** Baseline PNG filename for one surface/theme/viewport triple — the one place this naming is
+ *  decided. `viewportId` defaults to `"desktop"`, which produces the ORIGINAL, un-suffixed
+ *  filename (`${surfaceId}--${theme}.png`) every already-approved baseline already uses. */
+export function baselineFile(surfaceId, theme, viewportId = "desktop") {
   if (!THEMES.includes(theme)) throw new Error(`unknown theme "${theme}" — expected one of ${THEMES.join(", ")}`);
   findSurface(surfaceId); // throws on an unknown id, naming the valid ones
-  return `${surfaceId}--${theme}.png`;
+  findViewport(viewportId); // throws on an unknown id, naming the valid ones
+  const suffix = viewportId === "desktop" ? "" : `--${viewportId}`;
+  return `${surfaceId}--${theme}${suffix}.png`;
 }
 
 /**
@@ -159,9 +210,12 @@ export function evaluateDiff(stats, tolerance = TOLERANCE) {
  * The generated `docs/VISUAL-REGRESSION.md` content, built entirely from the approval manifest —
  * see the file header for why it must never read from a live capture's diff numbers.
  *
- * `manifest` shape: { tolerance, surfaces: { [surfaceId]: { [theme]: { approvedAt, approvedCommit,
- * note } } } }. `noiseFloor` is a short, hand-recorded string describing the last noise-floor
- * measurement run (dated), reported verbatim rather than re-measured on every doc build.
+ * `manifest` shape: { tolerance, surfaces: { [surfaceId]: { [themeViewportKey]: { approvedAt,
+ * approvedCommit, note } } } } — `themeViewportKey(theme, viewportId)` above is the one function
+ * that decides the key (bare `theme` for the desktop viewport, `${theme}--${viewportId}`
+ * otherwise), so every already-approved desktop entry's key is untouched by adding a viewport.
+ * `noiseFloor` is a short, hand-recorded string describing the last noise-floor measurement run
+ * (dated), reported verbatim rather than re-measured on every doc build.
  */
 export function buildStatusMarkdown({ manifest, noiseFloor, addedCiTimeNote }) {
   const tol = manifest?.tolerance || TOLERANCE;
@@ -183,10 +237,17 @@ export function buildStatusMarkdown({ manifest, noiseFloor, addedCiTimeNote }) {
     "",
     "## Coverage",
     "",
-    `Rendered in **both light and dark theme** (${SURFACES.length} surfaces × ${THEMES.length} ` +
-      `themes = ${SURFACES.length * THEMES.length} baseline images):`,
+    `Rendered in **both light and dark theme, at both viewports** (${SURFACES.length} surfaces × ` +
+      `${THEMES.length} themes × ${VIEWPORTS.length} viewports = ` +
+      `${SURFACES.length * THEMES.length * VIEWPORTS.length} baseline images):`,
     "",
     ...SURFACES.map((s) => `- **${s.name}** (\`${s.id}\`) — ${s.note}`),
+    "",
+    "**Viewports** (NEW-2, 2026-09-03 — added after a phone-width layout defect, the update " +
+      "banner squeezed to an unreadable sliver, shipped with every prior visual gate green: " +
+      "nothing this file ever rendered was narrower than 1440px):",
+    "",
+    ...VIEWPORTS.map((v) => `- **${v.label}** (\`${v.id}\`)`),
     "",
     "**Not covered, named rather than silently absent:**",
     "",
@@ -262,16 +323,19 @@ export function buildStatusMarkdown({ manifest, noiseFloor, addedCiTimeNote }) {
     "",
     "## Current baselines",
     "",
-    "| surface | theme | last approved | at commit | note |",
-    "|---|---|---|---|---|",
+    "| surface | theme | viewport | last approved | at commit | note |",
+    "|---|---|---|---|---|---|",
   ];
   for (const s of SURFACES) {
     for (const theme of THEMES) {
-      const entry = manifest?.surfaces?.[s.id]?.[theme];
-      if (!entry) {
-        lines.push(`| ${s.name} | ${theme} | _(no baseline yet)_ | — | — |`);
-      } else {
-        lines.push(`| ${s.name} | ${theme} | ${entry.approvedAt} | \`${entry.approvedCommit}\` | ${entry.note} |`);
+      for (const v of VIEWPORTS) {
+        const key = themeViewportKey(theme, v.id);
+        const entry = manifest?.surfaces?.[s.id]?.[key];
+        if (!entry) {
+          lines.push(`| ${s.name} | ${theme} | ${v.id} | _(no baseline yet)_ | — | — |`);
+        } else {
+          lines.push(`| ${s.name} | ${theme} | ${v.id} | ${entry.approvedAt} | \`${entry.approvedCommit}\` | ${entry.note} |`);
+        }
       }
     }
   }
