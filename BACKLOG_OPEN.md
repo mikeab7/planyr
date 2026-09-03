@@ -257,7 +257,7 @@
 | B1084000 | County appraisal panel can print the literal word "Null" and a bare "0" as if they were data; a split parcel silently shows its pre-split parent's whole-tract record | [Site Planner / parcel-data] | #site-planner #parcel | ⏳ live — awaiting |
 | B177 | Parcel tax breakdown panel | [Site Planner] | #site-planner | ⏳ live — awaiting |
 | B179 | Backend per-account exact tax fetch | [server] | #infra | ⏳ live — awaiting |
-| B851 (×3) | Schedule grid diverges from the route + a false "newer version — reload?" banner, same cause | [Scheduler / persistence] | #scheduler #persistence #ui | ⏳ live — awaiting |
+| B851 (×4) | Schedule grid diverges from the route + a false "newer version — reload?" banner, same cause | [Scheduler / persistence] | #scheduler #persistence #ui | ⏳ live — awaiting |
 | B1080545 | "New project" in the Schedule module minted junk-named orphan schedules while the breadcrumb kept showing the previous project | [Scheduler] | #scheduler #ui | ⏳ live — awaiting |
 | B1080546 | Duplicate an existing schedule | [Scheduler] | #scheduler | ⏳ live — awaiting |
 | B1080547 | Allow multiple schedules per project | [Scheduler] | #scheduler | ⏳ live — awaiting |

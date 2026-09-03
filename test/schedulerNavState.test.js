@@ -379,3 +379,178 @@ describe("Scheduler.jsx — the ROUTE outranks the embed's section", () => {
     expect(SRC).toMatch(/onDuplicateProject=\{\(id\) => post\(\{ type: "planar:nav-duplicate", id \}\)\}/);
   });
 });
+
+/* B851 ×4 (NEW-1) — the ×3 fix's render gate (`isGridMismatched`) was correctly wired and its own
+ * unit tests are sound — and STILL demonstrably not engaged over a wrong grid in production. LIVE
+ * REPRODUCTION (planyr.io, signed in, 2026-09-03, on merge commit 2a9afc5 / PR #1367): routed on
+ * Richfield (its own linked schedule id 15, 1 task), breadcrumb correctly read "Richfield", the grid
+ * rendered ZERO rows — the iframe was actually showing project 16 (ZZ-RENAME-TEST-G, 0 tasks), and
+ * `isGridMismatched` was returning false (not engaged) at that exact moment. Root cause: the gate
+ * compares the ROUTE against the shell's BELIEF (`activeId`), and that belief only updates when the
+ * embedded app posts a fresh `planar:nav-state` — which a backgrounded tab's silent self-reload
+ * (B850) can leave stale for an arbitrary stretch, during which the reloaded document may already be
+ * rendering a different project entirely. `navConfirmed` is the fix: false the instant the iframe's
+ * `load` event fires (a fresh boot OR a reload), true only once a genuine nav-state lands for THAT
+ * load — so an un-announced grid reads as mismatched even when the STALE belief it's being compared
+ * against happens to already agree with the route. This is the exact case the ×3 fix's own tests
+ * could never catch: they fed `isGridMismatched` a belief and asked whether IT was self-consistent,
+ * never asked whether that belief was still current for what the iframe is actually showing. */
+describe("isGridMismatched — navConfirmed makes the gate fail CLOSED across a reload with no fresh nav-state (B851 ×4/NEW-1)", () => {
+  const RICHFIELD = sanitizeProjects([
+    { id: 15, name: "Richfield", linkedSiteId: "rf" },
+    { id: 16, name: "ZZ-RENAME-TEST-G" }, // unlinked — the production repro's foreign aPid
+  ]);
+
+  it("GREEN before any reload: the shell's belief (activeId 15) genuinely matches the route", () => {
+    expect(isGridMismatched(RICHFIELD, "rf", 15, false, /* navConfirmed */ true)).toBe(false);
+  });
+
+  it('RED: the exact production defect — a STALE belief that still reads "matched" must be treated as mismatched the instant it is unconfirmed, never assumed still-correct', () => {
+    // The shell's `activeId` is untouched (still 15, still "correct" on paper) — nothing has told it
+    // otherwise. The iframe, meanwhile, has silently reloaded and may be rendering ANY project by now
+    // (in production it was rendering 16's zero-task grid). The old gate — no navConfirmed dimension
+    // — read this as matched. The fixed gate must not, because "matched" was never re-proven for this
+    // load.
+    expect(isGridMismatched(RICHFIELD, "rf", 15, false, /* navConfirmed */ false)).toBe(true);
+  });
+
+  it("RED persists regardless of what the stale belief happens to say, including a value that would otherwise be a genuine mismatch too", () => {
+    expect(isGridMismatched(RICHFIELD, "rf", 16, false, false)).toBe(true);
+    expect(isGridMismatched(RICHFIELD, "rf", null, false, false)).toBe(true);
+  });
+
+  it("GREEN once the reload's OWN nav-state lands and it genuinely matches — confirmation, not time, clears the gate", () => {
+    expect(isGridMismatched(RICHFIELD, "rf", 15, false, true)).toBe(false);
+  });
+
+  it("stays RED once confirmed if the reload's own nav-state reveals a genuine drift — this is the ×3 fix's original case, untouched", () => {
+    expect(isGridMismatched(RICHFIELD, "rf", 16, false, true)).toBe(true);
+  });
+
+  it("omitting navConfirmed preserves EVERY pre-×4 caller's exact prior behaviour (default true)", () => {
+    expect(isGridMismatched(RICHFIELD, "rf", 15, false)).toBe(false);
+    expect(isGridMismatched(RICHFIELD, "rf", 16, false)).toBe(true);
+  });
+
+  it("an unconfirmed load never overrides a deliberate cross-cutting pick or an unrouted/unlinked site — pickShowing and siteId still short-circuit first", () => {
+    expect(isGridMismatched(RICHFIELD, "rf", 16, /* pickShowing */ true, false)).toBe(false);
+    expect(isGridMismatched(RICHFIELD, null, 16, false, false)).toBe(false);
+  });
+});
+
+/* The SHELL↔IFRAME BOUNDARY itself, simulated: this reproduces the exact sequence the live repro
+ * went through — boot, confirm, silent reload, (no fresh nav-state yet), and only then either a
+ * matching or a drifted confirmation — using the same state shape Scheduler.jsx threads through
+ * (`navConfirmed` reset by every iframe `load`, set true only by a genuine nav-state message for
+ * that load). Repo convention for this component is source-guard regex tests (no jsdom/React
+ * rendering harness is configured — see vitest.config.js, Node environment only), so the boundary
+ * is proven at the level Scheduler.jsx actually implements it: the same transition sequence its own
+ * refs/state go through, run against the real pure gate function. */
+describe("shell↔iframe boundary — an iframe reload with no fresh nav-state must never render as matched", () => {
+  const RICHFIELD = sanitizeProjects([
+    { id: 15, name: "Richfield", linkedSiteId: "rf" },
+    { id: 16, name: "ZZ-RENAME-TEST-G" },
+  ]);
+
+  // Mirrors Scheduler.jsx's own state machine: onIframeLoad → navConfirmed=false;
+  // onMsg(nav-state) → activeId/projects/navConfirmed=true.
+  function simulateShell() {
+    let activeId = null;
+    let navConfirmed = false;
+    return {
+      onIframeLoad() { navConfirmed = false; },              // fires on EVERY load, reload included
+      onNavState(id) { activeId = id; navConfirmed = true; }, // fires only when the iframe announces
+      gridMismatched(siteId, pickShowing = false) {
+        return isGridMismatched(RICHFIELD, siteId, activeId, pickShowing, navConfirmed);
+      },
+    };
+  }
+
+  it("initial boot: hidden until the first nav-state confirms, then reflects reality", () => {
+    const shell = simulateShell();
+    shell.onIframeLoad(); // the very first <iframe> load
+    expect(shell.gridMismatched("rf")).toBe(true); // nothing confirmed yet → fail closed
+    shell.onNavState(15); // embed's first boot: correctly on Richfield's own schedule
+    expect(shell.gridMismatched("rf")).toBe(false);
+  });
+
+  it("THE PRODUCTION CASE: a silent reload with a still-stale-but-matching belief must not render as matched", () => {
+    const shell = simulateShell();
+    shell.onIframeLoad();
+    shell.onNavState(15); // confirmed match, exactly as before the background reload
+    expect(shell.gridMismatched("rf")).toBe(false);
+
+    // The tab backgrounds; the embedded app silently self-reloads (B850). The iframe element's own
+    // `load` fires again — this is the ONE thing the shell can observe here, since the reload was
+    // never asked for and no nav-state has arrived yet. The shell's `activeId` belief is untouched.
+    shell.onIframeLoad();
+    // OLD gate (no navConfirmed): would read isGridMismatched(RICHFIELD, "rf", 15, false) → false —
+    // "still matched" — while the iframe underneath may already be showing a different project. This
+    // is the exact live defect: matched-by-stale-belief instead of matched-by-proof.
+    expect(shell.gridMismatched("rf")).toBe(true); // fixed gate: fails closed until re-proven
+  });
+
+  it("the reload's own nav-state resolves it — matching case", () => {
+    const shell = simulateShell();
+    shell.onIframeLoad();
+    shell.onNavState(15);
+    shell.onIframeLoad(); // reload
+    expect(shell.gridMismatched("rf")).toBe(true); // unconfirmed
+    shell.onNavState(15); // this load's own announcement: still Richfield
+    expect(shell.gridMismatched("rf")).toBe(false);
+  });
+
+  it("the reload's own nav-state resolves it — genuinely drifted case (aPid moved to a different project)", () => {
+    const shell = simulateShell();
+    shell.onIframeLoad();
+    shell.onNavState(15);
+    shell.onIframeLoad(); // reload
+    shell.onNavState(16); // this load's own announcement: the shared aPid had actually drifted
+    expect(shell.gridMismatched("rf")).toBe(true); // stays hidden — the carry-in effect re-drives it
+  });
+
+  it("repeated reloads with no announcement in between never accidentally read as matched", () => {
+    const shell = simulateShell();
+    shell.onIframeLoad();
+    shell.onNavState(15);
+    for (let i = 0; i < 4; i++) shell.onIframeLoad(); // several reloads, none yet answered
+    expect(shell.gridMismatched("rf")).toBe(true);
+  });
+});
+
+describe("Scheduler.jsx — the shell invalidates its nav belief on EVERY iframe load, not only the first (B851 ×4/NEW-1)", () => {
+  const SRC = readFileSync(fileURLToPath(new URL("../src/workspaces/scheduler/Scheduler.jsx", import.meta.url)), "utf8");
+
+  it("navConfirmed state + ref exist, both starting false", () => {
+    expect(SRC).toMatch(/const navConfirmedRef = useRef\(false\)/);
+    expect(SRC).toMatch(/const \[navConfirmed, setNavConfirmed\] = useState\(false\)/);
+  });
+
+  it("onIframeLoad resets navConfirmed to false BEFORE its retry loop runs, every time it fires — not gated behind readyRef", () => {
+    const i = SRC.indexOf("const onIframeLoad = useCallback(() => {");
+    expect(i).toBeGreaterThan(-1);
+    const askIdx = SRC.indexOf("const ask = () => {", i);
+    const block = SRC.slice(i, askIdx);
+    expect(block).toMatch(/setNavConfirmedBoth\(false\)/);
+  });
+
+  it("the retry loop's early-return no longer permanently gates on readyRef — a reload gets its own fresh retries", () => {
+    const i = SRC.indexOf("const ask = () => {");
+    expect(i).toBeGreaterThan(-1);
+    const block = SRC.slice(i, i + 600);
+    expect(block).not.toMatch(/if \(readyRef\.current\) return;/);
+    expect(block).toMatch(/if \(navConfirmedRef\.current\) return;/);
+  });
+
+  it("the nav-state message handler confirms THIS load before markReady", () => {
+    const i = SRC.indexOf("setSection(nav.section);");
+    expect(i).toBeGreaterThan(-1);
+    const block = SRC.slice(i, i + 400);
+    expect(block.indexOf("setNavConfirmedBoth(true)")).toBeGreaterThan(-1);
+    expect(block.indexOf("setNavConfirmedBoth(true)")).toBeLessThan(block.indexOf("markReady()"));
+  });
+
+  it("the render gate is fed navConfirmed, not just projects/activeId/pickShowing", () => {
+    expect(SRC).toMatch(/isGridMismatched\(projects, projectId, activeId, pickShowing, navConfirmed\)/);
+  });
+});
