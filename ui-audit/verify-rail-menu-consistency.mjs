@@ -100,20 +100,77 @@ check("Measure flyout's right edge lands near the caret's right edge (not ~150px
 await dismiss();
 await page.waitForTimeout(150);
 
-/* ── NEW-1: open state — Parcel tools reads as open, Select (unrelated) is unaffected ──────────── */
+/* ── NEW-1 (B849584 ×2) — FULL computed-style diff, every property, both buttons of every flyout
+ * trigger, real Playwright clicks (never a synthetic dispatch). This mirrors the exact methodology
+ * that caught the first ship not landing: snapshot ALL of getComputedStyle before, open the menu,
+ * snapshot again, require a NON-EMPTY diff. Checking one property (backgroundColor) or the class
+ * name/aria attribute alone is exactly what let a real absence through the first time — the aria
+ * attribute was already correct while nothing rendered. */
+const fullStyleSnapshot = async (loc) => loc.evaluate((el) => {
+  const cs = getComputedStyle(el);
+  const out = {};
+  for (let i = 0; i < cs.length; i++) { const p = cs[i]; out[p] = cs.getPropertyValue(p); }
+  return out;
+});
+const styleDiff = (before, after) => {
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  const changed = [];
+  for (const k of keys) if (before[k] !== after[k]) changed.push(k);
+  return changed;
+};
+
 const selectBtn = page.getByRole("button", { name: /^Select\b/ }).first();
-const selectBgBefore = await selectBtn.evaluate((el) => getComputedStyle(el).backgroundColor);
-const parcelToolsBgClosed = await parcelToolsBtn.evaluate((el) => getComputedStyle(el).backgroundColor);
-await parcelToolsBtn.click();
-await page.waitForTimeout(150);
-const parcelToolsBgOpen = await parcelToolsBtn.evaluate((el) => getComputedStyle(el).backgroundColor);
-const selectBgAfter = await selectBtn.evaluate((el) => getComputedStyle(el).backgroundColor);
-check("Parcel tools trigger's background changes when its own menu opens", parcelToolsBgOpen !== parcelToolsBgClosed, `${parcelToolsBgClosed} → ${parcelToolsBgOpen}`);
-check("Select's own background is unaffected by Parcel tools' menu opening", selectBgAfter === selectBgBefore, `${selectBgBefore} → ${selectBgAfter}`);
-// The open state must not be the ember active-tool fill (rgb(194, 65, 12) family) — never claim "armed".
-check("Parcel tools' open background is NOT the ember active-tool fill", !/194,\s*65,\s*12/.test(parcelToolsBgOpen), parcelToolsBgOpen);
+const selectBefore = await fullStyleSnapshot(selectBtn);
+
+// [caretAriaLabel, mainRowLocator | null] — Parcel tools' "main row" IS the trigger under test too
+// (both halves open the same menu); the other five arm a tool from the main row, so only their
+// CARET opens the menu without side effects.
+const triggers = [
+  ["Parcel tools", parcelToolsBtn],
+  ["Measure modes", page.getByRole("button", { name: /^Measure$/ })],
+  ["Dock layout", page.getByRole("button", { name: /^Building$/ })],
+  ["Road presets", page.getByRole("button", { name: /^Road$/ })],
+  ["Parking type", page.getByRole("button", { name: /^Parking$/ })],
+  ["Easement options", page.getByRole("button", { name: /^Easement$/ })],
+];
+
+for (const [caretLabel, mainLoc] of triggers) {
+  const caretLoc = page.locator(`button[aria-label="${caretLabel}"]`);
+  const mainBefore = await fullStyleSnapshot(mainLoc);
+  const caretBefore = await fullStyleSnapshot(caretLoc);
+  const ariaBefore = await mainLoc.getAttribute("aria-expanded").catch(() => null);
+
+  await caretLoc.click();
+  await page.waitForTimeout(200);
+
+  const ariaAfter = await mainLoc.getAttribute("aria-expanded").catch(() => null);
+  const mainAfter = await fullStyleSnapshot(mainLoc);
+  const caretAfter = await fullStyleSnapshot(caretLoc);
+  const mainDiff = styleDiff(mainBefore, mainAfter);
+  const caretDiff = styleDiff(caretBefore, caretAfter);
+
+  check(`${caretLabel}: aria-expanded flips false → true`, ariaBefore !== "true" && ariaAfter === "true", `${ariaBefore} → ${ariaAfter}`);
+  check(`${caretLabel}: MAIN row's computed style measurably differs when open`, mainDiff.length > 0, mainDiff.length ? mainDiff.join(", ") : "(no properties changed)");
+  check(`${caretLabel}: CARET's computed style measurably differs when open`, caretDiff.length > 0, caretDiff.length ? caretDiff.join(", ") : "(no properties changed)");
+  // `fullStyleSnapshot` keys by the HYPHENATED CSS property name (what `CSSStyleDeclaration`
+  // iteration yields), not the camelCase DOM property — reading `.backgroundColor` here would
+  // silently be `undefined` and pass every check on it vacuously.
+  const mainBg = mainAfter["background-color"], mainBorder = mainAfter["border-top-color"];
+  check(`${caretLabel}: open background is NOT the ember active-tool fill`, !/194,\s*65,\s*12/.test(mainBg) && !/242,\s*107,\s*58/.test(mainBg), mainBg);
+  check(`${caretLabel}: open state is visually real (background or border actually painted, not still transparent)`,
+    mainBg !== "rgba(0, 0, 0, 0)" || mainBorder !== "rgba(0, 0, 0, 0)", `bg=${mainBg} border=${mainBorder}`);
+
+  await dismiss();
+  await page.waitForTimeout(150);
+}
+
+const selectAfter = await fullStyleSnapshot(selectBtn);
+check("Select's own computed style is unaffected by the six flyouts opening/closing in turn", styleDiff(selectBefore, selectAfter).length === 0, styleDiff(selectBefore, selectAfter).join(", "));
 
 /* ── NEW-3: tether — flush against the rail, no gap ─────────────────────────────────────────────── */
+// The NEW-1 loop above closes every menu it opens, so re-open Parcel tools for this check.
+await parcelToolsBtn.click();
+await page.waitForTimeout(200);
 const railEl = selectBtn.locator("xpath=ancestor::div[contains(@class,'dark-scroll')]");
 const railBox = await railEl.boundingBox();
 const toolMenuPanel = page.locator("body > div.menu").last();
