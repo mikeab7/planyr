@@ -10,7 +10,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
-| B1106257 | `ui-audit/ui-inventory.mjs`'s "plan menu" scenario double-clicks the same trigger, and `docs/UI-INVENTORY.md` carries ~24 lines of sandbox-only (dummy-secrets) drift | [global/ui-audit] | #ui #testing | sandbox |
+| B1106257 | `ui-audit/ui-inventory.mjs`'s "plan menu" scenario double-clicks the same trigger | [global/ui-audit] | #ui #testing | sandbox |
 | B1066370 (×2) | Edit / Delete / "Place on map" may need two clicks — confound eliminated, does NOT reproduce in isolation, instrumented rather than closed | [Site Planner / comps] | #comps #ui #site-planner | sandbox |
 | B849584 (×2) | An open rail flyout leaves its own trigger unhighlighted | [Site Planner] | #site-planner #ui | sandbox |
 | B1080976 | Share a schedule, from inside the Schedule module | [Scheduler] | #scheduler | live |

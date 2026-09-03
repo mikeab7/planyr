@@ -52,7 +52,7 @@ backstop, not the headline — see "Known, deliberately-not-fixed findings".
 | Main menu — File ▾ | 1 | 1 | 1 | — | 1 |
 | Main menu — Undo history | 0 | 0 | 0 | — | 0 |
 | Main menu — Settings gear | 2 | 2 | 2 | — | 2 |
-| Main menu — plan menu (▾ next to the plan name) | 3 | 3 | 3 | — | 3 |
+| Main menu — plan menu (▾ next to the plan name) | 0 | 0 | 3 | — | 3 |
 | Tool rail | 2 | 2 | 2 | — | 2 |
 | Left rail + panels (Yield) | 15 | 15 | 15 | — | 15 |
 | Library | 0 | 0 | 0 | — | 0 |
@@ -603,21 +603,13 @@ _(nothing matched in this theme/scenario)_
 
 ### Main menu — plan menu (▾ next to the plan name)
 
-**light** — 3 distinct style signature(s) over 6 matched element(s):
+**light** — 0 distinct style signature(s) over 0 matched element(s):
 
-| radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
-|---|---|---|---|---|---|---|---|
-| 6px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Save this plan now and confirm it actually persisted (device + cloud), Restore an earlier automatically-saved version of this plan, How much room this app is using on this device, and what's safe to clear ×3 | src/workspaces/site-planner/SitePlanner.jsx:19128:            title="Save this plan now and confirm it actually persisted (device + cloud)" data-testid="save-now"> |
-| 8px | 31px | 12px | 500 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | New layout on the same parcel, Clone this plan to iterate on ×2 | src/workspaces/site-planner/SitePlanner.jsx:19124:            <button style={{ ...chip, flex: 1 }} onClick={handleNewPlan} title="New layout on the same parcel"><span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><PlusIcon size={12} />New plan</span></button> |
-| 8px | 29px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | plan-name-input ×1 | src/workspaces/site-planner/SitePlanner.jsx:19073:            onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} data-testid="plan-name-input" /> |
+_(nothing matched in this theme/scenario)_
 
-**dark** — 3 distinct style signature(s) over 6 matched element(s):
+**dark** — 0 distinct style signature(s) over 0 matched element(s):
 
-| radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
-|---|---|---|---|---|---|---|---|
-| 6px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Save this plan now and confirm it actually persisted (device + cloud), Restore an earlier automatically-saved version of this plan, How much room this app is using on this device, and what's safe to clear ×3 | src/workspaces/site-planner/SitePlanner.jsx:19128:            title="Save this plan now and confirm it actually persisted (device + cloud)" data-testid="save-now"> |
-| 8px | 31px | 12px | 500 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | New layout on the same parcel, Clone this plan to iterate on ×2 | src/workspaces/site-planner/SitePlanner.jsx:19124:            <button style={{ ...chip, flex: 1 }} onClick={handleNewPlan} title="New layout on the same parcel"><span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><PlusIcon size={12} />New plan</span></button> |
-| 8px | 29px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | plan-name-input ×1 | src/workspaces/site-planner/SitePlanner.jsx:19073:            onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} data-testid="plan-name-input" /> |
+_(nothing matched in this theme/scenario)_
 
 
 ---
