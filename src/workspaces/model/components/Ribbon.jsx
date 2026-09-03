@@ -77,7 +77,12 @@ const GROUP_GAP = 8; // literal match to SPACE.md — real breathing room betwee
 
 function ribbonBtnStyle(active, extra) {
   return {
-    height: CTRL_H, minWidth: CTRL_H, padding: "0 6px", borderRadius: RADIUS.control, boxSizing: "border-box",
+    // B1087904 — was `RADIUS.control`, a token that doesn't exist on RADIUS (only
+    // pill/sm/md/lg) — silently resolved to `undefined`, which React drops from the style
+    // object, so every ribbon button rendered with a flat 0 border-radius regardless of theme.
+    // `RADIUS.sm` is the correct one per radius.js's own scale: a control nested inside another
+    // rounded surface (the toolbar card below).
+    height: CTRL_H, minWidth: CTRL_H, padding: "0 6px", borderRadius: RADIUS.sm, boxSizing: "border-box",
     border: `1px solid ${active ? "var(--accent-model)" : "var(--border-default)"}`,
     background: active ? "var(--accent-model)" : "var(--surface-page)",
     color: active ? "var(--on-accent-model)" : "var(--text-primary)",

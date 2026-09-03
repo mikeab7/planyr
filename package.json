@@ -80,7 +80,8 @@
     "pmtiles": "^4.4.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "tesseract.js": "^6.0.1"
+    "tesseract.js": "^6.0.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.4",

@@ -103,7 +103,7 @@ function leafBlock(tag, attrs, runs, path) {
 }
 
 function opaqueBlock(tag, label, node, path) {
-  return { tag, opaque: true, label, path, sig: JSON.stringify(["opaque", tag, sigPath(path), node]) };
+  return { tag, opaque: true, label, node, path, sig: JSON.stringify(["opaque", tag, sigPath(path), node]) };
 }
 
 /** Walk one document model into a flat, in-order list of leaf blocks (paragraphs, headings,
@@ -242,14 +242,15 @@ function sameShape(a, b) {
 
 function renderedLeaf(status, block, spans) {
   return block.opaque
-    ? { status, path: block.path, tag: block.tag, opaque: true, label: block.label }
+    ? { status, path: block.path, tag: block.tag, opaque: true, label: block.label, node: block.node }
     : { status, path: block.path, tag: block.tag, attrs: block.attrs, spans };
 }
 
-/** The public entry. Returns `{ blocks, changed }` — `blocks` is a tree ready for
- *  `NoteRedline.jsx` to render (see `nestByPath`), `changed` is whether anything differs at
- *  all (an identical pair renders as plain "same" text with nothing to show). */
-export function buildRedline(localDoc, serverDoc) {
+/** The shared engine behind both `buildRedline` (one merged document) and `buildComparison`'s
+ *  two split panes — ONE LCS alignment, computed once, so the unified redline and the
+ *  side-by-side panes can never disagree about what changed. Returns the FLAT, pre-nesting
+ *  list `nestByPath` expects. */
+function computeFlat(localDoc, serverDoc) {
   const blocksA = flattenBlocks(localDoc);   // revised
   const blocksB = flattenBlocks(serverDoc);  // original
   const raw = lcsAlign(blocksA.map((b) => b.sig), blocksB.map((b) => b.sig));
@@ -289,8 +290,50 @@ export function buildRedline(localDoc, serverDoc) {
     }
     i = j;
   }
+  return flat;
+}
 
+/** The public entry. Returns `{ blocks, changed }` — `blocks` is a tree ready for
+ *  `NoteRedline.jsx` to render (see `nestByPath`), `changed` is whether anything differs at
+ *  all (an identical pair renders as plain "same" text with nothing to show). */
+export function buildRedline(localDoc, serverDoc) {
+  const flat = computeFlat(localDoc, serverDoc);
   return { blocks: nestByPath(flat), changed: flat.some((b) => b.status !== "same") };
+}
+
+/** Two independent, fully-formatted trees — the NEWER document's own shape (kept text plus
+ *  insertions) and the OLDER document's own shape (kept text plus deletions) — built from the
+ *  SAME block alignment `buildRedline` uses, never a second, separately-computed diff. Built
+ *  for `ConflictSideBySide.jsx` (the follow-up brief's NEW-2): a plain-text flatten
+ *  (`docToText`) cannot tell "a table" from "the same words typed as running text," so two
+ *  STRUCTURALLY different documents that happen to say the same words could render two
+ *  IDENTICAL-looking panes — exactly what the owner hit (a signature-block table on one side,
+ *  the same contact lines as plain paragraphs on the other; both panes read as flat, matching
+ *  text). Real block shape survives per pane instead — a table that only exists on the older
+ *  side renders as a real `<table>` there and is simply absent from the newer pane, where the
+ *  paragraphs that replaced it render instead — so the two panes can only look alike when the
+ *  documents genuinely do.
+ *
+ *  Each pane is rendered by the SAME `NoteRedline` component the unified view uses (a leaf's
+ *  `status`/`spans` already carry everything the renderer needs to tint "this is new here" /
+ *  "this is going away" within one pane, exactly as they do in the merged view) — so there is
+ *  one rendering engine for both surfaces, not two that can drift apart. */
+export function buildComparison(localDoc, serverDoc) {
+  const flat = computeFlat(localDoc, serverDoc);
+  const changed = flat.some((b) => b.status !== "same");
+
+  const paneFlat = (excludeStatus, keepSpanKinds) => flat
+    .filter((b) => b.status !== excludeStatus)
+    .map((b) => (b.spans ? { ...b, spans: b.spans.filter((s) => keepSpanKinds.has(s.kind)) } : b));
+
+  return {
+    blocks: nestByPath(flat),
+    changed,
+    panes: {
+      newer: nestByPath(paneFlat("deleted", new Set(["same", "ins"]))),
+      older: nestByPath(paneFlat("inserted", new Set(["same", "del"]))),
+    },
+  };
 }
 
 /** Group a flat, path-carrying list back into a nested tree — the inverse of flattening. Two
