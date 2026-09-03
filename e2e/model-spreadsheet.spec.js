@@ -947,3 +947,98 @@ test.describe("Model workspace — B1106256 (a click next to an open menu is no 
     await expect(trigger).toHaveText(/Default/); // nothing was selected
   });
 });
+
+/* ⛔ B1107632 — replaces the ONE-FRAME-LATE scroll-dismiss arm (B1076480) with an EXPLICIT guard.
+ * `shared/ui/programmaticScroll.js` lets the "keep active cell fully on screen" layout effect
+ * (SheetView.jsx) MARK its own deliberate `scrollTop`/`scrollLeft` writes, and ContextMenu's
+ * dismiss listener — now armed IMMEDIATELY, no rAF delay — consumes that mark instead of racing
+ * it. The B1076480 suite above already covers the row case (line 688); this suite adds the
+ * column case, proves a genuine scroll still dismisses, and repeats the open/close cycle to
+ * match the (informal, pre-commit) CPU-throttle stress check's intent with a committed, CI-
+ * runnable equivalent.
+ *
+ * Click targeting: a partially-cut header's own `boundingBox()` reports its full, un-clipped
+ * layout box — its geometric center can land outside what the scrolling container actually
+ * paints there, which a raw `page.mouse` click (unlike Playwright's `locator.click()`, which
+ * auto-scrolls the target fully into view first — exactly the DRIVER-SCROLL-IS-NOT-APP-SCROLL
+ * trap this suite exists to avoid) will silently miss. `hitTestablePoint` scans for a real,
+ * currently-painted point on the target instead of assuming the center is one.
+ */
+test.describe("Model workspace — B1107632 (explicit scroll-dismiss guard)", () => {
+  /** A point on `testId` that a real `elementFromPoint` hit-test resolves back to `testId` —
+   *  robust to the element being partially clipped by an ancestor's overflow. */
+  async function hitTestablePoint(page, testId) {
+    return page.evaluate((id) => {
+      const el = document.querySelector(`[data-testid="${id}"]`);
+      const r = el.getBoundingClientRect();
+      for (let y = Math.ceil(r.top) + 1; y < r.bottom; y += 2) {
+        for (let x = Math.ceil(r.left) + 1; x < r.right; x += 4) {
+          const hit = document.elementFromPoint(x, y);
+          if (hit && hit.getAttribute("data-testid") === id) return { x, y };
+        }
+      }
+      return null;
+    }, testId);
+  }
+
+  async function rightClickPoint(page, { x, y }) {
+    await page.mouse.move(x, y);
+    await page.mouse.down({ button: "right" });
+    await page.mouse.up({ button: "right" });
+  }
+
+  test("right-clicking a column header that requires auto-scrolling itself into view does not immediately self-dismiss the menu it just opened", async ({ page }) => {
+    const id = "e2e-b1107632-colscroll";
+    await seedProject(page, id);
+    await page.setViewportSize({ width: 300, height: 500 }); // narrow enough to cut a column header
+    await page.goto(`/#/project/${id}/model`);
+    await expect(sheetEl(page)).toBeVisible();
+
+    // Find the column header straddling the sheet's own clipped right edge (the "last partially
+    // visible column"), then a real hit-testable point on it.
+    const target = await page.evaluate(() => {
+      const clip = document.querySelector('[data-testid="model-sheet"]').getBoundingClientRect();
+      for (let c = 0; c < 20; c++) {
+        const el = document.querySelector(`[data-testid="model-col-header-${c}"]`);
+        if (!el) continue;
+        const r = el.getBoundingClientRect();
+        if (r.left < clip.right && r.right > clip.right) return `model-col-header-${c}`;
+      }
+      return null;
+    });
+    expect(target, "no partially-cut column header found at this viewport width").not.toBeNull();
+    const point = await hitTestablePoint(page, target);
+    expect(point, `no hit-testable point found on ${target}`).not.toBeNull();
+
+    await rightClickPoint(page, point);
+    // Give the auto-scroll nudge (and its deferred native `scroll` event) a full beat to land.
+    await page.waitForTimeout(300);
+    await expect(page.locator(".menu")).toBeVisible();
+
+    // And a genuine later scroll still dismisses it.
+    await sheetEl(page).evaluate((el) => {
+      el.scrollLeft += 200;
+      el.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await expect(page.locator(".menu")).toBeHidden();
+  });
+
+  test("repeated right-click-and-close cycles on a row requiring auto-scroll never self-dismiss — deterministic across N opens, not merely observed once", async ({ page }) => {
+    const id = "e2e-b1107632-repeat";
+    await seedProject(page, id);
+    await page.setViewportSize({ width: 900, height: 500 });
+    await page.goto(`/#/project/${id}/model`);
+    await expect(sheetEl(page)).toBeVisible();
+
+    const point = await hitTestablePoint(page, "model-row-header-14");
+    expect(point, "no hit-testable point found on model-row-header-14").not.toBeNull();
+
+    for (let i = 0; i < 6; i++) {
+      await rightClickPoint(page, point);
+      await page.waitForTimeout(300);
+      await expect(page.locator(".menu"), `self-closed on open #${i + 1}`).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(page.locator(".menu")).toBeHidden();
+    }
+  });
+});
