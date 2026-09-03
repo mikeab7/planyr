@@ -6,14 +6,14 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-09-02",
-        "approvedCommit": "a90e0c37",
-        "note": "B1074770 (map-finder split-button caret audit) — the Select-parcels/Place-comp split-button carets now render via the same aria-hidden, opacity-0.6 caret span controls.jsx's MenuTrigger primitive uses everywhere else in the app (was full-opacity bare text), and the Select-parcels menu panel is intentionally narrower (148px vs 200px, B1074769). Both are deliberate, requested visual changes to the map-landing toolbar."
+        "approvedAt": "2026-09-03",
+        "approvedCommit": "a8f42d04",
+        "note": "B1099937: re-approve with a verified rev-1228 capture after the earlier approval was proven stale (vanilla-vs-origin byte-match proved this sandbox IS CI-accurate for this surface; the prior approval simply wasn't captured with the verified binary)"
       },
       "dark": {
-        "approvedAt": "2026-09-02",
-        "approvedCommit": "a90e0c37",
-        "note": "B1074770 (map-finder split-button caret audit) — the Select-parcels/Place-comp split-button carets now render via the same aria-hidden, opacity-0.6 caret span controls.jsx's MenuTrigger primitive uses everywhere else in the app (was full-opacity bare text), and the Select-parcels menu panel is intentionally narrower (148px vs 200px, B1074769). Both are deliberate, requested visual changes to the map-landing toolbar."
+        "approvedAt": "2026-09-03",
+        "approvedCommit": "a8f42d04",
+        "note": "B1099937: re-approve with a verified rev-1228 capture after the earlier approval was proven stale (vanilla-vs-origin byte-match proved this sandbox IS CI-accurate for this surface; the prior approval simply wasn't captured with the verified binary)"
       },
       "light--phone": {
         "approvedAt": "2026-09-03",
@@ -28,68 +28,68 @@
     },
     "site-planner-header": {
       "light": {
-        "approvedAt": "2026-09-02",
-        "approvedCommit": "a90e0c37",
-        "note": "B1074770 (map-finder split-button caret audit) — the Select-parcels/Place-comp split-button carets now render via the same aria-hidden, opacity-0.6 caret span controls.jsx's MenuTrigger primitive uses everywhere else in the app (was full-opacity bare text), and the Select-parcels menu panel is intentionally narrower (148px vs 200px, B1074769). Both are deliberate, requested visual changes to the map-landing toolbar."
+        "approvedAt": "2026-09-03",
+        "approvedCommit": "a8f42d04",
+        "note": "B1096017 (×2): re-approve with a verified rev-1228 capture of the current code — the darkened --surface-page/--success-text tokens visibly change this surface's chrome (AppHeader, left rail), a real intended consequence of the Model Round 4 fix, not sandbox noise (origin/main's own CI run 33717394337 passed clean on the old baseline, ruling out a pre-existing CI-side gap)"
       },
       "dark": {
-        "approvedAt": "2026-09-02",
-        "approvedCommit": "a90e0c37",
-        "note": "B1074770 (map-finder split-button caret audit) — the Select-parcels/Place-comp split-button carets now render via the same aria-hidden, opacity-0.6 caret span controls.jsx's MenuTrigger primitive uses everywhere else in the app (was full-opacity bare text), and the Select-parcels menu panel is intentionally narrower (148px vs 200px, B1074769). Both are deliberate, requested visual changes to the map-landing toolbar."
+        "approvedAt": "2026-09-03",
+        "approvedCommit": "a8f42d04",
+        "note": "B1096017 (×2): re-approve with a verified rev-1228 capture of the current code — the darkened --surface-page/--success-text tokens visibly change this surface's chrome (AppHeader, left rail), a real intended consequence of the Model Round 4 fix, not sandbox noise (origin/main's own CI run 33717394337 passed clean on the old baseline, ruling out a pre-existing CI-side gap)"
       },
       "light--phone": {
         "approvedAt": "2026-09-03",
-        "approvedCommit": "f94412eb",
-        "note": "Model Round 4 token move (--surface-page/--success-text) shifted phone baselines too; re-captured with CI's exact pinned Chromium (rev 1228, confirmed available this session) while here, closing B1096017's playwright-install blocker in the same commit."
+        "approvedCommit": "a8f42d04",
+        "note": "B1096017 (×2): re-approve with a verified rev-1228 capture of the current code — the darkened --surface-page/--success-text tokens visibly change this surface's chrome (AppHeader, left rail), a real intended consequence of the Model Round 4 fix, not sandbox noise (origin/main's own CI run 33717394337 passed clean on the old baseline, ruling out a pre-existing CI-side gap)"
       },
       "dark--phone": {
         "approvedAt": "2026-09-03",
-        "approvedCommit": "f94412eb",
-        "note": "Model Round 4 token move (--surface-page/--success-text) shifted phone baselines too; re-captured with CI's exact pinned Chromium (rev 1228, confirmed available this session) while here, closing B1096017's playwright-install blocker in the same commit."
+        "approvedCommit": "a8f42d04",
+        "note": "B1096017 (×2): re-approve with a verified rev-1228 capture of the current code — the darkened --surface-page/--success-text tokens visibly change this surface's chrome (AppHeader, left rail), a real intended consequence of the Model Round 4 fix, not sandbox noise (origin/main's own CI run 33717394337 passed clean on the old baseline, ruling out a pre-existing CI-side gap)"
       }
     },
     "site-planner-left-rail": {
       "light": {
-        "approvedAt": "2026-09-02",
-        "approvedCommit": "a90e0c37",
-        "note": "B1074770 (map-finder split-button caret audit) — the Select-parcels/Place-comp split-button carets now render via the same aria-hidden, opacity-0.6 caret span controls.jsx's MenuTrigger primitive uses everywhere else in the app (was full-opacity bare text), and the Select-parcels menu panel is intentionally narrower (148px vs 200px, B1074769). Both are deliberate, requested visual changes to the map-landing toolbar."
+        "approvedAt": "2026-09-03",
+        "approvedCommit": "a8f42d04",
+        "note": "B1096017 (×2): same as site-planner-header — real token-driven chrome change, re-approved with verified rev-1228"
       },
       "dark": {
-        "approvedAt": "2026-09-02",
-        "approvedCommit": "a90e0c37",
-        "note": "B1074770 (map-finder split-button caret audit) — the Select-parcels/Place-comp split-button carets now render via the same aria-hidden, opacity-0.6 caret span controls.jsx's MenuTrigger primitive uses everywhere else in the app (was full-opacity bare text), and the Select-parcels menu panel is intentionally narrower (148px vs 200px, B1074769). Both are deliberate, requested visual changes to the map-landing toolbar."
+        "approvedAt": "2026-09-03",
+        "approvedCommit": "a8f42d04",
+        "note": "B1096017 (×2): same as site-planner-header — real token-driven chrome change, re-approved with verified rev-1228"
       },
       "light--phone": {
         "approvedAt": "2026-09-03",
-        "approvedCommit": "f94412eb",
-        "note": "Model Round 4 token move (--surface-page/--success-text) shifted phone baselines too; re-captured with CI's exact pinned Chromium (rev 1228, confirmed available this session) while here, closing B1096017's playwright-install blocker in the same commit."
+        "approvedCommit": "a8f42d04",
+        "note": "B1096017 (×2): same as site-planner-header — real token-driven chrome change, re-approved with verified rev-1228"
       },
       "dark--phone": {
         "approvedAt": "2026-09-03",
-        "approvedCommit": "f94412eb",
-        "note": "Model Round 4 token move (--surface-page/--success-text) shifted phone baselines too; re-captured with CI's exact pinned Chromium (rev 1228, confirmed available this session) while here, closing B1096017's playwright-install blocker in the same commit."
+        "approvedCommit": "a8f42d04",
+        "note": "B1096017 (×2): same as site-planner-header — real token-driven chrome change, re-approved with verified rev-1228"
       }
     },
     "library": {
       "light": {
-        "approvedAt": "2026-09-02",
-        "approvedCommit": "a90e0c37",
-        "note": "B1074770 (map-finder split-button caret audit) — the Select-parcels/Place-comp split-button carets now render via the same aria-hidden, opacity-0.6 caret span controls.jsx's MenuTrigger primitive uses everywhere else in the app (was full-opacity bare text), and the Select-parcels menu panel is intentionally narrower (148px vs 200px, B1074769). Both are deliberate, requested visual changes to the map-landing toolbar."
+        "approvedAt": "2026-09-03",
+        "approvedCommit": "a8f42d04",
+        "note": "B1096017 (×2): same as site-planner-header — the darkened --surface-page background is directly visible on this workspace's page background, re-approved with verified rev-1228"
       },
       "dark": {
-        "approvedAt": "2026-09-02",
-        "approvedCommit": "a90e0c37",
-        "note": "B1074770 (map-finder split-button caret audit) — the Select-parcels/Place-comp split-button carets now render via the same aria-hidden, opacity-0.6 caret span controls.jsx's MenuTrigger primitive uses everywhere else in the app (was full-opacity bare text), and the Select-parcels menu panel is intentionally narrower (148px vs 200px, B1074769). Both are deliberate, requested visual changes to the map-landing toolbar."
+        "approvedAt": "2026-09-03",
+        "approvedCommit": "a8f42d04",
+        "note": "B1096017 (×2): same as site-planner-header — the darkened --surface-page background is directly visible on this workspace's page background, re-approved with verified rev-1228"
       },
       "light--phone": {
         "approvedAt": "2026-09-03",
-        "approvedCommit": "f94412eb",
-        "note": "Model Round 4 token move (--surface-page/--success-text) shifted phone baselines too; re-captured with CI's exact pinned Chromium (rev 1228, confirmed available this session) while here, closing B1096017's playwright-install blocker in the same commit."
+        "approvedCommit": "a8f42d04",
+        "note": "B1096017 (×2): same as site-planner-header — the darkened --surface-page background is directly visible on this workspace's page background, re-approved with verified rev-1228"
       },
       "dark--phone": {
         "approvedAt": "2026-09-03",
-        "approvedCommit": "f94412eb",
-        "note": "Model Round 4 token move (--surface-page/--success-text) shifted phone baselines too; re-captured with CI's exact pinned Chromium (rev 1228, confirmed available this session) while here, closing B1096017's playwright-install blocker in the same commit."
+        "approvedCommit": "a8f42d04",
+        "note": "B1096017 (×2): same as site-planner-header — the darkened --surface-page background is directly visible on this workspace's page background, re-approved with verified rev-1228"
       }
     }
   }
