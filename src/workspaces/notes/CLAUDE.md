@@ -163,6 +163,41 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   reported side-by-side clipping at the owner's exact viewport (1600 CSS px) and could not
   reproduce it** — reported as most likely his screenshot being cropped, not a real defect; see
   that item in `docs/archive/BACKLOG-DONE.md` for the full headless proof.
+  ⛔ **B842944–B842948 (owner redlines, five in one screenshot on his own LIVE conflict, 2026-09-03)
+  — A FOLLOW-UP LAYER, not a rebuild.** None of the redlines touched the redline direction, the
+  key's existence, or decide-later; all stayed. **B842944/NEW-1** — *"why are both copies safe? …
+  i dont care to keep an old copy that much"* / *"isnt that wasted space"* — resolving a conflict no
+  longer creates a sibling page at all. `Notes.jsx`'s `handleConflict` now parks the discarded copy
+  in THIS PAGE'S OWN version history via `snapshotPage` (`lib/notesVersions.js`, pinned + forced),
+  reusing the toolbar's existing History control rather than inventing a new concept; it falls back
+  to the old sibling-copy behaviour — immediately BINNED, never left live — only if IndexedDB
+  genuinely refuses the write. The reassurance sentence is rewritten to match
+  (`notesConflictKeptLine()`, `lib/notesStore.js`) and demoted from a `--warn-bg` banner to a quiet
+  caption below the buttons. **B842945/NEW-2** — *"this header somehow splits the documents"*: the
+  version bar + legend used to be `position: sticky` INSIDE the scrolling pane, which reserves its
+  layout space only ONCE at its original flow position, so the pinned copy painted OVER content that
+  had since scrolled up underneath it (his exact case: "jerry@broadacrellc.com" / "M: (832)
+  309-0891" occluded). Fixed structurally — the bar is now DOCKED, its own `flex: 0 0 auto` sibling
+  ABOVE the scrolling pane, never inside it, so `overflow-y: auto` clips content to the pane's own
+  box and content can never reach the space the header occupies. **B842946/NEW-3** — *"the
+  explanation is way too wordy"*: the legend used to spell out a full consequence sentence per mark
+  ("keeping the older version loses it") — a PRIOR brief's own instruction, right in spirit and
+  wrong in execution — replaced with two short fragments naming what each mark MEANS (`Struck-through
+  or − Removed = the older version only. Underlined or + Added = the newer version only.`).
+  **B842947/NEW-4** — *"these buttons blend in too much"* (both clusters): every hand-rolled
+  `<button>` in the panel now matches the shared control primitives' `Button`(primary/ghost)/
+  `ToggleChip` shape-for-shape — `PrimaryButton`/`GhostButton`/`ModeChip`, MIRRORED locally rather
+  than imported (same reasoning `NoteToolbar.jsx` already documents for its own `RADIUS`:
+  importing the shared primitives module from Notes risks hoisting a shared chunk onto other
+  routes and breaking the Site-route chunk allowlist the perf-bundle audit enforces).
+  **B842948/NEW-5** — *"spacing is weird here"*: the footer used to spread the two choices to
+  opposite ends of the full-width bar with each label floating above its own outlined pill;
+  `KeepButton` now merges a Keep action's label AND its timestamp into the ONE filled button, and
+  the two sit centered, close together, as a pair. Critique-loop screenshots (both themes ×
+  desktop/narrow, plus a deliberately-injected long-note stress render proving the exact reported
+  lines now scroll cleanly under the docked header) judged against the six-question bar in
+  `docs/notes-conflict-critique.md`; proof lives in the notes conflict-review verification
+  harness under `ui-audit/` (62 checks).
 - `lib/notesVersionOrder.js` — PURE: `orderConflictVersions()` decides which of the two
   conflicting copies is NEWER (both timestamps known and different), returning `{comparable,
   newer, older}` with `which: "mine"|"theirs"` on each side so a caller can still wire the right

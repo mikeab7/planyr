@@ -104,5 +104,9 @@ export function versionReasonLabel(reason) {
   if (reason === "before-restore") return "Before a restore";
   if (reason === "restored") return "Restored";
   if (reason === "closed") return "When you left the page";
+  // ⛔ B842944/NEW-1 (owner redlines, 2026-09-03) — a resolved conflict's discarded copy is
+  // now parked HERE, in the page's own version history, rather than as a sibling page. See
+  // Notes.jsx's handleConflict.
+  if (reason === "conflict-discarded") return "From a resolved conflict";
   return "While you were typing";
 }

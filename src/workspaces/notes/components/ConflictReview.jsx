@@ -50,63 +50,160 @@
  *  `NoteRedline` component the unified view uses, so real structure — a table, a picture, a
  *  list — survives in both views and the two panes can only look alike when the documents
  *  genuinely do.
+ *
+ *  ⛔ B842944–B842948 (owner redlines, five in one screenshot, 2026-09-03) — A FOLLOW-UP LAYER, AFTER
+ *  THE MECHANISM ABOVE ALREADY SHIPPED. Michael marked up his own live panel with five separate
+ *  notes; none touched the redline direction, the key's existence, or decide-later — all of
+ *  that stayed. What changed:
+ *
+ *  NEW-1 — "why are both copies safe? ... i dont care to keep an old copy that much" /
+ *  "isnt that wasted space". Resolving a conflict no longer creates a sibling page at all — see
+ *  `Notes.jsx`'s `handleConflict`, which now parks the discarded copy in THIS PAGE's own
+ *  version history (`snapshotPage`) instead of `copyPageWithin`. The reassurance sentence below
+ *  is rewritten to match (`notesConflictKeptLine`, `lib/notesStore.js`) and demoted from a
+ *  warn-tinted banner to a quiet caption — it is no longer the loudest thing on the panel.
+ *
+ *  NEW-2 — "this header somehow splits the documents": the version bar + legend used to be
+ *  `position: sticky` INSIDE the scrolling pane, which reserves its layout space only ONCE at
+ *  its original flow position — once that gap scrolls past, the pinned copy paints ON TOP of
+ *  whatever content has since scrolled up underneath it (exactly what happened to his
+ *  "jerry@broadacrellc.com" / "M: (832) 309-0891" lines). Fixed structurally, not by tuning the
+ *  sticky offset: the bar is now DOCKED — its own `flex: 0 0 auto` sibling ABOVE the scrolling
+ *  pane, never inside it — so it reserves real flexbox space on every frame and content can
+ *  never scroll underneath it. It is still visible throughout the scroll (better than sticky:
+ *  no scroll-timing edge case to get wrong), it just isn't part of the scrolling flow.
+ *
+ *  NEW-3 — "the explanation is way too wordy to say somehting very simple". The prior legend
+ *  stated the CONSEQUENCE of each encoding in a full sentence each ("keeping the older version
+ *  loses it") — a previous brief explicitly asked for exactly that phrasing, and it produced
+ *  two run-on sentences instead of the "absorb it at a glance" bar the owner wants. Rewritten
+ *  as two short fragments naming what each mark MEANS, matching the header line's own
+ *  older→newer order, with the direction-of-loss already implied by which slot the mark
+ *  belongs to (visible in the version-bar line directly above it).
+ *
+ *  NEW-4 — "these buttons blend in too much" (both the mode toggle / Decide later cluster AND
+ *  the two Keep buttons). Every hand-rolled `<button>` here now matches `shared/ui/controls.jsx`'s
+ *  `Button`(primary/ghost)/`ToggleChip` primitives shape-for-shape (`PrimaryButton`/`GhostButton`/
+ *  `ModeChip` below — MIRRORED rather than imported, see that block's own comment for why) per
+ *  docs/DESIGN.md's hard rule ("a new control is never invented at the call site") — `ModeChip`
+ *  for the Redline/Side by side mode switch, `GhostButton` for Decide later, and `PrimaryButton`
+ *  (a real filled button, Notes' own `--accent-notes`) for the two Keep actions, which are the
+ *  entire point of the panel and were previously the least visible things on it.
+ *
+ *  NEW-5 — "spacing is weird here". The footer used to spread the two choices to opposite ends
+ *  of the full-width bar (`justify-content: space-between`) with each label floating above its
+ *  own button as a separate element. `KeepButton` below merges the label and its timestamp INTO
+ *  the one button (so there is never a question which time belongs to which action), and the
+ *  two buttons sit centered, side by side, close together — the two things being compared read
+ *  as a pair, the way Google Docs' own restore bar keeps a version's identity and its action in
+ *  one control rather than two.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { buildComparison } from "../lib/notesRedline.js";
 import { orderConflictVersions } from "../lib/notesVersionOrder.js";
 import { imageIdsInDoc } from "../lib/notesMarkdown.js";
-import { readNoteImages } from "../lib/notesStore.js";
+import { notesConflictKeptLine, readNoteImages } from "../lib/notesStore.js";
 import NoteRedline, { ChangeTag } from "./NoteRedline.jsx";
 import ConflictSideBySide from "./ConflictSideBySide.jsx";
 import { stampLabel, absoluteStamp } from "../lib/notesTime.js";
 
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
+const PAD = { sm: "5px 10px", lg: "9px 14px" }; // mirrored from shared/ui/controls.jsx — see below
+const FONT = { sm: 10.5 }; // mirrored from shared/ui/controls.jsx — see below
+const REST_SHADOW = "0 1px 2px rgba(0,0,0,0.05)"; // design-exempt: neutral rest-shadow mirrored verbatim from shared/ui/controls.jsx's own REST_SHADOW — token-independent by design, see that file's Button comment
+// The module's own accent, per docs/DESIGN.md's "active-control accent" rule — every filled
+// primitive in this panel uses Notes' hue, not the app-wide default.
+const NOTES_ACCENT = { accent: "var(--accent-notes)", onAccent: "var(--on-accent-notes)" };
+
+/* ⛔ B842947/NEW-4 — `PrimaryButton`/`GhostButton`/`ModeChip` MIRROR `shared/ui/controls.jsx`'s
+ * `Button`(variant primary/ghost)/`ToggleChip` rather than importing them — deliberately, the
+ * same reasoning `NoteToolbar.jsx` already documents for `RADIUS`: importing `controls.jsx`
+ * from Notes hoists a shared chunk onto other routes and risks the site-planner route's chunk
+ * allowlist (`ui-audit/perf-bundle-audit.mjs`). A few duplicated style rules beat a cross-route bundle
+ * regression. Keep these in step with `controls.jsx`'s own `Button`/`ToggleChip` if either
+ * changes shape. */
+function PrimaryButton({ size = "lg", accent = "var(--accent)", onAccent = "var(--on-accent)", style, children, ...rest }) {
+  return (
+    <button
+      style={{
+        padding: PAD[size] || PAD.lg, fontSize: 12, borderRadius: RADIUS.control, cursor: "pointer",
+        fontFamily: "inherit", fontWeight: 600, boxShadow: REST_SHADOW,
+        border: `1px solid ${accent}`, background: accent, color: onAccent, ...style,
+      }}
+      {...rest}
+    >{children}</button>
+  );
+}
+
+function GhostButton({ size = "sm", style, children, ...rest }) {
+  return (
+    <button
+      style={{
+        padding: PAD[size] || PAD.sm, fontSize: FONT.sm, borderRadius: RADIUS.control, cursor: "pointer",
+        fontFamily: "inherit", fontWeight: 600, boxShadow: REST_SHADOW,
+        border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-primary)", ...style,
+      }}
+      {...rest}
+    >{children}</button>
+  );
+}
+
+function ModeChip({ active, accent = "var(--accent)", onAccent = "var(--on-accent)", style, children, ...rest }) {
+  return (
+    <button
+      style={{
+        padding: "6px 11px", fontSize: FONT.sm, borderRadius: RADIUS.pill, cursor: "pointer",
+        fontFamily: "inherit", fontWeight: active ? 650 : 500,
+        border: `1px solid ${active ? accent : "var(--border-default)"}`,
+        background: active ? accent : "var(--surface-raised)",
+        color: active ? onAccent : "var(--text-primary)",
+        boxShadow: REST_SHADOW, ...style,
+      }}
+      {...rest}
+    >{children}</button>
+  );
+}
 
 /** The visible HEADING name for one slot ("newer"/"older") — recency-based whenever it's known,
  *  and a plain, honest window fallback when it isn't (see `notesVersionOrder.js`'s header for
- *  why an unranked pair must never be LABELLED as ranked). Shared by the footer's two columns
- *  and the redline's own key so the two "speak the same language" (NEW-4). */
+ *  why an unranked pair must never be LABELLED as ranked). Shared by the version bar and the
+ *  redline's own key so the two "speak the same language" (NEW-4). */
 function roleLabel(comparable, isNewer, which) {
   if (comparable) return isNewer ? "Newer version" : "Older version";
   return which === "mine" ? "This window’s version" : "The other window’s version";
 }
 
-/** The MID-SENTENCE form of the same slot, for the legend's own prose ("is only in ⟨phrase⟩" /
- *  "keeping ⟨phrase⟩ loses it"). Deliberately NOT just `roleLabel(...).toLowerCase()` wrapped in
- *  an external "the": "this window's version" takes no article and "the other window's
- *  version" already carries its own, so a template that prepends "the" to both produces "the
- *  this window's version" / "the the other window's version" — caught in the critique loop's
- *  second pass, on the very fallback path this whole rule exists to keep honest. Each phrase
- *  here is total and self-contained; a caller never adds its own article. */
+/** The MID-SENTENCE form of the same slot, for the legend's own fragments ("= ⟨phrase⟩ only").
+ *  Deliberately NOT just `roleLabel(...).toLowerCase()` wrapped in an external "the": "this
+ *  window's version" takes no article and "the other window's version" already carries its
+ *  own, so a template that prepends "the" to both produces a double article — caught in the
+ *  critique loop's second pass, on the very fallback path this whole rule exists to keep
+ *  honest. Each phrase here is total and self-contained; a caller never adds its own article. */
 function rolePhrase(comparable, isNewer, which) {
   if (comparable) return isNewer ? "the newer version" : "the older version";
   return which === "mine" ? "this window’s version" : "the other window’s version";
 }
 
-/** One resolve choice, in the footer — the condensed sibling of `ConflictSideBySide`'s
- *  `VersionCard`: no text pane (the redline above already shows the content), just enough to
- *  identify and act on ONE specific copy. MODULE-SCOPE, not a closure per render. */
-function ChoiceColumn({ roleText, when, whenExact, buttonLabel, buttonAriaLabel, onChoose, testId }) {
+/** ONE primary resolve action — the label AND its timestamp are the SAME control (NEW-4/NEW-5),
+ *  so there is never a question which time belongs to which button; the old layout floated a
+ *  label above an outlined pill with the timestamp off to the side of that. MODULE-SCOPE, not a
+ *  closure per render (MODULE-SCOPE-COMPONENTS). */
+function KeepButton({ buttonLabel, when, whenExact, buttonAriaLabel, onChoose, testId }) {
   return (
-    <div style={{ minWidth: 0, flex: "1 1 220px", display: "flex", flexDirection: "column", gap: 4 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-        <span style={{ fontWeight: 700, fontSize: 12, color: "var(--text-primary)" }}>{roleText}</span>
-        <span title={whenExact || undefined} style={{ fontSize: 10.5, fontWeight: 600, color: "var(--text-secondary)" }}>
-          {when ? `edited ${when}` : "edit time unknown"}
-        </span>
-      </div>
-      <button
-        type="button"
-        data-testid={testId}
-        aria-label={buttonAriaLabel}
-        onClick={onChoose}
-        style={{
-          alignSelf: "flex-start", border: "1px solid var(--warn-text)", borderRadius: RADIUS.pill,
-          background: "transparent", color: "var(--warn-text)", font: "inherit",
-          fontSize: 10.5, fontWeight: 700, padding: "4px 14px", cursor: "pointer",
-        }}
-      >{buttonLabel}</button>
-    </div>
+    <PrimaryButton
+      type="button"
+      size="lg"
+      {...NOTES_ACCENT}
+      data-testid={testId}
+      aria-label={buttonAriaLabel}
+      onClick={onChoose}
+      style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, minWidth: 172 }}
+    >
+      <span style={{ fontSize: 12, fontWeight: 700 }}>{buttonLabel}</span>
+      <span title={whenExact || undefined} style={{ fontSize: 10.5, fontWeight: 500, opacity: 0.85 }}>
+        {when ? `edited ${when}` : "edit time unknown"}
+      </span>
+    </PrimaryButton>
   );
 }
 
@@ -166,6 +263,8 @@ export default function ConflictReview({
    *  label restates BOTH facts a sighted person gets for free — which window, and when. */
   const ariaFor = (slot, roleText, when) =>
     `${roleText} — edited ${when || "an unknown time"}, from ${slot.which === "mine" ? "this window" : "the other window"}`;
+  const newerButtonLabel = order.comparable ? "Keep the newer version" : `Keep ${order.newer.which === "mine" ? "this window’s" : "the other window’s"} version`;
+  const olderButtonLabel = order.comparable ? "Keep the older version" : `Keep ${order.older.which === "mine" ? "this window’s" : "the other window’s"} version`;
 
   return (
     <div
@@ -188,78 +287,76 @@ export default function ConflictReview({
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>Compare versions — {name}</span>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <div style={{ display: "flex", border: "1px solid var(--border-default)", borderRadius: RADIUS.pill, overflow: "hidden" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {/* NEW-4 — a ModeChip pair reads as a real control (filled active state), not
+             * flat text with a hairline border. */}
+            <div style={{ display: "flex", gap: 4 }}>
               {[["redline", "Redline"], ["sidebyside", "Side by side"]].map(([id, label]) => (
-                <button
+                <ModeChip
                   key={id}
                   type="button"
                   data-testid={`notes-conflict-view-${id}`}
                   onClick={() => setView(id)}
                   aria-pressed={view === id}
-                  style={{
-                    border: "none", cursor: "pointer", font: "inherit", fontSize: 10.5, fontWeight: 700,
-                    padding: "5px 12px", color: view === id ? "var(--on-accent-notes)" : "var(--text-secondary)",
-                    background: view === id ? "var(--accent-notes)" : "transparent",
-                  }}
-                >{label}</button>
+                  active={view === id}
+                  {...NOTES_ACCENT}
+                >{label}</ModeChip>
               ))}
             </div>
-            {/* NEW-3 — NOT A BARE "✕". A close icon alone reads as "cancel/discard" to a person
-             * deciding whether it's safe to walk away without picking a version; this button
-             * says in words that it is. It does exactly what Esc/the old ✕ did — nothing is
-             * resolved, the compact notice's "Review changes →" button reopens this exact
-             * comparison later — the change is only that it now SAYS so. */}
-            <button
+            {/* NEW-3 (of the original B849107 brief) — NOT A BARE "✕". A close icon alone reads
+             * as "cancel/discard" to a person deciding whether it's safe to walk away without
+             * choosing; this button says in words that it is. It does exactly what Esc/the old
+             * ✕ did — nothing is resolved, the compact notice's "Review changes →" button
+             * reopens this exact comparison later — the change is only that it now SAYS so. */}
+            <GhostButton
               type="button"
+              size="sm"
               data-testid="notes-conflict-review-close"
               aria-label="Decide later — closes this comparison without choosing; both versions stay safe and you can reopen it anytime from the notice"
               onClick={onClose}
-              style={{
-                border: "1px solid var(--border-default)", borderRadius: RADIUS.pill, background: "transparent",
-                color: "var(--text-secondary)", font: "inherit", fontSize: 10.5, fontWeight: 700,
-                padding: "5px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: 5,
-              }}
-            ><span aria-hidden="true">✕</span> Decide later</button>
+              style={{ display: "flex", alignItems: "center", gap: 5 }}
+            ><span aria-hidden="true">✕</span> Decide later</GhostButton>
           </div>
         </div>
-        <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>
-          Both copies are safe either way — pick a version below, or close this and decide later.
-        </span>
       </div>
+
+      {/* NEW-2 — DOCKED, not sticky-inside-the-scroll-pane: its own flex sibling above the
+       * scrolling body, so it reserves real layout space on every frame and content can never
+       * scroll underneath it. Only the redline view needs it — side by side shows both full
+       * copies with nothing to key. */}
+      {view === "redline" ? (
+        <div style={{
+          flex: "0 0 auto", padding: "8px 16px", borderBottom: "1px solid var(--border-default)",
+          background: "var(--surface-page)",
+        }}
+        >
+          <div style={{ maxWidth: 820, margin: "0 auto", display: "flex", flexDirection: "column", gap: 4 }}>
+            <p style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-primary)", margin: 0 }}>
+              {order.comparable
+                ? <>{olderLabel} (edited {olderWhen}) → {newerLabel} (edited {newerWhen})</>
+                : <>{newerLabel} ↔ {olderLabel} — edit time unknown, so we can’t say which is newer</>}
+            </p>
+            {/* NEW-3 — TWO SHORT FRAGMENTS naming what each mark MEANS, matching the older→newer
+             * order of the line above. The prior version spelled out the CONSEQUENCE of each in
+             * a full sentence ("keeping the older version loses it") per an earlier brief's own
+             * instruction — right in spirit, wrong in execution: it read as two run-on
+             * sentences instead of something absorbed at a glance. */}
+            <p style={{ fontSize: 10.5, color: "var(--text-secondary)", margin: 0 }}>
+              <span style={{ color: "var(--danger-text)", textDecoration: "line-through" }}>Struck-through</span>
+              {" "}or <ChangeTag status="deleted" /> = <strong>{olderPhrase}</strong> only.{" "}
+              <span style={{ color: "var(--success-text)", textDecoration: "underline" }}>Underlined</span>
+              {" "}or <ChangeTag status="inserted" /> = <strong>{newerPhrase}</strong> only.
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       <div style={{ flex: "1 1 auto", overflowY: "auto", padding: "14px 16px" }}>
         {view === "redline" ? (
           <div style={{ maxWidth: 820, margin: "0 auto" }}>
-            {/* NEW-4 — STICKY, so the key is still on screen once he's scrolled into a long
-             * note (the exact spot he was looking at when he couldn't find one), and it now
-             * covers BOTH encodings the renderer actually uses: inline underline/strikethrough
-             * for a word-level edit, and the block-level "+ Added"/"− Removed" tag for a whole
-             * item (table, picture, paragraph) that only exists on one side. Framed by WHICH
-             * VERSION IS NEWER, matching the footer below, and stated as a CONSEQUENCE — which
-             * button loses which text — rather than bare set membership. */}
-            <div style={{
-              position: "sticky", top: 0, zIndex: 1, background: "var(--surface-page)",
-              paddingBottom: 8, marginBottom: 2,
-            }}
-            >
-              <p style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-primary)", margin: "0 0 4px" }}>
-                {order.comparable
-                  ? <>{olderLabel} (edited {olderWhen}) → {newerLabel} (edited {newerWhen})</>
-                  : <>{newerLabel} ↔ {olderLabel} — edit time unknown, so we can’t say which is newer</>}
-              </p>
-              <p style={{ fontSize: 10.5, color: "var(--text-secondary)", margin: 0 }}>
-                <span style={{ color: "var(--success-text)", textDecoration: "underline" }}>Underlined</span> text
-                {" "}or a <ChangeTag status="inserted" /> tag is only in <strong>{newerPhrase}</strong> —
-                {" "}keeping {olderPhrase} loses it.{" "}
-                <span style={{ color: "var(--danger-text)", textDecoration: "line-through" }}>Struck-through</span> text
-                {" "}or a <ChangeTag status="deleted" /> tag is only in <strong>{olderPhrase}</strong> —
-                {" "}keeping {newerPhrase} loses it.
-              </p>
-            </div>
             {/* A bordered "page" rather than text floating on the bare background — the
              * empty margin either side is a document-reading width, not unfinished chrome
-             * (round 1 of the critique loop read this as sparse without the card). */}
+             * (round 1 of the original critique loop read this as sparse without the card). */}
             <div
               data-testid="notes-redline-body"
               style={{
@@ -283,33 +380,30 @@ export default function ConflictReview({
 
       {/* ⛔ ONLY THE REDLINE NEEDS A FOOTER. The side-by-side view already carries both
        * resolve buttons — one per card, right next to that card's own text — so a second,
-       * identical pair down here would be redundant (found in round 1 of the critique loop:
-       * both surfaces on screen at once). Redline has no per-card buttons to reuse, so it
+       * identical pair down here would be redundant (found in round 1 of the original critique
+       * loop: both surfaces on screen at once). Redline has no per-card buttons to reuse, so it
        * alone needs this. */}
       {view === "redline" ? (
         <div style={{
-          flex: "0 0 auto", display: "flex", flexDirection: "column", gap: 8,
-          padding: "10px 14px", borderTop: "1px solid var(--border-default)", background: "var(--warn-bg)",
+          flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+          padding: "12px 14px 14px", borderTop: "1px solid var(--border-default)", background: "var(--surface-raised)",
         }}
         >
-          {/* NEW-1 — THE REASSURANCE IS STATED ONCE, HERE, NOT REPEATED PER BUTTON. It used to
-           * be a near-mirror sentence under EACH button, competing with the choice instead of
-           * supporting it. */}
-          <p style={{ fontSize: 10.5, color: "var(--text-secondary)", margin: 0 }}>
-            Nothing is lost either way — the version you don’t keep is saved as a copy next to “{name}”.
-          </p>
-          <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-            <ChoiceColumn
-              roleText={newerLabel} when={newerWhen} whenExact={absoluteStamp(order.newer.updatedAt)}
-              buttonLabel={order.comparable ? "Keep the newer version" : `Keep ${order.newer.which === "mine" ? "this window’s" : "the other window’s"} version`}
-              buttonAriaLabel={ariaFor(order.newer, newerLabel, newerWhen)}
-              onChoose={chooseFor(order.newer.which)} testId="notes-conflict-review-keep-newer"
-            />
-            <ChoiceColumn
-              roleText={olderLabel} when={olderWhen} whenExact={absoluteStamp(order.older.updatedAt)}
-              buttonLabel={order.comparable ? "Keep the older version" : `Keep ${order.older.which === "mine" ? "this window’s" : "the other window’s"} version`}
+          {/* NEW-1 — stated once, quietly, above the buttons that are the actual point of the
+           * panel, not the loudest thing on it (the old amber banner used to be). */}
+          <p style={{ fontSize: 10.5, color: "var(--text-secondary)", margin: 0 }}>{notesConflictKeptLine()}</p>
+          {/* NEW-5 — the two choices sit close together, centered, as a pair — not shoved to
+           * opposite ends of the full-width bar. */}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+            <KeepButton
+              buttonLabel={olderButtonLabel} when={olderWhen} whenExact={absoluteStamp(order.older.updatedAt)}
               buttonAriaLabel={ariaFor(order.older, olderLabel, olderWhen)}
               onChoose={chooseFor(order.older.which)} testId="notes-conflict-review-keep-older"
+            />
+            <KeepButton
+              buttonLabel={newerButtonLabel} when={newerWhen} whenExact={absoluteStamp(order.newer.updatedAt)}
+              buttonAriaLabel={ariaFor(order.newer, newerLabel, newerWhen)}
+              onChoose={chooseFor(order.newer.which)} testId="notes-conflict-review-keep-newer"
             />
           </div>
         </div>

@@ -27,9 +27,32 @@
  *  content as plain paragraphs on the other) asserting the two panes now differ.
  */
 import NoteRedline from "./NoteRedline.jsx";
+import { notesConflictKeptLine } from "../lib/notesStore.js";
 import { stampLabel, absoluteStamp } from "../lib/notesTime.js";
 
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
+// ⛔ B842947/NEW-4 (owner redlines, 2026-09-03) — the choose button below is a filled button
+// matching `shared/ui/controls.jsx`'s `Button variant="primary"` shape-for-shape (Notes' own
+// accent) instead of the old hand-rolled outline pill. MIRRORED rather than imported — the
+// same reasoning `ConflictReview.jsx`'s own `PrimaryButton` documents (importing controls.jsx
+// from Notes risks the site-planner route's chunk allowlist, `ui-audit/perf-bundle-audit.mjs`). The
+// "nothing is lost" line is now `notesConflictKeptLine()` — the discarded copy goes to version
+// history, not a sibling page.
+const NOTES_ACCENT = { accent: "var(--accent-notes)", onAccent: "var(--on-accent-notes)" };
+const REST_SHADOW = "0 1px 2px rgba(0,0,0,0.05)"; // design-exempt: neutral rest-shadow mirrored verbatim from shared/ui/controls.jsx's own REST_SHADOW — token-independent by design, see that file's Button comment
+
+function PrimaryButton({ accent = "var(--accent)", onAccent = "var(--on-accent)", style, children, ...rest }) {
+  return (
+    <button
+      style={{
+        padding: "5px 10px", fontSize: 10.5, borderRadius: RADIUS.control, cursor: "pointer",
+        fontFamily: "inherit", fontWeight: 600, boxShadow: REST_SHADOW,
+        border: `1px solid ${accent}`, background: accent, color: onAccent, ...style,
+      }}
+      {...rest}
+    >{children}</button>
+  );
+}
 
 /** One version, read-only and in full — the pane's real formatted content (`NoteRedline`) in
  *  place of the old plain-text diff highlight. */
@@ -75,17 +98,13 @@ function VersionCard({ label, when, whenExact, blocks, images, buttonLabel, butt
           : <em style={{ color: "var(--text-secondary)" }}>This copy is empty.</em>}
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <button
+        <PrimaryButton
           type="button"
+          {...NOTES_ACCENT}
           data-testid={`${testId}-choose`}
           aria-label={buttonAriaLabel}
           onClick={onChoose}
-          style={{
-            flex: "0 0 auto", border: "1px solid var(--warn-text)", borderRadius: RADIUS.pill,
-            background: "transparent", color: "var(--warn-text)", font: "inherit",
-            fontSize: 10.5, fontWeight: 700, padding: "3px 12px", cursor: "pointer",
-          }}
-        >{buttonLabel}</button>
+        >{buttonLabel}</PrimaryButton>
       </div>
     </div>
   );
@@ -106,8 +125,7 @@ function roleLabel(comparable, isNewer, which) {
  *  `ConflictReview.jsx`, not re-derived here); `panes` is `lib/notesRedline.js`'s
  *  `buildComparison(...).panes` — `panes.newer` pairs with `order.newer`, `panes.older` with
  *  `order.older`, by construction (both come from the same caller, in the same order). */
-export default function ConflictSideBySide({ title, order, panes, images, onKeepMine, onKeepTheirs }) {
-  const name = String(title || "").trim() || "Untitled";
+export default function ConflictSideBySide({ order, panes, images, onKeepMine, onKeepTheirs }) {
   const chooseFor = (which) => (which === "mine" ? onKeepMine : onKeepTheirs);
 
   const cardFor = (slot, blocks) => ({
@@ -125,9 +143,7 @@ export default function ConflictSideBySide({ title, order, panes, images, onKeep
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {/* NEW-1 — stated once, above both cards, not repeated per card. */}
-      <p style={{ fontSize: 10.5, color: "var(--text-secondary)", margin: 0 }}>
-        Nothing is lost either way — the version you don’t keep is saved as a copy next to “{name}”.
-      </p>
+      <p style={{ fontSize: 10.5, color: "var(--text-secondary)", margin: 0 }}>{notesConflictKeptLine()}</p>
       <div data-testid="notes-conflict-sidebyside" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 8, alignItems: "start" }}>
         <VersionCard
           label={newerLabel} when={newerCard.when} whenExact={newerCard.whenExact} blocks={newerCard.blocks} images={images}
