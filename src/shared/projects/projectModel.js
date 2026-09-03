@@ -108,17 +108,46 @@ export function withCurrentProject(projects = [], currentProject = null) {
 // shown; the caller resolves a click on it back to the right schedule id (see Scheduler.jsx's
 // `selectSchedule`). Only a controlled entry with no site at all (Operations, Pursuits) — or one
 // whose linked site genuinely isn't in the registry yet — still appears via `extra`.
+//
+// ⛔ B1112449/NEW-2 — THAT "DROP THE BRIDGED COPY, THE REGISTRY ROW COVERS IT" RULE ASSUMED AT
+// MOST ONE SCHEDULE PER SITE. B1080547 (same day, same PR) removed that constraint elsewhere
+// (`findAllBySiteId`/`isGridMismatched`/`needsScheduleCarryIn` all test the FULL linked set now)
+// but this function was never revisited, so a site with TWO linked schedules had BOTH of their
+// bridged copies dropped — `byId.has(p.linkedSiteId)` is true for either one — leaving exactly
+// ONE selectable row (the site's own registry row) no matter how many schedules it actually
+// carries. Clicking that lone row passes the SITE's id to `selectSchedule`, which could only
+// resolve it back to the first-created schedule (`.find()`), so every schedule after the first
+// was a permanent orphan: created successfully, named correctly, completely unreachable from the
+// UI. Measured live: a site with two linked schedules (pids 16/17) showed one switcher row.
+//
+// Fix: the "prefer the richer registry row, drop the bridge" rule now applies ONLY when exactly
+// ONE schedule links to that site (unchanged prior behavior, still covered by every existing test
+// above). Once two or more do, the single registry row can no longer stand in for all of them —
+// it's DROPPED instead, and each of that site's schedules gets its OWN row (carrying the site's
+// timestamp/status for sensible sort order), so every one is independently clickable and
+// `selectSchedule`'s `p.id === id` branch resolves it directly — no ambiguity left to fall back on.
 export function unionProjectLists(controlledList = [], registryList = []) {
   const byId = new Map();
   for (const p of registryList || []) if (p && p.id != null) byId.set(p.id, p);
+  const linkedCounts = new Map();
+  for (const p of controlledList || []) {
+    if (p && p.linkedSiteId != null) linkedCounts.set(p.linkedSiteId, (linkedCounts.get(p.linkedSiteId) || 0) + 1);
+  }
+  const multiLinkedSiteIds = new Set([...linkedCounts.entries()].filter(([, n]) => n > 1).map(([id]) => id));
   const extra = [];
   for (const p of controlledList || []) {
     if (!p || p.id == null) continue;
     if (byId.has(p.id)) continue;
+    if (p.linkedSiteId != null && multiLinkedSiteIds.has(p.linkedSiteId)) {
+      const site = byId.get(p.linkedSiteId);
+      extra.push(site ? { ...p, updatedAt: site.updatedAt, status: site.status } : p);
+      continue;
+    }
     if (p.linkedSiteId != null && byId.has(p.linkedSiteId)) continue;
     extra.push(p);
   }
-  return [...byId.values(), ...extra];
+  const registryOut = (registryList || []).filter((p) => p && p.id != null && !multiLinkedSiteIds.has(p.id));
+  return [...registryOut, ...extra];
 }
 
 // Case-insensitive name filter for the dropdown search field. Empty query → all.

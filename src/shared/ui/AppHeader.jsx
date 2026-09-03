@@ -495,6 +495,12 @@ export default function AppHeader({
   // posts the command to the embedded app instead.
   onRenameProject,
   onDeleteProject,
+  // Duplicate a project (B1112448/NEW-1). Same shape as onRenameProject/onDeleteProject above —
+  // optional, forwarded straight to ProjectBreadcrumb, which already gates its own "Duplicate"
+  // menu row on this being provided (`canDuplicate = !!onDuplicateProject`). This prop was never
+  // added here when the Schedule module started wiring it, so the row could never render for any
+  // caller no matter what it passed — see ProjectBreadcrumb.jsx's own header for the full contract.
+  onDuplicateProject,
   // Whether a real account is signed in. The same-project-in-another-tab warning
   // (B313) only applies to signed-in accounts: a logged-out, device-only session
   // starts fresh and should never see the cross-tab conflict banner — it protects
@@ -893,6 +899,7 @@ export default function AppHeader({
                 onNewProject={onNewProject}
                 onRenameProject={onRenameProject}
                 onDeleteProject={onDeleteProject}
+                onDuplicateProject={onDuplicateProject}
                 saveState={saveState}
                 projects={projects}
                 homeLabel={homeLabel}
