@@ -29,11 +29,11 @@ import { useCallback, useRef, useState } from "react";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import ContextMenu from "./ContextMenu.jsx";
 
-// SPACE.xs/SPACE.sm/SPACE.md literals (4/6/8) — deliberately NOT imported from designTokens.js.
-// Same reasoning SheetView.jsx/Ribbon.jsx already document at their own top: this is a
-// Model-only lazy chunk, and a second import point into designTokens.js tips Rollup into
-// extracting it as its own shared chunk that then rides onto every OTHER route's bundle,
-// breaching ui-audit/perf-bundle-audit.mjs's site-route allowlist.
+// SPACE.xs/SPACE.sm/SPACE.md and FONT_SIZE.control/FONT_SIZE.display literals (4/6/8, 12/14) —
+// deliberately NOT imported from designTokens.js. Same reasoning SheetView.jsx/Ribbon.jsx already
+// document at their own top: this is a Model-only lazy chunk, and a second import point into
+// designTokens.js tips Rollup into extracting it as its own shared chunk that then rides onto
+// every OTHER route's bundle, breaching ui-audit/perf-bundle-audit.mjs's site-route allowlist.
 const TAB_H = 28; // literal match to CONTROL_H.md (26) + 2 — a hair taller reads better as a pill than an exact match
 const STRIP_PAD = 8; // SPACE.md literal
 const TAB_GAP = 4; // SPACE.xs literal
@@ -52,7 +52,7 @@ function tabStyle(active, dragging, dropTarget) {
     height: TAB_H, padding: "0 14px", borderRadius: RADIUS.pill, border: "none",
     background: active ? "var(--surface-raised)" : "transparent",
     color: active ? "var(--text-primary)" : "var(--text-secondary)",
-    fontWeight: active ? 650 : 500, fontSize: 12.5, font: "inherit",
+    fontWeight: active ? 650 : 500, fontSize: 12, font: "inherit", // FONT_SIZE.control literal — designTokens.js note above
     boxShadow: active ? "0 1px 3px rgba(0,0,0,0.12)" : "none", // design-exempt: no shadow-color token yet repo-wide — matches this module's other card shadows
     outline: dropTarget ? "2px solid var(--accent-model)" : "none", outlineOffset: -1,
     cursor: "pointer", flex: "none", display: "inline-flex", alignItems: "center",
@@ -160,7 +160,7 @@ export default function TabStrip({ sheets, activeSheetId, onSelect, onAdd, onRen
         style={{
           flex: "none", width: ADD_BTN_SIZE, height: ADD_BTN_SIZE, borderRadius: RADIUS.pill,
           border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)",
-          fontSize: 16, lineHeight: 1, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center",
+          fontSize: 14, lineHeight: 1, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", // FONT_SIZE.display literal — designTokens.js note above
         }}
       >+</button>
       {contextMenu && <ContextMenu point={contextMenu.point} items={contextMenu.items} onClose={() => setContextMenu(null)} />}

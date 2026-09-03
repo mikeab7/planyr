@@ -1146,16 +1146,27 @@ test.describe("Model workspace — Stage 3 (multi-sheet workbooks, tab strip)", 
   });
 
   test("the tab strip stays pinned when the grid scrolls horizontally — never inside the grid's own scroller", async ({ page }) => {
+    // Numeric proof, not just a passing assertion (the historical trap: SheetView.jsx's own
+    // "+ Add column" button once landed at x=3173 in a 1191px window because it was laid out
+    // to the grid's full column extent instead of the viewport). getBoundingClientRect().x
+    // before vs. after scrolling the grid FULLY right (scrollLeft driven to its max, not a
+    // magic number) must be bit-for-bit identical — this asserts exact equality, not "close".
     const id = "e2e-stage3-pinned";
     await seedProject(page, id);
     await page.goto(`/#/project/${id}/model`);
     await expect(sheetEl(page)).toBeVisible();
-    const before = await page.getByTestId("model-tab-strip").boundingBox();
-    await sheetEl(page).evaluate((el) => { el.scrollLeft = 2000; });
+    const strip = page.getByTestId("model-tab-strip");
+    const before = await strip.evaluate((el) => el.getBoundingClientRect().toJSON());
+    const scrollInfo = await sheetEl(page).evaluate((el) => {
+      el.scrollLeft = el.scrollWidth; // drive fully right, not a fixed offset
+      return { scrollLeft: el.scrollLeft, scrollWidth: el.scrollWidth, clientWidth: el.clientWidth };
+    });
+    expect(scrollInfo.scrollLeft).toBeGreaterThan(0); // sanity: the grid actually had room to scroll
     await page.waitForTimeout(100);
-    const after = await page.getByTestId("model-tab-strip").boundingBox();
-    expect(after.x).toBeCloseTo(before.x, 0);
-    expect(after.y).toBeCloseTo(before.y, 0);
+    const after = await strip.evaluate((el) => el.getBoundingClientRect().toJSON());
+    console.log(`[tab-strip-pin] before.x=${before.x} after.x=${after.x} scrollLeft=${scrollInfo.scrollLeft} scrollWidth=${scrollInfo.scrollWidth}`);
+    expect(after.x).toBe(before.x);
+    expect(after.y).toBe(before.y);
   });
 
   test("round-trip through local storage: a second sheet + a cross-sheet formula survive a reload", async ({ page }) => {
