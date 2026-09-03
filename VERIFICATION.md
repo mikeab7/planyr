@@ -6489,6 +6489,14 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
 6. — Confirm a comp's Land/Bldg summary line on the rail (e.g. "Land avg $10.00/SF (2, 1 undated excluded)") matches reality against real account data with at least one undated comp mixed into a sale-comp average.
 `Blocker: auth` `Blocker: real-data`
 
+### V607840 — B1090466 (adversarial review NEW-5): sharing a comp anchored to a site-plan overlay that ISN'T shared with the same team is refused, with a clear message, instead of silently rendering as a point on an invisible plan `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** The conflict check itself (`anchorTeamConflict`, `comps.js`) is pure and fully unit-tested (`test/comps.test.js`) — blocks when the comp's `teamId` differs from its pinned overlay's `teamId`, allows it once they match, never blocks a pin/parcel comp or an unshared (private) one, and never guesses when the overlay isn't in the loaded `overlaysById` map. What's unprovable here: exercising it needs a real signed-in account with an existing TEAM, an existing site-plan overlay NOT shared to that team, and a comp anchored to it — `Blocker: auth` for the sign-in, `Blocker: real-data` for the team/overlay setup. On **planyr.io**, signed in, with a team and an unshared site-plan overlay pinned by a comp, confirm —
+1. — Open that comp for edit, set its Team to the team the overlay is NOT shared with, click Save. **Expect:** the save is refused with a message naming that the site plan isn't shared with that team — the comp's `team_id` does not change, and no teammate on that team can see the comp afterward.
+2. — Share the SITE PLAN itself with that team first (via "Your sites"), then repeat step 1. **Expect:** the save now succeeds — the comp shares cleanly once its overlay already does.
+3. — Same check via the paste-grid batch save (a row anchored to an unshared overlay, Team set on the row): **Expect:** that row is held back with the same message while any other ready rows in the batch still save normally.
+`Blocker: auth` `Blocker: real-data`
+
 ## ✅ Verified / ❌ Failed — history
 
 > Passed/failed items are archived to **`VERIFICATION-DONE.md`** to keep this file fast.

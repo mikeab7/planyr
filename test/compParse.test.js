@@ -887,3 +887,60 @@ describe("compParse corpus: TYPE INFERENCE (only when the text doesn't say outri
     expect(detectCompType("nothing recognizable here at all").value).toBeNull();
   });
 });
+
+describe("compParse: adversarial-review SEVERITY-1 findings (2026-09-02) — never half-read a malformed number", () => {
+  it("a dropped negative sign never silently becomes positive — the rate stays blank with a blocking flag", () => {
+    const { draft, cellFlags } = parseProseLine("-5.00/SF/yr NNN Houston TX");
+    expect(draft.leaseRate).toBe("");
+    expect(cellFlags.leaseRate).toMatchObject({ level: "blocking" });
+    expect(draft.notes).toMatch(/negative amount isn't valid/);
+    expect(draft.notes).toMatch(/5\.00\/SF\/yr/); // the raw text survives for manual entry
+  });
+
+  it("a European decimal (comma as decimal, period as thousands) is refused, never misread as ~19,000x too high", () => {
+    const { draft, cellFlags } = parseProseLine("1.234,56/SF/yr NNN Berlin TX");
+    expect(draft.leaseRate).toBe("");
+    expect(Number(draft.leaseRate || 0)).not.toBe(23456);
+    expect(cellFlags.leaseRate).toMatchObject({ level: "blocking" });
+    expect(draft.notes).toMatch(/ambiguous number format/);
+  });
+
+  it("still reads a normal 3-digit-grouped thousands number just fine (no false positive)", () => {
+    const { draft } = parseProseLine("Sold for $1,200,000, Tomball TX");
+    expect(draft.bldgPrice || draft.landPrice).toBe("1200000");
+  });
+
+  it("a spaced dash used as a clause separator is never mistaken for a negative sign", () => {
+    const { draft } = parseProseLine("3.2 AC land - $850k - Jan 2026");
+    expect(draft.landPrice).toBe("850000");
+  });
+
+  it("a 'price'-labelled bare number is now captured (was lost to notes with no $ or suffix)", () => {
+    const { draft, cellFlags } = parseProseLine("7.5% cap 1,200,000 price Tomball TX");
+    expect(draft.bldgCapRate).toBe("0.075");
+    expect(draft.bldgPrice).toBe("1200000");
+    expect(cellFlags.bldgPrice).toBeUndefined();
+  });
+
+  it("a $0 rate is accepted but flagged soft for confirmation, never silently treated as a real deal with no note", () => {
+    const { draft, cellFlags } = parseProseLine("0/SF/yr NNN");
+    expect(draft.leaseRate).toBe("0");
+    expect(cellFlags.leaseRate).toMatchObject({ level: "soft" });
+  });
+
+  it("an implausibly huge rate is accepted (never guessed away) but flagged soft, with no ceiling silently applied", () => {
+    const { draft, cellFlags } = parseProseLine("999999999/SF/yr NNN");
+    expect(draft.leaseRate).toBe("999999999");
+    expect(cellFlags.leaseRate).toMatchObject({ level: "soft" });
+  });
+
+  it("a realistic rate is never flagged for magnitude", () => {
+    const { cellFlags } = parseProseLine("6.72/SF/yr NNN Houston TX");
+    expect(cellFlags.leaseRate).toBeUndefined();
+  });
+
+  it("basis still defaults to NNN even when the rate itself couldn't be read", () => {
+    const { draft } = parseProseLine("-5.00/SF/yr NNN Houston TX");
+    expect(draft.leaseRateExpense).toBe("nnn");
+  });
+});
