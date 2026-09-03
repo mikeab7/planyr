@@ -34,7 +34,13 @@ const TRASH_SELECT_COLS = `${SELECT_COLS},deleted_at`;
  * (deleted_at set) are excluded — see fetchDeletedComps for the "Recently deleted" trash list. */
 export async function fetchAllComps() {
   if (!supabase) return { data: [], error: null };
-  const { data, error } = await supabase.from(TABLE).select(SELECT_COLS).is("deleted_at", null).order("comp_date", { ascending: false });
+  // NEW-5 (owner decision, 2026-09-02) — comp_date is nullable now (db/comps_optional_date.sql);
+  // `nullsFirst: false` keeps an undated comp from sorting to the very TOP by Postgres's own
+  // default DESC behavior, which is exactly backwards for a genuinely-unset field. This is only
+  // the coarse DB-level order — `lib/comps.js`'s `sortCompsByRecency` (applied by the caller) is
+  // the one that actually implements "falls back to Date entered," which needs a client-side
+  // COALESCE-style comparison PostgREST's `.order()` can't express on its own.
+  const { data, error } = await supabase.from(TABLE).select(SELECT_COLS).is("deleted_at", null).order("comp_date", { ascending: false, nullsFirst: false });
   if (error) return { data: [], error };
   return { data: (data || []).map(rowToComp), error: null };
 }
