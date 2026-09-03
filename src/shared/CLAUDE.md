@@ -293,6 +293,19 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   Owner/Developer + Tenant, land = Seller + Buyer, building sale = Seller + Buyer/User.
   Every migration in `db/` (incl. the party-fields/free-rent ones this bullet used to flag as
   unapplied) is live on production, confirmed by column read against project `lyeqzkuiwngunutlkkmi`.
+  **`db/comps_site_plan_overlay_delete_reverts_to_pin.sql` (B1114992) fixes a real schema hazard:
+  `comps_site_plan_overlay_id_fkey` was `ON DELETE SET NULL`, which wrote exactly the value
+  `comps_parcel_anchor_has_identity` forbids for a `site_plan` anchor, aborting any real DELETE of
+  a `site_plan_overlays` row a comp was still pinned to.** Fixed at the root, not guarded around:
+  a `SECURITY DEFINER` `BEFORE DELETE` trigger detaches a pinned comp to a plain `'pin'` anchor at
+  its already-current lat/lon (never a stale one — kept in sync by every placement move) in the
+  same statement as the delete, and the FK's action is now the default `NO ACTION` as a safety
+  net. A matching `soft_delete_site_plan_overlay` RPC does the identical detach for the app's
+  ordinary (soft) "Delete site plan…" path, which never fires a DELETE trigger at all. This
+  **replaced** B972512-HARDENING item 5's app-level `blockedByPinnedComps` block (which refused
+  the delete outright — safe, but it contradicted its own confirm-dialog copy, which had always
+  promised the comp "keeps their location but loses the link back"): deleting a site plan is now
+  unconditional, comps included.
   `lib/partySuggest.js` is the pure party-name suggestion logic
   (`collectPartyNames`/`matchPartyNames` — loose substring match, suggests only, never forces or
   merges near-spellings) behind `components/PartyNameField.jsx`'s accessible combobox (B832391) —

@@ -186,3 +186,36 @@ test.describe("Model workspace — inconsistent-formula detection (NEW-2)", () =
     expect(text).not.toMatch(/[1-9]/);
   });
 });
+
+// ⛔ B1117409 (owner brief 2026-09-03) — reported as "Enter does not submit the Name Manager New
+// name field ... only the Define button works." Investigated (code read + git blame on
+// NameManager.jsx: the New name input's `onKeyDown` has called the identical `create()` the
+// Define button calls since the very first commit that introduced this panel) and driven live,
+// through the EXACT reported path — ribbon overflow, Name Manager, type a name, press a real
+// (native, bubbling) Enter key — and it defines the name correctly, same as clicking Define.
+// NOT REPRODUCIBLE on this codebase. Filed anyway per this repo's DEDUPE-FIRST/STANDING RULE #2
+// discipline, and left here as a permanent regression lock so a future change to this panel that
+// broke Enter-to-define would fail CI immediately instead of silently reaching production.
+test.describe("Model workspace — Name Manager (B1117409)", () => {
+  test("pressing Enter in the New name field defines the name, same as clicking Define — reached via the ribbon overflow path, as reported", async ({ page }) => {
+    const id = "e2e-model-namemgr-enter";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await expect(sheetEl(page)).toBeVisible();
+
+    await cell(page, 0, 0).click(); // "Select a cell" per the repro
+    await clickRibbonButton(page, "ribbon-names"); // opens via the ribbon overflow ("More ▾") at this viewport
+    await expect(page.getByTestId("name-manager")).toBeVisible();
+
+    const input = page.getByTestId("name-manager-new-input");
+    await input.click();
+    await page.keyboard.type("MyRange");
+    await page.keyboard.press("Enter"); // a real, native, bubbling key press — not a synthetic dispatch
+    await expect(input).toHaveValue(""); // the field only ever clears once the name was actually defined (create() guards on canCreate)
+    await expect(page.getByTestId("name-manager-new-error")).toHaveCount(0);
+
+    const rows = page.getByTestId("name-manager-row");
+    await expect(rows).toHaveCount(1);
+    await expect(rows.first()).toContainText("MyRange"); // the range really was defined, not just cleared
+  });
+});
