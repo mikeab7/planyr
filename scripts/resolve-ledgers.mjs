@@ -15,6 +15,28 @@
  * anyone. In the file that is the single source of truth for what is open, a silent duplicate is a
  * correctness failure. This script is union WITH THE PRECONDITION CHECKED instead of assumed.
  *
+ * ⛔ AMENDED (B1102688, 2026-09-03) — `docs/archive/BACKLOG-DONE.md` SPECIFICALLY now DOES carry a
+ * committed `.gitattributes` `merge=union` line, unlike `BACKLOG.md` above, which deliberately does
+ * not. The reasoning above is UNCHANGED and still governs `BACKLOG.md`: that file is the single
+ * source of truth for what is still OPEN, so a silently duplicated entry there is a correctness
+ * failure with teeth — a session could act on either copy. `docs/archive/BACKLOG-DONE.md` is
+ * different in exactly the way that matters: it is closed history nothing reads to decide what to
+ * do next, its conflicts are overwhelmingly two branches each ARCHIVING a different item (disjoint
+ * ids — precisely union's safe case), and the one case union cannot get right — two branches
+ * editing the exact same already-closed entry — is caught LOUDLY by `test/idUniqueness.test.js`'s
+ * existing cross-file collision guard (same `findDuplicateIds`/`newCrossFileCollisions` machinery
+ * this script's own post-condition below reuses) rather than silently duplicating unnoticed. This
+ * was a deliberate trade against a measured, recurring cost: a raw conflict on this file held
+ * GitHub's `mergeable_state` at `dirty` and withheld every required CI check indefinitely, reading
+ * like an outage rather than a conflict. `resolveConflicts`/`UNION_FILES` below still know how to
+ * fix this file correctly (the precondition-checked path stays available for a human/session who
+ * runs this script by hand, or for a conflict that also spans `BACKLOG.md` in the same hunk-set)
+ * — it just no longer needs to fire automatically for this one file, because git's own built-in
+ * `union` driver plus the CI backstop now closes the gap before anyone has to. See `.gitattributes`
+ * and `scripts/install-hooks.mjs` for the full two-layer design (this file is also protected the
+ * same way MAP.md/BACKLOG_OPEN.md already were: an npm-installed clone can still resolve a mixed
+ * conflict — one that also touches a file this script owns — by running `resolve-ledgers.mjs`.)
+ *
  * THE PRECONDITION, and it is exactly the property that makes union safe:
  *
  *     within a conflict hunk, NO B#/V# heading may appear on BOTH sides.

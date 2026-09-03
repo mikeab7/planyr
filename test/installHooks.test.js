@@ -18,13 +18,14 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   hooksPlan, installHooks, samePath, HOOKS_DIR, REQUIRED_HOOKS,
   mergeDriverPlan, installMergeDriver, MERGE_DRIVER_NAME, MERGE_DRIVER_COMMAND,
+  attributesOverridePlan, installAttributesOverride, attrMergeValue, stripPathLines, OVERRIDE_PATHS,
 } from "../scripts/install-hooks.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -186,7 +187,8 @@ describe("(c) it NEVER silently no-ops — every un-armed outcome is loud", () =
   it("`--check` passes once the clone is armed", () => {
     const dir = scratchRepo();
     installHooks(dir);
-    installMergeDriver(dir); // both concerns must be armed for `--check` to pass
+    installMergeDriver(dir);
+    installAttributesOverride(dir); // all three concerns must be armed for `--check` to pass
     expect(cli(dir, "--check").code).toBe(0);
   });
 });
@@ -306,10 +308,117 @@ describe("installMergeDriver — real git config, same guarantees as installHook
     expect(r.status).not.toBe(0);
   });
 
-  it("the CLI arms BOTH concerns on a fresh clone and reports both", () => {
+  it("the CLI arms ALL THREE concerns on a fresh clone and reports both lines", () => {
     const { code, out } = cli(scratchRepo("merge-cli"));
     expect(code).toBe(0);
     expect(out).toMatch(/Mint-gate hook: wired core\.hooksPath/);
-    expect(out).toMatch(/Ledger merge driver: wired merge\.planyr-ledger\.driver/);
+    expect(out).toMatch(/Ledger merge driver: merge\.planyr-ledger\.driver configured and the local \.git\/info\/attributes override wired/);
+  });
+});
+
+/* attributesOverridePlan / installAttributesOverride — the LOCAL `.git/info/attributes` upgrade
+ * (B1102688). The committed `.gitattributes` already gives every clone a safe, zero-config `union`
+ * merge for MAP.md/BACKLOG_OPEN.md; this is purely the UPGRADE to the smarter custom driver, so
+ * unlike the two decision cores above, none of its branches describe an unsafe or broken state —
+ * only "smarter" vs. "safe but generic" vs. "somebody else's deliberate choice, left alone". */
+describe("attributesOverridePlan — the pure decision, pinned branch by branch", () => {
+  it("no file at all → install", () => {
+    const p = attributesOverridePlan({ existingText: "" });
+    expect(p.action).toBe("install");
+    expect(p.armed).toBe(true); // "armed" here means "this call would arm it", matching the other plans' convention for the install branch
+  });
+
+  it("both paths already point at our driver → already, armed", () => {
+    const text = OVERRIDE_PATHS.map((p) => `${p} merge=${MERGE_DRIVER_NAME}`).join("\n") + "\n";
+    const p = attributesOverridePlan({ existingText: text });
+    expect(p.action).toBe("already");
+    expect(p.armed).toBe(true);
+  });
+
+  it("one of the two paths already wired, the other missing → still install (adds only what's missing)", () => {
+    const text = `${OVERRIDE_PATHS[0]} merge=${MERGE_DRIVER_NAME}\n`;
+    const p = attributesOverridePlan({ existingText: text });
+    expect(p.action).toBe("install");
+  });
+
+  it("a foreign merge value on one of our exact paths → foreign, NOT armed, names the value", () => {
+    const p = attributesOverridePlan({ existingText: `${OVERRIDE_PATHS[0]} merge=ours\n` });
+    expect(p.action).toBe("foreign");
+    expect(p.armed).toBe(false);
+    expect(p.message).toMatch(/LEFT UNTOUCHED/);
+    expect(p.message).toContain(`${OVERRIDE_PATHS[0]} → merge=ours`);
+  });
+
+  it("an unrelated path's merge attribute is not our concern at all", () => {
+    const p = attributesOverridePlan({ existingText: "SomeOtherFile.md merge=union\n" });
+    expect(p.action).toBe("install"); // our two paths are still both missing — this line is irrelevant to them
+  });
+});
+
+describe("attrMergeValue / stripPathLines — the pure text helpers", () => {
+  it("finds an exact-path merge value, ignoring comments, blank lines, and other paths", () => {
+    const text = "# a comment\n\nOther.md merge=union\nMAP.md merge=planyr-ledger\n";
+    expect(attrMergeValue(text, "MAP.md")).toBe("planyr-ledger");
+    expect(attrMergeValue(text, "Missing.md")).toBe(null);
+  });
+
+  it("a path with no merge attribute at all (just some other attribute) reads as unset", () => {
+    expect(attrMergeValue("MAP.md text\n", "MAP.md")).toBe(null);
+  });
+
+  it("stripPathLines drops only the named paths' own lines, keeping everything else", () => {
+    const text = "# keep me\nMAP.md merge=ours\nOther.md merge=union\nBACKLOG_OPEN.md merge=ours\n";
+    expect(stripPathLines(text, OVERRIDE_PATHS)).toBe("# keep me\nOther.md merge=union\n");
+  });
+});
+
+describe("installAttributesOverride — real filesystem, same guarantees as the other two installers", () => {
+  it("a fresh repo gets a local .git/info/attributes override for both paths", () => {
+    const dir = scratchRepo("attrs-fresh");
+    const res = installAttributesOverride(dir);
+    expect(res.ok).toBe(true);
+    expect(res.armed).toBe(true);
+    const text = readFileSync(join(dir, ".git", "info", "attributes"), "utf8");
+    for (const p of OVERRIDE_PATHS) expect(attrMergeValue(text, p)).toBe(MERGE_DRIVER_NAME);
+  });
+
+  it("idempotent — a second run is a no-op and does not duplicate the lines", () => {
+    const dir = scratchRepo("attrs-idempotent");
+    installAttributesOverride(dir);
+    const before = readFileSync(join(dir, ".git", "info", "attributes"), "utf8");
+    expect(installAttributesOverride(dir).action).toBe("already");
+    expect(readFileSync(join(dir, ".git", "info", "attributes"), "utf8")).toBe(before);
+  });
+
+  it("a pre-existing, unrelated .git/info/attributes file is preserved, not overwritten", () => {
+    const dir = scratchRepo("attrs-preserve");
+    mkdirSync(join(dir, ".git", "info"), { recursive: true });
+    writeFileSync(join(dir, ".git", "info", "attributes"), "*.bin -text\n");
+    installAttributesOverride(dir);
+    const text = readFileSync(join(dir, ".git", "info", "attributes"), "utf8");
+    expect(text).toContain("*.bin -text");
+    for (const p of OVERRIDE_PATHS) expect(attrMergeValue(text, p)).toBe(MERGE_DRIVER_NAME);
+  });
+
+  it("a deliberate foreign override for our exact paths is reported, never clobbered — only --force replaces it", () => {
+    const dir = scratchRepo("attrs-foreign");
+    mkdirSync(join(dir, ".git", "info"), { recursive: true });
+    writeFileSync(join(dir, ".git", "info", "attributes"), `${OVERRIDE_PATHS[0]} merge=ours\n`);
+    const res = installAttributesOverride(dir);
+    expect(res.action).toBe("foreign");
+    expect(res.armed).toBe(false);
+    expect(readFileSync(join(dir, ".git", "info", "attributes"), "utf8")).toBe(`${OVERRIDE_PATHS[0]} merge=ours\n`);
+
+    const forced = installAttributesOverride(dir, { force: true });
+    expect(forced.armed).toBe(true);
+    const text = readFileSync(join(dir, ".git", "info", "attributes"), "utf8");
+    for (const p of OVERRIDE_PATHS) expect(attrMergeValue(text, p)).toBe(MERGE_DRIVER_NAME);
+  });
+
+  it("`--check` never writes and reports would-install on an un-armed clone", () => {
+    const dir = scratchRepo("attrs-check");
+    const res = installAttributesOverride(dir, { write: false });
+    expect(res.action).toBe("would-install");
+    expect(existsSync(join(dir, ".git", "info", "attributes"))).toBe(false);
   });
 });
