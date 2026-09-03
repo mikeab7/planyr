@@ -72,7 +72,7 @@
  * OTHER columns, the same reasoning `cells`/`formats`/`styles` already rely on) and the raw ROW
  * INDEX (relocated on row insert/delete exactly like `rowHeights` is).
  */
-import { rewriteFormulaForStructuralShift } from "../../../shared/formula/formula.js";
+import { rewriteFormulaForStructuralShift, rewriteFormulaForSheetRename, dropFormulaSheetRefs } from "../../../shared/formula/formula.js";
 
 export const SHEET_VERSION = 1;
 // STAGE 1 (2026-09-01): 8→26 default columns, extending past Z (AA, AB…) on demand via
@@ -673,13 +673,21 @@ export function ensureColumnCount(sheet, count) {
 
 /** Rewrite every formula cell's raw text for a structural shift on ONE axis, leaving every
  *  literal cell untouched. Shared by insertRowAt/deleteRowAt/insertColumnAt/deleteColumn — the
- *  ONLY thing that differs between them is which axis/at/delta to pass. */
-function shiftAllFormulas(cells, axis, at, delta) {
+ *  ONLY thing that differs between them is which axis/at/delta to pass.
+ *
+ *  ⛔ STAGE 3 (NEW-1) — `ownerSheetName`/`editedSheetName` scope the shift to cross-sheet
+ *  references correctly: see rewriteFormulaForStructuralShift's own header in formula.js.
+ *  Both default to `null`, which preserves this function's exact original single-sheet
+ *  behavior (shift every reference, unconditionally) — every pre-existing call below that
+ *  doesn't pass them (a bare `sheet` mutator call, outside a workbook) is untouched. The
+ *  workbook-level wrappers near the bottom of this file are what actually pass real names, so
+ *  a cross-sheet reference elsewhere in the WORKBOOK can be swept too. */
+function shiftAllFormulas(cells, axis, at, delta, ownerSheetName = null, editedSheetName = null) {
   const next = {};
   let changed = false;
   for (const [k, v] of Object.entries(cells)) {
     if (isFormulaText(v)) {
-      const shifted = rewriteFormulaForStructuralShift(v, axis, at, delta);
+      const shifted = rewriteFormulaForStructuralShift(v, axis, at, delta, ownerSheetName, editedSheetName);
       if (shifted !== v) changed = true;
       next[k] = shifted;
     } else {
@@ -695,12 +703,12 @@ function shiftAllFormulas(cells, axis, at, delta) {
  *  insertion point moves right; nothing before it is touched — see
  *  rewriteFormulaForStructuralShift for the exact rule, including why it shifts $-anchored
  *  references too). */
-export function insertColumnAt(sheet, colIndex) {
+export function insertColumnAt(sheet, colIndex, ownerSheetName = null, editedSheetName = null) {
   const at = Math.max(0, Math.min(sheet.columns.length, colIndex));
   const id = `c${sheet.nextColId}`;
   const columns = [...sheet.columns];
   columns.splice(at, 0, makeColumn(id, colLetterName(at)));
-  const cells = shiftAllFormulas(sheet.cells, "col", at + 1, 1);
+  const cells = shiftAllFormulas(sheet.cells, "col", at + 1, 1, ownerSheetName, editedSheetName);
   return { ...sheet, columns, cells, nextColId: sheet.nextColId + 1 };
 }
 
@@ -708,14 +716,14 @@ export function insertColumnAt(sheet, colIndex) {
  *  remaining formula's column references — a reference to the deleted column becomes #REF!, a
  *  reference after it shifts left. There is no undo affordance beyond the workspace's own
  *  Ctrl+Z, which already snapshots the whole sheet. */
-export function deleteColumn(sheet, colIndex) {
+export function deleteColumn(sheet, colIndex, ownerSheetName = null, editedSheetName = null) {
   const col = colAt(sheet, colIndex);
   if (!col || sheet.columns.length <= 1) return sheet; // never leave a sheet with zero columns
   const columns = sheet.columns.filter((_, i) => i !== colIndex);
   const prefix = `${col.id}:`;
   const survivingCells = {};
   for (const [k, v] of Object.entries(sheet.cells)) if (!k.startsWith(prefix)) survivingCells[k] = v;
-  const cells = shiftAllFormulas(survivingCells, "col", colIndex + 1, -1);
+  const cells = shiftAllFormulas(survivingCells, "col", colIndex + 1, -1, ownerSheetName, editedSheetName);
   // Full cascade: a deleted column's per-cell FORMATS are gone too, not just its values —
   // leaving them behind would resurrect a stale format the moment a new column happened to
   // reuse the same id (TOMBSTONE-DELETES).
@@ -745,9 +753,9 @@ function relocateRowMap(map, rowIndex, delta) {
  *  (`cellKey` embeds the raw row INDEX — see the file header), so every cell/format/row-height
  *  entry at or after `rowIndex` has to actually relocate its storage key, on top of the same
  *  formula-reference shift columns get. */
-export function insertRowAt(sheet, rowIndex) {
+export function insertRowAt(sheet, rowIndex, ownerSheetName = null, editedSheetName = null) {
   const at = Math.max(0, Math.min(sheet.rowCount, rowIndex));
-  const shifted = shiftAllFormulas(sheet.cells, "row", at + 1, 1);
+  const shifted = shiftAllFormulas(sheet.cells, "row", at + 1, 1, ownerSheetName, editedSheetName);
   const cells = {};
   for (const [k, v] of Object.entries(shifted)) {
     const sep = k.lastIndexOf(":");
@@ -774,7 +782,7 @@ export function insertRowAt(sheet, rowIndex) {
 /** STAGE 1 — delete the row at `rowIndex` entirely (every cell/format stored on it), then
  *  relocate everything below it up by one and shift every remaining formula's row references —
  *  a reference to the deleted row becomes #REF!, a reference after it shifts up. */
-export function deleteRowAt(sheet, rowIndex) {
+export function deleteRowAt(sheet, rowIndex, ownerSheetName = null, editedSheetName = null) {
   const at = Math.max(0, Math.min(sheet.rowCount - 1, rowIndex));
   const survivingCells = {};
   for (const [k, v] of Object.entries(sheet.cells)) {
@@ -783,7 +791,7 @@ export function deleteRowAt(sheet, rowIndex) {
     if (r === at) continue; // the deleted row's own cells vanish
     survivingCells[k] = v;
   }
-  const shifted = shiftAllFormulas(survivingCells, "row", at + 1, -1);
+  const shifted = shiftAllFormulas(survivingCells, "row", at + 1, -1, ownerSheetName, editedSheetName);
   const cells = {};
   for (const [k, v] of Object.entries(shifted)) {
     const sep = k.lastIndexOf(":");
@@ -833,4 +841,304 @@ export function usedRangeEnd(sheet) {
     if (colIndex > maxCol) maxCol = colIndex;
   }
   return maxRow < 0 ? null : { row: maxRow, col: maxCol };
+}
+
+/* ============================================================================================
+ * STAGE 3 (NEW-1, owner brief 2026-09-03) — MULTI-SHEET WORKBOOKS.
+ *
+ * Everything above this line is unchanged and still speaks in terms of ONE sheet — SheetView,
+ * FormulaBar, and every mutator above operate on a single `sheet` object exactly as before.
+ * A WORKBOOK is the new layer on top: an ORDERED list of named sheets, each holding one of the
+ * `sheet` objects above, plus which one is currently active.
+ *
+ *   workbook = {
+ *     version: WORKBOOK_VERSION,
+ *     nextSheetId: <int>,                          // next `sheetN` id to mint
+ *     sheets: [ { id: "sheet1", name: "Sheet1", sheet: <a sheet object, unchanged shape> }, … ],
+ *     activeSheetId: "sheet1",
+ *   }
+ *
+ * ⛔ STORAGE SHAPE, decided explicitly per the build brief rather than silently picked: the
+ * Supabase table (`db/model_sheets.sql`) is `public.model_sheets`, one ROW PER WORKBOOK, with a
+ * `jsonb "data"` column holding the whole serialized blob and an integer `version` column doing
+ * OPTIMISTIC-CONCURRENCY (compare-and-swap) on the WHOLE row. `data` was always an untyped JSON
+ * blob — pre-Stage-3 it held one sheet's fields directly (`{columns, cells, formats, …}`); Stage
+ * 3 simply changes WHAT that blob contains (the `workbook` shape above) — same table, same
+ * column, same CAS guard, same row-per-project keying (`db/model_sheets.sql` §"one row per
+ * project's spreadsheet" is unchanged: it is now one row per project's WORKBOOK, still one row).
+ * **No migration was run and none is needed** — a jsonb column has no fixed shape for Postgres
+ * to migrate. The only migration that exists is in CODE: `migrateWorkbook` below reads whatever
+ * shape a stored blob actually has (the old bare-sheet shape, or the new `{sheets:[…]}` shape)
+ * and always returns a valid workbook — see its own header for why this is the cheapest correct
+ * choice over a row-per-sheet schema (a second table would need its OWN CAS/RLS/trigger set,
+ * its own foreign key to this row, and a join on every load, to hold what is in practice a
+ * handful of small JSON blobs that already round-trip through one guarded write with no benefit
+ * from being addressable independently — nothing in this app ever needs to read/write ONE
+ * sheet of a workbook without the rest).
+ *
+ * ⛔ DELETING A REFERENCED SHEET turns every cross-sheet reference to it into `#REF!`
+ * (`dropFormulaSheetRefs`, formula.js) rather than BLOCKING the delete. Decided, not defaulted:
+ * blocking would mean hunting down every reference across every other sheet before a delete is
+ * even possible — a worse workflow than a spreadsheet user already expects from Excel itself,
+ * which does exactly this (delete a referenced sheet, formulas pointing at it show #REF!,
+ * nothing else breaks). The same convention this engine already uses for a reference that
+ * shifts off the edge of a sheet (STANDING structural-shift/copy behavior, above) — never a
+ * silent wrong number, always a loud, visible error at the exact cell that's now broken.
+ * ============================================================================================ */
+
+export const WORKBOOK_VERSION = 1;
+
+function makeSheetEntry(id, name, sheet) {
+  return { id, name, sheet: sheet || createSheet() };
+}
+
+export function createWorkbook() {
+  return {
+    version: WORKBOOK_VERSION,
+    nextSheetId: 2,
+    sheets: [makeSheetEntry("sheet1", "Sheet1", createSheet())],
+    activeSheetId: "sheet1",
+  };
+}
+
+const SHEET_ID_RE = /^sheet(\d+)$/;
+/** The next free `sheetN` id, derived from whatever ids are ACTUALLY present — never a stored
+ *  counter trusted blindly (a hand-edited or partially-migrated blob could carry a stale one). */
+function deriveNextSheetId(sheets) {
+  let max = 0;
+  for (const s of sheets) { const m = SHEET_ID_RE.exec(String(s.id)); if (m) max = Math.max(max, Number(m[1])); }
+  return max + 1;
+}
+
+/** A sheet name that doesn't collide (case-insensitively) with any OTHER sheet already in the
+ *  workbook — Excel's own "Sheet1 (2)" convention for a name that's already taken.
+ *  `excludeId` lets a rename check every sheet EXCEPT the one being renamed (renaming a sheet
+ *  to the name it already has — same text, different case — is not a collision with itself). */
+function uniqueSheetName(sheets, base, excludeId = null) {
+  const taken = new Set(sheets.filter((s) => s.id !== excludeId).map((s) => s.name.trim().toLowerCase()));
+  const baseLower = base.trim().toLowerCase();
+  if (!taken.has(baseLower)) return base;
+  let n = 2;
+  while (taken.has(`${base} (${n})`.trim().toLowerCase())) n++;
+  return `${base} (${n})`;
+}
+
+/** Read a possibly-foreign blob back into a workbook this module understands — the workbook
+ *  analogue of `migrateSheet` above, and subject to the exact same LOUD-FAILURE contract: an
+ *  unreadable/pre-Stage-3 blob returns a fresh, valid workbook rather than a half-understood
+ *  one, never guessing at a shape it doesn't recognize.
+ *
+ *  TWO shapes are handled: (1) a genuinely PRE-Stage-3 blob — the bare single-sheet fields
+ *  (`columns`/`cells`/…) directly at the top level, exactly what `migrateSheet` already reads
+ *  — wraps it as a brand-new one-sheet workbook named "Sheet1", so **every existing saved
+ *  project opens with zero data loss**, its one sheet simply promoted into a workbook of one.
+ *  (2) an ALREADY-workbook-shaped blob (`Array.isArray(raw.sheets)`) — each entry's own
+ *  `sheet` sub-object is migrated through `migrateSheet` (so a workbook saved by an OLDER
+ *  Stage-3 build still floats every sheet up to the current column/row floor, freeze defaults,
+ *  etc. — the exact same "capacity never regresses" contract `migrateSheet` already documents),
+ *  ids/names are defended against a missing/duplicate/blank field, and the workbook can never
+ *  end up with zero sheets (an empty `sheets` array is treated as shape (1) never happened —
+ *  falls through to a fresh workbook) or an `activeSheetId` pointing nowhere. */
+export function migrateWorkbook(raw) {
+  if (!raw || typeof raw !== "object") return createWorkbook();
+  if (Array.isArray(raw.sheets) && raw.sheets.length > 0) {
+    const seenIds = new Set();
+    const sheets = raw.sheets.map((s, i) => {
+      let id = (s && typeof s.id === "string" && s.id.trim()) || `sheet${i + 1}`;
+      if (seenIds.has(id)) id = `sheet${deriveNextSheetId([...seenIds].map((x) => ({ id: x })))}`; // defend a duplicate id
+      seenIds.add(id);
+      const name = (s && typeof s.name === "string" && s.name.trim()) || `Sheet${i + 1}`;
+      return makeSheetEntry(id, name, migrateSheet(s && s.sheet));
+    });
+    const activeSheetId = sheets.some((s) => s.id === raw.activeSheetId) ? raw.activeSheetId : sheets[0].id;
+    const nextSheetId = Number.isInteger(raw.nextSheetId) && raw.nextSheetId > 0
+      ? Math.max(raw.nextSheetId, deriveNextSheetId(sheets))
+      : deriveNextSheetId(sheets);
+    return { version: WORKBOOK_VERSION, nextSheetId, sheets, activeSheetId };
+  }
+  // Pre-Stage-3 shape: the bare single-sheet fields live directly on `raw`. migrateSheet
+  // already returns a safe, valid sheet for anything it doesn't recognize, so this also
+  // correctly handles a genuinely corrupt/unreadable blob (falls through to a blank workbook).
+  return { version: WORKBOOK_VERSION, nextSheetId: 2, sheets: [makeSheetEntry("sheet1", "Sheet1", migrateSheet(raw))], activeSheetId: "sheet1" };
+}
+
+export function activeSheetIndex(workbook) {
+  const idx = workbook.sheets.findIndex((s) => s.id === workbook.activeSheetId);
+  return idx < 0 ? 0 : idx;
+}
+export function activeSheetEntry(workbook) {
+  return workbook.sheets[activeSheetIndex(workbook)];
+}
+
+export function setActiveSheet(workbook, sheetId) {
+  if (workbook.activeSheetId === sheetId) return workbook;
+  if (!workbook.sheets.some((s) => s.id === sheetId)) return workbook;
+  return { ...workbook, activeSheetId: sheetId };
+}
+
+/** Append a new blank sheet after the last one and make it active — Excel's own "+" tab
+ *  behavior. Names default to "SheetN" (N = count + 1), de-duplicated against whatever already
+ *  exists (renaming/reordering can otherwise leave a gap or a repeat). */
+export function addSheet(workbook) {
+  const n = workbook.nextSheetId;
+  const id = `sheet${n}`;
+  const name = uniqueSheetName(workbook.sheets, `Sheet${workbook.sheets.length + 1}`);
+  const sheets = [...workbook.sheets, makeSheetEntry(id, name, createSheet())];
+  return { ...workbook, sheets, nextSheetId: n + 1, activeSheetId: id };
+}
+
+/** Duplicate a sheet — its own full cell/format/style/merge data, a fresh id, and a
+ *  "<Name> (copy)" name (de-duplicated) — inserted immediately after the source and made
+ *  active, matching Excel's "Move or Copy… (Create a copy)". A formula inside the copy that
+ *  references ANOTHER sheet keeps pointing at that same other sheet, unchanged (Excel's own
+ *  behavior — duplicating a sheet never rewrites what it references); a formula that reads its
+ *  OWN sheet via a bare/unqualified reference needs no rewrite either, since a bare reference
+ *  is already "whichever sheet this formula lives on" and the copy IS a new such sheet. */
+export function duplicateSheet(workbook, sheetId) {
+  const idx = workbook.sheets.findIndex((s) => s.id === sheetId);
+  if (idx < 0) return workbook;
+  const src = workbook.sheets[idx];
+  const n = workbook.nextSheetId;
+  const id = `sheet${n}`;
+  const name = uniqueSheetName(workbook.sheets, `${src.name} (copy)`);
+  const cloned = JSON.parse(JSON.stringify(src.sheet)); // the sheet shape is already plain/JSON-safe (see createSheet)
+  const sheets = [...workbook.sheets];
+  sheets.splice(idx + 1, 0, makeSheetEntry(id, name, cloned));
+  return { ...workbook, sheets, nextSheetId: n + 1, activeSheetId: id };
+}
+
+/** Rename a sheet — and, per the build brief, REWRITE every formula anywhere in the workbook
+ *  that references it by its old name (`rewriteFormulaForSheetRename`, formula.js), so a
+ *  rename can never silently break a cross-sheet formula. Runs across EVERY sheet's cells,
+ *  including the renamed sheet's own (a formula there might carry a redundant explicit
+ *  self-qualifier, e.g. someone typed `Sheet1!A5` while sitting on Sheet1 itself). A no-op
+ *  (blank name, or the name is already exactly this) returns the workbook unchanged. */
+export function renameSheet(workbook, sheetId, name) {
+  const idx = workbook.sheets.findIndex((s) => s.id === sheetId);
+  if (idx < 0) return workbook;
+  const trimmed = String(name || "").trim();
+  const oldName = workbook.sheets[idx].name;
+  if (!trimmed || trimmed === oldName) return workbook;
+  const finalName = uniqueSheetName(workbook.sheets, trimmed, sheetId);
+  let changed = false;
+  const sheets = workbook.sheets.map((s, i) => {
+    const renamed = i === idx ? { ...s, name: finalName } : s;
+    const cells = renamed.sheet.cells;
+    let nextCells = cells, cellsChanged = false;
+    for (const [key, v] of Object.entries(cells)) {
+      if (!isFormulaText(v)) continue;
+      const rewritten = rewriteFormulaForSheetRename(v, oldName, finalName);
+      if (rewritten !== v) { if (!cellsChanged) { nextCells = { ...cells }; cellsChanged = true; } nextCells[key] = rewritten; }
+    }
+    if (i === idx) changed = true; // the rename itself always counts as a change
+    if (!cellsChanged) return renamed;
+    changed = true;
+    return { ...renamed, sheet: { ...renamed.sheet, cells: nextCells } };
+  });
+  return changed ? { ...workbook, sheets } : workbook;
+}
+
+/** Delete a sheet entirely. Refuses (no-op) on the LAST remaining sheet — a workbook can never
+ *  end up with zero sheets. Every OTHER sheet's formulas that reference the deleted sheet
+ *  become `#REF!` (`dropFormulaSheetRefs`, formula.js) — see the file-section header above for
+ *  why this is chosen over blocking the delete. If the deleted sheet was active, the sheet
+ *  immediately before it becomes active (or the new first sheet, if it was first). */
+export function deleteSheet(workbook, sheetId) {
+  if (workbook.sheets.length <= 1) return workbook;
+  const idx = workbook.sheets.findIndex((s) => s.id === sheetId);
+  if (idx < 0) return workbook;
+  const deletedName = workbook.sheets[idx].name;
+  const remaining = workbook.sheets.filter((s) => s.id !== sheetId);
+  const sheets = remaining.map((s) => {
+    const cells = s.sheet.cells;
+    let nextCells = cells, changed = false;
+    for (const [key, v] of Object.entries(cells)) {
+      if (!isFormulaText(v)) continue;
+      const rewritten = dropFormulaSheetRefs(v, deletedName);
+      if (rewritten !== v) { if (!changed) { nextCells = { ...cells }; changed = true; } nextCells[key] = rewritten; }
+    }
+    return changed ? { ...s, sheet: { ...s.sheet, cells: nextCells } } : s;
+  });
+  const activeSheetId = workbook.activeSheetId === sheetId ? sheets[Math.max(0, idx - 1)].id : workbook.activeSheetId;
+  return { ...workbook, sheets, activeSheetId };
+}
+
+/** Move a sheet to a new position in the tab order (drag-reorder). Both indices clamp to the
+ *  workbook's real bounds; moving a sheet onto its own position is a no-op. */
+export function reorderSheet(workbook, fromIndex, toIndex) {
+  const n = workbook.sheets.length;
+  const from = Math.max(0, Math.min(n - 1, fromIndex));
+  const to = Math.max(0, Math.min(n - 1, toIndex));
+  if (from === to) return workbook;
+  const sheets = [...workbook.sheets];
+  const [moved] = sheets.splice(from, 1);
+  sheets.splice(to, 0, moved);
+  return { ...workbook, sheets };
+}
+
+/** Apply a pure PER-SHEET mutator (commitCellText, setCellStyle, insertColumnAt, …) to the
+ *  ACTIVE sheet of a workbook, returning a new workbook — or the SAME workbook reference when
+ *  the mutator was a no-op, since every per-sheet mutator above already returns its own input
+ *  unchanged when nothing moved (this composes for free with `useUndoableState`'s "no undo
+ *  frame for a no-op commit" contract). `fn` is called exactly as if invoked directly on the
+ *  active sheet's own `sheet` object: `fn(activeSheet, ...args)`. This is the ONE thing every
+ *  ordinary (non-structural) ModelApp.jsx handler needs — structural row/column edits go
+ *  through the four `workbook*` wrappers below instead, since THEY also have to sweep
+ *  cross-sheet references in every OTHER sheet. */
+export function applyToActiveSheet(workbook, fn, ...args) {
+  const idx = activeSheetIndex(workbook);
+  const entry = workbook.sheets[idx];
+  const nextSheet = fn(entry.sheet, ...args);
+  if (nextSheet === entry.sheet) return workbook;
+  const sheets = workbook.sheets.map((s, i) => (i === idx ? { ...s, sheet: nextSheet } : s));
+  return { ...workbook, sheets };
+}
+
+/** The shared shape behind the four `workbook*` structural wrappers below: apply `mutator` to
+ *  the active sheet (passing its own name as BOTH the owner and the edited sheet, since for
+ *  its own cells the two are the same thing), then — ONLY if that actually changed something
+ *  (a no-op structural edit, e.g. "delete the last column," must never sweep anything) — walk
+ *  every OTHER sheet's formulas for a cross-sheet reference INTO the edited sheet and shift it
+ *  too, via `rewriteFormulaForStructuralShift`'s sheet-scoped signature (its own header in
+ *  formula.js explains why a bare reference elsewhere is untouched while a qualified one
+ *  naming the edited sheet shifts). `axis`/`at`/`delta` describe the SAME edit the mutator
+ *  itself computes internally — each wrapper below reproduces that exact clamped `at` so the
+ *  sweep and the own-sheet edit can never disagree about where the change happened. */
+function applyStructuralEdit(workbook, mutator, axis, at, delta, ...mutatorArgs) {
+  const idx = activeSheetIndex(workbook);
+  const entry = workbook.sheets[idx];
+  const editedName = entry.name;
+  const nextOwnSheet = mutator(entry.sheet, ...mutatorArgs, editedName, editedName);
+  if (nextOwnSheet === entry.sheet) return workbook; // the edit itself no-op'd — nothing happened to sweep
+  const sheets = workbook.sheets.map((s, i) => {
+    if (i === idx) return { ...s, sheet: nextOwnSheet };
+    const cells = s.sheet.cells;
+    let nextCells = cells, changed = false;
+    for (const [key, v] of Object.entries(cells)) {
+      if (!isFormulaText(v)) continue;
+      const rewritten = rewriteFormulaForStructuralShift(v, axis, at, delta, s.name, editedName);
+      if (rewritten !== v) { if (!changed) { nextCells = { ...cells }; changed = true; } nextCells[key] = rewritten; }
+    }
+    return changed ? { ...s, sheet: { ...s.sheet, cells: nextCells } } : s;
+  });
+  return { ...workbook, sheets };
+}
+
+export function workbookInsertRowAt(workbook, rowIndex) {
+  const entry = activeSheetEntry(workbook);
+  const at = Math.max(0, Math.min(entry.sheet.rowCount, rowIndex));
+  return applyStructuralEdit(workbook, insertRowAt, "row", at + 1, 1, rowIndex);
+}
+export function workbookDeleteRowAt(workbook, rowIndex) {
+  const entry = activeSheetEntry(workbook);
+  const at = Math.max(0, Math.min(entry.sheet.rowCount - 1, rowIndex));
+  return applyStructuralEdit(workbook, deleteRowAt, "row", at + 1, -1, rowIndex);
+}
+export function workbookInsertColumnAt(workbook, colIndex) {
+  const entry = activeSheetEntry(workbook);
+  const at = Math.max(0, Math.min(entry.sheet.columns.length, colIndex));
+  return applyStructuralEdit(workbook, insertColumnAt, "col", at + 1, 1, colIndex);
+}
+export function workbookDeleteColumn(workbook, colIndex) {
+  return applyStructuralEdit(workbook, deleteColumn, "col", colIndex + 1, -1, colIndex);
 }

@@ -1026,7 +1026,12 @@ test.describe("Model workspace — B1107632 (explicit scroll-dismiss guard)", ()
   test("repeated right-click-and-close cycles on a row requiring auto-scroll never self-dismiss — deterministic across N opens, not merely observed once", async ({ page }) => {
     const id = "e2e-b1107632-repeat";
     await seedProject(page, id);
-    await page.setViewportSize({ width: 900, height: 500 });
+    // Stage 3 (NEW-1) added the sheet TAB STRIP below the grid — a required ~36px of chrome
+    // that wasn't there when this viewport height was first tuned to make row 14 "partially cut,
+    // requiring auto-scroll." +40px restores that same relationship rather than accidentally
+    // making row 14 either fully on-screen (defeats the point of this test) or fully off (the
+    // regression this fix closes).
+    await page.setViewportSize({ width: 900, height: 540 });
     await page.goto(`/#/project/${id}/model`);
     await expect(sheetEl(page)).toBeVisible();
 
@@ -1040,5 +1045,215 @@ test.describe("Model workspace — B1107632 (explicit scroll-dismiss guard)", ()
       await page.keyboard.press("Escape");
       await expect(page.locator(".menu")).toBeHidden();
     }
+  });
+});
+
+// ── STAGE 3 (NEW-1/NEW-2, owner brief 2026-09-03) — multi-sheet workbooks + input/formula/
+// cross-sheet-link colour ──────────────────────────────────────────────────────────────────
+const tab = (page, i) => page.getByTestId(`model-sheet-tab-${i}`);
+
+test.describe("Model workspace — Stage 3 (multi-sheet workbooks, tab strip)", () => {
+  test("a fresh project opens with exactly one tab, 'Sheet1', already active", async ({ page }) => {
+    const id = "e2e-stage3-onetab";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await expect(sheetEl(page)).toBeVisible();
+    await expect(tab(page, 0)).toHaveText("Sheet1");
+    await expect(page.getByTestId("model-sheet-tab-1")).toHaveCount(0);
+  });
+
+  test("+ adds a new sheet, named Sheet2, and switches to it", async ({ page }) => {
+    const id = "e2e-stage3-add";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await cell(page, 0, 0).click(); await typeAndEnter(page, "111"); // Sheet1!A1
+    await page.getByTestId("model-add-sheet").click();
+    await expect(tab(page, 1)).toHaveText("Sheet2");
+    // The new sheet is BLANK — its own A1 must not show Sheet1's content.
+    await expect(cell(page, 0, 0)).toHaveText("");
+    // Switching back to Sheet1 shows its own data again.
+    await tab(page, 0).click();
+    await expect(cell(page, 0, 0)).toHaveText("111");
+  });
+
+  test("double-click renames a tab inline — no window.prompt, ever", async ({ page }) => {
+    const id = "e2e-stage3-rename";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    let promptCalled = false;
+    await page.exposeFunction("__e2ePromptFlag", () => { promptCalled = true; });
+    await page.addInitScript(() => { window.prompt = () => { window.__e2ePromptFlag?.(); return null; }; });
+    await tab(page, 0).dblclick();
+    await page.keyboard.press("Control+A");
+    await page.keyboard.type("Revenue");
+    await page.keyboard.press("Enter");
+    await expect(tab(page, 0)).toHaveText("Revenue");
+    expect(promptCalled).toBe(false);
+  });
+
+  test("a cross-sheet formula (Sheet1!A1) reads another sheet's value, live", async ({ page }) => {
+    const id = "e2e-stage3-crosssheet";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await cell(page, 0, 0).click(); await typeAndEnter(page, "500"); // Sheet1!A1
+    await page.getByTestId("model-add-sheet").click(); // Sheet2, now active
+    await cell(page, 0, 0).click(); await typeAndEnter(page, "=Sheet1!A1*2");
+    await expect(cell(page, 0, 0)).toHaveText("1000");
+  });
+
+  test("renaming the referenced sheet rewrites the cross-sheet formula's qualifier", async ({ page }) => {
+    const id = "e2e-stage3-rename-rewrite";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await cell(page, 0, 0).click(); await typeAndEnter(page, "7"); // Sheet1!A1
+    await page.getByTestId("model-add-sheet").click(); // Sheet2
+    await cell(page, 0, 0).click(); await typeAndEnter(page, "=Sheet1!A1");
+    // A double-click on a tab lands two ordinary clicks before the dblclick itself (real browser
+    // behavior, matched here — Excel's own tabs work the same way), so this ALSO switches the
+    // active sheet to Sheet1 first; switch back to Sheet2 afterward to read its own formula.
+    await tab(page, 0).dblclick();
+    await page.keyboard.press("Control+A");
+    await page.keyboard.type("Costs");
+    await page.keyboard.press("Enter");
+    await tab(page, 1).click(); // back to Sheet2
+    await expect(cell(page, 0, 0)).toHaveText("7"); // still resolves — the reference followed the rename
+    await cell(page, 0, 0).click();
+    await expect(page.getByTestId("model-formula-bar")).toHaveValue("=Costs!A1"); // the qualifier itself was rewritten
+  });
+
+  test("deleting a referenced sheet turns the cross-sheet formula into #REF!, not a crash", async ({ page }) => {
+    const id = "e2e-stage3-delete-ref";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await cell(page, 0, 0).click(); await typeAndEnter(page, "9"); // Sheet1!A1
+    await page.getByTestId("model-add-sheet").click(); // Sheet2
+    await cell(page, 0, 0).click(); await typeAndEnter(page, "=Sheet1!A1+1");
+    await tab(page, 0).click({ button: "right" });
+    await page.getByText("Delete", { exact: true }).click();
+    await expect(tab(page, 0)).toHaveText("Sheet2");
+    await expect(cell(page, 0, 0)).toHaveText("#REF!");
+  });
+
+  test("the last remaining sheet cannot be deleted — the Delete menu item is disabled", async ({ page }) => {
+    const id = "e2e-stage3-lastsheet";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await tab(page, 0).click({ button: "right" });
+    const del = page.getByText("Delete", { exact: true });
+    await expect(del).toBeVisible();
+    await expect(del).toBeDisabled();
+    await expect(tab(page, 0)).toHaveText("Sheet1"); // still there
+  });
+
+  test("the tab strip stays pinned when the grid scrolls horizontally — never inside the grid's own scroller", async ({ page }) => {
+    const id = "e2e-stage3-pinned";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await expect(sheetEl(page)).toBeVisible();
+    const before = await page.getByTestId("model-tab-strip").boundingBox();
+    await sheetEl(page).evaluate((el) => { el.scrollLeft = 2000; });
+    await page.waitForTimeout(100);
+    const after = await page.getByTestId("model-tab-strip").boundingBox();
+    expect(after.x).toBeCloseTo(before.x, 0);
+    expect(after.y).toBeCloseTo(before.y, 0);
+  });
+
+  test("round-trip through local storage: a second sheet + a cross-sheet formula survive a reload", async ({ page }) => {
+    const id = "e2e-stage3-roundtrip";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await cell(page, 0, 0).click(); await typeAndEnter(page, "42"); // Sheet1!A1
+    await page.getByTestId("model-add-sheet").click(); // Sheet2
+    await cell(page, 0, 0).click(); await typeAndEnter(page, "=Sheet1!A1+8");
+    await expect(cell(page, 0, 0)).toHaveText("50");
+    await page.reload();
+    await expect(sheetEl(page)).toBeVisible();
+    await expect(tab(page, 1)).toHaveText("Sheet2");
+    await expect(cell(page, 0, 0)).toHaveText("50"); // the cross-sheet formula, and Sheet1's own value, both survived
+  });
+
+  test("a PRE-Stage-3 single-sheet localStorage blob still opens without loss, now inside a one-sheet workbook", async ({ page }) => {
+    const id = "e2e-stage3-migrate";
+    await seedProject(page, id);
+    const oldShapeSheet = {
+      version: 1, nextColId: 27,
+      columns: Array.from({ length: 26 }, (_, i) => ({ id: `c${i + 1}`, name: String.fromCharCode(65 + i), width: 120 })),
+      rowCount: 1000, cells: { "c1:0": "12345", "c2:0": "=A1*2" }, formats: {}, styles: {},
+      rowHeights: {}, freezeRows: 0, freezeCols: 0, merges: [],
+    };
+    await page.addInitScript(([pid, blob]) => {
+      localStorage.setItem(`planyr:model:sheet:v1:local:${pid}`, JSON.stringify(blob));
+    }, [id, oldShapeSheet]);
+    await page.goto(`/#/project/${id}/model`);
+    await expect(sheetEl(page)).toBeVisible();
+    await expect(tab(page, 0)).toHaveText("Sheet1");
+    await expect(page.getByTestId("model-sheet-tab-1")).toHaveCount(0);
+    await expect(cell(page, 0, 0)).toHaveText("12345");
+    await expect(cell(page, 0, 1)).toHaveText("24690");
+  });
+});
+
+test.describe("Model workspace — Stage 3 (input/formula/cross-sheet-link colour)", () => {
+  test("an input, a same-sheet formula, and a cross-sheet formula each render a distinctly different colour", async ({ page }) => {
+    const id = "e2e-stage3-colour";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await cell(page, 0, 0).click(); await typeAndEnter(page, "5"); // A1 — input
+    await cell(page, 0, 1).click(); await typeAndEnter(page, "=A1+1"); // B1 — same-sheet formula
+    await page.getByTestId("model-add-sheet").click();
+    await cell(page, 0, 0).click(); await typeAndEnter(page, "=Sheet1!A1"); // Sheet2!A1 — cross-sheet
+    await tab(page, 0).click();
+
+    const inputColor = await cell(page, 0, 0).evaluate((el) => getComputedStyle(el).color);
+    const formulaColor = await cell(page, 0, 1).evaluate((el) => getComputedStyle(el).color);
+    expect(inputColor).not.toBe(formulaColor);
+
+    await tab(page, 1).click();
+    const crossColor = await cell(page, 0, 0).evaluate((el) => getComputedStyle(el).color);
+    expect(crossColor).not.toBe(inputColor);
+    expect(crossColor).not.toBe(formulaColor);
+  });
+
+  test("the ribbon toggle turns automatic colouring off, and back on", async ({ page }) => {
+    const id = "e2e-stage3-colour-toggle";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await cell(page, 0, 0).click(); await typeAndEnter(page, "5"); // input — blue while ON
+    const onColor = await cell(page, 0, 0).evaluate((el) => getComputedStyle(el).color);
+
+    await page.getByTestId("ribbon-autocolor").click(); // OFF
+    const offColor = await cell(page, 0, 0).evaluate((el) => getComputedStyle(el).color);
+    expect(offColor).not.toBe(onColor);
+
+    await page.getByTestId("ribbon-autocolor").click(); // back ON
+    await expect.poll(() => cell(page, 0, 0).evaluate((el) => getComputedStyle(el).color)).toBe(onColor);
+  });
+
+  test("a manual font colour always wins over the automatic classification", async ({ page }) => {
+    const id = "e2e-stage3-colour-manual";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await cell(page, 0, 0).click(); await typeAndEnter(page, "5"); // input — auto-blue while ON
+    const autoColor = await cell(page, 0, 0).evaluate((el) => getComputedStyle(el).color);
+
+    await cell(page, 0, 0).click();
+    // Open the "A" text-colour swatch (ColorSwatchButton's trigger carries this title).
+    await page.locator('[title="Text colour"]').click();
+    await page.locator('button[title="#c62828"]').click(); // a palette red — deliberately NOT the auto-colour blue
+    const manualColor = await cell(page, 0, 0).evaluate((el) => getComputedStyle(el).color);
+    expect(manualColor).not.toBe(autoColor);
+    expect(manualColor).toBe("rgb(198, 40, 40)"); // #c62828, exactly what was picked — the auto-colour never overrides it
+  });
+
+  test("the toggle persists across a reload (a standing display choice, not a mid-task gesture)", async ({ page }) => {
+    const id = "e2e-stage3-colour-persist";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await expect(page.getByTestId("ribbon-autocolor")).toHaveAttribute("aria-pressed", "true");
+    await page.getByTestId("ribbon-autocolor").click();
+    await expect(page.getByTestId("ribbon-autocolor")).toHaveAttribute("aria-pressed", "false");
+    await page.reload();
+    await expect(sheetEl(page)).toBeVisible();
+    await expect(page.getByTestId("ribbon-autocolor")).toHaveAttribute("aria-pressed", "false");
   });
 });

@@ -7,6 +7,15 @@
  * `version`, so the second write's compare-and-swap matched 0 rows and was wrongly reported
  * as a conflict — which then froze autosave until reload).
  *
+ * ⛔ STAGE 3 (NEW-1) — the persisted blob is now a WORKBOOK (`lib/sheetModel.js`'s
+ * `{version, nextSheetId, sheets:[{id,name,sheet}], activeSheetId}` shape), not a bare sheet.
+ * NOTHING BELOW IN THIS FILE CHANGED to make that true: `data` was always an untyped jsonb
+ * blob (see `db/model_sheets.sql`'s own header), this module has never known or cared what
+ * shape it holds, and it still doesn't — it reads/writes whatever `ModelApp.jsx` hands it
+ * verbatim. `migrateWorkbook` (sheetModel.js) is what turns an old bare-sheet blob (or a
+ * corrupt/foreign one) into a valid workbook on load; this file's job stays exactly "move
+ * bytes," never "understand them."
+ *
  * The two shared primitives that fix exactly that (src/shared/cloud/):
  *   - serializeWrites.makeWriteSerializer() — same-key writes for THIS tab run strictly in
  *     submission order, so a tab can never race itself.

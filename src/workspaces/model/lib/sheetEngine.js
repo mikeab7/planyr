@@ -87,113 +87,148 @@ export function kindOf(value) {
   return "text";
 }
 
-/** Walk a formula's parsed AST, collecting which CELLS it reads — both reference systems.
- *  `addDep(rowIndex, colIndex)` (0-based) is called for every cell the formula could possibly
- *  read; the caller (evaluateSheet) is responsible for bounds-checking and for deciding which
- *  of those are themselves formula cells (only formula cells need ordering — a literal is
- *  already resolved). `colNameToIndex` resolves a `[Column]` bracket name to a column index,
- *  or null for an unknown column (the engine's own #REF! already covers reporting that at
- *  eval time — this walker just skips a dependency it can't resolve, over-depending on nothing
- *  is fine since the eval itself will raise the real error). */
-function collectCellDeps(node, rowCount, colNameToIndex, addDep) {
+/** Walk a formula's parsed AST, collecting which CELLS it reads — both reference systems, now
+ *  across the WHOLE WORKBOOK (Stage 3, NEW-1). `addDep(sheetId, rowIndex, colIndex)` (0-based)
+ *  is called for every cell the formula could possibly read; the caller (evaluateWorkbook) is
+ *  responsible for bounds-checking against the TARGET sheet's own dimensions and for deciding
+ *  which of those are themselves formula cells (only formula cells need ordering — a literal
+ *  is already resolved). `ownerSheetId` is the sheet the FORMULA ITSELF lives on — an
+ *  unqualified A1/range reference means "this cell on THAT sheet" (Excel semantics), and a
+ *  `[Column]` bracket reference is ALWAYS same-sheet (no cross-sheet bracket syntax exists) so
+ *  it resolves against `ownerSheetId` regardless of what a sibling A1 reference in the same
+ *  formula names. `colNameToIndex` resolves a `[Column]` bracket name to a column index on the
+ *  OWNER sheet, or null for an unknown column (the engine's own #REF! already covers reporting
+ *  that at eval time). `resolveSheetId(name)` resolves a qualifier's sheet NAME to its id, or
+ *  null if no sheet by that name exists (over-depending on nothing is fine — the eval itself
+ *  raises the real #REF! for an unresolvable sheet). `sheetBounds(sheetId)` returns that
+ *  sheet's own `{rows, cols}`, needed because a `[Column]`-whole-column dependency has to walk
+ *  the OWNER sheet's row count, not whichever sheet a sibling reference in the same formula
+ *  might target. */
+function collectCellDeps(node, ownerSheetId, colNameToIndex, resolveSheetId, sheetBounds, addDep) {
   if (!node || typeof node !== "object") return;
   switch (node.type) {
     case "col": {
       const idx = colNameToIndex(node.name);
-      if (idx != null) for (let r = 0; r < rowCount; r++) addDep(r, idx);
+      const bounds = sheetBounds(ownerSheetId);
+      if (idx != null && bounds) for (let r = 0; r < bounds.rows; r++) addDep(ownerSheetId, r, idx);
       return;
     }
-    case "ref":
-      addDep(node.row - 1, node.col - 1);
+    case "ref": {
+      const sheetId = node.sheet ? resolveSheetId(node.sheet) : ownerSheetId;
+      if (sheetId == null) return; // unresolvable sheet name — nothing to depend on; eval raises #REF!
+      addDep(sheetId, node.row - 1, node.col - 1);
       return;
+    }
     case "range": {
+      const sheetId = node.sheet ? resolveSheetId(node.sheet) : ownerSheetId;
+      if (sheetId == null) return;
       const r1 = Math.min(node.from.row, node.to.row) - 1, r2 = Math.max(node.from.row, node.to.row) - 1;
       const c1 = Math.min(node.from.col, node.to.col) - 1, c2 = Math.max(node.from.col, node.to.col) - 1;
-      for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) addDep(r, c);
+      for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) addDep(sheetId, r, c);
       return;
     }
     case "unary":
     case "percent":
-      collectCellDeps(node.arg, rowCount, colNameToIndex, addDep);
+      collectCellDeps(node.arg, ownerSheetId, colNameToIndex, resolveSheetId, sheetBounds, addDep);
       return;
     case "binary":
-      collectCellDeps(node.left, rowCount, colNameToIndex, addDep);
-      collectCellDeps(node.right, rowCount, colNameToIndex, addDep);
+      collectCellDeps(node.left, ownerSheetId, colNameToIndex, resolveSheetId, sheetBounds, addDep);
+      collectCellDeps(node.right, ownerSheetId, colNameToIndex, resolveSheetId, sheetBounds, addDep);
       return;
     case "call":
-      node.args.forEach((a) => collectCellDeps(a, rowCount, colNameToIndex, addDep));
+      node.args.forEach((a) => collectCellDeps(a, ownerSheetId, colNameToIndex, resolveSheetId, sheetBounds, addDep));
       return;
     default:
       return; // num, str, bool, blankLiteral, errLiteral — leaves, no cell deps
   }
 }
 
-/** Evaluate every formula CELL of a sheet, once, in dependency order. Returns
- *  { get(rowIndex, colIndex) } -> {ok, value, error, detail} | null (null = not a formula cell,
- *  or a row past sheet.rowCount). */
-export function evaluateSheet(sheet) {
-  const rows = sheet.rowCount;
-  const cols = sheet.columns;
-  const numCols = cols.length;
-  if (!rows || !numCols) return { get: () => null };
+const EMPTY_SHEET_EVAL = { get: () => null };
 
-  const nameToIndex = (name) => {
-    const nk = lower(name);
-    const idx = cols.findIndex((c) => lower(c.name) === nk);
-    return idx < 0 ? null : idx;
-  };
+/** Evaluate every formula CELL of a WHOLE WORKBOOK, once, in ONE combined dependency order
+ *  across every sheet (Stage 3, NEW-1 — cross-sheet references, `SheetName!A1`). This is the
+ *  workbook-wide generalization of the single-sheet algorithm below (evaluateSheet): the same
+ *  seed-grid / build-deps / topo-sort / evaluate-in-order shape, just keyed by
+ *  `sheetId:row:col` instead of `row:col`, so a formula on ANY sheet that reads another
+ *  sheet's cell sees that cell's CURRENT (possibly itself formula-computed) value, and a
+ *  circular reference that loops THROUGH another sheet is caught exactly like one that stays
+ *  on one sheet. Must always evaluate every sheet, even the ones not currently visible — a
+ *  hidden sheet's formulas are still live inputs to whichever sheet the user IS looking at.
+ *  Returns `{ get(sheetId) }` -> `{ get(rowIndex, colIndex) }` -> `{ok, value, error, detail}
+ *  | null`, so `displayFor`/`displayColorFor`/`displayKindFor` below (unchanged, per-sheet)
+ *  keep working exactly as before once handed the right sheet's own slice. */
+export function evaluateWorkbook(workbook) {
+  const entries = workbook.sheets;
+  const nameToId = new Map();
+  for (const s of entries) nameToId.set(s.name.trim().toLowerCase(), s.id);
+  const resolveSheetId = (name) => (nameToId.has(String(name).trim().toLowerCase()) ? nameToId.get(String(name).trim().toLowerCase()) : null);
 
-  // ONE shared, mutable-during-eval representation of the sheet's current typed values —
-  // grid[r][c] (0-based) for A1 refs, rowMaps[r][lowerColName] for [Column] refs. Seeded from
-  // every literal cell; formula cells fill themselves in as they resolve, in topological
-  // order, so a formula that reads another formula cell always sees a real value.
-  const grid = Array.from({ length: rows }, () => new Array(numCols).fill(BLANK));
-  const rowMaps = Array.from({ length: rows }, () => ({}));
-  const formulaCells = new Map(); // "r:c" -> { rowIndex, colIndex, src, ast, parseErr }
+  const grids = {};          // sheetId -> grid[][]
+  const gridsByName = {};    // lowercased sheet name -> the SAME grid[][] object (for ctx.grids)
+  const rowMapsBySheet = {}; // sheetId -> rowMaps[]
+  const colsBySheet = {};    // sheetId -> columns[]
+  const formulaCells = new Map(); // "sheetId:r:c" -> { sheetId, rowIndex, colIndex, src, ast, parseErr }
 
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < numCols; c++) {
-      const col = cols[c];
-      const raw = sheet.cells[`${col.id}:${r}`];
-      if (raw != null && isFormulaText(raw)) {
-        const src = formulaSource(raw);
-        const { ast, error, detail } = parseFormula(src);
-        formulaCells.set(`${r}:${c}`, { rowIndex: r, colIndex: c, src, ast, parseErr: error ? { error, detail } : null });
-      } else {
-        const v = literalTypedValue(raw);
-        grid[r][c] = v;
-        rowMaps[r][lower(col.name)] = v;
+  for (const s of entries) {
+    const sheet = s.sheet;
+    const rows = sheet.rowCount;
+    const cols = sheet.columns;
+    const numCols = cols.length;
+    const grid = Array.from({ length: rows }, () => new Array(numCols).fill(BLANK));
+    const rowMaps = Array.from({ length: rows }, () => ({}));
+    grids[s.id] = grid;
+    gridsByName[s.name.trim().toLowerCase()] = grid;
+    rowMapsBySheet[s.id] = rowMaps;
+    colsBySheet[s.id] = cols;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < numCols; c++) {
+        const col = cols[c];
+        const raw = sheet.cells[`${col.id}:${r}`];
+        if (raw != null && isFormulaText(raw)) {
+          const src = formulaSource(raw);
+          const { ast, error, detail } = parseFormula(src);
+          formulaCells.set(`${s.id}:${r}:${c}`, { sheetId: s.id, rowIndex: r, colIndex: c, src, ast, parseErr: error ? { error, detail } : null });
+        } else {
+          const v = literalTypedValue(raw);
+          grid[r][c] = v;
+          rowMaps[r][lower(col.name)] = v;
+        }
       }
     }
   }
 
-  // Dependency graph, formula cells only (a literal is already resolved above).
-  //
-  // ⛔ A SELF-REFERENCE MUST STAY IN ITS OWN DEPENDENCY SET — do not filter `dk !== key` here.
-  // Measured live in this session's own test suite: excluding it meant a cell referencing
-  // itself (e.g. "=A1+1" typed into A1) had an EMPTY dependency set, so the cycle-detection DFS
-  // below never revisited it and never flagged it — it evaluated against its own still-BLANK
-  // grid slot (BLANK+1) and silently returned a plausible-looking 1 instead of #CIRC!. Exactly
-  // the class of defect this whole rewrite exists to prevent: a wrong number that looks right.
+  const nameToIndexFor = (sheetId) => {
+    const cols = colsBySheet[sheetId] || [];
+    return (name) => { const nk = lower(name); const idx = cols.findIndex((c) => lower(c.name) === nk); return idx < 0 ? null : idx; };
+  };
+  const sheetBounds = (sheetId) => {
+    const cols = colsBySheet[sheetId];
+    return cols ? { rows: rowMapsBySheet[sheetId].length, cols: cols.length } : null;
+  };
+
+  // ⛔ A SELF-REFERENCE MUST STAY IN ITS OWN DEPENDENCY SET — see evaluateSheet's own note
+  // below, unchanged reasoning, now over the combined key space.
   const deps = new Map(); // key -> Set<key>
   for (const [key, cell] of formulaCells) {
     const set = new Set();
     if (cell.ast) {
-      collectCellDeps(cell.ast, rows, nameToIndex, (r, c) => {
-        if (r < 0 || r >= rows || c < 0 || c >= numCols) return; // off-sheet: nothing to depend on
-        const dk = `${r}:${c}`;
+      const colNameToIndex = nameToIndexFor(cell.sheetId);
+      collectCellDeps(cell.ast, cell.sheetId, colNameToIndex, resolveSheetId, sheetBounds, (sheetId, r, c) => {
+        const bounds = sheetBounds(sheetId);
+        if (!bounds || r < 0 || r >= bounds.rows || c < 0 || c >= bounds.cols) return; // off-sheet: nothing to depend on
+        const dk = `${sheetId}:${r}:${c}`;
         if (formulaCells.has(dk)) set.add(dk);
       });
     }
     deps.set(key, set);
   }
 
-  // Topological order + cycle detection — 3-color DFS. Any node revisited while still
-  // "visiting" (gray) means every node on the stack from its first occurrence onward is part
-  // of a cycle; all of them get marked, not just the one that closed the loop.
+  // Topological order + cycle detection — 3-color DFS, unchanged shape from evaluateSheet
+  // below, now walking the combined sheetId:row:col key space so a cycle THROUGH another
+  // sheet is caught exactly like one that never leaves the current sheet.
   const order = [];
   const cyclic = new Set();
-  const state = new Map(); // key -> 1 visiting | 2 done (absent = unvisited)
+  const state = new Map();
   const stack = [];
   const visit = (key) => {
     const st = state.get(key);
@@ -213,27 +248,39 @@ export function evaluateSheet(sheet) {
   };
   for (const key of formulaCells.keys()) visit(key);
 
-  const results = new Map(); // "r:c" -> {ok, value, error, detail}
+  const results = new Map(); // "sheetId:r:c" -> {ok, value, error, detail}
   const today = Math.floor(Date.now() / 86400000);
   for (const key of order) {
     const cell = formulaCells.get(key);
     let res;
-    // ⛔ B891184-FOLLOWUP: propagate the engine's OWN parse-error code (e.g. "#NAME?" for an
-    // unrecognized token/address, "#ERROR!" for a genuine syntax error) rather than flattening
-    // every parse failure to a generic "#ERROR!" — measured live: "=ZQXW123" (an out-of-bounds
-    // address, out-of-bounds beyond XFD) showed the vague #ERROR! instead of the #NAME? the
-    // engine itself determined, which is exactly the "never a silent/generic wrong-looking
-    // error" bar the brief holds this to.
     if (cell.parseErr) res = { ok: false, error: cell.parseErr.error || "#ERROR!", detail: cell.parseErr.detail };
     else if (cyclic.has(key)) res = { ok: false, error: "#CIRC!", detail: "circular reference between cells" };
-    else res = evaluateFormula(cell.src, { columns: rowMaps[cell.rowIndex], rows: rowMaps, rowIndex: cell.rowIndex, grid, calendar: DEFAULT_CALENDAR, today });
+    else {
+      res = evaluateFormula(cell.src, {
+        columns: rowMapsBySheet[cell.sheetId][cell.rowIndex], rows: rowMapsBySheet[cell.sheetId], rowIndex: cell.rowIndex,
+        grid: grids[cell.sheetId], grids: gridsByName,
+        calendar: DEFAULT_CALENDAR, today,
+      });
+    }
     const value = res.ok ? res.value : errVal(res.error);
-    grid[cell.rowIndex][cell.colIndex] = value;
-    rowMaps[cell.rowIndex][lower(cols[cell.colIndex].name)] = value;
+    grids[cell.sheetId][cell.rowIndex][cell.colIndex] = value;
+    rowMapsBySheet[cell.sheetId][cell.rowIndex][lower(colsBySheet[cell.sheetId][cell.colIndex].name)] = value;
     results.set(key, res);
   }
 
-  return { get: (rowIndex, colIndex) => results.get(`${rowIndex}:${colIndex}`) || null };
+  const bySheet = new Map();
+  for (const s of entries) bySheet.set(s.id, { get: (rowIndex, colIndex) => results.get(`${s.id}:${rowIndex}:${colIndex}`) || null });
+  return { get: (sheetId) => bySheet.get(sheetId) || EMPTY_SHEET_EVAL };
+}
+
+/** Evaluate every formula CELL of a SINGLE sheet, once, in dependency order — the ORIGINAL,
+ *  single-sheet entry point (unit tests and any future single-sheet caller). Returns
+ *  { get(rowIndex, colIndex) } -> {ok, value, error, detail} | null. Implemented as a thin
+ *  wrapper over evaluateWorkbook (Stage 3, NEW-1), wrapping `sheet` in an ephemeral one-sheet
+ *  workbook — no reference resolution can ever behave differently between the two, because
+ *  there is only ever one real algorithm now. */
+export function evaluateSheet(sheet) {
+  return evaluateWorkbook({ sheets: [{ id: "sheet1", name: "Sheet1", sheet }], activeSheetId: "sheet1" }).get("sheet1");
 }
 
 /** What the cell actually shows — a formula's computed, formatted value; a plain cell's raw
@@ -292,4 +339,48 @@ export function formulaBarText(sheet, rowIndex, colIndex) {
   const col = sheet.columns[colIndex];
   if (!col) return "";
   return sheet.cells[`${col.id}:${rowIndex}`] ?? "";
+}
+
+/* ── STAGE 3 (NEW-2, owner brief 2026-09-03) — INPUT / FORMULA / CROSS-SHEET-LINK COLOUR ──
+ * The financial-modelling convention: BLUE for a hardcoded input the user typed, BLACK for a
+ * formula computed on this sheet, GREEN for a formula whose value comes from ANOTHER sheet.
+ * Derived automatically from the cell's own raw content and its PARSED reference shape — never
+ * from the eval RESULT, so it costs nothing extra to compute (parseFormula's own LRU cache
+ * makes a repeat call here a lookup, not a re-parse) and never disagrees with what the formula
+ * bar shows for the same cell. A blank cell classifies as `null` (nothing to colour). */
+
+/** Does this formula's AST read a reference qualified to a sheet OTHER than `ownSheetName`
+ *  (case-insensitively)? A `[Column]` bracket ref is always same-sheet by construction and
+ *  never counts. Per the brief: "even if it also references this sheet" — mixing a bare/
+ *  same-sheet-qualified ref with a genuinely cross-sheet one still counts as cross-sheet. */
+function astHasCrossSheetRef(node, ownSheetName) {
+  if (!node || typeof node !== "object") return false;
+  switch (node.type) {
+    case "ref":
+    case "range":
+      return !!node.sheet && node.sheet.trim().toLowerCase() !== ownSheetName.trim().toLowerCase();
+    case "unary":
+    case "percent":
+      return astHasCrossSheetRef(node.arg, ownSheetName);
+    case "binary":
+      return astHasCrossSheetRef(node.left, ownSheetName) || astHasCrossSheetRef(node.right, ownSheetName);
+    case "call":
+      return node.args.some((a) => astHasCrossSheetRef(a, ownSheetName));
+    default:
+      return false; // num, str, bool, blankLiteral, errLiteral, col — no A1 reference to check
+  }
+}
+
+/** "input" | "formula" | "cross-sheet" | null (blank — nothing to colour) for one cell.
+ *  `sheetName` is the sheet THIS cell lives on (needed only to tell a genuinely cross-sheet
+ *  reference apart from a redundant explicit self-qualifier, e.g. `Sheet1!A5` typed while
+ *  sitting on Sheet1 — that reads as an ordinary same-sheet "formula", not "cross-sheet"). */
+export function cellColorKind(sheet, sheetName, rowIndex, colIndex) {
+  const col = sheet.columns[colIndex];
+  if (!col) return null;
+  const raw = sheet.cells[`${col.id}:${rowIndex}`];
+  if (raw == null || raw === "") return null;
+  if (!isFormulaText(raw)) return "input";
+  const { ast } = parseFormula(formulaSource(raw));
+  return ast && astHasCrossSheetRef(ast, sheetName || "") ? "cross-sheet" : "formula";
 }
