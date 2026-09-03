@@ -147,10 +147,22 @@ export const IconButton = forwardRef(function IconButton({ size = 30, active = f
  * `stacked` — label ABOVE the control instead of beside it, so the control gets the panel's
  * full width. Use in any narrow host (a rail panel) where the default label-left row leaves a
  * field squeezed into half the available width. `required` appends a small inline marker to
- * the label — the one convention for a required field, so a form never invents its own. */
-export function Field({ label, children, stacked = false, required = false }) {
+ * the label — the one convention for a required field, so a form never invents its own.
+ *
+ * `tight` (NEW-12, B1123424) — a THIRD row style, for read-only label/value pairs (a detail
+ * view, never a form): the label sits at its own natural width (never stretched, never
+ * wrapped — `flex:"0 0 auto"` + `whiteSpace:"nowrap"`) immediately followed by the value in
+ * the remaining space, with a small fixed gap between them. The default (`space-between`)
+ * row pushes the value to the far right edge, which reads fine for a wide value but strands a
+ * short one ("Term" / "126 mo") at opposite ends of an otherwise-empty shelf — `tight` is the
+ * fix for that specific complaint, additive only: every existing non-tight Field call renders
+ * byte-identically. */
+export function Field({ label, children, stacked = false, required = false, tight = false }) {
   const labelNode = (
-    <span style={{ fontSize: stacked ? 11 : 12, fontWeight: stacked ? 600 : 400, color: "var(--text-secondary)" }}>
+    <span style={{
+      fontSize: stacked ? 11 : 12, fontWeight: stacked ? 600 : 400, color: "var(--text-secondary)",
+      ...(tight ? { flex: "0 0 auto", whiteSpace: "nowrap" } : null),
+    }}>
       {label}{required && <span style={{ color: "var(--danger-text)" }}> *</span>}
     </span>
   );
@@ -163,8 +175,9 @@ export function Field({ label, children, stacked = false, required = false }) {
     );
   }
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 8 }}>
-      {labelNode}{children}
+    <div style={{ display: "flex", justifyContent: tight ? "flex-start" : "space-between", alignItems: tight ? "baseline" : "center", gap: 10, marginBottom: 8 }}>
+      {labelNode}
+      {tight ? <span style={{ flex: "1 1 auto", minWidth: 0 }}>{children}</span> : children}
     </div>
   );
 }

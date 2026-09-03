@@ -3376,7 +3376,18 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               // shared MAP_OVERLAY_CHIP_H_PX, matching the Layers panel's collapsed chip instead
               // of resting at whatever height its two-tab header row happened to need. `maxHeight`
               // (B948496) still caps the OPEN state so the panel never grows past the viewport.
-              : { top: MAP_OVERLAY_TOP_PX, left: 10, zIndex: MAP_CHROME_Z.panel, width: 232, maxHeight: "calc(100% - 24px)", ...(sitesPanelOpen ? null : { height: MAP_OVERLAY_CHIP_H_PX }) }) }}>
+              // NEW-12 (B1123424, owner report — the comp detail panel cramped on a wide monitor,
+              // label/value rows wrapping) — the rail's fixed 232px never scaled with the
+              // viewport, so a comp's field rows (the longest label, "Total annual rent (face)",
+              // 131px at the panel's own 12px/Inter) had no room to grow on a 2000px+ display.
+              // Scoped to the Comps tab only (`mode === "comp"`) — the Sites list already reads
+              // fine at 232 and B885136's team-chip layout was measured against that exact
+              // width, so leave Sites untouched. `clamp(232px, 23vw, 440px)` measured live
+              // against the real CompDetail component (a throwaway harness, discarded after
+              // use): 1191px viewport → 274px panel, 1440px → 331px, 1920px → 440px (the
+              // ceiling) — comfortably wider on a big monitor, barely different from today on a
+              // laptop, and it never shrinks below the original 232.
+              : { top: MAP_OVERLAY_TOP_PX, left: 10, zIndex: MAP_CHROME_Z.panel, width: mode === "comp" ? "clamp(232px, 23vw, 440px)" : 232, maxHeight: "calc(100% - 24px)", ...(sitesPanelOpen ? null : { height: MAP_OVERLAY_CHIP_H_PX }) }) }}>
             {/* collapsible header (B106) + the two tabs — one row, always visible (never buried
                 behind the collapse, and now PINNED — flex:"none" against the scrollable body
                 below — so both counts stay readable, and reachable, no matter how long either
