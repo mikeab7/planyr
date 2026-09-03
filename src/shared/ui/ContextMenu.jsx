@@ -123,12 +123,31 @@ export default function ContextMenu({
     const onResize = () => onCloseRef.current?.();
     const onNav = () => onCloseRef.current?.();
     window.addEventListener("keydown", onKey, true);
-    window.addEventListener("scroll", onScroll, true); // capture: catch a scroll in any container
     window.addEventListener("resize", onResize);
     window.addEventListener("hashchange", onNav);
+    // ⛔ B1076480 — `scroll` is armed a frame LATE, on purpose. Opening this menu very often
+    // selects the row/header/cell that was right-clicked (SheetView's openRowMenu/openColMenu/
+    // openCellMenu all call setSelRange in the same handler), and a SEPARATE "keep the active
+    // cell fully on screen" layout effect elsewhere can react to that same selection change by
+    // nudging the scroll container a few px — a real, deliberate scroll, not user input. Chrome
+    // does not dispatch the resulting native `scroll` event synchronously with the `scrollTop`
+    // write; it lands a frame or so later — which, measured live, landed AFTER this effect used
+    // to arm its listener on mount, so the menu closed itself within ~10-15ms of opening with no
+    // way to tell it apart from "the click did nothing." Reproduced on the Model sheet: right-
+    // click the last PARTIALLY visible row/column header (any grid tall/wide enough to scroll —
+    // an everyday interaction, not a corner case) opened and then immediately vanished the menu.
+    // A `scroll` from a genuine user action (wheel, scrollbar drag, keyboard) always arrives well
+    // after this delay, so dismissal for a REAL scroll is unaffected — only the opening gesture's
+    // own synchronous side effect is exempted.
+    let scrollArmed = false;
+    const raf = requestAnimationFrame(() => {
+      scrollArmed = true;
+      window.addEventListener("scroll", onScroll, true); // capture: catch a scroll in any container
+    });
     return () => {
+      cancelAnimationFrame(raf);
       window.removeEventListener("keydown", onKey, true);
-      window.removeEventListener("scroll", onScroll, true);
+      if (scrollArmed) window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onResize);
       window.removeEventListener("hashchange", onNav);
     };

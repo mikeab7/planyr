@@ -43,6 +43,7 @@ import SheetView from "./components/SheetView.jsx";
 import FormulaBar from "./components/FormulaBar.jsx";
 import FindReplaceBar from "./components/FindReplaceBar.jsx";
 import Ribbon from "./components/Ribbon.jsx";
+import { RADIUS } from "../../shared/ui/radius.js";
 import { useUndoableState } from "./lib/undoStack.js";
 import {
   createSheet, migrateSheet, commitCellText, blankRange, renameColumn, setNumberFormat,
@@ -57,7 +58,7 @@ import { increaseDecimals, decreaseDecimals, toggleThousands } from "./lib/numbe
 import { modelSaveState } from "./lib/modelSaveState.js";
 import { readZoom, writeZoom } from "./lib/sheetZoom.js";
 import { readLocalSheet, writeLocalSheet, loadCloudSheet, saveCloudSheet } from "./lib/modelStore.js";
-import { listProjects } from "../../shared/projects/projects.js";
+import { listProjects, reconcileProjects, onProjectsChanged } from "../../shared/projects/projects.js";
 
 const CLOUD_PUSH_DEBOUNCE_MS = 800;
 
@@ -92,6 +93,32 @@ export default function ModelApp({
   // nothing failed but nothing was ever confirmed either — the exact ambiguity that used to let
   // the badge claim "Synced" for a project that had never actually reached the cloud.
   const [cloudConfirmed, setCloudConfirmed] = useState(false);
+  // B1076480: the on-device project-name cache (listProjects()) is only populated after a cloud
+  // pull — Notes.jsx/Scheduler.jsx warm it on mount, but this workspace never did, so a fresh
+  // tab/deep-link/reload landing straight in Model saw an empty cache and the breadcrumb fell back
+  // to the literal word "Project" instead of the real name.
+  // ⛔ `warmProjectsIfEmpty()` (what Notes/Scheduler use) is NOT enough on its own — it's gated on
+  // the WHOLE cache being empty (`loadSiteSummaries().length === 0`), so it no-ops for the more
+  // likely real case: a cache that already holds OTHER projects but has quietly diverged and is
+  // simply missing/stale for THIS one (documented gap, B853266 — "the switcher can be opened a
+  // hundred times and it will keep serving the same stale snapshot"). That fix only reaches the
+  // project SWITCHER dropdown (reconcile only runs when it's opened, in ProjectBreadcrumb.jsx) —
+  // the crumb TEXT itself, resolved via resolveCurrentName()'s synthetic-entry fallback, is still
+  // exposed the moment this workspace is a fresh mount. reconcileProjects() is the always-pull
+  // sibling (no empty-cache gate) — call it once on mount, then keep listening so a later cloud
+  // pull (from anywhere in the app) self-heals the breadcrumb too.
+  // Deliberately unread — its only job is to force the re-render that picks up the newly-warmed
+  // cache in the plain `projectName` computation below (B1128 dead-store convention: `_` prefix).
+  const [_projectsTick, setProjectsTick] = useState(0);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try { await reconcileProjects(); } catch (_) {}
+      if (live) setProjectsTick((n) => n + 1);
+    })();
+    const off = onProjectsChanged(() => { if (live) setProjectsTick((n) => n + 1); });
+    return () => { live = false; off(); };
+  }, []);
   const cloudVersionRef = useRef(null);
   const pushTimer = useRef(0);
   const loadTokenRef = useRef(0);
@@ -404,6 +431,26 @@ export default function ModelApp({
         <EmptyProjectState onGoDashboard={onGoDashboard} />
       ) : (
         <>
+          {/* Round 3 visual pass (B1087904, owner verbatim: "rerun the loop to make it
+              pretty, also i dont like the square edging"). The ribbon and formula bar used to be
+              two full-bleed strips running edge to edge with 90-degree corners, separated by
+              hairline rules — the owner's own read: "reads as stacked strips bolted to a window,
+              not as a document inside an application." They are tightly coupled (the name box
+              and formula bar both act on whatever the ribbon is formatting), so they join into
+              ONE contained chrome card here — panel radius, inset from the window edges with the
+              SAME margin the sheet card below uses, sitting on the app background rather than
+              bleeding into it — with a single hairline divider marking the seam between the two
+              rows inside it. `overflow: hidden` is load-bearing: it's what clips the ribbon's own
+              square content to the card's rounded top corners (CHROME-NEVER-EATS-A-PRESS is not
+              at issue here — nothing inside is chrome floating OVER content). */}
+          <div
+            data-testid="model-toolbar-card"
+            style={{
+              flex: "none", margin: "8px 8px 0", overflow: "hidden",
+              background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: RADIUS.lg,
+              boxShadow: "0 1px 3px rgba(0,0,0,0.07)", // design-exempt: no shadow-color token yet repo-wide — matches SheetView.jsx's own card (same reasoning, its header)
+            }}
+          >
           <Ribbon
             activeFormat={activeFormat}
             activeStyle={activeStyle}
@@ -435,6 +482,7 @@ export default function ModelApp({
             onFilterToggle={onFilterToggle}
           />
           <FormulaBar sheet={sheet} row={selRange.r1} col={selRange.c1} onCommit={onCommitCell} onGoTo={onGoTo} nameBoxRef={nameBoxRef} />
+          </div>
           <SheetView
             sheet={sheet}
             evalResult={evalResult}

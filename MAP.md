@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-03 @ `13459c558` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-03 @ `deed5093` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -859,7 +859,7 @@ _650 source files mapped._
   - _exports_: `combineDepthToWater`, `pondGroundwaterScreen`
 - **`src/workspaces/site-planner/lib/groupCas.js`** — B1341 stage 2: the group-CAS kill switch (ships OFF; `VITE_GROUP_CAS` or the `planarfit:groupCas` device key, read at call time).
   - _exports_: `GROUP_CAS_KEY`, `groupCasEnabled`
-- **`src/workspaces/site-planner/lib/harrisTaxRates.js`** — Harris County's real tax-rate source (NEW-1): combines `/api/taxrates` (the Comptroller's published rates) with `identifyJurisdiction`'s live city/ISD lookup into a dated, coverage-noted total. Never sums a MUD/special district it can't match to a rate.
+- **`src/workspaces/site-planner/lib/harrisTaxRates.js`** — NEW-1: Harris County's real, dated combined tax rate (Comptroller workbook + jurisdiction/district lookup), never a "not connected" placeholder.
   - _exports_: `resolveHarrisTaxRates`
 - **`src/workspaces/site-planner/lib/hcfcdWse.js`** — HCFCD MAAPnext model WSE sampler (B882, Harris County): registry-driven ImageServer getSamples for the 1% + 0.2% WSE rasters; no-op until the provisional endpoints are confirmed live. `sampleMaapnextWse`/`maapnextEndpoints`/`clearMaapnextCache`.
   - _exports_: `clearMaapnextCache`, `maapnextEndpoints`, `maapnextOutage`, `sampleMaapnextWse`
