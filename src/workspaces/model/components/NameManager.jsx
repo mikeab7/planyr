@@ -14,12 +14,13 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RADIUS } from "../../../shared/ui/radius.js";
+import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import {
   validateNameText, namesList, nameUsageCount, rectFromSelRange, rectToAddressText,
 } from "../lib/namedRanges.js";
 
 const fieldStyle = {
-  flex: 1, minWidth: 0, font: "inherit", fontSize: 12.5, padding: "4px 7px",
+  flex: 1, minWidth: 0, font: "inherit", fontSize: FONT_SIZE.control, padding: "4px 7px",
   borderRadius: RADIUS.sm, border: "1px solid var(--border-default)",
   background: "var(--surface-page)", color: "var(--text-primary)",
 };
@@ -27,7 +28,7 @@ const smallBtnStyle = (enabled = true) => ({
   height: 24, padding: "0 8px", display: "inline-flex", alignItems: "center", justifyContent: "center",
   borderRadius: RADIUS.sm, border: "1px solid var(--border-default)", background: "var(--surface-page)",
   color: enabled ? "var(--text-primary)" : "var(--text-tertiary)", cursor: enabled ? "pointer" : "default",
-  opacity: enabled ? 1 : 0.5, fontSize: 11.5, font: "inherit",
+  opacity: enabled ? 1 : 0.5, fontSize: FONT_SIZE.label, font: "inherit",
 });
 
 function NewNameRow({ sheet, selRange, onDefineName }) {
@@ -60,11 +61,11 @@ function NewNameRow({ sheet, selRange, onDefineName }) {
           Define
         </button>
       </div>
-      <div style={{ fontSize: 11, color: "var(--text-tertiary)", fontVariantNumeric: "tabular-nums" }}>
+      <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", fontVariantNumeric: "tabular-nums" }}>
         Refers to: <span style={{ color: "var(--text-secondary)", fontWeight: 650 }}>{rectToAddressText(rect)}</span>
       </div>
       {text.trim() && !canCreate && (
-        <div data-testid="name-manager-new-error" style={{ fontSize: 11, color: "var(--danger)" }}>{validation.reason}</div>
+        <div data-testid="name-manager-new-error" style={{ fontSize: FONT_SIZE.label, color: "var(--danger)" }}>{validation.reason}</div>
       )}
     </div>
   );
@@ -111,12 +112,12 @@ function NameRow({ entry, sheet, selRange, onGoTo, onRenameName, onRetargetName,
         <button type="button" title="Point this name at the current selection" onClick={() => onRetargetName(entry.name, rectFromSelRange(selRange))} style={smallBtnStyle()}>Use selection</button>
         <button type="button" title={`Delete "${entry.name}"`} aria-label={`Delete ${entry.name}`} onClick={() => onDeleteName(entry.name)} style={{ ...smallBtnStyle(), width: 24, padding: 0, color: "var(--danger)" }}>✕</button>
       </div>
-      <div style={{ marginTop: 3, display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-tertiary)", fontVariantNumeric: "tabular-nums" }}>
+      <div style={{ marginTop: 3, display: "flex", justifyContent: "space-between", fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", fontVariantNumeric: "tabular-nums" }}>
         <span>{rectToAddressText(entry)}</span>
         <span>{usage === 0 ? "not used" : usage === 1 ? "1 formula" : `${usage} formulas`}</span>
       </div>
       {renaming && renameText.trim() && !renameOk && (
-        <div style={{ marginTop: 3, fontSize: 11, color: "var(--danger)" }}>{validation.reason}</div>
+        <div style={{ marginTop: 3, fontSize: FONT_SIZE.label, color: "var(--danger)" }}>{validation.reason}</div>
       )}
     </div>
   );
@@ -147,7 +148,7 @@ export default function NameManager({ open, sheet, selRange, onClose, onGoTo, on
       }}
     >
       <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 6, padding: 8, borderBottom: "1px solid var(--border-default)" }}>
-        <span style={{ flex: 1, fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)" }}>Name Manager</span>
+        <span style={{ flex: 1, fontSize: FONT_SIZE.control, fontWeight: 700, color: "var(--text-primary)" }}>Name Manager</span>
         <button type="button" title="Close (Esc)" onClick={onClose} style={{ ...smallBtnStyle(), width: 24, padding: 0 }}>✕</button>
       </div>
       <div style={{ flex: "none", padding: 8, borderBottom: "1px solid var(--border-default)" }}>
@@ -163,7 +164,7 @@ export default function NameManager({ open, sheet, selRange, onClose, onGoTo, on
       <NewNameRow sheet={sheet} selRange={selRange} onDefineName={onDefineName} />
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
         {rows.length === 0 ? (
-          <div style={{ padding: 16, textAlign: "center", fontSize: 12, color: "var(--text-tertiary)" }}>
+          <div style={{ padding: 16, textAlign: "center", fontSize: FONT_SIZE.control, color: "var(--text-tertiary)" }}>
             {q ? "No names match your search." : "No named ranges yet — select a cell or range above and give it a name."}
           </div>
         ) : (
