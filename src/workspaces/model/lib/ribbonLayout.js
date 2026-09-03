@@ -75,6 +75,14 @@ export const RIBBON_GROUPS = [
   { key: "number", label: "Number", width: 237 + DIVIDER_FOOTPRINT, priority: 6 },
   { key: "borders", label: "Borders", width: 87 + DIVIDER_FOOTPRINT, priority: 5 },
   { key: "cells", label: "Cells", width: 90 + DIVIDER_FOOTPRINT, priority: 1 },
+  // Stage 3 pt 2 (NEW-1) — a single icon button opening the Name Manager (list/search/jump,
+  // rename, retarget, delete, plus the "define from selection" fast path — see
+  // components/NameManager.jsx). Placed after Cells: a real spreadsheet's structural-editing
+  // tools (Cells) matter more moment to moment than naming a range, but naming still earns a
+  // spot ahead of Sort & Filter (the LOWEST-priority group, still first to collapse — a
+  // pre-existing checkpoint test pins that). Tied with Cells at priority 1 so it collapses
+  // before Cells but strictly after Sort & Filter as the window narrows.
+  { key: "names", label: "Names", width: 26 + DIVIDER_FOOTPRINT, priority: 1 },
   { key: "sortfilter", label: "Sort & Filter", width: 87 + DIVIDER_FOOTPRINT, priority: 0 },
 ];
 export const MORE_BUTTON_WIDTH = 26 + DIVIDER_FOOTPRINT;

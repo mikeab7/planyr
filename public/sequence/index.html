@@ -876,8 +876,15 @@ const parse = toks => {
       const info = parseRefText(t.v);
       if (info) return finishRefOrRange(info);
       // A bare identifier that is not TRUE/FALSE, not a call, and not a valid address
-      // (out-of-bounds addresses like ABCD1/XFE1/A0/A1048577 land here too) is unknown.
-      throw ferr(FORMULA_ERRORS.NAME, `unknown name "${t.v}" (use [${t.v}] for a column)`);
+      // (out-of-bounds addresses like ABCD1/XFE1/A0/A1048577 land here too) is a NAMED
+      // RANGE reference (Model workspace, NEW-1) — deferred to EVAL time via ctx.names,
+      // exactly the way a [Column] reference already defers to ctx.columns, rather than
+      // resolved here at parse time. A host that never wires up ctx.names (the Schedule
+      // module, Cost Estimating, or a Model formula naming a name that doesn't exist)
+      // throws the SAME #NAME? this used to throw right here — see the "name" case in
+      // evalNode below — so nothing about the existing parse-time contract changes for
+      // any caller that doesn't opt in.
+      return { type: "name", name: t.v };
     }
     throw ferr(FORMULA_ERRORS.ERR, "unexpected end of formula");
   };
@@ -1329,10 +1336,17 @@ function rangeArray(node, ctx) {
 }
 // A [Column]-shaped range argument must be a bare [Column] reference; it expands to
 // that column's values across every row in ctx.rows (the whole table, in display
-// order). An A1-shaped range argument (A1:B10) is handled by rangeArray above.
+// order). An A1-shaped range argument (A1:B10) is handled by rangeArray above. A
+// NAMED RANGE argument (Model workspace, NEW-1 — e.g. SUM(LandCosts)) resolves to its
+// own rectangle and reuses rangeArray over that — a single-cell name contributes a
+// one-element array, exactly like a one-cell A1:A1 range would.
 function colArray(node, ctx) {
   if (node && node.type === "range") return rangeArray(node, ctx);
-  if (!node || node.type !== "col") throw ferr(FORMULA_ERRORS.VALUE, "expected a [Column] or A1:B10 range reference");
+  if (node && node.type === "name") {
+    const rect = resolveNamedRange(ctx, node.name);
+    return rangeArray({ type: "range", from: { row: rect.r1, col: rect.c1 }, to: { row: rect.r2, col: rect.c2 } }, ctx);
+  }
+  if (!node || node.type !== "col") throw ferr(FORMULA_ERRORS.VALUE, "expected a [Column], A1:B10 range, or named range reference");
   const key = node.name.toLowerCase();
   // [@Column] forces THIS row even inside a range function (consistent with how
   // SUM/AVERAGE treat a [@Column] arg), so it contributes a single cell. It is cheap
@@ -1356,11 +1370,12 @@ function colArray(node, ctx) {
   return arr;
 }
 // A range-position argument: either a bare (non-"@") [Column] — the whole column —
-// or an A1 "range" node (A1:B10). Shared by the four collectors below, so SUM/MIN/
-// MAX/AVERAGE/COUNT/COUNTA treat "[Column]" and "A1:B10" identically wherever one
-// of them is legal — anything else (a scalar, [@Column], an expression) is a
-// per-row/per-cell scalar, handled by each collector's own `else` branch via `ev`.
-const isRangeArg = n => (n.type === "col" && !n.atRow) || n.type === "range";
+// an A1 "range" node (A1:B10), or a named-range "name" node (Model workspace, NEW-1).
+// Shared by the four collectors below, so SUM/MIN/MAX/AVERAGE/COUNT/COUNTA treat
+// "[Column]", "A1:B10" and a named range identically wherever one of them is legal —
+// anything else (a scalar, [@Column], an expression) is a per-row/per-cell scalar,
+// handled by each collector's own `else` branch via `ev`.
+const isRangeArg = n => (n.type === "col" && !n.atRow) || n.type === "range" || n.type === "name";
 // Numbers for SUM/AVERAGE/MIN/MAX/PRODUCT: a bare [Column] arg contributes its numeric
 // (and date→serial) cells, skipping blank/text/bool (Excel range behavior); a scalar or
 // [@Column] arg is coerced via toNumber.
@@ -1729,6 +1744,19 @@ function readGridCell(ctx, row, col, sheetName) {
   if (!r) return undefined;
   return r[col - 1];
 }
+// A NAMED RANGE reference (Model workspace, NEW-1). ctx.names is an optional map: lowercased
+// name -> {r1,c1,r2,c2} (1-based, inclusive — a single-cell name has r1===r2 && c1===c2, the
+// same shape the Model workspace's lib/namedRanges.js stores). A host that never wires one up
+// (Schedule, Cost Estimating) — or a name genuinely undefined in a Model sheet — throws the
+// SAME #NAME? the parser itself used to throw before named ranges existed (see the parser's
+// own "id" atom case above).
+function resolveNamedRange(ctx, name) {
+  const names = ctx.names;
+  const key = String(name).toLowerCase();
+  const rect = names && Object.prototype.hasOwnProperty.call(names, key) ? names[key] : null;
+  if (!rect) throw ferr(FORMULA_ERRORS.NAME, `unknown name "${name}"`);
+  return rect;
+}
 const evalNode = (node, ctx) => {
   switch (node.type) {
     case "num": return node.value;
@@ -1751,6 +1779,19 @@ const evalNode = (node, ctx) => {
     // is valid ONLY in a range-position argument, resolved via colArray/rangeArray
     // below, which never routes through evalNode for the range node itself.
     case "range": throw ferr(FORMULA_ERRORS.VALUE, "a range reference cannot be used where a single value is expected");
+    // A NAMED RANGE (Model workspace, NEW-1) reached as a SCALAR — e.g. "=LandCost*2". A
+    // name defined over a single cell reads that cell, exactly like a bare "ref"; a name
+    // defined over several cells is the same VALUE error a multi-cell "range" node
+    // already throws in scalar position — see colArray below for its range-argument use
+    // (SUM(SomeRangeName) etc.), which never routes through here.
+    case "name": {
+      const rect = resolveNamedRange(ctx, node.name);
+      if (rect.r1 === rect.r2 && rect.c1 === rect.c2) {
+        const v = readGridCell(ctx, rect.r1, rect.c1);
+        return v === undefined ? BLANK : raiseIfErr(v);
+      }
+      throw ferr(FORMULA_ERRORS.VALUE, `"${node.name}" is a multi-cell named range and cannot be used where a single value is expected`);
+    }
     case "errLiteral": throw ferr(node.code, "literal error in formula");
     case "unary": {
       if (node.op === "+") return toNumber(evalNode(node.arg, ctx));
@@ -1946,6 +1987,12 @@ const evaluateFormula = (src, ctx) => {
     // workbook evaluator). Absent (null) for every other caller — a sheet-qualified
     // reference then reads as "unknown sheet" (#REF!), never a silent blank.
     grids: (ctx && ctx.grids) || null,
+    // names powers NAMED RANGE references (Model workspace, NEW-1). Optional map, lowercased
+    // name -> {r1,c1,r2,c2} (1-based). A host that never wires one up (Schedule, Cost
+    // Estimating) leaves every bare "name" AST node unresolvable — resolveNamedRange throws
+    // #NAME? for it, exactly the error the parser itself used to throw at parse time before
+    // named ranges existed.
+    names: (ctx && ctx.names) || null,
     calendar: (ctx && ctx.calendar) || DEFAULT_CALENDAR,
     today: (ctx && ctx.today != null) ? ctx.today : Math.round(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()) / MS_PER_DAY),
     formatDate: (ctx && ctx.formatDate) || serialToISO,
@@ -5486,7 +5533,7 @@ function HistoryPanel({ data, setData, onClose, exportJSON, importJSON, applyLoa
     try {
       // 1. Snapshot current state with pre-restore label
       if (data) {
-        await window.storage.set("hs-v1", JSON.stringify(data), { label: "pre-restore", skipSanity: true });
+        await window.storage.set("hs-v1", JSON.stringify(stripViewState(data)), { label: "pre-restore", skipSanity: true });
       }
       // 2. Fetch the snapshot value
       const valStr = await window.storage.getHistoryValue(row.id);
@@ -6601,6 +6648,102 @@ function SuggestionsView({data, updateTask, setData, rows, setRows, loading, onC
   );
 }
 
+// B1107680 (NEW-1) — the 13 per-tab / per-browser VIEW-state keys that must NEVER live in the
+// versioned hs-v1 cloud document. Before this fix they rode inside the same `data` object that
+// gets cloud-saved on every change, so switching projects / zooming the grid / resizing a column
+// rewrote the whole ~355KB document and bumped __rev — and every OTHER open tab read that write as
+// a genuine concurrent edit, showing a phantom "a newer version was saved on another device" banner
+// from a mere navigation. They now live client-side only: VIEW_TAB_KEYS in sessionStorage (per-tab
+// — survives a reload of the SAME tab, never crosses to a new one) and VIEW_PREF_KEYS in
+// localStorage (durable per-browser preferences a brand-new tab is expected to already have —
+// column widths, sort, grouping, health style). editProjId (an in-progress rename) is deliberately
+// never persisted at all — it always resets to null on load, like any other transient in-progress-
+// edit flag.
+const VIEW_TAB_KEYS  = ["aPid", "view", "section"];
+const VIEW_PREF_KEYS = ["gridZoom", "gridColWidths", "masterSort", "masterCols", "masterColWidths",
+                         "masterGroupBy", "masterLevelFilter", "masterHealthFilter", "healthColStyle"];
+const VIEW_TRANSIENT_KEYS = ["editProjId"];
+const VIEW_STATE_KEYS = new Set([...VIEW_TAB_KEYS, ...VIEW_PREF_KEYS, ...VIEW_TRANSIENT_KEYS]);
+const VIEW_TAB_STORAGE_KEY   = "planar:tabView:v1";
+const VIEW_PREFS_STORAGE_KEY = "planar:viewPrefs:v1";
+function loadTabView()      { try { return JSON.parse(sessionStorage.getItem(VIEW_TAB_STORAGE_KEY) || "{}") || {}; } catch { return {}; } }
+function saveTabView(obj)   { try { sessionStorage.setItem(VIEW_TAB_STORAGE_KEY, JSON.stringify(obj)); } catch (_) {} }
+function loadViewPrefs()    { try { return JSON.parse(localStorage.getItem(VIEW_PREFS_STORAGE_KEY) || "{}") || {}; } catch { return {}; } }
+function saveViewPrefs(obj) { try { localStorage.setItem(VIEW_PREFS_STORAGE_KEY, JSON.stringify(obj)); } catch (_) {} }
+
+// True when any key OUTSIDE the 13 view-state keys differs between `prev` and `next` — a shallow,
+// reference-equality check per top-level key. Safe because every setData updater in this file
+// builds its result via immutable spreads, so a changed sub-tree always gets a new object identity.
+// Handles any future core key automatically: this only special-cases the fixed, enumerated view
+// keys, never the core ones (VIEW-INDEPENDENT-ONCE — work whose inputs are the document's real data
+// must not be redone just because the view moved).
+function coreChanged(prev, next) {
+  if (prev === next) return false;
+  if (!prev || !next) return true;
+  const keys = new Set([...Object.keys(prev), ...Object.keys(next)]);
+  for (const k of keys) {
+    if (VIEW_STATE_KEYS.has(k)) continue;
+    if (prev[k] !== next[k]) return true;
+  }
+  return false;
+}
+
+// The payload actually written to the cloud (a routine autosave OR an explicit pre-X checkpoint
+// snapshot) never carries the 13 view-state keys — they are not versioned data and must never bump
+// __rev or freeze a stale value into a Version History snapshot.
+function stripViewState(d) {
+  if (!d || typeof d !== "object") return d;
+  const out = {...d};
+  VIEW_STATE_KEYS.forEach(k => { delete out[k]; });
+  return out;
+}
+
+// Persist whichever of the 13 keys actually changed since the last render — cheap (a few small JSON
+// blobs), and this never touches the cloud.
+function persistViewState(prev, next) {
+  let tabChanged = false, prefsChanged = false;
+  VIEW_TAB_KEYS.forEach(k => { if (!prev || prev[k] !== next[k]) tabChanged = true; });
+  VIEW_PREF_KEYS.forEach(k => { if (!prev || prev[k] !== next[k]) prefsChanged = true; });
+  if (tabChanged) {
+    const cur = loadTabView();
+    VIEW_TAB_KEYS.forEach(k => { cur[k] = next[k]; });
+    saveTabView(cur);
+  }
+  if (prefsChanged) {
+    const cur = loadViewPrefs();
+    VIEW_PREF_KEYS.forEach(k => { cur[k] = next[k]; });
+    saveViewPrefs(cur);
+  }
+}
+
+// Resolve the 13 view-state keys for a just-loaded/imported/restored document `d`: prefer whatever
+// THIS tab (sessionStorage) / THIS browser (localStorage) already holds, and fall back to the value
+// baked into `d` only the first time nothing is saved yet — a one-time migration off the legacy
+// hs-v1 rows that used to carry these fields inline. This also means an import or a Version History
+// restore can never yank the current tab onto a different project than what's on screen: this tab's
+// already-saved aPid/view/section win over whatever happened to be baked into the imported/restored
+// snapshot. editProjId always resets to null (never resurrected). A guard keeps aPid pointing at a
+// REAL project — a stale per-tab id surviving a delete on another device, or an import that swapped
+// in a different project set entirely, falls back to the document's own aPid, then to its first
+// project, so nothing downstream ever reads data.projects[data.aPid] as undefined.
+function resolveViewState(d) {
+  if (!d || typeof d !== "object") return d;
+  const tab = loadTabView();
+  const prefs = loadViewPrefs();
+  const patch = { editProjId: null };
+  VIEW_TAB_KEYS.forEach(k => { patch[k] = Object.prototype.hasOwnProperty.call(tab, k) ? tab[k] : d[k]; });
+  VIEW_PREF_KEYS.forEach(k => { patch[k] = Object.prototype.hasOwnProperty.call(prefs, k) ? prefs[k] : d[k]; });
+  if (d.projects && (patch.aPid == null || !d.projects[patch.aPid])) {
+    const fallback = d.projects[d.aPid] ? d.projects[d.aPid] : Object.values(d.projects)[0];
+    patch.aPid = fallback ? fallback.id : null;
+  }
+  const tabPatch = {};   VIEW_TAB_KEYS.forEach(k => { tabPatch[k] = patch[k]; });
+  const prefsPatch = {}; VIEW_PREF_KEYS.forEach(k => { prefsPatch[k] = patch[k]; });
+  saveTabView({...tab, ...tabPatch});
+  saveViewPrefs({...prefs, ...prefsPatch});
+  return {...d, ...patch};
+}
+
 // ── App ───────────────────────────────────────────────────
 function App() {
   const [data,       setData]       = useState(null);
@@ -6689,6 +6832,7 @@ function App() {
   const [driftNotice, setDriftNotice] = useState(null);   // B836 — non-pinned tasks whose saved start the load re-cascade corrected; surfaced loudly (banner)
   const [staleNotice, setStaleNotice] = useState(false);
   const didInitialLoad = useRef(false);
+  const prevCoreRef = useRef(null);   // B1107680 — last `data` whose CORE (versioned) portion was considered for a cloud save
   const [formatOpen, setFormatOpen] = useState(false);
   const [settingsOpen,    setSettingsOpen]    = useState(false);
   const [settingsSection, setSettingsSection] = useState(null);   // B844 — pre-expand a Settings section
@@ -6781,7 +6925,9 @@ function App() {
   const attemptCloudSave = (d) => {
     const seq = ++saveSeq.current;
     setSaveStatus("saving");
-    window.storage.set("hs-v1", JSON.stringify(d), { label: "auto" })
+    // B1107680 — the payload never carries the 13 per-tab/per-browser view-state keys; they aren't
+    // versioned data and must never bump __rev or ride into a cloud row other tabs watch.
+    window.storage.set("hs-v1", JSON.stringify(stripViewState(d)), { label: "auto" })
       .then(res => { if (saveSeq.current === seq) setSaveStatus(res ? "saved" : "error"); })
       .catch(()  => { if (saveSeq.current === seq) setSaveStatus("error"); });
   };
@@ -6951,7 +7097,7 @@ function App() {
           d.projects[pid] = {...d.projects[pid], tasks: recascadeWithDrift(tasks, d.projects[pid].name || pid, driftFound)};
         });
         if (driftFound.length) { setDriftNotice(driftFound); console.warn("[planar cascade-drift] imported/restored data had saved starts out of sync with predecessors (auto-recalculated, B835/B836):", driftFound); }
-        setData(d);
+        setData(resolveViewState(d));   // B1107680 — never let an import/restore's snapshot-time aPid/view yank this tab elsewhere
       };
       try {
         const isMobile = window.innerWidth < 768;
@@ -6978,7 +7124,7 @@ function App() {
             d.projects[pid] = {...d.projects[pid], tasks: recascadeWithDrift(tasks, d.projects[pid].name || pid, driftFound)};
           });
           if (driftFound.length) { setDriftNotice(driftFound); console.warn("[planar cascade-drift] saved starts that didn't match their predecessor chain were auto-recalculated on load (B835/B836):", driftFound); }
-          setData(d); return;
+          setData(resolveViewState(d)); return;   // B1107680 — migrate the 13 view-state keys off the cloud doc on first read
         }
         // First load (Supabase empty) — seed from inline data or SEED constant
         const seed = window.__PLANAR_DATA__ || SEED;
@@ -6993,11 +7139,11 @@ function App() {
           });
         if (window.__planarCloudError) setOfflineFallback(true);
         else if (window.__planarAuthRequired) setAuthRequired(true);
-        setData(d);
+        setData(resolveViewState(d));
       } catch {
         const d = normalizeToV8(ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(window.__PLANAR_DATA__ || SEED))))));
         setOfflineFallback(true);
-        setData(d);
+        setData(resolveViewState(d));
       }
     })();
   }, []);
@@ -7005,44 +7151,58 @@ function App() {
   useEffect(() => {
     if (!data) return;
     latestData.current = data;
-    // Don't re-save on initial load -- loading shouldn't mint a new version
-    // (that collision is what made two freshly-opened tabs fight). Real edits only.
-    if (!didInitialLoad.current) didInitialLoad.current = true;
-    else attemptCloudSave(data);
-    // Rebuild holiday set whenever settings change
-    HOLIDAY_SET = buildHolidaySet(data.settings?.holidays || DEFAULT_HOLIDAYS);
-    ROW_H = Math.min(34, Math.max(20, data.settings?.rowHeight || 24));
-    rebuildHEALTH(data.settings?.customHealth || [], data.settings?.healthLabelOverrides || {});
-    // rebuildHEALTH mutates the module-scope HEALTH/HK/HDARK globals but doesn't itself
-    // re-render; without this nudge a just-added/renamed status shows up one beat late
-    // (you'd have to click around). Force one render when the status config actually
-    // changed — keyed so it fires only on real changes, never looping (B5/M3).
-    const healthKey = JSON.stringify([data.settings?.customHealth, data.settings?.healthLabelOverrides]);
-    if (prevHealthKey.current !== null && healthKey !== prevHealthKey.current) setHealthTick(x => x + 1);
-    prevHealthKey.current = healthKey;
-    // Recascade all task dates when holidays change
-    const holKey = JSON.stringify(data.settings?.holidays);
-    if (!skipHolRecasc.current && holKey !== prevHolKey.current && prevHolKey.current !== null) {
-      prevHolKey.current = holKey;
-      skipHolRecasc.current = true;
-      // Recompute from the LIVE `d` inside the updater, not the effect's closure snapshot — otherwise a
-      // setData that lands between this effect's render and its callback (a realtime suggestion insert, an
-      // autosave merge, a rapid second edit) would be clobbered by the stale projects map (data loss).
-      setData(d => {
-        const newProjects = {};
-        Object.entries(d.projects).forEach(([id, proj]) => {
-          let tasks = proj.tasks.map(t => {
-            if (t.pinnedEnd && t.end) return t;                        // preserve a locked finish (B616) — never re-derive its end
-            const r = resolveTaskSpan(t); return {...t, end: r.end, duration: r.duration};  // unit-aware re-derive (days/weeks vs calendar)
+    persistViewState(prevCoreRef.current, data);   // B1107680 — cheap, local-only; never touches the cloud
+
+    // Don't re-save on initial load -- loading shouldn't mint a new version (that collision is what
+    // made two freshly-opened tabs fight). B1107680 — and never re-save on a VIEW-ONLY change either:
+    // navigating projects / resizing a column / zooming used to rewrite the whole versioned document
+    // and bump __rev, which is exactly what made every OTHER open tab see a phantom "a newer version
+    // was saved on another device" conflict from a mere navigation.
+    const isFirstLoad = !didInitialLoad.current;
+    if (isFirstLoad) didInitialLoad.current = true;
+    const coreIsNew = coreChanged(prevCoreRef.current, data);
+    prevCoreRef.current = data;
+    if (!isFirstLoad && coreIsNew) attemptCloudSave(data);
+
+    // Everything below derives from data.settings/data.projects (core, versioned fields) — skip it
+    // entirely on a view-only change (VIEW-INDEPENDENT-ONCE: work whose inputs are the model/settings
+    // must not be redone because the view moved). Always runs on first load.
+    if (isFirstLoad || coreIsNew) {
+      // Rebuild holiday set whenever settings change
+      HOLIDAY_SET = buildHolidaySet(data.settings?.holidays || DEFAULT_HOLIDAYS);
+      ROW_H = Math.min(34, Math.max(20, data.settings?.rowHeight || 24));
+      rebuildHEALTH(data.settings?.customHealth || [], data.settings?.healthLabelOverrides || {});
+      // rebuildHEALTH mutates the module-scope HEALTH/HK/HDARK globals but doesn't itself
+      // re-render; without this nudge a just-added/renamed status shows up one beat late
+      // (you'd have to click around). Force one render when the status config actually
+      // changed — keyed so it fires only on real changes, never looping (B5/M3).
+      const healthKey = JSON.stringify([data.settings?.customHealth, data.settings?.healthLabelOverrides]);
+      if (prevHealthKey.current !== null && healthKey !== prevHealthKey.current) setHealthTick(x => x + 1);
+      prevHealthKey.current = healthKey;
+      // Recascade all task dates when holidays change
+      const holKey = JSON.stringify(data.settings?.holidays);
+      if (!skipHolRecasc.current && holKey !== prevHolKey.current && prevHolKey.current !== null) {
+        prevHolKey.current = holKey;
+        skipHolRecasc.current = true;
+        // Recompute from the LIVE `d` inside the updater, not the effect's closure snapshot — otherwise a
+        // setData that lands between this effect's render and its callback (a realtime suggestion insert, an
+        // autosave merge, a rapid second edit) would be clobbered by the stale projects map (data loss).
+        setData(d => {
+          const newProjects = {};
+          Object.entries(d.projects).forEach(([id, proj]) => {
+            let tasks = proj.tasks.map(t => {
+              if (t.pinnedEnd && t.end) return t;                        // preserve a locked finish (B616) — never re-derive its end
+              const r = resolveTaskSpan(t); return {...t, end: r.end, duration: r.duration};  // unit-aware re-derive (days/weeks vs calendar)
+            });
+            tasks = recomputeSchedule(tasks);
+            newProjects[id] = {...proj, tasks};
           });
-          tasks = recomputeSchedule(tasks);
-          newProjects[id] = {...proj, tasks};
+          return {...d, projects: newProjects};
         });
-        return {...d, projects: newProjects};
-      });
-    } else {
-      if (skipHolRecasc.current) skipHolRecasc.current = false;
-      else prevHolKey.current = holKey;
+      } else {
+        if (skipHolRecasc.current) skipHolRecasc.current = false;
+        else prevHolKey.current = holKey;
+      }
     }
     if (fileHandleRef.current && fileHtmlRef.current) {
       clearTimeout(fileSaveTimer.current);
@@ -8413,7 +8573,7 @@ function App() {
         return d;
       }
       // Fire-and-forget the labeled snapshot of the PRE-delete state
-      try { window.storage.set("hs-v1", JSON.stringify(d), { label: "pre-delete-project", skipSanity: true }); } catch {}
+      try { window.storage.set("hs-v1", JSON.stringify(stripViewState(d)), { label: "pre-delete-project", skipSanity: true }); } catch {}
       const newProjects = {...d.projects};
       delete newProjects[id];
       const remaining = Object.keys(newProjects).map(Number);
@@ -8799,7 +8959,7 @@ function App() {
         return;
       }
       // Snapshot the current state with a pre-import label BEFORE applying
-      if (data) { try { window.storage.set("hs-v1", JSON.stringify(data), { label: "pre-import", skipSanity: true }); } catch {} }
+      if (data) { try { window.storage.set("hs-v1", JSON.stringify(stripViewState(data)), { label: "pre-import", skipSanity: true }); } catch {} }
       // Route the import through the SAME shared normalize + cascade pipeline the cloud/seed load and
       // version-restore use (B4), so old/partial backups get migrated (predecessor format, holidays,
       // ids, contacts) and dates recomputed. (This used to inline the pipeline, calling normalizeIds/
@@ -13322,7 +13482,7 @@ function SettingsPanel({data, setData, onClose, openFile, fileLinked, initialSec
                 // Guardrail: confirm + snapshot before destructive recascade
                 if (!window.confirm("Strip all pinned dates across all projects and recalculate from predecessor logic?\n\nA backup snapshot will be saved — you can restore from Version History if needed.")) return;
                 setData(d => {
-                  try { window.storage.set("hs-v1", JSON.stringify(d), { label: "pre-recascade", skipSanity: true }); } catch {}
+                  try { window.storage.set("hs-v1", JSON.stringify(stripViewState(d)), { label: "pre-recascade", skipSanity: true }); } catch {}
                   HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
                   const newProjects = {};
                   Object.entries(d.projects).forEach(([pid, proj]) => {

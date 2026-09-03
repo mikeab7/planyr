@@ -11,7 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ModuleLoader from "../../shared/ui/ModuleLoader.jsx";
 import {
-  parseNavState, deriveCurrentProject, findBySiteId, needsScheduleCarryIn,
+  parseNavState, deriveCurrentProject, findBySiteId, findAllBySiteId, needsScheduleCarryIn,
   dashboardNavActions, shouldShowLinkPanel, shouldAdoptLinkedSiteIntoRoute, isPickShowing,
   isGridMismatched, newProjectAction,
 } from "./lib/navState.js";
@@ -62,6 +62,17 @@ export default function Scheduler({
     readyRef.current = true;
     setReady(true);
   }, []);
+  // B851 ×4 (NEW-1) — is the grid we'd currently show CONFIRMED to belong to this iframe's most
+  // recent `load`? False from the instant `onIframeLoad` fires (a fresh boot OR a silent self-reload
+  // — see public/sequence/index.html's B850 background-tab reload) until a genuine `planar:nav-state`
+  // message lands for THAT load. Unlike `readyRef` (a one-way latch — never show the loader twice),
+  // this is re-armed on EVERY load, because the whole point is to stop the render gate from trusting
+  // a BELIEF (`activeId`) that predates a reload that may have changed what the iframe is actually
+  // showing. The ref is read synchronously inside `onIframeLoad`'s retry loop; the state drives the
+  // render gate below.
+  const navConfirmedRef = useRef(false);
+  const [navConfirmed, setNavConfirmed] = useState(false);
+  const setNavConfirmedBoth = useCallback((v) => { navConfirmedRef.current = v; setNavConfirmed(v); }, []);
   // B388 — the embedded app's action toolbar, lifted into this shell header. The embedded app
   // reports its live toolbar state up over the bridge (planar:toolbar-state); the lifted
   // controls render it and post commands (planar:*) back down. `ready` stays false until the
@@ -125,11 +136,15 @@ export default function Scheduler({
       setProjects(nav.projects);
       setActiveId(nav.activeId);
       setSection(nav.section);
+      // B851 ×4 — this IS the confirmation the render gate fail-closes on: a genuine nav-state
+      // announcement for the iframe's current load has now landed, so `activeId`/`projects`/
+      // `section` above are no longer a stale pre-reload belief.
+      setNavConfirmedBoth(true);
       markReady();   // first nav-state ⇒ the embedded app is interactive
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [markReady, onScheduleLinkChanged]); // markReady is a stable useCallback → still effectively attach-once
+  }, [markReady, onScheduleLinkChanged, setNavConfirmedBoth]); // all stable useCallbacks → still effectively attach-once
 
   // When the iframe document finishes loading, ASK the embedded app to (re-)announce its
   // nav-state, retrying briefly in case its own message listener isn't attached yet. The lone
@@ -151,9 +166,21 @@ export default function Scheduler({
     setToolbar((t) => (t.ready ? t : { ...t, ready: true }));
   }, []);
   const onIframeLoad = useCallback(() => {
+    // B851 ×4 (NEW-1) — this fires on EVERY document load the iframe element goes through, not just
+    // the first: a plain browser guarantee that holds regardless of who triggered the navigation, so
+    // it fires just as much for the embedded app's own silent background-tab self-reload (B850) as
+    // for the initial `src="/sequence/"` load. Whatever the shell believed about the active project
+    // is now UNCONFIRMED for this fresh document until it says otherwise — reset it before anything
+    // else so the render gate (isGridMismatched's `navConfirmed` arg) fails closed for the whole
+    // window between this load and that document's own first nav-state.
+    setNavConfirmedBoth(false);
     let tries = 0;
     const ask = () => {
-      if (readyRef.current) return;
+      // ⛔ Gating this on `readyRef` (whether the loader has EVER been dismissed) used to make every
+      // retry after the very first load a silent no-op — exactly the gap that let a reload's nav
+      // state go unrequested. Gate on THIS load's own confirmation instead, so a reload gets its own
+      // fresh round of polite retries regardless of how long ago `ready` first flipped true.
+      if (navConfirmedRef.current) return;
       try {
         iframeRef.current?.contentWindow?.postMessage(
           { source: "planar-shell", type: "planar:nav-request" }, window.location.origin,
@@ -164,7 +191,7 @@ export default function Scheduler({
     ask();
     setTimeout(markReady, 2500); // reveal even if the embed never reports interactive
     setTimeout(markToolbarReadyFallback, 2500);
-  }, [markReady, markToolbarReadyFallback]);
+  }, [markReady, markToolbarReadyFallback, setNavConfirmedBoth]);
 
   // Absolute backstop in case `onLoad` itself never fires (e.g. the iframe doc hangs).
   useEffect(() => {
@@ -179,6 +206,27 @@ export default function Scheduler({
     const t = setTimeout(() => setShowLoader(false), 450);
     return () => clearTimeout(t);
   }, [ready]);
+
+  // LOUD-FAILURE — the fail-closed gate above (navConfirmed) is correct to hold the iframe hidden
+  // indefinitely rather than ever show an unconfirmed grid, but "indefinitely, silently" is still the
+  // failure mode this repo bans. If a load never gets its nav-state confirmed (the announce is lost,
+  // or the embed hangs mid-boot after a reload), surface it once per stuck load instead of leaving a
+  // permanent, unexplained "switching schedule…" loader with nothing in telemetry to find it by.
+  // Gated on `ready` (a one-way latch — stays true across a later reload): the ordinary FIRST boot
+  // routinely takes several seconds and would otherwise fire this on every normal cold load.
+  useEffect(() => {
+    if (navConfirmed || !ready) return;
+    const t = setTimeout(() => {
+      try {
+        reportClientEvent(
+          "schedule-nav-unconfirmed",
+          "iframe reloaded but never re-announced its nav state",
+          { projectId, activeId },
+        );
+      } catch (_) { /* telemetry must never throw into the app */ }
+    }, 8000);
+    return () => clearTimeout(t);
+  }, [navConfirmed, ready, projectId, activeId]);
 
   // Same-origin iframe, so target its exact origin (not "*").
   const post = (msg) => {
@@ -274,12 +322,27 @@ export default function Scheduler({
   //
   // ⛔ B881666 — `id` may name either one of THIS module's own schedules or a shared-header
   // switcher ROW that is a site-registry entry for a linked project (unionProjectLists prefers
-  // that richer, timestamped row over this module's own bridged copy — see its own header). A
-  // registry row's id is the site GROUP id, not a schedule id, so resolve it back to the linked
-  // schedule before posting into the iframe (which only knows its own schedule ids) or latching
-  // `explicitPickRef` (which `isPickShowing` compares against the iframe's OWN reported activeId).
+  // that richer, timestamped row over this module's own bridged copy when exactly ONE schedule
+  // covers it — see its own header). A registry row's id is the site GROUP id, not a schedule id,
+  // so resolve it back to the linked schedule before posting into the iframe (which only knows
+  // its own schedule ids) or latching `explicitPickRef` (which `isPickShowing` compares against
+  // the iframe's OWN reported activeId).
+  //
+  // ⛔ B1112449/NEW-2 — a bare site id is ambiguous once a site carries MULTIPLE linked schedules
+  // (unionProjectLists now gives each of those its own row with its own real schedule id, so the
+  // switcher itself never produces this case anymore — but a bare site id can still reach here
+  // from any other caller). `.find()`'s old "always the first-created" answer would silently snap
+  // an already-active OTHER schedule of the same site back to the first one on every unrelated
+  // re-render path that happens to call this with the site id — the exact "switching between two
+  // schedules of the same site doesn't stick" failure. Prefer whichever of the site's schedules is
+  // ALREADY active over always picking the first, so a genuinely ambiguous id is at least a
+  // STABLE (never-regressing) choice rather than an arbitrary one.
   const selectSchedule = (id) => {
-    const sch = projects.find((p) => p && p.id === id) || projects.find((p) => p && p.linkedSiteId === id);
+    let sch = projects.find((p) => p && p.id === id);
+    if (!sch) {
+      const linked = findAllBySiteId(projects, id);
+      sch = linked.find((p) => p.id === activeId) || linked[0] || null;
+    }
     if (!sch) return; // an id this module cannot resolve at all — nothing to switch to
     dashboardIntentRef.current = false; // a deliberate pick supersedes a pending Dashboard press
     explicitPickRef.current = sch.id; // isPickShowing() lets this override the route-derived empty state
@@ -319,6 +382,16 @@ export default function Scheduler({
   const routedSite = projectId != null ? (siteProjects.find((p) => p.id === projectId) || null) : null;
   const routedSiteName = routedSite ? routedSite.name : null;
   const linkedSchedule = findBySiteId(projects, projectId);
+  // B1112450/NEW-3 — when the routed site carries MORE than one linked schedule (B1080547), the
+  // crumb must name the ACTIVE one, not always the first-linked. `linkedSchedule` above (the
+  // FIRST match) is exactly what the breadcrumb used to show regardless of which schedule was
+  // actually on screen — the "crumb says Richfield, grid shows Richfield (2)" ambiguity B851
+  // exists to prevent, reintroduced here by B1080547 shipping without this. A site with exactly
+  // one linked schedule is unaffected: `activeLinkedSchedule` is just `linkedSchedule` again.
+  const linkedSchedules = findAllBySiteId(projects, projectId);
+  const activeLinkedSchedule = linkedSchedules.length > 1
+    ? (linkedSchedules.find((p) => p.id === activeId) || linkedSchedule)
+    : linkedSchedule;
 
   // The breadcrumb's "current project". When the route carries a project, show THAT project — the
   // schedule linked to it, or its name as last-known-good during the ~2 s iframe boot — never the
@@ -341,7 +414,7 @@ export default function Scheduler({
   if (pickShowing) {
     currentProject = deriveCurrentProject(projects, activeId, section);
   } else if (projectId != null) {
-    currentProject = linkedSchedule || (routedSiteName ? { id: projectId, name: routedSiteName } : null);
+    currentProject = activeLinkedSchedule || (routedSiteName ? { id: projectId, name: routedSiteName } : null);
   } else if (section === "reports") {
     currentProject = null; // Dashboard with no routed project: none is current
   } else {
@@ -374,7 +447,11 @@ export default function Scheduler({
   // (yet, or any longer) caught up must never be visibly shown as if it had. `showEmptyState`
   // covers "no schedule exists"; this covers "a schedule exists but the wrong one is on screen" —
   // the case a global `aPid` drifting away from the route produces. See navState.js's own header.
-  const gridMismatched = ready && isGridMismatched(projects, projectId, activeId, pickShowing);
+  // B851 ×4 (NEW-1) — `navConfirmed` closes the gap the prior three fixes left: without it, this
+  // gate trusted `activeId` even across an iframe reload the shell hadn't yet heard back from, so a
+  // stale-but-still-matching belief read as "fine" while the reloaded document was already showing a
+  // different project underneath. See navState.js's isGridMismatched header for the full mechanism.
+  const gridMismatched = ready && isGridMismatched(projects, projectId, activeId, pickShowing, navConfirmed);
 
   // B566 — the Schedule workspace now shows the SAME unified top-right cloud sync badge as the
   // Site Planner (Row-1 right zone of AppHeader), driven by the embedded app's already-reported

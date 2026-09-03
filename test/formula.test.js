@@ -1332,6 +1332,73 @@ describe("A1 cell references — #REF! semantics", () => {
   });
 });
 
+// ── Named ranges (Model workspace, NEW-1) — ctx.names is {lowercasedName: {r1,c1,r2,c2}},
+// 1-based inclusive, exactly the shape lib/namedRanges.js's `sheet.names` already stores. A
+// bare identifier that isn't TRUE/FALSE, isn't called, and doesn't parse as an address becomes
+// a deferred "name" AST node (see the parser's own header note) — resolved here at EVAL time,
+// never at parse time, so a host that never wires up ctx.names still gets the SAME #NAME? this
+// used to throw immediately at parse time (proven below).
+const NAMES1 = { landcost: { r1: 1, c1: 1, r2: 1, c2: 1 } };                 // LandCost -> A1 (=1)
+const NAMES_RANGE = { costs: { r1: 1, c1: 1, r2: 3, c2: 1 } };               // Costs -> A1:A3 (1,4,7)
+const namedRun = (src, names, grid = GRID3, extra = {}) => evaluateFormula(src, { grid, names, today: isoToSerial("2026-06-29"), ...extra });
+const namedVal = (src, names, grid, extra) => { const r = namedRun(src, names, grid, extra); if (!r.ok) throw new Error(`unexpected error ${r.error} (${r.detail}) for ${src}`); return r.value; };
+const namedErr = (src, names, grid, extra) => { const r = namedRun(src, names, grid, extra); expect(r.ok, `expected ${src} to error`).toBe(false); return r.error; };
+
+describe("named ranges — parser defers, evaluator resolves via ctx.names", () => {
+  it("a single-cell name reads that cell's value, exactly like a bare ref", () => {
+    expect(namedVal("LandCost", NAMES1)).toBe(1);
+    expect(namedVal("LandCost*2", NAMES1)).toBe(2);
+  });
+  it("resolution is case-insensitive, like [Column]/A1 refs", () => {
+    expect(namedVal("landcost", NAMES1)).toBe(1);
+    expect(namedVal("LANDCOST", NAMES1)).toBe(1);
+  });
+  it("an undefined name is #NAME? — the SAME error the parser used to throw at parse time", () => {
+    expect(namedErr("Bogus", NAMES1)).toBe(FORMULA_ERRORS.NAME);
+    expect(namedErr("Bogus+1", NAMES1)).toBe(FORMULA_ERRORS.NAME);
+  });
+  it("a host that never wires up ctx.names at all gets the exact same #NAME? (Schedule/Cost Estimating parity)", () => {
+    // No `names` key on ctx at all — the pre-existing contract for every host except Model.
+    const r = evaluateFormula("randomword", { today: isoToSerial("2026-06-29") });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe(FORMULA_ERRORS.NAME);
+  });
+  it("a name pointing at a MULTI-CELL range used as a scalar is #VALUE!, exactly like a bare A1:B2 range", () => {
+    expect(namedErr("Costs", NAMES_RANGE)).toBe(FORMULA_ERRORS.VALUE);
+    expect(namedErr("Costs+1", NAMES_RANGE)).toBe(FORMULA_ERRORS.VALUE);
+  });
+  it("a multi-cell name feeds a range-aware function exactly like SUM(A1:A3)", () => {
+    expect(namedVal("SUM(Costs)", NAMES_RANGE)).toBe(1 + 4 + 7);
+    expect(namedVal("AVERAGE(Costs)", NAMES_RANGE)).toBe((1 + 4 + 7) / 3);
+    expect(namedVal("MAX(Costs)", NAMES_RANGE)).toBe(7);
+    expect(namedVal("COUNT(Costs)", NAMES_RANGE)).toBe(3);
+  });
+  it("a single-cell name ALSO feeds a range-aware function as a one-element array", () => {
+    expect(namedVal("SUM(LandCost)", NAMES1)).toBe(1);
+  });
+  it("a name and an A1 reference coexist in one formula", () => {
+    expect(namedVal("LandCost + B1", NAMES1)).toBe(1 + 2); // A1=1, B1=2
+  });
+  it("a name and a [Column] structured reference coexist in one formula", () => {
+    const r = evaluateFormula("LandCost + [Rate]", { columns: { rate: 3 }, grid: GRID3, names: NAMES1, today: isoToSerial("2026-06-29") });
+    expect(r.ok).toBe(true);
+    expect(r.value).toBe(4); // LandCost(A1)=1 + Rate=3
+  });
+  it("XLOOKUP/MATCH/INDEX accept a named range exactly like an A1 range", () => {
+    expect(namedVal("MATCH(4,Costs,0)", NAMES_RANGE)).toBe(2);
+    expect(namedVal("INDEX(Costs,3)", NAMES_RANGE)).toBe(7);
+    expect(namedVal("XLOOKUP(4,Costs,Costs)", NAMES_RANGE)).toBe(4);
+  });
+  it("a name referencing an errored grid cell propagates the error, exactly like a bare ref would", () => {
+    const grid = [[errVal(FORMULA_ERRORS.DIV0)]];
+    expect(namedErr("LandCost", NAMES1, grid)).toBe(FORMULA_ERRORS.DIV0);
+    expect(namedErr("SUM(LandCost)", NAMES1, grid)).toBe(FORMULA_ERRORS.DIV0);
+  });
+  it("extractRefs does not choke on a formula containing a name (no crash, parses cleanly)", () => {
+    expect(extractRefs("LandCost + [Rate]").error).toBeUndefined();
+  });
+});
+
 // ── rewriteFormulaForCopy — the relative-reference rewrite on copy/fill ─────────
 // Pure, separately testable: (formula, sourceAddr, targetAddr) -> rewritten formula.
 describe("rewriteFormulaForCopy", () => {

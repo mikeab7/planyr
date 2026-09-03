@@ -71,8 +71,19 @@
  * follow-up (B1007283), not a silent gap. Anchored on COLUMN ID (stable across insert/delete of
  * OTHER columns, the same reasoning `cells`/`formats`/`styles` already rely on) and the raw ROW
  * INDEX (relocated on row insert/delete exactly like `rowHeights` is).
+ *
+ * ⛔ STAGE 3, PART 2 — NAMED RANGES (NEW-1). `names` is a NEW map, keyed by a name's LOWERCASED
+ * text, each entry `{ name, r1, c1, r2, c2 }` (1-based, inclusive rect — see
+ * lib/namedRanges.js's own header for the full scope/storage/delete-behaviour writeup, which is
+ * the one place to read before touching this field). Shifted on every row/column insert/delete
+ * exactly like `rowHeights`/`merges` already are (via namedRanges.js's
+ * `shiftNamesForStructuralChange`, called from insertRowAt/deleteRowAt/insertColumnAt/
+ * deleteColumn below) — a name's own target must move when the sheet's structure changes under
+ * it, the same reasoning every formula reference already gets via
+ * `rewriteFormulaForStructuralShift`.
  */
 import { rewriteFormulaForStructuralShift, rewriteFormulaForSheetRename, dropFormulaSheetRefs } from "../../../shared/formula/formula.js";
+import { shiftNamesForStructuralChange } from "./namedRanges.js";
 
 export const SHEET_VERSION = 1;
 // STAGE 1 (2026-09-01): 8→26 default columns, extending past Z (AA, AB…) on demand via
@@ -123,6 +134,7 @@ export function createSheet() {
     freezeRows: 0,   // count of frozen TOP rows
     freezeCols: 0,   // count of frozen LEFT columns
     merges: [],      // [{ r, c1Id, c2Id }] — horizontal-only spans, see file header
+    names: {},       // lowercased name -> { name, r1, c1, r2, c2 } — see file header (Stage 3 pt 2)
   };
 }
 
@@ -171,10 +183,13 @@ export function migrateSheet(raw) {
     const rowHeights = raw.rowHeights && typeof raw.rowHeights === "object" ? { ...raw.rowHeights } : {};
     const freezeRows = Number.isInteger(raw.freezeRows) && raw.freezeRows >= 0 ? raw.freezeRows : 0;
     const freezeCols = Number.isInteger(raw.freezeCols) && raw.freezeCols >= 0 ? raw.freezeCols : 0;
+    // Stage 3 pt 2 — a pre-named-ranges blob simply has no `names` at all, same defaulting
+    // shape as every other field a later build added (rowHeights/freezeRows/styles/merges above).
+    const names = raw.names && typeof raw.names === "object" ? { ...raw.names } : {};
     const migrated = {
       version: SHEET_VERSION, nextColId: raw.nextColId || columns.length + 1, columns,
       rowCount: Math.max(Number(raw.rowCount) || 0, DEFAULT_ROW_COUNT), cells: { ...raw.cells }, formats, styles,
-      rowHeights, freezeRows, freezeCols, merges,
+      rowHeights, freezeRows, freezeCols, merges, names,
     };
     // Always float capacity up to the current floor — never a stored ceiling. Reuses
     // ensureColumnCount (already used by paste/fill to grow the sheet mid-session) so there is
@@ -709,7 +724,8 @@ export function insertColumnAt(sheet, colIndex, ownerSheetName = null, editedShe
   const columns = [...sheet.columns];
   columns.splice(at, 0, makeColumn(id, colLetterName(at)));
   const cells = shiftAllFormulas(sheet.cells, "col", at + 1, 1, ownerSheetName, editedSheetName);
-  return { ...sheet, columns, cells, nextColId: sheet.nextColId + 1 };
+  const names = shiftNamesForStructuralChange(sheet.names, "col", at + 1, 1);
+  return { ...sheet, columns, cells, names, nextColId: sheet.nextColId + 1 };
 }
 
 /** Delete a column entirely (and every cell/format stored under it), then shift every
@@ -733,7 +749,8 @@ export function deleteColumn(sheet, colIndex, ownerSheetName = null, editedSheet
   const styles = {};
   for (const [k, v] of Object.entries(sheet.styles || {})) if (!k.startsWith(prefix)) styles[k] = v;
   const merges = mergesAfterColumnDelete(sheet, colIndex);
-  return { ...sheet, columns, cells, formats, styles, merges };
+  const names = shiftNamesForStructuralChange(sheet.names, "col", colIndex + 1, -1);
+  return { ...sheet, columns, cells, formats, styles, merges, names };
 }
 
 // Relocate a rowIndex-keyed map's entries (rowHeights) by the same rule cells/formats use
@@ -776,7 +793,8 @@ export function insertRowAt(sheet, rowIndex, ownerSheetName = null, editedSheetN
   }
   const rowHeights = relocateRowMap(sheet.rowHeights, at, 1);
   const merges = relocateMergeRows(sheet.merges, at, 1);
-  return { ...sheet, cells, formats, styles, rowHeights, merges, rowCount: sheet.rowCount + 1 };
+  const names = shiftNamesForStructuralChange(sheet.names, "row", at + 1, 1);
+  return { ...sheet, cells, formats, styles, rowHeights, merges, names, rowCount: sheet.rowCount + 1 };
 }
 
 /** STAGE 1 — delete the row at `rowIndex` entirely (every cell/format stored on it), then
@@ -814,7 +832,8 @@ export function deleteRowAt(sheet, rowIndex, ownerSheetName = null, editedSheetN
   }
   const rowHeights = relocateRowMap(sheet.rowHeights, at, -1);
   const merges = relocateMergeRows(sheet.merges, at, -1);
-  return { ...sheet, cells, formats, styles, rowHeights, merges, rowCount: Math.max(1, sheet.rowCount - 1) };
+  const names = shiftNamesForStructuralChange(sheet.names, "row", at + 1, -1);
+  return { ...sheet, cells, formats, styles, rowHeights, merges, names, rowCount: Math.max(1, sheet.rowCount - 1) };
 }
 
 /** How many rows the view should render past the real data, so typing never has to "add a

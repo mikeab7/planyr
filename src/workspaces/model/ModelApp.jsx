@@ -42,6 +42,7 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
 import SheetView from "./components/SheetView.jsx";
 import FormulaBar from "./components/FormulaBar.jsx";
 import FindReplaceBar from "./components/FindReplaceBar.jsx";
+import NameManager from "./components/NameManager.jsx";
 import Ribbon from "./components/Ribbon.jsx";
 import TabStrip from "./components/TabStrip.jsx";
 import { RADIUS } from "../../shared/ui/radius.js";
@@ -56,6 +57,7 @@ import {
   styleAt, setCellStyle, applyBorder, clearFormatting,
   paintedStyleAt, applyPaintedStyle, mergeAt, mergeRange, unmergeAt, sortRange, usedRangeEnd,
 } from "./lib/sheetModel.js";
+import { defineName, renameName, retargetName, deleteName } from "./lib/namedRanges.js";
 import { evaluateWorkbook, displayFor } from "./lib/sheetEngine.js";
 import { copyRange, pasteRange, fillDown, replaceAll, replaceInCellText } from "./lib/sheetOps.js";
 import { increaseDecimals, decreaseDecimals, toggleThousands } from "./lib/numberFormats.js";
@@ -155,6 +157,9 @@ export default function ModelApp({
   const nameBoxRef = useRef(null);
   const [findOpen, setFindOpen] = useState(false);
   const [findShowReplace, setFindShowReplace] = useState(false);
+  // Stage 3 pt 2 (NEW-1) — the Name Manager panel's own open/closed state, the same "plain view
+  // state, not sheet data" convention findOpen already uses one line above.
+  const [nameManagerOpen, setNameManagerOpen] = useState(false);
   // B1007280 — sheet zoom is a per-project VIEW preference (like a browser's own zoom level),
   // never sheet DATA: it doesn't ride the undo stack and doesn't sync to the cloud, so two
   // people (or two tabs) looking at the same model have no reason to share a zoom level.
@@ -276,8 +281,8 @@ export default function ModelApp({
       if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
       else if ((k === "z" && e.shiftKey) || k === "y") { e.preventDefault(); redo(); }
       else if (k === "g") { e.preventDefault(); nameBoxRef.current?.focus(); }
-      else if (k === "f") { e.preventDefault(); setFindShowReplace(false); setFindOpen(true); }
-      else if (k === "h") { e.preventDefault(); setFindShowReplace(true); setFindOpen(true); }
+      else if (k === "f") { e.preventDefault(); setFindShowReplace(false); setFindOpen(true); setNameManagerOpen(false); }
+      else if (k === "h") { e.preventDefault(); setFindShowReplace(true); setFindOpen(true); setNameManagerOpen(false); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -365,6 +370,21 @@ export default function ModelApp({
     commit((wb) => applyToActiveSheet(wb, commitCellText, match.r, match.c, replaceInCellText(current, find, replace)));
   }, [commit, sheet]);
   const onReplaceAll = useCallback((find, replace) => commit((wb) => applyToActiveSheet(wb, replaceAll, find, replace)), [commit]);
+
+  // Stage 3 pt 2 (NEW-1) — named ranges. Every one of these commits (one undo frame each, like
+  // every other edit here); validation itself happens in the Name Manager UI (validateNameText)
+  // BEFORE it ever calls onDefineName/onRenameName, matching sheetModel.js's own "mutators are
+  // pure setters, validation lives at the UI boundary" convention.
+  const onDefineName = useCallback((name, rect) => commit((wb) => applyToActiveSheet(wb, defineName, name, rect)), [commit]);
+  const onRenameName = useCallback((oldName, newName) => commit((wb) => applyToActiveSheet(wb, renameName, oldName, newName)), [commit]);
+  const onRetargetName = useCallback((name, rect) => commit((wb) => applyToActiveSheet(wb, retargetName, name, rect)), [commit]);
+  const onDeleteName = useCallback((name) => commit((wb) => applyToActiveSheet(wb, deleteName, name)), [commit]);
+  // Both this panel and Find/Replace float at the same fixed screen position (top-right — see
+  // each component's own header), so they never coexist: opening one closes the other, rather
+  // than reserving a second screen position that would crowd the owner's real 729px-wide window.
+  const onToggleNameManager = useCallback(() => {
+    setNameManagerOpen((o) => { if (!o) setFindOpen(false); return !o; });
+  }, []);
 
   const activeCol = selRange.c1;
   // Per-cell format (item 4/pro-forma finding): the picker reflects and edits the ACTIVE
@@ -567,6 +587,8 @@ export default function ModelApp({
             onUnfreeze={onUnfreeze}
             onSort={onSort}
             onFilterToggle={onFilterToggle}
+            nameManagerOpen={nameManagerOpen}
+            onToggleNameManager={onToggleNameManager}
           />
           <FormulaBar sheet={sheet} row={selRange.r1} col={selRange.c1} onCommit={onCommitCell} onGoTo={onGoTo} nameBoxRef={nameBoxRef} />
           </div>
@@ -618,6 +640,17 @@ export default function ModelApp({
             onGoTo={onGoTo}
             onReplaceOne={onReplaceOne}
             onReplaceAll={onReplaceAll}
+          />
+          <NameManager
+            open={nameManagerOpen}
+            sheet={sheet}
+            selRange={selRange}
+            onClose={() => setNameManagerOpen(false)}
+            onGoTo={onGoTo}
+            onDefineName={onDefineName}
+            onRenameName={onRenameName}
+            onRetargetName={onRetargetName}
+            onDeleteName={onDeleteName}
           />
         </>
       )}

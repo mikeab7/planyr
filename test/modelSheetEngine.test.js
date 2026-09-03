@@ -198,6 +198,91 @@ describe("evaluateSheet — unresolvable references error loudly, never silently
   });
 });
 
+// ── Named ranges (Stage 3 pt 2, NEW-1) — sheet.names feeds the SAME per-cell dependency graph
+// (collectCellDeps's own "name" case) and the SAME ctx.names contract formula.js's evalNode/
+// colArray resolve through; see lib/namedRanges.js's own header for the storage shape.
+function defineNameOnSheet(s, name, rect) {
+  const key = name.toLowerCase();
+  return { ...s, names: { ...s.names, [key]: { name, ...rect } } };
+}
+
+describe("evaluateSheet — named ranges feed the existing per-cell dependency graph (NEW-1)", () => {
+  it("a formula reading a name resolves the name's target cell, not a #NAME? or blank", () => {
+    let s = createSheet();
+    s = setRaw(s, 4, 1, "250000000"); // B5 = LandCost
+    s = defineNameOnSheet(s, "LandCost", { r1: 5, c1: 2, r2: 5, c2: 2 }); // 1-based -> B5
+    s = commitCellText(s, 0, 0, "=LandCost*2");
+    const r = evaluateSheet(s);
+    expect(r.get(0, 0)).toEqual({ ok: true, value: 500000000 });
+  });
+
+  it("a name pointing at a FORMULA cell evaluates in dependency order (the name's own target computes first)", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "100");               // A1
+    s = commitCellText(s, 4, 1, "=A1*2");     // B5 = 200 (a formula, not a literal)
+    s = defineNameOnSheet(s, "LandCost", { r1: 5, c1: 2, r2: 5, c2: 2 }); // -> B5
+    s = commitCellText(s, 0, 2, "=LandCost+1"); // C1, depends on the name's target
+    const r = evaluateSheet(s);
+    expect(r.get(4, 1)).toEqual({ ok: true, value: 200 });
+    expect(r.get(0, 2)).toEqual({ ok: true, value: 201 });
+  });
+
+  it("retargeting a name (same commit shape as lib/namedRanges.js's retargetName) recalculates its dependents", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "100"); // A1
+    s = setRaw(s, 1, 0, "999"); // A2
+    s = defineNameOnSheet(s, "Target", { r1: 1, c1: 1, r2: 1, c2: 1 }); // -> A1
+    s = commitCellText(s, 0, 2, "=Target"); // C1
+    let r = evaluateSheet(s);
+    expect(r.get(0, 2)).toEqual({ ok: true, value: 100 });
+    // Retarget the SAME name at A2 instead — evaluateSheet is called fresh on the new sheet
+    // object (exactly how ModelApp.jsx's useMemo(() => evaluateSheet(sheet), [sheet]) already
+    // reruns on every commit), so the dependent formula picks up the new target with no
+    // separate invalidation step.
+    s = defineNameOnSheet(s, "Target", { r1: 2, c1: 1, r2: 2, c2: 1 }); // -> A2
+    r = evaluateSheet(s);
+    expect(r.get(0, 2)).toEqual({ ok: true, value: 999 });
+  });
+
+  it("a name over a multi-cell range feeds SUM the same way a formula-populated A1:A3 range would", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "10");                // A1
+    s = commitCellText(s, 1, 0, "=A1*2");     // A2 = 20 (formula)
+    s = setRaw(s, 2, 0, "30");                // A3
+    s = defineNameOnSheet(s, "Costs", { r1: 1, c1: 1, r2: 3, c2: 1 }); // -> A1:A3
+    s = commitCellText(s, 0, 2, "=SUM(Costs)"); // C1
+    const r = evaluateSheet(s);
+    expect(r.get(0, 2)).toEqual({ ok: true, value: 60 });
+  });
+
+  it("an undefined name is #NAME? at the cell, not a crash", () => {
+    let s = createSheet();
+    s = commitCellText(s, 0, 0, "=Bogus+1");
+    const r = evaluateSheet(s);
+    expect(r.get(0, 0)).toMatchObject({ ok: false, error: "#NAME?" });
+  });
+
+  it("a name over several cells used as a scalar is #VALUE!, matching a bare multi-cell A1:B2 range", () => {
+    let s = createSheet();
+    s = defineNameOnSheet(s, "Costs", { r1: 1, c1: 1, r2: 3, c2: 1 }); // A1:A3
+    s = commitCellText(s, 0, 2, "=Costs+1"); // C1 — outside the named range, so this isn't also a #CIRC! case
+    const r = evaluateSheet(s);
+    expect(r.get(0, 2)).toMatchObject({ ok: false, error: "#VALUE!" });
+  });
+
+  it("deleting a name (it's simply absent from sheet.names) makes a formerly-resolving formula read #NAME? on next recalc", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "5");
+    s = defineNameOnSheet(s, "X", { r1: 1, c1: 1, r2: 1, c2: 1 });
+    s = commitCellText(s, 0, 2, "=X+1");
+    expect(evaluateSheet(s).get(0, 2)).toEqual({ ok: true, value: 6 });
+    const names = { ...s.names };
+    delete names.x;
+    s = { ...s, names };
+    expect(evaluateSheet(s).get(0, 2)).toMatchObject({ ok: false, error: "#NAME?" });
+  });
+});
+
 describe("displayFor / displayKindFor — per-CELL number format (not per-column)", () => {
   it("formats a literal cell per ITS OWN number format", () => {
     let s = createSheet();

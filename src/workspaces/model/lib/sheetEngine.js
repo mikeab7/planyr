@@ -87,24 +87,26 @@ export function kindOf(value) {
   return "text";
 }
 
-/** Walk a formula's parsed AST, collecting which CELLS it reads — both reference systems, now
- *  across the WHOLE WORKBOOK (Stage 3, NEW-1). `addDep(sheetId, rowIndex, colIndex)` (0-based)
- *  is called for every cell the formula could possibly read; the caller (evaluateWorkbook) is
- *  responsible for bounds-checking against the TARGET sheet's own dimensions and for deciding
- *  which of those are themselves formula cells (only formula cells need ordering — a literal
- *  is already resolved). `ownerSheetId` is the sheet the FORMULA ITSELF lives on — an
- *  unqualified A1/range reference means "this cell on THAT sheet" (Excel semantics), and a
- *  `[Column]` bracket reference is ALWAYS same-sheet (no cross-sheet bracket syntax exists) so
- *  it resolves against `ownerSheetId` regardless of what a sibling A1 reference in the same
- *  formula names. `colNameToIndex` resolves a `[Column]` bracket name to a column index on the
- *  OWNER sheet, or null for an unknown column (the engine's own #REF! already covers reporting
- *  that at eval time). `resolveSheetId(name)` resolves a qualifier's sheet NAME to its id, or
- *  null if no sheet by that name exists (over-depending on nothing is fine — the eval itself
- *  raises the real #REF! for an unresolvable sheet). `sheetBounds(sheetId)` returns that
- *  sheet's own `{rows, cols}`, needed because a `[Column]`-whole-column dependency has to walk
- *  the OWNER sheet's row count, not whichever sheet a sibling reference in the same formula
- *  might target. */
-function collectCellDeps(node, ownerSheetId, colNameToIndex, resolveSheetId, sheetBounds, addDep) {
+/** Walk a formula's parsed AST, collecting which CELLS it reads — every reference system, now
+ *  across the WHOLE WORKBOOK (Stage 3, NEW-1) and including named ranges (Stage 3, NEW-1 pt 2).
+ *  `addDep(sheetId, rowIndex, colIndex)` (0-based) is called for every cell the formula could
+ *  possibly read; the caller (evaluateWorkbook) is responsible for bounds-checking against the
+ *  TARGET sheet's own dimensions and for deciding which of those are themselves formula cells
+ *  (only formula cells need ordering — a literal is already resolved). `ownerSheetId` is the
+ *  sheet the FORMULA ITSELF lives on — an unqualified A1/range/name reference means "this cell
+ *  on THAT sheet" (Excel semantics), and a `[Column]` bracket reference is ALWAYS same-sheet (no
+ *  cross-sheet bracket syntax exists) so it resolves against `ownerSheetId` regardless of what a
+ *  sibling A1 reference in the same formula names. `colNameToIndex` resolves a `[Column]`
+ *  bracket name to a column index on the OWNER sheet, or null for an unknown column (the
+ *  engine's own #REF! already covers reporting that at eval time). `resolveSheetId(name)`
+ *  resolves a qualifier's sheet NAME to its id, or null if no sheet by that name exists
+ *  (over-depending on nothing is fine — the eval itself raises the real #REF! for an
+ *  unresolvable sheet). `sheetBounds(sheetId)` returns that sheet's own `{rows, cols}`, needed
+ *  because a `[Column]`-whole-column dependency has to walk the OWNER sheet's row count, not
+ *  whichever sheet a sibling reference in the same formula might target. `namesMap` is the OWNER
+ *  sheet's own named-range table (never another sheet's — named ranges are sheet-scoped, same as
+ *  formula.js's own ctx.names/resolveNamedRange contract), used to resolve a bare "name" node. */
+function collectCellDeps(node, ownerSheetId, colNameToIndex, resolveSheetId, sheetBounds, namesMap, addDep) {
   if (!node || typeof node !== "object") return;
   switch (node.type) {
     case "col": {
@@ -127,16 +129,31 @@ function collectCellDeps(node, ownerSheetId, colNameToIndex, resolveSheetId, she
       for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) addDep(sheetId, r, c);
       return;
     }
+    // A NAMED RANGE reference (NEW-1) — the EXISTING per-cell graph, extended, per the build
+    // brief ("named-range edges go into the existing dependency graph — do not build a second
+    // graph"). Resolves the name via the sheet's own `names` table (the SAME table
+    // evaluateSheet below hands to evaluateFormula as ctx.names, so a formula that reads a
+    // name depends on exactly the cells that name's CURRENT target names — retargeting or
+    // renaming a name changes what this walks the very next time the sheet recomputes, which
+    // is every commit, so "changing what a name points at recalculates its dependents" falls
+    // out of this for free, no separate invalidation step needed). An undefined name adds no
+    // edge — the eval-time #NAME? (formula.js's own resolveNamedRange) is what reports it;
+    // over-depending on nothing is as harmless here as it already is for an unknown [Column].
+    case "name": {
+      const rect = namesMap && namesMap[node.name.toLowerCase()];
+      if (rect) for (let r = rect.r1 - 1; r <= rect.r2 - 1; r++) for (let c = rect.c1 - 1; c <= rect.c2 - 1; c++) addDep(ownerSheetId, r, c);
+      return;
+    }
     case "unary":
     case "percent":
-      collectCellDeps(node.arg, ownerSheetId, colNameToIndex, resolveSheetId, sheetBounds, addDep);
+      collectCellDeps(node.arg, ownerSheetId, colNameToIndex, resolveSheetId, sheetBounds, namesMap, addDep);
       return;
     case "binary":
-      collectCellDeps(node.left, ownerSheetId, colNameToIndex, resolveSheetId, sheetBounds, addDep);
-      collectCellDeps(node.right, ownerSheetId, colNameToIndex, resolveSheetId, sheetBounds, addDep);
+      collectCellDeps(node.left, ownerSheetId, colNameToIndex, resolveSheetId, sheetBounds, namesMap, addDep);
+      collectCellDeps(node.right, ownerSheetId, colNameToIndex, resolveSheetId, sheetBounds, namesMap, addDep);
       return;
     case "call":
-      node.args.forEach((a) => collectCellDeps(a, ownerSheetId, colNameToIndex, resolveSheetId, sheetBounds, addDep));
+      node.args.forEach((a) => collectCellDeps(a, ownerSheetId, colNameToIndex, resolveSheetId, sheetBounds, namesMap, addDep));
       return;
     default:
       return; // num, str, bool, blankLiteral, errLiteral — leaves, no cell deps
@@ -146,17 +163,18 @@ function collectCellDeps(node, ownerSheetId, colNameToIndex, resolveSheetId, she
 const EMPTY_SHEET_EVAL = { get: () => null };
 
 /** Evaluate every formula CELL of a WHOLE WORKBOOK, once, in ONE combined dependency order
- *  across every sheet (Stage 3, NEW-1 — cross-sheet references, `SheetName!A1`). This is the
- *  workbook-wide generalization of the single-sheet algorithm below (evaluateSheet): the same
- *  seed-grid / build-deps / topo-sort / evaluate-in-order shape, just keyed by
- *  `sheetId:row:col` instead of `row:col`, so a formula on ANY sheet that reads another
- *  sheet's cell sees that cell's CURRENT (possibly itself formula-computed) value, and a
- *  circular reference that loops THROUGH another sheet is caught exactly like one that stays
- *  on one sheet. Must always evaluate every sheet, even the ones not currently visible — a
- *  hidden sheet's formulas are still live inputs to whichever sheet the user IS looking at.
- *  Returns `{ get(sheetId) }` -> `{ get(rowIndex, colIndex) }` -> `{ok, value, error, detail}
- *  | null`, so `displayFor`/`displayColorFor`/`displayKindFor` below (unchanged, per-sheet)
- *  keep working exactly as before once handed the right sheet's own slice. */
+ *  across every sheet (Stage 3, NEW-1 — cross-sheet references, `SheetName!A1` — and Stage 3,
+ *  NEW-1 pt 2 — named ranges, sheet-scoped). This is the workbook-wide generalization of the
+ *  single-sheet algorithm below (evaluateSheet): the same seed-grid / build-deps / topo-sort /
+ *  evaluate-in-order shape, just keyed by `sheetId:row:col` instead of `row:col`, so a formula
+ *  on ANY sheet that reads another sheet's cell sees that cell's CURRENT (possibly itself
+ *  formula-computed) value, and a circular reference that loops THROUGH another sheet is caught
+ *  exactly like one that stays on one sheet. Must always evaluate every sheet, even the ones
+ *  not currently visible — a hidden sheet's formulas are still live inputs to whichever sheet
+ *  the user IS looking at. Returns `{ get(sheetId) }` -> `{ get(rowIndex, colIndex) }` ->
+ *  `{ok, value, error, detail} | null`, so `displayFor`/`displayColorFor`/`displayKindFor`
+ *  below (unchanged, per-sheet) keep working exactly as before once handed the right sheet's
+ *  own slice. */
 export function evaluateWorkbook(workbook) {
   const entries = workbook.sheets;
   const nameToId = new Map();
@@ -167,6 +185,7 @@ export function evaluateWorkbook(workbook) {
   const gridsByName = {};    // lowercased sheet name -> the SAME grid[][] object (for ctx.grids)
   const rowMapsBySheet = {}; // sheetId -> rowMaps[]
   const colsBySheet = {};    // sheetId -> columns[]
+  const namesBySheet = {};   // sheetId -> that sheet's OWN named-range table (never another sheet's)
   const formulaCells = new Map(); // "sheetId:r:c" -> { sheetId, rowIndex, colIndex, src, ast, parseErr }
 
   for (const s of entries) {
@@ -180,6 +199,12 @@ export function evaluateWorkbook(workbook) {
     gridsByName[s.name.trim().toLowerCase()] = grid;
     rowMapsBySheet[s.id] = rowMaps;
     colsBySheet[s.id] = cols;
+    // NEW-1 — this sheet's own named ranges (lib/namedRanges.js's `sheet.names`), already stored
+    // keyed by lowercased name with a 1-based {r1,c1,r2,c2} rect — exactly the shape formula.js's
+    // own ctx.names/resolveNamedRange contract expects, so it's handed straight through with no
+    // translation. Named ranges are sheet-scoped (resolved against the OWNER sheet's own grid,
+    // never a cross-sheet lookup), so this is keyed by sheetId, not shared workbook-wide.
+    namesBySheet[s.id] = sheet.names || {};
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < numCols; c++) {
         const col = cols[c];
@@ -213,7 +238,7 @@ export function evaluateWorkbook(workbook) {
     const set = new Set();
     if (cell.ast) {
       const colNameToIndex = nameToIndexFor(cell.sheetId);
-      collectCellDeps(cell.ast, cell.sheetId, colNameToIndex, resolveSheetId, sheetBounds, (sheetId, r, c) => {
+      collectCellDeps(cell.ast, cell.sheetId, colNameToIndex, resolveSheetId, sheetBounds, namesBySheet[cell.sheetId], (sheetId, r, c) => {
         const bounds = sheetBounds(sheetId);
         if (!bounds || r < 0 || r >= bounds.rows || c < 0 || c >= bounds.cols) return; // off-sheet: nothing to depend on
         const dk = `${sheetId}:${r}:${c}`;
@@ -258,7 +283,7 @@ export function evaluateWorkbook(workbook) {
     else {
       res = evaluateFormula(cell.src, {
         columns: rowMapsBySheet[cell.sheetId][cell.rowIndex], rows: rowMapsBySheet[cell.sheetId], rowIndex: cell.rowIndex,
-        grid: grids[cell.sheetId], grids: gridsByName,
+        grid: grids[cell.sheetId], grids: gridsByName, names: namesBySheet[cell.sheetId],
         calendar: DEFAULT_CALENDAR, today,
       });
     }

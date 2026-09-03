@@ -189,6 +189,45 @@ describe("unionProjectLists — a controlled switcher (Scheduler) sees the real 
     const out = unionProjectLists(controlled, registry);
     expect(out.map((p) => p.id)).toEqual(["g1", "g2", "sched-ops"]);
   });
+
+  // B1112449/NEW-2 — a site with TWO OR MORE linked schedules must never collapse to the single
+  // registry row: B881666's "the registry copy already covers it" rule assumed at most one
+  // schedule per site, which B1080547 removed elsewhere but not here. Reproduces the exact
+  // production shape (pids 16/17, both linkedSiteId "smtjb0lrexb3") measured live 2026-09-03.
+  describe("B1112449 — a site with multiple linked schedules keeps every schedule as its own row", () => {
+    const site = { id: "smtjb0lrexb3", name: "ZZ-RENAME-TEST-G", updatedAt: 700, status: "active" };
+    const tworegistry = [site, { id: "g2", name: "Grand Port", updatedAt: 500 }];
+    const twoSchedules = [
+      { id: 16, name: "ZZ-RENAME-TEST-G", linkedSiteId: "smtjb0lrexb3", linkedSiteName: "ZZ-RENAME-TEST-G" },
+      { id: 17, name: "ZZ-RENAME-TEST-G (2)", linkedSiteId: "smtjb0lrexb3", linkedSiteName: "ZZ-RENAME-TEST-G" },
+    ];
+
+    it("both schedules appear as their own row — never collapsed to the site's one registry row", () => {
+      const out = unionProjectLists(twoSchedules, tworegistry);
+      expect(out.map((p) => p.id)).toEqual(["g2", 16, 17]); // the site's own registry row is DROPPED (ambiguous — replaced by its 2 schedules)
+      expect(out.find((p) => p.id === 16).name).toBe("ZZ-RENAME-TEST-G");
+      expect(out.find((p) => p.id === 17).name).toBe("ZZ-RENAME-TEST-G (2)");
+    });
+
+    it("each schedule row carries the site's registry timestamp/status for sensible sorting", () => {
+      const out = unionProjectLists(twoSchedules, tworegistry);
+      expect(out.find((p) => p.id === 16).updatedAt).toBe(700);
+      expect(out.find((p) => p.id === 17).updatedAt).toBe(700);
+      expect(out.find((p) => p.id === 17).status).toBe("active");
+    });
+
+    it("a THIRD schedule linked to the same site also gets its own row (not just the first two)", () => {
+      const three = [...twoSchedules, { id: 18, name: "ZZ-RENAME-TEST-G (3)", linkedSiteId: "smtjb0lrexb3", linkedSiteName: "ZZ-RENAME-TEST-G" }];
+      const out = unionProjectLists(three, tworegistry);
+      expect(out.map((p) => p.id)).toEqual(["g2", 16, 17, 18]);
+    });
+
+    it("a DIFFERENT site with exactly one linked schedule is unaffected — still collapses to its registry row (unchanged prior behavior)", () => {
+      const mixed = [...twoSchedules, { id: 9, name: "Grand Port", linkedSiteId: "g2", linkedSiteName: "Grand Port" }];
+      const out = unionProjectLists(mixed, tworegistry);
+      expect(out.map((p) => p.id)).toEqual(["g2", 16, 17]); // g2's own bridged copy (id 9) is dropped, same as B881666
+    });
+  });
 });
 
 describe("resolveCurrentName — header crumb tracks a live rename (auto-update-name)", () => {
