@@ -1,36 +1,50 @@
-/* B1076480 — AnchoredMenu's full-viewport click-away backdrop used to close only on `onClick`,
- * which per spec fires ONLY for the primary (left) mouse button. A right-click anywhere on that
- * backdrop — e.g. aimed at a DIFFERENT trigger while one AnchoredMenu-based dropdown was already
- * open — produced no `click` at all, so the backdrop never closed and the browser's own
- * `contextmenu` hit-test resolved to the backdrop (topmost, full-viewport) instead of whatever was
- * actually underneath: a silent dead right-click, live-reproduced on the Model workspace's own
- * (now-replaced) point-anchor use of this component. `onMouseDown` fires for every button and
- * precedes the native `contextmenu` event, so closing there clears the backdrop from the DOM in
- * time for the real target to receive the click.
+/* B1106256 (was B1076480's backdrop-based guard) — AnchoredMenu no longer dismisses via a
+ * full-viewport interactive backdrop element at all: that backdrop was itself the mechanism that
+ * swallowed a left-click aimed at a control underneath it (NEW-1, B1106256 — "a click next to an
+ * open menu is swallowed"). It is replaced by a document-level, CAPTURE-phase `mousedown` listener
+ * that isn't a hit-test target, so it can never stand between a press and the real element beneath
+ * it. This test used to assert the backdrop wired BOTH `onClick` and `onMouseDown` to `onClose` (the
+ * B1076480 fix); it now asserts the REPLACEMENT mechanism carries the same guarantee — every mouse
+ * button dismisses, not just the left one — plus that the backdrop shape is actually gone, so a
+ * regression back to a rendered click-away layer is caught here rather than rediscovered live.
  *
  * Asserted on the SOURCE, not a DOM render: AnchoredMenu is a portal + layout-effect-driven
  * component with no lightweight mount path in this suite (see planMenuChrome.test.js for the same
  * reasoning) — the live-browser behavior is covered by e2e/model-spreadsheet.spec.js's B1076480
- * suite, which mutation-proved this exact fix (reverting AnchoredMenu.jsx alone leaves those
- * specs green, because the Model context menu no longer routes through this component at all —
- * this source guard is what actually pins the fix down for AnchoredMenu's OTHER consumers:
- * button dropdowns, the account menu, ribbon flyouts, anything else built on this primitive).
+ * suite (right-click) and by the NEW-1 click-swallow regression spec (left-click while a menu is
+ * open), both mutation-proven against AnchoredMenu.jsx alone.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 
 const src = readFileSync("src/shared/ui/AnchoredMenu.jsx", "utf8");
 
-// The backdrop div: the click-away layer, identified by its own comment + `data-menu-owner`.
-const backdropLine = src.split("\n").find((l) => l.includes("!hoverSafe && pos &&") && l.includes("data-menu-owner"));
-
-describe("B1076480 — AnchoredMenu's click-away backdrop dismisses on ANY mouse button, not left-click only", () => {
-  it("the backdrop div exists and is gated on pos/hoverSafe as before (sanity)", () => {
-    expect(backdropLine, "could not find the click-away backdrop div — did it move or get renamed?").toBeTruthy();
+describe("B1106256 — AnchoredMenu dismisses via a document listener, never a hit-test-blocking backdrop", () => {
+  it("renders no full-viewport click-away backdrop element — a single portalled div, not a backdrop-plus-panel pair", () => {
+    // The old shape was two sibling JSX nodes inside the portal: a backdrop `<div onClick={onClose}
+    // onMouseDown={onClose} ... style={{ position: "fixed", inset: 0, zIndex }} />` plus the panel
+    // `<div ref={menuRef} ...>`. `onClick={onClose}` in JSX (as opposed to `onClose?.()` inside the
+    // dismiss handler) only ever appeared on that backdrop; `data-menu-owner` is now stamped on
+    // exactly one rendered node (the panel).
+    expect(src).not.toMatch(/onClick=\{onClose\}/);
+    const ownerAttrCount = (src.match(/data-menu-owner=\{ownerScope\}/g) || []).length;
+    expect(ownerAttrCount).toBe(1);
   });
 
-  it("wires BOTH onClick and onMouseDown to onClose — onClick alone is the exact regression", () => {
-    expect(backdropLine).toMatch(/onClick=\{onClose\}/);
-    expect(backdropLine).toMatch(/onMouseDown=\{onClose\}/);
+  it("wires a document-level mousedown listener, in the CAPTURE phase, to close on an outside press", () => {
+    expect(src).toMatch(/document\.addEventListener\("mousedown",\s*onDown,\s*true\)/);
+  });
+
+  it("the listener excludes the panel and the anchor — a re-press of the menu's own trigger isn't double-handled", () => {
+    expect(src).toMatch(/panel\s*&&\s*panel\.contains\(e\.target\)/);
+    expect(src).toMatch(/anchor\s*&&\s*anchor\.contains\(e\.target\)/);
+  });
+
+  it("closes by calling onClose, never by calling preventDefault/stopPropagation on the real event", () => {
+    // The whole point of the fix: the underlying press must still reach its own target natively.
+    const dismissEffect = src.slice(src.indexOf("const onDown = (e) => {"), src.indexOf("document.addEventListener(\"mousedown\", onDown, true)"));
+    expect(dismissEffect).toMatch(/onClose\?\.\(\)/);
+    expect(dismissEffect).not.toMatch(/preventDefault/);
+    expect(dismissEffect).not.toMatch(/stopPropagation/);
   });
 });

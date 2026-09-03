@@ -21,25 +21,28 @@ import { placeMenu } from "./anchoredMenuPlacement.js";
  *
  * Props:
  *  - open        : boolean — render the menu when true
- *  - onClose     : () => void — called when the click-away backdrop is clicked
+ *  - onClose     : () => void — called on a click/tap outside the panel and anchor (B1106256: a
+ *                  document-level listener, not a rendered click-away backdrop — see that effect)
  *  - anchorRef   : ref to the trigger element the menu positions against
  *  - placement   : "left" | "below-left" | "below-right" (default "left")
  *  - width       : menu width in px (default 230)
  *  - gap         : px gap between anchor and menu (default 10)
- *  - zIndex      : backdrop z-index; the panel sits at zIndex+1 (default 4000,
- *                  matching the app's modal layer — above the map, below AuthPanel)
+ *  - zIndex      : reserved stacking value; the panel itself renders at zIndex+1 (default 4000,
+ *                  matching the app's modal layer — above the map, below AuthPanel). Unchanged by
+ *                  B1106256 — kept so a consumer's own override (e.g. TeamPanel's 6000) still lands
+ *                  the panel where it always did.
  *  - panelStyle  : visual style for the panel (e.g. the shared `menuPanel`)
  *  - className   : panel className (default "menu", for the existing menu styles)
- *  - hoverSafe   : for HOVER-opened popovers (RowInfo/SourcesLegend). The normal
- *                  full-viewport click-away backdrop sits ON TOP of the trigger, so
- *                  the instant a hover-opened menu appears the backdrop covers the
- *                  button, the browser fires `mouseleave` on it, the close timer
- *                  fires, the menu closes, the backdrop is removed, `mouseenter`
- *                  fires again → the popover FLASHES open/closed continuously. In
- *                  hoverSafe mode we render NO interactive backdrop (so it can't
- *                  steal the pointer) and dismiss via a document `mousedown` that
- *                  ignores clicks on the anchor or the panel. Click-opened consumers
- *                  keep the default backdrop (unchanged). (B930 — info-icon flash)
+ *  - hoverSafe   : historically opted a HOVER-opened popover (RowInfo/SourcesLegend) out of
+ *                  the full-viewport click-away backdrop, which otherwise sat ON TOP of the
+ *                  trigger and made a hover-opened menu's own appearance fire a spurious
+ *                  `mouseleave` on it (the close timer would fire, the backdrop would be
+ *                  removed, `mouseenter` would fire again → the popover FLASHED open/closed
+ *                  continuously; B930). There is no backdrop for ANYONE any more (B1106256 —
+ *                  see the dismiss effect below), so every consumer already gets the
+ *                  non-pointer-stealing behavior this flag used to opt into. Kept as an
+ *                  accepted prop for existing call sites and for the call-site documentation
+ *                  value ("this menu opens on hover") — it no longer changes anything here.
  */
 export default function AnchoredMenu({
   open,
@@ -172,11 +175,34 @@ export default function AnchoredMenu({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  // hoverSafe click-away: no backdrop to catch the click (it would steal the hover
-  // and flash the popover), so dismiss on any document mousedown outside both the
-  // anchor (its own click toggles) and the panel (its content is not click-away).
+  /* ⛔ B1106256 — dismiss via a document-level, CAPTURE-phase `mousedown` listener rather than a
+   * full-viewport interactive backdrop element. The backdrop used to sit on TOP of every control on
+   * the page (`position:fixed; inset:0`, above everything below it in z-index) so it could catch a
+   * click-away — which made it a hit-test target in its own right, and BOTH ways it closed itself
+   * broke the press aimed at whatever was actually underneath it:
+   *   - closing on `onMouseDown` (B1076480, added so a RIGHT-click could dismiss one menu and open
+   *     another) unmounts the backdrop between mousedown and mouseup, and a native `click` only
+   *     fires when mousedown and mouseup share a target — so a left-click on a real control under
+   *     the backdrop (a ribbon button, a re-press of the menu's own trigger) never received a click
+   *     at all: the menu closed, but the control never activated.
+   *   - closing on `onClick` alone (the pre-B1076480 shape) let a right-click's `mousedown` land ON
+   *     the backdrop and stay there through `mouseup` — per spec `click` never fires for the
+   *     secondary button, so the backdrop (still topmost) never closed and the browser's own
+   *     `contextmenu` hit-test resolved to it instead of whatever a right-click was actually aimed at.
+   * A document listener isn't a hit-test target at all: it can observe every button on every
+   * element without ever standing between the press and what's really there. Closing here — WITHOUT
+   * calling `preventDefault`/`stopPropagation` — and letting the event carry on natively is what
+   * lets "click a ribbon button while a menu is open" both dismiss the menu AND activate the button
+   * in the same press, and lets a right-click aimed at a different trigger still resolve its own
+   * `contextmenu` correctly once this menu is out of the way — same guarantee B1076480 needed, now
+   * without a backdrop to stand in the way in the first place. Excluding the anchor keeps a re-press
+   * of the menu's OWN trigger from double-toggling (this listener stands down; the trigger's own
+   * `onClick` handles it, exactly as if this listener weren't here). Was hoverSafe-only (see that
+   * prop's own doc comment above) — now applies to every open menu, because there is no backdrop for
+   * any of them to avoid.
+   */
   useEffect(() => {
-    if (!open || !hoverSafe) return;
+    if (!open) return;
     const onDown = (e) => {
       const panel = menuRef.current;
       const anchor = anchorRef?.current;
@@ -186,7 +212,7 @@ export default function AnchoredMenu({
     };
     document.addEventListener("mousedown", onDown, true);
     return () => document.removeEventListener("mousedown", onDown, true);
-  }, [open, hoverSafe, onClose, anchorRef]);
+  }, [open, onClose, anchorRef]);
 
   if (!open) return null;
 
@@ -200,53 +226,37 @@ export default function AnchoredMenu({
      and are byte-identical to before. */
   const ownerScope = anchorRef?.current?.closest?.("[data-menu-scope]")?.getAttribute("data-menu-scope") || undefined;
 
+  /* B1106256 — no click-away backdrop element (see the dismiss effect above): dismissal is a
+   * document-level listener, not a rendered node, so there is nothing here to gate on `pos` the way
+   * the old backdrop was (B1125's concern — an interactive layer swallowing clicks while nothing was
+   * visibly open) — a listener that closes an unplaced (invisible) menu on an outside press is
+   * harmless, it just closes something nobody could see yet. `zIndex` is still honored by the panel
+   * itself, unchanged. */
   return createPortal(
-    <>
-      {/* click-away backdrop (transparent). Skipped in hoverSafe mode — an
-          interactive full-viewport layer over the trigger makes a hover-opened
-          popover flash; hoverSafe dismisses via the document mousedown above.
-          B1125 — also skipped until the menu is actually PLACED (`pos`). This layer covers the whole
-          app (elementFromPoint over the canvas returns it), which is correct while a visible menu
-          needs dismissing and indefensible otherwise: an unplaced menu is invisible, so the layer
-          would swallow clicks with nothing on screen to explain why the app stopped responding.
-          ⛔ B1076480 — `onClick` ALONE left every RIGHT-click dead against a still-open menu. Per
-          spec, `click` fires only for the primary (left) mouse button — a right-button press never
-          generates one, only `mousedown`/`mouseup`/`contextmenu` — so a right-click aimed at a
-          DIFFERENT trigger (e.g. a different grid header) while a menu was already open hit this
-          backdrop, produced no `click`, and silently ate the press: nothing closed, nothing opened,
-          and the underlying element never even saw a `contextmenu` event, because the browser
-          resolves that event's target by hit-testing at dispatch time and this topmost, full-
-          viewport div was still there to win it. `onMouseDown` fires for every button and — for a
-          right-click — fires BEFORE the native `contextmenu` event, so closing here removes the
-          backdrop from the DOM in time for the browser's hit-test to land on whatever is actually
-          underneath. Reproduced live via Playwright before the fix (an actionability-check timeout:
-          "<div></div> intercepts pointer events") and confirmed fixed after. */}
-      {!hoverSafe && pos && <div onClick={onClose} onMouseDown={onClose} data-menu-owner={ownerScope} style={{ position: "fixed", inset: 0, zIndex }} />}
-      <div
-        ref={menuRef}
-        className={className}
-        data-menu-owner={ownerScope}
-        style={{
-          maxHeight: "min(72vh, 540px)",
-          overflowY: "auto",
-          ...panelStyle,
-          position: "fixed",
-          width,
-          zIndex: zIndex + 1,
-          left: pos ? pos.left : -9999,
-          top: pos ? pos.top : 0,
-          // Hide until measured+placed so it never flashes at the wrong spot — `opacity`, not
-          // `visibility` (B1012832): a `visibility:hidden` ancestor is unfocusable, which silently
-          // broke every consumer's `autoFocus` child (React's one-shot commit-time `.focus()` landed
-          // on a hidden node and never retried). `opacity:0` hides the same way without that trap;
-          // the off-screen `left:-9999` above still keeps it visually and pointer-wise out of the way.
-          opacity: pos ? 1 : 0,
-          pointerEvents: pos ? "auto" : "none",
-        }}
-      >
-        {children}
-      </div>
-    </>,
+    <div
+      ref={menuRef}
+      className={className}
+      data-menu-owner={ownerScope}
+      style={{
+        maxHeight: "min(72vh, 540px)",
+        overflowY: "auto",
+        ...panelStyle,
+        position: "fixed",
+        width,
+        zIndex: zIndex + 1,
+        left: pos ? pos.left : -9999,
+        top: pos ? pos.top : 0,
+        // Hide until measured+placed so it never flashes at the wrong spot — `opacity`, not
+        // `visibility` (B1012832): a `visibility:hidden` ancestor is unfocusable, which silently
+        // broke every consumer's `autoFocus` child (React's one-shot commit-time `.focus()` landed
+        // on a hidden node and never retried). `opacity:0` hides the same way without that trap;
+        // the off-screen `left:-9999` above still keeps it visually and pointer-wise out of the way.
+        opacity: pos ? 1 : 0,
+        pointerEvents: pos ? "auto" : "none",
+      }}
+    >
+      {children}
+    </div>,
     document.body,
   );
 }
