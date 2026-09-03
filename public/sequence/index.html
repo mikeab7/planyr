@@ -5338,7 +5338,7 @@ function HistoryPanel({ data, setData, onClose, exportJSON, importJSON, applyLoa
     try {
       // 1. Snapshot current state with pre-restore label
       if (data) {
-        await window.storage.set("hs-v1", JSON.stringify(data), { label: "pre-restore", skipSanity: true });
+        await window.storage.set("hs-v1", JSON.stringify(stripViewState(data)), { label: "pre-restore", skipSanity: true });
       }
       // 2. Fetch the snapshot value
       const valStr = await window.storage.getHistoryValue(row.id);
@@ -6453,6 +6453,102 @@ function SuggestionsView({data, updateTask, setData, rows, setRows, loading, onC
   );
 }
 
+// B1107680 (NEW-1) — the 13 per-tab / per-browser VIEW-state keys that must NEVER live in the
+// versioned hs-v1 cloud document. Before this fix they rode inside the same `data` object that
+// gets cloud-saved on every change, so switching projects / zooming the grid / resizing a column
+// rewrote the whole ~355KB document and bumped __rev — and every OTHER open tab read that write as
+// a genuine concurrent edit, showing a phantom "a newer version was saved on another device" banner
+// from a mere navigation. They now live client-side only: VIEW_TAB_KEYS in sessionStorage (per-tab
+// — survives a reload of the SAME tab, never crosses to a new one) and VIEW_PREF_KEYS in
+// localStorage (durable per-browser preferences a brand-new tab is expected to already have —
+// column widths, sort, grouping, health style). editProjId (an in-progress rename) is deliberately
+// never persisted at all — it always resets to null on load, like any other transient in-progress-
+// edit flag.
+const VIEW_TAB_KEYS  = ["aPid", "view", "section"];
+const VIEW_PREF_KEYS = ["gridZoom", "gridColWidths", "masterSort", "masterCols", "masterColWidths",
+                         "masterGroupBy", "masterLevelFilter", "masterHealthFilter", "healthColStyle"];
+const VIEW_TRANSIENT_KEYS = ["editProjId"];
+const VIEW_STATE_KEYS = new Set([...VIEW_TAB_KEYS, ...VIEW_PREF_KEYS, ...VIEW_TRANSIENT_KEYS]);
+const VIEW_TAB_STORAGE_KEY   = "planar:tabView:v1";
+const VIEW_PREFS_STORAGE_KEY = "planar:viewPrefs:v1";
+function loadTabView()      { try { return JSON.parse(sessionStorage.getItem(VIEW_TAB_STORAGE_KEY) || "{}") || {}; } catch { return {}; } }
+function saveTabView(obj)   { try { sessionStorage.setItem(VIEW_TAB_STORAGE_KEY, JSON.stringify(obj)); } catch (_) {} }
+function loadViewPrefs()    { try { return JSON.parse(localStorage.getItem(VIEW_PREFS_STORAGE_KEY) || "{}") || {}; } catch { return {}; } }
+function saveViewPrefs(obj) { try { localStorage.setItem(VIEW_PREFS_STORAGE_KEY, JSON.stringify(obj)); } catch (_) {} }
+
+// True when any key OUTSIDE the 13 view-state keys differs between `prev` and `next` — a shallow,
+// reference-equality check per top-level key. Safe because every setData updater in this file
+// builds its result via immutable spreads, so a changed sub-tree always gets a new object identity.
+// Handles any future core key automatically: this only special-cases the fixed, enumerated view
+// keys, never the core ones (VIEW-INDEPENDENT-ONCE — work whose inputs are the document's real data
+// must not be redone just because the view moved).
+function coreChanged(prev, next) {
+  if (prev === next) return false;
+  if (!prev || !next) return true;
+  const keys = new Set([...Object.keys(prev), ...Object.keys(next)]);
+  for (const k of keys) {
+    if (VIEW_STATE_KEYS.has(k)) continue;
+    if (prev[k] !== next[k]) return true;
+  }
+  return false;
+}
+
+// The payload actually written to the cloud (a routine autosave OR an explicit pre-X checkpoint
+// snapshot) never carries the 13 view-state keys — they are not versioned data and must never bump
+// __rev or freeze a stale value into a Version History snapshot.
+function stripViewState(d) {
+  if (!d || typeof d !== "object") return d;
+  const out = {...d};
+  VIEW_STATE_KEYS.forEach(k => { delete out[k]; });
+  return out;
+}
+
+// Persist whichever of the 13 keys actually changed since the last render — cheap (a few small JSON
+// blobs), and this never touches the cloud.
+function persistViewState(prev, next) {
+  let tabChanged = false, prefsChanged = false;
+  VIEW_TAB_KEYS.forEach(k => { if (!prev || prev[k] !== next[k]) tabChanged = true; });
+  VIEW_PREF_KEYS.forEach(k => { if (!prev || prev[k] !== next[k]) prefsChanged = true; });
+  if (tabChanged) {
+    const cur = loadTabView();
+    VIEW_TAB_KEYS.forEach(k => { cur[k] = next[k]; });
+    saveTabView(cur);
+  }
+  if (prefsChanged) {
+    const cur = loadViewPrefs();
+    VIEW_PREF_KEYS.forEach(k => { cur[k] = next[k]; });
+    saveViewPrefs(cur);
+  }
+}
+
+// Resolve the 13 view-state keys for a just-loaded/imported/restored document `d`: prefer whatever
+// THIS tab (sessionStorage) / THIS browser (localStorage) already holds, and fall back to the value
+// baked into `d` only the first time nothing is saved yet — a one-time migration off the legacy
+// hs-v1 rows that used to carry these fields inline. This also means an import or a Version History
+// restore can never yank the current tab onto a different project than what's on screen: this tab's
+// already-saved aPid/view/section win over whatever happened to be baked into the imported/restored
+// snapshot. editProjId always resets to null (never resurrected). A guard keeps aPid pointing at a
+// REAL project — a stale per-tab id surviving a delete on another device, or an import that swapped
+// in a different project set entirely, falls back to the document's own aPid, then to its first
+// project, so nothing downstream ever reads data.projects[data.aPid] as undefined.
+function resolveViewState(d) {
+  if (!d || typeof d !== "object") return d;
+  const tab = loadTabView();
+  const prefs = loadViewPrefs();
+  const patch = { editProjId: null };
+  VIEW_TAB_KEYS.forEach(k => { patch[k] = Object.prototype.hasOwnProperty.call(tab, k) ? tab[k] : d[k]; });
+  VIEW_PREF_KEYS.forEach(k => { patch[k] = Object.prototype.hasOwnProperty.call(prefs, k) ? prefs[k] : d[k]; });
+  if (d.projects && (patch.aPid == null || !d.projects[patch.aPid])) {
+    const fallback = d.projects[d.aPid] ? d.projects[d.aPid] : Object.values(d.projects)[0];
+    patch.aPid = fallback ? fallback.id : null;
+  }
+  const tabPatch = {};   VIEW_TAB_KEYS.forEach(k => { tabPatch[k] = patch[k]; });
+  const prefsPatch = {}; VIEW_PREF_KEYS.forEach(k => { prefsPatch[k] = patch[k]; });
+  saveTabView({...tab, ...tabPatch});
+  saveViewPrefs({...prefs, ...prefsPatch});
+  return {...d, ...patch};
+}
+
 // ── App ───────────────────────────────────────────────────
 function App() {
   const [data,       setData]       = useState(null);
@@ -6541,6 +6637,7 @@ function App() {
   const [driftNotice, setDriftNotice] = useState(null);   // B836 — non-pinned tasks whose saved start the load re-cascade corrected; surfaced loudly (banner)
   const [staleNotice, setStaleNotice] = useState(false);
   const didInitialLoad = useRef(false);
+  const prevCoreRef = useRef(null);   // B1107680 — last `data` whose CORE (versioned) portion was considered for a cloud save
   const [formatOpen, setFormatOpen] = useState(false);
   const [settingsOpen,    setSettingsOpen]    = useState(false);
   const [settingsSection, setSettingsSection] = useState(null);   // B844 — pre-expand a Settings section
@@ -6633,7 +6730,9 @@ function App() {
   const attemptCloudSave = (d) => {
     const seq = ++saveSeq.current;
     setSaveStatus("saving");
-    window.storage.set("hs-v1", JSON.stringify(d), { label: "auto" })
+    // B1107680 — the payload never carries the 13 per-tab/per-browser view-state keys; they aren't
+    // versioned data and must never bump __rev or ride into a cloud row other tabs watch.
+    window.storage.set("hs-v1", JSON.stringify(stripViewState(d)), { label: "auto" })
       .then(res => { if (saveSeq.current === seq) setSaveStatus(res ? "saved" : "error"); })
       .catch(()  => { if (saveSeq.current === seq) setSaveStatus("error"); });
   };
@@ -6803,7 +6902,7 @@ function App() {
           d.projects[pid] = {...d.projects[pid], tasks: recascadeWithDrift(tasks, d.projects[pid].name || pid, driftFound)};
         });
         if (driftFound.length) { setDriftNotice(driftFound); console.warn("[planar cascade-drift] imported/restored data had saved starts out of sync with predecessors (auto-recalculated, B835/B836):", driftFound); }
-        setData(d);
+        setData(resolveViewState(d));   // B1107680 — never let an import/restore's snapshot-time aPid/view yank this tab elsewhere
       };
       try {
         const isMobile = window.innerWidth < 768;
@@ -6830,7 +6929,7 @@ function App() {
             d.projects[pid] = {...d.projects[pid], tasks: recascadeWithDrift(tasks, d.projects[pid].name || pid, driftFound)};
           });
           if (driftFound.length) { setDriftNotice(driftFound); console.warn("[planar cascade-drift] saved starts that didn't match their predecessor chain were auto-recalculated on load (B835/B836):", driftFound); }
-          setData(d); return;
+          setData(resolveViewState(d)); return;   // B1107680 — migrate the 13 view-state keys off the cloud doc on first read
         }
         // First load (Supabase empty) — seed from inline data or SEED constant
         const seed = window.__PLANAR_DATA__ || SEED;
@@ -6845,11 +6944,11 @@ function App() {
           });
         if (window.__planarCloudError) setOfflineFallback(true);
         else if (window.__planarAuthRequired) setAuthRequired(true);
-        setData(d);
+        setData(resolveViewState(d));
       } catch {
         const d = normalizeToV8(ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(window.__PLANAR_DATA__ || SEED))))));
         setOfflineFallback(true);
-        setData(d);
+        setData(resolveViewState(d));
       }
     })();
   }, []);
@@ -6857,44 +6956,58 @@ function App() {
   useEffect(() => {
     if (!data) return;
     latestData.current = data;
-    // Don't re-save on initial load -- loading shouldn't mint a new version
-    // (that collision is what made two freshly-opened tabs fight). Real edits only.
-    if (!didInitialLoad.current) didInitialLoad.current = true;
-    else attemptCloudSave(data);
-    // Rebuild holiday set whenever settings change
-    HOLIDAY_SET = buildHolidaySet(data.settings?.holidays || DEFAULT_HOLIDAYS);
-    ROW_H = Math.min(34, Math.max(20, data.settings?.rowHeight || 24));
-    rebuildHEALTH(data.settings?.customHealth || [], data.settings?.healthLabelOverrides || {});
-    // rebuildHEALTH mutates the module-scope HEALTH/HK/HDARK globals but doesn't itself
-    // re-render; without this nudge a just-added/renamed status shows up one beat late
-    // (you'd have to click around). Force one render when the status config actually
-    // changed — keyed so it fires only on real changes, never looping (B5/M3).
-    const healthKey = JSON.stringify([data.settings?.customHealth, data.settings?.healthLabelOverrides]);
-    if (prevHealthKey.current !== null && healthKey !== prevHealthKey.current) setHealthTick(x => x + 1);
-    prevHealthKey.current = healthKey;
-    // Recascade all task dates when holidays change
-    const holKey = JSON.stringify(data.settings?.holidays);
-    if (!skipHolRecasc.current && holKey !== prevHolKey.current && prevHolKey.current !== null) {
-      prevHolKey.current = holKey;
-      skipHolRecasc.current = true;
-      // Recompute from the LIVE `d` inside the updater, not the effect's closure snapshot — otherwise a
-      // setData that lands between this effect's render and its callback (a realtime suggestion insert, an
-      // autosave merge, a rapid second edit) would be clobbered by the stale projects map (data loss).
-      setData(d => {
-        const newProjects = {};
-        Object.entries(d.projects).forEach(([id, proj]) => {
-          let tasks = proj.tasks.map(t => {
-            if (t.pinnedEnd && t.end) return t;                        // preserve a locked finish (B616) — never re-derive its end
-            const r = resolveTaskSpan(t); return {...t, end: r.end, duration: r.duration};  // unit-aware re-derive (days/weeks vs calendar)
+    persistViewState(prevCoreRef.current, data);   // B1107680 — cheap, local-only; never touches the cloud
+
+    // Don't re-save on initial load -- loading shouldn't mint a new version (that collision is what
+    // made two freshly-opened tabs fight). B1107680 — and never re-save on a VIEW-ONLY change either:
+    // navigating projects / resizing a column / zooming used to rewrite the whole versioned document
+    // and bump __rev, which is exactly what made every OTHER open tab see a phantom "a newer version
+    // was saved on another device" conflict from a mere navigation.
+    const isFirstLoad = !didInitialLoad.current;
+    if (isFirstLoad) didInitialLoad.current = true;
+    const coreIsNew = coreChanged(prevCoreRef.current, data);
+    prevCoreRef.current = data;
+    if (!isFirstLoad && coreIsNew) attemptCloudSave(data);
+
+    // Everything below derives from data.settings/data.projects (core, versioned fields) — skip it
+    // entirely on a view-only change (VIEW-INDEPENDENT-ONCE: work whose inputs are the model/settings
+    // must not be redone because the view moved). Always runs on first load.
+    if (isFirstLoad || coreIsNew) {
+      // Rebuild holiday set whenever settings change
+      HOLIDAY_SET = buildHolidaySet(data.settings?.holidays || DEFAULT_HOLIDAYS);
+      ROW_H = Math.min(34, Math.max(20, data.settings?.rowHeight || 24));
+      rebuildHEALTH(data.settings?.customHealth || [], data.settings?.healthLabelOverrides || {});
+      // rebuildHEALTH mutates the module-scope HEALTH/HK/HDARK globals but doesn't itself
+      // re-render; without this nudge a just-added/renamed status shows up one beat late
+      // (you'd have to click around). Force one render when the status config actually
+      // changed — keyed so it fires only on real changes, never looping (B5/M3).
+      const healthKey = JSON.stringify([data.settings?.customHealth, data.settings?.healthLabelOverrides]);
+      if (prevHealthKey.current !== null && healthKey !== prevHealthKey.current) setHealthTick(x => x + 1);
+      prevHealthKey.current = healthKey;
+      // Recascade all task dates when holidays change
+      const holKey = JSON.stringify(data.settings?.holidays);
+      if (!skipHolRecasc.current && holKey !== prevHolKey.current && prevHolKey.current !== null) {
+        prevHolKey.current = holKey;
+        skipHolRecasc.current = true;
+        // Recompute from the LIVE `d` inside the updater, not the effect's closure snapshot — otherwise a
+        // setData that lands between this effect's render and its callback (a realtime suggestion insert, an
+        // autosave merge, a rapid second edit) would be clobbered by the stale projects map (data loss).
+        setData(d => {
+          const newProjects = {};
+          Object.entries(d.projects).forEach(([id, proj]) => {
+            let tasks = proj.tasks.map(t => {
+              if (t.pinnedEnd && t.end) return t;                        // preserve a locked finish (B616) — never re-derive its end
+              const r = resolveTaskSpan(t); return {...t, end: r.end, duration: r.duration};  // unit-aware re-derive (days/weeks vs calendar)
+            });
+            tasks = recomputeSchedule(tasks);
+            newProjects[id] = {...proj, tasks};
           });
-          tasks = recomputeSchedule(tasks);
-          newProjects[id] = {...proj, tasks};
+          return {...d, projects: newProjects};
         });
-        return {...d, projects: newProjects};
-      });
-    } else {
-      if (skipHolRecasc.current) skipHolRecasc.current = false;
-      else prevHolKey.current = holKey;
+      } else {
+        if (skipHolRecasc.current) skipHolRecasc.current = false;
+        else prevHolKey.current = holKey;
+      }
     }
     if (fileHandleRef.current && fileHtmlRef.current) {
       clearTimeout(fileSaveTimer.current);
@@ -8265,7 +8378,7 @@ function App() {
         return d;
       }
       // Fire-and-forget the labeled snapshot of the PRE-delete state
-      try { window.storage.set("hs-v1", JSON.stringify(d), { label: "pre-delete-project", skipSanity: true }); } catch {}
+      try { window.storage.set("hs-v1", JSON.stringify(stripViewState(d)), { label: "pre-delete-project", skipSanity: true }); } catch {}
       const newProjects = {...d.projects};
       delete newProjects[id];
       const remaining = Object.keys(newProjects).map(Number);
@@ -8651,7 +8764,7 @@ function App() {
         return;
       }
       // Snapshot the current state with a pre-import label BEFORE applying
-      if (data) { try { window.storage.set("hs-v1", JSON.stringify(data), { label: "pre-import", skipSanity: true }); } catch {} }
+      if (data) { try { window.storage.set("hs-v1", JSON.stringify(stripViewState(data)), { label: "pre-import", skipSanity: true }); } catch {} }
       // Route the import through the SAME shared normalize + cascade pipeline the cloud/seed load and
       // version-restore use (B4), so old/partial backups get migrated (predecessor format, holidays,
       // ids, contacts) and dates recomputed. (This used to inline the pipeline, calling normalizeIds/
@@ -13174,7 +13287,7 @@ function SettingsPanel({data, setData, onClose, openFile, fileLinked, initialSec
                 // Guardrail: confirm + snapshot before destructive recascade
                 if (!window.confirm("Strip all pinned dates across all projects and recalculate from predecessor logic?\n\nA backup snapshot will be saved — you can restore from Version History if needed.")) return;
                 setData(d => {
-                  try { window.storage.set("hs-v1", JSON.stringify(d), { label: "pre-recascade", skipSanity: true }); } catch {}
+                  try { window.storage.set("hs-v1", JSON.stringify(stripViewState(d)), { label: "pre-recascade", skipSanity: true }); } catch {}
                   HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
                   const newProjects = {};
                   Object.entries(d.projects).forEach(([pid, proj]) => {
