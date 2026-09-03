@@ -24,13 +24,16 @@ export function friendlySaveError(error) {
   // that would otherwise match the more generic rule first and give a less specific, less
   // actionable sentence.
   //
-  // B972512-HARDENING item 5 — deleting a site plan that still has comps pinned to it hits this
-  // exact constraint (comps_parcel_anchor_has_identity, comps_site_plan_anchor.sql): the FK's
-  // `on delete set null` tries to null out the deleted comp's site_plan_overlay_id, which then
-  // fails the CHECK requiring a 'site_plan' anchor to carry one. The app now checks for this
-  // proactively before attempting a delete (SitePlansSection.jsx), but this stays as the honest
-  // fallback for a race (a comp pinned between the check and the delete) — never the raw
-  // "violates check constraint" text.
+  // B1114992 — this used to be the common-case message: deleting a site plan that still had
+  // comps pinned to it hit this exact constraint (comps_parcel_anchor_has_identity,
+  // comps_site_plan_anchor.sql), because the FK's `on delete set null` tried to null out the
+  // pinned comp's site_plan_overlay_id, which then failed the CHECK requiring a 'site_plan'
+  // anchor to carry one. Fixed at the root: comps_site_plan_overlay_delete_reverts_to_pin.sql's
+  // BEFORE DELETE trigger (and the matching soft_delete_site_plan_overlay RPC for the app's
+  // ordinary soft delete) now detaches a pinned comp to a plain 'pin' anchor atomically, in the
+  // SAME statement as the delete — so this constraint should no longer be reachable through any
+  // known path. Left in place as defense-in-depth (never surface the raw "violates check
+  // constraint" text) in case a future schema change reopens a gap this doesn't cover.
   if (msg.includes("comps_parcel_anchor_has_identity")) {
     return "Can't delete this site plan — one or more comps are still pinned to it. Remove or re-pin them first.";
   }

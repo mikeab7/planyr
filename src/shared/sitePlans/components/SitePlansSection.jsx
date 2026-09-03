@@ -684,29 +684,13 @@ export default function SitePlansSection({
   // rule is finally real, so it also needs to be LEGIBLE for a non-owner rather than a dead
   // toggle — see OverlayRow's lock button, gated on `isOwner`.
   const toggleLocked = (o) => patchAndReload(o, { locked: !o.locked });
-  // B972512-HARDENING item 5 — the database already refuses this delete outright the moment ANY
-  // comp still references the overlay (comps_parcel_anchor_has_identity — proven live: the FK's
-  // `on delete set null` trips the CHECK requiring a 'site_plan' anchor to carry an overlay id),
-  // and reassignment isn't a real alternative either (comps.update is owner-only RLS, so this
-  // user often can't even rewrite a teammate's comp to a plain pin). So the rule is BLOCK, always
-  // — the only thing to fix is telling the person why, proactively and by name, rather than
-  // firing the delete and translating whatever raw constraint error comes back. Shared by the
-  // ordinary (soft) delete AND the trash view's permanent delete — the constraint doesn't care
-  // which path reached it, and neither should the message.
-  // `fetchOverlayCompPoints` already crosses the same RLS boundary this needs (a teammate's
-  // comp is otherwise invisible), so it doubles as the "how many, and are you sure" count.
-  const blockedByPinnedComps = async (o) => {
-    const { data: points, error: countError } = await fetchOverlayCompPoints(o.id);
-    if (countError) { console.error("[sitePlanOverlays] checking pinned comps before delete failed:", countError); return false; }
-    if (points && points.length) {
-      const n = points.length;
-      setPanelError(`Can't delete “${o.docTitle || "this site plan"}” — ${n} comp${n === 1 ? " is" : "s are"} still pinned to it. Remove or re-pin ${n === 1 ? "it" : "them"} first.`);
-      return true;
-    }
-    return false;
-  };
+  // B1114992 — deleting a site plan is now UNCONDITIONAL: no proactive "N comps are still
+  // pinned" block. A comp pinned to this overlay (own-owner or a teammate's) is detached to a
+  // plain 'pin' anchor at its already-current lat/lon in the same statement as the delete —
+  // matching this row's own confirm-dialog copy below ("Comps pinned to it keep their location
+  // but lose the link back"), which used to be untrue (the delete was refused instead). See
+  // comps_site_plan_overlay_delete_reverts_to_pin.sql for the full mechanism and reasoning.
   const remove = async (o) => {
-    if (await blockedByPinnedComps(o)) return;
     const { error } = await deleteOverlay(o.id);
     if (error) { console.error("[sitePlanOverlays] delete failed:", error); setPanelError(friendlySaveError(error)); }
     else if (activeOverlayId === o.id) onActivateOverlay && onActivateOverlay(null);
@@ -729,7 +713,6 @@ export default function SitePlansSection({
     await loadTrash();
   };
   const purgeForever = async (o) => {
-    if (await blockedByPinnedComps(o)) return;
     const { error } = await permanentlyDeleteOverlay(o.id);
     if (error) { console.error("[sitePlanOverlays] permanent delete failed:", error); setPanelError(friendlySaveError(error)); }
     await loadTrash();
