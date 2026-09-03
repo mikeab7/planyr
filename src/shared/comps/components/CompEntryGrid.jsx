@@ -1275,6 +1275,12 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     if (e.key.length === 1 && !meta && !e.altKey) {
       const colDef = SHEET_COLUMNS[selection.col];
       if (colDef.kind === "action") { triggerAction(selection.row, selection.col); return; }
+      // NEW-1 (B1113714) — every sibling branch above calls preventDefault() before acting;
+      // this one didn't. beginEdit() seeds the new input's React state with e.key and focuses it
+      // synchronously (the `editing` useLayoutEffect), all before this handler returns — so with
+      // the keydown's default action left unprevented, the browser's own native character-insertion
+      // then lands the SAME keystroke a second time into the now-focused input, doubling it.
+      e.preventDefault();
       beginEdit(selection.row, selection.col, e.key, false);
     }
   };
