@@ -118,8 +118,8 @@ const NOTES_ACCENT = { accent: "var(--accent-notes)", onAccent: "var(--on-accent
 /* ⛔ B842947/NEW-4 — `PrimaryButton`/`GhostButton`/`ModeChip` MIRROR `shared/ui/controls.jsx`'s
  * `Button`(variant primary/ghost)/`ToggleChip` rather than importing them — deliberately, the
  * same reasoning `NoteToolbar.jsx` already documents for `RADIUS`: importing `controls.jsx`
- * from Notes hoists a shared chunk onto other routes and risks the Site-route chunk allowlist
- * (`ui-audit/perf-bundle-audit.mjs`). A few duplicated style rules beat a cross-route bundle
+ * from Notes hoists a shared chunk onto other routes and risks the site-planner route's chunk
+ * allowlist (`ui-audit/perf-bundle-audit.mjs`). A few duplicated style rules beat a cross-route bundle
  * regression. Keep these in step with `controls.jsx`'s own `Button`/`ToggleChip` if either
  * changes shape. */
 function PrimaryButton({ size = "lg", accent = "var(--accent)", onAccent = "var(--on-accent)", style, children, ...rest }) {

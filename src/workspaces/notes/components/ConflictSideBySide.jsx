@@ -35,7 +35,7 @@ const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.js
 // matching `shared/ui/controls.jsx`'s `Button variant="primary"` shape-for-shape (Notes' own
 // accent) instead of the old hand-rolled outline pill. MIRRORED rather than imported — the
 // same reasoning `ConflictReview.jsx`'s own `PrimaryButton` documents (importing controls.jsx
-// from Notes risks the Site-route chunk allowlist, `ui-audit/perf-bundle-audit.mjs`). The
+// from Notes risks the site-planner route's chunk allowlist, `ui-audit/perf-bundle-audit.mjs`). The
 // "nothing is lost" line is now `notesConflictKeptLine()` — the discarded copy goes to version
 // history, not a sibling page.
 const NOTES_ACCENT = { accent: "var(--accent-notes)", onAccent: "var(--on-accent-notes)" };
