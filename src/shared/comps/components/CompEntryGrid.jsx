@@ -475,7 +475,13 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, touched, selected, i
     : cellText;
   // HARDENING-10 (message B NEW-3) — Title/Address and the two party columns are the ones real
   // values got cut off in ("Core5 Industrial Partners"); a hover reveals the untruncated value.
-  const isLongTextCol = col.key === "title" || col.key === "partyProvider" || col.key === "partyAcquirer";
+  // B850016 (NEW-10) — extended to `leaseAnnualRate` (still a fixed-width column; widening it
+  // covers the common case but a rare long value can still clip) and `notes` (the one flex column
+  // that deliberately shrinks first under pressure, per this file's own FLEX_NOTES comment, so it
+  // clips the most often of any column here) — both are free-text/derived, exactly the class this
+  // report says truncation is acceptable for AS LONG AS the full value stays reachable on hover.
+  const isLongTextCol = col.key === "title" || col.key === "partyProvider" || col.key === "partyAcquirer"
+    || col.key === "leaseAnnualRate" || col.key === "notes";
   const hoverTitle = col.key === "location" ? locationText : flag?.reason || (isLongTextCol && st.text ? st.text : undefined);
   // ⛔ HARDENING-12 (B986096, owner P0 live-test) — an ACTION cell (Location) is a real, focusable
   // `<button>` now, not a bare `<span>` inside a `<td>` — the owner tested it with
@@ -658,6 +664,17 @@ function markTouched(rows, ids) {
 
 export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, onFocusAnchor, onSave, onCancel, saving, saveError, overlaysById }) {
   const isMobile = useIsMobileViewport();
+  // B850016 (NEW-9) — arming a row's Location cell ("Set") has nowhere to go on desktop either:
+  // the docked panel can still cover most of the map at a short window (measured 71% of a
+  // 1191x521 viewport), so the "click the map" banner it shows sits on top of the map it's
+  // pointing at. Mirrors CompEntryMobileSheet's own `minimized` — collapse to a slim strip the
+  // instant a row is armed (pin OR "Comp from parcel", both go through the same `armedRowId`),
+  // freeing the map underneath, and restore full view — rows/edits untouched, this is a pure
+  // render branch, never a data path — the instant it's disarmed (a pick lands, Cancel, or Esc).
+  const [minimizedForPlacement, setMinimizedForPlacement] = useState(false);
+  // useLayoutEffect (not useEffect) so the switch lands before paint — an armed row must never
+  // render the full-height panel over the map for even one visible frame.
+  useLayoutEffect(() => { setMinimizedForPlacement(!!armedRowId); }, [armedRowId]);
   const [pasteText, setPasteText] = useState("");
   const [lastPasteText, setLastPasteText] = useState(null);
   const [lastCommitSummary, setLastCommitSummary] = useState(null);
@@ -1541,6 +1558,33 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     );
   }
 
+  // NEW-9 — collapse the whole panel to a thin bottom strip while a row is armed for a map pick,
+  // so the map above it is actually clickable (measured: the docked panel alone still covered
+  // 71% of the map at 1191x521). `rows`/`onRowsChange` are the parent's own state (CompsPanel),
+  // never local to this component, so nothing here is lost by unmounting the full panel —
+  // clicking Cancel or landing a pick just flips `minimizedForPlacement` back via the effect above.
+  if (minimizedForPlacement) {
+    return createPortal(
+      <div
+        data-comp-entry-panel="1" data-comp-entry-minimized="1"
+        onPointerDown={(e) => e.stopPropagation()}
+        style={{
+          position: "fixed", left: 16, right: 16, bottom: 12, zIndex: 2700,
+          background: "var(--warn-bg)", border: "1px solid var(--warn-border)", borderRadius: 12,
+          padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+          boxShadow: "0 -8px 28px rgba(28,25,20,0.18), 0 -2px 8px rgba(28,25,20,0.08)", // design-exempt: matches the full panel's own un-tokenized shadow below — no shadow token exists yet
+        }}>
+        <span style={{ fontSize: 12, color: "var(--warn-text)" }}>
+          Click the map above to drop the pin — or click <strong>Comp from parcel</strong> on the map toolbar to anchor to a lot instead. Press Esc to cancel.
+        </span>
+        <button onClick={() => onArm(null)} style={{ flex: "none", border: "none", background: "none", color: "var(--warn-text)", textDecoration: "underline", fontFamily: "inherit", fontSize: 12, cursor: "pointer", padding: 0 }}>
+          Cancel
+        </button>
+      </div>,
+      document.body,
+    );
+  }
+
   return createPortal(
     <div
       data-comp-entry-panel="1"
@@ -1580,21 +1624,14 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
 
       {pasteBoxNode}
 
-      {armedRowId && (
-        <div style={{ flex: "none", fontSize: 12, color: "var(--warn-text)", background: "var(--warn-bg)", borderBottom: "1px solid var(--warn-border)", padding: "6px 14px" }}>
-          {/* HARDENING-12 — "the map stays fully usable" was true only once the panel stopped
-              covering the top of it (see the dock change above); now docked to the bottom, the
-              map above this panel is clickable. Escape is now a real way out, not just Cancel.
-              HARDENING-13 — arming Location now also arms the map's own pin-drop mode (the
-              parent's `onArmMapPin`), so the NEXT click on the map is already listening — no
-              separate "Drop a pin" click needed first. "Comp from parcel" stays a real
-              alternative (anchor to an actual lot instead of a raw point), reached the same way
-              it always was, from the map's own toolbar. */}
-          Click the map above to drop the pin — or click <strong>Comp from parcel</strong> on the map toolbar to anchor to a lot instead.{" "}
-          <button onClick={() => onArm(null)} style={{ border: "none", background: "none", color: "inherit", textDecoration: "underline", cursor: "pointer", padding: 0, marginLeft: 4 }}>Cancel</button>
-          {" "}or press Esc.
-        </div>
-      )}
+      {/* NEW-9 (B850016) — the armed banner used to render HERE, inside the full panel, which is
+          exactly the "click the map" instruction sitting on top of the map it's pointing at
+          (HARDENING-12's dock-to-bottom fix shrank the overlap but never closed it at a short
+          window — measured 71% of a 1191x521 viewport still covered). `armedRowId` truthy now
+          always routes to the `minimizedForPlacement` branch above BEFORE this ever paints (see
+          its own header comment), so this branch is unreachable by construction and was removed
+          rather than left as a second, driftable copy of the same banner text. Escape still
+          disarms from anywhere (CompsPanel's own window keydown listener), unchanged. */}
 
       {rows.length === 0 ? (
         <div style={{ flex: "none", fontSize: 12, color: "var(--text-secondary)", padding: "24px 14px", textAlign: "center" }}>

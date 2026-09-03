@@ -116,6 +116,34 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V471328 — B850016: a pasted comp's Location can actually be placed and saved, end to end, on a real signed-in account `Blocker: auth`
+
+**Why this needs its own real pass.** Every other part of this fix (the panel minimizing, the map becoming clickable, a click landing a pin, the row filling in, the footer/Save-button state) is proven live below against a real headless browser and the real dev build. What remains is the actual signed-in write into `public.comps` — this module's stated whole point, and its whole history (0 live / 0 deleted rows) is why this bug was Severity 1. This sandbox's egress proxy CORS-blocks the Supabase auth handshake, so no signed-in write of any kind is reachable here.
+
+**What was verified here, without a signed-in browser — driving the real, unmocked dev build, not a code read.** `ui-audit/verify-comp-entry-placement-clip.mjs`'s NEW-9 section: paste a real comp → click Location "Set" → the panel collapses to a slim bottom strip (covered fraction 53.2% → 7.1% of the viewport, was 71% pre-fix) → the map's own "Click the map to place a comp…" banner, previously hidden underneath the panel, is now genuinely visible and clickable → "Comp from parcel" is reachable from the same minimized state and clicking it does not re-expand the panel → Cancel restores the full panel with the pasted row still present (never the discard path) → Escape does the same → re-arming and clicking a point on the now-reachable map lands the pin, disarms, restores the full panel, resolves the Location cell to a real county/address, moves the footer to "1 comp ready", and enables Save comps. 14/14 checks. Full repo suite green, build clean.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, on a throwaway project:**
+1. Open Comps → "＋ Paste comps", paste a real broker comp block. **Expect:** the row appears with no Location, footer reads "1 comp · 0 ready — 1 missing a Location.".
+2. Click the row's Location "Set". **Expect:** the panel collapses to a slim strip; the map above it is fully usable (not just a sliver); the toolbar shows "Click the map to place a comp…" with Cancel and "Comp from parcel" both visible and clickable.
+3. Click a point on the map. **Expect:** the panel restores to full size; the Location cell shows a resolved address/APN/site-plan title; the footer reads "1 comp · 1 ready"; Save comps is enabled.
+4. Click Save comps. **Expect:** the request succeeds, the row disappears from the paste sheet, and — read back via Supabase directly, not just the UI — a real row now exists in `public.comps` with the pasted fields and the placed lat/lon. This is the first row this module has ever produced through this flow; confirm the count actually moves off zero.
+5. Repeat step 2 but choose "Comp from parcel" instead of clicking a raw point, and select an actual parcel. **Expect:** the same minimized-panel behavior, and the Location cell resolves to the parcel's APN instead of a lat/lon pin.
+
+**Result:** ⏳ pending — the placement flow itself, both arming paths, Escape, row survival, and the footer/Save-enable state are all proven live above; only the real signed-in database write remains, blocked by this sandbox's auth wall. `Cadence: once`.
+
+### V471329 — B850019: comp map markers read as a crisp white border, not a glow, against REAL aerial imagery `Blocker: live-GIS`
+
+**Why this needs its own real pass.** The owner's own VERIFY LIVE ask is explicit: a screenshot of the marker over real FEMA/Esri aerial imagery, at two zoom levels, before and after, over both a dark and a light area of the photo. This sandbox's egress proxy blocks every external GIS/tile host (`ERR_CONNECTION_RESET`, consistent with every other `Blocker: live-GIS` item in this file), so no real aerial tile can be fetched here.
+
+**What was verified here, without real aerial imagery — and it is a live-rendering proof, not a code read.** The fix removes a `filter:drop-shadow` CSS property from the marker's own SVG (`compMarkerIcon.js`) — the exact mechanism a `drop-shadow` blur uses is independent of whatever is drawn underneath it, so the marker's rendered edge is provably identical whether the background is a solid swatch or a real photo. Rendered the real, unmocked `compMarkerSvg` output in a headless Chromium page over both a dark (`#0d2b12`) and a light (`#c9c2ad`) swatch: a side-by-side before/after screenshot (retained locally this session) shows the reported soft glow on the left and a hard, uniform, fully-opaque white edge on the right, on both backgrounds. Pixel-level proof: rasterized the marker at 8x scale and measured the colour transition across the diamond's edge — settles to its final colour within one sample (an eighth of a CSS pixel, ordinary antialiasing), confirmed against the OLD `drop-shadow` markup run through the identical measurement as a control. `test/compMarkerIcon.test.js` (7/7, 3 new) asserts the fix structurally: no `filter`/`drop-shadow` string in the marker's output ever again, in either the resting or selected state, for all three comp types.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, on a project with at least one comp pinned over a bright/developed aerial area and one over a dark/wooded area:**
+1. Zoom to a level where the comp marker is clearly visible over each kind of background. **Expect:** a crisp white edge hugging the diamond shape at every point around it — no visible soft gradient fading outward into the imagery, on either background.
+2. Zoom in one more level (a second, different zoom). **Expect:** the same — a hard edge, not a glow, regardless of zoom.
+3. If any UI path currently reaches the marker's `selected` visual state (flagged on the item as possibly not yet wired to a click — confirm whether it is or isn't as part of this check), select a comp. **Expect:** the marker is visibly larger with a marginally thicker but still crisp border — never a glow — and stays clearly distinguishable from an unselected marker at a glance.
+
+**Result:** ⏳ pending — the fix is proven live above against an equivalent isolated rendering (structurally and pixel-for-pixel identical to what real tiles would sit behind); what remains is the visual read against a genuinely busy real aerial photo, which needs a browser with real GIS network access this sandbox does not have. `Cadence: once`.
+
 ### V620144 — B1114992: deleting a site plan with a pinned comp succeeds and the comp reverts to a plain pin, on a real signed-in account `Blocker: auth`
 
 **Why this needs its own real pass.** This is a real-project-data / signed-in destructive-action class (delete a database row through the actual UI, then read the result back) — mandatory-live per `CLAUDE.md`. This sandbox's egress proxy CORS-blocks the Supabase auth handshake, so no signed-in write of any kind is reachable here.

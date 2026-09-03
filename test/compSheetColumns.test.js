@@ -209,16 +209,16 @@ describe("compSheetColumns: HARDENING-10 NEW-5 / HARDENING-27 — computeFlexWid
   it("severe squeeze: Notes is pinned at its own floor, the three growers then shrink together, never below their own floor", () => {
     const w = computeFlexWidths(0);
     expect(w.notes).toBe(40);
-    expect(w.title).toBe(46);
-    expect(w.partyProvider).toBe(46);
-    expect(w.partyAcquirer).toBe(46);
+    expect(w.title).toBe(58);
+    expect(w.partyProvider).toBe(58);
+    expect(w.partyAcquirer).toBe(58);
   });
   it("every regime keeps every column at or above its own floor, and never returns a negative width", () => {
     for (const avail of [-50, 0, 100, 178, 220, 408, 900, 5000]) {
       const w = computeFlexWidths(avail);
-      expect(w.title).toBeGreaterThanOrEqual(46);
-      expect(w.partyProvider).toBeGreaterThanOrEqual(46);
-      expect(w.partyAcquirer).toBeGreaterThanOrEqual(46);
+      expect(w.title).toBeGreaterThanOrEqual(58);
+      expect(w.partyProvider).toBeGreaterThanOrEqual(58);
+      expect(w.partyAcquirer).toBeGreaterThanOrEqual(58);
       expect(w.notes).toBeGreaterThanOrEqual(40);
     }
   });
