@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-03 @ `deed5093` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-03 @ `e9ca0f21f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_650 source files mapped._
+_651 source files mapped._
 
 ## infra
 
@@ -121,11 +121,11 @@ _650 source files mapped._
   - _exports_: `useUndoableState`
 - **`src/workspaces/model/ModelApp.jsx`** — Model workspace root: the underwriting spreadsheet — loads/saves the active project's sheet and wires the toolbar, formula bar and grid together.
   - _exports_: `default (ModelApp)`
-- **`src/workspaces/notes/components/ConflictNotice.jsx`** — the quiet one-line conflict notice — one click opens the full-screen ConflictReview
+- **`src/workspaces/notes/components/ConflictNotice.jsx`** — The compact, inline conflict notice (role=alert) — one line plus a "Review changes →" button that opens `ConflictReview` full-screen; carries no resolve choices of its own.
   - _exports_: `default (ConflictNotice)`
-- **`src/workspaces/notes/components/ConflictReview.jsx`** — full-screen conflict review — opens on the redline (NoteRedline.jsx) by default, side-by-side one click away
+- **`src/workspaces/notes/components/ConflictReview.jsx`** — The full-screen conflict review: redline by default (toggle to side-by-side), both symmetric "Keep this version" resolve buttons live only here.
   - _exports_: `default (ConflictReview)`
-- **`src/workspaces/notes/components/ConflictSideBySide.jsx`** — the two-card side-by-side conflict comparison, now the secondary view inside ConflictReview
+- **`src/workspaces/notes/components/ConflictSideBySide.jsx`** — The two-card, word-highlight version comparison (B842624's original layout), now `ConflictReview`'s secondary view.
   - _exports_: `default (ConflictSideBySide)`
 - **`src/workspaces/notes/components/IntegrityBanner.jsx`** — the bar for the two findings nothing could previously mention: one note living in two projects, and a note that had lost its place (already recovered by the time it renders, and named / openable / re-filable inline). Its own lazy chunk — it renders only when something is wrong.
   - _exports_: `default (IntegrityBanner)`
@@ -135,7 +135,7 @@ _650 source files mapped._
   - _exports_: `default (NoteHistory)`
 - **`src/workspaces/notes/components/NoteOutline.jsx`** — Outline pane derived from the open note's headings — click to go, caret section highlighted, collapsible, absent with no headings.
   - _exports_: `default (NoteOutline)`
-- **`src/workspaces/notes/components/NoteRedline.jsx`** — renders notesRedline.js's diff as one document with insertions/deletions marked in place
+- **`src/workspaces/notes/components/NoteRedline.jsx`** — Renders `lib/notesRedline.js`'s output as one document with insertions underlined and deletions struck through, formatting (headings/lists/marks) preserved.
   - _exports_: `ChangeTag`, `default (NoteRedline)`
 - **`src/workspaces/notes/components/NoteSlashMenu.jsx`** — The command list drawn at the caret when `/` opens it; renders only — every decision is the plugin's.
   - _exports_: `default (NoteSlashMenu)`
@@ -205,7 +205,7 @@ _650 source files mapped._
   - _exports_: `moveNotesBetweenProjects`, `projectNotes`
 - **`src/workspaces/notes/lib/notesQuickOpen.js`** — PURE fuzzy ranking for quick open, plus the shortcut's spelling and chord test.
   - _exports_: `fuzzyScore`, `isQuickOpenChord`, `QUICK_OPEN_KEY`, `quickOpenResults`, `rankQuickOpen`, `stepIndex`
-- **`src/workspaces/notes/lib/notesRedline.js`** — pure redline diff between two note bodies — one document, changes marked in place
+- **`src/workspaces/notes/lib/notesRedline.js`** — PURE: flattens two document models into leaf blocks, block-matches them, and word-diffs each matched pair with marks preserved — the data behind `NoteRedline.jsx`.
   - _exports_: `buildComparison`, `buildRedline`, `flattenBlocks`, `nestByPath`
 - **`src/workspaces/notes/lib/notesSaveState.js`** — this module status → the ONE app-wide CloudSyncBadge state. Notes was the last module rendering its own save chips; this is it joining the convention.
   - _exports_: `notesSaveState`
@@ -241,7 +241,7 @@ _650 source files mapped._
   - _exports_: `default`, `NoteToggle`, `NoteToggleTitle`, `TOGGLE_TITLE_PLACEHOLDER`, `toggleClickKey`
 - **`src/workspaces/notes/lib/notesToolbarDiag.js`** — Read-only, call-time-gated diagnostic for B831600 ×3 (the table-toolbar-jump bug): records every `applyToolbarDelta` call so the owner can capture the real production call sequence. Off by default, no telemetry leaves the browser.
   - _exports_: `isToolbarDiagArmed`, `latchToolbarDiag`, `recordToolbarDiag`, `TOOLBAR_DIAG_LOG_KEY`, `TOOLBAR_DIAG_PARAM`, `TOOLBAR_DIAG_STORAGE_KEY`
-- **`src/workspaces/notes/lib/notesVersionOrder.js`** — PURE: orders a conflict's two copies by recency (never by which browser window they came from), telling the caller whether that ordering is actually known.
+- **`src/workspaces/notes/lib/notesVersionOrder.js`** — PURE: orders a conflict's two copies by recency (`comparable`/`newer`/`older`), refusing to call either "newer" when a timestamp is missing or both tie.
   - _exports_: `orderConflictVersions`
 - **`src/workspaces/notes/lib/notesVersions.js`** — PURE version-history policy: when a snapshot is due, which are kept, and the restore plan that never destroys history.
   - _exports_: `MAX_VERSIONS_PER_PAGE`, `planRestore`, `planRetention`, `RETENTION_TIERS`, `shouldSnapshot`, `SNAPSHOT_MIN_GAP_MS`, `versionReasonLabel`
@@ -504,6 +504,8 @@ _650 source files mapped._
   - _exports_: `default (AppHeader)`, `exitFs`, `fsElement`, `fsSupported`, `MODULE_ACCENT`, `requestFs`, `useNarrow`
 - **`src/shared/ui/bottomSheetTracker.js`** — Module-scope publish/subscribe signal: the open mobile bottom sheet's live height, so a FloatingNotice can sit above it instead of under or over it
   - _exports_: `currentBottomSheetHeight`, `publishBottomSheetHeight`, `subscribeBottomSheetHeight`, `useBottomSheetHeight`
+- **`src/shared/ui/clickDiag.js`** — Always-on, silent-by-construction diagnostic (B1066370): reports a button press with no matching click via client_errors, so a reported "first click does nothing" bug can capture itself in the wild
+  - _exports_: `describeSuspect`, `installClickDiag`, `labelFor`
 - **`src/shared/ui/CloudSyncBadge.jsx`** — App-wide cloud-sync glyph driven by real saveState (synced/saving/offline/readonly/error/local); loud never-vanish error via crash boundary + retry popover
   - _exports_: `CloudBadgeBoundary`, `cloudBadgeView`, `default (CloudSyncBadge)`
 - **`src/shared/ui/ColorField.jsx`** — Color control = the native wheel + the shared recently-used swatch row (NEW-4); `ColorRecentsRow` is the row alone, for controls with a bespoke wheel.
@@ -859,7 +861,7 @@ _650 source files mapped._
   - _exports_: `combineDepthToWater`, `pondGroundwaterScreen`
 - **`src/workspaces/site-planner/lib/groupCas.js`** — B1341 stage 2: the group-CAS kill switch (ships OFF; `VITE_GROUP_CAS` or the `planarfit:groupCas` device key, read at call time).
   - _exports_: `GROUP_CAS_KEY`, `groupCasEnabled`
-- **`src/workspaces/site-planner/lib/harrisTaxRates.js`** — NEW-1: Harris County's real, dated combined tax rate (Comptroller workbook + jurisdiction/district lookup), never a "not connected" placeholder.
+- **`src/workspaces/site-planner/lib/harrisTaxRates.js`** — `resolveHarrisTaxRates`: builds a real, dated combined tax rate for a Harris County point from the Comptroller's published Rates and Levies workbooks plus spatially-resolved city/ISD/MUD jurisdiction, listing any resolved unit with no matching rate row instead of dropping it.
   - _exports_: `resolveHarrisTaxRates`
 - **`src/workspaces/site-planner/lib/hcfcdWse.js`** — HCFCD MAAPnext model WSE sampler (B882, Harris County): registry-driven ImageServer getSamples for the 1% + 0.2% WSE rasters; no-op until the provisional endpoints are confirmed live. `sampleMaapnextWse`/`maapnextEndpoints`/`clearMaapnextCache`.
   - _exports_: `clearMaapnextCache`, `maapnextEndpoints`, `maapnextOutage`, `sampleMaapnextWse`
