@@ -7,49 +7,49 @@
     "map-landing": {
       "light": {
         "approvedAt": "2026-09-02",
-        "approvedCommit": "6dbc66c0d",
-        "note": "B849587: Parcel tools now uses the same split row + separate 26px caret control as the other five rail flyouts (was one wide button with an inline caret glyph), per the owner's rail-caret-consistency block. site-planner-header and site-planner-left-rail baselines both capture the right rail in frame; visible change is confined to the Parcel tools row width/caret, deliberate and reviewed."
+        "approvedCommit": "a90e0c37",
+        "note": "B1074770 (map-finder split-button caret audit) — the Select-parcels/Place-comp split-button carets now render via the same aria-hidden, opacity-0.6 caret span controls.jsx's MenuTrigger primitive uses everywhere else in the app (was full-opacity bare text), and the Select-parcels menu panel is intentionally narrower (148px vs 200px, B1074769). Both are deliberate, requested visual changes to the map-landing toolbar."
       },
       "dark": {
         "approvedAt": "2026-09-02",
-        "approvedCommit": "6dbc66c0d",
-        "note": "B849587: Parcel tools now uses the same split row + separate 26px caret control as the other five rail flyouts (was one wide button with an inline caret glyph), per the owner's rail-caret-consistency block. site-planner-header and site-planner-left-rail baselines both capture the right rail in frame; visible change is confined to the Parcel tools row width/caret, deliberate and reviewed."
+        "approvedCommit": "a90e0c37",
+        "note": "B1074770 (map-finder split-button caret audit) — the Select-parcels/Place-comp split-button carets now render via the same aria-hidden, opacity-0.6 caret span controls.jsx's MenuTrigger primitive uses everywhere else in the app (was full-opacity bare text), and the Select-parcels menu panel is intentionally narrower (148px vs 200px, B1074769). Both are deliberate, requested visual changes to the map-landing toolbar."
       }
     },
     "site-planner-header": {
       "light": {
         "approvedAt": "2026-09-02",
-        "approvedCommit": "6dbc66c0d",
-        "note": "B849587: Parcel tools now uses the same split row + separate 26px caret control as the other five rail flyouts (was one wide button with an inline caret glyph), per the owner's rail-caret-consistency block. site-planner-header and site-planner-left-rail baselines both capture the right rail in frame; visible change is confined to the Parcel tools row width/caret, deliberate and reviewed."
+        "approvedCommit": "a90e0c37",
+        "note": "B1074770 (map-finder split-button caret audit) — the Select-parcels/Place-comp split-button carets now render via the same aria-hidden, opacity-0.6 caret span controls.jsx's MenuTrigger primitive uses everywhere else in the app (was full-opacity bare text), and the Select-parcels menu panel is intentionally narrower (148px vs 200px, B1074769). Both are deliberate, requested visual changes to the map-landing toolbar."
       },
       "dark": {
         "approvedAt": "2026-09-02",
-        "approvedCommit": "6dbc66c0d",
-        "note": "B849587: Parcel tools now uses the same split row + separate 26px caret control as the other five rail flyouts (was one wide button with an inline caret glyph), per the owner's rail-caret-consistency block. site-planner-header and site-planner-left-rail baselines both capture the right rail in frame; visible change is confined to the Parcel tools row width/caret, deliberate and reviewed."
+        "approvedCommit": "a90e0c37",
+        "note": "B1074770 (map-finder split-button caret audit) — the Select-parcels/Place-comp split-button carets now render via the same aria-hidden, opacity-0.6 caret span controls.jsx's MenuTrigger primitive uses everywhere else in the app (was full-opacity bare text), and the Select-parcels menu panel is intentionally narrower (148px vs 200px, B1074769). Both are deliberate, requested visual changes to the map-landing toolbar."
       }
     },
     "site-planner-left-rail": {
       "light": {
         "approvedAt": "2026-09-02",
-        "approvedCommit": "6dbc66c0d",
-        "note": "B849587: Parcel tools now uses the same split row + separate 26px caret control as the other five rail flyouts (was one wide button with an inline caret glyph), per the owner's rail-caret-consistency block. site-planner-header and site-planner-left-rail baselines both capture the right rail in frame; visible change is confined to the Parcel tools row width/caret, deliberate and reviewed."
+        "approvedCommit": "a90e0c37",
+        "note": "B1074770 (map-finder split-button caret audit) — the Select-parcels/Place-comp split-button carets now render via the same aria-hidden, opacity-0.6 caret span controls.jsx's MenuTrigger primitive uses everywhere else in the app (was full-opacity bare text), and the Select-parcels menu panel is intentionally narrower (148px vs 200px, B1074769). Both are deliberate, requested visual changes to the map-landing toolbar."
       },
       "dark": {
         "approvedAt": "2026-09-02",
-        "approvedCommit": "6dbc66c0d",
-        "note": "B849587: Parcel tools now uses the same split row + separate 26px caret control as the other five rail flyouts (was one wide button with an inline caret glyph), per the owner's rail-caret-consistency block. site-planner-header and site-planner-left-rail baselines both capture the right rail in frame; visible change is confined to the Parcel tools row width/caret, deliberate and reviewed."
+        "approvedCommit": "a90e0c37",
+        "note": "B1074770 (map-finder split-button caret audit) — the Select-parcels/Place-comp split-button carets now render via the same aria-hidden, opacity-0.6 caret span controls.jsx's MenuTrigger primitive uses everywhere else in the app (was full-opacity bare text), and the Select-parcels menu panel is intentionally narrower (148px vs 200px, B1074769). Both are deliberate, requested visual changes to the map-landing toolbar."
       }
     },
     "library": {
       "light": {
         "approvedAt": "2026-09-02",
-        "approvedCommit": "6dbc66c0d",
-        "note": "B849587: Parcel tools now uses the same split row + separate 26px caret control as the other five rail flyouts (was one wide button with an inline caret glyph), per the owner's rail-caret-consistency block. site-planner-header and site-planner-left-rail baselines both capture the right rail in frame; visible change is confined to the Parcel tools row width/caret, deliberate and reviewed."
+        "approvedCommit": "a90e0c37",
+        "note": "B1074770 (map-finder split-button caret audit) — the Select-parcels/Place-comp split-button carets now render via the same aria-hidden, opacity-0.6 caret span controls.jsx's MenuTrigger primitive uses everywhere else in the app (was full-opacity bare text), and the Select-parcels menu panel is intentionally narrower (148px vs 200px, B1074769). Both are deliberate, requested visual changes to the map-landing toolbar."
       },
       "dark": {
         "approvedAt": "2026-09-02",
-        "approvedCommit": "6dbc66c0d",
-        "note": "B849587: Parcel tools now uses the same split row + separate 26px caret control as the other five rail flyouts (was one wide button with an inline caret glyph), per the owner's rail-caret-consistency block. site-planner-header and site-planner-left-rail baselines both capture the right rail in frame; visible change is confined to the Parcel tools row width/caret, deliberate and reviewed."
+        "approvedCommit": "a90e0c37",
+        "note": "B1074770 (map-finder split-button caret audit) — the Select-parcels/Place-comp split-button carets now render via the same aria-hidden, opacity-0.6 caret span controls.jsx's MenuTrigger primitive uses everywhere else in the app (was full-opacity bare text), and the Select-parcels menu panel is intentionally narrower (148px vs 200px, B1074769). Both are deliberate, requested visual changes to the map-landing toolbar."
       }
     }
   }

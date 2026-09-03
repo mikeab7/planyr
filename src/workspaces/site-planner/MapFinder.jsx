@@ -3086,7 +3086,20 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                   fontSize: FONT_SIZE.micro, boxShadow: "none",
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}
-              >▾</Button>
+              >
+                {/* NEW-3 (map-finder split-button audit) — the same trailing caret `controls.jsx`'s
+                    shared `MenuTrigger` draws for every other "opens a menu" trigger in the app
+                    (the row-1 "File ▾" button, the account chip): aria-hidden span, opacity 0.6,
+                    a decorative-glyph size off the FONT_SIZE scale. This control already used the
+                    right CHARACTER (▾, matching MenuTrigger) — only the STRUCTURE drifted (a bare
+                    button-text child sized off the button's own fontSize). Deliberately NOT the ▼
+                    the Imagery & layers toggle uses below: that one is a PERSISTENT DISCLOSURE
+                    (rotates to show expanded/collapsed, like the Sites-panel header and each group's
+                    collapse arrow beside it) — a different affordance from a caret that opens a
+                    transient popover menu, so unifying it here would break its own consistency with
+                    those other two disclosure toggles. */}
+                <span aria-hidden="true" style={{ opacity: 0.6, fontSize: FONT_SIZE.micro }}>▾</span>
+              </Button>
             </div>
           )}
           {/* B848304 — the mode toggle's old "Comp" segment plus these two buttons said the same
@@ -3129,7 +3142,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                   fontSize: FONT_SIZE.micro, boxShadow: "none",
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}
-              >▾</Button>
+              >
+                {/* NEW-3 — see the matching caret on the "Select parcels" split button above. */}
+                <span aria-hidden="true" style={{ opacity: 0.6, fontSize: FONT_SIZE.micro }}>▾</span>
+              </Button>
             </div>
           )}
           {placingCompPin && (
@@ -3251,9 +3267,21 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
 
         {/* NEW-1 — the "Start blank" secondary option, off the "Select parcels" split button's
             caret. One item today; a MenuItem list rather than a bare popover so a future secondary
-            option (e.g. a saved-template start) has somewhere to go without another redesign. */}
+            option (e.g. a saved-template start) has somewhere to go without another redesign.
+            ⛔ NEW-1/NEW-2 (map-finder split-button audit) — TWO fixes, both measured live on
+            planyr.io: (a) `placement="below-right"`, not "-left" — AnchoredMenu's anchor is this
+            caret button, whose own right edge IS the split control's right edge (it's the trailing
+            flex segment), so "below-right" right-aligns the panel to the CONTROL, not just the
+            caret; "-left" anchored the panel's LEFT edge to the caret's left edge, hanging 178px of
+            it out past the control's right edge over open map with nothing under it. (b) `width`
+            148, not 200 — MenuItem is `width:"100%"`, so the panel width IS the item's width; 200px
+            for one short "Start blank" item was heavier than the thing it hides (matches the
+            148px compact-menu precedent already used elsewhere, e.g. `Ribbon.jsx`'s tool menu). The
+            caret+menu STRUCTURE stays — see B831780/NEW-1 above (do not "fix" this by giving
+            "Start blank" its own co-equal button beside "Select parcels" again; that is the
+            two-buttons-of-equal-weight problem this exact toolbar was already corrected out of). */}
         <AnchoredMenu open={startBlankMenuOpen} onClose={() => setStartBlankMenuOpen(false)}
-          anchorRef={startBlankMenuBtnRef} placement="below-left" width={200} gap={6}
+          anchorRef={startBlankMenuBtnRef} placement="below-right" width={148} gap={6}
           zIndex={MAP_CHROME_Z.panel} panelStyle={menuPanelStyle}>
           <MenuItem data-testid="map-start-blank-menu-item"
             title="Start a plan with no parcel, located where the map is looking — draw the boundary yourself"
@@ -3267,9 +3295,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             three unrelated commands instead of one action with three ways to anchor it). "On a
             site plan" always renders, never omitted, even when unreachable: a missing item
             teaches the user the capability doesn't exist, a disabled one with a reason teaches
-            them how to get it. */}
+            them how to get it.
+            ⛔ NEW-1 (map-finder split-button audit) — `placement="below-right"`, not "-left"; see
+            the matching fix + explanation on the "Select parcels" menu above (this caret's own
+            right edge is the split control's right edge, same as that one). Width stays 200 —
+            three items, unlike that one's single "Start blank" (NEW-2 doesn't apply here). */}
         <AnchoredMenu open={placeCompMenuOpen} onClose={() => setPlaceCompMenuOpen(false)}
-          anchorRef={placeCompMenuBtnRef} placement="below-left" width={200} gap={6}
+          anchorRef={placeCompMenuBtnRef} placement="below-right" width={200} gap={6}
           zIndex={MAP_CHROME_Z.panel} panelStyle={menuPanelStyle}>
           <MenuItem data-testid="map-place-comp-menu-item-map"
             title="Place a comp anywhere you click on the map"
