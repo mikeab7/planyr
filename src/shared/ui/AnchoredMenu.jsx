@@ -208,8 +208,20 @@ export default function AnchoredMenu({
           B1125 — also skipped until the menu is actually PLACED (`pos`). This layer covers the whole
           app (elementFromPoint over the canvas returns it), which is correct while a visible menu
           needs dismissing and indefensible otherwise: an unplaced menu is invisible, so the layer
-          would swallow clicks with nothing on screen to explain why the app stopped responding. */}
-      {!hoverSafe && pos && <div onClick={onClose} data-menu-owner={ownerScope} style={{ position: "fixed", inset: 0, zIndex }} />}
+          would swallow clicks with nothing on screen to explain why the app stopped responding.
+          ⛔ B1076480 — `onClick` ALONE left every RIGHT-click dead against a still-open menu. Per
+          spec, `click` fires only for the primary (left) mouse button — a right-button press never
+          generates one, only `mousedown`/`mouseup`/`contextmenu` — so a right-click aimed at a
+          DIFFERENT trigger (e.g. a different grid header) while a menu was already open hit this
+          backdrop, produced no `click`, and silently ate the press: nothing closed, nothing opened,
+          and the underlying element never even saw a `contextmenu` event, because the browser
+          resolves that event's target by hit-testing at dispatch time and this topmost, full-
+          viewport div was still there to win it. `onMouseDown` fires for every button and — for a
+          right-click — fires BEFORE the native `contextmenu` event, so closing here removes the
+          backdrop from the DOM in time for the browser's hit-test to land on whatever is actually
+          underneath. Reproduced live via Playwright before the fix (an actionability-check timeout:
+          "<div></div> intercepts pointer events") and confirmed fixed after. */}
+      {!hoverSafe && pos && <div onClick={onClose} onMouseDown={onClose} data-menu-owner={ownerScope} style={{ position: "fixed", inset: 0, zIndex }} />}
       <div
         ref={menuRef}
         className={className}

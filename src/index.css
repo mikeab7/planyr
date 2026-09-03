@@ -196,6 +196,11 @@
   --danger-border: #E4AFA9;
   --success-bg:    #ECF7F0;
   --success-border:#C3E2CF;
+  /* B1091712 — the info tint the mobile comp-entry sheet's LEASE type badge sits on, pairing
+     with the existing --info-text (blue was already a semantic color with no background tint
+     of its own — LAND/BLDG SALE badges reuse --warn-bg/--warn-text and --hover-chrome/
+     --text-secondary respectively rather than adding two more one-off tokens). */
+  --info-bg:       #E1EAFB;
 
   /* Yield-panel PROVENANCE source-tag color (B895 — the CODE tag: an adopted
      ordinance/criteria value). PLAN/SURVEY/ESTIMATE/YOURS/UNVERIFIED reuse the
@@ -365,6 +370,8 @@
   --danger-border: #6B2F2C;
   --success-bg:    #16301F;
   --success-border:#2C6B45;
+  /* B1091712 — dark counterpart of the light-block --info-bg above. */
+  --info-bg:       #1B2A4A;
   --source-code-text: #AFA9EC;
 
   /* Status — lighter variants so saturated values don't go muddy on dark cards (B320).

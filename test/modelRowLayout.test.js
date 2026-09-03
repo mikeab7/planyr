@@ -164,4 +164,41 @@ describe("visibleRowRange — the buffered virtualization window", () => {
     // 400px / 200px-tall rows ≈ 2 rows visible, not the ~15 a fixed 26px height would give
     expect(endIdx - startIdx).toBeLessThan(5);
   });
+
+  // B1087905 — measured live: freeze the top row, scroll a LITTLE (not a whole row's worth), and
+  // the first scrolling row's own pixels land UNDER the pinned frozen band instead of clearing
+  // it — "Line Item" (frozen) and "Soft cost" (a scrolling row) painted on the same pixels. A
+  // bare `minIdx` index clamp (the test above) only stops the SAME row index from double-
+  // rendering; it says nothing about where that row's PIXELS land once frozen. The headerH
+  // constant SheetView.jsx actually adds is irrelevant to this pure function — it's a shared
+  // offset on both the frozen band's sticky `top` and every scrolling row's absolute `top`, so
+  // it cancels out of "does row r's rendered top clear the frozen band's rendered bottom."
+  describe("frozen-band pixel clearance (B1087905)", () => {
+    it("a small scroll — less than one frozen row's height — still keeps every rendered row's top at or past the frozen band's own bottom edge", () => {
+      const s = createSheet();
+      const offsets = buildRowOffsets(s, 40); // DEFAULT_ROW_H apart, row 0 frozen (minIdx=1)
+      const frozenBandH = offsets[1]; // one frozen row's height
+      const scrollTop = Math.round(frozenBandH * 0.6); // partway into the first data row — never a clean row boundary
+      const { startIdx } = visibleRowRange(offsets, scrollTop, 400, 6, 1);
+      // The rendered top of the first scrolling row, in the SAME coordinate space the frozen
+      // band's own pinned bottom sits at (both offset by the same headerH, which cancels here).
+      const renderedTop = offsets[startIdx] - scrollTop;
+      expect(renderedTop).toBeGreaterThanOrEqual(frozenBandH);
+    });
+
+    it("reproduces the exact live repro numbers (freeze top row, scrollTop=60, ~22px rows) — first rendered row must be index 4, not 3", () => {
+      const s = createSheet();
+      const offsets = buildRowOffsets(s, 33); // DEFAULT_ROW_H (22) apart
+      const { startIdx } = visibleRowRange(offsets, 60, 850, 6, 1);
+      expect(startIdx).toBe(4); // row index 3 ("Soft cost") still overlaps the frozen band by 16px
+    });
+
+    it("an UNFROZEN sheet (minIdx=0) is completely unaffected by this — same buffered window as before", () => {
+      const s = createSheet();
+      const offsets = buildRowOffsets(s, 1000);
+      const buf = 6, targetRow = 10, scrollTop = targetRow * DEFAULT_ROW_H;
+      const { startIdx } = visibleRowRange(offsets, scrollTop, 400, buf, 0);
+      expect(startIdx).toBe(Math.max(0, targetRow - buf));
+    });
+  });
 });
