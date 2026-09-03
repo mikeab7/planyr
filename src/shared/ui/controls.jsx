@@ -260,11 +260,15 @@ export const MenuTrigger = forwardRef(function MenuTrigger({
 
 /* Menu primitives — a token-only flyout panel + item (the Site Planner menuPanel/menuItem). */
 export const menuPanelStyle = { background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: RADIUS.panel, boxShadow: "0 16px 44px rgba(0,0,0,0.22), 0 3px 10px rgba(0,0,0,0.1)", padding: 6 };
-export function MenuItem({ active = false, style, children, ...rest }) {
+// NEW-2 (B849585) — `disabled` gets a real, unmistakable treatment (opacity, matching Button's/
+// IconButton's own `disabled → opacity: 0.5`), not just a `cursor` change: a disabled row that
+// only differs from an enabled one by cursor is invisible until you try to click it.
+export function MenuItem({ active = false, disabled = false, style, children, ...rest }) {
   return (
-    <button style={{
-      display: "block", width: "100%", textAlign: "left", padding: "7px 10px", fontSize: FONT.md, borderRadius: RADIUS.control, cursor: "pointer",
-      border: "none", background: active ? "var(--hover-menu)" : "transparent", color: "var(--text-primary)", fontFamily: "inherit", fontWeight: active ? 650 : 500, ...style,
+    <button disabled={disabled} style={{
+      display: "block", width: "100%", textAlign: "left", padding: "7px 10px", fontSize: FONT.md, borderRadius: RADIUS.control,
+      border: "none", background: active ? "var(--hover-menu)" : "transparent", color: "var(--text-primary)", fontFamily: "inherit", fontWeight: active ? 650 : 500,
+      cursor: disabled ? "default" : "pointer", ...(disabled ? { opacity: 0.5 } : {}), ...style,
     }} {...rest}>{children}</button>
   );
 }

@@ -155,8 +155,25 @@ export function parcelMenuModel(state = {}) {
     };
   };
 
+  /* NEW-2 (B849585) — when EVERY row in a group is disabled, the group carries ONE stated reason
+   * instead of leaving the user to infer it from N individually-greyed rows (which is what made
+   * the disabled rows read as "13 live options, 9 do nothing" rather than "here's what to do
+   * first"). Rows stay VISIBLE and individually disabled either way — this is a header note, not a
+   * replacement for the rows (a hidden action is exactly the bug PARCEL_ACTIONS above was written
+   * to close). `hasParcels` is checked FIRST because it's the one root cause every row in "modify"/
+   * "remove" traces back to on a brand-new plan; when rows disagree for another reason, the first
+   * row's own reason is still a true, honest answer for the group. */
+  const groupReason = (rows) => {
+    if (!rows.length || rows.some((r) => r.enabled)) return null;
+    if (!hasParcels) return "Add a parcel first — see Add land above";
+    return rows[0].disabledReason;
+  };
+
   return PARCEL_GROUPS
-    .map((g) => ({ id: g.id, label: g.label, rows: PARCEL_ACTIONS.filter((a) => a.group === g.id).map(rowFor).filter(Boolean) }))
+    .map((g) => {
+      const rows = PARCEL_ACTIONS.filter((a) => a.group === g.id).map(rowFor).filter(Boolean);
+      return { id: g.id, label: g.label, rows, reason: groupReason(rows) };
+    })
     .filter((g) => g.rows.length > 0);
 }
 

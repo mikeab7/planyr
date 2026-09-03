@@ -55,6 +55,13 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 
 ## 🔲 Open
 
+### B1080976 — Share a schedule, from inside the Schedule module `[Scheduler]` (feature) #scheduler  *(owner chat block 2026-09-02, NEW-2 — the owner's actual request: "I can't share schedules, I don't see a clear way to share schedules, that should be an option within the schedule module." BLOCKED on B778 until this session: a schedule had no owner at all, so nothing could be shared. Minted **B1080976** from this branch's reserved block B1080976–B1080991 against freshly-fetched `origin/main`.)*
+`[ ]` **No longer blocked on ownership (B778 shipped this session) — still blocked on a product decision. Not attempted.** A schedule now has a real owner (`user_id`) and is private by default; this item is the actual sharing feature the owner asked for, and it has NOT been designed or built.
+- **⛔ Do not default this to team-based sharing.** `public.sites` shares by `team_id` + a `share_locked` flag, and B778's first pass copied that model onto schedules by default — the owner explicitly overrode it mid-session, verbatim: **"let me decide when i share."** No implicit or inherited sharing, ever — not by team membership, not by project adjacency. Whatever this feature ends up being, sharing is an EXPLICIT act the owner performs.
+- **Ask him what "shared" should mean before drawing anything** — read-only vs co-edit, per-person vs per-team, whether it reuses `team_id` (present on all three `planar_*` tables now, unused, for exactly this) or something else entirely. Two different sharing models in one app is the exact class of problem this repo's design-arc rules exist to stop.
+- Verify: live — `Blocker: auth` (a real test needs a second signed-in account).
+- Origin: filed 2026-09-02 from owner chat (NEW-2), same block as B778's amendment below.
+
 ### B1038016 — Give every crawled UI surface a hard signature BUDGET, not a ratchet `[global/ui-audit]` (feature) #ui #testing  *(owner chat block 2026-09-01, NEW-1 — "THE PROBLEM… nothing anywhere says A SURFACE MAY CONTAIN AT MOST N DISTINCT CONTROL SIGNATURES. Because no budget exists, 'deliberately left, here is why' is always an available and always a passing answer." Cites #1293 (B989105's own shipped resolution, which left five control groups unconverted with individually-defensible reasons) as the exact case this closes. Minted **B1038016** from this branch's reserved block B1038016–B1038031 against freshly-fetched `origin/main` d8cce97. DEDUPE-FIRST — searched Open/⏳Verify/Done for "signature budget", "control signature", B982400/B982402/B989104/B989105/B989106: B982402 built the COUNT and a RATCHET (never exceed today's number); nothing before this bound the number to anything chosen. Net-new — the ratchet this supersedes is deleted in the same commit, not left running alongside it.)*
 `[x]` **SHIPPED.** `ui-audit/signature-budget.json` (new) replaces `ui-audit/control-signature-ceiling.json` (deleted): every one of the 12 crawled surfaces carries a deliberately-chosen integer BUDGET, and `ui-inventory.mjs --check` fails when a surface's raw signature count exceeds `budget + the sum of every named, dated exemption naming that surface`. Wired into the required `build` check (reusing PR #1311's existing Playwright-browser cache and preview-server steps rather than paying for a second copy of either — see B1038017/B1038018 below for why those steps needed reconciling).
 - Verify: sandbox — pure UI geometry, verified by build + the automated crawl + hand-inspected pixel diffs, all logged out; none of the mandatory LIVE-VERIFY classes (timing/race, GIS, PDF export, real-project-data) apply.
@@ -2450,13 +2457,6 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 - **Degradation (LOUD-FAILURE):** a mask-source outage degrades to today's behavior with an honest note — never blocks arrows entirely.
 - **Acceptance (live):** Bain + one Harris site — no arrows over existing structures; provenance line renders in hover ⓘ and on the sheet.
 
-### B778 — Tighten the migrated `planar_*` tables off wide-open anon RLS `[Infra / Scheduler]` (task) #infra #scheduler #auth  *(spun out of the B408 consolidation on merge, 2026-07-11; minted **B778**)*
-`[ ]` The B408 consolidation moved the Scheduler's `planar_data`/`planar_history`/`planar_suggestions` tables onto the main production project (`lyeqzkuiwngunutlkkmi`) with their RLS policies carried over UNCHANGED — anon can read AND write all three tables, no auth check. That was safe parity while the Scheduler lived on its own disposable project; now those tables sit in the same production project as real user data, so the same-shaped exposure carries more weight even though behavior hasn't changed.
-- Verify: live
-- Origin: filed 2026-07-11, follow-up flagged in `docs/REFERENCE.md` "## Supabase" during the B408 consolidation (PR #591).
-- **Why not folded into B408 itself:** the Scheduler currently has no sign-in / auth of its own — it talks to PostgREST straight with the anon key. Locking the policies to authenticated/owner-scoped access needs the Scheduler to grow an auth layer first (who's allowed to write, and how do they prove it) — real feature work, not a one-line policy flip.
-- **Scope when picked up:** decide what "authorized" means for the Scheduler (piggyback on B406's team auth? a simpler shared secret? per-user rows?), rewrite the `planar_*` RLS policies to match, and repoint `public/sequence/index.html`'s client accordingly.
-
 ### B776 — Special-district layers: ESD, TIRZ (+ audit LID/FWSD coverage of the TCEQ row) `[Site Planner / GIS]` (feature) #site-planner #gis  *(owner review 2026-07-11 as "NEW-6"; §B2. RENUMBERED B765→**B776** on merge-in of `origin/main` (concurrent floodplain/detention session took B763–B773). **Sources VERIFIED LIVE this session — implementation-ready.**)*
 `[ ]` Evidence-first source hunt + registry rows for ESDs and TIRZs; audit the TCEQ water-districts TYPEs. **The sources were hunted + verified live via the sandbox proxy this session:**
 - **TCEQ audit — DONE (verified live):** the `TCEQ_Water_Districts/MapServer/0` service carries **15 TYPEs**: MUD, WCID, LID, FWSD, SUD, WID, DD, ID, ND, RA, RD, SWCD, **MMD (Municipal Management District)**, MD, OTH. So the LID/FWSD gap the brief worried about is CLOSED (both present), and **management districts (MMD) are also present** (the stretch goal). → just document this in the `jur_mud` ⓘ ("includes MUD, WCID, LID, FWSD, SUD, WID, DD + management districts (MMD)…").
@@ -3829,6 +3829,25 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 ---
 
 ## ⏳ Verify — awaiting live confirmation
+
+### B778 — Tighten the migrated `planar_*` tables off wide-open anon RLS `[Infra / Scheduler]` (bug) #infra #scheduler #auth  *(spun out of the B408 consolidation on merge, 2026-07-11; minted **B778**. AMENDED + SHIPPED 2026-09-02 — owner chat block, ship-now directive: investigating his schedule-sharing request (filed as **B1080976**, NEW-2) surfaced a live security exposure that makes sharing unbuildable as asked; this item is the security/ownership work that has to land first.)*
+`[x]` **SHIPPED THIS SESSION.** What B778 filed as "not urgent… exact parity with how the scheduler has always worked" turned out to be a live, exploitable exposure: **confirmed against production** that an unauthenticated request carrying only the public anon key (no Authorization header) could read Michael's real schedule (`planar_data`, key `hs-v1`) end to end, and an unauthenticated INSERT succeeded too (tested against a throwaway key inside a rolled-back transaction — the original report had not tested the write half). RLS was ENABLED on all three tables, which is what let this hide: every policy was `USING (true)` for `public`/`anon`, so enabling RLS bought nothing.
+- **Root cause, matching B778's own original diagnosis:** `planar_data`/`planar_history`/`planar_suggestions` had NO owner column at all — `planar_data` is, in full, `key text, value jsonb`, and there was exactly ONE row (`hs-v1`) holding every "project" (Goose Creek, Kilgore, …) as one shared global blob. You cannot write an ownership predicate against a table that records no owner, which is exactly why this had sat as "needs the Scheduler to grow an auth layer first — real feature work" since 2026-07-11.
+- **The fix, three parts, all shipped:**
+  1. **Real ownership.** `user_id`/`team_id` columns added to all three tables (`team_id` present for a future feature only — see part 3). The one existing schedule is owned by Michael alone (`b147d90d-b610-423d-af65-7e004f0ad72f`) — `planar_data.user_id` defaults to `auth.uid()` (same pattern `public.sites.user_id` already uses), so the existing 16k-line client's `{key, value}`-only upsert still gets a real owner with **zero client changes** to the save/load wire protocol.
+  2. **Real RLS.** Every anon policy replaced with an authenticated, owner-scoped one (`user_id = auth.uid()`), and anon's table-level grants revoked outright — defense in depth beyond RLS, since anon previously held SELECT/INSERT/UPDATE/DELETE/**TRUNCATE** grants on all three tables (TRUNCATE bypasses row-level policies entirely; not reachable via PostgREST today, but no reason to leave it standing). A `planar_history` BEFORE INSERT trigger auto-stamps ownership from the schedule row being snapshotted, so history-writing needs no client changes either.
+  3. **⛔ PRIVATE BY DEFAULT — owner decision, verbatim, mid-session: "let me decide when i share."** A first-pass migration defaulted the policy to "owner OR same team" (mirroring `public.sites`' `is_team_member()` model) and backfilled `team_id` to the HIP Houston team (which had been reading/writing the shared schedule). The owner overrode that in this same session: schedules are **owner-only**, with **no implicit or inherited sharing** — not via team membership, not via project adjacency. `team_id` stays on all three tables for the separate, blocked sharing feature (**B1080976**) to use later, but participates in **no** policy today — not select, not insert, not update. **Consequence, stated loudly rather than left to be discovered:** the two Hillwood teammates (michael.butler@hillwood.com, bryndan.nerren@hillwood.com) who could read/write the shared schedule under the first-pass migration lose that access under the correction, until Michael explicitly shares it via B1080976 (filed, not designed or built).
+- **Consumer repointed in the same change** (would otherwise have silently broken): `functions/api/mcp/_tools.js`'s `fetchScheduleData` used the anon key directly (documented at the time as safe "because the read path is anon-readable") — now routed through the file's own `pgGet` choke point, which is GET-only, uses the service-role key, and appends `user_id=eq.<PLANYR_MCP_OWNER_ID>` automatically, so the MCP `get_schedule`/`list_projects` tools keep working with no second, un-scoped query path.
+- **`planar_suggestions` (the adjacent case the report asked about) — also exposed, also closed.** It carries real correspondence content (`email_from`/`email_subject`/`email_body`) under the same anon SELECT/UPDATE policies; it's now owner-scoped identically (its 9 existing rows backfilled to Michael — this single-schedule app has no other real owner for them). **Audited every OTHER `public` table for a `USING (true)` policy targeting `public`/`anon`**, against the live `pg_policies` catalog: only `jurisdictions`, `jurisdiction_row_standards`, `thoroughfare_segments`, and `food_places` carry one, and all four are deliberate public reference data (confirmed, not assumed) — no other exposure found.
+- **⛔ PROVED RED, per the task's own bar — before/after, against production, verbatim status.** Direct HTTPS to the Supabase project is policy-blocked from this sandbox (the standing `Blocker: auth` wall — same one behind every signed-in click-through in this file), so verification used Postgres role + JWT-claim simulation inside a rolled-back transaction: the EXACT mechanism PostgREST itself uses to enforce RLS (it sets `role` and `request.jwt.claims` from the request; there is no second, different enforcement path this could diverge from), not a weaker proxy for it:
+  - anon SELECT — **BEFORE:** succeeded, returned `key: "hs-v1"` (this app's real schedule). **AFTER:** `42501 permission denied for table planar_data` (PostgREST maps this to HTTP 403).
+  - anon INSERT (throwaway key, rolled back either way — no data ever left committed) — **BEFORE:** succeeded. **AFTER:** `42501 permission denied` (403).
+  - Michael (owner, authenticated) — SELECT and UPDATE both succeed, confirming he is **not locked out**.
+  - HIP Houston teammate (real account, team member) — SELECT returns **0 rows** (was visible under the first-pass team-default migration; confirms the private-by-default correction actually took).
+  - Unrelated signed-in stranger (a real, separate registered account, not on the team) — SELECT returns **0 rows**.
+- **Verify: live** — `Blocker: auth`. Everything checkable without a real signed-in browser session is done: the SQL-level proof above (against production, both directions, before AND after the private-by-default correction); `npm run build` — clean; `npx vitest run` — 688/688 files, 14,251/14,251 tests green, including the pre-existing MCP owner-scoping invariant test now correctly covering the schedule read too; `npm run lint` — 0 errors, 0 new warnings. What's left needs Michael's own signed-in browser (this sandbox's proxy CORS-blocks the Supabase auth handshake): open the Schedule tab signed in and confirm it still loads his real data unchanged, and that a save still lands. See **V602256**.
+- Files: `src/workspaces/scheduler/db/planar_tables_owner_scoped_rls.sql` (new, applied to production), `src/workspaces/scheduler/db/planar_tables_owner_only_no_team_default.sql` (new, same-session correction, applied to production), `functions/api/mcp/_tools.js`, `public/sequence/index.html` (accurate "sign in required" copy replacing a misleading "cloud unreachable" banner for the new signed-out case — no change to the save/load wire protocol), `src/workspaces/scheduler/Scheduler.jsx`, `docs/REFERENCE.md`, `src/workspaces/doc-review/db/advisor_hardening.sql`.
+- Origin: filed 2026-07-11 (B408 consolidation follow-up); ship-now directive + `planar_suggestions`/sharing-blocker instructions from owner chat block, 2026-09-02 (NEW-1); private-by-default correction from owner chat mid-session, 2026-09-02, verbatim "let me decide when i share."
 
 ### B850432 — A placed site plan overlay never renders on the map — a silent zoom gate hides it, with nothing telling you why `[Site Planner / comps]` (bug) #site-planner #comps #ui  *(owner chat block 2026-09-02, NEW-1 — deployed-build repro (5498e53), THE FIRST TIME the site-plan comp anchor path has ever been driven: uploaded an 800x600 PNG as a site plan, clicked "Place on map" — it appeared in the Site plans list with a correct thumbnail/opacity/eye-toggle, but `document.querySelectorAll('.leaflet-image-layer').length` and every other "any non-tile img inside .leaflet-container" probe read `0`, while the panel simultaneously reported the overlay as PRESENT and VISIBLE (opacity 0.85, eye button "Hide on map"). "Pin comp here" armed correctly but a click on the map did nothing (nothing rendered to click) — blocking the entire site-plan comp-anchor path, which is why it had never been verifiable. Minted **B850432 / V471744** from this branch's reserved block B850432–B850447 · V471744–V471759 against freshly-fetched `origin/main` 5498e53. DEDUPE-FIRST — searched Open/⏳Verify/Done for "site plan overlay", "SITE_PLAN_MIN_ZOOM", "leaflet-image-layer", "visibleSitePlanOverlays", B848496/B848304/B972512-HARDENING: the feature's own 17+ hardening rounds cover upload/sharing/locking/trash/version-conflict — none of them touch the map-visibility zoom gate. Net-new.)*
 `[x]` **SHIPPED THIS SESSION.**
@@ -5217,6 +5236,115 @@ defect along the way.
 - Files: `src/index.css`, `docs/DESIGN.md`, `src/shared/comps/components/CompEntryGrid.jsx`,
   `src/shared/comps/lib/compSheetColumns.js`, `ui-audit/verify-comp-entry-grid-consistency.mjs` (new),
   `package.json` (`verify:compentrygrid`).
+
+**Recurrence (×18) — HARDENING PASS 16 (B986096-HARDENING-28), owner "STATUS FROM LIVE — build
+`9b25522`" report, 2026-09-02: two of three prior fixes confirmed working live; the third (grid
+height) was WORSE, root-caused by the owner's own measurement to be CAUSED by the "fix" for the
+second (quiet pre-touch validation) — plus NEW-5 (Executed date requirement) is now DECIDED and
+built out in full.** Two independent pieces of work, shipped together because the owner's report
+covered both in one message and both touch the same file.
+1. **THE GRID-SHRINKS-AS-ROWS-GROW REGRESSION.** Owner's own measurement, same page/session: 3
+   rows → grid `clientH` 154px, no scroll; 8 rows → `clientH` SHRANK to 101px and started
+   scrolling — "more comps means less of them visible... backwards." His own diagnosis, verbatim:
+   "NEW-2 (premature errors) is not just cosmetic — it is causing NEW-1. Fix NEW-2 and a large part
+   of NEW-1 fixes itself." Root cause confirmed exactly as he named it: the prior round's NEW-2 fix
+   rendered ONE quiet `<div>` per untouched row in `ProblemsList`, an unbounded list competing with
+   the grid's own `flex: 1` share in a fixed-height flex column — 8 untouched rows stacked 8 lines
+   and starved the grid of the height it needed. **Fix, per his own stated rule ("the grid gets the
+   dialog's remaining height and is the LAST thing to give up space... per-row messages must not be
+   an unbounded vertical stack... let the row itself carry its own quiet marker"):** the per-row
+   quiet branch is REMOVED from `ProblemsList` entirely — a genuinely untouched row now shows
+   nothing there at all, only the footer's aggregate count. The quiet signal moved onto the row
+   itself — a single muted dot (`•`) in the Executed cell, visible only while the row is both
+   untouched AND blank, gone the instant the row is touched or a date is entered. The notice line
+   above the grid is capped (`maxHeight: 32, overflowY: "auto"`) so it can no longer grow
+   unbounded either. A new `GRID_MIN_HEIGHT` floor (5.5 data rows' worth, plus the header) is
+   applied to the grid wrapper so it never drops below a usable size regardless of row count.
+   **Verified against the owner's OWN exact reproduction** (paste 3, measure, paste 5 more to
+   reach 8, measure again, same session): grid now holds steady at 278px clientHeight for both 3
+   and 8 rows — it no longer shrinks at all — and never drops below the 200px floor. (Full ≥8 rows
+   visible is not reached at every viewport — reported honestly, not claimed as met; see
+   `GRID_MIN_HEIGHT`'s own header comment in `CompEntryGrid.jsx`.)
+2. **NEW-5 — THE EXECUTED-DATE REQUIREMENT ITSELF IS RELAXED, PER THE OWNER'S OWN DECISION.** He
+   first asked whether the app should just default Executed to today when left blank; pushed back
+   ("today is a fact about the typist, not the transaction — defaulting fabricates deal data and
+   defeats the recency filtering the requirement exists for"), he answered "sure, go ahead" —
+   deciding to relax the REQUIREMENT rather than add a silent default. Built out in full per his
+   six-item checklist, none skipped:
+   - **`public.comps.comp_date` DROP NOT NULL** — applied live to production (project
+     `lyeqzkuiwngunutlkkmi`) via `src/shared/comps/db/comps_optional_date.sql`, confirmed via
+     `information_schema.columns` before (`is_nullable: NO`) and after (`YES`); `get_advisors`
+     shows no new security/lint issues touching `comps`. **This answers his explicit ask** ("report
+     whether the Executed column is NOT NULL in the database or only enforced in the UI") — it was
+     BOTH: a real DB constraint, plus `validateComp`'s independent client-side check; both are now
+     relaxed in lockstep (an app-only relaxation with the DB constraint still in place would have
+     produced a real, confusing insert failure the first time anyone tried to save a dateless comp).
+   - **`validateComp` no longer lists a missing Executed date as a save-blocking error** — only
+     comp type and a valid anchor (Location) remain required. The footer's old three-way "missing
+     date / missing location / missing both" split is GONE — it would have gone on saying "N
+     missing an Executed date" for rows the very same render now counts as ready, a genuinely
+     contradictory message; replaced with a single Location-only count.
+   - **"Date entered" — automatic, never editable, the real DB `created_at` timestamp** (no new
+     column needed). Shown in the comp detail view (`compFieldRows`) as its own row, distinct from
+     Executed, per his "does not need a grid column; the detail view is enough."
+   - **A comp saves with no Executed date, shown as "Date unknown" in the panel's neutral text
+     color** — `compDateLabel`, used by the list row, the trash-list row, and the detail view; a
+     blank date used to make the field DISAPPEAR from the detail view entirely, which is now fixed
+     alongside this (its absence is a real fact worth showing, not nothing to report).
+   - **A one-click "Today" control lives in the Executed cell while it's being edited** — his own
+     words, "this is the speed he actually wanted; he asserts the date, the app never assumes it."
+     `todayIso()` (`compDates.js`) + `setRowToday` (`CompEntryGrid.jsx`, a fully independent commit
+     path mirroring the already-safe `resolvePeriod` pattern — this file carries a standing
+     moratorium on touching `onEditKeyDown`/`onGridKeyDown`/tabindex wiring after 5 rounds of
+     regressions on that exact commit-path logic, HARDENING-16; the Today button routes around it
+     entirely, reusing `finishEdit(false, null)`, the same discard-only branch Escape already uses).
+   - **Recency ordering falls back to Date entered when Executed is blank, and the fallback is a
+     genuinely distinct, interleaved sort key — never a silent mix.** `sortCompsByRecency`
+     (`comps.js`): dated comps sort by `compDate` DESC; an undated comp's sort key becomes its
+     `createdAt` date, so it lands wherever it was actually added relative to the dated comps —
+     never bucketed at either end. `CompsPanel.jsx`'s `reload()` now calls this instead of relying
+     on the raw DB order; `compsStore.js`'s own `.order("comp_date", ...)` gained `nullsFirst:
+     false` so the coarse DB-level order at least doesn't push every undated row to the very top
+     before the client-side sort takes over.
+   - **An undated comp is excluded from every average and recency-filtered set, and the exclusion
+     count is stated, matching the existing "(2, unweighted)" convention.** `summarizeLeaseComps`/
+     `summarizeSaleComps` now track `undatedCount` separately from the pre-existing "no computable
+     $/SF at all" exclusion (a genuinely different reason, never conflated); `compsSummaryBits`
+     appends ", N undated excluded" to the parenthetical only when non-zero.
+   - **A self-discovered bug caught before it could ship**: `draftToComp` was not converting an
+     empty `compDate` string to `null` before forwarding it toward `compToRow`/Postgres — dead code
+     until this change (validateComp always blocked a blank date from reaching a save before this),
+     now live and would have thrown a hard "invalid input syntax for type date" error on the first
+     real dateless save. Fixed to match the existing `leaseCommencementDate: d.leaseCommencementDate
+     || null` pattern already used one line below it.
+- **VERIFIED (sandbox + live headless).** `npx vitest run` — 688/688 files, 14,259/14,259 tests
+  green (13 new NEW-5 cases in `test/comps.test.js`: `todayIso`, `compDateLabel`'s "Date unknown"
+  fallback, `draftToComp`'s null conversion, `summarizeLeaseComps`/`summarizeSaleComps`'s
+  `undatedCount` exclusion kept distinct from the pre-existing no-$/SF exclusion,
+  `compsSummaryBits`'s undated-exclusion suffix appended/omitted correctly, `compFieldRows`'s
+  "Date unknown"/"Date entered" rows, and `sortCompsByRecency`'s dated-order/undated-fallback/
+  no-mutation/empty-list cases; plus every pre-existing fixture across
+  `summarizeLeaseComps`/`summarizeSaleComps`/`compsSummaryBits` updated to carry a real `compDate`
+  so they keep testing what they always tested, not the new exclusion by accident). Ran the real,
+  unmocked headless Chromium harness (`ui-audit/verify-comp-entry-defects-0902.mjs`) against a live
+  `npm run dev` server, signed out, fixture-seeded, no network — 66/66 checks green, including the
+  owner's own exact 3-row/8-row grid-height reproduction and a new NEW-5 section (the Today button
+  appears and commits correctly; the footer names only Location, never Executed, both before and
+  after the row is otherwise touched via a real map-click Location pick; the Save button reports
+  and enables a dateless-but-located row as ready). `npm run build` clean. `npx eslint` — 0 errors
+  (pre-existing warnings only, none in touched files). `node ui-audit/design-drift-audit.mjs
+  --check` clean. `node scripts/build-map.mjs --check` clean (regenerated for the three new
+  exports — `sortCompsByRecency`, `compDateLabel`, `todayIso`).
+- **Verify: live** — the real signed-in Supabase INSERT/SELECT for a dateless save, the detail
+  view's "Date unknown"/"Date entered" rendering against a real saved row, and the recency-sort
+  fallback against real multi-comp account data are LIVE-VERIFY classes (concurrency/persistence +
+  real-project-data repro). Parked as **V600496** in `VERIFICATION.md`'s `## 🔲 Needs verification`
+  section per STANDING RULE #2/ATTEMPT-BEFORE-YOU-PARK — everything Claude-doable headless and
+  signed-out was done this session (above), not deferred.
+- Files: `src/shared/comps/components/CompEntryGrid.jsx`, `src/shared/comps/components/CompsPanel.jsx`,
+  `src/shared/comps/lib/comps.js`, `src/shared/comps/lib/compDates.js`, `src/shared/comps/lib/compsStore.js`,
+  `src/shared/comps/db/comps_optional_date.sql` (new, applied to production),
+  `test/comps.test.js`, `ui-audit/verify-comp-entry-defects-0902.mjs`.
 
 ### B986097 — A draft staging table, reachable only by the KML import `[Site Planner / comps]` (feature) #comps #gis #persistence  *(owner chat block 2026-09-01, NEW-2, same decision doc as B986096 above. Minted **B986097 / V556721** from this branch's reserved block B986096–B986111 · V556720–V556735 against `origin/main` 8e42a14. DEDUPE-FIRST — searched Open/⏳Verify/Done for "KML", "My Maps", "import draft", "staging table", #comps: no prior item touches KML/My Maps import; net-new. Also searched for any prior `comp_import_drafts`/`comp_drafts` table — none exists.)*
 `[x]` **Shipped this session, including the schema — applied directly to production** (this session has Supabase MCP write access, unlike the read-only access a prior comps session flagged in this same module's folder pointer — that stale claim was corrected in the same commit).
