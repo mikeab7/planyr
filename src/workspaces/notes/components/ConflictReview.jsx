@@ -30,10 +30,32 @@
  *  — matching the reference the owner named, Google Docs' version history: each version is
  *  identified by WHEN, and the action names what it does. See `docs/notes-conflict-critique.md`
  *  for the critique-loop screenshots this design passed before shipping.
+ *
+ *  ⛔ B1077680/NEW-1 — AN OPAQUE BLOCK (A TABLE, A BOX, A SKETCH, A PICTURE) NOW SHOWS ITS OWN
+ *  CONTENT, NOT JUST ITS TYPE NAME — see `NoteRedline.jsx`'s header for the full argument. A
+ *  picture's bytes live in IndexedDB, not in the document, so this file loads them
+ *  ASYNCHRONOUSLY once the review is actually open (never on the compact notice's mount — a
+ *  real conflict is rare and most notes have no pictures in them at all) and hands the
+ *  resulting `imageId → data URL` map down to both the redline and the side-by-side view, which
+ *  is why both accept the same `images` prop rather than each fetching their own copy.
+ *
+ *  ⛔ B1077681/NEW-2 — SIDE BY SIDE NO LONGER FLATTENS TO PLAIN TEXT. It used to diff
+ *  `docToText(doc)` word-by-word, which cannot tell "a table" from "the same words typed as
+ *  running text" — the owner's exact case (a contact-info table on one side, the same four
+ *  lines as plain paragraphs on the other) rendered as two IDENTICAL-looking panes with no
+ *  table anywhere. Both views now come from ONE shared computation, `buildComparison`
+ *  (`lib/notesRedline.js`) — the unified redline's `blocks`, and `panes.newer`/`panes.older`,
+ *  two fully-formatted trees (kept text + insertions / kept text + deletions) built from the
+ *  SAME block alignment. `ConflictSideBySide.jsx` renders each pane through the same
+ *  `NoteRedline` component the unified view uses, so real structure — a table, a picture, a
+ *  list — survives in both views and the two panes can only look alike when the documents
+ *  genuinely do.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { buildRedline } from "../lib/notesRedline.js";
+import { buildComparison } from "../lib/notesRedline.js";
 import { orderConflictVersions } from "../lib/notesVersionOrder.js";
+import { imageIdsInDoc } from "../lib/notesMarkdown.js";
+import { readNoteImages } from "../lib/notesStore.js";
 import NoteRedline, { ChangeTag } from "./NoteRedline.jsx";
 import ConflictSideBySide from "./ConflictSideBySide.jsx";
 import { stampLabel, absoluteStamp } from "../lib/notesTime.js";
@@ -100,10 +122,26 @@ export default function ConflictReview({
     () => orderConflictVersions({ localDoc, serverDoc, localUpdatedAt, serverUpdatedAt }),
     [localDoc, serverDoc, localUpdatedAt, serverUpdatedAt],
   );
-  // ⛔ THE REDLINE IS BUILT NEWER-FIRST, NEVER LOCAL-FIRST (B849105) — `buildRedline`'s first
+  // ⛔ THE REDLINE IS BUILT NEWER-FIRST, NEVER LOCAL-FIRST (B849105) — `buildComparison`'s first
   // argument is always its REVISED side, so passing `order.newer` there is what makes "added"
   // mean "added going from old to new" instead of "added in whichever tab you're reading from".
-  const redline = useMemo(() => buildRedline(order.newer.doc, order.older.doc), [order]);
+  // `comparison.panes.newer`/`.older` (B1077681) feed the side-by-side view below with the SAME
+  // alignment, so the two views can never disagree about what changed.
+  const comparison = useMemo(() => buildComparison(order.newer.doc, order.older.doc), [order]);
+
+  // ⛔ B1077680 — a picture's bytes are not in the document (IndexedDB, behind `readNoteImages`);
+  // loaded once per open comparison, never on the compact notice's mount. `images` stays `null`
+  // (NoteRedline's "not loaded yet" state) until this resolves, then holds whatever came back —
+  // a missing id is simply absent from the map, same contract `readNoteImages` already promises.
+  const [images, setImages] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    const ids = [...new Set([...imageIdsInDoc(order.newer.doc), ...imageIdsInDoc(order.older.doc)])];
+    if (!ids.length) { setImages({}); return undefined; }
+    setImages(null);
+    readNoteImages(ids).then((map) => { if (!cancelled) setImages(map); });
+    return () => { cancelled = true; };
+  }, [order]);
 
   useEffect(() => {
     const opener = document.activeElement;
@@ -229,16 +267,15 @@ export default function ConflictReview({
                 borderRadius: RADIUS.control, padding: "18px 24px",
               }}
             >
-              <NoteRedline blocks={redline.blocks} />
-              {!redline.changed ? (
+              <NoteRedline blocks={comparison.blocks} images={images} />
+              {!comparison.changed ? (
                 <p style={{ fontSize: 12, color: "var(--text-secondary)", fontStyle: "italic" }}>The two copies read the same — nothing found to mark.</p>
               ) : null}
             </div>
           </div>
         ) : (
           <ConflictSideBySide
-            title={title} localDoc={localDoc} serverDoc={serverDoc}
-            localUpdatedAt={localUpdatedAt} serverUpdatedAt={serverUpdatedAt}
+            title={title} order={order} panes={comparison.panes} images={images}
             onKeepMine={onKeepMine} onKeepTheirs={onKeepTheirs}
           />
         )}
