@@ -12683,7 +12683,15 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
       const tgt = glyphEdges(l.task, idxOf.get(l.task.id));
       const a = depAnchors({ type:l.type, src, tgt, fanIndex:group.indexOf(l), fanCount:group.length,
                              tgtLabelRightX:(l.type==="SS"||l.type==="FS") ? startDateLabelRightX(l.task) : null });
-      return { key:`${l.pred.id}-${l.task.id}-${l.type}`, x1:a.x1, y1:a.y1, x2:a.x2, y2:a.y2, down:a.down, type:l.type };
+      // NEW-1/B1113712 — carry both endpoints' ROW INDEX (their position in this same `tasks`
+      // array) alongside the geometry, so the render below can require both to fall in the same
+      // [startIdx,endIdx) window the BARS use. `tasks` is already collapse-filtered (flatTasks
+      // never walks into a collapsed parent's children), so pred/task here are always visible
+      // rows and srcIdx/tgtIdx are always valid indices into it — a link into a hidden descendant
+      // never reaches this point at all (the idxOf.has(p.id) guard above already dropped it,
+      // matching buildGanttSVG's ix.has(pr.id) print-path guard — PDF-PARITY, B1113713).
+      return { key:`${l.pred.id}-${l.task.id}-${l.type}`, x1:a.x1, y1:a.y1, x2:a.x2, y2:a.y2, down:a.down, type:l.type,
+               srcIdx: idxOf.get(l.pred.id), tgtIdx: idxOf.get(l.task.id) };
     });
   }, [tasks, minD, ppd, childParentIds, settings]);
 
@@ -12833,9 +12841,12 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
             </div>
           </div>
 
-          {/* Dependency arrows */}
+          {/* Dependency arrows — B1113712: windowed to the SAME [startIdx,endIdx) range the bars
+              slice below use, so an arrow can never terminate on a row whose bar isn't mounted
+              (a scrolled-off task above/below the buffer, or — belt-and-suspenders — any row
+              index that ever fell outside the current collapse-filtered `tasks` array). */}
           <svg style={{position:"absolute",top:0,left:0,width:totalW,height:tasks.length*ROW_H,pointerEvents:"none",zIndex:3,overflow:"visible"}}>
-            {depLines.map(l => {
+            {depLines.filter(l => l.srcIdx >= startIdx && l.srcIdx < endIdx && l.tgtIdx >= startIdx && l.tgtIdx < endIdx).map(l => {
             const color = l.type==="SS"?"#7c3aed":l.type==="FF"?"#0891b2":l.type==="SF"?"#be185d":"#0969da";
             // Curved (cubic bézier) connector — owner-preferred (B396) — now leaving the source's
             // top/bottom EDGE and entering the target's opposing edge (shared depAnchors, B396 re-report).
