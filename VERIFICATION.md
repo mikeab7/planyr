@@ -116,6 +116,22 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V629856 — B1128272: pressing Schedule's Dashboard crumb stays in Schedule (never jumps to the map), signed in on a routed cloud-linked project `Blocker: auth`
+
+**Why this needs its own real pass.** Filed as `Verify: live` (timing/race class) per CLAUDE.md's LIVE-VERIFY rule, even though the mechanism turned out to be a deterministic double-write rather than a genuinely nondeterministic race (see below) — the rule is mandatory for the class regardless. This sandbox's egress proxy CORS-blocks the Supabase auth handshake, so a real signed-in, cloud-linked schedule (the embedded scheduler's own reports view, actually rendering) isn't reachable here.
+
+**What was verified here, without a signed-in browser — a real headless click-through against the actual built app, not just a source read.** `e2e/schedule-dashboard-nav.spec.js` seeds a local `planarfit:sites:v1` site (logged out — ATTEMPT-BEFORE-YOU-PARK), routes straight to `#/project/<gid>/schedule`, and clicks the real DOM buttons. This proved the reported bug is not actually probabilistic: `navigate()` reads `window.location.hash` synchronously on every call, so `goDashboard`'s second call (`onGoDashboard`) deterministically overwrote whatever the first call (`goDashboardWithinModule`) had just written — reverting the fix and re-running made the crumb land on `"#/"` (the map) **5/5 times**, never `"#/schedule"`, matching the reported shape exactly. With the fix: the crumb lands on `"#/schedule"` 5/5 times running (project cleared, stays in Schedule); the wordmark still lands on `"#/"` (leaves the workspace). Red-proofed against the real app (revert → fails with `Expected: "#/schedule", Received: "#/"` → restore → green). Full repo suite: 711 files / 14,715 tests green; `npm run build` clean; `test/dashboardNav.test.js` + `test/scheduleDashboardNav.test.js` (source-level guard, independently red-proofed) both green.
+
+**What the sandbox genuinely cannot reach:** the embedded scheduler is a cloud-backed app (`public/sequence/index.html`) that also loads React/Babel from a CDN this sandbox's browser can't reach — so even logged out, its own rendered "reports view" content never actually appears here (only the shell-level route change was observable, which is what the bug and fix are both about). A signed-in pass confirms the same click also lands visually on that reports view, not just the correct route.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, on the throwaway site `ZZ-RENAME-TEST-G` (group_id `smtjb0lrexb3`), never a real plan:**
+1. Route to Schedule with a project routed (open ZZ-RENAME-TEST-G, switch to the Schedule tab). Press the breadcrumb "Dashboard" crumb. **Expect:** lands on Schedule's own reports view — module tab strip still shows Schedule as the active tab, the embedded app visibly shows its all-projects reports screen, not a jump away from the module.
+2. Repeat step 1 **five times** in a row (the reported symptom is "often," so a single pass proves nothing). **Expect:** identical result every time — never a jump to the Site Planner map.
+3. From the same state, click the `planyr` wordmark (top-left logo). **Expect:** leaves the Schedule workspace entirely, lands on the Site Planner map home.
+4. Hover each control without clicking. **Expect:** the tooltip text reads distinctly — wordmark "Leave Schedule — go to the Site Planner map", crumb "Schedule dashboard — reports for every project".
+
+**Result:** ⏳ pending — needs a real signed-in browser session; not reachable from this sandbox. The shell-level navigation mechanism (above) is fully proven end-to-end against the real built app, headless, mutation/red-proofed both ways, not sandbox-simulated guesswork.
+
 ### V620144 — B1114992: deleting a site plan with a pinned comp succeeds and the comp reverts to a plain pin, on a real signed-in account `Blocker: auth`
 
 **Why this needs its own real pass.** This is a real-project-data / signed-in destructive-action class (delete a database row through the actual UI, then read the result back) — mandatory-live per `CLAUDE.md`. This sandbox's egress proxy CORS-blocks the Supabase auth handshake, so no signed-in write of any kind is reachable here.
