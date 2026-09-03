@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-03 @ `a16c4154` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-03 @ `4636072a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_653 source files mapped._
+_654 source files mapped._
 
 ## infra
 
@@ -521,7 +521,7 @@ _653 source files mapped._
 - **`src/shared/ui/contextMenuPlacement.js`** — Pure viewport-placement math for `ContextMenu` (B915): flip-up-if-bottom-overflow, flip-left-if-right-overflow, hard-clamp to a margin on all four edges, and a viewport max-height. Unit-tested without a DOM.
   - _exports_: `placeContextMenu`
 - **`src/shared/ui/controls.jsx`** — shared control primitives (B657-5B): one radius/padding/typography scale + Button/ToggleChip/IconButton/Field/Section/MenuItem, token-driven, with a threaded `accent` prop so each module keeps its hue.
-  - _exports_: `Button`, `Field`, `FONT`, `IconButton`, `MenuItem`, `menuPanelStyle`, `MenuTrigger`, `PAD`, `RADIUS`, `Section`, `SIZE`, `Tab`, `ToggleChip`
+  - _exports_: `Button`, `CONTROL_RADIUS`, `Field`, `FONT`, `IconButton`, `MenuItem`, `menuPanelStyle`, `MenuTrigger`, `PAD`, `Section`, `SIZE`, `Tab`, `ToggleChip`
 - **`src/shared/ui/designTokens.js`** — B809906 design tokens: spacing (`SPACE`), type scale (`FONT_SIZE`) and standard control heights (`CONTROL_H`) — the audited-value siblings of `radius.js`'s `RADIUS`.
   - _exports_: `CONTROL_H`, `FONT_SIZE`, `SPACE`
 - **`src/shared/ui/FloatingNotice.jsx`** — The one shared primitive owning position for every floating, app-level notification: bottom-centered, stacked via a shared portal host, max-width clamped, clears an open mobile bottom sheet
@@ -558,6 +558,8 @@ _653 source files mapped._
   - _exports_: `default (RotationStepper)`, `formatDeg`, `normalizeDeg`, `parseRotationInput`
 - **`src/shared/ui/statusTokens.js`** — STATUS_TOKENS: single project-lifecycle status palette (color/glyph/map-pin tier/opacity/z) with monotonic salience rules; statusToken() + darken()
   - _exports_: `darken`, `STATUS_TOKENS`, `statusToken`
+- **`src/shared/ui/strictScale.js`** — dev-mode-only Proxy guard for a token "scale" object (RADIUS/SPACE/FONT_SIZE/CONTROL_H): throws on an unknown key instead of silently returning undefined; zero cost in production
+  - _exports_: `strictScale`
 - **`src/shared/ui/Toast.jsx`** — reusable non-blocking toast stack (B673): auto-dismiss with hover-hold, action slot, cap + "+n more", theme tokens; pure pushToastPure/visibleToasts for tests
   - _exports_: `pushToastPure`, `TOAST_CAP`, `TOAST_TTL_MS`, `ToastHost`, `useToasts`, `visibleToasts`
 - **`src/shared/ui/ToolRail.jsx`** — Shared Bluebeam-style vertical icon rail: presentational items list (tool/header/divider/spacer/node), active-tool accent highlight, theme-token chrome

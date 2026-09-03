@@ -26,10 +26,14 @@
  * can start (the "7" radius value, and how far to take the spacing/type convergence).
  */
 
+import { strictScale } from "./strictScale.js";
+
 // Control height — the modal values found for <button height:N> across the app split cleanly
 // into three real tiers already (20-22 / 24-26 / 30), so this one converges easily onto a scale
 // without changing what anything currently renders at: pick the tier nearest an existing height.
-export const CONTROL_H = { sm: 22, md: 26, lg: 30 };
+// NEW-1 — every export below is wrapped in a dev-only Proxy (strictScale.js) that throws on an
+// unknown key instead of silently returning `undefined`; zero cost in production.
+export const CONTROL_H = strictScale("CONTROL_H", { sm: 22, md: 26, lg: 30 });
 
 // Type scale — REDUCED to 5 named ROLES (B915536's NEW-1, 2026-08-31), superseding the previous
 // eight-value half-point ladder below. That ladder was audited-not-invented, but eight values
@@ -51,10 +55,10 @@ export const CONTROL_H = { sm: 22, md: 26, lg: 30 };
 //                  gallery's own <h1>).
 // Superseded ladder (kept here for history, do not resurrect): xs 10 / sm 10.5 / base 11 /
 // md 11.5 / lg 12 / xl 12.5 / xxl 13 / display 14.
-export const FONT_SIZE = { micro: 10, label: 10.5, control: 12, emphasis: 13, display: 14 };
+export const FONT_SIZE = strictScale("FONT_SIZE", { micro: 10, label: 10.5, control: 12, emphasis: 13, display: 14 });
 
 // Spacing scale — a conventional 2px-rooted ladder matching the most common padding numbers
 // measured on <button> elements (2/3/4/6/7/8/9/10/11/12/14/16 all appear repeatedly). Use these
 // for new gap/margin/padding values; PAD in controls.jsx (sm/md/lg button padding PAIRS) is the
 // higher-level convenience built from the same numbers and is unchanged by this file.
-export const SPACE = { xxs: 2, xs: 4, sm: 6, md: 8, lg: 10, xl: 12, xxl: 16 };
+export const SPACE = strictScale("SPACE", { xxs: 2, xs: 4, sm: 6, md: 8, lg: 10, xl: 12, xxl: 16 });

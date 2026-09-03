@@ -450,8 +450,14 @@ describe("components are declared at module scope (MODULE-SCOPE-COMPONENTS)", ()
 describe("the mirrored control scale still matches the shared one", () => {
   it("controls.jsx is the source, and every notes copy agrees with it", () => {
     const shared = read(REPO, "src/shared/ui/controls.jsx");
-    const m = shared.match(/export const RADIUS = \{\s*control:\s*(\d+),\s*pill:\s*(\d+),/);
-    expect(m, "controls.jsx no longer declares RADIUS in the expected shape").toBeTruthy();
+    // NEW-1 (design-token RADIUS name collision fix) renamed controls.jsx's own scale from
+    // `RADIUS` to `CONTROL_RADIUS` — this file's exported identifier collided with
+    // shared/ui/radius.js's own `RADIUS` (different key set: pill/sm/md/lg vs control/pill/panel),
+    // and a miss silently evaluated to undefined. The Notes copies below still hand-write the
+    // literal shape `{ control: 8, pill: 999 }` under their own local name; only the SOURCE's
+    // export identifier changed, not the digits this regex reads.
+    const m = shared.match(/export const CONTROL_RADIUS = \{\s*control:\s*(\d+),\s*pill:\s*(\d+),/);
+    expect(m, "controls.jsx no longer declares CONTROL_RADIUS in the expected shape").toBeTruthy();
     const [, control, pill] = m;
 
     const copies = ALL_NOTES_FILES.filter((f) => code(f).includes("const RADIUS ="));

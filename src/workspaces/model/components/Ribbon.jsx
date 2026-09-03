@@ -80,8 +80,21 @@ function ribbonBtnStyle(active, extra) {
     // B1087904 — was `RADIUS.control`, a token that doesn't exist on RADIUS (only
     // pill/sm/md/lg) — silently resolved to `undefined`, which React drops from the style
     // object, so every ribbon button rendered with a flat 0 border-radius regardless of theme.
-    // `RADIUS.sm` is the correct one per radius.js's own scale: a control nested inside another
-    // rounded surface (the toolbar card below).
+    // `RADIUS.sm` is a control nested inside another rounded surface (the toolbar card below,
+    // `ModelApp.jsx`'s `model-toolbar-card`, `RADIUS.lg` = 12) — the right FAMILY of value.
+    //
+    // ⛔ NEW-2 — IT IS NOT `nestedIn(12, …)` FOR THIS CARD'S ACTUAL PADDING, AND THAT IS STATED
+    // HERE RATHER THAN LEFT IMPLIED. The card pads this row 5px vertically and 8px
+    // horizontally (`Ribbon.jsx`'s own outer `padding: "5px 8px"`), asymmetric on purpose (a
+    // dense toolbar row wants more side breathing room than top/bottom) — `nestedIn(12, 5)` = 7
+    // on the vertical axis, `nestedIn(12, 8)` = 4 on the horizontal one, and there is no single
+    // "correct" concentric radius for an inset that differs per axis (the nesting rule in
+    // `radius.js`'s own header assumes one uniform gap). `RADIUS.sm` = 6 is a deliberately CHOSEN
+    // approximation — the scale's next step down from the card's own `RADIUS.lg`, sitting between
+    // the two axis-derived values — not a precise per-axis derivation, and a 1-2px move either way
+    // is imperceptible at working zoom (PERCEPTUAL-PARITY) for a cosmetic difference this small.
+    // Left alone rather than re-picked; see the item for the two considered alternatives (govern
+    // by the tighter horizontal gap, or make the card's padding symmetric) if this is ever revisited.
     height: CTRL_H, minWidth: CTRL_H, padding: "0 6px", borderRadius: RADIUS.sm, boxSizing: "border-box",
     border: `1px solid ${active ? "var(--accent-model)" : "var(--border-default)"}`,
     background: active ? "var(--accent-model)" : "var(--surface-page)",
