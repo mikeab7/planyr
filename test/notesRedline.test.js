@@ -3,13 +3,15 @@
  *  plain function call over raw ProseMirror JSON, no DOM, no editor.
  */
 import { describe, it, expect } from "vitest";
-import { buildRedline, flattenBlocks, nestByPath } from "../src/workspaces/notes/lib/notesRedline.js";
+import { buildRedline, buildComparison, flattenBlocks, nestByPath } from "../src/workspaces/notes/lib/notesRedline.js";
 
 const doc = (...content) => ({ type: "doc", content });
 const p = (text, marks) => ({ type: "paragraph", content: text ? [{ type: "text", text, marks }] : [] });
 const h = (level, text) => ({ type: "heading", attrs: { level }, content: [{ type: "text", text }] });
 const bulletList = (...items) => ({ type: "bulletList", content: items.map((c) => ({ type: "listItem", content: [c] })) });
 const attachment = (name) => ({ type: "noteAttachment", attrs: { name } });
+const tableRow = (text) => ({ type: "tableRow", content: [{ type: "tableCell", content: [p(text)] }] });
+const table = (...rows) => ({ type: "table", content: rows.map(tableRow) });
 
 /** Walk `buildRedline`'s nested tree and collect every LEAF in document order, for assertions
  *  that don't care about the wrapper structure. */
@@ -181,5 +183,92 @@ describe("nestByPath — rebuilds real nesting from a flat, path-carrying list",
     expect(r.blocks).toHaveLength(1);
     expect(r.blocks[0].wrapper.type).toBe("bulletList");
     expect(r.blocks[0].children).toHaveLength(3);
+  });
+});
+
+describe("buildRedline — an opaque leaf now carries its real node (B1077680/NEW-1)", () => {
+  it("a table leaf's `node` is the actual table (rows/cells), not just its label", () => {
+    const d = doc(table("Executive Assistant", "O: 281-305-1115"));
+    const r = buildRedline(d, d);
+    const [leaf] = leaves(r.blocks);
+    expect(leaf.opaque).toBe(true);
+    expect(leaf.label).toBe("Table");
+    expect(leaf.node.type).toBe("table");
+    const rows = leaf.node.content.filter((n) => n.type === "tableRow");
+    expect(rows).toHaveLength(2);
+  });
+});
+
+describe("buildComparison — NEW-1/NEW-2's exact reported case: a table on one side, the same content as plain paragraphs on the other", () => {
+  const CONTACT_LINES = ["Executive Assistant", "O: 281-305-1115", "M: (281) 705-2931", "E: Kandicec@quadvest.com"];
+  const olderDoc = doc(p("Utility contacts"), table(...CONTACT_LINES));
+  const newerDoc = doc(p("Utility contacts"), ...CONTACT_LINES.map((l) => p(l)));
+  // buildComparison's first argument is always REVISED (newer); second is ORIGINAL (older).
+  const cmp = buildComparison(newerDoc, olderDoc);
+
+  it("the unified redline carries the table's real node on the removed leaf, not just its label", () => {
+    const removed = leaves(cmp.blocks).find((l) => l.opaque && l.status === "deleted");
+    expect(removed).toBeTruthy();
+    expect(removed.node.type).toBe("table");
+    const cellText = JSON.stringify(removed.node);
+    for (const line of CONTACT_LINES) expect(cellText).toContain(line);
+  });
+
+  it("the OLDER pane contains the real table (an opaque 'table' leaf) — not a bare label", () => {
+    const olderLeaves = leaves(cmp.panes.older);
+    const tableLeaf = olderLeaves.find((l) => l.opaque && l.tag === "table");
+    expect(tableLeaf).toBeTruthy();
+    expect(tableLeaf.node.content.some((r) => r.type === "tableRow")).toBe(true);
+  });
+
+  it("the NEWER pane has NO table leaf at all — the table only ever existed on the older side", () => {
+    const newerLeaves = leaves(cmp.panes.newer);
+    expect(newerLeaves.some((l) => l.opaque && l.tag === "table")).toBe(false);
+  });
+
+  it("the NEWER pane instead carries the four contact lines as plain paragraphs", () => {
+    const newerLeaves = leaves(cmp.panes.newer);
+    const bodyText = newerLeaves.filter((l) => !l.opaque).map((l) => text(l.spans)).join(" ");
+    for (const line of CONTACT_LINES) expect(bodyText).toContain(line);
+  });
+
+  it("REGRESSION — the two panes cannot render identically (this is the bug the owner hit: 'where is the table')", () => {
+    const shapeOf = (blocks) => leaves(blocks).map((l) => (l.opaque ? `opaque:${l.tag}` : `${l.tag}:${text(l.spans)}`));
+    const olderShape = shapeOf(cmp.panes.older);
+    const newerShape = shapeOf(cmp.panes.newer);
+    expect(olderShape).not.toEqual(newerShape);
+    // The concrete, human-legible assertion: one pane's shape list literally contains the
+    // table, the other's doesn't — a plain-text flatten (the old `docToText` approach) could
+    // never produce this distinction, since both sides say the same words.
+    expect(olderShape.some((s) => s.startsWith("opaque:table"))).toBe(true);
+    expect(newerShape.some((s) => s.startsWith("opaque:table"))).toBe(false);
+  });
+
+  it("a block unchanged on both sides (the 'Utility contacts' heading paragraph) appears in BOTH panes", () => {
+    const inBoth = (blocks) => leaves(blocks).some((l) => !l.opaque && text(l.spans).includes("Utility contacts"));
+    expect(inBoth(cmp.panes.newer)).toBe(true);
+    expect(inBoth(cmp.panes.older)).toBe(true);
+  });
+});
+
+describe("buildComparison — a word-level 'changed' block splits its spans correctly per pane", () => {
+  it("the newer pane shows only kept+inserted words; the older pane shows only kept+deleted words", () => {
+    const server = doc(p("Point of contact is now approved."));
+    const local = doc(p("Point of contact is still pending review."));
+    const cmp = buildComparison(local, server);
+    const newerText = leaves(cmp.panes.newer).map((l) => text(l.spans)).join("");
+    const olderText = leaves(cmp.panes.older).map((l) => text(l.spans)).join("");
+    expect(newerText).toBe("Point of contact is still pending review.");
+    expect(olderText).toBe("Point of contact is now approved.");
+  });
+});
+
+describe("buildComparison — identical documents produce two identical, unmarked panes", () => {
+  it("both panes read the same when nothing differs", () => {
+    const d = doc(h(1, "Grand Port"), p("Entitlements are on track."));
+    const cmp = buildComparison(d, d);
+    expect(cmp.changed).toBe(false);
+    const shapeOf = (blocks) => leaves(blocks).map((l) => text(l.spans));
+    expect(shapeOf(cmp.panes.newer)).toEqual(shapeOf(cmp.panes.older));
   });
 });
