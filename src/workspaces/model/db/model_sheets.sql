@@ -15,8 +15,12 @@
 -- (src/shared/cloud/optimisticUpsert.js) — it is the RLS/team shape that intentionally differs.
 --
 -- One row per project's spreadsheet (id = the Site Planner's project/group id). `data` is the
--- whole serialized sheet (columns, formulas, formats, cell values) from
--- src/workspaces/model/lib/sheetModel.js; `version` is the optimistic-concurrency guard.
+-- whole serialized WORKBOOK (an ordered list of named sheets, each with its own columns,
+-- formulas, formats, cell values — src/workspaces/model/lib/sheetModel.js's `createWorkbook`/
+-- `migrateWorkbook`) as of Stage 3 (NEW-1, 2026-09-03); `version` is the optimistic-concurrency
+-- guard. `data` is an untyped jsonb column, so this schema needed NO migration for that change
+-- — a pre-Stage-3 row (one bare sheet's fields directly in `data`) still loads correctly,
+-- migrateWorkbook wraps it into a one-sheet workbook named "Sheet1" on read.
 --
 -- NOT YET APPLIED to production as of this PR — the session that wrote this had read-only
 -- (SELECT-only) production access, so it is handed to the owner to run rather than applied

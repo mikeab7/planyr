@@ -517,7 +517,7 @@ look aligned because they float over the same surface.
 |---|---|---|---|---|---|---|---|
 | 0px | 25px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(69, 76, 92)` | Schedule, Review, Library (+2 more) ×5 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+91 more matches, best-effort) |
 | 8px | 30px | 12px | 400 | `rgb(234, 238, 243)` | `1px solid rgb(215, 221, 229)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:149:      aria-label={active ? "Leave full screen" : "Full screen"} (+6 more matches, best-effort) |
-| 8px 0px 0px 8px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Undo, Redo ×2 | src/shared/comps/components/CompEntryGrid.jsx:661:  // summary line can say so and Undo can remove precisely those rows, nothing else. (+49 more matches, best-effort) |
+| 8px 0px 0px 8px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Undo, Redo ×2 | src/shared/comps/components/CompEntryGrid.jsx:661:  // summary line can say so and Undo can remove precisely those rows, nothing else. (+50 more matches, best-effort) |
 | 0px 8px 8px 0px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Recent actions to undo, Recent actions to redo ×2 | src/workspaces/site-planner/SitePlanner.jsx:19247:            aria-label="Recent actions to undo" title="Recent actions to undo"> |
 | 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:872:            title={onDashboard ? "Dashboard: all projects" : undefined} |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
@@ -535,7 +535,7 @@ look aligned because they float over the same surface.
 |---|---|---|---|---|---|---|---|
 | 0px | 25px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(194, 200, 210)` | Schedule, Review, Library (+2 more) ×5 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+91 more matches, best-effort) |
 | 8px | 30px | 12px | 400 | `rgb(17, 19, 25)` | `1px solid rgb(38, 42, 51)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:149:      aria-label={active ? "Leave full screen" : "Full screen"} (+6 more matches, best-effort) |
-| 8px 0px 0px 8px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Undo, Redo ×2 | src/shared/comps/components/CompEntryGrid.jsx:661:  // summary line can say so and Undo can remove precisely those rows, nothing else. (+49 more matches, best-effort) |
+| 8px 0px 0px 8px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Undo, Redo ×2 | src/shared/comps/components/CompEntryGrid.jsx:661:  // summary line can say so and Undo can remove precisely those rows, nothing else. (+50 more matches, best-effort) |
 | 0px 8px 8px 0px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Recent actions to undo, Recent actions to redo ×2 | src/workspaces/site-planner/SitePlanner.jsx:19247:            aria-label="Recent actions to undo" title="Recent actions to undo"> |
 | 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:872:            title={onDashboard ? "Dashboard: all projects" : undefined} |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
@@ -588,7 +588,7 @@ _(nothing matched in this theme/scenario)_
 |---|---|---|---|---|---|---|---|
 | 6px | 42px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | DarkAlways dark, SystemMatch your computer ×2 | unattributed (no source match — best-effort text search) |
 | 6px | 42px | 12px | 400 | `rgb(238, 241, 245)` | `0px none rgb(27, 30, 38)` | LightAlways light✓ ×1 | unattributed (no source match — best-effort text search) |
-| 0px | 13px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | INPUT ×1 | src/shared/keyboard/keyScope.js:12: *     if (document.activeElement is INPUT/SELECT/TEXTAREA/contentEditable) return; (+40 more matches, best-effort) |
+| 0px | 13px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | INPUT ×1 | src/shared/keyboard/keyScope.js:12: *     if (document.activeElement is INPUT/SELECT/TEXTAREA/contentEditable) return; (+41 more matches, best-effort) |
 
 **dark** — 3 distinct style signature(s) over 4 matched element(s):
 
@@ -596,7 +596,7 @@ _(nothing matched in this theme/scenario)_
 |---|---|---|---|---|---|---|---|
 | 6px | 42px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | LightAlways light, SystemMatch your computer ×2 | unattributed (no source match — best-effort text search) |
 | 6px | 42px | 12px | 400 | `rgba(255, 255, 255, 0.06)` | `0px none rgb(232, 235, 240)` | DarkAlways dark✓ ×1 | unattributed (no source match — best-effort text search) |
-| 0px | 13px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | INPUT ×1 | src/shared/keyboard/keyScope.js:12: *     if (document.activeElement is INPUT/SELECT/TEXTAREA/contentEditable) return; (+40 more matches, best-effort) |
+| 0px | 13px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | INPUT ×1 | src/shared/keyboard/keyScope.js:12: *     if (document.activeElement is INPUT/SELECT/TEXTAREA/contentEditable) return; (+41 more matches, best-effort) |
 
 
 ---

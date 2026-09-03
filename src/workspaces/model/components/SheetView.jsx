@@ -38,7 +38,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { colAt, rawAt, usedRangeEnd, rowHeightAt, DEFAULT_ROW_H, styleAt, mergeAt, isFormulaText } from "../lib/sheetModel.js";
-import { displayFor, displayKindFor, displayColorFor } from "../lib/sheetEngine.js";
+import { displayFor, displayKindFor, displayColorFor, cellColorKind } from "../lib/sheetEngine.js";
 import { ctrlArrowTarget } from "../lib/sheetOps.js";
 import { buildRowOffsets, visibleRowRange, rowAtOffset } from "../lib/rowLayout.js";
 import { MIN_ZOOM, MAX_ZOOM, DEFAULT_ZOOM, zoomFromWheelDelta, zoomStepButton } from "../lib/sheetZoom.js";
@@ -53,6 +53,7 @@ import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { menuPanelStyle } from "../../../shared/ui/controls.jsx";
 import { markProgrammaticScroll } from "../../../shared/ui/programmaticScroll.js";
 import ContextMenu from "./ContextMenu.jsx";
+import { TAB_STRIP_HEIGHT } from "./TabStrip.jsx";
 
 // B1007281 — AutoFilter (Sort & Filter). One column header's own filter trigger + checkbox
 // popover. `allowed` is the column's current filter (a Set of DISPLAY-value strings still
@@ -127,6 +128,9 @@ const FILL_HANDLE_PX = 7;
 function stepCol(colCount, c, dir) { return Math.max(0, Math.min(colCount - 1, c + dir)); }
 
 const TEXT_ALIGN = { number: "right", date: "right", bool: "center", error: "left", text: "left", blank: "left" };
+// STAGE 3 (NEW-2) — the input/formula/cross-sheet-link colour convention's token map. "formula"
+// (same-sheet, black) has no entry — it's the plain default the lookup already falls back to.
+const AUTO_COLOR_TOKEN = { input: "var(--info-text)", "cross-sheet": "var(--success-text)" };
 
 function zoomBtnStyle(enabled) {
   return {
@@ -153,7 +157,7 @@ function measureTextWidth(text, font) {
 const CELL_FONT = "12.5px system-ui, sans-serif"; // must match the cell's own rendered font below
 
 export default function SheetView({
-  sheet, evalResult, totalRows,
+  sheet, sheetName, evalResult, totalRows,
   selRange, setSelRange,
   onCommit, onBlankRange, onRenameColumn, onAddColumn,
   onCopy, onPaste, onFillDown,
@@ -170,6 +174,8 @@ export default function SheetView({
   // `columnFilters` is a Map<colIndex, Set<allowed display values>> (a column absent from the
   // map is unfiltered); `onSetColumnFilter(colIndex, allowedOrNull)` commits one column's choice.
   filterOn = false, columnFilters = null, onSetColumnFilter,
+  // STAGE 3 (NEW-2) — input (blue) / formula (black) / cross-sheet link (green), ON by default.
+  autoColor = true,
 }) {
   const outerRef = useRef(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -663,18 +669,19 @@ export default function SheetView({
         const kind = displayKindFor(sheet, evalResult, r, c);
         const color = displayColorFor(sheet, evalResult, r, c);
         const style = styleAt(sheet, r, c);
-        // Stage 2 visual pass — a HOOK for Stage 3's formula/input colour convention (blue =
-        // input, black = plain, green = cross-sheet reference): a `data-formula` marker on every
-        // cell now, so that work drops in as a style-only change with no new plumbing. Not yet
-        // consumed for colour here — cellStyle.color (an explicit user override) still wins.
         const isFormula = isFormulaText(sheet.cells[`${col.id}:${r}`]);
-        return { display, kind, empty: display === "", color, style, isFormula };
+        // STAGE 3 (NEW-2) — input (blue) / formula (black) / cross-sheet link (green). Derived
+        // purely from the cell's own content/references (sheetEngine.js's cellColorKind, the
+        // consumer of Stage 2's `data-formula` hook above), never from manual formatting — an
+        // explicit cellStyle.color (below, at render) still wins.
+        const colorKind = autoColor ? cellColorKind(sheet, sheetName, r, c) : null;
+        return { display, kind, empty: display === "", color, style, isFormula, colorKind };
       });
       map.set(r, row);
     }
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheet, evalResult, startIdx, endIdx, freezeRows, cols]);
+  }, [sheet, sheetName, evalResult, startIdx, endIdx, freezeRows, cols, autoColor]);
 
   // One row's cells, shared by BOTH the frozen (sticky, normal-flow) and scrolling (absolute,
   // virtualized) render paths below — everything about a row is identical between the two
@@ -761,8 +768,12 @@ export default function SheetView({
           const edgeCSS = (token) => (token === "double" ? `${3 * zoom}px double var(--text-primary)` : token === "thin" ? `${1.5 * zoom}px solid var(--text-primary)` : "1px solid var(--border-default)");
           // Explicit colour wins outright; an erroring cell always reads as danger regardless of
           // any number-format colour; otherwise the number format's own colour tag (negative
-          // red) applies; the plain default last.
-          const textColor = cellStyle.color || (cell.kind === "error" ? "var(--danger)" : (cell.color || "var(--text-primary)"));
+          // red) applies; STAGE 3 (NEW-2)'s automatic input/formula/cross-sheet-link colour is
+          // the plain default's own replacement (blue/green — `--info-text`/`--success-text`,
+          // already AA-checked in both themes; "formula" reads as the ordinary default, no new
+          // token needed) — never above the number format's own colour tag, matching the
+          // pre-existing precedence order this comment already documents.
+          const textColor = cellStyle.color || (cell.kind === "error" ? "var(--danger)" : (cell.color || AUTO_COLOR_TOKEN[cell.colorKind] || "var(--text-primary)"));
           return (
             <div
               key={col.id}
@@ -1060,12 +1071,17 @@ export default function SheetView({
           ancestor's scroll offset entirely, which is exactly "always visible" without any of
           freeze panes' sticky-offset bookkeeping. Excel's own zoom slider lives in the same
           corner for the same reason: a view control, reachable without hunting through a menu,
-          that never competes with the grid it controls for space. */}
+          that never competes with the grid it controls for space.
+          ⛔ STAGE 3 (NEW-1) — `bottom` is lifted by TAB_STRIP_HEIGHT: `position: fixed` places
+          this relative to the whole VIEWPORT, not to this card, so it has no way to "see" that
+          ModelApp.jsx now renders a sheet-tab strip below this card and would otherwise sit on
+          top of that strip's own "+" add-sheet button — MEASURED LIVE, they occupied the same
+          pixels before this fix. */}
       {onZoomChange && (
         <div
           data-testid="model-zoom-control"
           style={{
-            position: "fixed", bottom: 12, right: 16, zIndex: 20,
+            position: "fixed", bottom: 12 + TAB_STRIP_HEIGHT, right: 16, zIndex: 20,
             display: "flex", alignItems: "center", gap: 2, padding: 3,
             borderRadius: RADIUS.pill, border: "1px solid var(--border-default)",
             background: "var(--surface-raised)",

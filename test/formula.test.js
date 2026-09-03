@@ -5,7 +5,7 @@ import {
   makeDate, isoToSerial, serialToISO, BLANK, FORMULA_ERRORS, isDate,
   errVal, isErrVal, DEFAULT_CALENDAR,
   MAX_COL, MAX_ROW, parseRefText, colLettersToNum, colNumToLetters, rewriteFormulaForCopy,
-  rewriteFormulaForStructuralShift,
+  rewriteFormulaForStructuralShift, rewriteFormulaForSheetRename, dropFormulaSheetRefs,
   FUNCTION_NAMES,
 } from "../src/shared/formula/formula.js";
 
@@ -1130,8 +1130,139 @@ describe("A1 cell references — grammar", () => {
     expect(gridErr("A1", grid)).toBe(FORMULA_ERRORS.DIV0);
     expect(gridErr("SUM(A1:B1)", grid)).toBe(FORMULA_ERRORS.DIV0);
   });
-  it("cross-sheet references (Sheet1!A1) are out of scope and fail loudly, not silently mis-parsed", () => {
-    expect(gridErr("Sheet1!A1")).toBe(FORMULA_ERRORS.ERR);
+});
+
+// ── Cross-sheet references (Model workbook Stage 3, NEW-1) ─────────────────────
+// ctx.grids is an optional map of LOWERCASED sheet name -> that sheet's own grid[][],
+// wired only by a multi-sheet host. Sheet2!A1 / 'Sheet With Spaces'!A1 resolve through it;
+// a bare A1 keeps reading ctx.grid exactly as before (untouched by any of this).
+const GRID_SHEET2 = [[10, 20], [30, 40]];
+describe("A1 cell references — cross-sheet (Sheet1!A1)", () => {
+  const grids = { "sheet2": GRID_SHEET2, "sheet with spaces": [[99]] };
+  it("a bare, unqualified reference is completely unaffected by ctx.grids being present", () => {
+    expect(gridVal("A1", GRID3, { grids })).toBe(1);
+  });
+  it("Sheet1!A1 resolves the named sheet's own grid, case-insensitively", () => {
+    expect(gridVal("Sheet2!A1", GRID3, { grids })).toBe(10);
+    expect(gridVal("SHEET2!B2", GRID3, { grids })).toBe(40);
+    expect(gridVal("sheet2!A1", GRID3, { grids })).toBe(10);
+  });
+  it("a single-quoted sheet name (spaces/punctuation) resolves the same way", () => {
+    expect(gridVal("'Sheet With Spaces'!A1", GRID3, { grids })).toBe(99);
+  });
+  it("a cross-sheet reference and a same-sheet reference combine in one formula", () => {
+    expect(gridVal("A1+Sheet2!A1", GRID3, { grids })).toBe(1 + 10);
+  });
+  it("a cross-sheet A1:B2 range feeds a range-aware function", () => {
+    expect(gridVal("SUM(Sheet2!A1:B2)", GRID3, { grids })).toBe(10 + 20 + 30 + 40);
+  });
+  it("a cell beyond a resolved sheet's own grid reads as blank, never an error", () => {
+    expect(gridVal("Sheet2!C1", GRID3, { grids })).toEqual(BLANK);
+  });
+  it("$-anchoring on a cross-sheet reference parses and resolves identically at rest", () => {
+    expect(gridVal("Sheet2!$A$1", GRID3, { grids })).toBe(10);
+  });
+  it("a sheet name that doesn't resolve is a #REF!, never a silent blank", () => {
+    expect(gridErr("NoSuchSheet!A1", GRID3, { grids })).toBe(FORMULA_ERRORS.REF);
+    expect(gridErr("SUM(NoSuchSheet!A1:B2)", GRID3, { grids })).toBe(FORMULA_ERRORS.REF);
+  });
+  it("a sheet-qualified reference with NO ctx.grids wired at all is also a #REF!, not a crash", () => {
+    expect(gridErr("Sheet2!A1")).toBe(FORMULA_ERRORS.REF);
+  });
+  it("a stored error value in another sheet's grid propagates through the reference", () => {
+    const g2 = [[errVal(FORMULA_ERRORS.DIV0), 2]];
+    expect(gridErr("Sheet2!A1", GRID3, { grids: { sheet2: g2 } })).toBe(FORMULA_ERRORS.DIV0);
+  });
+  it("a quoted sheet name with no following '!' is a genuine parse error", () => {
+    expect(gridErr("'Sheet2' + 1", GRID3, { grids })).toBe(FORMULA_ERRORS.ERR);
+  });
+});
+
+// ── rewriteFormulaForCopy — cross-sheet qualifiers ride through untouched ──────
+describe("rewriteFormulaForCopy — cross-sheet qualifiers", () => {
+  it("a qualifier is preserved verbatim while the ref after it shifts, same as an unqualified ref", () => {
+    expect(rewriteFormulaForCopy("Sheet2!A1", "A1", "A5")).toBe("Sheet2!A5");
+    expect(rewriteFormulaForCopy("'Sheet Two'!A1+B1", "A1", "C1")).toBe("'Sheet Two'!C1+D1");
+  });
+  it("$ anchoring inside a qualified reference is respected exactly like an unqualified one", () => {
+    expect(rewriteFormulaForCopy("Sheet2!$A$1+B1", "A1", "F20")).toBe("Sheet2!$A$1+G20");
+  });
+  it("a qualified range shifts both endpoints, keeping its own qualifier", () => {
+    expect(rewriteFormulaForCopy("SUM(Sheet2!A1:B10)", "A1", "A2")).toBe("SUM(Sheet2!A2:B11)");
+  });
+  it("a qualified reference that shifts off the sheet becomes #REF! — the qualifier itself survives (it still names which sheet the broken reference was pointing at, exactly like Excel's own '#REF!' address stays attached to its sheet)", () => {
+    expect(rewriteFormulaForCopy("Sheet2!A1", "B1", "A1")).toBe("Sheet2!#REF!");
+  });
+});
+
+// ── rewriteFormulaForStructuralShift — per-sheet scoping ────────────────────────
+describe("rewriteFormulaForStructuralShift — cross-sheet scoping", () => {
+  it("with no sheet names passed at all, every reference shifts (exact pre-existing behavior)", () => {
+    expect(rewriteFormulaForStructuralShift("A1+Sheet2!A1", "row", 1, 1)).toBe("A2+Sheet2!A2");
+  });
+  it("a bare reference shifts only when the edited sheet IS the formula's own sheet", () => {
+    // This formula lives on Sheet1; Sheet1's own row 1 insert shifts its bare A1.
+    expect(rewriteFormulaForStructuralShift("A1", "row", 1, 1, "Sheet1", "Sheet1")).toBe("A2");
+    // The SAME formula, but Sheet2 is the one being edited — Sheet1's bare A1 is untouched.
+    expect(rewriteFormulaForStructuralShift("A1", "row", 1, 1, "Sheet1", "Sheet2")).toBe("A1");
+  });
+  it("a qualified reference shifts only when it names the edited sheet, regardless of owner", () => {
+    // Formula lives on Sheet1, references Sheet2 — Sheet2's own edit shifts it...
+    expect(rewriteFormulaForStructuralShift("Sheet2!A1", "row", 1, 1, "Sheet1", "Sheet2")).toBe("Sheet2!A2");
+    // ...but an edit on Sheet1 (or Sheet3) leaves the Sheet2! reference alone.
+    expect(rewriteFormulaForStructuralShift("Sheet2!A1", "row", 1, 1, "Sheet1", "Sheet1")).toBe("Sheet2!A1");
+    expect(rewriteFormulaForStructuralShift("Sheet2!A1", "row", 1, 1, "Sheet1", "Sheet3")).toBe("Sheet2!A1");
+  });
+  it("a formula with both a bare and a qualified reference shifts each independently", () => {
+    // Owner = Sheet1, edited = Sheet1: the bare A1 (Sheet1's own) shifts; Sheet2!A1 does not.
+    expect(rewriteFormulaForStructuralShift("A1+Sheet2!A1", "row", 1, 1, "Sheet1", "Sheet1")).toBe("A2+Sheet2!A1");
+    // Owner = Sheet1, edited = Sheet2: the reverse.
+    expect(rewriteFormulaForStructuralShift("A1+Sheet2!A1", "row", 1, 1, "Sheet1", "Sheet2")).toBe("A1+Sheet2!A2");
+  });
+  it("a collapsed qualified reference becomes #REF! with its qualifier intact, when its own sheet is edited", () => {
+    expect(rewriteFormulaForStructuralShift("Sheet2!A1", "row", 1, -1, "Sheet1", "Sheet2")).toBe("Sheet2!#REF!");
+  });
+});
+
+// ── rewriteFormulaForSheetRename ────────────────────────────────────────────────
+describe("rewriteFormulaForSheetRename", () => {
+  it("rewrites every qualifier matching the old name, case-insensitively, leaving the ref untouched", () => {
+    expect(rewriteFormulaForSheetRename("Sheet2!A1+SHEET2!B2", "Sheet2", "Costs")).toBe("Costs!A1+Costs!B2");
+  });
+  it("quotes the new name only when it doesn't lex as a single bare identifier", () => {
+    expect(rewriteFormulaForSheetRename("Sheet2!A1", "Sheet2", "My Sheet")).toBe("'My Sheet'!A1");
+    expect(rewriteFormulaForSheetRename("Sheet2!A1", "Sheet2", "Costs")).toBe("Costs!A1");
+  });
+  it("escapes an embedded single quote in the new name by doubling it", () => {
+    expect(rewriteFormulaForSheetRename("Sheet2!A1", "Sheet2", "Bob's Sheet")).toBe("'Bob''s Sheet'!A1");
+  });
+  it("a reference qualified to a DIFFERENT sheet is untouched", () => {
+    expect(rewriteFormulaForSheetRename("Sheet3!A1", "Sheet2", "Costs")).toBe("Sheet3!A1");
+  });
+  it("an unqualified (bare) reference is never touched by a rename", () => {
+    expect(rewriteFormulaForSheetRename("A1+Sheet2!B1", "Sheet2", "Costs")).toBe("A1+Costs!B1");
+  });
+  it("a quoted old name is matched and rewritten the same as a bare one", () => {
+    expect(rewriteFormulaForSheetRename("'Old Sheet'!A1", "Old Sheet", "New")).toBe("New!A1");
+  });
+});
+
+// ── dropFormulaSheetRefs — the delete-sheet behavior ────────────────────────────
+describe("dropFormulaSheetRefs", () => {
+  it("turns every reference qualified to the deleted sheet into #REF!, qualifier included", () => {
+    expect(dropFormulaSheetRefs("Sheet2!A1+1", "Sheet2")).toBe("#REF!+1");
+  });
+  it("turns a qualified RANGE into a single #REF!, not one per endpoint", () => {
+    expect(dropFormulaSheetRefs("SUM(Sheet2!A1:B10)", "Sheet2")).toBe("SUM(#REF!)");
+  });
+  it("a reference qualified to a different sheet is untouched", () => {
+    expect(dropFormulaSheetRefs("Sheet3!A1", "Sheet2")).toBe("Sheet3!A1");
+  });
+  it("an unqualified reference is never touched by a sheet delete", () => {
+    expect(dropFormulaSheetRefs("A1+Sheet2!B1", "Sheet2")).toBe("A1+#REF!");
+  });
+  it("matches case-insensitively and accepts a quoted qualifier", () => {
+    expect(dropFormulaSheetRefs("'Sheet2'!A1", "SHEET2")).toBe("#REF!");
   });
 });
 

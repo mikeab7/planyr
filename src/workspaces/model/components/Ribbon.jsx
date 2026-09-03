@@ -148,6 +148,19 @@ function IconFreeze() { return <Icon><rect x="3" y="3" width="18" height="18" rx
 function IconFilter() { return <Icon><path d="M4 4h16l-6.5 8v7l-3 2v-9z" /></Icon>; }
 function IconSortAsc() { return <Icon><line x1="3" y1="6" x2="9" y2="6" /><line x1="3" y1="12" x2="13" y2="12" /><line x1="3" y1="18" x2="17" y2="18" /><line x1="20" y1="5" x2="20" y2="19" /><polyline points="17 16 20 19 23 16" /></Icon>; }
 function IconSortDesc() { return <Icon><line x1="3" y1="6" x2="17" y2="6" /><line x1="3" y1="12" x2="13" y2="12" /><line x1="3" y1="18" x2="9" y2="18" /><line x1="20" y1="5" x2="20" y2="19" /><polyline points="17 16 20 19 23 16" /></Icon>; }
+// STAGE 3 (NEW-2) — three dots in the actual convention's own colours (blue input / black
+// formula / green cross-sheet link — the SAME tokens SheetView.jsx paints cell text with), not
+// a `currentColor` outline like the rest of this icon set: the glyph IS the feature it toggles,
+// so showing its real effect reads at a glance in a way an abstract shape wouldn't.
+function IconAutoColor() {
+  return (
+    <Icon>
+      <circle cx="5" cy="12" r="3.4" fill="var(--info-text)" stroke="none" />
+      <circle cx="12" cy="12" r="3.4" fill="var(--text-primary)" stroke="none" />
+      <circle cx="19" cy="12" r="3.4" fill="var(--success-text)" stroke="none" />
+    </Icon>
+  );
+}
 // Stage 3 pt 2 (NEW-1) — a name TAG: a pentagon tag shape + its punch hole, the plainest literal
 // read for "named range" available in this app's own hand-drawn convention (no text label — see
 // the file header's iconography rule).
@@ -324,6 +337,14 @@ function ColorGroup({ ctx }) {
     <span style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
       <ColorSwatchButton label="A" title="Text colour" value={s.color} palette={TEXT_PALETTE} defaultSwatchLabel="Default text colour" onPick={(hex) => ctx.onSetCellStyle({ color: hex })} />
       <ColorSwatchButton icon={<IconBucket />} title="Fill colour" value={s.fill} palette={FILL_PALETTE} defaultSwatchLabel="No fill" onPick={(hex) => ctx.onSetCellStyle({ fill: hex })} />
+      {/* STAGE 3 (NEW-2) — the input/formula/cross-sheet-link colour convention toggle, ON by
+          default. A manual font colour (the "A" swatch above) always wins over this regardless
+          of the toggle's state — SheetView.jsx's own render decides that precedence. */}
+      <button
+        type="button" data-testid="ribbon-autocolor" title="Colour cells by kind — blue input, black formula, green cross-sheet link"
+        aria-label="Toggle automatic cell colouring" aria-pressed={ctx.autoColor}
+        onClick={ctx.onAutoColorToggle} style={ribbonBtnStyle(ctx.autoColor)}
+      ><IconAutoColor /></button>
     </span>
   );
 }
@@ -475,6 +496,7 @@ function MoreMenu({ overflowKeys, ctx }) {
 
 export default function Ribbon({
   activeFormat, activeStyle, mergedHere, freezeRows, freezeCols, painterArmed, filterOn,
+  autoColor, onAutoColorToggle,
   canUndo, canRedo, onUndo, onRedo,
   onSetCellStyle, onApplyBorder, onApplyFormat, onNumberFormatOp, onClearFormatting,
   onFormatPainterToggle, onMergeToggle,
@@ -498,6 +520,7 @@ export default function Ribbon({
 
   const ctx = {
     activeFormat, activeStyle: activeStyle || {}, mergedHere, freezeRows, freezeCols, painterArmed, filterOn,
+    autoColor, onAutoColorToggle,
     canUndo, canRedo, onUndo, onRedo,
     onSetCellStyle, onApplyBorder, onApplyFormat, onNumberFormatOp, onClearFormatting,
     onFormatPainterToggle, onMergeToggle,

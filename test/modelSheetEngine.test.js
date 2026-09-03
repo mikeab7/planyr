@@ -14,7 +14,8 @@ import {
   createSheet, setRaw, commitCellText, renameColumn, setNumberFormat, colAt,
 } from "../src/workspaces/model/lib/sheetModel.js";
 import {
-  evaluateSheet, displayFor, displayKindFor, displayColorFor, formulaBarText, literalTypedValue, kindOf, cellAddressText,
+  evaluateSheet, evaluateWorkbook, displayFor, displayKindFor, displayColorFor, formulaBarText,
+  literalTypedValue, kindOf, cellAddressText, cellColorKind,
 } from "../src/workspaces/model/lib/sheetEngine.js";
 
 function sheetWithColumns(names) {
@@ -384,5 +385,124 @@ describe("formulaBarText — the underlying formula, never the displayed value",
     let s = createSheet();
     s = setRaw(s, 0, 0, "1,234.50");
     expect(formulaBarText(s, 0, 0)).toBe("1,234.50");
+  });
+});
+
+// ── evaluateWorkbook — cross-sheet formulas (Stage 3, NEW-1) ────────────────────────────────
+function wb(sheets, activeSheetId) {
+  return { sheets: sheets.map((s) => ({ id: s.id, name: s.name, sheet: s.sheet })), activeSheetId: activeSheetId || sheets[0].id };
+}
+
+describe("evaluateWorkbook — cross-sheet references", () => {
+  it("Sheet1!A1 read from a formula on a different sheet resolves to that sheet's value", () => {
+    let s1 = createSheet(); s1 = setRaw(s1, 0, 0, "500"); // Sheet1!A1 = 500
+    let s2 = createSheet(); s2 = commitCellText(s2, 0, 0, "=Sheet1!A1"); // Sheet2!A1
+    const r = evaluateWorkbook(wb([{ id: "sheet1", name: "Sheet1", sheet: s1 }, { id: "sheet2", name: "Sheet2", sheet: s2 }]));
+    expect(r.get("sheet2").get(0, 0)).toEqual({ ok: true, value: 500 });
+  });
+
+  it("a bare reference stays scoped to the formula's OWN sheet, never bleeds into another", () => {
+    let s1 = createSheet(); s1 = setRaw(s1, 0, 0, "111"); // Sheet1!A1
+    let s2 = createSheet(); s2 = setRaw(s2, 0, 0, "222"); // Sheet2!A1 — a DIFFERENT value
+    s2 = commitCellText(s2, 0, 1, "=A1"); // Sheet2!B1 — bare, must read ITS OWN A1
+    const r = evaluateWorkbook(wb([{ id: "sheet1", name: "Sheet1", sheet: s1 }, { id: "sheet2", name: "Sheet2", sheet: s2 }]));
+    expect(r.get("sheet2").get(0, 1)).toEqual({ ok: true, value: 222 });
+  });
+
+  it("a cross-sheet formula reads ANOTHER cross-sheet formula, resolved in one dependency-ordered pass", () => {
+    let s1 = createSheet(); s1 = setRaw(s1, 0, 0, "10"); // Sheet1!A1
+    let s2 = createSheet(); s2 = commitCellText(s2, 0, 0, "=Sheet1!A1*2"); // Sheet2!A1 = 20
+    let s3 = createSheet(); s3 = commitCellText(s3, 0, 0, "=Sheet2!A1+1"); // Sheet3!A1 depends on Sheet2!A1
+    const r = evaluateWorkbook(wb([
+      { id: "sheet1", name: "Sheet1", sheet: s1 }, { id: "sheet2", name: "Sheet2", sheet: s2 }, { id: "sheet3", name: "Sheet3", sheet: s3 },
+    ]));
+    expect(r.get("sheet3").get(0, 0)).toEqual({ ok: true, value: 21 });
+  });
+
+  it("a quoted sheet name with spaces resolves the same way", () => {
+    let s1 = createSheet(); s1 = setRaw(s1, 0, 0, "7");
+    let s2 = createSheet(); s2 = commitCellText(s2, 0, 0, "='My Sheet'!A1");
+    const r = evaluateWorkbook(wb([{ id: "sheet1", name: "My Sheet", sheet: s1 }, { id: "sheet2", name: "Sheet2", sheet: s2 }]));
+    expect(r.get("sheet2").get(0, 0)).toEqual({ ok: true, value: 7 });
+  });
+
+  it("resolution is case-insensitive on the sheet name, matching same-cell A1 case-insensitivity", () => {
+    let s1 = createSheet(); s1 = setRaw(s1, 0, 0, "3");
+    let s2 = createSheet(); s2 = commitCellText(s2, 0, 0, "=SHEET1!A1");
+    const r = evaluateWorkbook(wb([{ id: "sheet1", name: "Sheet1", sheet: s1 }, { id: "sheet2", name: "Sheet2", sheet: s2 }]));
+    expect(r.get("sheet2").get(0, 0)).toEqual({ ok: true, value: 3 });
+  });
+
+  it("a reference to a sheet name that doesn't exist is a #REF!, not a crash or a silent blank", () => {
+    let s1 = createSheet(); s1 = commitCellText(s1, 0, 0, "=NoSuchSheet!A1");
+    const r = evaluateWorkbook(wb([{ id: "sheet1", name: "Sheet1", sheet: s1 }]));
+    expect(r.get("sheet1").get(0, 0)).toMatchObject({ ok: false, error: "#REF!" });
+  });
+
+  it("a SUM over a cross-sheet A1:B2 range totals correctly, never a silent 0", () => {
+    let s1 = createSheet();
+    s1 = setRaw(s1, 0, 0, "1"); s1 = setRaw(s1, 0, 1, "2"); s1 = setRaw(s1, 1, 0, "3"); s1 = setRaw(s1, 1, 1, "4");
+    let s2 = createSheet(); s2 = commitCellText(s2, 0, 0, "=SUM(Sheet1!A1:B2)");
+    const r = evaluateWorkbook(wb([{ id: "sheet1", name: "Sheet1", sheet: s1 }, { id: "sheet2", name: "Sheet2", sheet: s2 }]));
+    expect(r.get("sheet2").get(0, 0)).toEqual({ ok: true, value: 10 });
+  });
+
+  it("a circular reference THROUGH another sheet is caught as #CIRC!, not an infinite loop", () => {
+    let s1 = createSheet(); s1 = commitCellText(s1, 0, 0, "=Sheet2!A1+1");
+    let s2 = createSheet(); s2 = commitCellText(s2, 0, 0, "=Sheet1!A1+1");
+    const r = evaluateWorkbook(wb([{ id: "sheet1", name: "Sheet1", sheet: s1 }, { id: "sheet2", name: "Sheet2", sheet: s2 }]));
+    expect(r.get("sheet1").get(0, 0)).toMatchObject({ ok: false, error: "#CIRC!" });
+    expect(r.get("sheet2").get(0, 0)).toMatchObject({ ok: false, error: "#CIRC!" });
+  });
+
+  it("a hidden (inactive) sheet's formulas still evaluate — every sheet is live, not just the active one", () => {
+    let s1 = createSheet(); s1 = setRaw(s1, 0, 0, "5");
+    let s2 = createSheet(); s2 = commitCellText(s2, 0, 0, "=Sheet1!A1*10"); // never made active
+    const r = evaluateWorkbook(wb([{ id: "sheet1", name: "Sheet1", sheet: s1 }, { id: "sheet2", name: "Sheet2", sheet: s2 }], "sheet1"));
+    expect(r.get("sheet2").get(0, 0)).toEqual({ ok: true, value: 50 });
+  });
+
+  it("evaluateSheet (single-sheet) is unaffected — same results as before cross-sheet support existed", () => {
+    let s = createSheet(); s = setRaw(s, 0, 0, "9"); s = commitCellText(s, 0, 1, "=A1+1");
+    expect(evaluateSheet(s).get(0, 1)).toEqual({ ok: true, value: 10 });
+  });
+});
+
+// ── cellColorKind — input (blue) / formula (black) / cross-sheet link (green) (Stage 3, NEW-2) ─
+describe("cellColorKind", () => {
+  it("a blank cell classifies as null — nothing to colour", () => {
+    const s = createSheet();
+    expect(cellColorKind(s, "Sheet1", 0, 0)).toBe(null);
+  });
+  it("a hardcoded literal value is an 'input'", () => {
+    let s = createSheet(); s = setRaw(s, 0, 0, "500");
+    expect(cellColorKind(s, "Sheet1", 0, 0)).toBe("input");
+  });
+  it("a formula that only reads its OWN sheet is 'formula'", () => {
+    let s = createSheet(); s = setRaw(s, 0, 0, "1"); s = commitCellText(s, 0, 1, "=A1+1");
+    expect(cellColorKind(s, "Sheet1", 0, 1)).toBe("formula");
+  });
+  it("a formula referencing [Column] only is 'formula' — brackets are always same-sheet", () => {
+    let s = createSheet(); s = renameColumn(s, 0, "Revenue"); s = commitCellText(s, 0, 1, "=[Revenue]*2");
+    expect(cellColorKind(s, "Sheet1", 0, 1)).toBe("formula");
+  });
+  it("a formula referencing ANOTHER sheet is 'cross-sheet' even when it also reads this sheet", () => {
+    let s = createSheet(); s = commitCellText(s, 0, 0, "=A2+Sheet2!A1");
+    expect(cellColorKind(s, "Sheet1", 0, 0)).toBe("cross-sheet");
+  });
+  it("an explicit self-qualified reference (typed while sitting on that sheet) reads as 'formula', not 'cross-sheet'", () => {
+    let s = createSheet(); s = commitCellText(s, 0, 0, "=Sheet1!A2+1");
+    expect(cellColorKind(s, "Sheet1", 0, 0)).toBe("formula");
+    // The sheet-name match is case-insensitive, matching every other sheet-name comparison in the engine.
+    expect(cellColorKind(s, "sheet1", 0, 0)).toBe("formula");
+  });
+  it("a cross-sheet range (SUM(Sheet2!A1:B2)) is 'cross-sheet'", () => {
+    let s = createSheet(); s = commitCellText(s, 0, 0, "=SUM(Sheet2!A1:B2)");
+    expect(cellColorKind(s, "Sheet1", 0, 0)).toBe("cross-sheet");
+  });
+  it("a genuinely unparseable formula still classifies as 'formula' rather than crashing", () => {
+    let s = createSheet(); s = commitCellText(s, 0, 0, "=1+");
+    expect(() => cellColorKind(s, "Sheet1", 0, 0)).not.toThrow();
+    expect(cellColorKind(s, "Sheet1", 0, 0)).toBe("formula");
   });
 });

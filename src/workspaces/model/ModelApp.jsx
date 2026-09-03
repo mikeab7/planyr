@@ -44,21 +44,26 @@ import FormulaBar from "./components/FormulaBar.jsx";
 import FindReplaceBar from "./components/FindReplaceBar.jsx";
 import NameManager from "./components/NameManager.jsx";
 import Ribbon from "./components/Ribbon.jsx";
+import TabStrip from "./components/TabStrip.jsx";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { useUndoableState } from "./lib/undoStack.js";
 import {
-  createSheet, migrateSheet, commitCellText, blankRange, renameColumn, setNumberFormat,
-  deleteColumn, addColumn, formatAt, padRowCount, sheetsDiverge, rawAt,
-  insertRowAt, deleteRowAt, insertColumnAt, setColumnWidth, setRowHeight, setFreeze,
+  createWorkbook, migrateWorkbook, activeSheetEntry, applyToActiveSheet,
+  addSheet, duplicateSheet, renameSheet, deleteSheet, reorderSheet,
+  workbookInsertRowAt, workbookDeleteRowAt, workbookInsertColumnAt, workbookDeleteColumn,
+  commitCellText, blankRange, renameColumn, setNumberFormat, addColumn,
+  formatAt, padRowCount, sheetsDiverge, rawAt,
+  setColumnWidth, setRowHeight, setFreeze,
   styleAt, setCellStyle, applyBorder, clearFormatting,
   paintedStyleAt, applyPaintedStyle, mergeAt, mergeRange, unmergeAt, sortRange, usedRangeEnd,
 } from "./lib/sheetModel.js";
 import { defineName, renameName, retargetName, deleteName } from "./lib/namedRanges.js";
-import { evaluateSheet, displayFor } from "./lib/sheetEngine.js";
+import { evaluateWorkbook, displayFor } from "./lib/sheetEngine.js";
 import { copyRange, pasteRange, fillDown, replaceAll, replaceInCellText } from "./lib/sheetOps.js";
 import { increaseDecimals, decreaseDecimals, toggleThousands } from "./lib/numberFormats.js";
 import { modelSaveState } from "./lib/modelSaveState.js";
 import { readZoom, writeZoom } from "./lib/sheetZoom.js";
+import { readAutoColor, writeAutoColor } from "./lib/sheetColorMode.js";
 import { readLocalSheet, writeLocalSheet, loadCloudSheet, saveCloudSheet } from "./lib/modelStore.js";
 import { listProjects, reconcileProjects, onProjectsChanged } from "../../shared/projects/projects.js";
 
@@ -86,7 +91,22 @@ export default function ModelApp({
   isActive, shellModule, onShellSwitch, authControl, accountActive, userId,
   projectId, crossProject, onNavigate, onGoDashboard, onNewProject, onSelectOrg,
 }) {
-  const { value: sheet, commit, undo, redo, reset, canUndo, canRedo } = useUndoableState(createSheet());
+  const { value: workbook, commit, undo, redo, reset, canUndo, canRedo } = useUndoableState(createWorkbook());
+  // STAGE 3 (NEW-1) — which sheet TAB is currently being VIEWED. Deliberately kept OUTSIDE the
+  // undo-tracked `workbook` value, the same way zoom/painter/filterOn already are below: a plain
+  // tab click is navigation, not a content edit, and must never mint (or be reverted by) an undo
+  // frame. `workbook.activeSheetId` itself still exists (sheetModel.js's pure functions need
+  // SOME notion of "active" and it's what a fresh load seeds this from) and IS updated by real
+  // content operations that also pick a new active sheet (add/duplicate/delete) — see those
+  // handlers below, each of which syncs this state explicitly right after committing. A plain
+  // tab click never touches `workbook` at all. If an undo/redo ever lands on a workbook whose
+  // stored `activeSheetId` no longer matches this sheet id (e.g. undoing past an "Add Sheet"),
+  // the render below falls back defensively and a small effect resyncs this state to match.
+  const [activeSheetId, setActiveSheetId] = useState(() => workbook.activeSheetId);
+  const activeEntry = workbook.sheets.find((s) => s.id === activeSheetId) || activeSheetEntry(workbook);
+  useEffect(() => { if (activeEntry.id !== activeSheetId) setActiveSheetId(activeEntry.id); }, [activeEntry.id, activeSheetId]);
+  const sheet = activeEntry.sheet;
+  const sheetName = activeEntry.name;
   const [selRange, setSelRange] = useState({ r1: 0, r2: 0, c1: 0, c2: 0 });
   const [ready, setReady] = useState(false);
   const [status, setStatus] = useState("idle"); // idle | saving | saved | error | conflict | not-provisioned | diverged
@@ -147,6 +167,18 @@ export default function ModelApp({
   useEffect(() => { setZoom(readZoom(projectId)); }, [projectId]);
   const onZoomChange = useCallback((z) => { setZoom(z); writeZoom(projectId, z); }, [projectId]);
 
+  // STAGE 3 (NEW-2) — the input/formula/cross-sheet-link colour toggle. Same "view preference,
+  // not sheet data" treatment as zoom: never through undo/redo, never synced to the cloud (a
+  // colleague looking at the same cloud model has no reason to share this device's toggle), but
+  // — UNLIKE painter/filterOn — persisted across a reload, because it's a standing display
+  // choice ("I turned this off because I use my own font colours") rather than a mid-task
+  // gesture that would be confusing to find still armed after a reload.
+  const [autoColor, setAutoColorState] = useState(() => readAutoColor(projectId));
+  useEffect(() => { setAutoColorState(readAutoColor(projectId)); }, [projectId]);
+  const onAutoColorToggle = useCallback(() => {
+    setAutoColorState((v) => { const next = !v; writeAutoColor(projectId, next); return next; });
+  }, [projectId]);
+
   // STAGE 2 — THE RIBBON (B1007281). Format Painter's captured source ({format, style} — see
   // sheetModel.js's paintedStyleAt) while armed, or null. AutoFilter's on/off switch and its
   // per-column choices (colIndex -> Set of allowed display values; a column absent from the map
@@ -175,9 +207,11 @@ export default function ModelApp({
     cloudVersionRef.current = null;
     setStatus("idle");
     setCloudConfirmed(false);
-    if (!openProject) { reset(createSheet()); setReady(false); return undefined; }
+    if (!openProject) { const wb = createWorkbook(); reset(wb); setActiveSheetId(wb.activeSheetId); setReady(false); return undefined; }
     const local = readLocalSheet(userId, projectId);
-    reset(local ? migrateSheet(local) : createSheet());
+    const initialWorkbook = local ? migrateWorkbook(local) : createWorkbook();
+    reset(initialWorkbook);
+    setActiveSheetId(initialWorkbook.activeSheetId);
     setReady(true);
     let live = true;
     (async () => {
@@ -187,7 +221,9 @@ export default function ModelApp({
         cloudVersionRef.current = r.version;
         setCloudConfirmed(true);
         if (!local && r.sheet) {
-          reset(migrateSheet(r.sheet));
+          const cloudWorkbook = migrateWorkbook(r.sheet);
+          reset(cloudWorkbook);
+          setActiveSheetId(cloudWorkbook.activeSheetId);
         } else if (local && r.sheet) {
           // Both a local copy AND a saved cloud copy exist. "Local always wins on load" (the
           // file header) means this device keeps showing ITS content — but if that content
@@ -196,7 +232,7 @@ export default function ModelApp({
           // raced — this device's `cloudVersionRef` is genuinely current). That is a real
           // second-device data-loss path, not a hypothetical one, so it is surfaced loudly
           // rather than left to happen quietly.
-          if (sheetsDiverge(migrateSheet(local), migrateSheet(r.sheet))) setStatus("diverged");
+          if (sheetsDiverge(migrateWorkbook(local), migrateWorkbook(r.sheet))) setStatus("diverged");
         }
       } else if (r.reason === "not-provisioned") {
         setStatus("not-provisioned");
@@ -210,11 +246,11 @@ export default function ModelApp({
    * be staler than the screen: a tab close a moment after typing must not lose that edit). */
   useEffect(() => {
     if (!ready || !openProject) return;
-    if (!writeLocalSheet(userId, projectId, sheet)) setStatus("error");
-  }, [sheet, ready, openProject, projectId, userId]);
+    if (!writeLocalSheet(userId, projectId, workbook)) setStatus("error");
+  }, [workbook, ready, openProject, projectId, userId]);
 
   /* Best-effort, debounced cloud push through the guarded save path. Reads `status` without
-   * depending on it — this must fire only on a SHEET change, not on every status transition
+   * depending on it — this must fire only on a WORKBOOK change, not on every status transition
    * the push itself causes (that would restart the debounce on its own "saving" flag). */
   useEffect(() => {
     if (!ready || !openProject || !userId) return undefined;
@@ -222,7 +258,7 @@ export default function ModelApp({
     clearTimeout(pushTimer.current);
     pushTimer.current = setTimeout(async () => {
       setStatus("saving");
-      const r = await saveCloudSheet({ uid: userId, projectId, sheet, expected: cloudVersionRef.current });
+      const r = await saveCloudSheet({ uid: userId, projectId, sheet: workbook, expected: cloudVersionRef.current });
       if (r.ok) { cloudVersionRef.current = r.version; setCloudConfirmed(true); setStatus("saved"); }
       else if (r.reason === "not-provisioned") setStatus("not-provisioned");
       else if (r.reason === "conflict") setStatus("conflict");
@@ -231,7 +267,7 @@ export default function ModelApp({
     }, CLOUD_PUSH_DEBOUNCE_MS);
     return () => clearTimeout(pushTimer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheet, ready, openProject, projectId, userId]);
+  }, [workbook, ready, openProject, projectId, userId]);
 
   // Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z (or +Y), Ctrl+G (Name Box), Ctrl+F / Ctrl+H (Find/Replace) —
   // SheetView deliberately leaves every Ctrl/Cmd chord alone so this can own them, gated on
@@ -252,40 +288,75 @@ export default function ModelApp({
     return () => window.removeEventListener("keydown", onKey);
   }, [isActive, undo, redo]);
 
-  const evalResult = useMemo(() => evaluateSheet(sheet), [sheet]);
+  // STAGE 3 (NEW-1) — evaluated across the WHOLE WORKBOOK, always, regardless of which sheet is
+  // currently visible: a cross-sheet formula on one sheet needs every OTHER sheet's cells (its
+  // own formulas included) to be live inputs, not just the one tab the user happens to be
+  // looking at. `.get(activeSheetId)` slices out the visible sheet's own results for
+  // SheetView/displayFor/etc, which stay unaware anything changed.
+  const workbookEval = useMemo(() => evaluateWorkbook(workbook), [workbook]);
+  const evalResult = workbookEval.get(activeEntry.id);
   const totalRows = sheet.rowCount + padRowCount(sheet, 20);
 
-  const onCommitCell = useCallback((r, c, text) => commit((s) => commitCellText(s, r, c, text)), [commit]);
-  const onBlankRange = useCallback((r1, r2, c1, c2) => commit((s) => blankRange(s, r1, r2, c1, c2)), [commit]);
-  const onRenameColumn = useCallback((c, name) => commit((s) => renameColumn(s, c, name)), [commit]);
-  const onAddColumn = useCallback(() => commit((s) => addColumn(s)), [commit]);
+  const onCommitCell = useCallback((r, c, text) => commit((wb) => applyToActiveSheet(wb, commitCellText, r, c, text)), [commit]);
+  const onBlankRange = useCallback((r1, r2, c1, c2) => commit((wb) => applyToActiveSheet(wb, blankRange, r1, r2, c1, c2)), [commit]);
+  const onRenameColumn = useCallback((c, name) => commit((wb) => applyToActiveSheet(wb, renameColumn, c, name)), [commit]);
+  const onAddColumn = useCallback(() => commit((wb) => applyToActiveSheet(wb, addColumn)), [commit]);
+
+  // STAGE 3 (NEW-1) — the sheet tab strip. `onSelectSheetTab` is pure navigation (see the
+  // `activeSheetId` state's own header above — never through `commit`); the other four are real
+  // content edits and go through the undo stack like everything else, syncing the view's
+  // `activeSheetId` afterward since add/duplicate/delete all pick a new active sheet themselves.
+  const onSelectSheetTab = useCallback((id) => setActiveSheetId(id), []);
+  const onAddSheetTab = useCallback(() => {
+    const next = addSheet(workbook);
+    commit(next);
+    setActiveSheetId(next.activeSheetId);
+  }, [commit, workbook]);
+  const onDuplicateSheetTab = useCallback((id) => {
+    const next = duplicateSheet(workbook, id);
+    if (next === workbook) return;
+    commit(next);
+    setActiveSheetId(next.activeSheetId);
+  }, [commit, workbook]);
+  const onRenameSheetTab = useCallback((id, name) => commit((wb) => renameSheet(wb, id, name)), [commit]);
+  const onDeleteSheetTab = useCallback((id) => {
+    const next = deleteSheet(workbook, id);
+    if (next === workbook) return;
+    commit(next);
+    setActiveSheetId(next.activeSheetId);
+  }, [commit, workbook]);
+  const onReorderSheetTab = useCallback((from, to) => commit((wb) => reorderSheet(wb, from, to)), [commit]);
 
   // Copy/paste/fill-down (items 6/7) — the internal clipboard round-trips a snapshot of raw
   // cell text (see lib/sheetOps.js); paste and fill-down both shift a formula's relative A1
-  // references by the destination delta, exactly like dragging Excel's fill handle.
+  // references by the destination delta, exactly like dragging Excel's fill handle. All three
+  // operate on the ACTIVE sheet only — pasting a cross-sheet formula's qualifier rides through
+  // untouched (rewriteFormulaForCopy preserves it — see formula.js's own header).
   const onCopy = useCallback((r1, r2, c1, c2) => { clipboardRef.current = copyRange(sheet, r1, r2, c1, c2); }, [sheet]);
   const onPaste = useCallback((targetR, targetC, selR1, selR2, selC1, selC2) => {
     if (!clipboardRef.current) return;
-    commit((s) => pasteRange(s, targetR, targetC, clipboardRef.current, selR2, selC2));
+    commit((wb) => applyToActiveSheet(wb, pasteRange, targetR, targetC, clipboardRef.current, selR2, selC2));
   }, [commit]);
-  const onFillDown = useCallback((r1, r2, c1, c2) => commit((s) => fillDown(s, r1, r2, c1, c2)), [commit]);
+  const onFillDown = useCallback((r1, r2, c1, c2) => commit((wb) => applyToActiveSheet(wb, fillDown, r1, r2, c1, c2)), [commit]);
 
   // Stage 1 structural editing (context-menu driven — see SheetView.jsx's ContextMenu). Every
-  // one of these shifts formula references sheet-wide (sheetModel.js's insertRowAt/deleteRowAt/
-  // insertColumnAt/deleteColumn), not just the cell that moved.
-  const onInsertRowAt = useCallback((rowIndex) => commit((s) => insertRowAt(s, rowIndex)), [commit]);
-  const onDeleteRowAt = useCallback((rowIndex) => commit((s) => deleteRowAt(s, rowIndex)), [commit]);
-  const onInsertColumnAt = useCallback((colIndex) => commit((s) => insertColumnAt(s, colIndex)), [commit]);
+  // one of these shifts formula references sheet-wide on the ACTIVE sheet AND sweeps every
+  // OTHER sheet for a cross-sheet reference into it (Stage 3, NEW-1 — see the `workbook*`
+  // wrappers in sheetModel.js for why this needs a workbook-level function, not a plain
+  // per-sheet mutator).
+  const onInsertRowAt = useCallback((rowIndex) => commit((wb) => workbookInsertRowAt(wb, rowIndex)), [commit]);
+  const onDeleteRowAt = useCallback((rowIndex) => commit((wb) => workbookDeleteRowAt(wb, rowIndex)), [commit]);
+  const onInsertColumnAt = useCallback((colIndex) => commit((wb) => workbookInsertColumnAt(wb, colIndex)), [commit]);
   const onDeleteColumnAt = useCallback((colIndex) => {
     if (sheet.columns.length <= 1) return;
-    commit((s) => deleteColumn(s, colIndex));
+    commit((wb) => workbookDeleteColumn(wb, colIndex));
   }, [commit, sheet.columns.length]);
-  const onSetColumnWidth = useCallback((colIndex, width) => commit((s) => setColumnWidth(s, colIndex, width)), [commit]);
-  const onSetRowHeight = useCallback((rowIndex, height) => commit((s) => setRowHeight(s, rowIndex, height)), [commit]);
+  const onSetColumnWidth = useCallback((colIndex, width) => commit((wb) => applyToActiveSheet(wb, setColumnWidth, colIndex, width)), [commit]);
+  const onSetRowHeight = useCallback((rowIndex, height) => commit((wb) => applyToActiveSheet(wb, setRowHeight, rowIndex, height)), [commit]);
   // Freeze panes goes through the normal commit/undo path like every other edit here — NOT
   // `reset` (that primitive wipes the whole undo history, meant only for adopting a load/sync
   // result, never a user action taken mid-session).
-  const onSetFreeze = useCallback((rows, cols) => commit((s) => setFreeze(s, rows, cols)), [commit]);
+  const onSetFreeze = useCallback((rows, cols) => commit((wb) => applyToActiveSheet(wb, setFreeze, rows, cols)), [commit]);
 
   // Name Box / Find navigation — a plain jump, not an edit, so it never mints an undo frame.
   // r2/c2 default to r1/c1 so Find's own single-cell `onGoTo(r, c)` call needs no change;
@@ -296,18 +367,18 @@ export default function ModelApp({
   // else, so "one cell = one match" stays consistent between the counter and the action.
   const onReplaceOne = useCallback((match, find, replace) => {
     const current = rawAt(sheet, match.r, match.c);
-    commit((s) => commitCellText(s, match.r, match.c, replaceInCellText(current, find, replace)));
+    commit((wb) => applyToActiveSheet(wb, commitCellText, match.r, match.c, replaceInCellText(current, find, replace)));
   }, [commit, sheet]);
-  const onReplaceAll = useCallback((find, replace) => commit((s) => replaceAll(s, find, replace)), [commit]);
+  const onReplaceAll = useCallback((find, replace) => commit((wb) => applyToActiveSheet(wb, replaceAll, find, replace)), [commit]);
 
   // Stage 3 pt 2 (NEW-1) — named ranges. Every one of these commits (one undo frame each, like
   // every other edit here); validation itself happens in the Name Manager UI (validateNameText)
   // BEFORE it ever calls onDefineName/onRenameName, matching sheetModel.js's own "mutators are
   // pure setters, validation lives at the UI boundary" convention.
-  const onDefineName = useCallback((name, rect) => commit((s) => defineName(s, name, rect)), [commit]);
-  const onRenameName = useCallback((oldName, newName) => commit((s) => renameName(s, oldName, newName)), [commit]);
-  const onRetargetName = useCallback((name, rect) => commit((s) => retargetName(s, name, rect)), [commit]);
-  const onDeleteName = useCallback((name) => commit((s) => deleteName(s, name)), [commit]);
+  const onDefineName = useCallback((name, rect) => commit((wb) => applyToActiveSheet(wb, defineName, name, rect)), [commit]);
+  const onRenameName = useCallback((oldName, newName) => commit((wb) => applyToActiveSheet(wb, renameName, oldName, newName)), [commit]);
+  const onRetargetName = useCallback((name, rect) => commit((wb) => applyToActiveSheet(wb, retargetName, name, rect)), [commit]);
+  const onDeleteName = useCallback((name) => commit((wb) => applyToActiveSheet(wb, deleteName, name)), [commit]);
   // Both this panel and Find/Replace float at the same fixed screen position (top-right — see
   // each component's own header), so they never coexist: opening one closes the other, rather
   // than reserving a second screen position that would crowd the owner's real 729px-wide window.
@@ -322,11 +393,11 @@ export default function ModelApp({
   // every dollar amount above it in the same column.
   const activeFormat = formatAt(sheet, selRange.r1, selRange.c1);
   const onApplyFormat = useCallback((token) => {
-    commit((s) => setNumberFormat(s, selRange.r1, selRange.r2, selRange.c1, selRange.c2, token));
+    commit((wb) => applyToActiveSheet(wb, setNumberFormat, selRange.r1, selRange.r2, selRange.c1, selRange.c2, token));
   }, [commit, selRange]);
   const onDeleteColumn = useCallback(() => {
     if (sheet.columns.length <= 1) return;
-    commit((s) => deleteColumn(s, activeCol));
+    commit((wb) => workbookDeleteColumn(wb, activeCol));
     setSelRange({ r1: 0, r2: 0, c1: 0, c2: 0 });
   }, [commit, activeCol, sheet.columns.length]);
 
@@ -337,17 +408,17 @@ export default function ModelApp({
   const mergedHere = !!mergeAt(sheet, selRange.r1, selRange.c1);
 
   const onSetCellStyle = useCallback((patch) => {
-    commit((s) => setCellStyle(s, selRange.r1, selRange.r2, selRange.c1, selRange.c2, patch));
+    commit((wb) => applyToActiveSheet(wb, setCellStyle, selRange.r1, selRange.r2, selRange.c1, selRange.c2, patch));
   }, [commit, selRange]);
   const onApplyBorderCmd = useCallback(({ edges, style, mode }) => {
-    commit((s) => applyBorder(s, selRange.r1, selRange.r2, selRange.c1, selRange.c2, { edges, style, mode }));
+    commit((wb) => applyToActiveSheet(wb, applyBorder, selRange.r1, selRange.r2, selRange.c1, selRange.c2, { edges, style, mode }));
   }, [commit, selRange]);
   const onClearFormattingCmd = useCallback(() => {
-    commit((s) => clearFormatting(s, selRange.r1, selRange.r2, selRange.c1, selRange.c2));
+    commit((wb) => applyToActiveSheet(wb, clearFormatting, selRange.r1, selRange.r2, selRange.c1, selRange.c2));
   }, [commit, selRange]);
   const onNumberFormatOp = useCallback((op) => {
     const fn = op === "increaseDecimals" ? increaseDecimals : op === "decreaseDecimals" ? decreaseDecimals : toggleThousands;
-    commit((s) => setNumberFormat(s, selRange.r1, selRange.r2, selRange.c1, selRange.c2, fn(activeFormat)));
+    commit((wb) => applyToActiveSheet(wb, setNumberFormat, selRange.r1, selRange.r2, selRange.c1, selRange.c2, fn(activeFormat)));
   }, [commit, selRange, activeFormat]);
 
   // Format Painter — arm/disarm on click (capturing the CURRENT active cell's format+style);
@@ -360,16 +431,16 @@ export default function ModelApp({
     setPainter((p) => {
       if (!p) return p;
       const sr = selRangeRef.current;
-      commit((s) => applyPaintedStyle(s, sr.r1, sr.r2, sr.c1, sr.c2, p.source));
+      commit((wb) => applyToActiveSheet(wb, applyPaintedStyle, sr.r1, sr.r2, sr.c1, sr.c2, p.source));
       return null;
     });
   }, [commit]);
 
   const onMergeToggle = useCallback(() => {
-    commit((s) => {
+    commit((wb) => applyToActiveSheet(wb, (s) => {
       const m = mergeAt(s, selRange.r1, selRange.c1);
       return m ? unmergeAt(s, selRange.r1, selRange.c1) : mergeRange(s, selRange.r1, selRange.r2, selRange.c1, selRange.c2);
-    });
+    }));
   }, [commit, selRange]);
 
   // Insert/Delete (Cells group) act on the single active row/column — the right-click context
@@ -390,7 +461,7 @@ export default function ModelApp({
   const onSort = useCallback((direction) => {
     let r1 = selRange.r1, r2 = selRange.r2;
     if (r1 === r2) { const used = usedRangeEnd(sheet); r1 = 0; r2 = used ? used.row : 0; }
-    commit((s) => sortRange(s, r1, r2, selRange.c1, direction));
+    commit((wb) => applyToActiveSheet(wb, sortRange, r1, r2, selRange.c1, direction));
   }, [commit, selRange, sheet]);
 
   const onFilterToggle = useCallback(() => setFilterOn((v) => !v), []);
@@ -493,6 +564,8 @@ export default function ModelApp({
             freezeCols={sheet.freezeCols}
             painterArmed={!!painter}
             filterOn={filterOn}
+            autoColor={autoColor}
+            onAutoColorToggle={onAutoColorToggle}
             canUndo={canUndo}
             canRedo={canRedo}
             onUndo={undo}
@@ -521,6 +594,7 @@ export default function ModelApp({
           </div>
           <SheetView
             sheet={sheet}
+            sheetName={sheetName}
             evalResult={evalResult}
             totalRows={totalRows}
             selRange={selRange}
@@ -546,6 +620,17 @@ export default function ModelApp({
             filterOn={filterOn}
             columnFilters={columnFilters}
             onSetColumnFilter={onSetColumnFilter}
+            autoColor={autoColor}
+          />
+          <TabStrip
+            sheets={workbook.sheets}
+            activeSheetId={activeEntry.id}
+            onSelect={onSelectSheetTab}
+            onAdd={onAddSheetTab}
+            onRename={onRenameSheetTab}
+            onDuplicate={onDuplicateSheetTab}
+            onDelete={onDeleteSheetTab}
+            onReorder={onReorderSheetTab}
           />
           <FindReplaceBar
             open={findOpen}
