@@ -148,6 +148,10 @@ function IconFreeze() { return <Icon><rect x="3" y="3" width="18" height="18" rx
 function IconFilter() { return <Icon><path d="M4 4h16l-6.5 8v7l-3 2v-9z" /></Icon>; }
 function IconSortAsc() { return <Icon><line x1="3" y1="6" x2="9" y2="6" /><line x1="3" y1="12" x2="13" y2="12" /><line x1="3" y1="18" x2="17" y2="18" /><line x1="20" y1="5" x2="20" y2="19" /><polyline points="17 16 20 19 23 16" /></Icon>; }
 function IconSortDesc() { return <Icon><line x1="3" y1="6" x2="17" y2="6" /><line x1="3" y1="12" x2="13" y2="12" /><line x1="3" y1="18" x2="9" y2="18" /><line x1="20" y1="5" x2="20" y2="19" /><polyline points="17 16 20 19 23 16" /></Icon>; }
+// Stage 3 pt 2 (NEW-1) — a name TAG: a pentagon tag shape + its punch hole, the plainest literal
+// read for "named range" available in this app's own hand-drawn convention (no text label — see
+// the file header's iconography rule).
+function IconTag() { return <Icon><path d="M3 11.5 12.5 2H21v8.5L11.5 21z" /><circle cx="16.5" cy="7.5" r="1.6" fill="currentColor" stroke="none" /></Icon>; }
 function IconMore() {
   return (
     <Icon>
@@ -408,6 +412,21 @@ function CellsGroup({ ctx }) {
   );
 }
 
+// Stage 3 pt 2 (NEW-1) — a single button, not an IconDropdownButton: there is only ONE
+// destination (the Name Manager panel — components/NameManager.jsx), which itself carries the
+// "define from the current selection" fast path in its own top row, so a second menu item here
+// would just be an extra click to reach the same place.
+function NamesGroup({ ctx }) {
+  return (
+    <span style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
+      <button
+        type="button" data-testid="ribbon-names" title="Name Manager — define, rename, or jump to a named cell or range" aria-label="Name Manager"
+        aria-pressed={ctx.nameManagerOpen} onClick={ctx.onToggleNameManager} style={ribbonBtnStyle(ctx.nameManagerOpen)}
+      ><IconTag /></button>
+    </span>
+  );
+}
+
 function SortFilterGroup({ ctx }) {
   return (
     <span style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
@@ -420,7 +439,8 @@ function SortFilterGroup({ ctx }) {
 
 const GROUP_RENDER = {
   actions: ActionsGroup, fontface: FontFaceGroup, fontstyle: FontStyleGroup, color: ColorGroup,
-  alignment: AlignmentGroup, number: NumberGroup, borders: BordersGroup, cells: CellsGroup, sortfilter: SortFilterGroup,
+  alignment: AlignmentGroup, number: NumberGroup, borders: BordersGroup, cells: CellsGroup,
+  names: NamesGroup, sortfilter: SortFilterGroup,
 };
 
 /** The SINGLE overflow trigger — replaces the first cut's one-trigger-per-collapsed-group
@@ -461,6 +481,7 @@ export default function Ribbon({
   onInsertRow, onInsertColumn, onDeleteRow, onDeleteColumn,
   onSetFreezeTopRow, onSetFreezeFirstColumn, onSetFreezeAtSelection, onUnfreeze,
   onSort, onFilterToggle,
+  nameManagerOpen, onToggleNameManager,
 }) {
   const outerRef = useRef(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -483,6 +504,7 @@ export default function Ribbon({
     onInsertRow, onInsertColumn, onDeleteRow, onDeleteColumn,
     onSetFreezeTopRow, onSetFreezeFirstColumn, onSetFreezeAtSelection, onUnfreeze,
     onSort, onFilterToggle,
+    nameManagerOpen, onToggleNameManager,
   };
 
   const { visibleKeys, overflowKeys } = computeRibbonLayout(containerWidth, RIBBON_GROUPS, MORE_BUTTON_WIDTH);
