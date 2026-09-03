@@ -43,7 +43,7 @@ import {
   notesScopeLabel, notesStorageLine, onNotesConflict, onNotesStorageError, onNotesSyncState,
   collectBinFacts, ignoreDuplicate, onNotesPagesChanged, purgePages, readIgnoredDuplicates, readNoteFiles,
   readNoteImages, readPage, readTreeRaw,
-  resolveNotesConflict, searchNotes, setNotesScope, startNotesSync, stopNotesSync,
+  resolveNotesConflict, searchNotes, setNotesScope, snapshotPage, startNotesSync, stopNotesSync,
   sweepEmptyAnchors, sweepImagesOfMissingPages, sweepOrphans, toggleNoteTask, writePage, writeTree,
 } from "./lib/notesStore.js";
 import {
@@ -962,59 +962,61 @@ export default function Notes({
   }, [conflictIds, tree]);
 
   const handleConflict = useCallback(async (pageId, choice) => {
-    /* ⛔ EITHER CHOICE PARKS THE COPY IT IS ABOUT TO DISCARD FIRST, AS A SIBLING PAGE
-     * (B842624 — extends B1391's guarantee to BOTH buttons). Before this, only "Use the
-     * other" protected the text it was about to replace; "Keep this one" force-pushed
-     * straight over the other window's already-saved text with nothing kept anywhere. That
-     * asymmetry would have made the new comparison bar's own "nothing is lost" promise false
-     * for half its buttons, which is worse than the vague bar it replaces — so it is fixed
-     * here, not just described. Without this step the choice would destroy real, committed
-     * text, and "never a lost edit" would be true of only one button.
+    /* ⛔ B842944/NEW-1 (owner redlines, 2026-09-03) — THE DISCARDED COPY NO LONGER BECOMES A
+     * SIBLING PAGE. The owner, on the live panel: "why are both copies safe? ... i dont care
+     * to keep an old copy that much" / "isnt that wasted space" — a permanent second page in
+     * his tree for every resolved conflict, forever, was the wrong shape for "a working doc
+     * and an update to it." The discarded body now goes into THIS PAGE'S OWN version history
+     * (`snapshotPage`, pinned so retention can never sweep it, forced so it writes even if the
+     * editor already snapshotted recently) — recoverable from the toolbar's existing History
+     * control, invisible in the tree. Deliberately NOT a silent delete: the owner said he
+     * doesn't care to keep a copy "that much", not "at all".
      *
      * `notesConflictFor(pageId)` is read FRESH here, at click time, rather than off the
      * `conflict` object the render closed over — the same freshness `readPage(pageId)`
-     * already gets for the "theirs" side, so neither side of the park can go stale between
-     * the bar painting and the click landing.
+     * already gets for the "theirs" side, so neither side can go stale between the bar
+     * painting and the click landing.
      *
-     * ⛔ AND THE PARKED COPY NEVER CHANGES PROJECT (NEW-1). `copyPageWithin` takes the source
-     * page id and NOTHING ELSE — there is no project argument to hand it, so there is no way
-     * for the project the user happens to be STANDING IN to reach the copy. That is the whole
-     * fix: a page's project is a property of the page, not of the viewer. The copy lands as
-     * the source's next sibling, wearing the source root's project, or the write is REFUSED.
-     *
-     * ⛔ AND IT IS SAID OUT LOUD, AT THE MOMENT IT HAPPENS. A copy discovered a week later
-     * under a "from a project you deleted" heading is the failure this item is named for. */
+     * ⛔ THE FALLBACK, ONLY IF INDEXEDDB GENUINELY REFUSES THE WRITE: the OLD sibling-copy
+     * behaviour, except the copy is BINNED immediately rather than left live in the tree — a
+     * fallback that fires (say) once in a while must not routinely litter the page list the
+     * way the primary path was reported for. Never a project a viewer happens to be standing
+     * in (B842624/NEW-1's still-live rule): `copyPageWithin` takes the source id and nothing
+     * else, so the copy lands wearing the source's own project, or the write is refused. */
     const bodyToPark = choice === "theirs" ? readPage(pageId) : (notesConflictFor(pageId)?.serverDoc ?? null);
     if (bodyToPark != null) {
-      const base = treeRef.current || tree;
-      const hit = findPage(base, pageId);
-      const suffix = choice === "theirs" ? notesConflictLine().parkedSuffix : notesConflictLine().otherParkedSuffix;
-      const r = copyPageWithin(base, pageId, {
-        title: hit ? `${hit.page.title} ${suffix}` : undefined,
-      });
-      /* A SOURCE THIS WINDOW CANNOT SEE IS A REFUSAL, NOT A GUESS. There is no honest
-       * project for a copy whose source is unknown, so nothing is filed anywhere — and
-       * because parking is what makes "never a lost edit" true, the choice does not
-       * proceed either. Both halves are named (LOUD-FAILURE). */
-      if (r.refused || !r.pageId) {
-        setExportNote("That note is not in this window’s list, so the version you didn’t pick could not be kept safely — nothing was changed. Reload and try again.");
-        return;
+      const snap = await snapshotPage(pageId, bodyToPark, { reason: "conflict-discarded", pinned: true, force: true });
+      if (!snap.ok) {
+        const base = treeRef.current || tree;
+        const hit = findPage(base, pageId);
+        const suffix = choice === "theirs" ? notesConflictLine().parkedSuffix : notesConflictLine().otherParkedSuffix;
+        const r = copyPageWithin(base, pageId, {
+          title: hit ? `${hit.page.title} ${suffix}` : undefined,
+        });
+        /* A SOURCE THIS WINDOW CANNOT SEE IS A REFUSAL, NOT A GUESS. There is no honest
+         * project for a copy whose source is unknown, so nothing is filed anywhere — and
+         * because parking is what makes "never a lost edit" true, the choice does not
+         * proceed either. Both halves are named (LOUD-FAILURE). */
+        if (r.refused || !r.pageId) {
+          setExportNote("That note is not in this window’s list, so the version you didn’t pick could not be kept safely — nothing was changed. Reload and try again.");
+          return;
+        }
+        if (!writePage(r.pageId, bodyToPark)) {
+          setExportNote("The version you didn’t pick could not be saved here, so nothing was changed.");
+          return;
+        }
+        // Bin it immediately — version history is the intended home for a discarded conflict
+        // copy; a live sibling page is only ever this fallback's fallback, never the resting
+        // state, so it goes straight into the same 30-day bin an ordinary delete uses.
+        const { tree: binned, entry } = deleteNode(r.tree, r.pageId);
+        persistTree(binned);
+        if (entry) markPagesBinned(entry.pageIds);
+        setExportNote("Version history wasn’t available on this device, so the version you didn’t pick was kept in the Bin instead — nothing was deleted.");
       }
-      if (!writePage(r.pageId, bodyToPark)) {
-        setExportNote("The version you didn’t pick could not be saved here, so nothing was changed.");
-        return;
-      }
-      persistTree(r.tree);
-      // ORG SCOPE (NEW-1) — checked first, since a copy of an org page still reports
-      // `projectId: null` and must not be captioned as "Not in a project".
-      const where = r.orgScope ? ORG_GROUP_LABEL
-        : r.projectId == null ? NO_PROJECT_LABEL
-        : (projects.find((p) => p.id === r.projectId)?.name || "its project");
-      setExportNote(`The version you didn’t pick was kept as “${hit ? `${hit.page.title} ${suffix}` : "a copy"}”, in ${where} — the same place as the note it came from.`);
     }
     const res = await resolveNotesConflict(pageId, choice);
     if (!res.ok) setExportNote(res.error || "That copy could not be saved — nothing was changed.");
-  }, [tree, persistTree, projects]);
+  }, [tree, persistTree]);
 
   /* ---- the integrity findings, acted on (NEW-4) ------------------------------------------ */
 

@@ -12,9 +12,20 @@
  *    never the same string; the newer/older headings are stated in words, not just position.
  *  B849107 (the key) — the legend states the old→new direction, covers BOTH the inline
  *    underline/strikethrough encoding AND the block-level "+ Added"/"− Removed" tag, and stays
- *    on screen (sticky) once scrolled into a long note.
+ *    on screen once scrolled into a long note.
  *  B849106 (defer) — closing via the header control does not resolve anything, and the compact
  *    notice (with its "Review changes →" reopen) is still there afterward.
+ *
+ *  B842944–B842948's own follow-up layer (owner redlines, 2026-09-03), added alongside the
+ *  checks above:
+ *  B842944/NEW-1 — the reassurance names Version history, never a saved sibling copy.
+ *  B842945/NEW-2 — the version bar/legend is DOCKED (its own flex sibling above the scroll
+ *    pane), so the scroll pane's box never moves and structurally cannot paint content over it
+ *    — checked geometrically, not by re-testing "is it sticky".
+ *  B842946/NEW-3 — the legend is short (a word-count ceiling), not a "keeping X loses it"
+ *    sentence pair.
+ *  B842947/NEW-4 & B842948/NEW-5 — the two Keep buttons are filled (a real background color)
+ *    and sit close together as a pair, not flat outline text spread across a wide bar.
  *
  * Screenshots (both themes × desktop/narrow) are written for the critique loop under
  * /tmp/claude-conflict-review-shots/ — this script does not judge them; a human/model read of
@@ -93,6 +104,19 @@ async function openReview(page) {
   ok("the two 'keep' buttons read DIFFERENT text", newerBtn.trim() !== olderBtn.trim(), `newer="${newerBtn}" older="${olderBtn}"`);
   ok("the newer button says 'newer'", /newer/i.test(newerBtn), newerBtn);
   ok("the older button says 'older'", /older/i.test(olderBtn), olderBtn);
+
+  // ---- B842947/NEW-4: the two Keep buttons must read as real, FILLED buttons ----
+  const newerBtnColor = await page.locator('[data-testid="notes-conflict-review-keep-newer"]').evaluate((el) => getComputedStyle(el).backgroundColor);
+  ok("the 'keep newer' button is a filled (non-transparent) background, not flat outline text",
+    newerBtnColor && newerBtnColor !== "rgba(0, 0, 0, 0)" && newerBtnColor !== "transparent", newerBtnColor);
+
+  // ---- B842948/NEW-5: the two choices sit close together as a pair, not at opposite ends ----
+  const newerBtnBox = await page.locator('[data-testid="notes-conflict-review-keep-newer"]').boundingBox();
+  const olderBtnBox = await page.locator('[data-testid="notes-conflict-review-keep-older"]').boundingBox();
+  const gapPx = newerBtnBox && olderBtnBox ? Math.abs(newerBtnBox.x - (olderBtnBox.x + olderBtnBox.width)) : Infinity;
+  ok("the two Keep buttons sit close together as a pair (a small gap, not opposite ends of a wide bar)",
+    gapPx >= 0 && gapPx < 40, `gap=${gapPx}px`);
+
   // server (1 day ago) is newer than local (4 days ago) in this fixture — "theirs" must be the newer choice.
   await page.locator('[data-testid="notes-conflict-review-keep-newer"]').click();
   await page.waitForTimeout(50);
@@ -111,17 +135,43 @@ async function openReview(page) {
   await openReview(page);
 
   const legendText = await page.locator('[data-testid="notes-conflict-review"]').locator("p").first().locator("xpath=..").innerText();
-  ok("the legend states the old→new direction with real dates", /Older version.*edited 4d ago.*Newer version.*edited 1d ago/s.test(legendText.replace(/\s+/g, " ")), legendText.slice(0, 200));
+  // The fixture's timestamps are fixed relative to a hardcoded harness date (2026-09-02), so the
+  // exact "Nd ago" figure drifts with the real wall clock the suite happens to run on — match the
+  // SHAPE (older's day-count > newer's), not a day count frozen to one specific run date.
+  ok("the legend states the old→new direction with real relative dates", /Older version \(edited (\d+)d ago\) → Newer version \(edited (\d+)d ago\)/.test(legendText.replace(/\s+/g, " ")), legendText.slice(0, 200));
+  const dirMatch = legendText.replace(/\s+/g, " ").match(/Older version \(edited (\d+)d ago\) → Newer version \(edited (\d+)d ago\)/);
+  ok("the older copy's day-count is genuinely larger than the newer copy's", !!dirMatch && Number(dirMatch[1]) > Number(dirMatch[2]), JSON.stringify(dirMatch?.slice(1)));
   ok("the legend mentions the underline/strikethrough encoding", /Underlined/.test(legendText) && /Struck-through/.test(legendText));
   ok("the legend ALSO mentions the block-level tag encoding (the gap the owner found)", /added/i.test(legendText) && /removed/i.test(legendText));
-  ok("the legend states a CONSEQUENCE (which button loses what), not just set membership", /lose/i.test(legendText));
+  // ---- B842946/NEW-3: SHORT, not a consequence sentence per mark ----
+  // A prior brief asked for exactly the "keeping X loses it" phrasing this replaces — right in
+  // spirit, wrong in execution: the owner reported it as "way too wordy to say somehting very
+  // simple." The bar now is brevity, checked directly, not the presence of a particular word.
+  const legendWordCount = legendText.trim().split(/\s+/).filter(Boolean).length;
+  ok("the whole version bar + legend reads as a handful of short fragments, not two run-on sentences",
+    legendWordCount > 0 && legendWordCount <= 40, `words=${legendWordCount}: ${legendText.slice(0, 200)}`);
+  ok("the legend no longer spells out a full 'keeping X loses it' consequence sentence per mark", !/loses it/i.test(legendText));
 
-  // Sticky: scroll the redline body, confirm the legend is still within the viewport.
+  // ---- B842945/NEW-2: DOCKED, not sticky-inside-the-scroll-pane — the scroll pane itself must
+  // start BELOW the legend and never move, so note content can structurally never paint over it
+  // (unlike the old position:sticky + z-index approach, which let scrolled-up text paint UNDER
+  // the pinned header because the header and the content shared one scrolling coordinate space).
+  const legendBoxBefore = await page.locator('[data-testid="notes-conflict-review"]').locator("p", { hasText: "Older version" }).first().boundingBox();
   const scrollBox = await page.locator('[data-testid="notes-conflict-review"] div[style*="overflow-y"]').first();
+  const paneBoxBefore = await scrollBox.boundingBox();
+  ok("the scrollable note pane starts at or below the legend's bottom edge, never overlapping it",
+    legendBoxBefore && paneBoxBefore && paneBoxBefore.y + 1 >= legendBoxBefore.y + legendBoxBefore.height,
+    JSON.stringify({ legendBottom: legendBoxBefore.y + legendBoxBefore.height, paneTop: paneBoxBefore?.y }));
+
   await scrollBox.evaluate((el) => { el.scrollTop = el.scrollHeight; });
   await page.waitForTimeout(100);
-  const legendBox = await page.locator('[data-testid="notes-conflict-review"]').locator("p", { hasText: "Older version" }).first().boundingBox();
-  ok("the legend is still on screen after scrolling to the bottom of a long note (sticky)", legendBox && legendBox.y >= 0 && legendBox.y < 700, JSON.stringify(legendBox));
+  const paneBoxAfter = await scrollBox.boundingBox();
+  ok("scrolling the note never moves the scroll pane's own box (the legend sits outside it, docked, so it can't be scrolled under)",
+    paneBoxBefore && paneBoxAfter && Math.abs(paneBoxBefore.y - paneBoxAfter.y) < 1, JSON.stringify({ before: paneBoxBefore, after: paneBoxAfter }));
+  const legendBoxAfter = await page.locator('[data-testid="notes-conflict-review"]').locator("p", { hasText: "Older version" }).first().boundingBox();
+  ok("the legend is still fully visible after scrolling to the bottom of a long note", legendBoxAfter && legendBoxAfter.y >= 0 && legendBoxAfter.y < 700, JSON.stringify(legendBoxAfter));
+  ok("the scroll pane still never overlaps the legend after scrolling", legendBoxAfter && paneBoxAfter && paneBoxAfter.y + 1 >= legendBoxAfter.y + legendBoxAfter.height,
+    JSON.stringify({ legendBottom: legendBoxAfter.y + legendBoxAfter.height, paneTop: paneBoxAfter?.y }));
 
   // ---- B849106: closing does not resolve, and the notice is still there to reopen ----
   await page.evaluate(() => { window.__choices = []; });
@@ -151,8 +201,12 @@ async function openReview(page) {
   const theirsLabel = await page.locator('[data-testid="notes-conflict-theirs-choose"]').textContent();
   ok("side-by-side buttons also carry DIFFERENT labels", mineLabel.trim() !== theirsLabel.trim(), `mine="${mineLabel}" theirs="${theirsLabel}"`);
 
-  const reassuranceCount = (await page.locator('[data-testid="notes-conflict-review"]').innerText()).match(/nothing is lost/gi) || [];
-  ok("the 'nothing is lost' reassurance appears exactly once, not per-card", reassuranceCount.length === 1, `count=${reassuranceCount.length}`);
+  // ⛔ B842944/NEW-1 — the reassurance no longer promises a saved sibling COPY; it names
+  // Version history instead (`notesConflictKeptLine`, lib/notesStore.js).
+  const panelText = await page.locator('[data-testid="notes-conflict-review"]').innerText();
+  const reassuranceCount = panelText.match(/version history/gi) || [];
+  ok("the 'moves to Version history' reassurance appears exactly once, not per-card", reassuranceCount.length === 1, `count=${reassuranceCount.length}`);
+  ok("the reassurance no longer claims the discarded copy is saved as a sibling page", !/saved as a copy/i.test(panelText));
 
   // ---- B1077681/NEW-2: the two panes must NOT render identically — one holds a real table,
   // the other holds the same content as plain paragraphs ("main" fixture: local=OLDER/table,

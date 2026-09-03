@@ -69,9 +69,47 @@ Re-ran all six questions against the corrected fallback screenshot: passes. Re-r
 assertions against the comparable fixture) — all green, confirming the grammar fix touched only
 prose, not the underlying direction logic.
 
-## Stopping condition
+## Stopping condition (rounds 1–2)
 
 Two rounds, the second one finding and fixing a real defect the first one's own construction did
 not surface. Stopping here per the brief ("stop when the screenshot passes, not when the controls
 exist") — the screenshots pass the six questions in both themes, both widths, and the one
 fallback state that has its own distinct wording to get right.
+
+---
+
+## Round 3–4 (B842944–B842948, owner redlines, 2026-09-03)
+
+Michael marked up a screenshot of his own LIVE conflict panel — the one this document's rounds 1–2
+shipped — with five separate notes (never touched: the reference conflict itself, only reproduced
+on scratch data via `ui-audit/conflict-review-harness.html`). Full detail on each fix is in
+`ConflictReview.jsx`'s own header and the notes workspace `CLAUDE.md`'s B842944–B842948 entry; this
+section is the critique-loop record the brief asked for.
+
+**Round 3 — built the redesign, ran the six questions against `node
+ui-audit/verify-notes-conflict-review.mjs`'s fresh screenshots** (both themes × desktop/narrow,
+`/tmp/claude-conflict-review-shots/`): passed cleanly. The two Keep buttons are filled, Notes'
+own accent, labelled + timestamped as one control, sitting close together, centered; the mode
+toggle and Decide later read as real controls; the legend is two short fragments; the reassurance
+line is a quiet caption, not a banner. Q3 ("does the header ever cover a single character of the
+note?") could not be answered from the short fixture alone — it never scrolls far enough to test
+the exact failure Michael reported.
+
+**Round 4 — a targeted stress render, because Q3 is the one question a short fixture cannot
+answer.** Loaded the harness, opened the review, then injected forty extra paragraphs into the
+redline body (a one-off diagnostic script, not a committed fixture) ending in the owner's own
+reported text — `jerry@broadacrellc.com` / `M: (832) 309-0891` — and scrolled halfway down.
+Screenshot: those exact lines render in full, directly under the docked version bar, with a clean
+divider and zero overlap — the header never entered the content's paint area at any scroll
+position, which is the structural guarantee `overflow-y: auto` clipping gives a DOCKED sibling
+that `position: sticky` inside the same scrolling box never had. This is the same case that broke
+round 1–2's shipped design (sticky, inside the scroll pane) once real long-note content met it —
+worth recording so a future session does not reach for `position: sticky` here again believing it
+already "stays visible" is the same thing as "never overlaps."
+
+## Stopping condition (rounds 3–4)
+
+Two rounds again: round 3 covered the five items generically, round 4 specifically stress-tested
+the one item (NEW-2) most likely to hide a subtle regression under a short fixture. Both passed;
+stopping per the same rule — the screenshots pass, including the one that reproduces his exact
+reported text scrolling cleanly under the header.
