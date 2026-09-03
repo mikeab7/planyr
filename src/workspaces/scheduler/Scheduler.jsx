@@ -11,7 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ModuleLoader from "../../shared/ui/ModuleLoader.jsx";
 import {
-  parseNavState, deriveCurrentProject, findBySiteId, needsScheduleCarryIn,
+  parseNavState, deriveCurrentProject, findBySiteId, findAllBySiteId, needsScheduleCarryIn,
   dashboardNavActions, shouldShowLinkPanel, shouldAdoptLinkedSiteIntoRoute, isPickShowing,
   isGridMismatched, newProjectAction,
 } from "./lib/navState.js";
@@ -322,12 +322,27 @@ export default function Scheduler({
   //
   // ⛔ B881666 — `id` may name either one of THIS module's own schedules or a shared-header
   // switcher ROW that is a site-registry entry for a linked project (unionProjectLists prefers
-  // that richer, timestamped row over this module's own bridged copy — see its own header). A
-  // registry row's id is the site GROUP id, not a schedule id, so resolve it back to the linked
-  // schedule before posting into the iframe (which only knows its own schedule ids) or latching
-  // `explicitPickRef` (which `isPickShowing` compares against the iframe's OWN reported activeId).
+  // that richer, timestamped row over this module's own bridged copy when exactly ONE schedule
+  // covers it — see its own header). A registry row's id is the site GROUP id, not a schedule id,
+  // so resolve it back to the linked schedule before posting into the iframe (which only knows
+  // its own schedule ids) or latching `explicitPickRef` (which `isPickShowing` compares against
+  // the iframe's OWN reported activeId).
+  //
+  // ⛔ B1112449/NEW-2 — a bare site id is ambiguous once a site carries MULTIPLE linked schedules
+  // (unionProjectLists now gives each of those its own row with its own real schedule id, so the
+  // switcher itself never produces this case anymore — but a bare site id can still reach here
+  // from any other caller). `.find()`'s old "always the first-created" answer would silently snap
+  // an already-active OTHER schedule of the same site back to the first one on every unrelated
+  // re-render path that happens to call this with the site id — the exact "switching between two
+  // schedules of the same site doesn't stick" failure. Prefer whichever of the site's schedules is
+  // ALREADY active over always picking the first, so a genuinely ambiguous id is at least a
+  // STABLE (never-regressing) choice rather than an arbitrary one.
   const selectSchedule = (id) => {
-    const sch = projects.find((p) => p && p.id === id) || projects.find((p) => p && p.linkedSiteId === id);
+    let sch = projects.find((p) => p && p.id === id);
+    if (!sch) {
+      const linked = findAllBySiteId(projects, id);
+      sch = linked.find((p) => p.id === activeId) || linked[0] || null;
+    }
     if (!sch) return; // an id this module cannot resolve at all — nothing to switch to
     dashboardIntentRef.current = false; // a deliberate pick supersedes a pending Dashboard press
     explicitPickRef.current = sch.id; // isPickShowing() lets this override the route-derived empty state
@@ -367,6 +382,16 @@ export default function Scheduler({
   const routedSite = projectId != null ? (siteProjects.find((p) => p.id === projectId) || null) : null;
   const routedSiteName = routedSite ? routedSite.name : null;
   const linkedSchedule = findBySiteId(projects, projectId);
+  // B1112450/NEW-3 — when the routed site carries MORE than one linked schedule (B1080547), the
+  // crumb must name the ACTIVE one, not always the first-linked. `linkedSchedule` above (the
+  // FIRST match) is exactly what the breadcrumb used to show regardless of which schedule was
+  // actually on screen — the "crumb says Richfield, grid shows Richfield (2)" ambiguity B851
+  // exists to prevent, reintroduced here by B1080547 shipping without this. A site with exactly
+  // one linked schedule is unaffected: `activeLinkedSchedule` is just `linkedSchedule` again.
+  const linkedSchedules = findAllBySiteId(projects, projectId);
+  const activeLinkedSchedule = linkedSchedules.length > 1
+    ? (linkedSchedules.find((p) => p.id === activeId) || linkedSchedule)
+    : linkedSchedule;
 
   // The breadcrumb's "current project". When the route carries a project, show THAT project — the
   // schedule linked to it, or its name as last-known-good during the ~2 s iframe boot — never the
@@ -389,7 +414,7 @@ export default function Scheduler({
   if (pickShowing) {
     currentProject = deriveCurrentProject(projects, activeId, section);
   } else if (projectId != null) {
-    currentProject = linkedSchedule || (routedSiteName ? { id: projectId, name: routedSiteName } : null);
+    currentProject = activeLinkedSchedule || (routedSiteName ? { id: projectId, name: routedSiteName } : null);
   } else if (section === "reports") {
     currentProject = null; // Dashboard with no routed project: none is current
   } else {

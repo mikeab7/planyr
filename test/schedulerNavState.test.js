@@ -375,8 +375,65 @@ describe("Scheduler.jsx — the ROUTE outranks the embed's section", () => {
 
   // NEW-2/B1080546 — Duplicate is reachable from the shell breadcrumb (the in-iframe project list
   // it used to depend on is hidden whenever the app runs inside the Planyr shell).
+  //
+  // ⛔ B1112448/NEW-1 — THIS ASSERTION ALONE WAS PROVEN INADEQUATE (2026-09-03): it stayed green
+  // for the entire time the Duplicate row was 100% DEAD in production, because a source regex
+  // against Scheduler.jsx cannot see what happens to the prop one layer up, in AppHeader.jsx.
+  // AppHeader.jsx destructured only `onRenameProject`/`onDeleteProject` and forwarded only those
+  // two into <ProjectBreadcrumb>, so ProjectBreadcrumb's own `canDuplicate = !!onDuplicateProject`
+  // was always false no matter what this line posts. Measured live on planyr.io: the switcher
+  // kebab menu read `["Rename","Delete"]`, `[data-testid="project-duplicate"]` absent from the
+  // DOM. Kept here (Scheduler.jsx really must still post the right message), but it is NOT the
+  // guard against a repeat of this class of bug — that is `e2e/scheduler-duplicate-menu.spec.js`,
+  // which mounts the REAL Scheduler → AppHeader → ProjectBreadcrumb chain in a real browser and
+  // asserts the menu item actually renders. Red-proofed there by reverting AppHeader.jsx's forward.
   it("onDuplicateProject is wired to the embedded app's nav-duplicate bridge", () => {
     expect(SRC).toMatch(/onDuplicateProject=\{\(id\) => post\(\{ type: "planar:nav-duplicate", id \}\)\}/);
+  });
+
+  // The other half of the chain this spec CAN see without a browser: AppHeader.jsx must actually
+  // receive and forward the prop. This does not replace the e2e render test above (a source guard
+  // proves the code SAYS the right thing, not that the DOM ends up right — the exact gap that let
+  // the bug ship), but it fails fast in the Node-only suite on a repeat of the identical mistake.
+  it("AppHeader.jsx destructures onDuplicateProject and forwards it into <ProjectBreadcrumb>", () => {
+    const headerSrc = readFileSync(fileURLToPath(new URL("../src/shared/ui/AppHeader.jsx", import.meta.url)), "utf8");
+    expect(headerSrc).toMatch(/^\s*onDuplicateProject,\s*$/m);
+    const i = headerSrc.indexOf("<ProjectBreadcrumb");
+    expect(i).toBeGreaterThan(-1);
+    const block = headerSrc.slice(i, headerSrc.indexOf("/>", i));
+    expect(block).toMatch(/onDuplicateProject=\{onDuplicateProject\}/);
+  });
+});
+
+/* B1112449/NEW-2 — the switcher must never collapse a site's MULTIPLE linked schedules down to
+ * one unreachable row, and picking a schedule directly (never through the ambiguous site-id
+ * fallback) must resolve unambiguously. */
+describe("selectSchedule — a bare site id resolves definitely, not to always-the-first (B1112449/NEW-2)", () => {
+  const SRC = readFileSync(fileURLToPath(new URL("../src/workspaces/scheduler/Scheduler.jsx", import.meta.url)), "utf8");
+  it("uses findAllBySiteId + prefers the already-active schedule over the old always-first .find()", () => {
+    const i = SRC.indexOf("const selectSchedule = (id) => {");
+    expect(i).toBeGreaterThan(-1);
+    const block = SRC.slice(i, SRC.indexOf("};", i));
+    expect(block).toMatch(/findAllBySiteId\(projects,\s*id\)/);
+    expect(block).toMatch(/linked\.find\(\(p\) => p\.id === activeId\)/);
+    // The pre-fix shape — a bare `.find(p => p.linkedSiteId === id)` with no preference for the
+    // already-active schedule — must not survive as the resolution path.
+    expect(SRC).not.toMatch(/projects\.find\(\(p\) => p && p\.linkedSiteId === id\)/);
+  });
+});
+
+/* B1112450/NEW-3 — the breadcrumb must name the ACTIVE schedule once a site has more than one,
+ * never always the first-linked (the same "crumb says one thing, grid shows another" ambiguity
+ * B851 exists to prevent). A site with exactly one linked schedule is unaffected. */
+describe("the breadcrumb's currentProject follows the ACTIVE schedule on a multi-schedule site", () => {
+  const SRC = readFileSync(fileURLToPath(new URL("../src/workspaces/scheduler/Scheduler.jsx", import.meta.url)), "utf8");
+  it("computes activeLinkedSchedule from the full linked set, preferring activeId, and feeds it to currentProject", () => {
+    const i = SRC.indexOf("const linkedSchedules = findAllBySiteId(projects, projectId);");
+    expect(i).toBeGreaterThan(-1);
+    const block = SRC.slice(i, i + 260);
+    expect(block).toMatch(/linkedSchedules\.length > 1/);
+    expect(block).toMatch(/linkedSchedules\.find\(\(p\) => p\.id === activeId\)/);
+    expect(SRC).toMatch(/currentProject = activeLinkedSchedule \|\| \(routedSiteName \? \{ id: projectId, name: routedSiteName \} : null\);/);
   });
 });
 
