@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-03 @ `4636072a` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-03 @ `5efd0760` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_654 source files mapped._
+_655 source files mapped._
 
 ## infra
 
@@ -550,6 +550,8 @@ _654 source files mapped._
   - _exports_: `default (PanelChrome)`
 - **`src/shared/ui/persistedSet.js`** — Tiny localStorage Set-of-ids persistence (loadIdSet/saveIdSet/pruneSet) for remembered UI state like Library tree expansion; corrupt payloads read empty + clear
   - _exports_: `loadIdSet`, `pruneSet`, `saveIdSet`
+- **`src/shared/ui/programmaticScroll.js`** — Marks a scrollTop/scrollLeft write as app-initiated so a scroll-dismiss listener (ContextMenu) can tell it apart from a real user scroll without guessing from magnitude or timing
+  - _exports_: `consumeProgrammaticScroll`, `markProgrammaticScroll`
 - **`src/shared/ui/ProjectBreadcrumb.jsx`** — Row-1 Dashboard/Project breadcrumb + switcher dropdown: search, recents, New project, inline rename/delete kebab, at-risk-save surfacing, cloud-cache warm
   - _exports_: `CRUMB_MIN_W`, `default (ProjectBreadcrumb)`
 - **`src/shared/ui/radius.js`** — the ONE corner-radius scale (pill/sm/md/lg) + `nestedIn`, the concentric rule for a control inside a rounded surface; CSS mirror is `--radius-*` in `index.css`

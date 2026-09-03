@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { placeContextMenu } from "./contextMenuPlacement.js";
+import { consumeProgrammaticScroll } from "./programmaticScroll.js";
 
 /**
  * ContextMenu — the ONE shared right-click / context menu primitive (B915).
@@ -114,10 +115,27 @@ export default function ContextMenu({
   // switch. This primitive is reused far beyond the breadcrumb (map pins, canvas elements,
   // parcels, markups, the Library folder tree, Doc Review markup objects), so the same trap was
   // live everywhere a context menu is left open across a tab switch, not just here.
+  //
+  // ⛔ B1107632 — `scroll` used to arm a frame LATE, on purpose (see B1076480). Opening this menu
+  // very often selects the row/header/cell that was right-clicked (SheetView's openRowMenu/
+  // openColMenu/openCellMenu all call setSelRange in the same handler), and a SEPARATE "keep the
+  // active cell fully on screen" layout effect elsewhere can react to that same selection change
+  // by writing `el.scrollTop`/`el.scrollLeft` directly — a real, deliberate app scroll, not user
+  // input. Chrome does not dispatch the resulting native `scroll` event synchronously with that
+  // write; it lands a frame or so later. The one-frame-late arm exploited that as an IMPLICIT
+  // ordering (stress-tested 1x-40x CPU throttle, up to 10,000 rows, never broke) — but it is a
+  // timing coincidence, not a mechanism: nothing guarantees scroll dispatch stays sequenced
+  // behind rAF forever, across engines or future effect-ordering changes. Replaced with an
+  // EXPLICIT guard: `programmaticScroll.js` lets the writer (SheetView's own layout effect) mark
+  // an element's scroll as app-initiated right before the write, and this listener — now armed
+  // IMMEDIATELY, no delay — consumes that mark instead of dismissing. A genuine user scroll never
+  // carries a mark, so it always dismisses; an unmarked scroll on any OTHER element (a real page
+  // scroll, a different panel) also always dismisses, exactly as before.
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); onCloseRef.current?.(); } };
     const onScroll = (e) => {
       if (panelRef.current && e.target instanceof Node && panelRef.current.contains(e.target)) return;
+      if (consumeProgrammaticScroll(e.target)) return; // the app's own adjustment, not a user gesture
       onCloseRef.current?.();
     };
     const onResize = () => onCloseRef.current?.();
@@ -125,29 +143,10 @@ export default function ContextMenu({
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("resize", onResize);
     window.addEventListener("hashchange", onNav);
-    // ⛔ B1076480 — `scroll` is armed a frame LATE, on purpose. Opening this menu very often
-    // selects the row/header/cell that was right-clicked (SheetView's openRowMenu/openColMenu/
-    // openCellMenu all call setSelRange in the same handler), and a SEPARATE "keep the active
-    // cell fully on screen" layout effect elsewhere can react to that same selection change by
-    // nudging the scroll container a few px — a real, deliberate scroll, not user input. Chrome
-    // does not dispatch the resulting native `scroll` event synchronously with the `scrollTop`
-    // write; it lands a frame or so later — which, measured live, landed AFTER this effect used
-    // to arm its listener on mount, so the menu closed itself within ~10-15ms of opening with no
-    // way to tell it apart from "the click did nothing." Reproduced on the Model sheet: right-
-    // click the last PARTIALLY visible row/column header (any grid tall/wide enough to scroll —
-    // an everyday interaction, not a corner case) opened and then immediately vanished the menu.
-    // A `scroll` from a genuine user action (wheel, scrollbar drag, keyboard) always arrives well
-    // after this delay, so dismissal for a REAL scroll is unaffected — only the opening gesture's
-    // own synchronous side effect is exempted.
-    let scrollArmed = false;
-    const raf = requestAnimationFrame(() => {
-      scrollArmed = true;
-      window.addEventListener("scroll", onScroll, true); // capture: catch a scroll in any container
-    });
+    window.addEventListener("scroll", onScroll, true); // capture: catch a scroll in any container
     return () => {
-      cancelAnimationFrame(raf);
       window.removeEventListener("keydown", onKey, true);
-      if (scrollArmed) window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onResize);
       window.removeEventListener("hashchange", onNav);
     };

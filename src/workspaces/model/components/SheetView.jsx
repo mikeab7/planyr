@@ -51,6 +51,7 @@ import { RADIUS } from "../../../shared/ui/radius.js";
 // Same literal-duplicate pattern controls.jsx's own RADIUS already uses for the same reason.
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { menuPanelStyle } from "../../../shared/ui/controls.jsx";
+import { markProgrammaticScroll } from "../../../shared/ui/programmaticScroll.js";
 import ContextMenu from "./ContextMenu.jsx";
 
 // B1007281 — AutoFilter (Sort & Filter). One column header's own filter trigger + checkbox
@@ -341,6 +342,12 @@ export default function SheetView({
   // visible by construction, so this only ever needs to move the scrolling body. Without this,
   // arrow-key navigation on a 1000-row sheet could move the logical selection somewhere the
   // user can no longer see (Stage 1 grew the sheet enough that this is no longer a corner case).
+  //
+  // ⛔ B1107632 — right-clicking a cell/row/column can ALSO land here (openRowMenu/openColMenu/
+  // openCellMenu call setSelRange in the same handler that opens the ContextMenu), so a write
+  // here is marked via `markProgrammaticScroll` right before it happens — that's what lets
+  // ContextMenu's scroll-dismiss listener tell this deliberate, app-initiated nudge apart from a
+  // real user scroll without racing it. See shared/ui/programmaticScroll.js for why.
   useLayoutEffect(() => {
     const el = outerRef.current;
     if (!el || edit) return;
@@ -350,14 +357,14 @@ export default function SheetView({
     if (activeR >= freezeRows) {
       const cellTop = headerH + rowOffsets[activeR], cellBottom = headerH + rowOffsets[activeR + 1];
       const frozenBandBottom = el.scrollTop + headerH + rowOffsets[freezeRows];
-      if (cellTop < frozenBandBottom) el.scrollTop = cellTop - headerH - rowOffsets[freezeRows];
-      else if (cellBottom > el.scrollTop + el.clientHeight) el.scrollTop = cellBottom - el.clientHeight;
+      if (cellTop < frozenBandBottom) { markProgrammaticScroll(el); el.scrollTop = cellTop - headerH - rowOffsets[freezeRows]; }
+      else if (cellBottom > el.scrollTop + el.clientHeight) { markProgrammaticScroll(el); el.scrollTop = cellBottom - el.clientHeight; }
     }
     if (activeC >= freezeCols) {
       const cellLeft = colOffsets[activeC], cellRight = colOffsets[activeC + 1];
       const frozenBandRight = el.scrollLeft + colOffsets[freezeCols];
-      if (cellLeft < frozenBandRight) el.scrollLeft = cellLeft - colOffsets[freezeCols];
-      else if (cellRight > el.scrollLeft + el.clientWidth) el.scrollLeft = cellRight - el.clientWidth;
+      if (cellLeft < frozenBandRight) { markProgrammaticScroll(el); el.scrollLeft = cellLeft - colOffsets[freezeCols]; }
+      else if (cellRight > el.scrollLeft + el.clientWidth) { markProgrammaticScroll(el); el.scrollLeft = cellRight - el.clientWidth; }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeR, activeC]);
