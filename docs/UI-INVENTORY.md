@@ -186,63 +186,63 @@ by construction (radius 0 opts out of that check's own candidate pool).
 
 **Map landing page (no project selected) — light:**
 
-- "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
+- "Settings" sits 6px from "Sign in or create an account" — padding "0px" vs "0px 12px".
 - "Click parcels on the map to select them, then start a plan from the selection" sits 0px from "More ways to start a plan" — padding "0px 12px" vs "0px".
 - "Collapse the sites panel" sits 4px from "Sites1" — padding "1px 6px" vs "0px 8px".
 - "Collapse" sits 0px from "Reorder the Pursuit group" — height 23px vs 17px, padding "4px 4px 4px 12px" vs "1px 6px".
 
 **Map landing page (no project selected) — dark:**
 
-- "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
+- "Settings" sits 6px from "Sign in or create an account" — padding "0px" vs "0px 12px".
 - "Click parcels on the map to select them, then start a plan from the selection" sits 0px from "More ways to start a plan" — padding "0px 12px" vs "0px".
 - "Collapse the sites panel" sits 4px from "Sites1" — padding "1px 6px" vs "0px 8px".
 - "Collapse" sits 0px from "Reorder the Pursuit group" — height 23px vs 17px, padding "4px 4px 4px 12px" vs "1px 6px".
 
 **Map landing page (comp mode) — light:**
 
-- "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
+- "Settings" sits 6px from "Sign in or create an account" — padding "0px" vs "0px 12px".
 - "Click the map to place a comp on the map" sits 0px from "More ways to anchor a comp" — padding "0px 12px" vs "0px".
 - "Collapse the sites panel" sits 4px from "Sites1" — padding "1px 6px" vs "0px 8px".
 
 **Map landing page (comp mode) — dark:**
 
-- "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
+- "Settings" sits 6px from "Sign in or create an account" — padding "0px" vs "0px 12px".
 - "Click the map to place a comp on the map" sits 0px from "More ways to anchor a comp" — padding "0px 12px" vs "0px".
 - "Collapse the sites panel" sits 4px from "Sites1" — padding "1px 6px" vs "0px 8px".
 
 **Map landing page (selecting parcels) — light:**
 
-- "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
+- "Settings" sits 6px from "Sign in or create an account" — padding "0px" vs "0px 12px".
 - "Search for an address or place" sits 198px from "Cancel" — height 42px vs 30px, padding "0px 10px" vs "0px 12px" (divider-separated).
 - "Collapse the sites panel" sits 4px from "Sites1" — padding "1px 6px" vs "0px 8px".
 - "Collapse" sits 0px from "Reorder the Pursuit group" — height 23px vs 17px, padding "4px 4px 4px 12px" vs "1px 6px".
 
 **Map landing page (selecting parcels) — dark:**
 
-- "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
+- "Settings" sits 6px from "Sign in or create an account" — padding "0px" vs "0px 12px".
 - "Search for an address or place" sits 198px from "Cancel" — height 42px vs 30px, padding "0px 10px" vs "0px 12px" (divider-separated).
 - "Collapse the sites panel" sits 4px from "Sites1" — padding "1px 6px" vs "0px 8px".
 - "Collapse" sits 0px from "Reorder the Pursuit group" — height 23px vs 17px, padding "4px 4px 4px 12px" vs "1px 6px".
 
 **App header — light:**
 
-- "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
+- "Settings" sits 6px from "Sign in or create an account" — padding "0px" vs "0px 12px".
 - "File — export a PNG or print a PDF" sits 134px from "Zoom to fit" — padding "6px 11px" vs "0px" (divider-separated).
 
 **App header — dark:**
 
-- "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
+- "Settings" sits 6px from "Sign in or create an account" — padding "0px" vs "0px 12px".
 - "File — export a PNG or print a PDF" sits 134px from "Zoom to fit" — padding "6px 11px" vs "0px" (divider-separated).
 
 **Tool rail — light:**
 
-- "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
+- "Settings" sits 6px from "Sign in or create an account" — padding "0px" vs "0px 12px".
 - "File — export a PNG or print a PDF" sits 134px from "Zoom to fit" — padding "6px 11px" vs "0px" (divider-separated).
 - "What's shown on this drawing — hide groups temporarily, plus grid & snap" sits 10px from "Layers — map data layers (flood, utilities, parcels, aerial…)" — height 31px vs 32px.
 
 **Tool rail — dark:**
 
-- "Settings" sits 6px from "Cloud sync isn't set up — your work is saved on this device only" — padding "0px" vs "0px 12px".
+- "Settings" sits 6px from "Sign in or create an account" — padding "0px" vs "0px 12px".
 - "File — export a PNG or print a PDF" sits 134px from "Zoom to fit" — padding "6px 11px" vs "0px" (divider-separated).
 - "What's shown on this drawing — hide groups temporarily, plus grid & snap" sits 10px from "Layers — map data layers (flood, utilities, parcels, aerial…)" — height 31px vs 32px.
 
@@ -307,8 +307,8 @@ look aligned because they float over the same surface.
 | 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:866:            title={onDashboard ? "Dashboard: all projects" : undefined} |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Choose a project or organization ×1 | src/shared/ui/ProjectBreadcrumb.jsx:627:        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"} |
-| 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:144:          title="Cloud sync isn't set up — your work is saved on this device only" |
-| 999px | 20px | 12px | 800 | `rgb(215, 221, 229)` | `0px none rgb(53, 59, 73)` | ⊘ ×1 | unattributed (label too short to search) |
+| 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:195:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>}> |
+| 999px | 20px | 10.5px | 800 | `rgb(234, 238, 243)` | `0px none rgb(27, 30, 38)` | › ×1 | unattributed (label too short to search) |
 | 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+484 more matches, best-effort) |
 | 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1289:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
 | 0px | 18px | 12px | 400 | `rgba(255, 255, 255, 0.8)` | `0px none rgb(51, 51, 51)` | 500 mi ×1 | unattributed (no source match — best-effort text search) |
@@ -341,8 +341,8 @@ look aligned because they float over the same surface.
 | 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:866:            title={onDashboard ? "Dashboard: all projects" : undefined} |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Choose a project or organization ×1 | src/shared/ui/ProjectBreadcrumb.jsx:627:        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"} |
-| 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:144:          title="Cloud sync isn't set up — your work is saved on this device only" |
-| 999px | 20px | 12px | 800 | `rgb(38, 42, 51)` | `0px none rgb(166, 173, 186)` | ⊘ ×1 | unattributed (label too short to search) |
+| 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:195:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>}> |
+| 999px | 20px | 10.5px | 800 | `rgb(17, 19, 25)` | `0px none rgb(236, 239, 244)` | › ×1 | unattributed (label too short to search) |
 | 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+484 more matches, best-effort) |
 | 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(236, 239, 244)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1289:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
 | 0px | 18px | 12px | 400 | `rgba(255, 255, 255, 0.8)` | `0px none rgb(51, 51, 51)` | 500 mi ×1 | unattributed (no source match — best-effort text search) |
@@ -381,8 +381,8 @@ look aligned because they float over the same surface.
 | 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:866:            title={onDashboard ? "Dashboard: all projects" : undefined} |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Choose a project or organization ×1 | src/shared/ui/ProjectBreadcrumb.jsx:627:        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"} |
-| 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:144:          title="Cloud sync isn't set up — your work is saved on this device only" |
-| 999px | 20px | 12px | 800 | `rgb(215, 221, 229)` | `0px none rgb(53, 59, 73)` | ⊘ ×1 | unattributed (label too short to search) |
+| 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:195:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>}> |
+| 999px | 20px | 10.5px | 800 | `rgb(234, 238, 243)` | `0px none rgb(27, 30, 38)` | › ×1 | unattributed (label too short to search) |
 | 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+484 more matches, best-effort) |
 | 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1289:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
 | 0px | 18px | 12px | 400 | `rgba(255, 255, 255, 0.8)` | `0px none rgb(51, 51, 51)` | 500 mi ×1 | unattributed (no source match — best-effort text search) |
@@ -414,8 +414,8 @@ look aligned because they float over the same surface.
 | 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:866:            title={onDashboard ? "Dashboard: all projects" : undefined} |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Choose a project or organization ×1 | src/shared/ui/ProjectBreadcrumb.jsx:627:        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"} |
-| 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:144:          title="Cloud sync isn't set up — your work is saved on this device only" |
-| 999px | 20px | 12px | 800 | `rgb(38, 42, 51)` | `0px none rgb(166, 173, 186)` | ⊘ ×1 | unattributed (label too short to search) |
+| 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:195:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>}> |
+| 999px | 20px | 10.5px | 800 | `rgb(17, 19, 25)` | `0px none rgb(236, 239, 244)` | › ×1 | unattributed (label too short to search) |
 | 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+484 more matches, best-effort) |
 | 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(236, 239, 244)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1289:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
 | 0px | 18px | 12px | 400 | `rgba(255, 255, 255, 0.8)` | `0px none rgb(51, 51, 51)` | 500 mi ×1 | unattributed (no source match — best-effort text search) |
@@ -451,8 +451,8 @@ look aligned because they float over the same surface.
 | 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:866:            title={onDashboard ? "Dashboard: all projects" : undefined} |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Choose a project or organization ×1 | src/shared/ui/ProjectBreadcrumb.jsx:627:        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"} |
-| 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:144:          title="Cloud sync isn't set up — your work is saved on this device only" |
-| 999px | 20px | 12px | 800 | `rgb(215, 221, 229)` | `0px none rgb(53, 59, 73)` | ⊘ ×1 | unattributed (label too short to search) |
+| 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:195:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>}> |
+| 999px | 20px | 10.5px | 800 | `rgb(234, 238, 243)` | `0px none rgb(27, 30, 38)` | › ×1 | unattributed (label too short to search) |
 | 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+484 more matches, best-effort) |
 | 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1289:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
 | 0px | 18px | 12px | 400 | `rgba(255, 255, 255, 0.8)` | `0px none rgb(51, 51, 51)` | 500 mi ×1 | unattributed (no source match — best-effort text search) |
@@ -485,8 +485,8 @@ look aligned because they float over the same surface.
 | 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/AppHeader.jsx:866:            title={onDashboard ? "Dashboard: all projects" : undefined} |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Choose a project or organization ×1 | src/shared/ui/ProjectBreadcrumb.jsx:627:        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"} |
-| 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:144:          title="Cloud sync isn't set up — your work is saved on this device only" |
-| 999px | 20px | 12px | 800 | `rgb(38, 42, 51)` | `0px none rgb(166, 173, 186)` | ⊘ ×1 | unattributed (label too short to search) |
+| 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:195:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>}> |
+| 999px | 20px | 10.5px | 800 | `rgb(17, 19, 25)` | `0px none rgb(236, 239, 244)` | › ×1 | unattributed (label too short to search) |
 | 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+484 more matches, best-effort) |
 | 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(236, 239, 244)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1289:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
 | 0px | 18px | 12px | 400 | `rgba(255, 255, 255, 0.8)` | `0px none rgb(51, 51, 51)` | 500 mi ×1 | unattributed (no source match — best-effort text search) |
@@ -524,7 +524,7 @@ look aligned because they float over the same surface.
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Switch project ×1 | src/shared/ui/ProjectBreadcrumb.jsx:627:        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"} (+1 more match, best-effort) |
 | 8px | 30px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Switch or rename plan ×1 | src/workspaces/site-planner/SitePlanner.jsx:19042:          "Switch project sits 10.7px from Switch or rename plan — height 26px vs 24px" sibling (+1 more match, best-effort) |
 | 8px | 30px | 12px | 400 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Cloud sync: Saved on this device ×1 | unattributed (no source match — best-effort text search) |
-| 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:144:          title="Cloud sync isn't set up — your work is saved on this device only" |
+| 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:195:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>}> |
 | 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+484 more matches, best-effort) |
 | 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(215, 221, 229)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:19189:            title="File — export a PNG or print a PDF" |
 | 8px | 26px | 12px | 500 | `rgba(0, 0, 0, 0.06)` | `1px solid rgba(0, 0, 0, 0)` | Zoom to fit ×1 | src/workspaces/site-planner/MapFinder.jsx:218: * "+ Select parcels", "Turn all 1 layer off", "Zoom to fit", "Export to Google Earth (KMZ)" — none (+5 more matches, best-effort) |
@@ -542,7 +542,7 @@ look aligned because they float over the same surface.
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | Switch project ×1 | src/shared/ui/ProjectBreadcrumb.jsx:627:        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"} (+1 more match, best-effort) |
 | 8px | 30px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | Switch or rename plan ×1 | src/workspaces/site-planner/SitePlanner.jsx:19042:          "Switch project sits 10.7px from Switch or rename plan — height 26px vs 24px" sibling (+1 more match, best-effort) |
 | 8px | 30px | 12px | 400 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Cloud sync: Saved on this device ×1 | unattributed (no source match — best-effort text search) |
-| 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Cloud sync isn't set up — your work is saved on this device only ×1 | src/app/AccountControl.jsx:144:          title="Cloud sync isn't set up — your work is saved on this device only" |
+| 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:195:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>}> |
 | 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+484 more matches, best-effort) |
 | 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(38, 42, 51)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:19189:            title="File — export a PNG or print a PDF" |
 | 8px | 26px | 12px | 500 | `rgba(255, 255, 255, 0.09)` | `1px solid rgba(0, 0, 0, 0)` | Zoom to fit ×1 | src/workspaces/site-planner/MapFinder.jsx:218: * "+ Select parcels", "Turn all 1 layer off", "Zoom to fit", "Export to Google Earth (KMZ)" — none (+5 more matches, best-effort) |
