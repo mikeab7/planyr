@@ -1204,6 +1204,122 @@ test.describe("Model workspace — Stage 3 (multi-sheet workbooks, tab strip)", 
     await expect(cell(page, 0, 0)).toHaveText("12345");
     await expect(cell(page, 0, 1)).toHaveText("24690");
   });
+
+  // ⛔ B1117408 REGRESSION (owner brief 2026-09-03) — typed cells were written to the PREVIOUSLY
+  // active sheet after a plain tab-strip switch, never the one now on screen. Repro: be on
+  // Sheet2, click the Sheet1 tab, click D1, type 999, Enter — the write committed against
+  // Sheet2 (the OLD sheet), leaving Sheet1's column D empty. Every check below reads BOTH
+  // sheets explicitly (the target sheet has the value AND the other sheet does not) — a check
+  // that only confirms "some cell changed" passes on the broken behavior, which is exactly the
+  // trap the report calls out.
+  test.describe("NEW-1 — a typed cell lands on the sheet CURRENTLY ON SCREEN, never the one you just left", () => {
+    test("Sheet2 → Sheet1: typing after a plain tab click lands on Sheet1, not Sheet2 (the reported direction)", async ({ page }) => {
+      const id = "e2e-newone-s2-to-s1";
+      await seedProject(page, id);
+      await page.goto(`/#/project/${id}/model`);
+      await page.getByTestId("model-add-sheet").click(); // Sheet2, now active
+      await tab(page, 0).click(); // switch back to Sheet1 via a PLAIN tab click
+      await cell(page, 0, 3).click(); // D1
+      await typeAndEnter(page, "999");
+      await expect(cell(page, 0, 3)).toHaveText("999"); // Sheet1 (currently on screen) got it
+      await tab(page, 1).click(); // Sheet2
+      await expect(cell(page, 0, 3)).toHaveText(""); // Sheet2's D1 must stay untouched
+    });
+
+    test("Sheet1 → Sheet2: the same fix holds in the other direction", async ({ page }) => {
+      const id = "e2e-newone-s1-to-s2";
+      await seedProject(page, id);
+      await page.goto(`/#/project/${id}/model`);
+      await cell(page, 0, 0).click(); await typeAndEnter(page, "1"); // Sheet1!A1 — a real edit, so
+      // workbook's own last-committed sheet is Sheet1 before the switch below.
+      await page.getByTestId("model-add-sheet").click(); // Sheet2, now active
+      await tab(page, 0).click(); // back to Sheet1
+      await tab(page, 1).click(); // and back to Sheet2 via a PLAIN click (no content edit in between)
+      await cell(page, 0, 3).click(); // D1
+      await typeAndEnter(page, "999");
+      await expect(cell(page, 0, 3)).toHaveText("999"); // Sheet2 (on screen) got it
+      await tab(page, 0).click(); // Sheet1
+      await expect(cell(page, 0, 3)).toHaveText(""); // Sheet1's D1 must stay untouched
+    });
+
+    test("a formula typed after switching evaluates in the ON-SCREEN sheet's own context — the reported =A1*2 case", async ({ page }) => {
+      const id = "e2e-newone-formula-context";
+      await seedProject(page, id);
+      await page.goto(`/#/project/${id}/model`);
+      await cell(page, 0, 0).click(); await typeAndEnter(page, "10"); // Sheet1!A1 = 10
+      await page.getByTestId("model-add-sheet").click(); // Sheet2
+      await cell(page, 0, 0).click(); await typeAndEnter(page, "20"); // Sheet2!A1 = 20
+      await tab(page, 0).click(); // switch to Sheet1 via a plain click
+      await cell(page, 1, 0).click(); // A2
+      await typeAndEnter(page, "=A1*2");
+      await expect(cell(page, 1, 0)).toHaveText("20"); // Sheet1!A1*2 == 10*2, NOT Sheet2's 20*2=40
+      await tab(page, 1).click(); // confirm Sheet2 never received the formula at all
+      await expect(cell(page, 1, 0)).toHaveText("");
+    });
+
+    test("holds with three sheets: a commit always targets whichever tab is on screen", async ({ page }) => {
+      const id = "e2e-newone-three-sheets";
+      await seedProject(page, id);
+      await page.goto(`/#/project/${id}/model`);
+      await page.getByTestId("model-add-sheet").click(); // Sheet2
+      await page.getByTestId("model-add-sheet").click(); // Sheet3, now active
+      await tab(page, 1).click(); // switch to Sheet2 via a plain click
+      await cell(page, 0, 0).click();
+      await typeAndEnter(page, "42");
+      await expect(cell(page, 0, 0)).toHaveText("42"); // Sheet2 (on screen) got it
+      await tab(page, 0).click();
+      await expect(cell(page, 0, 0)).toHaveText(""); // Sheet1 untouched
+      await tab(page, 2).click();
+      await expect(cell(page, 0, 0)).toHaveText(""); // Sheet3 untouched
+    });
+
+    test("Delete after switching tabs blanks the ON-SCREEN sheet's own cell, not the sheet just left", async ({ page }) => {
+      const id = "e2e-newone-delete";
+      await seedProject(page, id);
+      await page.goto(`/#/project/${id}/model`);
+      await cell(page, 0, 0).click(); await typeAndEnter(page, "5"); // Sheet1!A1
+      await page.getByTestId("model-add-sheet").click(); // Sheet2
+      await cell(page, 0, 0).click(); await typeAndEnter(page, "9"); // Sheet2!A1
+      await tab(page, 0).click(); // switch to Sheet1 via a plain click — Sheet1!A1 is the on-screen target
+      await cell(page, 0, 0).click();
+      await page.keyboard.press("Delete");
+      await expect(cell(page, 0, 0)).toHaveText(""); // Sheet1!A1 cleared
+      await tab(page, 1).click();
+      await expect(cell(page, 0, 0)).toHaveText("9"); // Sheet2!A1 untouched
+    });
+
+    test("Ctrl+V paste after switching tabs lands on the ON-SCREEN sheet", async ({ page }) => {
+      const id = "e2e-newone-paste";
+      await seedProject(page, id);
+      await page.goto(`/#/project/${id}/model`);
+      await cell(page, 0, 0).click(); await typeAndEnter(page, "123"); // Sheet1!A1 — the copy source
+      await cell(page, 0, 0).click();
+      await page.keyboard.press("Control+C");
+      await page.getByTestId("model-add-sheet").click(); // Sheet2
+      await tab(page, 0).click(); // back to Sheet1 via a plain click
+      await cell(page, 2, 0).click(); // A3
+      await page.keyboard.press("Control+V");
+      await expect(cell(page, 2, 0)).toHaveText("123"); // pasted onto Sheet1 (on screen)
+      await tab(page, 1).click();
+      await expect(cell(page, 2, 0)).toHaveText(""); // Sheet2's A3 untouched
+    });
+
+    test("the correctly-targeted write survives a reload", async ({ page }) => {
+      const id = "e2e-newone-persist";
+      await seedProject(page, id);
+      await page.goto(`/#/project/${id}/model`);
+      await page.getByTestId("model-add-sheet").click(); // Sheet2, now active
+      await tab(page, 0).click(); // switch to Sheet1 via a plain click
+      await cell(page, 0, 3).click();
+      await typeAndEnter(page, "999");
+      await page.reload();
+      await expect(sheetEl(page)).toBeVisible();
+      await expect(tab(page, 0)).toHaveText("Sheet1");
+      await expect(cell(page, 0, 3)).toHaveText("999"); // still on Sheet1 after reload
+      await tab(page, 1).click();
+      await expect(cell(page, 0, 3)).toHaveText(""); // Sheet2 never got it, even after a round trip
+    });
+  });
 });
 
 test.describe("Model workspace — Stage 3 (input/formula/cross-sheet-link colour)", () => {
