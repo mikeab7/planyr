@@ -93,18 +93,16 @@ export default function Scheduler({
   // let a deliberate pick of a cross-cutting unlinked schedule (Operations/Pursuits) show its grid
   // even on a routed project with no schedule of its own — see navState.js for the full story.
   const explicitPickRef = useRef(null);
-  // ⛔ B1112449/B1112450 ×2 (NEW-1, 2026-09-03) — owner-verified live that the switcher still shows
-  // one row and the breadcrumb still doesn't disambiguate for a site with two linked schedules,
-  // AFTER the fix that should cover it merged (unionProjectLists' multi-link branch). Every static
-  // read of unionProjectLists/ProjectBreadcrumb/this bridge traces correctly, and a live e2e drive
-  // of the REAL Scheduler→AppHeader→ProjectBreadcrumb chain (e2e/scheduler-multi-schedule-switcher.spec.js)
-  // posting the EXACT shape the owner's production row held — two entries, matching linkedSiteId,
-  // both string/number types as minted — renders two rows and a disambiguated crumb correctly. So
-  // the defect, if it's still live, is in data this sandbox cannot produce (no live signed-in
-  // browser reaches planyr.io from here) — DANGEROUS-MEANS-UNOBSERVABLE: the honest fix is the
-  // missing instrument, not another guess. This captures the RAW bridged payload the very next time
-  // any tab observes a site with 2+ linked schedules, so a recurrence report comes with ground
-  // truth (exact ids/types/linkedSiteId values as posted) instead of another blind reproduction.
+  // DIAGNOSTIC INSTRUMENT (not a bug fix) — B1112449/B1112450, 2026-09-03. A same-day report that
+  // the multi-schedule switcher/breadcrumb still failed live on planyr.io after the fix
+  // (unionProjectLists' multi-link branch) turned out to be a FALSE ALARM: the report was measured
+  // in a browser tab still serving the pre-fix cached bundle, retracted once re-measured against a
+  // fresh chunk hash (see BACKLOG.md / VERIFICATION.md's V613904, PASSED). Both items are confirmed
+  // working on production as shipped — this instrument is NOT covering a known defect. It's kept
+  // anyway because it's cheap, self-contained, and useful for any genuine future question about what
+  // the embedded scheduler's bridge actually posts: it captures the RAW bridged payload the moment
+  // any tab observes a site with 2+ linked schedules, so a real future report comes with ground
+  // truth (exact ids/types/linkedSiteId values as posted) instead of a blind reproduction.
   // Fires once per distinct multi-link snapshot (never a spam loop) via the signature ref below.
   const multiLinkTelemetrySigRef = useRef("");
 
