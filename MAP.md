@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-03 @ `4a4ddfbb` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-03 @ `b1ca3977` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_650 source files mapped._
+_653 source files mapped._
 
 ## infra
 
@@ -265,7 +265,9 @@ _650 source files mapped._
 - **`src/shared/comps/components/CompDraftsPanel.jsx`** — KML-import review/promote surface (B849233): one card per staged draft, pre-filled from best-effort description parsing, confirm-before-commit; reachable only from the KML import action
   - _exports_: `anchorFromGeometry`, `default (CompDraftsPanel)`
 - **`src/shared/comps/components/CompEntryGrid.jsx`** — the paste-box-over-a-row-grid comp entry surface (B849232): parsed values land directly in typed, editable cells with blocking (red) vs soft (amber) uncertainty; replaces the old single-comp create form
-  - _exports_: `default (CompEntryGrid)`, `draftFromParsedRow`
+  - _exports_: `default (CompEntryGrid)`, `draftFromParsedRow`, `locationCellText`
+- **`src/shared/comps/components/CompEntryMobileSheet.jsx`** — the TRANSPOSED comp entry layout below MOBILE_BREAKPOINT_PX: pager + status dots, sticky identity strip, one-comp-per-screen field list grouped by compMobileLayout.js, a jump sheet for the whole batch
+  - _exports_: `default (CompEntryMobileSheet)`
 - **`src/shared/comps/components/CompsPanel.jsx`** — Leasing Comps right-side panel (B711328): list/detail/create-edit for land, building-sale and lease comps; owner-only Edit/Delete, empty fields never render
   - _exports_: `CompDetail`, `CompRow`, `default (CompsPanel)`
 - **`src/shared/comps/components/PartyNameField.jsx`** — Comp form party-name field: plain text input + a loose-match suggestion listbox (accessible combobox, independent of the map toolbar's PlaceSearchField)
@@ -280,6 +282,8 @@ _650 source files mapped._
   - _exports_: `parcelLocationText`, `pinFallbackText`, `siteplanLocationText`
 - **`src/shared/comps/lib/compMarkerIcon.js`** — Pure map-marker spec for a comp: a small colored tag (hue per comp type), deliberately a different silhouette from sitePinIcon
   - _exports_: `compMarkerColor`, `compMarkerSize`, `compMarkerSvg`
+- **`src/shared/comps/lib/compMobileLayout.js`** — pure model behind the mobile transposed sheet: which fields show in which section per comp type (filtered off SHEET_COLUMNS' own appliesTo), the pinned "needed to save" fields, and a row's short status text
+  - _exports_: `isRequiredColEmpty`, `MOBILE_BREAKPOINT_PX`, `mobileLabel`, `mobileSections`, `neededToSaveColumns`, `neededToSaveRemaining`, `rowStatusText`
 - **`src/shared/comps/lib/compParse.js`** — comp entry parsing (B849232): prose-line + tab-delimited spreadsheet block parsing into typed draft rows, with blocking-vs-soft uncertainty flags per cell (a lease rate with no period blocks; a k/m-suffixed number never does)
   - _exports_: `detectCompType`, `detectPasteShape`, `findDateToken`, `looksLikeSpreadsheetPaste`, `parseMagnitudeNumber`, `parsePaste`, `parsePasteBlock`, `parseProseLine`, `parseSingleRecord`, `rowHasBlockingFlags`, `splitPasteLines`
 - **`src/shared/comps/lib/comps.js`** — Leasing Comps pure model: $/SF derivation for land/building sale, lease basis normalization (annual NNN default, NNN/gross never blended), compFieldRows (the one empty-field-hides choke point), anchor validation, row<->model mapping
@@ -504,6 +508,8 @@ _650 source files mapped._
   - _exports_: `default (AppHeader)`, `exitFs`, `fsElement`, `fsSupported`, `MODULE_ACCENT`, `requestFs`, `useNarrow`
 - **`src/shared/ui/bottomSheetTracker.js`** — Module-scope publish/subscribe signal: the open mobile bottom sheet's live height, so a FloatingNotice can sit above it instead of under or over it
   - _exports_: `currentBottomSheetHeight`, `publishBottomSheetHeight`, `subscribeBottomSheetHeight`, `useBottomSheetHeight`
+- **`src/shared/ui/clickDiag.js`** — B1066370 self-instrumenting click diagnostic: a capture-phase listener flags a press with no matching click within a short window, so a "worked on the second click" report captures itself when the owner hits it live
+  - _exports_: `describeSuspect`, `installClickDiag`, `labelFor`
 - **`src/shared/ui/CloudSyncBadge.jsx`** — App-wide cloud-sync glyph driven by real saveState (synced/saving/offline/readonly/error/local); loud never-vanish error via crash boundary + retry popover
   - _exports_: `CloudBadgeBoundary`, `cloudBadgeView`, `default (CloudSyncBadge)`
 - **`src/shared/ui/ColorField.jsx`** — Color control = the native wheel + the shared recently-used swatch row (NEW-4); `ColorRecentsRow` is the row alone, for controls with a bespoke wheel.
