@@ -13,6 +13,7 @@ import ModuleLoader from "../../shared/ui/ModuleLoader.jsx";
 import {
   parseNavState, deriveCurrentProject, findBySiteId, needsScheduleCarryIn,
   dashboardNavActions, shouldShowLinkPanel, shouldAdoptLinkedSiteIntoRoute, isPickShowing,
+  isGridMismatched, newProjectAction,
 } from "./lib/navState.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { scheduleSaveState } from "./lib/saveState.js";
@@ -194,6 +195,12 @@ export default function Scheduler({
   // and the resolution panel (below) offers create/link. The embedded handler no-ops when that
   // schedule is already active, so re-posting is harmless (it can't trigger a save).
   //
+  // Picking a schedule from the breadcrumb is a USER action: switch to it, and if it's linked to a
+  // site, carry that site into the route so the Site/Review tabs follow. Computed HERE (before the
+  // carry-in effect below) because NEW-5's fix needs it as the carry-in's ONLY suppression signal —
+  // see that effect's own note.
+  const pickShowing = isPickShowing(explicitPickRef.current, activeId, section);
+
   // SELF-HEALING (B851 — the route↔grid divergence): this is a RE-DRIVE, not a fire-once. The
   // original one-shot (deps `[ready, projectId]`) posted the select a single time when `ready`
   // flipped; when `ready` flips via the fallback timer (onIframeLoad's 2.5s / the 6s backstop)
@@ -202,25 +209,24 @@ export default function Scheduler({
   // previously-active schedule while the crumb correctly named the routed one (owner repro
   // 2026-07-15: route Goose Creek, grid Grand Port). Re-running on `projects`/`activeId` means the
   // dropped select is re-posted the moment the embed's data lands, and keeps re-driving until the
-  // grid ADOPTS the routed link; `carriedRef` then stops it so a later DELIBERATE pick of a
-  // cross-cutting unlinked schedule (Pursuits/Operations) isn't yanked back. Never writes the route
-  // (no onProjectChange) → cannot revive the B560/V172 A↔B ping-pong; the `projectId != null` gate
-  // keeps this strictly the carry-IN branch (carry-out below stays `projectId == null`).
-  const carriedRef = useRef(null);
+  // grid ADOPTS the routed link.
+  //
+  // ⛔ NEW-5 (B1080544) — THIS EFFECT USED TO LATCH (`carriedRef`) THE FIRST TIME IT SUCCEEDED AND
+  // NEVER RE-ARM FOR THE SAME ROUTED PROJECT. `aPid` (which schedule the embed shows) is a single
+  // GLOBAL, MUTABLE field in the shared hs-v1 blob — not scoped to this tab or this route — so once
+  // ANYTHING else moved it away (a second tab, a stale reconciliation) the latch silently refused to
+  // re-correct it: the grid kept showing a WRONG project's tasks while the route-derived breadcrumb
+  // kept reading correctly. Reproduced live: routed on Richfield, `aPid` reading Pappadoupolos — the
+  // breadcrumb said Richfield, the grid rendered Pappadoupolos's 41 tasks. The latch's real intent
+  // (never yank back a DELIBERATE pick of a cross-cutting unlinked schedule — Pursuits/Operations)
+  // is already correctly tracked by `pickShowing`/`explicitPickRef`, so that's now the ONLY
+  // suppression: this effect re-drives on every genuine mismatch, forever, not once. The render gate
+  // below (`gridMismatched`) is the other half — it makes any remaining mismatch INVISIBLE rather
+  // than merely quickly corrected, so the fix holds even if something re-drifts `aPid` again later.
   useEffect(() => {
     if (!ready || projectId == null) return;
-    if (!needsScheduleCarryIn(projects, projectId, activeId, section)) { carriedRef.current = projectId; return; }
-    // Already carried this route's grid onto its schedule once → let deliberate later picks stand
-    // (picking the cross-cutting Pursuits / Operations schedule must not be yanked back). Re-arms
-    // whenever the routed project changes (carriedRef holds the last-carried projectId).
-    //
-    // NEW-2 — that latch is scoped to the PROJECTS section. A non-projects section (the embed's own
-    // Dashboard) cannot reflect the route at all, so it is never a deliberate pick worth preserving:
-    // pressing Dashboard inside Schedule clears the routed project, so the only way to be here is to
-    // have arrived from another module. Without this scoping, coming back to a project we had
-    // already carried once left the latch closed and the Dashboard on screen — the same landing the
-    // section fix exists to prevent, reached by a second route.
-    if (carriedRef.current === projectId && section === "projects") return;
+    if (pickShowing) return; // a deliberate cross-cutting pick stands; never yanked back
+    if (!needsScheduleCarryIn(projects, projectId, activeId, section)) return;
     post({ type: "planar:nav-select-by-site", siteId: projectId });
     // LOUD-FAILURE backstop: if the routed site's linked schedule is ALREADY loaded (resolvable in
     // `projects`) yet the grid still hasn't adopted it after a short settle window, the drive isn't
@@ -240,7 +246,7 @@ export default function Scheduler({
       } catch (_) { /* telemetry must never throw into the app */ }
     }, 2500);
     return () => clearTimeout(t);
-  }, [ready, projectId, projects, activeId, section]);
+  }, [ready, projectId, projects, activeId, section, pickShowing]);
 
   // Carry the project the OTHER way ONLY when the route has no project yet (projectId == null):
   // adopt the iframe's active schedule's linked site into the empty route so the Site/Review tabs
@@ -329,7 +335,7 @@ export default function Scheduler({
   // one can never move `projectId`. Gated on the embed actually having caught up to the pick
   // (isPickShowing), so this can't flash the OLD project's name for the one round-trip before the
   // embed reports back. See navState.js for the full story and Scheduler.jsx's own history below.
-  const pickShowing = isPickShowing(explicitPickRef.current, activeId, section);
+  // (`pickShowing` itself is computed once, near the top of this component — see its own note.)
 
   let currentProject;
   if (pickShowing) {
@@ -363,6 +369,12 @@ export default function Scheduler({
   const iframeFullyReported = ready && toolbar.ready;
   const showEmptyState = !pickShowing && shouldShowLinkPanel({ ready: iframeFullyReported, projectId, linkedSchedule, routedSiteName });
   const suggestedMatch = showEmptyState ? suggestNameMatch(routedSiteName, projects) : null;
+
+  // NEW-5 (B1080544) — the render gate: a routed project WITH a linked schedule whose grid hasn't
+  // (yet, or any longer) caught up must never be visibly shown as if it had. `showEmptyState`
+  // covers "no schedule exists"; this covers "a schedule exists but the wrong one is on screen" —
+  // the case a global `aPid` drifting away from the route produces. See navState.js's own header.
+  const gridMismatched = ready && isGridMismatched(projects, projectId, activeId, pickShowing);
 
   // B566 — the Schedule workspace now shows the SAME unified top-right cloud sync badge as the
   // Site Planner (Row-1 right zone of AppHeader), driven by the embedded app's already-reported
@@ -437,12 +449,27 @@ export default function Scheduler({
         projects={projects}
         onSelectProject={selectSchedule}
         onDashboard={goDashboard}
-        onNewProject={() => post({ type: "planar:nav-new" })}
+        // NEW-1 (B1080545) — while routed on a Planyr project, "+ New project" must create a
+        // SCHEDULE FOR THAT PROJECT (linked + named after it, disambiguated if it already has
+        // one — NEW-3), never a bare unlinked "Project N" the route can never reach again. See
+        // newProjectAction's own header. Outside a routed project the generic unlinked creation
+        // (Operations/Pursuits-style) is unchanged.
+        onNewProject={() => {
+          const action = newProjectAction({ projectId, routedSiteName, projects });
+          post(action.type === "create-linked"
+            ? { type: "planar:nav-create-linked", name: action.name, siteId: action.siteId, siteName: action.siteName }
+            : { type: "planar:nav-new" });
+        }}
         // Rename/delete a SCHEDULE project (B440) — bridged to the embedded app's own hs-v1
         // record (not the Site store). The breadcrumb already confirmed the delete inline, so
         // the embedded handler deletes without re-prompting + routes home on the active project.
         onRenameProject={(id, name) => post({ type: "planar:nav-rename", id, name })}
         onDeleteProject={(id) => post({ type: "planar:nav-delete", id })}
+        // NEW-2 (B1080546) — deep-copy a schedule's tasks into a new, distinctly-named project.
+        // Bridged to the embedded app's existing `duplicateProject` (already correct: strips the
+        // source's linkedSiteId/linkedSiteName rather than silently attaching the copy to a live
+        // Planyr project — the owner's standing rule that he decides when things are linked).
+        onDuplicateProject={(id) => post({ type: "planar:nav-duplicate", id })}
         // B388 — the embedded app's toolbar, lifted into the unified header (center = view +
         // review; right = zoom/export/save/history/contacts/automation/format/settings).
         toolbarCenter={<ScheduleCenter toolbar={toolbar} post={post} />}
@@ -454,27 +481,31 @@ export default function Scheduler({
             its layout box, so the embedded Gantt's width measurements survive and it needs no
             re-layout when it comes back; and it stays MOUNTED, so the ~2 s boot + its nav/toolbar
             bridge are never lost (the keep-alive guarantee). Clearing the routed project — what
-            Dashboard does — brings it straight back. */}
+            Dashboard does — brings it straight back.
+            NEW-5 (B1080544) — ALSO hidden while `gridMismatched`: the grid is showing a schedule
+            that isn't the routed project's own (a stale/foreign `aPid`), and that must never be
+            visible even for one frame — see isGridMismatched's header. The carry-in effect above
+            is actively re-driving it; this is what keeps the wrong picture off screen meanwhile. */}
         <iframe
           ref={iframeRef}
           src="/sequence/"
           title="Sequence Planyr"
           onLoad={onIframeLoad}
-          aria-hidden={showEmptyState || undefined}
+          aria-hidden={showEmptyState || gridMismatched || undefined}
           style={{
             position: "absolute", inset: 0, border: "none", width: "100%", height: "100%", display: "block",
-            visibility: showEmptyState ? "hidden" : "visible",
-            pointerEvents: showEmptyState ? "none" : "auto",
+            visibility: (showEmptyState || gridMismatched) ? "hidden" : "visible",
+            pointerEvents: (showEmptyState || gridMismatched) ? "none" : "auto",
           }}
         />
-        {showLoader && (
+        {(showLoader || (!showEmptyState && gridMismatched)) && (
           <div
-            aria-hidden={ready}
+            aria-hidden={ready && !gridMismatched}
             style={{
               position: "absolute", inset: 0, zIndex: 5,
-              opacity: ready ? 0 : 1,
+              opacity: (ready && !gridMismatched) ? 0 : 1,
               transition: "opacity 0.45s ease",
-              pointerEvents: ready ? "none" : "auto",
+              pointerEvents: (ready && !gridMismatched) ? "none" : "auto",
             }}
           >
             <ModuleLoader module="scheduler" />
