@@ -243,9 +243,17 @@ const SURFACES = [
     mockNetwork: true,
     prep: async (p) => {
       await clickIf(p, '[title="Collapse layers"]');
-      // B848304 — the toggle's aria-label was renamed to "Browse sites or comps" (the visible
-      // segment text stays "Comp" on purpose; see MapFinder.jsx's SiteCompSwitch header).
-      await clickIf(p, '[role="tablist"][aria-label="Browse sites or comps"] button:has-text("Comp")');
+      // B848304 renamed the toggle's aria-label once already; B850016 (NEW-11) renamed it again
+      // to "What an address search creates" (the visible segment text stays "Comp" on purpose;
+      // see MapFinder.jsx's SiteCompSwitch header).
+      // ⛔ B850016 (NEW-11) — this click no longer also flips the left rail to the Comps tab.
+      // Before that fix the centre toggle and the rail tab were ONE coupled state, so clicking
+      // Comp here also swapped the panel below to Comps — that coupling was itself the bug NEW-11
+      // fixed, and this surface's committed signature count/UI-INVENTORY snapshot was measured
+      // WHILE that bug was still live. Post-fix, this state is centre-toggle-Comp with the left
+      // panel legitimately still showing SITES (its own last state, untouched) — the CORRECT
+      // decoupled behavior, not a regression, and it changes what this crawl inventories.
+      await clickIf(p, '[role="tablist"][aria-label="What an address search creates"] button:has-text("Comp")');
       await p.waitForTimeout(300);
     },
     scope: "body",
