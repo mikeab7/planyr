@@ -290,3 +290,81 @@ describe("workbook structural edits — cross-sheet reference sweep", () => {
     expect(wb.sheets[1].sheet.cells["c1:0"]).toBe("=Sheet1!D1");
   });
 });
+
+// ⛔ B1117408 REGRESSION (owner brief 2026-09-03) — a typed cell landed on the sheet you had just
+// LEFT, not the one you switched TO. ModelApp.jsx used to call `applyToActiveSheet(wb, fn, …)` /
+// `workbookInsertRowAt(wb, …)` directly, which resolve their target from `workbook.activeSheetId`
+// — a field a PLAIN TAB CLICK never touches (deliberately: navigation must never mint an undo
+// frame — see ModelApp.jsx's own `activeSheetId` state comment). The fix composes
+// `setActiveSheet(wb, viewedSheetId)` into the SAME commit as the edit
+// (`applyActive`/`applyStructuralActive` in ModelApp.jsx); these tests assert the TARGET SHEET ID
+// of the commit directly — a test that only checks "some cell changed" would pass on the broken
+// behavior, exactly the trap the bug report itself calls out.
+describe("NEW-1 regression — a commit lands on the sheet CURRENTLY BEING VIEWED, never workbook.activeSheetId's own stale copy", () => {
+  it("switching the view to a different sheet, then committing, targets the NEWLY VIEWED sheet (Sheet2 → Sheet1)", () => {
+    let wb = addSheet(createWorkbook()); // Sheet1, Sheet2 — active = Sheet2, matching the repro's starting point
+    const sheet1Id = wb.sheets[0].id, sheet2Id = wb.sheets[1].id;
+    expect(wb.activeSheetId).toBe(sheet2Id);
+
+    // Simulate ModelApp.jsx's `applyActive`: the VIEW navigated to Sheet1 (a plain tab click,
+    // which never itself touches `workbook.activeSheetId`), and a commit composes
+    // `setActiveSheet` into the SAME call as the edit.
+    const viewedSheetId = sheet1Id;
+    wb = applyToActiveSheet(setActiveSheet(wb, viewedSheetId), commitCellText, 0, 3, "999"); // D1
+
+    expect(wb.activeSheetId).toBe(sheet1Id); // the commit corrected the stale field to match the view
+    expect(wb.sheets.find((s) => s.id === sheet1Id).sheet.cells["c4:0"]).toBe("999"); // landed on Sheet1
+    expect(wb.sheets.find((s) => s.id === sheet2Id).sheet.cells["c4:0"]).toBeUndefined(); // NOT on Sheet2
+  });
+
+  it("the same fix reproduces in the OTHER direction too (Sheet1 → Sheet2)", () => {
+    let wb = addSheet(createWorkbook()); // active = Sheet2
+    const sheet1Id = wb.sheets[0].id, sheet2Id = wb.sheets[1].id;
+    wb = { ...wb, activeSheetId: sheet1Id }; // simulate having been left on Sheet1 by a prior commit
+
+    const viewedSheetId = sheet2Id; // the view has since navigated to Sheet2
+    wb = applyToActiveSheet(setActiveSheet(wb, viewedSheetId), commitCellText, 0, 3, "777");
+
+    expect(wb.activeSheetId).toBe(sheet2Id);
+    expect(wb.sheets.find((s) => s.id === sheet2Id).sheet.cells["c4:0"]).toBe("777");
+    expect(wb.sheets.find((s) => s.id === sheet1Id).sheet.cells["c4:0"]).toBeUndefined();
+  });
+
+  it("holds with three sheets: a commit always targets whichever one is CURRENTLY viewed, not the middle sheet a prior edit left active", () => {
+    let wb = addSheet(addSheet(createWorkbook())); // Sheet1, Sheet2, Sheet3 — active = Sheet3
+    const [id1, id2, id3] = wb.sheets.map((s) => s.id);
+    wb = { ...wb, activeSheetId: id2 }; // a prior real edit left Sheet2 as workbook.activeSheetId
+
+    wb = applyToActiveSheet(setActiveSheet(wb, id3), commitCellText, 0, 0, "42"); // view is on Sheet3
+    expect(wb.activeSheetId).toBe(id3);
+    expect(wb.sheets.find((s) => s.id === id3).sheet.cells["c1:0"]).toBe("42");
+    expect(wb.sheets.find((s) => s.id === id2).sheet.cells["c1:0"]).toBeUndefined();
+    expect(wb.sheets.find((s) => s.id === id1).sheet.cells["c1:0"]).toBeUndefined();
+  });
+
+  it("a FORMULA typed after switching evaluates in the newly-viewed sheet's OWN context, not the sheet it left — the reported =A1*2 case", () => {
+    let wb = addSheet(createWorkbook()); // Sheet1, Sheet2
+    const sheet1Id = wb.sheets[0].id, sheet2Id = wb.sheets[1].id;
+    wb = applyToActiveSheet(setActiveSheet(wb, sheet1Id), setRaw, 0, 0, "10"); // Sheet1!A1 = 10
+    wb = applyToActiveSheet(setActiveSheet(wb, sheet2Id), setRaw, 0, 0, "20"); // Sheet2!A1 = 20
+    // Simulate: the view is now back on Sheet1 (a plain tab click, workbook.activeSheetId still
+    // reads Sheet2 from the commit above), and a bare (same-sheet) formula is typed there.
+    wb = applyToActiveSheet(setActiveSheet(wb, sheet1Id), commitCellText, 1, 0, "=A1*2"); // A2
+    const sheet1 = wb.sheets.find((s) => s.id === sheet1Id);
+    const sheet2 = wb.sheets.find((s) => s.id === sheet2Id);
+    expect(sheet1.sheet.cells["c1:1"]).toBe("=A1*2"); // landed on Sheet1, not Sheet2
+    expect(sheet2.sheet.cells["c1:1"]).toBeUndefined();
+  });
+
+  it("a structural edit (insert row) after switching sheets also targets the newly-viewed sheet", () => {
+    let wb = addSheet(createWorkbook()); // Sheet1, Sheet2 — active = Sheet2
+    const sheet1Id = wb.sheets[0].id, sheet2Id = wb.sheets[1].id;
+    wb = applyToActiveSheet(setActiveSheet(wb, sheet1Id), setRaw, 0, 0, "1"); // Sheet1!A1
+    // View switches to Sheet1 (workbook.activeSheetId is still "sheet2" from creation above).
+    wb = workbookInsertRowAt(setActiveSheet(wb, sheet1Id), 0); // insert a row at the top of Sheet1
+    expect(wb.activeSheetId).toBe(sheet1Id);
+    const sheet1 = wb.sheets.find((s) => s.id === sheet1Id);
+    expect(sheet1.sheet.cells["c1:0"]).toBeUndefined(); // A1 shifted down
+    expect(sheet1.sheet.cells["c1:1"]).toBe("1"); // now at A2
+  });
+});
