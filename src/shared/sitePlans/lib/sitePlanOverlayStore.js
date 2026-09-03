@@ -117,16 +117,22 @@ export async function commitOverlayPlacementWithComps(overlayId, placement, comp
 
 /** Soft-delete (B972512-HARDENING item 6, mirrors sites/doc_reviews' `deleted_at` pattern) — the
  * ordinary "Delete site plan…" action never permanently destroys the row; it stamps `deleted_at`
- * so it drops out of fetchAllOverlays() but stays recoverable via restoreOverlay(). Still subject
- * to the caller's own proactive comp-reference check (item 5) — soft-deleting an overlay while
- * comps still point at it would leave those comps' "pinned to a plan" state pointing at something
- * hidden, so SitePlansSection.jsx's `remove()` blocks BEFORE calling this, same as it did for the
- * old hard delete. */
+ * so it drops out of fetchAllOverlays() but stays recoverable via restoreOverlay().
+ *
+ * B1114992 — routed through the `soft_delete_site_plan_overlay` RPC rather than a plain
+ * `.update()`: any comp still pinned to this overlay (own-owner OR a teammate's — comps' UPDATE
+ * policy is owner-only RLS, so a plain client update can't touch someone else's pin) is detached
+ * to a plain 'pin' anchor at its already-current lat/lon, in the SAME statement as the
+ * `deleted_at` stamp. This is a deliberate, permanent detach matching the confirm dialog's own
+ * copy ("Comps pinned to it keep their location but lose the link back") — restoring the overlay
+ * later brings the PLAN back, never the comp's link to it. No proactive block is needed here any
+ * more (see comps_site_plan_overlay_delete_reverts_to_pin.sql for the full writeup) — a soft
+ * delete never hit the FK/CHECK hazard in the first place (it's an UPDATE, not a DELETE), and the
+ * detach makes the delete itself unconditional rather than something that needs guarding. */
 export async function deleteOverlay(id) {
   if (!supabase) return { error: new Error("Supabase not configured") };
-  const { data, error } = await supabase.from(TABLE).update({ deleted_at: new Date().toISOString() }).eq("id", id).select("id");
+  const { error } = await supabase.rpc("soft_delete_site_plan_overlay", { p_overlay_id: id });
   if (error) return { error };
-  if (!Array.isArray(data) || !data.length) return { error: new Error("Not deleted — you can only remove site plans you uploaded") };
   return { error: null };
 }
 
@@ -139,9 +145,11 @@ export async function restoreOverlay(id) {
   return { error: null };
 }
 
-/** Permanent delete out of the trash view — the real DELETE, still subject to the SAME
- * comp-reference guard as the soft delete (comps_parcel_anchor_has_identity — see
- * overlayErrors.js) since the underlying constraint doesn't care which path reached it.
+/** Permanent delete out of the trash view — the real DELETE. B1114992 — no proactive
+ * comp-reference block any more: a BEFORE DELETE trigger on site_plan_overlays
+ * (comps_site_plan_overlay_delete_reverts_to_pin.sql) detaches any pinned comp to a plain 'pin'
+ * anchor, atomically, before the row is actually removed, so comps_parcel_anchor_has_identity
+ * never sees the intermediate state that used to abort this DELETE.
  *
  * B972512-HARDENING item 16 — `deleteOverlayRaster` existed but was never actually CALLED
  * anywhere in the app, so every permanently-deleted overlay left its cached raster JPEG behind

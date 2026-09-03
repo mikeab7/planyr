@@ -1334,13 +1334,13 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     if (e.key.length === 1 && !meta && !e.altKey) {
       const colDef = SHEET_COLUMNS[selection.col];
       if (colDef.kind === "action") { triggerAction(selection.row, selection.col); return; }
-      // B844400/NEW-4 — this used to leave the keydown un-prevented (every other branch here
-      // does call preventDefault). `beginEdit` seeds the freshly mounted editor's value straight
-      // from `e.key`; without preventDefault, the browser's own default action for the SAME
-      // keydown can independently insert the character a second time once focus lands on that
-      // editor within the same dispatch — the exact first-character-doubling class named in this
-      // item's brief. Harmless for the grid `<div>` itself (a plain div has no default text-
-      // insertion action to suppress), so this is a pure safety net, not a behavior change.
+      // B1120976 (NEW-1/B1113714) — every sibling branch above calls preventDefault() before
+      // acting; this one didn't. beginEdit() seeds the new input's React state with e.key and
+      // focuses it synchronously (the `editing` useLayoutEffect), all before this handler
+      // returns — so with the keydown's default action left unprevented, the browser's own
+      // native character-insertion then lands the SAME keystroke a second time into the
+      // now-focused input, doubling it. (Independently identified in this same spot by B1119282's
+      // owner brief — one fix, landed here first via B1120976; the two sessions agreed.)
       e.preventDefault();
       beginEdit(selection.row, selection.col, e.key, false);
     }
