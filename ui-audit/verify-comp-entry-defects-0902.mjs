@@ -344,17 +344,29 @@ async function sweepRestingRow(page) {
   await ctx.close();
 }
 {
-  const ctx = await newCtx(browser, { width: 1600, height: 900 }, "n844400-unitfixed");
+  // ⛔ B1119282 (×2, owner live-CLICK measurement, 2026-09-03) — AMENDS this block. The original
+  // (B844400) shape asserted a "FIXED, no editor mounts" Unit cell on a non-land row — that was
+  // itself the defect: a real click found no <select> there at all while the cell carried the
+  // same caret as Type/Per/Basis, a dropdown the caret advertised but could not reach. Unit is a
+  // genuinely editable <select> on every row type now (compSheetColumns.js's `optionsFor` — a
+  // non-land row's own real option set is SF-only, the one value its DB column accepts). Full
+  // real-click coverage (every row type, option-set assertions) lives in the dedicated harness,
+  // ui-audit/verify-comp-entry-b844400.mjs; this block just confirms the corrected shape here too.
+  const ctx = await newCtx(browser, { width: 1600, height: 900 }, "n1119282-unit-real-select");
   const page = await ctx.newPage();
   await openEntrySheet(page);
   await pasteViaTextarea(page, "Sugarbun Way industrial, 25,000 SF lease, $6.50/SF/yr NNN, 5 yr term, executed 1/15/2026");
   const unitCell = page.locator('td[data-cell="0-4"]'); // Unit column index (see compSheetColumns.js SHEET_COLUMNS order)
   const beforeText = (await unitCell.innerText()).trim();
-  check("a FIXED Unit cell (non-land) still shows the caret glyph alongside its value", /[▾▼⌄˅⋁]/.test(beforeText) && /SF/.test(beforeText), JSON.stringify(beforeText));
+  check("Unit (lease row) shows the caret glyph alongside its value", /[▾▼⌄˅⋁]/.test(beforeText) && /SF/.test(beforeText), JSON.stringify(beforeText));
   await unitCell.click();
   await pacedWait(page, 200);
-  const mounted = await unitCell.evaluate((el) => !!el.querySelector("input,select"));
-  check("clicking a FIXED Unit cell still mounts NO editor (the caret is decorative there, not a claim of editability)", !mounted, `mounted=${mounted}`);
+  const info = await page.evaluate(() => {
+    const el = document.activeElement;
+    return { tag: el?.tagName, options: el?.tagName === "SELECT" ? [...el.options].map((o) => o.textContent.trim()) : null };
+  });
+  check("a REAL click on Unit (lease row) focuses an actual SELECT (never advertises a dropdown it can't reach)", info.tag === "SELECT", JSON.stringify(info));
+  check("its options are exactly ['', 'SF'] — the one value lease_size_sf accepts", JSON.stringify(info.options) === JSON.stringify(["", "SF"]), JSON.stringify(info));
   await ctx.close();
 }
 

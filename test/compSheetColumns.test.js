@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   SHEET_COLUMNS, GROUPS, columnIndex, cellState, cellPlaceholder, applyCellEdit,
   fillDownColumn, spillPaste, formatNumberDisplay, sanitizeNumericInput, visibleColumnIndices,
-  computeFlexWidths, widthFor, frozenLeftOffsets,
+  computeFlexWidths, widthFor, frozenLeftOffsets, optionsForColumn,
 } from "../src/shared/comps/lib/compSheetColumns.js";
 import { emptyDraft } from "../src/shared/comps/lib/comps.js";
 
@@ -61,11 +61,25 @@ describe("compSheetColumns: cellState — EVERY column exists on EVERY row (neve
     expect(cellState(sizeCol, draftOf("building_sale", { bldgSizeSf: "25000" })).text).toBe("25,000");
     expect(cellState(sizeCol, draftOf("lease", { leaseSizeSf: "613208" })).text).toBe("613,208");
   });
-  it("Unit is editable for land, FIXED (not em-dash — it applies, just not a choice) for others", () => {
+  it("B1119282 (×2) — Unit is a real editable select on EVERY row, never a non-em-dash 'fixed' state (a real click found that state unreachable — no <select> ever mounted)", () => {
     const unitCol = SHEET_COLUMNS[columnIndex("landSizeUnit")];
     expect(cellState(unitCol, draftOf("land", { landSizeUnit: "ac" }))).toEqual({ state: "editable", text: "AC", raw: "ac" });
-    expect(cellState(unitCol, draftOf("lease"))).toEqual({ state: "fixed", text: "SF" });
-    expect(cellState(unitCol, draftOf("building_sale"))).toEqual({ state: "fixed", text: "SF" });
+    expect(cellState(unitCol, draftOf("lease"))).toEqual({ state: "editable", text: "SF", raw: "sf" });
+    expect(cellState(unitCol, draftOf("building_sale"))).toEqual({ state: "editable", text: "SF", raw: "sf" });
+  });
+  it("B1119282 (×2) — Unit's option set varies by row type: land gets the real AC/SF choice, everything else gets only the one option its DB column accepts", () => {
+    const unitCol = SHEET_COLUMNS[columnIndex("landSizeUnit")];
+    expect(optionsForColumn(unitCol, "land")).toEqual([{ value: "ac", label: "AC" }, { value: "sf", label: "SF" }]);
+    expect(optionsForColumn(unitCol, "lease")).toEqual([{ value: "sf", label: "SF" }]);
+    expect(optionsForColumn(unitCol, "building_sale")).toEqual([{ value: "sf", label: "SF" }]);
+  });
+  it("B1119282 (×2) — applyCellEdit resolves Unit against the ROW's own option set: 'ac' never applies on a lease/building-sale row", () => {
+    const unitCol = SHEET_COLUMNS[columnIndex("landSizeUnit")];
+    const landDraft = draftOf("land", { landSizeUnit: "sf" });
+    expect(applyCellEdit(unitCol, landDraft, "a").landSizeUnit).toBe("ac");
+    const leaseDraft = draftOf("lease");
+    expect(applyCellEdit(unitCol, leaseDraft, "a")).toBe(leaseDraft); // no match against [SF] -> unchanged
+    expect(applyCellEdit(unitCol, leaseDraft, "s").landSizeUnit).toBe("sf");
   });
   it("Commencement and Term apply to lease only", () => {
     const commCol = SHEET_COLUMNS[columnIndex("leaseCommencementDate")];

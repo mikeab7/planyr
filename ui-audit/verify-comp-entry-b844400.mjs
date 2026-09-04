@@ -10,6 +10,17 @@
  *     (root-caused to `.showPicker()`'s native OS popup owning every subsequent keystroke — see
  *     the fix's own header in CompEntryGrid.jsx), and the Unit cell carried no caret when fixed.
  *
+ * ⛔ B1119282 (×2, owner live-CLICK measurement, 2026-09-03) — the caret half of B844402/NEW-4
+ * shipped WRONG and was caught only by driving a real browser against the deployed build: the
+ * fix gave Unit the same caret as Type/Per/Basis while it was still gated non-editable outside
+ * land, so the caret advertised a dropdown a real click could never reach
+ * (`document.querySelectorAll('table select').length === 0`). Every check in THIS file that
+ * "verified" the caret only tested for the GLYPH's presence in cell text — never whether a real
+ * click resolves to a live `<select>` — which is exactly how a caret-with-nothing-behind-it read
+ * as fixed. The real fix (compSheetColumns.js's `optionsFor`) makes Unit a genuinely editable
+ * select on every row type; the blocks below now assert on `document.activeElement` after a real
+ * Playwright `.click()`, not on cell text, so this class can't recur invisibly again.
+ *
  * Run against a local dev server (signed out, fixture-seeded, no network egress — mirrors
  * verify-comp-entry-p0.mjs / verify-comp-entry-defects-0902.mjs's own shape):
  *   node ui-audit/verify-comp-entry-b844400.mjs [--url http://localhost:4319/] [--shots]
@@ -174,7 +185,16 @@ async function clickThenType(page, colIdx, key) {
   await ctx.close();
 }
 
-console.log("\n=== B844402/NEW-4b — Unit carries the same caret as Type/Per/Basis on EVERY row type, but stays inert where it's fixed ===");
+console.log("\n=== B1119282 (×2) — Unit is a REAL <select> on every row type, not just a caret over an unreachable choice ===");
+// B1119282 (×2, owner live-click measurement, 2026-09-03) — the FIRST fix here (B844402/NEW-4)
+// gave Unit the same CARET as Type/Per/Basis but left it `editableFor`-gated to land only, so on
+// every other row type the caret advertised a dropdown that a real click could not reach at all
+// (`document.querySelectorAll('table select').length === 0`). Caught by the owner clicking the
+// real, deployed build — not by any check in THIS file, because every earlier check here (like
+// the synthetic-click sweep this block replaces) tested for the caret's mere presence, never
+// whether a real click actually resolves to a live SELECT. That is the gap this block closes:
+// every assertion here drives a REAL Playwright `.click()` (routed through actual CDP input, not
+// `element.dispatchEvent(...)`) and reads `document.activeElement`, never just cell text content.
 async function sweepRestingRow(page) {
   return page.evaluate(() => {
     const t = [...document.querySelectorAll("table")].find((x) => x.offsetParent);
@@ -184,7 +204,7 @@ async function sweepRestingRow(page) {
   });
 }
 {
-  const ctx = await newCtx(browser, { width: 1600, height: 900 }, "b844402-caret-lease");
+  const ctx = await newCtx(browser, { width: 1600, height: 900 }, "b1119282-real-select-lease");
   const page = await ctx.newPage();
   await openEntrySheet(page);
   await pasteViaTextarea(page, "Sugarbun Way industrial, 25,000 SF lease, $6.50/SF/yr NNN, 5 yr term, executed 1/15/2026");
@@ -193,12 +213,43 @@ async function sweepRestingRow(page) {
     const row = sweep.find((r) => r.col === name);
     check(`${name} shows the caret at rest (lease row)`, !!row?.caret, JSON.stringify(row));
   }
-  const unitCell = page.locator('td[data-cell="0-4"]');
-  await unitCell.click();
-  await pacedWait(page, 200);
-  const mounted = await unitCell.evaluate((el) => !!el.querySelector("input,select"));
-  check("Unit's caret on a lease row is decorative, not a claim of editability — clicking it mounts NO editor", !mounted, `mounted=${mounted}`);
+  // The real-click check the earlier round skipped: every one of the four caret-bearing cells
+  // must resolve to an actual, focused <select> with the RIGHT option set for this row's type —
+  // Unit's own set is SF-only here, the one value a lease's `lease_size_sf` column accepts.
+  const EXPECTED = { Type: ["", "Land", "Bldg sale", "Lease"], Unit: ["", "SF"], Per: ["", "MO", "YR"], Basis: ["", "NNN", "GROSS"] };
+  const COLIDX = { Type: 0, Unit: 4, Per: 12, Basis: 13 };
+  for (const [name, expected] of Object.entries(EXPECTED)) {
+    const cell = page.locator(`td[data-cell="0-${COLIDX[name]}"]`);
+    await cell.click();
+    await pacedWait(page, 200);
+    const info = await page.evaluate(() => {
+      const el = document.activeElement;
+      return { tag: el?.tagName, options: el?.tagName === "SELECT" ? [...el.options].map((o) => o.textContent.trim()) : null };
+    });
+    check(`${name}: a REAL click focuses an actual SELECT (lease row)`, info.tag === "SELECT", JSON.stringify(info));
+    check(`${name}: its options are exactly ${JSON.stringify(expected)} (lease row)`, JSON.stringify(info.options) === JSON.stringify(expected), JSON.stringify(info));
+    await page.keyboard.press("Escape");
+    await pacedWait(page, 150);
+  }
   if (SHOTS) await page.screenshot({ path: `${SHOT_DIR}/carets-lease.png` });
+  await ctx.close();
+}
+{
+  // Type-ahead on the SF-only Unit select must still work (jumps to, and stays on, its one
+  // option) — proves the select is genuinely live, not a static caret with a select painted over it.
+  const ctx = await newCtx(browser, { width: 1600, height: 900 }, "b1119282-unit-typeahead-lease");
+  const page = await ctx.newPage();
+  await openEntrySheet(page);
+  await pasteViaTextarea(page, "Sugarbun Way industrial, 25,000 SF lease, $6.50/SF/yr NNN, 5 yr term, executed 1/15/2026");
+  const cell = page.locator('td[data-cell="0-4"]');
+  await cell.click();
+  await pacedWait(page, 150);
+  await page.keyboard.press("Escape");
+  await pacedWait(page, 150);
+  await page.keyboard.press("s");
+  await pacedWait(page, 200);
+  const r = await page.evaluate(() => ({ tag: document.activeElement?.tagName, value: document.activeElement?.value }));
+  check("Unit (lease): select-then-type 's' opens a real SELECT already at value sf", r.tag === "SELECT" && r.value === "sf", JSON.stringify(r));
   await ctx.close();
 }
 {
@@ -209,6 +260,15 @@ async function sweepRestingRow(page) {
   const sweep = await sweepRestingRow(page);
   const unitRow = sweep.find((r) => r.col === "Unit");
   check("Unit shows the caret at rest on a LAND row too (a genuine choice there)", !!unitRow?.caret, JSON.stringify(unitRow));
+  const cell = page.locator('td[data-cell="0-4"]');
+  await cell.click();
+  await pacedWait(page, 200);
+  const info = await page.evaluate(() => {
+    const el = document.activeElement;
+    return { tag: el?.tagName, options: el?.tagName === "SELECT" ? [...el.options].map((o) => o.textContent.trim()) : null };
+  });
+  check("Unit (land): a REAL click focuses an actual SELECT", info.tag === "SELECT", JSON.stringify(info));
+  check("Unit (land): its options are exactly ['', 'AC', 'SF']", JSON.stringify(info.options) === JSON.stringify(["", "AC", "SF"]), JSON.stringify(info));
   if (SHOTS) await page.screenshot({ path: `${SHOT_DIR}/carets-land.png` });
   await ctx.close();
 }

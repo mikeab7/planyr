@@ -109,6 +109,18 @@ export const TYPE_OPTIONS = [
 export const PERIOD_OPTIONS = [{ value: "monthly", label: "MO" }, { value: "annual", label: "YR" }];
 export const BASIS_OPTIONS = [{ value: "nnn", label: "NNN" }, { value: "gross", label: "GROSS" }];
 export const UNIT_OPTIONS = [{ value: "ac", label: "AC" }, { value: "sf", label: "SF" }];
+// B1119282 (×2) — the Unit cell's option set on a building-sale/lease row: the one real value
+// those types' own DB columns accept, never a fabricated AC choice with no field to hold it.
+const SF_ONLY_OPTIONS = [{ value: "sf", label: "SF" }];
+
+/** A select column's option set for ONE row's comp type — `col.optionsFor(compType)` when the
+ * column declares one (currently only Unit, whose choices genuinely vary by type), else the
+ * column's own static `options`. The one place every select-kind caller (cellState,
+ * applyCellEdit, and the sheet's own rendering/type-ahead) resolves this, so the per-row set
+ * can't drift between what's shown, what's typed against, and what's stored. */
+export function optionsForColumn(col, compType) {
+  return col.optionsFor ? col.optionsFor(compType) : col.options;
+}
 
 /* ---- number display: comma-separated while resting, raw digits while being typed ----------- */
 
@@ -239,11 +251,32 @@ export const SHEET_COLUMNS = [
     flagKey: (d) => (d.compType === "land" ? "landSizeValue" : d.compType === "building_sale" ? "bldgSizeSf" : "leaseSizeSf"),
   },
   {
-    // Editable AC/SF only for land — building-sale and lease sizes are always SF, shown as a
-    // fixed (not em-dash — it DOES apply, it's just not a choice) label.
+    // B1119282 (×2, owner live-click measurement, 2026-09-03) — REVERSES the earlier "fixed,
+    // non-editable outside land" design (HARDENING-10's own note, quoted below for the record):
+    // "Editable AC/SF only for land — building-sale and lease sizes are always SF, shown as a
+    // fixed (not em-dash — it DOES apply, it's just not a choice) label." That reads consistent
+    // on paper, but real clicking found the opposite of consistent: Type/Per/Basis are genuine
+    // native `<select>` elements a user can click into on every row they apply to, while Unit —
+    // the ONE column with `editableFor` gating it to a single comp type — mounted NO select at
+    // all outside land (`document.querySelectorAll('table select').length === 0`), yet a prior
+    // round gave it the SAME caret as those three for visual parity. That combination is worse
+    // than having no caret: the caret now claims a choice exists that a click cannot reach at
+    // all, on the one column whose whole job is disambiguating SF from acres — and this repo has
+    // already shipped a real "5 acres became 5 SF" defect from exactly that kind of unit
+    // confusion. Unit is a real, always-mounting select cell now, on the SAME mechanism as
+    // Type/Per/Basis (`editableFor` is gone; `cellState`'s now-dead "fixed" state is removed
+    // with it). What differs per row is only the OPTION SET, via `optionsFor` below — land keeps
+    // the genuine AC/SF choice; building-sale and lease get a select whose one real, honest
+    // option is SF, because that is the entire option set their own DB columns
+    // (`bldg_size_sf`/`lease_size_sf`) accept — never a fabricated AC choice with nowhere to
+    // persist it. A real one-option select is not a lie; a caret over an unreachable one was.
+    // B850016 (NEW-10) — width 40->44: measured live, both AC and SF sat at literally 0px of
+    // slack against their own content (see this file's own SHEET_COLUMNS header comment); a small
+    // buffer removes the fragility without changing anything about the select-vs-fixed question
+    // this comment is otherwise about.
     key: "landSizeUnit", label: "Unit", group: "PROPERTY", width: 44, align: "left", kind: "select", options: UNIT_OPTIONS,
     appliesTo: () => true,
-    editableFor: (t) => t === "land",
+    optionsFor: (compType) => (compType === "land" ? UNIT_OPTIONS : SF_ONLY_OPTIONS),
     getValue: (d) => (d.compType === "land" ? d.landSizeUnit : "sf"),
     setValue: (d, v) => ({ ...d, landSizeUnit: v }),
     flagKey: () => "landSizeUnit",
@@ -395,9 +428,11 @@ export function visibleColumnIndices(rows) {
   return out;
 }
 
-/** The one place a cell's rendered state is decided: applicable+editable, applicable+fixed
- * (Unit for a non-land row), not-applicable (em dash), or derived. Never returns a raw value the
- * caller has to re-interpret — `text` is always what the cell should show. */
+/** The one place a cell's rendered state is decided: applicable+editable, not-applicable (em
+ * dash), or derived. Never returns a raw value the caller has to re-interpret — `text` is always
+ * what the cell should show. (B1119282 ×2 removed the third, "fixed", state this used to have
+ * for Unit on a non-land row — Unit is a real editable select on every row now; see its own
+ * column header for why.) */
 export function cellState(col, draft) {
   const applies = col.appliesTo(draft.compType);
   if (col.kind === "derived") {
@@ -426,11 +461,7 @@ export function cellState(col, draft) {
     return { state: "editable", text: formatNumberDisplay(raw), raw: raw ?? "" };
   }
   const raw = col.getValue(draft);
-  if (col.editableFor && !col.editableFor(draft.compType)) {
-    // applies, but not a choice for this type (Unit is always SF outside land)
-    return { state: "fixed", text: optionLabel(col.options, raw) || String(raw || "").toUpperCase() };
-  }
-  if (col.kind === "select") return { state: "editable", text: optionLabel(col.options, raw), raw: raw || "" };
+  if (col.kind === "select") return { state: "editable", text: optionLabel(optionsForColumn(col, draft.compType), raw), raw: raw || "" };
   if (col.kind === "number") return { state: "editable", text: formatNumberDisplay(raw), raw: raw ?? "" };
   if (col.kind === "date") {
     // HARDENING-8 — `raw` (ISO, what's actually stored) is never shown; the REST display and
@@ -460,7 +491,7 @@ export function cellPlaceholder() {
 export function applyCellEdit(col, draft, rawInput) {
   if (col.kind === "derived" || col.kind === "action") return draft;
   if (col.kind === "select") {
-    const matched = matchOption(col.options, rawInput);
+    const matched = matchOption(optionsForColumn(col, draft.compType), rawInput);
     return matched == null ? draft : col.setValue(draft, matched);
   }
   if (col.kind === "number") return col.setValue(draft, sanitizeNumericInput(rawInput));
