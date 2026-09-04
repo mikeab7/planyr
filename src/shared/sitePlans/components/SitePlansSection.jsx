@@ -35,7 +35,9 @@ import {
 import { overlayPlaced } from "../lib/sitePlanOverlays.js";
 import { imagePointToLatLon } from "../lib/overlayGeoref.js";
 import { friendlySaveError } from "../lib/overlayErrors.js";
-import { uploadOverlayRaster } from "../lib/overlayRasterStorage.js";
+import { uploadOverlayRaster, downloadOverlayRasterUrl } from "../lib/overlayRasterStorage.js";
+import ImageCropTool from "./ImageCropTool.jsx";
+import { hasCrop } from "../../../workspaces/site-planner/lib/overlayCrop.js";
 import {
   OVERLAY_RASTER_BASE_DPI, OVERLAY_RASTER_MAX_LONG_EDGE_PX, OVERLAY_RASTER_JPEG_QUALITY,
   OVERLAY_THUMB_MAX_LONG_EDGE_PX, OVERLAY_THUMB_JPEG_QUALITY, cappedRasterDims,
@@ -166,6 +168,13 @@ function MoveIcon() {
     </svg>
   );
 }
+function CropIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 2 v14 a2 2 0 0 0 2 2 h14" /><path d="M18 22 V8 a2 2 0 0 0-2-2 H2" />
+    </svg>
+  );
+}
 function PinIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
@@ -209,20 +218,27 @@ function emptyFlow() {
     dropPlacement: null, // {lat,lng} — where a dropped file landed on the map, if any (a center override only — never a full placement on its own, see confirmPage)
     queue: [], // remaining File objects still to place, after this one (multi-file drop)
     uploadProgress: null, // {sent,total} bytes, while the brochure itself is uploading
+    crop: null, // {x,y,w,h} in source-image px — set via "Crop…" in the page-picker step (NEW-21)
+    cropping: false, // the crop tool is open ON TOP of the page-picker step
   };
 }
 
 /** One overlay's row — module scope (MODULE-SCOPE-COMPONENTS). */
 function OverlayRow({
   o, expanded, onToggleExpand, isActive, onActivate, pinning, onStartPin, onStopPin,
-  onSetOpacity, onToggleVisible, onRename, onConfirmChangePage, onDelete, rasterFailed,
-  teams, onShareTeam, duplicateCount, isOwner, onToggleLocked, zoomBelowGate, onZoomToOverlay,
+  onSetOpacity, onSetRotation, onToggleVisible, onRename, onConfirmChangePage, onDelete, rasterFailed,
+  teams, onShareTeam, duplicateCount, isOwner, onToggleLocked, zoomBelowGate, onZoomToOverlay, onStartCrop,
 }) {
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(o.docTitle || "");
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [confirmingChangePage, setConfirmingChangePage] = useState(false);
+  // B1134753 NEW-20 — "rotation needs a way to type an exact value." `null` = not editing (show
+  // the live stored value); a string while the field has focus, so a half-typed "12." isn't
+  // clobbered by the next map-driven re-render mid-keystroke.
+  const [rotDraft, setRotDraft] = useState(null);
+  const rotCancelingRef = useRef(false); // Escape sets this so the resulting blur doesn't ALSO commit
   const menuBtnRef = useRef(null);
 
   const commitName = () => {
@@ -230,6 +246,13 @@ function OverlayRow({
     const next = nameDraft.trim();
     if (next && next !== o.docTitle) onRename(next);
     else setNameDraft(o.docTitle || "");
+  };
+
+  const commitRotation = () => {
+    if (rotCancelingRef.current) { rotCancelingRef.current = false; setRotDraft(null); return; }
+    const v = parseFloat(rotDraft);
+    setRotDraft(null);
+    if (Number.isFinite(v)) onSetRotation(((v % 360) + 360) % 360);
   };
 
   const placed = overlayPlaced(o);
@@ -341,6 +364,26 @@ function OverlayRow({
             </div>
           </div>
 
+          {/* B1134753 NEW-20 — an exact-value alternative to eyeballing the rotate handle on the
+              map. Committed the SAME way a drag is (SitePlansSection's commitPlacement), so a
+              pinned comp on this plan still recomputes and the version guard still applies. */}
+          {placed && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <span style={metaText}>Rotation</span>
+              <input type="number" step={0.1}
+                value={rotDraft != null ? rotDraft : Math.round((o.rotationDeg || 0) * 10) / 10}
+                onChange={(e) => setRotDraft(e.target.value)}
+                onFocus={() => setRotDraft(String(Math.round((o.rotationDeg || 0) * 10) / 10))}
+                onBlur={commitRotation}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.currentTarget.blur(); }
+                  if (e.key === "Escape") { rotCancelingRef.current = true; e.currentTarget.blur(); }
+                }}
+                style={{ ...inputStyle, width: 72 }} />
+              <span style={metaText}>°</span>
+            </div>
+          )}
+
           {/* B972512-HARDENING item 8 — sharing is a deliberate, POST-placement action, gated on
               `placed` so a half-set-up plan (still at its auto-suggested default position) can
               never appear on a teammate's map before its owner has actually positioned it. */}
@@ -370,6 +413,14 @@ function OverlayRow({
               onClick={() => onActivate()} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
               title={placed && o.locked ? "Locked — unlock to move or resize" : undefined}>
               <MoveIcon />{isActive ? "Editing on map" : placed ? "Move / resize" : "Place on map"}
+            </Button>
+            {/* B1134754 NEW-21 — crop is available whether or not the overlay has been placed
+                yet ("crop should be available BEFORE placement as well as after… avoids fighting
+                the alignment twice"); disabled only while there's no raster to crop at all. */}
+            <Button size="sm" variant="ghost" disabled={!o.rasterKey}
+              onClick={onStartCrop} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+              title={!o.rasterKey ? "This plan doesn't have an image yet" : hasCrop(o) ? "Already cropped — edit or reset it" : undefined}>
+              <CropIcon />{hasCrop(o) ? "Cropped ✓" : "Crop…"}
             </Button>
             {placed && (pinning ? (
               <Button size="sm" variant="danger" onClick={onStopPin}>Cancel pin</Button>
@@ -409,6 +460,9 @@ export default function SitePlansSection({
   const [trash, setTrash] = useState([]);
   const [trashOpen, setTrashOpen] = useState(false);
   const [trashLoading, setTrashLoading] = useState(false);
+  // B1134754 NEW-21 — same rule as `trash` above: declared before the `if (!open) return null`
+  // below, so this hook still runs unconditionally on every render even while the panel is closed.
+  const [cropTarget, setCropTarget] = useState(null); // { overlay, src } while the crop tool is open
   const notifiedRef = useRef(onOverlaysChange);
   notifiedRef.current = onOverlaysChange;
   const overlaysRef = useRef(overlays);
@@ -451,12 +505,24 @@ export default function SitePlansSection({
       for (const o of data) noteVersion(o.id, o.version);
       notifiedRef.current?.(data);
     }
+    return error ? null : data; // callers that need the FRESH rows (not a re-render's timing) read this
   };
   useEffect(() => { if (open) reload(); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The map calls this on every finished drag (move / scale / rotate) — this module stays the
   // one place that persists an overlay, so its own list state can't drift from what the map
-  // just committed. Optimistic locally, then written through.
+  // just committed. Optimistic locally, then written through. This is also the ONE
+  // placement-commit path the typed-rotation field (setRotation, below) reuses — rotation is a
+  // PLACEMENT field (it moves any pinned comp's derived position), so it must go through the
+  // SAME atomic commit + version guard a drag does, never the plain patchAndReload path
+  // opacity/visible/locked use, which never touches pinned comps.
+  //
+  // NEW-18 — queued per overlay id via `serialized` (the write-queue module above), so a second
+  // finished-drag/rotation commit for the SAME overlay never starts reading the expected version
+  // until the first has fully settled — this is what closes the false "someone else changed
+  // this site plan" conflict for a single user's own rapid successive gestures (measured on the
+  // owner's real row: version 18 after four minutes of ordinary corner/rotate nudging — far more
+  // commits than four minutes of deliberate releases should produce).
   //
   // B972512-HARDENING item 1: a placement change silently left every comp pinned to this overlay
   // at its OLD lat/lon — the map position is DERIVED (site_plan_point run through the placement
@@ -467,72 +533,72 @@ export default function SitePlansSection({
   // recompute its lat/lon under the NEW placement, and write both the overlay and every comp
   // position through commitOverlayPlacementWithComps, a single-transaction RPC (comps.update is
   // owner-only RLS, so a plain client-side update would silently no-op on a teammate's pin).
+  const commitPlacement = (id, placement) => serialized(id, async () => {
+    const existing = overlaysRef.current.find((o) => o.id === id);
+    if (!existing) return;
+    const next = { ...existing, ...placement };
+    setOverlays((list) => { const l = list.map((o) => (o.id === id ? next : o)); notifiedRef.current?.(l); return l; });
+
+    const { data: points, error: pointsError } = await fetchOverlayCompPoints(id);
+    if (pointsError) console.error("[sitePlanOverlays] fetching pinned comps for recompute failed:", pointsError);
+    const compPositions = (points || []).map((p) => {
+      const ll = imagePointToLatLon(next, next.imgW, next.imgH, p.sitePlanPoint.x, p.sitePlanPoint.y);
+      return ll && Number.isFinite(ll.lat) && Number.isFinite(ll.lon) ? { id: p.id, lat: ll.lat, lon: ll.lon } : null;
+    }).filter(Boolean);
+
+    // Item 7: carries the version this client last saw — the RPC refuses (and reports
+    // `conflict`) if the row changed elsewhere since, rather than silently clobbering a
+    // concurrent drag from another live session on the same plan.
+    const expected0 = Number.isFinite(overlayVersionsRef.current[id]) ? overlayVersionsRef.current[id] : existing.version;
+    let outcome = await commitOverlayPlacementWithComps(id, next, compPositions, expected0);
+
+    // NEW-18 — a reported conflict here is presumed stale bookkeeping, not a foreign edit
+    // (the queue above already rules out a second call racing this one): refetch the row's
+    // real current version and retry exactly once before believing it. A conflict that
+    // survives a fresh version is a genuine concurrent editor.
+    if (outcome.conflict) {
+      const { data: fresh } = await fetchAllOverlays();
+      const freshVersion = (fresh || []).find((o) => o.id === id)?.version;
+      if (Number.isFinite(freshVersion) && freshVersion !== expected0) {
+        noteVersion(id, freshVersion);
+        outcome = await commitOverlayPlacementWithComps(id, next, compPositions, freshVersion);
+      }
+    }
+
+    if (outcome.conflict) {
+      // Survived the retry — a genuine second editor moved this plan mid-gesture. Never
+      // silently discard this session's own in-progress placement: `next` stays on screen
+      // (it was already applied above), and the version cache is refreshed so the user's next
+      // move/release retries clean instead of repeating the same stale write.
+      console.warn("[sitePlanOverlays] placement commit conflict survived retry — treating as a genuine concurrent edit:", id);
+      setPanelError("Someone else changed this site plan just now, so your last move hasn't saved yet — move it again to retry.");
+      const { data: fresh } = await fetchAllOverlays();
+      noteVersion(id, (fresh || []).find((o) => o.id === id)?.version);
+    } else if (outcome.error) {
+      console.error("[sitePlanOverlays] placement commit failed:", outcome.error);
+      setPanelError(friendlySaveError(outcome.error));
+      await reload(); // the optimistic move didn't actually save — pull the real, current position back
+    } else {
+      // Success — advance the locally-held version so the NEXT drag's guard compares against
+      // what the server actually has now, not the pre-commit value (else every subsequent
+      // drag in this same session would spuriously read as a conflict against itself).
+      noteVersion(id, outcome.version);
+      if (Number.isFinite(outcome.version)) {
+        setOverlays((list) => list.map((o) => (o.id === id ? { ...o, version: outcome.version } : o)));
+      }
+      if (compPositions.length) {
+        // Tell the comps panel/map markers to refetch — otherwise the mover sees their own and
+        // teammates' pins sitting at the old spot until the next tab-focus refetch
+        // (CompsPanel's own cross-device polling, which is otherwise the only thing that would
+        // eventually pick this up).
+        compsChangedRef.current && compsChangedRef.current();
+      }
+    }
+  });
+
   useEffect(() => {
     if (!commitPlacementRef) return undefined;
-    // NEW-18 — queued per overlay id (see `serialized` above), so a second finished-drag commit
-    // never starts reading the expected version until this one has fully settled.
-    commitPlacementRef.current = (id, placement) => serialized(id, async () => {
-      const existing = overlaysRef.current.find((o) => o.id === id);
-      if (!existing) return;
-      const next = { ...existing, ...placement };
-      setOverlays((list) => { const l = list.map((o) => (o.id === id ? next : o)); notifiedRef.current?.(l); return l; });
-
-      const { data: points, error: pointsError } = await fetchOverlayCompPoints(id);
-      if (pointsError) console.error("[sitePlanOverlays] fetching pinned comps for recompute failed:", pointsError);
-      const compPositions = (points || []).map((p) => {
-        const ll = imagePointToLatLon(next, next.imgW, next.imgH, p.sitePlanPoint.x, p.sitePlanPoint.y);
-        return ll && Number.isFinite(ll.lat) && Number.isFinite(ll.lon) ? { id: p.id, lat: ll.lat, lon: ll.lon } : null;
-      }).filter(Boolean);
-
-      // Item 7: carries the version this client last saw — the RPC refuses (and reports
-      // `conflict`) if the row changed elsewhere since, rather than silently clobbering a
-      // concurrent drag from another live session on the same plan.
-      const expected0 = Number.isFinite(overlayVersionsRef.current[id]) ? overlayVersionsRef.current[id] : existing.version;
-      let outcome = await commitOverlayPlacementWithComps(id, next, compPositions, expected0);
-
-      // NEW-18 — a reported conflict here is presumed stale bookkeeping, not a foreign edit
-      // (the queue above already rules out a second call racing this one): refetch the row's
-      // real current version and retry exactly once before believing it. A conflict that
-      // survives a fresh version is a genuine concurrent editor — presence still fires for that.
-      if (outcome.conflict) {
-        const { data: fresh } = await fetchAllOverlays();
-        const freshVersion = (fresh || []).find((o) => o.id === id)?.version;
-        if (Number.isFinite(freshVersion) && freshVersion !== expected0) {
-          noteVersion(id, freshVersion);
-          outcome = await commitOverlayPlacementWithComps(id, next, compPositions, freshVersion);
-        }
-      }
-
-      if (outcome.conflict) {
-        // Survived the retry — a genuine second editor moved this plan mid-gesture. Never
-        // silently discard this session's own in-progress placement: `next` stays on screen
-        // (it was already applied above), and the version cache is refreshed so the user's next
-        // move/release retries clean instead of repeating the same stale write.
-        console.warn("[sitePlanOverlays] placement commit conflict survived retry — treating as a genuine concurrent edit:", id);
-        setPanelError("Someone else changed this site plan just now, so your last move hasn't saved yet — move it again to retry.");
-        const { data: fresh } = await fetchAllOverlays();
-        noteVersion(id, (fresh || []).find((o) => o.id === id)?.version);
-      } else if (outcome.error) {
-        console.error("[sitePlanOverlays] placement commit failed:", outcome.error);
-        setPanelError(friendlySaveError(outcome.error));
-        await reload(); // the optimistic move didn't actually save — pull the real, current position back
-      } else {
-        // Success — advance the locally-held version so the NEXT drag's guard compares against
-        // what the server actually has now, not the pre-commit value (else every subsequent
-        // drag in this same session would spuriously read as a conflict against itself).
-        noteVersion(id, outcome.version);
-        if (Number.isFinite(outcome.version)) {
-          setOverlays((list) => list.map((o) => (o.id === id ? { ...o, version: outcome.version } : o)));
-        }
-        if (compPositions.length) {
-          // Tell the comps panel/map markers to refetch — otherwise the mover sees their own and
-          // teammates' pins sitting at the old spot until the next tab-focus refetch
-          // (CompsPanel's own cross-device polling, which is otherwise the only thing that would
-          // eventually pick this up).
-          compsChangedRef.current && compsChangedRef.current();
-        }
-      }
-    });
+    commitPlacementRef.current = commitPlacement;
     return () => { if (commitPlacementRef) commitPlacementRef.current = null; };
   }, [commitPlacementRef]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -607,7 +673,7 @@ export default function SitePlansSection({
 
   const choosePage = async (n) => {
     if (n < 1 || n > flow.pageCount) return;
-    setF({ page: n });
+    setF({ page: n, crop: null }); // a different page invalidates any crop drawn against the old one
     try {
       const src = flow.fileBuffer || flow.file;
       const r = await rasterizePage(src, n);
@@ -634,6 +700,10 @@ export default function SitePlansSection({
         const existing = overlaysRef.current.find((o) => o.id === f.overlayId);
         const { data, error } = await updateOverlay(f.overlayId, {
           ...existing, page: f.page, imgW: f.rasterW, imgH: f.rasterH, thumbDataUrl: f.thumbDataUrl,
+          // B1134754 — a stored crop is a rect in the OLD raster's own pixel grid; a different
+          // page/image invalidates it exactly like it invalidates the old placement fit below,
+          // so this clears it too rather than silently applying a stale rect to new artwork.
+          crop: f.crop || null,
           ...(placement || {}), // Change page clears the old placement's fit — re-place fresh
         });
         if (error) throw error;
@@ -659,6 +729,7 @@ export default function SitePlansSection({
           reviewId: uploaded.id, page: f.page,
           docTitle: f.title, docDate: f.docDate, sourceFileName: (f.file && f.file.name) || "",
           imgW: f.rasterW, imgH: f.rasterH, thumbDataUrl: f.thumbDataUrl, opacity: 0.85, visible: true,
+          crop: f.crop || null,
           ...(placement || {}),
         });
         if (error) throw error;
@@ -745,6 +816,29 @@ export default function SitePlansSection({
   });
   const rename = (o, docTitle) => patchAndReload(o, { docTitle });
   const setOpacity = (o, opacity) => patchAndReload(o, { opacity });
+  // Rotation is a PLACEMENT field (it moves any pinned comp's derived position), so it goes
+  // through the same atomic commit the map's own rotate handle uses — never the plain
+  // patchAndReload path opacity/visible/locked use, which never touches pinned comps.
+  const setRotation = (o, rotationDeg) => commitPlacement(o.id, { rotationDeg });
+
+  // ---- crop (B1134754 NEW-21), for an ALREADY-PLACED overlay -------------------------------
+  // A crop never moves the placement transform (see site_plan_overlays_crop.sql's header), so
+  // it commits through the plain patchAndReload path — never commitPlacement — and never
+  // recomputes a pinned comp's position. (`cropTarget` state itself is declared near the top of
+  // the component, above the `if (!open) return null` early return — see that declaration.)
+  const startCrop = async (o) => {
+    if (!o.rasterKey) return;
+    setPanelError(null);
+    const src = await downloadOverlayRasterUrl(o.rasterKey);
+    if (!src) { setPanelError("Couldn't load this plan's image to crop it — reload and try again."); return; }
+    setCropTarget({ overlay: o, src });
+  };
+  const commitCrop = async (crop) => {
+    const o = cropTarget && cropTarget.overlay;
+    setCropTarget(null);
+    if (!o) return;
+    await patchAndReload(o, { crop });
+  };
   const toggleVisible = (o) => patchAndReload(o, { visible: !o.visible });
   const shareOverlay = (o, teamId) => patchAndReload(o, { teamId });
   // B972512-HARDENING item 17 — `locked` exists on the schema (mirrors the Site Planner's own
@@ -790,6 +884,7 @@ export default function SitePlansSection({
   };
 
   return (
+    <>
     <div style={{ borderBottom: "1px solid var(--border-default)", padding: "10px 14px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: overlays.length ? 8 : 0 }}>
         <span style={{ fontSize: FONT_SIZE.label, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)" }}>Site plans</span>
@@ -839,6 +934,8 @@ export default function SitePlansSection({
           onStartPin={() => onStartPinOnOverlay?.(o.id)}
           onStopPin={() => onStopPinOnOverlay?.()}
           onSetOpacity={(v) => setOpacity(o, v)}
+          onSetRotation={(deg) => setRotation(o, deg)}
+          onStartCrop={() => startCrop(o)}
           onToggleVisible={() => toggleVisible(o)}
           onRename={(name) => rename(o, name)}
           onConfirmChangePage={() => startChangePage(o)}
@@ -920,11 +1017,28 @@ export default function SitePlansSection({
                   </span>
                 </Field>
               )}
-              <PagePreview url={flow.previewUrl} />
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <Button size="sm" onClick={confirmPage} disabled={!flow.overlayId && (!flow.title || !flow.docDate)}>{flow.overlayId ? "Use this page" : "Place on map"}</Button>
-                <Button size="sm" variant="ghost" onClick={cancelFlow}>Cancel</Button>
-              </div>
+              {flow.cropping ? (
+                // B1134754 NEW-21 — "crop should be available BEFORE placement… trimming the
+                // flyer down to the plan first, then placing, is the natural workflow." Same
+                // tool the post-placement "Crop…" button opens, over the just-rasterized page.
+                <ImageCropTool
+                  src={flow.previewUrl} imgW={flow.rasterW} imgH={flow.rasterH} crop={flow.crop}
+                  onCommit={(crop) => setF({ crop, cropping: false })}
+                  onCancel={() => setF({ cropping: false })}
+                  maxWidth={420} maxHeight={340}
+                />
+              ) : (
+                <>
+                  <PagePreview url={flow.previewUrl} />
+                  <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
+                    <Button size="sm" onClick={confirmPage} disabled={!flow.overlayId && (!flow.title || !flow.docDate)}>{flow.overlayId ? "Use this page" : "Place on map"}</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setF({ cropping: true })} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                      <CropIcon />{hasCrop(flow) ? "Cropped ✓" : "Crop…"}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={cancelFlow}>Cancel</Button>
+                  </div>
+                </>
+              )}
             </>
           )}
 
@@ -959,5 +1073,28 @@ export default function SitePlansSection({
         </div>
       )}
     </div>
+
+    {/* B1134754 NEW-21 — cropping an ALREADY-PLACED overlay. A simple centered overlay (this
+        panel has no existing modal primitive) rather than a second bespoke crop surface. */}
+    {cropTarget && (
+      <div style={{
+        position: "fixed", inset: 0, zIndex: 2000, background: "rgba(0,0,0,0.35)", // design-exempt: modal backdrop scrim — no backdrop-color token exists repo-wide yet
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }} onPointerDown={(e) => { if (e.target === e.currentTarget) setCropTarget(null); }}>
+        <div style={{
+          background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: RADIUS.lg, padding: 14,
+          boxShadow: "0 8px 32px rgba(0,0,0,0.35)", // design-exempt: no shadow-color token yet repo-wide (matches model/FindReplaceBar.jsx's own popPanel precedent)
+        }}>
+          <div style={{ fontSize: FONT_SIZE.control, fontWeight: 600, marginBottom: 8, color: "var(--text-primary)" }}>
+            Crop “{cropTarget.overlay.docTitle || "this site plan"}”
+          </div>
+          <ImageCropTool
+            src={cropTarget.src} imgW={cropTarget.overlay.imgW} imgH={cropTarget.overlay.imgH} crop={cropTarget.overlay.crop}
+            onCommit={commitCrop} onCancel={() => setCropTarget(null)}
+          />
+        </div>
+      </div>
+    )}
+    </>
   );
 }

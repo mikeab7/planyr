@@ -58,18 +58,45 @@ export function createPlacementHandles(map) {
   const moveHit = svgEl("polygon", { fill: "transparent", style: "cursor:grab; pointer-events:auto;" });
   const boundary = svgEl("polygon", { fill: "none", stroke: ACCENT, "stroke-width": 1.5, "stroke-dasharray": "6 4", style: "pointer-events:none;" });
   const rotLine = svgEl("line", { stroke: ACCENT, "stroke-width": 1.5, style: "pointer-events:none;" });
-  const rotHandle = svgEl("circle", { r: 6.5, fill: ON_ACCENT, stroke: ACCENT, "stroke-width": 1.5, style: "cursor:grab; pointer-events:auto;" });
+  // A DIAMOND marker for rotate — the owner-cited Google Earth Pro image-overlay convention
+  // (B1134753 NEW-20): a circle reads as just another grip, a diamond reads as a distinct kind
+  // of grip at a glance, matching the reference model's own four-handle-shapes vocabulary.
+  const rotHandle = svgEl("polygon", { fill: ON_ACCENT, stroke: ACCENT, "stroke-width": 1.5, style: "cursor:grab; pointer-events:auto;" });
   const cornerCursors = ["nwse-resize", "nesw-resize", "nwse-resize", "nesw-resize"]; // [tl, tr, br, bl]
   const corners = cornerCursors.map((cur) => svgEl("rect", {
     width: 11, height: 11, rx: 2, fill: ON_ACCENT, stroke: ACCENT, "stroke-width": 1.5, style: `cursor:${cur}; pointer-events:auto;`,
   }));
-  svg.append(moveHit, boundary, rotLine, ...corners, rotHandle);
+  // Live numeric readout — shown only while a scale or rotate gesture is in flight (B1134753
+  // NEW-20: "rotation needs a numeric readout while dragging"). A small pill so it reads over
+  // both light and dark basemap imagery.
+  const readoutBg = svgEl("rect", { rx: 4, fill: "rgba(20,20,20,0.82)", style: "display:none; pointer-events:none;" }); // design-exempt: a fixed-dark HUD chip legible over any basemap/theme, same reasoning as this file's own ACCENT/ON_ACCENT SVG-attrs-can't-use-var() precedent — no token models "readable over a photo" today
+  const readoutText = svgEl("text", { fill: ON_ACCENT, "font-size": 12, "font-family": "system-ui,sans-serif", "text-anchor": "middle", "dominant-baseline": "middle", style: "display:none; pointer-events:none;" });
+  svg.append(moveHit, boundary, rotLine, ...corners, rotHandle, readoutBg, readoutText);
+
+  const showReadout = (text, x, y) => {
+    readoutText.textContent = text;
+    readoutText.setAttribute("x", x); readoutText.setAttribute("y", y);
+    readoutText.style.display = "";
+    // Measure after the text is in the DOM so the pill fits whatever string was just set. A
+    // cosmetic label must never be able to break a live drag gesture — fall back to a
+    // fixed-width estimate rather than throw (getBBox can be unavailable in some environments).
+    let bb;
+    try { bb = readoutText.getBBox(); } catch { bb = { x: x - text.length * 3.5, y: y - 6, width: text.length * 7, height: 14 }; }
+    readoutBg.setAttribute("x", bb.x - 8); readoutBg.setAttribute("y", bb.y - 4);
+    readoutBg.setAttribute("width", bb.width + 16); readoutBg.setAttribute("height", bb.height + 8);
+    readoutBg.style.display = "";
+  };
+  const hideReadout = () => { readoutBg.style.display = "none"; readoutText.style.display = "none"; };
 
   let current = null; // { overlay, imgW, imgH, onLive, onCommit }
   let gesture = false;
   let cancelGesture = null; // set while a gesture is in flight — destroy()'s safety net
+  let readoutMode = null; // null | "rotate" | "scale" — which gesture (if any) owns the readout
+  let readoutValue = "";
 
   const containerCenter = (overlay) => map.latLngToContainerPoint(L.latLng(overlay.centerLat, overlay.centerLon));
+
+  const DIAMOND_R = 7; // half-diagonal, px — matches the corner squares' visual weight
 
   const redraw = () => {
     if (!current) { svg.style.display = "none"; return; }
@@ -89,8 +116,18 @@ export function createPlacementHandles(map) {
     const rp = { x: topCenter.x + dx * 24, y: topCenter.y + dy * 24 };
     rotLine.setAttribute("x1", topCenter.x); rotLine.setAttribute("y1", topCenter.y);
     rotLine.setAttribute("x2", rp.x); rotLine.setAttribute("y2", rp.y);
-    rotHandle.setAttribute("cx", rp.x); rotHandle.setAttribute("cy", rp.y);
+    // The diamond's own "up" tracks the overlay's current rotation, so it visually reads as
+    // pointing the same direction the rotate gesture would spin it further.
+    rotHandle.setAttribute("points", pointsAttr([
+      { x: rp.x + dx * DIAMOND_R, y: rp.y + dy * DIAMOND_R },
+      { x: rp.x + dy * DIAMOND_R, y: rp.y - dx * DIAMOND_R },
+      { x: rp.x - dx * DIAMOND_R, y: rp.y - dy * DIAMOND_R },
+      { x: rp.x - dy * DIAMOND_R, y: rp.y + dx * DIAMOND_R },
+    ]));
     [tl, tr, br, bl].forEach((p, i) => { corners[i].setAttribute("x", p.x - 5.5); corners[i].setAttribute("y", p.y - 5.5); });
+    if (readoutMode === "rotate") showReadout(readoutValue, rp.x, rp.y - 22);
+    else if (readoutMode === "scale") showReadout(readoutValue, tr.x, tr.y - 18);
+    else hideReadout();
   };
 
   // B972512-HARDENING item 18 — which gesture owns the touch. `L.DomEvent.stop(e)` on the
@@ -106,35 +143,49 @@ export function createPlacementHandles(map) {
   // same species of bug as the open pinch/marker-displacement issue elsewhere in this codebase,
   // just for this feature's own handles. Fixed the standard Leaflet way: explicitly own the map's
   // own gesture handlers for the duration of OUR gesture, never let both be live at once.
-  const runGesture = (onMoveFn) => {
+  // `overlay0` — the placement snapshot at grab, restored verbatim if the gesture is cancelled
+  // (Escape — B1134753 NEW-20: "Escape cancels the in-progress manipulation and restores the
+  // previous transform"). `mode` — "rotate" | "scale" | null, which readout (if any) shows live.
+  const runGesture = (overlay0, onMoveFn, { mode = null } = {}) => {
     gesture = true;
+    readoutMode = mode;
     const wasDragging = map.dragging && map.dragging.enabled();
     const wasTouchZoom = map.touchZoom && map.touchZoom.enabled();
     if (map.dragging) map.dragging.disable();
     if (map.touchZoom) map.touchZoom.disable();
     const onMove = (ev) => { onMoveFn(ev); redraw(); };
-    const onUp = () => {
+    const cleanup = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("keydown", onKey, true);
       gesture = false;
       cancelGesture = null;
+      readoutMode = null;
       if (wasDragging && map.dragging) map.dragging.enable();
       if (wasTouchZoom && map.touchZoom) map.touchZoom.enable();
+    };
+    const onUp = () => {
+      cleanup();
       const done = current;
+      redraw(); // drop the readout before the (possibly async) commit round-trips
       if (done) done.onCommit(done.overlay);
+    };
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      L.DomEvent.stop(e);
+      cleanup();
+      if (current) { current.overlay = overlay0; current.onLive(overlay0); }
+      redraw();
     };
     // destroy()'s safety net for a controller torn down mid-gesture (e.g. the map unmounts
     // while a finger is still down) — drops the in-flight commit rather than firing onCommit on
     // a caller that's gone, but always restores the map's own gesture handlers.
-    cancelGesture = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      gesture = false;
-      if (wasDragging && map.dragging) map.dragging.enable();
-      if (wasTouchZoom && map.touchZoom) map.touchZoom.enable();
-    };
+    cancelGesture = () => { cleanup(); };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
+    // Capture phase — Escape must reach this handler even if the map or another control has
+    // focus mid-drag (a pointer gesture never moves DOM focus onto the handle itself).
+    window.addEventListener("keydown", onKey, true);
   };
 
   const startMove = (e) => {
@@ -143,7 +194,7 @@ export function createPlacementHandles(map) {
     const overlay0 = current.overlay;
     const grab = map.mouseEventToLatLng(e);
     const lat0 = overlay0.centerLat, lon0 = overlay0.centerLon;
-    runGesture((ev) => {
+    runGesture(overlay0, (ev) => {
       const p = map.mouseEventToLatLng(ev);
       current.overlay = { ...current.overlay, centerLat: lat0 + (p.lat - grab.lat), centerLon: lon0 + (p.lng - grab.lng) };
       current.onLive(current.overlay);
@@ -158,13 +209,15 @@ export function createPlacementHandles(map) {
     const grabPt = map.mouseEventToContainerPoint(e);
     const grabDist = Math.max(1e-6, Math.hypot(grabPt.x - centerPt.x, grabPt.y - centerPt.y));
     const ftPerPx0 = overlay0.ftPerPx;
-    runGesture((ev) => {
+    runGesture(overlay0, (ev) => {
       const p = map.mouseEventToContainerPoint(ev);
       const d = Math.max(1e-6, Math.hypot(p.x - centerPt.x, p.y - centerPt.y));
       const next = scalePlacement({ ...current.overlay, ftPerPx: ftPerPx0 }, d / grabDist);
       current.overlay = { ...current.overlay, ftPerPx: next.ftPerPx };
       current.onLive(current.overlay);
-    });
+      const wFt = Math.round(current.imgW * next.ftPerPx), hFt = Math.round(current.imgH * next.ftPerPx);
+      readoutValue = `${wFt.toLocaleString()} × ${hFt.toLocaleString()} ft`;
+    }, { mode: "scale" });
   };
 
   const startRotate = (e) => {
@@ -175,13 +228,14 @@ export function createPlacementHandles(map) {
     const grabPt = map.mouseEventToContainerPoint(e);
     const a0 = (Math.atan2(grabPt.y - centerPt.y, grabPt.x - centerPt.x) * 180) / Math.PI;
     const rot0 = overlay0.rotationDeg || 0;
-    runGesture((ev) => {
+    runGesture(overlay0, (ev) => {
       const p = map.mouseEventToContainerPoint(ev);
       const a = (Math.atan2(p.y - centerPt.y, p.x - centerPt.x) * 180) / Math.PI;
       const next = rotatePlacement(current.overlay, rot0, a - a0);
       current.overlay = { ...current.overlay, rotationDeg: next.rotationDeg };
       current.onLive(current.overlay);
-    });
+      readoutValue = `${next.rotationDeg.toFixed(1)}°`;
+    }, { mode: "rotate" });
   };
 
   moveHit.addEventListener("pointerdown", startMove);
