@@ -539,7 +539,7 @@ export default function Notes({
    * Same shape as Review and Library: the route's id, with the store's name when it resolves
    * (the breadcrumb re-resolves the live name itself, so a rename shows without a reload). */
   const notesProject = useMemo(
-    () => (projectId ? { id: projectId, name: projectName || "Project" } : null),
+    () => (projectId ? { id: projectId, name: projectName || "Untitled project" } : null),
     [projectId, projectName],
   );
 

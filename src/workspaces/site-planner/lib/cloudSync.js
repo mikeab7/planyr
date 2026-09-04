@@ -326,6 +326,41 @@ export async function cloudDeletedRows(uid) {
   return { ok: true, supported: true, rows: data || [] };
 }
 
+/* NEW-2 (soft-deleted project stays open) — a SINGLE-ROW check for the one question a deep link
+ * into a project route needs answered before it mounts a workspace: is THIS id soft-deleted, and
+ * does it exist at all. Deliberately its own targeted `.eq("id", …)` lookup rather than routing
+ * through `cloudDeletedRows` (the whole-account bin list) — that would cost an unbounded scan on
+ * every navigation just to answer a question about one row.
+ *
+ * Returns { ok, exists, deleted, deletedAt, name, groupId }:
+ *   ok:false   → the check itself failed (offline, signed out, RLS, a thrown error) — the caller
+ *                MUST fail OPEN (never block a route on an inconclusive answer; STANDING RULE —
+ *                a hard gate needs a POSITIVE fact, not the absence of one).
+ *   exists:false → no row matched this id for this user at all (never existed, or belongs to
+ *                  someone else) — a DIFFERENT state from `deleted:true`, so a caller can tell
+ *                  "there's nothing here" from "this was here and got removed".
+ *   deleted:true → the row is soft-deleted; `deletedAt`/`name`/`groupId` are populated so the
+ *                  caller can offer a restore without a second round trip. */
+export async function cloudCheckDeleted(uid, id) {
+  if (!supabase || !uid || !id) return { ok: false, exists: false, deleted: false };
+  try {
+    const { data, error } = await supabase.from("sites")
+      .select("id, group_id, site, name, deleted_at")
+      .eq("id", id)
+      .maybeSingle();
+    if (error) {
+      if (isMissingColumn(error, "deleted_at")) return { ok: true, exists: true, deleted: false };
+      return { ok: false, exists: false, deleted: false, error: error.message || "deletion check failed" };
+    }
+    if (!data) return { ok: true, exists: false, deleted: false };
+    return {
+      ok: true, exists: true, deleted: !!data.deleted_at,
+      deletedAt: data.deleted_at || null, name: data.site || data.name || null, groupId: data.group_id || data.id,
+    };
+  } catch (e) {
+    return { ok: false, exists: false, deleted: false, error: (e && e.message) || "deletion check threw" };
+  }
+}
 
 /* NEW-1/NEW-2 — the project-rename cloud write lives in `cloudRename.js` and is reached ONLY by a
  * dynamic import from `storage.renameSiteGroup`.

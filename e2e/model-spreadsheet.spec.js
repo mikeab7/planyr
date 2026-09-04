@@ -291,6 +291,47 @@ test.describe("Model workspace — spreadsheet vertical slice", () => {
     await page.getByTestId("model-add-column").click();
     await expect(page.locator('[data-testid^="model-col-header-"]')).toHaveCount(start + 2);
   });
+
+  // NEW-1 (B848832, owner report 2026-09-04) — "frozen row gutter and column headers desync from
+  // the grid body on horizontal scroll". SheetView.jsx's header row, row-header gutter and every
+  // data cell all read their x position from the SAME `colOffsets` array under one native browser
+  // scroll (no separate JS-tracked horizontal offset exists anywhere in that file), so this proves
+  // the exact invariant the report named at deliberately NON-ZERO, NON-COLUMN-BOUNDARY scroll
+  // offsets — a check at offset zero passes on ANY implementation, correct or not, which is exactly
+  // the trap the report called out.
+  test("column headers stay aligned with their own column, and the row gutter is never bled through, at a non-boundary horizontal scroll", async ({ page }) => {
+    const id = "e2e-model-scroll-align";
+    await seedProject(page, id);
+    await page.goto(`/#/project/${id}/model`);
+    await expect(sheetEl(page)).toBeVisible();
+    // Column A carries the report's own data shape ("1 then 10, 2 then 20…") so a gutter
+    // bleed-through would be the exact visual symptom described, not just a structural one.
+    for (let r = 0; r < 4; r++) {
+      await cell(page, r, 0).click(); await typeAndEnter(page, String((r + 1) * 10));
+      for (let c = 1; c < 4; c++) { await cell(page, r, c).click(); await typeAndEnter(page, `${String.fromCharCode(65 + c)}${r + 1}`); }
+    }
+    // C4 (row idx 3, col idx 2) is the report's own named cell — select it once; a re-click on an
+    // already-active cell doesn't refire the "keep active cell on screen" auto-scroll, so it stays
+    // put for every scroll offset tried below.
+    await cell(page, 3, 2).click();
+    for (const scrollLeft of [45, 91, 137, 250]) {
+      await sheetEl(page).evaluate((el, sl) => { el.scrollLeft = sl; el.dispatchEvent(new Event("scroll", { bubbles: true })); }, scrollLeft);
+      const result = await page.evaluate(() => {
+        const active = document.querySelector('[data-testid="model-active-cell"]');
+        const rect = active.getBoundingClientRect();
+        const headerBand = document.querySelector('[data-testid^="model-col-header-"]').parentElement;
+        const y = headerBand.getBoundingClientRect().top + 13;
+        const hit = [...document.elementsFromPoint(rect.left + rect.width / 2, y)]
+          .map((e) => e.closest && e.closest('[data-testid^="model-col-header-"]')).find(Boolean);
+        const gutter0 = document.querySelector('[data-testid="model-row-header-0"]');
+        const gr = gutter0.getBoundingClientRect();
+        const topAtGutter = document.elementFromPoint(gr.left + gr.width / 2, gr.top + gr.height / 2);
+        return { headerAt: hit ? hit.getAttribute("data-testid") : null, gutterOnTop: topAtGutter === gutter0 || gutter0.contains(topAtGutter) };
+      });
+      expect(result.headerAt, `header alignment at scrollLeft=${scrollLeft}`).toBe("model-col-header-2");
+      expect(result.gutterOnTop, `gutter clipping at scrollLeft=${scrollLeft}`).toBe(true);
+    }
+  });
 });
 
 /* ⛔ STAGE 1 (owner report, 2026-09-01 — "this should be a full blown model") — the grid grows
@@ -726,10 +767,15 @@ test.describe("Model workspace — B1076480 (context-menu chrome, positioning, d
     // then a cache warm (a cloud pull in production; here, a same-tab write + the same synthetic
     // `storage` event notifyProjectsChanged() dispatches) must update the breadcrumb WITHOUT a
     // reload.
+    // NEW-2 (B848832) — the bare-word "Project" fallback itself was retired (it read as a broken
+    // placeholder, and the owner asked for the breadcrumb to never render it); every one of these
+    // spots now falls back to "Untitled project" instead, matching the bin's own existing
+    // "Untitled project" convention. This test's OWN subject — a cold cache warming without a
+    // reload — is otherwise unchanged.
     const id = "e2e-b1032840-breadcrumb";
     await page.goto(`/#/project/${id}/model`); // no seed — the cache for this id is genuinely cold
     await expect(sheetEl(page)).toBeVisible();
-    await expect(page.getByText("Project", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("Untitled project", { exact: true }).first()).toBeVisible();
 
     const site = {
       id, groupId: id, site: "Goose Creek", name: "Goose Creek", origin: null, county: "harris",
@@ -741,7 +787,7 @@ test.describe("Model workspace — B1076480 (context-menu chrome, positioning, d
       window.dispatchEvent(new StorageEvent("storage", { key: "planarfit:sites:v1" }));
     }, [id, site]);
     await expect(page.getByText("Goose Creek", { exact: true })).toBeVisible();
-    await expect(page.getByText("Project", { exact: true })).not.toBeVisible();
+    await expect(page.getByText("Untitled project", { exact: true })).not.toBeVisible();
   });
 
   test("right-clicking INSIDE an existing multi-cell selection preserves it — the context menu acts on the whole range, not just the clicked cell", async ({ page }) => {

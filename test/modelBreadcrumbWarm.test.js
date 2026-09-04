@@ -44,7 +44,8 @@ describe("B1076480 — ModelApp warms + self-heals the on-device project cache o
     expect(effectBlock.trim().endsWith("}, []);")).toBe(true); // runs once on mount, not on every render
   });
 
-  it("the fallback breadcrumb string is still exactly the literal word this bug is about (sanity — proves the guard is pinned to the right code)", () => {
-    expect(src).toMatch(/name:\s*projectName\s*\|\|\s*"Project"/);
+  it("the fallback breadcrumb string is never the bare placeholder word 'Project' (B848833/NEW-2 — sanity, proves the guard is pinned to the right code)", () => {
+    expect(src).toMatch(/name:\s*projectName\s*\|\|\s*"Untitled project"/);
+    expect(src).not.toMatch(/name:\s*projectName\s*\|\|\s*"Project"/);
   });
 });

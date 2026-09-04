@@ -246,7 +246,7 @@ export default function Library({
   if (projectId) {
     try { const p = listLocalProjects().find((pp) => pp.id === projectId); if (p) projectName = p.name; } catch (_) {}
   }
-  const libraryProject = projectId ? { id: projectId, name: projectName || "Project" } : null;
+  const libraryProject = projectId ? { id: projectId, name: projectName || "Untitled project" } : null;
 
   // Folder mode only makes sense with a project + signed in; FileBrowser gates its own
   // signed-out / pick-a-project states, so the rail simply doesn't mount there.

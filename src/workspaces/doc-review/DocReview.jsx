@@ -442,7 +442,7 @@ export default function DocReview({
     let name = "";
     try { const p = listLocalProjects().find((pp) => pp.id === projectId); if (p) name = p.name; } catch (_) {}
     if (!name && meta.projectId === projectId && meta.project) name = meta.project;
-    return { id: projectId, name: name || "Project" };
+    return { id: projectId, name: name || "Untitled project" };
   }, [projectId, meta.projectId, meta.project]);
   const [pendingStitch, setPendingStitch] = useState(null); // a stitch review handed to <Stitcher> to load
   const sourceRef = useRef(null);                  // { srcId, name } for re-drop matching after load

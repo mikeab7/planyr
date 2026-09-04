@@ -3,7 +3,7 @@
  * workspace-specific toolbar content). The shell's job is auth, module
  * switching state, and building the auth-control slot that AppHeader needs.
  */
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { supabaseConfigured } from "../workspaces/site-planner/lib/supabase.js";
 import { onAuthChange } from "../workspaces/site-planner/lib/auth.js";
 // B927105 — this is the ONLY storage-adjacent thing the shell needs at boot, and it's a
@@ -24,6 +24,11 @@ import { reloadFresh, isChunkRecoveryStuck, subscribeChunkRecoveryStuck } from "
 import { RADIUS } from "../shared/ui/radius.js";
 import FloatingNotice from "../shared/ui/FloatingNotice.jsx";
 import { mayResumeLastSite } from "../workspaces/site-planner/lib/bootResume.js";
+import { checkProjectDeletionStatus, listDeletedProjects, restoreDeletedProject } from "../shared/projects/projects.js";
+
+// NEW-2 (B848833) — lazy, same reasoning as AdminGate/DesignGallery below: a soft-deleted-project
+// notice is rare enough that it has no business riding the entry chunk every route downloads.
+const DeletedProjectNotice = lazy(() => import("../shared/ui/DeletedProjectNotice.jsx"));
 
 const AdminGate = lazy(() => import("../workspaces/admin/AdminGate.jsx"));
 // NEW-4 (docs/DESIGN.md) — the `/design` primitive gallery. Same lazy/not-a-workspace shape as
@@ -311,6 +316,50 @@ export default function Shell() {
   const [visited, setVisited] = useState(() => new Set([active]));
   useEffect(() => { setVisited((v) => (v.has(active) ? v : new Set(v).add(active))); }, [active]);
 
+  /* NEW-2 (B848833) — A SOFT-DELETED PROJECT MUST NOT SILENTLY STAY OPEN AND WRITABLE.
+   *
+   * A deep link (or a tab left open across a delete) can name a project id that's since been
+   * moved to Recently deleted — nothing about the route itself changes, and every workspace here
+   * mounts unconditionally off `projectId` with no notion that the site behind it might be gone.
+   * The check is asked ONCE per (projectId, recheck) pair, against the cloud directly (a single
+   * indexed row lookup — see `cloudCheckDeleted`'s own header), never against the local project
+   * list: that cache only reliably EXCLUDES a deleted project once a pull has run since the
+   * delete, so an already-cached, since-deleted entry would read as live for however long this
+   * device goes between pulls — exactly the staleness this gate exists to close.
+   *
+   * Deliberately OPTIMISTIC, not blocking: the workspace mounts normally the instant you navigate
+   * (no added latency for the overwhelming common case of a live project), and this swaps the
+   * blocked notice in the moment the check comes back positive. `gateReqRef` drops a stale
+   * response from a projectId the user has already navigated away from.
+   */
+  const [projectGate, setProjectGate] = useState({ id: null, status: "unknown", name: null, deletedAt: null });
+  const [gateRecheck, setGateRecheck] = useState(0);
+  const gateReqRef = useRef(null);
+  useEffect(() => {
+    if (!projectId || cross || org) { setProjectGate({ id: projectId, status: "live", name: null, deletedAt: null }); return; }
+    gateReqRef.current = projectId;
+    let live = true;
+    checkProjectDeletionStatus(projectId).then((res) => {
+      if (!live || gateReqRef.current !== projectId) return; // superseded by a later navigation
+      if (!res || res.ok === false) { setProjectGate({ id: projectId, status: "live", name: null, deletedAt: null }); return; } // fail OPEN
+      if (!res.exists) { setProjectGate({ id: projectId, status: "missing", name: null, deletedAt: null }); return; }
+      if (res.deleted) { setProjectGate({ id: projectId, status: "deleted", name: res.name, deletedAt: res.deletedAt }); return; }
+      setProjectGate({ id: projectId, status: "live", name: null, deletedAt: null });
+    });
+    return () => { live = false; };
+  }, [projectId, cross, org, gateRecheck]);
+  const projectBlocked = projectGate.id === projectId && (projectGate.status === "deleted" || projectGate.status === "missing");
+  const restoreBlockedProject = async () => {
+    // Restore the WHOLE group the routed id belongs to (every sibling plan), same as the
+    // breadcrumb's own Recently-deleted bin — never just the one plan id, which would leave the
+    // rest of a multi-plan project still binned.
+    const bin = await listDeletedProjects();
+    const entry = bin && bin.ok && bin.projects ? bin.projects.find((p) => (p.ids || []).includes(projectId)) : null;
+    const res = await restoreDeletedProject(entry ? entry.ids : [projectId]);
+    if (res && res.ok !== false) setGateRecheck((n) => n + 1); // re-run the gate check, drops the notice on success
+    return res;
+  };
+
   /* DEPLOY SKEW (B1373) — two independent signals, one banner.
    *
    *  `servedBuild` is what the SERVER says is current (null while unknown / offline / dev);
@@ -404,6 +453,25 @@ export default function Shell() {
         {WORKSPACES.filter((w) => visited.has(w.id) || w.id === active).map((w) => {
           const isActive = w.id === active;
           const Comp = w.Comp;
+          // NEW-2 (B848833) — a workspace never mounts (or stays mounted) for a project the gate
+          // has confirmed is soft-deleted / nonexistent. This is what makes the block real rather
+          // than cosmetic: swapping the JSX at this slot unmounts an already-open workspace too,
+          // which is what actually stops its autosave/write effects, not just hides them.
+          if (isActive && projectBlocked) {
+            return (
+              <div key={w.id} style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
+                <Suspense fallback={null}>
+                  <DeletedProjectNotice
+                    status={projectGate.status}
+                    name={projectGate.name}
+                    deletedAt={projectGate.deletedAt}
+                    onRestore={restoreBlockedProject}
+                    onDashboard={goDashboard}
+                  />
+                </Suspense>
+              </div>
+            );
+          }
           return (
             <div key={w.id} style={{ position: "absolute", inset: 0, display: isActive ? "flex" : "none", flexDirection: "column" }}>
               <ErrorBoundary label={w.label}>
