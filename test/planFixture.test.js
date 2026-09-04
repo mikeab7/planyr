@@ -125,7 +125,7 @@ describe("rasterSpecOf / census arithmetic", () => {
  * `ui-audit/build-bain-fixture.mjs` produced. It was green for the fixture's whole life — while
  * the fixture's coordinates were INVENTED. That is the shape of the check's limit: it proves a
  * file matches the thing that produced it, and says nothing about whether that thing was making
- * the plan up. docs/PERF-BAIN.md §6 named it as the bound on the report's largest claim.
+ * the plan up. docs/perf/PERF-BAIN.md §6 named it as the bound on the report's largest claim.
  *
  * Both fixtures are now pulled from `public.sites` JOINED to `public.site_elements`, so there is
  * no generator to be identical to, and the guard is the OWNER'S OWN MEASURED CENSUS asserted

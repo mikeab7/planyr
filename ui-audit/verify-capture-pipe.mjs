@@ -27,7 +27,7 @@
  * POST the production bundle issues — method, path, headers, and the exact row body — and it
  * drives the response itself, which is the only way to test the REJECTION path at all. The row it
  * captures is written to disk so the database half can be proven separately, by executing that
- * same insert against the real table under the real RLS roles (see `docs/CAPTURE-PIPE.md`).
+ * same insert against the real table under the real RLS roles (see `docs/perf/CAPTURE-PIPE.md`).
  *
  * FIVE ARMS, and the last three are the ones that make it a guard rather than a demo:
  *   auto       — induce a stall; a capture fires and a row goes on the wire
