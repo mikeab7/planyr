@@ -21,6 +21,7 @@
 
 import { absoluteStamp } from "./notesTime.js";
 import { DEFAULT_DENSITY, SINGLE, densityFor } from "./notesSpacing.js";
+import { indentCssRules } from "./notesIndentLevel.js";
 
 const esc = (s) => String(s == null ? "" : s)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -59,6 +60,9 @@ body { font: 11.5pt/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sa
 .note-body ul, .note-body ol { padding-left: 1.5em; margin: 0; }
 .note-body li { margin: 2px 0; }
 .note-body li p { margin: 0; }
+/* PDF-PARITY for the indent attribute's stylesheet table (B842949) — mirrors the identical
+   table in components/NoteEditor.jsx → EDITOR_CSS, construct for construct. */
+${indentCssRules(".note-body li")}
 .note-body blockquote { border-left: 3px solid #B8418C; padding-left: 0.9em; color: #3A3F4B; margin: 0; }
 .note-body code { background: #F2F3F6; border: 1px solid #D8DBE2; border-radius: 3px; padding: 0.1em 0.32em; font-family: ui-monospace, "Courier New", monospace; font-size: 0.9em; }
 .note-body pre { background: #F2F3F6; border: 1px solid #D8DBE2; border-radius: 6px; padding: 0.7em 0.85em; white-space: pre-wrap; word-break: break-word; break-inside: avoid; }

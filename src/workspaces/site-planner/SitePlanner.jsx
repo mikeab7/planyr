@@ -4723,11 +4723,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * undoable action funnels through here already, so this is the cheapest complete count there
    * is. It is a no-op unless the perf instrument is installed (a quarter of page loads). */
   // NEW-2 (B712225) — `kind` is optional and defaults to the generic "edit": classifying every one
-  // of pushHistory()'s ~190 call sites into the OP_KINDS vocabulary is future work (the module's
-  // vocabulary exists for merge/split/replace specifically, none of which are wired this pass);
-  // what THIS wiring needs is that every write carries an op_id + actor_session_id it can be
-  // correlated by, which "edit" (a real OP_KINDS member, not the "no operation open" unknown
-  // fallback) already gives it. `deleteSel` passes "delete" explicitly — see below.
+  // of pushHistory()'s ~190 call sites into the OP_KINDS vocabulary is future work (split/replace
+  // remain unwired); what THIS wiring needs is that every write carries an op_id + actor_session_id
+  // it can be correlated by, which "edit" (a real OP_KINDS member, not the "no operation open"
+  // unknown fallback) already gives it. `deleteSel` passes "delete" explicitly, `mergeParcels`
+  // passes "merge" — see below.
   const pushHistory = (kind = "edit") => { opTrackerRef.current.beginOperation(kind); histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
   /* ⛔ NEW-5 — "CAN I UNDO?" IS ASKED OF THE DOCUMENT, ONCE PER REAL CHANGE.
    *
@@ -7386,7 +7386,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
     }
     if (remaining.length) { flashWarn("⚠ Those parcels don't all share a boundary — pick parcels that touch edge-to-edge.", 6000); return; } // B735: non-blocking notice, not a jarring alert()
-    pushHistory();
+    pushHistory("merge"); // NEW-1 (perf investigation) — was the bare "edit" fallback; a real OP_KINDS member so a merge is answerable from telemetry (op_kind on the written rows) instead of a fresh investigation next time.
     const np = { id: uid(), points: result, locked: true };
     // The merged-away parcels are genuinely removed (replaced by `np`), so TOMBSTONE them — the same
     // invariant every other delete honors (B276/B556). Two reasons, both real bugs without it (B596):

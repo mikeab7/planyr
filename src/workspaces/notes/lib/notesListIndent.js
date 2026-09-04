@@ -50,7 +50,7 @@ import { Extension } from "@tiptap/core";
  * lib/notesFileMeta.js. */
 import { INDENTABLE, MAX_INDENT, indentAttrs, parseIndent, readIndent } from "./notesIndentLevel.js";
 
-export { INDENTABLE, INDENT_STEP_EM, MAX_INDENT, indentAttrs, readIndent } from "./notesIndentLevel.js";
+export { INDENTABLE, INDENT_STEP_EM, MAX_INDENT, indentAttrs, indentCssRules, readIndent } from "./notesIndentLevel.js";
 
 /** ⛔ THE ITEMS THE SELECTION IS ACTUALLY IN — WHICH IS **NOT** WHAT `nodesBetween` RETURNS
  *  (NEW-OUTDENT, reported by the owner with a screenshot).
@@ -92,7 +92,34 @@ const itemsInSelection = (state) => {
     }
     return true;
   });
-  return [...hits.values()];
+  const all = [...hits.values()];
+
+  /* ⛔ A REAL DESCENDANT RIDES ITS ANCESTOR'S SHIFT FOR FREE — GIVING BOTH THEIR OWN BUMP
+   *  DOUBLE-COUNTS IT (B842949, owner report: "highlighted the contacts thing... tabbed
+   *  everything, but then it's made the distance between indents bigger").
+   *
+   *  MEASURED, on a real chain three levels deep (Contacts: > Jerry Hayley > 713-416-5353,
+   *  each the sole child of the one above — built the same way `sinkListItem` builds any real
+   *  nested list). Select all three, press Tab once: every item picked up the SAME `indent: 1`,
+   *  and the on-screen step between adjacent levels went from 22.5px to 45px — not "one level
+   *  deeper", DOUBLE the step. The `margin-left` this file renders is a normal CSS box property:
+   *  it shifts an item's own border box, and everything REALLY nested inside that item (its
+   *  child `bulletList`, and everything in it) moves along for free because it lives inside that
+   *  now-shifted box. So when "Contacts:" gets `margin-left` for its new level, "Jerry Hayley"
+   *  is ALREADY carried one step deeper — giving Jerry its OWN identical bump on top adds a
+   *  SECOND step it was never owed, and "713-416-5353" (real-nested inside Jerry) inherits that
+   *  double twice over. A single caret on "Jerry Hayley" ALONE was never affected by this — one
+   *  hit, nothing to double — which is why the bug reads as selection-shaped even though the
+   *  underlying rule is really about REAL STRUCTURAL nesting, not selection size.
+   *
+   *  THE RULE: within one Tab/Shift+Tab press, only the OUTERMOST item in each real-nested
+   *  chain that is entirely inside the selection gets its own attribute moved. A hit already
+   *  contained inside another hit's own node range is a real descendant of it and is dropped —
+   *  its level still changes, carried by its ancestor's own shift, exactly as real nesting
+   *  already carries an item's real children with no attribute of their own. */
+  return all.filter(({ pos }) =>
+    !all.some((other) => other.pos !== pos
+      && other.pos <= pos && pos < other.pos + other.node.nodeSize));
 };
 
 /** Which list-item type the caret is in, or null. */
