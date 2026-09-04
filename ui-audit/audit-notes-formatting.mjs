@@ -272,6 +272,31 @@ const clickTool = async (page, id) => {
   return true;
 };
 
+/* ⛔ nt-block / nt-size MOVED OFF A NATIVE `<select>` ONTO A LISTBOX POPOVER (B1139216) — a real
+ * dead click otherwise (a native select's `change` never fires on re-picking the option already
+ * selected, and a mixed selection used to show the FIRST block's value as if it were the whole
+ * selection's). `.selectOption()` no longer applies to either; open the trigger with `clickTool`
+ * (already handles the "behind More" case) and click the option BUTTON instead — see
+ * NoteToolbar.jsx's `FormatMenu` for the option testid shape (`${testid}-opt-<value|"default">`). */
+const formatMenuOptions = async (page, testid) => {
+  if (!(await clickTool(page, testid))) return null;
+  const opts = await page.evaluate(
+    (t) => [...document.querySelectorAll(`[data-testid^="${t}-opt-"]`)].map((b) => b.getAttribute("data-testid").slice(`${t}-opt-`.length)),
+    testid,
+  );
+  await page.keyboard.press("Escape");
+  await pacedWait(page, 150);
+  return opts.length ? opts : null;
+};
+const pickFormatMenuOption = async (page, testid, suffix) => {
+  if (!(await clickTool(page, testid))) return false;
+  const opt = page.locator(`[data-testid="${testid}-opt-${suffix}"]`).first();
+  if (!(await opt.count())) { await page.keyboard.press("Escape"); return false; }
+  await opt.click({ timeout: 4000 }).catch(() => {});
+  await pacedWait(page, 500);
+  return true;
+};
+
 /* ═══════════════════════════════════════════════════════════════════════════════════════════
  * 1. EVERY MARK: apply · remove · RE-apply · undo after each — at a caret AND across a selection
  * ═════════════════════════════════════════════════════════════════════════════════════════ */
@@ -376,21 +401,18 @@ async function auditBlocks(page, label) {
   for (const level of ["1", "2", "3", "4"]) {
     await seed(page);
     await caretAfter(page, "Closing paragraph.");
-    const sel = page.locator('[data-testid="nt-block"]').first();
-    if (!(await sel.count())) { finding("blocks", "no block-style control", "seed, look for nt-block"); break; }
-    const opts = await sel.evaluate((n) => [...n.options].map((o) => o.value));
+    const opts = await formatMenuOptions(page, "nt-block");
+    if (opts == null) { finding("blocks", "no block-style control", "seed, look for nt-block"); break; }
     const want = opts.find((o) => o.includes(level)) || null;
     if (!want) { note(`no block option for heading ${level} (options: ${opts.join(",")})`); continue; }
-    await sel.selectOption(want);
-    await pacedWait(page, 700);
+    await pickFormatMenuOption(page, "nt-block", want);
     const types = await blockTypes(page);
     if (!types.some((t) => t.startsWith("heading"))) finding("blocks", `heading ${level} did not reach the document`, `seed, caret in the last paragraph, block style → ${want}`, JSON.stringify(types));
     else pass(`heading ${level} applies`);
     // back to body
     const back = opts.find((o) => /para|body|normal|text/i.test(o));
     if (back) {
-      await sel.selectOption(back);
-      await pacedWait(page, 700);
+      await pickFormatMenuOption(page, "nt-block", back);
       const t2 = await blockTypes(page);
       if (t2[t2.length - 2] !== "paragraph" && t2[t2.length - 1] !== "paragraph") {
         finding("blocks", `heading ${level} → body text did not return the block to a paragraph`, `seed, heading ${level}, then ${back}`, JSON.stringify(t2));
@@ -401,13 +423,12 @@ async function auditBlocks(page, label) {
   /* ⛔ A HEADING ON A LINE THAT IS ALREADY A LIST ITEM — his explicit case. */
   await seed(page);
   await caretAfter(page, "Third item");
-  const sel2 = page.locator('[data-testid="nt-block"]').first();
-  if (await sel2.count()) {
-    const opts = await sel2.evaluate((n) => [...n.options].map((o) => o.value));
-    const h = opts.find((o) => o.includes("2"));
+  const opts2 = await formatMenuOptions(page, "nt-block");
+  if (opts2) {
+    const h = opts2.find((o) => o.includes("2"));
     if (h) {
       const before = await fingerprint(page);
-      await sel2.selectOption(h);
+      await pickFormatMenuOption(page, "nt-block", h);
       const after = await fingerprint(page);
       if (before === after) finding("blocks", "making a LIST ITEM into a heading does nothing at all", "seed, caret on 'Third item', block style → heading 2");
       else pass("a list item can become a heading");
@@ -607,21 +628,29 @@ async function auditAttributes(page, label) {
     else pass(`line spacing undoes on ${where}`);
   }
 
-  /* ⛔ THE ATTRIBUTE MARKS: the VALUE has to be in the document, not just a class on screen. */
-  for (const [tool, mark, how] of [["nt-size", "textStyle", "select"], ["nt-font", "textStyle", "select"]]) {
+  /* ⛔ THE ATTRIBUTE MARKS: the VALUE has to be in the document, not just a class on screen.
+   * `nt-size` is a `FormatMenu` listbox (B1139216); `nt-font` is still a native `<select>`. */
+  for (const [tool, mark] of [["nt-size", "textStyle"], ["nt-font", "textStyle"]]) {
     await seed(page);
     await selectWord(page, "bravo");
-    const el = page.locator(`[data-testid="${tool}"]`).first();
-    const behindMore = await page.evaluate((t) => {
-      const n = document.querySelector(`[data-testid="${t}"]`);
-      return !n || !n.getBoundingClientRect().width;
-    }, tool);
-    if (behindMore) { await page.locator('[data-testid="nt-more"]').first().click().catch(() => {}); await pacedWait(page, 250); }
-    if (!(await el.count())) { finding("attrs", `${tool} is not reachable`, `seed, open More, look for ${tool}`); continue; }
-    const opts = await el.evaluate((n) => [...n.options].map((o) => o.value));
-    const pick = opts.find((o) => o && o !== opts[0]);
+    const isMenu = tool === "nt-size";
+    let opts;
+    if (isMenu) {
+      opts = await formatMenuOptions(page, tool);
+    } else {
+      const behindMore = await page.evaluate((t) => {
+        const n = document.querySelector(`[data-testid="${t}"]`);
+        return !n || !n.getBoundingClientRect().width;
+      }, tool);
+      if (behindMore) { await page.locator('[data-testid="nt-more"]').first().click().catch(() => {}); await pacedWait(page, 250); }
+      const el = page.locator(`[data-testid="${tool}"]`).first();
+      opts = (await el.count()) ? await el.evaluate((n) => [...n.options].map((o) => o.value)) : null;
+    }
+    if (opts == null) { finding("attrs", `${tool} is not reachable`, `seed, open More, look for ${tool}`); continue; }
+    const pick = isMenu ? opts.find((o) => o && o !== "default") : opts.find((o) => o && o !== opts[0]);
     if (!pick) { note(`${tool} offers no second option`); continue; }
-    await el.selectOption(pick);
+    if (isMenu) await pickFormatMenuOption(page, tool, pick);
+    else await page.locator(`[data-testid="${tool}"]`).first().selectOption(pick);
     const hit = (await marksOn(page, "bravo"))[0];
     if (!hit || !hit.marks.some((m) => m.startsWith(mark))) {
       finding("attrs", `${tool} does not reach the document as a stored mark`, `seed, select 'bravo', ${tool} → ${pick}`, JSON.stringify(hit?.marks ?? null));
