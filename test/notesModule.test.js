@@ -427,13 +427,17 @@ describe("no dialog boxes anywhere in the module (owner rule)", () => {
     expect(bar).not.toMatch(/useState\([^)]*editor\s*\./);
     /* The count stays capped as a second, blunter net. The bar's useStates are: the two
      * colour popovers' open flags, the link editor's open + href, the overflow drawer's
-     * open flag, the table grid picker's open + hovered size + grown grid (B1372), and the
-     * callout tone picker's open flag (NEW-7) — every one of them a transient control-chrome
-     * flag, none of them a formatting state. The callout control reads its CURRENT TONE from
-     * `editor.getAttributes("noteCallout")` on every render, which is the sharper assertion
-     * above and the reason raising this blunt cap by one is not a weakening. */
+     * open flag, the table grid picker's open + hovered size + grown grid (B1372), the
+     * callout tone picker's open flag (NEW-7), and `FormatMenu`'s own open flag (B1139216,
+     * shared by the Block style AND Font size controls — one source-level `useState`, two
+     * runtime instances) — every one of them a transient control-chrome flag, none of them a
+     * formatting state. The callout control reads its CURRENT TONE from
+     * `editor.getAttributes("noteCallout")` on every render, and FormatMenu reads its current
+     * VALUE from the `value`/`mixed` props its caller computes off the editor's own selection
+     * (lib/notesMixedSelection.js) — never off its own `open` state — which is the sharper
+     * assertion above and the reason raising this blunt cap by one is not a weakening. */
     const states = [...bar.matchAll(/useState\(/g)].length;
-    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(8);
+    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(9);
   });
 });
 
