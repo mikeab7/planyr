@@ -80,6 +80,10 @@ const MONTHS = {
 };
 
 const LEASE_WORDS = /\b(lease|leased|leasing|tenant|landlord|rent(?:ed|al)?|abat[a-z]*|term|RCD|LCD)\b/i;
+// B1149586-family (owner report, 2026-09-04) — a standalone real-estate condition term, recognized
+// outright (never a guess) so it can never be mistaken for an unclaimed identity line by anything
+// downstream, and so "As-is" lands as a clean, labeled note instead of raw leftover text.
+const ASIS_RE = /\bas[-\s]is\b/i;
 // HARDENING-11 (owner correction, 2026-09-02) — the gross-family list Michael named explicitly:
 // gross, full service, FS, IG, industrial gross, MG, modified gross, base year. Any of these
 // still WINS over the NNN default (see finalizeGenericRow's own basis-default logic below) —
@@ -360,13 +364,21 @@ function findTurnkeyMention(text) {
  * bare "$X/SF") can never re-read an opex figure as the lease rate. */
 const OPEX_LABEL = /\b(?:op\s*ex|operating\s*expenses?|nnn\s*charges?|nnn'?s|reimbursements?|ticam|cam|taxes,?\s*insurance,?\s*(?:and|&)\s*cam)\b/i;
 const OPEX_VALUE_THEN_LABEL_RE = new RegExp(`\\$?\\s*([\\d,]*\\.?\\d+)\\s*(?:\\/\\s*sf\\s*\\/\\s*yr\\b|\\/\\s*sf\\b|psf\\b)?\\s*(?:${OPEX_LABEL.source})`, "i");
-const OPEX_LABEL_THEN_VALUE_RE = new RegExp(`(?:${OPEX_LABEL.source})\\s*(?:of|:|is|was)?\\s*\\$?\\s*([\\d,]*\\.?\\d+)`, "i");
+// B1149585 (owner report, 2026-09-04) — "Opex are $0.23 PSF" was invisible to this pattern: "are"
+// wasn't an accepted connector, so the label-then-value match failed outright, leaving the $0.23
+// unclaimed for `findRateToken` to misread as the LEASE RATE two detectors later (a real dollar
+// figure landing on the wrong field — the OpEx column stayed blank while the rate was corrupted).
+// "are"/"were" join the existing "of|:|is|was" connectors, and a trailing "/SF"/"psf" unit marker
+// is now consumed too (mirroring the value-then-label pattern's own optional suffix group) so
+// nothing of the figure's own unit leaks into Notes as orphaned text.
+const OPEX_LABEL_THEN_VALUE_RE = new RegExp(
+  `(?:${OPEX_LABEL.source})\\s*(?:of|:|is|was|are|were)?\\s*\\$?\\s*([\\d,]*\\.?\\d+)\\s*(?:\\/\\s*sf\\s*\\/\\s*yr\\b|\\/\\s*sf\\b|psf\\b)?`, "i");
 
-/** "$4.20/SF opex" / "est. 2025 opex $3.85" / "OpEx: $3.85" / "NNN charges of $4.20" — both
- * directions. Returns `{ value, working, invalid?, negative? }` or null. A bare mention with no
- * dollar figure ("CAM", "reimbursements") is a real fact with nothing numeric to store — the
- * caller checks for that separately, same as `findTurnkeyMention` for TI. Reuses `moneyVal` (the
- * same ambiguous-grouping refusal — SEVERITY-1's "1.234,56" European-decimal class — every other
+/** "$4.20/SF opex" / "est. 2025 opex $3.85" / "OpEx: $3.85" / "OpEx are $3.85" / "NNN charges of
+ * $4.20" — both directions. Returns `{ value, working, invalid?, negative? }` or null. A bare
+ * mention with no dollar figure ("CAM", "reimbursements") is a real fact with nothing numeric to
+ * store — the caller checks for that separately, same as `findTurnkeyMention` for TI. Reuses
+ * `moneyVal` (the same ambiguous-grouping refusal — SEVERITY-1's "1.234,56" European-decimal class — every other
  * money detector here uses) rather than a bare `Number()`, per this module's own hardening rule:
  * a recognized-but-unsafe number is a BLOCKING flag, never a guess.
  *
@@ -398,7 +410,10 @@ function findOpexToken(text) {
 
 /* ---- escalation (percentage AND dollar-denominated) ---------------------------------------- */
 
-const ESCAL_WORD = /(?:annual|escalat[a-z]*|increase[a-z]*|bumps?|steps?|\bann\b)/i;
+// B1149585 (owner report, 2026-09-04) — "annual" alone left a matched span that stopped one letter
+// short of "annually", so blanking it left a stray "ly" behind in Notes ("increasing 3% annually"
+// -> "increasing  ly"). `(?:ly)?` makes the match consume the whole word either way.
+const ESCAL_WORD = /(?:annual(?:ly)?|escalat[a-z]*|increase[a-z]*|bumps?|steps?|\bann\b)/i;
 // Consumes a whole RUN of escalation-flavored words ("annual increases", "annual escalations of")
 // rather than stopping at the first one, so a trailing word like "increases" doesn't leak into
 // the unrecognized-fragment leftover after "annual" alone has already claimed the match.
@@ -472,8 +487,20 @@ const FREE_RENT_VALUE_THEN_LABEL_RE = new RegExp(
 const FREE_RENT_LABEL_THEN_VALUE_RE = new RegExp(
   `(?:${FREE_WORD.source})\\s*(?:of\\s*|:\\s*)?(\\d+(?:\\.\\d+)?)\\s*(?:mo|mos|months?)?`, "i");
 const FREE_RENT_WORD_NUM_RE = /\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*months?\s*free/i;
+// B1149584 (owner report, 2026-09-04) — "no free rent" is a real, negative term (the deal has
+// ZERO months free — a fact, not an absence of one) and previously matched nothing at all: it
+// fell through every positive free-rent pattern above, then made `findTermBare` (below) refuse to
+// read the SAME line's own lease term, because that function's own safety guard bails out on ANY
+// line mentioning "free rent" — a guard built for "6 months free rent" (one number, two possible
+// owners), wrongly also catching "36 months, no free rent" (two clauses, two separate facts).
+// Claiming and blanking "no free rent" FIRST — before the term detector ever runs — removes the
+// phrase from the line entirely, so the guard's own text scan no longer finds it and the term is
+// free to be read normally.
+const NEGATED_FREE_RENT_RE = /\b(?:no|without|zero)\s+free(?:\s*rent)?\b/i;
 
 function findFreeRentMonths(text) {
+  const negated = text.match(NEGATED_FREE_RENT_RE);
+  if (negated) return { value: 0, working: blank(text, negated) };
   const wordM = text.match(FREE_RENT_WORD_NUM_RE);
   if (wordM) return { value: WORD_NUM[wordM[1].toLowerCase()], working: blank(text, wordM) };
   return scanField(text, FREE_RENT_VALUE_THEN_LABEL_RE, FREE_RENT_LABEL_THEN_VALUE_RE, (m) => Number(m[1]));
@@ -760,6 +787,16 @@ function extractUnlabeledLine(generic, flags, rawLine, recordContext) {
   if (!generic.title && looksLikeAddressLine(line)) {
     generic.title = line.trim();
     working = " ".repeat(working.length); // the whole line IS the title — nothing else to read
+    claimedAnything = true;
+  }
+
+  // B1149586-family — a standalone condition term, recognized outright so it reads as a clean
+  // labeled note ("Condition: As-is") instead of raw leftover text, and so it can never collide
+  // with an unrelated heuristic that might otherwise treat a short unclaimed line as something else.
+  const asIsMatch = working.match(ASIS_RE);
+  if (asIsMatch) {
+    addRecognizedNote(generic, "Condition: As-is");
+    working = blank(working, asIsMatch);
     claimedAnything = true;
   }
 
@@ -1074,6 +1111,30 @@ function genericToDraft(generic) {
     if (generic.freeRentMonths != null) d.leaseFreeRentMonths = String(generic.freeRentMonths);
     if (generic.escalationPct != null) d.leaseEscalationPct = String(generic.escalationPct);
     if (generic.opex != null) d.leaseOpex = String(generic.opex);
+  } else {
+    // ⛔ B1149584 — a row whose TYPE could not be resolved at all (no wording signal anywhere in
+    // the record, and `inferTypeFromCapturedFields` also came up empty) previously dropped every
+    // captured economic figure on the floor: none of the three branches above ever ran, and none
+    // of `landPrice`/`bldgPrice`/`leaseRate`/etc. is a neutral, type-independent slot a figure can
+    // land in. That produced a genuinely empty-looking row even though real facts had been read —
+    // DEFECT A's own rule (a recognized fact must never silently vanish) applied one level further
+    // out than the original fix reached. Nothing here guesses a type; it only keeps what was found
+    // visible, in Notes, until a person picks one.
+    const bits = [];
+    if (generic.price != null) bits.push(`Price: $${generic.price.toLocaleString()}`);
+    if (generic.sizeValue != null) bits.push(`Size: ${generic.sizeValue.toLocaleString()} ${generic.sizeUnit === "ac" ? "AC" : "SF"}`);
+    if (generic.rate != null) bits.push(`Rate: $${generic.rate}/SF`);
+    if (generic.ti != null) bits.push(`TI: $${generic.ti}`);
+    if (generic.opex != null) bits.push(`OpEx: $${generic.opex}`);
+    if (generic.noi != null) bits.push(`NOI: $${generic.noi.toLocaleString()}`);
+    if (generic.capRate != null) bits.push(`Cap: ${generic.capRate}%`);
+    if (generic.escalationPct != null) bits.push(`Escalation: ${generic.escalationPct}%`);
+    if (generic.freeRentMonths != null) bits.push(`Free rent: ${generic.freeRentMonths} mo`);
+    if (generic.term) bits.push(`Term: ${generic.term}`);
+    if (bits.length) {
+      const summary = `${bits.join(", ")} — pick a Type to file these.`;
+      d.notes = d.notes ? `${d.notes}; ${summary}` : summary;
+    }
   }
   return d;
 }

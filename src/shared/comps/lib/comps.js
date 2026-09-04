@@ -598,7 +598,14 @@ export function emptyDraft(anchor) {
   // own 2-decimal display (66.17 AC in, 66.17 out).
   const landSizeValue = anchor?.acreageAc != null ? String(Math.round(anchor.acreageAc * 100) / 100) : "";
   return {
-    compType: "land", compDate: "", leaseCommencementDate: "", title: "", notes: "", teamId: null, projectId: null,
+    // ⛔ B1149586 (owner report, 2026-09-04) — "an address alone never implies a comp type." This
+    // used to default to "land" unconditionally, so the moment a location was picked (a map
+    // search, a toolbar pin drop, a "+ Location" click) with nothing else known about the deal yet,
+    // `CompsPanel.jsx`'s pendingAnchor effect appended a brand-new row via `emptyDraft(anchor)` that
+    // silently read as a Land comp — never asked, never shown as a guess. A rate implies Lease, a
+    // price-per-acre implies Land; a bare location implies nothing, and the sheet already renders a
+    // blank Type cleanly (every paste-parsed row with no type signal already arrives this way).
+    compType: "", compDate: "", leaseCommencementDate: "", title: "", notes: "", teamId: null, projectId: null,
     anchor: anchor || null,
     partyProvider: "", partyAcquirer: "",
     landPrice: "", landSizeValue, landSizeUnit: "ac",

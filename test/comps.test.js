@@ -17,8 +17,8 @@ describe("comps: emptyDraft — HARDENING-11, Per stays empty but Basis defaults
   it("Basis starts NNN — industrial leases are overwhelmingly triple-net, gross is the exception", () => {
     expect(emptyDraft(null).leaseRateExpense).toBe("nnn");
   });
-  it("compType still defaults to land (unrelated to the Per/Basis fix)", () => {
-    expect(emptyDraft(null).compType).toBe("land");
+  it("B1149586 — compType now starts genuinely blank, never a guessed 'land' (an address/location alone never implies a type)", () => {
+    expect(emptyDraft(null).compType).toBe("");
   });
 });
 

@@ -60,7 +60,11 @@ function DraftCard({ draft, anchorOverride, armed, onArm, onFocusAnchor, onPromo
       )}
 
       <Field label="Type" stacked>
+        {/* B1149586 — emptyDraft no longer defaults compType to "land", so a draft with no type
+            signal genuinely has none yet; a blank option keeps the control honest about that
+            instead of visually resting on "Land" for a value the user never chose. */}
         <select value={fields.compType} onChange={set("compType")} style={inputStyle}>
+          <option value="">Choose…</option>
           {COMP_TYPES.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
         </select>
       </Field>

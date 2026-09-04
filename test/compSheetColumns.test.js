@@ -323,7 +323,8 @@ describe("compSheetColumns: spillPaste — Excel-style paste into the selected c
   });
   it("HARDENING-10 NEW-1 — a new blank row created by an overrun paste defaults Type to the row above's", () => {
     const rows = [rowOf("building_sale")];
-    // emptyDraftFn mirrors the real caller: () => emptyDraft(null), always compType 'land'.
+    // emptyDraftFn mirrors the real caller: () => emptyDraft(null) — compType now starts blank
+    // (B1149586); this test proves the row-above inheritance wins regardless of that default.
     const next = spillPaste(rows, 0, columnIndex("partyProvider"), "Acme\nBeta\nGamma", () => emptyDraft(null), newId);
     expect(next).toHaveLength(3);
     expect(next[1].draft.compType).toBe("building_sale");

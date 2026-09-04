@@ -1013,3 +1013,91 @@ describe("compParse: adversarial-review SEVERITY-1 findings (2026-09-02) — nev
     expect(draft.leaseRateExpense).toBe("nnn");
   });
 });
+
+describe("compParse: B1149584/B1149585 — Michael's Tesla repro, one comp not four (2026-09-04)", () => {
+  // The exact 9-line paste from the bug report (a blank line before the last line), reproduced
+  // verbatim rather than paraphrased so this test fails the moment the real repro regresses.
+  const TESLA_PASTE = [
+    "Tesla",
+    "Logistics Center II",
+    "6500 Nita Way",
+    "800,405 SF",
+    "36 months, no free rent",
+    "$0.58 NNN increasing 3% annually",
+    "As-is",
+    "",
+    "Opex are $0.23 PSF which hurt them.",
+  ].join("\n");
+
+  it("produces exactly ONE row, not four — the false Rate collision (0.58 vs the OpEx figure misread as rent) is gone", () => {
+    const { mode, rows } = parsePaste(TESLA_PASTE);
+    expect(mode).toBe("single");
+    expect(rows).toHaveLength(1);
+  });
+
+  it("the full field mapping: type, address/title, size, term, free rent, rate, basis, escalation, opex", () => {
+    const { rows } = parsePaste(TESLA_PASTE);
+    const { draft, cellFlags } = rows[0];
+    expect(draft.compType).toBe("lease");
+    expect(draft.title).toBe("6500 Nita Way");
+    expect(draft.leaseSizeSf).toBe("800405"); // 800,405 SF — never lost to a blank-type row
+    expect(draft.leaseTerm).toBe("36 mo"); // NEW-1: previously dropped because the SAME line's
+    // "no free rent" clause made findTermBare refuse to read the whole line at all
+    expect(draft.leaseFreeRentMonths).toBe("0"); // "no free rent" is a real, negative fact
+    expect(draft.leaseRate).toBe("0.58"); // NEW-2: previously the $0.23 OpEx figure won this field
+    expect(draft.leaseRateExpense).toBe("nnn");
+    expect(draft.leaseEscalationPct).toBe("3");
+    expect(draft.leaseOpex).toBe("0.23"); // NEW-2: previously left blank with a false "no $ figure
+    // given" note while the very same figure was silently miscoded as the rent
+    expect(rowHasBlockingFlags(cellFlags)).toBe(false); // ready to save with no correction needed
+  });
+
+  it("nothing recognized is lost — Tesla, Logistics Center II, As-is and the editorial aside all survive in Notes", () => {
+    const { rows } = parsePaste(TESLA_PASTE);
+    const { notes } = rows[0].draft;
+    expect(notes).toMatch(/Tesla/);
+    expect(notes).toMatch(/Logistics Center II/);
+    expect(notes).toMatch(/As-is/);
+    expect(notes).toMatch(/which hurt them/); // the "editorial aside"
+    // NEW-2's second named defect: the escalation clause must not shred a trailing word fragment
+    // into Notes ("increasing 3% annually" -> "increasing ly").
+    expect(notes).not.toMatch(/\bly\b/);
+  });
+
+  it("B1149585 — 'Opex are $X' (a copula connecting label to value) is read the same as 'OpEx: $X'", () => {
+    const { draft } = parseSingleRecord("$0.65/sf NNN\nOpex are $3.85 which hurt them.");
+    expect(draft.leaseOpex).toBe("3.85");
+    expect(draft.leaseRate).toBe("0.65"); // the opex figure must never also become the rate
+  });
+
+  it("B1149585 — an escalation word is fully consumed, not truncated mid-word ('annually' not 'annual' + stray 'ly')", () => {
+    const { draft } = parseSingleRecord("$0.58 NNN increasing 3% annually");
+    expect(draft.leaseEscalationPct).toBe("3");
+    expect(draft.notes || "").not.toMatch(/\bly\b/);
+  });
+
+  it("B1149584 — 'no free rent' reads as a real ZERO, and a term on the SAME line is still found", () => {
+    const { draft } = parseSingleRecord("$0.65/sf NNN\n36 months, no free rent");
+    expect(draft.leaseFreeRentMonths).toBe("0");
+    expect(draft.leaseTerm).toBe("36 mo");
+  });
+
+  it("B1149584 — the pre-existing 'N months free' shape (one number, one owner) is unaffected by the negation fix", () => {
+    const { draft } = parseSingleRecord("$0.65/sf NNN\n6 months free rent");
+    expect(draft.leaseFreeRentMonths).toBe("6");
+  });
+
+  it("B1149586-family — 'As-is' is captured as a clean condition note, not raw leftover text", () => {
+    const { draft } = parseProseLine("Sold as-is for $1.2M, Houston TX");
+    expect(draft.notes).toMatch(/Condition: As-is/);
+  });
+
+  it("a captured figure is never silently dropped when the type stays genuinely unresolved (DEFECT A, one level further out)", () => {
+    // No wording anywhere signals a type, and the size's own unit (SF) doesn't let
+    // inferTypeFromCapturedFields guess one either — this used to produce a row with NOTHING in
+    // it even though a real size was read.
+    const { draft } = parseProseLine("800,405 SF");
+    expect(draft.compType).toBe("");
+    expect(draft.notes).toMatch(/800,405 SF/);
+  });
+});
