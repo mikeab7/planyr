@@ -185,11 +185,24 @@ function simpleColumn(base) {
   };
 }
 
+// B850016 (NEW-10) — a SELECT-kind column drawn from a fixed, known-at-build-time vocabulary
+// (Type/Unit/Per/Basis) must fit its LONGEST option, at every viewport, always — there is no
+// excuse for truncating "GROSS" or "Bldg sale," the owner's own words. These four widths used to
+// be sized against whatever option happened to be on screen while testing (often the SHORTEST
+// one), leaving literally 0px of slack — measured live via `td>span>span` scrollWidth vs
+// clientWidth on the real rendered sheet: "Lease"/"MO"/"YR"/"NNN"/"SF"/"AC" all sat at EXACTLY
+// clientWidth === scrollWidth (zero margin, one sub-pixel of font-rendering difference between
+// machines from clipping), and the option that actually IS longest clipped outright — "Bldg sale"
+// needed ~70px in a 58px cell, "GROSS" needed ~59px in a 48px cell. Each width below is that
+// measured worst-case option's real rendered width (padding + gap + caret included) plus a small
+// buffer, not a guess — this is what fixes both the reported 1191px clip and the "wider monitor
+// clips WORSE" report (that was never about window width; it was ALWAYS-marginal columns tipping
+// over on whichever option/font happened to render longest that session).
 export const SHEET_COLUMNS = [
   // TYPE — the classifier every other column's meaning depends on ("choose deal first because it
   // will inform the rest"). Frozen alongside Location (see below) so it never scrolls out of view.
   {
-    key: "compType", label: "Type", group: "TYPE", width: 58, align: "left", kind: "select", options: TYPE_OPTIONS, frozen: true,
+    key: "compType", label: "Type", group: "TYPE", width: 74, align: "left", kind: "select", options: TYPE_OPTIONS, frozen: true,
     appliesTo: () => true,
     getValue: (d) => d.compType,
     setValue: (d, v) => {
@@ -257,7 +270,11 @@ export const SHEET_COLUMNS = [
     // option is SF, because that is the entire option set their own DB columns
     // (`bldg_size_sf`/`lease_size_sf`) accept — never a fabricated AC choice with nowhere to
     // persist it. A real one-option select is not a lie; a caret over an unreachable one was.
-    key: "landSizeUnit", label: "Unit", group: "PROPERTY", width: 40, align: "left", kind: "select", options: UNIT_OPTIONS,
+    // B850016 (NEW-10) — width 40->44: measured live, both AC and SF sat at literally 0px of
+    // slack against their own content (see this file's own SHEET_COLUMNS header comment); a small
+    // buffer removes the fragility without changing anything about the select-vs-fixed question
+    // this comment is otherwise about.
+    key: "landSizeUnit", label: "Unit", group: "PROPERTY", width: 44, align: "left", kind: "select", options: UNIT_OPTIONS,
     appliesTo: () => true,
     optionsFor: (compType) => (compType === "land" ? UNIT_OPTIONS : SF_ONLY_OPTIONS),
     getValue: (d) => (d.compType === "land" ? d.landSizeUnit : "sf"),
@@ -325,8 +342,8 @@ export const SHEET_COLUMNS = [
   // RENT — lease-only now that Price moved to PRICE: Rate (+ how it's quoted) and Escalation,
   // because escalation IS rent, over time — never a generic "term".
   simpleColumn({ key: "leaseRate", label: "Rate", fullLabel: "Rate $/SF", group: "RENT", width: 50, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
-  simpleColumn({ key: "leaseRatePeriod", label: "Per", group: "RENT", width: 42, align: "left", kind: "select", options: PERIOD_OPTIONS, appliesTo: (t) => t === "lease" }),
-  simpleColumn({ key: "leaseRateExpense", label: "Basis", group: "RENT", width: 48, align: "left", kind: "select", options: BASIS_OPTIONS, appliesTo: (t) => t === "lease" }),
+  simpleColumn({ key: "leaseRatePeriod", label: "Per", group: "RENT", width: 46, align: "left", kind: "select", options: PERIOD_OPTIONS, appliesTo: (t) => t === "lease" }),
+  simpleColumn({ key: "leaseRateExpense", label: "Basis", group: "RENT", width: 64, align: "left", kind: "select", options: BASIS_OPTIONS, appliesTo: (t) => t === "lease" }),
   simpleColumn({ key: "leaseEscalationPct", label: "Escal (%)", fullLabel: "Escalation %/yr", group: "RENT", width: 60, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
 
   // CONCESSIONS — the other half of the economics: what the landlord gives up, which is exactly
@@ -361,7 +378,12 @@ export const SHEET_COLUMNS = [
   {
     // The lease's annualized rate on its OWN quoted basis — the basis prints inline so this is
     // never silently compared across NNN and gross (they are not the same figure).
-    key: "leaseAnnualRate", label: "$/SF/yr", group: "DERIVED", width: 58, align: "right", kind: "derived",
+    // B850016 (NEW-10) — widened from 58 to match its sibling derived column (`$/SF or $/AC`,
+    // 84): 58px clipped the basis word outright on an ordinary GROSS row ("96.48 GROSS" measured
+    // at 89px real width vs 57px available) — not a "genuinely tight space" case, just undersized.
+    // A rate long enough to still clip past 84px falls back to the cell's hover title (SheetCell's
+    // `isLongTextCol`), same as the free-text columns.
+    key: "leaseAnnualRate", label: "$/SF/yr", group: "DERIVED", width: 84, align: "right", kind: "derived",
     appliesTo: (t) => t === "lease",
     derive: (comp) => {
       const v = annualLeaseRate(comp);
@@ -562,10 +584,18 @@ export function spillPaste(rows, startRow, startCol, clipboardText, emptyDraftFn
 // no longer needs the largest guaranteed share of leftover space either. The three growers now
 // share weight EQUALLY — a broker paste is as likely to fill in a landlord/tenant name as a
 // property title, so there's no longer a reason to bias toward Title specifically.
+// B850016 (NEW-10) — the floor used to be 46: measured live at a squeezed 1191px window, a real
+// "Core5 Industrial Partners" (needs ~152px) and "Modular Power Solutions" (~151px) both landed
+// in a 48px cell, unreadable at rest. 46 was chosen to guarantee the sheet never overflows even at
+// an extreme window (this file's own header), not because 46px is enough to show a real party
+// name — it never was. Raised to 58: still comfortably safe against the "extreme window" case the
+// original floor was defending (the overflow fallback below still holds if even that isn't
+// enough), and it gives the common "somewhat squeezed but not extreme" case — the owner's own
+// 1191px report — noticeably more of a real name before the hover title has to carry the rest.
 const FLEX_GROWERS = [
-  { key: "title", nominal: 108, floor: 46, weight: 1 },
-  { key: "partyProvider", nominal: 110, floor: 46, weight: 1 },
-  { key: "partyAcquirer", nominal: 110, floor: 46, weight: 1 },
+  { key: "title", nominal: 108, floor: 58, weight: 1 },
+  { key: "partyProvider", nominal: 110, floor: 58, weight: 1 },
+  { key: "partyAcquirer", nominal: 110, floor: 58, weight: 1 },
 ];
 const FLEX_NOTES = { key: "notes", nominal: 80, floor: 40 };
 

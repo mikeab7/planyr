@@ -58,7 +58,7 @@ try {
     await pacedWait(page, 800);
 
     // ── shape presence ──────────────────────────────────────────────────────────
-    const switchSel = 'div[role="tablist"][aria-label="Browse sites or comps"]'; // B848304 — renamed (see MapFinder.jsx's SiteCompSwitch header)
+    const switchSel = 'div[role="tablist"][aria-label="What an address search creates"]'; // B848304 — renamed (see MapFinder.jsx's SiteCompSwitch header)
     const hasSwitch = await page.locator(switchSel).count();
     check(`${width}px · Site/Comp switch renders`, hasSwitch === 1);
     const hasCombobox = await page.locator('input[role="combobox"]').count();
@@ -69,20 +69,32 @@ try {
     const showComps = await page.locator('[data-testid="map-show-comps"]').count();
     check(`${width}px · Sites/Comps visibility checkboxes exist in Imagery & layers`, showSites === 1 && showComps === 1);
 
-    // ── NEW-1/NEW-2 — one piece of state ────────────────────────────────────────
+    // ⛔ B850016 (NEW-11) SUPERSEDES this section's original "one piece of state" claim (NEW-1/
+    // NEW-2's own name for it). The owner reversed that coupling — clicking the toolbar switch
+    // must never move the rail tab, and vice versa — so this now asserts the opposite: the two
+    // stay independent in both directions.
     const railTab = (label) => page.locator(`button[role="tab"]`, { hasText: label }).first();
     const switchSeg = (label) => page.locator(`${switchSel} button`, { hasText: label });
     let siteSel = await switchSeg("Site").getAttribute("aria-selected");
     check(`${width}px · Site mode selected by default`, siteSel === "true");
+    const sitesTabSelBefore = await railTab("Sites").getAttribute("aria-selected");
     await switchSeg("Comp").click();
     await pacedWait(page, 200);
-    const compsTabSel = await railTab("Comps").getAttribute("aria-selected");
-    check(`${width}px · clicking the toolbar's Comp segment selects the Comps rail tab (same state)`, compsTabSel === "true");
-    // Flip it back via the RAIL this time, and confirm the SWITCH follows.
+    const sitesTabSelAfter = await railTab("Sites").getAttribute("aria-selected");
+    check(`${width}px · clicking the toolbar's Comp segment does NOT move the rail tab (B850016/NEW-11)`, sitesTabSelAfter === sitesTabSelBefore);
+    // Flip the toolbar back to Site (rail is still on whatever it was — untouched by the above),
+    // then flip the RAIL to Comps and confirm the toolbar switch stays on Site — the reverse
+    // direction of the same decoupling, proven by an assertion whose value genuinely changes if
+    // the coupling ever comes back (unlike checking a value that never moved in the first place).
+    await switchSeg("Site").click();
+    await pacedWait(page, 200);
+    await railTab("Comps").click();
+    await pacedWait(page, 200);
+    const siteSegSelAfterRailClick = await switchSeg("Site").getAttribute("aria-selected");
+    check(`${width}px · clicking the Comps rail tab does NOT move the toolbar switch back to Comp (B850016/NEW-11, reverse direction)`, siteSegSelAfterRailClick === "true");
+    // Reset both to Site for the checks below, which assume Site mode.
     await railTab("Sites").click();
     await pacedWait(page, 200);
-    const siteSegSel = await switchSeg("Site").getAttribute("aria-selected");
-    check(`${width}px · clicking the Sites rail tab selects the toolbar's Site segment (same state, both directions)`, siteSegSel === "true");
 
     // ── NEW-3 — decoupling, DOM level ───────────────────────────────────────────
     const checkedBefore = await page.evaluate(() => ({
