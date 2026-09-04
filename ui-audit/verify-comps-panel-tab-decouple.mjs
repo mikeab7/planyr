@@ -20,17 +20,28 @@
  *   - the comp detail's "← All comps" back link → stays on the Comps tab, returns to the list
  *     within CompsPanel's own local state, never touches `mode`/`panelTab`.
  *
- * ⛔ NEW-1 (owner report 2026-09-04, measured live on deployed build `index-Dh4XXz5X.js`) — the
- * click-handler split above was real, but the panel's own WIDTH style survived from before it as
- * `width: mode === "comp" ? "clamp(232px, 23vw, 440px)" : 232` — so the centre toggle alone still
- * resized the panel (272×32 vs 230×32 measured collapsed), the SAME coupling coming back through
- * CSS after the click handlers were cleaned up. Fixed by keying that width on `panelTab` (what the
- * rail is actually showing) instead of `mode`. The GEOMETRY section below is the regression test
- * for exactly this: it asserts the panel's bounding box is BYTE-IDENTICAL across a centre-toggle
- * click, collapsed and expanded, and that the panel DOES still resize when the rail tab itself
- * changes (that coupling is correct and must keep working). Red-proofed by temporarily restoring
- * the `mode === "comp"` width expression: the "no resize" assertions failed, confirming this
- * harness would have caught the regression.
+ * ⛔ B1133760 (owner report 2026-09-04, measured live on deployed build `index-Dh4XXz5X.js`) — NOT
+ * an independent regression. The click-handler split above (this same PR #1402/`cde60ea5`) left ONE
+ * call site unmigrated: the panel's own WIDTH style, still `width: mode === "comp" ?
+ * "clamp(232px, 23vw, 440px)" : 232`. Because that rewrite moved every CLICK HANDLER onto
+ * `panelTab` and this is a plain STYLE READ, it never came up in that pass — so the centre toggle
+ * alone still resized the panel (272×32 vs 230×32 measured collapsed), the same coupling this file's
+ * own NEW-11 checks were written to kill, surviving in the one place they don't look. Fixed by
+ * keying that width on `panelTab` instead of `mode`, finishing what NEW-11 started.
+ *
+ * ⛔ THE REUSABLE LESSON — read this before adding a "does X still move Y" check anywhere else.
+ * The NEW-11 checks above PASSED, unbroken, for the whole time this width coupling survived on
+ * `main`: they read `aria-selected` (WHICH tab/content is showing), and this coupling is expressed
+ * as CSS GEOMETRY (HOW BIG the panel is), a different axis entirely. A harness that only proves the
+ * right tab lit up will never catch "but the box also grew" — the two have to be asserted
+ * separately, and both live in THIS file (not split out) so a future reader sees them side by side
+ * rather than assuming the NEW-11 section alone means the decoupling is fully covered.
+ *
+ * The GEOMETRY section below is the regression test for the width coupling specifically: it asserts
+ * the panel's bounding box is BYTE-IDENTICAL across a centre-toggle click, collapsed and expanded,
+ * and that the panel DOES still resize when the rail tab itself changes (that coupling is correct
+ * and must keep working). Red-proofed by temporarily restoring the `mode === "comp"` width
+ * expression: the "no resize" assertions failed, confirming this harness would have caught it.
  *
  * Run against a local dev server (signed out, fixture-seeded, no network egress):
  *   node ui-audit/verify-comps-panel-tab-decouple.mjs [--url http://localhost:4319/] [--shots]

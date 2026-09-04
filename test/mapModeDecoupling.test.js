@@ -110,11 +110,13 @@ describe("MapFinder map-layer effects never read `mode` (B831778/NEW-3)", () => 
   });
 
   // ⛔ B1133760 (owner report 2026-09-04, measured live on deployed build `index-Dh4XXz5X.js`) —
-  // B850018/NEW-11 above split the CLICK HANDLERS cleanly, but the sites-panel container's own
-  // WIDTH style survived from before the split as `mode === "comp" ? "clamp(...)" : 232`, so the
-  // centre toggle alone still resized the panel (measured 272×32 vs 230×32 collapsed) — the same
-  // coupling reappearing through CSS rather than through a click handler. Fixed by keying that
-  // width on `panelTab` (what the rail is actually showing), never `mode`.
+  // NOT an independent regression. B850018/NEW-11 above (PR #1402, `cde60ea5`) split every CLICK
+  // HANDLER off `mode` onto `panelTab`, but the sites-panel container's own WIDTH style is a plain
+  // STYLE READ, not a click handler, so it never came up in that rewrite and survived unmigrated as
+  // `mode === "comp" ? "clamp(...)" : 232` — the centre toggle alone still resized the panel
+  // (measured 272×32 vs 230×32 collapsed), the same coupling PR #1402 removed everywhere else,
+  // surviving in the one call site its pass didn't look at. Fixed by keying that width on
+  // `panelTab` (what the rail is actually showing), never `mode`, finishing what that PR started.
   it("the sites-panel width follows `panelTab`, never `mode` (B1133760)", () => {
     const src = readFileSync(SRC, "utf8");
     const i = src.indexOf('data-testid="map-sites-panel"');
