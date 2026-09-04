@@ -233,3 +233,122 @@ describe("source guards — the shipped file actually carries the window-filter 
     expect(SRC).toContain("if(!ix.has(pr.id)) continue;");
   });
 });
+
+// ── AMENDMENT to B1113712/B1113713 (owner re-report, 2026-09-04): "most orphan arrows are gone;
+// at least one class survives." The index-window class above (NEW-1/NEW-2) was already closed and
+// stayed closed — every fixture above still passes. Live investigation (headless, this session)
+// found a SEPARATE, still-open class: `depLines`'s useMemo bakes ROW_H (a module-scope `let`,
+// mutated by an effect keyed on data.settings.rowHeight that runs AFTER the commit that reads it)
+// into every x/y it returns via glyphEdges, but never listed ROW_H in its own dependency array. A
+// project whose rowHeight differs from the module's initial default (24) renders self-consistently
+// on its FIRST paint (bars and this memo both read the still-stale ROW_H in that same commit), but
+// the very next render this memo doesn't otherwise recompute for — a plain scroll, since
+// tasks/minD/ppd/childParentIds/settings are all untouched by scrolling — re-renders the
+// (unmemoized) bars fresh at the NOW-correct ROW_H while this memo keeps serving geometry baked
+// under the STALE one. srcIdx/tgtIdx (NEW-1's fix) stay perfectly valid throughout — this is a
+// PIXEL-position staleness, invisible to an index-bounds check — and the drift is
+// `rowIdx * (staleROW_H - currentROW_H)` px, large enough by the bottom of a real schedule to land
+// an arrowhead past the last rendered row. Reproduced live: mounted the real app with
+// rowHeight:20, waited for the settings effect, then scrolled — bar row tops correctly read
+// 0/20/40/…; depLines' own arrow y-coordinates stayed frozen at 0/24/48/… (5 of 25 arrows orphaned)
+// until ROW_H joined its dependency list.
+describe("NEW-3 — depLines must recompute when ROW_H changes, even when nothing else in its deps does", () => {
+  // A minimal, faithful reimplementation of React's own useMemo dependency-array semantics —
+  // shallow-compare each slot with Object.is, recompute only on a mismatch. This is a well-defined,
+  // uncontroversial ~5-line algorithm (not a re-implementation of React itself), used here exactly
+  // the way test/ganttArrowVirtualization.test.js already "faithfully copies" pure logic out of the
+  // Babel-in-browser file it can't `import` from — the property under test is a MEMOIZATION-TIMING
+  // bug, so the harness has to actually memoize, not just call the pure builder fresh each time
+  // (which is what every fixture above does, and exactly why none of them could have caught this).
+  const makeUseMemo = () => {
+    let cachedVal = null, cachedDeps = null, calls = 0;
+    return (compute, deps) => {
+      const stale = !cachedDeps || deps.length !== cachedDeps.length || deps.some((d, i) => !Object.is(d, cachedDeps[i]));
+      if (stale) { cachedVal = compute(); cachedDeps = deps; calls++; }
+      return cachedVal;
+    };
+  };
+
+  // Faithful copy of glyphEdges, parameterized on rowH (the real file reads the module-scope ROW_H
+  // directly instead of taking a parameter — same computation, just made testable).
+  const glyphEdgesFor = (rowH, childParentIds, xOf) => (t, idx) => {
+    const rowTop = idx * rowH;
+    const sX = xOf(t.start), eX = xOf(t.end);
+    if (childParentIds.has(t.id)) {
+      const dd = Math.min(t.level || 0, 3), SPAN = [6, 5, 4, 4][dd], LEG = [0.16, 0.12, 0.09, 0.07][dd] * rowH;
+      const spanTop = rowTop + (rowH - 2 - LEG - SPAN);
+      return { startX: sX, endX: eX, topY: spanTop, botY: rowTop + rowH - 2, rowTop };
+    }
+    if (t.duration === 0) {
+      const cy = rowTop + rowH - 7.5, mv = 4.24;
+      return { startX: sX, endX: sX, topY: cy - mv, botY: cy + mv, rowTop };
+    }
+    const LEAF_H = rowH * 0.25, top = rowTop + (rowH - LEAF_H - 1);
+    return { startX: sX, endX: sX + Math.max(9, eX - sX), topY: top, botY: top + LEAF_H, rowTop };
+  };
+
+  // Faithful copy of the depLines builder, parameterized on rowH so it can be called under two
+  // different ROW_H values — the real bug's whole shape is "the same tasks/minD/ppd, a DIFFERENT
+  // rowH, and whether the memo notices."
+  const buildDepLinesFor = (rowH, tasks, minD, ppd) => {
+    const xOf = (d) => Math.max(0, dif(minD, d) * ppd);
+    const childParentIds = new Set(tasks.filter((t) => t.parentId !== null).map((t) => t.parentId));
+    const ge = glyphEdgesFor(rowH, childParentIds, xOf);
+    const idxOf = new Map(tasks.map((t, i) => [t.id, i]));
+    const raw = [];
+    tasks.forEach((task) => normPreds(task.predecessors).forEach((p) => {
+      const pred = idxOf.has(p.id) ? tasks[idxOf.get(p.id)] : null; if (!pred) return;
+      raw.push({ pred, task, type: (p.type || "FS").toUpperCase() });
+    }));
+    return raw.map((l) => {
+      const src = ge(l.pred, idxOf.get(l.pred.id));
+      const tgt = ge(l.task, idxOf.get(l.task.id));
+      const a = depAnchors({ type: l.type, src, tgt, fanIndex: 0, fanCount: 1 });
+      return { key: `${l.pred.id}-${l.task.id}-${l.type}`, y1: a.y1, y2: a.y2, srcIdx: idxOf.get(l.pred.id), tgtIdx: idxOf.get(l.task.id) };
+    });
+  };
+
+  const fixtureTasks = () => Array.from({ length: 25 }, (_, i) => mkTask(i, {
+    start: `2027-01-${String(1 + (i % 27)).padStart(2, "0")}`, end: `2027-01-${String(2 + (i % 26)).padStart(2, "0")}`,
+    predecessors: i > 0 ? [{ id: i - 1, type: "FS" }] : [],
+  }));
+
+  it("RED-PROOF: WITHOUT ROW_H in the deps, a rowH change with nothing else in the deps changing leaves the memo serving stale (pre-change) pixel geometry", () => {
+    const useMemoSim = makeUseMemo();
+    const tasks = fixtureTasks(), minD = tasks[0].start, ppd = 2;
+    // Render 1: mounts at the module's initial default, exactly like the real file's first paint.
+    const rowH1 = 24;
+    const buggyDeps = (rowH) => [tasks, minD, ppd]; // ROW_H NOT included — this is the pre-fix shape
+    const first = useMemoSim(() => buildDepLinesFor(rowH1, tasks, minD, ppd), buggyDeps(rowH1));
+    // Render 2: the settings effect has now applied the project's real rowHeight (20), and SOME
+    // OTHER render occurs (a scroll) that touches none of tasks/minD/ppd — the memo's own (buggy)
+    // dependency list is therefore unchanged, so it must NOT recompute.
+    const rowH2 = 20;
+    const second = useMemoSim(() => buildDepLinesFor(rowH2, tasks, minD, ppd), buggyDeps(rowH2));
+    expect(second).toBe(first); // same cached array reference — proves the memo didn't recompute
+    // And that stale geometry now disagrees with what a FRESH (unmemoized) computation at rowH2
+    // would say — the exact shape of "bars re-rendered fresh, arrows didn't."
+    const fresh = buildDepLinesFor(rowH2, tasks, minD, ppd);
+    const drifted = second.filter((l, i) => l.y1 !== fresh[i].y1 || l.y2 !== fresh[i].y2);
+    expect(drifted.length, "the unfixed memo shape must reproduce at least one drifted arrow, or this fixture doesn't test NEW-3").toBeGreaterThan(0);
+  });
+
+  it("GREEN: WITH ROW_H in the deps (the shipped fix), the same sequence recomputes and matches a fresh build exactly", () => {
+    const useMemoSim = makeUseMemo();
+    const tasks = fixtureTasks(), minD = tasks[0].start, ppd = 2;
+    const rowH1 = 24;
+    const fixedDeps = (rowH) => [tasks, minD, ppd, rowH]; // ROW_H included — post-fix shape
+    const first = useMemoSim(() => buildDepLinesFor(rowH1, tasks, minD, ppd), fixedDeps(rowH1));
+    const rowH2 = 20;
+    const second = useMemoSim(() => buildDepLinesFor(rowH2, tasks, minD, ppd), fixedDeps(rowH2));
+    expect(second).not.toBe(first); // a NEW array — the memo correctly recomputed
+    const fresh = buildDepLinesFor(rowH2, tasks, minD, ppd);
+    expect(second).toEqual(fresh); // and it matches what a fresh build at the current rowH says
+  });
+});
+
+describe("source guard — depLines' useMemo lists ROW_H as a dependency (NEW-3 drift/revert proof)", () => {
+  it("the shipped file's depLines useMemo dependency array includes ROW_H", () => {
+    expect(SRC).toContain("}, [tasks, minD, ppd, childParentIds, settings, ROW_H]);");
+  });
+});

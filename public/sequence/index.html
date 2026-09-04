@@ -12693,7 +12693,25 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
       return { key:`${l.pred.id}-${l.task.id}-${l.type}`, x1:a.x1, y1:a.y1, x2:a.x2, y2:a.y2, down:a.down, type:l.type,
                srcIdx: idxOf.get(l.pred.id), tgtIdx: idxOf.get(l.task.id) };
     });
-  }, [tasks, minD, ppd, childParentIds, settings]);
+  // AMENDMENT to B1113712/B1113713 — ROW_H is a module-scope `let`, set from an effect keyed on
+  // data.settings.rowHeight (App's own render, far above this component) that runs AFTER the
+  // commit that reads it, not during it. So the FIRST paint of a project whose rowHeight differs
+  // from the module's initial default (24) renders self-consistently at 24 (bars and this memo
+  // agree, because both read ROW_H fresh in that same commit); the effect then mutates ROW_H in
+  // place with no render of its own. glyphEdges bakes ROW_H into every x/y this memo returns, but
+  // ROW_H was missing from this dependency list — so the NEXT render this memo doesn't otherwise
+  // recompute for (a plain scroll: tasks/minD/ppd/childParentIds/settings all unchanged) re-renders
+  // the bars fresh at the CURRENT ROW_H while this memo keeps serving geometry baked at the STALE
+  // one. The drift is `rowIdx * (staleROW_H - currentROW_H)` px — small near the top, large enough
+  // by the bottom of a long schedule to land an arrowhead past the last rendered row, which is
+  // exactly the "arrow pointing to nothing" shape being re-reported after B1113712/B1113713 (those
+  // fixed the INDEX-bounds class; this is a separate PIXEL-staleness class the index guard cannot
+  // see, since srcIdx/tgtIdx are still perfectly valid — only the x/y baked alongside them is
+  // wrong). Reproduced live and measured before this line existed: mount with rowHeight:20, wait
+  // for the settings effect, then scroll — bar row tops correctly read 0/20/40/…, this memo's own
+  // arrow y-coordinates stayed frozen at 0/24/48/… until something else it already depends on
+  // changed. Fix: ROW_H joins the dependency list like any other value this computation reads.
+  }, [tasks, minD, ppd, childParentIds, settings, ROW_H]);
 
   // ── In-chart name labels (B393) ──────────────────────────
   // Per-project alignment; the chart's horizontal clip is [0, totalW] (a label past it
