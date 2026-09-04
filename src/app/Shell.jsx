@@ -441,21 +441,36 @@ export default function Shell() {
             </div>
           );
         })}
-        {/* B711904 (NEW-1) — the admin page. Only mounted (lazy chunk + the allowlist RPC
-            call) while the hash actually reads #/admin, so a normal session never pays for
-            either. AdminGate itself renders null for anyone not on the allowlist, which lets
-            the ordinary workspace underneath show through unblocked — the "404, not a
-            permission page" requirement — rather than this overlay needing its own denied
-            state. */}
+        {/* B711904 (NEW-1), pointer-events fixed B1154240 — the admin page. Only mounted (lazy
+            chunk + the allowlist RPC call) while the hash actually reads #/admin, so a normal
+            session never pays for either. AdminGate itself renders null for anyone not on the
+            allowlist, so the ordinary workspace underneath shows through unblocked, paint-wise —
+            the "404, not a permission page" requirement. But an absolutely-positioned wrapper
+            with default `pointer-events: auto` wins every hit-test inside its box regardless of
+            what it paints (CHROME-NEVER-EATS-A-PRESS), so a null-rendering AdminGate still froze
+            the whole workspace underneath for anyone not on the allowlist. This wrapper is
+            therefore deliberately `pointer-events: none` — pointer-transparent whether or not
+            AdminGate ends up rendering anything — and AdminApp claims its own presses back with
+            `pointer-events: auto` on its root (pointer-events inherits, so that second half is
+            required; AdminGate's own null render needs nothing, since none is nothing to hit). */}
         {isAdminHash && (
-          <div style={{ position: "absolute", inset: 0, zIndex: 1 }}>
+          <div style={{ position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none" }}>
             <Suspense fallback={null}>
               <AdminGate user={user} onExit={goDashboard} />
             </Suspense>
           </div>
         )}
         {isDesignHash && (
-          <div style={{ position: "absolute", inset: 0, zIndex: 1 }}>
+          // Pointer-events fixed B1154242 (NEW-3), same defect and same shape as B1154240's
+          // #/admin fix: while the DesignGallery lazy chunk is still loading (the Suspense
+          // fallback={null} gap), this wrapper is an empty box that still wins every hit-test
+          // in its area by CSS default (CHROME-NEVER-EATS-A-PRESS) — measured, ~3s of a dead
+          // workspace underneath on a throttled/cold load. Only ONE line is needed here, unlike
+          // #/admin's two: DesignGallery itself renders via `createPortal(..., document.body)`
+          // (see its own header — done to escape this exact wrapper's z-index stacking), so once
+          // it mounts it is not a DOM descendant of this div at all and never inherits its
+          // `pointer-events`; nothing there needs a counter-flip.
+          <div style={{ position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none" }}>
             <Suspense fallback={null}>
               {/* Not `onExit={goDashboard}` — `#/design` and the plain dashboard both parse to
                   the identical { module: "site-planner", projectId: null, cross: false } route
