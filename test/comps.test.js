@@ -3,7 +3,7 @@ import {
   landSizeSf, landPricePerSf, buildingPricePerSf, annualLeaseRate, leaseTotalAnnualRent,
   summarizeLeaseComps, summarizeSaleComps, compsSummaryBits, compFieldRows, compHeadline, partyLabels,
   validAnchor, validateComp, rowToComp, compToRow,
-  landPricePerAreaUnit, parseLeaseTermYears, netEffectiveLeaseRate,
+  landPricePerAreaUnit, parseLeaseTermYears, netEffectiveLeaseRate, opexNormalizedRate,
   anchorCountyFlag, resolveCapTriangle, emptyDraft, draftToComp, compToDraft,
   sortCompsByRecency, compDateLabel, anchorTeamConflict,
 } from "../src/shared/comps/lib/comps.js";
@@ -252,6 +252,42 @@ describe("comps: netEffectiveLeaseRate — the number brokers actually compare",
   });
 });
 
+describe("comps: opexNormalizedRate — B843664, a SEPARATE figure from netEffectiveLeaseRate", () => {
+  it("NNN + OpEx approximates the gross equivalent", () => {
+    const r = opexNormalizedRate({
+      compType: "lease", leaseRate: 6, leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseOpex: 2.5,
+    });
+    expect(r).toEqual({ value: 8.5, impliedBasis: "gross" });
+  });
+  it("gross - OpEx approximates the NNN equivalent", () => {
+    const r = opexNormalizedRate({
+      compType: "lease", leaseRate: 9, leaseRatePeriod: "annual", leaseRateExpense: "gross", leaseOpex: 2.5,
+    });
+    expect(r).toEqual({ value: 6.5, impliedBasis: "nnn" });
+  });
+  it("annualizes a monthly rate before combining with OpEx", () => {
+    const r = opexNormalizedRate({
+      compType: "lease", leaseRate: 0.5, leaseRatePeriod: "monthly", leaseRateExpense: "nnn", leaseOpex: 1,
+    });
+    expect(r.value).toBeCloseTo(7, 10); // 0.5*12 + 1
+  });
+  it("null when OpEx is absent, basis is unknown, or the comp isn't a lease — never guessed", () => {
+    expect(opexNormalizedRate({ compType: "lease", leaseRate: 6, leaseRatePeriod: "annual", leaseRateExpense: "nnn" })).toBeNull();
+    expect(opexNormalizedRate({ compType: "lease", leaseRate: 6, leaseRatePeriod: "annual", leaseOpex: 2 })).toBeNull(); // no basis
+    expect(opexNormalizedRate({ compType: "land", leaseOpex: 2 })).toBeNull();
+  });
+  it("never mutates or replaces netEffectiveLeaseRate's own figure", () => {
+    const comp = {
+      compType: "lease", leaseRate: 0.65, leaseRatePeriod: "monthly", leaseRateExpense: "nnn",
+      leaseTerm: "126 mo", leaseEscalationPct: 3.5, leaseFreeRentMonths: 6, leaseTi: 13, leaseOpex: 2,
+    };
+    const net = netEffectiveLeaseRate(comp);
+    const normalized = opexNormalizedRate(comp);
+    expect(net).toBeCloseTo(7.629, 3); // unchanged from the OpEx-less test above
+    expect(normalized.value).not.toBeCloseTo(net, 3);
+  });
+});
+
 describe("comps: sale $/SF summary (land / building_sale)", () => {
   it("averages only comps with a computable $/SF, by type", () => {
     const comps = [
@@ -459,6 +495,25 @@ describe("comps: empty fields never render", () => {
     expect(keys2).not.toContain("totalRent");
   });
 
+  it("lease: OpEx is independently optional (B843664) — blank never renders a row, and never blocks the rate row", () => {
+    const noOpex = compFieldRows({ compType: "lease", compDate: "2026-08-01", leaseRate: 7, leaseRatePeriod: "annual", leaseRateExpense: "nnn" });
+    expect(noOpex.map((r) => r.key)).not.toContain("opex");
+    expect(noOpex.map((r) => r.key)).not.toContain("opexNormalized");
+
+    const withOpex = compFieldRows({ compType: "lease", compDate: "2026-08-01", leaseRate: 6, leaseRatePeriod: "annual", leaseRateExpense: "nnn", leaseOpex: 2.5 });
+    const keys = withOpex.map((r) => r.key);
+    expect(keys).toContain("opex");
+    expect(keys).toContain("opexNormalized");
+    expect(withOpex.find((r) => r.key === "opex").value).toBe("$2.5"); // fmtMoney never pads to 2 decimals (matches TI's own rendering)
+    const normRow = withOpex.find((r) => r.key === "opexNormalized");
+    expect(normRow.label).toBe("Gross equivalent");
+    expect(normRow.value).toBe("$8.50/SF/yr");
+
+    // Land/building-sale comps never render an OpEx row at all — it isn't part of their vocabulary.
+    const land = compFieldRows({ compType: "land", compDate: "2026-08-01", landPrice: 100, landSizeValue: 1, landSizeUnit: "ac" });
+    expect(land.map((r) => r.key)).not.toContain("opex");
+  });
+
   it("no comp type at all still only shows the required date, not blank rows for anything else", () => {
     const rows = compFieldRows({ compDate: "2026-08-01" });
     expect(rows).toEqual([{ key: "date", label: "Date", value: "08/01/26" }]);
@@ -551,6 +606,13 @@ describe("comps: create/edit validation", () => {
     expect(validateComp({ compType: "land", anchor: { kind: "pin", lat: 1, lon: 1 } })).toEqual([]);
     expect(validateComp({ compType: "land", compDate: "", anchor: { kind: "pin", lat: 1, lon: 1 } })).toEqual([]);
     expect(validateComp({ compType: "land", compDate: null, anchor: { kind: "pin", lat: 1, lon: 1 } })).toEqual([]);
+  });
+
+  it("B843664: OpEx is never required — blank, absent, or present, a lease comp with type+anchor always validates clean", () => {
+    const base = { compType: "lease", compDate: "2026-08-01", anchor: { kind: "pin", lat: 1, lon: 1 } };
+    expect(validateComp(base)).toEqual([]);
+    expect(validateComp({ ...base, leaseOpex: null })).toEqual([]);
+    expect(validateComp({ ...base, leaseOpex: 2.5 })).toEqual([]);
   });
 });
 
@@ -676,6 +738,49 @@ describe("comps: row <-> model round-trip", () => {
     expect(row.lease_free_rent_months).toBeNull();
     expect(row.comp_party_provider).toBeNull();
     expect(row.comp_party_acquirer).toBeNull();
+  });
+
+  it("lease_opex round-trips like every other lease column (B843664), and is null when absent — never omitted, never 0", () => {
+    const row = compToRow({
+      compType: "lease", compDate: "2026-08-01", anchor: { kind: "pin", lat: 29.7, lon: -95.4 },
+      leaseOpex: 2.5,
+    });
+    expect(row.lease_opex).toBe(2.5);
+    expect(compToRow({ compType: "lease", compDate: "2026-08-01", anchor: { kind: "pin", lat: 29.7, lon: -95.4 } }).lease_opex).toBeNull();
+
+    const comp = rowToComp({
+      id: "c1", user_id: "u1", team_id: null, project_id: null,
+      comp_type: "lease", comp_date: "2026-08-01", title: "", notes: "",
+      anchor_kind: "pin", lat: "29.7", lon: "-95.4", county: null, parcel_apn: null, parcel_geom: null,
+      land_price: null, land_size_value: null, land_size_unit: null,
+      bldg_price: null, bldg_size_sf: null,
+      lease_rate: "6", lease_rate_period: "annual", lease_rate_expense: "nnn", lease_ti: null, lease_term: null,
+      lease_size_sf: null, lease_free_rent_months: null, comp_party_provider: null, comp_party_acquirer: null,
+      lease_opex: "2.5",
+      created_at: "2026-08-01T00:00:00Z", updated_at: "2026-08-01T00:00:00Z",
+    });
+    expect(comp.leaseOpex).toBe(2.5);
+
+    const compAbsent = rowToComp({
+      id: "c1", user_id: "u1", team_id: null, project_id: null,
+      comp_type: "lease", comp_date: "2026-08-01", title: "", notes: "",
+      anchor_kind: "pin", lat: "29.7", lon: "-95.4", county: null, parcel_apn: null, parcel_geom: null,
+      land_price: null, land_size_value: null, land_size_unit: null,
+      bldg_price: null, bldg_size_sf: null,
+      lease_rate: "6", lease_rate_period: "annual", lease_rate_expense: "nnn", lease_ti: null, lease_term: null,
+      lease_size_sf: null, lease_free_rent_months: null, comp_party_provider: null, comp_party_acquirer: null,
+      lease_opex: null,
+      created_at: "2026-08-01T00:00:00Z", updated_at: "2026-08-01T00:00:00Z",
+    });
+    expect(compAbsent.leaseOpex).toBeNull();
+  });
+
+  it("emptyDraft/draftToComp/compToDraft carry leaseOpex through the string-draft round trip", () => {
+    expect(emptyDraft(null).leaseOpex).toBe("");
+    expect(draftToComp({ ...emptyDraft(null), compType: "lease", leaseOpex: "2.5" }).leaseOpex).toBe(2.5);
+    expect(draftToComp({ ...emptyDraft(null), compType: "lease", leaseOpex: "" }).leaseOpex).toBeNull();
+    expect(compToDraft({ compType: "lease", leaseOpex: 2.5 }).leaseOpex).toBe("2.5");
+    expect(compToDraft({ compType: "lease", leaseOpex: null }).leaseOpex).toBe("");
   });
 });
 
