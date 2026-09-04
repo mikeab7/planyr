@@ -174,8 +174,11 @@ export function parseLeaseTermYears(text) {
  * comp's OWN quoted basis (NNN stays NNN, gross stays gross) — deliberately NOT converted to a
  * true NNN-equivalent for a gross-quoted comp, because that conversion needs an operating-
  * expense figure this app doesn't capture anywhere; inventing one would be a guessed number
- * wearing a precise decimal. True NNN normalization is future work, gated on an opex field —
- * flagged loudly rather than silently built as if it were already handled.
+ * wearing a precise decimal. True NNN normalization was future work, gated on an opex field.
+ * ⛔ B843664 — that field now exists (`leaseOpex`), and the resulting figure is
+ * `opexNormalizedRate` below, on the comp's OPPOSITE basis — deliberately a SEPARATE function
+ * from this one, never folded in: this stays a net-of-concessions figure on the comp's OWN
+ * basis, unchanged.
  *
  * Method: the face rate compounds by the escalation percentage once per full year of the term
  * (a partial final year weighted by its fraction), summed to a total $/SF over the whole term;
@@ -206,6 +209,29 @@ export function netEffectiveLeaseRate(comp) {
   }
   const netPsfOverTerm = grossPsfOverTerm - faceAnnual * freeRentYears - ti;
   return netPsfOverTerm / termYears;
+}
+
+/** OpEx-normalized rate (B843664) — NOT the existing net-effective figure (`netEffectiveLeaseRate`
+ * above, which stays on the comp's OWN quoted basis and is unchanged by this) and NEVER folded
+ * into it or into `summarizeLeaseComps`'s NNN/gross averages: whether the summary average should
+ * ever switch to an OpEx-adjusted basis is the OWNER'S decision, not made here — this is a
+ * separate, additional figure only.
+ *
+ * Approximates the comp's rate on the OPPOSITE basis from how it was quoted: an NNN comp's face
+ * rate + OpEx is roughly what a gross tenant would pay all-in (the gross equivalent); a gross
+ * comp's face rate − OpEx is roughly its base rent alone (the NNN equivalent). This is a rough
+ * convention, not an exact conversion (a real gross lease's OpEx isn't always identical to what an
+ * NNN tenant on the same building would pay), which is why it's surfaced as its own labeled figure
+ * rather than silently blended into the existing $/SF/yr column. Null unless the comp is a lease
+ * with both a computable annual face rate and a stated OpEx AND a known basis — never guessed. */
+export function opexNormalizedRate(comp) {
+  if (comp?.compType !== "lease") return null;
+  const faceAnnual = annualLeaseRate(comp);
+  const opex = positiveNumber(comp?.leaseOpex);
+  if (faceAnnual == null || !opex) return null;
+  if (comp?.leaseRateExpense === "nnn") return { value: faceAnnual + opex, impliedBasis: "gross" };
+  if (comp?.leaseRateExpense === "gross") return { value: faceAnnual - opex, impliedBasis: "nnn" };
+  return null;
 }
 
 /* ---- basis normalization for any list / average / sort / comparison view ---------------- */
@@ -405,6 +431,7 @@ export function compFieldRows(comp) {
     // NEW-3: labeled FACE (never blended with an effective/net-of-abatement figure this app
     // doesn't compute — see the item for why) + NEW-5: whole-dollar currency, never a raw float.
     if (totalRent != null) push("totalRent", "Total annual rent (face)", fmtMoneyWhole(totalRent));
+    if (comp?.leaseOpex != null) push("opex", "OpEx ($/SF/yr)", fmtMoney(comp.leaseOpex));
     if (comp?.leaseTi != null) push("ti", "TI allowance", `${fmtMoney(comp.leaseTi)}/SF`);
     if (comp?.leaseTerm) push("term", "Term", comp.leaseTerm);
     // NEW-2: free rent sits right next to Term, the field it belongs with.
@@ -416,6 +443,13 @@ export function compFieldRows(comp) {
     if (comp?.leaseCommencementDate) push("commencement", "Commencement", fmtCompDate(comp.leaseCommencementDate));
     const net = netEffectiveLeaseRate(comp);
     if (net != null) push("netEffective", "Net effective", `$${net.toFixed(2)}/SF/yr`);
+    // B843664 — OpEx-normalized rate: a SEPARATE figure from Net effective above, only shown when
+    // an OpEx figure was actually entered. Never blended into any other row.
+    const normalized = opexNormalizedRate(comp);
+    if (normalized) {
+      const label = normalized.impliedBasis === "gross" ? "Gross equivalent" : "NNN equivalent";
+      push("opexNormalized", label, `$${normalized.value.toFixed(2)}/SF/yr`);
+    }
   }
 
   // ⛔ NEW-5 (owner decision, 2026-09-02) — a blank Executed date used to make this row DISAPPEAR
@@ -534,6 +568,10 @@ export function rowToComp(r) {
     leaseRatePeriod: r.lease_rate_period || null,
     leaseRateExpense: r.lease_rate_expense || null,
     leaseTi: r.lease_ti != null ? Number(r.lease_ti) : null,
+    // OpEx ($/SF/YR, always — B843664) — the missing input for comparing an NNN comp against a
+    // gross one. Fixed at yr regardless of the rate's own Per (mo/yr), rather than a second period
+    // selector: industrial OpEx is conventionally quoted $/SF/yr even when rent isn't.
+    leaseOpex: r.lease_opex != null ? Number(r.lease_opex) : null,
     leaseTerm: r.lease_term || null,
     leaseSizeSf: r.lease_size_sf != null ? Number(r.lease_size_sf) : null,
     leaseFreeRentMonths: r.lease_free_rent_months != null ? Number(r.lease_free_rent_months) : null,
@@ -576,7 +614,7 @@ export function emptyDraft(anchor) {
     // gross-family term (gross, full service, FS, IG, MG, modified gross, base year) still wins
     // over this default — see compParse.js's BASIS_RE/genericToDraft.
     leaseRate: "", leaseRatePeriod: "", leaseRateExpense: "nnn", leaseTi: "", leaseTerm: "", leaseSizeSf: "",
-    leaseFreeRentMonths: "", leaseEscalationPct: "",
+    leaseFreeRentMonths: "", leaseEscalationPct: "", leaseOpex: "",
   };
 }
 
@@ -658,6 +696,7 @@ export function draftToComp(d) {
     bldgCapRate: tri ? tri.capRate.value : num(d.bldgCapRate),
     leaseRate: num(d.leaseRate), leaseTi: num(d.leaseTi), leaseSizeSf: num(d.leaseSizeSf),
     leaseFreeRentMonths: num(d.leaseFreeRentMonths), leaseEscalationPct: num(d.leaseEscalationPct),
+    leaseOpex: num(d.leaseOpex),
     // ⛔ NEW-5 (owner decision, 2026-09-02) — an empty draft string must become `null`, never the
     // literal `""` `compToRow` would otherwise forward straight into a Postgres `date` column
     // (which rejects an empty string with a real error, not a null). This was DEAD CODE UNTIL
@@ -682,7 +721,7 @@ export function compToDraft(c) {
     leaseRate: str(c.leaseRate), leaseRatePeriod: c.leaseRatePeriod || "annual",
     leaseRateExpense: c.leaseRateExpense || "nnn", leaseTi: str(c.leaseTi), leaseTerm: c.leaseTerm || "",
     leaseSizeSf: str(c.leaseSizeSf), leaseFreeRentMonths: str(c.leaseFreeRentMonths),
-    leaseEscalationPct: str(c.leaseEscalationPct),
+    leaseEscalationPct: str(c.leaseEscalationPct), leaseOpex: str(c.leaseOpex),
   };
 }
 
@@ -720,6 +759,7 @@ export function compToRow(comp) {
     lease_size_sf: comp.leaseSizeSf ?? null,
     lease_free_rent_months: comp.leaseFreeRentMonths ?? null,
     lease_escalation_pct: comp.leaseEscalationPct ?? null,
+    lease_opex: comp.leaseOpex ?? null,
     comp_party_provider: comp.partyProvider || null,
     comp_party_acquirer: comp.partyAcquirer || null,
     updated_at: new Date().toISOString(),

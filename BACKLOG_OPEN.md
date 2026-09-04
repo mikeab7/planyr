@@ -4,7 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _241 open · 592 awaiting live verification._
+> _241 open · 593 awaiting live verification._
 
 ## 🔲 Open
 
@@ -256,6 +256,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B1129408 | OpEx as an optional input on lease comps | [Site Planner / comps] | #comps | ⏳ live — awaiting |
 | B1128272 | "Dashboard" on the Schedule module fires two navigations and lands on the Site Planner map | [Scheduler] | #scheduler #ui | ⏳ live — awaiting |
 | B850016 | Location "Set" arms placement, then the Paste-comps panel keeps covering the map it just told you to click | [Site Planner / comps] | #comps #site-planner #ui | ⏳ live — awaiting |
 | B850019 | Comp map markers wear a soft blurred halo instead of a crisp white border `[Site Planner / comps][map]` | — | #comps #site-planner #ui | ⏳ live — awaiting |
@@ -855,7 +856,7 @@
 - **#admin** — B711905, B711906, B711907, B711908, B877442, B711904, B890560
 - **#auth** — B916, B917, B483, B778, B711330, B711904, B672113, B616672, B616673, B377891, B366384, B366385, B366386, B326416, B326417, B326418, B326419, B312545, B1425, B482, B1291, B676, B714, B1167, B890560
 - **#compare** — B471, B1053568, B1053569, B1053570
-- **#comps** — B1066370, B850016, B850019, B1123425, B1114992, B1090466, B1091712, B850432, B850434, B1066368, B1066368, B1066369, B1066560, B986096, B986096, B986097, B986097, B1063904, B1063904, B978272, B978273, B978274, B978275, B978276, B978277, B978278, B978279, B978280, B978281, B978282, B978283, B978284, B978285, B978286, B978287, B948496, B972225, B972224, B972512, B972513, B941152, B832385, B832387, B832390, B832391, B831779, B711328, B711329
+- **#comps** — B1066370, B1129408, B850016, B850019, B1123425, B1114992, B1090466, B1091712, B850432, B850434, B1066368, B1066368, B1066369, B1066560, B986096, B986096, B986097, B986097, B1063904, B1063904, B978272, B978273, B978274, B978275, B978276, B978277, B978278, B978279, B978280, B978281, B978282, B978283, B978284, B978285, B978286, B978287, B948496, B972225, B972224, B972512, B972513, B941152, B832385, B832387, B832390, B832391, B831779, B711328, B711329
 - **#coordinates** — B290247, B290250, B1422, B217541, B1106, B297904, B230080, B1141, B1142, B1122, B1111, B1043, B625, B684
 - **#doc-review** — B770897, B484, B471, B423, B422, B413, B411, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B978272, B978273, B978276, B948496, B972225, B972512, B972513, B503184, B208960, B208961, B208962, B208965, B208966, B1190, B1173, B1160, B947, B948, B914, B918, B919, B791, B792, B409, B746, B667, B659
 - **#drive** — B663, B662, B629, B1017, B1005, B1009, B989, B791, B792, B409, B699, B701

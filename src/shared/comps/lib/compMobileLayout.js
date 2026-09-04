@@ -36,7 +36,7 @@ const MOBILE_LABEL_OVERRIDES = { title: "Deal name" };
 
 const SECTION_ORDER = [
   { title: "Property", keys: ["compType", "title", "size", "landSizeUnit"] },
-  { title: "Rent", keys: ["leaseRate", "leaseRatePeriod", "leaseRateExpense", "leaseEscalationPct", "leaseAnnualRate"] },
+  { title: "Rent", keys: ["leaseRate", "leaseRatePeriod", "leaseRateExpense", "leaseOpex", "leaseEscalationPct", "leaseAnnualRate"] },
   { title: "Term", keys: ["leaseCommencementDate", "leaseTerm"] },
   { title: "Concessions", keys: ["leaseFreeRentMonths", "leaseTi"] },
   { title: "Price", keys: ["price", "bldgNoi", "bldgCapRate", "salePricePerArea"] },
