@@ -215,14 +215,14 @@ by construction (radius 0 opts out of that check's own candidate pool).
 **Map landing page (selecting parcels) — light:**
 
 - "Settings" sits 6px from "Sign in or create an account" — padding "0px" vs "0px 12px".
-- "Search for an address or place" sits 198px from "Cancel" — height 42px vs 30px, padding "0px 10px" vs "0px 12px" (divider-separated).
+- "Search for an address or place" sits 199px from "Cancel" — height 42px vs 30px, padding "0px 10px" vs "0px 12px" (divider-separated).
 - "Collapse the sites panel" sits 4px from "Sites1" — padding "1px 6px" vs "0px 8px".
 - "Collapse" sits 0px from "Reorder the Pursuit group" — height 23px vs 17px, padding "4px 4px 4px 12px" vs "1px 6px".
 
 **Map landing page (selecting parcels) — dark:**
 
 - "Settings" sits 6px from "Sign in or create an account" — padding "0px" vs "0px 12px".
-- "Search for an address or place" sits 198px from "Cancel" — height 42px vs 30px, padding "0px 10px" vs "0px 12px" (divider-separated).
+- "Search for an address or place" sits 199px from "Cancel" — height 42px vs 30px, padding "0px 10px" vs "0px 12px" (divider-separated).
 - "Collapse the sites panel" sits 4px from "Sites1" — padding "1px 6px" vs "0px 8px".
 - "Collapse" sits 0px from "Reorder the Pursuit group" — height 23px vs 17px, padding "4px 4px 4px 12px" vs "1px 6px".
 
@@ -649,7 +649,7 @@ _(nothing matched in this theme/scenario)_
 | 0px | 15px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | [object SVGAnimatedString] ×17 | unattributed (no source match — best-effort text search) |
 | 0px | 13px | 10.5px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | M, ⇧N, L (+6 more) ×9 | unattributed (label too short to search) |
 | 8px | 27px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Parcel tools, Measure modes, Dock layout (+3 more) ×6 | src/workspaces/site-planner/MapFinder.jsx:3876:                  empty state and its Parcel tools ▾ menu use for this same job (get a parcel from (+6 more matches, best-effort) |
-| 0px | 54px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Land, Analysis, Overlays ×3 | src/app/chunkReload.js:306:  let _failedSinceLanding = false; (+69 more matches, best-effort) |
+| 0px | 54px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Land, Analysis, Overlays ×3 | src/app/chunkReload.js:306:  let _failedSinceLanding = false; (+71 more matches, best-effort) |
 | 0px | 30px | 14px | 600 | `rgba(255, 255, 255, 0.94)` | `0px none rgb(27, 30, 38)` | Zoom out, Zoom to fit ×2 | src/workspaces/doc-review/DocReview.jsx:1999:    { kind: "tool", id: "zoomOut", label: "Out", title: "Zoom out (or scroll the wheel over the sheet)", icon: <MkIcon id="zoomOut" />, onClick: () => zoom(1 / 1.2) }, (+3 more matches, best-effort) |
 | 0px | 52px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Properties, Standards ×2 | src/shared/keyboard/keyScope.js:172: * delete suite: with it, clicking the Properties panel's ＋ to add dock zones, pressing Escape to (+30 more matches, best-effort) |
 | 0px | 32px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | ▶Buildings1 · 75,600 SF, ▶Costsnot priced yet ×2 | unattributed (no source match — best-effort text search) |
@@ -674,7 +674,7 @@ _(nothing matched in this theme/scenario)_
 | 0px | 15px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | [object SVGAnimatedString] ×17 | unattributed (no source match — best-effort text search) |
 | 0px | 13px | 10.5px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | M, ⇧N, L (+6 more) ×9 | unattributed (label too short to search) |
 | 8px | 27px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Parcel tools, Measure modes, Dock layout (+3 more) ×6 | src/workspaces/site-planner/MapFinder.jsx:3876:                  empty state and its Parcel tools ▾ menu use for this same job (get a parcel from (+6 more matches, best-effort) |
-| 0px | 54px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Land, Analysis, Overlays ×3 | src/app/chunkReload.js:306:  let _failedSinceLanding = false; (+69 more matches, best-effort) |
+| 0px | 54px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Land, Analysis, Overlays ×3 | src/app/chunkReload.js:306:  let _failedSinceLanding = false; (+71 more matches, best-effort) |
 | 0px | 30px | 14px | 600 | `rgba(24, 27, 33, 0.93)` | `0px none rgb(232, 235, 240)` | Zoom out, Zoom to fit ×2 | src/workspaces/doc-review/DocReview.jsx:1999:    { kind: "tool", id: "zoomOut", label: "Out", title: "Zoom out (or scroll the wheel over the sheet)", icon: <MkIcon id="zoomOut" />, onClick: () => zoom(1 / 1.2) }, (+3 more matches, best-effort) |
 | 0px | 52px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Properties, Standards ×2 | src/shared/keyboard/keyScope.js:172: * delete suite: with it, clicking the Properties panel's ＋ to add dock zones, pressing Escape to (+30 more matches, best-effort) |
 | 0px | 32px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | ▶Buildings1 · 75,600 SF, ▶Costsnot priced yet ×2 | unattributed (no source match — best-effort text search) |
