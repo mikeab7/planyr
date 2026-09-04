@@ -108,4 +108,23 @@ describe("MapFinder map-layer effects never read `mode` (B831778/NEW-3)", () => 
     // `const setPanelTab = (...)` function definition anywhere in the file.
     expect(src).not.toMatch(/const setPanelTab = /);
   });
+
+  // ⛔ B1133760 (owner report 2026-09-04, measured live on deployed build `index-Dh4XXz5X.js`) —
+  // B850018/NEW-11 above split the CLICK HANDLERS cleanly, but the sites-panel container's own
+  // WIDTH style survived from before the split as `mode === "comp" ? "clamp(...)" : 232`, so the
+  // centre toggle alone still resized the panel (measured 272×32 vs 230×32 collapsed) — the same
+  // coupling reappearing through CSS rather than through a click handler. Fixed by keying that
+  // width on `panelTab` (what the rail is actually showing), never `mode`.
+  it("the sites-panel width follows `panelTab`, never `mode` (B1133760)", () => {
+    const src = readFileSync(SRC, "utf8");
+    const i = src.indexOf('data-testid="map-sites-panel"');
+    expect(i, "sites-panel container not found").toBeGreaterThan(-1);
+    // Scan forward to the container's own width expression rather than the whole file, so this
+    // can't accidentally match one of the toolbar-workflow `mode === "comp"` reads elsewhere.
+    const region = src.slice(i, i + 6000);
+    expect(region).toMatch(/width:\s*panelTab === "comp" \? "clamp\(232px, 23vw, 440px\)" : 232/);
+    // Teeth proof: the exact pre-fix expression must genuinely be gone from this region, not
+    // merely superseded alongside it.
+    expect(region).not.toMatch(/width:\s*mode === "comp" \? "clamp\(232px, 23vw, 440px\)" : 232/);
+  });
 });
