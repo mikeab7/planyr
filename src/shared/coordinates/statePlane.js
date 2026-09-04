@@ -250,5 +250,27 @@ export function gridScaleFactor(zone, lat) {
   return (c.n * c.F * lccT(latR) ** c.n) / m;
 }
 
+/* Grid-north-vs-true-north convergence at a point, in degrees. POSITIVE = the zone's State Plane
+ * grid north lies EAST of true north. Moved here from the site-planner workspace's `deedAlign.js`
+ * (B1134752) — this is a plain geodetic fact about a zone at a point, the exact same category as
+ * `gridScaleFactor` right above it, and it has a SECOND consumer now (the site-plan-overlay
+ * placement math, `shared/sitePlans/lib/overlayGeoref.js`) that lives in `shared/` and must not
+ * import a workspace-scoped module. `deedAlign.js` re-exports this unchanged so its own callers
+ * (SitePlanner.jsx's deed-align flow) are untouched.
+ *
+ * Returns **null** — an honest unknown, never 0 — for non-finite input and for ground outside
+ * every modelled zone. 0 is a real answer ("you are on the central meridian"), so a caller must
+ * be able to tell the two apart before rotating anything by it. */
+export function gridConvergenceDeg(lat, lon, { state = null, county = null } = {}) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  const zone = resolveZone({ state, county, lat, lon });
+  if (!zone) return null; // no modelled zone here — refuse, never guess
+  const p = projectToZone(zone, lat, lon);
+  const up = zoneToProject(zone, { x: p.x, y: p.y + 1000 }); // a point 1000 ft due GRID-north
+  const dLat = up.lat - lat;
+  const dLon = (up.lon - lon) * Math.cos((lat * Math.PI) / 180); // east component, in degrees
+  return (Math.atan2(dLon, dLat) * 180) / Math.PI; // angle of grid-north east of true north
+}
+
 export const zoneById = (id) => SP_ZONES[id] || null;
 export const ZONE_IDS = Object.keys(SP_ZONES);
