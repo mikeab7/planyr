@@ -82,12 +82,30 @@ describe("MapFinder map-layer effects never read `mode` (B831778/NEW-3)", () => 
     expect(MENTIONS_MODE.test(body)).toBe(false);
   });
 
-  it("the toolbar switch and the rail tab are driven by the SAME state variable (NEW-1/NEW-2 coupling)", () => {
+  // ⛔ B850018 (NEW-11) SUPERSEDES this test's original claim. B831776/B831777's "one piece of
+  // state, never two" was a deliberate design and this test used to guard it; the owner reversed
+  // that design ("when i click comp in the center it shouldnt auto switch the left side to comp
+  // mode as well" — measured bidirectional coupling on deployed build 80c78cc). The toolbar switch
+  // (`mode`) and the rail tab (`panelTab`) are now two INDEPENDENT state variables, and this test
+  // now guards THAT instead — the opposite assertion, on purpose, not a loosening.
+  it("the toolbar switch reads `mode`; the rail tab reads its OWN `panelTab`, never `mode` (B850018/NEW-11)", () => {
     const src = readFileSync(SRC, "utf8");
-    // Both call sites read `mode`/pass `setMode` — a literal source sweep that there is exactly
-    // one state variable behind both surfaces, not two independently-toggleable ones.
     expect(src).toMatch(/<SiteCompSwitch mode=\{mode\} onChange=\{setMode\}/);
-    expect(src).toMatch(/<RailTab label="Sites"[\s\S]{0,120}active=\{mode === "site"\}/);
-    expect(src).toMatch(/<RailTab label="Comps"[\s\S]{0,80}active=\{mode === "comp"\}/);
+    expect(src).toMatch(/<RailTab label="Sites"[\s\S]{0,120}active=\{panelTab === "site"\}/);
+    expect(src).toMatch(/<RailTab label="Comps"[\s\S]{0,80}active=\{panelTab === "comp"\}/);
+    // Teeth proof: the OLD coupled pattern must genuinely be gone, not just "a new pattern also
+    // exists alongside it" — a partial revert would still satisfy the three matches above.
+    expect(src).not.toMatch(/<RailTab label="Sites"[\s\S]{0,120}active=\{mode === "site"\}/);
+    expect(src).not.toMatch(/<RailTab label="Comps"[\s\S]{0,80}active=\{mode === "comp"\}/);
+  });
+
+  it("setPanelTab is a plain setter — switching tabs must never cancel an in-flight comp placement the way leaving `mode` does", () => {
+    const src = readFileSync(SRC, "utf8");
+    const i = src.indexOf("const [panelTab, setPanelTab] = useState(");
+    expect(i, "panelTab state not found").toBeGreaterThan(-1);
+    // setPanelTab must be the raw useState setter, not a wrapper with side effects like `setMode`
+    // (which cancels `placingCompPin`/`selectMode` on leaving comp mode) — there must be no
+    // `const setPanelTab = (...)` function definition anywhere in the file.
+    expect(src).not.toMatch(/const setPanelTab = /);
   });
 });

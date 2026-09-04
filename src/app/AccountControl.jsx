@@ -129,14 +129,19 @@ export default function AccountControl({ user, profileApi, onOpenAuth, onOpenAcc
   if (!supabaseConfigured()) {
     // Cloud not configured — show a "Cloud off" pill with an explanatory popover.
     return (
-      <div style={{ position: "relative" }}>
+      <div style={{ position: "relative" }} data-testid="account-cloud-off">
         {/* NEW-1 (B982400) — was a hand-rolled chip (RADIUS.md, an asymmetric "4px 10px 4px 6px"
             pad, an auto height around 30px); now the shared MenuTrigger (size="md"), which is
             the same locked (radius, height, padding, font) bundle the account/sign-in pills below
             use — one family for the whole "opens something" row-1 chip class, not three
             independently hand-tuned near-matches. `caret={false}`: this opens a popover
             explainer, not a menu. `textColor=MUTED` keeps the deliberate "quieter than an active
-            account" reading — a real, kept distinction, not a geometry override. */}
+            account" reading — a real, kept distinction, not a geometry override.
+            `data-testid="account-cloud-off"` on the wrapper (NEW-15/B846608): a stable,
+            copy-independent hook for anything that needs to tell "Supabase not configured at
+            build time" apart from "signed out" without matching on this pill's visible/title
+            text, which changes with copy edits and is what let this exact divergence ship
+            undetected into docs/UI-INVENTORY.md (see ui-inventory.mjs's own auth-state gate). */}
         <MenuTrigger
           onClick={() => setCloudNote((o) => !o)}
           aria-haspopup="dialog"
@@ -191,8 +196,12 @@ export default function AccountControl({ user, profileApi, onOpenAuth, onOpenAcc
     // NEW-1 (B982400) — was a hand-rolled `pill` (see the shared style object above, now unused
     // by this file — MenuTrigger is the same shape, byte-for-byte). `caret={false}`: this opens a
     // modal, not a menu.
+    // `data-testid="account-signed-out"` (NEW-15/B846608) — the stable counterpart to
+    // "account-cloud-off" above: Supabase IS configured (CI's real secrets always make this the
+    // branch that renders), but nobody is signed in. See that hook's own comment for why a
+    // copy-independent marker matters here.
     return (
-      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>}>
+      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out">
         Sign in
       </MenuTrigger>
     );

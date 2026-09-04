@@ -109,6 +109,18 @@ export const TYPE_OPTIONS = [
 export const PERIOD_OPTIONS = [{ value: "monthly", label: "MO" }, { value: "annual", label: "YR" }];
 export const BASIS_OPTIONS = [{ value: "nnn", label: "NNN" }, { value: "gross", label: "GROSS" }];
 export const UNIT_OPTIONS = [{ value: "ac", label: "AC" }, { value: "sf", label: "SF" }];
+// B1119282 (×2) — the Unit cell's option set on a building-sale/lease row: the one real value
+// those types' own DB columns accept, never a fabricated AC choice with no field to hold it.
+const SF_ONLY_OPTIONS = [{ value: "sf", label: "SF" }];
+
+/** A select column's option set for ONE row's comp type — `col.optionsFor(compType)` when the
+ * column declares one (currently only Unit, whose choices genuinely vary by type), else the
+ * column's own static `options`. The one place every select-kind caller (cellState,
+ * applyCellEdit, and the sheet's own rendering/type-ahead) resolves this, so the per-row set
+ * can't drift between what's shown, what's typed against, and what's stored. */
+export function optionsForColumn(col, compType) {
+  return col.optionsFor ? col.optionsFor(compType) : col.options;
+}
 
 /* ---- number display: comma-separated while resting, raw digits while being typed ----------- */
 
@@ -173,11 +185,24 @@ function simpleColumn(base) {
   };
 }
 
+// B850016 (NEW-10) — a SELECT-kind column drawn from a fixed, known-at-build-time vocabulary
+// (Type/Unit/Per/Basis) must fit its LONGEST option, at every viewport, always — there is no
+// excuse for truncating "GROSS" or "Bldg sale," the owner's own words. These four widths used to
+// be sized against whatever option happened to be on screen while testing (often the SHORTEST
+// one), leaving literally 0px of slack — measured live via `td>span>span` scrollWidth vs
+// clientWidth on the real rendered sheet: "Lease"/"MO"/"YR"/"NNN"/"SF"/"AC" all sat at EXACTLY
+// clientWidth === scrollWidth (zero margin, one sub-pixel of font-rendering difference between
+// machines from clipping), and the option that actually IS longest clipped outright — "Bldg sale"
+// needed ~70px in a 58px cell, "GROSS" needed ~59px in a 48px cell. Each width below is that
+// measured worst-case option's real rendered width (padding + gap + caret included) plus a small
+// buffer, not a guess — this is what fixes both the reported 1191px clip and the "wider monitor
+// clips WORSE" report (that was never about window width; it was ALWAYS-marginal columns tipping
+// over on whichever option/font happened to render longest that session).
 export const SHEET_COLUMNS = [
   // TYPE — the classifier every other column's meaning depends on ("choose deal first because it
   // will inform the rest"). Frozen alongside Location (see below) so it never scrolls out of view.
   {
-    key: "compType", label: "Type", group: "TYPE", width: 58, align: "left", kind: "select", options: TYPE_OPTIONS, frozen: true,
+    key: "compType", label: "Type", group: "TYPE", width: 74, align: "left", kind: "select", options: TYPE_OPTIONS, frozen: true,
     appliesTo: () => true,
     getValue: (d) => d.compType,
     setValue: (d, v) => {
@@ -226,11 +251,32 @@ export const SHEET_COLUMNS = [
     flagKey: (d) => (d.compType === "land" ? "landSizeValue" : d.compType === "building_sale" ? "bldgSizeSf" : "leaseSizeSf"),
   },
   {
-    // Editable AC/SF only for land — building-sale and lease sizes are always SF, shown as a
-    // fixed (not em-dash — it DOES apply, it's just not a choice) label.
-    key: "landSizeUnit", label: "Unit", group: "PROPERTY", width: 40, align: "left", kind: "select", options: UNIT_OPTIONS,
+    // B1119282 (×2, owner live-click measurement, 2026-09-03) — REVERSES the earlier "fixed,
+    // non-editable outside land" design (HARDENING-10's own note, quoted below for the record):
+    // "Editable AC/SF only for land — building-sale and lease sizes are always SF, shown as a
+    // fixed (not em-dash — it DOES apply, it's just not a choice) label." That reads consistent
+    // on paper, but real clicking found the opposite of consistent: Type/Per/Basis are genuine
+    // native `<select>` elements a user can click into on every row they apply to, while Unit —
+    // the ONE column with `editableFor` gating it to a single comp type — mounted NO select at
+    // all outside land (`document.querySelectorAll('table select').length === 0`), yet a prior
+    // round gave it the SAME caret as those three for visual parity. That combination is worse
+    // than having no caret: the caret now claims a choice exists that a click cannot reach at
+    // all, on the one column whose whole job is disambiguating SF from acres — and this repo has
+    // already shipped a real "5 acres became 5 SF" defect from exactly that kind of unit
+    // confusion. Unit is a real, always-mounting select cell now, on the SAME mechanism as
+    // Type/Per/Basis (`editableFor` is gone; `cellState`'s now-dead "fixed" state is removed
+    // with it). What differs per row is only the OPTION SET, via `optionsFor` below — land keeps
+    // the genuine AC/SF choice; building-sale and lease get a select whose one real, honest
+    // option is SF, because that is the entire option set their own DB columns
+    // (`bldg_size_sf`/`lease_size_sf`) accept — never a fabricated AC choice with nowhere to
+    // persist it. A real one-option select is not a lie; a caret over an unreachable one was.
+    // B850016 (NEW-10) — width 40->44: measured live, both AC and SF sat at literally 0px of
+    // slack against their own content (see this file's own SHEET_COLUMNS header comment); a small
+    // buffer removes the fragility without changing anything about the select-vs-fixed question
+    // this comment is otherwise about.
+    key: "landSizeUnit", label: "Unit", group: "PROPERTY", width: 44, align: "left", kind: "select", options: UNIT_OPTIONS,
     appliesTo: () => true,
-    editableFor: (t) => t === "land",
+    optionsFor: (compType) => (compType === "land" ? UNIT_OPTIONS : SF_ONLY_OPTIONS),
     getValue: (d) => (d.compType === "land" ? d.landSizeUnit : "sf"),
     setValue: (d, v) => ({ ...d, landSizeUnit: v }),
     flagKey: () => "landSizeUnit",
@@ -296,8 +342,8 @@ export const SHEET_COLUMNS = [
   // RENT — lease-only now that Price moved to PRICE: Rate (+ how it's quoted) and Escalation,
   // because escalation IS rent, over time — never a generic "term".
   simpleColumn({ key: "leaseRate", label: "Rate", fullLabel: "Rate $/SF", group: "RENT", width: 50, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
-  simpleColumn({ key: "leaseRatePeriod", label: "Per", group: "RENT", width: 42, align: "left", kind: "select", options: PERIOD_OPTIONS, appliesTo: (t) => t === "lease" }),
-  simpleColumn({ key: "leaseRateExpense", label: "Basis", group: "RENT", width: 48, align: "left", kind: "select", options: BASIS_OPTIONS, appliesTo: (t) => t === "lease" }),
+  simpleColumn({ key: "leaseRatePeriod", label: "Per", group: "RENT", width: 46, align: "left", kind: "select", options: PERIOD_OPTIONS, appliesTo: (t) => t === "lease" }),
+  simpleColumn({ key: "leaseRateExpense", label: "Basis", group: "RENT", width: 64, align: "left", kind: "select", options: BASIS_OPTIONS, appliesTo: (t) => t === "lease" }),
   simpleColumn({ key: "leaseEscalationPct", label: "Escal (%)", fullLabel: "Escalation %/yr", group: "RENT", width: 60, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
 
   // CONCESSIONS — the other half of the economics: what the landlord gives up, which is exactly
@@ -332,7 +378,12 @@ export const SHEET_COLUMNS = [
   {
     // The lease's annualized rate on its OWN quoted basis — the basis prints inline so this is
     // never silently compared across NNN and gross (they are not the same figure).
-    key: "leaseAnnualRate", label: "$/SF/yr", group: "DERIVED", width: 58, align: "right", kind: "derived",
+    // B850016 (NEW-10) — widened from 58 to match its sibling derived column (`$/SF or $/AC`,
+    // 84): 58px clipped the basis word outright on an ordinary GROSS row ("96.48 GROSS" measured
+    // at 89px real width vs 57px available) — not a "genuinely tight space" case, just undersized.
+    // A rate long enough to still clip past 84px falls back to the cell's hover title (SheetCell's
+    // `isLongTextCol`), same as the free-text columns.
+    key: "leaseAnnualRate", label: "$/SF/yr", group: "DERIVED", width: 84, align: "right", kind: "derived",
     appliesTo: (t) => t === "lease",
     derive: (comp) => {
       const v = annualLeaseRate(comp);
@@ -377,9 +428,11 @@ export function visibleColumnIndices(rows) {
   return out;
 }
 
-/** The one place a cell's rendered state is decided: applicable+editable, applicable+fixed
- * (Unit for a non-land row), not-applicable (em dash), or derived. Never returns a raw value the
- * caller has to re-interpret — `text` is always what the cell should show. */
+/** The one place a cell's rendered state is decided: applicable+editable, not-applicable (em
+ * dash), or derived. Never returns a raw value the caller has to re-interpret — `text` is always
+ * what the cell should show. (B1119282 ×2 removed the third, "fixed", state this used to have
+ * for Unit on a non-land row — Unit is a real editable select on every row now; see its own
+ * column header for why.) */
 export function cellState(col, draft) {
   const applies = col.appliesTo(draft.compType);
   if (col.kind === "derived") {
@@ -408,11 +461,7 @@ export function cellState(col, draft) {
     return { state: "editable", text: formatNumberDisplay(raw), raw: raw ?? "" };
   }
   const raw = col.getValue(draft);
-  if (col.editableFor && !col.editableFor(draft.compType)) {
-    // applies, but not a choice for this type (Unit is always SF outside land)
-    return { state: "fixed", text: optionLabel(col.options, raw) || String(raw || "").toUpperCase() };
-  }
-  if (col.kind === "select") return { state: "editable", text: optionLabel(col.options, raw), raw: raw || "" };
+  if (col.kind === "select") return { state: "editable", text: optionLabel(optionsForColumn(col, draft.compType), raw), raw: raw || "" };
   if (col.kind === "number") return { state: "editable", text: formatNumberDisplay(raw), raw: raw ?? "" };
   if (col.kind === "date") {
     // HARDENING-8 — `raw` (ISO, what's actually stored) is never shown; the REST display and
@@ -442,7 +491,7 @@ export function cellPlaceholder() {
 export function applyCellEdit(col, draft, rawInput) {
   if (col.kind === "derived" || col.kind === "action") return draft;
   if (col.kind === "select") {
-    const matched = matchOption(col.options, rawInput);
+    const matched = matchOption(optionsForColumn(col, draft.compType), rawInput);
     return matched == null ? draft : col.setValue(draft, matched);
   }
   if (col.kind === "number") return col.setValue(draft, sanitizeNumericInput(rawInput));
@@ -535,10 +584,18 @@ export function spillPaste(rows, startRow, startCol, clipboardText, emptyDraftFn
 // no longer needs the largest guaranteed share of leftover space either. The three growers now
 // share weight EQUALLY — a broker paste is as likely to fill in a landlord/tenant name as a
 // property title, so there's no longer a reason to bias toward Title specifically.
+// B850016 (NEW-10) — the floor used to be 46: measured live at a squeezed 1191px window, a real
+// "Core5 Industrial Partners" (needs ~152px) and "Modular Power Solutions" (~151px) both landed
+// in a 48px cell, unreadable at rest. 46 was chosen to guarantee the sheet never overflows even at
+// an extreme window (this file's own header), not because 46px is enough to show a real party
+// name — it never was. Raised to 58: still comfortably safe against the "extreme window" case the
+// original floor was defending (the overflow fallback below still holds if even that isn't
+// enough), and it gives the common "somewhat squeezed but not extreme" case — the owner's own
+// 1191px report — noticeably more of a real name before the hover title has to carry the rest.
 const FLEX_GROWERS = [
-  { key: "title", nominal: 108, floor: 46, weight: 1 },
-  { key: "partyProvider", nominal: 110, floor: 46, weight: 1 },
-  { key: "partyAcquirer", nominal: 110, floor: 46, weight: 1 },
+  { key: "title", nominal: 108, floor: 58, weight: 1 },
+  { key: "partyProvider", nominal: 110, floor: 58, weight: 1 },
+  { key: "partyAcquirer", nominal: 110, floor: 58, weight: 1 },
 ];
 const FLEX_NOTES = { key: "notes", nominal: 80, floor: 40 };
 

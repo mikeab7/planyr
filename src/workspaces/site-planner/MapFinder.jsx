@@ -488,19 +488,22 @@ const PinGlyph = ({ size = 12 }) => (
 );
 
 /* B831776 (NEW-1) — the far-left Site/Comp switch. MODULE-SCOPE-COMPONENTS: defined here, not
- * inside MapFinder's render. Two segments, one piece of state (`mode`) — see the state's own
- * comment for why there is deliberately no second "which tab" variable.
+ * inside MapFinder's render.
+ * ⛔ B850016 (NEW-11) — SUPERSEDES this comment's original claim of "one piece of state, no second
+ * `which tab` variable." That was a deliberate coupling and the owner reversed it: clicking this
+ * switch must never move the left rail's tab, and vice versa (see `mode`'s own state comment).
+ * This switch is keyed on `mode` ONLY now — what an address search creates and which toolbar
+ * workflow is armed (Select-parcels vs. Place-comp) — never `panelTab`.
  * ⛔ B848304 — RENAMED, not removed: read this before "simplifying" it away. Once the map
  * toolbar's placement buttons collapsed into the "Place comp" split button, this switch stopped
  * being about arming a click at all — it never was ONLY that, which is why it stays. It still
- * does a real, distinct job the split button cannot: it picks which list the left rail shows
- * (Sites or Comps — B831777, the SAME `mode` state, no second variable) and which toolbar
- * workflow is active (the Select-parcels flow vs. the Place-comp flow). The RENAME lives in the
- * accessible name ("Browse sites or comps") and each segment's own tooltip — precisely so this
- * no longer READS as a second way to say "place a comp" (the duplication the owner flagged) —
- * without touching the terse visible glyph, which stays "Site"/"Comp" on purpose: a segmented
- * toggle this narrow keeps PANEL-BREVITY's short label, and pluralizing it to "Comps" collides
- * with the rail tab's own accessible name ("Comps 0") for any locator that doesn't disambiguate
+ * does a real, distinct job the split button cannot: it decides what a search creates and which
+ * toolbar workflow is active. The RENAME lives in the accessible name and each segment's own
+ * tooltip — precisely so this no longer READS as a second way to say "place a comp" (the
+ * duplication the owner flagged) — without touching the terse visible glyph, which stays
+ * "Site"/"Comp" on purpose: a segmented toggle this narrow keeps PANEL-BREVITY's short label, and
+ * pluralizing it to "Comps" collides with the rail tab's own accessible name ("Comps 0") for any
+ * locator that doesn't disambiguate
  * — tried, reverted, see this item's PR history. */
 const SWITCH_SEG_H = 26;
 function SiteCompSwitch({ mode, onChange }) {
@@ -526,12 +529,12 @@ function SiteCompSwitch({ mode, onChange }) {
     );
   };
   return (
-    <div role="tablist" aria-label="Browse sites or comps" style={{
+    <div role="tablist" aria-label="What an address search creates" style={{
       flex: "none", display: "flex", gap: 2, padding: 2, marginRight: 6,
       height: SWITCH_SEG_H + 4, borderRadius: RADIUS.sm, background: "var(--chrome-bg-elev)",
     }}>
-      {seg("site", "Site", PAL.accent, "Browse your sites and start new plans")}
-      {seg("comp", "Comp", COMP_ACCENT, "Browse your leasing comps and place new ones")}
+      {seg("site", "Site", PAL.accent, "Address search creates a new site")}
+      {seg("comp", "Comp", COMP_ACCENT, "Address search creates a new leasing comp")}
     </div>
   );
 }
@@ -699,13 +702,16 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placingCompPin]);
 
-  /* B831776 (NEW-1/NEW-2) — the Site/Comp switch and the left-rail tab are ONE piece of state,
-   * never two: flipping either flips the other, which is the whole point of this design (two
-   * independent modes is the failure it replaces). `mode` drives BOTH — the toolbar switch's
-   * highlighted segment (and therefore which pair of action buttons it offers) AND which rail
-   * tab is showing. It does NOT drive what's drawn on the map — see `showSitesLayer`/
-   * `showCompsLayer` below (NEW-3): those are independent, so switching modes here can never hide
-   * a pin. */
+  /* ⛔ B850016 (NEW-11) — B831776's original design ("the Site/Comp switch and the left-rail tab
+   * are ONE piece of state, never two") is SUPERSEDED. Owner, verbatim: "when i click comp in the
+   * center it shouldnt auto switch the left side to comp mode as well." Measured live: the
+   * coupling was bidirectional — the centre toggle flipped the rail tab AND the rail tab flipped
+   * the centre toggle — so wanting to look up a comp's address while keeping your Sites list open
+   * (or vice versa) was impossible. The two now have DIFFERENT jobs and DIFFERENT state: `mode`
+   * decides what an address SEARCH creates (a site or a comp) and drives the toolbar's
+   * placement workflow (Select-parcels vs. Place-comp); `panelTab` (below) decides what the left
+   * rail BROWSES. Neither setter touches the other. It still does not drive what's drawn on the
+   * map — see `showSitesLayer`/`showCompsLayer` below (NEW-3): those stay independent too. */
   const [mode, setModeRaw] = useState(() => {
     try { return localStorage.getItem("planarfit:mapMode:v1") === "comp" ? "comp" : "site"; } catch (_) { return "site"; }
   });
@@ -718,6 +724,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     if (m !== "comp") { setPlacingCompPin(false); }
     setSelectMode(false);
   };
+  // B850016 (NEW-11) — the rail tab's OWN state, independent of `mode` above. A plain setter, no
+  // side effects: switching which list you're browsing must never cancel an in-flight comp
+  // placement or parcel selection the way leaving `mode` does (those belong to the toolbar
+  // workflow, untouched by which tab is merely visible).
+  const [panelTab, setPanelTab] = useState(() => {
+    try { return localStorage.getItem("planarfit:mapMode:v1") === "comp" ? "comp" : "site"; } catch (_) { return "site"; }
+  });
   const [zoom, setZoom] = useState(null);
 
   // ---- Site-plan overlays (B948496) — upload a site plan, place it on the map by DIRECT
@@ -902,7 +915,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       setFileDragActive(false);
       const files = e.dataTransfer.files;
       if (!files || !files.length) return;
+      // B850016 (NEW-11) — dropping a file both arms the toolbar for a comp-placement workflow
+      // (`setMode`) AND is a direct enough action that the Comps tab should surface to show it
+      // (`setPanelTab`) — unlike the centre toggle's own click, which must never move the panel.
       setMode("comp");
+      setPanelTab("comp");
       if (!sitesPanelOpen) toggleSitesPanel();
       let dropPlacement = null;
       const m = mapRef.current;
@@ -923,12 +940,14 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
 
   // NEW-COMPS/NEW-2 — a comp pin just dropped or an existing comp's marker just got clicked: the
   // Comps tab is what should be showing to act on it, wherever the rail happened to be pointed.
+  // B850016 (NEW-11) — this used to also force `mode` (the search-create toggle) to "comp", which
+  // was the SAME coupling NEW-11 reports from the other direction: merely clicking an existing
+  // comp marker silently rearmed what an address search creates. Selecting a specific comp should
+  // surface its detail (the panel tab) — it should not decide what a future search does.
   useEffect(() => {
     if (!pendingCompAnchor && !focusCompId) return;
-    setModeRaw("comp");
-    try { localStorage.setItem("planarfit:mapMode:v1", "comp"); } catch (_) { /* private mode */ }
+    setPanelTab("comp");
     setSitesPanelOpen(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingCompAnchor, focusCompId]);
   // Layers/imagery panel: on a phone it collapses to a tap (default closed) so it stops
   // covering the search bar; desktop keeps it always-open as before.
@@ -3376,7 +3395,18 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               // shared MAP_OVERLAY_CHIP_H_PX, matching the Layers panel's collapsed chip instead
               // of resting at whatever height its two-tab header row happened to need. `maxHeight`
               // (B948496) still caps the OPEN state so the panel never grows past the viewport.
-              : { top: MAP_OVERLAY_TOP_PX, left: 10, zIndex: MAP_CHROME_Z.panel, width: 232, maxHeight: "calc(100% - 24px)", ...(sitesPanelOpen ? null : { height: MAP_OVERLAY_CHIP_H_PX }) }) }}>
+              // NEW-12 (B1123424, owner report — the comp detail panel cramped on a wide monitor,
+              // label/value rows wrapping) — the rail's fixed 232px never scaled with the
+              // viewport, so a comp's field rows (the longest label, "Total annual rent (face)",
+              // 131px at the panel's own 12px/Inter) had no room to grow on a 2000px+ display.
+              // Scoped to the Comps tab only (`mode === "comp"`) — the Sites list already reads
+              // fine at 232 and B885136's team-chip layout was measured against that exact
+              // width, so leave Sites untouched. `clamp(232px, 23vw, 440px)` measured live
+              // against the real CompDetail component (a throwaway harness, discarded after
+              // use): 1191px viewport → 274px panel, 1440px → 331px, 1920px → 440px (the
+              // ceiling) — comfortably wider on a big monitor, barely different from today on a
+              // laptop, and it never shrinks below the original 232.
+              : { top: MAP_OVERLAY_TOP_PX, left: 10, zIndex: MAP_CHROME_Z.panel, width: mode === "comp" ? "clamp(232px, 23vw, 440px)" : 232, maxHeight: "calc(100% - 24px)", ...(sitesPanelOpen ? null : { height: MAP_OVERLAY_CHIP_H_PX }) }) }}>
             {/* collapsible header (B106) + the two tabs — one row, always visible (never buried
                 behind the collapse, and now PINNED — flex:"none" against the scrollable body
                 below — so both counts stay readable, and reachable, no matter how long either
@@ -3396,9 +3426,9 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                 <span style={{ fontSize: 8, lineHeight: 1, transform: sitesPanelOpen ? "none" : "rotate(-90deg)", display: "inline-block" }}>▼</span>
               </button>
               <RailTab label="Sites" count={nf ? `${shownCount}/${sites.length}` : sites.length}
-                active={mode === "site"} onClick={() => { setMode("site"); if (!sitesPanelOpen) toggleSitesPanel(); }} />
-              <RailTab label="Comps" count={comps.length} active={mode === "comp"}
-                onClick={() => { setMode("comp"); if (!sitesPanelOpen) toggleSitesPanel(); }} />
+                active={panelTab === "site"} onClick={() => { setPanelTab("site"); if (!sitesPanelOpen) toggleSitesPanel(); }} />
+              <RailTab label="Comps" count={comps.length} active={panelTab === "comp"}
+                onClick={() => { setPanelTab("comp"); if (!sitesPanelOpen) toggleSitesPanel(); }} />
             </div>
             {/* B948496 — everything below the pinned header is ONE scrollable region, so the
                 panel itself never grows past the viewport regardless of which tab is open or
@@ -3407,7 +3437,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                 for per-group behavior; this outer scroller is the backstop that makes the
                 WHOLE panel — not just one nested list — reachable at any viewport height. */}
             <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflowY: "auto" }}>
-            {sitesPanelOpen && mode === "site" && (<>
+            {sitesPanelOpen && panelTab === "site" && (<>
             {/* B855952 (NEW-1) — the name filter and the sort control share ONE line (the status
                 chip row this replaced ate two). "Delete the status filter chip row" — owner,
                 verbatim: "that's not really a good way to filter it… there's literally just
@@ -3514,12 +3544,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             {/* B831777 (NEW-2) — the Comps tab's content. Mounted whenever the map route is
                 visible (`open={visible}`) so a comp anchored while browsing Sites still loads and
                 renders as a map pin (NEW-3) — only DISPLAY is gated on the tab (`active`). */}
-            {(sitesPanelOpen && mode === "comp") && (
+            {(sitesPanelOpen && panelTab === "comp") && (
               <PanelErrorBoundary name="SitePlans">
                 <Suspense fallback={<div style={{ padding: 14, fontSize: 12, color: PAL.muted }}>Loading…</div>}>
                   <SitePlansSection
                     open={visible}
-                    active={sitesPanelOpen && mode === "comp"}
+                    active={sitesPanelOpen && panelTab === "comp"}
                     projects={sites}
                     onOverlaysChange={setSitePlanOverlays}
                     suggestPlacement={suggestPlacement}
@@ -3540,10 +3570,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               </PanelErrorBoundary>
             )}
             <PanelErrorBoundary name="Comps">
-              <Suspense fallback={sitesPanelOpen && mode === "comp" ? <div style={{ padding: 14, fontSize: 12, color: PAL.muted }}>Loading…</div> : null}>
+              <Suspense fallback={sitesPanelOpen && panelTab === "comp" ? <div style={{ padding: 14, fontSize: 12, color: PAL.muted }}>Loading…</div> : null}>
                 <CompsPanel
                   open={visible}
-                  active={sitesPanelOpen && mode === "comp"}
+                  active={sitesPanelOpen && panelTab === "comp"}
                   pendingAnchor={pendingCompAnchor}
                   onAnchorConsumed={onCompAnchorConsumed}
                   focusCompId={focusCompId}
