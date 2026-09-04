@@ -344,6 +344,16 @@ export const SHEET_COLUMNS = [
   simpleColumn({ key: "leaseRate", label: "Rate", fullLabel: "Rate $/SF", group: "RENT", width: 50, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
   simpleColumn({ key: "leaseRatePeriod", label: "Per", group: "RENT", width: 46, align: "left", kind: "select", options: PERIOD_OPTIONS, appliesTo: (t) => t === "lease" }),
   simpleColumn({ key: "leaseRateExpense", label: "Basis", group: "RENT", width: 64, align: "left", kind: "select", options: BASIS_OPTIONS, appliesTo: (t) => t === "lease" }),
+  // B843664 (owner: "add opex as an optional input") — fixed at $/SF/YR regardless of the rate's
+  // own Per (mo/yr): industrial OpEx is conventionally quoted $/SF/yr even when rent isn't, and a
+  // second period selector wasn't worth the friction. Optional in every sense — never required,
+  // never blocks Save, never flagged by validateComp — so it never counts against "N ready".
+  // Width measured (headless Chromium canvas measureText, "600 10px Inter, system-ui, sans-serif")
+  // at ~81px for the label text. A first pass at 100 rendered with ZERO slack live
+  // (scrollWidth===clientWidth===99) — exactly the "0px margin" failure class B850016's own header
+  // documents, even though it didn't actually clip — so widened to 110 for real headroom rather
+  // than a coincidental exact fit, same measured-not-guessed approach that file already documents.
+  simpleColumn({ key: "leaseOpex", label: "OpEx ($/SF/yr)", fullLabel: "Operating expenses ($/SF/yr)", group: "RENT", width: 110, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
   simpleColumn({ key: "leaseEscalationPct", label: "Escal (%)", fullLabel: "Escalation %/yr", group: "RENT", width: 60, align: "right", kind: "number", appliesTo: (t) => t === "lease" }),
 
   // CONCESSIONS — the other half of the economics: what the landlord gives up, which is exactly

@@ -427,6 +427,9 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
               {LEASE_EXPENSE_BASES.map((b) => <option key={b} value={b}>{b.toUpperCase()}</option>)}
             </select>
           </Field>
+          {/* B843664 (owner: "add opex as an optional input") — fixed at $/SF/yr, always, so the
+              label states the unit explicitly rather than borrowing Rate's own MO/YR selector. */}
+          <Field label="OpEx ($/SF/yr)" stacked><NumField value={draft.leaseOpex} onChange={setVal("leaseOpex")} placeholder="optional" style={inputStyle} /></Field>
           <Field label="Leased SF" stacked><NumField value={draft.leaseSizeSf} onChange={setVal("leaseSizeSf")} placeholder="optional" style={inputStyle} /></Field>
           {draft.leaseRate && draft.leaseSizeSf && (
             <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: -4, marginBottom: 8 }}>

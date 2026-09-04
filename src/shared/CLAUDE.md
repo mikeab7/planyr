@@ -291,6 +291,12 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   `comp_party_acquirer` (B832390): ONE shared axis across all three comp types (never six
   per-type columns), labeled per type by `lib/comps.js`'s `partyLabels(compType)` — lease =
   Owner/Developer + Tenant, land = Seller + Buyer, building sale = Seller + Buyer/User.
+  `db/comps_lease_opex.sql` — adds `lease_opex` (B843664, "add opex as an optional input"): a
+  nullable $/SF/YR OpEx figure on LEASE comps only, never required. `lib/comps.js`'s
+  `opexNormalizedRate` derives a SEPARATE gross/NNN-equivalent figure from it (rate + OpEx on an
+  NNN comp ≈ gross; rate − OpEx on a gross comp ≈ NNN) — never blended into the existing $/SF/yr
+  column or `netEffectiveLeaseRate`, and `summarizeLeaseComps`' NNN/gross average is untouched
+  pending an owner decision on whether it should ever use this basis.
   Every migration in `db/` (incl. the party-fields/free-rent ones this bullet used to flag as
   unapplied) is live on production, confirmed by column read against project `lyeqzkuiwngunutlkkmi`.
   **`db/comps_site_plan_overlay_delete_reverts_to_pin.sql` (B1114992) fixes a real schema hazard:

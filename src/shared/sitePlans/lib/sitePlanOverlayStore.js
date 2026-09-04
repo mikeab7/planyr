@@ -11,7 +11,7 @@ import { deleteOverlayRaster } from "./overlayRasterStorage.js";
 const TABLE = "site_plan_overlays";
 const SELECT_COLS =
   "id,user_id,team_id,project_id,review_id,page,doc_title,doc_date,source_file_name," +
-  "img_w,img_h,raster_key,thumb_data_url,center_lat,center_lon,ft_per_px,rotation_deg," +
+  "img_w,img_h,raster_key,thumb_data_url,center_lat,center_lon,ft_per_px,rotation_deg,crop," +
   "opacity,visible,locked,version,created_at,updated_at";
 const TRASH_SELECT_COLS = "id,doc_title,page,source_file_name,deleted_at";
 

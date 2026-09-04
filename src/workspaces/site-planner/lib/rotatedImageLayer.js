@@ -47,6 +47,35 @@ export function createRotatedImageLayer(map) {
 
   let corners = null, imgW = 0, imgH = 0, clickHandler = null;
 
+  // B1134753 — TAP vs DRAG, for an INACTIVE (not-yet-armed) overlay's own click-to-select.
+  // Before this, a mousedown on the image was never stopped, so a real pan-drag correctly
+  // reached Leaflet's own dragging handler underneath — but the browser's native `click` event
+  // still fires afterward (Leaflet's Draggable never suppresses it; confirmed against the
+  // installed leaflet-src.js: `finishDrag` fires only its own `dragend`, no document-level click
+  // guard), so the SAME gesture both panned the map AND selected the overlay — the owner's
+  // "sometimes I click and drag and it just pans the map, and sometimes it actually grabs the
+  // site plan, and there's no clear way to tell which." Deliberately still NOT stopping
+  // pointerdown (an inactive overlay must let a real drag pan the map straight through it); this
+  // only tracks whether the gesture stayed within tap-slop before deciding whether the trailing
+  // `click` really means "select this."
+  const TAP_SLOP_PX = 6;
+  let downPt = null, moved = false;
+  const onWindowMove = (e) => {
+    if (!downPt) return;
+    if (Math.hypot(e.clientX - downPt.x, e.clientY - downPt.y) > TAP_SLOP_PX) moved = true;
+  };
+  const onWindowUp = () => {
+    window.removeEventListener("pointermove", onWindowMove);
+    window.removeEventListener("pointerup", onWindowUp);
+  };
+  const onImgPointerDown = (e) => {
+    if (!clickHandler) return;
+    downPt = { x: e.clientX, y: e.clientY };
+    moved = false;
+    window.addEventListener("pointermove", onWindowMove);
+    window.addEventListener("pointerup", onWindowUp);
+  };
+
   const update = () => {
     if (!corners || !imgW || !imgH) return;
     const p0 = map.latLngToLayerPoint(corners.topLeft);
@@ -59,25 +88,44 @@ export function createRotatedImageLayer(map) {
     img.style.transform = `matrix(${a},${b},${c},${d},${p0.x},${p0.y})`;
   };
 
+  // B1134754 NEW-21 — non-destructive crop. `clip-path: inset(...)` is measured in the
+  // element's OWN local pixel box, i.e. BEFORE the CSS transform above is applied — so clipping
+  // in plain image-pixel coordinates and letting the SAME matrix transform carry both the image
+  // and its clip means the visible crop rotates/scales/moves exactly with the placement, with
+  // zero extra math here. This is display-only: it never touches `img.src`, so widening or
+  // clearing the crop later needs no re-fetch or re-decode.
+  const applyCrop = (crop) => {
+    if (!crop || !(imgW > 0) || !(imgH > 0)) { img.style.clipPath = ""; return; }
+    const top = Math.max(0, crop.y), left = Math.max(0, crop.x);
+    const right = Math.max(0, imgW - crop.x - crop.w), bottom = Math.max(0, imgH - crop.y - crop.h);
+    img.style.clipPath = `inset(${top}px ${right}px ${bottom}px ${left}px)`;
+  };
+  let pendingCrop = null;
+
   map.on("move zoom viewreset", update);
 
   const onImgClick = (e) => {
     if (!clickHandler) return;
+    if (moved) return; // a real drag's trailing click — this was a pan, not a tap; never select
     L.DomEvent.stop(e); // consume it — the plan is the target, not the map underneath
     clickHandler(map.mouseEventToLatLng(e));
   };
+  img.addEventListener("pointerdown", onImgPointerDown);
   img.addEventListener("click", onImgClick);
 
   return {
     setImage(url) { img.src = url || ""; },
     setCorners(c) { corners = c; update(); },
-    setSize(w, h) { imgW = w; imgH = h; update(); },
+    setSize(w, h) { imgW = w; imgH = h; update(); applyCrop(pendingCrop); },
+    setCrop(crop) { pendingCrop = crop || null; applyCrop(pendingCrop); },
     setOpacity(op) { img.style.opacity = String(op == null ? 1 : op); },
     setVisible(v) { img.style.display = v === false ? "none" : ""; },
     setClickable(fn) { clickHandler = fn || null; img.style.pointerEvents = fn ? "auto" : "none"; img.style.cursor = fn ? "crosshair" : ""; },
     destroy() {
       map.off("move zoom viewreset", update);
+      img.removeEventListener("pointerdown", onImgPointerDown);
       img.removeEventListener("click", onImgClick);
+      onWindowUp();
       if (img.parentNode) img.parentNode.removeChild(img);
     },
   };

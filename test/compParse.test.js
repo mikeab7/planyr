@@ -751,6 +751,75 @@ describe("compParse corpus: TI", () => {
   });
 });
 
+describe("compParse corpus: OPEX (B843664, owner: 'add opex as an optional input')", () => {
+  const opex = (line) => parseSingleRecord(`$0.65/sf NNN\n${line}`)?.draft.leaseOpex;
+
+  it("real broker phrasings from the item, value-then-label", () => {
+    expect(opex("$4.20/SF opex")).toBe("4.2");
+  });
+  it("real broker phrasings, label-then-value", () => {
+    expect(opex("est. 2025 opex $3.85")).toBe("3.85");
+    expect(opex("OpEx: $3.85")).toBe("3.85");
+    expect(opex("OPEX $3.85")).toBe("3.85");
+    expect(opex("operating expenses $3.85")).toBe("3.85");
+    expect(opex("NNN charges of $4.20")).toBe("4.2");
+  });
+  it("bare mentions with no $ figure are preserved as a note, never a fabricated value (mirrors turnkey for TI)", () => {
+    for (const line of ["NNN's", "reimbursements", "CAM", "TICAM", "taxes, insurance and CAM"]) {
+      const { draft } = parseSingleRecord(`$0.65/sf NNN\n${line}`);
+      expect(draft.leaseOpex).toBe("");
+      expect(draft.notes.toLowerCase()).toContain("opex");
+    }
+  });
+  it("a labeled 'OpEx:' line is recognized as a label prefix, same mechanism as TI:/Rate:/Term:", () => {
+    expect(parseSingleRecord("$0.65/sf NNN\nOpEx: $3.85").draft.leaseOpex).toBe("3.85");
+  });
+  it("TICAM is read as OpEx, never partially as TI (TI's own \\b boundary can't match mid-word)", () => {
+    const { draft } = parseSingleRecord("$0.65/sf NNN\nTICAM $3.85");
+    expect(draft.leaseOpex).toBe("3.85");
+    expect(draft.leaseTi).toBe("");
+  });
+  it("an opex figure is never misread as the lease rate — findOpexToken claims it before findRateToken runs", () => {
+    const { draft } = parseSingleRecord("$0.65/sf NNN\n$4.20/SF opex");
+    expect(draft.leaseRate).toBe("0.65"); // unchanged — the ONLY rate on the record
+    expect(draft.leaseOpex).toBe("4.2");
+  });
+  it("a bare OpEx mention alone is enough to infer the row is a lease (inferTypeFromCapturedFields)", () => {
+    expect(detectCompType("opex $3.85")).toEqual({ value: "lease", soft: false });
+    const { rows } = parsePaste("opex $3.85");
+    expect(rows[0].draft.compType).toBe("lease");
+  });
+  it("a dropped negative sign is REFUSED (blocking), never silently read positive — same hardening RATE/SIZE/PRICE already have", () => {
+    const { draft, cellFlags } = parseSingleRecord("$0.65/sf NNN\n-3.85 opex");
+    expect(draft.leaseOpex).toBe(""); // never guessed
+    expect(cellFlags.leaseOpex?.level).toBe("blocking");
+  });
+  it("an ambiguous European-style decimal grouping is REFUSED (blocking), never misread as a huge number", () => {
+    // Same construction the RATE detector's own SEVERITY-1 regression test uses (below) — the
+    // regex naturally truncates to the tail "234,56" here (a leading "1." with no unit attached
+    // to it doesn't satisfy the pattern), which is exactly what exposes the malformed grouping.
+    const { draft, cellFlags } = parseSingleRecord("$0.65/sf NNN\n1.234,56/SF opex");
+    expect(draft.leaseOpex).toBe("");
+    expect(cellFlags.leaseOpex?.level).toBe("blocking");
+    expect(draft.notes).toMatch(/ambiguous number format/);
+  });
+  it("a blocking OpEx never appears in the finished draft's ready state via a different key — the flag lands on leaseOpex, not opex", () => {
+    const { cellFlags } = parseSingleRecord("$0.65/sf NNN\n-3.85 opex");
+    expect(cellFlags).toHaveProperty("leaseOpex");
+    expect(cellFlags).not.toHaveProperty("opex");
+  });
+  it("absent entirely — a lease record with no opex mention leaves leaseOpex blank, no flag at all", () => {
+    const { draft, cellFlags } = parseSingleRecord("$0.65/sf NNN, 5 yrs");
+    expect(draft.leaseOpex).toBe("");
+    expect(cellFlags.leaseOpex).toBeUndefined();
+  });
+  it("MERGE SAFETY: two lines disagreeing on OpEx split rather than silently merge (B1063904's own mechanism, extended)", () => {
+    const { mode, splitReason } = parsePaste("$0.65/sf NNN opex $2\n$0.65/sf NNN opex $4");
+    expect(mode).toBe("split");
+    expect(splitReason).toMatch(/OpEx/);
+  });
+});
+
 describe("compParse corpus: ESCALATION", () => {
   const escal = (line) => parseSingleRecord(`$0.65/sf NNN\n${line}`)?.draft.leaseEscalationPct;
   it("value-then-label forms", () => {

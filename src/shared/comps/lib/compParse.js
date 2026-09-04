@@ -225,7 +225,7 @@ function detectBasis(text) {
  * guess rather than an explicit signal (lease words, or sale + a building word). */
 export function detectCompType(text) {
   const t = String(text || "");
-  if (LEASE_WORDS.test(t) || BASIS_RE.test(t) || BARE_SF_RATE_RE.test(t) || TI_MENTION_RE.test(t)) return { value: "lease", soft: false };
+  if (LEASE_WORDS.test(t) || BASIS_RE.test(t) || BARE_SF_RATE_RE.test(t) || TI_MENTION_RE.test(t) || OPEX_LABEL.test(t)) return { value: "lease", soft: false };
   const sale = SALE_WORDS.test(t);
   const building = BUILDING_WORDS.test(t);
   const capOrNoi = CAP_WORD_RE.test(t) || NOI_WORD_RE.test(t);
@@ -241,7 +241,7 @@ export function detectCompType(text) {
  * price alongside a non-acre size reads as a building sale (TYPE INFERENCE table, B986096 ×9).
  * Returns null — never a type — when even the captured fields don't say. */
 function inferTypeFromCapturedFields(g) {
-  if (g.rate != null || g.ti != null || g.freeRentMonths != null) return "lease";
+  if (g.rate != null || g.ti != null || g.freeRentMonths != null || g.opex != null) return "lease";
   if (g.capRate != null || g.noi != null) return "building_sale";
   if (g.sizeUnit === "ac") return "land";
   if (g.price != null && g.sizeValue != null && g.sizeUnit !== "ac") return "building_sale";
@@ -346,6 +346,54 @@ function findTiToken(text) {
 
 function findTurnkeyMention(text) {
   return /\bturnkey\b/i.test(text);
+}
+
+/* ---- opex (operating expenses — B843664, owner: "add opex as an optional input") ------------
+ * Real broker phrasings this recognizes: "NNN charges", "NNN's", "opex", "OPEX", "operating
+ * expenses", "reimbursements", "CAM", "TICAM", "taxes, insurance and CAM", "$4.20/SF opex",
+ * "est. 2025 opex $3.85". Fixed at $/SF/YR always (see comps.js's `leaseOpex` note) — the parser
+ * never reads a period for it the way it does for the lease rate. "TICAM" is deliberately its own
+ * alternative rather than relying on a bare "cam" match inside it — a bare-word \b boundary never
+ * matches mid-word, so "TICAM" needs its own listing or it would be recognized as neither TI nor
+ * opex. Follows the exact "claim and blank" contract every other field detector here does (see
+ * this file's header): a value claim blanks its span so `findRateToken` (which also matches a
+ * bare "$X/SF") can never re-read an opex figure as the lease rate. */
+const OPEX_LABEL = /\b(?:op\s*ex|operating\s*expenses?|nnn\s*charges?|nnn'?s|reimbursements?|ticam|cam|taxes,?\s*insurance,?\s*(?:and|&)\s*cam)\b/i;
+const OPEX_VALUE_THEN_LABEL_RE = new RegExp(`\\$?\\s*([\\d,]*\\.?\\d+)\\s*(?:\\/\\s*sf\\s*\\/\\s*yr\\b|\\/\\s*sf\\b|psf\\b)?\\s*(?:${OPEX_LABEL.source})`, "i");
+const OPEX_LABEL_THEN_VALUE_RE = new RegExp(`(?:${OPEX_LABEL.source})\\s*(?:of|:|is|was)?\\s*\\$?\\s*([\\d,]*\\.?\\d+)`, "i");
+
+/** "$4.20/SF opex" / "est. 2025 opex $3.85" / "OpEx: $3.85" / "NNN charges of $4.20" — both
+ * directions. Returns `{ value, working, invalid?, negative? }` or null. A bare mention with no
+ * dollar figure ("CAM", "reimbursements") is a real fact with nothing numeric to store — the
+ * caller checks for that separately, same as `findTurnkeyMention` for TI. Reuses `moneyVal` (the
+ * same ambiguous-grouping refusal — SEVERITY-1's "1.234,56" European-decimal class — every other
+ * money detector here uses) rather than a bare `Number()`, per this module's own hardening rule:
+ * a recognized-but-unsafe number is a BLOCKING flag, never a guess.
+ *
+ * Label-then-value is tried FIRST, deliberately the opposite of this file's usual value-then-
+ * label-first convention (`scanField`) — a real broker phrasing like "est. 2025 opex $3.85"
+ * carries an unrelated bare number (a year) immediately before the label word, which the
+ * value-then-label pattern would otherwise misclaim as the OpEx figure itself ("2025 opex"). The
+ * label-then-value pattern anchors on the label word wherever it sits, so leading noise like
+ * "est. 2025" is never even examined; value-then-label is still tried second for the "$X/SF opex"
+ * shape, where the label comes AFTER the number and nothing else can claim it first. The dropped-
+ * negative-sign check is only meaningful on the value-then-label direction, where the match index
+ * lines up with the numeral itself (same reasoning `wrapMoneyMatch`'s callers rely on) — the
+ * label-then-value direction's match starts at the LABEL word, so checking the character before
+ * *that* would test the wrong position and is skipped rather than done wrong. */
+function findOpexToken(text) {
+  const t = String(text || "");
+  let m = t.match(OPEX_LABEL_THEN_VALUE_RE);
+  if (m) {
+    const mv = moneyVal(m[1]);
+    return { ...mv, working: blank(t, m), rawMatch: m[0] };
+  }
+  m = t.match(OPEX_VALUE_THEN_LABEL_RE);
+  if (m) {
+    const mv = moneyVal(m[1]);
+    return { ...mv, working: blank(t, m), negative: precededByDroppedMinus(t, m.index), rawMatch: m[0] };
+  }
+  return null;
 }
 
 /* ---- escalation (percentage AND dollar-denominated) ---------------------------------------- */
@@ -649,7 +697,7 @@ function emptyGeneric() {
     compType: null, compDate: null, title: null, partyProvider: null, partyAcquirer: null,
     price: null, sizeValue: null, sizeUnit: null, rate: null, ratePeriod: null, rateBasis: null,
     ti: null, term: null, notes: null, freeRentMonths: null, escalationPct: null,
-    capRate: null, noi: null, hadRecognizedNote: false,
+    capRate: null, noi: null, opex: null, hadRecognizedNote: false,
     commencementDate: null, commencementEstimated: false, commencementSourceLine: null,
   };
 }
@@ -662,7 +710,8 @@ function emptyGeneric() {
 function genericHasAnything(g) {
   return !!(g.compDate || g.title || g.partyProvider || g.partyAcquirer || g.price != null ||
     g.rate != null || g.sizeValue != null || g.term || g.ti != null || g.freeRentMonths != null ||
-    g.escalationPct != null || g.capRate != null || g.noi != null || g.commencementDate || g.hadRecognizedNote);
+    g.escalationPct != null || g.capRate != null || g.noi != null || g.opex != null ||
+    g.commencementDate || g.hadRecognizedNote);
 }
 
 function addNote(g, text) {
@@ -737,6 +786,28 @@ function extractUnlabeledLine(generic, flags, rawLine, recordContext) {
     const tiHit = findTiToken(working);
     if (tiHit) { generic.ti = tiHit.value; working = tiHit.working; claimedAnything = true; }
     else if (findTurnkeyMention(working)) { addRecognizedNote(generic, "TI: turnkey (landlord-built, no $ allowance stated)"); claimedAnything = true; }
+  }
+
+  // B843664 — OpEx claims before rate/NOI so "$4.20/SF opex" can never be misread as the lease
+  // rate (findRateToken also matches a bare "$X/SF" and runs last, by design).
+  if (generic.opex == null) {
+    const opexHit = findOpexToken(working);
+    if (opexHit) {
+      if (opexHit.invalid || opexHit.negative) {
+        flagUnreadableNumber(generic, flags, "opex", opexHit, "OpEx");
+      } else {
+        generic.opex = opexHit.value;
+      }
+      working = opexHit.working;
+      claimedAnything = true;
+    } else {
+      const mention = working.match(OPEX_LABEL);
+      if (mention) {
+        addRecognizedNote(generic, `OpEx: mentioned ("${mention[0].trim()}") — no $ figure given, check manually.`);
+        working = blank(working, mention);
+        claimedAnything = true;
+      }
+    }
   }
 
   if (generic.noi == null) {
@@ -888,6 +959,7 @@ function remapFlagKey(key, compType) {
   if (key === "sizeValue") return compType === "land" ? "landSizeValue" : compType === "building_sale" ? "bldgSizeSf" : "leaseSizeSf";
   if (key === "rate") return "leaseRate";
   if (key === "noi") return "bldgNoi";
+  if (key === "opex") return "leaseOpex";
   return key;
 }
 
@@ -963,7 +1035,7 @@ function genericToDraft(generic) {
     landPrice: "", landSizeValue: "", landSizeUnit: "ac",
     bldgPrice: "", bldgSizeSf: "", bldgNoi: "", bldgCapRate: "",
     leaseRate: "", leaseRatePeriod: "", leaseRateExpense: "", leaseTi: "", leaseTerm: "", leaseSizeSf: "",
-    leaseFreeRentMonths: "", leaseEscalationPct: "",
+    leaseFreeRentMonths: "", leaseEscalationPct: "", leaseOpex: "",
   };
   d.compType = generic.compType || d.compType;
   if (generic.title) d.title = generic.title;
@@ -1001,6 +1073,7 @@ function genericToDraft(generic) {
     if (generic.term) d.leaseTerm = generic.term;
     if (generic.freeRentMonths != null) d.leaseFreeRentMonths = String(generic.freeRentMonths);
     if (generic.escalationPct != null) d.leaseEscalationPct = String(generic.escalationPct);
+    if (generic.opex != null) d.leaseOpex = String(generic.opex);
   }
   return d;
 }
@@ -1079,6 +1152,7 @@ const COLLISION_FIELDS = [
   ["compType", "Type"], ["sizeUnit", "Unit"],
   ["sizeValue", "Size"], ["rate", "Rate"], ["price", "Price"], ["ratePeriod", "Rate period"],
   ["rateBasis", "Basis"], ["ti", "TI"], ["noi", "NOI"], ["capRate", "Cap rate"], ["escalationPct", "Escalation"],
+  ["opex", "OpEx"],
 ];
 
 /** Parses every line fully independently (each reads only itself, `respectLabels: true` so a
@@ -1103,11 +1177,11 @@ function detectFieldCollisions(lines) {
 // Label:value line prefixes, industrial-brokerage shorthand included (TT=Tenant, LL=Landlord,
 // TI=Tenant Improvement allowance) — a small domain lexicon, not generic pattern matching. The
 // separator between label and value is a colon OR a dash ("LL -"), not just a colon.
-const LABEL_PREFIX_RE = /^\s*(TT|LL|TI|T|Landlord|Tenant|Owner|Developer|Seller|Buyer|Purchaser|Grantor|Grantee|Rate|Term|Type|Date|Notes)\s*(?::|-)\s*/i;
+const LABEL_PREFIX_RE = /^\s*(TT|LL|TI|OpEx|T|Landlord|Tenant|Owner|Developer|Seller|Buyer|Purchaser|Grantor|Grantee|Rate|Term|Type|Date|Notes)\s*(?::|-)\s*/i;
 const LABEL_FIELD = {
   tt: "partyAcquirer", tenant: "partyAcquirer", buyer: "partyAcquirer", purchaser: "partyAcquirer", grantee: "partyAcquirer", t: "partyAcquirer",
   ll: "partyProvider", landlord: "partyProvider", owner: "partyProvider", developer: "partyProvider", seller: "partyProvider", grantor: "partyProvider",
-  ti: "ti", term: "term", rate: "rate", type: "compTypeLabel", date: "compDate", notes: "notes",
+  ti: "ti", opex: "opex", term: "term", rate: "rate", type: "compTypeLabel", date: "compDate", notes: "notes",
 };
 const LEASE_LABELS = new Set(["tt", "ll"]);
 
@@ -1152,6 +1226,11 @@ function applyLabeledLine(generic, flags, sawLeaseLabel, label, value) {
     case "ti": {
       const tiHit = findTiToken(v) || (() => { const n = extractLeadingNumber(v.replace(/^\$/, "").replace(/\/\s*sf/i, "")); return n ? { value: n.value } : null; })();
       if (tiHit) generic.ti = tiHit.value;
+      break;
+    }
+    case "opex": {
+      const opexHit = findOpexToken(v) || (() => { const n = extractLeadingNumber(v.replace(/^\$/, "").replace(/\/\s*sf(?:\s*\/\s*yr)?/i, "")); return n ? { value: n.value } : null; })();
+      if (opexHit && !opexHit.invalid && !opexHit.negative) generic.opex = opexHit.value;
       break;
     }
     case "term": { const termHit = findTermBare(v); generic.term = termHit ? termHit.text : (/^\d+(?:\.\d+)?$/.test(v) ? `${v} mo` : v); break; }
@@ -1232,6 +1311,7 @@ const HEADER_ALIASES = {
   ratePeriod: ["period", "mo/yr"],
   rateBasis: ["basis", "nnn/gross", "expense"],
   ti: ["ti", "ti $/sf", "ti allowance"],
+  opex: ["opex", "op ex", "operating expenses", "opex $/sf/yr", "nnn charges", "cam"],
   term: ["term"],
   noi: ["noi"],
   capRate: ["cap", "cap rate"],
@@ -1290,6 +1370,7 @@ function assignGenericCell(generic, flags, key, val) {
     case "ratePeriod": generic.ratePeriod = /mo/i.test(val) ? "monthly" : /yr|year|annual/i.test(val) ? "annual" : null; break;
     case "rateBasis": generic.rateBasis = /nnn|net/i.test(val) ? "nnn" : /gross|fs|full|\big\b|\bmg\b|base\s*year/i.test(val) ? "gross" : null; break;
     case "ti": { const n = parseMagnitudeNumber(val.replace(/^\$/, "")); if (n) generic.ti = n.value; break; }
+    case "opex": { const n = parseMagnitudeNumber(val.replace(/^\$/, "")); if (n) generic.opex = n.value; break; }
     case "term": { const termHit = findTermBare(val); generic.term = termHit ? termHit.text : val; break; }
     case "noi": { const n = parseMagnitudeNumber(val.replace(/^\$/, "")); if (n) generic.noi = n.value; break; }
     case "capRate": { const n = Number(String(val).replace(/%$/, "")); if (Number.isFinite(n)) generic.capRate = n; break; }

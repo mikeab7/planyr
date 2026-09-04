@@ -766,12 +766,23 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const commitOverlayPlacement = (id, placement) => { commitPlacementRef.current && commitPlacementRef.current(id, placement); };
 
   // A sensible starting size/position for a freshly placed overlay: centered on the current map
-  // view, sized to a fraction of it (mirrors the Site Planner reference-image panel's own "Size
-  // to view" button). Pure sizing math lives in overlayGeoref.js; only the live view is read here.
-  const suggestPlacement = (imgW, imgH) => {
+  // view (or `centerOverride`, below), sized to a fraction of it (mirrors the Site Planner
+  // reference-image panel's own "Size to view" button). Pure sizing math lives in
+  // overlayGeoref.js; only the live view is read here.
+  //
+  // `centerOverride` ({lat,lng}) — NEW-17: this is the ONLY door through which a caller may pin
+  // the placement to a specific point instead of the live view center (a drag-and-drop upload
+  // lands where the file was DROPPED, not wherever the map happens to be centered). Before this,
+  // the drop handler below built its own standalone `{centerLat, centerLon}` object with no
+  // scale and handed it to `confirmPage` as if it were a complete placement — every dropped
+  // upload landed on the map with `ft_per_px: null`, which has nothing to draw (`validPlacement`
+  // requires all three fields), so "Editing on map" armed on a plan with no image and no handles
+  // to grab. Routing every placement — dropped or not — through this one function guarantees
+  // `ftPerPx` is always present and sanely clamped (`suggestFtPerPx`).
+  const suggestPlacement = (imgW, imgH, centerOverride) => {
     const m = mapRef.current;
     if (!m || !imgW || !imgH) return null;
-    const c = m.getCenter();
+    const c = centerOverride || m.getCenter();
     const size = m.getSize();
     const midY = size.y / 2;
     const pL = m.containerPointToLatLng([0, midY]), pR = m.containerPointToLatLng([size.x, midY]);
@@ -921,9 +932,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       setMode("comp");
       setPanelTab("comp");
       if (!sitesPanelOpen) toggleSitesPanel();
+      // NEW-17 — this is a DROP POINT only (a {lat,lng} center override), never a full placement
+      // on its own: it carries no scale, because the dropped file's own pixel dimensions aren't
+      // known until it's rasterized. `confirmPage` merges it into `suggestPlacement`'s full,
+      // always-scaled placement rather than using it standalone.
       let dropPlacement = null;
       const m = mapRef.current;
-      if (m) { const ll = m.mouseEventToLatLng(e); dropPlacement = { centerLat: ll.lat, centerLon: ll.lng }; }
+      if (m) { const ll = m.mouseEventToLatLng(e); dropPlacement = { lat: ll.lat, lng: ll.lng }; }
       dropIntakeRef.current && dropIntakeRef.current(files, dropPlacement);
     };
     window.addEventListener("dragenter", onDragEnter);
@@ -3365,7 +3380,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             brand-new account saw no rail at all); it now always renders, since the Comps tab is
             useful with zero sites and zero comps alike — this is the one persistent place to
             browse or add either. */}
-        <div style={{ position: "absolute", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, boxShadow: "0 4px 18px rgba(28,25,20,0.14)", overflow: "hidden",
+        <div data-testid="map-sites-panel" style={{ position: "absolute", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, boxShadow: "0 4px 18px rgba(28,25,20,0.14)", overflow: "hidden",
             // B831777×2/B948496 — the rail must never grow past the viewport: it can hold a
             // long site list, several site plans, or an open comp form, and any one of those
             // used to just push the panel off-screen with no way to reach what fell below the
@@ -3399,14 +3414,20 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               // label/value rows wrapping) — the rail's fixed 232px never scaled with the
               // viewport, so a comp's field rows (the longest label, "Total annual rent (face)",
               // 131px at the panel's own 12px/Inter) had no room to grow on a 2000px+ display.
-              // Scoped to the Comps tab only (`mode === "comp"`) — the Sites list already reads
+              // Scoped to the Comps TAB only (`panelTab === "comp"`) — the Sites list already reads
               // fine at 232 and B885136's team-chip layout was measured against that exact
               // width, so leave Sites untouched. `clamp(232px, 23vw, 440px)` measured live
               // against the real CompDetail component (a throwaway harness, discarded after
               // use): 1191px viewport → 274px panel, 1440px → 331px, 1920px → 440px (the
               // ceiling) — comfortably wider on a big monitor, barely different from today on a
               // laptop, and it never shrinks below the original 232.
-              : { top: MAP_OVERLAY_TOP_PX, left: 10, zIndex: MAP_CHROME_Z.panel, width: mode === "comp" ? "clamp(232px, 23vw, 440px)" : 232, maxHeight: "calc(100% - 24px)", ...(sitesPanelOpen ? null : { height: MAP_OVERLAY_CHIP_H_PX }) }) }}>
+              // ⛔ NEW-1 (this item) — this was `mode === "comp"` and re-coupled the centre
+              // Site/Comp switch (what an address search creates) to the panel's width, the exact
+              // B850016 coupling the click handlers were split to remove: clicking the centre
+              // toggle changed `mode` without touching `panelTab`, so the panel silently grew even
+              // though the rail tab it's showing never moved. Width now follows `panelTab` (what
+              // the rail is actually browsing) like every other read of this panel already does.
+              : { top: MAP_OVERLAY_TOP_PX, left: 10, zIndex: MAP_CHROME_Z.panel, width: panelTab === "comp" ? "clamp(232px, 23vw, 440px)" : 232, maxHeight: "calc(100% - 24px)", ...(sitesPanelOpen ? null : { height: MAP_OVERLAY_CHIP_H_PX }) }) }}>
             {/* collapsible header (B106) + the two tabs — one row, always visible (never buried
                 behind the collapse, and now PINNED — flex:"none" against the scrollable body
                 below — so both counts stay readable, and reachable, no matter how long either
