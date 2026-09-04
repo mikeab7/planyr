@@ -1164,6 +1164,19 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [mapMenu]);
+  // B849840/NEW-1 — Escape leaves a site plan's manipulation mode entirely (deselects/disarms),
+  // distinct from overlayPlacementHandles.js's own Escape (cancel one in-flight drag and restore
+  // the pre-gesture placement, then stay armed). The two never race: that in-flight handler is
+  // capture-phase and calls L.DomEvent.stop, which calls the native stopPropagation — per the DOM
+  // dispatch algorithm that keeps this bubble-phase window listener (same node, later path entry)
+  // from ever firing for the SAME keypress, so a mid-drag Escape only cancels the drag, and a
+  // second, separate Escape (nothing in flight) is what actually leaves the mode.
+  useEffect(() => {
+    if (!activeOverlayId) return undefined;
+    const onKey = (e) => { if (e.key === "Escape") setActiveOverlayId(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activeOverlayId]);
   // Export the sites currently on the map — plus any selected parcels — to a Google Earth .kmz
   // (B684). Each visible site becomes its own folder; its boundary + drawn layout are reprojected
   // to WGS84 via the SAME feetToLatLng the map render uses (KML is lon,lat, so we flip [lat,lng]).
