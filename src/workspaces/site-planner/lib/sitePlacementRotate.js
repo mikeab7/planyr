@@ -17,6 +17,7 @@
  * Pure. Unit-tested in test/sitePlacement.test.js.
  */
 import { rotPt } from "./sitePlacement.js";
+import { isPinnedMapReference } from "./overlayOrder.js";
 
 const isPt = (p) => p && typeof p === "object" && Number.isFinite(p.x) && Number.isFinite(p.y);
 
@@ -55,8 +56,8 @@ export function rotateEntry(entry, deg, pivot) {
   return out;
 }
 
-/* The collections a rotation touches. `underlay` is deliberately absent from the ROTATED set —
- * see rotateSiteCollections. */
+/* The collections a rotation touches. The pinned map reference is deliberately excluded from
+ * the sheetOverlays rotation below — see rotateSiteCollections. */
 export const ROTATED_FIELDS = ["parcels", "els", "measures", "callouts", "markups", "sheetOverlays"];
 
 /* Vertex centroid of the plan's BODY: the active parcel rings when there are any (the boundary
@@ -85,18 +86,27 @@ export function siteRotationPivot(collections) {
  *
  * Returns { next, pivot, unrotatable }. `unrotatable` names the things a rotation CANNOT honestly
  * turn, so the caller can say so out loud (LOUD-FAILURE) instead of silently leaving them askew:
- * the aerial `underlay` is a north-up raster captured for the old anchor and has no rotation term,
- * so it is left exactly where it was rather than being moved under a plan it no longer matches.
- * A no-op rotation (0°, or nothing drawn) returns the SAME object references. */
+ * the pinned map reference (B848736 — the aerial backdrop, folded into `sheetOverlays`) is a
+ * north-up raster captured for the old anchor and has no rotation term, so it is left exactly
+ * where it was rather than being moved under a plan it no longer matches. An ordinary reference
+ * in the SAME array (a hand-dropped/placed drawing) rotates normally — only the pinned one is
+ * excluded. A no-op rotation (0°, or nothing drawn) returns the SAME object references. */
 export function rotateSiteCollections(collections, deg, pivot) {
   const c = collections || {};
   const d = Number(deg) || 0;
   const piv = isPt(pivot) ? pivot : siteRotationPivot(c);
   if (!piv || Math.abs(d) < 1e-9) return { next: c, pivot: piv, unrotatable: [] };
   const next = { ...c };
-  for (const f of ROTATED_FIELDS)
-    if (Array.isArray(c[f])) next[f] = c[f].map((e) => rotateEntry(e, d, piv));
-  const unrotatable = c.underlay ? ["underlay"] : [];
+  const unrotatable = [];
+  for (const f of ROTATED_FIELDS) {
+    if (!Array.isArray(c[f])) continue;
+    if (f === "sheetOverlays") {
+      next[f] = c[f].map((e) => (isPinnedMapReference(e) ? e : rotateEntry(e, d, piv)));
+      if (c[f].some(isPinnedMapReference)) unrotatable.push("underlay");
+    } else {
+      next[f] = c[f].map((e) => rotateEntry(e, d, piv));
+    }
+  }
   return { next, pivot: piv, unrotatable };
 }
 

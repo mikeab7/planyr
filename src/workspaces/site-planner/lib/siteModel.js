@@ -2,12 +2,24 @@
  * whole app reads from and writes to. See CLAUDE.md "## Site Model" for the spec.
  *
  * Design (Option A): the PERSISTED record keeps its existing flat, back-compatible
- * field names (parcels, els, markups, measures, callouts, settings, underlay,
+ * field names (parcels, els, markups, measures, callouts, settings,
  * origin, county) so every saved localStorage site keeps working untouched. This
  * module gives that shape a NAME, a VERSION, an additive MIGRATION, and SELECTORS
  * that classify the flat arrays into semantic buckets — constraints, utilities,
  * elevation, annotations — so the pages, tools, and a future buildable-area / cost
  * synthesis can all read from one place instead of re-deriving it ad hoc.
+ *
+ * v14 (B848736) — `underlay` (the separate aerial-backdrop slot) is RETIRED as an output field:
+ * a References panel offering both an aerial card and a sheet-overlay list was two mechanisms for
+ * one idea ("a backdrop image, positioned and scaled"). `foldAerialIntoOverlays` below folds any
+ * legacy `underlay` INTO `sheetOverlays` (a bottom-pinned record — see lib/overlayOrder.js's
+ * `isPinnedMapReference`) the moment a record passes through `createSiteModel`, so every read path
+ * (localStorage, cloud row, import, merge) sees ONE reference list with no code left that has to
+ * remember two field names. This is a one-way, in-memory fold, never a mass rewrite: an old
+ * record's raw `underlay` key is harmless dead weight until the plan's next ordinary save, at
+ * which point the written record simply has no `underlay` key at all (createSiteModel doesn't
+ * emit one). `p.underlay` is still read as INPUT here — that is what makes the fold possible —
+ * it is just never round-tripped back out.
  *
  * The drawn collections stay `els` (layout elements) and `markups` (a mix of
  * neutral annotations + semantic shapes). Rather than physically splitting them
@@ -1135,6 +1147,41 @@ export function normalizeBondedChildren(els, onHeal, { mintId = null } = {}) {
   );
 }
 
+// v14 (B848736) — the fixed id a folded aerial is minted under. FIXED, not random: two
+// independent createSiteModel() calls over the SAME raw legacy record (e.g. mergeSiteContent's
+// `createSiteModel(a)` / `createSiteModel(b)` on two device copies that haven't saved under the
+// new schema yet) must fold to the IDENTICAL id, or unionById would treat them as two different
+// references and duplicate the aerial. There is at most one `underlay` per legacy record, so one
+// constant id is sufficient — no id-minting machinery needed.
+const LEGACY_AERIAL_ID = "legacy-aerial";
+
+// Fold a legacy `underlay` record into `sheetOverlays`, bottom-pinned (NEW-1 — see
+// lib/overlayOrder.js's `isPinnedMapReference`, which every consumer of this list already keys
+// off `fromMap` for). Preserves every field a saved plan might be carrying: the raster (or its
+// idb/cloud recovery pointers when the inline src was stripped/evicted), the non-uniform
+// `ftPerPxY` a map capture carries, and whether it came from the map (`fromMap`) or was
+// calibrated by hand (`calibrated`) — both of which the References panel still reads to decide
+// what controls to offer. `knockout: false` because it's an image, never a PDF (B848736 item 3).
+// Idempotent: a no-op when there's nothing to fold, or when the fold already ran (the migrated
+// record is already present — can't happen via the normal save path, since a saved record never
+// carries `underlay` again, but stays safe against a hand-edited/replayed record).
+function foldAerialIntoOverlays(underlay, sheetOverlays) {
+  const list = arr(sheetOverlays);
+  if (!underlay || typeof underlay !== "object" || !Number.isFinite(underlay.imgW)) return list;
+  if (list.some((o) => o && o.id === LEGACY_AERIAL_ID)) return list;
+  const migrated = {
+    id: LEGACY_AERIAL_ID, name: "Aerial backdrop", kind: "image",
+    src: underlay.src || null, imgW: underlay.imgW, imgH: underlay.imgH,
+    x: underlay.x || 0, y: underlay.y || 0, ftPerPx: underlay.ftPerPx,
+    ftPerPxY: underlay.ftPerPxY || undefined, rotation: 0,
+    opacity: underlay.opacity ?? 1, locked: !!underlay.locked,
+    fromMap: !!underlay.fromMap, calibrated: !!underlay.calibrated,
+    knockout: false, page: 1, pageCount: 1,
+    idbKey: underlay.idbKey || undefined, storageKey: underlay.storageKey || undefined, ext: underlay.ext || undefined,
+  };
+  return [migrated, ...list];
+}
+
 /* Build / normalize a Site Model from a (possibly legacy / partial) record.
  * Additive only — never renames or drops the legacy flat fields, so it is also a
  * lossless, idempotent migration. */
@@ -1188,10 +1235,11 @@ export function createSiteModel(p = {}, { onHeal } = {}) {
     status: normStatus(p.status, isLegacyRecord(p) ? LEGACY_STATUS : DEFAULT_STATUS),
     // inputs
     parcels: ensureZ(withStableParcelIds(parcelArr(p.parcels))),
-    underlay: p.underlay || null,
     // placed site-plan overlays (B72): backdrop PDFs/images positioned on the map by
     // hand. Each: {id,name,src,imgW,imgH,page,pageCount,x,y,ftPerPx,rotation,opacity,locked}
-    sheetOverlays: objArr(p.sheetOverlays),
+    // v14 (B848736) — ALSO the one home for the aerial backdrop: a legacy `underlay` folds in
+    // here (bottom-pinned, `fromMap`/`calibrated` preserved) via `foldAerialIntoOverlays`.
+    sheetOverlays: objArr(foldAerialIntoOverlays(p.underlay, p.sheetOverlays)),
     // parcel-attached drawings (B67): a PDF/JPEG attached to a parcel as an IMMUTABLE
     // backdrop, marked up on an editable layer above it in PIXEL-RELATIVE (0..1) coords
     // so zoom/pan can't corrupt geometry. Each: {id,parcelId,name,kind:'pdf'|'image',
@@ -1304,11 +1352,9 @@ export function mergeSiteContent(a, b) {
       older.elevation && older.elevation.crossSections)) },
     deletedIds: [...tomb].slice(-MAX_TOMBSTONES),
   };
-  // single-object underlay: keep the newer placement, but don't blank a real image with a stripped one
-  if (newer.underlay && (!newer.underlay.src || newer.underlay.strippedForCloud) &&
-      older.underlay && older.underlay.src && !older.underlay.strippedForCloud) {
-    merged.underlay = { ...newer.underlay, src: older.underlay.src, strippedForCloud: false };
-  }
+  // v14 (B848736) — the aerial backdrop is now just another sheetOverlays record (bottom-pinned),
+  // so its src-healing rides the generic `healSrc(unionById(...))` call above like any other
+  // reference; there is no second single-object field left to heal here.
   return createSiteModel(merged);
 }
 

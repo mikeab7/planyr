@@ -460,7 +460,9 @@ export function discardLegacySite(uid, siteId) {
   }
 }
 
-// True when a site has no meaningful content — nothing drawn, no parcels, no underlay.
+// True when a site has no meaningful content — nothing drawn, no parcels, no references
+// (B848736 — a captured aerial is a bottom-pinned `sheetOverlays` record, not a separate field,
+// so checking that array is what keeps an aerial-only plan from reading as empty).
 // Used to decide whether to offer Save (nothing to keep) vs. only Discard.
 export function isEmptySite(model) {
   if (!model) return true;
@@ -469,7 +471,7 @@ export function isEmptySite(model) {
     (model.els || []).length ||
     (model.markups || []).length ||
     (model.measures || []).length ||
-    model.underlay
+    (model.sheetOverlays || []).length
   );
 }
 
@@ -679,7 +681,7 @@ const mainBuildingCount = (m) =>
 export function snapshotVersion(model, { force = false } = {}) {
   if (!model || !model.id) return false;
   const m = createSiteModel(model);
-  if (!contentCount(m) && !m.underlay) return false; // never snapshot an empty record
+  if (!contentCount(m)) return false; // never snapshot an empty record (contentCount includes sheetOverlays, so a folded aerial counts)
   const all = historyAll();
   const list = all[m.id] || [];
   const sig = sigOf(m);
@@ -697,7 +699,7 @@ export function backupNow(id) {
   if (!id) return false;
   const cur = loadSite(id);
   if (!cur) return true;                                  // nothing stored to overwrite
-  if (!contentCount(cur) && !cur.underlay) return true;   // current state is empty → nothing to protect
+  if (!contentCount(cur)) return true;                    // current state is empty → nothing to protect
   return snapshotVersion(cur, { force: true }) === true;  // real content → require a persisted backup
 }
 // Human content summary of a snapshot for the version-history list (B456/NEW-8). Computed
@@ -772,7 +774,7 @@ export const storage = {
  *   - `groupId` = links every plan of one site together
  * Each record also carries a geographic `origin` (so the map can show it).
  *   plan = { id, groupId, site, name, origin:{lat,lon}|null, updatedAt,
- *            parcels, els, measures, settings, underlay }
+ *            parcels, els, measures, settings, sheetOverlays }
  * ----------------------------------------------------------------------- */
 const SITES_KEY = "planarfit:sites:v1"; // legacy / logged-out store
 const CURRENT_KEY = "planarfit:currentSite:v1";

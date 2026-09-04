@@ -40,4 +40,14 @@ describe("site-plan overlay print selection (B131)", () => {
     expect(isOverlayPrintable(null)).toBe(false);
     expect(isOverlayPrintable(undefined)).toBe(false);
   });
+
+  // B848736 — the pinned map-captured reference prints/exports under its own "Aerial imagery"
+  // toggle (unchanged from when it was a separate `underlay` field), never the "Placed reference
+  // overlay" one — so it must not gate or default-check that checkbox just by being present.
+  it("excludes the pinned map reference even though it has a real raster and is visible", () => {
+    const mapRef = { id: "aerial", src: "data:image/png;base64,AAAA", opacity: 1, fromMap: true };
+    expect(isOverlayPrintable(mapRef)).toBe(false);
+    expect(printableOverlays([mapRef, rendered]).map((o) => o.id)).toEqual(["a"]);
+    expect(hasPrintableOverlay([mapRef])).toBe(false); // only the pinned reference present → still hide the checkbox
+  });
 });

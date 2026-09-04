@@ -1,7 +1,7 @@
 // Element-level sync (B670) — the pure JS mirror of the SQL explode/rebuild in
 // db/site_elements_backfill.sql / db/site_elements_down.sql. One element = one row in
 // `site_elements`; the 5 vector collections below ride rows, everything else in the site
-// model (settings, underlay, sheetOverlays, parcelDrawings, meta…) stays in the slim
+// model (settings, sheetOverlays, parcelDrawings, meta…) stays in the slim
 // `sites.data` header. Keep BOTH sides' rules identical — the fidelity check
 // (db/site_elements_fidelity.sql) and test/elementRows.test.js hold them together.
 

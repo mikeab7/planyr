@@ -159,10 +159,21 @@ describe("rotateSiteCollections", () => {
     expect(next.parcels[0].stroke).toBe("#34E802");
     expect(next.parcels[0].acct).toBe("123");
   });
-  it("reports the aerial underlay as UNROTATABLE instead of silently skewing it", () => {
-    const { unrotatable } = rotateSiteCollections({ parcels: [parcel], underlay: { src: "x", x: 0, y: 0 } }, 5);
+  it("reports the pinned map reference as UNROTATABLE instead of silently skewing it (B848736 — folded into sheetOverlays)", () => {
+    const mapRef = { id: "aerial", src: "x", x: 0, y: 0, imgW: 100, imgH: 100, ftPerPx: 1, rotation: 0, fromMap: true };
+    const { next, unrotatable } = rotateSiteCollections({ parcels: [parcel], sheetOverlays: [mapRef] }, 5);
     expect(unrotatable).toEqual(["underlay"]);
+    // the pinned record itself is untouched — same reference, same fields
+    expect(next.sheetOverlays[0]).toBe(mapRef);
     expect(rotateSiteCollections({ parcels: [parcel] }, 5).unrotatable).toEqual([]);
+  });
+  it("rotates an ordinary reference alongside a pinned one in the SAME sheetOverlays array", () => {
+    const mapRef = { id: "aerial", src: "x", x: 0, y: 0, imgW: 100, imgH: 100, ftPerPx: 1, rotation: 0, fromMap: true };
+    const dropped = { id: "s1", x: 5, y: 6, rotation: 3 };
+    const { next, unrotatable } = rotateSiteCollections({ parcels: [parcel], sheetOverlays: [mapRef, dropped] }, 90);
+    expect(unrotatable).toEqual(["underlay"]);
+    expect(next.sheetOverlays[0]).toBe(mapRef); // pinned: untouched
+    expect(next.sheetOverlays[1].rotation).toBeCloseTo(93, 9); // ordinary: rotates normally
   });
   it("a 0° rotation and an empty plan are no-ops that keep the same references", () => {
     const c = { parcels: [parcel] };

@@ -10,7 +10,7 @@
  *
  * So this module names an operation a different way: it DIFFS the two whole-canvas snapshots
  * `history.js` already stores either side of the step (before/after — the same shape as
- * `stateRef.current`: parcels/els/measures/callouts/markups/underlay/sheetOverlays/origin/
+ * `stateRef.current`: parcels/els/measures/callouts/markups/sheetOverlays/origin/
  * layerOverrides/layerAbove) and describes what actually changed. This can never drift out of sync
  * with reality the way a hand-typed label at a call site can (the label is derived from the real
  * before/after content, not asserted by whichever code path happened to run), and it costs zero
@@ -46,7 +46,7 @@ const COLLECTIONS = [
   { key: "measures", noun: "measurement", nounOf: measureNoun },
   { key: "callouts", noun: "callout", nounOf: calloutNoun },
   { key: "markups", noun: "markup", nounOf: markupNoun },
-  { key: "sheetOverlays", noun: "reference image", nounOf: () => "reference image" },
+  { key: "sheetOverlays", noun: "reference image", nounOf: () => "reference image" }, // B848736 — includes the pinned aerial backdrop, same as any other reference
 ];
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -108,7 +108,9 @@ export function describeHistoryStep(before, after) {
     if (JSON.stringify(before.origin) !== JSON.stringify(after.origin)) return "Set location";
     if (JSON.stringify(before.layerOverrides) !== JSON.stringify(after.layerOverrides)) return "Changed layer visibility";
     if (JSON.stringify(before.layerAbove) !== JSON.stringify(after.layerAbove)) return "Changed layer order";
-    if (JSON.stringify(before.underlay) !== JSON.stringify(after.underlay)) return "Adjusted reference image";
+    // B848736 — the aerial backdrop is a `sheetOverlays` entry now, so a change to it is already
+    // caught by the COLLECTIONS diff above (producing "Moved reference image" and friends) — there
+    // is no second, single-object field left to check here.
     return "Edited plan";
   }
 

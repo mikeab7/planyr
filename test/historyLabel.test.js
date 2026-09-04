@@ -3,7 +3,7 @@ import { describeHistoryStep, describeHistorySteps, historyRunLabel } from "../s
 
 const doc = (over = {}) => ({
   parcels: [], els: [], measures: [], callouts: [], markups: [], sheetOverlays: [],
-  underlay: null, origin: null, layerOverrides: {}, layerAbove: {},
+  origin: null, layerOverrides: {}, layerAbove: {},
   ...over,
 });
 const bldg = (id, over = {}) => ({ id, type: "building", cx: 0, cy: 0, w: 100, h: 60, rot: 0, ...over });
@@ -107,6 +107,16 @@ describe("historyLabel — naming an undo step from what actually changed (B6483
     expect(describeHistoryStep(doc(), doc({ measures: [{ id: "x1", mode: "area", pts: [] }] }))).toBe("Added area measurement");
     expect(describeHistoryStep(doc(), doc({ parcels: [{ id: "p1", points: [] }] }))).toBe("Added parcel");
     expect(describeHistoryStep(doc(), doc({ sheetOverlays: [{ id: "o1" }] }))).toBe("Added reference image");
+  });
+
+  // B848736 — the aerial backdrop is now a `sheetOverlays` entry (bottom-pinned, `fromMap:true`),
+  // not a separate single-object field, so moving/adjusting it is caught by the SAME collection
+  // diff as any other reference — there is no dedicated "underlay changed" branch left to test.
+  it("moving the pinned aerial reference (a fromMap sheetOverlays entry) says Edited reference image", () => {
+    const mapRef = { id: "aerial", x: 0, y: 0, fromMap: true };
+    const before = doc({ sheetOverlays: [mapRef] });
+    const after = doc({ sheetOverlays: [{ ...mapRef, x: 40 }] });
+    expect(describeHistoryStep(before, after)).toBe("Edited reference image");
   });
 });
 

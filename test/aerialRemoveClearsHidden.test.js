@@ -14,6 +14,11 @@
  * The fix: Remove clears the flag (`setShowAerial(true)`, which withAerialVisible's `want:true`
  * branch strips back to the sparse default) instead of setting it, since there is no longer an
  * aerial for the flag to describe.
+ *
+ * B848736 — the aerial is now just the bottom-pinned `sheetOverlays` record (`fromMap:true`), so
+ * there is no longer a separate Remove button just for it: every reference row's Remove goes
+ * through the SAME `removeRow` helper, which conditions the `setShowAerial(true)` clear on
+ * `isAerialRow` (the row being the pinned one) rather than firing unconditionally.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -21,17 +26,18 @@ import { isAerialVisible, withAerialVisible } from "../src/workspaces/site-plann
 
 const src = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
 
-describe("the References panel's aerial Remove button clears aerialHidden", () => {
-  const removeButtonLine = src.split("\n").find((l) => l.includes('title="Remove"') && l.includes("releaseUnderlayAssets"));
+describe("the References panel row's Remove clears aerialHidden for the pinned map reference", () => {
+  const removeRowLine = src.split("\n").find((l) => l.includes("const removeRow = "));
 
   it("exists (the anchor text didn't move)", () => {
-    expect(removeButtonLine).toBeTruthy();
+    expect(removeRowLine).toBeTruthy();
   });
-  it("calls setShowAerial(true) — clear, not hide", () => {
-    expect(removeButtonLine).toMatch(/setShowAerial\(true\)/);
+  it("calls removeOverlay unconditionally, then setShowAerial(true) ONLY for the pinned row", () => {
+    expect(removeRowLine).toMatch(/removeOverlay\(o\.id\)/);
+    expect(removeRowLine).toMatch(/if \(isAerialRow\) setShowAerial\(true\)/);
   });
   it("never calls setShowAerial(false) on removal (that is the exact pre-fix defect)", () => {
-    expect(removeButtonLine).not.toMatch(/setShowAerial\(false\)/);
+    expect(removeRowLine).not.toMatch(/setShowAerial\(false\)/);
   });
 });
 

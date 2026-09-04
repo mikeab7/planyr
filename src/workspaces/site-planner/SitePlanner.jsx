@@ -46,12 +46,11 @@ import { DRAG_SLOP_PX, makeDragGate, stepDragGate, dragArmed } from "./lib/dragG
 import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
 import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody, stackHoldsFeature, parseFeatureKey, stackAtPoint, nextPickIndex } from "./lib/featureTarget.js";
 import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
-import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale, overlayRasterKey, HIRES_CACHE_PER_OVERLAY } from "./lib/overlayPdf.js";
 import { isDwgFile, convertDwgToDxf } from "./lib/convertClient.js";
-import { uploadOverlayFile, uploadUnderlayDataUrl, downloadOverlayBytes, downloadOverlayDataUrl, fetchOverlayBytes, fetchOverlayDataUrl, deleteOverlayObject, MAX_BYTES as OVERLAY_MAX_BYTES } from "./lib/overlayStorage.js";
+import { uploadOverlayFile, downloadOverlayBytes, downloadOverlayDataUrl, fetchOverlayBytes, fetchOverlayDataUrl, deleteOverlayObject, MAX_BYTES as OVERLAY_MAX_BYTES } from "./lib/overlayStorage.js";
 import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset, feetPerInchFromPair, PAGE_UNITS, REAL_UNITS } from "./lib/overlayScale.js";
-import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, calibrateUnderlayScale } from "./lib/overlayAlign.js";
+import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, imagePointToWorld } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, layerVintage, identifyOverlaysAt, rasterIdentifyLayers } from "./lib/layers.js";
 // NEW-3 — the per-building floodplain answer, off the SAME geometry the mitigation ledger uses.
@@ -333,7 +332,7 @@ import {
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, stallStripesExplicit, segmentsPath, featureNameLabelVisible, featureNameFontPx, featureExtentFt } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
-import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand } from "./lib/overlayOrder.js";
+import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference } from "./lib/overlayOrder.js";
 import { hasCrop, cropClipRectScreen, cropTrimFeet, cropFromTrimFeet } from "./lib/overlayCrop.js";
 import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerialVisibility.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, dockAxisOf, healDockAxes, withDockAxis, rotateDockAxisPatch } from "./lib/dockZones.js";
@@ -2267,28 +2266,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // It arms Select, keeps a parcel selected, and shows the banner that TEACHES the three gestures.
   const [boundaryEdit, setBoundaryEdit] = useState(false);
 
-  // aerial underlay + scale calibration
-  const [underlay, setUnderlay] = useState(() => restored?.underlay || null);    // {src,imgW,imgH,x,y,ftPerPx,opacity,locked}
   // B688864 — persisted via `settings.aerialHidden` (sparse; absent = shown), NOT a plain
   // component state, so Hide/Remove survive a reload instead of resetting to shown every mount.
   // See lib/aerialVisibility.js for why this also has to gate the LIVE basemap tile layer, not
-  // just this static image: on a georeferenced plan the live tiles are what's actually on screen.
+  // just the pinned map-captured reference's static image: on a georeferenced plan the live
+  // tiles are what's actually on screen. B848736 — this is a PLAN-LEVEL "show background
+  // imagery" toggle, not a per-reference one: it still applies even when the map-captured
+  // reference has been removed (a georeferenced plan's live tiles alone are "the aerial" then).
   const showAerial = isAerialVisible(settings);
   const setShowAerial = useCallback((next) => {
     setSettings((s) => withAerialVisible(s, typeof next === "function" ? next(isAerialVisible(s)) : next));
   }, []);
-  const [underlayErr, setUnderlayErr] = useState(false);
-  const [underlayLost, setUnderlayLost] = useState(false); // B474 review (#16) — saved aerial couldn't be recovered from idb OR cloud → honest re-drop prompt (not a silent blank)
-  const [underlayLoading, setUnderlayLoading] = useState(() => {
-    const u = restored?.underlay;
-    return !!(u && u.src && !String(u.src).startsWith("data:")); // show spinner until the remote aerial loads
-  });
-  const fileRef = useRef(null);
 
   // Site-plan overlays (B72): backdrop PDFs/images the user drops onto the map and
   // places by hand (immutable backdrop — above the basemap, below markup/massing).
   // Distinct from the GIS map `overlays` (app-shared layer props, declared below).
   const [sheetOverlays, setSheetOverlays] = useState(() => restored?.sheetOverlays || []);
+  // B848736 — the pinned map-captured reference (if any). Every former `underlay`-shaped read in
+  // this file now derives from this. `.find()` returns the SAME object reference across renders
+  // while `sheetOverlays` itself hasn't changed, so this is safe in a hook's dependency array
+  // exactly like `underlay` used to be.
+  const mapRef = sheetOverlays.find(isPinnedMapReference) || null;
   // Delete-tombstones (B276): ids of items deliberately removed (today: overlays). Persisted +
   // merged so a deletion isn't resurrected by a stale/cloud copy on reload, tab-sync, or device sync.
   const [deletedIds, setDeletedIds] = useState(() => restored?.deletedIds || []);
@@ -2311,7 +2309,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [layerAbove, setLayerAbove] = useState(() => sanitizeLayerAbove(restored?.layerAbove));
   const prevAboveSig = useRef(aboveSig(sanitizeLayerAbove(restored?.layerAbove)));
   const [selOverlay, setSelOverlay] = useState(null);   // id of the overlay shown in the panel
-  const [aerialSel, setAerialSel] = useState(false);    // References: aerial row expanded (B654)
   // Transient editor state for the ONE expanded overlay row (B575 opacity field draft + B576 scale
   // picker mode/paired fields). Keyed by overlay id; `null` = follow the overlay's stored values.
   // Reset whenever the expanded overlay changes so a fresh row derives its display from the model.
@@ -2338,24 +2335,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // .current inside the window listeners with no stale-closure risk; forced to 0 on drop/reset.
   const canvasDragDepth = useRef(0);
   const overlayDragDepth = useRef(0);
-  // B474 — re-hydrate the underlay raster from IndexedDB when the saved record carried only the ref (src
-  // was dropped to keep the record off the ~5MB localStorage cap). Mirrors the drawing/overlay rehydrate
-  // above; the underlay is the one raster that previously had NO recovery path (it needed a re-drop).
-  useEffect(() => {
-    if (!underlay || underlay.src || (!underlay.idbKey && !underlay.storageKey)) return;
-    let live = true;
-    (async () => {
-      let src = null;
-      try {
-        if (underlay.idbKey && idbAvailable()) src = await idbGet(underlay.idbKey);   // B474 — local IndexedDB cache first (fast, offline)
-        if (!src && underlay.storageKey) src = await downloadOverlayDataUrl(underlay.storageKey); // B474 review (#5) — cloud Storage fallback (cross-device / post-eviction)
-      } catch (_) { /* fall through to the lost flag */ }
-      if (!live) return;
-      if (src) { setUnderlay((u) => (u && !u.src ? { ...u, src } : u)); setUnderlayLost(false); }
-      else setUnderlayLost(true); // B474 review (#16) — neither home had it → surface an honest re-drop prompt instead of an invisible <image>
-    })();
-    return () => { live = false; };
-  }, [underlay]);
   // B556 — a DELIBERATE delete must leave a tombstone (`deletedIds`), the same invariant
   // removeOverlay/B276 already follow. WITHOUT it two things break: (1) the B459 thin-clobber guard
   // sees ≥2 items vanish with no tombstone to explain them and FALSELY rejects the save as an
@@ -3806,13 +3785,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // NEW-1 — `origin` rides the snapshot too, so setting or adjusting the plan's location is a
   // normal undoable frame (and a rotate, which moves geometry AND is paired with an anchor, undoes
   // as ONE step rather than leaving the drawing turned under the old anchor).
-  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null, sheetOverlays: [], deletedIds: [], layerOverrides: {}, layerAbove: {}, origin: null });
-  stateRef.current = { parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds, layerOverrides, layerAbove, origin };
+  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], sheetOverlays: [], deletedIds: [], layerOverrides: {}, layerAbove: {}, origin: null });
+  stateRef.current = { parcels, els, measures, callouts, markups, sheetOverlays, deletedIds, layerOverrides, layerAbove, origin };
   // A site with no parcels / elements / measures / callouts / aerial is "blank".
   // We don't want unedited blank sites cluttering the list, so we never persist
   // them, and drop their record on leave (but only un-located blank-planner
   // sites — a map-sourced site keeps its record even if you clear it).
-  const isBlankSite = (s) => !(s?.parcels?.length) && !(s?.els?.length) && !(s?.measures?.length) && !(s?.callouts?.length) && !(s?.markups?.length) && !s?.underlay && !(s?.sheetOverlays?.length);
+  const isBlankSite = (s) => !(s?.parcels?.length) && !(s?.els?.length) && !(s?.measures?.length) && !(s?.callouts?.length) && !(s?.markups?.length) && !(s?.sheetOverlays?.length);
   // B473 — count of drawn items in a record, for the save-verify read-back (silent-loss guard).
   const drawnCount = (s) => (s ? ((s.parcels?.length || 0) + (s.els?.length || 0) + (s.measures?.length || 0) + (s.callouts?.length || 0) + (s.markups?.length || 0) + (s.sheetOverlays?.length || 0)) : 0);
   // Site/plan metadata (name etc.) lives in component state declared below; mirror
@@ -3905,14 +3884,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // though the canvas correctly showed it gone. `fresh` (no existing record yet) is the right
     // discriminator, so it's computed BEFORE the blank check rather than after.
     const fresh = !loadSite(siteId); // first save of a brand-new site → tell App to list it
-    if (fresh && isBlankSite({ parcels, els, measures, callouts, markups, underlay, sheetOverlays }) && !deletedIds.length) return; // don't save a still-blank NEW site (but DO persist a tombstone so a delete sticks even on an otherwise-empty site)
+    if (fresh && isBlankSite({ parcels, els, measures, callouts, markups, sheetOverlays }) && !deletedIds.length) return; // don't save a still-blank NEW site (but DO persist a tombstone so a delete sticks even on an otherwise-empty site)
     setSaveStatus("saving");
     // B671 — per-element sync (signed-in): diff the vector collections and enqueue per-element
     // commits. Deferred while a geometry gesture is in flight (flushElems() at gesture end commits
     // the settled result); property-panel edits + text land on the engine's own debounce. Runs
     // ALONGSIDE the whole-doc save below (dual-write; the blob is still the read source until B672).
     reconcileElems(!!drag.current);
-    const payload = { id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds, layerOverrides, layerAbove };
+    const payload = { id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, sheetOverlays, deletedIds, layerOverrides, layerAbove };
     // B458 — write the on-device mirror IMMEDIATELY, decoupled from the debounced cloud push: a reload
     // within the 400ms debounce must still find this edit on the device so boot's union-merge can
     // restore it (the prior structural cause of the 8 South building-loss — the mirror + history were
@@ -3993,7 +3972,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       else setSaveStatus("unsaved"); // logged out + device full: the red localSaveFailed banner (writeMirror) covers it
     }, 400);
     return () => { clearTimeout(t); if (microT) clearTimeout(microT); };
-  }, [siteId, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds, layerOverrides, layerAbove]);
+  }, [siteId, parcels, els, measures, callouts, markups, settings, sheetOverlays, deletedIds, layerOverrides, layerAbove]);
   // Manual "Retry now" for the loud cloud-save-failure banner (B125) — also the escape from a
   // watchdog escalation (B455/NEW-7).
   const retryCloudSave = () => {
@@ -4002,7 +3981,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Persist on leave; if the site is still blank and un-located, drop it instead.
   const liveRef = useRef({});
-  useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds, layerOverrides, layerAbove }; });
+  useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, sheetOverlays, deletedIds, layerOverrides, layerAbove }; });
   const persistOrDrop = () => {
     if (!siteId || deletedSelfRef.current) return; // B264: this plan was just deleted — don't resurrect it
     const s = liveRef.current;
@@ -4718,8 +4697,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [siteId]);
   const histKey = (s) =>
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
-    "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none") +
-    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${o.x},${o.y},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1},${o.aboveParcel === true ? 1 : 0}`).join(";") || "no") + // NEW-2: aboveParcel is in the signature so promoting a reference over the plan is its own undo frame (like `visible`). RC-8: no Math.round — a sub-foot overlay nudge must be a distinct undo frame (underlay pos isn't rounded either)
+    // B848736 — the aerial backdrop is now just a sheetOverlays record (bottom-pinned), so its
+    // position/scale/lock ride the SAME per-item signature below; there is no second field to sign.
+    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${o.x},${o.y},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1},${o.aboveParcel === true ? 1 : 0}`).join(";") || "no") + // NEW-2: aboveParcel is in the signature so promoting a reference over the plan is its own undo frame (like `visible`). RC-8: no Math.round — a sub-foot overlay nudge must be a distinct undo frame
     "|O:" + (s.origin ? `${s.origin.lat.toFixed(9)},${s.origin.lon.toFixed(9)}` : "none") + // NEW-1 — the geo anchor, so "Set location" / a placement nudge is its own undo frame
     "|L:" + overridesSig(s.layerOverrides) + // NEW-1 — GIS Layers-panel visibility set, so a layer toggle is a distinct, undoable frame (matches sheetOverlays.visible)
     "|A:" + aboveSig(s.layerAbove); // NEW-1 — …and which layers are LIFTED above the plan, so "Show above plan" is its own undoable frame too
@@ -4761,7 +4741,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const canUndoNow = useMemo(
     () => histRef.current.canUndo(stateRef.current, { exact: true }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [histTick, parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds, layerOverrides, layerAbove, origin],
+    [histTick, parcels, els, measures, callouts, markups, sheetOverlays, deletedIds, layerOverrides, layerAbove, origin],
   );
   /* NEW-1 — the two context axes the always-on performance recorder cannot read off the DOM.
    * `notePlanContext` is one string compare per plan load (and counts the switches — the axis
@@ -5067,7 +5047,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // an echo landing in the window right after the restore is kept off the canvas too.
     pendingRemoteRef.current = pendingRemoteRef.current.filter((i) => i && i.action === "remove");
     try { const e = elSyncRef.current; if (e) e.noteLocalAuthority(); } catch (_) {}
-    setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay); setSheetOverlays(s.sheetOverlays || []); setDeletedIds(s.deletedIds || []);
+    setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setSheetOverlays(s.sheetOverlays || []); setDeletedIds(s.deletedIds || []);
     // NEW-1 — restore the geo ANCHOR with the geometry. A placement rotate turns the drawing while
     // the anchor stays put, and a nudge does the reverse; undoing only one half would leave the plan
     // sitting somewhere neither state ever described. `undefined` (a pre-NEW-1 frame) leaves it alone.
@@ -5622,11 +5602,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pts = [];
     visibleParcels(hiddenGroups, parcels).forEach((pc) => pts.push(...pc.points));
     visibleEls(hiddenGroups, els).forEach((e) => pts.push(...(e.points ? e.points : elCorners(e))));
-    if (underlay) {
-      const sy = underlay.ftPerPxY || underlay.ftPerPx;
-      pts.push({ x: underlay.x, y: underlay.y });
-      pts.push({ x: underlay.x + underlay.imgW * underlay.ftPerPx, y: underlay.y + underlay.imgH * sy });
-    }
+    // B848736 — every reference counts toward the frame (the aerial backdrop always did; the
+    // gap for a hand-dropped site-plan overlay is closed here too, folded into the same list now).
+    // imagePointToWorld carries a rotated reference's corners correctly; the pinned map reference
+    // never rotates, so this is exact for it and a reasonable box for a rotated one too.
+    sheetOverlays.filter((o) => o.visible !== false).forEach((o) => {
+      pts.push(imagePointToWorld(o, 0, 0), imagePointToWorld(o, o.imgW, 0), imagePointToWorld(o, o.imgW, o.imgH), imagePointToWorld(o, 0, o.imgH));
+    });
     if (pts.length === 0) { setView({ ppf: 0.35, offX: 60, offY: 60 }); return; }
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     pts.forEach((p) => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
@@ -5634,7 +5616,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pad = 60;
     const ppf = Math.min((size.w - pad * 2) / bw, (size.h - pad * 2) / bh);
     setView({ ppf, offX: pad - minX * ppf + (size.w - pad * 2 - bw * ppf) / 2, offY: pad - minY * ppf + (size.h - pad * 2 - bh * ppf) / 2 });
-  }, [parcels, els, underlay, size, hiddenGroups]);
+  }, [parcels, els, sheetOverlays, size, hiddenGroups]);
 
   // Fit *after* a state change has committed: bump the nonce instead of calling
   // fit() from a stale closure (which would frame the view without the content
@@ -8235,7 +8217,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * Gating HERE rather than in `move` is the whole point of the fix: every drag that translates
      * or reshapes existing geometry — element and parcel moves, group moves, markups, callouts,
      * measurements, chips, dimension slides, all four vertex layers, resize / edge-resize / rotate,
-     * road ends and road vertices, underlay and sheet overlays — passes through this one test.
+     * road ends and road vertices, and sheet overlays (incl. the pinned aerial reference) — passes through this one test.
      * Patching the single branch the report named would have left every sibling defective.
      *
      * TRAVEL ONLY, NO CLOCK (see lib/dragGate.js): the pan path's tap test pairs slop with a 400 ms
@@ -8300,11 +8282,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!d.panArmed) armViewAnchor(view.ppf, d.ox, d.oy);
       d.panArmed = true;
       setView((v) => ({ ...v, offX: d.ox + (e.clientX - d.sx), offY: d.oy + (e.clientY - d.sy) }));
-      return;
-    }
-    if (d.mode === "moveUnderlay") {
-      const dx = fp.x - d.fx, dy = fp.y - d.fy;
-      setUnderlay((u) => (u ? { ...u, x: d.ox + dx, y: d.oy + dy } : u));
       return;
     }
     if (d.mode === "moveSheetOverlay") {
@@ -9271,41 +9248,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     requestFit();
   };
 
-  /* ------------ aerial underlay ------------ */
-  const onUnderlayFile = async (file) => {
-    if (!file) return;
-    try {
-      const { src, w, h } = await loadAndDownscaleImage(file);
-      pushHistory();
-      // Start at ~600 ft across the image width; the user calibrates precisely next.
-      // Auto-locked (click-through) so you can immediately draw over it.
-      // B474 review (#2/#6): set the underlay WITHOUT idbKey first so src stays inline (the safe
-      // localStorage fallback dropIdbBackedSrc won't strip), and attach idbKey only AFTER idbPut CONFIRMS —
-      // so a failed/slow stash can never delete the underlay's only on-device copy.
-      const idbKey = siteId ? `raster:${siteId}:underlay` : undefined;
-      setUnderlay({ src, imgW: w, imgH: h, x: 0, y: 0, ftPerPx: 600 / w, opacity: 1, locked: true });
-      setShowAerial(true); // B688864 — a newly loaded aerial must not stay suppressed by an earlier Hide/Remove
-      setUnderlayErr(false);
-      setUnderlayLost(false);
-      setUnderlayLoading(true);
-      requestFit();
-      if (idbKey && idbAvailable()) idbPut(idbKey, src).then((ok) => { if (ok) setUnderlay((u) => (u && u.src === src ? { ...u, idbKey } : u)); });
-      // B474 review (#5): back the underlay up to cloud Storage too (like overlays/drawings) so it survives
-      // a SECOND device and an IndexedDB eviction — previously its ONLY home was this device's IndexedDB.
-      if (isCloudActive()) uploadUnderlayDataUrl(siteId, src).then((res) => { if (res) setUnderlay((u) => (u && u.src === src ? { ...u, storageKey: res.key, ext: res.ext } : u)); }).catch(() => {});
-    } catch (err) {
-      alert(humanizeError(err));
-    }
-  };
-  const startMoveUnderlay = (e) => {
-    if (tool !== "select" || e.button !== 0 || !underlay || underlay.locked) return;
-    e.stopPropagation();
-    const fp = p2f(e.clientX, e.clientY);
-    setSel(null);
-    drag.current = { mode: "moveUnderlay", fx: fp.x, fy: fp.y, ox: underlay.x, oy: underlay.y, ...startGate(e) };
-    svgRef.current.setPointerCapture(e.pointerId);
-  };
-
   /* ------------ site-plan overlays (B72 · CAD in B747/B748) ------------ */
   // Add a dropped PDF/image/DXF/DWG as a backdrop overlay, placed centered on the current view.
   // PDF/image size via the B73 scale heuristic; a DXF (or a DWG converted through the B238
@@ -9424,7 +9366,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const startScaleOverlay = (e, id) => {
     if (e.button !== 0) return;
     const o = sheetOverlays.find((x) => x.id === id);
-    if (!o || o.locked) return;
+    if (!o || o.locked || o.fromMap) return; // B848736 — the pinned map reference never resizes
     e.stopPropagation();
     const fp = p2f(e.clientX, e.clientY);
     const C = { x: o.x + (o.imgW * o.ftPerPx) / 2, y: o.y + (o.imgH * o.ftPerPx) / 2 };
@@ -9435,7 +9377,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const startRotateOverlay = (e, id) => {
     if (e.button !== 0) return;
     const o = sheetOverlays.find((x) => x.id === id);
-    if (!o || o.locked) return;
+    if (!o || o.locked || o.fromMap) return; // B848736 — the pinned map reference never rotates
     e.stopPropagation();
     const fp = p2f(e.clientX, e.clientY);
     const C = { x: o.x + (o.imgW * o.ftPerPx) / 2, y: o.y + (o.imgH * o.ftPerPx) / 2 };
@@ -9447,21 +9389,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const patchOverlay = (id, patch, hist = true) => {
     if (hist) pushHistory();
     setSheetOverlays((arr) => arr.map((o) => (o.id === id ? { ...o, ...patch } : o)));
-  };
-  /* ⛔ NEW-1 — THE AERIAL UNDERLAY IS SHARED TOO, and this path had NO ref-count at all. `New plan,
-   * same parcel` copies `underlay: src.underlay` (SitePlannerApp), so two plans routinely point at
-   * one backdrop; removing it from either used to delete both tiers outright. Same rule, same
-   * module — and B474's hazard makes it the worst tier to get wrong: an underlay whose `src` was
-   * dropped and whose bytes are gone is unrecoverable. */
-  const releaseUnderlayAssets = (u) => {
-    if (!u) return;
-    const refs = collectAssetRefs(loadSitesList());
-    const { release, kept } = releasePlanForOverlay(refs, u, siteId);
-    for (const r of release) { if (r.tier === "storage") deleteOverlayObject(r.key); else idbDelete(r.key); }
-    if (kept.length)
-      reportClientEvent("underlay-asset-retained", "kept an aerial backdrop another plan still references", {
-        siteId, kept: kept.map((k) => ({ what: k.what, reason: k.reason, heldBy: k.heldBy })),
-      });
   };
   const removeOverlay = (id) => {
     const o = sheetOverlays.find((x) => x.id === id);
@@ -9653,25 +9580,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B73 fallbacks — calibrate by clicking the canvas. trace: 2 points on the drawing +
   // a real length → rescale (pinned at the first click). align: 2 points on the drawing
   // then the 2 matching points on the map → similarity (move + rotate + scale).
-  // B654: the SAME flow also calibrates the aerial underlay ({target:"underlay"}) — the
-  // old separate "calibrate" tool + its dialog-box input are gone; the underlay commit
-  // goes through the pure calibrateUnderlayScale with the same inline numEdit UX.
+  // B848736 — the aerial backdrop is now just a reference like any other, so it shares this
+  // exact flow too (its own row's "Calibrate" is disabled only when it's the pinned map
+  // capture — already-to-scale, never a manual calibration target).
   const onOvCalibClick = (fp) => {
-    if (ovCalib.target === "underlay") {
-      const u = underlay;
-      if (!u) { setOvCalib(null); return; }
-      const pts = [...ovCalib.pts, fp];
-      if (pts.length < 2) { setOvCalib({ ...ovCalib, pts }); return; }
-      setOvCalib(null);
-      setNumEdit({ fx: pts[1].x, fy: pts[1].y, value: "", onCommit: (realFt) => {
-        const patch = calibrateUnderlayScale(u, pts[0], pts[1], realFt);
-        if (!patch) return; // fromMap / non-positive input — the Calibrate button is already disabled for fromMap
-        pushHistory();
-        setUnderlay((cur) => (cur ? { ...cur, ...patch } : cur));
-        flashWarn(`Aerial calibrated — that segment is now ${f0(realFt)}′.`, 4000);
-      } });
-      return;
-    }
     const o = sheetOverlays.find((x) => x.id === ovCalib.id);
     if (!o) { setOvCalib(null); return; }
     const pts = [...ovCalib.pts, fp];
@@ -9710,8 +9622,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const ovCalibMsg = () => {
     if (!ovCalib) return "";
     const n = ovCalib.pts.length;
-    const what = ovCalib.target === "underlay" ? "aerial" : "drawing";
-    if (ovCalib.kind === "trace") return n === 0 ? `Click one end of a known dimension on the ${what}.` : "Click the other end — then enter its real length.";
+    if (ovCalib.kind === "trace") return n === 0 ? "Click one end of a known dimension on the drawing." : "Click the other end — then enter its real length.";
     const pairNo = Math.floor(n / 2) + 1;
     return n % 2 === 0 ? `Click a known point on the drawing (point ${pairNo}).` : "Now click where that point belongs on the map.";
   };
@@ -15091,7 +15002,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (tok !== identifyTok.current) return;
       if (!candidates.length) {
         const gap = noParcelSourceNote(countyIdentity(lat, lng));
-        setIdentifyRes({ error: gap ? `${gap} You can still trace the lot from the Aerial underlay.` : "Parcel services are still loading — give it a second and click again." });
+        setIdentifyRes({ error: gap ? `${gap} You can still trace the lot from the aerial.` : "Parcel services are still loading — give it a second and click again." });
         return;
       }
       const res = await identifyParcelEager(candidates, lng, lat, {
@@ -15104,7 +15015,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // source that could have answered this point was unreachable this click.
         if (res.responded === 0) { setIdentifyRes({ error: "The parcel server for this area isn't responding right now — try again in a moment." }); return; }
         const gap = noParcelSourceNote(countyIdentity(lat, lng));
-        setIdentifyRes({ error: gap ? `${gap} You can still trace the lot from the Aerial underlay.` : "No parcel right there — click directly on a lot (zoom in if the outlines aren't showing)." });
+        setIdentifyRes({ error: gap ? `${gap} You can still trace the lot from the aerial.` : "No parcel right there — click directly on a lot (zoom in if the outlines aren't showing)." });
         return;
       }
       const hit = res.hits[0]; // first county whose service answered owns the lot
@@ -15281,7 +15192,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const live = liveRef.current || {};
       const liveModel = createSiteModel({ id: siteId, ...metaRef.current, ...live, updatedAt: Date.now() });
       const merged = mergeSiteContent(liveModel, createSiteModel(cloudData)); // our (newest) scalars + union of both sides' content
-      // Re-hydrate the canvas (mirror the cross-tab `storage` handler — the live underlay stays as-is). This
+      // Re-hydrate the canvas (mirrors the cross-tab `storage` handler above). This
       // state change triggers the autosave, which — gate cleared + version now fresh — pushes the union ONCE.
       // ⛔ B727936 (widened) — this state change feeds the SAME autosave-diff effect `refetchReplace`'s
       // seed does, with no gesture (and so no `pushHistory()`) ever having opened an operation for it:
@@ -15435,7 +15346,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     pushHistory();
     setParcels(v.parcels); setEls(v.els); setMeasures(v.measures); setCallouts(v.callouts); setMarkups(v.markups);
-    setUnderlay(v.underlay); setSheetOverlays(v.sheetOverlays); setDeletedIds(v.deletedIds || []);
+    setSheetOverlays(v.sheetOverlays); setDeletedIds(v.deletedIds || []);
     // B563 — parcelDrawings rides its OWN persistence path (off the main autosave snapshot), so the
     // restore above silently skips it. The per-parcel Attached-Drawings UI was removed, but the data
     // still round-trips and must survive a version restore (else a restored version would keep the
@@ -15474,7 +15385,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const warmExportSheet = () => { loadExportSheet().catch(() => {}); };
   const exportCtx = () => ({
-    parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays,
+    // B848736 — exportSheet.js's aerial compositing still wants an `underlay`-shaped object
+    // (src/x/y/ftPerPx/ftPerPxY/opacity/fromMap); `mapRef` is exactly that, now sourced from
+    // sheetOverlays' pinned record instead of a separate field. null when there is none — same
+    // as the old `underlay` when nothing had been captured/dropped.
+    parcels, els, measures, callouts, markups, settings, underlay: mapRef, sheetOverlays,
     DEV_TYPES, devExtent, elCorners, f2p, view, size, origin,
     hidden: hiddenGroups,   // B494050 — the export's fallback crop asks the same predicate the canvas does
     svgRef, stateRef, overlayRefs, geoMapRef,
@@ -15673,7 +15588,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B739 — is any RASTER GIS layer (floodplain, pipelines, wetlands, utilities, relief) turned on?
   // Gates the "Print map layers" checkbox so there's no dead control when no such layer is live.
   const mapLayersPrintable = Object.keys(ALL_LAYERS).some((id) => overlays?.[id]?.on); // B739 raster + B745 vector — any live layer prints
-  const aerialAvailable = !!(origin && basemapOn) || !!underlay; // B765985 — gates the compose screen's "Aerial imagery" toggle
+  const aerialAvailable = !!(origin && basemapOn) || !!mapRef; // B765985 — gates the compose screen's "Aerial imagery" toggle
   const startPrintMove = (e) => {
     e.stopPropagation();
     const fp = p2f(e.clientX, e.clientY);
@@ -15880,9 +15795,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // part of the collision pool, and its paint depends on whether the drawing is calibrated (the
   // amber warn state overrides the user's colour), so this has to resolve before chips are sized.
   const isGeoref = !!origin || parcels.some((p) => p.attrs); // NEW-1 — the LIVE anchor, so a plan located after the fact stops reading as un-georeferenced
+  // B848736 — reads the pinned map reference only (a hand-dropped, non-pinned reference is now
+  // an ordinary sheetOverlay with its own scale heuristic/trace-length flow, same as a placed
+  // PDF always has — it doesn't carry this plan-wide "is the backdrop trustworthy" badge).
   const calibrationState =
-    underlay
-      ? (underlay.fromMap ? "georef" : underlay.calibrated ? "calibrated" : "uncalibrated")
+    mapRef
+      ? (mapRef.fromMap ? "georef" : mapRef.calibrated ? "calibrated" : "uncalibrated")
       : (isGeoref ? "georef" : "drawn");
   const calibrated = calibrationState === "georef" || calibrationState === "calibrated" || calibrationState === "drawn";
 
@@ -17053,9 +16971,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // chrome moved to overlayChrome below, so this renderer can be dropped into either band pass.
   const renderSheetOverlay = (o) => {
     if (o.visible === false) return null; // B277 — hidden overlays don't render on the map (still listed in the References panel, with the eye toggle to bring them back)
+    // B848736 — the pinned map reference keeps the old aerial's exact suppression: hidden via the
+    // plan-level `showAerial` toggle, and standing down on a georeferenced plan while the live
+    // basemap tiles are on (they ARE the aerial there — item 4, B688864).
+    if (o.fromMap && (!showAerial || (origin && basemapOn))) return null;
     const tl = f2p({ x: o.x, y: o.y });
+    const sy = o.ftPerPxY || o.ftPerPx; // B848736 — a map capture's vertical scale can differ (Web Mercator)
     const w = o.imgW * o.ftPerPx * rppf;
-    const h = o.imgH * o.ftPerPx * rppf;
+    const h = o.imgH * sy * rppf;
     const cx = tl.x + w / 2, cy = tl.y + h / 2;
     return (
       /* B548819 — a reference is a DRAWN FAMILY and carries the same census key as the other four,
@@ -17086,9 +17009,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             })()}
             {/* data-overlay-image marks the printable raster so buildExportSvg can include/exclude it per the "Print overlay" toggle (B131).
                 B749 — a live hi-res object URL overrides the base raster while zoomed in (transient; the record's src is unchanged).
-                data-overlay-id lets the export swap a transient blob: hi-res back to the persisted base raster before inlining. */}
-            <image data-overlay-image="1" data-overlay-id={o.id} href={hiresById[o.id] || o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none"
-              clipPath={hasCrop(o) ? `url(#ov-crop-${o.id})` : undefined} />
+                data-overlay-id lets the export swap a transient blob: hi-res back to the persisted base raster before inlining.
+                B848736 — the pinned map reference OMITS data-overlay-image on purpose: it prints/exports
+                under its own "Aerial imagery" toggle (exportSheet.js's explicit aerial compositing reads
+                it via ctx.underlay), not the "Placed reference overlay" one — omitting the marker is what
+                lets the export's generic "drop any live aerial copy" sweep remove this clone so the
+                explicit synthesis is the only thing that draws it, exactly as when it was a separate field. */}
+            <image data-overlay-image={o.fromMap ? undefined : "1"} data-overlay-id={o.id} href={hiresById[o.id] || o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none"
+              clipPath={hasCrop(o) ? `url(#ov-crop-${o.id})` : undefined}
+              onError={o.fromMap ? () => setOverlayLoadErr((m) => ({ ...m, [o.id]: "remote" })) : undefined}
+              onLoad={o.fromMap ? () => setOverlayLoadErr((m) => (m[o.id] === "remote" ? Object.fromEntries(Object.entries(m).filter(([k]) => k !== o.id)) : m)) : undefined} />
           </>
         ) : (() => {
           // B784 — an honest, TERMINAL placeholder for an overlay with no raster. "missing" (or a
@@ -17163,14 +17093,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     );
     if (!o || tool !== "select") return calib || null;
     const tl = f2p({ x: o.x, y: o.y });
+    const sy = o.ftPerPxY || o.ftPerPx; // B848736 — match renderSheetOverlay's non-uniform scale
     const w = o.imgW * o.ftPerPx * rppf;
-    const h = o.imgH * o.ftPerPx * rppf;
+    const h = o.imgH * sy * rppf;
     const cx = tl.x + w / 2, cy = tl.y + h / 2;
     return (
       <g data-export="skip">
         <g transform={o.rotation ? `rotate(${o.rotation} ${cx} ${cy})` : undefined}>
           <rect x={tl.x} y={tl.y} width={w} height={h} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />
-          {!o.locked && !ovCalib && (<>
+          {/* B848736 — the pinned map reference never offers resize/rotate handles: it's placed
+              true-to-scale and axis-aligned from the map capture (same reason its panel row hides
+              Width/Rotate/"Size to view" — see renderPanelBody's isAerialRow). */}
+          {!o.locked && !ovCalib && !o.fromMap && (<>
             {[[tl.x, tl.y], [tl.x + w, tl.y], [tl.x + w, tl.y + h], [tl.x, tl.y + h]].map(([hx, hy], hi) => (
               <rect key={`hsc${hi}`} data-handle="overlay-scale" x={hx - 5} y={hy - 5} width={10} height={10} rx={2} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
                 style={{ cursor: hi % 2 === 0 ? "nwse-resize" : "nesw-resize" }} onPointerDown={(e) => startScaleOverlay(e, o.id)} />
@@ -19278,7 +19212,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           magnifier — a magnifier says "zoom", not "fit", and would be confused with the separate
           zoom in/out controls. */}
       <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-        <button className="dbtn tb-icon-btn" style={dIcon} onClick={fit} disabled={!parcels.length && !els.length && !markups.length && !callouts.length && !underlay} aria-label="Zoom to fit" title="Zoom to fit"><ZoomFitIcon size={20} /></button>
+        <button className="dbtn tb-icon-btn" style={dIcon} onClick={fit} disabled={!parcels.length && !els.length && !markups.length && !callouts.length && !sheetOverlays.length} aria-label="Zoom to fit" title="Zoom to fit"><ZoomFitIcon size={20} /></button>
       </div>
       {/* Snap's interactive toggle moved to the on-canvas View (eye) menu with the other
           view/drawing aids (B653) — the top-bar duplicate is gone. S still toggles it. */}
@@ -19365,12 +19299,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // floating card. A called render FUNCTION (never a mounted <Component/>) so the same JSX inlines
   // into either host with no remount on drag (MODULE-SCOPE-COMPONENTS).
   const renderPanelBody = (_pid) => (<>
-          {/* Overlays (B654; user-facing name via B966630) — the merged Aerial + Overlay panel:
-              every backdrop the plan sits over, in one list with one add flow and ONE shared
-              calibration (the ovCalib trace/align flow — the old separate "calibrate" tool is gone).
-              Row #1 is the aerial (image-only, always beneath everything); the rest are sheet
-              overlays (site plans / surveys, PDF or image). Persisted fields are UNCHANGED
-              (`underlay` + `sheetOverlays`) — this is a UI unification, then a UI rename. */}
+          {/* Overlays (B654; user-facing name via B966630; data model unified in B848736) — every
+              backdrop the plan sits over, in ONE list, ONE add flow, and ONE shared calibration
+              (the ovCalib trace/align flow). An aerial captured from the Map (top-left) is just a
+              reference that happens to be a photo — it lands in `sheetOverlays` like everything
+              else, bottom-pinned (lib/overlayOrder.js's `isPinnedMapReference`) so it still renders
+              beneath everything, matching the old dedicated aerial slot's position. There is no
+              second card and no second concept: dropping a screenshot here (or on the map) adds it
+              to this same list, through the same dropzone below. */}
           {_pid === "references" && (
           <Section>
             {/* The whole block is a drop target (NEW-1): drop a PDF/image here or on the map,
@@ -19390,82 +19326,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </div>
             </div>
 
-            {/* Aerial backdrop — pinned reference #1. Opacity + lock lived on the underlay
-                object all along (render honours both); the CONTROLS are new here. */}
-            <div style={{ marginTop: 12 }}>
-              {!underlay ? (
-                <div style={{ border: "1px dashed var(--border-default)", borderRadius: 9, padding: 9, background: SURF_RAISED }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    {/* B525632 — a plan with NO aerial must not ANNOUNCE one. The owner read the
-                        old heading ("Aerial backdrop", printed here whether or not an aerial
-                        existed) as a fixture every project carried: "planner always shows this
-                        aerial backdrop overlay no matter the project, but i dont know if this is
-                        even a thing." B519152 proved the row was honest underneath — the CTA and
-                        the explainer below are unchanged — so the confusion lived entirely in the
-                        heading, and the fix removes it rather than documenting it. The occupied
-                        row's heading (the <button> in the sibling branch) stays "Aerial backdrop":
-                        once there IS one, naming it is right. Same slot, same one line — the words
-                        change, never the position.
-                        ⛔ IT IS "Add an aerial", NOT "Add an aerial backdrop", AND THAT IS MEASURED
-                        RATHER THAN PREFERRED — do not "restore" the longer phrase. This row is
-                        [heading][spacer][Load screenshot…], which leaves the heading 124px; the
-                        longer phrase needs 134px, so it WRAPPED to two lines and pushed the
-                        explainer and everything under it down — the exact reflow the owner asked
-                        us to avoid. "Add an aerial" needs 76px. The app already uses "aerial" as a
-                        noun throughout ("the aerial sits beneath everything", "Hide aerial"), and
-                        PANEL-BREVITY prefers the shorter form independently. Lengthening it again
-                        turns the harness's height assertion red rather than failing silently.
-                        Guard: ui-audit/verify-aerial-empty-state-copy.mjs. */}
-                    <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 600 }}>Add an aerial</span>
-                    <span style={{ flex: 1 }} />
-                    <button style={chip} onClick={() => fileRef.current?.click()}>Load screenshot…</button>
-                  </div>
-                  <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 5, lineHeight: 1.45 }}>The aerial sits beneath everything — drop in a screenshot and calibrate it, or capture one from the Map (top-left) already to scale.</div>
-                </div>
-              ) : (
-                <div style={{ border: `1px solid ${aerialSel ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: SURF_RAISED }}>
-                  <button style={{ ...chip, width: "100%", textAlign: "left", borderColor: aerialSel ? PAL.accent : "var(--border-default)", color: aerialSel ? PAL.accent : PAL.ink }} title="Aerial backdrop — image-only, always beneath everything" onClick={() => setAerialSel((v) => !v)}>Aerial backdrop</button>
-                  {/* B688864 — Hide and Remove now stand down the LIVE basemap tiles too (via
-                      `showAerial`/`wantBasemapSrc`), not just this static image: on a georeferenced
-                      plan the live tiles are what's actually on screen, so either control used to
-                      leave the identical-looking aerial in place. Both are persisted, so they stick
-                      across a reload. */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
-                    <button style={{ ...iconBtn, color: showAerial ? PAL.ink : PAL.muted }} title={showAerial ? "Hide aerial" : "Show aerial"} onClick={() => setShowAerial((v) => !v)}>{showAerial ? <EyeIcon /> : <EyeOffIcon />}</button>
-                    <button style={iconBtn} title={underlay.locked ? "Unlock (drag to reposition)" : "Lock (click-through)"} onClick={() => { pushHistory(); setUnderlay((u) => (u ? { ...u, locked: !u.locked } : u)); }}>{underlay.locked ? <LockIcon /> : <UnlockIcon />}</button>
-                    {/* B719778 — Remove must CLEAR `aerialHidden`, not set it. `setShowAerial(false)`
-                        persists `settings.aerialHidden = true` (withAerialVisible's `want:false`
-                        branch) — so with no aerial left to be hidden, the record kept a stale "hide"
-                        preference that silently applied to the NEXT aerial dropped onto this plan,
-                        rendering it invisible with no on-screen explanation (confirmed on production
-                        plan smsz866fuql0: underlay null, aerialHidden still "true"). Removing the
-                        aerial removes the whole question, so it resets to the sparse default
-                        (`setShowAerial(true)` clears the key via withAerialVisible's `want:true`
-                        branch) rather than answering it "hidden". */}
-                    <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={() => { pushHistory(); releaseUnderlayAssets(underlay); setUnderlay(null); setShowAerial(true); setUnderlayLost(false); }}><XIcon /></button>
-                  </div>
-                  {aerialSel && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
-                      <label style={ovRow}><span style={{ width: 48 }}>Opacity</span>
-                        <input type="range" min={0.1} max={1} step={0.05} value={underlay.opacity ?? 1} style={{ flex: 1 }} {...sliderHistory((e) => setUnderlay((u) => (u ? { ...u, opacity: +e.target.value } : u)))} />
-                        <span style={{ fontSize: 11, color: PAL.muted, width: 34, textAlign: "right" }}>{Math.round((underlay.opacity ?? 1) * 100)}%</span>
-                      </label>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button style={{ ...chip, flex: 1, ...(underlay.fromMap ? { opacity: 0.55, cursor: "not-allowed" } : null) }} disabled={!!underlay.fromMap}
-                          title={underlay.fromMap ? "This aerial came from the map — it's already to scale, so manual calibration is disabled" : "Click two ends of a known distance on the aerial, then enter its real length"}
-                          onClick={() => { setShowAerial(true); setOvCalib({ target: "underlay", kind: "trace", pts: [] }); }}>Calibrate</button>
-                        <button style={{ ...chip, flex: 1 }} title="Zoom the canvas to fit everything" onClick={requestFit}>Fit view</button>
-                      </div>
-                      <div style={{ fontSize: 11, color: PAL.muted }}>Scale: <b style={{ color: PAL.ink }}>{f2(1 / underlay.ftPerPx)}</b> px/ft · image ≈ {f0(underlay.imgW * underlay.ftPerPx)}′ wide{underlay.fromMap ? " · georeferenced from the map" : ""}</div>
-                      {origin && basemapOn && showAerial && <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45 }}>Hidden while the live map basemap is on — the basemap IS the aerial there.</div>}
-                    </div>
-                  )}
-                  {underlayErr && <div style={{ fontSize: 11, color: PAL.accent, marginTop: 6, lineHeight: 1.45 }}>Aerial image didn't load from the source. Your boundary and tools still work — go back to the map and re-pick the site, or drop a screenshot here instead.</div>}
-                  {underlayLost && <div style={{ fontSize: 11, color: PAL.accent, marginTop: 6, lineHeight: 1.45 }}>The saved aerial couldn't be recovered on this device (not in the offline cache or your account). Your boundary and tools are intact — <button style={{ ...chip, padding: "1px 7px", color: PAL.accent }} onClick={() => fileRef.current?.click()}>re-drop the screenshot</button> to restore the backdrop.</div>}
-                </div>
-              )}
-              <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { onUnderlayFile(e.target.files?.[0]); e.target.value = ""; }} />
-            </div>
             {!sheetOverlays.length ? null : (
               <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
                 {/* B952 — map overlays live ONLY in the Site Planner and are a SEPARATE feature
@@ -19487,16 +19347,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {overlayPanelOrder(sheetOverlays).map((o) => {
                   const on = selOverlay === o.id;
                   const zf = overlayOrderFlags(sheetOverlays, o.id);
+                  // B848736 — the pinned map reference keeps the OLD aerial's exact Hide/Remove
+                  // wiring: Hide drives the plan-level `showAerial` (it also stands down the live
+                  // basemap tiles — B688864), never its own `visible` field, and Remove clears the
+                  // same "hide" preference (B719778) so a future map-captured reference on this plan
+                  // isn't born invisible.
+                  const isAerialRow = !!o.fromMap;
+                  const hideOn = isAerialRow ? showAerial : o.visible !== false;
+                  const toggleHide = isAerialRow ? () => setShowAerial((v) => !v) : () => patchOverlay(o.id, { visible: o.visible === false });
+                  const removeRow = () => { removeOverlay(o.id); if (isAerialRow) setShowAerial(true); };
                   return (
-                    <div key={o.id} data-testid={`reference-row-${o.id}`} data-reference-band={overlayBand(o)} style={{ border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: SURF_RAISED }}>
+                    <div key={o.id} data-testid={`reference-row-${o.id}`} data-reference-band={overlayBand(o)} data-reference-frommap={isAerialRow ? "1" : undefined} style={{ border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: SURF_RAISED }}>
                       {/* Filename gets its own full-width row (B578) and WRAPS instead of truncating, so a long
                           sheet name is fully readable; the hide / lock / remove controls drop to their own row. */}
-                      <button style={{ ...chip, width: "100%", textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.35, borderColor: on ? PAL.accent : "var(--border-default)", color: on ? PAL.accent : PAL.ink }} title={`${o.name} — right-click for Copy, Duplicate, z-order, Lock, Align to base`} onClick={() => setSelOverlay(on ? null : o.id)} onContextMenu={(e) => onOverlayContext(e, o.id)}>{o.name}</button>
+                      <button style={{ ...chip, width: "100%", textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.35, borderColor: on ? PAL.accent : "var(--border-default)", color: on ? PAL.accent : PAL.ink }} title={isAerialRow ? `${o.name} — the map capture; always beneath everything else` : `${o.name} — right-click for Copy, Duplicate, z-order, Lock, Align to base`} onClick={() => setSelOverlay(on ? null : o.id)} onContextMenu={(e) => onOverlayContext(e, o.id)}>{o.name}</button>
                       {/* Hide / lock / remove — one shared square icon style (B574) so the three render identically. */}
                       <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
-                        <button style={{ ...iconBtn, color: o.visible === false ? PAL.muted : PAL.ink }} title={o.visible === false ? "Show overlay" : "Hide overlay"} onClick={() => patchOverlay(o.id, { visible: o.visible === false })}>{o.visible === false ? <EyeOffIcon /> : <EyeIcon />}</button>
+                        <button style={{ ...iconBtn, color: hideOn ? PAL.ink : PAL.muted }} title={hideOn ? "Hide" : "Show"} onClick={toggleHide}>{hideOn ? <EyeIcon /> : <EyeOffIcon />}</button>
                         <button style={iconBtn} title={o.locked ? "Unlock" : "Lock"} onClick={() => patchOverlay(o.id, { locked: !o.locked })}>{o.locked ? <LockIcon /> : <UnlockIcon />}</button>
-                        <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={() => removeOverlay(o.id)}><XIcon /></button>
+                        <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={removeRow}><XIcon /></button>
                       </div>
                       {on && (
                         <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
@@ -19513,16 +19382,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               onBlur={() => setOvEditFor(o.id, { opacityText: null })} />
                             <span style={{ fontSize: 11, color: PAL.muted }}>%</span>
                           </label>
+                          {/* B848736 — the pinned map reference never rotates: it's placed true-to-scale
+                              and axis-aligned from the map capture, and rotating it would be exactly the
+                              kind of manual transform "Georeferencing survives" rules out. */}
+                          {!isAerialRow && (
                           <label style={ovRow}><span style={{ width: 48 }}>Rotate</span>
                             <RotationStepper value={o.rotation || 0} disabled={!!o.locked} disabledReason="Unlock this drawing to rotate it" data-testid="overlay-rotation"
                               onCommit={(deg) => patchOverlay(o.id, { rotation: deg })}
                               onStep={(d) => patchOverlay(o.id, { rotation: normalizeDeg((o.rotation || 0) + d) })} />
                           </label>
+                          )}
                           {/* Numeric width — kept ONLY for image overlays (B577). A PDF carries a `sheet`
                               (intrinsic inches) so the scale picker below owns its sizing and Width is redundant;
                               a raster (PNG/JPG) has no physical inch dimension, so the scale picker can't apply
-                              and this stays its one direct numeric size + ±10% nudge control. */}
-                          {!o.sheet && (
+                              and this stays its one direct numeric size + ±10% nudge control. Excluded for the
+                              pinned map reference too — resizing it would fight its true-to-scale placement. */}
+                          {!o.sheet && !isAerialRow && (
                             <label style={ovRow}><span style={{ width: 48 }}>Width</span>
                               {/* onFocus pushes ONE history frame per width-edit session (patchOverlay runs
                                   with hist=false so live typing doesn't flood the stack) — same coalescing as
@@ -19552,12 +19427,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               {!overlayPageReady(o) && <span style={{ fontSize: 10 }}>re-add to change page</span>}
                             </div>
                           )}
+                          {/* B848736 — the pinned map reference keeps the OLD aerial's exact Calibrate
+                              affordance: a single disabled chip with the same explanation, instead of the
+                              ordinary Trace-a-length / Align-to-map pair (it's already to scale). */}
+                          {isAerialRow ? (
+                            <button style={{ ...chip, opacity: 0.55, cursor: "not-allowed" }} disabled
+                              title="This aerial came from the map — it's already to scale, so manual calibration is disabled">Calibrate</button>
+                          ) : (
                           <div style={{ display: "flex", gap: 6 }}>
                             <button style={{ ...chip, flex: 1 }} title="Click two ends of a known dimension on the drawing, then enter its real length" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "trace", pts: [] }); }}>Trace a length</button>
                             <button style={{ ...chip, flex: 1 }} title="Click a point on the drawing then its spot on the map; repeat for 2+ pairs, then Apply (moves, rotates & scales; 3+ pairs = robust best-fit + residual)" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "align", pts: [] }); }}>Align to map</button>
                           </div>
+                          )}
                           {/* B654: above/below moved into the panel (the right-click menu keeps them too).
-                              NEW-2 — these order a reference against the OTHER references, within its band. */}
+                              NEW-2 — these order a reference against the OTHER references, within its band.
+                              zf.atFront/atBack already read true for the pinned map reference (overlayOrderFlags),
+                              so both grey out with no extra check here. */}
                           <div style={{ display: "flex", gap: 6 }}>
                             <button style={{ ...chip, flex: 1, opacity: zf.atFront ? 0.5 : 1 }} disabled={zf.atFront} title="Draw this overlay above the other overlays" onClick={() => reorderOverlay(o.id, "front")}>Bring to front</button>
                             <button style={{ ...chip, flex: 1, opacity: zf.atBack ? 0.5 : 1 }} disabled={zf.atBack} title="Draw this overlay beneath the other overlays" onClick={() => reorderOverlay(o.id, "back")}>Send to back</button>
@@ -19565,11 +19450,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           {/* NEW-2 — the cross-layer control the owner asked for. Off by default: the usual
                               job is tracing over a scanned plan, where your own property line has to stay on
                               top. Turn it on for an exhibit you're working ON and the whole reference —
-                              including its resize corners — comes over the parcel and the site elements. */}
+                              including its resize corners — comes over the parcel and the site elements.
+                              B848736 — hidden for the pinned map reference: it always renders beneath
+                              everything, including the parcel, and never promotes. */}
+                          {!isAerialRow && (
                           <label style={{ ...ovRow, cursor: "pointer" }} title="Draw this overlay over the parcel boundary, the setback ring and the site elements instead of underneath them">
                             <input type="checkbox" data-testid={`reference-above-${o.id}`} checked={overlayBand(o) === "above"} onChange={(e) => toggleOverlayBand(o.id, e.target.checked)} />
                             <span>{CROSS_BAND_FRONT}</span>
                           </label>
+                          )}
                           {/* B654: per-sheet white knockout — re-renders the page, so it needs a PDF source */}
                           {overlayPageReady(o) && (   /* NEW-5(ii) — the same "live or re-openable" question, one helper */
                             <label style={{ ...ovRow, cursor: "pointer" }} title="Make the sheet's white paper transparent so the map shows through the linework">
@@ -19677,12 +19566,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <div style={{ display: "flex", gap: 6 }}>
                             {/* Resize THIS drawing to ~60% of the current view and recentre it — the
                                 one-click rescue when a drawing came in far too big/small (then set the
-                                real scale above). Distinct from "Fit view", which zooms the canvas. */}
+                                real scale above). Distinct from "Fit view", which zooms the canvas.
+                                B848736 — never offered for the pinned map reference (would fight its
+                                true-to-scale placement, same reason Width/Rotate are hidden above). */}
+                            {!isAerialRow && (
                             <button style={{ ...chip, flex: 1 }} title="Resize this drawing to fit your current view (use when it came in far too big or small), then set the real scale above"
                               onClick={() => { const f = Math.max(0.01, ((size.w / view.ppf) * 0.6) / Math.max(1, o.imgW)); const vc = p2fStatic(size.w / 2, size.h / 2); patchOverlay(o.id, { ftPerPx: f, x: vc.x - (o.imgW * f) / 2, y: vc.y - (o.imgH * f) / 2 }); }}>Size to view</button>
+                            )}
                             <button style={{ ...chip, flex: 1 }} title="Zoom the canvas to fit everything" onClick={requestFit}>Fit view</button>
                           </div>
+                          {/* B848736 — item 4: on a georeferenced plan the live map tiles ARE the aerial,
+                              so the static image (this row) stands down while they're on — matching the
+                              old aerial card's exact note. */}
+                          {isAerialRow && origin && basemapOn && showAerial && (
+                            <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45 }}>Hidden while the live map basemap is on — the basemap IS the aerial there.</div>
+                          )}
                         </div>
+                      )}
+                      {/* B848736 — a remote fetch failure (the map-captured reference loads straight
+                          from the GIS export endpoint, not a locally-cached raster) is shown regardless
+                          of whether the row is expanded, mirroring the old aerial card's error banner. */}
+                      {isAerialRow && overlayLoadErr[o.id] === "remote" && (
+                        <div style={{ fontSize: 11, color: PAL.accent, marginTop: 6, lineHeight: 1.45 }}>Aerial image didn't load from the source. Your boundary and tools still work — go back to the map and re-pick the site, or drop a screenshot here instead.</div>
                       )}
                     </div>
                   );
@@ -21590,7 +21495,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!el) return;
     const w = el.scrollWidth + 40;
     setCalibBadgeW((prev) => (Math.abs(prev - w) > 1 ? w : prev));
-  }, [calibrationState, underlay]);
+  }, [calibrationState, mapRef]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "var(--planner-panel)",
@@ -21931,24 +21836,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 attribute instead of re-emitting every host element. It is undefined at rest and on
                 every export pass, so nothing outside a live pan sees a transform at all. */}
             <g transform={panT}>
-              {/* aerial underlay (drawn beneath everything) — hidden until you
-                  click a parcel or toggle it on, so it doesn't fill the canvas by default */}
-              {showAerial && underlay && !(origin && basemapOn) && (() => {
-                const tl = f2p({ x: underlay.x, y: underlay.y });
-                const sy = underlay.ftPerPxY || underlay.ftPerPx;
-                const w = underlay.imgW * underlay.ftPerPx * rppf;
-                const h = underlay.imgH * sy * rppf;
-                return <image href={underlay.src} x={tl.x} y={tl.y} width={w} height={h}
-                  opacity={underlay.opacity} preserveAspectRatio="none"
-                  style={{ cursor: tool === "select" && !underlay.locked ? "move" : "crosshair" }}
-                  pointerEvents={underlay.locked ? "none" : "auto"}
-                  onError={() => { setUnderlayErr(true); setUnderlayLoading(false); }} onLoad={() => { setUnderlayErr(false); setUnderlayLoading(false); }}
-                  onPointerDown={startMoveUnderlay} />;
-              })()}
-
               {/* site-plan overlays (B72) — placed PDF/image backdrops in feet space, above the
-                  basemap/underlay; shown even with the basemap on (the point is to overlay onto
-                  the aerial). NEW-2 — this is the DEFAULT "below" band: beneath the parcel, the
+                  basemap. NEW-2 — this is the DEFAULT "below" band: beneath the parcel, the
                   setback ring, the elements and the markups, so your own property line stays
                   legible over a scanned plan. A reference the user has explicitly promoted paints
                   from the SECOND pass further down (overlayBands.above). The selection outline,
@@ -23263,7 +23152,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </div>
 
           {/* empty state */}
-          {parcels.length === 0 && els.length === 0 && !underlay && (
+          {parcels.length === 0 && els.length === 0 && !sheetOverlays.length && (
             <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
               <div style={{ textAlign: "left", color: PAL.muted, background: "var(--surface-overlay)", padding: "20px 24px", borderRadius: 14, border: `1px solid ${PAL.panelLine}`, boxShadow: "0 8px 32px rgba(28,25,20,0.08)", maxWidth: 380 }}>
                 <div style={{ fontSize: 14.5, fontWeight: 700, color: PAL.ink, marginBottom: 10 }}>Start your site</div>
@@ -23276,7 +23165,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     in Parcel tools ▾, right here. */}
                 {[
                   ["1", <><b>Click a lot on the map</b> — county records (Parcel tools ▾, right rail) — or add one by address,</>],
-                  ["2", <>or drop a <b>screenshot underlay</b> and calibrate it,</>],
+                  ["2", <>or drop a <b>screenshot reference</b> and calibrate it,</>],
                   ["3", <>or draw one yourself (Parcel tools ▾ → Draw new parcel).</>],
                 ].map(([n, body]) => (
                   <div key={n} style={{ display: "flex", gap: 10, alignItems: "baseline", fontSize: 12.5, lineHeight: 1.55, marginBottom: 5 }}>
@@ -23298,19 +23187,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
           )}
 
-          {/* aerial loading indicator (not while the live basemap stands in for the captured underlay) */}
-          {showAerial && underlayLoading && !(origin && basemapOn) && (
-            <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", background: "rgba(25,22,19,0.92)", color: "#fff", padding: "7px 15px", borderRadius: 99, fontSize: 12.5, fontWeight: 500, pointerEvents: "none", display: "flex", alignItems: "center", gap: 9, boxShadow: "0 6px 22px rgba(0,0,0,0.28)" }}>
-              <span style={{ width: 8, height: 8, borderRadius: "50%", background: PAL.ember, display: "inline-block", animation: "pf-pulse 1.1s ease-in-out infinite" }} />
-              Loading aerial…
-            </div>
-          )}
-
           {/* calibration / accuracy badge (bottom-left; B609 removed the status bar so the badge now floats 40px above the canvas edge) */}
           {(() => {
             const cfg = {
               georef: { bg: "rgba(22,101,52,0.92)", dot: "#4ade80", text: "● Scaled · county GIS", sub: null },
-              calibrated: { bg: "rgba(22,101,52,0.92)", dot: "#4ade80", text: "● Scaled · calibrated", sub: underlay ? `1 px = ${f2(underlay.ftPerPx)} ft` : null },
+              calibrated: { bg: "rgba(22,101,52,0.92)", dot: "#4ade80", text: "● Scaled · calibrated", sub: mapRef ? `1 px = ${f2(mapRef.ftPerPx)} ft` : null },
               drawn: { bg: "rgba(40,37,33,0.92)", dot: "#cbd5e1", text: "● True scale · drawn in feet", sub: null },
               uncalibrated: { bg: "rgba(180,83,9,0.95)", dot: "#fbbf24", text: "▲ Not calibrated", sub: "click to calibrate" },
             }[calibrationState];
@@ -23322,7 +23203,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // an ellipsis instead of overflowing the pane. Wide panes keep the original layout.
             const badgeMaxW = calibPlace.maxWidth ?? undefined;
             return (
-              <div onClick={warn ? () => { setShowAerial(true); setLeftPanel("references"); setOvCalib({ target: "underlay", kind: "trace", pts: [] }); } : undefined}
+              <div onClick={warn && mapRef ? () => { setShowAerial(true); setLeftPanel("references"); setSelOverlay(mapRef.id); setOvCalib({ id: mapRef.id, kind: "trace", pts: [] }); } : undefined}
                 style={{ position: "absolute", left: calibPlace.left, bottom: calibPlace.bottom, maxWidth: badgeMaxW, display: "flex", alignItems: "center", gap: 8, background: cfg.bg, color: "#fff", padding: "5px 11px", borderRadius: 99, fontSize: 11.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.22)", cursor: warn ? "pointer" : "default", zIndex: MAP_CHROME_Z.furniture, overflow: "hidden" }}>
                 <span style={{ width: 7, height: 7, borderRadius: 99, background: cfg.dot, flex: "none", animation: warn ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
                 <span ref={calibBadgeRef} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -23946,7 +23827,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           <div style={{ flex: 1 }} />
           {tool === "measure" && calibrationState === "uncalibrated" && (
-            <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, padding: "8px 6px 0", fontWeight: 600 }}>⚠ Underlay isn't calibrated — distances may be wrong.</div>
+            <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, padding: "8px 6px 0", fontWeight: 600 }}>⚠ Aerial isn't calibrated — distances may be wrong.</div>
           )}
         </div>
 
@@ -27654,6 +27535,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // greying matches what the ops actually do; crossing the plan is the separate toggle below.
         const { atFront, atBack } = overlayOrderFlags(sheetOverlays, ovMenu.id);
         const isAbove = overlayBand(o) === "above";
+        const isAerialRow = !!o.fromMap; // B848736 — the pinned map reference: no promote, no align (see the panel row for the full rationale)
         const locked = !!o.locked, hasParcel = parcels.length > 0;
         const MOD = (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "")) ? "⌘" : "Ctrl+";
         const hdr = (top) => ({ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: top ? "8px 8px 6px" : "4px 8px 6px", ...(top ? { borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 } : {}) });
@@ -27673,12 +27555,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <div style={hdr(true)}>Arrange</div>
             {item({ text: "Bring to front", dis: atFront, on: () => { reorderOverlay(ovMenu.id, "front"); setOvMenu(null); } })}
             {item({ text: "Send to back", dis: atBack, on: () => { reorderOverlay(ovMenu.id, "back"); setOvMenu(null); } })}
-            {item({ text: isAbove ? CROSS_BAND_BEHIND : CROSS_BAND_FRONT, title: isAbove ? "Put this overlay back under the parcel and the site elements" : "Lift this overlay over the parcel boundary, the setback ring and the site elements", on: () => { toggleOverlayBand(ovMenu.id, !isAbove); setOvMenu(null); } })}
+            {!isAerialRow && item({ text: isAbove ? CROSS_BAND_BEHIND : CROSS_BAND_FRONT, title: isAbove ? "Put this overlay back under the parcel and the site elements" : "Lift this overlay over the parcel boundary, the setback ring and the site elements", on: () => { toggleOverlayBand(ovMenu.id, !isAbove); setOvMenu(null); } })}
             <div style={hdr(true)}>Place</div>
             {item({ text: locked ? "Unlock" : "Lock", hint: locked ? "🔒" : "🔓", on: () => { patchOverlay(ovMenu.id, { locked: !locked }); setOvMenu(null); } })}
-            {item({ text: "Align to base edge…", dis: locked || !hasParcel, title: locked ? "Unlock to align" : (!hasParcel ? "Draw or load a parcel first" : "Click a parcel edge to snap this drawing parallel to it"), on: () => { setSelOverlay(ovMenu.id); setOvAlignBase(ovMenu.id); setOvMenu(null); flashWarn("Click a parcel boundary to align this drawing parallel to it.", 6000); } })}
+            {item({ text: "Align to base edge…", dis: locked || !hasParcel || isAerialRow, title: isAerialRow ? "This aerial came from the map — it's already to scale, so manual alignment is disabled" : locked ? "Unlock to align" : (!hasParcel ? "Draw or load a parcel first" : "Click a parcel edge to snap this drawing parallel to it"), on: () => { setSelOverlay(ovMenu.id); setOvAlignBase(ovMenu.id); setOvMenu(null); flashWarn("Click a parcel boundary to align this drawing parallel to it.", 6000); } })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
-            {item({ text: "Delete", hint: "Del", danger: true, on: () => { removeOverlay(ovMenu.id); setOvMenu(null); } })}
+            {item({ text: "Delete", hint: "Del", danger: true, on: () => { removeOverlay(ovMenu.id); if (isAerialRow) setShowAerial(true); setOvMenu(null); } })}
           </ContextMenu>
         );
       })()}

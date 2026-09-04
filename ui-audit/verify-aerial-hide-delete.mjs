@@ -1,6 +1,15 @@
 /* B688864 — LIVE proof that the References panel's "Aerial backdrop" Hide (eye) and Remove (✕)
  * controls actually change what's on screen, and that the change PERSISTS across a reload.
  *
+ * B848736 (2026-09) — the panel this drives was rewired: the aerial is no longer a separate
+ * `underlay` field/card, it is a bottom-pinned `sheetOverlays` record (`fromMap:true`, fixed id
+ * `legacy-aerial` when folded from a legacy plan) inside the ONE References row list. The Hide/
+ * Remove MECHANISM this harness proves (`settings.aerialHidden` via `lib/aerialVisibility.js`,
+ * gating the live basemap's own `want`) is UNCHANGED and still exactly what's under test — only
+ * the row's DOM shape moved: the eye icon's title is now the generic `"Hide"`/`"Show"` every
+ * reference row carries (not `"Hide aerial"`/`"Show aerial"`), and there is no more separate
+ * "Add an aerial" empty state (a plan with no aerial just shows zero reference rows).
+ *
  * THE BUG (AUDIT-FIRST, measured across the 54 production plans in Supabase project
  * lyeqzkuiwngunutlkkmi before a line of fix code was written): 48 of them carry `sites.data.underlay`
  * and every one of the 48 has `fromMap: true` — captured from the Map picker, which always sets a
@@ -120,9 +129,13 @@ await page.screenshot({ path: `${OUT}aerial-hide-delete-1-initial.png` });
 
 await openReferencesRow();
 
+// B848736 — the pinned map reference's row (scoping to it, not the whole page, so a page with a
+// second, ordinary overlay could never make these selectors ambiguous).
+const aerialRow = page.locator('[data-testid="reference-row-legacy-aerial"]');
+
 // ── 2. Hide removes the live tiles immediately. ──
-const hideBtn = page.locator('button[title="Hide aerial"]');
-log(await hideBtn.count() > 0, `Hide aerial button is present`);
+const hideBtn = aerialRow.locator('button[title="Hide"]');
+log(await hideBtn.count() > 0, `Hide button is present`);
 await hideBtn.first().click();
 await page.waitForTimeout(600);
 const afterHide = await liveTileCount();
@@ -135,8 +148,8 @@ await page.waitForTimeout(2000);
 const afterReloadHidden = await liveTileCount();
 log(afterReloadHidden === 0, `Hide SURVIVES a reload — tiles still absent (${afterReloadHidden})`);
 await openReferencesRow();
-const showBtnAfterReload = page.locator('button[title="Show aerial"]');
-log(await showBtnAfterReload.count() > 0, `the eye icon reads "Show aerial" after reload (state round-tripped through storage)`);
+const showBtnAfterReload = aerialRow.locator('button[title="Show"]');
+log(await showBtnAfterReload.count() > 0, `the eye icon reads "Show" after reload (state round-tripped through storage)`);
 
 // ── 4. Show brings the live tiles back. ──
 await showBtnAfterReload.first().click();
@@ -145,14 +158,16 @@ const afterShow = await liveTileCount();
 log(afterShow > 0, `Show restores the live basemap tiles (${afterShow} tile node(s))`);
 
 // ── 5. Remove clears the row to the empty state AND removes the live tiles. ──
-const removeBtn = page.locator('button[title="Remove"]');
+const removeBtn = aerialRow.locator('button[title="Remove"]');
 log(await removeBtn.count() > 0, `Remove button is present`);
 await removeBtn.first().click();
 await page.waitForTimeout(600);
 const afterRemove = await liveTileCount();
-const emptyStateShown = await page.locator('text=Add an aerial').count();
+// B848736 — no more separate "Add an aerial" empty state; a plan with no aerial (and, here,
+// nothing else placed) just carries zero reference rows in the unified list.
+const rowsAfterRemove = await page.locator('[data-testid^="reference-row-"]').count();
 log(afterRemove === 0, `Remove also silences the live basemap tiles, not just the archived snapshot (${afterRemove})`);
-log(emptyStateShown > 0, `the row reverts to the empty ("Add an aerial") state`);
+log(rowsAfterRemove === 0, `the row reverts to the empty state (zero reference rows)`);
 await page.screenshot({ path: `${OUT}aerial-hide-delete-3-removed.png` });
 
 // ── 6. Persists across a reload — Remove sticks too. ──
@@ -160,9 +175,9 @@ await page.reload({ waitUntil: "load" });
 await page.waitForTimeout(2000);
 const afterReloadRemoved = await liveTileCount();
 await openReferencesRow(); // the panel doesn't reopen itself — must look before concluding "gone"
-const emptyStateAfterReload = await page.locator('text=Add an aerial').count();
+const rowsAfterReloadRemoved = await page.locator('[data-testid^="reference-row-"]').count();
 log(afterReloadRemoved === 0, `Remove SURVIVES a reload — no live tiles (${afterReloadRemoved})`);
-log(emptyStateAfterReload > 0, `Remove SURVIVES a reload — still the empty state, not a regenerated aerial`);
+log(rowsAfterReloadRemoved === 0, `Remove SURVIVES a reload — still zero reference rows, not a regenerated aerial`);
 
 console.log(fail ? `\n${fail} check(s) failed` : "\nAll checks passed");
 await ctx.close();

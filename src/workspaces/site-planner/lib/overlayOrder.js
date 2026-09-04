@@ -33,11 +33,37 @@ export const OVERLAY_BAND_ABOVE = "above";
 /** Which band a reference record draws in. Absent/false/anything-but-true → the default band. */
 export const overlayBand = (o) => (o && o.aboveParcel === true ? OVERLAY_BAND_ABOVE : OVERLAY_BAND_BELOW);
 
-/** Split a reference list into its two bands, each keeping its relative array order. */
+/* NEW-1 (B848736) — the map-captured reference (`fromMap: true`, minted by MapFinder's site
+ * creation and by siteModel.js's fold of a legacy `underlay`) is PINNED: it renders beneath
+ * every other "below"-band reference, matching the historic aerial underlay's absolute-backdrop
+ * position. It is the only reference that behaves this way — an ordinary reference the user drops
+ * still reorders freely — so this is a per-record flag, not a third band. Front/back and the
+ * above-parcel promote are inert for a pinned record (reorderOverlays/setOverlayBand below), and
+ * overlayOrderFlags reports it as already at both ends so the panel/menu grey their controls with
+ * no extra plumbing at the call sites. */
+export const isPinnedMapReference = (o) => !!(o && o.fromMap === true);
+
+/** Stable-sort a "below"-band group so every pinned record leads (their own relative order
+ * preserved) — the sub-ordering `splitOverlayBands`/`overlayDrawOrder` enforce alongside the
+ * band grouping. Returns the SAME array reference when it's already pin-leading. */
+function pinLeading(group) {
+  let seenUnpinned = false, needsMove = false;
+  for (const o of group) {
+    if (isPinnedMapReference(o)) { if (seenUnpinned) { needsMove = true; break; } }
+    else seenUnpinned = true;
+  }
+  if (!needsMove) return group;
+  const pinned = group.filter(isPinnedMapReference);
+  const rest = group.filter((o) => !isPinnedMapReference(o));
+  return pinned.concat(rest);
+}
+
+/** Split a reference list into its two bands, each keeping its relative array order (pinned
+ * map references pulled to the front of "below"). */
 export function splitOverlayBands(list) {
   const below = [], above = [];
   for (const o of arr(list)) (overlayBand(o) === OVERLAY_BAND_ABOVE ? above : below).push(o);
-  return { below, above };
+  return { below: pinLeading(below), above };
 }
 
 /** True when the list is already band-grouped (no "below" record after an "above" one). */
@@ -50,10 +76,23 @@ export function overlayBandsGrouped(list) {
   return true;
 }
 
-/** The canonical draw order, bottom → top. Identity when the list is already grouped. */
+/** True when every pinned "below" record already leads the band (no non-pinned record appears
+ * before a pinned one) — the sub-ordering half of the "already correctly ordered" fast path. */
+function belowPinLeading(list) {
+  let seenUnpinned = false;
+  for (const o of arr(list)) {
+    if (overlayBand(o) === OVERLAY_BAND_ABOVE) continue;
+    if (isPinnedMapReference(o)) { if (seenUnpinned) return false; }
+    else seenUnpinned = true;
+  }
+  return true;
+}
+
+/** The canonical draw order, bottom → top. Identity when the list is already grouped (band AND
+ * pin-leading). */
 export function overlayDrawOrder(list) {
   const a = arr(list);
-  if (overlayBandsGrouped(a)) return a;
+  if (overlayBandsGrouped(a) && belowPinLeading(a)) return a;
   const { below, above } = splitOverlayBands(a);
   return below.concat(above);
 }
@@ -70,17 +109,21 @@ export function overlayOrderFlags(list, id) {
   for (const [band, group] of [[OVERLAY_BAND_BELOW, below], [OVERLAY_BAND_ABOVE, above]]) {
     const index = group.findIndex((o) => o && o.id === id);
     if (index < 0) continue;
-    return { found: true, band, index, count: group.length, atFront: index === group.length - 1, atBack: index === 0 };
+    // A pinned record has nowhere to move TO — report both ends so the panel/menu's existing
+    // atFront/atBack-greyed buttons read as disabled with no per-call-site fromMap check.
+    const pinned = isPinnedMapReference(group[index]);
+    return { found: true, band, index, count: group.length, atFront: pinned || index === group.length - 1, atBack: pinned || index === 0, pinned };
   }
-  return { found: false, band: null, index: -1, count: 0, atFront: true, atBack: true };
+  return { found: false, band: null, index: -1, count: 0, atFront: true, atBack: true, pinned: false };
 }
 
-/** Move a reference to the front / back of its own band. Same array reference on a no-op. */
+/** Move a reference to the front / back of its own band. Same array reference on a no-op.
+ * A pinned map reference never moves (it stays leading its band — see isPinnedMapReference). */
 export function reorderOverlays(list, id, mode) {
   const a = arr(list);
   if (mode !== "front" && mode !== "back") return a;
   const flags = overlayOrderFlags(a, id);
-  if (!flags.found) return a;
+  if (!flags.found || flags.pinned) return a;
   const already = mode === "front" ? flags.atFront : flags.atBack;
   if (already && overlayBandsGrouped(a)) return a;
   const { below, above } = splitOverlayBands(a);
@@ -94,13 +137,14 @@ export function reorderOverlays(list, id, mode) {
  * Promote / demote ONE reference across the parcel. The moved record lands at the FRONT of its
  * new band — you promoted it to see (or grab) it, so burying it under its new neighbours would
  * miss the point — and the band it left keeps its own order untouched.
- * Same array reference when the record is missing or already in that band.
+ * Same array reference when the record is missing, already in that band, or pinned (a map
+ * reference always renders beneath everything, including the parcel — it never promotes).
  */
 export function setOverlayBand(list, id, above) {
   const a = arr(list);
   const want = above ? OVERLAY_BAND_ABOVE : OVERLAY_BAND_BELOW;
   const cur = a.find((o) => o && o.id === id);
-  if (!cur) return a;
+  if (!cur || isPinnedMapReference(cur)) return a;
   if (overlayBand(cur) === want && overlayBandsGrouped(a)) return a;
   const moved = { ...cur, aboveParcel: !!above };
   const rest = a.filter((o) => o && o.id !== id);

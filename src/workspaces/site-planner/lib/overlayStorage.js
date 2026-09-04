@@ -50,30 +50,6 @@ export async function uploadOverlayFile(siteId, overlayId, file) {
   return error ? null : { key };
 }
 
-// Aerial underlay (B474 review #5) — same bucket + uid-first RLS, distinct path. The underlay is the one
-// raster that previously had NO cross-device / post-eviction recovery (it lived only in this device's
-// IndexedDB), so back it up like overlays/drawings. We store the DOWNSCALED data-URL the planner actually
-// renders (not the original file) so the restored raster matches the record's saved imgW/imgH + ftPerPx.
-export const siteUnderlayKey = (uid, siteId, ext = "png") =>
-  `${uid}/site-underlay/${siteId || "unfiled"}/underlay.${ext}`;
-
-/* Upload the underlay's downscaled data-URL so its backdrop can be rebuilt on another device or after a
- * local IndexedDB eviction; returns { key, ext } or null (no client / not signed in / oversize / bad input
- * / error → caller keeps the local copy, nothing regresses). */
-export async function uploadUnderlayDataUrl(siteId, dataUrl) {
-  if (!supabase || typeof dataUrl !== "string" || !dataUrl.startsWith("data:image/")) return null;
-  let blob;
-  try { blob = await (await fetch(dataUrl)).blob(); } catch (_) { return null; }
-  if (!blob || blob.size > MAX_BYTES) return null;
-  const ext = blob.type === "image/jpeg" ? "jpg" : "png";
-  const user = await getUser();
-  const uid = user && user.id;
-  if (!uid) return null;
-  const key = siteUnderlayKey(uid, siteId, ext);
-  const { error } = await supabase.storage.from(BUCKET).upload(key, blob, { contentType: blob.type || "image/png", upsert: true });
-  return error ? null : { key, ext };
-}
-
 /* Classify a Storage download failure so a caller can tell "the object is GONE (re-add it)" from
  * "a transient network/5xx blip (retry)". Supabase Storage's download endpoint returns HTTP 400 with
  * an "Object not found" message (NOT a 404) for a missing key — confirmed live against prod — so 400
