@@ -25,9 +25,11 @@
  *     `storage.js`) — same as above: only the `sites` row via `cloudUpsert`/`siteRowFor`. No
  *     separate gap; covered by the same `refetchReplace` fix.
  *   · Parcel split (`performSplit`) and parcel combine/merge (`mergeParcels`) — both call
- *     `pushHistory()` before writing (kind defaults to "edit", not "split"/"merge" specifically —
- *     a labeling-quality gap the module's own header calls out as deliberately deferred future
- *     work, not an `op_kind: "unknown"` bug).
+ *     `pushHistory()` before writing. `mergeParcels` now passes `"merge"` explicitly (a real
+ *     perf-investigation session wired it while measuring the owner's "merging parcels lags"
+ *     report — the labeling was a deferred-future-work note, not an `op_kind: "unknown"` bug, and
+ *     costs nothing once you're already touching the call site). `performSplit` still defaults to
+ *     "edit" — split remains unwired.
  *   · Deed promotion → parcel (`promoteDeedToParcel`, `plannerPlacementCmds.js`) — calls
  *     `ctx.pushHistory()` before `ctx.addParcel()`. Covered.
  *   · JSON site import (`importJSONFile`) — REMOVED (B765984, owner: "no one should really be
@@ -135,6 +137,15 @@ describe("B727936 (widened) · wiring — every non-gesture reconcile seam opens
       expect(apply, `${line} must still call applySnapshot`).toBeGreaterThan(-1);
       expect(begin).toBeLessThan(apply);
     }
+  });
+
+  it("mergeParcels passes the real \"merge\" op kind, not the generic \"edit\" fallback", () => {
+    const body = slice(
+      "const mergeParcels = () => {",
+      "\n  // Remove ONE parcel by id (B598)",
+    );
+    expect(body.includes('pushHistory("merge")'), "mergeParcels must call pushHistory(\"merge\") so its rows carry a real op_kind").toBe(true);
+    expect(body.includes("pushHistory();"), "mergeParcels must not also fall back to the bare pushHistory()").toBe(false);
   });
 
   it("the Standards-apply toast's own Undo button opens a fresh operation (and is now on the undo stack)", () => {
