@@ -5,20 +5,22 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-08-31._
+_Last updated: 2026-09-04._
 
-## 🔐 One small GitHub setting still open, and a closed hunt for another (B825232–B825234)
+## 🔐 One small GitHub setting still open, and two closed hunts (B825232–B825234)
 
-> **Not urgent, and nothing is broken while it waits — it just removes one spot where a Claude
-> session has to do by hand what a setting would let happen automatically.**
+> **Not urgent, and nothing is broken while it waits — it just means a session has to merge a green
+> PR by hand instead of GitHub queuing it automatically.**
 
-- [ ] **Authorize `mikeab7/planyr` for the Cowork session type**, so the Cowork thread (the one that
-      drives your actual signed-in browser to check things a sandbox can't reach — sign-in-required
-      checks, live map data, and so on) can push its own results straight into the project instead of
-      relaying them through a chat message that a different session then has to type in by hand. Right
-      now its connection to GitHub refuses to let it save anything to this project directly, so every
-      one of those checks has to be handed off and re-entered — which is exactly how **79 of those
-      checks piled up waiting** before this was noticed. **Soon, not urgent.**
+- **Authorizing `mikeab7/planyr` for the Cowork session type — closed, turned out unnecessary, not
+  done (2026-09-04).** Nobody flipped a switch; the need went away from two directions at once. (a)
+  No such setting exists — the connector directory has no GitHub entry that grants it, checked
+  2026-08-31. (b) The repository went **public again on 2026-09-03**, so a Cowork session already
+  reads the whole repo directly, no authorization needed. (c) For writes, the working path is the
+  GitHub web editor, driven through your own signed-in browser — and per a new standing rule in
+  `CLAUDE.md` (your call, 2026-09-01), a Cowork session now writes its own live-verify result straight
+  into the ledger itself rather than relaying it through a chat message for a different session to
+  type in. Don't re-open this hunt.
 - **Un-drafting PRs automatically — closed, nothing left to check or flip.** Both repo settings
   ("Workflow permissions: Read and write" and "Allow GitHub Actions to create and approve pull
   requests") were switched on and live re-tested on real PRs (#1246, #1255) — both still came back the
@@ -36,11 +38,13 @@ _Last updated: 2026-08-31._
       one, or it exists but doesn't name `build` as required. If there's no rule: add one requiring the
       `build` check to pass before merging. **Nothing is broken while this waits** — a session just has to
       merge each green PR by hand instead of it happening on its own, same as before this automation existed.
-- [ ] **Three stale throwaway probe branches need deleting** — `claude/verify-pr-auto-ready-throwaway`,
-      `claude/verify-pr-auto-ready-20260831-001137`, and `claude/verify-pr-auto-ready-20260831-015902`.
-      All three are closed PRs' leftover branches from testing the item above; no session's git credentials
-      can delete a remote branch here (`HTTP 403`), and there's no GitHub tool for it either. Harmless
-      clutter, delete whenever convenient from the GitHub branches page.
+- [ ] **Five stale throwaway probe branches need deleting** — `claude/verify-pr-auto-ready-throwaway`,
+      `claude/verify-pr-auto-ready-20260831-001137`, `claude/verify-pr-auto-ready-20260831-015902`,
+      `claude/v438336-retest-create-approve-hg8wde`, and `claude/v438336-verification-y2wyna`. All five
+      are closed-PR leftovers from the un-drafting hunt and its 2026-09-01 token re-check (both closed,
+      above) — none has an open PR. Re-confirmed 2026-09-04: no session's git credentials can delete a
+      remote branch here (`HTTP 403`), and there's still no GitHub tool for it either. Harmless clutter,
+      delete whenever convenient from the GitHub branches page.
 
 ## 👀 One thing only you can check: does the app actually TELL you when it has stopped saving? (V273520 / B484337)
 

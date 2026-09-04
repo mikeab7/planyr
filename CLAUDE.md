@@ -332,6 +332,21 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > rubber stamp, and a session that drains a partial pass says explicitly which parts it is accepting and
 > why (STANDING RULE #2 — no closing an owner-reported symptom on a null still applies here).
 >
+> **⛔ STANDING RULE — A COWORK SESSION RECORDS ITS OWN LIVE VERIFY, DIRECTLY (owner decision, 2026-09-01:
+> "I'm okay with the chat writing to the repo … implement the new rule so you can write that yourself").**
+> When a Cowork session verifies something live — on Michael's own browser, against production — it
+> commits the result straight into the ledger (`VERIFICATION.md` / `BACKLOG.md`) itself, instead of
+> relaying it to a Claude Code session to type in. This **supersedes the inbox-then-drain path above for
+> new checks** — `verification-inbox/` stays only for whatever is already queued in it. Claude Code still
+> owns every line of product code; this is recording, never building. **Why:** a session spun up purely
+> to transcribe one paragraph is the most expensive possible way to write it, and the hand-off fails
+> open — 79 completed live checks once piled up unrecorded because the courier didn't always get sent.
+> **Guardrails:** ledgers and docs only, never product code or a workflow file · never hand-edit a
+> script-generated, drift-checked file (`MAP.md`, `BACKLOG_OPEN.md`) · never commit to `main` while
+> another session is mid-measurement against it (the bundle gate compares against a base ref — moving it
+> mid-flight caused the 2026-08-31 double revert) · the commit message names the Cowork session and the
+> `V#`/`B#` it closes · record only what was observed, never what a session reported.
+
 > **📦 `docs/archive/BACKLOG-DONE.md` / `docs/archive/VERIFICATION-DONE.md` are write-only archives — do NOT read them** unless looking
 > up a specific past item; they are historical record only, and exist so the two live files above stay small.
 
