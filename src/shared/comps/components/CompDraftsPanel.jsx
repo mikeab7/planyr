@@ -68,8 +68,11 @@ function DraftCard({ draft, anchorOverride, armed, onArm, onFocusAnchor, onPromo
           {COMP_TYPES.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
         </select>
       </Field>
-      <Field label="Date" stacked required>
-        <input type="date" value={fields.compDate} onChange={set("compDate")} style={inputStyle} />
+      {/* NEW-5 — Executed is no longer required (comp_date is nullable, validateComp no longer
+          blocks a save on it); this asterisk used to tell a promoter the opposite of what
+          `canPromote` (validateComp, below) actually enforces. */}
+      <Field label="Date" stacked>
+        <input type="date" value={fields.compDate} onChange={set("compDate")} placeholder="optional" style={inputStyle} />
       </Field>
 
       {fields.compType === "land" && (<>
