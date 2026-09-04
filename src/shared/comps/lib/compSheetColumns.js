@@ -408,6 +408,18 @@ export function columnIndex(key) {
   return SHEET_COLUMNS.findIndex((c) => c.key === key);
 }
 
+// NEW-7 — the Save button's label, shared by the desktop sheet and the mobile one so the same fix
+// covers both surfaces at once. The prior template literal (`Save ${n || ""} comp...`.trim())
+// produced a literal DOUBLE SPACE — "Save  comps" — whenever `n` was 0: `.trim()` only strips
+// leading/trailing whitespace, never a gap in the MIDDLE of a string, and a freshly pasted row is
+// never "ready" until its Location is picked, so `n` reads 0 far more often than not. A disabled
+// button with a hole where its count should be reads as broken, not as "nothing to save yet" — so
+// the zero case gets its own honest, complete sentence instead of an empty interpolation.
+export function saveButtonLabel(readyCount) {
+  if (readyCount <= 0) return "Save comps";
+  return `Save ${readyCount} comp${readyCount === 1 ? "" : "s"}`;
+}
+
 /** B986096-HARDENING-9 (owner rule: "hide unused columns entirely") — which of the FULL column
  * list is worth showing given the rows actually on the sheet, as an array of indices into
  * `SHEET_COLUMNS`. "Every column exists on every ROW" (a cell that doesn't apply renders grey

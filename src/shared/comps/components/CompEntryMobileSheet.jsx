@@ -18,7 +18,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "../../ui/controls.jsx";
 import { RADIUS } from "../../ui/radius.js";
 import { FONT_SIZE } from "../../ui/designTokens.js";
-import { SHEET_COLUMNS, columnIndex, cellState, TYPE_OPTIONS } from "../lib/compSheetColumns.js";
+import { SHEET_COLUMNS, columnIndex, cellState, TYPE_OPTIONS, saveButtonLabel } from "../lib/compSheetColumns.js";
 import { mobileSections, neededToSaveColumns, mobileLabel, neededToSaveRemaining, rowStatusText, isRequiredColEmpty } from "../lib/compMobileLayout.js";
 import { compHeadline, draftToComp } from "../lib/comps.js";
 
@@ -465,7 +465,7 @@ export default function CompEntryMobileSheet({
               fontSize: FONT_SIZE.emphasis, fontWeight: 600, fontFamily: "inherit",
               cursor: saving || readyRows.length === 0 ? "default" : "pointer",
             }}>
-            {saving ? "Saving…" : `Save ${readyRows.length || ""} comp${readyRows.length === 1 ? "" : "s"}`.trim()}
+            {saving ? "Saving…" : saveButtonLabel(readyRows.length)}
           </button>
         </div>
       </div>

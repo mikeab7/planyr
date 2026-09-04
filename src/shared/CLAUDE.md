@@ -664,6 +664,55 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   two layouts can never hold two different ideas of what a "comp" is. The paste box is shared
   verbatim (`pasteBoxNode`, computed once, rendered in both branches) — mobile has no separate
   create surface; rows land on a phone the same way they do on desktop (paste, or a map pick).**
+  **⛔ ROUND 16 (B1125024/B1125025/B1125026, second-half adversarial review, 2026-09-03) —
+  KEYBOARD/A11Y HARDENING, AND A LIVE OWNER RETRACTION MID-SESSION. Read before touching
+  `onGridKeyDown`'s Tab branch, `finishEdit`'s reopen check, or either action-cell's tabIndex.**
+  **THE RETRACTION, because it is the reusable lesson:** the round's own bug report first claimed
+  "ZERO cells carry tabindex=0, no keyboard entry point exists" — re-measured mid-session and
+  RETRACTED: that reading was taken with a cell editor mounted (the exact cycle-24 trap — a reading
+  taken while an input is open is not final), the real per-cell roving anchor (exactly ONE
+  `tabIndex="0"` cell at any moment, moving with selection) already existed and worked, and the fix
+  must NEVER add a second one — two simultaneous anchors is worse than the reported bug. **⛔ THE
+  INVARIANT THIS ROUND ENFORCES: EXACTLY ONE ELEMENT IN THE WHOLE GRID CARRIES `tabIndex="0"` AT
+  ANY MOMENT, PROVEN BY A LIVE CENSUS, NOT ASSUMED FROM READING THE HANDLER.** What the retraction
+  independently reconfirmed as real (and what an independent live re-measurement, done BEFORE
+  trusting either version, also found on its own): the grid's own `<div role="grid">` wrapper
+  carried `tabIndex={0}` — a SECOND, non-cell tab stop sitting in front of the active cell's own
+  anchor, so Tab from the paste box landed there first rather than on a data cell. Fixed to
+  `tabIndex={-1}` (still `.focus()`-able programmatically; still receives every bubbled keydown —
+  nothing else changes). The Location column's roving anchor MOVED from its inner `<button>`
+  (previously the only element conditionally at `tabIndex={selected?0:-1}` for that cell) onto the
+  `<td>` itself, matching every other column uniformly — the button is now PERMANENTLY
+  `tabIndex={-1}`, never an independent tab stop; reachable from the focused cell instead via the
+  pre-existing focus-follows-selection effect (unchanged) and `onGridKeyDown`'s pre-existing
+  Enter/typed-character activation (keyed on `selection`, not on `document.activeElement`). The
+  delete ✕ button — previously with NO `tabIndex` attribute at all, hence unconditionally native-
+  tabbable on every row regardless of selection — is `tabIndex={-1}` now; reachable instead via a
+  new **Shift+Delete** shortcut (`removeSelectedRows`, same undo-covered `commitRows` path the
+  mouse click already used) — which itself needed a focus-recovery call (`gridRef.current?.focus()`
+  after committing) because removing the row holding DOM focus drops focus to `<body>`, taking
+  Ctrl/Cmd+Z out of the grid's own `onKeyDown` reach entirely; caught by testing the shortcut
+  end-to-end, not by reasoning about it. Tab/Shift+Tab used to wrap forever at the grid's own edges
+  — in BOTH plain navigation (`onGridKeyDown`) and, separately, the editing commit-and-move path
+  (`finishEdit`'s HARDENING-10 NEW-3 reopen, the MORE commonly hit one since a click/Enter already
+  opens editing) — now let Tab through / skip the reopen at the genuine edge, purely additive
+  alongside the pre-existing `samecell` guard, touching no other `moveDir` shape. ARIA finished:
+  `scope="col"`/`scope="colgroup"` on every header `<th>`, an accessible name +
+  `aria-rowcount`/`aria-colcount` on the grid, `aria-selected` on every cell. **None of this touches
+  `onEditKeyDown`'s commit/blur machinery** — the five-regression Enter/Tab-discards class prior
+  rounds closed stays exactly as HARDENING-15/17 left it. Guard: the ui-audit harness
+  **verify-comp-entry-a11y-close** (27 live checks, incl. a per-scale tabindex census and a
+  dispatch-directly-on-the-open-`<select>` technique for the Shift+Tab-backward case, which routes
+  around a headless-Chromium quirk — a native OS picker popup swallows a synthetic keypress meant
+  for the underlying element — verified as a TEST artifact, not an app defect, by reproducing the
+  identical symptom against an untouched build). Same round: the Save button's
+  `` `Save ${n || ""} comp...`.trim() `` produced a literal double space ("Save  comps") whenever `n`
+  was 0 — `.trim()` never touches a mid-string gap — fixed via one shared `saveButtonLabel(n)` in
+  `compSheetColumns.js` used by BOTH the desktop and mobile Save buttons (the mobile one had the
+  identical bug, independently). And Close (header ✕ + footer button, both surfaces) used to
+  silently discard every unsaved row with no prompt at all — now routes through `requestClose`,
+  arming an inline (never `window.confirm`) "Discard N unsaved comps?" / Keep-editing prompt
+  whenever the sheet holds rows, staying instant/silent when it's empty.
   KML import (B849233) is a SEPARATE staging table, `db/comp_import_drafts.sql`
   (`public.comp_import_drafts`, owner-only RLS — no team visibility at all, unlike `comps` itself,
   until promoted) — `lib/kmlImport.js` is the pure, hand-rolled Placemark parser (a Point is a

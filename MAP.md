@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-04 @ `c94556bd` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-04 @ `93e01e56` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -303,7 +303,7 @@ _663 source files mapped._
 - **`src/shared/comps/lib/comps.js`** — Leasing Comps pure model: $/SF derivation for land/building sale, lease basis normalization (annual NNN default, NNN/gross never blended), compFieldRows (the one empty-field-hides choke point), anchor validation, row<->model mapping
   - _exports_: `ANCHOR_KINDS`, `anchorCountyFlag`, `anchorTeamConflict`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compDateLabel`, `compFieldRows`, `compHeadline`, `compsSummaryBits`, `compToDraft`, `compToRow`, `draftToComp`, `emptyDraft`, `isCompType`, `landPricePerAreaUnit`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `leaseTotalAnnualRent`, `netEffectiveLeaseRate`, `parseLeaseTermYears`, `partyLabels`, `resolveCapTriangle`, `rowToComp`, `sortCompsByRecency`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
 - **`src/shared/comps/lib/compSheetColumns.js`** — pure column model for the comp-entry spreadsheet: per-cell get/set, polymorphic fields, display formatting, fill-down/paste-spill
-  - _exports_: `applyCellEdit`, `BASIS_OPTIONS`, `cellPlaceholder`, `cellState`, `columnIndex`, `computeFlexWidths`, `fillDownColumn`, `formatNumberDisplay`, `frozenLeftOffsets`, `GROUPS`, `matchOption`, `optionsForColumn`, `PERIOD_OPTIONS`, `sanitizeNumericInput`, `SHEET_COLUMNS`, `spillPaste`, `TYPE_OPTIONS`, `UNIT_OPTIONS`, `visibleColumnIndices`, `widthFor`
+  - _exports_: `applyCellEdit`, `BASIS_OPTIONS`, `cellPlaceholder`, `cellState`, `columnIndex`, `computeFlexWidths`, `fillDownColumn`, `formatNumberDisplay`, `frozenLeftOffsets`, `GROUPS`, `matchOption`, `optionsForColumn`, `PERIOD_OPTIONS`, `sanitizeNumericInput`, `saveButtonLabel`, `SHEET_COLUMNS`, `spillPaste`, `TYPE_OPTIONS`, `UNIT_OPTIONS`, `visibleColumnIndices`, `widthFor`
 - **`src/shared/comps/lib/compsStore.js`** — Supabase CRUD for public.comps (team-visible read, owner-only write); every call returns {data,error}, never swallows a failure
   - _exports_: `deleteComp`, `fetchAllComps`, `fetchDeletedComps`, `insertComp`, `insertComps`, `permanentlyDeleteComp`, `restoreComp`, `supabase`, `updateComp`
 - **`src/shared/comps/lib/kmlImport.js`** — pure, hand-rolled KML placemark parsing (B849233): Point/Polygon geometry (a polygon's area-weighted centroid, not a vertex average), plus best-effort description extraction reusing compParse.js's prose parser
@@ -536,7 +536,7 @@ _663 source files mapped._
   - _exports_: `placeContextMenu`
 - **`src/shared/ui/controls.jsx`** — shared control primitives (B657-5B): one radius/padding/typography scale + Button/ToggleChip/IconButton/Field/Section/MenuItem, token-driven, with a threaded `accent` prop so each module keeps its hue.
   - _exports_: `Button`, `CONTROL_RADIUS`, `Field`, `FONT`, `IconButton`, `MenuItem`, `menuPanelStyle`, `MenuTrigger`, `PAD`, `Section`, `SIZE`, `Tab`, `ToggleChip`
-- **`src/shared/ui/dashboardNav.js`** — pure helpers splitting the wordmark's "leave this workspace" click from the breadcrumb's in-module Dashboard action (B1128272)
+- **`src/shared/ui/dashboardNav.js`** — Pure wordmark/crumb Dashboard action+tooltip split (B1128272), so Schedule's header can leave-vs-stay differently.
   - _exports_: `crumbDashboardTitle`, `logoDashboardAction`
 - **`src/shared/ui/designTokens.js`** — B809906 design tokens: spacing (`SPACE`), type scale (`FONT_SIZE`) and standard control heights (`CONTROL_H`) — the audited-value siblings of `radius.js`'s `RADIUS`.
   - _exports_: `CONTROL_H`, `FONT_SIZE`, `SPACE`
