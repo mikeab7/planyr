@@ -3365,7 +3365,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             brand-new account saw no rail at all); it now always renders, since the Comps tab is
             useful with zero sites and zero comps alike — this is the one persistent place to
             browse or add either. */}
-        <div style={{ position: "absolute", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, boxShadow: "0 4px 18px rgba(28,25,20,0.14)", overflow: "hidden",
+        <div data-testid="map-sites-panel" style={{ position: "absolute", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, boxShadow: "0 4px 18px rgba(28,25,20,0.14)", overflow: "hidden",
             // B831777×2/B948496 — the rail must never grow past the viewport: it can hold a
             // long site list, several site plans, or an open comp form, and any one of those
             // used to just push the panel off-screen with no way to reach what fell below the
@@ -3399,14 +3399,20 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               // label/value rows wrapping) — the rail's fixed 232px never scaled with the
               // viewport, so a comp's field rows (the longest label, "Total annual rent (face)",
               // 131px at the panel's own 12px/Inter) had no room to grow on a 2000px+ display.
-              // Scoped to the Comps tab only (`mode === "comp"`) — the Sites list already reads
+              // Scoped to the Comps TAB only (`panelTab === "comp"`) — the Sites list already reads
               // fine at 232 and B885136's team-chip layout was measured against that exact
               // width, so leave Sites untouched. `clamp(232px, 23vw, 440px)` measured live
               // against the real CompDetail component (a throwaway harness, discarded after
               // use): 1191px viewport → 274px panel, 1440px → 331px, 1920px → 440px (the
               // ceiling) — comfortably wider on a big monitor, barely different from today on a
               // laptop, and it never shrinks below the original 232.
-              : { top: MAP_OVERLAY_TOP_PX, left: 10, zIndex: MAP_CHROME_Z.panel, width: mode === "comp" ? "clamp(232px, 23vw, 440px)" : 232, maxHeight: "calc(100% - 24px)", ...(sitesPanelOpen ? null : { height: MAP_OVERLAY_CHIP_H_PX }) }) }}>
+              // ⛔ NEW-1 (this item) — this was `mode === "comp"` and re-coupled the centre
+              // Site/Comp switch (what an address search creates) to the panel's width, the exact
+              // B850016 coupling the click handlers were split to remove: clicking the centre
+              // toggle changed `mode` without touching `panelTab`, so the panel silently grew even
+              // though the rail tab it's showing never moved. Width now follows `panelTab` (what
+              // the rail is actually browsing) like every other read of this panel already does.
+              : { top: MAP_OVERLAY_TOP_PX, left: 10, zIndex: MAP_CHROME_Z.panel, width: panelTab === "comp" ? "clamp(232px, 23vw, 440px)" : 232, maxHeight: "calc(100% - 24px)", ...(sitesPanelOpen ? null : { height: MAP_OVERLAY_CHIP_H_PX }) }) }}>
             {/* collapsible header (B106) + the two tabs — one row, always visible (never buried
                 behind the collapse, and now PINNED — flex:"none" against the scrollable body
                 below — so both counts stay readable, and reachable, no matter how long either

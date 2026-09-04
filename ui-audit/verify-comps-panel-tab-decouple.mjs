@@ -20,6 +20,29 @@
  *   - the comp detail's "← All comps" back link → stays on the Comps tab, returns to the list
  *     within CompsPanel's own local state, never touches `mode`/`panelTab`.
  *
+ * ⛔ B1133760 (owner report 2026-09-04, measured live on deployed build `index-Dh4XXz5X.js`) — NOT
+ * an independent regression. The click-handler split above (this same PR #1402/`cde60ea5`) left ONE
+ * call site unmigrated: the panel's own WIDTH style, still `width: mode === "comp" ?
+ * "clamp(232px, 23vw, 440px)" : 232`. Because that rewrite moved every CLICK HANDLER onto
+ * `panelTab` and this is a plain STYLE READ, it never came up in that pass — so the centre toggle
+ * alone still resized the panel (272×32 vs 230×32 measured collapsed), the same coupling this file's
+ * own NEW-11 checks were written to kill, surviving in the one place they don't look. Fixed by
+ * keying that width on `panelTab` instead of `mode`, finishing what NEW-11 started.
+ *
+ * ⛔ THE REUSABLE LESSON — read this before adding a "does X still move Y" check anywhere else.
+ * The NEW-11 checks above PASSED, unbroken, for the whole time this width coupling survived on
+ * `main`: they read `aria-selected` (WHICH tab/content is showing), and this coupling is expressed
+ * as CSS GEOMETRY (HOW BIG the panel is), a different axis entirely. A harness that only proves the
+ * right tab lit up will never catch "but the box also grew" — the two have to be asserted
+ * separately, and both live in THIS file (not split out) so a future reader sees them side by side
+ * rather than assuming the NEW-11 section alone means the decoupling is fully covered.
+ *
+ * The GEOMETRY section below is the regression test for the width coupling specifically: it asserts
+ * the panel's bounding box is BYTE-IDENTICAL across a centre-toggle click, collapsed and expanded,
+ * and that the panel DOES still resize when the rail tab itself changes (that coupling is correct
+ * and must keep working). Red-proofed by temporarily restoring the `mode === "comp"` width
+ * expression: the "no resize" assertions failed, confirming this harness would have caught it.
+ *
  * Run against a local dev server (signed out, fixture-seeded, no network egress):
  *   node ui-audit/verify-comps-panel-tab-decouple.mjs [--url http://localhost:4319/] [--shots]
  */
@@ -49,6 +72,9 @@ const page = await ctx.newPage();
 await page.goto(`${BASE}#/site`, { waitUntil: "domcontentloaded", timeout: 20000 });
 await pacedWait(page, 2500);
 await assertMeasurable(page, "verify-comps-panel-tab-decouple");
+// The centre toggle mounts slightly after the paced wait above on a cold run (observed flake,
+// unrelated to any of this file's own state) — wait for it explicitly rather than racing it once.
+await page.waitForSelector('[role="tablist"][aria-label="What an address search creates"]', { timeout: 10000 });
 
 async function state() {
   return page.evaluate(() => {
@@ -94,6 +120,85 @@ console.log("=== NEW-11 — the centre toggle and the left rail tab move indepen
   await pacedWait(page, 250);
   const s4 = await state();
   check("clicking the rail 'Sites' tab flips it back, centre untouched", s4.railSites === "true" && s4.centreSite === "true", JSON.stringify(s4));
+}
+
+const panelBox = () => page.locator('[data-testid="map-sites-panel"]').boundingBox();
+const collapseBtn = page.locator('[data-testid="map-sites-panel"] button[title*="the sites panel"]').first();
+const sameBox = (a, b) => a && b && Math.round(a.width) === Math.round(b.width) && Math.round(a.height) === Math.round(b.height)
+  && Math.round(a.x) === Math.round(b.x) && Math.round(a.y) === Math.round(b.y);
+
+console.log("\n=== NEW-1 (owner report 2026-09-04) — the centre toggle must never resize the sites panel ===");
+{
+  // EXPANDED state (the default at this viewport).
+  const openBefore = await panelBox();
+  await centreBtn("Comp").click();
+  await pacedWait(page, 250);
+  const openAfterComp = await panelBox();
+  check("expanded: clicking centre 'Comp' leaves the panel's box unchanged",
+    sameBox(openBefore, openAfterComp), `before=${JSON.stringify(openBefore)} after=${JSON.stringify(openAfterComp)}`);
+  await centreBtn("Site").click();
+  await pacedWait(page, 250);
+  const openAfterSite = await panelBox();
+  check("expanded: clicking centre 'Site' back leaves the panel's box unchanged",
+    sameBox(openBefore, openAfterSite), `before=${JSON.stringify(openBefore)} after=${JSON.stringify(openAfterSite)}`);
+
+  // COLLAPSED state — the exact geometry the owner's report measured (272×32 vs 230×32).
+  await collapseBtn.click();
+  await pacedWait(page, 250);
+  const closedBefore = await panelBox();
+  await centreBtn("Comp").click();
+  await pacedWait(page, 250);
+  const closedAfterComp = await panelBox();
+  check("collapsed: clicking centre 'Comp' leaves the panel's box unchanged",
+    sameBox(closedBefore, closedAfterComp), `before=${JSON.stringify(closedBefore)} after=${JSON.stringify(closedAfterComp)}`);
+  await centreBtn("Site").click();
+  await pacedWait(page, 250);
+  const closedAfterSite = await panelBox();
+  check("collapsed: clicking centre 'Site' back leaves the panel's box unchanged",
+    sameBox(closedBefore, closedAfterSite), `before=${JSON.stringify(closedBefore)} after=${JSON.stringify(closedAfterSite)}`);
+  if (SHOTS) await page.screenshot({ path: `${SHOT_DIR}/collapsed-unchanged.png` });
+
+  // Restore to expanded/Sites so the next section starts from a known state.
+  await collapseBtn.click();
+  await pacedWait(page, 250);
+}
+
+console.log("\n=== the RAIL TAB (panelTab), not the centre toggle, legitimately still resizes the panel ===");
+{
+  const sitesBox = await panelBox();
+  await page.getByRole("tab", { name: /^Comps/ }).first().click();
+  await pacedWait(page, 250);
+  const compsBox = await panelBox();
+  check("clicking the rail 'Comps' tab DOES widen the panel (B1123424, unchanged)",
+    compsBox.width > sitesBox.width + 10, `sites=${sitesBox.width} comps=${compsBox.width}`);
+  if (SHOTS) await page.screenshot({ path: `${SHOT_DIR}/comps-tab-widened.png` });
+  await page.getByRole("tab", { name: /^Sites/ }).first().click();
+  await pacedWait(page, 250);
+  const backBox = await panelBox();
+  check("clicking the rail 'Sites' tab back returns the panel to its original width",
+    Math.round(backBox.width) === Math.round(sitesBox.width), `sites=${sitesBox.width} back=${backBox.width}`);
+}
+
+console.log("\n=== narrow/phone width — the OTHER branch of the panel's width ternary, untouched by mode or panelTab ===");
+{
+  await page.setViewportSize({ width: 375, height: 700 });
+  await pacedWait(page, 400);
+  // Narrow defaults to collapsed; open it so the panel is actually on screen to measure.
+  const chevron = page.locator('[data-testid="map-sites-panel"] button[title*="the sites panel"]').first();
+  await chevron.click();
+  await pacedWait(page, 250);
+  const narrowBefore = await panelBox();
+  await centreBtn("Comp").click();
+  await pacedWait(page, 250);
+  const narrowAfterComp = await panelBox();
+  check("narrow: clicking centre 'Comp' leaves the panel's box unchanged",
+    sameBox(narrowBefore, narrowAfterComp), `before=${JSON.stringify(narrowBefore)} after=${JSON.stringify(narrowAfterComp)}`);
+  await centreBtn("Site").click();
+  await pacedWait(page, 250);
+  const narrowAfterSite = await panelBox();
+  check("narrow: clicking centre 'Site' back leaves the panel's box unchanged",
+    sameBox(narrowBefore, narrowAfterSite), `before=${JSON.stringify(narrowBefore)} after=${JSON.stringify(narrowAfterSite)}`);
+  if (SHOTS) await page.screenshot({ path: `${SHOT_DIR}/narrow-unchanged.png` });
 }
 
 await browser.close();
