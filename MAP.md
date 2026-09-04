@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-04 @ `ae7786f1` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-04 @ `40e18278` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_665 source files mapped._
+_666 source files mapped._
 
 ## infra
 
@@ -205,6 +205,8 @@ _665 source files mapped._
   - _exports_: `assetIdsInDoc`, `attachmentIdsInDoc`, `attachmentIdsInDocs`, `docToMarkdown`, `docToText`, `escapeText`, `imageIdsInDoc`, `imageIdsInDocs`, `lossyNote`, `MD_INLINE_ATTACHMENT_MAX`, `MD_MAX_HEADING`, `NOTE_MD_HANDLED`, `pageToMarkdown`, `safeFileName`
 - **`src/workspaces/notes/lib/notesMarquee.js`** — PURE: one gesture on empty page, two meanings, decided by distance — place below the slop, marquee above it. Also the band's rectangle, which boxes it caught, shift-toggling, arrow nudges, and moving a whole set by ONE clamped delta so the arrangement cannot deform.
   - _exports_: `applyMarquee`, `boxesInMarquee`, `DRAG_SLOP`, `dragDistance`, `gestureOutcome`, `marqueeRect`, `moveSelection`, `NUDGE_STEP`, `NUDGE_STEP_FAST`, `nudgeDelta`, `rectsOverlap`, `toggleSelection`
+- **`src/workspaces/notes/lib/notesMixedSelection.js`** — PURE: does a text selection agree on one font size/block style, or is it MIXED (`getAttributes`/`isActive` only ever answer for a caret's single position, not a range that can honestly disagree with itself) — and what a toolbar control should display for either case.
+  - _exports_: `formatDisplayValue`, `MIXED`, `selectionBlockShapes`, `selectionFontSizes`, `uniformValue`
 - **`src/workspaces/notes/lib/notesModel.js`** — PURE notebook › section › page tree schema, page timestamps, every structural op (add/rename/move/delete/search/migrate) and the 30-day BIN. `deleteNode` is a soft delete that still computes the FULL cascade of orphaned page ids and stamps it on the trash entry.
   - _exports_: `addPage`, `adoptUnreachable`, `allPageIds`, `ancestorIds`, `boundProjectIds`, `commitTitle`, `COPY_SUFFIX`, `copyPageWithin`, `countNodes`, `DEFAULT_PAGE_TITLE`, `deleteNode`, `descendantPageIds`, `displayTitle`, `dropPages`, `emptyTree`, `expiredTrashIds`, `findPage`, `firstPageId`, `makePage`, `migrate`, `movePage`, `moveProjectNotes`, `newId`, `NO_PROJECT`, `NO_PROJECT_LABEL`, `NOTES_TREE_VERSION`, `ORG_GROUP_LABEL`, `pageProjectIndex`, `pagesInScope`, `projectGroups`, `projectNoteCensus`, `projectOfPage`, `purgeTrashEntry`, `recentPages`, `recoveredTitle`, `renameNode`, `restoreNode`, `SCOPE_ALL`, `SCOPE_ORG`, `SCOPE_PROJECT`, `searchTitles`, `setPageOrgScope`, `setPageProject`, `subpagesPhrase`, `subtreePageIds`, `TOMB_RETENTION_DAYS`, `tombstoneIds`, `touchPage`, `TRASH_RETENTION_DAYS`, `trashEntries`, `trashPageIds`, `walkPages`, `withTombstones`
 - **`src/workspaces/notes/lib/notesOutline.js`** — PURE outline of a document: headings, their ProseMirror positions, the active section, and which rows fold.
