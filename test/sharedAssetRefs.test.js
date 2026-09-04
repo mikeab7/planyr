@@ -150,10 +150,15 @@ describe("the call sites ask the shared rule, not the current plan's list", () =
     expect(planner).not.toMatch(/sheetOverlays\.some\(\(x\)\s*=>\s*x\.id\s*!==\s*id\s*&&\s*x\.idbKey/);
   });
 
-  it("SitePlanner routes BOTH overlay and underlay removal through the shared rule", () => {
+  // B848736 — the aerial backdrop is now just a `sheetOverlays` record (bottom-pinned), so its
+  // removal is no longer a SEPARATE call site with its own ref-counting helper: there is exactly
+  // ONE removal path (`removeOverlay`) and it already asks the shared rule for every reference,
+  // aerial included. A second, parallel `releaseUnderlayAssets` reappearing would mean the
+  // unification regressed back into two mechanisms.
+  it("SitePlanner routes ALL reference removal — the aerial included — through the ONE shared-rule call site", () => {
     expect(planner).toMatch(/releasePlanForOverlay\(assetRefs, o, siteId\)/);
-    expect(planner).toMatch(/releaseUnderlayAssets/);
-    // the underlay button must not delete either tier directly any more
+    expect(planner).not.toMatch(/releaseUnderlayAssets/);
+    // no direct tier delete may bypass the shared rule, for the aerial or any other reference
     expect(planner).not.toMatch(/if \(underlay\?\.idbKey\) idbDelete/);
     expect(planner).not.toMatch(/if \(underlay\?\.storageKey\) deleteOverlayObject/);
   });

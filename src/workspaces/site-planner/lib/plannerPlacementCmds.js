@@ -77,7 +77,7 @@ export function commitOrigin(ctx, next, { rotateDeg = 0, note = "" } = {}) {
   applyOriginState(ctx, o);
   persistPlacement(ctx, o, collections);
   ctx.flashWarn(note || (had
-    ? `Moved the plan's location. Everything you drew is unchanged — only where it sits on the earth changed.${spun && spun.unrotatable.length ? " The captured aerial underlay can't be turned, so it was left where it was." : ""}`
+    ? `Moved the plan's location. Everything you drew is unchanged — only where it sits on the earth changed.${spun && spun.unrotatable.length ? " The captured aerial can't be turned, so it was left where it was." : ""}`
     : "Location set — the aerial, flood layer, contours and county rules are switching on. Nothing you drew moved."), 9000);
   return true;
 }
@@ -93,7 +93,7 @@ export function rotatePlan(ctx, deg) {
   persistPlacement(ctx, ctx.origin(), applyRotated(ctx, spun));
   ctx.bumpPlaceRot((r) => normalizeRot(r + d));
   if (spun.unrotatable.length)
-    ctx.flashWarn(`Turned the plan ${Math.abs(d).toFixed(1)}° ${d > 0 ? "clockwise" : "counter-clockwise"}. The captured aerial underlay is a fixed north-up picture, so it stayed put.`, 9000);
+    ctx.flashWarn(`Turned the plan ${Math.abs(d).toFixed(1)}° ${d > 0 ? "clockwise" : "counter-clockwise"}. The captured aerial is a fixed north-up picture, so it stayed put.`, 9000);
 }
 
 /* Nudge the plan across the ground. NOT a geometry edit: the anchor moves, so every drawn

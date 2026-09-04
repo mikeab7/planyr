@@ -880,8 +880,11 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
        already exists — `MUST_BE_PRESENT` in `count-pond-invocations`, the vacuity guards in
        `verify-hidden-content-behaviour` — this makes it the default rather than a per-harness habit.
      - Scope every query to the element under test, and put a surface into the state the assertion is
-       about before measuring it. Precedent harnesses: `ui-audit/verify-aerial-empty-state-copy.mjs`
-       (its with-an-aerial arm is the known case) and `ui-audit/diagnose-aerial-backdrop-row.mjs`.
+       about before measuring it. (The two precedent harnesses this clause originally cited,
+       `verify-aerial-empty-state-copy.mjs` and `diagnose-aerial-backdrop-row.mjs`, were retired with
+       the UI/data model they guarded — B848736 folded the standalone aerial card into the unified
+       References list, so both a distinct empty-state heading and a distinct `underlay` field to seed
+       stopped existing.)
 - **COUNT-EVERY-KIND** — **A PLAN'S CONTENTS ARE ITS FIVE DRAWN KINDS. A count that reads `[data-el-id]`
   sees ONE of them and reports the other four as NOTHING HAPPENED.** (NEW-2, 2026-08-09.) Measured live on
   the owner's Silvestri pair: a cross-plan paste landed three markup objects, the app correctly said so, and

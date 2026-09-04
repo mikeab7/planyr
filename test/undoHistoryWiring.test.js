@@ -49,6 +49,6 @@ describe("B828: undo records a frame on every editable-state mutation (wiring gu
     // NEW-1 (parcel-drawing-offline) appended `origin` — the geo anchor rides the snapshot so
     // "Set location" / a placement nudge is a normal undo frame. The guard's subject is the
     // DURING-RENDER assignment, so it stays anchored on the collections and tolerates the tail.
-    expect(sp).toMatch(/\n  stateRef\.current = \{ parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds, layerOverrides, layerAbove(, origin)? \};/);
+    expect(sp).toMatch(/\n  stateRef\.current = \{ parcels, els, measures, callouts, markups, sheetOverlays, deletedIds, layerOverrides, layerAbove(, origin)? \};/);
   });
 });

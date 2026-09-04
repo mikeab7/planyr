@@ -47,7 +47,11 @@ export const ASSET_TIERS = ["storage", "idb"];
 
 /* Every key a single plan record references, by tier. Overlays carry the source object
  * (`storageKey`), the B748 DWG provenance copy (`sourceDwgKey`) and the device raster
- * (`idbKey`); the aerial underlay carries its own pair. A missing/!string value is not a key. */
+ * (`idbKey`) — the aerial backdrop included, since it's folded into `sheetOverlays` (B848736).
+ * A missing/!string value is not a key. `plan.underlay` is checked too, purely as a legacy-shape
+ * fallback: every real caller here passes plans already run through `migrate()`/`createSiteModel`
+ * (which folds `underlay` away), so this never fires in practice — kept because getting asset
+ * release WRONG destroys a picture nothing can recover (see this file's header). */
 export function planAssetKeys(plan) {
   const storage = new Set();
   const idb = new Set();

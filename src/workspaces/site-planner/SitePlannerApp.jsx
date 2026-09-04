@@ -22,6 +22,7 @@ import { cloudParcelRows, cloudElementRecency } from "./lib/cloudSync.js";
 import { summarizeParcelRows } from "./lib/parcelSummary.js";
 import { summarizeElementRecency, groupRecencyMs } from "./lib/siteRecency.js";
 import { STATUS_META } from "./lib/siteModel.js";
+import { isPinnedMapReference } from "./lib/overlayOrder.js";
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
 import { idbPersist } from "./lib/localDb.js";
 /* LOADED ON DEMAND (B1092). The legacy-import review modal is signed-in-only and opens
@@ -706,8 +707,14 @@ export default function App({
     // That is what keeps "new projects only" honest from the other direction: adding a plan to an
     // old private project must not be a back door that shares it.
     const { teamId } = resolveNewPlanTeam(loadPlansOfGroup(group));
+    // B848736 — "keep the aerial" now means "keep the ONE pinned map reference" (the aerial is
+    // folded into `sheetOverlays`, not a separate field). Everything else — the hand-dropped
+    // site-plan overlays that are specific to the SOURCE layout — deliberately does NOT carry
+    // over, matching the pre-B848736 behavior (only `underlay` ever crossed this boundary).
+    const srcMapRef = (src.sheetOverlays || []).find(isPinnedMapReference) || null;
     saveSite({ id, groupId: group, site: src.site || src.name, name: nextConceptForGroup(group),
-      origin: src.origin || null, county: src.county || null, parcels: src.parcels || [], els: [], measures: [], settings: src.settings || {}, underlay: src.underlay || null, teamId });
+      origin: src.origin || null, county: src.county || null, parcels: src.parcels || [], els: [], measures: [], settings: src.settings || {},
+      sheetOverlays: srcMapRef ? [srcMapRef] : [], teamId });
     pushLoud(id, "The new plan"); // NEW-F6
     refreshSites();
     goPlan(id);

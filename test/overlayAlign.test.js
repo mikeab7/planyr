@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   imagePointToWorld, scaleOverlayAbout, similarityTransform, alignOverlaySimilarity,
-  solveSimilarityLSQ, applySimilarityToOverlay, calibrateUnderlayScale,
+  solveSimilarityLSQ, applySimilarityToOverlay,
 } from "../src/workspaces/site-planner/lib/overlayAlign.js";
 
 const ov = (over = {}) => ({ x: 100, y: 50, imgW: 800, imgH: 600, ftPerPx: 0.5, rotation: 0, ...over });
@@ -100,37 +100,22 @@ describe("overlay align — solveSimilarityLSQ N-point fit + residual (B73)", ()
   });
 });
 
-describe("underlay calibration — calibrateUnderlayScale (B654)", () => {
-  const u = (over = {}) => ({ x: 0, y: 0, imgW: 1000, imgH: 800, ftPerPx: 0.6, ...over });
-  it("scales ftPerPx by known/measured and pins point a in world space", () => {
-    const und = u();
-    // a and b are 100 world-ft apart at the current scale; the user says it's really 250 ft
-    const a = { x: 60, y: 30 }, b = { x: 160, y: 30 };
-    const patch = calibrateUnderlayScale(und, a, b, 250);
-    expect(patch.calibrated).toBe(true);
-    expect(patch.ftPerPx).toBeCloseTo(0.6 * 2.5, 10);
-    // point a's image pixel must land back at the same world spot after the rescale
-    const aPx = { x: (a.x - und.x) / und.ftPerPx, y: (a.y - und.y) / und.ftPerPx };
-    expect(patch.x + aPx.x * patch.ftPerPx).toBeCloseTo(a.x, 8);
-    expect(patch.y + aPx.y * patch.ftPerPx).toBeCloseTo(a.y, 8);
+describe("overlay align — ftPerPxY (B848736, the map-captured reference's non-uniform scale)", () => {
+  it("imagePointToWorld uses ftPerPxY for the Y axis when present, ftPerPx for X", () => {
+    const o = { x: 100, y: 50, imgW: 800, imgH: 600, ftPerPx: 0.5, ftPerPxY: 0.4, rotation: 0 };
+    near(imagePointToWorld(o, 0, 0), { x: 100, y: 50 });
+    near(imagePointToWorld(o, 800, 0), { x: 100 + 800 * 0.5, y: 50 });
+    near(imagePointToWorld(o, 0, 600), { x: 100, y: 50 + 600 * 0.4 });
   });
-  it("scales an anisotropic (ftPerPxY) underlay's BOTH axes by the same factor", () => {
-    const und = u({ ftPerPxY: 0.5 });
-    const patch = calibrateUnderlayScale(und, { x: 0, y: 0 }, { x: 100, y: 0 }, 200);
-    expect(patch.ftPerPx).toBeCloseTo(1.2, 10);
-    expect(patch.ftPerPxY).toBeCloseTo(1.0, 10);
+  it("falls back to ftPerPx for Y when ftPerPxY is absent (the ordinary, uniform-scale overlay)", () => {
+    const withY = imagePointToWorld({ x: 0, y: 0, imgW: 800, imgH: 600, ftPerPx: 0.5, ftPerPxY: 0.5, rotation: 0 }, 400, 300);
+    const withoutY = imagePointToWorld({ x: 0, y: 0, imgW: 800, imgH: 600, ftPerPx: 0.5, rotation: 0 }, 400, 300);
+    near(withY, withoutY);
   });
-  it("leaves ftPerPxY undefined when the underlay has none", () => {
-    const patch = calibrateUnderlayScale(u(), { x: 0, y: 0 }, { x: 50, y: 0 }, 100);
-    expect(patch.ftPerPxY).toBeUndefined();
-  });
-  it("refuses a from-map (georeferenced) underlay", () => {
-    expect(calibrateUnderlayScale(u({ fromMap: true }), { x: 0, y: 0 }, { x: 50, y: 0 }, 100)).toBe(null);
-  });
-  it("refuses non-positive lengths and zero-length picks", () => {
-    expect(calibrateUnderlayScale(u(), { x: 0, y: 0 }, { x: 50, y: 0 }, 0)).toBe(null);
-    expect(calibrateUnderlayScale(u(), { x: 0, y: 0 }, { x: 50, y: 0 }, -10)).toBe(null);
-    expect(calibrateUnderlayScale(u(), { x: 7, y: 7 }, { x: 7, y: 7 }, 100)).toBe(null);
-    expect(calibrateUnderlayScale(null, { x: 0, y: 0 }, { x: 1, y: 0 }, 100)).toBe(null);
+  it("rotation still turns about the ftPerPxY-aware center", () => {
+    const o = { x: 0, y: 0, imgW: 800, imgH: 600, ftPerPx: 0.5, ftPerPxY: 0.4, rotation: 90 };
+    // the center itself is invariant under its own rotation
+    const cx = (o.imgW * o.ftPerPx) / 2, cy = (o.imgH * o.ftPerPxY) / 2;
+    near(imagePointToWorld(o, o.imgW / 2, o.imgH / 2), { x: cx, y: cy });
   });
 });
