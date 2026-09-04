@@ -636,10 +636,13 @@ export default function NoteToolbar({ editor, onExport, onPrint, onAttach, onHis
   const currentColor = editor.getAttributes("textStyle")?.color || null;
   const currentHl = editor.getAttributes("highlight")?.color || null;
 
-  // Indent/outdent act on whichever list kind the caret is actually in.
+  // Indent/outdent act on whichever list kind the caret is actually in. Real nesting first,
+  // the indent-attribute fallback second — the same order Tab itself uses (lib/notesListIndent.js)
+  // and MiniBar already mirrors below; without the fallback these buttons silently did nothing
+  // on a first/solo item, which sinkListItem/liftListItem alone always decline.
   const listItemType = editor.isActive("taskItem") ? "taskItem" : "listItem";
-  const indent = () => chain().sinkListItem(listItemType).run();
-  const outdent = () => chain().liftListItem(listItemType).run();
+  const indent = () => chain().sinkListItem(listItemType).run() || chain().indentListItem().run();
+  const outdent = () => chain().outdentListItem().run() || chain().liftListItem(listItemType).run();
 
   const pickImages = (e) => {
     const files = Array.from(e.target.files || []);

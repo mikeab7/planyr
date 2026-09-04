@@ -46,6 +46,7 @@ import { HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.
 import { PASTE_MODES } from "../lib/notesPastePlain.js";
 import { bindingShouldDecline } from "../lib/notesKeyScope.js";
 import { DEFAULT_DENSITY, densityFor } from "../lib/notesSpacing.js";
+import { indentCssRules } from "../lib/notesIndentLevel.js";
 import {
   readNoteFiles, readNoteImages, readPage, readPageVersions, registerOpenNoteDoc,
   restorePageVersion, snapshotPage, writePage,
@@ -92,6 +93,11 @@ const EDITOR_CSS = `
 .planyr-note .ProseMirror ul, .planyr-note .ProseMirror ol { padding-left: 1.5em; margin: 0; }
 .planyr-note .ProseMirror li { margin: var(--note-list-gap, 2px) 0; }
 .planyr-note .ProseMirror li p { margin: 0; }
+/* ⛔ THE indent ATTRIBUTE'S ONE STYLESHEET TABLE (B842949) — a fixed step per level, looked up
+   by data-indent, never an inline margin computed and stamped onto the element by hand. See
+   lib/notesIndentLevel.js → indentAttrs / indentCssRules for why. PDF-PARITY: the print sheet
+   (lib/notesPrint.js) carries the identical table for .note-body li. */
+${indentCssRules(".planyr-note .ProseMirror li")}
 .planyr-note .ProseMirror blockquote { border-left: 3px solid var(--accent-notes); padding-left: 0.9em; color: var(--text-secondary); margin: 0; }
 .planyr-note .ProseMirror code { background: var(--surface-page); border: 1px solid var(--border-default); border-radius: 4px; padding: 0.1em 0.32em; font-family: ui-monospace, "Courier New", monospace; font-size: 0.9em; }
 .planyr-note .ProseMirror pre { background: var(--surface-page); border: 1px solid var(--border-default); border-radius: ${RADIUS.control}px; padding: 0.75em 0.9em; overflow-x: auto; }
