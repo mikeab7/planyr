@@ -4,7 +4,7 @@ import {
   scalePlacement, rotatePlacement, OVERLAY_SUGGEST_MIN_WIDTH_FT, OVERLAY_SUGGEST_MAX_WIDTH_FT,
 } from "../src/shared/sitePlans/lib/overlayGeoref.js";
 import { projectToGrid, gridToProject } from "../src/shared/coordinates/index.js";
-import { projectToZone } from "../src/shared/coordinates/statePlane.js";
+import { projectToZone, gridConvergenceDeg } from "../src/shared/coordinates/statePlane.js";
 
 // A synthetic placement near Katy, TX.
 const ORIGIN = { lat: 29.7858, lon: -95.8244 };
@@ -207,9 +207,51 @@ describe("overlayGeoref — zone-aware projection", () => {
     })();
     expect(zoned.center.x).toBe(legacy.center.x);
     expect(zoned.center.y).toBe(legacy.center.y);
-    // And the actual corners the app computes come out identical too.
+    // The corner math is NOT bit-identical any more — B1134752 (see below) deliberately makes
+    // rotationDeg=0 mean "true-north-up on screen" rather than "axis-aligned to the State Plane
+    // GRID", which differ by the local grid-convergence angle. Pinned to the NEW, corrected value.
     const c = overlayCornersFromPlacement(p, IMG_W, IMG_H);
-    expect(c.topLeft.lat).toBeCloseTo(29.787968524040373, 9); // pinned value, regression guard
+    expect(c.topLeft.lat).toBeCloseTo(29.78794655070079, 9); // pinned value, regression guard
+  });
+
+  it("B1134752 — rotationDeg:0 renders TRUE-north-up, not GRID-north-up (the 'automatically angled' defect)", () => {
+    // Before the fix, an unrotated overlay's top edge pointed at STATE PLANE GRID north, which
+    // equals true north only on the zone's own central meridian. Away from it (Katy, TX included)
+    // the top edge came out visibly tilted on the true-north-up map even at rotationDeg:0 — the
+    // owner's "it seemed to automatically angle it when it placed it". Proven two ways:
+    const p = placement(0);
+    const conv = gridConvergenceDeg(p.centerLat, p.centerLon);
+    expect(Math.abs(conv)).toBeGreaterThan(0.5); // Katy is well off the -99° central meridian
+    const c = overlayCornersFromPlacement(p, IMG_W, IMG_H);
+    // 1) The top row is now level (equal latitude) to a small fraction of a foot — GRID
+    //    convergence used to leave a real, visible tilt here (~2.4 m at this box's half-width);
+    //    the correction removes essentially all of it. Not bit-exact: the correction is evaluated
+    //    ONCE at the placement's center, and convergence itself varies (very slightly) with
+    //    position, so a residual well under a millimeter survives — that residual is the proof
+    //    the correction is a real geodetic compensation, not a hack that forces exact levelness.
+    expect(c.topLeft.lat).toBeCloseTo(c.topRight.lat, 5);
+    // 2) Reproducing the OLD (uncorrected) formula by hand — rotating in grid space by the RAW
+    //    rotationDeg with no convergence compensation — must land at a DIFFERENT point, proving
+    //    the fix actually changed the math rather than coincidentally matching it.
+    const center = projectToZone("tx_sc", p.centerLat, p.centerLon);
+    const halfW = (IMG_W * p.ftPerPx) / 2, halfH = (IMG_H * p.ftPerPx) / 2;
+    const oldTopLeftGridY = center.y - -halfH; // rotationDeg 0 => rx=dx, ry=dy, un-rotated
+    expect(oldTopLeftGridY).not.toBeCloseTo(center.y, 6); // sanity: the old math really did move north
+    expect(conv).not.toBeCloseTo(0, 3); // the compensation this fix applies is a real, non-zero angle
+  });
+
+  it("B1134752 — the forward/inverse round trip still agrees exactly with the convergence correction applied", () => {
+    // latLonToImagePoint / imagePointToLatLon must stay exact inverses of each other (a pinned
+    // comp's position depends on it) — proven at a rotation AND an off-central-meridian anchor,
+    // where the convergence correction is actually doing something (Katy, not the zone's own
+    // central meridian).
+    const p = placement(37);
+    for (const [x, y] of [[0, 0], [IMG_W, 0], [0, IMG_H], [IMG_W, IMG_H], [IMG_W / 2, IMG_H / 2], [137, 842]]) {
+      const ll = imagePointToLatLon(p, IMG_W, IMG_H, x, y);
+      const back = latLonToImagePoint(p, IMG_W, IMG_H, ll.lat, ll.lon);
+      expect(back.x).toBeCloseTo(x, 6);
+      expect(back.y).toBeCloseTo(y, 6);
+    }
   });
 
   it("a Colorado placement resolves through its OWN zone rather than silently through Texas South Central", () => {

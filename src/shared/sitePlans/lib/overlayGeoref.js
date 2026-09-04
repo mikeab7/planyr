@@ -34,7 +34,7 @@
  * included) rather than inventing an unverified new zone's survey constants from memory.
  */
 import { projectToGrid, gridToProject } from "../../coordinates/index.js";
-import { resolveZone, projectToZone, zoneToProject } from "../../coordinates/statePlane.js";
+import { resolveZone, projectToZone, zoneToProject, gridConvergenceDeg } from "../../coordinates/statePlane.js";
 
 /** The projector pair to use for a placement anchored at (lat, lon): the resolved State Plane
  * zone's own math when this app has one modeled for that point, else the legacy hardcoded
@@ -43,6 +43,40 @@ function projectorsFor(lat, lon) {
   const zone = resolveZone({ lat, lon });
   if (!zone) return { toGrid: projectToGrid, toProject: gridToProject, zoneId: null };
   return { toGrid: (la, lo) => projectToZone(zone, la, lo), toProject: (xy) => zoneToProject(zone, xy), zoneId: zone.id };
+}
+
+/* B1134752 — THE ROTATION APPLIED IN GRID SPACE IS NOT THE ROTATION THE USER SEES ON A
+ * TRUE-NORTH-UP MAP, and that gap is the "it seemed to automatically angle it when it placed it"
+ * defect: a freshly placed overlay at `rotationDeg: 0` rendered visibly tilted even though the
+ * stored value really was 0.
+ *
+ * Every function below builds a box axis-aligned in STATE PLANE GRID coordinates (grid-x/grid-y)
+ * and only THEN converts each corner back to lat/lon. State Plane grid north equals TRUE north
+ * only exactly on the zone's central meridian (EPSG:2278's is 99°W, through the Texas Hill
+ * Country); anywhere east or west of it the two differ by the grid CONVERGENCE angle — a real,
+ * already-modeled geodetic fact this codebase computes elsewhere for exactly this reason
+ * (`gridConvergenceDeg`, moved here from the deed-alignment tool alongside this fix — see that
+ * module's own header: "~1.5° in the Houston/Katy area", enough to drift a flyer ~1.5° off the
+ * aerial's own road grid at rest, no drag involved). A user-facing `rotationDeg` of 0 has to mean
+ * "this overlay's top points at TRUE north on screen" — that's what the rotate handle's own
+ * screen-pixel angle already assumes (overlayPlacementHandles.js) — so the GRID-space rotation
+ * actually fed into `rotatedOffset` has to be `rotationDeg` compensated by the local convergence,
+ * not `rotationDeg` verbatim. Applied identically in the forward direction (this function,
+ * `imagePointToLatLon`) and inverted the same way the user's own `rotationDeg` already was
+ * (`latLonToImagePoint`), so a round trip through all three still agrees exactly.
+ *
+ * No state/county hint is threaded through here — an overlay's placement carries only its own
+ * anchor point, so this resolves the zone from the coarse point envelope
+ * (`resolveZone`/`gridConvergenceDeg` with no state/county), which `statePlane.js` documents as
+ * the correct fallback for exactly this "no county identified" case and is exact for Texas (one
+ * zone, no interleaving) — the only imprecision it inherits is Colorado's Front Range county
+ * interleave, already a documented, accepted limit of the coarse envelope itself. Outside every
+ * modeled zone `gridConvergenceDeg` returns null and this falls back to 0 — UNCHANGED behavior
+ * (verbatim grid rotation), matching every other zone-aware fallback in this module. */
+function gridRotationDeg(placement) {
+  const rot = placement.rotationDeg || 0;
+  const conv = gridConvergenceDeg(placement.centerLat, placement.centerLon);
+  return conv == null ? rot : rot - conv;
 }
 
 /** True if `p` is a usable placement. */
@@ -72,8 +106,9 @@ export function overlayCornersFromPlacement(placement, imgW, imgH) {
   const { toGrid, toProject } = projectorsFor(placement.centerLat, placement.centerLon);
   const center = toGrid(placement.centerLat, placement.centerLon);
   const halfW = (imgW * placement.ftPerPx) / 2, halfH = (imgH * placement.ftPerPx) / 2;
+  const rotDeg = gridRotationDeg(placement);
   const at = (dx, dy) => {
-    const { rx, ry } = rotatedOffset(dx, dy, placement.rotationDeg);
+    const { rx, ry } = rotatedOffset(dx, dy, rotDeg);
     // grid y is north-positive; a "down" (+y) image-local offset is south, so flip it going in.
     return toProject({ x: center.x + rx, y: center.y - ry });
   };
@@ -96,8 +131,8 @@ export function latLonToImagePoint(placement, imgW, imgH, lat, lon) {
   const center = toGrid(placement.centerLat, placement.centerLon);
   const p = toGrid(lat, lon);
   const rx = p.x - center.x, ry = -(p.y - center.y); // grid offset -> image-local (y-down) rotated frame
-  // Invert the rotation: [dx,dy] = R(-rotationDeg) * [rx,ry].
-  const { rx: dx, ry: dy } = rotatedOffset(rx, ry, -(placement.rotationDeg || 0));
+  // Invert the rotation: [dx,dy] = R(-gridRotationDeg) * [rx,ry].
+  const { rx: dx, ry: dy } = rotatedOffset(rx, ry, -gridRotationDeg(placement));
   const halfW = (imgW * placement.ftPerPx) / 2, halfH = (imgH * placement.ftPerPx) / 2;
   return { x: (dx + halfW) / placement.ftPerPx, y: (dy + halfH) / placement.ftPerPx };
 }
@@ -115,7 +150,7 @@ export function imagePointToLatLon(placement, imgW, imgH, x, y) {
   const center = toGrid(placement.centerLat, placement.centerLon);
   const halfW = (imgW * placement.ftPerPx) / 2, halfH = (imgH * placement.ftPerPx) / 2;
   const dx = x * placement.ftPerPx - halfW, dy = y * placement.ftPerPx - halfH;
-  const { rx, ry } = rotatedOffset(dx, dy, placement.rotationDeg);
+  const { rx, ry } = rotatedOffset(dx, dy, gridRotationDeg(placement));
   return toProject({ x: center.x + rx, y: center.y - ry });
 }
 

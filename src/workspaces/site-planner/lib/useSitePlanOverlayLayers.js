@@ -106,6 +106,7 @@ export function useSitePlanOverlayLayers(map, overlays, { pinTargetId, onPinClic
       if (!handle) { handle = createRotatedImageLayer(map); layers.set(o.id, handle); }
       const corners = overlayCornersFromPlacement(o, o.imgW, o.imgH);
       if (corners) { handle.setCorners(corners); handle.setSize(o.imgW, o.imgH); }
+      handle.setCrop(o.crop); // B1134754 NEW-21 — non-destructive; setSize also re-applies it
       handle.setOpacity(o.opacity);
       handle.setVisible(o.visible);
       if (pinTargetId === o.id) {
