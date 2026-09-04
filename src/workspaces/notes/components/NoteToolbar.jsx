@@ -20,17 +20,22 @@
  * cancels — never `window.prompt`. The table size is picked by sweeping a GRID for the same
  * reason (B1372), not by a box asking for two numbers.
  *
- * THREE THINGS HERE ARE FIXES, NOT DECORATION, and each has its note at the code:
+ * FOUR THINGS HERE ARE FIXES, NOT DECORATION, and each has its note at the code:
  *   • text colour and highlight draw DIFFERENT glyphs (B1370) — they were identical;
  *   • font size sits ON the row (B1371) — it existed, buried in "More", which reads to a
  *     user as "there is no font size";
- *   • the table button opens a drag-to-size grid (B1372) — it used to insert a fixed 3×3.
+ *   • the table button opens a drag-to-size grid (B1372) — it used to insert a fixed 3×3;
+ *   • Block style and Font size are a `FormatMenu` LISTBOX, not a native `<select>` (B1139216)
+ *     — a mixed selection now shows no value instead of lying with the first block's, and
+ *     re-picking the value already shown is a real click, not a dead one. See FormatMenu's
+ *     own note and lib/notesMixedSelection.js for the measured bug and why this is the fix.
  */
 import { useEffect, useRef, useState } from "react";
 import { HEADING_LEVELS } from "../lib/notesExtensions.js";
 import { BLOCK_SPACES, DENSITIES, LINE_SPACINGS, spacingLabel } from "../lib/notesSpacing.js";
 import { CALLOUT_TONES } from "../lib/notesCalloutNode.js";
 import { FONTS, HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.js";
+import { MIXED, formatDisplayValue, selectionBlockShapes, selectionFontSizes } from "../lib/notesMixedSelection.js";
 
 /* Mirrored from src/shared/ui/controls.jsx rather than imported — deliberately, and there
  * is a test that fails if the copies drift (test/notesModule.test.js). Importing
@@ -121,6 +126,104 @@ function TBSelect({ value, onChange, title, options, testid, width = 116, big })
     >
       {options.map((o) => <option key={String(o.value)} value={o.value == null ? "" : String(o.value)}>{o.label}</option>)}
     </select>
+  );
+}
+
+/** A LISTBOX POPOVER, not a native `<select>` — the fix for B1139216's "dead click".
+ *
+ * ⛔ A NATIVE `<select>`'s `change` event does not fire when the option picked is already the one
+ * selected. Measured live: three blocks at 24/18/9px, all selected, the box wrongly read "24" (the
+ * first block's size, not a real answer for a mixed selection — see notesMixedSelection.js), and
+ * picking "24" again — a real, distinct value the user could see was already showing — did nothing
+ * at all, silently. Blanking the box on a mixed selection (this file's other change) fixes the
+ * REPORTED case, because the box then reads "" and any pick is a genuine value change. But a dead
+ * click must be **structurally impossible**, not merely usually avoided: a UNIFORM selection sitting
+ * at 12px, re-picked at 12px on purpose (to force it onto some inline run the readout does not
+ * separately show — his second, unproven report), must also apply. A `<button onClick>` has no
+ * "previous value" to compare against, so it fires on every press, full stop — which is also the
+ * only shape this repo's own harnesses can drive and prove headless (a native select's real popup
+ * cannot be opened and clicked in headless Chromium; ColorPopover/CalloutControl/TableGridPicker
+ * already use exactly this shape for the same reason).
+ *
+ * `mixed` suppresses the "this option is the current one" highlight — showing a highlighted row
+ * during a mixed selection would claim an answer the selection does not have. */
+function FormatMenu({ title, testid, value, mixed, options, onPick, big, width = 116 }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+
+  const current = mixed ? null : options.find((o) => o.value === value);
+  const label = current ? current.label : "";
+
+  return (
+    <span ref={wrapRef} style={{ position: "relative", display: "inline-flex" }}>
+      <button
+        type="button"
+        title={mixed ? `${title} — mixed` : title}
+        aria-label={mixed ? `${title} — mixed` : title}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        data-testid={testid}
+        onMouseDown={stop}
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: "inline-flex", alignItems: "center", justifyContent: "space-between", gap: 4,
+          height: big ? 44 : 28, width: big ? Math.max(width, 132) : width, padding: "0 6px 0 8px",
+          flex: big ? "0 0 auto" : undefined,
+          border: "1px solid var(--border-default)", borderRadius: RADIUS.control,
+          background: "var(--surface-raised)", color: "var(--text-primary)",
+          font: "inherit", fontSize: big ? 15 : 13, cursor: "pointer",
+        }}
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "left" }}>{label}</span>
+        <Icon size={11}><path d="M4 6.5L8 10.5l4-4" /></Icon>
+      </button>
+      {open && (
+        <div
+          data-testid={`${testid}-menu`}
+          role="listbox"
+          aria-label={title}
+          onMouseDown={stop}
+          style={{
+            position: "absolute", top: big ? 48 : 32, left: 0, zIndex: 40, padding: 4,
+            minWidth: big ? 160 : width, maxHeight: 280, overflowY: "auto",
+            display: "flex", flexDirection: "column", gap: 1,
+            background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+            borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
+          }}
+        >
+          {options.map((o) => {
+            const selected = !mixed && o.value === value;
+            return (
+              <button
+                key={String(o.value)}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                data-testid={`${testid}-opt-${o.value == null ? "default" : o.value}`}
+                onMouseDown={stop}
+                onClick={() => { onPick(o.value); setOpen(false); }}
+                style={{
+                  display: "flex", alignItems: "center", width: "100%", textAlign: "left",
+                  padding: big ? "10px 10px" : "5px 8px", minHeight: big ? 44 : undefined,
+                  borderRadius: RADIUS.control, cursor: "pointer", border: "none",
+                  background: selected ? "var(--accent-notes)" : "transparent",
+                  color: selected ? "var(--on-accent-notes)" : "var(--text-primary)",
+                  font: "inherit", fontSize: big ? 15 : 12.5, fontWeight: selected ? 650 : 500,
+                }}
+              >{o.label}</button>
+            );
+          })}
+        </div>
+      )}
+    </span>
   );
 }
 
@@ -624,14 +727,32 @@ export default function NoteToolbar({ editor, onExport, onPrint, onAttach, onHis
   const chain = () => editor.chain().focus();
   const inTable = editor.isActive("table");
 
-  const blockValue = HEADING_LEVELS.find((l) => editor.isActive("heading", { level: l }));
-  const setBlock = (e) => {
-    const v = e.target.value;
+  /* ⛔ MIXED-SELECTION AWARE (B1139216) — a RANGE asks whether every touched run/block agrees
+   * before showing a value; a collapsed caret still trusts the editor's own read directly, per
+   * this file's rule 1. See lib/notesMixedSelection.js for why: a native `getAttributes`/
+   * `isActive` read answers "what is at one position", which silently presented the FIRST
+   * block's size/style as the whole (mixed) selection's — his exact report. */
+  const { selection } = editor.state;
+
+  const blockCaretValue = HEADING_LEVELS.find((l) => editor.isActive("heading", { level: l }));
+  const blockDisplay = formatDisplayValue({
+    selectionEmpty: selection.empty,
+    caretValue: blockCaretValue ? `h${blockCaretValue}` : "p",
+    rangeValues: selection.empty ? [] : selectionBlockShapes(editor.state.doc, selection.from, selection.to),
+  });
+  const blockMixed = blockDisplay === MIXED;
+  const setBlock = (v) => {
     if (v === "p") chain().setParagraph().run();
     else chain().setHeading({ level: Number(v.slice(1)) }).run();
   };
 
-  const currentSize = editor.getAttributes("textStyle")?.fontSize || null;
+  const sizeDisplay = formatDisplayValue({
+    selectionEmpty: selection.empty,
+    caretValue: editor.getAttributes("textStyle")?.fontSize || null,
+    rangeValues: selection.empty ? [] : selectionFontSizes(editor.state.doc, selection.from, selection.to),
+  });
+  const sizeMixed = sizeDisplay === MIXED;
+  const currentSizeNum = !sizeMixed && sizeDisplay ? parseInt(sizeDisplay, 10) : null;
   const currentFont = editor.getAttributes("textStyle")?.fontFamily || null;
   const currentColor = editor.getAttributes("textStyle")?.color || null;
   const currentHl = editor.getAttributes("highlight")?.color || null;
@@ -661,22 +782,22 @@ export default function NoteToolbar({ editor, onExport, onPrint, onAttach, onHis
    * Each is placed in exactly one of the two spots below via `{!narrow && x}` / `{narrow && x}`
    * — never both — so there is one copy of every prop and handler, not two that can drift. */
   const blockStyleControl = (
-    <TBSelect title="Block style" testid="nt-block" width={104} big={narrow}
-      value={blockValue ? `h${blockValue}` : "p"} onChange={setBlock} options={HEADING_OPTIONS} />
+    <FormatMenu title="Block style" testid="nt-block" width={104} big={narrow}
+      value={blockDisplay} mixed={blockMixed} onPick={setBlock} options={HEADING_OPTIONS} />
   );
   /* FONT SIZE LIVES ON THE ROW ON DESKTOP (B1371) — moved into the More sheet on phone, where
    * it stays reachable in two taps rather than crowding the six-control primary row. */
   const fontSizeControl = (
-    <TBSelect title="Font size" testid="nt-size" width={62} big={narrow}
-      value={currentSize ? String(parseInt(currentSize, 10)) : null}
+    <FormatMenu title="Font size" testid="nt-size" width={62} big={narrow}
+      value={currentSizeNum} mixed={sizeMixed}
       options={SIZES.map((s) => ({ label: s == null ? "Size" : String(s), value: s }))}
       /* ⛔ THE INLINE MARK, THEN THE BLOCK (NEW-SPACING-2). Setting the size only on the runs
        * leaves the paragraph's own strut at the default, so a whole line made smaller stayed
        * exactly as tall — measured, 11px words in the 24.75px row a 15px paragraph uses.
        * `syncBlockFontSize` reads the runs back and writes the size onto any block whose runs
        * all agree, so the row scales with its text. It is one chain, so it is one undo step. */
-      onChange={(e) => (e.target.value
-        ? chain().setFontSize(`${e.target.value}px`).syncBlockFontSize().run()
+      onPick={(size) => (size
+        ? chain().setFontSize(`${size}px`).syncBlockFontSize().run()
         : chain().unsetFontSize().syncBlockFontSize().run())} />
   );
   const spacingControl = (
