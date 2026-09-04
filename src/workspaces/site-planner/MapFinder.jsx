@@ -766,12 +766,23 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const commitOverlayPlacement = (id, placement) => { commitPlacementRef.current && commitPlacementRef.current(id, placement); };
 
   // A sensible starting size/position for a freshly placed overlay: centered on the current map
-  // view, sized to a fraction of it (mirrors the Site Planner reference-image panel's own "Size
-  // to view" button). Pure sizing math lives in overlayGeoref.js; only the live view is read here.
-  const suggestPlacement = (imgW, imgH) => {
+  // view (or `centerOverride`, below), sized to a fraction of it (mirrors the Site Planner
+  // reference-image panel's own "Size to view" button). Pure sizing math lives in
+  // overlayGeoref.js; only the live view is read here.
+  //
+  // `centerOverride` ({lat,lng}) — NEW-17: this is the ONLY door through which a caller may pin
+  // the placement to a specific point instead of the live view center (a drag-and-drop upload
+  // lands where the file was DROPPED, not wherever the map happens to be centered). Before this,
+  // the drop handler below built its own standalone `{centerLat, centerLon}` object with no
+  // scale and handed it to `confirmPage` as if it were a complete placement — every dropped
+  // upload landed on the map with `ft_per_px: null`, which has nothing to draw (`validPlacement`
+  // requires all three fields), so "Editing on map" armed on a plan with no image and no handles
+  // to grab. Routing every placement — dropped or not — through this one function guarantees
+  // `ftPerPx` is always present and sanely clamped (`suggestFtPerPx`).
+  const suggestPlacement = (imgW, imgH, centerOverride) => {
     const m = mapRef.current;
     if (!m || !imgW || !imgH) return null;
-    const c = m.getCenter();
+    const c = centerOverride || m.getCenter();
     const size = m.getSize();
     const midY = size.y / 2;
     const pL = m.containerPointToLatLng([0, midY]), pR = m.containerPointToLatLng([size.x, midY]);
@@ -921,9 +932,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       setMode("comp");
       setPanelTab("comp");
       if (!sitesPanelOpen) toggleSitesPanel();
+      // NEW-17 — this is a DROP POINT only (a {lat,lng} center override), never a full placement
+      // on its own: it carries no scale, because the dropped file's own pixel dimensions aren't
+      // known until it's rasterized. `confirmPage` merges it into `suggestPlacement`'s full,
+      // always-scaled placement rather than using it standalone.
       let dropPlacement = null;
       const m = mapRef.current;
-      if (m) { const ll = m.mouseEventToLatLng(e); dropPlacement = { centerLat: ll.lat, centerLon: ll.lng }; }
+      if (m) { const ll = m.mouseEventToLatLng(e); dropPlacement = { lat: ll.lat, lng: ll.lng }; }
       dropIntakeRef.current && dropIntakeRef.current(files, dropPlacement);
     };
     window.addEventListener("dragenter", onDragEnter);

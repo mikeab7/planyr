@@ -1,6 +1,7 @@
 # MAP.md — Planyr codebase map
 
 > **Generated 2026-09-04 @ `f77e0ef` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-04 @ `e2d2b48d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +16,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_663 source files mapped._
+_665 source files mapped._
 
 ## infra
 
@@ -276,6 +277,8 @@ _663 source files mapped._
   - _exports_: `makeWriteSerializer`
 - **`src/shared/cloud/writeFailureLog.js`** — Durable (localStorage) record of a cloud write that failed, surviving a same-event auto-reload that can outrun an in-memory banner before it paints
   - _exports_: `clearAllCloudWriteFailures`, `clearCloudWriteFailure`, `readCloudWriteFailures`, `recordCloudWriteFailure`, `replayCloudWriteFailures`
+- **`src/shared/cloud/writeSerializer.js`** — per-key async write queue; stops a rapid second write for the same id from racing an unsettled first one
+  - _exports_: `createWriteSerializer`
 - **`src/shared/comps/components/CompDraftsPanel.jsx`** — KML-import review/promote surface (B849233): one card per staged draft, pre-filled from best-effort description parsing, confirm-before-commit; reachable only from the KML import action
   - _exports_: `anchorFromGeometry`, `default (CompDraftsPanel)`
 - **`src/shared/comps/components/CompEntryGrid.jsx`** — the paste-box-over-a-row-grid comp entry surface (B849232): parsed values land directly in typed, editable cells with blocking (red) vs soft (amber) uncertainty; replaces the old single-comp create form
@@ -315,7 +318,7 @@ _663 source files mapped._
 - **`src/shared/coordinates/scaleFactor.js`** — NEW-4 grid-vs-ground: per-zone grid scale factor × elevation factor = the site's combined factor (with what it is worth per mile), plus `detectSurveyFrame` — grid / ground / other-scale from corresponding survey↔grid distances. Reports the factor; deliberately never applies it
   - _exports_: `combinedScaleFactor`, `detectSurveyFrame`, `earthRadiusFt`, `elevationFactor`, `MATERIAL_THRESHOLD`
 - **`src/shared/coordinates/statePlane.js`** — NEW-3 multi-zone state plane: the zone registry (TX South Central 2278 · CO North 2231 · CO Central 2232), per-county assignment incl. the documented Broomfield decision, a generic Lambert engine that reproduces the hardcoded EPSG:2278 path bit-for-bit, and the LCC grid scale factor
-  - _exports_: `COUNTY_ZONE`, `gridScaleFactor`, `projectToZone`, `resolveZone`, `SP_ZONES`, `ZONE_IDS`, `zoneById`, `zoneForCounty`, `zoneForPoint`, `zoneToProject`
+  - _exports_: `COUNTY_ZONE`, `gridConvergenceDeg`, `gridScaleFactor`, `projectToZone`, `resolveZone`, `SP_ZONES`, `ZONE_IDS`, `zoneById`, `zoneForCounty`, `zoneForPoint`, `zoneToProject`
 - **`src/shared/files/chunkedUpload.js`** — Chunked any-size file upload to Google Drive through the same-origin /api/uploads/* proxy: pure 16 MiB chunk math plus the sequential upload loop with retry/backoff, resume-from-offset, and byte progress (B409 rework)
   - _exports_: `backoffMs`, `CHUNK_SIZE`, `chunkPlan`, `contentRangeFor`, `DRIVE_CHUNK_GRANULE`, `QUOTA_MESSAGE`, `uploadFileInChunks`
 - **`src/shared/files/deedOcr.js`** — Lazy Tesseract.js orchestration: OCRs a scanned deed PDF page by page (render → preprocess → recognize → repair/reflow), with progress/cancel and per-word confidence, for the metes-and-bounds plotter's OCR fallback
@@ -452,6 +455,8 @@ _663 source files mapped._
   - _exports_: `activeUid`, `DELETED_RETENTION_DAYS`, `deleteProject`, `filterProjects`, `groupProjects`, `listDeletedProjects`, `listProjects`, `normalizeProjectName`, `notifyProjectsChanged`, `onProjectsChanged`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `reconcileProjects`, `relTime`, `renameProject`, `restoreDeletedProject`, `suggestNameMatch`, `warmProjects`, `warmProjectsIfEmpty`
 - **`src/shared/recents/recentDocs.js`** — Library-Home Recent list: local recently-OPENED drawings (not updated_at), per-uid, deduped by id, newest-first, capped at 15
   - _exports_: `listRecents`, `RECENTS_CAP`, `recordOpen`, `removeRecent`
+- **`src/shared/sitePlans/components/ImageCropTool.jsx`** — reusable non-destructive crop UI for a site-plan overlay (8 handles, scrim, rule-of-thirds), used before or after placement
+  - _exports_: `default (ImageCropTool)`
 - **`src/shared/sitePlans/components/SitePlansSection.jsx`** — upload a site plan, pick which page is the site plan, anchor it on the map, and pin comps to buildings on it (rendered by MapFinder above the Comps list)
   - _exports_: `default (SitePlansSection)`
 - **`src/shared/sitePlans/lib/overlayErrors.js`** — turns a raw Postgres/PostgREST save error into a plain-English sentence, passing an already-hand-written Error through unchanged

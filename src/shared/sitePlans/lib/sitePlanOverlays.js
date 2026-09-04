@@ -42,6 +42,10 @@ export function rowToOverlay(r) {
     centerLon: r.center_lon != null ? Number(r.center_lon) : null,
     ftPerPx: r.ft_per_px != null ? Number(r.ft_per_px) : null,
     rotationDeg: r.rotation_deg != null ? Number(r.rotation_deg) : 0,
+    // B1134754 NEW-21 — non-destructive crop, in SOURCE-IMAGE pixels; null = full image (the
+    // OVERWHELMING majority of rows). See overlayCrop.js (reused verbatim from the Site
+    // Planner's own reference-image crop) for the shape and every invariant it upholds.
+    crop: r.crop && Number.isFinite(r.crop.w) && Number.isFinite(r.crop.h) ? r.crop : null,
     opacity: r.opacity != null ? Number(r.opacity) : 0.85,
     visible: r.visible !== false,
     locked: !!r.locked,
@@ -70,6 +74,7 @@ export function overlayToRow(o) {
     center_lon: o.centerLon ?? null,
     ft_per_px: o.ftPerPx ?? null,
     rotation_deg: o.rotationDeg ?? 0,
+    crop: o.crop || null,
     opacity: o.opacity ?? 0.85,
     visible: o.visible !== false,
     locked: !!o.locked,

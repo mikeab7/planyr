@@ -32,7 +32,8 @@
  * fit) reads the two outlines and needs no projection at all, so nothing else here moves. This
  * module is reached only through `deedLazy.js`, so the zone registry rides the deed chunk and
  * never the boot path. */
-import { resolveZone, projectToZone, zoneToProject } from "../../../shared/coordinates/statePlane.js";
+// (statePlane.js's resolveZone/projectToZone/zoneToProject are no longer imported directly here —
+// gridConvergenceDeg, the one function that used them, is now defined there and re-exported below.)
 
 // residual / characteristic-size ratio at or below which a fit is called "confident".
 export const CONFIDENT_FRAC = 0.02; // 2%
@@ -194,17 +195,13 @@ export function solveDeedAlignment(deedRing, parcelRing, opts = {}) {
  * Returns **null** — an honest unknown, never 0 — for non-finite input and for ground outside every
  * modelled zone. 0 is not a safe stand-in here: it is a real answer meaning "you are on the central
  * meridian, there is nothing to correct", and the caller must be able to tell the two apart before
- * it rotates a surveyed boundary. */
-export function gridConvergenceDeg(lat, lon, { state = null, county = null } = {}) {
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-  const zone = resolveZone({ state, county, lat, lon });
-  if (!zone) return null;                      // no modelled zone here — refuse, never guess
-  const p = projectToZone(zone, lat, lon);
-  const up = zoneToProject(zone, { x: p.x, y: p.y + 1000 }); // a point 1000 ft due GRID-north
-  const dLat = up.lat - lat;
-  const dLon = (up.lon - lon) * Math.cos((lat * Math.PI) / 180); // east component, in degrees
-  return (Math.atan2(dLon, dLat) * 180) / Math.PI; // angle of grid-north east of true north
-}
+ * it rotates a surveyed boundary.
+ *
+ * B1134752 — MOVED to `shared/coordinates/statePlane.js` (re-exported here unchanged): the
+ * site-plan-overlay placement math (`shared/sitePlans/lib/overlayGeoref.js`) needed this same
+ * fact and lives in `shared/`, which must not import a workspace-scoped module — this is a plain
+ * geodetic fact about a zone at a point, the same category as `gridScaleFactor` already there. */
+export { gridConvergenceDeg } from "../../../shared/coordinates/statePlane.js";
 
 /* A plain-language description of a rotation magnitude/direction, for the honest read-out
  * ("rotated 1.55° clockwise to match the county parcel"). Screen-frame: +deg = clockwise. */
