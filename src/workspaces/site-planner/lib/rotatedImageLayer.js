@@ -43,6 +43,16 @@ export function createRotatedImageLayer(map) {
   img.style.top = "0";
   img.style.transformOrigin = "0 0";
   img.draggable = false;
+  // B849841/NEW-2 — opts this element into Leaflet's own CSS-eased zoom animation, the same way
+  // every built-in layer (ImageOverlay, Marker, the vector renderer) does: Leaflet flags its
+  // `_mapPane` (an ancestor of every custom pane, this one included — createPane() with no
+  // container argument appends under _mapPane) with `leaflet-zoom-anim` for the ~250ms of a zoom
+  // gesture, and leaflet.css eases `transform` on any DESCENDANT carrying `leaflet-zoom-animated`
+  // during that window. Without this class the transform below still ends up correct (the plain
+  // "move zoom viewreset" listener sets it), but with no transition to ease into it just SNAPS
+  // there the instant the gesture starts — see onZoomAnim below for why that instant write is
+  // otherwise a jump, not a lag.
+  img.classList.add("leaflet-zoom-animated");
   pane.appendChild(img);
 
   let corners = null, imgW = 0, imgH = 0, clickHandler = null;
@@ -76,16 +86,41 @@ export function createRotatedImageLayer(map) {
     window.addEventListener("pointerup", onWindowUp);
   };
 
-  const update = () => {
-    if (!corners || !imgW || !imgH) return;
-    const p0 = map.latLngToLayerPoint(corners.topLeft);
-    const p1 = map.latLngToLayerPoint(corners.topRight);
-    const p2 = map.latLngToLayerPoint(corners.bottomLeft);
+  // Shared affine-matrix math — `project` turns a corner latLng into a pane-local pixel point.
+  // The resting case (`update`, below) projects at the map's CURRENT state; the animated case
+  // (`onZoomAnim`) projects at the gesture's TARGET zoom/center via Leaflet's own private
+  // `_latLngToNewLayerPoint` — the same helper every built-in Leaflet layer's own `_animateZoom`
+  // uses (ImageOverlay, Marker, the vector renderer) for exactly this, so this is the sanctioned
+  // technique for a custom pane layer, not a private-API workaround invented here.
+  const matrixFor = (project) => {
+    const p0 = project(corners.topLeft);
+    const p1 = project(corners.topRight);
+    const p2 = project(corners.bottomLeft);
     const a = (p1.x - p0.x) / imgW, b = (p1.y - p0.y) / imgW;
     const c = (p2.x - p0.x) / imgH, d = (p2.y - p0.y) / imgH;
+    return `matrix(${a},${b},${c},${d},${p0.x},${p0.y})`;
+  };
+
+  const update = () => {
+    if (!corners || !imgW || !imgH) return;
     img.style.width = `${imgW}px`;
     img.style.height = `${imgH}px`;
-    img.style.transform = `matrix(${a},${b},${c},${d},${p0.x},${p0.y})`;
+    img.style.transform = matrixFor((ll) => map.latLngToLayerPoint(ll));
+  };
+
+  // B849841/NEW-2 — without this, the overlay only ever repositions on "move zoom viewreset",
+  // which (per `_animateZoom` in Leaflet's own Map.js) fires with the FINAL, post-animation
+  // state already current — so `update()` above writes the correct RESTING transform the instant
+  // a zoom gesture *starts*. On a plain element that write is an unexplained instant jump — the
+  // reported "the plan stays fixed on screen … it snaps to its new position at the end" (it's
+  // actually snapping at the START; the tiles then spend ~250ms visually catching up to it).
+  // `leaflet-zoom-animated` (added above) turns that same instant write into an eased one, but
+  // only for elements that are told the TARGET view during the `zoomanim` event Leaflet fires at
+  // the start of the gesture (once per discrete zoom step, once per frame for a continuous pinch)
+  // — hence this second, explicit handler rather than relying on `update()` alone.
+  const onZoomAnim = (e) => {
+    if (!corners || !imgW || !imgH) return;
+    img.style.transform = matrixFor((ll) => map._latLngToNewLayerPoint(ll, e.zoom, e.center));
   };
 
   // B1134754 NEW-21 — non-destructive crop. `clip-path: inset(...)` is measured in the
@@ -103,6 +138,7 @@ export function createRotatedImageLayer(map) {
   let pendingCrop = null;
 
   map.on("move zoom viewreset", update);
+  map.on("zoomanim", onZoomAnim);
 
   const onImgClick = (e) => {
     if (!clickHandler) return;
@@ -123,6 +159,7 @@ export function createRotatedImageLayer(map) {
     setClickable(fn) { clickHandler = fn || null; img.style.pointerEvents = fn ? "auto" : "none"; img.style.cursor = fn ? "crosshair" : ""; },
     destroy() {
       map.off("move zoom viewreset", update);
+      map.off("zoomanim", onZoomAnim);
       img.removeEventListener("pointerdown", onImgPointerDown);
       img.removeEventListener("click", onImgClick);
       onWindowUp();

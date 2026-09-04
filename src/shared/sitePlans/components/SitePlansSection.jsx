@@ -288,7 +288,20 @@ function OverlayRow({
         <IconButton ref={menuBtnRef} size={24} onClick={() => setMenuOpen(true)} aria-label="More actions" title="More actions" style={{ flex: "none" }}>⋯</IconButton>
         <AnchoredMenu open={menuOpen} onClose={() => { setMenuOpen(false); setConfirmingDelete(false); }} anchorRef={menuBtnRef} placement="below-right" width={210}>
           {!confirmingDelete ? (
-            <MenuItem onClick={() => setConfirmingDelete(true)} style={{ color: "var(--danger-text)" }}>Delete site plan…</MenuItem>
+            <>
+              {/* B849840/NEW-1 — the overflow menu used to offer nothing but Delete, so the ONLY
+                  door into #1409's manipulation mode (rotate diamond, live degree/size readout,
+                  Escape-to-cancel, the non-destructive crop tool) was this row's own disclosure
+                  arrow, then the "Move / resize" button buried inside it — undiscoverable. Same
+                  handler that button already calls (`onActivate`: expands the row AND arms the
+                  map's placement handles, self-placing the plan first if it has none yet), just
+                  reachable one click sooner and from the row's most obvious control. */}
+              <MenuItem onClick={() => { setMenuOpen(false); onActivate(); }} disabled={placed && o.locked}
+                title={placed && o.locked ? "Locked — unlock to move or resize" : undefined}>
+                {isActive ? "Editing on map" : placed ? "Edit / adjust…" : "Place on map…"}
+              </MenuItem>
+              <MenuItem onClick={() => setConfirmingDelete(true)} style={{ color: "var(--danger-text)" }}>Delete site plan…</MenuItem>
+            </>
           ) : (
             <div style={{ padding: "6px 10px" }}>
               <div style={{ fontSize: FONT_SIZE.control, marginBottom: 8, color: "var(--text-primary)" }}>Delete “{o.docTitle || "this site plan"}”? Comps pinned to it keep their location but lose the link back.</div>
@@ -463,6 +476,15 @@ export default function SitePlansSection({
   // B1134754 NEW-21 — same rule as `trash` above: declared before the `if (!open) return null`
   // below, so this hook still runs unconditionally on every render even while the panel is closed.
   const [cropTarget, setCropTarget] = useState(null); // { overlay, src } while the crop tool is open
+
+  // B849840/NEW-1 — arming an overlay for editing via ANY path must reveal the same row
+  // controls (opacity slider, rotation field, the "Editing on map" state) with no second step.
+  // Before this, only this panel's OWN "Move / resize" button expanded its row (it calls
+  // setExpandedId itself, see onActivate below) — clicking the plan directly on the map
+  // (MapFinder's onSelect → selectOverlay → activeOverlayId) armed the SAME map handles but
+  // never touched this component's local expand state, so the row stayed collapsed and looked
+  // like the click had done nothing.
+  useEffect(() => { if (activeOverlayId) setExpandedId(activeOverlayId); }, [activeOverlayId]);
   const notifiedRef = useRef(onOverlaysChange);
   notifiedRef.current = onOverlaysChange;
   const overlaysRef = useRef(overlays);
