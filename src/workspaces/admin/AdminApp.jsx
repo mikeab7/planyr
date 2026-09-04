@@ -32,7 +32,7 @@ export default function AdminApp({ onExit }) {
       data-testid="admin-app"
       style={{
         height: "100%", overflow: "auto", background: "var(--surface-page)",
-        display: "flex", flexDirection: "column",
+        display: "flex", flexDirection: "column", pointerEvents: "auto",
       }}
     >
       <header
