@@ -860,6 +860,25 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   finding:** all 17 cases passed before AND after the fix, because every one used a FLAT list where
   an item has no indentable ancestor — depth was the variable that mattered and nothing had any.
   Fixture and diff harness: **diagnose-notes-outdent** under `ui-audit/`.
+  - **⛔ AND A SIBLING DEFECT IN THE SAME WALK, ONE LEVEL LATER (B1136400): FINDING THE RIGHT ITEMS
+    IS NOT ENOUGH — BUMPING EVERY ONE OF THEM INDEPENDENTLY STILL DOUBLE-COUNTS A REAL CHAIN.**
+    Owner: *"I highlighted the contacts thing… it's made the distance between indents bigger."*
+    B519680 fixed WHICH items a selection touches (nearest ancestor only); this bug is about what
+    happens once several of those items are themselves real ancestor/descendant of EACH OTHER.
+    `margin-left` on a real-nested `<li>` carries its whole subtree with it (that is what real
+    nesting IN THE DOM means), so giving a real ancestor AND its real descendant their own
+    identical `indent` bump in the same Select-All+Tab doubles the visual step at every level the
+    selection spans — measured live: a 22.5px step became 45px, then kept doubling with every
+    further Tab. Fix: `itemsInSelection` now drops any hit whose node range falls inside ANOTHER
+    hit's range — only the outermost item in each real chain gets bumped; its real descendants
+    ride that shift for free, exactly as they already do structurally. Proven to make a single
+    caret on the middle item and a whole-chain selection converge on the identical result.
+    Same pass also retired `indentAttrs`'s inline `margin-left` for `data-indent` + one stylesheet
+    table (`indentCssRules`, mirrored into `EDITOR_CSS` and `PRINT_CSS`) — not the root cause, but
+    the owner asked for it by name and it costs nothing to also be true. Existing stored documents
+    are NOT rewritten; Shift+Tab now reliably walks back any stray old over-indent one level at a
+    time. New pure cases in the repo-root `test/` suite **notesListIndent** reproduce his exact
+    three-level chain.
 - `lib/notesKeyScope.js` — the one predicate above, plus the measured two states it separates.
   ⛔ **AND `UNGATED_KEYS` — ESCAPE IS NEVER GATED (B539653), which is a rule rather than a hole.**
   The gate exists so a binding cannot steal a key the person typing NEEDS; a caret has no use for

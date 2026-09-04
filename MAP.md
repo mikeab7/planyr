@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-04 @ `8befa94d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-04 @ `62524ccc` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -194,13 +194,13 @@ _666 source files mapped._
 - **`src/workspaces/notes/lib/notesImageNode.js`** — The `noteImage` schema node: the document holds an image ID, never the bytes. Owns the paste/drop intake plugin and the node view that draws a VISIBLE broken-image state when a picture's bytes are gone.
   - _exports_: `default`, `NoteImage`
 - **`src/workspaces/notes/lib/notesIndentLevel.js`** — a list item's own indent LEVEL, decided once: reader, ceiling and markup. Pure and engine-free so the Markdown exporter (static path) can read it.
-  - _exports_: `INDENT_STEP_EM`, `INDENTABLE`, `indentAttrs`, `MAX_INDENT`, `parseIndent`, `readIndent`
+  - _exports_: `INDENT_STEP_EM`, `INDENTABLE`, `indentAttrs`, `indentCssRules`, `MAX_INDENT`, `parseIndent`, `readIndent`
 - **`src/workspaces/notes/lib/notesKeys.js`** — the device storage KEY FORMAT and the scope rule, written down once — a dependency-free leaf so the one module allowed to read these keys from outside the Notes route cannot drift from the store.
   - _exports_: `IGNORED_DUPES_KEY_BASE`, `LOCAL_SCOPE`, `PAGE_KEY_BASE`, `scopeFor`, `SYNC_KEY_BASE`, `TREE_KEY_BASE`
 - **`src/workspaces/notes/lib/notesKeyScope.js`** — who owns a keypress: while there is a live caret in editable text, every global binding in Notes is inert. One shared predicate, asserted as a source property.
   - _exports_: `bindingShouldDecline`, `caretOwnsTheKey`, `FIELD_SELECTOR`, `keysBelongToTheCaret`, `readCaretScope`, `UNGATED_KEYS`
 - **`src/workspaces/notes/lib/notesListIndent.js`** — Tab changes the LEVEL of the current item and never creates a node the user did not type: the `indent` attribute on listItem/taskItem, above the list keymap.
-  - _exports_: `default`, `INDENT_STEP_EM`, `INDENTABLE`, `indentAttrs`, `LIST_INDENT_PRIORITY`, `MAX_INDENT`, `readIndent`, `shiftIndent`
+  - _exports_: `default`, `INDENT_STEP_EM`, `INDENTABLE`, `indentAttrs`, `indentCssRules`, `LIST_INDENT_PRIORITY`, `MAX_INDENT`, `readIndent`, `shiftIndent`
 - **`src/workspaces/notes/lib/notesMarkdown.js`** — PURE Markdown export of a note's document model (GFM tables/task lists, HTML fallback for what Markdown cannot spell, plus a lossiness report) and `docToText` for body search.
   - _exports_: `assetIdsInDoc`, `attachmentIdsInDoc`, `attachmentIdsInDocs`, `docToMarkdown`, `docToText`, `escapeText`, `imageIdsInDoc`, `imageIdsInDocs`, `lossyNote`, `MD_INLINE_ATTACHMENT_MAX`, `MD_MAX_HEADING`, `NOTE_MD_HANDLED`, `pageToMarkdown`, `safeFileName`
 - **`src/workspaces/notes/lib/notesMarquee.js`** — PURE: one gesture on empty page, two meanings, decided by distance — place below the slop, marquee above it. Also the band's rectangle, which boxes it caught, shift-toggling, arrow nudges, and moving a whole set by ONE clamped delta so the arrangement cannot deform.
@@ -456,7 +456,7 @@ _666 source files mapped._
   - _exports_: `activeUid`, `DELETED_RETENTION_DAYS`, `deleteProject`, `filterProjects`, `groupProjects`, `listDeletedProjects`, `listProjects`, `normalizeProjectName`, `notifyProjectsChanged`, `onProjectsChanged`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `reconcileProjects`, `relTime`, `renameProject`, `restoreDeletedProject`, `suggestNameMatch`, `warmProjects`, `warmProjectsIfEmpty`
 - **`src/shared/recents/recentDocs.js`** — Library-Home Recent list: local recently-OPENED drawings (not updated_at), per-uid, deduped by id, newest-first, capped at 15
   - _exports_: `listRecents`, `RECENTS_CAP`, `recordOpen`, `removeRecent`
-- **`src/shared/sitePlans/components/ImageCropTool.jsx`** — reusable non-destructive crop UI for a site-plan overlay (8 handles, scrim, rule-of-thirds), used before or after placement
+- **`src/shared/sitePlans/components/ImageCropTool.jsx`** — non-destructive 8-handle crop UI for a site-plan overlay's raster, used both pre- and post-placement
   - _exports_: `default (ImageCropTool)`
 - **`src/shared/sitePlans/components/SitePlansSection.jsx`** — upload a site plan, pick which page is the site plan, anchor it on the map, and pin comps to buildings on it (rendered by MapFinder above the Comps list)
   - _exports_: `default (SitePlansSection)`

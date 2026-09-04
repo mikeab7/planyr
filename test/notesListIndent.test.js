@@ -27,7 +27,7 @@ import { EditorState, TextSelection } from "@tiptap/pm/state";
 
 import { NOTE_EXTENSIONS } from "../src/workspaces/notes/lib/notesExtensions.js";
 import { shiftIndent, MAX_INDENT, INDENTABLE } from "../src/workspaces/notes/lib/notesListIndent.js";
-import { indentAttrs, readIndent } from "../src/workspaces/notes/lib/notesIndentLevel.js";
+import { indentAttrs, indentCssRules, readIndent } from "../src/workspaces/notes/lib/notesIndentLevel.js";
 import { docToMarkdown } from "../src/workspaces/notes/lib/notesMarkdown.js";
 
 const schema = getSchema(NOTE_EXTENSIONS);
@@ -178,13 +178,25 @@ describe("the level is carried, not lost, by everything that reads a document", 
     expect(indentAttrs({ indent: "nonsense" })).toEqual({});
   });
 
-  it("…and writes a margin ON THE ITEM at level 1+, so the bullet moves with its words", () => {
+  it("⛔ …and NEVER an inline style, even at level 1+ (B842949) — data-indent only, so the actual "
+     + "margin is looked up from ONE stylesheet table (indentCssRules) rather than computed and "
+     + "stamped onto the element by hand", () => {
     const one = indentAttrs({ indent: 1 });
     expect(one["data-indent"]).toBe("1");
-    expect(one.style).toMatch(/^margin-left: \d+\.\d+em$/);
+    expect(one.style).toBeUndefined();
+    expect(Object.keys(one)).toEqual(["data-indent"]);
     expect(indentAttrs({ indent: 3 })["data-indent"]).toBe("3");
     // The ceiling holds in the markup too — a hand-edited document cannot exceed it.
     expect(indentAttrs({ indent: 999 })["data-indent"]).toBe(String(MAX_INDENT));
+  });
+
+  it("⛔ indentCssRules is the ONE table both the editor and the print sheet read (PDF-PARITY) — "
+     + "a fixed, monotonically increasing step per level, one rule per level up to the ceiling", () => {
+    const css = indentCssRules(".note-body li");
+    for (let n = 1; n <= MAX_INDENT; n += 1) {
+      expect(css).toContain(`.note-body li[data-indent="${n}"] { margin-left: ${(n * 1.5).toFixed(2)}em; }`);
+    }
+    expect(css).not.toContain(`[data-indent="${MAX_INDENT + 1}"]`);
   });
 
   it("⛔ MARKDOWN carries the level as indentation, which is how Markdown spells nesting", () => {
@@ -366,5 +378,105 @@ describe("⛔ only the item the caret is IN moves — never its ancestors", () =
     // Two items for one collapsed caret: the bullet, and the parent nobody pressed on.
     expect(oldWalk.length).toBeGreaterThan(1);
     expect(oldWalk.some((t) => t.startsWith("MUD 377"))).toBe(true);
+  });
+});
+
+/* ⛔ A REAL DESCENDANT RIDES ITS ANCESTOR'S SHIFT FOR FREE (B842949, owner report on his own
+ * Contacts note, verbatim: "I highlighted the contacts thing. And when I tapped it, it tabbed
+ * everything, but then it's made the distance between indents bigger for some reason.").
+ *
+ * His exact shape: a REAL three-level chain, each item the sole child of the one above —
+ * Contacts: > Jerry Hayley > 713-416-5353 — built the same way `sinkListItem` builds any real
+ * nested list (type, Enter, Tab on the new empty sibling, which nests because there IS a
+ * sibling above; repeat one level deeper). Selecting the whole list and pressing Tab used to
+ * give EVERY item its own `indent: 1` — and because a real nested item already inherits its
+ * ancestor's `margin-left` (that is what "real nesting" means in the rendered DOM: a child
+ * lives inside its parent's now-shifted box), giving the child its OWN identical bump doubled
+ * the visual step between levels instead of shifting the whole block down by one level. Measured
+ * live in a real browser before this fix: a 22.5px step became 45px after one Tab, and kept
+ * doubling with every further press — see the PR for the full before/after measurement. */
+describe("⛔ a REAL nested chain moves as ONE block — only the outermost selected item is touched", () => {
+  /** Contacts: > Jerry Hayley > 713-416-5353 — his exact shape, sole child at every level. */
+  const chain = () => ({
+    type: "doc",
+    content: [{ type: "bulletList", content: [
+      { type: "listItem", content: [para("Contacts:"), { type: "bulletList", content: [
+        { type: "listItem", content: [para("Jerry Hayley"), { type: "bulletList", content: [
+          item("713-416-5353"),
+        ] }] },
+      ] }] },
+    ] }],
+  });
+
+  /** The position just inside a named item's own paragraph. Declared once, above both cases
+   *  below that need it, so it is not duplicated. */
+  const caretIn = (json, text) => {
+    const doc = PMNode.fromJSON(schema, json);
+    let at = null;
+    doc.descendants((node, pos) => {
+      if (at != null || !node.isTextblock) return true;
+      if (node.textContent === text) at = pos + 1;
+      return true;
+    });
+    if (at == null) throw new Error(`no item reads "${text}"`);
+    return at;
+  };
+  const wholeChainRange = (json) => [caretIn(json, "Contacts:"), caretIn(json, "713-416-5353")];
+
+  it("⛔ HIS CASE — select the whole chain, Tab once: only the OUTERMOST item gets the attribute", () => {
+    const before = chain();
+    const { ok, json } = run(before, +1, { range: wholeChainRange(before) });
+    expect(ok).toBe(true);
+    const levels = Object.fromEntries(itemsOf(json));
+    expect(levels["Contacts:"]).toBe(1);              // the block's own new level
+    expect(levels["Jerry Hayley"]).toBe(0);            // carried by Contacts' shift — not bumped again
+    expect(levels["713-416-5353"]).toBe(0);            // carried transitively — not bumped at all
+  });
+
+  it("…and pressing Tab again moves the SAME outermost item, never its already-carried children", () => {
+    const before = chain();
+    const once = run(before, +1, { range: wholeChainRange(before) });
+    const twice = run(once.json, +1, { range: wholeChainRange(once.json) });
+    const levels = Object.fromEntries(itemsOf(twice.json));
+    expect(levels["Contacts:"]).toBe(2);
+    expect(levels["Jerry Hayley"]).toBe(0);
+    expect(levels["713-416-5353"]).toBe(0);
+  });
+
+  it("⛔ AND A SINGLE CARET ON THE MIDDLE ITEM ALONE PRODUCES THE IDENTICAL RESULT — the whole "
+     + "point being that selection size must not change the outcome (NEW requirement 1)", () => {
+    const before = chain();
+    const single = run(before, +1, { at: caretIn(before, "Jerry Hayley") });
+    const selected = run(before, +1, { range: wholeChainRange(before) });
+    // A caret on Jerry alone bumps Jerry itself; selecting the whole chain bumps Contacts
+    // instead (the outermost item in the selection) — different item, but the SAME shape of
+    // result: exactly one attribute set in the whole document, nothing double-counted.
+    const countIndented = (json) => itemsOf(json).filter(([, n]) => n > 0).length;
+    expect(countIndented(single.json)).toBe(1);
+    expect(countIndented(selected.json)).toBe(1);
+  });
+
+  it("⛔ MUTATION: the OLD behaviour — bump every item in the chain — reproduces the reported "
+     + "doubling and is what this fix replaces", () => {
+    const before = chain();
+    const doc = PMNode.fromJSON(schema, before);
+    const oldHits = [];
+    doc.nodesBetween(1, doc.content.size - 1, (node, pos) => {
+      if (!node.isTextblock) return true;
+      const $at = doc.resolve(pos);
+      for (let d = $at.depth; d > 0; d -= 1) {
+        if (!INDENTABLE.includes($at.node(d).type.name)) continue;
+        oldHits.push(pos);
+        break;
+      }
+      return true;
+    });
+    // The old walk finds all THREE items (one hit per textblock, exactly as the fixed
+    // `itemsInSelection` still does) — the defect was never in which items were FOUND, it was
+    // that every one of them got its own attribute bump with no regard for real nesting among
+    // them. The fixed selection collapses that to exactly one.
+    expect(oldHits.length).toBe(3);
+    const { json } = run(before, +1, { range: wholeChainRange(before) });
+    expect(itemsOf(json).filter(([, n]) => n > 0).length).toBe(1);
   });
 });
