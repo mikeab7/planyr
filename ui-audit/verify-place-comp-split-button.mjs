@@ -50,7 +50,7 @@ await pacedWait(page, 800);
 
 console.log("\n=== Mode toggle — renamed, not removed (drives the rail tab + toolbar workflow) ===");
 {
-  const tablist = page.locator('div[role="tablist"][aria-label="Browse sites or comps"]');
+  const tablist = page.locator('div[role="tablist"][aria-label="What an address search creates"]');
   check("the Site/Comp switch still exists, under its renamed accessible name", await tablist.count() === 1);
   const segTexts = await tablist.locator("button").allTextContents();
   report("switch segment labels", segTexts);
@@ -64,6 +64,13 @@ console.log("\n=== Mode toggle — renamed, not removed (drives the rail tab + t
 }
 
 console.log("\n=== Reach Comps, seed a sheet that already has a row (the append bug never shows on the first row) ===");
+// ⛔ B850016 (NEW-11) — the rail "Comps" tab and the toolbar switch are now independent (see
+// MapFinder.jsx's `mode`/`panelTab` state comments). Before that fix, clicking the rail tab ALSO
+// armed `mode` to "comp" (the coupling bug), which is what used to make the toolbar's "Place comp"
+// button appear below with no separate click. Now the toolbar switch must be armed explicitly,
+// matching how a real user reaches this split button.
+await page.locator('div[role="tablist"][aria-label="What an address search creates"] button', { hasText: "Comp" }).click();
+await pacedWait(page, 150);
 await page.getByRole("tab", { name: /^Comps/ }).first().click();
 await pacedWait(page, 200);
 await page.getByText("＋ Paste comps", { exact: true }).click();
