@@ -34,9 +34,10 @@ export default function Scheduler({
   // (the whole point — no ~2 s Gantt re-boot per switch); hidden, we still FOLLOW the route
   // into the iframe, but never write the route from iframe state.
   isActive = true,
-  // NEW-1 (B866xxx) — the Shell passes this to every workspace so the shared header's Dashboard
-  // crumb always means the same thing (leave this workspace, go to the Site Planner map home).
-  // Scheduler used to receive it and never read it — see goDashboard's own header below.
+  // The Shell passes this to every workspace as the "leave this workspace, go to the
+  // Site Planner map home" action. B1128272 — Schedule wires it to the header
+  // wordmark ONLY (`onLogoDashboard`), never to the breadcrumb crumb — see
+  // goDashboard's own header below for why those two now do different things.
   onGoDashboard,
   // ORG SCOPE (B1020930) — the route's org flag, uniform with `projectId`/`crossProject` on
   // every other workspace. `userId` scopes the local-only agenda store per account (never
@@ -394,17 +395,17 @@ export default function Scheduler({
   // up over the dashboard the user had just navigated to, with no way to close it. Mirror
   // selectSchedule: post AND carry the change up to the route. One-shot, not a reactive effect.
   //
-  // ⛔ NEW-1 (B866xxx) — this was ALSO, silently, the shared header crumb's ENTIRE `onDashboard`
-  // handler, which made "Dashboard" mean something different on Schedule than on every other
-  // workspace: Library/Notes/Review all wire the Shell's `onGoDashboard` (leave the workspace,
-  // go to the Site Planner map home) straight into the crumb; this function only ever clears the
-  // routed project WITHIN Schedule and tells the embedded iframe to show its own reports view —
-  // it never left the module. On the global `/schedule` route (already showing that internal
-  // view) that made the button a genuine no-op: no navigation, no error, four presses, nothing —
-  // exactly the reported repro. `goDashboardWithinModule` keeps every bit of the existing B1050
-  // behavior (still needed if the user ends up back on Schedule with no project routed — the
-  // iframe should already be showing its reports view, not a stale project); the crumb now ALSO
-  // calls the Shell's `onGoDashboard`, so pressing it behaves identically everywhere.
+  // ⛔ NEW-1 (B866xxx) added a call to the Shell's `onGoDashboard` (leave the workspace, go to the
+  // Site Planner map home) here too, reasoning that Library/Notes/Review all wire it straight into
+  // the shared header crumb and Schedule should be no different. That reasoning held for those three
+  // modules — none of them has a dashboard of its own, so for them "Dashboard" can only mean "leave"
+  // — but it does NOT hold for Schedule, which DOES have its own dashboard (the embedded app's
+  // reports view). One press then fired TWO navigations (this function's own route-clear + iframe
+  // post, AND the Shell's "leave" route change), and the second one usually won the race — the
+  // "often takes me back to the map" report (B1128272). `goDashboardWithinModule` still keeps every
+  // bit of the original B1050 behavior; it is now the crumb's ENTIRE action, never followed by
+  // `onGoDashboard`. The wordmark keeps the "leave this workspace" job — see `onLogoDashboard` on
+  // the AppHeader call below.
   const goDashboardWithinModule = () => {
     const { post: msg, clearRoute } = dashboardNavActions({ projectId });
     if (clearRoute) dashboardIntentRef.current = true; // arm before the route write (see the carry-out effect)
@@ -412,7 +413,7 @@ export default function Scheduler({
     post(msg);
     if (clearRoute) { try { onProjectChange?.(null); } catch (_) {} }
   };
-  const goDashboard = () => { goDashboardWithinModule(); onGoDashboard?.(); };
+  const goDashboard = () => { goDashboardWithinModule(); };
 
   // Resolve the routed project's display NAME from the site list — NEVER the raw group_id (which
   // reads as random letters/numbers). null when the list isn't warm yet; callers treat null as
@@ -564,6 +565,13 @@ export default function Scheduler({
         projects={projects}
         onSelectProject={selectSchedule}
         onDashboard={goDashboard}
+        // B1128272 — the wordmark stays the way OUT of Schedule (onGoDashboard, same as
+        // every other module); the crumb above it stays IN Schedule (goDashboard, its
+        // own reports view). Distinct tooltips say so in plain words rather than
+        // leaving the owner to click either one to find out which does what.
+        onLogoDashboard={onGoDashboard}
+        logoDashboardTitle="Leave Schedule — go to the Site Planner map"
+        dashboardTitle="Schedule dashboard — reports for every project"
         // NEW-1 (B1080545) — while routed on a Planyr project, "+ New project" must create a
         // SCHEDULE FOR THAT PROJECT (linked + named after it, disambiguated if it already has
         // one — NEW-3), never a bare unlinked "Project N" the route can never reach again. See

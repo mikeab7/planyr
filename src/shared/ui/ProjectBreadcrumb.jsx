@@ -40,6 +40,7 @@ import FloatingNotice from "./FloatingNotice.jsx";
 import AnchoredMenu from "./AnchoredMenu.jsx";
 import ContextMenu from "./ContextMenu.jsx";
 import { NO_AUTOFILL } from "./noAutofill.js";
+import { crumbDashboardTitle } from "./dashboardNav.js";
 import {
   listProjects, filterProjects, relTime, warmProjectsIfEmpty, reconcileProjects,
   renameProject as storeRename, deleteProject as storeDelete,
@@ -273,6 +274,9 @@ export default function ProjectBreadcrumb({
   currentProject,
   accent = "var(--accent-site-text)", // foreground text token (AA), not the fill (B341)
   onDashboard,
+  // B1128272 — optional override for this crumb's tooltip, used only where the crumb's
+  // action genuinely differs from the wordmark's (Schedule). See dashboardNav.js.
+  dashboardTitle,
   onSelectProject,
   onNewProject,
   onRenameProject,
@@ -620,7 +624,7 @@ export default function ProjectBreadcrumb({
       {/* Dashboard crumb (B192) — literal text, always visible, primary route home */}
       <button
         onClick={goDashboard}
-        title={`All projects: ${homeLabel}`}
+        title={crumbDashboardTitle({ homeLabel, dashboardTitle })}
         aria-current={onDash ? "page" : undefined}
         style={crumbBtn({ color: onDash ? INK : MUTED })}
         onMouseEnter={(e) => { if (!onDash) e.currentTarget.style.color = INK; }}
