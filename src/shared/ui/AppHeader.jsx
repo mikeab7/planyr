@@ -15,6 +15,9 @@
  *   module        — active workspace id ('site-planner' | 'scheduler' | 'doc-review')
  *   onSwitch      — (id) => void  — switch to another module
  *   onDashboard   — () => void    — "Dashboard" / "Projects" nav links
+ *   onLogoDashboard, logoDashboardTitle, dashboardTitle — optional B1128272 overrides;
+ *                                    see dashboardNav.js's header. Every caller but
+ *                                    Schedule omits these and is unaffected.
  *   centerContent — ReactNode     — project name + chevron dropdown (workspace provides)
  *   saveState     — normalized save/sync state — drives the shared CloudSyncBadge (NEW-1)
  *   onRetrySave   — () => void     — optional; the badge's error popover offers "Retry now"
@@ -53,6 +56,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { RADIUS } from "./radius.js";
 import { Tab, IconButton } from "./controls.jsx";
 import ProjectBreadcrumb from "./ProjectBreadcrumb.jsx";
+import { logoDashboardAction } from "./dashboardNav.js";
 import CloudSyncBadge from "./CloudSyncBadge.jsx";
 import AnchoredMenu from "./AnchoredMenu.jsx";
 import { createMultiTabPresence } from "../presence/multiTab.js";
@@ -444,6 +448,16 @@ export default function AppHeader({
   module = "site-planner",
   onSwitch,
   onDashboard,
+  // B1128272 — optional overrides for the wordmark specifically, used ONLY where the
+  // wordmark and the breadcrumb's Dashboard crumb must fire genuinely different
+  // actions (Schedule: the wordmark leaves the workspace, the crumb shows Schedule's
+  // own dashboard). Omitted by every other caller, which keeps `onDashboard` driving
+  // both controls exactly as before — see dashboardNav.js's own header.
+  onLogoDashboard,
+  logoDashboardTitle,
+  // Optional override for the breadcrumb's Dashboard-crumb tooltip (same B1128272
+  // pairing as onLogoDashboard above) — forwarded straight to ProjectBreadcrumb.
+  dashboardTitle,
   centerContent,
   saveSlot,
   // B674 — the caller supports concurrent editing (per-element sync + multi-writer, OR its own
@@ -790,6 +804,9 @@ export default function AppHeader({
   // must be the AA-passing -text token, never the fill (fill-as-text = 3.4:1, B341/B318).
   const accent = ACCENT_TEXT[module] || "var(--accent)";
 
+  // B1128272 — the wordmark's own action/tooltip; see dashboardNav.js's header.
+  const logoAction = logoDashboardAction({ onDashboard, onLogoDashboard, logoDashboardTitle });
+
   /* ⛔ B1173(×2) — THE FLOATING "✕ Exit fullscreen" BUTTON IS GONE, and its removal is the point
      rather than a tidy-up. It existed for exactly one reason: a hidden header has no exit control,
      so one had to float over the canvas. The header no longer hides, so the button became a second
@@ -866,14 +883,17 @@ export default function AppHeader({
             <body>, so overflow:hidden here never clips a menu.) */}
         <div ref={leftZoneRef} data-header-zone="left" style={{ display: "flex", alignItems: "center", gap: 4, paddingLeft: 9, minWidth: 0, ...(narrow ? { flex: 1, ...zoneFixed } : { flex: "0 1 auto", maxWidth: "60%", overflow: "hidden" }) }}>
           {/* Logo — the Planyr brand mark + wordmark (BrandMark, theme-aware).
-              Also a secondary route to the Dashboard (the labeled crumb is primary, B192). */}
+              Also a secondary route to the Dashboard (the labeled crumb is primary, B192).
+              B1128272 — `onLogoDashboard`/`logoDashboardTitle` let a caller (Schedule) give
+              this control a DIFFERENT action + tooltip than the breadcrumb crumb below;
+              every other caller passes neither and gets the prior behavior unchanged. */}
           <button
-            onClick={onDashboard || undefined}
-            title={onDashboard ? "Dashboard: all projects" : undefined}
+            onClick={logoAction.onClick}
+            title={logoAction.title}
             style={{
               display: "flex", alignItems: "center", flex: "none",
               background: "transparent", border: "none",
-              cursor: onDashboard ? "pointer" : "default",
+              cursor: logoAction.onClick ? "pointer" : "default",
               padding: "2px 4px", borderRadius: RADIUS.sm,
               // NEW-2 (B915536) — inert: BrandMark's own wordmark span sets its own explicit
               // fontSize, so this never reached the page; an on-scale value costs nothing.
@@ -895,6 +915,7 @@ export default function AppHeader({
                 currentProject={currentProject}
                 accent={accent}
                 onDashboard={onDashboard}
+                dashboardTitle={dashboardTitle}
                 onSelectProject={onSelectProject}
                 onNewProject={onNewProject}
                 onRenameProject={onRenameProject}
