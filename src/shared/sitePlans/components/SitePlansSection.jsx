@@ -43,6 +43,7 @@ import {
 import { fileNewReview, loadReview, downloadFromDrive, stripFileExt } from "../../../workspaces/doc-review/lib/reviewStore.js";
 import { listMyTeams, currentIdentity } from "../../../workspaces/site-planner/lib/teams.js";
 import { PALETTES } from "../../theme/palette.js";
+import { createWriteSerializer } from "../../cloud/writeSerializer.js";
 
 const inputStyle = {
   width: "100%", boxSizing: "border-box", padding: "6px 8px", fontSize: FONT_SIZE.control, borderRadius: 6, fontFamily: "inherit",
@@ -205,7 +206,7 @@ function emptyFlow() {
     pageCount: 1, page: 1, previewUrl: null,
     rasterBlob: null, rasterW: 0, rasterH: 0, thumbDataUrl: null,
     error: null,
-    dropPlacement: null, // {centerLat,centerLon} — where a dropped file landed on the map, if any
+    dropPlacement: null, // {lat,lng} — where a dropped file landed on the map, if any (a center override only — never a full placement on its own, see confirmPage)
     queue: [], // remaining File objects still to place, after this one (multi-file drop)
     uploadProgress: null, // {sent,total} bytes, while the brochure itself is uploading
   };
@@ -414,6 +415,20 @@ export default function SitePlansSection({
   overlaysRef.current = overlays;
   const compsChangedRef = useRef(onCompPositionsChanged);
   compsChangedRef.current = onCompPositionsChanged;
+  // NEW-18 — "someone else changed this site plan" was firing for a single user editing alone.
+  // Root cause: the version-guard's `expected` came from `overlaysRef.current`/a prop, both of
+  // which lag a just-issued write by at least one React render — so a second rapid save (another
+  // drag release, a fast double-click on "Editing on map") read the SAME stale expected-version
+  // its own predecessor already used, and the loser was reported as a foreign edit and dropped.
+  // `overlayVersionsRef` is the true last-known-good version per overlay id, updated synchronously
+  // (never through React state) the instant a write settles; `serialized` queues writes PER
+  // OVERLAY so a second one never even STARTS reading that cache until the first has fully
+  // resolved (including its own cache update) — the two together close the race at its source.
+  const overlayVersionsRef = useRef({});
+  const noteVersion = (id, v) => { if (id != null && Number.isFinite(v)) overlayVersionsRef.current[id] = v; };
+  const writeSerializerRef = useRef(null);
+  if (!writeSerializerRef.current) writeSerializerRef.current = createWriteSerializer();
+  const serialized = (id, fn) => writeSerializerRef.current.run(id, fn);
 
   useEffect(() => {
     if (!open) return;
@@ -431,9 +446,13 @@ export default function SitePlansSection({
     setLoading(true);
     const { data, error } = await fetchAllOverlays();
     setLoading(false);
-    if (!error) { setOverlays(data); notifiedRef.current?.(data); }
+    if (!error) {
+      setOverlays(data);
+      for (const o of data) noteVersion(o.id, o.version);
+      notifiedRef.current?.(data);
+    }
   };
-  useEffect(() => { if (open) reload(); }, [open]);
+  useEffect(() => { if (open) reload(); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The map calls this on every finished drag (move / scale / rotate) — this module stays the
   // one place that persists an overlay, so its own list state can't drift from what the map
@@ -450,7 +469,9 @@ export default function SitePlansSection({
   // owner-only RLS, so a plain client-side update would silently no-op on a teammate's pin).
   useEffect(() => {
     if (!commitPlacementRef) return undefined;
-    commitPlacementRef.current = async (id, placement) => {
+    // NEW-18 — queued per overlay id (see `serialized` above), so a second finished-drag commit
+    // never starts reading the expected version until this one has fully settled.
+    commitPlacementRef.current = (id, placement) => serialized(id, async () => {
       const existing = overlaysRef.current.find((o) => o.id === id);
       if (!existing) return;
       const next = { ...existing, ...placement };
@@ -466,19 +487,42 @@ export default function SitePlansSection({
       // Item 7: carries the version this client last saw — the RPC refuses (and reports
       // `conflict`) if the row changed elsewhere since, rather than silently clobbering a
       // concurrent drag from another live session on the same plan.
-      const { version: newVersion, conflict, error } = await commitOverlayPlacementWithComps(id, next, compPositions, existing.version);
-      if (error) {
-        console.error("[sitePlanOverlays] placement commit failed:", error);
-        setPanelError(friendlySaveError(error));
+      const expected0 = Number.isFinite(overlayVersionsRef.current[id]) ? overlayVersionsRef.current[id] : existing.version;
+      let outcome = await commitOverlayPlacementWithComps(id, next, compPositions, expected0);
+
+      // NEW-18 — a reported conflict here is presumed stale bookkeeping, not a foreign edit
+      // (the queue above already rules out a second call racing this one): refetch the row's
+      // real current version and retry exactly once before believing it. A conflict that
+      // survives a fresh version is a genuine concurrent editor — presence still fires for that.
+      if (outcome.conflict) {
+        const { data: fresh } = await fetchAllOverlays();
+        const freshVersion = (fresh || []).find((o) => o.id === id)?.version;
+        if (Number.isFinite(freshVersion) && freshVersion !== expected0) {
+          noteVersion(id, freshVersion);
+          outcome = await commitOverlayPlacementWithComps(id, next, compPositions, freshVersion);
+        }
+      }
+
+      if (outcome.conflict) {
+        // Survived the retry — a genuine second editor moved this plan mid-gesture. Never
+        // silently discard this session's own in-progress placement: `next` stays on screen
+        // (it was already applied above), and the version cache is refreshed so the user's next
+        // move/release retries clean instead of repeating the same stale write.
+        console.warn("[sitePlanOverlays] placement commit conflict survived retry — treating as a genuine concurrent edit:", id);
+        setPanelError("Someone else changed this site plan just now, so your last move hasn't saved yet — move it again to retry.");
+        const { data: fresh } = await fetchAllOverlays();
+        noteVersion(id, (fresh || []).find((o) => o.id === id)?.version);
+      } else if (outcome.error) {
+        console.error("[sitePlanOverlays] placement commit failed:", outcome.error);
+        setPanelError(friendlySaveError(outcome.error));
         await reload(); // the optimistic move didn't actually save — pull the real, current position back
-      } else if (conflict) {
-        await reload();
       } else {
         // Success — advance the locally-held version so the NEXT drag's guard compares against
         // what the server actually has now, not the pre-commit value (else every subsequent
         // drag in this same session would spuriously read as a conflict against itself).
-        if (Number.isFinite(newVersion)) {
-          setOverlays((list) => list.map((o) => (o.id === id ? { ...o, version: newVersion } : o)));
+        noteVersion(id, outcome.version);
+        if (Number.isFinite(outcome.version)) {
+          setOverlays((list) => list.map((o) => (o.id === id ? { ...o, version: outcome.version } : o)));
         }
         if (compPositions.length) {
           // Tell the comps panel/map markers to refetch — otherwise the mover sees their own and
@@ -488,9 +532,9 @@ export default function SitePlansSection({
           compsChangedRef.current && compsChangedRef.current();
         }
       }
-    };
+    });
     return () => { if (commitPlacementRef) commitPlacementRef.current = null; };
-  }, [commitPlacementRef]);
+  }, [commitPlacementRef]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setF = (patch) => setFlow((f) => (f ? { ...f, ...patch } : f));
 
@@ -576,13 +620,14 @@ export default function SitePlansSection({
 
   // Upload the whole brochure (if new), place the overlay with a default placement, and arm it
   // for editing immediately — no anchor step, no scale check. A dropped file's own drop point
-  // (flow.dropPlacement) wins over the generic suggestPlacement fallback, which reads the live
-  // map view (MapFinder) and centers on whatever the user is looking at.
+  // (flow.dropPlacement, a bare {lat,lng}) is merged into suggestPlacement's own full placement
+  // as a CENTER OVERRIDE — never used standalone (NEW-17: a center with no scale has nothing to
+  // draw, and used to leave `ft_per_px` null on every drag-and-dropped upload).
   const confirmPage = async () => {
     const f = flow; // close over this render's flow — queue/dropPlacement/etc, before "saving" clears the step-specific fields nothing else needs
     setF({ step: "saving", uploadProgress: null });
     try {
-      const placement = f.dropPlacement || (suggestPlacement ? suggestPlacement(f.rasterW, f.rasterH) : null);
+      const placement = suggestPlacement ? suggestPlacement(f.rasterW, f.rasterH, f.dropPlacement) : null;
       const onProgress = (sent, total) => setF({ uploadProgress: { sent, total } });
       let overlay;
       if (f.overlayId) {
@@ -635,7 +680,14 @@ export default function SitePlansSection({
       }
       await reload();
       setExpandedId(overlay.id);
-      onActivateOverlay && onActivateOverlay(overlay.id);
+      // NEW-17 — only arm "Editing on map" when the overlay actually has a full, drawable
+      // placement (overlayPlaced requires center + a non-null scale); arming it on anything less
+      // used to leave the panel reading "Not placed yet" and "Editing on map" at once, with
+      // nothing rendered on the map for the handles to attach to — a dead end. The rare case
+      // where `suggestPlacement` itself returned null (the map genuinely wasn't ready yet) now
+      // just leaves the row honestly unplaced; its own "Place on map" button (below) already
+      // self-heals by seeding a placement before arming.
+      if (overlayPlaced(overlay)) onActivateOverlay && onActivateOverlay(overlay.id);
       // A multi-file drop queues the rest — place them one after another through the same flow
       // rather than a second modal; each still gets its own title/date/page pick.
       if (f.queue && f.queue.length) pickFile(f.queue[0], { queue: f.queue.slice(1) });
@@ -667,11 +719,30 @@ export default function SitePlansSection({
   };
 
   // ---- simple per-item controls -----------------------------------------------------------
-  const patchAndReload = async (o, patch) => {
-    const { error } = await updateOverlay(o.id, { ...o, ...patch });
-    if (error) { console.error("[sitePlanOverlays] update failed:", error); setPanelError(friendlySaveError(error)); }
+  // NEW-18 — same version-race fix as the placement-drag committer above: queued per overlay id,
+  // reads the synchronously-updated version cache rather than a possibly-stale prop, and retries
+  // once on a reported conflict before treating it as a genuine foreign edit.
+  const patchAndReload = (o, patch) => serialized(o.id, async () => {
+    const expected0 = Number.isFinite(overlayVersionsRef.current[o.id]) ? overlayVersionsRef.current[o.id] : o.version;
+    let { error, data, conflict } = await updateOverlay(o.id, { ...o, ...patch, version: expected0 });
+    if (conflict) {
+      const { data: fresh } = await fetchAllOverlays();
+      const freshVersion = (fresh || []).find((x) => x.id === o.id)?.version;
+      if (Number.isFinite(freshVersion) && freshVersion !== expected0) {
+        noteVersion(o.id, freshVersion);
+        ({ error, data, conflict } = await updateOverlay(o.id, { ...o, ...patch, version: freshVersion }));
+      }
+    }
+    if (conflict) {
+      console.warn("[sitePlanOverlays] update conflict survived retry — treating as a genuine concurrent edit:", o.id);
+      setPanelError("Someone else changed this site plan just now — your change hasn't saved. Try again.");
+    } else if (error) {
+      console.error("[sitePlanOverlays] update failed:", error); setPanelError(friendlySaveError(error));
+    } else if (data && Number.isFinite(data.version)) {
+      noteVersion(o.id, data.version);
+    }
     await reload();
-  };
+  });
   const rename = (o, docTitle) => patchAndReload(o, { docTitle });
   const setOpacity = (o, opacity) => patchAndReload(o, { opacity });
   const toggleVisible = (o) => patchAndReload(o, { visible: !o.visible });
@@ -748,7 +819,13 @@ export default function SitePlansSection({
           duplicateCount={pageDupeCount}
           expanded={expandedId === o.id}
           onToggleExpand={() => setExpandedId((id) => (id === o.id ? null : o.id))}
-          isActive={activeOverlayId === o.id}
+          // NEW-17 — "Editing on map" must never render for a row with nothing on the map to
+          // edit (overlayPlaced requires a real center + scale) — belt-and-suspenders against
+          // the panel showing "Not placed yet" and "Editing on map" at the same time, whatever
+          // path got `activeOverlayId` here. The map's own handles controller already refuses to
+          // arm on an unplaced overlay (useSitePlanOverlayLayers/syncHandles); this keeps the
+          // row's own label from disagreeing with that.
+          isActive={activeOverlayId === o.id && overlayPlaced(o)}
           onActivate={async () => {
             setExpandedId(o.id);
             if (!overlayPlaced(o)) {
