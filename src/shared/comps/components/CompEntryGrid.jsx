@@ -38,7 +38,7 @@ import { parsePaste, rowHasBlockingFlags, parseProseLine, parseSingleRecord, spl
 import { emptyDraft, draftToComp, validateComp, summarizeLeaseComps, summarizeSaleComps, resolveCapTriangle } from "../lib/comps.js";
 import {
   SHEET_COLUMNS, cellState, applyCellEdit, fillDownColumn, spillPaste, visibleColumnIndices,
-  computeFlexWidths, widthFor, frozenLeftOffsets, saveButtonLabel, matchOption,
+  computeFlexWidths, widthFor, frozenLeftOffsets, saveButtonLabel, matchOption, optionsForColumn,
 } from "../lib/compSheetColumns.js";
 import { parcelLocationText, siteplanLocationText, pinFallbackText } from "../lib/compLocationText.js";
 import { todayIso } from "../lib/compDates.js";
@@ -368,7 +368,7 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, touched, selected, i
             // its resting position and its editing position. Same padding as every other cell now.
             style={inputStyle}>
             <option value="" disabled hidden>{" "}</option>
-            {col.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            {optionsForColumn(col, draft.compType).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </td>
       );
@@ -550,15 +550,15 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, touched, selected, i
           representation for a choice cell, applied uniformly, is this row/caret span, always a
           `<span>` here, never a live `<select>` (a native `<select>` only ever mounts while the
           cell is actually being edited — the same as every other kind of cell).
-          B844400/NEW-4 (owner report, 2026-09-03) — AMENDS the "never on a fixed one" clause
-          above: Unit on a non-land row is `state === "fixed"` (always SF, not a real per-row
-          choice — see compSheetColumns.js's own `editableFor`), and it used to be the one choice
-          column with no caret at rest, reading as inconsistent with Type/Per/Basis next to it.
-          The caret now also shows on a `"fixed"` select cell — purely a visual-parity signal
-          ("this is drawn from a fixed set of options"), not a claim of editability: clicking a
-          fixed cell still does nothing, same as before, since Unit genuinely isn't a choice
-          outside land. */}
-      {col.kind === "select" && (st.state === "editable" || st.state === "fixed") ? (
+          B1119282 (×2, owner live-click measurement, 2026-09-03) — an earlier round gave Unit
+          this same caret on a non-land row while it was still `editableFor`-gated to land only,
+          so the caret claimed a choice that a real click could not reach at all (no `<select>`
+          ever mounted). That's fixed at the SOURCE now, not papered over here: Unit is a genuine
+          `state === "editable"` select on every row (compSheetColumns.js's `optionsFor` — land
+          gets AC/SF, everything else gets the one real option, SF), so this condition is back to
+          exactly what it was before that patch — `st.state === "editable"` alone — and it is
+          honest again: every cell carrying this caret really does mount a `<select>` on click. */}
+      {col.kind === "select" && st.state === "editable" ? (
         <span style={{ ...textStyle, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 3 }}>
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", verticalAlign: "middle" }}>{cellContent}</span>
           <span aria-hidden="true" style={{ flex: "none", fontSize: FONT_SIZE.micro, color: "var(--text-tertiary)", verticalAlign: "middle" }}>▾</span>
@@ -1010,7 +1010,8 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   const beginEdit = (row, col, initial, selectAll, draftOverride) => {
     const colDef = SHEET_COLUMNS[col];
     if (colDef.kind === "derived" || colDef.kind === "action") return;
-    const st = cellState(colDef, draftOverride || rows[row].draft);
+    const activeDraft = draftOverride || rows[row].draft;
+    const st = cellState(colDef, activeDraft);
     if (st.state !== "editable") return;
     // B844400/NEW-4 (owner report, 2026-09-03) — a select's value is a fixed option, not typed
     // text, so a printable keypress can't seed it character-for-character the way a text/number
@@ -1019,8 +1020,10 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     // (matchOption — the same prefix rule applyCellEdit already uses when a select cell is typed
     // OVER), mirroring the spreadsheet type-ahead the rest of the grid already implies. A
     // non-matching character (or no character at all — a click, F2, Enter) opens at the current
-    // value, same as before.
-    const matchedOption = colDef.kind === "select" && initial ? matchOption(colDef.options, initial) : null;
+    // value, same as before. `optionsForColumn` resolves the row's OWN option set (B1119282 ×2 —
+    // Unit's options now vary by comp type), never the column's static fallback list.
+    const matchedOption = colDef.kind === "select" && initial
+      ? matchOption(optionsForColumn(colDef, activeDraft.compType), initial) : null;
     const startValue = colDef.kind === "select" ? (matchedOption ?? (st.raw ?? "")) : initial != null ? initial : (st.raw ?? "");
     editHandledRef.current = false;
     editingRef.current = { row, col };
@@ -1171,7 +1174,8 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
     else if (editingRef.current && e.key.length === 1 && !(e.metaKey || e.ctrlKey) && !e.altKey) {
       const colDef = SHEET_COLUMNS[editingRef.current.col];
       if (colDef.kind === "select") {
-        const matched = matchOption(colDef.options, e.key);
+        const compType = rows[editingRef.current.row]?.draft.compType;
+        const matched = matchOption(optionsForColumn(colDef, compType), e.key);
         if (matched != null) { e.preventDefault(); onSelectEditChange(matched); }
       }
     }
