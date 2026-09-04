@@ -38,21 +38,22 @@ function mockLocalStorage({ quotaBytes = Infinity } = {}) {
 describe("B473 — device-full degrades gracefully + the cloud save is never blocked", () => {
   beforeEach(() => { upserts.length = 0; setActiveUser(null); });
 
-  it("a full store sheds inline rasters from sheetOverlays/parcelDrawings/underlay so ALL geometry still persists", () => {
+  it("a full store sheds inline rasters from sheetOverlays/parcelDrawings (incl. a folded aerial) so ALL geometry still persists", () => {
     mockLocalStorage({ quotaBytes: 60 * 1024 }); // the raster-laden record won't fit; the slim one will
     const ok = saveSite({
       id: "s1", site: "X", els: [bld("a"), bld("b")],
       sheetOverlays: [{ id: "o1", src: BIG }],
       parcelDrawings: [{ id: "d1", src: BIG }],
-      underlay: { src: BIG },
+      underlay: { src: BIG, imgW: 10, imgH: 10 }, // B848736 — folded into sheetOverlays, bottom-pinned
     });
     expect(ok).toBe(true);                                  // the write SUCCEEDED via the slim retry — no total loss
     const back = loadSite("s1");
+    expect(back).not.toHaveProperty("underlay");
     expect(back.els.map((e) => e.id).sort()).toEqual(["a", "b"]); // every drawn item survived
-    expect(back.sheetOverlays[0].src ?? null).toBe(null);          // raster shed...
-    expect(back.sheetOverlays[0].strippedForCloud).toBe(true);     // ...and flagged to re-fetch from cloud
+    expect(back.sheetOverlays).toHaveLength(2);                    // the folded aerial + o1
+    for (const o of back.sheetOverlays) expect(o.src ?? null).toBe(null); // every raster shed...
+    expect(back.sheetOverlays.find((o) => o.id === "o1").strippedForCloud).toBe(true); // ...and flagged to re-fetch from cloud
     expect(back.parcelDrawings[0].src ?? null).toBe(null);
-    expect(back.underlay?.src ?? null).toBe(null);
   });
 
   it("a normal (non-quota) save KEEPS inline rasters — stripping is ONLY under pressure", () => {
@@ -91,17 +92,21 @@ describe("B473 — device-full degrades gracefully + the cloud save is never blo
 describe("B474 — IndexedDB-backed raster src is dropped from the persisted record (off the cap)", () => {
   beforeEach(() => { upserts.length = 0; setActiveUser(null); mockLocalStorage(); });
 
-  it("drops underlay src when it's idb-backed (idbKey present), keeping geometry + the ref", () => {
+  // B848736 — `underlay` is still accepted as INPUT (createSiteModel folds it into `sheetOverlays`,
+  // bottom-pinned) so a caller passing the legacy shape keeps working; the OUTPUT is read off
+  // `sheetOverlays` now, never a separate `underlay` field (createSiteModel never emits one).
+  it("drops the folded aerial's src when it's idb-backed (idbKey present), keeping geometry + the ref", () => {
     saveSite({ id: "u1", els: [bld("a")], underlay: { src: BIG, idbKey: "raster:u1:underlay", imgW: 10, imgH: 10 } });
     const back = loadSite("u1");
+    expect(back).not.toHaveProperty("underlay");
     expect(back.els.map((e) => e.id)).toEqual(["a"]);          // geometry kept
-    expect(back.underlay.src ?? null).toBe(null);              // heavy raster dropped from the record
-    expect(back.underlay.idbKey).toBe("raster:u1:underlay");   // ref kept → rehydrate on load
+    expect(back.sheetOverlays[0].src ?? null).toBe(null);      // heavy raster dropped from the record
+    expect(back.sheetOverlays[0].idbKey).toBe("raster:u1:underlay"); // ref kept → rehydrate on load
   });
 
-  it("KEEPS underlay src when it is NOT idb-backed (no idbKey) — safe fallback, no data loss", () => {
+  it("KEEPS the folded aerial's src when it is NOT idb-backed (no idbKey) — safe fallback, no data loss", () => {
     saveSite({ id: "u2", els: [bld("a")], underlay: { src: BIG, imgW: 10, imgH: 10 } });
-    expect(loadSite("u2").underlay.src).toBe(BIG);             // not idb-backed → src preserved in the record
+    expect(loadSite("u2").sheetOverlays[0].src).toBe(BIG);     // not idb-backed → src preserved in the record
   });
 
   it("over-quota with MIXED rasters: dropIdbBackedSrc sheds the idb-backed one; the still-too-big record then sheds the inline one too (#30)", () => {
@@ -112,10 +117,12 @@ describe("B474 — IndexedDB-backed raster src is dropped from the persisted rec
     expect(ok).toBe(true);                                                        // persisted via the slim retry
     const back = loadSite("u4");
     expect(back.els.map((e) => e.id)).toEqual(["a"]);            // geometry survived
-    expect(back.underlay.src ?? null).toBe(null);               // idb-backed underlay shed
-    expect(back.underlay.idbKey).toBe("raster:u4:underlay");    // ref kept → rehydrate from idb
-    expect(back.sheetOverlays[0].src ?? null).toBe(null);       // inline overlay shed by the quota fallback
-    expect(back.sheetOverlays[0].strippedForCloud).toBe(true);  // flagged to re-fetch from cloud
+    // the folded aerial always sorts first within sheetOverlays (bottom-pinned)
+    const aerial = back.sheetOverlays.find((o) => o.idbKey === "raster:u4:underlay");
+    expect(aerial.src ?? null).toBe(null);                       // idb-backed aerial shed
+    const other = back.sheetOverlays.find((o) => o.id === "o1");
+    expect(other.src ?? null).toBe(null);                        // inline overlay shed by the quota fallback
+    expect(other.strippedForCloud).toBe(true);                   // flagged to re-fetch from cloud
   });
 
   it("drops sheetOverlay + parcelDrawing src ONLY when idb-backed (keeps non-backed = safe)", () => {

@@ -8,6 +8,63 @@ import {
   parcelDisplayInfo, parcelOutline, parcelSplitNames,
 } from "../src/workspaces/site-planner/lib/siteModel.js";
 
+// B848736 (v14) — the separate `underlay` aerial-backdrop field is retired: createSiteModel folds
+// it into `sheetOverlays` as a bottom-pinned, `fromMap`-preserving record, and never emits an
+// `underlay` field itself. This is the migration's own coverage.
+describe("Site Model v14 (B848736) — folding a legacy `underlay` into `sheetOverlays`", () => {
+  const legacyUnderlay = { src: "data:image/png;base64,AAAA", imgW: 800, imgH: 600, x: 10, y: 20, ftPerPx: 0.5, opacity: 0.9, locked: true };
+
+  it("createSiteModel never emits an `underlay` field, migrated or not", () => {
+    expect(createSiteModel({ underlay: legacyUnderlay })).not.toHaveProperty("underlay");
+    expect(createSiteModel({})).not.toHaveProperty("underlay");
+  });
+
+  it("folds a legacy underlay into sheetOverlays, PREPENDED (bottom-pinned) and carrying its placement", () => {
+    const m = createSiteModel({ underlay: legacyUnderlay, sheetOverlays: [{ id: "s1", x: 0, y: 0 }] });
+    expect(m.sheetOverlays).toHaveLength(2);
+    const folded = m.sheetOverlays[0];
+    expect(typeof folded.id).toBe("string");
+    expect(folded.id.length).toBeGreaterThan(0);
+    expect(folded).toMatchObject({ src: legacyUnderlay.src, imgW: 800, imgH: 600, x: 10, y: 20, ftPerPx: 0.5, opacity: 0.9, locked: true, knockout: false });
+    expect(m.sheetOverlays[1].id).toBe("s1");
+  });
+
+  it("mints a FIXED id, so two independent folds of the same raw underlay agree (unionById can't duplicate it)", () => {
+    const a = createSiteModel({ underlay: legacyUnderlay });
+    const b = createSiteModel({ underlay: legacyUnderlay });
+    expect(a.sheetOverlays[0].id).toBe(b.sheetOverlays[0].id);
+  });
+
+  it("preserves fromMap and calibrated so the References panel keeps offering/withholding Calibrate correctly", () => {
+    const fromMap = createSiteModel({ underlay: { ...legacyUnderlay, fromMap: true, ftPerPxY: 0.4 } }).sheetOverlays[0];
+    expect(fromMap.fromMap).toBe(true);
+    expect(fromMap.ftPerPxY).toBe(0.4);
+    const calibrated = createSiteModel({ underlay: { ...legacyUnderlay, calibrated: true } }).sheetOverlays[0];
+    expect(calibrated.calibrated).toBe(true);
+  });
+
+  it("is idempotent — re-normalizing an already-migrated model (no `underlay` key) doesn't duplicate the row", () => {
+    const once = createSiteModel({ underlay: legacyUnderlay });
+    const twice = createSiteModel(once);
+    expect(twice.sheetOverlays).toHaveLength(1);
+    expect(twice.sheetOverlays[0].id).toBe(once.sheetOverlays[0].id);
+  });
+
+  it("a plan with no underlay at all is untouched (no phantom row)", () => {
+    expect(createSiteModel({ sheetOverlays: [{ id: "s1" }] }).sheetOverlays).toEqual([{ id: "s1" }]);
+    expect(createSiteModel({ underlay: null }).sheetOverlays).toEqual([]);
+  });
+
+  it("mergeSiteContent unions the folded row like any other reference (no second single-object heal needed)", () => {
+    const a = createSiteModel({ id: "p1", updatedAt: 100, underlay: legacyUnderlay });
+    const b = createSiteModel({ id: "p1", updatedAt: 200, sheetOverlays: [{ id: "s2", x: 1, y: 1 }] });
+    const merged = mergeSiteContent(a, b);
+    const ids = merged.sheetOverlays.map((o) => o.id);
+    expect(ids).toContain(a.sheetOverlays[0].id);
+    expect(ids).toContain("s2");
+  });
+});
+
 describe("Site Model — schema, lifecycle status, selectors", () => {
   it("createSiteModel stamps the current version and safe empty defaults", () => {
     const m = createSiteModel();

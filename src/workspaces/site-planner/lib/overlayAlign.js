@@ -13,15 +13,20 @@ export const solveSimilarityLSQ = _solveSimilarityLSQ;
 
 const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y });
 const len = (v) => Math.hypot(v.x, v.y);
-const centerOf = (o) => ({ x: o.x + (o.imgW * o.ftPerPx) / 2, y: o.y + (o.imgH * o.ftPerPx) / 2 });
-// Top-left {x,y} that puts the sheet's center at C (given size + ftPerPx).
-const tlFromCenter = (C, imgW, imgH, ftPerPx) => ({ x: C.x - (imgW * ftPerPx) / 2, y: C.y - (imgH * ftPerPx) / 2 });
+// B848736 — an overlay's Y-axis scale is USUALLY the same as its X (ftPerPx); a map-captured
+// reference is the one case it isn't (aerialPlacement's ftPerPxY — Web Mercator's non-square
+// pixels at scale). Every caller here falls back to ftPerPx when ftPerPxY is absent, so this
+// changes nothing for the ordinary (no-ftPerPxY) overlay.
+const scaleY = (o) => o.ftPerPxY || o.ftPerPx;
+const centerOf = (o) => ({ x: o.x + (o.imgW * o.ftPerPx) / 2, y: o.y + (o.imgH * scaleY(o)) / 2 });
+// Top-left {x,y} that puts the sheet's center at C (given size + ftPerPx/ftPerPxY).
+const tlFromCenter = (C, imgW, imgH, ftPerPx, ftPerPxY = ftPerPx) => ({ x: C.x - (imgW * ftPerPx) / 2, y: C.y - (imgH * ftPerPxY) / 2 });
 
 /* Map an image-space point (px, in [0..imgW]×[0..imgH]) to world feet under the
  * overlay's current placement. */
 export function imagePointToWorld(o, ix, iy) {
   const C = centerOf(o);
-  const pre = { x: o.x + ix * o.ftPerPx, y: o.y + iy * o.ftPerPx };
+  const pre = { x: o.x + ix * o.ftPerPx, y: o.y + iy * scaleY(o) };
   const a = ((o.rotation || 0) * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
   const d = sub(pre, C);
   return { x: C.x + c * d.x - s * d.y, y: C.y + s * d.x + c * d.y };
@@ -70,33 +75,5 @@ export function applySimilarityToOverlay(o, S) {
 /* 2-point alignment: lands the two drawing points (p1,p2) on the two map points (q1,q2). */
 export function alignOverlaySimilarity(o, p1, p2, q1, q2) {
   return applySimilarityToOverlay(o, similarityTransform(p1, p2, q1, q2));
-}
-
-/* Aerial-underlay trace calibration (B654) — the shared-calibration port of the old
- * inline `applyCalibration`: two clicked world points (a,b) a known real length apart
- * → rescale the underlay about point `a` (pinned in world space). The underlay is
- * axis-aligned (no rotation) but may carry independent x/y scales (`ftPerPxY` on a
- * georeferenced map capture), so BOTH axes scale by the same factor. Returns the
- * changed fields { ftPerPx, ftPerPxY?, x, y, calibrated:true } or null when the input
- * can't calibrate: a from-map underlay (already georeferenced — a diagonal-derived
- * scalar would mis-size it, B57a), a non-positive known length, or a zero-length pick. */
-export function calibrateUnderlayScale(u, a, b, knownFt) {
-  if (!u || u.fromMap || !a || !b || !(knownFt > 0) || !(u.ftPerPx > 0)) return null;
-  const measured = len(sub(b, a));
-  if (!(measured > 0)) return null;
-  const factor = knownFt / measured;
-  const sy = u.ftPerPxY || u.ftPerPx;
-  const ftPerPx = u.ftPerPx * factor;
-  const newSy = sy * factor;
-  // image-pixel coords of point a under the current placement — kept pinned after rescale
-  const aPxX = (a.x - u.x) / u.ftPerPx;
-  const aPxY = (a.y - u.y) / sy;
-  return {
-    ftPerPx,
-    ftPerPxY: u.ftPerPxY ? newSy : undefined,
-    x: a.x - aPxX * ftPerPx,
-    y: a.y - aPxY * newSy,
-    calibrated: true,
-  };
 }
 

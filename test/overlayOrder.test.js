@@ -7,7 +7,8 @@
 import { describe, it, expect } from "vitest";
 import {
   OVERLAY_BAND_ABOVE, OVERLAY_BAND_BELOW, overlayBand, overlayBandsGrouped, overlayDrawOrder,
-  overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand,
+  overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, isPinnedMapReference,
+  splitOverlayBands,
 } from "../src/workspaces/site-planner/lib/overlayOrder.js";
 
 const o = (id, extra = {}) => ({ id, name: id, ...extra });
@@ -137,5 +138,53 @@ describe("setOverlayBand — the cross-plan promotion the owner asked for", () =
     const out = setOverlayBand(setOverlayBand(l, "a", true), "a", false);
     expect(new Set(ids(out))).toEqual(new Set(ids(l)));
     expect(out.every((x) => overlayBand(x) === OVERLAY_BAND_BELOW)).toBe(true);
+  });
+});
+
+/* B848736 — the map-captured reference (`fromMap:true`) always renders beneath every other
+ * "below"-band reference, matching the retired `underlay` field's absolute-backdrop position. */
+describe("isPinnedMapReference + the pin-leading sub-order it drives", () => {
+  const pin = o("aerial", { fromMap: true });
+
+  it("only a literal fromMap:true pins — a truthy-but-not-true value does not", () => {
+    expect(isPinnedMapReference(pin)).toBe(true);
+    for (const v of [false, 0, 1, "true", null, undefined]) {
+      expect(isPinnedMapReference(o("a", { fromMap: v })), String(v)).toBe(false);
+    }
+    expect(isPinnedMapReference(null)).toBe(false);
+  });
+
+  it("splitOverlayBands pulls the pinned record to the FRONT of the below band regardless of array position", () => {
+    const { below } = splitOverlayBands([o("a"), o("b"), pin]);
+    expect(ids(below)).toEqual(["aerial", "a", "b"]);
+  });
+  it("overlayDrawOrder returns the SAME array reference when the pin already leads (no forced churn)", () => {
+    const already = [pin, o("a"), o("b")];
+    expect(overlayDrawOrder(already)).toBe(already);
+  });
+  it("draw order and panel order both put the pinned reference at the very bottom", () => {
+    const l = [o("a"), pin, o("b")];
+    expect(ids(overlayDrawOrder(l))).toEqual(["aerial", "a", "b"]);
+    expect(ids(overlayPanelOrder(l))).toEqual(["b", "a", "aerial"]); // front-most first
+  });
+  it("a pin promoted to the above band (defensively, via a hand-edited record) still leads only its OWN band", () => {
+    const l = [o("a"), { ...pin, aboveParcel: true }, o("b", { aboveParcel: true })];
+    expect(ids(overlayDrawOrder(l))).toEqual(["a", "aerial", "b"]);
+  });
+
+  it("overlayOrderFlags reports the pinned record atFront AND atBack (nowhere to move to)", () => {
+    const l = [o("a"), o("b"), pin];
+    expect(overlayOrderFlags(l, "aerial")).toMatchObject({ found: true, atFront: true, atBack: true, pinned: true });
+    expect(overlayOrderFlags(l, "a")).toMatchObject({ pinned: false });
+  });
+
+  it("reorderOverlays never moves a pinned record — front, back, or with other reordering happening around it", () => {
+    const l = [o("a"), o("b"), pin];
+    expect(reorderOverlays(l, "aerial", "front")).toBe(l);
+    expect(reorderOverlays(l, "aerial", "back")).toBe(l);
+  });
+  it("setOverlayBand refuses to promote a pinned record above the parcel", () => {
+    const l = [o("a"), pin];
+    expect(setOverlayBand(l, "aerial", true)).toBe(l);
   });
 });

@@ -9,7 +9,11 @@
  * changes. Pure, dependency-free — no import here may ever reach back into siteModel.js.
  */
 
-export const SITE_MODEL_VERSION = 13;
+// v14 (B848736): the separate `underlay` aerial-backdrop field is retired — folded into
+// `sheetOverlays` on read (siteModel.js's `foldAerialIntoOverlays`) as a bottom-pinned
+// reference (`fromMap`/legacy-underlay records sort first in the "below" band; see
+// lib/overlayOrder.js's `isPinnedMapReference`). One reference model, not two.
+export const SITE_MODEL_VERSION = 14;
 
 /* Project lifecycle status — the deal stage of a site, shown on the map markers.
  * Ordered pursuit → active → onhold → complete → dead (deal funnel order). New

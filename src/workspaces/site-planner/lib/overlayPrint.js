@@ -7,6 +7,8 @@
  * dead control) and the compositing pass in SitePlanner's `buildExportSvg`.
  */
 
+import { isPinnedMapReference } from "./overlayOrder.js";
+
 // An overlay is printable when it has a rendered raster (`src`) and isn't explicitly
 // hidden. The `visible !== false` guard is forward-compatible with a future
 // per-overlay show/hide toggle (the brief's "respect each overlay's own visibility");
@@ -14,7 +16,10 @@
 // matches exactly what's drawn on screen (WYSIWYG). A placeholder overlay whose raster
 // hasn't synced to this device (no `src`) is never printed: it only renders an on-screen
 // "re-add me" prompt, which has no place on a plot.
-export const isOverlayPrintable = (o) => !!(o && o.src && o.visible !== false);
+// B848736 — the pinned map-captured reference is EXCLUDED: it prints/exports under its own
+// "Aerial imagery" toggle (`showAerial`), same as before it was folded into this list, so it
+// must not also gate or default this separate "Placed reference overlay" control.
+export const isOverlayPrintable = (o) => !!(o && o.src && o.visible !== false && !isPinnedMapReference(o));
 
 // The overlays that should be composited into output, in their given order. The
 // "Print overlay" checkbox is a master include/exclude layered on top of this.

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mergePulledSites, groupCountDivergence, saveSite, loadSite, loadSitesList, loadPlansOfGroup, renameSiteGroup, repairSplitProjectNames, snapshotVersion, listVersions, getVersion, summarizeVersion, backupNow, pruneMigratedLegacy } from "../src/workspaces/site-planner/lib/storage.js";
+import { mergePulledSites, groupCountDivergence, saveSite, loadSite, loadSitesList, loadPlansOfGroup, renameSiteGroup, repairSplitProjectNames, snapshotVersion, listVersions, getVersion, summarizeVersion, backupNow, pruneMigratedLegacy, isEmptySite } from "../src/workspaces/site-planner/lib/storage.js";
 import { mergeSiteContent, contentCount, createSiteModel } from "../src/workspaces/site-planner/lib/siteModel.js";
 import { idbAvailable } from "../src/workspaces/site-planner/lib/localDb.js";
 
@@ -499,6 +499,28 @@ describe("snapshotVersion return + backupNow (B467/NEW-4)", () => {
     expect(backupNow("missing")).toBe(true); // no record → a restore can't lose anything
     saveSite({ id: "e", els: [] });          // an empty record
     expect(backupNow("e")).toBe(true);       // nothing to protect → never block the restore
+  });
+
+  // B848736 — a captured aerial is a bottom-pinned `sheetOverlays` record, not a separate
+  // `underlay` field, so a plan whose ONLY content is one must still read as non-empty.
+  it("a plan whose only content is a captured aerial is never treated as empty", () => {
+    saveSite({ id: "a", underlay: { src: "data:image/png;base64,AA", imgW: 10, imgH: 10 } });
+    const cur = loadSite("a");
+    expect(isEmptySite(cur)).toBe(false);
+    expect(backupNow("a")).toBe(true);
+    expect(listVersions("a").length).toBeGreaterThan(0); // real content → a backup was actually written
+  });
+});
+
+describe("isEmptySite (B848736 — reads sheetOverlays, not the retired underlay field)", () => {
+  it("true for no record and for a model with no drawn content", () => {
+    expect(isEmptySite(null)).toBe(true);
+    expect(isEmptySite({})).toBe(true);
+    expect(isEmptySite({ sheetOverlays: [] })).toBe(true);
+  });
+  it("false once any drawn collection (incl. sheetOverlays) has content", () => {
+    expect(isEmptySite({ sheetOverlays: [{ id: "o1" }] })).toBe(false);
+    expect(isEmptySite({ els: [bld("a")] })).toBe(false);
   });
 });
 
