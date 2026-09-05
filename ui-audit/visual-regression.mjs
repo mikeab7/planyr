@@ -338,6 +338,40 @@ function diffHighlightPng(actual, baseline) {
   });
 }
 
+/* The triage artifact itself (B1171504) — every surface/theme/viewport pair this approve run
+ * touched, changed or not, so a reviewer sees the FULL set rather than only the entries someone
+ * chose to mention. Exported so both the CLI's own console/file output and a caller (the
+ * authorize-visual-baselines.yml workflow, posting this as a PR comment) build byte-identical
+ * tables from one source rather than two hand-maintained renderings drifting apart. */
+export function buildTriageMarkdown(triage, reason) {
+  const fmtMag = (r) => {
+    if (r.isNewBaseline) return "_new baseline — no prior to diff against_";
+    if (!r.changed) return "unchanged";
+    const m = r.diffMagnitude;
+    if (!m) return "changed — magnitude unavailable";
+    if (m.error) return `changed — could not diff (${m.error})`;
+    if (m.dimensionChanged) return `changed — **dimensions changed** (${m.priorSize} → ${m.newSize})`;
+    return `changed — **${m.pct.toFixed(4)}%** of pixels, max channel Δ **${m.maxDelta}/255**`;
+  };
+  const lines = [
+    "### Visual-regression baseline triage (B1171504)",
+    "",
+    `Reason given: ${reason || "_(none)_"}`,
+    "",
+    "This is the full list this run touched — **changed and unchanged alike** — so an unexpected " +
+      "entry (a surface you didn't mean to affect) and an unexpected absence (a surface you DID " +
+      "mean to affect that isn't here) are both visible. A surface unrelated to the change you " +
+      "intended is a stop-and-report, not a rubber stamp — it's evidence of a ripple the change " +
+      "description doesn't account for. Re-approving here does not mean any of this was judged " +
+      "correct; that judgment is the reviewer's, on this list, before merging.",
+    "",
+    "| surface | theme | viewport | result |",
+    "|---|---|---|---|",
+    ...triage.map((r) => `| ${r.surfaceId} | ${r.theme} | ${r.viewportId} | ${fmtMag(r)} |`),
+  ];
+  return lines.join("\n") + "\n";
+}
+
 async function run() {
   const argv = process.argv.slice(2);
   const approve = argv.includes("--approve");
@@ -386,6 +420,22 @@ async function run() {
             }
             const prior = existsSync(baselinePath) ? readFileSync(baselinePath) : null;
             const changed = !prior || !prior.equals(png);
+            // Triage data (B1171504, NOT a gate signal — approve always overwrites regardless of
+            // this number). A CI-authored baseline removes the one place a human used to eyeball
+            // "does this diff make sense for what I changed" before trusting a --approve run, so
+            // this computes the SAME diffImages() the --check path already uses against the prior
+            // committed baseline and carries it into the approval manifest + the caller's own
+            // triage report — never silently bulk-approved with no visible per-surface record.
+            let diffMagnitude = null;
+            if (changed && prior) {
+              try {
+                const priorImg = decodePng(prior);
+                const newImg = decodePng(png);
+                diffMagnitude = (priorImg.width === newImg.width && priorImg.height === newImg.height)
+                  ? diffImages(newImg, priorImg)
+                  : { dimensionChanged: true, priorSize: `${priorImg.width}x${priorImg.height}`, newSize: `${newImg.width}x${newImg.height}` };
+              } catch (e) { diffMagnitude = { error: e.message }; }
+            }
             mkdirSync(BASELINE_DIR, { recursive: true });
             writeFileSync(baselinePath, png);
             (manifest.surfaces[s.id] ||= {})[key] = {
@@ -396,6 +446,7 @@ async function run() {
             results.push({
               surfaceId: s.id, theme, viewportId: v.id, status: "approved",
               detail: changed ? "pixels changed — baseline updated" : "no pixel change — re-stamped",
+              changed, isNewBaseline: !prior, diffMagnitude,
             });
             continue;
           }
@@ -464,7 +515,23 @@ async function run() {
     writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2) + "\n");
     const md = buildStatusMarkdown({ manifest, noiseFloor: NOISE_FLOOR_NOTE, addedCiTimeNote: ADDED_CI_TIME_NOTE });
     writeFileSync(DOC_PATH, md);
+    // Triage artifact (B1171504). An --approve run overwrites baselines with no theory of whether
+    // the new picture is RIGHT — that judgment call has always belonged to whoever reviews the
+    // resulting commit. A CI-authored approval is no different in kind, but it removes the one
+    // moment a human previously had to notice something like "why did a surface I never touched
+    // just change" before the commit even existed. So every approve run — local or CI — writes a
+    // full per-surface/theme/viewport report (changed AND unchanged, so an unexpectedly-absent
+    // entry is as visible as an unexpectedly-present one) for the caller to surface prominently;
+    // ui-audit/visual-regression.mjs never decides on its own that a diff is "fine" to hide.
+    mkdirSync(ARTIFACT_DIR, { recursive: true });
+    const triage = results.map((r) => ({
+      surfaceId: r.surfaceId, theme: r.theme, viewportId: r.viewportId, status: r.status,
+      changed: r.changed ?? null, isNewBaseline: r.isNewBaseline ?? null, diffMagnitude: r.diffMagnitude ?? null,
+    }));
+    writeFileSync(join(ARTIFACT_DIR, "approve-triage.json"), JSON.stringify(triage, null, 2) + "\n");
+    writeFileSync(join(ARTIFACT_DIR, "approve-triage.md"), buildTriageMarkdown(triage, reasonArg));
     console.log(`\n${results.length} baseline(s) approved. ui-audit/visual-baselines/manifest.json and docs/VISUAL-REGRESSION.md written — commit them together with your code change.`);
+    console.log(`Triage report written to ${ARTIFACT_DIR}/approve-triage.{json,md} — every surface, changed or not, with its diff magnitude against the prior baseline. Surface this before trusting the approval.`);
     return;
   }
 
