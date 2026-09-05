@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-05 @ `6fca5cf9` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-05 @ `8b8140ba` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_682 source files mapped._
+_693 source files mapped._
 
 ## infra
 
@@ -40,7 +40,7 @@ _682 source files mapped._
 - **`src/app/recoverableError.js`** — Which render crashes the error boundary may clear by remounting instead of showing a dead end (B1189): classifies React's nested-update circuit breaker (dev text + minified #185) and decides recover-vs-show under a bounded, time-windowed retry budget. — `UPDATE_DEPTH_CODE`, `isUpdateDepthError`, `isRecoverableRenderError`, `MAX_AUTO_RECOVERIES`, `RECOVERY_WINDOW_MS`, `planRecovery`
   - _exports_: `isRecoverableRenderError`, `isUpdateDepthError`, `MAX_AUTO_RECOVERIES`, `planRecovery`, `RECOVERY_WINDOW_MS`, `UPDATE_DEPTH_CODE`
 - **`src/app/route.js`** — Hash-route model: parseRoute/buildHash for {module,projectId,cross}, slug maps, useHashRoute hook with merge-navigate, INITIAL_HASH_EMPTY resume flag
-  - _exports_: `buildHash`, `DEFAULT_MODULE`, `INITIAL_HASH_EMPTY`, `isAdminRoute`, `isDesignRoute`, `MODULE_BY_SLUG`, `parseRoute`, `readRoute`, `sameRoute`, `SLUG_BY_MODULE`, `unknownModuleSlug`, `useHashRoute`
+  - _exports_: `buildHash`, `DEFAULT_MODULE`, `INITIAL_HASH_EMPTY`, `isAdminRoute`, `isDashboardRoute`, `isDesignRoute`, `MODULE_BY_SLUG`, `parseRoute`, `readRoute`, `sameRoute`, `SLUG_BY_MODULE`, `unknownModuleSlug`, `useHashRoute`
 - **`src/app/Shell.jsx`** — App shell: auth state, hash-driven module switching, lazy workspace registry with per-id ErrorBoundary+Suspense, builds the AccountControl auth slot, cross-workspace intents
   - _exports_: `default (Shell)`
 - **`src/main.jsx`** — Entry point: installs client-error telemetry + chunk-reload guard, retires old GIS service worker, renders Shell inside ThemeProvider/StrictMode
@@ -63,6 +63,28 @@ _682 source files mapped._
   - _exports_: `default (ReportsSection)`
 - **`src/workspaces/admin/SignupActivitySection.jsx`** — Admin view of recent signup attempts (volume/flood visibility) via the admin_list_signup_attempts() RPC
   - _exports_: `default (SignupActivitySection)`
+- **`src/workspaces/dashboard/components/DashboardCard.jsx`** — the one card shell (title + Customize-mode drag handle/resize/remove) every Dashboard card renders inside.
+  - _exports_: `default (DashboardCard)`
+- **`src/workspaces/dashboard/components/DashboardCards.jsx`** — the six default Dashboard card renderers (pure presentational, token-only).
+  - _exports_: `CompsSummaryCard`, `GoingQuietCard`, `JumpBackInCard`, `PipelineCard`, `PursuitsByActivityCard`, `ScheduleHealthCard`
+- **`src/workspaces/dashboard/Dashboard.jsx`** — the real Dashboard landing page (B1213312/B1213313): the arrangeable card grid + Customize mode, above the six workspaces.
+  - _exports_: `default (Dashboard)`
+- **`src/workspaces/dashboard/lib/dashboardCompsFetch.js`** — the one minimal `comps` read (type counts) the Comps summary card needs.
+  - _exports_: `fetchCompsCounts`
+- **`src/workspaces/dashboard/lib/dashboardDocFetch.js`** — the last-touched Review document, for the Jump-back-in card.
+  - _exports_: `fetchLastTouchedDoc`
+- **`src/workspaces/dashboard/lib/dashboardLayout.js`** — pure model for the arrangeable card grid: catalog, default layout, add/remove/reorder/resize.
+  - _exports_: `addCard`, `availableToAdd`, `CARD_DEFS`, `CARD_KEYS`, `DEFAULT_LAYOUT`, `moveCard`, `normalizeLayout`, `removeCard`, `SIZES`, `toggleCardSize`
+- **`src/workspaces/dashboard/lib/dashboardPipeline.js`** — pure grouping/derivation over `sites` rows for the Pipeline, Pursuits-by-activity, Going-quiet, and Jump-back-in cards.
+  - _exports_: `goingQuiet`, `groupProjectsByGroupId`, `mostRecentProject`, `pipelineCounts`, `pursuitsByActivity`
+- **`src/workspaces/dashboard/lib/dashboardPrefs.js`** — per-user persisted Dashboard card layout (`profiles.prefs.dashboardLayout`, independent of `site-planner/lib/userPrefs.js`).
+  - _exports_: `loadDashboardLayout`, `saveDashboardLayout`
+- **`src/workspaces/dashboard/lib/dashboardScheduleFetch.js`** — the one `planar_data` read (the embedded Scheduler's own document) the Schedule health card needs.
+  - _exports_: `fetchScheduleProjects`
+- **`src/workspaces/dashboard/lib/dashboardSitesFetch.js`** — the one minimal `sites` read that powers the Pipeline/Pursuits/Going-quiet/Jump-back-in cards.
+  - _exports_: `fetchSiteSummaries`
+- **`src/workspaces/dashboard/lib/scheduleHealth.js`** — pure per-schedule task-health summary (complete/overdue/at-risk) for the Schedule health card.
+  - _exports_: `summarizeProjectHealth`, `summarizeScheduleHealth`
 - **`src/workspaces/design-gallery/DesignGallery.jsx`** — the `#/design` dev-only primitive gallery (NEW-4): every shared control/token in every state, both themes.
   - _exports_: `default (DesignGallery)`
 - **`src/workspaces/food/components/BottomSheet.jsx`** — Generic drag-to-resize mobile bottom sheet (peek/half/full snap points, content-driven height, dismiss-on-drag), content-agnostic
