@@ -39,20 +39,34 @@ was never clicked" quietly ships broken.
 >   then `getByTestId("map-start-blank-menu-item")` is the reliable two-step click); drive the SVG
 >   canvas with `page.mouse` (CDP mouse events fire React's pointer handlers); `page.screenshot({clip})`
 >   then read the PNG back to eyeball it.
-> - **⛔ THIS SANDBOX HAS NO WEBKIT — every "phone" or "mobile" claim made here is a CHROMIUM claim,
->   never a Safari one, and this is a standing gap, not a one-off (B1168128, 2026-09-05).**
->   `npx playwright install chromium` restores Chromium/its headless-shell; it does NOT install
->   WebKit — `/opt/pw-browsers/webkit-*` does not exist in this environment and nothing here fetches
->   it. Playwright's `devices["iPhone …"]` descriptors (isMobile/hasTouch/dpr/mobile UA) make Chromium
->   behave like a phone-shaped browser, which is real evidence for layout, touch-event wiring, and
->   gesture logic — but it is still Chromium's touch/pointer pipeline, not Safari's, and it cannot
->   render `env(safe-area-inset-*)` as anything but 0 (no notch/home-indicator to inset around) or
->   reproduce Mobile Safari's collapsing-address-bar `visualViewport` behavior. **Say "Chromium at
->   iPhone-13 width" in a report, never "tested on iPhone" or "verified on Safari."** A synthetic
->   safe-area value can be exercised in an isolated fixture as a SIMULATION of the CSS arithmetic —
->   labeled as simulation, never reported as device evidence. Closing a real notch/gesture-bar or
->   Safari-touch-pipeline question needs an actual iPhone; that gap is Michael's own device, not a
->   task for a self-check here.
+> - **⛔ WEBKIT IS INSTALLABLE HERE (amended 2026-09-05, B1168128 fourth pass) — but it is still not
+>   Safari, and getting it running needs two steps most sessions will miss on the first try.**
+>   `npx playwright install chromium` does NOT install WebKit — that part of the old note still
+>   holds, and a fresh container starts with Chromium only. But `npx playwright install webkit` DOES
+>   work from here: the download hits a 403 on its first two CDN mirrors
+>   (`cdn.playwright.dev/dbazure/...`, `playwright.download.prss.microsoft.com` — a real, narrow
+>   block on those two hosts specifically) and then succeeds on Playwright's own third fallback
+>   mirror automatically — no manual retry needed, just let the command finish. The binary then
+>   FAILS TO LAUNCH the first time, not from network/permissions but from ~27 missing OS shared
+>   libraries (`libgtk-4.so.1` and similar — normal Ubuntu packages this container doesn't ship by
+>   default). Fix: `npx playwright install-deps webkit` (this container runs as root) installs them;
+>   `webkit.launch()` then succeeds. **Do both installs before assuming WebKit is unreachable.**
+>   Once launched, this is Playwright's Linux WebKit build — the real WebKit rendering + pointer-event
+>   engine, materially closer to Safari than Chromium — but it is still **not** Apple's WebKit and
+>   **not** Mobile Safari's browser chrome: no real notch, no real collapsing address bar, and
+>   Playwright exposes no CDP-equivalent for WebKit (no `Emulation.setSafeAreaInsetsOverride`
+>   analog), so `env(safe-area-inset-*)` still resolves to 0 here with no way to override it —
+>   confirmed by trying, not assumed (Chromium's CDP override IS available and DOES let you inject a
+>   real inset value; that asymmetry is real and worth knowing before reaching for WebkKit expecting
+>   parity with the Chromium simulation path). Playwright's `touchscreen` API on WebKit (like
+>   Chromium) exposes only a single-point `.tap()` — no drag primitive on either engine — so a real
+>   held-and-moved touch gesture still can't be produced through Playwright's public API; Chromium's
+>   "genuine touch drag" tests use Chromium-only CDP (`Input.dispatchTouchEvent`), which has no WebKit
+>   equivalent. **Say "WebKit" in a report, never "iPhone" or "Safari" or "Mobile Safari."** A
+>   synthetic safe-area value can still only be exercised as a SIMULATION on Chromium (via its CDP
+>   override), never on WebKit here. Closing a real notch/gesture-bar or true Mobile-Safari-chrome
+>   question still needs an actual iPhone; that gap is Michael's own device, not a task for a
+>   self-check here.
 
 >
 > ### 🚚 Confirming a change is actually SERVED (B1119) — use the script, not a hand grep
