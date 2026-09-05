@@ -501,6 +501,40 @@ export async function pushSiteToCloud(id) {
   if (!m) return { ok: false, error: "missing" };
   return cloudUpsert(activeUid(), m);
 }
+/* B1165441 (NEW-2/NEW-3, adversarial review of B1156864/PR 1424) — "Nothing in the app ever
+ * creates a site for a comp; the migration was a snapshot, not a mechanism." The one-time backfill
+ * (db/site_role_unify_backfill_20260905.sql) attached the three comps that existed the day it ran
+ * and stopped there — every comp saved afterward with no site picked landed with `project_id: null`,
+ * right back in the pre-migration state. This is the runtime mechanism: called whenever a comp is
+ * saved with no owning site, it either attaches to an existing plausible site (NEW-3's dedupe — see
+ * shared/comps/lib/compSiteMatch.js for the matching rule, the SAME 0.5mi radius the backfill used)
+ * or mints a new "tracked" site from the comp's own title/location, exactly mirroring the backfill's
+ * per-comp shape (role: "tracked", name: "Market record", site: the comp's title). The owner must
+ * never have to create a site before recording a deal.
+ *
+ * Matching runs against loadSitesList() — EVERY role, not just "pursuit" — so a second deal on a
+ * property that's currently only "tracked" (market intel from an earlier comp) attaches to that
+ * same site instead of minting a duplicate (the Airtex Building A/B case NEW-3 names explicitly).
+ *
+ * Returns { groupId, created, matched, matchedName?, matchedBy? }. `groupId` is what the caller
+ * writes into `comps.project_id`. A failed background cloud push doesn't block the local write —
+ * it's saved on this device and mirrors on the next edit/reload, same as every other site write. */
+export async function resolveOrCreateTrackedSiteForComp({ title, lat, lon, county } = {}) {
+  if (typeof lat !== "number" || typeof lon !== "number" || !Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return { groupId: null, created: false, matched: false };
+  }
+  const { findMatchingSite } = await import("../../../shared/comps/lib/compSiteMatch.js");
+  const all = loadSitesList(); // every role, every stage — see the matching-scope note above
+  const match = findMatchingSite({ lat, lon, title }, all);
+  if (match) return { groupId: match.groupId, created: false, matched: true, matchedName: match.name, matchedBy: match.matchedBy };
+
+  const id = "trk" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const name = (title && String(title).trim()) || "Tracked property";
+  saveSite({ id, groupId: id, site: name, name: "Market record", role: "tracked", origin: { lat, lon }, county: county || null, els: [], measures: [], settings: {} });
+  const r = await pushSiteToCloud(id).catch((e) => ({ ok: false, error: (e && e.message) || "" }));
+  if (r && r.ok === false) reportClientEvent("cloud-push-failed", "background push failed (comp-created tracked site)", { id });
+  return { groupId: id, created: true, matched: false };
+}
 // B473 — push a LIVE in-memory model to the cloud, NOT by id. Used when the on-device write FAILED
 // (full localStorage): pushSiteToCloud→loadSite would re-read the failed store and ship a stale,
 // pre-edit copy — losing the very edit in the cloud too. The cloud has no ~5MB cap, so pushing the
