@@ -33,6 +33,7 @@ import {
   fetchDeletedComps, restoreComp, permanentlyDeleteComp,
 } from "../lib/compsStore.js";
 import { formatNumberDisplay, sanitizeNumericInput } from "../lib/compSheetColumns.js";
+import { loadSiteSummaries } from "../../../workspaces/site-planner/lib/siteListLight.js";
 import { listMyTeams, currentIdentity } from "../../../workspaces/site-planner/lib/teams.js";
 import CompEntryGrid, { draftFromParsedRow } from "./CompEntryGrid.jsx";
 import CompDraftsPanel from "./CompDraftsPanel.jsx";
@@ -292,7 +293,7 @@ export function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysBy
   );
 }
 
-function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave, onCancel, saving }) {
+export function CompForm({ draft, setDraft, teams, projects, trackedSites, partyNames, errors, onSave, onCancel, saving }) {
   const set = (k) => (e) => setDraft((d) => ({ ...d, [k]: e.target.value }));
   // NEW-13 — NumField's onChange hands back the plain (already-sanitized) value, not an event.
   const setVal = (k) => (v) => setDraft((d) => ({ ...d, [k]: v }));
@@ -474,11 +475,21 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
           </select>
         </Field>
       )}
-      {projects?.length > 0 && (
+      {/* NEW-2/NEW-3 correction (owner review, adversarial review of B1156864) — `projects` is
+          deliberately the PURSUIT-ONLY Sites list (MapFinder's own `siteGroups`), so a comp
+          attached to a "tracked" site (market intel only) could never appear as a selected
+          option here: per the HTML select spec, a value matching no option silently renders the
+          FIRST option ("No project"), which is exactly why every one of the owner's three live
+          comps — all correctly linked by the migration — read "No project" with no way to see or
+          restore the link. Tracked sites are always offered too (not just the current comp's own
+          site, so reassigning to a DIFFERENT tracked site works), visibly labelled so a market
+          record never reads as a pipeline project. */}
+      {(projects?.length > 0 || trackedSites?.length > 0) && (
         <Field label="Project (optional)" stacked>
           <select value={draft.projectId || ""} onChange={(e) => setDraft((d) => ({ ...d, projectId: e.target.value || null }))} style={inputStyle}>
             <option value="">No project</option>
-            {projects.map((p) => <option key={p.id} value={p.id}>{p.site || p.name}</option>)}
+            {(projects || []).map((p) => <option key={p.id} value={p.id}>{p.site || p.name}</option>)}
+            {(trackedSites || []).map((s) => <option key={s.id} value={s.id}>{(s.site || s.name) + " (market record)"}</option>)}
           </select>
         </Field>
       )}
@@ -693,6 +704,22 @@ export default function CompsPanel({
 
   if (!open) return null;
 
+  // NEW-2/NEW-3 correction (owner review) — every live "tracked" site (market intel only),
+  // computed fresh on every render (cheap: a handful of rows, a plain localStorage read) so a
+  // site this same session just auto-created (resolveOrCreateTrackedSiteForComp) shows up
+  // immediately. Deduped by groupId — a tracked "project" is always single-plan today, but this
+  // stays correct if that ever changes, the same way MapFinder's own siteGroups collapses to one
+  // row per group.
+  const trackedSites = (() => {
+    const byGroup = new Map();
+    for (const s of loadSiteSummaries()) {
+      if (s.role !== "tracked") continue;
+      const g = s.groupId || s.id;
+      if (!byGroup.has(g)) byGroup.set(g, s);
+    }
+    return [...byGroup.values()];
+  })();
+
   const openDetail = (c) => { setActiveComp(c); setView("detail"); setAssignNotice(null); };
   const openEdit = (c) => { setDraft(compToDraft(c)); setErrors([]); setAssignNotice(null); setView("form"); };
   const cancelForm = () => { setView(activeComp ? "detail" : "list"); setDraft(null); };
@@ -793,7 +820,28 @@ export default function CompsPanel({
     }
     setGridSaving(true);
     setGridSaveError(null);
-    const result = await insertComps(toSave.map((r) => draftToComp(r.draft)));
+    // B1167137/B1165441 (adversarial review of B1156864) — same resolution as the single-comp
+    // save(), applied per row, SEQUENTIALLY (not in parallel): a tracked site this loop just
+    // created for an earlier row in the SAME paste is written to local storage before the next
+    // row's own resolveOrCreateTrackedSiteForComp call reads it back, so two rows for the same
+    // property in one batch (Building A / Building B on one flyer) attach to ONE new site rather
+    // than two.
+    const comps = [];
+    for (const r of toSave) {
+      const comp = draftToComp(r.draft);
+      if (!comp.projectId && comp.anchor) {
+        try {
+          const { resolveOrCreateTrackedSiteForComp } = await import("../../../workspaces/site-planner/lib/storage.js");
+          const resolved = await resolveOrCreateTrackedSiteForComp({ title: comp.title, lat: comp.anchor.lat, lon: comp.anchor.lon, county: comp.anchor.county });
+          if (resolved.groupId) comp.projectId = resolved.groupId;
+        } catch (_) {
+          // Same non-fatal shape as the single-comp save() path — an unattached comp is still
+          // fixable via the Site dropdown, never a blocked save.
+        }
+      }
+      comps.push(comp);
+    }
+    const result = await insertComps(comps);
     setGridSaving(false);
     if (result.error) { setGridSaveError(result.error.message || "Save failed"); return; }
     const savedIds = new Set(toSave.map((r) => r._id));
@@ -954,7 +1002,7 @@ export default function CompsPanel({
         )}
 
         {!loading && view === "form" && draft && (
-          <CompForm draft={draft} setDraft={setDraft} teams={teams} projects={projects} partyNames={collectPartyNames(comps)} errors={errors} onSave={save} onCancel={cancelForm} saving={saving} />
+          <CompForm draft={draft} setDraft={setDraft} teams={teams} projects={projects} trackedSites={trackedSites} partyNames={collectPartyNames(comps)} errors={errors} onSave={save} onCancel={cancelForm} saving={saving} />
         )}
       </div>
     </div>

@@ -30,6 +30,7 @@
  */
 import { activeUid, isCloudActive } from "../../workspaces/site-planner/lib/activeUser.js";
 import { loadSiteSummaries } from "../../workspaces/site-planner/lib/siteListLight.js";
+import { roleOf } from "../../workspaces/site-planner/lib/siteStatus.js";
 import { groupProjects, DELETED_RETENTION_DAYS } from "./projectModel.js";
 
 /** Which account's data every project surface is reading. Re-exported through this one
@@ -66,9 +67,18 @@ export async function checkProjectDeletionStatus(id) {
 
 export { groupProjects, filterProjects, relTime, suggestNameMatch, normalizeProjectName } from "./projectModel.js";
 
+// NEW-1 (this branch, adversarial review of B1156864) — a "tracked" site (market intel only — a
+// comp, an asking price with nothing transacted) is never a real project: it has no plans, no
+// layout, nothing for the Model/Notes/Scheduler workspaces to attach to. `siteListLight.js`'s own
+// reader is a plain passthrough of whatever role a record carries — filtering belongs here, at the
+// one place every one of those workspaces' "pick a project" surface actually calls through
+// (this file's own header: "read on literally every workspace's header"). Filtering upstream, in
+// the reader, would also silently exclude a tracked site from any FUTURE caller that legitimately
+// wants the full list (e.g. the comps auto-attach match in compSiteMatch.js, which must see
+// tracked sites to find one to attach a second comp to — see BACKLOG.md NEW-3).
 export function listProjects() {
   try {
-    return groupProjects(loadSiteSummaries());
+    return groupProjects(loadSiteSummaries().filter((s) => roleOf(s) === "pursuit"));
   } catch (_) {
     return [];
   }

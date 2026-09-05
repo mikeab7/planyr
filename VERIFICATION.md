@@ -316,6 +316,30 @@ was never clicked" quietly ships broken.
 
 **Result:** ⏳ pending — needs a real signed-in browser session. `Cadence: once`.
 
+### V852304 — B1167136: no cross-workspace project switcher lists a "tracked" site as a selectable project `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** `listProjects()` (the reader behind AppHeader → ProjectBreadcrumb on every route, and the Model/Notes/Scheduler workspaces' own project pickers) now filters to `role === "pursuit"`, but its data source (`loadSiteSummaries()`, the on-device cache) only reflects the tracked sites this account actually holds once a real signed-in pull has run — the sandbox cannot sign in to confirm the filter against the owner's real three tracked sites.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner (real account, real data; do not create, delete, or edit anything):**
+1. Click the project breadcrumb's switcher dropdown from any workspace (Site Planner, Notes, Model, Scheduler). **Expect:** "Core 5 - West Hardy", "Tesla - TGS 800K SF", and "Tesla - TGS DC4" do NOT appear in the list, on any workspace.
+2. Confirm every ordinary project (any of the owner's 37 real pursuit sites) still appears and switches correctly.
+3. Open the Site Planner's own map Sites rail (unaffected by this item, already correct per B1156864) and confirm it still reads the same count it did before this session — a sanity cross-check, not this item's own claim.
+
+**Result:** ⏳ pending — needs a real signed-in browser session. `Cadence: once`.
+
+### V852305 — B1167137: the comp editor's Project field always shows a comp's REAL owning site, tracked or not, never "No project" `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** This checks the Project-select DISPLAY fix only — the one surface `V850608` (B1165441's own live-verify, the attach/create mechanism itself) does not cover, since that item never touches `CompForm`. Confirmed directly against real production data via the Supabase MCP that the underlying link is correct (63 live sites, unchanged; the earlier throwaway comp still reads `project_id = trk8eef7db4d0`) — what remains is confirming the owner's own signed-in browser actually RENDERS that link.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner (real account, real data — do NOT edit or save any of the three comps named below, read the field and cancel):**
+1. Open "Core 5 - West Hardy" for edit (the single-comp edit form, not the paste grid). **Expect:** the Project field reads "Core 5 - West Hardy (market record)" — never "No project" and never the bare internal name "Market record". Cancel without saving.
+2. Repeat for "Tesla - TGS 800K SF" and "Tesla - TGS DC4", each showing its own matching name. Cancel without saving.
+3. Report all three displayed strings verbatim.
+
+**Result:** ⏳ pending — needs a real signed-in browser session. `Cadence: once`.
+
+(B1167138's own live-verify was folded into `V850608` above — same mechanism, same shipped code, no separate check needed; see B1167138's writeup in `BACKLOG.md`.)
+
 ### V650128 — B1156864: the Sites list stays at 37 pursuit projects after the comps-to-sites migration, the three new tracked sites stay off it, and a comp's owning site shows correctly `Blocker: auth` `Blocker: real-data`
 
 NEW-1 collapsed the Site/comp split: every site now carries a `role` ("pursuit" vs "tracked"),
