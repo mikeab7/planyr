@@ -35,7 +35,7 @@ import { HEADING_LEVELS } from "../lib/notesExtensions.js";
 import { BLOCK_SPACES, DENSITIES, LINE_SPACINGS, spacingLabel } from "../lib/notesSpacing.js";
 import { CALLOUT_TONES } from "../lib/notesCalloutNode.js";
 import { FONTS, HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.js";
-import { MIXED, formatDisplayValue, selectionBlockShapes, selectionFontSizes } from "../lib/notesMixedSelection.js";
+import { MIXED, formatDisplayValue, selectionBlockShapes, selectionFontSizes, selectionLineHeights } from "../lib/notesMixedSelection.js";
 
 /* Mirrored from src/shared/ui/controls.jsx rather than imported — deliberately, and there
  * is a test that fails if the copies drift (test/notesModule.test.js). Importing
@@ -48,6 +48,22 @@ const RADIUS = { control: 8, pill: 999 };
  * so B849633's phone-sheet branch of OverflowMenu's panel doesn't count as a second raw
  * colour literal against the design-drift ceiling for what is visually the same shadow. */
 const POPOVER_SHADOW = "0 12px 32px rgba(0,0,0,0.20)";
+
+/* ⛔ ICON-2: a colour control's swatch bar showing GREY communicates no colour at all, and it
+ * made the two colour buttons a matched silhouette differing only by a small glyph on top.
+ * The bar now always carries a real colour — the caret's actual one where there is one, else
+ * the colour a first click would apply (Google Docs' own convention) — so the button also
+ * shows what it will DO, not just what is currently true.
+ * Highlight defaults to the palette's first real colour (Yellow) — a genuine "the next click
+ * applies this" answer, safely legible on both themes. Text colour does NOT default to the
+ * palette's literal "Black" swatch the same way: `TEXT_COLORS`' Black is the exact same value
+ * as this app's own dark-theme `--surface-raised`, so the letter and the bar beneath it would vanish into
+ * the toolbar on a dark screen — caught by screenshotting both themes, not by reading the
+ * code, which looked identical to the highlight fix and was not. Unset text genuinely renders
+ * in the theme's own ink colour, so `var(--text-primary)` is both the honest answer and the
+ * one every theme can already show. */
+const DEFAULT_TEXT_SWATCH = "var(--text-primary)";
+const DEFAULT_HIGHLIGHT_SWATCH = HIGHLIGHT_COLORS.find((c) => c.value)?.value || null;
 
 /* ⛔ THE PALETTES MOVED TO `lib/notesFormatPalette.js` (NEW-MINI-TOOLBAR). The right-click
  * mini-toolbar offers the same choices, and two copies of a palette is how this bar and that
@@ -147,7 +163,14 @@ function TBSelect({ value, onChange, title, options, testid, width = 116, big })
  *
  * `mixed` suppresses the "this option is the current one" highlight — showing a highlighted row
  * during a mixed selection would claim an answer the selection does not have. */
-function FormatMenu({ title, testid, value, mixed, options, onPick, big, width = 116 }) {
+/* `displayLabel` (NEW-SPACING-3): the CLOSED trigger normally just shows the matched option's
+ * own label, which is right for Block style / Font size (short by construction — "H2", "18").
+ * Line spacing's option labels are the long list-row text ("Lines: Double"), and this control
+ * is deliberately kept narrow (PANEL-BREVITY — the row is full at a laptop width). An explicit
+ * override lets the trigger show a SHORT current-state glyph while the dropdown keeps its own
+ * full, readable option text — the one thing a native `<select>` cannot do, because it ties the
+ * closed box to the exact string of whatever option is selected. */
+function FormatMenu({ title, testid, value, mixed, options, onPick, big, width = 116, displayLabel }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
   useEffect(() => {
@@ -160,7 +183,7 @@ function FormatMenu({ title, testid, value, mixed, options, onPick, big, width =
   }, [open]);
 
   const current = mixed ? null : options.find((o) => o.value === value);
-  const label = current ? current.label : "";
+  const label = mixed ? "" : (displayLabel != null ? displayLabel : (current ? current.label : ""));
 
   return (
     <span ref={wrapRef} style={{ position: "relative", display: "inline-flex" }}>
@@ -254,11 +277,18 @@ const InkGlyph = ({ swatch }) => (
 
 const MarkerGlyph = ({ swatch }) => (
   <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-    {/* A marker pen held at an angle, nib down — read at control size as "highlighter",
-        which the letter-over-a-bar never was. */}
-    <Icon size={13}>
-      <path d="M3.2 10.4l5.1-5.1a1.6 1.6 0 0 1 2.3 0l1.1 1.1a1.6 1.6 0 0 1 0 2.3l-5.1 5.1H3.2z" />
-      <path d="M8.3 5.3l2.4 2.4" />
+    {/* ⛔ ICON-1: this used to be a pointed pen nib — the universal glyph for EDIT, not
+     * highlight — drawn one size smaller than every other icon on the bar (13px against the
+     * bar's own 15px, a population of one). A highlighter reads as a highlighter because of
+     * its TIP: broad and flat, never a point. The barrel is the same stroke outline every
+     * sibling icon uses; the tip is a small SOLID wedge, wide enough that it cannot be
+     * mistaken for a pencil's point at this size, held at the same read-as-a-pen angle. */}
+    <Icon size={15}>
+      <g transform="rotate(35 8 8)">
+        <rect x="6" y="1.3" width="4" height="6.2" rx="0.9" />
+        <line x1="6" y1="7.5" x2="10" y2="7.5" />
+        <path d="M6.3 7.5L9.7 7.5L8.7 11.6L7.3 11.6Z" fill="currentColor" stroke="none" />
+      </g>
     </Icon>
     <span style={{
       width: 14, height: 4, borderRadius: 1,
@@ -678,9 +708,16 @@ const TableIcon = () => (
 const ImageIcon = () => (
   <Icon><rect x="2" y="3" width="12" height="10" rx="1.5" /><circle cx="5.75" cy="6.25" r="1.1" /><path d="M2.5 11.5l3.2-3 2.6 2.4 2-1.8 3.2 2.9" /></Icon>
 );
-/* Sketch mode: two boxes and an arrow between them — the thing it makes, not a metaphor. */
+/* Sketch mode: two boxes and an arrow between them — the thing it makes, not a metaphor
+ * (ICON-3). The metaphor was always right; the first drawing was not — four thin diagonal
+ * elements (two small rects, an elbow, a separate arrowhead) inside a 16-unit viewBox
+ * collapse into an indistinct blob once rendered at this bar's actual 15px, which is the only
+ * size that matters. Side-by-side boxes with a straight horizontal arrow between them read at
+ * a glance instead; the arrowhead is the same vertex-plus-two-wings chevron this file already
+ * draws for the history-step icons at the start of the row, just pointing the other way,
+ * rather than a new shape to get wrong. */
 const SketchIcon = () => (
-  <Icon><rect x="1.5" y="2.5" width="5.5" height="4" rx="1" /><rect x="9" y="9.5" width="5.5" height="4" rx="1" /><path d="M7 4.5h3.2a1.5 1.5 0 0 1 1.5 1.5v3" /><path d="M10.2 7.6l1.5 1.9 1.5-1.9" /></Icon>
+  <Icon><rect x="0.5" y="5.2" width="5.4" height="5.6" rx="1.2" /><rect x="10.1" y="5.2" width="5.4" height="5.6" rx="1.2" /><path d="M6.3 8H9.5M7.5 6.1L9.5 8L7.5 9.9" /></Icon>
 );
 const PrintIcon = () => (
   <Icon><path d="M4.5 6V2.5h7V6" /><rect x="2" y="6" width="12" height="5" rx="1.2" /><path d="M4.5 9.5h7v4h-7z" /></Icon>
@@ -753,6 +790,35 @@ export default function NoteToolbar({ editor, onExport, onPrint, onAttach, onHis
   });
   const sizeMixed = sizeDisplay === MIXED;
   const currentSizeNum = !sizeMixed && sizeDisplay ? parseInt(sizeDisplay, 10) : null;
+
+  /* ⛔ THE LINE SPACING CONTROL USED TO BE WRITE-ONLY (NEW-SPACING-3) — it applied a spacing but
+   * never showed what the paragraph under the caret actually had, unlike Block style / Font size
+   * just above (same B1139216 fix, applied here). `lineHeight` lives on the block itself
+   * (paragraph OR heading — notesSpacing.js), so the caret read is the selection's own parent
+   * block, not a named-type `getAttributes` call (which would silently read `{}` on a heading). */
+  const spacingCaretValue = selection.$from.parent.attrs?.lineHeight ?? null;
+  const spacingDisplay = formatDisplayValue({
+    selectionEmpty: selection.empty,
+    caretValue: spacingCaretValue,
+    rangeValues: selection.empty ? [] : selectionLineHeights(editor.state.doc, selection.from, selection.to),
+  });
+  const spacingMixed = spacingDisplay === MIXED;
+  const spacingResolved = spacingMixed ? null : spacingDisplay;
+  /* ⛔ ICON-4: the trigger used to be a bare "↕" glyph with no word at all — the least labelled
+   * control on the row, sitting between "Body text" and "Size", which both show a word even in
+   * their own default/unset state. `spacingLabel(null)` already returns exactly that word
+   * ("Spacing") for the same reason those two do — so this reuses it rather than keeping the
+   * lone symbol now that the control shows real words for every other state too. */
+  const spacingGlyph = spacingLabel(spacingResolved);
+  const pickSpacing = (v) => {
+    if (!v) return;
+    const [kind, raw] = v.split(":");
+    if (kind === "den") { chain().setNoteDensity(raw).run(); return; }
+    const n = raw === "" ? null : Number(raw);
+    const key = kind === "lh" ? "lineHeight" : (kind === "sb" ? "spaceBefore" : "spaceAfter");
+    chain().setNoteSpacing({ [key]: n }).run();
+  };
+
   const currentFont = editor.getAttributes("textStyle")?.fontFamily || null;
   const currentColor = editor.getAttributes("textStyle")?.color || null;
   const currentHl = editor.getAttributes("highlight")?.color || null;
@@ -800,25 +866,27 @@ export default function NoteToolbar({ editor, onExport, onPrint, onAttach, onHis
         ? chain().setFontSize(`${size}px`).syncBlockFontSize().run()
         : chain().unsetFontSize().syncBlockFontSize().run())} />
   );
+  /* ⛔ A FormatMenu, NOT the native `<select>` this used to be (NEW-SPACING-3) — a DESIGN CHOICE
+   * made to fix the write-only report, not a cosmetic match to its neighbours for its own sake.
+   * A native select ties the closed box's text to the exact string of whatever option is
+   * selected, so making `value` honestly track state (the actual bug fix) would have forced the
+   * box to show the full row text — "Lines: Double" — the moment anything was set, blowing past
+   * the deliberately narrow width this control has always needed (PANEL-BREVITY: "the formatting
+   * row is full at a laptop width"). FormatMenu's `displayLabel` decouples the two: the dropdown
+   * still lists the full, readable rows, and the closed trigger shows a short current-state word
+   * instead. (The RULED-OUT dead-click question the earlier report raised does not apply to this
+   * shape either way — FormatMenu dispatches on every real click, same as Block style/Font size.) */
   const spacingControl = (
-    <TBSelect title={`Line spacing — ${spacingLabel(editor.getAttributes("paragraph").lineHeight)}`} testid="nt-spacing" width={40} big={narrow}
-      value=""
+    <FormatMenu title="Line spacing" testid="nt-spacing" width={82} big={narrow}
+      value={spacingMixed ? "" : `lh:${spacingResolved ?? ""}`} mixed={spacingMixed}
+      displayLabel={spacingGlyph}
       options={[
-        { label: "↕", value: "" },
         ...DENSITIES.map((d) => ({ label: `Whole note: ${d.label}`, value: `den:${d.id}` })),
         ...LINE_SPACINGS.map((s) => ({ label: `Lines: ${s.label}`, value: `lh:${s.value ?? ""}` })),
         ...BLOCK_SPACES.map((s) => ({ label: `Space before: ${s.label}`, value: `sb:${s.value ?? ""}` })),
         ...BLOCK_SPACES.map((s) => ({ label: `Space after: ${s.label}`, value: `sa:${s.value ?? ""}` })),
       ]}
-      onChange={(e) => {
-        const v = e.target.value;
-        if (!v) return;
-        const [kind, raw] = v.split(":");
-        if (kind === "den") { chain().setNoteDensity(raw).run(); return; }
-        const n = raw === "" ? null : Number(raw);
-        const key = kind === "lh" ? "lineHeight" : (kind === "sb" ? "spaceBefore" : "spaceAfter");
-        chain().setNoteSpacing({ [key]: n }).run();
-      }} />
+      onPick={pickSpacing} />
   );
   const underlineBtn = (
     <TBButton title="Underline" testid="nt-underline" big={narrow} active={editor.isActive("underline")} onClick={() => chain().toggleUnderline().run()}>
@@ -831,11 +899,11 @@ export default function NoteToolbar({ editor, onExport, onPrint, onAttach, onHis
     </TBButton>
   );
   const textColorControl = (
-    <ColorPopover title="Text colour" testid="nt-color" glyph="ink" big={narrow} swatch={currentColor} colors={TEXT_COLORS}
+    <ColorPopover title="Text colour" testid="nt-color" glyph="ink" big={narrow} swatch={currentColor || DEFAULT_TEXT_SWATCH} colors={TEXT_COLORS}
       onPick={(c) => (c ? chain().setColor(c).run() : chain().unsetColor().run())} />
   );
   const highlightColorControl = (
-    <ColorPopover title="Highlight colour" testid="nt-highlight" glyph="marker" big={narrow} swatch={currentHl} colors={HIGHLIGHT_COLORS}
+    <ColorPopover title="Highlight colour" testid="nt-highlight" glyph="marker" big={narrow} swatch={currentHl || DEFAULT_HIGHLIGHT_SWATCH} colors={HIGHLIGHT_COLORS}
       onPick={(c) => (c ? chain().setHighlight({ color: c }).run() : chain().unsetHighlight().run())} />
   );
   const checklistBtn = (
