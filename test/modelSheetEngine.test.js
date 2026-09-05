@@ -532,6 +532,19 @@ describe("evaluateWorkbook's graph — Stage 3, NEW-1 (owner brief 2026-09-03) t
     expect(hops[0].cells).toEqual([{ row: 0, col: 0 }, { row: 1, col: 0 }, { row: 2, col: 0 }]);
   });
 
+  it("B1179328 — a NEW range-taking function (VLOOKUP) needs ZERO collectRefHops/collectCellDeps changes: its table_array is a RANGE hop, its scalar target/col_index args are not", () => {
+    let s = createSheet();
+    s = setRaw(s, 0, 0, "1"); s = setRaw(s, 0, 1, "10");
+    s = setRaw(s, 1, 0, "2"); s = setRaw(s, 1, 1, "20");
+    s = commitCellText(s, 2, 2, "=VLOOKUP(2,A1:B2,2,FALSE)");
+    const r = wb1(s);
+    const hops = r.graph.hopsFor("sheet1", 2, 2);
+    expect(hops).toHaveLength(1); // just the table_array — the target (2) and col_index (2) are scalar literals, not references
+    expect(hops[0]).toMatchObject({ kind: "range", sheetId: "sheet1", crossSheet: false, label: "A1:B2" });
+    expect(hops[0].cells).toEqual([{ row: 0, col: 0 }, { row: 0, col: 1 }, { row: 1, col: 0 }, { row: 1, col: 1 }]);
+    expect(r.get("sheet1").get(2, 2)).toMatchObject({ ok: true, value: 20 }); // end-to-end: 2 matches A2, col 2 = B2 = 20
+  });
+
   it("a NAMED RANGE hop is labeled with the NAME, never the raw address", () => {
     let s = createSheet();
     s = setRaw(s, 4, 1, "250000000");

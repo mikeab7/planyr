@@ -6,7 +6,7 @@ import {
   errVal, isErrVal, DEFAULT_CALENDAR,
   MAX_COL, MAX_ROW, parseRefText, colLettersToNum, colNumToLetters, rewriteFormulaForCopy,
   rewriteFormulaForStructuralShift, rewriteFormulaForSheetRename, dropFormulaSheetRefs,
-  FUNCTION_NAMES,
+  FUNCTION_NAMES, FUNCTION_HELP,
 } from "../src/shared/formula/formula.js";
 
 // ── Test harness ────────────────────────────────────────────────────────────
@@ -495,6 +495,67 @@ describe("B586 — lookups", () => {
   it("MATCH type 1 = largest value ≤ lookup (ascending)", () => {
     const N = [{ V: 10 }, { V: 20 }, { V: 30 }];
     expect(valTable("MATCH(25, [V], 1)", N)).toBe(2);
+  });
+});
+
+// ── B1179328 — Excel-parity formula library: the multi-criteria *IFS family and SUMPRODUCT.
+// Every expected value below is computed independently (plain arithmetic on the fixture, not
+// a number trusted from memory), matching this file's existing convention for the financial
+// block. See test/formula.test.js's "A1 cell references — VLOOKUP / HLOOKUP" describe block
+// further down for VLOOKUP/HLOOKUP (which need a genuine 2D table, not a [Column] table) and
+// for the mismatched-range-size cases (which need two A1 ranges of different extents — every
+// [Column] in one table necessarily shares the same row count, so that case can't arise here).
+describe("B1179328 — SUMIFS / COUNTIFS / AVERAGEIFS (multi-criteria, AND not OR)", () => {
+  const T = [
+    { Phase: "DD", Status: "Done", Cost: 100 },
+    { Phase: "DD", Status: "Open", Cost: 250 },
+    { Phase: "Permit", Status: "Done", Cost: 50 },
+    { Phase: "Permit", Status: "Open", Cost: 400 },
+    { Phase: "DD", Status: "Done", Cost: 30 },
+  ];
+  it("SUMIFS sums only rows where EVERY criteria pair matches", () => {
+    expect(valTable('SUMIFS([Cost], [Phase], "DD", [Status], "Done")', T)).toBe(130); // rows 1,5: 100+30
+    expect(valTable('SUMIFS([Cost], [Phase], "Permit")', T)).toBe(450); // one pair == SUMIF: 50+400
+  });
+  it("COUNTIFS counts only rows where EVERY criteria pair matches", () => {
+    expect(valTable('COUNTIFS([Phase], "DD", [Status], "Done")', T)).toBe(2);
+    expect(valTable('COUNTIFS([Phase], "DD", [Status], "Open")', T)).toBe(1);
+    expect(valTable('COUNTIFS([Status], "Done")', T)).toBe(3);
+  });
+  it("AVERAGEIFS averages only matching rows, and is #DIV/0! when nothing matches (same as AVERAGEIF)", () => {
+    expect(valTable('AVERAGEIFS([Cost], [Phase], "DD", [Status], "Done")', T)).toBe(65); // (100+30)/2
+    expect(errTable('AVERAGEIFS([Cost], [Phase], "Zoning")', T)).toBe(FORMULA_ERRORS.DIV0);
+  });
+  it("comparison-operator and wildcard criteria work the same as the single-criterion versions", () => {
+    // Cost>=100 AND Phase="DD": row0 (100, DD) and row1 (250, DD) both qualify — row4 (30, DD)
+    // fails the Cost test, row3 (400, Permit) fails the Phase test. 100+250=350.
+    expect(valTable('SUMIFS([Cost], [Cost], ">=100", [Phase], "DD")', T)).toBe(350);
+    expect(valTable('COUNTIFS([Phase], "P*")', T)).toBe(2);
+  });
+  it("an unpaired argument list (missing a trailing criteria/range) is a #VALUE!, not a crash", () => {
+    expect(errTable('SUMIFS([Cost], [Phase], "DD", [Status])', T)).toBe(FORMULA_ERRORS.VALUE); // 4 args after sum_range would need to be pairs
+    expect(errTable('COUNTIFS([Phase], "DD", [Status])', T)).toBe(FORMULA_ERRORS.VALUE); // 3 args, not an even pair count
+  });
+});
+
+describe("B1179328 — SUMPRODUCT", () => {
+  it("multiplies two ranges element-wise, then sums (2*10 + 3*20 + 1*5 = 85)", () => {
+    const T = [{ Qty: 2, Price: 10 }, { Qty: 3, Price: 20 }, { Qty: 1, Price: 5 }];
+    expect(valTable("SUMPRODUCT([Qty],[Price])", T)).toBe(85);
+  });
+  it("three ranges multiply elementwise together (1*2*3 + 4*5*6 = 126)", () => {
+    const T = [{ A: 1, B: 2, C: 3 }, { A: 4, B: 5, C: 6 }];
+    expect(valTable("SUMPRODUCT([A],[B],[C])", T)).toBe(126);
+  });
+  it("boolean TRUE/FALSE contributes 1/0, matching Excel's own boolean coercion (1*10 + 0*20 + 1*30 = 40)", () => {
+    const T = [{ Flag: true, Amt: 10 }, { Flag: false, Amt: 20 }, { Flag: true, Amt: 30 }];
+    expect(valTable("SUMPRODUCT([Flag],[Amt])", T)).toBe(40);
+  });
+  it("a single range is equivalent to SUM", () => {
+    expect(valTable("SUMPRODUCT([A])", [{ A: 5 }, { A: 10 }])).toBe(15);
+  });
+  it("non-numeric text in a contributing cell is #VALUE!, matching toNumber's own coercion contract", () => {
+    expect(errTable("SUMPRODUCT([A],[B])", [{ A: 1, B: "abc" }])).toBe(FORMULA_ERRORS.VALUE);
   });
 });
 
@@ -1060,6 +1121,65 @@ describe("financial functions", () => {
   });
 });
 
+// ── B1179328 — XIRR gets its OWN block per the build brief: irregular dates, a leading
+// negative cash flow, an actual-365 (not actual-366) day count, and a solver that converges
+// rather than returning its own guess. XIRR itself pre-dates this item (already implemented,
+// already tested above for the round-trip identity) — this block closes the specific edge
+// cases the brief calls out by name, none of which the pre-existing coverage exercised.
+describe("B1179328 — XIRR Excel-parity edge cases", () => {
+  const approx = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
+
+  it("irregular date intervals + a leading negative cash flow — Microsoft's own documented XIRR example", () => {
+    // Source: Microsoft Support's XIRR function reference (support.microsoft.com), the
+    // worked example that page itself uses to demonstrate XIRR: an initial investment
+    // followed by four irregularly-spaced returns. Documented answer: 37.3362535%.
+    //   -10000  2008-01-01
+    //     2750  2008-03-01
+    //     4250  2008-10-30
+    //     3250  2009-02-15
+    //     2750  2009-04-01
+    const r = num(
+      "XIRR(-10000,DATE(2008,1,1), 2750,DATE(2008,3,1), 4250,DATE(2008,10,30), 3250,DATE(2009,2,15), 2750,DATE(2009,4,1))"
+    );
+    expect(approx(r, 0.373362535, 1e-6)).toBe(true);
+  });
+
+  it("actual-365 day count: a span that includes a leap day is STILL divided by 365, not 366 (the documented Excel quirk)", () => {
+    // Closed form for exactly two cash flows: 0 = C0 + C1*(1+r)^(-days/365)  =>  r = (C1/-C0)^(365/days) - 1.
+    // 2028 is a leap year, so 2028-01-01 -> 2029-01-01 spans 366 CALENDAR days — but XIRR's
+    // documented day-count convention is a flat /365, so the rate must come out slightly
+    // BELOW the clean 50% a true 365-day, C1=1.5x case gives (proven in the very next case).
+    const days = 366;
+    const expected = Math.pow(1500 / 1000, 365 / days) - 1;
+    const r = num("XIRR(-1000,DATE(2028,1,1),1500,DATE(2029,1,1))");
+    expect(approx(r, expected, 1e-9)).toBe(true);
+    expect(r).not.toBeCloseTo(0.5, 4); // the 366-day span must NOT read as the clean 365-day answer
+  });
+
+  it("the SAME two-cash-flow shape over an exact 365-day, non-leap span gives the clean closed-form answer (control for the case above)", () => {
+    // 2026 is not a leap year, so 2026-01-01 -> 2027-01-01 is exactly 365 days: r = 1500/1000 - 1 = 0.5.
+    const r = num("XIRR(-1000,DATE(2026,1,1),1500,DATE(2027,1,1))");
+    expect(approx(r, 0.5, 1e-9)).toBe(true);
+  });
+
+  it("a cash-flow set with two sign changes still converges to a genuine root (XNPV at that rate is ~0)", () => {
+    // -1000, +1600, -500, +400 — sign flips negative->positive->negative->positive. A solver
+    // that merely returns its own initial guess (rather than actually solving) would fail
+    // this identity; this repo's solver falls back to a bracketed bisection search precisely
+    // for cases like this (see solveRoot's own header).
+    const args = "-1000,DATE(2026,1,1), 1600,DATE(2026,4,1), -500,DATE(2026,7,1), 400,DATE(2026,11,1)";
+    const r = num(`XIRR(${args})`);
+    expect(approx(num(`XNPV(${r},${args})`), 0, 1e-4)).toBe(true);
+  });
+
+  it("a cash-flow set with no sign change at all is exactly what Excel itself errors on (#NUM! — no rate can make it balance)", () => {
+    // Two positive flows, no negative: Excel's own documented XIRR error for this shape.
+    expect(err("XIRR(100,DATE(2026,1,1),200,DATE(2026,6,1))")).toBe(FORMULA_ERRORS.NUM);
+    // All-negative is the same failure from the other side.
+    expect(err("XIRR(-100,DATE(2026,1,1),-200,DATE(2026,6,1))")).toBe(FORMULA_ERRORS.NUM);
+  });
+});
+
 // ── A1 cell references (Model module support) ──────────────────────────────────
 // grid is row-major, 0-indexed: grid[0][0] is A1. Every case below is evaluated
 // against the same 3×3 grid unless a test builds its own.
@@ -1129,6 +1249,66 @@ describe("A1 cell references — grammar", () => {
     const grid = [[errVal(FORMULA_ERRORS.DIV0), 2]];
     expect(gridErr("A1", grid)).toBe(FORMULA_ERRORS.DIV0);
     expect(gridErr("SUM(A1:B1)", grid)).toBe(FORMULA_ERRORS.DIV0);
+  });
+});
+
+// ── B1179328 — VLOOKUP / HLOOKUP: the classic multi-column-table lookups, which need a real
+// 2D A1 range (GRID3 below), unlike XLOOKUP/MATCH/INDEX above which read one flat [Column] or
+// range array. Table:
+//   A1=1 B1=2 C1=3
+//   A2=4 B2=5 C2=6
+//   A3=7 B3=8 C3=9
+describe("A1 cell references — VLOOKUP / HLOOKUP (B1179328)", () => {
+  it("VLOOKUP exact match (range_lookup=FALSE) returns the value from col_index_num of the matching row", () => {
+    expect(gridVal("VLOOKUP(4,A1:C3,2,FALSE)")).toBe(5);   // row with 4 in col A, col 2 = B -> 5
+    expect(gridVal("VLOOKUP(7,A1:C3,3,FALSE)")).toBe(9);
+    expect(gridVal("VLOOKUP(1,A1:C3,1,FALSE)")).toBe(1);
+  });
+  it("VLOOKUP exact match with no match is #N/A", () => {
+    expect(gridErr("VLOOKUP(99,A1:C3,2,FALSE)")).toBe(FORMULA_ERRORS.NA);
+  });
+  it("VLOOKUP approximate match (range_lookup TRUE, or omitted — Excel's own default) finds the largest value <= target", () => {
+    expect(gridVal("VLOOKUP(5,A1:C3,1,TRUE)")).toBe(4);   // largest col-A value <= 5 is 4 (row 2)
+    expect(gridVal("VLOOKUP(5,A1:C3,1)")).toBe(4);        // 4th arg omitted -> same default as Excel
+    expect(gridVal("VLOOKUP(100,A1:C3,1)")).toBe(7);      // largest value overall
+  });
+  it("col_index_num < 1 is #VALUE!; beyond the table's own column count is #REF! (Excel's exact two-way split)", () => {
+    expect(gridErr("VLOOKUP(4,A1:C3,0,FALSE)")).toBe(FORMULA_ERRORS.VALUE);
+    expect(gridErr("VLOOKUP(4,A1:C3,4,FALSE)")).toBe(FORMULA_ERRORS.REF);
+  });
+  it("VLOOKUP over a named range works exactly like a plain A1 range", () => {
+    // Same shape as "VLOOKUP(4,A1:C3,2,FALSE)" above (target 4 in col A, row 2; col_index 2 = col B = 5),
+    // just addressed through a named range instead of a literal A1:C3 span.
+    const r = evaluateFormula("VLOOKUP(4,Tbl,2,FALSE)", { grid: GRID3, names: { tbl: { r1: 1, c1: 1, r2: 3, c2: 3 } }, today: isoToSerial("2026-06-29") });
+    expect(r.ok).toBe(true);
+    expect(r.value).toBe(5);
+  });
+  it("HLOOKUP exact match returns the value from row_index_num of the matching column", () => {
+    expect(gridVal("HLOOKUP(2,A1:C3,2,FALSE)")).toBe(5);  // col with 2 in row 1 is col B; row 2 of col B = 5
+    expect(gridVal("HLOOKUP(3,A1:C3,3,FALSE)")).toBe(9);
+  });
+  it("HLOOKUP exact match with no match is #N/A", () => {
+    expect(gridErr("HLOOKUP(99,A1:C3,2,FALSE)")).toBe(FORMULA_ERRORS.NA);
+  });
+  it("HLOOKUP approximate match finds the largest value <= target across the first row, returning from row_index_num", () => {
+    // First row = [1,2,3]; the largest value <= 2.5 is 2, in column B. row_index_num=2 then
+    // returns B2 (5) — a different row than the one searched, proving row_index_num is honored.
+    expect(gridVal("HLOOKUP(2.5,A1:C3,2,TRUE)")).toBe(5);
+  });
+  it("row_index_num < 1 is #VALUE!; beyond the table's own row count is #REF!", () => {
+    expect(gridErr("HLOOKUP(1,A1:C3,0,FALSE)")).toBe(FORMULA_ERRORS.VALUE);
+    expect(gridErr("HLOOKUP(1,A1:C3,4,FALSE)")).toBe(FORMULA_ERRORS.REF);
+  });
+  it("VLOOKUP/HLOOKUP exact match honors wildcards, exactly like MATCH's own type-0 path", () => {
+    const textGrid = [["Permit A", 10], ["Permit B", 20], ["Site Plan", 30]];
+    expect(gridVal('VLOOKUP("Permit*",A1:B3,2,FALSE)', textGrid)).toBe(10);
+  });
+  it("SUMIFS/COUNTIFS over two A1 ranges of DIFFERENT extents is a #VALUE! (ranges must be the same size)", () => {
+    expect(gridErr('SUMIFS(A1:A3,B1:B2,">0")')).toBe(FORMULA_ERRORS.VALUE);
+    expect(gridErr('COUNTIFS(A1:A3,">0",B1:B2,">0")')).toBe(FORMULA_ERRORS.VALUE);
+  });
+  it("SUMPRODUCT over two A1 ranges of DIFFERENT extents is a #VALUE!", () => {
+    expect(gridErr("SUMPRODUCT(A1:A3,B1:B2)")).toBe(FORMULA_ERRORS.VALUE);
   });
 });
 
@@ -1302,6 +1482,16 @@ describe("A1 cell references — address bounds (XFD1048576) and the LOG10 colli
   it("LOG10 is the ONLY function name in the current registry that also parses as a valid address (audit claim, checked live)", () => {
     const collisions = FUNCTION_NAMES.filter(name => parseRefText(name) !== null);
     expect(collisions).toEqual(["LOG10"]);
+  });
+  // B1179328 — "a function nobody can discover is not shipped" (the build brief's own words).
+  // FUNCTION_HELP is the one discoverability surface this registry exposes today (no UI
+  // autocomplete currently consumes it — confirmed by search — but namedRanges.js's own
+  // collision guard already derives FUNCTION_NAME_SET from FUNCTION_NAMES, so a future
+  // autocomplete needs only wire up what's already here). This guards the WHOLE registry,
+  // not just the six functions this item adds, so a future function can't skip it either.
+  it("every function in FUNCTION_NAMES has a FUNCTION_HELP entry", () => {
+    const missing = FUNCTION_NAMES.filter(name => !FUNCTION_HELP[name]);
+    expect(missing).toEqual([]);
   });
   it("LOG10( is always a function call — never a reference, per Excel's own disambiguation rule", () => {
     expect(gridVal("LOG10(100)")).toBe(2);
