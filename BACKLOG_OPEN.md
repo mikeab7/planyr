@@ -269,7 +269,7 @@
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
-| B1202176 | New project creates nothing and dead-ends on "This project doesn't exist" | [Site Planner / projects] | #site-planner #persistence #ui #testing | ⏳ live — awaiting |
+| B1202176 (×2) | New project creates nothing and dead-ends on "This project doesn't exist" | [Site Planner / projects] | #site-planner #persistence #ui #testing | ⏳ live — awaiting |
 | B1205297 | The Library files the same upload again every time, with no duplicate check | [Library] | #library #files #filing | ⏳ live — awaiting |
 | B1203344 | A comp's auto-created "tracked" market-record site gets the full 133-folder document tree, and the Library's org-scope organize job names it in its progress banner | [library] | #library #doc-review #comps | ⏳ live — awaiting |
 | B1191456 | Boot-time auto-fit races the user's first gesture and silently undoes it | [Site Planner] | #site-planner #view #ui | ⏳ live — awaiting |

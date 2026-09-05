@@ -39,6 +39,7 @@
 import { supabase, supabaseConfigured } from "../../site-planner/lib/supabase.js";
 import { casUpsert, degradeUpsert } from "../../../shared/cloud/optimisticUpsert.js";
 import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
+import { ensureProjectExists } from "../../../shared/projects/projects.js";
 
 const TABLE = "model_sheets";
 // model_sheets' real primary key is COMPOSITE — (user_id, id), not `id` alone (db/model_sheets.sql;
@@ -95,6 +96,11 @@ export async function loadCloudSheet(projectId) {
 }
 
 async function upsertCore({ uid, projectId, sheet, expected }) {
+  // NEW-1 (B1202176 ×2) — this is the FIRST cloud write for a project's workbook, and nothing
+  // guarantees the project's own `sites` row exists yet (creation is deliberately lazy — see
+  // storage.js's `ensureSiteRow`). Never let a `model_sheets` row be the only trace of a project:
+  // best-effort, never blocks/fails this save if it can't reach the sites table for some reason.
+  try { await ensureProjectExists(projectId); } catch (_) { /* the sheet save below still proceeds */ }
   // ⛔ B891184-FOLLOWUP-2 (live production finding, 2026-08-31) — `row` must carry `id` itself,
   // same as `sites`/`doc_reviews`' row-builders (siteRowFor/reviewRowFor) already do; casUpsert's
   // own contract comment says so. This one didn't, so casUpsert's INSERT branch sent `{ data,

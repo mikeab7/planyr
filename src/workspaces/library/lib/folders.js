@@ -14,6 +14,7 @@
 import { supabase } from "../../site-planner/lib/supabase.js";
 import { FOLDER_TEMPLATE, TEMPLATE_VERSION } from "../../../shared/folders/folderTemplate.js";
 import { buildSeedRows, subtreeIds, childrenOf } from "../../../shared/folders/folderTree.js";
+import { ensureProjectExists } from "../../../shared/projects/projects.js";
 
 const COLS = "id,parent_id,name,sort_order,trashed,drive_folder_id";
 
@@ -63,6 +64,12 @@ export async function ensureSeeded(projectId) {
       .from("project_folders").select("id", { count: "exact", head: true }).eq("project_id", projectId);
     if (error) return { ok: false, error: error.message };
     if ((count || 0) > 0) return { ok: true, seeded: false };
+    // NEW-1 (B1202176 ×2) — this is the project's FIRST folder-tree write, and nothing otherwise
+    // guarantees its own `sites` row exists yet (creation is deliberately lazy — see storage.js's
+    // `ensureSiteRow`). A project opened straight into the Library, never touching the Site
+    // Planner canvas, would otherwise seed 12 real `project_folders` rows with no parent at all.
+    // Best-effort: never blocks/fails the seed if it can't reach the sites table.
+    try { await ensureProjectExists(projectId); } catch (_) { /* the seed below still proceeds */ }
     const rows = buildSeedRows(FOLDER_TEMPLATE, { projectId, templateVersion: TEMPLATE_VERSION, makeId });
     const { error: insErr } = await supabase.from("project_folders").insert(rows);
     if (insErr) {

@@ -26,15 +26,31 @@ vi.mock("../src/workspaces/site-planner/lib/supabase.js", () => ({
           maybeSingle: async () => ({ data: h.row, error: h.error }),
         }),
       }),
+      // ensureSiteRow's cloud push (cloudUpsert → casUpsert) INSERTs a brand-new row — the
+      // mock records it and makes it visible to the SAME select().eq().maybeSingle() chain
+      // above, so a later checkProjectDeletionStatus() call for the same id sees it, exactly
+      // as a real reload's fresh gate check would against the real database.
+      insert: (v) => ({
+        select: async () => {
+          h.row = { id: v.id, group_id: v.group_id ?? null, site: v.site ?? null, name: v.name ?? null, deleted_at: null };
+          return { data: [{ version: 1 }], error: null };
+        },
+      }),
     }),
   },
   supabaseRest: () => ({ url: "", anon: "" }),
   currentAccessToken: () => null,
 }));
 vi.mock("../src/shared/telemetry/clientErrors.js", () => ({ reportClientEvent: () => {} }));
+// Isolate ensureSiteRow's team-sharing lookup — it's a real network round trip (profiles +
+// teams) unrelated to this file's question. Private (teamId: null) is a safe, inert default.
+vi.mock("../src/workspaces/site-planner/lib/newProjectSharing.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, defaultShareTeam: async () => ({ teamId: null, reason: "test", teamName: null }) };
+});
 
 import { cloudCheckDeleted } from "../src/workspaces/site-planner/lib/cloudSync.js";
-import { checkProjectDeletionStatus, setActiveUser } from "../src/workspaces/site-planner/lib/storage.js";
+import { checkProjectDeletionStatus, setActiveUser, ensureSiteRow } from "../src/workspaces/site-planner/lib/storage.js";
 import { projectGateStatus } from "../src/shared/projects/projectModel.js";
 
 describe("cloudCheckDeleted — the one question a routed project id must answer before a workspace mounts", () => {
@@ -156,5 +172,73 @@ describe("projectGateStatus — B1202176: a lazily-created project must not read
   it("an inconclusive answer still fails OPEN regardless of freshlyCreated", () => {
     expect(projectGateStatus({ res: { ok: false }, freshlyCreated: false }).status).toBe("live");
     expect(projectGateStatus({ res: null, freshlyCreated: false }).status).toBe("live");
+  });
+});
+
+/* B1202176 ×2 (recurrence, owner chat 2026-09-05) — "a new project persists its child data but
+ * never itself, so a reload loses the lot." The first B1202176 fix only taught the gate to
+ * TOLERATE a freshly-minted id for the life of the session (`freshlyCreated`, proven above) — it
+ * never made the project's own `sites` row actually exist. So a project used from a NON-Site
+ * module (Model/Notes/Review/Library) — never touching the Site Planner canvas — still had no
+ * `sites` row, and the tolerance is wiped by a reload (a fresh page load has no session memory),
+ * at which point `checkProjectDeletionStatus` finds nothing and the gate blocks the workspace
+ * exactly as before, regardless of how much child data survived elsewhere.
+ *
+ * THE REGRESSION THIS PROVES, which the first fix's own tests could not: a gate check made with
+ * `freshlyCreated: false` — i.e. AFTER a reload, with no session memory at all, the honest
+ * post-reload case — for a project `ensureSiteRow` has already run against, resolves LIVE on the
+ * strength of a REAL row, not a session flag. A test that only checked the gate with a
+ * PRE-EXISTING row (seeded by the mock, never actually written by this code) would pass on the
+ * broken behaviour — this one writes the row through the real `ensureSiteRow` → `saveSite` →
+ * `pushSiteToCloud` → `cloudUpsert` path and reads it back through the real
+ * `checkProjectDeletionStatus` → `cloudCheckDeleted` path, the same two functions the app
+ * actually calls. */
+// storage.js's saveSite/readSites persist through the browser's localStorage; this suite runs in
+// vitest's Node environment (no DOM), so it needs the same minimal in-memory shim
+// test/saveFallbackCloud.test.js already uses for the identical reason.
+function mockLocalStorage() {
+  const store = {};
+  globalThis.localStorage = {
+    getItem: (k) => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = String(v); },
+    removeItem: (k) => { delete store[k]; },
+    clear: () => { for (const k of Object.keys(store)) delete store[k]; },
+    key: (i) => Object.keys(store)[i] ?? null,
+    get length() { return Object.keys(store).length; },
+  };
+}
+
+describe("ensureSiteRow — B1202176 ×2: closes the gap the session-memory fix left open", () => {
+  beforeEach(() => { h.row = null; h.error = null; mockLocalStorage(); setActiveUser(null); });
+
+  it("a brand-new id gets a real LOCAL row, signed out (no cloud call needed to keep local work safe)", async () => {
+    const r = await ensureSiteRow("s-newproj-local");
+    expect(r).toEqual({ ok: true, created: true, cloudPushed: false });
+    expect(h.row).toBe(null); // signed out — never touches the cloud at all
+  });
+
+  it("is idempotent — a project that already has a row is left completely alone", async () => {
+    await ensureSiteRow("s-newproj-idem");
+    const r2 = await ensureSiteRow("s-newproj-idem");
+    expect(r2).toEqual({ ok: true, created: false });
+  });
+
+  it("THE CORE REPRO, closed for real: signed in, ensureSiteRow's write is what a POST-RELOAD gate check (freshlyCreated:false — no session memory) needs to read the project LIVE", async () => {
+    setActiveUser("u1");
+    const id = "s-newproj-signedin";
+    // Before the fix: nothing ever wrote this row, so this is where the reported bug lived.
+    expect((await checkProjectDeletionStatus(id)).exists).toBe(false);
+    const ensured = await ensureSiteRow(id, { name: "Untitled project" });
+    expect(ensured.ok).toBe(true);
+    expect(ensured.created).toBe(true);
+    expect(ensured.cloudPushed).toBe(true); // the row genuinely reached the mocked cloud
+    // The reload case: a fresh gate check with NO freshlyCreated memory (a real reload has none).
+    const res = await checkProjectDeletionStatus(id);
+    expect(res.ok).toBe(true);
+    expect(res.exists).toBe(true);
+    expect(res.deleted).toBe(false);
+    const g = projectGateStatus({ res, freshlyCreated: false });
+    expect(g.status).toBe("live"); // never "missing" — the OLD failure mode this reproduces
+    setActiveUser(null);
   });
 });

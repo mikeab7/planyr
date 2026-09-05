@@ -25,6 +25,7 @@ import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn } 
 import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
 import { STATUSES, STATUS_META, statusOf, ROLES, DEFAULT_ROLE } from "../../site-planner/lib/siteModel.js";
 import { uploadFileInChunks } from "../../../shared/files/chunkedUpload.js";
+import { ensureProjectExists } from "../../../shared/projects/projects.js";
 
 export const BUCKET = "doc-review-files";
 // The OLD Supabase free-tier per-file cap. It no longer limits uploads (B409 rework:
@@ -155,6 +156,11 @@ async function upsertReviewCore(record) {
   const uid = await currentUid();
   if (!uid) return { ok: false, error: "Sign in to save." };
   if (!record || !record.id) return { ok: false, error: "Review has no id." };
+  // NEW-1 (B1202176 ×2) — a review filed under a project is a CHILD row keyed by that project's
+  // id, and nothing otherwise guarantees the project's own `sites` row exists (creation is
+  // deliberately lazy — see storage.js's `ensureSiteRow`). Best-effort: never blocks/fails this
+  // save if it can't reach the sites table.
+  if (record.projectId) { try { await ensureProjectExists(record.projectId); } catch (_) { /* the review save below still proceeds */ } }
   // Core columns (exist since the first persistence migration) + the data jsonb, which
   // always carries every field (incl. the library ones). The library index columns are
   // added on top; if that migration hasn't run yet we fall back to the core row so
