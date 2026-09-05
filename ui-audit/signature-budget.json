@@ -15,6 +15,20 @@
   },
   "exemptions": [
     {
+      "id": "B842864-global-help-report-control",
+      "date": "2026-09-05",
+      "surfaces": [
+        "Map landing page (no project selected)",
+        "Map landing page (comp mode)",
+        "Map landing page (selecting parcels)",
+        "Left rail + panels (Yield)",
+        "Library",
+        "Doc Review (empty state)"
+      ],
+      "count": 1,
+      "reason": "The global help/report control (src/app/HelpReportControl.jsx) is a persistent, fixed bottom-right FAB the app shell mounts once, on every route — the owner's own request, so the control being everywhere is the point, not drift. It renders one uniform signature (radius:999px, height:44px, padding:0px, fontSize:12px) on every whole-page surface this crawl visits; the surfaces that scope to a sub-region only (App header, the Main menu popovers, Tool rail) don't see it because it lives outside that DOM subtree, which is why only the whole-page surfaces above needed a budget lift. A single shared implementation, one exemption line per affected surface, never a per-surface variant."
+    },
+    {
       "id": "B1038016-leaflet-chrome",
       "date": "2026-09-01",
       "surfaces": [

@@ -11,6 +11,7 @@
 import { SECTIONS } from "./lib/adminSections.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 import CriteriaRequestsSection from "./CriteriaRequestsSection.jsx";
+import ReportsSection from "./ReportsSection.jsx";
 
 function Section({ title, blurb }) {
   return (
@@ -63,6 +64,8 @@ export default function AdminApp({ onExit }) {
             meant to be: without touching this grid's layout. It carries a table, so it gets its
             own component rather than being squeezed into the shared blurb-only Section shape. */}
         <CriteriaRequestsSection />
+        {/* B842866 — the "help / report a problem" control's owner-only read side. */}
+        <ReportsSection />
       </div>
     </div>
   );

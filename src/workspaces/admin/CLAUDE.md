@@ -38,5 +38,14 @@ modeled-jurisdiction lists the app itself routes against (`detentionRules.COUNTY
 `easementRules.MODELED_COUNTIES`) — the database has no way to know what a given deploy has modeled, and
 this keeps "wired" self-correcting the moment a county is added, with nothing to update by hand.
 
+**Sixth section (B842866) — `ReportsSection.jsx`.** Lists everything filed through the global
+"help / report a problem" control the app shell mounts on every route (the shared `reports/`
+folder's model + the shell's own help-control component), newest first — category, who
+(email / signed-in / signed-out), description, and a collapsible context blob (route/build/
+viewport/plan/perf-capture outcome). Read through `admin_list_problem_reports()`, a RPC defined
+alongside the table in the shared `reports/` folder's own migration — the same SECURITY DEFINER
++ `is_admin()` pattern as `admin_users.sql`. RLS proof (live, self-rolling-back, run via the
+Supabase MCP) lives in that same folder's `test/` subfolder.
+
 <!-- Keep this pointer current: if you rename/move/delete a key file in this folder, update the
      lines above in the same commit. The doc-pointer-audit check fails CI on a stale reference. -->
