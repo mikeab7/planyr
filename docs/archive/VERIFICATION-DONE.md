@@ -2457,3 +2457,128 @@ The PR was never marked ready and never left draft. **This rules out both settin
 5. Navigate away (Dashboard, or a different project) and back into this site's schedule. **Expect:** it lands on ONE of the site's own linked schedules (never a foreign/stale one) and the breadcrumb names whichever one is showing.
 
 **Result:** ✅ PASSED, 2026-09-03. **A false-alarm recurrence report was filed and then retracted the same day — recorded here in full since it is exactly the kind of ambiguous middle state STANDING RULE #2 exists to handle correctly.** Michael reported the switcher-shows-one-row / breadcrumb-not-disambiguating symptoms reproducing live on planyr.io, on the throwaway `ZZ-RENAME-TEST-G` site (pid 16 + a newly-created pid 18). AUDIT-FIRST re-check of every hop found nothing wrong, and a live e2e drive of the real chain with the exact reported payload shape (`e2e/scheduler-multi-schedule-switcher.spec.js`) rendered correctly — so rather than close the report on that null, a diagnostic telemetry capture (`schedule-multi-link-payload`, PR #1390) was shipped and this item stayed `⏳ pending`. **Michael then re-measured and retracted the report**: his original observation was taken in a browser tab still serving the pre-fix cached bundle (old chunk hashes `Scheduler-27nzqUfO.js`/`AppHeader-BbD8ZbVw.js`) — a reload of that tab reloaded the same stale chunks rather than fetching the new deploy. Re-measured live minutes later, chunk hash read in the same call as the assertion: on `AppHeader-BO3DSGYZ.js`, the switcher lists both `["ZZ-RENAME-TEST-G", "ZZ-RENAME-TEST-G (2)"]` (38 rows total); clicking the second switches the grid and the breadcrumb reads `ZZ-RENAME-TEST-G (2) ▾`, matching steps 1–4 above exactly. **Both B1112449 and B1112450 are confirmed working on production as originally shipped.** Test fixture pid 18 (0 tasks) removed from production `hs-v1` via the Supabase MCP, mirroring the app's own delete path (snapshot to `planar_history` first, `__rev` 3968→3969); `ZZ-RENAME-TEST-G` is back to its single schedule, pid 16.
+
+### V650128 — B1156864: the Sites list stays at 37 pursuit projects after the comps-to-sites migration, the three new tracked sites stay off it, and a comp's owning site shows correctly `Blocker: auth` `Blocker: real-data`
+
+NEW-1 collapsed the Site/comp split: every site now carries a `role` ("pursuit" vs "tracked"),
+and the three live comps ("Core 5 - West Hardy", "Tesla - TGS 800K SF", "Tesla - TGS DC4") were
+each attached to a brand-new "tracked" site (none matched an existing pursuit site's location).
+The data-layer migration was fully verified against production directly (byte-for-byte snapshot
+diff, before/after row counts, the role-flip RPC proven live) — see B1156864's own writeup. What
+that could NOT confirm is what the owner's own signed-in browser actually renders, which is the
+one thing this check exists for.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner (this is his
+real account and real data; do not create, delete, or edit anything beyond what a step says to):**
+1. Open the Site Planner's map view (the Sites/Comps rail). **Expect:** the Sites list count reads
+   **37** (not 40, not some other number) — the three new tracked sites (`trk8eef7db4d0`,
+   `trk4c75bf98dd`, `trk0892cf7b73`) must NOT appear anywhere in this list or as map pins.
+2. Switch to the Comps tab. **Expect:** still exactly **3** comps listed (Core 5 - West Hardy,
+   Tesla - TGS 800K SF, Tesla - TGS DC4) — unchanged from before this migration.
+3. Open "Core 5 - West Hardy" for edit (the single-comp edit form, not the paste grid). **Expect:**
+   its project dropdown now shows a real selected project — a site named "Core 5 - West Hardy" —
+   instead of the "no project" default it had before this session. Do NOT change the selection;
+   just confirm it reads correctly, then close without saving.
+4. Repeat step 3 for the two Tesla comps, confirming each shows its own matching project name.
+5. Confirm nothing else about the 37 pre-existing projects changed — pick 2-3 at random from the
+   Sites list and spot-check their names/counties/status read exactly as they did before this
+   session (cross-reference against the owner's own memory or an earlier screenshot if available;
+   this is a sanity check on top of the machine-verified snapshot diff, not a substitute for it).
+
+**2026-09-05 addendum — an adversarial review reported this step FAILED live** (Sites header read
+33, Pursuit read 19, with the three tracked sites at the top, "no boundary" badge, sorted by
+recency) **on build b487f11**, contradicting this item's own code trace. Re-read the exact shipped
+`siteGroups` filter and reproduced it in Node against a fixture shaped like the review's own
+numbers (30 pursuit + 3 tracked/`status:null`) — it correctly excludes all 3 and returns 30, so the
+filter as written is not defeated by a null `status`. Could not settle from this sandbox whether
+the live report was a stale cached bundle (this repo's own standing caution — see `/CLAUDE.md` →
+"A LIVE MEASUREMENT ON planyr.io IS ONLY VALID IF THE DEPLOYED CHUNK HASH IS READ IN THE SAME
+CALL") or a real gap. Per STANDING RULE #2, fixed it anyway rather than resting on the trace:
+`MapFinder.jsx` (B1165440) now re-derives its own pursuit-only filter at the point every one of
+these numbers is actually computed (header count, per-status groups, pinned rows, map pins),
+independent of what `siteGroups` upstream already filtered — so step 1's answer is now enforced at
+two layers regardless of which explanation was correct. **Step 1 (and its "37" expectation, now
+whatever the live count is at verify time) is the one to re-run first; if it still misreads,
+capture the served chunk hash (Network tab or `document.querySelectorAll('script[src]')`) in the
+same observation so a stale-bundle explanation can be ruled in or out.**
+
+**2026-09-05 SECOND addendum — the re-check FAILED TOO, this time root-caused for real (B1181104).**
+A live pass run AFTER the B1165440 fix merged (service worker unregistered, all caches cleared, hard
+reload — genuinely current, confirmed via `/version.json` reading `main`'s own tip at that moment, so
+deploy lag is ruled out) still measured header 33 / Pursuit 19 with all three tracked sites listed.
+The mechanism: `db/set_site_group_role.sql`'s RPC bumped the outer SQL `updated_at` column but never
+the jsonb's OWN `updatedAt` field — the one `mergeSiteContent` actually reads to pick the "newer" side
+of a pull-vs-local merge, with an exact TIE keeping the LOCAL side by design (B559). This item's own
+B1156864(d) live verification flipped `trk8eef7db4d0` tracked→pursuit→tracked through this exact RPC
+to prove the flip works — and while the database has read `role: "tracked"` the whole time, the
+jsonb's `updatedAt` never advanced off its original creation instant, so any client that ever cached
+that row got permanently stuck, immune to every later correct pull. Proven mechanically with the
+real, unmodified `mergeSiteContent` (see `test/siteModel.test.js`'s new B1181104 case) — not
+theorized. Fixed: the RPC now stamps `data.updatedAt` too (applied to production), the JS fallback
+path in `cloudRole.js` had the identical gap and is fixed the same way, and all three affected rows
+were re-flipped through the corrected RPC to force their `data.updatedAt` to now — confirmed via
+direct read (`trk8eef7db4d0` v3→v4, the other two v1→v2, all still `role: "tracked"`). This should
+self-heal every client on its next pull, but **has not yet been re-confirmed live** — that is what
+this check now needs, a third time, reading the served chunk hash in the same observation.
+
+**2026-09-05 THIRD addendum — the SECOND addendum's "failure" was RETRACTED by its own reporter.**
+The reporter's own follow-up measurement found that their "cleared cache + reload" had still served
+the OLD bundle — naming the build via `fetch("/version.json",{cache:"no-store"})` showed the second
+addendum's failing measurement predated the fix entirely. Re-measured naming the build properly
+(`21aa3d6`, bundle `index-CJP_74JB.js`, signed in as the owner): **Sites header 30, Pursuit 16, the
+string "Market record" appears nowhere on the sites page.** Step 1's original "37" expectation is
+superseded by this real count (other sessions created more projects in the interim); what matters —
+the three tracked sites correctly excluded — held. The B1181104 RPC fix from the second addendum is
+real and stays shipped, but it was NOT what fixed this: the original B1165440 fix was correct and
+sufficient all along, and the second addendum's own failure was itself a stale-bundle artifact, one
+level up from the first. **Lesson for the next session, stated by the reporter:** a cleared cache
+plus a reload is not proof of being on the new build — name the build with `/version.json` (fetched
+with `cache:"no-store"`) in the SAME observation as any live pass/fail claim.
+
+**Result:** ✅ PASSED — 2026-09-05, live signed-in pass on `planyr.io`, build `21aa3d6` named via
+`/version.json`. Sites header 30, Pursuit 16, all three tracked sites (Core 5 - West Hardy,
+Tesla - TGS DC4, Tesla - TGS 800K SF) absent from the list and the page. `Cadence: once` — done.
+
+### V850608 — B1165441: saving a comp with no site picked auto-attaches to an existing site or creates a new tracked one, through the real signed-in UI `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** Filed `Verify: live` per the LIVE-VERIFY rule (real project
+data + persistence). The matching rule and the DB round-trip mechanics were verified directly this
+session — the matching rule via 9 unit tests against the real production coordinates for the
+owner's three existing tracked sites (`test/compSiteMatch.test.js`), and the round trip by running
+the actual, unmodified `findMatchingSite`/`resolveOrCreateTrackedSiteForComp` logic (read via the
+Supabase MCP, not guessed) against a real throwaway comp, then performing the identical
+insert/update the app's own code would perform — see B1165441's own writeup for the exact steps and
+cleanup. What that could NOT do is drive the actual React form through a signed-in browser, which
+is the one thing this check exists for.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner, using a
+THROWAWAY comp (title it "verification-only, delete me" so it's never mistaken for a real deal;
+delete it when done):**
+1. Open the Comps tab, click "+ New comp" (or drop a pin and start one), fill in any comp type with
+   a title and a location, and leave the Site field unset (no project picked). Save it.
+   **Expect:** the save succeeds with no error, and the comp's detail view shows a real Site name
+   under Location — never blank/unset.
+2. If the pin was placed far from every existing site (a genuinely new location): **expect** a
+   brand-new site was created (visible in the Sites list, role "tracked" so it does NOT appear in
+   the default Pursuit view) named after the comp's own title, and NO "attached to…" notice (a
+   brand-new site needs no explanation).
+3. If the pin was placed within about half a mile of an existing site's location (pursuit OR
+   tracked): **expect** the comp attaches to THAT site instead of creating a new one, and the detail
+   view shows a dismissible notice naming which site it attached to and why (location or name
+   match) — confirm no duplicate site was created.
+4. Use the existing Site dropdown in the edit form to confirm the attachment can be changed by
+   hand (the manual-reassign path, unaffected by this item).
+5. Delete the throwaway comp (and, if step 2 created one, the throwaway tracked site it made) via
+   the app's own Delete controls. **Expect:** both are gone from the respective lists on reload.
+
+**2026-09-05 — closed per explicit reporter instruction, bundled with `V650128`'s own PASS** ("Close
+V650128 / V850608 as passed if you have not already"). Honest caveat: that round's live measurement
+described the Sites/Pursuit list counts only (`V650128`'s own subject) — steps 1-5 above (the actual
+comp-save round trip through the real form) were not separately walked in that message. What WAS
+independently verified this session, against real production data: the matching rule (9 unit tests
+against the real production coordinates) and the DB round-trip mechanics (a throwaway comp created,
+matched to the real "Core 5 - West Hardy" tracked site, and fully cleaned up). If the auto-attach UI
+itself is ever in doubt, the steps above are still here to re-run.
+
+**Result:** ✅ PASSED (closed per reporter instruction — see caveat above). `Cadence: once` — done.
+
