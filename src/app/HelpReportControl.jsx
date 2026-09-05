@@ -14,40 +14,49 @@
  *                         was, so this is a "that just happened" button, never a start/stop one).
  *   Help               — a short static blurb; there is no separate help system in this app yet.
  *
- * Placement: fixed bottom-right, clear of Leaflet's zoom/attribution controls (bottom-left /
+ * Placement: fixed bottom-right, clear of Leaflet's zoom/attribution/scale controls (bottom-left /
  * bottom-right respectively — see MapFinder.jsx / mapChromeStack.js) and the Site Planner's own
  * canvas furniture (scale bar + zoom stack, confined to the CANVAS PANE, which is inset from the
  * true viewport edge by the docked tool rail on desktop and stacks the "✎ Tools" FAB at
- * `right:12,bottom:16` on narrow screens) — verified live by
- * `ui-audit/verify-help-report-control.mjs`, which also proves a drag starting on/near the
- * control still pans the map (CHROME-NEVER-EATS-A-PRESS: nothing here is a full-viewport
- * pointer-events layer, so a press anywhere outside the control's own small box reaches
- * whatever's underneath, unchanged).
+ * `right:12,bottom:16` on narrow screens).
+ *
+ * ⛔ B966700 (owner report, 2026-09-05) — THE BOTTOM OFFSET WAS A CONSTANT (292px), SIZED TO
+ * CLEAR THE TALLEST THING THAT COULD EVER OCCUPY THIS CORNER, RESERVED ON EVERY ROUTE WHETHER
+ * THAT THING WAS THERE OR NOT. Measured on production: byte-identical `bottom:292` on the map
+ * root, a schedule route and a project model route — three screens with completely different
+ * chrome — which is exactly the tell that a constant, not adaptive layout, was reserving a slot
+ * that was almost always empty. At the owner's viewport that put the button 63% of the way up
+ * the screen, tucked under "Imagery & layers", nowhere near the corner he asked for. Fixed by
+ * measuring the real DOM instead of assuming the worst case is always present — see
+ * `shared/ui/cornerClearance.js` for the mechanism and why it can live in the Shell (which must
+ * never statically import a lazy workspace's module) without knowing anything about Site
+ * Planner internals. Verified live by `ui-audit/verify-help-report-control.mjs`, which also
+ * proves a drag starting on/near the control still pans the map (CHROME-NEVER-EATS-A-PRESS:
+ * nothing here is a full-viewport pointer-events layer, so a press anywhere outside the
+ * control's own small box reaches whatever's underneath, unchanged).
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import AnchoredMenu from "../shared/ui/AnchoredMenu.jsx";
 import { MenuItem, menuPanelStyle } from "../shared/ui/controls.jsx";
 import { RADIUS } from "../shared/ui/radius.js";
 import { FONT_SIZE } from "../shared/ui/designTokens.js";
+import { cornerClearanceFromBottom } from "../shared/ui/cornerClearance.js";
 import { requestPerfCapture, perfCaptureDelivery, perfRecorderArmed } from "../shared/telemetry/perfRecorderHandle.js";
 import { SUPPRESSED_AUTOMATED } from "../shared/telemetry/clientErrors.js";
 import { buildReportContext, submitReport, queuedReportCount } from "../shared/reports/reportsStore.js";
 
-// Fixed at every breakpoint, deliberately — see mapChromeStack.js's own "the no-branch part is
-// deliberate" note on the map's zoom control: a position that does not depend on the breakpoint
-// cannot drift apart from a chrome change on only one of them. Measured clear (headless, both
-// modes, both breakpoints) via ui-audit/verify-help-report-control.mjs.
 const FAB_SIZE = 44;
 const FAB_RIGHT = 14;
-// 292 clears the tallest occupant of this corner anywhere in the app: the Site Planner
-// canvas's own narrow-width stack (the "✎ Tools" FAB at bottom:16-54, the furniture row
-// reserved above it at bottom:102-~134, and the 4-button zoom stack at bottom:162-282 —
-// SitePlanner.jsx's FAB_RESERVE_PX/zoomBottom). Desktop's canvas furniture sits inside a
-// pane the docked tool rail insets from the true viewport edge, so it's never actually a
-// contender there — this number is set by the narrow case alone.
-const FAB_BOTTOM = 292;
 const Z_FAB = 2000;
 const Z_MENU = 2100;
+// How often the corner is re-measured. Cheap (a couple of `getBoundingClientRect` reads, no
+// subtree DOM watching that would fire on every canvas pan/drag frame) — a MutationObserver
+// scoped wide enough to catch every occupant (a Leaflet map mounting async, a route switch, a
+// narrow-width breakpoint flip) would also fire on every SVG canvas edit, which is the one thing
+// this control must never cost. Correctness matters more than elegance for a background poll
+// this cheap; a stale position for at most one tick is invisible, an assumed one is the bug this
+// replaces.
+const CORNER_POLL_MS = 500;
 
 const DESC_MAX = 4000;
 
@@ -72,8 +81,25 @@ export default function HelpReportControl({ user }) {
   const [submitState, setSubmitState] = useState(null); // null | "sending" | "ok" | "queued"
   const [slowNote, setSlowNote] = useState(null);        // null | "sending" | "ok" | "local" | "undelivered" | "fail"
   const [queued, setQueued] = useState(0);
+  const [fabBottom, setFabBottom] = useState(FAB_RIGHT);
 
   useEffect(() => { setQueued(queuedReportCount()); }, [open]);
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const next = cornerClearanceFromBottom({ right: FAB_RIGHT, width: FAB_SIZE, base: FAB_RIGHT });
+      setFabBottom((prev) => (Math.abs(prev - next) > 0.5 ? next : prev));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("orientationchange", measure);
+    const id = setInterval(measure, CORNER_POLL_MS);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("orientationchange", measure);
+      clearInterval(id);
+    };
+  }, []);
 
   const closeAll = () => { setOpen(false); setTimeout(() => { setView("menu"); setDesc(""); setSubmitState(null); }, 200); };
 
@@ -133,7 +159,7 @@ export default function HelpReportControl({ user }) {
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         style={{
-          position: "fixed", right: FAB_RIGHT, bottom: FAB_BOTTOM, zIndex: Z_FAB,
+          position: "fixed", right: FAB_RIGHT, bottom: fabBottom, zIndex: Z_FAB,
           width: FAB_SIZE, height: FAB_SIZE, borderRadius: RADIUS.pill,
           border: "1px solid var(--border-strong)", background: "var(--surface-raised)",
           color: "var(--text-primary)", display: "flex", alignItems: "center", justifyContent: "center",
