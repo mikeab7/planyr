@@ -22,7 +22,7 @@
 import { describe, it, expect } from "vitest";
 import {
   basemapWrapPoint, basemapWrapPointTransformed, registrationShift, sanitizeShift,
-  REGISTRATION_SANITY_PX, tileNwFeet, lngLatToFeet, mercDeg, ftPerDeg,
+  REGISTRATION_SANITY_PX, tileNwFeet, lngLatToFeet, mercDeg, ftPerDeg, hasRegisterableContainer,
 } from "../src/workspaces/site-planner/lib/mapLock.js";
 import { edgeLockTolFt, EDGE_LOCK_PX, EDGE_LOCK_MAX_FT } from "../src/workspaces/site-planner/lib/edgeConstrain.js";
 import {
@@ -147,6 +147,22 @@ describe("NEW-2 — the drawing↔basemap registration shift", () => {
     expect(nan.ok).toBe(false);
     expect(nan.reason).toBe("non-finite");
     expect(nan.shift).toEqual({ dx: 0, dy: 0 });   // a NaN transform can never reach the canvas
+  });
+});
+
+describe("NEW-1 — a 0×0 Leaflet container has nothing to register against", () => {
+  it("refuses a zero-width or zero-height container", () => {
+    expect(hasRegisterableContainer({ w: 0, h: 0 })).toBe(false);
+    expect(hasRegisterableContainer({ w: 0, h: 600 })).toBe(false);
+    expect(hasRegisterableContainer({ w: 900, h: 0 })).toBe(false);
+  });
+  it("refuses a missing/unreadable size the same way (fails closed)", () => {
+    expect(hasRegisterableContainer(null)).toBe(false);
+    expect(hasRegisterableContainer(undefined)).toBe(false);
+  });
+  it("accepts any genuinely sized container", () => {
+    expect(hasRegisterableContainer({ w: 900, h: 600 })).toBe(true);
+    expect(hasRegisterableContainer({ w: 1, h: 1 })).toBe(true);
   });
 });
 

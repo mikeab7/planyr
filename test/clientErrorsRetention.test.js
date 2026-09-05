@@ -32,6 +32,7 @@ import { PGlite } from "@electric-sql/pglite";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const TELEMETRY = join(ROOT, "src/shared/telemetry");
 const TABLE_SQL = readFileSync(join(TELEMETRY, "client_errors.sql"), "utf8");
+const KIND_SQL = readFileSync(join(TELEMETRY, "client_errors_kind.sql"), "utf8");
 const RETENTION_SQL = readFileSync(join(TELEMETRY, "client_errors_retention.sql"), "utf8");
 
 /* What Supabase supplies and a bare Postgres does not. Nothing here is part of the artifact under
@@ -58,6 +59,7 @@ async function freshDb(retentionSql = RETENTION_SQL) {
   const db = new PGlite();
   await db.exec(SUPABASE_SHIM);
   await db.exec(TABLE_SQL);
+  await db.exec(KIND_SQL); // NEW-3 — the retention sweep's fast tier reads the `kind` column
   await db.exec(retentionSql);
   return db;
 }
@@ -201,7 +203,11 @@ describe("MUTATION CHECK — the two clauses that carry the policy are each load
     await seed(db);
     await prune(db);
     const after = new Set(await surviving(db));
-    expect(after.has("ordinary-100d")).toBe(true);
+    // NEW-3 — `ordinary-100d` is `kind='event'` now and is caught by the (unmutated) 45-day fast
+    // tier regardless of this mutation, so it can no longer isolate the 90-day clause on its own.
+    // `ordinary-91d` is `kind='error'` (react) — untouched by the fast tier — so it is the row this
+    // mutation actually has to keep alive to prove the 90-day clause is load-bearing.
+    expect(after.has("ordinary-91d")).toBe(true);
   });
 
   it("the classifier reads the encoder's real output, not a hand-written string", async () => {

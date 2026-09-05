@@ -70,6 +70,7 @@ import { BASEMAPS } from "./lib/basemaps.js";
 import {
   ppfToZoom, zoomToPpf, exactContainerPoint,
   basemapWrapPoint, registrationShift, sanitizeShift, tileNwFeet, registrationLayoutMayHaveChanged,
+  hasRegisterableContainer,
 } from "./lib/mapLock.js";
 import { overscanPx, keepBufferFor, retinaForZoom, tileWeight, tileCacheLimit } from "./lib/tileBudget.js";
 import { preserveTilesAcrossSetView, announceSetView, boundTileCache, releaseLayer, throttleTilePruning, armBlankTileHeal } from "./lib/tileLifecycle.js";
@@ -3247,6 +3248,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     });
     const syncReg = (c) => {
       try {
+        // NEW-1 — no Leaflet container to register against means nothing to measure (routine on
+        // every route with no map mounted, and during the planner's own pre-layout mount frame).
+        // See mapLock.hasRegisterableContainer's header for the measurement behind this gate.
+        let leafletSize;
+        try { const sz = map.getSize(); leafletSize = { w: sz.x, h: sz.y }; } catch (_) { leafletSize = null; }
+        if (!hasRegisterableContainer(leafletSize)) return;
         const t = tileRef();
         if (t) noteReg(t.imgPt, t.drawPt, "tile");
         else { const p = projRef(c); noteReg(p.imgPt, p.drawPt, "projection"); } // B1189 — build the reference ONCE (it was projecting twice for one measurement)
