@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-05 @ `da99483ec` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-05 @ `a1ccec4d8` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_673 source files mapped._
+_678 source files mapped._
 
 ## infra
 
@@ -49,6 +49,8 @@ _673 source files mapped._
   - _exports_: `default (AdminApp)`
 - **`src/workspaces/admin/AdminGate.jsx`** — The one place that decides whether AdminApp mounts: calls checkIsAdmin only while signed in, renders null on anything but a confirmed true
   - _exports_: `default (AdminGate)`
+- **`src/workspaces/admin/AdminPasswordResetSection.jsx`** — TODO — describe
+  - _exports_: `default (AdminPasswordResetSection)`
 - **`src/workspaces/admin/CriteriaRequestsSection.jsx`** — (B877442) Admin table of "Request criteria for this county" filings — most-requested first, with a Wired ✓ / Outstanding status per row
   - _exports_: `default (CriteriaRequestsSection)`
 - **`src/workspaces/admin/lib/adminAccess.js`** — checkIsAdmin(client): the is_admin() RPC wrapper, fails closed (false) on no client/no session/RPC error/thrown exception
@@ -59,6 +61,8 @@ _673 source files mapped._
   - _exports_: `isWired`, `prepareCriteriaRequestRows`
 - **`src/workspaces/admin/ReportsSection.jsx`** — owner-only list of filed problem reports (B842866), read via `admin_list_problem_reports()`.
   - _exports_: `default (ReportsSection)`
+- **`src/workspaces/admin/SignupActivitySection.jsx`** — TODO — describe
+  - _exports_: `default (SignupActivitySection)`
 - **`src/workspaces/design-gallery/DesignGallery.jsx`** — the `#/design` dev-only primitive gallery (NEW-4): every shared control/token in every state, both themes.
   - _exports_: `default (DesignGallery)`
 - **`src/workspaces/food/components/BottomSheet.jsx`** — Generic drag-to-resize mobile bottom sheet (peek/half/full snap points, content-driven height, dismiss-on-drag), content-agnostic
@@ -272,6 +276,8 @@ _673 source files mapped._
 
 ## shared lib
 
+- **`src/shared/auth/rateLimitCopy.js`** — TODO — describe
+  - _exports_: `SIGNUP_RATE_LIMIT_MESSAGE_FRAGMENT`
 - **`src/shared/brand/BrandMark.jsx`** — Planyr coral isometric-stack logo as inline theme-aware SVG: favicon/mark/auto variants plus optional 'planyr' wordmark lockup
   - _exports_: `default (BrandMark)`
 - **`src/shared/brand/tokens.js`** — Planyr brand palette constants (coral tier faces, linework, surfaces, wordmark colors) mirroring the CSS --coral-* vars for inline-styled chrome
@@ -530,6 +536,10 @@ _673 source files mapped._
   - _exports_: `HOUSTON`, `HOUSTON_ROW_STANDARDS`
 - **`src/shared/thoroughfare/ingestTransform.js`** — Pure config-driven transform from an ArcGIS GeoJSON feature → a thoroughfare_segments upsert row (B721): crosswalk classification + status, resolve ROW widths from standards, and build WGS84 + EPSG:2278 MULTILINESTRING EWKT (reusing src/shared/coordinates); the reusable heart of every jurisdiction adapter
   - _exports_: `buildQueryUrl`, `ewkt2278`, `ewkt4326`, `featureToRow`, `geometryToParts`
+- **`src/shared/turnstile/Turnstile.jsx`** — TODO — describe
+  - _exports_: `default`
+- **`src/shared/turnstile/turnstileConfig.js`** — TODO — describe
+  - _exports_: `TURNSTILE_SITE_KEY`, `turnstileEnabled`
 - **`src/shared/ui/AnchoredMenu.jsx`** — Portal-to-body dropdown/flyout that escapes rail stacking-context + overflow clipping; rect-anchored fixed positioning, click-away + Esc
   - _exports_: `default (AnchoredMenu)`
 - **`src/shared/ui/anchoredMenuPlacement.js`** — Pure viewport-placement math for AnchoredMenu: left/below-left/below-right anchoring + edge clamp; returns null for a zero-sized (display:none) anchor so a mis-anchored menu hides instead of pinning top-left (B734)
