@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-05 @ `01e1177b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-05 @ `9bcadfac` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_678 source files mapped._
+_679 source files mapped._
 
 ## infra
 
@@ -602,6 +602,8 @@ _678 source files mapped._
   - _exports_: `nestedIn`, `RADIUS`
 - **`src/shared/ui/RotationStepper.jsx`** — The one app-wide rotation control: type-to-set 2dp field + spinner nudges, wrap to [0,360), fine Shift+Arrow, invalid-flash-revert, locked-disable
   - _exports_: `default (RotationStepper)`, `formatDeg`, `normalizeDeg`, `parseRotationInput`
+- **`src/shared/ui/safeAreaInsets.js`** — reads env(safe-area-inset-*) as numbers via a hidden probe element, for callers whose offset math runs in JS
+  - _exports_: `safeAreaInsets`
 - **`src/shared/ui/statusTokens.js`** — STATUS_TOKENS: single project-lifecycle status palette (color/glyph/map-pin tier/opacity/z) with monotonic salience rules; statusToken() + darken()
   - _exports_: `darken`, `STATUS_TOKENS`, `statusToken`
 - **`src/shared/ui/strictScale.js`** — dev-mode-only Proxy guard for a token "scale" object (RADIUS/SPACE/FONT_SIZE/CONTROL_H): throws on an unknown key instead of silently returning undefined; zero cost in production
