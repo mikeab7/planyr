@@ -7,89 +7,89 @@
     "map-landing": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "8f7752bf",
-        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
+        "approvedCommit": "feacd674",
+        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "8f7752bf",
-        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
+        "approvedCommit": "feacd674",
+        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "8f7752bf",
-        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
+        "approvedCommit": "feacd674",
+        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "8f7752bf",
-        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
+        "approvedCommit": "feacd674",
+        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
       }
     },
     "site-planner-header": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "8f7752bf",
-        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
+        "approvedCommit": "feacd674",
+        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "8f7752bf",
-        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
+        "approvedCommit": "feacd674",
+        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "8f7752bf",
-        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
+        "approvedCommit": "feacd674",
+        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "8f7752bf",
-        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
+        "approvedCommit": "feacd674",
+        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
       }
     },
     "site-planner-left-rail": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "8f7752bf",
-        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
+        "approvedCommit": "feacd674",
+        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "8f7752bf",
-        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
+        "approvedCommit": "feacd674",
+        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "8f7752bf",
-        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
+        "approvedCommit": "feacd674",
+        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "8f7752bf",
-        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
+        "approvedCommit": "feacd674",
+        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
       }
     },
     "library": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "8f7752bf",
-        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
+        "approvedCommit": "feacd674",
+        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "8f7752bf",
-        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
+        "approvedCommit": "feacd674",
+        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "8f7752bf",
-        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
+        "approvedCommit": "feacd674",
+        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "8f7752bf",
-        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
+        "approvedCommit": "feacd674",
+        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
       }
     }
   }
