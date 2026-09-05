@@ -37,6 +37,14 @@ const h = vi.hoisted(() => ({
   insertResult: { data: [{ version: 1 }], error: null },
   updateResult: { data: [{ version: 2 }], error: null },
   captured: {},
+  ensureProjectResult: { ok: true, created: false },
+}));
+// B1202176 ×2 / B1160480 — modelStore's first cloud write for a project now ensures the
+// project's own `sites` row exists first (storage.js's `ensureProjectRow`, re-exported here as
+// `ensureProjectExists`) and BLOCKS the save if that fails — mocked directly so these tests
+// control the verdict without a real network/config, same shape as the supabase mock above.
+vi.mock("../src/shared/projects/projects.js", () => ({
+  ensureProjectExists: vi.fn(async () => h.ensureProjectResult),
 }));
 vi.mock("../src/workspaces/site-planner/lib/supabase.js", () => ({
   supabaseConfigured: () => true,
@@ -75,12 +83,15 @@ vi.mock("../src/workspaces/site-planner/lib/supabase.js", () => ({
 }));
 
 import { saveCloudSheet } from "../src/workspaces/model/lib/modelStore.js";
+import { ensureProjectExists } from "../src/shared/projects/projects.js";
 
 describe("modelStore.saveCloudSheet — the row payload actually carries id", () => {
   beforeEach(() => {
     h.captured = {};
     h.insertResult = { data: [{ version: 1 }], error: null };
     h.updateResult = { data: [{ version: 2 }], error: null };
+    h.ensureProjectResult = { ok: true, created: false };
+    vi.clearAllMocks();
   });
 
   it("a brand-new project's first save inserts a payload that includes id (the fix)", async () => {
@@ -123,12 +134,46 @@ describe("modelStore.saveCloudSheet — the row payload actually carries id", ()
   });
 });
 
+// B1202176 ×2 / B1160480 — the project-row guard actually gates the write (never a silent
+// best-effort): a failed/soft-deleted project means no model_sheets row is attempted at all.
+describe("modelStore.saveCloudSheet — the project-row guard BLOCKS the write on failure", () => {
+  beforeEach(() => {
+    h.captured = {};
+    h.ensureProjectResult = { ok: true, created: false };
+    vi.clearAllMocks();
+  });
+
+  it("ensures the project's row exists, by id and a default name, before writing anything", async () => {
+    await saveCloudSheet({ uid: "u1", projectId: "proj-new", sheet: { cells: {} }, expected: null });
+    expect(ensureProjectExists).toHaveBeenCalledWith("proj-new", { name: "Untitled project" });
+    expect(h.captured.table).toBe("model_sheets"); // the write proceeded
+  });
+
+  it("a project that can't be confirmed with the cloud refuses the save — no model_sheets write at all", async () => {
+    h.ensureProjectResult = { ok: false, created: false, error: "couldn't reach the cloud" };
+    const r = await saveCloudSheet({ uid: "u1", projectId: "proj-flaky", sheet: { cells: {} }, expected: null });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe("error");
+    expect(typeof r.error).toBe("string");
+    expect(h.captured.table).toBeUndefined(); // model_sheets was never touched
+  });
+
+  it("a genuinely soft-deleted project refuses the save with a clear reason", async () => {
+    h.ensureProjectResult = { ok: false, created: false, deleted: true, error: "This project has been deleted." };
+    const r = await saveCloudSheet({ uid: "u1", projectId: "proj-deleted", sheet: { cells: {} }, expected: null });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/deleted/i);
+    expect(h.captured.table).toBeUndefined();
+  });
+});
+
 describe("modelStore's dormant degrade path targets the REAL composite constraint", () => {
   // Force the primary casUpsert call to degrade (simulate a pre-migration "version column
   // missing" error) so the fallback plain-upsert path actually runs and can be inspected.
   beforeEach(() => {
     h.captured = {};
     h.insertResult = { data: null, error: { code: "42703", message: 'column "version" does not exist' } };
+    h.ensureProjectResult = { ok: true, created: false };
   });
 
   it("upserts onConflict 'user_id,id' — NOT the single-column 'id' that has no matching constraint", async () => {

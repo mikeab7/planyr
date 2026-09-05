@@ -272,7 +272,7 @@
 | B1168128 (×2) | On a phone, panning the map drags the whole PAGE instead of the map — confirmed live with a screenshot, still unreproducible in any sandbox browser | [Site Planner] | #site-planner #ui #mobile #a11y | ⏳ live — awaiting |
 | B1213313 | Dashboard content: arrangeable cards, layout saved per user | [Shell / Dashboard] | #ui #dashboard #site-planner #scheduler #comps | ⏳ live — awaiting |
 | B1213314 | Almost no task in the scheduler has a responsible party — investigated, found REACHABLE not broken | [Scheduler] | #scheduler | ⏳ live — awaiting |
-| B1202176 | New project creates nothing and dead-ends on "This project doesn't exist" | [Site Planner / projects] | #site-planner #persistence #ui #testing | ⏳ live — awaiting |
+| B1202176 (×2) | New project creates nothing and dead-ends on "This project doesn't exist" | [Site Planner / projects] | #site-planner #persistence #ui #testing | ⏳ live — awaiting |
 | B1205297 | The Library files the same upload again every time, with no duplicate check | [Library] | #library #files #filing | ⏳ live — awaiting |
 | B1203344 | A comp's auto-created "tracked" market-record site gets the full 133-folder document tree, and the Library's org-scope organize job names it in its progress banner | [library] | #library #doc-review #comps | ⏳ live — awaiting |
 | B1208864 | The cloud-write retry path replayed a queued group rename as N separate writes instead of the one atomic RPC, and the durable log was cleared before a single row landed | [Site Planner] | #site-planner #persistence #sync | ⏳ live — awaiting |
