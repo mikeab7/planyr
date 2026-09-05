@@ -81,6 +81,43 @@ describe("assessHydraulicRegime", () => {
     expect(r.regime).toBe("B");
     expect(r.elevations.bfeFt).toBe(96);
   });
+  // NEW-6b (2026-09-05, owner-reported, real Goose Creek numbers) — most AE reaches leave the
+  // polygon's own STATIC_BFE at FEMA's "none" sentinel and carry the real water surface on the
+  // separate S_BFE line layer or a regulatory cross-section instead. Before this fallback, that
+  // read as "no published BFE" and the regime stuck at "unknown" forever — even with a real,
+  // already-resolved governing surface ~8 ft above grade (well inside Regime B territory) sitting
+  // right there, which is what left `estPoolDepthFt` null on two real ponds.
+  it("no zone publishes a static BFE, but a resolved (cross-section) WSE is passed → regime resolves off it", () => {
+    const r = assessHydraulicRegime({
+      floodZones: [{ zone: "AE", staticBfeFt: null }],
+      groundElevFt: 27.6926,
+      pondDepthFt: 8,
+      resolvedWseFt: 35.71,
+      resolvedWseSrc: "regulatory cross-section",
+    });
+    expect(r.regime).toBe("B"); // 35.71 sits well within pond depth of grade 27.69 → drowned outlet
+    expect(r.flags).toContain("derived-wse");
+    expect(r.elevations).toMatchObject({ bfeFt: 35.71, bfeDatum: "NAVD88", groundFt: 27.69 });
+    expect(r.reasons.join(" ")).toMatch(/regulatory cross-section/);
+  });
+
+  it("a published static BFE still wins outright over a resolved fallback (never overridden)", () => {
+    const r = assessHydraulicRegime({
+      floodZones: [{ zone: "AE", staticBfeFt: 95, vdatum: "NAVD88" }],
+      groundElevFt: 100,
+      pondDepthFt: 8,
+      resolvedWseFt: 200, // must be ignored — a real published BFE governs
+    });
+    expect(r.elevations.bfeFt).toBe(95);
+    expect(r.flags).not.toContain("derived-wse");
+  });
+
+  it("no zone AND no resolved fallback → still the honest unknown (unchanged default behavior)", () => {
+    const r = assessHydraulicRegime({ floodZones: [{ zone: "A", staticBfeFt: null }], groundElevFt: 100 });
+    expect(r.regime).toBe("unknown");
+    expect(r.flags).toContain("no-published-bfe");
+  });
+
   it("mixed datums: the governing BFE's datum comes from ITS OWN zone, never a neighbor's", () => {
     // The higher BFE (96) has no datum; a lower zone does. The undatumed governing BFE
     // must be rejected — NOT silently labeled with the other zone's NAVD88.

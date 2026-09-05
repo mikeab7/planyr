@@ -33,7 +33,7 @@ import { lngLatRingToFeet } from "./arcgis.js";
  * one fewer heavy edge on the site route. */
 import { resolveFloodZone } from "./floodZone.js";
 import { SQFT_PER_ACRE } from "../../../shared/coordinates/index.js";
-import { triggerClasses, mitigationOffsetBasis } from "./floodplainRules.js";
+import { triggerClasses, mitigationOffsetBasis, offsetSurfaceLabel } from "./floodplainRules.js";
 
 // NFHL publishes -9999 for "no static BFE" / "no depth" (same sentinel detentionRules guards).
 export const BFE_SENTINEL_MIN = -9000;
@@ -864,11 +864,21 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
   // 0, not an UNKNOWN — UNKNOWN is reserved for missing elevations / failed sources.
   // The floodway ledger stays separate: its acres never price and never poison the
   // trigger-volume total (fill there is prohibited outright, not mitigable).
+  // NEW-4 (2026-09-05, owner-reported) — `anyUnknown` keeps only the LAST unpriced class's reason,
+  // so when TWO classes are each blocked on a DIFFERENT missing input (e.g. 1pct wants a pad
+  // elevation, 02pct wants a 500-yr WSE) the earlier one was silently dropped on the floor — the
+  // app had already computed both honest reasons and only ever showed one. `unknownReasons`
+  // collects every DISTINCT reason across all unpriced classes so a caller can ask for every
+  // missing input at once, never just the last one the loop happened to see.
   let triggerAcres = 0, totalVolumeCf = 0, anyUnknown = null;
+  const unknownReasons = [];
   for (const cls of classes) {
     const b = perClass[cls];
     if (b.volumeCf != null) { b.volumeCf *= ratio; totalVolumeCf += b.volumeCf; }
-    if (b.acres > 0 && b.volumeCf == null) anyUnknown = b.unknown || "elevation inputs missing";
+    if (b.acres > 0 && b.volumeCf == null) {
+      anyUnknown = b.unknown || "elevation inputs missing";
+      if (!unknownReasons.includes(anyUnknown)) unknownReasons.push(anyUnknown);
+    }
     triggerAcres += b.acres;
   }
   const floodwayAcres = perClass.floodway ? perClass.floodway.acres : 0;
@@ -899,12 +909,22 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
     // NEW-4 — which flood LINE the offset was owed to vs. which one it could actually be priced
     // against. `matched:false` means the panel must say the requirement was computed off a lower
     // line than the jurisdiction requires (so the figure understates), never imply compliance.
-    offsetBasis: {
-      required: offsetBasis,
-      used: offsetBasis === "02pct" && !offsetBasisMissing ? offsetBasisUsed : offsetBasis === "02pct" ? "1pct" : "1pct",
-      matched: offsetBasis === "1pct" ? true : !offsetBasisMissing && offsetBasisUsed === "02pct",
-      label: offsetBasis === "02pct" ? "0.2% (500-yr) flood elevation" : "1% (100-yr) flood elevation",
-    },
+    // ⛔ NEW-3 fix (2026-09-05) — `label` MUST describe what was actually USED to price the volume,
+    // never the required-but-unavailable line: it used to be keyed on `required` alone, so an
+    // unmatched (`matched:false`) result stamped itself "0.2% (500-yr) flood elevation" while having
+    // priced off the 100-yr surface — a label that contradicts its own `used`/`matched` fields and
+    // reads as a compliance claim the number never earned. `requiredLabel` keeps the REQUIRED
+    // basis's own name so a caller can still say "the required 500-yr line wasn't available."
+    offsetBasis: (() => {
+      const usedBasis = offsetBasis === "02pct" && !offsetBasisMissing ? offsetBasisUsed : "1pct";
+      return {
+        required: offsetBasis,
+        used: usedBasis,
+        matched: offsetBasis === "1pct" ? true : !offsetBasisMissing && offsetBasisUsed === "02pct",
+        label: offsetSurfaceLabel(usedBasis),
+        requiredLabel: offsetSurfaceLabel(offsetBasis),
+      };
+    })(),
     // NEW-3 — per-cell fill spans for the elevation-band ledger (only when asked; they are bulky).
     ...(wantSpans ? { spans: allSpans } : {}),
     ratio,
@@ -916,6 +936,9 @@ export function computeMitigation({ footprints = [], zones = [], rule = null, el
     volumeAcFt: volumeKnown ? totalVolumeCf / SQFT_PER_ACRE : null,
     cutCy: volumeKnown ? totalVolumeCf / CF_PER_CY : null,
     unknownReason: anyUnknown,
+    // NEW-4 — every DISTINCT missing-input reason across all unpriced classes (never just the
+    // last one the roll-up loop happened to see). Empty when the volume is known.
+    unknownReasons: volumeKnown ? [] : unknownReasons,
     expertBypass: expert,
     flags: [...flags],
     providers: {
