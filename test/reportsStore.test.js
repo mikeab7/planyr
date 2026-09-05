@@ -1,10 +1,26 @@
 /* reportsStore — the global help/report control's submission model (B842866/B842864).
  * The pure context builder plus the queue/retry logic that guarantees LOUD-FAILURE: a report
- * that can't reach the server must survive on this device, never vanish. Runs with Supabase
- * unconfigured (no VITE_SUPABASE_* in this test environment), which exercises the exact path a
- * real signed-out/offline reporter hits — every submit queues, nothing is silently dropped.
+ * that can't reach the server must survive on this device, never vanish.
+ *
+ * ⛔ Supabase is MOCKED unconfigured here, not merely absent — this file's premise is "the
+ * signed-out/offline reporter path", and depending on the AMBIENT environment happening to lack
+ * VITE_SUPABASE_* is not the same claim. CI's `build` job sets real production secrets as env vars
+ * on the single shell step that runs the whole `npm run ci-parity` pipeline (build.yml), so THIS
+ * gate's `npm test` subprocess inherits them too even though `ci-gates.yml` never declares the
+ * Test gate as needing them — the first version of this file relied on that absence and, once it
+ * ran under real secrets, made genuine writes into the PRODUCTION `problem_reports` table on every
+ * CI run (caught live: PR #1425, 5 failing assertions all consistent with real inserts
+ * succeeding instead of queuing). Mocking the module the same way `test/reconcileSite.test.js`
+ * already does makes the "unconfigured" branch deterministic regardless of what secrets the
+ * process happens to hold.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+
+vi.mock("../src/workspaces/site-planner/lib/supabase.js", () => ({
+  supabase: null,
+  supabaseConfigured: () => false,
+}));
+
 import {
   buildReportContext, reportSessionId, submitReport, retryQueuedReports, queuedReportCount,
 } from "../src/shared/reports/reportsStore.js";
