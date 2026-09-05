@@ -75,9 +75,10 @@ await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 }).catch(e 
 const booted = await page.waitForSelector("[data-task-row]", { timeout: 30000 }).then(() => true).catch(() => false);
 ok("board boots (Babel block parses with the input fixes in)", booted);
 
-// Default visible column order → cell index within a [data-task-row]:
-//   0 id · 1 name · 2 start · 3 end(Finish) · 4 dur · 5 predecessors · …
-const COL = { start: 2, end: 3, predecessors: 5 };
+// B1197328 — resolved by data-col-key, never a positional index: DEFAULT_GRID_COLS reordered
+// Owner ahead of Predecessor in this same item, which silently moved "predecessors" from
+// index 5 to index 6 and broke this harness's own hardcoded `.nth(5)` lookup.
+const COL = { start: "start", end: "end", predecessors: "predecessors" };
 const lastToast = () => page.evaluate(() => {
   // showToast appends a fixed div to <body>; grab the most recent one's text.
   const nodes = [...document.querySelectorAll("body > div")].filter(d => d.style && d.style.position === "fixed" && /translateX/.test(d.style.transform || ""));
@@ -85,8 +86,8 @@ const lastToast = () => page.evaluate(() => {
 });
 
 // Edit a cell: double-click to open the inline editor, replace its text, commit with Enter.
-async function editCell(rowId, colIdx, text) {
-  const cell = page.locator(`[data-task-row="${rowId}"] > div`).nth(colIdx);
+async function editCell(rowId, colKey, text) {
+  const cell = page.locator(`[data-task-row="${rowId}"] [data-col-key="${colKey}"]`);
   await cell.dblclick();
   const input = page.locator(`[data-task-row="${rowId}"] input.ei`);
   await input.waitFor({ timeout: 4000 });

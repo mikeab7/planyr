@@ -22,7 +22,10 @@
  *               routing, never a sentinel `projectId`).
  *
  * Hash grammar:
- *   #/                       -> dashboard (default module, no project)
+ *   #/                       -> the dashboard (DASHBOARD_MODULE) — its own destination, no
+ *                               project, no workspace mounted; the Site Planner with no
+ *                               project is now #/site, never the bare "#/" (B1196304)
+ *   #/dashboard              -> same as "#/", spelled out (never trips the stale-build banner)
  *   #/<slug>                 -> module, no project (e.g. #/markup = pick-a-project)
  *   #/all/<slug>             -> cross-project mode for that module
  *   #/project/<id>/<slug>    -> project + module
@@ -32,6 +35,15 @@
 import { useCallback, useEffect, useState } from "react";
 
 export const DEFAULT_MODULE = "site-planner";
+// B1196304 (NEW-1) — the dashboard is a real, distinct destination now, not a synonym for "the
+// Site Planner with no project". It is deliberately NOT a workspace: it carries no header tab, no
+// entry in Shell's WORKSPACES registry, and is never offered by the module switcher — same shape
+// as ADMIN_SLUG/DESIGN_SLUG below, except the dashboard DOES live in the normal route grammar
+// (MODULE_BY_SLUG/parseRoute/buildHash) because "#/" is its own canonical hash, not a fallback.
+// DEFAULT_MODULE stays "site-planner" — it is still the right fallback for a project-scoped
+// route with a missing/unknown module slug (`#/project/x`, a typo) and for lastRoute's "always
+// resume into the Site Planner" setting; only the genuinely EMPTY hash means the dashboard now.
+export const DASHBOARD_MODULE = "dashboard";
 // B1166768 — the "model" tab was renamed "Spreadsheet" in user-facing copy (Michael doesn't want
 // Planyr's naming to echo his employer's internal vocabulary, and "pro forma" was rejected for
 // the same reason — it's developer/finance shorthand, and this container is meant for a GC's bid
@@ -41,8 +53,8 @@ export const DEFAULT_MODULE = "site-planner";
 // a permanent PARSE-ONLY alias so an existing bookmark/deep link naming "#/model" (or
 // "#/project/<id>/model") keeps resolving — SLUG_BY_MODULE is the one-way "what a NEW link looks
 // like" map, so it never grows the reverse alias.
-export const MODULE_BY_SLUG = { site: "site-planner", schedule: "scheduler", markup: "doc-review", library: "library", notes: "notes", model: "model", spreadsheet: "model", food: "food" };
-export const SLUG_BY_MODULE = { "site-planner": "site", scheduler: "schedule", "doc-review": "markup", library: "library", notes: "notes", model: "spreadsheet", food: "food" };
+export const MODULE_BY_SLUG = { site: "site-planner", schedule: "scheduler", markup: "doc-review", library: "library", notes: "notes", model: "model", spreadsheet: "model", food: "food", dashboard: DASHBOARD_MODULE };
+export const SLUG_BY_MODULE = { "site-planner": "site", scheduler: "schedule", "doc-review": "markup", library: "library", notes: "notes", model: "spreadsheet", food: "food", [DASHBOARD_MODULE]: "dashboard" };
 
 const slugFor = (module) => SLUG_BY_MODULE[module] || SLUG_BY_MODULE[DEFAULT_MODULE];
 
@@ -51,7 +63,11 @@ const slugFor = (module) => SLUG_BY_MODULE[module] || SLUG_BY_MODULE[DEFAULT_MOD
 export function parseRoute(hash) {
   const raw = String(hash || "").replace(/^#/, "");
   const segs = raw.split("/").filter(Boolean); // "/project/abc/markup" -> ["project","abc","markup"]
-  if (segs.length === 0) return { module: DEFAULT_MODULE, projectId: null, cross: false, org: false };
+  // B1196304 — the genuinely empty hash is the dashboard now, not a synonym for the Site
+  // Planner's own no-project state (which builds "#/site" — see buildHash below). Every OTHER
+  // fallback in this function (a bogus/missing module slug elsewhere in a real segment) still
+  // resolves to DEFAULT_MODULE, unchanged — this branch alone is the one that moved.
+  if (segs.length === 0) return { module: DASHBOARD_MODULE, projectId: null, cross: false, org: false };
   if (segs[0] === "project" && segs.length >= 2) {
     let id = segs[1];
     try { id = decodeURIComponent(id); } catch (_) { /* keep raw on malformed escape */ }
@@ -117,19 +133,31 @@ export function isDesignRoute(hash) {
   return segs[0] === DESIGN_SLUG;
 }
 
-/* Pure: { module, projectId, cross, org } -> a "#/..." hash string. */
-export function buildHash({ module = DEFAULT_MODULE, projectId = null, cross = false, org = false } = {}) {
+/* Pure: { module, projectId, cross, org } -> a "#/..." hash string. An omitted module means
+ * "no particular destination", which is the dashboard — so this stays symmetric with
+ * parseRoute's own empty-hash default a few lines up. */
+export function buildHash({ module = DASHBOARD_MODULE, projectId = null, cross = false, org = false } = {}) {
   const slug = slugFor(module);
   if (cross) return `#/all/${slug}`;
   if (org) return `#/org/${slug}`;
   if (projectId) return `#/project/${encodeURIComponent(projectId)}/${slug}`;
-  // No project = dashboard. Default module gets the clean "#/" home; others name the slug.
-  return module === DEFAULT_MODULE ? "#/" : `#/${slug}`;
+  // B1196304 — the dashboard alone gets the clean bare "#/" home; every other module,
+  // Site Planner included, now names its own slug even with no project open.
+  return module === DASHBOARD_MODULE ? "#/" : `#/${slug}`;
 }
 
 export function sameRoute(a, b) {
   return !!a && !!b && a.module === b.module && (a.projectId || null) === (b.projectId || null)
     && !!a.cross === !!b.cross && !!a.org === !!b.org;
+}
+
+/* Pure: normalizes the three empty-hash spellings ("", "#", "#/") to the canonical "#/" so a
+ * RAW hash can be compared against a built target hash without the empty forms looking like a
+ * spurious difference. Exported so navigate()'s own comparison (below) is unit-testable without
+ * a DOM — see route.test.js. */
+export function normalizeHashSpelling(rawHash) {
+  const h = String(rawHash || "");
+  return h === "" || h === "#" ? "#/" : h;
 }
 
 export function readRoute() {
@@ -159,8 +187,20 @@ export function useHashRoute() {
   const navigate = useCallback((partial) => {
     const cur = readRoute();
     const next = { ...cur, ...partial };
-    if (sameRoute(cur, next)) return; // no-op: don't spam history with identical hashes
-    window.location.hash = buildHash(next);
+    const nextHash = buildHash(next);
+    // B1196304 — comparing PARSED ROUTES alone (the old `sameRoute(cur, next)` guard) missed
+    // that a hash resolved via a bogus-slug FALLBACK ("#/design", "#/admin" — neither is a real
+    // MODULE_BY_SLUG entry) parses to the exact same route OBJECT as DEFAULT_MODULE's own plain
+    // no-project route, even though the raw hash still needs to move: a target route that
+    // happens to equal that fallback's resolved object left the hash sitting on "#/design"/
+    // "#/admin" forever (measured: click "succeeds", hash never moves — #/design's own overlay
+    // never got the hashchange it needed to unmount). Comparing the RAW hash spelling against
+    // the built target catches this; only the three empty spellings ("", "#", "#/") are folded
+    // together first, since they already all parse to the identical dashboard route and
+    // rewriting between them on a genuine no-op would be pure noise.
+    const curHash = normalizeHashSpelling(typeof window !== "undefined" && window.location ? window.location.hash : "");
+    if (curHash === nextHash) return; // no-op: don't spam history with identical destinations
+    window.location.hash = nextHash;
   }, []);
   return [route, navigate];
 }

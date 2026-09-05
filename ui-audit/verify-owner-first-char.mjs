@@ -76,10 +76,10 @@ const booted = await page.waitForSelector("[data-task-row]", { timeout: 30000 })
 ok("scheduler boots", booted);
 if (!booted) { await finish(); }
 
-// Default visible column order (DEFAULT_GRID_COLS):
-//   0 id · 1 name · 2 start · 3 end · 4 dur · 5 predecessors · 6 successors · 7 health
-//   8 status · 9 responsibleParty · 10 cost · 11 notes
-const COL = { name: 1, start: 2, end: 3, duration: 4, predecessors: 5, owner: 9 };
+// B1197328 — resolved by data-col-key (each grid cell carries one), never a positional index:
+// the Owner column's DEFAULT position moved from 10th to 6th in this same item, and an
+// index-based harness would have kept passing while silently measuring the WRONG column.
+const COL = { name: "name", start: "start", end: "end", duration: "duration", predecessors: "predecessors", owner: "responsibleParty" };
 
 // Pick leaf rows (parents have computed, locked date cells).
 const leaves = await page.evaluate(() => {
@@ -89,7 +89,7 @@ const leaves = await page.evaluate(() => {
 });
 ok("found leaf rows to drive", leaves.length >= 5, "rows=" + JSON.stringify(leaves));
 
-const cellOf = (rowId, colIdx) => page.locator(`[data-task-row="${rowId}"] > div`).nth(colIdx);
+const cellOf = (rowId, colKey) => page.locator(`[data-task-row="${rowId}"] [data-col-key="${colKey}"]`);
 const liveInput = rowId => page.locator(`[data-task-row="${rowId}"] input`).first();
 
 async function escapeOut() {
@@ -115,8 +115,8 @@ async function confirmIfAsked() {
   return false;
 }
 
-async function typeToEdit(rowId, colIdx, text) {
-  await cellOf(rowId, colIdx).click();
+async function typeToEdit(rowId, colKey, text) {
+  await cellOf(rowId, colKey).click();
   await pacedWait(page, 120);
   const trace = [];
   for (const ch of text) {
@@ -130,8 +130,8 @@ async function typeToEdit(rowId, colIdx, text) {
 
 /* Same text via the double-click route: the editor is already open and seeded with the
    EXISTING value, which is select-all'd on purpose so typing replaces it. */
-async function dblClickThenType(rowId, colIdx, text) {
-  await cellOf(rowId, colIdx).dblclick();
+async function dblClickThenType(rowId, colKey, text) {
+  await cellOf(rowId, colKey).dblclick();
   await pacedWait(page, 200);
   const trace = [];
   for (const ch of text) {
@@ -146,16 +146,16 @@ async function dblClickThenType(rowId, colIdx, text) {
    straight off the task model (`task.responsibleParty`), NOT from the input that was typed into.
    So this is the stored value round-tripped through render, not the editor's own state.
    Polled rather than read once: the DOM read races the re-render (SYNTHETIC-KEYS-DONT-EDIT §4). */
-async function committed(rowId, colIdx, expect) {
+async function committed(rowId, colKey, expect) {
   for (let i = 0; i < 12; i++) {
     const open = await page.locator(`[data-task-row="${rowId}"] input`).count();
     if (!open) {
-      const txt = (await cellOf(rowId, colIdx).innerText()).trim();
+      const txt = (await cellOf(rowId, colKey).innerText()).trim();
       if (txt === expect || i > 6) return txt;
     }
     await pacedWait(page, 120);
   }
-  return (await cellOf(rowId, colIdx).innerText()).trim();
+  return (await cellOf(rowId, colKey).innerText()).trim();
 }
 
 const NAME = "Scott";

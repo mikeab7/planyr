@@ -85,6 +85,13 @@ export default function App({
   // (this workspace never itself runs at org scope; Shell drops `org` on the way to any
   // module but Notes/Library).
   onSelectOrg,
+  // B1196304 (NEW-1) — Shell's "leave to the real dashboard" action. Every other workspace
+  // wires this straight to AppHeader's `onDashboard` (wordmark + crumb together); Site Planner
+  // is the one workspace with a genuinely different in-between destination — "Map" (no project,
+  // still this workspace) — so its own `onDashboard`/`goMap` keeps doing exactly that for the
+  // crumb, and `onGoDashboard` is wired ONLY to the wordmark below (`onLogoDashboard`), through
+  // the pre-existing dashboardNav.js seam. Was already passed down by Shell and simply unused.
+  onGoDashboard,
   // Keep-alive: false while this workspace is mounted but hidden behind another tab.
   // Hidden = follow the route, but never WRITE to it and never own global keyboard input.
   isActive = true,
@@ -963,6 +970,7 @@ export default function App({
           // project crumb invites a pick.
           homeLabel="Map"
           onDashboard={goMap}
+          onLogoDashboard={onGoDashboard}
           currentProject={null}
           onSelectProject={openProjectGroup}
           onNewProject={newBlankSite}
@@ -1050,6 +1058,7 @@ export default function App({
             setLayerStatus={setLayerStatus}
             sites={sites}
             onBackToMap={goMap}
+            onGoDashboard={onGoDashboard}
             onOpenSite={openSite}
             onNewSite={newBlankSite}
             onNewPlanSameParcel={newPlanSameParcel}

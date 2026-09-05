@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-05 @ `c5e22f60` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-05 @ `89b5c3f7` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_682 source files mapped._
+_698 source files mapped._
 
 ## infra
 
@@ -40,7 +40,7 @@ _682 source files mapped._
 - **`src/app/recoverableError.js`** — Which render crashes the error boundary may clear by remounting instead of showing a dead end (B1189): classifies React's nested-update circuit breaker (dev text + minified #185) and decides recover-vs-show under a bounded, time-windowed retry budget. — `UPDATE_DEPTH_CODE`, `isUpdateDepthError`, `isRecoverableRenderError`, `MAX_AUTO_RECOVERIES`, `RECOVERY_WINDOW_MS`, `planRecovery`
   - _exports_: `isRecoverableRenderError`, `isUpdateDepthError`, `MAX_AUTO_RECOVERIES`, `planRecovery`, `RECOVERY_WINDOW_MS`, `UPDATE_DEPTH_CODE`
 - **`src/app/route.js`** — Hash-route model: parseRoute/buildHash for {module,projectId,cross}, slug maps, useHashRoute hook with merge-navigate, INITIAL_HASH_EMPTY resume flag
-  - _exports_: `buildHash`, `DEFAULT_MODULE`, `INITIAL_HASH_EMPTY`, `isAdminRoute`, `isDesignRoute`, `MODULE_BY_SLUG`, `parseRoute`, `readRoute`, `sameRoute`, `SLUG_BY_MODULE`, `unknownModuleSlug`, `useHashRoute`
+  - _exports_: `buildHash`, `DASHBOARD_MODULE`, `DEFAULT_MODULE`, `INITIAL_HASH_EMPTY`, `isAdminRoute`, `isDesignRoute`, `MODULE_BY_SLUG`, `normalizeHashSpelling`, `parseRoute`, `readRoute`, `sameRoute`, `SLUG_BY_MODULE`, `unknownModuleSlug`, `useHashRoute`
 - **`src/app/Shell.jsx`** — App shell: auth state, hash-driven module switching, lazy workspace registry with per-id ErrorBoundary+Suspense, builds the AccountControl auth slot, cross-workspace intents
   - _exports_: `default (Shell)`
 - **`src/main.jsx`** — Entry point: installs client-error telemetry + chunk-reload guard, retires old GIS service worker, renders Shell inside ThemeProvider/StrictMode
@@ -63,6 +63,38 @@ _682 source files mapped._
   - _exports_: `default (ReportsSection)`
 - **`src/workspaces/admin/SignupActivitySection.jsx`** — Admin view of recent signup attempts (volume/flood visibility) via the admin_list_signup_attempts() RPC
   - _exports_: `default (SignupActivitySection)`
+- **`src/workspaces/dashboard/components/CompsSummaryCard.jsx`** — Dashboard card: comps summary lines over a live Supabase read (B1196305).
+  - _exports_: `default (CompsSummaryCard)`
+- **`src/workspaces/dashboard/components/DashboardCard.jsx`** — the one card shell every Dashboard card renders inside — title bar + Customize-mode drag/width/move/remove controls.
+  - _exports_: `default (DashboardCard)`
+- **`src/workspaces/dashboard/components/GoingQuietCard.jsx`** — Dashboard card: live pursuits untouched for 30+ days.
+  - _exports_: `default (GoingQuietCard)`
+- **`src/workspaces/dashboard/components/JumpBackInCard.jsx`** — Dashboard card: resume the last-route pointer + the newest Document Review file.
+  - _exports_: `default (JumpBackInCard)`
+- **`src/workspaces/dashboard/components/NeedsOwnerCard.jsx`** — Dashboard card: unassigned overdue tasks across every schedule (reachability aid, never a nag).
+  - _exports_: `default (NeedsOwnerCard)`
+- **`src/workspaces/dashboard/components/PipelineStatusCard.jsx`** — Dashboard card: pipeline counts by status, including tracked market records.
+  - _exports_: `default (PipelineStatusCard)`
+- **`src/workspaces/dashboard/components/PursuitsByActivityCard.jsx`** — Dashboard card: pursuits grouped by county with project/plan counts.
+  - _exports_: `default (PursuitsByActivityCard)`
+- **`src/workspaces/dashboard/components/ScheduleHealthCard.jsx`** — Dashboard card: per-schedule complete/overdue/at-risk bars.
+  - _exports_: `default (ScheduleHealthCard)`
+- **`src/workspaces/dashboard/Dashboard.jsx`** — the app's real home page (B1196304/B1196305) — arrangeable 3-column card board, not a workspace (no tab, not in Shell's WORKSPACES registry).
+  - _exports_: `default (Dashboard)`
+- **`src/workspaces/dashboard/lib/cardData.js`** — per-card async data loaders; cross-workspace lib reuse (comps/reviewStore/supabase) is always a dynamic import to keep the Site route's bundle unaffected.
+  - _exports_: `loadCompsSummary`, `loadGoingQuiet`, `loadJumpBackIn`, `loadNeedsAnOwner`, `loadPipelineCounts`, `loadPursuitsByCounty`, `loadScheduleHealth`
+- **`src/workspaces/dashboard/lib/dashboardCards.js`** — the card catalog: id -> title + rendering component, kept in lockstep with userPrefs.js's DASHBOARD_CARD_IDS.
+  - _exports_: `CARD_REGISTRY`
+- **`src/workspaces/dashboard/lib/dashboardLayout.js`** — pure card-board mutators (reorder/width/remove/add); Move-left/right and drag-drop share the identical `moveCardToIndex` call.
+  - _exports_: `addCard`, `availableCardIds`, `cycleCardWidth`, `DASHBOARD_CARD_IDS`, `DEFAULT_DASHBOARD_LAYOUT`, `moveCardBy`, `moveCardToIndex`, `removeCard`, `setCardWidth`, `WIDTH_COLS`
+- **`src/workspaces/dashboard/lib/goingQuiet.js`** — pure: live pursuits (role/status filtered) untouched for 30+ days, one row per project.
+  - _exports_: `goingQuietPursuits`, `QUIET_DAYS`
+- **`src/workspaces/dashboard/lib/pipelineCounts.js`** — pure: pipeline counts by status over siteListLight rows, one vote per project group.
+  - _exports_: `latestPerGroup`, `pipelineCounts`
+- **`src/workspaces/dashboard/lib/pursuitsByCounty.js`** — pure: pursuit projects grouped by county with project/plan/active counts.
+  - _exports_: `pursuitsByCounty`
+- **`src/workspaces/dashboard/lib/scheduleHealthPure.js`** — pure task classification (complete/overdue/at-risk/unassigned) shared by the Schedule-health and Needs-an-owner cards.
+  - _exports_: `isTaskAtRisk`, `isTaskComplete`, `isTaskOverdue`, `isUnassigned`, `summarizeScheduleHealth`, `unassignedOverdueTasks`
 - **`src/workspaces/design-gallery/DesignGallery.jsx`** — the `#/design` dev-only primitive gallery (NEW-4): every shared control/token in every state, both themes.
   - _exports_: `default (DesignGallery)`
 - **`src/workspaces/food/components/BottomSheet.jsx`** — Generic drag-to-resize mobile bottom sheet (peek/half/full snap points, content-driven height, dismiss-on-drag), content-agnostic
@@ -1270,7 +1302,7 @@ _682 source files mapped._
 - **`src/workspaces/site-planner/lib/upstreamArea.js`** — Upstream/offsite drainage delineation (NEW-C1): extends flowField D8 → flow-accumulation over the 3DEP DEM, contributing-area acreage at the site outfall, and the offsite-drainage "engineer's check" flag when upstream materially exceeds the site. Pure.
   - _exports_: `contributingAcres`, `delineateUpstream`, `downstreamIndex`, `flowAccumulation`, `lowestCell`, `OFFSITE_MATERIAL_RATIO`, `offsiteDrainageFlag`
 - **`src/workspaces/site-planner/lib/userPrefs.js`** — Account-level user preferences (NEW-3) — `public.profiles.prefs` jsonb with a localStorage mirror; backs the Standards "All projects" scope and publishes it into `planStyle`'s account layer.
-  - _exports_: `_normalizePrefs`, `applyPrefs`, `EMPTY_PREFS`, `getStandardPref`, `loadUserPrefs`, `readMirror`, `saveUserPrefs`, `setSitesPanelPref`, `setStandardPref`
+  - _exports_: `_normalizePrefs`, `applyPrefs`, `DASHBOARD_CARD_IDS`, `DEFAULT_DASHBOARD_LAYOUT`, `EMPTY_PREFS`, `getStandardPref`, `loadUserPrefs`, `readMirror`, `saveUserPrefs`, `setDashboardLayoutPref`, `setSitesPanelPref`, `setStandardPref`
 - **`src/workspaces/site-planner/lib/useSitePlanOverlayLayers.js`** — keeps one `rotatedImageLayer` per visible site-plan overlay in sync with MapFinder's `overlays` list (mount/update/teardown)
   - _exports_: `useSitePlanOverlayLayers`
 - **`src/workspaces/site-planner/lib/vectorLayers.js`** — Pure registry-driven vector GIS engine (FEMA/NWI + county/city/ETJ boundaries): paged ArcGIS pull, detail tiers with server-side generalization, grid-snapped SWR cache keys, Esri-to-GeoJSON, Douglas-Peucker, vector-vs-image decision

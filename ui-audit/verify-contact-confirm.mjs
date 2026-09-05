@@ -65,8 +65,10 @@ const booted = await page.waitForSelector("[data-task-row]", { timeout: 30000 })
 ok("scheduler boots", booted);
 if (!booted) await finish();
 
-const OWNER = 9;   // DEFAULT_GRID_COLS index of responsibleParty
-const cellOf = (r) => page.locator(`[data-task-row="${r}"] > div`).nth(OWNER);
+// B1197328 — resolved by data-col-key, never a positional index: the Owner column's DEFAULT
+// position moved from 10th to 6th in this same item, and an index-based locator would have
+// kept passing while silently measuring the WRONG column.
+const cellOf = (r) => page.locator(`[data-task-row="${r}"] [data-col-key="responsibleParty"]`);
 const liveInput = (r) => page.locator(`[data-task-row="${r}"] input`).first();
 const confirmBox = () => page.locator("[data-contact-confirm]");
 

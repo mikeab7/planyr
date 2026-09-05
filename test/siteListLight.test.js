@@ -34,4 +34,15 @@ describe("siteListLight — loadSiteSummaries (adversarial review of B1156864, N
     }));
     expect(loadSiteSummaries()[0].role).toBe("pursuit");
   });
+
+  // B1196305 (NEW-2) — the Dashboard's "Pursuits by activity" card groups by county.
+  it("passes through county as-is, and defaults to null when absent", () => {
+    localStorage.setItem(SITES_KEY, JSON.stringify({
+      p1: { id: "p1", groupId: "p1", site: "Has county", county: "harris", updatedAt: 2 },
+      p2: { id: "p2", groupId: "p2", site: "No county", updatedAt: 1 },
+    }));
+    const out = loadSiteSummaries();
+    expect(out.find((s) => s.id === "p1").county).toBe("harris");
+    expect(out.find((s) => s.id === "p2").county).toBe(null);
+  });
 });

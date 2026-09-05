@@ -21,6 +21,16 @@ import { normalizeBands as normalizeXSectionBands } from "./roadCrossSection.js"
 
 const MIRROR_KEY = "planyr:userPrefs:v1";
 
+// B1196305 (NEW-2) — the Dashboard's card catalog. Defined here (not in the dashboard workspace
+// itself) so this generic prefs-storage module stays the one place a card id is validated,
+// matching how `sitesPanel`'s own shape lives here rather than in the Site Planner's map feature.
+// `dashboard/lib/dashboardLayout.js` imports these rather than holding a second copy.
+export const DASHBOARD_CARD_IDS = [
+  "scheduleHealth", "needsOwner", "pipelineStatus", "pursuitsByActivity", "jumpBackIn", "compsSummary", "goingQuiet",
+];
+const DASHBOARD_WIDTHS = new Set(["sm", "md", "lg"]);
+export const DEFAULT_DASHBOARD_LAYOUT = DASHBOARD_CARD_IDS.map((id) => ({ id, width: "md" }));
+
 /** The shape we care about today. Additive: a new preference is a new key, never a migration. */
 export const EMPTY_PREFS = {
   planStandards: { parcelStyle: {}, typeStyles: {}, measureStyle: {} },
@@ -43,6 +53,11 @@ export const EMPTY_PREFS = {
   // with Complete/Dead closed (SitesPanel's pre-existing device-local default) so shipping this
   // doesn't reopen every settled project for someone who never touches the panel.
   sitesPanel: { order: [], collapsed: { complete: true, dead: true }, pinned: [], sort: "recent" },
+  // B1196305 (NEW-2) — the Dashboard's card board arrangement: which of the seven cards show,
+  // in what order, and at what width. Sparse-by-construction only in the sense that a signed-in
+  // user who never customizes gets the full DEFAULT_DASHBOARD_LAYOUT (every card, "md" width) —
+  // never an empty board (see normalizeDashboardLayout below: NO EMPTY LAYOUT MAY BE REACHABLE).
+  dashboardLayout: DEFAULT_DASHBOARD_LAYOUT,
 };
 
 const SITES_PANEL_SORTS = new Set(["largest", "az", "recent"]);
@@ -58,6 +73,26 @@ function normalizeSitesPanel(raw) {
   return { order, collapsed, pinned, sort };
 }
 
+// B1196305 — NO EMPTY LAYOUT MAY BE REACHABLE FROM ANY ENTRY POINT: malformed, corrupted, or
+// fully-stale-id storage (every saved id has since been removed from DASHBOARD_CARD_IDS) falls
+// back to the full default — every card, "md" width — never an empty board. Unknown ids and
+// duplicates are dropped rather than causing a throw, same defensive shape as normalizeSitesPanel.
+function normalizeDashboardLayout(raw) {
+  const arr = Array.isArray(raw) ? raw : null;
+  const out = [];
+  if (arr) {
+    const seen = new Set();
+    for (const entry of arr) {
+      if (!entry || typeof entry !== "object") continue;
+      const id = typeof entry.id === "string" ? entry.id : null;
+      if (!id || !DASHBOARD_CARD_IDS.includes(id) || seen.has(id)) continue;
+      seen.add(id);
+      out.push({ id, width: DASHBOARD_WIDTHS.has(entry.width) ? entry.width : "md" });
+    }
+  }
+  return out.length ? out : DEFAULT_DASHBOARD_LAYOUT.map((c) => ({ ...c }));
+}
+
 const normalizeXSectionPresets = (list) => (Array.isArray(list) ? list : [])
   .filter((p) => p && typeof p.name === "string" && p.name.trim() && Array.isArray(p.bands) && p.bands.length)
   .map((p) => ({ id: p.id || `xsec-${Math.random().toString(36).slice(2, 10)}`, name: p.name, bands: normalizeXSectionBands(p.bands) }));
@@ -68,6 +103,7 @@ const normalize = (p) => ({
   newProjectSharing: normalizeSharePref(p && p.newProjectSharing),
   roadCrossSectionPresets: normalizeXSectionPresets(p && p.roadCrossSectionPresets),
   sitesPanel: normalizeSitesPanel(p && p.sitesPanel),
+  dashboardLayout: normalizeDashboardLayout(p && p.dashboardLayout),
   planStandards: {
     parcelStyle: { ...((p && p.planStandards && p.planStandards.parcelStyle) || {}) },
     typeStyles: { ...((p && p.planStandards && p.planStandards.typeStyles) || {}) },
@@ -165,6 +201,13 @@ export function getStandardPref(prefs, group, key, type) {
 export function setSitesPanelPref(prefs, patch) {
   const p = normalize(prefs);
   return { ...p, sitesPanel: normalizeSitesPanel({ ...p.sitesPanel, ...patch }) };
+}
+
+/** Replace the Dashboard's card board arrangement wholesale (order + per-card width). Always
+ * re-normalized on the way in, so a caller can never persist an empty or malformed board. */
+export function setDashboardLayoutPref(prefs, layout) {
+  const p = normalize(prefs);
+  return { ...p, dashboardLayout: normalizeDashboardLayout(layout) };
 }
 
 export const _normalizePrefs = normalize;

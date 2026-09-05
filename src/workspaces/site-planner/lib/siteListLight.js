@@ -54,6 +54,11 @@ function projectSummaryOf(p) {
     role: normRole(p.role),
     scheduleProjectId: p.scheduleProjectId != null ? p.scheduleProjectId : null,
     scheduleProjectName: p.scheduleProjectName || null,
+    // B1196305 (NEW-2) — the dashboard's "Pursuits by activity" card groups by county; this is a
+    // scalar the raw record already carries (same field `storage.js`'s full loadSitesList() would
+    // hand back), so it's additive here rather than a sign this reader needs to grow into the
+    // real one (see this file's own header).
+    county: p.county || null,
   };
 }
 

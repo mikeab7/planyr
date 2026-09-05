@@ -16,7 +16,7 @@ import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
 import AccountControl from "./AccountControl.jsx";
 import { useProfile } from "../shared/profile/useProfile.js";
 import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
-import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, readRoute, buildHash, INITIAL_HASH_EMPTY } from "./route.js";
+import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, readRoute, buildHash, INITIAL_HASH_EMPTY, DASHBOARD_MODULE } from "./route.js";
 import { pageTitle } from "./pageTitle.js";
 import { writeLastRoute, seedBootRoute } from "./lastRoute.js";
 import { installBuildSkewWatch, shouldOfferReload, fetchServedBuild, isBuildSkewed, LOADED_BUILD } from "./buildSkew.js";
@@ -31,6 +31,12 @@ import { checkProjectDeletionStatus, listDeletedProjects, restoreDeletedProject,
 // NEW-2 (B848833) — lazy, same reasoning as AdminGate/DesignGallery below: a soft-deleted-project
 // notice is rare enough that it has no business riding the entry chunk every route downloads.
 const DeletedProjectNotice = lazy(() => import("../shared/ui/DeletedProjectNotice.jsx"));
+
+// B1196304/B1196305 (NEW-1/NEW-2) — the dashboard. Same lazy/not-a-workspace shape as AdminGate/
+// DesignGallery below (no header tab, never offered by the module switcher), except it DOES live
+// in the normal route grammar (route.js's DASHBOARD_MODULE) rather than being read off the raw
+// hash — so it's mounted the same way every WORKSPACES entry is, just outside that array.
+const Dashboard = lazy(() => import("../workspaces/dashboard/Dashboard.jsx"));
 
 const AdminGate = lazy(() => import("../workspaces/admin/AdminGate.jsx"));
 // NEW-4 (docs/DESIGN.md) — the `/design` primitive gallery. Same lazy/not-a-workspace shape as
@@ -209,7 +215,13 @@ export default function Shell() {
   // than needing its own guard everywhere.
   const ORG_CAPABLE_MODULES = new Set(["notes", "library", "scheduler"]);
   const switchModule = (id) => navigate({ module: id, org: org && ORG_CAPABLE_MODULES.has(id) });
-  const goDashboard  = () => navigate({ module: "site-planner", projectId: null, cross: false, org: false });
+  // B1196304 (NEW-1) — the wordmark (and admin/design-exit) now lead to a REAL dashboard (its
+  // own module, no workspace mounted behind it), replacing the old behavior of just landing on
+  // the Site Planner with no project. That OLD behavior — "the map with nothing open" — is kept
+  // byte-for-byte, but it needs no separate function here: it's the Site Planner's own "Map"
+  // breadcrumb, which SitePlannerApp.jsx's local `goMap`/`onBackToMap` already delivers entirely
+  // in-workspace, untouched by this change (it never routed through Shell's `navigate` at all).
+  const goDashboard = () => navigate({ module: DASHBOARD_MODULE, projectId: null, cross: false, org: false });
   // "New project" from anywhere: land in the Site Planner and tell it to start a blank
   // site. A monotonic tick (not a project id — the blank isn't saved yet) re-fires on
   // each click; the Site Planner writes the real id into the URL once it exists.
@@ -534,6 +546,28 @@ export default function Shell() {
             </div>
           );
         })}
+        {/* B1196304/B1196305 (NEW-1/NEW-2) — the dashboard. Rendered the same way as a WORKSPACES
+            slot (absolute inset, its own ErrorBoundary + Suspense) but outside that array, since
+            it never mounts alongside a real workspace and is never kept alive when inactive —
+            there's nothing on it that benefits from staying mounted hidden (no in-progress edit,
+            no map to keep warm), unlike the workspaces above. */}
+        {active === DASHBOARD_MODULE && (
+          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
+            <ErrorBoundary label="Dashboard">
+              <Suspense fallback={<ModuleLoader module="dashboard" />}>
+                <Dashboard
+                  onShellSwitch={switchModule}
+                  authControl={authControl}
+                  accountActive={!!user}
+                  userId={user?.id || null}
+                  onNavigate={navigate}
+                  onNewProject={newProject}
+                  onSelectOrg={goOrg}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        )}
         {/* B711904 (NEW-1), pointer-events fixed B1154240 — the admin page. Only mounted (lazy
             chunk + the allowlist RPC call) while the hash actually reads #/admin, so a normal
             session never pays for either. AdminGate itself renders null for anyone not on the
@@ -565,13 +599,16 @@ export default function Shell() {
           // `pointer-events`; nothing there needs a counter-flip.
           <div style={{ position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none" }}>
             <Suspense fallback={null}>
-              {/* Not `onExit={goDashboard}` — `#/design` and the plain dashboard both parse to
-                  the identical { module: "site-planner", projectId: null, cross: false } route
-                  (`design` isn't a real module slug), so `navigate`'s own same-route guard makes
-                  goDashboard() here a silent no-op (measured: click "succeeds", hash never moves).
-                  Setting the hash directly always fires a real hashchange, which is what actually
-                  needs to happen to leave this overlay. */}
-              <DesignGallery onExit={() => { window.location.hash = "#/"; }} />
+              {/* B1196304 — used to set window.location.hash directly, because `#/design` and the
+                  plain dashboard both resolved to the identical { module: "site-planner",
+                  projectId: null, cross: false } route (`design` isn't a real module slug), so
+                  navigate's own same-route guard made goDashboard() here a silent no-op (measured:
+                  click "succeeds", hash never moves). Fixed at the root now, two ways: the
+                  dashboard is its own distinct module (DASHBOARD_MODULE), so it no longer shares
+                  an object with #/design's fallback at all; and navigate() itself compares the
+                  RAW hash spelling rather than just the parsed route object, so any future case
+                  shaped like this one is covered too, not just this one route. */}
+              <DesignGallery onExit={goDashboard} />
             </Suspense>
           </div>
         )}

@@ -15,7 +15,7 @@
  * below — a generic "no project selected" placeholder is never seeded, and Food (which has no
  * project model at all) never even overwrites the pointer. Root cause + full reasoning: BACKLOG.md.
  */
-import { parseRoute, buildHash, DEFAULT_MODULE, INITIAL_HASH_EMPTY } from "./route.js";
+import { parseRoute, buildHash, DEFAULT_MODULE, DASHBOARD_MODULE, INITIAL_HASH_EMPTY } from "./route.js";
 
 const KEY = "planyr:lastRoute:v1";
 
@@ -50,8 +50,15 @@ export function readLastRoute() {
  * team; landing a bare-domain visit in a restaurant tracker instead of the professional
  * tool is a credibility problem, not a mere inconvenience. Food stays reachable by direct
  * URL (#/food still parses and mounts it) — it is only excluded from EVER being the
- * pointer "open where I left off" restores to, or even overwriting that pointer. */
-const PROJECTLESS_MODULES = new Set(["food"]);
+ * pointer "open where I left off" restores to, or even overwriting that pointer.
+ *
+ * B1196304 — the dashboard joins Food here for the identical reason: it has no project of its
+ * own, so a visit to it (the wordmark, from anywhere — including a page with a real project
+ * open) must not clobber the pointer to wherever the professional tool was actually left.
+ * Without this, clicking the wordmark from an open project would overwrite the stored pointer
+ * with the bare dashboard route, and the next bare-domain boot would land back on the dashboard
+ * instead of resuming that project — reproducing B710736 one module later. */
+const PROJECTLESS_MODULES = new Set(["food", DASHBOARD_MODULE]);
 
 /* Whether a route change is worth persisting as "where I left off" at all. A visit to a
  * projectless module must not clobber the pointer to wherever the professional tool was
@@ -74,17 +81,24 @@ export function writeLastRoute(route) {
 
 /* Whether a stored pointer names somewhere SPECIFIC enough to be worth seeding into a
  * fresh boot: a real project, or a deliberate cross-project view the user explicitly
- * toggled on (Notes' "All Notes" dashboard, a cross-project Library tree, …). A
- * non-default module sitting on no project and not in cross mode is a generic
- * placeholder — a project picker, an empty canvas, "nothing selected" — indistinguishable
- * from just landing on the default workspace, so restoring it is never restoring a place
- * the user was actually working; it only reproduces the food-tab bug in miniature
- * (B710736). Food is refused outright regardless of project/cross, matching
- * PROJECTLESS_MODULES above, in case a stale pointer written before this fix (or by a
- * future regression) still carries one. */
+ * toggled on (Notes' "All Notes" dashboard, a cross-project Library tree, …). A module
+ * sitting on no project and not in cross/org mode is a generic placeholder — a project
+ * picker, an empty canvas, "nothing selected" — indistinguishable from just landing on the
+ * default workspace, so restoring it is never restoring a place the user was actually
+ * working; it only reproduces the food-tab bug in miniature (B710736). Food is refused
+ * outright regardless of project/cross, matching PROJECTLESS_MODULES above, in case a
+ * stale pointer written before this fix (or by a future regression) still carries one.
+ *
+ * B1196304 — this used to special-case `route.module === DEFAULT_MODULE` to an unconditional
+ * `true`, relying on `pickBootRoute`'s OWN final `buildHash(route) === "#/"` check to null it
+ * back out — which only worked because a bare Site Planner with no project used to BUILD "#/".
+ * It no longer does (Site Planner now names its own slug, "#/site"), so that downstream check
+ * stopped catching this case and would have started seeding "#/site" for a stored pointer that
+ * was never worth restoring in the first place. The general rule below already gives the right
+ * answer for every module, Site Planner included — a bare default with nothing else is simply
+ * not worth restoring — so the special case is removed rather than patched. */
 function isWorthRestoring(route) {
   if (PROJECTLESS_MODULES.has(route.module)) return false;
-  if (route.module === DEFAULT_MODULE) return true; // already a no-op — buildHash gives "#/"
   // ORG SCOPE (NEW-1) — a deliberate destination the user toggled on, same standing as `cross`.
   return !!route.projectId || !!route.cross || !!route.org;
 }

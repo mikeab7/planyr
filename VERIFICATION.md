@@ -7263,6 +7263,44 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
 
 **Result:** ⏳ pending — needs a real signed-in browser session; not reachable from this sandbox. `Cadence: once`.
 
+### V869280 — B1196305: the dashboard's seven cards show real data, arrange/persist for a real signed-in account, and the layout survives a real cross-device sync `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** Every card's arithmetic is proven at the unit level against synthetic fixtures, and the whole board (drag, keyboard reorder, width cycling, remove/add, the never-empty guarantee) is proven headlessly signed OUT — but signed out, six of the seven cards have nothing to show (no Schedule, no comps, no pursuits, no doc reviews), so the sandbox can only ever exercise their empty states. The one thing this item explicitly parks on: whether the saved layout round-trips through the CLOUD half of `userPrefs.js` (`profiles.prefs` jsonb), not just the localStorage mirror already proven here — that needs a real account reachable from two different browsers/devices, which this sandbox's proxy cannot provide (Supabase auth handshake is CORS-blocked).
+
+**What was verified here (this session, sandbox).** `test/dashboardLayout.test.js` (14), `test/userPrefsDashboardLayout.test.js` (7), `test/scheduleHealthPure.test.js` (9), `test/pipelineCounts.test.js` (3), `test/pursuitsByCounty.test.js` (4), `test/goingQuiet.test.js` (7), `test/siteListLight.test.js` (+1 for the new `county` field) — all green, all pure/Node-testable. Headless Chromium, dev server, signed out: bare `#/` rendered all seven cards in default order with correct empty/signed-out states and no console errors beyond the sandbox's expected external-host blocks; Customize → Move-left twice on "Going quiet" reordered it correctly (the identical `moveCardToIndex` call drag uses); Done → reload confirmed the reordered layout persisted via the localStorage mirror; removing cards down to exactly one left that card's remove control inert, never reaching zero. `node ui-audit/perf-bundle-audit.mjs --check` clean (the `comps`/`metesAndBounds` allowlist widening is paid for and on the record). Full repo suite green, lint clean, build clean.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner, on an account with real Schedule data, at least one comp, at least one tracked pursuit, and a recent Document Review:**
+1. Read the loaded chunk hash in the same breath as everything below — confirm it names a chunk from a build after this PR merged.
+2. Land on `#/` (click the `planyr` wordmark from anywhere, or the bare domain). **Expect:** the dashboard, not the map — all seven cards visible, none blank/erroring.
+3. **Schedule health** and **Needs an owner**: confirm they show real numbers/rows drawn from an actual saved schedule (`planar_data`), not a placeholder. **Needs an owner** must show real UNASSIGNED overdue tasks if any exist — the count is informational only, never a nag to fill them in.
+4. **Pipeline** and **Pursuits by activity**: confirm the status counts and the per-county rows (with plan counts) match what the Sites list itself shows for the same account.
+5. **Jump back in**: confirm it names the actual last project/route visited and the actual newest Document Review, and clicking each opens the right one.
+6. **Comps summary**: confirm it shows the account's real comp count/summary, matching the Comps panel elsewhere in the app.
+7. **Going quiet**: confirm it lists real pursuits idle 30+ days (Complete/Dead excluded) if any exist on the account — or is empty if none qualify, which is a correct result, not a bug.
+8. Click **Customize**, drag a card to a new position, cycle one card's width, remove one card, then reopen the Add-card tray and add it back. Click **Done**. **Expect:** every action takes effect immediately and matches what a keyboard-only pass (Move-left/right) would produce for the same reorder.
+9. Reload the page. **Expect:** the customized layout is exactly as left.
+10. Sign into the SAME account from a second browser or a private/incognito window. **Expect:** the customized layout from step 8 is already there — this is the one thing that could not be checked in the sandbox, since only the localStorage mirror was provable there, never the cloud round-trip through `profiles.prefs`.
+
+**Result:** ⏳ pending — needs a real signed-in browser session with real Schedule/comp/pursuit/Document Review data, and a second device/browser for step 10. `Cadence: once`.
+
+### V870304 — B1197328: the Owner column reorder and the "+ Assign" affordance actually reach a task on the six real production schedules `Blocker: real-data`
+
+**Why this needs its own real pass.** The new default column order (`DEFAULT_GRID_COLS`) only governs a project that has never saved its own column configuration via the Columns chooser — which of the six real, already-in-use production schedules fall into that bucket (default order) versus already have a saved custom order (this fix irrelevant to them) cannot be read from a sandbox; there is no seed data here that reproduces a real, years-old saved `colConfig`. Separately, the hard constraint this item exists to protect — that a high count of unassigned tasks is normal and must never be nagged about — can only be honestly confirmed against real schedules that actually carry a realistic mix of assigned and unassigned tasks, not a synthetic 2-3 row fixture.
+
+**What was verified here (this session, sandbox).** `test/schedulerOwnerReachability.test.js` (7, new) — the reorder itself (Owner at position 6, right after Duration), the "+ Assign" affordance markup replacing the old blank span, the one-time park-on-Owner-after-naming behavior via `parkOwnerAfterNameRef`/`commitAndAdvance`, `mkt()` still creating `responsibleParty: ""`, and a dedicated case proving a hypothetical "default the field to a placeholder" change would be caught by this suite (the item's own failing-test requirement). `test/schedulerEngine.test.js` (436 tests) confirmed unaffected — none of the three fixes touch a pure logic function that guard mirrors. Live re-verification against the real running scheduler (Chromium, vendored libs): `verify-owner-first-char.mjs` 18/18, `verify-contact-confirm.mjs` 21/21, `verify-schedule-input-bugs.mjs` 8/8, `verify-grid-overlay-input.mjs` 12/12 — all four confirmed genuinely broken by the reorder on a `git stash`-restored pristine build before the `data-col-key` re-aim, ruling out an environmental flake. Full repo suite green, lint clean, build clean.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner, opening each of the six real production schedules in turn:**
+1. Read the loaded chunk hash in the same breath as everything below — confirm it names a chunk from a build after this PR merged.
+2. Open the schedule. **Expect:** if this project never used the Columns chooser to save a custom order, the Owner column now sits right after Duration (well within view at a normal window width), not off to the right past Notes.
+3. As a control, if this project DOES have a saved custom column order, confirm it is completely unaffected — this fix must never override a deliberately saved configuration.
+4. Find (or create) a task with no owner set. **Expect:** its Owner cell shows a clickable "+ Assign" affordance, never a blank, affordance-free space.
+5. Click "+ Assign". **Expect:** the same contact picker a double-click on a filled Owner cell already opens.
+6. Confirm the count of unassigned tasks on this real schedule is left completely unchanged by this fix, and that nothing on screen frames that count as a problem to fix (no nag, no required-field styling, no validation warning) — this is the hard constraint the item exists to protect.
+7. Create a brand-new task by name. **Expect:** after committing the name, the cursor lands on that same new task's Owner cell once (not the next row down) — but assigning an owner there is still completely optional; pressing Enter/Escape or clicking elsewhere without assigning anything must leave the task perfectly valid and unassigned.
+8. Repeat steps 2-7 across a second and third of the six real schedules to confirm the behavior is consistent, not particular to one project's data shape.
+
+**Result:** ⏳ pending — needs a real signed-in browser session across the six real production schedules. `Cadence: once`.
+
 ## ✅ Verified / ❌ Failed — history
 
 > Passed/failed items are archived to **`VERIFICATION-DONE.md`** to keep this file fast.

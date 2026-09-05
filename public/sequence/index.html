@@ -4487,7 +4487,12 @@ const TOTAL_W = COLS.reduce((s,c) => s+c.w, 0);
 // (the original twelve; the new fields above ship hidden). Config persists per project at
 // projects[pid].colConfig and rides the existing cloud-save path (setData → autosave).
 const COL_BY_K = Object.fromEntries(COLS.map(c => [c.k, c]));
-const DEFAULT_GRID_COLS = ["id","name","start","end","duration","predecessors","successors","health","status","responsibleParty","cost","notes"];
+// B1197328 — Owner (responsibleParty) moved from position 10 to position 6 (right after
+// Duration, before Predecessor): measured at 0% visible at 1280px width and 23% at 1440px in
+// its old spot, which was the single largest cause of "Owner is never set" reports — setting one
+// was never unreachable, it was just off the edge of a laptop screen. This is the DEFAULT order
+// only; a project with its own saved Columns-chooser config is unaffected (colConfig wins).
+const DEFAULT_GRID_COLS = ["id","name","start","end","duration","responsibleParty","predecessors","successors","health","status","cost","notes"];
 // B583 — a project's user-defined Formula columns (proj.formulaCols) are valid grid
 // columns alongside the built-in COLS. Their keys (f_…) must survive the visible-list
 // filter and get a default width, or a saved formula column would silently vanish on load.
@@ -8114,6 +8119,13 @@ function App() {
   // post-renumber id out, and rAF applies the selection after the commit.
   const revealRef = useRef(null);
   const openNameEditOnReveal = useRef(false);
+  // B1197328 — armed with a brand-new task's id whenever its Name field is auto-opened for
+  // editing below; commitAndAdvance consumes it on that task's FIRST name commit (Enter) to
+  // park the cursor on the Owner cell once, instead of dropping straight to the next row's
+  // Name cell (the every-task-creation-path used to skip Owner entirely). Writes nothing —
+  // only moves focus — and disarms itself on that one use, so every later edit of any task's
+  // name (this one included) behaves exactly as before.
+  const parkOwnerAfterNameRef = useRef(null);
   const revealInserted = useCallback(() => {
     const shouldOpenEdit = openNameEditOnReveal.current;
     openNameEditOnReveal.current = false;
@@ -8124,6 +8136,7 @@ function App() {
       const ni = COLS.findIndex(c => c.k === "name");
       if (ni >= 0) setSelectedColIdx(ni);
       if (shouldOpenEdit) {
+        parkOwnerAfterNameRef.current = id;
         requestAnimationFrame(() => setEdit({taskId: id, col: "name"}));
       }
     });
@@ -11120,7 +11133,15 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     // can't reshuffle rows and land the cursor on the wrong task.
     const idxBefore = tasks.findIndex(t => t.id === taskId);
     const nextIdBefore = tasks[idxBefore + 1]?.id ?? null;
+    // B1197328 — captured and cleared BEFORE commit, so this fires exactly once for the task
+    // parkOwnerAfterNameRef named, regardless of what the commit itself does.
+    const shouldParkOwner = col === "name" && parkOwnerAfterNameRef.current === taskId;
+    if (shouldParkOwner) parkOwnerAfterNameRef.current = null;
     commit(taskId, col, val);
+    if (shouldParkOwner) {
+      const oi = allCols.findIndex(c => c.k === "responsibleParty");
+      if (oi >= 0) { setSelectedId(taskId); setSelectedColIdx(oi); setSelRange(null); return; }
+    }
     if (nextIdBefore !== null) setSelectedId(nextIdBefore);
     // A date / dependency edit can re-sort rows via the cascade, so the flat-index selRange is now stale
     // (its highlight + Shift-Arrow anchor would point at whatever rows moved into that span); drop it so
@@ -12421,8 +12442,17 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
         </span>
       );
     case "responsibleParty":
-      // Match the neighboring data cells (dates, duration, notes): muted, 11px
-      return <span style={{...s,color:"var(--mut)",fontSize:11}}>{task.responsibleParty||""}</span>;
+      // Match the neighboring data cells (dates, duration, notes): muted, 11px.
+      // B1197328 — an EMPTY cell used to render as a literally blank span: no affordance at
+      // all, so even once the column was scrolled into view it read as dead space rather than
+      // an editable field. A single click here now opens the same ContactPicker a double-click
+      // on a filled cell already does (never a default value, never a required field — see
+      // this column's own reorder note above; setting one stays purely opt-in).
+      return task.responsibleParty
+        ? <span style={{...s,color:"var(--mut)",fontSize:11}}>{task.responsibleParty}</span>
+        : <span style={{...s,color:"var(--blue)",fontSize:11,cursor:"pointer"}}
+            title="Click to assign an owner"
+            onClick={() => setEdit({taskId: task.id, col: "responsibleParty"})}>+ Assign</span>;
     case "cost":
     case "budget":
     case "actualCost": {

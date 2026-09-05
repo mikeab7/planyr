@@ -181,12 +181,16 @@ if (booted) {
   await page.keyboard.press("Escape"); await pacedWait(page, 200);
   const r3 = rowsWithDot[1];
   await page.locator(`[data-task-row="${r3}"]`).scrollIntoViewIfNeeded().catch(() => {});
-  const before = (await page.locator(`[data-task-row="${r3}"] > div`).nth(8).innerText()).trim();
+  // B1197328 — resolved by data-col-key, never a positional index: DEFAULT_GRID_COLS reordered
+  // Owner ahead of Predecessor/Successor/Health in this same item, which silently moved
+  // "status" from index 8 to index 9 and broke this harness's own hardcoded `.nth(8)` readback.
+  const statusCell = (rowId) => page.locator(`[data-task-row="${rowId}"] [data-col-key="status"]`);
+  const before = (await statusCell(r3).innerText()).trim();
   await page.locator(`[data-picker-cell="health-${r3}"] [data-health-dot]`).click();
   await pacedWait(page, 220);
   await page.locator('body > div[style*="z-index: 9999"] > span').nth(2).click();   // RED
   await pacedWait(page, 450);
-  const after = (await page.locator(`[data-task-row="${r3}"] > div`).nth(8).innerText()).trim();
+  const after = (await statusCell(r3).innerText()).trim();
   ok("NEW-2 · clicking a swatch still COMMITS the value", after !== before && after.length > 0,
     `status ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
   ok("NEW-2 · and the menu closes on that click", (await menus()) === 0);

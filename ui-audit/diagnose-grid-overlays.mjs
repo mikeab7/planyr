@@ -176,8 +176,10 @@ console.log("instruments installed\n");
 const target = await page.evaluate(() => {
   const rows = [...document.querySelectorAll("[data-task-row]")].map(r => ({
     id: +r.getAttribute("data-task-row"),
-    succ: (r.children[6]?.innerText || "").trim(),
-    status: (r.children[8]?.innerText || "").trim(),
+    // B1197328 — resolved by data-col-key, never a positional index: DEFAULT_GRID_COLS
+    // reordered Owner ahead of Predecessor/Successor/Health/Status in this same item.
+    succ: (r.querySelector('[data-col-key="successors"]')?.innerText || "").trim(),
+    status: (r.querySelector('[data-col-key="status"]')?.innerText || "").trim(),
     hasDot: !!r.querySelector("[data-health-dot]"),
   }));
   const byId = Object.fromEntries(rows.map(r => [r.id, r]));

@@ -3,7 +3,7 @@
  * (clear + boot clean), and never seed a pointless "#/" replace. */
 import { describe, it, expect, beforeEach } from "vitest";
 import { readLastRoute, writeLastRoute, pickBootRoute, shouldPersistRoute } from "../src/app/lastRoute.js";
-import { DEFAULT_MODULE } from "../src/app/route.js";
+import { DEFAULT_MODULE, DASHBOARD_MODULE } from "../src/app/route.js";
 
 const KEY = "planyr:lastRoute:v1";
 
@@ -126,12 +126,38 @@ describe("lastRoute — pickBootRoute (the boot decision)", () => {
     expect(pickBootRoute({ initialHashEmpty: true, stored: { module: "food", projectId: null, cross: true } }))
       .toBe(null);
   });
+
+  /* B1196304 — the dashboard is projectless like Food (see PROJECTLESS_MODULES), and a stored
+   * pointer naming it must never seed a boot: a bare dashboard is exactly where a boot with
+   * nothing else worth restoring already lands. */
+  it("the dashboard is NEVER seeded as the restored default — not even with a project id or cross mode", () => {
+    expect(pickBootRoute({ initialHashEmpty: true, stored: { module: DASHBOARD_MODULE, projectId: "p1", cross: false } }))
+      .toBe(null);
+    expect(pickBootRoute({ initialHashEmpty: true, stored: { module: DASHBOARD_MODULE, projectId: null, cross: true } }))
+      .toBe(null);
+  });
+
+  /* B1196304 — "open where I left off" for a REAL project must be unchanged: only the
+   * meaningless bare-default case moved. A stored pointer naming an actual open project (in
+   * ANY module, Site Planner included) still resumes exactly as before. */
+  it("a real project pointer still resumes, in every module including Site Planner — only the meaningless default case changed", () => {
+    for (const module of ["site-planner", "doc-review", "library", "scheduler", "notes"]) {
+      expect(pickBootRoute({ initialHashEmpty: true, stored: { module, projectId: "silvestri-1", cross: false } }))
+        .toEqual({ module, projectId: "silvestri-1", cross: false, org: false });
+    }
+  });
 });
 
 describe("lastRoute — shouldPersistRoute (what's worth writing as \"where I left off\")", () => {
   it("Food never overwrites the pointer — a food visit must not clobber the last real place", () => {
     expect(shouldPersistRoute({ module: "food", projectId: null, cross: false })).toBe(false);
     expect(shouldPersistRoute({ module: "food", projectId: "p1", cross: false })).toBe(false);
+  });
+
+  // B1196304 — the wordmark now leaves any open project for the dashboard; visiting it must
+  // not clobber the pointer to the real project the user just left, same as Food.
+  it("the dashboard never overwrites the pointer either, for the identical reason as Food", () => {
+    expect(shouldPersistRoute({ module: DASHBOARD_MODULE, projectId: null, cross: false })).toBe(false);
   });
 
   it("every other module's navigation is persisted as before", () => {
