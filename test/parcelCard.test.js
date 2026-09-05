@@ -153,3 +153,32 @@ describe("ParcelInfoCard — everything the card already did, unchanged (NEW-1)"
     expect(render({ info: { status: "unavailable" } })).toContain("Parcel info unavailable");
   });
 });
+
+// NEW-6 (owner report, screenshot, build 9c35724) — with the map's Site/Comp toggle on Comp, an
+// address search still popped this card offering "Plan this site", a SITE-module action, while
+// the toolbar correctly read Comp. The primary action must follow `mode`, not always be Site's.
+describe("ParcelInfoCard — the primary action follows mode (NEW-6)", () => {
+  it("defaults to Plan this site when mode is unset (every existing Site-mode call site)", () => {
+    const html = render();
+    expect(html).toContain("Plan this site");
+    expect(html).not.toContain("Add as comp");
+  });
+
+  it("in comp mode with a comp handler, offers the comp action instead — never Plan this site", () => {
+    const html = render({ mode: "comp", onComp: () => {} });
+    expect(html).toContain("Add as comp");
+    expect(html).not.toContain("Plan this site");
+  });
+
+  it("in comp mode with no comp handler, offers neither action — just the parcel facts", () => {
+    const html = render({ mode: "comp", onComp: null });
+    expect(html).not.toContain("Plan this site");
+    expect(html).not.toContain("Add as comp");
+    // the facts themselves are still there
+    expect(html).toContain("ACME INDUSTRIAL PARTNERS LP");
+  });
+
+  it("comp mode never leaks into the no-parcel/unavailable states, which have their own copy", () => {
+    expect(render({ info: { status: "none" }, mode: "comp", onComp: () => {} })).not.toContain("Add as comp");
+  });
+});
