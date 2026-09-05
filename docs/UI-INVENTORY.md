@@ -217,14 +217,14 @@ by construction (radius 0 opts out of that check's own candidate pool).
 **Map landing page (selecting parcels) — light:**
 
 - "Settings" sits 6px from "Sign in or create an account" — padding "0px" vs "0px 12px".
-- "Search for an address or place" sits 199px from "Cancel" — height 42px vs 30px, padding "0px 10px" vs "0px 12px" (divider-separated).
+- "Search for an address or place" sits 198px from "Cancel" — height 42px vs 30px, padding "0px 10px" vs "0px 12px" (divider-separated).
 - "Collapse the sites panel" sits 4px from "Sites1" — padding "1px 6px" vs "0px 8px".
 - "Collapse" sits 0px from "Reorder the Pursuit group" — height 23px vs 17px, padding "4px 4px 4px 12px" vs "1px 6px".
 
 **Map landing page (selecting parcels) — dark:**
 
 - "Settings" sits 6px from "Sign in or create an account" — padding "0px" vs "0px 12px".
-- "Search for an address or place" sits 199px from "Cancel" — height 42px vs 30px, padding "0px 10px" vs "0px 12px" (divider-separated).
+- "Search for an address or place" sits 198px from "Cancel" — height 42px vs 30px, padding "0px 10px" vs "0px 12px" (divider-separated).
 - "Collapse the sites panel" sits 4px from "Sites1" — padding "1px 6px" vs "0px 8px".
 - "Collapse" sits 0px from "Reorder the Pursuit group" — height 23px vs 17px, padding "4px 4px 4px 12px" vs "1px 6px".
 
