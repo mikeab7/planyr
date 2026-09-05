@@ -1033,6 +1033,17 @@ landed together. What each one is, and the ONE decision inside it that is not ob
   (NEW-6). PURE over the document; its `pos` values restate ProseMirror's own size rule and the
   unit test resolves every one against the real schema. **Absent, not empty**, when there are no
   headings. It sits to the RIGHT of a left-aligned sheet, so showing it cannot shift the text.
+  ⛔ **ON A PHONE IT NEVER JOINS THAT ROW AT ALL (B1203505).** Found in B1203504's own phone
+  screenshot, pre-existing and independent of that item's changes: the docked rail (open OR
+  collapsed) sits BESIDE the mat in a row with no `overflow` of its own, so on a real phone the
+  mat's available width dropped below `note-sheet`'s own `minWidth: 260` floor and the sheet's
+  LEFT edge — the actual words — clipped off-screen ("No Density F[ield]" cut to "lo Density
+  F"). Below the shared `narrow` breakpoint the component now renders a `position: fixed`
+  floating toggle instead of joining the row (zero row-width cost by construction), opening the
+  same rows in a `position: fixed` panel drawn OVER the document; picking a heading closes it.
+  `outlineOpen` defaults to closed on a phone (`!narrow`) so opening a note never launches an
+  unasked full-screen takeover. **`NoteHistory.jsx` still has no phone treatment of its own** —
+  it was in scope for this item's diagnosis but not its fix (see that file and B1203506).
 - `lib/notesCalloutNode.js` + `lib/notesToggleNode.js` — **callouts and foldable sections**
   (NEW-7). A callout stores a TONE NAME, never a colour, so screen / paper / Markdown each draw
   it their own way — and the five tones are GitHub's five, so the export is `> [!NOTE]` rather
