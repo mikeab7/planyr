@@ -2050,7 +2050,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * mistake. Sparse and usually `undefined` — an untouched plan has no such key at all. */
   const hiddenGroups = settings.hidden;
 
-  const [view, setView] = useState({ ppf: 0.35, offX: 60, offY: 60 });
+  const [view, setViewRaw] = useState({ ppf: 0.35, offX: 60, offY: 60 });
+  /* NEW-1 (owner report, 2026-09-05 — "it zooms in very close, zooms out, zooms back in") — a
+   * READ-ONLY diagnostic recording every setView call with its real call stack, so a report of
+   * MORE THAN ONE automatic view change on a cold load can be settled with real evidence instead
+   * of another guess. This session exhaustively enumerated every `setView(`/`requestFit(` call
+   * site in this file and in MapFinder.jsx: every one but the boot-time 120ms reframe effect
+   * (already guarded by `userMovedViewRef` above) traces to a genuine user gesture (a drawn
+   * parcel, the Fit view button, a looked-up parcel, a paste, a toast's "Show", a locate-me fix,
+   * the wheel/pinch/pan gestures the same guard already covers) or is the Leaflet basemap purely
+   * MIRRORING this same `view` state (never an independent decision). No second automatic source
+   * was found by that audit — this instrument is what lets a LIVE load prove or disprove that
+   * conclusively, the next time the sequence is reported, rather than re-auditing blind. Gated the
+   * `diagArm.js` way (read at CALL time, armable with no console via `?planyrDiag=1`), so it costs
+   * nothing unarmed and needs no remount to switch on. It records; it changes nothing. */
+  const viewChangeLogRef = useRef([]);
+  const setView = useCallback((updater) => {
+    if (isDiagArmed(window)) {
+      const log = viewChangeLogRef.current;
+      log.push({ t: Math.round(performance.now()), stack: (new Error("setView")).stack });
+      if (log.length > 200) log.shift(); // bounded ring — a diagnostic must never leak memory
+    }
+    setViewRaw(updater);
+  }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const hook = () => (isDiagArmed(window) ? viewChangeLogRef.current.slice() : null);
+    window.__plannerViewChanges = hook;
+    return () => { if (window.__plannerViewChanges === hook) window.__plannerViewChanges = null; };
+  }, []);
   // `w`/`h` are clamped to a sane minimum for the coordinate math; `rawW` is the TRUE
   // (unclamped) map-pane width, used only to keep the bottom furniture from overlapping
   // when a docked left panel narrows the pane below the clamp (NEW-1 / B881).
@@ -5390,7 +5418,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        code, but it is dev-gated code that EVERY performance harness here arms, so a measurement
        taken through it was measuring the instrument as much as the product (B1439). */
     return () => { if (window.__plannerView === hook) window.__plannerView = null; };
-  }, [view, size.w, size.h]);
+  }, [view, size.w, size.h, setView]);
   /* NEW-1 — E2E/self-audit hook for the LAYER SET (same `window.__PLANYR_E2E` gate as above; never
    * runs in production). `ui-audit/boot-tail.mjs` has to build a plan that OPENS WITH N LAYERS ON,
    * because the reference fixture saves none and `defaultOverlayState()` starts every layer off —
@@ -5627,7 +5655,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pad = 60;
     const ppf = Math.min((size.w - pad * 2) / bw, (size.h - pad * 2) / bh);
     setView({ ppf, offX: pad - minX * ppf + (size.w - pad * 2 - bw * ppf) / 2, offY: pad - minY * ppf + (size.h - pad * 2 - bh * ppf) / 2 });
-  }, [parcels, els, sheetOverlays, size, hiddenGroups]);
+  }, [parcels, els, sheetOverlays, size, hiddenGroups, setView]);
 
   // Fit *after* a state change has committed: bump the nonce instead of calling
   // fit() from a stale closure (which would frame the view without the content
@@ -5651,7 +5679,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const ebw = maxX - minX, ebh = maxY - minY, pad = 40;
     const ppf = Math.max(0.02, Math.min(8, Math.min((size.w - pad * 2) / ebw, (size.h - pad * 2) / ebh)));
     setView({ ppf, offX: pad - minX * ppf + (size.w - pad * 2 - ebw * ppf) / 2, offY: pad - minY * ppf + (size.h - pad * 2 - ebh * ppf) / 2 });
-  }, [parcels, size]);
+  }, [parcels, size, setView]);
 
   /* Toggle a shared GIS overlay from a Site Analysis constraint card (B190). Writes
      the same app-shared `overlays` state the Layers panel uses (one source of truth) —
@@ -5903,7 +5931,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     // These deps are intentional re-measure TRIGGERS (the body reads only refs, so exhaustive-deps
     // is satisfied by any set): re-run whenever something that can move the canvas's left edge changes.
-  }, [leftPanel, narrow, companionSel, narrowProps, leftWidth, size.w]);
+    // (`setView`/`setViewAnchor` are stable state setters, listed only to satisfy the lint rule.)
+  }, [leftPanel, narrow, companionSel, narrowProps, leftWidth, size.w, setView, setViewAnchor]);
   // Remember the left menu width between sessions.
   useEffect(() => { try { localStorage.setItem("planarfit:leftWidth", String(leftWidth)); } catch (_) {} }, [leftWidth]);
   useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:parkingKind", parkingKind); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:roadXSection", JSON.stringify(roadXSection)); localStorage.setItem("planarfit:measureMode", measureMode); localStorage.setItem("planarfit:easeMode", easeMode); localStorage.setItem("planarfit:easeType", easeType); localStorage.setItem("planarfit:easeWidth", String(easeWidth)); } catch (_) {} }, [parkingRows, parkingKind, roadWidth, roadXSection, measureMode, easeMode, easeType, easeWidth]);
