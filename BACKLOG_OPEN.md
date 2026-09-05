@@ -4,8 +4,7 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _251 open · 618 awaiting live verification._
-> _250 open · 620 awaiting live verification._
+> _251 open · 621 awaiting live verification._
 
 ## 🔲 Open
 
