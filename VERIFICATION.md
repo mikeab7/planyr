@@ -144,6 +144,20 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V852800 — B1176977: the Model workspace's "+" add-sheet button renders as a rounded square (RADIUS.md), not a full circle `Blocker: real-data`
+
+**Why this needs its own real pass.** `src/workspaces/model/components/TabStrip.jsx`'s "+" add-sheet button was changed from `borderRadius: RADIUS.pill` (999, a full circle) to `RADIUS.md` (8) as an adjacent-case fold-in of B1176977's shape-rule fix. The Model ("Spreadsheet") workspace is not reachable logged-out in this sandbox — confirmed live: opening `#/model` with no project renders "No spreadsheet open… Pick or start a project," and the map-based "start a project" flow Site Planner uses signed-out does not itself open a spreadsheet workbook. It is also not yet one of `ui-inventory.mjs`/`visual-regression.mjs`'s crawled surfaces (a pre-existing, already-documented gap — see `ui-audit/lib/visualBaseline.mjs`'s own coverage note naming Model as needing its own seed data), so neither of this session's two headless crawl tools could screenshot or measure it either.
+
+**What was verified here, without a live account.** The change is a single property (`RADIUS.pill` → `RADIUS.md`), both are pre-existing tokens already imported in the file (no new import), and `node ui-audit/design-drift-audit.mjs --check` passes unchanged (a token reference, not a raw literal, was never counted either way). The identical change (a standalone icon button's own resting shape, `pill` → `md`) was fully live-verified elsewhere in the same session on `HelpReportControl.jsx` — screenshotted in both themes, both the light/dark rest state and the `:focus-visible`/`:active` states, confirming the token swap alone changes only the corner curve — so the class of change is proven; only this specific instance's own screen has not been seen rendered.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, with any project open:**
+1. Read the loaded chunk hash in the same breath as everything below (`document.querySelectorAll('script[src]')` or the Network tab) — confirm it names a chunk from a build after this PR merged, not a cached pre-merge bundle.
+2. Open the Spreadsheet (Model) workspace for that project. **Expect:** the sheet-tab strip along the bottom of the grid renders as before (flat rectangular tabs, no change there).
+3. Look at the "+" button at the trailing edge of the tab strip (`data-testid="model-add-sheet"`). **Expect:** it renders as a rounded SQUARE with an 8px corner radius — matching every other small icon button in the app (e.g. the header's Full screen/Settings buttons) — never a full circle.
+4. Click it. **Expect:** a new sheet tab is added, exactly as before — the shape change touches only the button's own corner curve, nothing about its click behavior, size, or position.
+
+**Result:** ⏳ pending — needs a signed-in account with a real project to open the Spreadsheet workspace. `Cadence: once`.
+
 ### V655264 — B1166768: the renamed "Model"→"Spreadsheet" tab's routing actually redirects correctly on the DEPLOYED `planyr.io` `Blocker: live-deploy`
 
 **Why this needs its own real pass.** Filed `Verify: live`. Unlike most `Blocker: live-deploy` items in this file, this is not a Chromium-reachability question — `curl` reaches `planyr.io` fine from this sandbox right now (confirmed: `curl -I https://planyr.io/model` returns `HTTP/2 302` → `location: /#/model`, today's PRE-merge behavior). The real wall is that `public/_redirects` is Cloudflare Pages EDGE routing, which does not exist in `npm run dev` or `vite preview` at all — there is no local stand-in for it — so this specific slice is a post-merge check by construction, independent of network reachability.

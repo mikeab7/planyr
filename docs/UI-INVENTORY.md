@@ -87,6 +87,8 @@ can certify two individually-on-scale, mutually-wrong values as clean.)
 
 **Total alignment mismatches found (B950322): 6.** See the section below.
 
+**Total isolated control kind mismatches found (NEW-2, B1176976): 0.** See the section below.
+
 ## Known, deliberately-not-fixed findings
 
 Classes of ⚠️ row below are investigated and intentionally left as-is, rather than mechanically
@@ -296,6 +298,22 @@ look aligned because they float over the same surface.
 
 ---
 
+## Isolated control kind mismatches (NEW-2, B1176976)
+
+A rounded, actionable control with NO rounded containing ancestor (nestingMismatches() has
+nothing to walk up to) and NO rounded row-peer (siblingMismatches() has nothing to compare
+against) — structurally invisible to both checks, and to alignmentMismatches() for a different
+reason (that check never reads radius at all). Classified by KIND from measured facts
+(ui-audit/lib/controlKind.mjs): 2+ separately-interactive descendants sitting in one row within
+a control-ish height (≤40px) is a segmented CONTAINER (expects
+`pill`); 2+ descendants otherwise (stacked, or taller) is a SURFACE (expects `lg`); anything
+else is a STANDALONE control (expects `md`) — docs/DESIGN.md's own three roles for the shape
+rule, made mechanical instead of relying on eye judgment.
+
+_None found on this run._
+
+---
+
 ### Map landing page (no project selected)
 
 **light** — 30 distinct style signature(s) over 36 matched element(s):
@@ -331,7 +349,7 @@ look aligned because they float over the same surface.
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Imagery & layers ×1 | src/app/HelpReportControl.jsx:29: * the screen, tucked under "Imagery & layers", nowhere near the corner he asked for. Fixed by (+6 more matches, best-effort) |
-| 999px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:201:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
 
 **dark** — 30 distinct style signature(s) over 36 matched element(s):
 
@@ -366,7 +384,7 @@ look aligned because they float over the same surface.
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Imagery & layers ×1 | src/app/HelpReportControl.jsx:29: * the screen, tucked under "Imagery & layers", nowhere near the corner he asked for. Fixed by (+6 more matches, best-effort) |
-| 999px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:201:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
 
 
 ---
@@ -406,7 +424,7 @@ look aligned because they float over the same surface.
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Imagery & layers ×1 | src/app/HelpReportControl.jsx:29: * the screen, tucked under "Imagery & layers", nowhere near the corner he asked for. Fixed by (+6 more matches, best-effort) |
-| 999px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:201:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
 
 **dark** — 30 distinct style signature(s) over 36 matched element(s):
 
@@ -441,7 +459,7 @@ look aligned because they float over the same surface.
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Imagery & layers ×1 | src/app/HelpReportControl.jsx:29: * the screen, tucked under "Imagery & layers", nowhere near the corner he asked for. Fixed by (+6 more matches, best-effort) |
-| 999px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:201:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
 
 
 ---
@@ -480,7 +498,7 @@ look aligned because they float over the same surface.
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Imagery & layers ×1 | src/app/HelpReportControl.jsx:29: * the screen, tucked under "Imagery & layers", nowhere near the corner he asked for. Fixed by (+6 more matches, best-effort) |
-| 999px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:201:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
 | 12px | 48px | 12px | 400 | `rgba(255, 255, 255, 0.94)` | `1px solid rgb(225, 229, 235)` | Click any lot on the map to add it (＋) — ×1 | src/workspaces/site-planner/MapFinder.jsx:3897:                ? "Click any lot on the map to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines." |
 
 **dark** — 30 distinct style signature(s) over 36 matched element(s):
@@ -515,7 +533,7 @@ look aligned because they float over the same surface.
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Imagery & layers ×1 | src/app/HelpReportControl.jsx:29: * the screen, tucked under "Imagery & layers", nowhere near the corner he asked for. Fixed by (+6 more matches, best-effort) |
-| 999px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:201:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
 | 12px | 48px | 12px | 400 | `rgba(24, 27, 33, 0.93)` | `1px solid rgb(42, 46, 55)` | Click any lot on the map to add it (＋) — ×1 | src/workspaces/site-planner/MapFinder.jsx:3897:                ? "Click any lot on the map to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines." |
 
 
@@ -673,7 +691,7 @@ _(nothing matched in this theme/scenario)_
 | 6px | 19px | 13px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Close panel ×1 | src/shared/ui/PanelChrome.jsx:83:      <IconBtn title="Close" aria-label="Close panel" onClick={onClose} data-testid={testId ? `${testId}-close` : undefined}>✕</IconBtn> |
 | 0px | 31px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | ▶Land use ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 12px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(75, 82, 99)` | About Screening disclaimer ×1 | unattributed (no source match — best-effort text search) |
-| 999px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:201:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
 
 **dark** — 21 distinct style signature(s) over 71 matched element(s):
 
@@ -699,7 +717,7 @@ _(nothing matched in this theme/scenario)_
 | 6px | 19px | 13px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Close panel ×1 | src/shared/ui/PanelChrome.jsx:83:      <IconBtn title="Close" aria-label="Close panel" onClick={onClose} data-testid={testId ? `${testId}-close` : undefined}>✕</IconBtn> |
 | 0px | 31px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | ▶Land use ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 12px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(164, 171, 184)` | About Screening disclaimer ×1 | unattributed (no source match — best-effort text search) |
-| 999px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:201:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
 
 
 ---
@@ -710,13 +728,13 @@ _(nothing matched in this theme/scenario)_
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
-| 999px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:201:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
 
 **dark** — 1 distinct style signature(s) over 1 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
-| 999px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:201:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
 
 
 ---
@@ -729,7 +747,7 @@ _(nothing matched in this theme/scenario)_
 |---|---|---|---|---|---|---|---|
 | 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Open PDF…, ⇄ Compare revisions… ×2 | src/workspaces/doc-review/DocReview.jsx:675:    if (!file) { setOpenErr("No file was received from that drop. Try the Open PDF… button, or drop a single .pdf."); return; } (+3 more matches, best-effort) |
 | 8px | 30px | 12px | 700 | `rgb(14, 116, 144)` | `1px solid rgb(14, 116, 144)` | 🗂 Browse the Library ×1 | src/workspaces/doc-review/DocReview.jsx:2283:                🗂 Browse the Library |
-| 999px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:201:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
 
 **dark** — 3 distinct style signature(s) over 4 matched element(s):
 
@@ -737,5 +755,5 @@ _(nothing matched in this theme/scenario)_
 |---|---|---|---|---|---|---|---|
 | 8px | 30px | 12px | 600 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Open PDF…, ⇄ Compare revisions… ×2 | src/workspaces/doc-review/DocReview.jsx:675:    if (!file) { setOpenErr("No file was received from that drop. Try the Open PDF… button, or drop a single .pdf."); return; } (+3 more matches, best-effort) |
 | 8px | 30px | 12px | 700 | `rgb(14, 116, 144)` | `1px solid rgb(14, 116, 144)` | 🗂 Browse the Library ×1 | src/workspaces/doc-review/DocReview.jsx:2283:                🗂 Browse the Library |
-| 999px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:201:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
 
