@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-05 @ `9bc61e4b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-05 @ `67a44d33` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_679 source files mapped._
+_682 source files mapped._
 
 ## infra
 
@@ -99,6 +99,8 @@ _679 source files mapped._
   - _exports_: `computeVisitAggregates`, `orderAgainEntries`
 - **`src/workspaces/model/components/ContextMenu.jsx`** — The right-click context menu (cell/row-header/column-header), anchored at the click point via a zero-sized virtual anchor into the shared AnchoredMenu.
   - _exports_: `default (ContextMenu)`
+- **`src/workspaces/model/components/FileMenu.jsx`** — TODO — describe
+  - _exports_: `default (FileMenu)`
 - **`src/workspaces/model/components/FindReplaceBar.jsx`** — The floating Find (Ctrl+F) / Replace (Ctrl+H) bar — searches raw cell text, never displayed values.
   - _exports_: `default (FindReplaceBar)`
 - **`src/workspaces/model/components/FormulaBar.jsx`** — The formula bar: shows the active cell's underlying formula/raw text (never the displayed value) and commits edits the same way as the in-cell editor.
@@ -113,6 +115,8 @@ _679 source files mapped._
   - _exports_: `default (SheetView)`, `HEADER_H`, `ROW_H`
 - **`src/workspaces/model/components/TabStrip.jsx`** — The sheet tab strip: add/rename (inline)/duplicate/delete/reorder (drag) a workbook sheet, pinned below the grid, outside its own scroller.
   - _exports_: `default (TabStrip)`, `TAB_STRIP_HEIGHT`
+- **`src/workspaces/model/lib/csvIO.js`** — TODO — describe
+  - _exports_: `addSheetFromCsvText`, `csvRowsToSheet`, `parseCsv`, `sheetToCsv`
 - **`src/workspaces/model/lib/formulaConsistency.js`** — Flags a formula whose R1C1-style shape breaks its row/column neighbours' pattern, or a hardcoded value sitting inside one; precision-tuned against a realistic pro-forma fixture.
   - _exports_: `findInconsistencies`
 - **`src/workspaces/model/lib/modelSaveState.js`** — This module's status → the shared CloudSyncBadge's vocabulary; never claims "synced" for an unprovisioned cloud table.
@@ -132,7 +136,7 @@ _679 source files mapped._
 - **`src/workspaces/model/lib/sheetEngine.js`** — Wires the sheet model to the shared formula engine: evaluates a per-CELL dependency graph (A1 grid refs + same-row `[Column]` refs), and renders each cell's display/formula-bar text.
   - _exports_: `cellAddressText`, `cellColorKind`, `displayColorFor`, `displayFor`, `displayKindFor`, `evaluateSheet`, `evaluateWorkbook`, `formulaBarText`, `formulaSource`, `kindOf`, `literalTypedValue`
 - **`src/workspaces/model/lib/sheetModel.js`** — The pure spreadsheet data model: columns/cells/formulas, cell addressing, and every mutator (all pure, undo-stack-ready).
-  - _exports_: `activeSheetEntry`, `activeSheetIndex`, `addColumn`, `addSheet`, `applyBorder`, `applyPaintedStyle`, `applyToActiveSheet`, `blankRange`, `cellKey`, `clearFormatting`, `colAt`, `columnIndexByName`, `commitCellText`, `createSheet`, `createWorkbook`, `DEFAULT_ROW_H`, `deleteColumn`, `deleteRowAt`, `deleteSheet`, `duplicateSheet`, `ensureColumnCount`, `formatAt`, `insertColumnAt`, `insertRowAt`, `isFormulaText`, `isInconsistencyDismissed`, `mergeAt`, `mergeRange`, `migrateSheet`, `migrateWorkbook`, `padRowCount`, `paintedStyleAt`, `rawAt`, `renameColumn`, `renameSheet`, `reorderSheet`, `rowHeightAt`, `setActiveSheet`, `setCellStyle`, `setColumnWidth`, `setFreeze`, `setInconsistencyDismissed`, `setNumberFormat`, `setRaw`, `setRowHeight`, `SHEET_VERSION`, `sheetsDiverge`, `sortRange`, `styleAt`, `unmergeAt`, `usedRangeEnd`, `WORKBOOK_VERSION`, `workbookDeleteColumn`, `workbookDeleteRowAt`, `workbookInsertColumnAt`, `workbookInsertRowAt`
+  - _exports_: `activeSheetEntry`, `activeSheetIndex`, `addColumn`, `addSheet`, `addSheetWithContent`, `applyBorder`, `applyPaintedStyle`, `applyToActiveSheet`, `blankRange`, `cellKey`, `clearFormatting`, `colAt`, `colLetterName`, `columnIndexByName`, `commitCellText`, `createSheet`, `createWorkbook`, `DEFAULT_ROW_H`, `deleteColumn`, `deleteRowAt`, `deleteSheet`, `duplicateSheet`, `ensureColumnCount`, `formatAt`, `insertColumnAt`, `insertRowAt`, `isFormulaText`, `isInconsistencyDismissed`, `mergeAt`, `mergeRange`, `migrateSheet`, `migrateWorkbook`, `padRowCount`, `paintedStyleAt`, `rawAt`, `renameColumn`, `renameSheet`, `reorderSheet`, `rowHeightAt`, `setActiveSheet`, `setCellStyle`, `setColumnWidth`, `setFreeze`, `setInconsistencyDismissed`, `setNumberFormat`, `setRaw`, `setRowHeight`, `SHEET_VERSION`, `sheetsDiverge`, `sortRange`, `styleAt`, `unmergeAt`, `unsupportedFormulaAt`, `usedRangeEnd`, `WORKBOOK_VERSION`, `workbookDeleteColumn`, `workbookDeleteRowAt`, `workbookInsertColumnAt`, `workbookInsertRowAt`
 - **`src/workspaces/model/lib/sheetOps.js`** — Copy/paste/fill-down and the Ctrl+Arrow block-jump target, sharing the formula engine's relative-reference rewrite.
   - _exports_: `copyRange`, `ctrlArrowTarget`, `fillDown`, `findMatches`, `parseNameBoxAddress`, `pasteRange`, `replaceAll`, `replaceInCellText`
 - **`src/workspaces/model/lib/sheetZoom.js`** — The sheet's own Ctrl/Cmd+wheel zoom level: pure clamp/step math plus per-project localStorage persistence (a view preference, never sheet data).
@@ -141,6 +145,8 @@ _679 source files mapped._
   - _exports_: `beginOrStepTrace`, `cellKey`, `parseCellKey`, `renderableTrace`, `stepTrace`, `TRACE_STEP_CAP`
 - **`src/workspaces/model/lib/undoStack.js`** — General whole-state undo/redo: a snapshot stack keyed on committed edits, agnostic to what kind of edit each one was.
   - _exports_: `useUndoableState`
+- **`src/workspaces/model/lib/xlsxIO.js`** — TODO — describe
+  - _exports_: `checkFormulaSupport`, `exportWorkbookToXlsxBlob`, `importXlsxToWorkbook`
 - **`src/workspaces/model/ModelApp.jsx`** — Model workspace root: the underwriting spreadsheet — loads/saves the active project's sheet and wires the toolbar, formula bar and grid together.
   - _exports_: `default (ModelApp)`
 - **`src/workspaces/notes/components/ConflictNotice.jsx`** — the quiet one-line conflict notice — one click opens the full-screen ConflictReview
