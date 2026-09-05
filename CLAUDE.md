@@ -396,6 +396,45 @@ doesn't write code. This is a standing rule, not a one-off.
 This plain-language rule is about how you talk **to me** in chat. Keep commit messages,
 PR descriptions, code comments, and the backlog technical and precise as usual.
 
+## Owner product constraints — decisions already made, do not relitigate
+
+The section above is about TONE — how to talk to Michael. This section is about BOUNDARIES —
+decisions he has already made about what may and may not be built. **It is authoritative over
+any dispatch brief.** If a brief asks for something an entry below forbids, the session must
+**STOP**: say plainly in its reply that the brief contradicts a standing constraint, name the
+constraint, and not build the contradicting part. Do not silently comply and do not silently
+skip — say so, every time. A brief is an instruction; this section is a boundary.
+
+Each entry is one constraint — a prohibition or a requirement — with the date Michael set it.
+No rationale paragraphs here; a constraint that needs one belongs in a decision doc with a
+pointer from its entry. If this list passes roughly 40 entries, split the oldest settled ones
+into a `docs/` file and leave pointers, the same way `SHIPPED.md`/`ROADMAP.md`/`REFERENCE.md`
+were split out of this file.
+
+1. **(2026-09-05) Tasks do not need an owner.** Michael does not assign a responsible party to
+   every task, and a high count of unassigned tasks is normal usage, not a defect. Never build a
+   prompt, nag, required field, default value, or validation that pushes an owner onto a task,
+   and never present an unassigned count as a number that should come down. Setting an owner
+   only has to be reachable and round-trip correctly.
+2. **(2026-07-18) Never quote measurements, units, pixels, thresholds, or zoom factors in
+   chat** — describe what he will SEE. Full text is in "How to talk to me" above; this entry is
+   a cross-reference, not a duplicate.
+3. **(2026-08-04) A Colorado site may never render a Texas-derived number** — not a fallback,
+   not a blank that reads as zero, not a plausible band. Where a capability is unwired for
+   Colorado, the surface shows a named "not available in Colorado yet" state instead. Enforced in
+   `coloradoRegions.js` (see B1422 and the B290240–B290250 missing-data audit).
+4. **(2026-07-29) No rate, volume, or elevation is ever displayed without the rule record behind
+   it.** A malformed or missing rule record is a LOUD failure that shows nothing, never a naked
+   number. (RULES-AS-DATA; see B1074.)
+5. **(2026-09-05) Project creation is deliberately LAZY.** Never create a `sites` row for every
+   abandoned "New project" click — the row is materialized only by a module's first real write.
+   (See B1160480, B1202176.)
+6. **(2026-09-02) On the cloud-write failure banner, the ✕ means "I have dealt with it" and
+   forgets the durable log; Retry does not.** Keep those two actions distinct — never collapse
+   them into one dismissal. (See B1037952, B1048400.)
+7. **(2026-08-22) A live check runs on a throwaway duplicate of a real plan, never on one of
+   Michael's real plans** — and the session says exactly what was touched.
+
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
 Michael (industrial developer, Dallas/Houston). It is becoming a multi-workspace
@@ -1222,18 +1261,34 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
      term**. Pure core unit-tested in `test/recomputeProbe.test.js`, the fixes in
      `test/pureCache.test.js`.
 
+- **CONSTRAINT-CAPTURE** — **When Michael states or corrects a product constraint in chat, the
+  session that hears it writes it into `## Owner product constraints` IN THE SAME SESSION, before
+  doing the work it was dispatched for.** Not "later," not "filed for a follow-up" — a constraint
+  that exists only in a chat is not a constraint; the repo is the only store every future session
+  reads. (Owner rule, 2026-09-05, after PR #1461 was built and armed for auto-merge carrying a
+  "Needs an owner" dashboard card and a scheduler column reorder Michael had already told a
+  different session to drop — the correction lived only in the orchestrating chat's memory of him
+  and nowhere in the repo, so the dispatch brief that produced #1461 carried the pre-correction
+  spec and nothing in the session contradicted it. Caught by hand; should have been caught by the
+  repo.) The reciprocal check lives in the Definition of Done below: before opening a PR, confirm
+  nothing built contradicts `## Owner product constraints`, and say so.
+
 ### Definition of Done (every item)
 1. **Implemented** — the whole job, including the hard / real part (STANDING RULE #1). No diagnosis-only.
 2. **Unit tests** for any pure library touched.
 3. Every **applicable named rule** above is satisfied.
-4. `BACKLOG.md` updated **and** `BACKLOG_OPEN.md` regenerated (`node scripts/build-backlog-index.mjs`).
+4. **No contradiction with `## Owner product constraints`.** Before opening a PR, confirm nothing
+   built in this item contradicts a listed constraint, and say so in the session reply. If a
+   contradiction was caught, **CONSTRAINT-CAPTURE** governs — the offending part is not built, and
+   the reply names the constraint it collided with.
+5. `BACKLOG.md` updated **and** `BACKLOG_OPEN.md` regenerated (`node scripts/build-backlog-index.mjs`).
    Touched yield / pond panel copy? **PANEL-BREVITY** applies: run `node ui-audit/panel-copy-budget.mjs`
    before and after, and put both numbers on the item.
-5. `MAP.md` regenerated (`node scripts/build-map.mjs`) **if** files were added / removed / renamed or a
+6. `MAP.md` regenerated (`node scripts/build-map.mjs`) **if** files were added / removed / renamed or a
    primary export changed.
-6. The `Verify:` field is honoured — a sandbox note appended (→ Done), or the item parked in `## ⏳ Verify`
+7. The `Verify:` field is honoured — a sandbox note appended (→ Done), or the item parked in `## ⏳ Verify`
    with the pending live steps **and** a `V###` logged in `VERIFICATION.md`.
-7. **Committed and merged** ("commit" = shipped live via PR + merge — see Workflow & deploy).
+8. **Committed and merged** ("commit" = shipped live via PR + merge — see Workflow & deploy).
 
 ## What's already built — see `docs/SHIPPED.md`
 
