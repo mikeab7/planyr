@@ -431,6 +431,25 @@ whatever the live count is at verify time) is the one to re-run first; if it sti
 capture the served chunk hash (Network tab or `document.querySelectorAll('script[src]')`) in the
 same observation so a stale-bundle explanation can be ruled in or out.**
 
+**2026-09-05 SECOND addendum — the re-check FAILED TOO, this time root-caused for real (B1181104).**
+A live pass run AFTER the B1165440 fix merged (service worker unregistered, all caches cleared, hard
+reload — genuinely current, confirmed via `/version.json` reading `main`'s own tip at that moment, so
+deploy lag is ruled out) still measured header 33 / Pursuit 19 with all three tracked sites listed.
+The mechanism: `db/set_site_group_role.sql`'s RPC bumped the outer SQL `updated_at` column but never
+the jsonb's OWN `updatedAt` field — the one `mergeSiteContent` actually reads to pick the "newer" side
+of a pull-vs-local merge, with an exact TIE keeping the LOCAL side by design (B559). This item's own
+B1156864(d) live verification flipped `trk8eef7db4d0` tracked→pursuit→tracked through this exact RPC
+to prove the flip works — and while the database has read `role: "tracked"` the whole time, the
+jsonb's `updatedAt` never advanced off its original creation instant, so any client that ever cached
+that row got permanently stuck, immune to every later correct pull. Proven mechanically with the
+real, unmodified `mergeSiteContent` (see `test/siteModel.test.js`'s new B1181104 case) — not
+theorized. Fixed: the RPC now stamps `data.updatedAt` too (applied to production), the JS fallback
+path in `cloudRole.js` had the identical gap and is fixed the same way, and all three affected rows
+were re-flipped through the corrected RPC to force their `data.updatedAt` to now — confirmed via
+direct read (`trk8eef7db4d0` v3→v4, the other two v1→v2, all still `role: "tracked"`). This should
+self-heal every client on its next pull, but **has not yet been re-confirmed live** — that is what
+this check now needs, a third time, reading the served chunk hash in the same observation.
+
 **Result:** ⏳ pending — needs a real signed-in browser session; not reachable from this sandbox
 (the sandbox proxy CORS-blocks the Supabase auth handshake). `Cadence: once`.
 

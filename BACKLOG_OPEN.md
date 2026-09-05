@@ -285,7 +285,7 @@
 | B1154369 | The lock button on a site plan doesn't stop it moving — the map handles and the rotation field never checked it | [Site Planner / site-plans] | #site-planner #ui #persistence | ⏳ live — awaiting |
 | B1154370 | Dragging the opacity slider wrote to Supabase and refetched the whole overlay list on every tick | [Site Planner / site-plans] | #site-planner #perf | ⏳ live — awaiting |
 | B1154371 | Four site-plan card layout defects: duplicated "Editing on map" with no exit, "Cropped ✓" reads as an action not a status, filename doubled | [Site Planner / site-plans] | #site-planner #ui | ⏳ live — awaiting |
-| B1156864 | One site entity with a role; a deal belongs to a site | [Site Planner / sites, comps] | #site-planner #comps #persistence | ⏳ live — awaiting |
+| B1156864 (×2) | One site entity with a role; a deal belongs to a site | [Site Planner / sites, comps] | #site-planner #comps #persistence | ⏳ live — awaiting |
 | B1165441 | Nothing ever creates a site for a comp; the migration was a snapshot, not a mechanism | [Site Planner / comps, sites] | #site-planner #comps #persistence | ⏳ live — awaiting |
 | B1146960 | A placed site plan has no way to edit it — the overflow menu offers only Delete | [Site Planner / site-plans] | #site-planner #ui | ⏳ live — awaiting |
 | B1146961 | The site plan does not track the map during zoom — it snaps instead of animating with the tiles | [Site Planner / site-plans] | #site-planner #gis #ui | ⏳ live — awaiting |
