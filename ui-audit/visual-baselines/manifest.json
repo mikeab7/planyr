@@ -7,89 +7,89 @@
     "map-landing": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a73dcda8",
-        "note": "PR #1426 (B1167120/B1167121): visual-regression gate failed twice with an identical 0.29-2.72% pixel signature against a 0.02% tolerance, confined to the help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision (1228). Font hinting/antialiasing differs between the sandbox container and this ubuntu-latest runner image below what any locally-available browser build can close (B1096017's own recorded recurrence is the same class on a different signature). Authorizing baselines rendered by this runner itself, per B1171504. [CI-authored by run 33951178166 on a73dcda8827b9c206931bdce23c60585f27c506e]"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a73dcda8",
-        "note": "PR #1426 (B1167120/B1167121): visual-regression gate failed twice with an identical 0.29-2.72% pixel signature against a 0.02% tolerance, confined to the help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision (1228). Font hinting/antialiasing differs between the sandbox container and this ubuntu-latest runner image below what any locally-available browser build can close (B1096017's own recorded recurrence is the same class on a different signature). Authorizing baselines rendered by this runner itself, per B1171504. [CI-authored by run 33951178166 on a73dcda8827b9c206931bdce23c60585f27c506e]"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a73dcda8",
-        "note": "PR #1426 (B1167120/B1167121): visual-regression gate failed twice with an identical 0.29-2.72% pixel signature against a 0.02% tolerance, confined to the help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision (1228). Font hinting/antialiasing differs between the sandbox container and this ubuntu-latest runner image below what any locally-available browser build can close (B1096017's own recorded recurrence is the same class on a different signature). Authorizing baselines rendered by this runner itself, per B1171504. [CI-authored by run 33951178166 on a73dcda8827b9c206931bdce23c60585f27c506e]"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a73dcda8",
-        "note": "PR #1426 (B1167120/B1167121): visual-regression gate failed twice with an identical 0.29-2.72% pixel signature against a 0.02% tolerance, confined to the help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision (1228). Font hinting/antialiasing differs between the sandbox container and this ubuntu-latest runner image below what any locally-available browser build can close (B1096017's own recorded recurrence is the same class on a different signature). Authorizing baselines rendered by this runner itself, per B1171504. [CI-authored by run 33951178166 on a73dcda8827b9c206931bdce23c60585f27c506e]"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       }
     },
     "site-planner-header": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a73dcda8",
-        "note": "PR #1426 (B1167120/B1167121): visual-regression gate failed twice with an identical 0.29-2.72% pixel signature against a 0.02% tolerance, confined to the help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision (1228). Font hinting/antialiasing differs between the sandbox container and this ubuntu-latest runner image below what any locally-available browser build can close (B1096017's own recorded recurrence is the same class on a different signature). Authorizing baselines rendered by this runner itself, per B1171504. [CI-authored by run 33951178166 on a73dcda8827b9c206931bdce23c60585f27c506e]"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a73dcda8",
-        "note": "PR #1426 (B1167120/B1167121): visual-regression gate failed twice with an identical 0.29-2.72% pixel signature against a 0.02% tolerance, confined to the help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision (1228). Font hinting/antialiasing differs between the sandbox container and this ubuntu-latest runner image below what any locally-available browser build can close (B1096017's own recorded recurrence is the same class on a different signature). Authorizing baselines rendered by this runner itself, per B1171504. [CI-authored by run 33951178166 on a73dcda8827b9c206931bdce23c60585f27c506e]"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a73dcda8",
-        "note": "PR #1426 (B1167120/B1167121): visual-regression gate failed twice with an identical 0.29-2.72% pixel signature against a 0.02% tolerance, confined to the help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision (1228). Font hinting/antialiasing differs between the sandbox container and this ubuntu-latest runner image below what any locally-available browser build can close (B1096017's own recorded recurrence is the same class on a different signature). Authorizing baselines rendered by this runner itself, per B1171504. [CI-authored by run 33951178166 on a73dcda8827b9c206931bdce23c60585f27c506e]"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a73dcda8",
-        "note": "PR #1426 (B1167120/B1167121): visual-regression gate failed twice with an identical 0.29-2.72% pixel signature against a 0.02% tolerance, confined to the help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision (1228). Font hinting/antialiasing differs between the sandbox container and this ubuntu-latest runner image below what any locally-available browser build can close (B1096017's own recorded recurrence is the same class on a different signature). Authorizing baselines rendered by this runner itself, per B1171504. [CI-authored by run 33951178166 on a73dcda8827b9c206931bdce23c60585f27c506e]"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       }
     },
     "site-planner-left-rail": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a73dcda8",
-        "note": "PR #1426 (B1167120/B1167121): visual-regression gate failed twice with an identical 0.29-2.72% pixel signature against a 0.02% tolerance, confined to the help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision (1228). Font hinting/antialiasing differs between the sandbox container and this ubuntu-latest runner image below what any locally-available browser build can close (B1096017's own recorded recurrence is the same class on a different signature). Authorizing baselines rendered by this runner itself, per B1171504. [CI-authored by run 33951178166 on a73dcda8827b9c206931bdce23c60585f27c506e]"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a73dcda8",
-        "note": "PR #1426 (B1167120/B1167121): visual-regression gate failed twice with an identical 0.29-2.72% pixel signature against a 0.02% tolerance, confined to the help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision (1228). Font hinting/antialiasing differs between the sandbox container and this ubuntu-latest runner image below what any locally-available browser build can close (B1096017's own recorded recurrence is the same class on a different signature). Authorizing baselines rendered by this runner itself, per B1171504. [CI-authored by run 33951178166 on a73dcda8827b9c206931bdce23c60585f27c506e]"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a73dcda8",
-        "note": "PR #1426 (B1167120/B1167121): visual-regression gate failed twice with an identical 0.29-2.72% pixel signature against a 0.02% tolerance, confined to the help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision (1228). Font hinting/antialiasing differs between the sandbox container and this ubuntu-latest runner image below what any locally-available browser build can close (B1096017's own recorded recurrence is the same class on a different signature). Authorizing baselines rendered by this runner itself, per B1171504. [CI-authored by run 33951178166 on a73dcda8827b9c206931bdce23c60585f27c506e]"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a73dcda8",
-        "note": "PR #1426 (B1167120/B1167121): visual-regression gate failed twice with an identical 0.29-2.72% pixel signature against a 0.02% tolerance, confined to the help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision (1228). Font hinting/antialiasing differs between the sandbox container and this ubuntu-latest runner image below what any locally-available browser build can close (B1096017's own recorded recurrence is the same class on a different signature). Authorizing baselines rendered by this runner itself, per B1171504. [CI-authored by run 33951178166 on a73dcda8827b9c206931bdce23c60585f27c506e]"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       }
     },
     "library": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a73dcda8",
-        "note": "PR #1426 (B1167120/B1167121): visual-regression gate failed twice with an identical 0.29-2.72% pixel signature against a 0.02% tolerance, confined to the help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision (1228). Font hinting/antialiasing differs between the sandbox container and this ubuntu-latest runner image below what any locally-available browser build can close (B1096017's own recorded recurrence is the same class on a different signature). Authorizing baselines rendered by this runner itself, per B1171504. [CI-authored by run 33951178166 on a73dcda8827b9c206931bdce23c60585f27c506e]"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a73dcda8",
-        "note": "PR #1426 (B1167120/B1167121): visual-regression gate failed twice with an identical 0.29-2.72% pixel signature against a 0.02% tolerance, confined to the help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision (1228). Font hinting/antialiasing differs between the sandbox container and this ubuntu-latest runner image below what any locally-available browser build can close (B1096017's own recorded recurrence is the same class on a different signature). Authorizing baselines rendered by this runner itself, per B1171504. [CI-authored by run 33951178166 on a73dcda8827b9c206931bdce23c60585f27c506e]"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a73dcda8",
-        "note": "PR #1426 (B1167120/B1167121): visual-regression gate failed twice with an identical 0.29-2.72% pixel signature against a 0.02% tolerance, confined to the help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision (1228). Font hinting/antialiasing differs between the sandbox container and this ubuntu-latest runner image below what any locally-available browser build can close (B1096017's own recorded recurrence is the same class on a different signature). Authorizing baselines rendered by this runner itself, per B1171504. [CI-authored by run 33951178166 on a73dcda8827b9c206931bdce23c60585f27c506e]"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a73dcda8",
-        "note": "PR #1426 (B1167120/B1167121): visual-regression gate failed twice with an identical 0.29-2.72% pixel signature against a 0.02% tolerance, confined to the help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision (1228). Font hinting/antialiasing differs between the sandbox container and this ubuntu-latest runner image below what any locally-available browser build can close (B1096017's own recorded recurrence is the same class on a different signature). Authorizing baselines rendered by this runner itself, per B1171504. [CI-authored by run 33951178166 on a73dcda8827b9c206931bdce23c60585f27c506e]"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       }
     }
   }

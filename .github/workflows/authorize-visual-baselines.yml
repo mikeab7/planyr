@@ -15,9 +15,9 @@ name: Authorize visual regression baselines
 # reproduce locally must never be a merge gate — so this workflow moves the AUTHORING step onto
 # the only environment that can legitimately produce it: this one.
 #
-# WHAT THIS DOES NOT DO. It does not touch ui-audit/visual-regression.mjs, ui-audit/lib/
-# visualBaseline.mjs, the 0.02% tolerance, or anything else the gate checks — see this item's own
-# BACKLOG.md entry for the empty `git diff` that proves it. This workflow is an AUTHORING path,
+# WHAT THIS DOES NOT DO. It does not touch ui-audit/visual-regression.mjs's TOLERANCE, evaluateDiff,
+# or the --check pass/fail path, or anything else the gate checks against — see this item's own
+# BACKLOG.md entry for exactly what changed and what didn't. This workflow is an AUTHORING path,
 # not a change to what "pass" means. The gate still runs, still measures, and still fails a real
 # regression exactly as before (B1171504's own acceptance test proves this both ways).
 #
@@ -26,6 +26,17 @@ name: Authorize visual regression baselines
 # purpose, one time, that THIS render is the one to approve. Any trigger that fires on an
 # ordinary push would silently turn every PR green by re-defining "correct" as "whatever was just
 # pushed," which is the exact failure this whole gate exists to prevent.
+#
+# ⛔ MOVING THE RENDER TO CI DOES NOT REMOVE HUMAN TRIAGE — it relocates it. Locally-approved
+# baselines have always relied on a person looking at the diff before trusting `--approve`; a CI
+# render is no different in kind, but nobody is watching the job run, so the triage has to travel
+# to where a human WILL look — the PR. Every run posts a comment (or, with no open PR, the job
+# summary) listing EVERY surface/theme/viewport this run touched, changed or not, with its diff
+# magnitude against the prior committed baseline (ui-audit/visual-regression.mjs's own
+# `buildTriageMarkdown`). A baseline that changed on a surface the PR's own diff never touches is
+# not noise to scroll past — it is exactly the signal that a change had a wider ripple than
+# intended, and the reviewer sees it before merging, not after. This workflow never decides a diff
+# is "fine" on its own; it only makes sure the full, honest list is somewhere a person will read it.
 on:
   workflow_dispatch:
     inputs:
@@ -44,6 +55,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 # One authoring run per branch at a time; a second dispatch on the same branch supersedes the
 # first (this operation is a pure function of the branch's own current code, so cancelling an
@@ -133,6 +145,7 @@ jobs:
       # diff shows exactly which baseline PNGs changed), but the PIXELS in it were rendered by the
       # only environment that can legitimately judge them.
       - name: Commit CI-authored baselines back to this branch
+        id: commit_baselines
         env:
           REASON_INPUT: ${{ inputs.reason }}
         run: |
@@ -142,6 +155,7 @@ jobs:
           git add ui-audit/visual-baselines/ docs/VISUAL-REGRESSION.md
           if git diff --cached --quiet; then
             echo "No baseline changes to commit — this runner's own render already matches what's committed on this branch."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           COMMIT_MSG_FILE="$(mktemp)"
@@ -161,4 +175,37 @@ jobs:
           git commit -F "$COMMIT_MSG_FILE"
           rm -f "$COMMIT_MSG_FILE"
           git push origin "HEAD:${GITHUB_REF_NAME}"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
           echo "Pushed CI-authored baselines to ${GITHUB_REF_NAME}. Note: a push from this workflow's own token may not auto-trigger the required build check (a known, documented quirk of automation-token pushes in this repo — see CLAUDE.md's 'Workflow & deploy' section) — a small nudge commit on the PR branch gets it running if the check stays at 'Expected'."
+      # THE TRIAGE ARTIFACT (B1171504). Runs even if the commit/push step above failed or found
+      # nothing to commit (`if: always()`), because "the render happened and here is what it found"
+      # is worth surfacing regardless of push outcome. Posts to every OPEN PR whose head is this
+      # branch — the place a human actually looks before merging — and falls back to the run's own
+      # job summary if no PR exists yet, so the report is never silently dropped either way.
+      - name: Post baseline triage report (every surface, changed or not, with diff magnitude)
+        if: always()
+        env:
+          PUSHED: ${{ steps.commit_baselines.outputs.pushed }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            let triageMd = "_Triage report was not produced — the render/approve step likely failed before writing it; see the job log._";
+            try { triageMd = fs.readFileSync(".perf/visual-regression/approve-triage.md", "utf8"); } catch (e) { /* keep default */ }
+            const branch = context.ref.replace("refs/heads/", "");
+            const pushed = process.env.PUSHED === "true";
+            const header = pushed
+              ? `**CI-authored baselines were pushed to \`${branch}\`** (run [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})).`
+              : `**No baseline changes were pushed to \`${branch}\`** — this runner's render already matched what's committed (or the render/commit step failed — check the job log).`;
+            const body = `${header}\n\n${triageMd}`;
+            const { owner, repo } = context.repo;
+            const prs = await github.rest.pulls.list({ owner, repo, head: `${owner}:${branch}`, state: "open" });
+            if (prs.data.length) {
+              for (const pr of prs.data) {
+                await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body });
+              }
+              core.info(`Posted the triage report on PR(s): ${prs.data.map((p) => `#${p.number}`).join(", ")}`);
+            } else {
+              await core.summary.addRaw(body).write();
+              core.info("No open PR found for this branch — wrote the triage report to the job summary instead.");
+            }

@@ -31,22 +31,40 @@ describe("workspace registration — all EIGHT places", () => {
     expect(shell).toMatch(/userId=\{user\?\.id \|\| null\}/);
   });
 
-  it("(2) route.js maps the slug BOTH ways, and the two maps agree", () => {
-    expect(MODULE_BY_SLUG.model).toBe(MODULE_ID);
-    expect(SLUG_BY_MODULE[MODULE_ID]).toBe("model");
+  it("(2) route.js maps the CANONICAL slug both ways, and the two maps agree", () => {
+    // B1166768 — the tab's user-facing name is "Spreadsheet" now, and "spreadsheet" is the
+    // slug a NEW link is built with. "model" is a permanent legacy alias (next test), never the
+    // canonical slug SLUG_BY_MODULE emits.
+    expect(MODULE_BY_SLUG.spreadsheet).toBe(MODULE_ID);
+    expect(SLUG_BY_MODULE[MODULE_ID]).toBe("spreadsheet");
   });
 
-  it("(2b) the route round-trips, including with a project", () => {
-    expect(parseRoute("#/model")).toEqual({ module: MODULE_ID, projectId: null, cross: false, org: false });
-    expect(buildHash({ module: MODULE_ID })).toBe("#/model");
+  it("(2a) \"model\" is kept as a permanent PARSE-ONLY legacy alias, so an old bookmark/deep link still resolves", () => {
+    expect(MODULE_BY_SLUG.model).toBe(MODULE_ID);
+    // The alias is one-way — SLUG_BY_MODULE must never emit "model" for a new link.
+    expect(SLUG_BY_MODULE[MODULE_ID]).not.toBe("model");
+  });
+
+  it("(2b) the route round-trips on the new slug, including with a project", () => {
+    expect(parseRoute("#/spreadsheet")).toEqual({ module: MODULE_ID, projectId: null, cross: false, org: false });
+    expect(buildHash({ module: MODULE_ID })).toBe("#/spreadsheet");
     const withProject = parseRoute(buildHash({ module: MODULE_ID, projectId: "abc" }));
     expect(withProject).toEqual({ module: MODULE_ID, projectId: "abc", cross: false, org: false });
   });
 
-  it("(2c) the Cloudflare clean-path redirect exists for the slug (bare and trailing-slash)", () => {
+  it("(2c) the OLD slug still parses too — a bookmarked deep link is never broken by the rename", () => {
+    expect(parseRoute("#/model")).toEqual({ module: MODULE_ID, projectId: null, cross: false, org: false });
+    expect(parseRoute("#/project/abc/model")).toEqual({ module: MODULE_ID, projectId: "abc", cross: false, org: false });
+  });
+
+  it("(2d) the Cloudflare clean-path redirect exists for the NEW slug (bare and trailing-slash)", () => {
     const redirects = src("public/_redirects");
-    expect(redirects).toMatch(/^\/model\s+\/#\/model\s+302/m);
-    expect(redirects).toMatch(/^\/model\/\s+\/#\/model\s+302/m);
+    expect(redirects).toMatch(/^\/spreadsheet\s+\/#\/spreadsheet\s+302/m);
+    expect(redirects).toMatch(/^\/spreadsheet\/\s+\/#\/spreadsheet\s+302/m);
+    // The old bare "/model" entrance is deliberately retired, not carried alongside — see
+    // public/_redirects' own header note (the sync test only allows one entrance per CURRENT
+    // canonical slug). The hash-level alias above is what actually keeps a saved link working.
+    expect(redirects).not.toMatch(/^\/model\b/m);
   });
 
   it("(3) modulePrefetch can warm the chunk on navigation intent", () => {
@@ -77,7 +95,7 @@ describe("workspace registration — all EIGHT places", () => {
     expect(header).toMatch(/id:\s*"model"/);
     expect(header).toMatch(/"model":\s*"var\(--accent-model\)"/);
     expect(header).toMatch(/"model":\s*"var\(--accent-model-text\)"/);
-    expect(MODULE_TAB_LABEL.model).toBe("Model");
+    expect(MODULE_TAB_LABEL.model).toBe("Spreadsheet"); // B1166768 — user-facing rename
   });
 
   it("(7) bundleMetrics ROUTE_KEYS names the route, so its budget can be evaluated at all", () => {

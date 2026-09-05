@@ -12,5 +12,10 @@ export const MODULE_TAB_LABEL = {
   "doc-review":   "Review",
   "library":      "Library",
   "notes":        "Notes",
-  "model":        "Model",
+  // B1166768 — user-facing name is "Spreadsheet", not "Model" (the internal workspace id,
+  // route.js's MODULE_BY_SLUG legacy alias, and every file/state-key under
+  // src/workspaces/model/ all deliberately keep the old name — see that rename's own note in
+  // route.js). Never re-introduce a domain word here (no "Pro Forma", "Underwriting", …) — this
+  // container is used by GCs and engineers too, not just developers/finance.
+  "model":        "Spreadsheet",
 };
