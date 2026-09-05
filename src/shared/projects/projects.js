@@ -75,7 +75,7 @@ export async function ensureProjectExists(id, opts) {
   return (await storageEngine()).ensureSiteRow(id, opts);
 }
 
-export { groupProjects, filterProjects, relTime, suggestNameMatch, normalizeProjectName, projectGateStatus } from "./projectModel.js";
+export { groupProjects, filterProjects, relTime, suggestNameMatch, normalizeProjectName, projectGateStatus, markProjectFreshlyMinted, wasProjectFreshlyMinted } from "./projectModel.js";
 
 // NEW-1 (this branch, adversarial review of B1156864) — a "tracked" site (market intel only — a
 // comp, an asking price with nothing transacted) is never a real project: it has no plans, no

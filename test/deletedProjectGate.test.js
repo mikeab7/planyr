@@ -51,7 +51,22 @@ vi.mock("../src/workspaces/site-planner/lib/newProjectSharing.js", async (import
 
 import { cloudCheckDeleted } from "../src/workspaces/site-planner/lib/cloudSync.js";
 import { checkProjectDeletionStatus, setActiveUser, ensureSiteRow } from "../src/workspaces/site-planner/lib/storage.js";
-import { projectGateStatus } from "../src/shared/projects/projectModel.js";
+import { projectGateStatus, markProjectFreshlyMinted, wasProjectFreshlyMinted } from "../src/shared/projects/projectModel.js";
+
+// storage.js's saveSite/readSites (and projectModel.js's persisted freshly-minted list) persist
+// through the browser's localStorage; this suite runs in vitest's Node environment (no DOM), so
+// it needs the same minimal in-memory shim test/saveFallbackCloud.test.js already uses.
+function mockLocalStorage() {
+  const store = {};
+  globalThis.localStorage = {
+    getItem: (k) => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = String(v); },
+    removeItem: (k) => { delete store[k]; },
+    clear: () => { for (const k of Object.keys(store)) delete store[k]; },
+    key: (i) => Object.keys(store)[i] ?? null,
+    get length() { return Object.keys(store).length; },
+  };
+}
 
 describe("cloudCheckDeleted — the one question a routed project id must answer before a workspace mounts", () => {
   beforeEach(() => { h.row = null; h.error = null; });
@@ -192,22 +207,17 @@ describe("projectGateStatus — B1202176: a lazily-created project must not read
  * broken behaviour — this one writes the row through the real `ensureSiteRow` → `saveSite` →
  * `pushSiteToCloud` → `cloudUpsert` path and reads it back through the real
  * `checkProjectDeletionStatus` → `cloudCheckDeleted` path, the same two functions the app
- * actually calls. */
-// storage.js's saveSite/readSites persist through the browser's localStorage; this suite runs in
-// vitest's Node environment (no DOM), so it needs the same minimal in-memory shim
-// test/saveFallbackCloud.test.js already uses for the identical reason.
-function mockLocalStorage() {
-  const store = {};
-  globalThis.localStorage = {
-    getItem: (k) => (k in store ? store[k] : null),
-    setItem: (k, v) => { store[k] = String(v); },
-    removeItem: (k) => { delete store[k]; },
-    clear: () => { for (const k of Object.keys(store)) delete store[k]; },
-    key: (i) => Object.keys(store)[i] ?? null,
-    get length() { return Object.keys(store).length; },
-  };
-}
-
+ * actually calls.
+ *
+ * NOTE — this is a DIFFERENT, complementary mechanism from the sibling "B1202176 (extended)"
+ * describe block below (`markProjectFreshlyMinted`/`wasProjectFreshlyMinted`, landed on `main`
+ * concurrently with this branch): that one persists the SESSION-MEMORY grace across a reload/new
+ * tab (still no real row, just a longer-lived flag); this one makes the row genuinely EXIST, so
+ * neither mechanism needs to fire at all once a module has actually saved something. Both are
+ * real fixes for different gaps and neither makes the other redundant — a project that mints an
+ * id and is then abandoned with zero content anywhere never gets an `ensureSiteRow` row (by
+ * design, per the lazy-creation model), so `markProjectFreshlyMinted`'s grace is still what
+ * carries it across a reload for however long its cap allows. */
 describe("ensureSiteRow — B1202176 ×2: closes the gap the session-memory fix left open", () => {
   beforeEach(() => { h.row = null; h.error = null; mockLocalStorage(); setActiveUser(null); });
 
@@ -240,5 +250,84 @@ describe("ensureSiteRow — B1202176 ×2: closes the gap the session-memory fix 
     const g = projectGateStatus({ res, freshlyCreated: false });
     expect(g.status).toBe("live"); // never "missing" — the OLD failure mode this reproduces
     setActiveUser(null);
+  });
+});
+
+/* B1202176 (extended, 2026-09-05) — THE RELOAD REPRO. `freshProjectIdsRef`/`locallyMintedGroupsRef`
+ * are plain in-memory Sets, scoped to one Shell/SitePlannerApp mount; they cannot answer for an id
+ * minted in an EARLIER mount. Live repro on production (build 59d08b4, which already contains
+ * #1451/#1457): loading bare https://planyr.io/ restored `planyr:lastRoute:v1` pointing at project
+ * id `smtouazufbss`, which has NO row in `public.sites` at all — not present, not soft-deleted —
+ * because "New project" mints an id and writes it into `lastRoute` on navigation, but (by design —
+ * see SitePlannerApp.jsx's `newBlankSite`) saves NOTHING anywhere until the first draw. Closing the
+ * tab before drawing anything and reopening the bare domain restores that id into a BRAND-NEW Shell
+ * mount, whose `freshProjectIdsRef` is an empty Set — the exact same `{exists:false}` answer as the
+ * original bug, now reading "missing" again.
+ *
+ * `markProjectFreshlyMinted`/`wasProjectFreshlyMinted` are the small, capped, localStorage-backed
+ * twin of that in-memory Set — written at the same two mint sites, read regardless of which mount
+ * (or tab) asks. This proves the actual cross-mount sequence the earlier tests in this file cannot:
+ * mint in one "mount" (write only the persisted store, never touching the in-memory ref), then ask
+ * in a SECOND, freshly-constructed in-memory Set (a fresh mount/reload) whether the combined
+ * `freshlyCreated` signal — exactly what Shell.jsx now computes — still resolves the gate to "live".
+ */
+describe("B1202176 (extended) — a restored lastRoute pointer to a locally-minted, never-saved project survives a reload", () => {
+  beforeEach(() => { mockLocalStorage(); });
+
+  it("THE CORE REPRO: an id minted in an EARLIER mount (no in-memory ref left) still resolves live via the persisted twin", () => {
+    // Mount 1: "New project" is clicked, the id is minted and persisted — but this mount's
+    // in-memory ref is deliberately never consulted again below, simulating the tab having closed.
+    const id = "smtouazufbss";
+    markProjectFreshlyMinted(id);
+
+    // Mount 2 (a bare-domain reload / brand-new tab): a FRESH in-memory Set, empty, exactly like
+    // Shell.jsx's freshProjectIdsRef on a real fresh mount.
+    const freshProjectIdsRefMount2 = new Set();
+    const res = { ok: true, exists: false, deleted: false }; // the cloud's honest "no such row" answer
+    const freshlyCreated = freshProjectIdsRefMount2.has(id) || wasProjectFreshlyMinted(id);
+    const g = projectGateStatus({ res, freshlyCreated });
+
+    expect(g.status).toBe("live"); // NOT "missing" — this is the exact dead-end the owner hit
+  });
+
+  it("an id this device never minted (a real bad/expired link) still reads missing after the same sequence", () => {
+    markProjectFreshlyMinted("some-other-id-entirely");
+    const res = { ok: true, exists: false, deleted: false };
+    const freshProjectIdsRefMount2 = new Set();
+    const freshlyCreated = freshProjectIdsRefMount2.has("bad-link-id") || wasProjectFreshlyMinted("bad-link-id");
+    expect(projectGateStatus({ res, freshlyCreated }).status).toBe("missing");
+  });
+
+  it("a genuinely soft-deleted project is still caught even though this device once minted that same id", () => {
+    const id = "smtouazufbss";
+    markProjectFreshlyMinted(id);
+    const res = { ok: true, exists: true, deleted: true, name: "Concept A", deletedAt: "2026-09-03T20:13:59+00:00" };
+    const freshlyCreated = wasProjectFreshlyMinted(id);
+    const g = projectGateStatus({ res, freshlyCreated });
+    expect(g.status).toBe("deleted");
+  });
+
+  it("markProjectFreshlyMinted/wasProjectFreshlyMinted round-trip and are capped so the list can't grow unbounded", () => {
+    for (let i = 0; i < 40; i++) markProjectFreshlyMinted(`id${i}`);
+    // The most recent entries are kept; the earliest ones fall off the cap.
+    expect(wasProjectFreshlyMinted("id39")).toBe(true);
+    expect(wasProjectFreshlyMinted("id0")).toBe(false);
+    const raw = JSON.parse(globalThis.localStorage.getItem("planyr:freshProjects:v1"));
+    expect(raw.length).toBeLessThanOrEqual(25);
+  });
+
+  it("re-minting an already-tracked id doesn't duplicate it in the persisted list", () => {
+    markProjectFreshlyMinted("dup-id");
+    markProjectFreshlyMinted("dup-id");
+    const raw = JSON.parse(globalThis.localStorage.getItem("planyr:freshProjects:v1"));
+    expect(raw.filter((x) => x === "dup-id").length).toBe(1);
+  });
+
+  it("gracefully no-ops with no localStorage (SSR/Node) rather than throwing", () => {
+    const saved = globalThis.localStorage;
+    delete globalThis.localStorage;
+    expect(() => markProjectFreshlyMinted("x")).not.toThrow();
+    expect(wasProjectFreshlyMinted("x")).toBe(false);
+    globalThis.localStorage = saved;
   });
 });
