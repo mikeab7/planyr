@@ -65,7 +65,7 @@ export async function checkProjectDeletionStatus(id) {
   return (await storageEngine()).checkProjectDeletionStatus(id);
 }
 
-export { groupProjects, filterProjects, relTime, suggestNameMatch, normalizeProjectName } from "./projectModel.js";
+export { groupProjects, filterProjects, relTime, suggestNameMatch, normalizeProjectName, projectGateStatus } from "./projectModel.js";
 
 // NEW-1 (this branch, adversarial review of B1156864) — a "tracked" site (market intel only — a
 // comp, an asking price with nothing transacted) is never a real project: it has no plans, no
