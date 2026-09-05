@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-05 @ `890c041c` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-05 @ `9a89b3ed` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -49,7 +49,7 @@ _678 source files mapped._
   - _exports_: `default (AdminApp)`
 - **`src/workspaces/admin/AdminGate.jsx`** — The one place that decides whether AdminApp mounts: calls checkIsAdmin only while signed in, renders null on anything but a confirmed true
   - _exports_: `default (AdminGate)`
-- **`src/workspaces/admin/AdminPasswordResetSection.jsx`** — TODO — describe
+- **`src/workspaces/admin/AdminPasswordResetSection.jsx`** — Admin panel to reset a teammate's password from inside the app (no email); generates a brand-new password shown once, never displays an existing one
   - _exports_: `default (AdminPasswordResetSection)`
 - **`src/workspaces/admin/CriteriaRequestsSection.jsx`** — (B877442) Admin table of "Request criteria for this county" filings — most-requested first, with a Wired ✓ / Outstanding status per row
   - _exports_: `default (CriteriaRequestsSection)`
@@ -61,7 +61,7 @@ _678 source files mapped._
   - _exports_: `isWired`, `prepareCriteriaRequestRows`
 - **`src/workspaces/admin/ReportsSection.jsx`** — owner-only list of filed problem reports (B842866), read via `admin_list_problem_reports()`.
   - _exports_: `default (ReportsSection)`
-- **`src/workspaces/admin/SignupActivitySection.jsx`** — TODO — describe
+- **`src/workspaces/admin/SignupActivitySection.jsx`** — Admin panel showing recent signup attempts (is signup being flooded?), read through a SECURITY DEFINER RPC gated on is_admin()
   - _exports_: `default (SignupActivitySection)`
 - **`src/workspaces/design-gallery/DesignGallery.jsx`** — the `#/design` dev-only primitive gallery (NEW-4): every shared control/token in every state, both themes.
   - _exports_: `default (DesignGallery)`
@@ -276,7 +276,7 @@ _678 source files mapped._
 
 ## shared lib
 
-- **`src/shared/auth/rateLimitCopy.js`** — TODO — describe
+- **`src/shared/auth/rateLimitCopy.js`** — One shared string kept in sync with the Postgres signup-rate-limit trigger's error message, so client code can detect it without re-parsing SQL
   - _exports_: `SIGNUP_RATE_LIMIT_MESSAGE_FRAGMENT`
 - **`src/shared/brand/BrandMark.jsx`** — Planyr coral isometric-stack logo as inline theme-aware SVG: favicon/mark/auto variants plus optional 'planyr' wordmark lockup
   - _exports_: `default (BrandMark)`
@@ -318,7 +318,7 @@ _678 source files mapped._
   - _exports_: `ANCHOR_KINDS`, `anchorCountyFlag`, `anchorTeamConflict`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compDateLabel`, `compFieldRows`, `compHeadline`, `compsSummaryBits`, `compToDraft`, `compToRow`, `draftToComp`, `emptyDraft`, `isCompType`, `landPricePerAreaUnit`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `leaseTotalAnnualRent`, `netEffectiveLeaseRate`, `opexNormalizedRate`, `parseLeaseTermYears`, `partyLabels`, `resolveCapTriangle`, `rowToComp`, `sortCompsByRecency`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
 - **`src/shared/comps/lib/compSheetColumns.js`** — pure column model for the comp-entry spreadsheet: per-cell get/set, polymorphic fields, display formatting, fill-down/paste-spill
   - _exports_: `applyCellEdit`, `BASIS_OPTIONS`, `cellPlaceholder`, `cellState`, `columnIndex`, `computeFlexWidths`, `fillDownColumn`, `formatNumberDisplay`, `frozenLeftOffsets`, `GROUPS`, `matchOption`, `optionsForColumn`, `PERIOD_OPTIONS`, `sanitizeNumericInput`, `saveButtonLabel`, `SHEET_COLUMNS`, `spillPaste`, `TYPE_OPTIONS`, `UNIT_OPTIONS`, `visibleColumnIndices`, `widthFor`
-- **`src/shared/comps/lib/compSiteMatch.js`** — TODO — describe
+- **`src/shared/comps/lib/compSiteMatch.js`** — Decides whether a saved comp with no owning site matches an existing site (by location radius or exact normalized name) or needs a new tracked one, mirroring the one-time backfill's rule
   - _exports_: `findMatchingSite`, `milesBetween`, `SITE_MATCH_MILES`
 - **`src/shared/comps/lib/compsStore.js`** — Supabase CRUD for public.comps (team-visible read, owner-only write); every call returns {data,error}, never swallows a failure
   - _exports_: `deleteComp`, `fetchAllComps`, `fetchDeletedComps`, `insertComp`, `insertComps`, `permanentlyDeleteComp`, `restoreComp`, `supabase`, `updateComp`
@@ -534,9 +534,9 @@ _678 source files mapped._
   - _exports_: `HOUSTON`, `HOUSTON_ROW_STANDARDS`
 - **`src/shared/thoroughfare/ingestTransform.js`** — Pure config-driven transform from an ArcGIS GeoJSON feature → a thoroughfare_segments upsert row (B721): crosswalk classification + status, resolve ROW widths from standards, and build WGS84 + EPSG:2278 MULTILINESTRING EWKT (reusing src/shared/coordinates); the reusable heart of every jurisdiction adapter
   - _exports_: `buildQueryUrl`, `ewkt2278`, `ewkt4326`, `featureToRow`, `geometryToParts`
-- **`src/shared/turnstile/Turnstile.jsx`** — TODO — describe
+- **`src/shared/turnstile/Turnstile.jsx`** — Cloudflare Turnstile CAPTCHA widget: lazy-loads the script once, reports loading/ready/error state so the caller can gate its Submit button, and exposes a reset() for expired/rejected tokens
   - _exports_: `default`
-- **`src/shared/turnstile/turnstileConfig.js`** — TODO — describe
+- **`src/shared/turnstile/turnstileConfig.js`** — Decides whether the signup form renders the Turnstile CAPTCHA at all (site key present); the secret key never appears in this repo, verification happens server-side in Supabase
   - _exports_: `TURNSTILE_SITE_KEY`, `turnstileEnabled`
 - **`src/shared/ui/AnchoredMenu.jsx`** — Portal-to-body dropdown/flyout that escapes rail stacking-context + overflow clipping; rect-anchored fixed positioning, click-away + Esc
   - _exports_: `default (AnchoredMenu)`
