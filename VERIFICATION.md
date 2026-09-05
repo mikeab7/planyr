@@ -148,6 +148,37 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V872976 — B1202176: "New project" opens a real, editable project for a SIGNED-IN account, never the "doesn't exist" card `Blocker: auth`
+
+**Why this needs its own real pass.** The bug is a race between the deletion gate (`Shell.jsx`) asking the cloud whether a brand-new project's row exists and the fact that lazy creation means it doesn't yet. `checkProjectDeletionStatus` only ever asks the cloud when there's a signed-in `activeUid()` — signed out it fails open unconditionally, so the ORIGINAL bug (and therefore this fix) has no signed-out manifestation beyond "nothing regressed." Confirming the actual repro (the owner's own reported symptom, on his real account) needs a real signed-in session.
+
+**What was verified here (this session, sandbox+headless).** The pure decision (`projectGateStatus`, `src/shared/projects/projectModel.js`) is unit-tested and mutation-proven (`test/deletedProjectGate.test.js`) — the exact repro shape (`{exists:false}` + `freshlyCreated:true` → `live`), the identical DB answer for an id NOT minted this session (→ still `missing`, so a real bad/expired link stays caught), and a genuinely soft-deleted project still caught even if impossibly flagged fresh. The wiring between `SitePlannerApp.jsx` (marks every id it mints) and `Shell.jsx` (records the flag, feeds it to the gate) is source-guard tested (`test/newProjectGateWiring.test.js`). Beyond the unit level, a **real headless browser pass against a built preview server, signed OUT**, drove the exact repro steps end to end: opened the project switcher, clicked "New project" — landed on `#/project/<id>/site` with the empty drafting canvas showing (zero `deleted-project-notice` nodes, where the pre-fix build would have shown the blocking card here for a SIGNED-IN account); drew a real building; hard-reloaded — same route, still no blocked notice, the building still present; reopened the switcher — the project now listed as current. Full repo suite green (737 files / 15,051 tests), lint clean (0 errors, warning count unchanged), build clean, `node scripts/build-map.mjs --check` clean.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner:**
+1. Read the loaded chunk hash in the same breath as everything below — confirm it names a chunk from a build after this PR merged.
+2. Open the project switcher (the project name in the top bar, or "Select a project" when none is open) and click **New project**. **Expect:** a real, empty, editable drafting canvas opens (tools rail, drafting grid) — never "This project doesn't exist."
+3. Draw something on it (a building, a parcel, anything). **Expect:** it draws normally, no error.
+4. Hard-reload the page. **Expect:** the same project reopens with what was drawn still present — not the "doesn't exist" card.
+5. Open the project switcher again. **Expect:** the new project is listed (by its default name, e.g. "Untitled site").
+6. Repeat 2-4 a few times in a row (the owner's own repro was 3-for-3) — expect the same result every time, from BOTH the no-project-selected map view and from inside an already-open project.
+7. As a control, navigate directly to a URL naming a project id that was never created and does not belong to this account (e.g. a random id pasted into the URL). **Expect:** this one STILL shows "This project doesn't exist" — the fix must not have opened a hole that lets any bad link through.
+
+**Result:** ⏳ pending — needs a real signed-in browser session. `Cadence: once`.
+### V874144 — B1203344: the Library's org-scope organize job no longer names a comp's tracked market-record site, and no tracked site gets a folder tree `Blocker: auth`
+
+**Why this needs its own real pass.** The fix (excluding `role:"tracked"` sites from `reviewStore.fetchProjects()`) is fully proven against a mocked Supabase in the sandbox (below), but the actual owner-reported symptom — the org-scope Library progress banner reading "Organizing <comp name> (N of M)" — only shows up in a real signed-in session with real comps on the account, which this sandbox's proxy CORS-blocks (can't reach Supabase auth).
+
+**What was verified here (this session, sandbox).** `test/reviewProjectsRoleFilter.test.js` (new, 3 tests) proves against a mocked Supabase client: a `role:"tracked"` group is dropped entirely from `fetchProjects()`'s result while a `role:"pursuit"` group is kept; an absent/legacy `role` column normalizes to pursuit rather than being silently excluded; `listProjects()` (the actual function `Library.jsx`/`ReviewsBar.jsx`/`FileBrowser.jsx` all call) inherits the filter. Also confirmed live against production (this session, via the Supabase MCP, no code deployed needed for this half): the three specific tracked sites named in the report (`trk0892cf7b73`, `trk4c75bf98dd`, `trk8eef7db4d0`) each had their already-provisioned 133-folder `project_folders` tree marked `trashed` (see B1203345) — that DB cleanup is independently done and confirmed regardless of this item's live-verify status. Full repo suite green (738 files / 15,041 tests), build clean.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner, on an account with at least one comp:**
+1. Read the loaded chunk hash in the same breath as everything below — confirm it names a chunk from a build after this PR merged.
+2. Save a new comp (or open one that already exists) so the account has at least one `role:"tracked"` market-record site.
+3. Open the Library module at org scope (the surface the original screenshot showed). **Expect:** no progress banner names the comp's site, and no new 133-folder tree is created for it.
+4. Open the Library's real project picker/switcher. **Expect:** the comp's tracked site never appears in the list (same standing rule B1430/B1431 already enforce for the Sites list and the cross-workspace project switcher — this closes the same gap for Library/Review).
+5. As a control, confirm an ordinary real project (a `role:"pursuit"` site) still organizes normally and still shows in every picker — the fix must exclude tracked sites only, never a real project.
+
+**Result:** ⏳ pending — needs a real signed-in browser session with real comp data. `Cadence: once`.
+
 ### V879664 — B1208864: a retried group rename lands on EVERY plan with the exact same commit, and an interrupted retry never forgets it happened `Blocker: auth`
 
 **Why this needs its own real pass.** The write shape (atomic RPC vs. non-atomic fan-out) and the log lifecycle (clear only on confirmation) are both fully proven without a browser — a fake `public.sites` table + a fake one-statement RPC + a killable row transport in `test/writeFailureLog.test.js` prove every row shares one name and one `updated_at`, and that the killable transport is never touched. What's unprovable here is the real Supabase round trip: whether `rename_site_group` really is atomic on production Postgres, and whether a genuinely interrupted browser tab (a real chunk failure or reload mid-retry) really leaves the durable log intact.
@@ -164,49 +195,56 @@ was never clicked" quietly ships broken.
 
 **Result:** ⏳ pending — needs a real signed-in browser session against production Supabase. `Cadence: once`.
 
-### V874144 — B1203344: the Library's org-scope organize job no longer names a comp's tracked market-record site, and no tracked site gets a folder tree `Blocker: auth`
-
-**Why this needs its own real pass.** The fix (excluding `role:"tracked"` sites from `reviewStore.fetchProjects()`) is fully proven against a mocked Supabase in the sandbox (below), but the actual owner-reported symptom — the org-scope Library progress banner reading "Organizing <comp name> (N of M)" — only shows up in a real signed-in session with real comps on the account, which this sandbox's proxy CORS-blocks (can't reach Supabase auth).
-
-**What was verified here (this session, sandbox).** `test/reviewProjectsRoleFilter.test.js` (new, 3 tests) proves against a mocked Supabase client: a `role:"tracked"` group is dropped entirely from `fetchProjects()`'s result while a `role:"pursuit"` group is kept; an absent/legacy `role` column normalizes to pursuit rather than being silently excluded; `listProjects()` (the actual function `Library.jsx`/`ReviewsBar.jsx`/`FileBrowser.jsx` all call) inherits the filter. Also confirmed live against production (this session, via the Supabase MCP, no code deployed needed for this half): the three specific tracked sites named in the report (`trk0892cf7b73`, `trk4c75bf98dd`, `trk8eef7db4d0`) each had their already-provisioned 133-folder `project_folders` tree marked `trashed` (see B1203345) — that DB cleanup is independently done and confirmed regardless of this item's live-verify status. Full repo suite green (738 files / 15,041 tests), build clean.
-
-**Steps, each with a named expected result — on `planyr.io`, signed in as the owner, on an account with at least one comp:**
-1. Read the loaded chunk hash in the same breath as everything below — confirm it names a chunk from a build after this PR merged.
-2. Save a new comp (or open one that already exists) so the account has at least one `role:"tracked"` market-record site.
-3. Open the Library module at org scope (the surface the original screenshot showed). **Expect:** no progress banner names the comp's site, and no new 133-folder tree is created for it.
-4. Open the Library's real project picker/switcher. **Expect:** the comp's tracked site never appears in the list (same standing rule B1430/B1431 already enforce for the Sites list and the cross-workspace project switcher — this closes the same gap for Library/Review).
-5. As a control, confirm an ordinary real project (a `role:"pursuit"` site) still organizes normally and still shows in every picker — the fix must exclude tracked sites only, never a real project.
-
-**Result:** ⏳ pending — needs a real signed-in browser session with real comp data. `Cadence: once`.
-
 ### V864432 — B1191456: the boot-time auto-fit no longer overwrites the first few seconds of the owner's own zoom/pan `Blocker: live-GIS` `Blocker: real-data`
 
 **Why this needs its own real pass.** The mechanism is a genuine timing race — a 120ms `setTimeout` that can fire late enough to land after a real wheel/pinch/pan gesture only when the main thread is genuinely busy right after boot, which in practice means real GIS/comp/parcel network calls congesting it. This sandbox's egress proxy blocks every external GIS/tile host, so nothing here can force the congestion that makes the race observable — confirmed the mechanism is otherwise sound via the structural/source-level tests below, but a sandbox pass on the RACE itself cannot be claimed.
 
 **What was verified here (this session, sandbox).** `test/reframeUserGesture.test.js` (new, 7 tests) proves the guard's shape directly against source: `userMovedViewRef` exists; the "reframe when this view becomes active" effect conditions its `requestFit()` call on it; a real wheel notch, a real pinch move, and an armed drag-pan (past its dead zone) all set the flag; every OTHER `requestFit()` call site (Fit view button, etc.) stays unconditional. Red-proofed by stashing the fix and rerunning — 6 of 7 assertions failed exactly as expected. Full repo suite green (736 files / 15,023 tests), lint clean, build clean.
 
+**⛔ AMENDED 2026-09-05 — a further report that the startup zoom is a SEQUENCE ("it zooms in very close, zooms out, zooms back in"), not one stray fit.** An exhaustive audit of every `setView(`/`requestFit(`/`map.setView(` call site in `SitePlanner.jsx` and `MapFinder.jsx` found no second automatic source — every one is already covered by the guard above, genuinely user-initiated, E2E-only, or the Leaflet basemap purely mirroring the already-guarded `view` state. Full details on `B1191456`'s own NEW-1 amendment in `BACKLOG.md`. Because a static audit is the wrong shape to fully rule out an INTERACTION between two individually-correct call sites, a permanent diagnostic instrument now ships alongside the audit (kept deliberately, not diagnostic-only-then-removed — it costs nothing at rest and is the only way a future live check can get hard evidence instead of another round of "couldn't reproduce it"): `window.__plannerViewChanges()` (gated behind the existing `isDiagArmed`/`?planyrDiag=1` mechanism, so it needs no console access) returns every `setView` call's timestamp and real JS call stack from a capped ring buffer. **Step 5 below uses it** — if the in→out→in sequence is still observed live, read this off before re-diagnosing from scratch.
+
+**Measured with the instrument this session (local build, no live GIS/sign-in needed — these call sites are local component state, not network-dependent).** A locally-served build seeded with a one-parcel local site, cold-loaded straight into the routed Site Planner canvas with the diagnostic armed, settled 6 seconds, then read back: **exactly ONE `setView` call recorded, at t=663ms** — no in→out→in sequence in this configuration. This doesn't prove the owner's live report can never occur under real GIS-congested load (this sandbox cannot force that congestion — see below), but combined with the exhaustive static audit finding no second automatic call site, it's a real measurement rather than a guess. **Separately measured, same session:** a real trusted Playwright click on the Map control (a synthetic `.click()` — what the original report itself could not get to register at all — was deliberately NOT used) moved the hash to `#/` and held it through a 2-second settle with no bounce-back, confirming `goMap`/`onBackToMap` is the real handler invoked and that it behaves correctly absent a later stale auth event (which needs a real signed-in account to fire — see V875216).
+
 **Steps, each with a named expected result — on `planyr.io`, signed in, on a real project heavy enough to load real GIS/comp/parcel data on open (a large multi-parcel site with several GIS layers on):**
 1. Read the loaded chunk hash in the same breath as everything below — confirm it names a chunk from a build after this PR merged.
 2. Open the heavy project so the Site Planner canvas becomes the active view. Within the first 1-2 seconds, before the view settles, start a wheel-zoom or a drag-pan. **Expect:** the gesture holds — the view does NOT snap back to the pre-gesture framing partway through or right after.
 3. Repeat 2 several times across a fresh reload each time (the reported symptom is "for the first 5 to 10 seconds," not always) — expect the same result every time.
-4. As a control, reload and do NOT touch the view for several seconds. **Expect:** the automatic whole-site framing still happens normally (unchanged) when no gesture ever intervenes.
+4. As a control, reload and do NOT touch the view for several seconds. **Expect:** the automatic whole-site framing still happens normally (unchanged) when no gesture ever intervenes, and it settles ONCE — not a visible in→out→in sequence.
+5. If step 4 shows a multi-step zoom sequence, open the browser console, navigate to `?planyrDiag=1#/project/<id>/site`, reload, and after the sequence plays out run `window.__plannerViewChanges()`. **Expect (if the sequence is genuinely gone):** the log shows either zero entries or one settling entry, never a rapid in→out→in sequence with distinct call stacks. If it DOES show one, the returned stacks name exactly which call sites are still involved — report them rather than re-auditing from scratch.
 
 **Result:** ⏳ pending — needs a real signed-in browser session on a real, GIS-heavy project. `Cadence: once`.
 
-### V864433 — B1191457: a signed-in second tab/device no longer resumes a project just left on this device `Blocker: auth`
+### V864433 — B1191457/NEW-2(b): a fresh tab on the bare domain no longer resumes the project just left (timing/race class)
 
-**Why this needs its own real pass.** The fix (`leaveProject`/`goMap` clearing `localStorage["planarfit:currentSite:v1"]`) is fully proven for the LOCAL, signed-out resume path (below). The SAME storage key also feeds the SIGNED-IN cloud resume path — a second tab or device pulling the just-cleared local pointer, or a fresh sign-in reading a server-side mirror of "last open plan" if one exists — which this sandbox cannot reach (the egress proxy CORS-blocks the Supabase auth handshake).
+**⛔ CORRECTED 2026-09-05 — this item's original `Blocker: auth` tag was wrong, not just unclosed, and a live pass on this exact check is what found the real bug.** The original filing reasoned that a second tab/device was a SIGNED-IN cloud-resume question; it is not — confirmed this session by reading `cloudSync.js`: `currentSite`/`CURRENT_KEY` (`localStorage["planarfit:currentSite:v1"]`) has NO cloud or cross-device sync path in this codebase at all, so there was never anything behind an auth wall to check here. A LIVE run of exactly the steps below (no sign-in used) found the REAL bug instead: a second, entirely separate pointer, `planyr:lastRoute:v1` (`src/app/lastRoute.js`), which `leaveProject`/`goMap` never cleared — full root-cause and fix on `B1191457`'s own NEW-2(b) amendment in `BACKLOG.md`. This is now a genuine **timing/race** live-verify item (per `/CLAUDE.md`'s LIVE-VERIFY class), not an auth-gated one.
 
-**What was verified here (this session, sandbox).** `test/dashboardLeaveClearsCurrentSite.test.js` (new, 5 tests) proves, against the REAL `pickResumeTarget` + the real `getCurrentSiteId`/`setCurrentSiteId`: a stale pointer left standing resumes into the just-left project (proving the bug); clearing it resumes nothing; a real routed deep-link boot is unaffected; a source guard confirms `leaveProject`/`goMap` actually call the fix. Red-proofed by stashing the fix and rerunning — the source-guard assertion failed exactly as expected. Full repo suite green, lint clean, build clean.
+**Why this still needs a live pass even though the fix is proven at the unit level.** `test/dashboardLeaveClearsLastRoute.test.js` proves the fix's logic against the real `writeLastRoute`/`readLastRoute`/`pickBootRoute` functions and red-proofs cleanly. But an e2e reproduction attempt (a real click, then a genuine second `context.newPage()` sharing localStorage — no sign-in needed) passed in EVERY configuration tried, pre-fix and post-fix alike, with and without a settle delay — the indirect propagation chain the original code relied on fully self-heals in a clean single-tab-pair test with no other tabs and no genuine page unload in the mix. That means this sandbox cannot force the exact real-world condition (multiple tabs, real navigation timing, or something else not yet isolated) that let the stale pointer survive on production. Only a real browser, doing what the owner's own report did, can confirm the fix actually closes it.
 
-**Steps, each with a named expected result — on `planyr.io`, signed in as the owner, in TWO tabs (or one tab + a fresh reload on the bare domain):**
+**What was verified here (this session, sandbox).** `test/dashboardLeaveClearsLastRoute.test.js` (new, 5 tests): a stale `lastRoute` measurably resumes into the just-left project via the real boot-decision function (proving the bug); clearing it resumes nothing; a real routed deep-link boot is unaffected; a source guard confirms `leaveProject`/`goMap` call the new `clearLastRouteProject()` helper. Red-proofed by stashing the fix and rerunning — the source-guard assertion failed exactly as expected. Full repo suite green, lint clean, build clean.
+
+**Steps, each with a named expected result — on `planyr.io`, NO sign-in required, in TWO tabs (or one tab + a fresh reload on the bare domain) — this is exactly the two-step repro that found the bug, so run it as literally as possible:**
 1. Read the loaded chunk hash in the same breath as everything below — confirm it's post-merge, in both tabs.
-2. Tab A: open a real project. Tab B (or the same tab, freshly opened on `planyr.io` with no hash): confirm it resumes wherever it was before (unchanged baseline behavior).
-3. Tab A: press the Dashboard breadcrumb (or the `planyr` wordmark) to leave the project. **Expect:** Tab A lands on the map/dashboard, as before.
-4. Open a brand-new tab (or reload Tab B) on the bare `planyr.io` domain with no project routed. **Expect:** it does NOT silently resume the project left in step 3 — it lands on the map/dashboard, not straight into that project's canvas.
-5. As a control, open a project, leave it via a route change alone (never through Dashboard/Map), and confirm ordinary resume behavior elsewhere is unaffected by this fix.
+2. Tab A: open a real project (`#/project/<id>/site`). Dump `localStorage["planyr:lastRoute:v1"]` and `localStorage["planarfit:currentSite:v1"]` — confirm both name that project (or, for currentSite, whatever it already held — it does not need to match).
+3. Tab A: click the `planyr` wordmark to leave the project. **Expect:** the URL goes to `#/`. Dump both keys again — **Expect:** `lastRoute`'s `projectId` is now `null` (or the key is absent). `currentSite` is unaffected either way (it is not the mechanism this bug lives in).
+4. Open a brand-new tab (or reload Tab B) on the bare `planyr.io` domain with no project routed. **Expect:** it does NOT deep-link back into the project left in step 3 — it lands on the map/dashboard.
+5. As a control, open a project, leave it via a route change alone (never through the wordmark/Dashboard crumb), and confirm ordinary resume behavior elsewhere is unaffected by this fix.
 
-**Result:** ⏳ pending — needs a real signed-in multi-tab/device session. `Cadence: once`.
+**Result:** ⏳ pending — needs a real live browser re-run of the exact repro that found this bug. `Cadence: once`.
+
+### V875216 — B1191457/NEW-2(c): pressing Map goes to the map and STAYS there (stale-closure class) `Blocker: auth`
+
+**Why this needs a live pass, and why it cannot be a sandbox one.** A further live report on top of V864433: "I click Map, and it takes me out to the map for a split second before returning me straight to the Goose Creek site." Traced to a stale React closure in `SitePlannerApp.jsx`'s `onAuthChange` subscription (full mechanism on `B1191457`'s NEW-2(c) amendment in `BACKLOG.md`) — a DIFFERENT mechanism from `lastRoute`/`currentSite`, confirmed by reading the code (the report's own "very likely the same lastRoute mechanism" guess does not hold up: `lastRoute` is read only once, at true cold boot, so it cannot cause a same-session bounce-back with no reload). The defect needs a real signed-in account and a real LATER auth event (a still-resolving cloud pull, a token refresh) firing against a subscription that was frozen at an earlier point in the session — this repo's vitest config has no jsdom/component-render environment at all, so no unit test can exercise the actual React runtime behavior end to end, and a signed-out sandbox browser session has no auth events to fire in the first place.
+
+**What was verified here (this session, sandbox).** `test/authSubscriptionFreshClosure.test.js` (new, 4 tests, source-guard style): `applyUserRef` is kept in sync every render; the subscription callback calls `applyUserRef.current(u, event)`, never the bare `applyUser` identifier; the subscription still subscribes exactly once (empty deps); a mutation check (reverting to the bare call) fails the guard. Red-proofed by stashing the fix and rerunning — the "never the bare applyUser" assertion failed exactly as expected. Full repo suite green, lint clean, build clean. A synthetic-click e2e attempt (`e2e/diag-map-bounce.spec.js`, diagnostic only) did not reproduce the bounce-back, as expected — the sandbox is signed out and the bug lives entirely on the signed-in auth-event path; deleted after diagnostic use rather than left as a misleadingly-passing spec.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner, with a REAL trusted click (a synthetic `.click()` on the Map control did not move the hash at all when tried this session — use an actual mouse/touch click):**
+1. Read the loaded chunk hash in the same breath as everything below — confirm it's post-merge.
+2. Open a real project (e.g. Goose Creek) so its Site Planner canvas is the active view.
+3. Click the **Map** control. **Expect:** the view goes to the map and stays there — no return to the project within the next several seconds.
+4. Repeat step 3 after leaving the tab open and idle for a few minutes first (to let any in-flight cloud pull or token refresh resolve), and again immediately after a fresh sign-in — the reported failure is timing-dependent on a LATER auth event, so it may not reproduce on every attempt.
+5. As a control, confirm ordinary sign-in/sign-out behavior elsewhere (switching accounts, a fresh sign-in landing on the right project) is unaffected by this fix.
+
+**Result:** ⏳ pending — needs a real signed-in browser session with a real trusted click. `Cadence: once`.
 
 ### V859232 — B1186256: the new Drainage rail tab renders every carried-over section correctly and Yield/Analysis's links jump to it, on a real multi-parcel plan `Blocker: auth` `Blocker: real-data`
 
@@ -7226,10 +7264,21 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
 
 **Result:** ⏳ pending — needs a real signed-in admin browser session; not reachable from this sandbox. `Cadence: once`.
 
-## ✅ Verified / ❌ Failed — history
+### V870512 — B1205297: the Library's duplicate-upload screen (Replace / Keep both / Cancel, and silent rapid-repeat collapse) actually fires against a real signed-in account's files `Blocker: auth`
 
-> Passed/failed items are archived to **`VERIFICATION-DONE.md`** to keep this file fast.
-> Move a fully-passed item there (do not add it here).
+**Why this needs its own real pass.** The whole decision layer is pure and unit-tested (`test/fileIndex.test.js`'s `findDuplicateReview`/`isRapidRepeatUpload`, including the exact production repro — the 8 South project's three-times-filed spreadsheet, 17s and 43min apart) and `test/uploadQueue.test.js` proves the new `QUEUE_STATUS.DUPLICATE` state stays active until resolved. The production data itself is fixed and confirmed by direct query (the 8 South project now reads 2 live reviews, not 4). What cannot be proven here: the actual drag-and-drop upload flow against a real signed-in Library, because the Library requires cloud data and this sandbox's proxy CORS-blocks the Supabase auth handshake.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, in the Library workspace, inside any one project:**
+1. Upload any file (e.g. a small PDF) once. **Expect:** it files normally, no prompt.
+2. Immediately (within a few seconds) drop the SAME file into the SAME project again. **Expect:** it collapses silently onto the existing file — no second card appears in the file list, no prompt, and the upload tray shows it as filed with no duplicate warning (this is the double-click/retry case).
+3. Wait at least a minute, then drop the SAME file into the SAME project a third time. **Expect:** the upload tray row now shows "Already filed · <date>" with three buttons — **Replace existing**, **Keep both**, **Cancel** — and the file list still shows only the one card from step 1 (nothing was filed yet for this attempt).
+4. Click **Cancel**. **Expect:** the tray row disappears; the file list is unchanged (still one card).
+5. Repeat the minute-plus wait and re-drop, then click **Keep both**. **Expect:** a SECOND, independent card for the same filename now appears in the file list — both are openable and both are real, separate files.
+6. Repeat once more, then click **Replace existing**. **Expect:** the file list still shows the same count as before this step (the old copy is replaced, not added); open "Recently deleted" and confirm the previous copy is there, reversible via Restore.
+7. Drop a file with a name that is ALREADY filed but in a DIFFERENT project (or in the Organization scope vs. a project). **Expect:** no duplicate prompt at all — the screen is scoped per project/Organization, not global.
+8. Open the 8 South project specifically (the production case this item fixed). **Expect:** it reads 2 files, not 4, and both are openable.
+
+**Result:** ⏳ pending — needs a real signed-in browser session; not reachable from this sandbox. `Cadence: once`.
 
 ## ✅ Verified / ❌ Failed — history
 

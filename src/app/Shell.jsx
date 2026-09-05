@@ -26,7 +26,7 @@ import FloatingNotice from "../shared/ui/FloatingNotice.jsx";
 import { mayResumeLastSite } from "../workspaces/site-planner/lib/bootResume.js";
 import HelpReportControl from "./HelpReportControl.jsx";
 import { retryQueuedReports } from "../shared/reports/reportsStore.js";
-import { checkProjectDeletionStatus, listDeletedProjects, restoreDeletedProject } from "../shared/projects/projects.js";
+import { checkProjectDeletionStatus, listDeletedProjects, restoreDeletedProject, projectGateStatus } from "../shared/projects/projects.js";
 
 // NEW-2 (B848833) — lazy, same reasoning as AdminGate/DesignGallery below: a soft-deleted-project
 // notice is rare enough that it has no business riding the entry chunk every route downloads.
@@ -342,16 +342,24 @@ export default function Shell() {
   const [projectGate, setProjectGate] = useState({ id: null, status: "unknown", name: null, deletedAt: null });
   const [gateRecheck, setGateRecheck] = useState(0);
   const gateReqRef = useRef(null);
+  /* B1202176 — ids the Site Planner minted LOCALLY this session via "New project" / "New site
+   * here" (reported through `onProjectChange`'s second argument, set below). Creation there is
+   * deliberately lazy — a blank project's cloud row lands on first save, sometimes racing an
+   * async push — so the very first thing this gate could ask about a brand-new project was
+   * "no such row", indistinguishable from a bad/expired deep link. That regression (against
+   * B848833's own gate) blocked EVERY "New project" click behind "This project doesn't exist"
+   * before the user could do anything to create the row. `projectGateStatus` is the one place
+   * that folds this context into the DB's honest `{exists,deleted}` answer — see its own header.
+   */
+  const freshProjectIdsRef = useRef(new Set());
   useEffect(() => {
     if (!projectId || cross || org) { setProjectGate({ id: projectId, status: "live", name: null, deletedAt: null }); return; }
     gateReqRef.current = projectId;
     let live = true;
     checkProjectDeletionStatus(projectId).then((res) => {
       if (!live || gateReqRef.current !== projectId) return; // superseded by a later navigation
-      if (!res || res.ok === false) { setProjectGate({ id: projectId, status: "live", name: null, deletedAt: null }); return; } // fail OPEN
-      if (!res.exists) { setProjectGate({ id: projectId, status: "missing", name: null, deletedAt: null }); return; }
-      if (res.deleted) { setProjectGate({ id: projectId, status: "deleted", name: res.name, deletedAt: res.deletedAt }); return; }
-      setProjectGate({ id: projectId, status: "live", name: null, deletedAt: null });
+      const g = projectGateStatus({ res, freshlyCreated: freshProjectIdsRef.current.has(projectId) });
+      setProjectGate({ id: projectId, ...g });
     });
     return () => { live = false; };
   }, [projectId, cross, org, gateRecheck]);
@@ -506,7 +514,13 @@ export default function Shell() {
                     org={org}
                     onSelectOrg={goOrg}
                     onNavigate={navigate}
-                    onProjectChange={(gid) => navigate({ projectId: gid || null, cross: false, org: false })}
+                    onProjectChange={(gid, meta) => {
+                      // B1202176 — record which ids SitePlannerApp minted locally (see its own
+                      // `locallyMintedGroupsRef` note) BEFORE navigating, so the gate effect above
+                      // never has a render where it could ask the cloud about this id cold.
+                      if (gid && meta && meta.freshlyCreated) freshProjectIdsRef.current.add(gid);
+                      navigate({ projectId: gid || null, cross: false, org: false });
+                    }}
                     resumeAllowed={mayResumeLastSite({ initialHashEmpty: INITIAL_HASH_EMPTY, projectId, initialProjectId: INITIAL_ROUTE.projectId })}
                     newProjectTick={newProjectTick}
                     docIntent={docIntent}
