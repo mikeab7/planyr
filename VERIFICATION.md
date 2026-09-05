@@ -161,6 +161,23 @@ was never clicked" quietly ships broken.
 5. As the admin, delete the two throwaway rows directly in the Supabase dashboard (there is no delete-from-the-UI path by design) once confirmed.
 
 **Result:** ⏳ pending — needs a real browser reaching the deployed page; not reachable from this sandbox. `Cadence: once`.
+### V848833 — B848833: navigating to a soft-deleted (or nonexistent) project shows the blocked notice — never the editor — on every module, and Restore brings the whole group back, on a real signed-in account `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** Filed `Verify: live` per CLAUDE.md's LIVE-VERIFY rule (the repro cites real project data — site `smtjb0lrexb3`, a real soft-deleted row). This sandbox's egress proxy CORS-blocks the Supabase auth handshake, so no signed-in read of a real `deleted_at` row is reachable here — and confirming the exact reported case needs a genuinely soft-deleted project, which cannot be fabricated signed-out (there is no local/offline soft-delete concept at all; `checkProjectDeletionStatus` returns `{ok:false}` — fail-open — the instant there's no signed-in uid).
+
+**What was verified here, without a signed-in browser.** The single-row deletion check's full branch table (row missing / live / soft-deleted / a genuine fetch error / a pre-migration DB with no `deleted_at` column) is proven against a mocked Supabase client, mutation-checked (`test/deletedProjectGate.test.js`, 8/8 — flipping the `deleted: !!data.deleted_at` derivation to a hardcoded `false` turns the core-repro case red). Confirmed the gate change causes **no regression to the ordinary live-project path**: the full existing `e2e/model-spreadsheet.spec.js` suite (68/69 — one pre-existing, unrelated flaky test, confirmed to fail identically on unmodified `origin/main`) still passes with `Shell.jsx`'s gate wired in. `npm run build` clean, `ui-audit/perf-bundle-audit.mjs` green (the new component is lazy-loaded off Shell.jsx and adds no chunk to any route's allowlist), full repo suite green (716 files / 14,830 tests).
+
+**⛔ A named, bounded residual, read from the actual code rather than glossed over (`Shell.jsx` ~L335-351):** `projectGate` starts at `{id: null, status: "unknown", …}`, and `projectBlocked` requires `projectGate.id === projectId` — so on the very FIRST render after navigating to a project id this session hasn't gated yet, that equality is false (the initial `id` is `null`), `projectBlocked` is false, and the real workspace mounts immediately, **optimistically**, before `checkProjectDeletionStatus`'s one Supabase round-trip resolves. Once it resolves to `deleted`/`missing`, the workspace unmounts on the very next render and `DeletedProjectNotice` replaces it — so from that point on there is no editor to write through. The gap is real but narrow: it's bounded by a single indexed single-row `select` (typically well under a second), it is a deliberate latency tradeoff stated in the code's own comment ("Optimistic — no added latency for the live-project case"), not an oversight, and it does not match the reported repro shape (re-opening a project id hours after deletion, not racing a page load against a keystroke). A second, separate, out-of-scope gap in the same direction: an already-open tab that was live BEFORE the project got soft-deleted never re-runs the check on its own (the effect's deps are `[projectId, cross, org, gateRecheck]` — there is no poll/interval), so it stays editable until the user navigates away and back. Neither gap is closed by this PR; both are two-line-summarizable and worth a follow-up B# if Michael wants the guarantee to be airtight rather than "closes the reported case."
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, using a THROWAWAY test project (never a real owner project):**
+1. Create a throwaway test project, note its project id from the URL, then delete it via the project switcher's kebab menu → Delete (soft delete — it lands in Recently deleted). **Expect:** it disappears from the ordinary project list and appears under "Recently deleted" in the switcher.
+2. Paste the deleted project's own URL directly into the address bar for EACH module in turn — `#/project/<id>/site`, `.../review`, `.../library`, `.../notes`, `.../model`, and the Schedule route — reloading fresh each time. **Expect:** every one shows the "This project was deleted" blocked notice (never the workspace's editor, canvas, or sheet), naming the project and when it was deleted, with a "Restore project" button and a "Go to Dashboard" button — never a working editor silently accepting edits.
+3. Click "Restore project" from one of those blocked screens. **Expect:** it succeeds, the notice clears, and the workspace loads normally with its content intact; the project also reappears in the ordinary project switcher list (not just this one plan, if the group has more than one).
+4. Re-delete the same test project, then navigate to a project id that has NEVER existed at all (make one up). **Expect:** a DISTINCT "This project doesn't exist" notice — no Restore button, just "Go to Dashboard" — confirming a nonexistent id is never conflated with a deleted one.
+5. While still blocked (step 2's state, before restoring), confirm there is no way to reach rename/duplicate/export for that project — the breadcrumb and every workspace menu that would offer them are unreachable because the workspace itself never mounted.
+6. Permanently delete the test project ("Delete forever" from Recently deleted) once done, so nothing throwaway is left behind.
+
+**Result:** ⏳ pending — needs a real signed-in browser session against a real soft-deleted row; not reachable from this sandbox. `Cadence: once`.
 ### V648864 — B1154368: with the map toggle on Comp, an address-search parcel popup offers "Add as comp", never "Plan this site" `Blocker: live-GIS`
 
 **Why this needs its own real pass.** The popup only appears after a real county ArcGIS parcel-identify call — an external host this sandbox's Chromium cannot reach (`ERR_CONNECTION_RESET`, this repo's own standing finding). Everything the fix itself touches (which button renders, which handler it calls) was proven at the component level via `test/parcelCard.test.js` (`renderToStaticMarkup`, mode/onComp props fed directly, no map needed) — what remains is confirming the REAL popup, produced by a REAL parcel click, actually receives `mode="comp"` and a working `onComp`.
@@ -209,6 +226,36 @@ was never clicked" quietly ships broken.
 4. Click "…" again with nothing armed. **Expect:** it still floats cleanly above the card (never inline, never displacing the row's own controls) — confirming (a) is genuinely unaffected.
 
 **Result:** ⏳ pending — needs a real signed-in browser session. `Cadence: once`.
+
+### V650128 — B1156864: the Sites list stays at 37 pursuit projects after the comps-to-sites migration, the three new tracked sites stay off it, and a comp's owning site shows correctly `Blocker: auth` `Blocker: real-data`
+
+NEW-1 collapsed the Site/comp split: every site now carries a `role` ("pursuit" vs "tracked"),
+and the three live comps ("Core 5 - West Hardy", "Tesla - TGS 800K SF", "Tesla - TGS DC4") were
+each attached to a brand-new "tracked" site (none matched an existing pursuit site's location).
+The data-layer migration was fully verified against production directly (byte-for-byte snapshot
+diff, before/after row counts, the role-flip RPC proven live) — see B1156864's own writeup. What
+that could NOT confirm is what the owner's own signed-in browser actually renders, which is the
+one thing this check exists for.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner (this is his
+real account and real data; do not create, delete, or edit anything beyond what a step says to):**
+1. Open the Site Planner's map view (the Sites/Comps rail). **Expect:** the Sites list count reads
+   **37** (not 40, not some other number) — the three new tracked sites (`trk8eef7db4d0`,
+   `trk4c75bf98dd`, `trk0892cf7b73`) must NOT appear anywhere in this list or as map pins.
+2. Switch to the Comps tab. **Expect:** still exactly **3** comps listed (Core 5 - West Hardy,
+   Tesla - TGS 800K SF, Tesla - TGS DC4) — unchanged from before this migration.
+3. Open "Core 5 - West Hardy" for edit (the single-comp edit form, not the paste grid). **Expect:**
+   its project dropdown now shows a real selected project — a site named "Core 5 - West Hardy" —
+   instead of the "no project" default it had before this session. Do NOT change the selection;
+   just confirm it reads correctly, then close without saving.
+4. Repeat step 3 for the two Tesla comps, confirming each shows its own matching project name.
+5. Confirm nothing else about the 37 pre-existing projects changed — pick 2-3 at random from the
+   Sites list and spot-check their names/counties/status read exactly as they did before this
+   session (cross-reference against the owner's own memory or an earlier screenshot if available;
+   this is a sanity check on top of the machine-verified snapshot diff, not a substitute for it).
+
+**Result:** ⏳ pending — needs a real signed-in browser session; not reachable from this sandbox
+(the sandbox proxy CORS-blocks the Supabase auth handshake). `Cadence: once`.
 
 ### V644080 — B1146960: the row's new "Edit / adjust…" menu item and clicking a placed plan on the map both arm #1409's manipulation mode, with opacity/rotation controls visible and Escape leaving it, on a real signed-in account `Blocker: auth` `Blocker: real-data`
 

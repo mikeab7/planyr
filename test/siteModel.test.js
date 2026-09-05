@@ -6,6 +6,7 @@ import {
   buildingNumbers, isBuilding, roadTravelWidth,
   parcelChildrenMap, parcelDescendants, parcelAncestors, lineageConflicts,
   parcelDisplayInfo, parcelOutline, parcelSplitNames,
+  ROLES, roleOf,
 } from "../src/workspaces/site-planner/lib/siteModel.js";
 
 // B848736 (v14) — the separate `underlay` aerial-backdrop field is retired: createSiteModel folds
@@ -114,6 +115,30 @@ describe("Site Model — schema, lifecycle status, selectors", () => {
     expect(STATUSES).toContain("complete");
     expect(createSiteModel({ status: "complete" }).status).toBe("complete");
     expect(createSiteModel({ status: "nonsense" }).status).toBe("pursuit");
+  });
+
+  // B843792 (NEW-1) — a site's ROLE (pursuit vs tracked). Unlike status, EVERY record — legacy
+  // or fresh — defaults to "pursuit": role never existed before this, so there is no prior
+  // population of "tracked" sites to presume, and no legacy-vs-fresh split to make.
+  it("role: a brand-new record and a pre-feature (older version) record both default to pursuit", () => {
+    expect(ROLES).toEqual(["pursuit", "tracked"]);
+    expect(createSiteModel().role).toBe("pursuit");
+    expect(createSiteModel({ schemaVersion: 1 }).role).toBe("pursuit");
+  });
+
+  it("role: an explicit valid role is honored; a bogus value falls back to pursuit", () => {
+    expect(createSiteModel({ role: "tracked" }).role).toBe("tracked");
+    expect(createSiteModel({ role: "nonsense" }).role).toBe("pursuit");
+    expect(roleOf({ role: "tracked" })).toBe("tracked");
+    expect(roleOf({})).toBe("pursuit");
+    expect(roleOf(null)).toBe("pursuit");
+  });
+
+  it("role round-trips through migrate (idempotent, additive)", () => {
+    const once = migrate({ id: "s1", parcels: [{ id: "p" }], role: "tracked" });
+    expect(once.role).toBe("tracked");
+    const twice = migrate(once);
+    expect(twice.role).toBe("tracked");
   });
 
   it("migrate is idempotent (normalize twice == once, ignoring the timestamp)", () => {

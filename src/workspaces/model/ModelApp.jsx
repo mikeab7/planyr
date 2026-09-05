@@ -580,7 +580,7 @@ export default function ModelApp({
 
   let projectName = "";
   if (projectId) { try { const p = listProjects().find((pp) => pp.id === projectId); if (p) projectName = p.name; } catch (_) {} }
-  const currentProject = projectId ? { id: projectId, name: projectName || "Project" } : null;
+  const currentProject = projectId ? { id: projectId, name: projectName || "Untitled project" } : null;
 
   return (
     <div data-testid="model-root" style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--surface-page)" }}>

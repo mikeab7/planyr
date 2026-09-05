@@ -57,6 +57,13 @@ export async function purgeExpiredDeletedProjects(opts) {
   return (await storageEngine()).purgeExpiredDeletedProjects(opts);
 }
 
+// NEW-2 (B848833) — the route gate's own check: is this ONE project id live, soft-deleted, or
+// nonexistent. Called from Shell.jsx on every project-route navigation, so it goes through the
+// same dynamic-import seam as every other engine call this module makes (see the file header).
+export async function checkProjectDeletionStatus(id) {
+  return (await storageEngine()).checkProjectDeletionStatus(id);
+}
+
 export { groupProjects, filterProjects, relTime, suggestNameMatch, normalizeProjectName } from "./projectModel.js";
 
 export function listProjects() {

@@ -9,8 +9,8 @@
  * loadSite migrates on read, saveSite normalizes on write.
  */
 import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs, countJunkEntries,
-  shareMirrorOf, withShareMirror } from "./siteModel.js";
-import { cloudUpsert, cloudDelete, cloudHardDelete, cloudRestore, cloudDeletedRows, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile } from "./cloudSync.js";
+  shareMirrorOf, withShareMirror, normRole } from "./siteModel.js";
+import { cloudUpsert, cloudDelete, cloudHardDelete, cloudRestore, cloudDeletedRows, cloudCheckDeleted, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile } from "./cloudSync.js";
 import { reconcileGroupNames, resolveNameFor, groupKeyOf, maxStampOf } from "./projectName.js";
 import { idbGet, idbPut, idbAvailable, idbDelete, idbDeleteByPrefix } from "./localDb.js";
 import { idbKeysReleasableOnPlanDelete, idbKeysHeldByOtherPlans } from "./sharedAssetRefs.js";
@@ -955,6 +955,25 @@ export function renameSiteGroup(idOrGroup, site) {
     .catch((e) => ({ ok: false, groupId, name, at, plans: localPlans.length, error: (e && e.message) || "rename failed" }));
 }
 
+/* B843792 (NEW-1) — THE ONE ROLE FLIP, mirroring renameSiteGroup's exact shape above (LOCAL
+ * synchronously + CLOUD as one statement over the whole group). "A site can be flipped from
+ * tracked to pursuit later without re-entering anything" is a required NEW-1 outcome — this is
+ * the write path that makes it real. No UI calls this yet (that's NEW-2's site-centric view); it
+ * exists now so the capability is genuinely provable, not merely designed. */
+export function setSiteGroupRole(idOrGroup, role) {
+  const r = normRole(role, null);
+  const rec = loadSite(idOrGroup);
+  const groupId = rec ? groupOf(rec) : idOrGroup;
+  if (!groupId || !r) return Promise.resolve({ ok: false, groupId, role: r, error: "Not a valid role." });
+  const localPlans = loadPlansOfGroup(groupId);
+  localPlans.forEach((s) => saveSite({ id: s.id, role: r }));
+  if (!activeUid()) return Promise.resolve({ ok: true, groupId, role: r, plans: localPlans.length, cloud: { skipped: true } });
+  // LOADED ON DEMAND — see lib/cloudRole.js.
+  return import("./cloudRole.js").then((m) => m.cloudSetSiteRole(activeUid(), groupId, r))
+    .then((cloud) => ({ ok: !!(cloud && cloud.ok), groupId, role: r, plans: localPlans.length, cloud, error: cloud && cloud.error }))
+    .catch((e) => ({ ok: false, groupId, role: r, plans: localPlans.length, error: (e && e.message) || "role flip failed" }));
+}
+
 /* NEW-3 — REPAIR the projects already split by the old rename, and keep them repaired.
  *
  * Idempotent, same contract as the other repair passes here: it converges every group whose plans
@@ -1049,6 +1068,16 @@ export function deleteSiteGroup(groupId) {
  * re-exported here, so the breadcrumb's confirmation copy never has to import this engine just
  * to say "30 days". */
 export { DELETED_RETENTION_DAYS };
+
+/* NEW-2 (B848833) — the ROUTE GATE's own question: is the project id this deep link/route names
+ * still live, soft-deleted, or nonexistent — asked BEFORE a workspace mounts for it, never after.
+ * Thin wrapper over the single-row cloud check (see its own header for the return contract);
+ * signed-out/offline answers `{ ok:false }` so the caller fails OPEN rather than blocking a route
+ * on an inconclusive read (there is no soft-delete concept at all for a local-only, signed-out plan). */
+export async function checkProjectDeletionStatus(id) {
+  if (!activeUid() || !id) return { ok: false, exists: false, deleted: false };
+  return cloudCheckDeleted(activeUid(), id);
+}
 
 // Group the cloud's soft-deleted rows into projects. Returns { ok, supported, projects }:
 // supported:false = db/sites_soft_delete.sql hasn't run on this DB (there is no bin — deletes are

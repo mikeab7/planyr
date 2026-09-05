@@ -27,7 +27,7 @@
 import { activeUid, cloudSitesKey } from "./activeUser.js";
 import { reconcileGroupNames } from "./projectName.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
-import { DEFAULT_STATUS, LEGACY_STATUS, normStatus, isLegacyRecord } from "./siteStatus.js";
+import { DEFAULT_STATUS, LEGACY_STATUS, normStatus, isLegacyRecord, normRole } from "./siteStatus.js";
 
 const SITES_KEY = "planarfit:sites:v1"; // legacy / logged-out store — mirrors storage.js's own key
 
@@ -49,6 +49,8 @@ function projectSummaryOf(p) {
     siteRenamedAt: typeof p.siteRenamedAt === "number" && isFinite(p.siteRenamedAt) && p.siteRenamedAt > 0 ? p.siteRenamedAt : null,
     updatedAt: p.updatedAt || 0,
     status: normStatus(p.status, isLegacyRecord(p) ? LEGACY_STATUS : DEFAULT_STATUS),
+    // B843792 (NEW-1) — role passthrough (pursuit vs tracked); see siteStatus.js.
+    role: normRole(p.role),
     scheduleProjectId: p.scheduleProjectId != null ? p.scheduleProjectId : null,
     scheduleProjectName: p.scheduleProjectName || null,
   };

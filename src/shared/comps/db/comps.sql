@@ -9,6 +9,21 @@
 -- viewer can access (their own, plus their team's) is a candidate for the map regardless of
 -- which project it was entered under, or whether it has one at all.
 --
+-- ⛔ B843792 (NEW-1, 2026-09-05) — `project_id` IS NOW THE COMP'S OWNING SITE, AND IT SUPERSEDES
+-- EVERY EARLIER READING OF THIS COLUMN'S ROLE. Before this, "a comp MAY optionally reference a
+-- project" (the line below, unchanged since this table was created) was true in schema only:
+-- `project_id` was NULL on every live row, and the app never populated or read it for anything
+-- beyond a single edit-form dropdown. NEW-1 collapses the conceptual split between "a Site" and "a
+-- comp's property" into ONE entity (a site with a ROLE — see site-planner/lib/siteStatus.js's
+-- `role`), so a comp's owning site is no longer an optional nicety, it is the whole point: every
+-- comp now belongs to a site (an existing "pursuit" site if one matches its location, otherwise a
+-- newly-created "tracked" site built from the comp's own location + title — see the one-time
+-- backfill in site-planner/db/site_role_unify_backfill_20260905.sql). THIS COLUMN IS NOT RENAMED
+-- and no second link is ever added beside it — `project_id` -> `public.sites(id)` already WAS the
+-- correct shape for "the owning site," it simply had no populated data and no consumer. Saying so
+-- here, loudly, is instead of adding a competing `site_id` column that would leave two links
+-- disagreeing about which one is authoritative.
+--
 -- SHARING SHAPE IS DELIBERATELY NARROWER THAN A SHARED SITE PLAN (site_planner/db/team_sharing.sql):
 -- a team member can READ every team-shared comp, but only the person who ENTERED a comp may
 -- change or delete it — team sharing's "any member may edit" is explicitly NOT reused here. Comp
@@ -35,7 +50,7 @@ create table if not exists public.comps (
   id           uuid not null default gen_random_uuid(),
   user_id      uuid not null default auth.uid() references auth.users(id) on delete cascade,
   team_id      uuid references public.teams(id) on delete set null,
-  project_id   text references public.sites(id) on delete set null,  -- optional; a comp never requires a project
+  project_id   text references public.sites(id) on delete set null,  -- the comp's OWNING SITE (B843792, NEW-1) — nullable at the schema level, but every live comp is now backfilled/attached on creation
 
   comp_type    text not null check (comp_type in ('land', 'building_sale', 'lease')),
   comp_date    date not null,                    -- required on all three comp types
