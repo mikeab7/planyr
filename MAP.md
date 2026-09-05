@@ -99,7 +99,7 @@ _682 source files mapped._
   - _exports_: `computeVisitAggregates`, `orderAgainEntries`
 - **`src/workspaces/model/components/ContextMenu.jsx`** — The right-click context menu (cell/row-header/column-header), anchored at the click point via a zero-sized virtual anchor into the shared AnchoredMenu.
   - _exports_: `default (ContextMenu)`
-- **`src/workspaces/model/components/FileMenu.jsx`** — TODO — describe
+- **`src/workspaces/model/components/FileMenu.jsx`** — The Excel round-trip entry point in row-1's toolbar: Download/Import as .xlsx (primary) and CSV (deliberately secondary).
   - _exports_: `default (FileMenu)`
 - **`src/workspaces/model/components/FindReplaceBar.jsx`** — The floating Find (Ctrl+F) / Replace (Ctrl+H) bar — searches raw cell text, never displayed values.
   - _exports_: `default (FindReplaceBar)`
@@ -115,7 +115,7 @@ _682 source files mapped._
   - _exports_: `default (SheetView)`, `HEADER_H`, `ROW_H`
 - **`src/workspaces/model/components/TabStrip.jsx`** — The sheet tab strip: add/rename (inline)/duplicate/delete/reorder (drag) a workbook sheet, pinned below the grid, outside its own scroller.
   - _exports_: `default (TabStrip)`, `TAB_STRIP_HEIGHT`
-- **`src/workspaces/model/lib/csvIO.js`** — TODO — describe
+- **`src/workspaces/model/lib/csvIO.js`** — CSV round-trip: values-only export of the active sheet (via displayFor), import as a new appended sheet. Dependency-free.
   - _exports_: `addSheetFromCsvText`, `csvRowsToSheet`, `parseCsv`, `sheetToCsv`
 - **`src/workspaces/model/lib/formulaConsistency.js`** — Flags a formula whose R1C1-style shape breaks its row/column neighbours' pattern, or a hardcoded value sitting inside one; precision-tuned against a realistic pro-forma fixture.
   - _exports_: `findInconsistencies`
@@ -145,7 +145,7 @@ _682 source files mapped._
   - _exports_: `beginOrStepTrace`, `cellKey`, `parseCellKey`, `renderableTrace`, `stepTrace`, `TRACE_STEP_CAP`
 - **`src/workspaces/model/lib/undoStack.js`** — General whole-state undo/redo: a snapshot stack keyed on committed edits, agnostic to what kind of edit each one was.
   - _exports_: `useUndoableState`
-- **`src/workspaces/model/lib/xlsxIO.js`** — TODO — describe
+- **`src/workspaces/model/lib/xlsxIO.js`** — Real .xlsx export/import on ExcelJS (lazy-loaded): formulas as formulas, styles, number formats, merges, named ranges; an unsupported formula keeps its cached value + original text.
   - _exports_: `checkFormulaSupport`, `exportWorkbookToXlsxBlob`, `importXlsxToWorkbook`
 - **`src/workspaces/model/ModelApp.jsx`** — Model workspace root: the underwriting spreadsheet — loads/saves the active project's sheet and wires the toolbar, formula bar and grid together.
   - _exports_: `default (ModelApp)`
