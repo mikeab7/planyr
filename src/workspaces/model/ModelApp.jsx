@@ -77,9 +77,9 @@ function EmptyProjectState({ onGoDashboard }) {
   return (
     <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 28, background: "var(--surface-page)" }}>
       <div style={{ maxWidth: 380, textAlign: "center" }}>
-        <h2 style={{ margin: "0 0 8px", fontSize: 19, fontWeight: 700, color: "var(--text-primary)" }}>No model open</h2>
+        <h2 style={{ margin: "0 0 8px", fontSize: 19, fontWeight: 700, color: "var(--text-primary)" }}>No spreadsheet open</h2>
         <p style={{ margin: "0 0 16px", fontSize: 13.5, lineHeight: 1.6, color: "var(--text-secondary)" }}>
-          A model belongs to a project, the same as a site plan or a set of drawings. Pick or start a project to open its spreadsheet.
+          A spreadsheet belongs to a project, the same as a site plan or a set of drawings. Pick or start a project to open it.
         </p>
         <button
           type="button"
@@ -597,9 +597,9 @@ export default function ModelApp({
         accountActive={accountActive}
         saveState={openProject ? modelSaveState(status, accountActive, cloudConfirmed) : null}
         saveDetail={
-          status === "not-provisioned" ? "Cloud backup for Model isn't turned on yet — saved on this device only."
-          : status === "conflict" ? "This model changed elsewhere — reload to see the latest (your edits here stayed on this device)."
-          : status === "diverged" ? "This model has different content saved from another device or browser. What you see here is safe on this device, but saving here will overwrite that other copy. Reload without editing first if you want the other copy instead."
+          status === "not-provisioned" ? "Cloud backup for Spreadsheet isn't turned on yet — saved on this device only."
+          : status === "conflict" ? "This spreadsheet changed elsewhere — reload to see the latest (your edits here stayed on this device)."
+          : status === "diverged" ? "This spreadsheet has different content saved from another device or browser. What you see here is safe on this device, but saving here will overwrite that other copy. Reload without editing first if you want the other copy instead."
           : undefined
         }
         multiEditOk

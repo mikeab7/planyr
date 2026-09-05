@@ -65,6 +65,19 @@ test.describe("Model workspace — spreadsheet vertical slice", () => {
     await expect(page.getByTestId("model-col-header-0")).toHaveText("A");
   });
 
+  // B1166768 — the tab's user-facing name is "Spreadsheet" now, and "spreadsheet" is the NEW
+  // route slug (route.js's SLUG_BY_MODULE). Every OTHER test in this file deliberately keeps
+  // navigating via the OLD "/model" slug (unchanged, on purpose) — route.js kept it as a
+  // permanent legacy alias precisely so those existing deep links never had to be rewritten,
+  // and leaving them as-is doubles as a live regression proof that the alias actually works.
+  // This one test proves the new canonical slug boots the identical workspace end to end.
+  test("the new /spreadsheet slug boots the same workspace as the legacy /model slug", async ({ page }) => {
+    await seedProject(page, "e2e-model-newslug");
+    await page.goto("/#/project/e2e-model-newslug/spreadsheet");
+    await expect(sheetEl(page)).toBeVisible();
+    await expect(page.getByTestId("model-col-header-0")).toHaveText("A");
+  });
+
   test("typing a full number character-by-character does not lose the leading digit", async ({ page }) => {
     // Regression guard for the onFocus/select-all bug: a naive re-introduction selects the
     // type-to-edit seed character, and the next keystroke replaces it.

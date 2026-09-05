@@ -57,7 +57,7 @@ const WORKSPACES = [
   { id: "library",      label: "Library", Comp: lazy(() => import("../workspaces/library/Library.jsx")) },
   { id: "scheduler",    label: "Sequence Planyr",  Comp: lazy(() => import("../workspaces/scheduler/Scheduler.jsx")) },
   { id: "notes",        label: "Notes", Comp: lazy(() => import("../workspaces/notes/Notes.jsx")) },
-  { id: "model",        label: "Model", Comp: lazy(() => import("../workspaces/model/ModelApp.jsx")) },
+  { id: "model",        label: "Spreadsheet", Comp: lazy(() => import("../workspaces/model/ModelApp.jsx")) }, // B1166768 — user-facing rename; this `label` also feeds ErrorBoundary's crash-card copy below
   { id: "food",         label: "Food", Comp: lazy(() => import("../workspaces/food/FoodApp.jsx")) },
 ];
 

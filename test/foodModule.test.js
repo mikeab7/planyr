@@ -93,7 +93,19 @@ describe("the route itself still works (NEW-2 changes discoverability, not the r
   it("(2) route.js maps the slug both ways, and the two maps agree", () => {
     expect(MODULE_BY_SLUG.food).toBe(MODULE_ID);
     expect(SLUG_BY_MODULE[MODULE_ID]).toBe("food");
-    for (const [slug, mod] of Object.entries(MODULE_BY_SLUG)) expect(SLUG_BY_MODULE[mod]).toBe(slug);
+    // Every slug MODULE_BY_SLUG recognizes must resolve to a module whose OWN canonical slug
+    // (SLUG_BY_MODULE[mod]) round-trips back to that same module. This used to assert plain
+    // slug === canonical equality for every entry — that held only because every module had
+    // exactly one recognized slug. B1166768 introduced the first deliberate exception: "model"
+    // stays a permanent PARSE-ONLY legacy alias after the Model tab's slug moved to
+    // "spreadsheet" (route.js's own header explains why), so an alias is allowed to differ FROM
+    // its module's canonical slug — it is never allowed to point at a canonical slug that
+    // resolves to some OTHER module, which is the actual defect this guard exists to catch.
+    for (const [slug, mod] of Object.entries(MODULE_BY_SLUG)) {
+      const canonical = SLUG_BY_MODULE[mod];
+      expect(canonical, `module "${mod}" (reached via slug "${slug}") has no canonical SLUG_BY_MODULE entry`).toBeTruthy();
+      expect(MODULE_BY_SLUG[canonical], `canonical slug "${canonical}" for module "${mod}" doesn't parse back to it`).toBe(mod);
+    }
   });
 
   it("(2b) the route round-trips: #/food -> {module:'food'} -> #/food", () => {

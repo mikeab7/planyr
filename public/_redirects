@@ -40,17 +40,28 @@
 # "clean-path entrances" suite fails the build if a slug is added there and not here (or here
 # and not there). Both the bare and the trailing-slash form need their own line; Cloudflare's
 # redirect matching is exact-path, not prefix, so /food does not also match /food/.
-/site        /#/site       302
-/site/       /#/site       302
-/schedule    /#/schedule   302
-/schedule/   /#/schedule   302
-/markup      /#/markup     302
-/markup/     /#/markup     302
-/library     /#/library    302
-/library/    /#/library    302
-/notes       /#/notes      302
-/notes/      /#/notes      302
-/model       /#/model      302
-/model/      /#/model      302
-/food        /#/food       302
-/food/       /#/food       302
+#
+# B1166768 — the Model tab's slug changed from "model" to "spreadsheet" (user-facing rename to
+# "Spreadsheet"; SLUG_BY_MODULE now emits "spreadsheet", never "model"). This is why /model and
+# /model/ are GONE from this list rather than kept alongside /spreadsheet: this list is strictly
+# one bare-path entrance per CURRENT canonical slug (the sync test above enforces exactly that —
+# a stray rule naming a slug SLUG_BY_MODULE no longer emits fails the build), so it can't carry a
+# second, retired entrance for the same module without changing that invariant. The deep-link
+# redirect that actually matters — an already-bookmarked "#/model" or "#/project/<id>/model" HASH
+# URL — is untouched and still resolves: route.js's MODULE_BY_SLUG keeps "model" as a permanent
+# parse-only alias, and the app never emits a bare (hash-less) link in the first place, so this
+# entrance only ever served someone typing "planyr.io/model" straight into the address bar.
+/site         /#/site         302
+/site/        /#/site         302
+/schedule     /#/schedule     302
+/schedule/    /#/schedule     302
+/markup       /#/markup       302
+/markup/      /#/markup       302
+/library      /#/library      302
+/library/     /#/library      302
+/notes        /#/notes        302
+/notes/       /#/notes        302
+/spreadsheet  /#/spreadsheet  302
+/spreadsheet/ /#/spreadsheet  302
+/food         /#/food         302
+/food/        /#/food         302
