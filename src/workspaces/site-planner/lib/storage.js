@@ -1378,6 +1378,7 @@ export function saveSite(partial, { skipHistory = false } = {}) {
   lastSeenAt[partial.id] = model.updatedAt;
   return writeSites(sites);
 }
+
 // Remove a site locally (instant/optimistic) AND from the cloud when signed in. Returns the
 // cloud-delete promise ({ ok, error?, removed? }) so the caller can AWAIT it and surface a loud
 // error if the cloud removal actually failed (the row would otherwise silently survive and
