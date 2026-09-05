@@ -1,10 +1,11 @@
 /* siteListLight.js — the LIGHTWEIGHT project list read (B927105).
  *
  * `shared/projects/projects.js`'s `listProjects()` — read on literally every workspace's header
- * (AppHeader -> ProjectBreadcrumb) for the project switcher/breadcrumb — only ever needs six
- * scalar fields per site record: id, groupId, site/name, siteRenamedAt, updatedAt, status,
- * scheduleProjectId/Name (see `projectModel.groupProjects` and `projectName.reconcileGroupNames`,
- * both pure and dependency-free). It never touches drawn geometry (els/parcels/markups/…).
+ * (AppHeader -> ProjectBreadcrumb) for the project switcher/breadcrumb — only ever needs a
+ * handful of scalar fields per site record: id, groupId, site/name, siteRenamedAt, updatedAt,
+ * status, role, scheduleProjectId/Name (see `projectModel.groupProjects` and
+ * `projectName.reconcileGroupNames`, both pure and dependency-free). It never touches drawn
+ * geometry (els/parcels/markups/…).
  *
  * `storage.js`'s `loadSitesList()` normalizes every record through the full Site Model
  * (`createSiteModel`), which statically pulls the whole geometry-healing engine —
