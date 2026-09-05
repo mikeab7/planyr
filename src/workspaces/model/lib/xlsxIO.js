@@ -19,8 +19,13 @@
  * language (src/shared/formula/formula.js) is deliberately Excel-syntax-compatible for A1/range/
  * name/cross-sheet references, so an Excel formula transfers VERBATIM whenever every function it
  * calls is one this engine implements (`FUNCTION_NAMES`). A function this engine has never built
- * (VLOOKUP is the standing example — extremely common in real Excel files, not in `FUNCTIONS`)
- * would otherwise silently become "=VLOOKUP(...)" text that evaluates to a confident #NAME? — a
+ * (INDIRECT is the standing example — genuinely common in real Excel models, and structurally
+ * unlikely to ever be added here: this engine's dependency graph is built by statically walking a
+ * formula's AST before evaluation, sheetEngine.js's `collectCellDeps` — a reference INDIRECT/
+ * OFFSET compute at runtime from a STRING can't be seen by that walk, so it isn't merely
+ * unimplemented today the way VLOOKUP/HLOOKUP briefly were before a concurrent session added them
+ * mid-development — it can't be supported without a different dependency model entirely)
+ * would otherwise silently become "=INDIRECT(...)" text that evaluates to a confident #NAME? — a
  * WRONG NUMBER THAT LOOKS RIGHT once the sheet recalculates, exactly the class this repo's rules
  * exist to prevent. So an unsupported cell keeps the FILE'S OWN CACHED VALUE as a plain literal
  * (nothing is silently dropped) and the original formula text is recorded in
@@ -65,7 +70,7 @@ function astUsesOnlyKnownFunctions(node) {
  *  the legacy .xlsx function-name table (IFS, TEXTJOIN, MAXIFS, …) — stripped before parsing so a
  *  function THIS engine already supports isn't misjudged as unsupported over a prefix, not a
  *  syntax choice, this engine's own syntax carries no such prefix. Exported for the round-trip
- *  unit test to probe directly against a known-unimplemented function (VLOOKUP). */
+ *  unit test to probe directly against a known-unimplemented function (INDIRECT). */
 export function checkFormulaSupport(excelFormulaText) {
   const stripped = String(excelFormulaText || "").replace(/_xlfn\./gi, "").replace(/_xlws\./gi, "");
   const { ast, error } = parseFormula(stripped);

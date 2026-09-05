@@ -5,8 +5,17 @@
  * it. Read the produced file back with the library (ExcelJS, directly — not through this app's
  * own reader) and assert FORMULA STRINGS, not just values. Then re-import the same file into
  * Planyr and confirm same values AND same formulas. Also test the unsupported-function path
- * explicitly with a function this engine does not implement (VLOOKUP is not in
+ * explicitly with a function this engine does not implement (INDIRECT is not in
  * shared/formula/formula.js's FUNCTIONS table — confirmed by this suite's own first test).
+ *
+ * ⛔ Originally written against VLOOKUP as the unsupported fixture — swapped to INDIRECT
+ * mid-session when a concurrent branch (B1179328) merged VLOOKUP/HLOOKUP/SUMIFS/COUNTIFS/
+ * AVERAGEIFS/SUMPRODUCT into the shared engine, which made VLOOKUP a real, supported function
+ * and turned this suite's own "is not implemented" assertion false. INDIRECT is a sturdier
+ * choice than picking another lookup function from the same actively-growing family: it needs a
+ * RUNTIME-computed reference from a string, which this engine's AST-walking dependency graph
+ * (sheetEngine.js's collectCellDeps) cannot see ahead of evaluation — see xlsxIO.js's own header
+ * for why that makes it structurally, not just currently, unsupported.
  */
 import { describe, it, expect } from "vitest";
 import ExcelJS from "exceljs";
@@ -40,9 +49,9 @@ function buildFixtureWorkbook() {
 }
 
 describe("checkFormulaSupport", () => {
-  it("VLOOKUP is not implemented by this engine — the deliberate unsupported-function fixture", () => {
-    expect(FUNCTION_NAMES).not.toContain("VLOOKUP");
-    expect(checkFormulaSupport("VLOOKUP(A1,B1:C10,2,FALSE)").supported).toBe(false);
+  it("INDIRECT is not implemented by this engine — the deliberate unsupported-function fixture", () => {
+    expect(FUNCTION_NAMES).not.toContain("INDIRECT");
+    expect(checkFormulaSupport('INDIRECT("A1")').supported).toBe(false);
   });
   it("SUM and a cross-sheet reference are supported", () => {
     expect(checkFormulaSupport("SUM(A1:A2)").supported).toBe(true);
@@ -129,17 +138,17 @@ describe("exportWorkbookToXlsxBlob + re-read with ExcelJS directly (the owner's 
   });
 });
 
-describe("the unsupported-function path — VLOOKUP, explicitly (owner's VERIFY ask)", () => {
+describe("the unsupported-function path — INDIRECT, explicitly (owner's VERIFY ask)", () => {
   it("keeps the FILE'S OWN cached value and records the original formula text, never drops it or fails the whole import", async () => {
     // Built with raw ExcelJS directly — simulating a real Excel-authored file where REAL Excel
-    // (not Planyr) already evaluated VLOOKUP to a genuine number, exactly what this app would
+    // (not Planyr) already evaluated INDIRECT to a genuine number, exactly what this app would
     // receive from a lender's or partner's real workbook.
     const raw = new ExcelJS.Workbook();
     const ws = raw.addWorksheet("Sheet1");
     ws.getCell("A1").value = "key";
     ws.getCell("B1").value = 2;
     ws.getCell("C1").value = 3;
-    ws.getCell("D1").value = { formula: "VLOOKUP(A1,A1:C1,3,FALSE)", result: 3 };
+    ws.getCell("D1").value = { formula: 'INDIRECT("B1")', result: 2 };
     ws.getCell("D2").value = { formula: "SUM(B1:C1)", result: 5 }; // a supported formula in the SAME file must be unaffected
     const buf = await raw.xlsx.writeBuffer();
 
@@ -148,13 +157,13 @@ describe("the unsupported-function path — VLOOKUP, explicitly (owner's VERIFY 
     const sheet = workbook.sheets[0].sheet;
 
     // The cached VALUE is kept as a plain literal — nothing silently dropped or zeroed.
-    expect(sheet.cells["c4:0"]).toBe("3");
-    // isFormulaText must be FALSE now — this is a value cell, never re-evaluated as "=VLOOKUP(...)"
+    expect(sheet.cells["c4:0"]).toBe("2");
+    // isFormulaText must be FALSE now — this is a value cell, never re-evaluated as "=INDIRECT(...)"
     // (which would show a confident, wrong #NAME? on the very next recalc).
     expect(sheet.cells["c4:0"].startsWith("=")).toBe(false);
     // The original formula text is preserved for the user to find, via the pure reader SheetView
     // itself calls to paint the corner marker.
-    expect(unsupportedFormulaAt(sheet, 0, 3)).toBe("=VLOOKUP(A1,A1:C1,3,FALSE)");
+    expect(unsupportedFormulaAt(sheet, 0, 3)).toBe('=INDIRECT("B1")');
 
     // The supported formula elsewhere in the same file imported normally — one unsupported
     // cell never fails (or degrades) the rest of the sheet.
@@ -165,7 +174,7 @@ describe("the unsupported-function path — VLOOKUP, explicitly (owner's VERIFY 
   it("an edit to the cell clears the marker (sheetModel.js's setRaw contract)", async () => {
     const raw = new ExcelJS.Workbook();
     const ws = raw.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: "VLOOKUP(1,A1:B1,2,FALSE)", result: 42 };
+    ws.getCell("A1").value = { formula: 'INDIRECT("B1")', result: 42 };
     const buf = await raw.xlsx.writeBuffer();
     const { workbook } = await importXlsxToWorkbook(Buffer.from(buf));
     const sheet = workbook.sheets[0].sheet;
