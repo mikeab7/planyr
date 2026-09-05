@@ -35,7 +35,13 @@ const PRINT_CSS = `
 html, body { margin: 0; padding: 0; background: #FFFFFF; color: #14161C; }
 body { font: 11.5pt/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .sheet { max-width: 190mm; margin: 0 auto; padding: 10mm 8mm; }
-.doc-title { font-size: 20pt; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 2mm; }
+/* ⛔ B1203504 — bumped 20pt → 26pt so the printed title stays unmistakably the largest text on
+   the page after the body's own heading scale opened up below (a 1.85em h1 at this body size
+   is ~21pt; the old 20pt title would have gone back to being about the SAME size as a heading
+   on paper, reproducing the exact screen defect this item exists to fix — see EDITOR_CSS's own
+   comment on the screen title for why "about the same size" already failed this item's own
+   critique loop once). */
+.doc-title { font-size: 26pt; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 2mm; }
 .doc-meta { font-size: 8.5pt; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #5B6270; margin: 0 0 6mm; }
 .page-break { break-before: page; page-break-before: always; }
 .note-trail { font-size: 9pt; font-weight: 600; letter-spacing: 0.03em; color: #5A6070; margin: 0 0 1mm; }
@@ -48,22 +54,35 @@ body { font: 11.5pt/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sa
    ⛔ NO BACKTICKS IN THIS COMMENT: it lives INSIDE the PRINT_CSS template literal, so one
    backtick ends the string and the whole module stops parsing. Sixth time in this repo. */
 .note-body { line-height: ${SINGLE}; }
-.note-body > * + * { margin-top: 0.7em; }
+/* ⛔ REAL VERTICAL RHYTHM ON PAPER TOO (B1203504) — mirrors EDITOR_CSS's identical fix,
+   construct for construct. ".note-body p"/"h1"-"h4"/"ul"/"ol"/"blockquote" used to reset
+   "margin: 0", which is more specific than this catch-all and silently cancelled it for every
+   one of them — the same specificity race the screen had, reproduced on paper because the two
+   sheets are deliberately parallel. Bumped 0.7em → 1em to match the screen's more generous gap;
+   still the fallback for constructs that never set their own margin (pre, tables, and the
+   custom node prints below). */
+.note-body > * + * { margin-top: 1em; }
+.note-body > *:first-child { margin-top: 0; }
 /* PDF-PARITY for the Tab indent (B1392): a tab typed in a paragraph is a real character
    in the document, so the sheet has to honour it — and at the SAME width the screen
    does, or an indented line would land in a different place on paper. */
-.note-body p { margin: 0; orphans: 2; widows: 2; white-space: pre-wrap; tab-size: 4; }
-.note-body h1 { font-size: 1.7em; font-weight: 700; line-height: 1.25; margin: 0; break-after: avoid; }
-.note-body h2 { font-size: 1.4em; font-weight: 700; line-height: 1.3; margin: 0; break-after: avoid; }
-.note-body h3 { font-size: 1.18em; font-weight: 650; margin: 0; break-after: avoid; }
-.note-body h4 { font-size: 1.05em; font-weight: 650; margin: 0; break-after: avoid; }
-.note-body ul, .note-body ol { padding-left: 1.5em; margin: 0; }
+.note-body p { margin: 1em 0 0 0; orphans: 2; widows: 2; white-space: pre-wrap; tab-size: 4; }
+/* ⛔ THE SAME OPENED-UP SCALE AS THE SCREEN, AND THE SAME TOP-HEAVY ASYMMETRY (B1203504) — see
+   EDITOR_CSS's identical comment. Paper keeps its own, slightly smaller multipliers than the
+   screen (an existing, deliberate gap — "at print weight" per this file's own header, not a
+   byte-identical mirror), scaled up from the old 1.7/1.4/1.18/1.05em in the same proportion the
+   screen moved. */
+.note-body h1 { font-size: 1.85em; font-weight: 700; line-height: 1.2; margin: 1.4em 0 0.5em 0; break-after: avoid; }
+.note-body h2 { font-size: 1.45em; font-weight: 700; line-height: 1.25; margin: 1.2em 0 0.45em 0; break-after: avoid; }
+.note-body h3 { font-size: 1.15em; font-weight: 650; margin: 1em 0 0.4em 0; break-after: avoid; }
+.note-body h4 { font-size: 1.03em; font-weight: 650; margin: 0.9em 0 0.35em 0; break-after: avoid; }
+.note-body ul, .note-body ol { padding-left: 1.5em; margin: 1em 0 0 0; }
 .note-body li { margin: 2px 0; }
 .note-body li p { margin: 0; }
 /* PDF-PARITY for the indent attribute's stylesheet table (B842949) — mirrors the identical
    table in components/NoteEditor.jsx → EDITOR_CSS, construct for construct. */
 ${indentCssRules(".note-body li")}
-.note-body blockquote { border-left: 3px solid #B8418C; padding-left: 0.9em; color: #3A3F4B; margin: 0; }
+.note-body blockquote { border-left: 3px solid #B8418C; padding-left: 0.9em; color: #3A3F4B; margin: 1em 0 0 0; }
 .note-body code { background: #F2F3F6; border: 1px solid #D8DBE2; border-radius: 3px; padding: 0.1em 0.32em; font-family: ui-monospace, "Courier New", monospace; font-size: 0.9em; }
 .note-body pre { background: #F2F3F6; border: 1px solid #D8DBE2; border-radius: 6px; padding: 0.7em 0.85em; white-space: pre-wrap; word-break: break-word; break-inside: avoid; }
 .note-body pre code { background: none; border: none; padding: 0; }

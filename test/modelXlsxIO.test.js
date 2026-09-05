@@ -21,7 +21,7 @@ import { describe, it, expect } from "vitest";
 import ExcelJS from "exceljs";
 import {
   createWorkbook, addSheet, applyToActiveSheet, commitCellText, setNumberFormat, setCellStyle,
-  mergeRange, unsupportedFormulaAt,
+  mergeRange, unsupportedFormulaAt, workbookHasContent,
 } from "../src/workspaces/model/lib/sheetModel.js";
 import { defineName } from "../src/workspaces/model/lib/namedRanges.js";
 import { exportWorkbookToXlsxBlob, importXlsxToWorkbook, checkFormulaSupport } from "../src/workspaces/model/lib/xlsxIO.js";
@@ -184,5 +184,67 @@ describe("the unsupported-function path — INDIRECT, explicitly (owner's VERIFY
     const edited = commitCellText(sheet, 0, 0, "99");
     expect(unsupportedFormulaAt(edited, 0, 0)).toBeNull();
     expect(edited.cells["c1:0"]).toBe("99");
+  });
+});
+
+describe("NEW-1 (owner chat block) — workbookHasContent, the gate a whole-workbook Import Excel checks before replacing anything", () => {
+  it("a brand-new workbook (never typed into) reads as empty — no confirmation needed to import over it", () => {
+    expect(workbookHasContent(createWorkbook())).toBe(false);
+  });
+
+  it("⛔ THE TRAP: a second sheet with zero cells still counts as content — dropping it silently is exactly NEW-1's live bug (Goose Creek)", () => {
+    const wb = addSheet(createWorkbook()); // Sheet1 (empty) + Sheet2 (empty, active) — two sheets, no cells anywhere
+    expect(workbookHasContent(wb)).toBe(true);
+  });
+
+  it("a single sheet with a typed cell counts as content", () => {
+    let wb = createWorkbook();
+    wb = applyToActiveSheet(wb, (s) => commitCellText(s, 0, 0, "hello"));
+    expect(workbookHasContent(wb)).toBe(true);
+  });
+
+  it("a single sheet carrying only a number format, a style, a merge, or a named range (no typed cell) still counts as content", () => {
+    let fmt = createWorkbook();
+    fmt = applyToActiveSheet(fmt, (s) => setNumberFormat(s, 0, 0, 0, 0, "$#,##0.00"));
+    expect(workbookHasContent(fmt)).toBe(true);
+
+    let style = createWorkbook();
+    style = applyToActiveSheet(style, (s) => setCellStyle(s, 0, 0, 0, 0, { bold: true }));
+    expect(workbookHasContent(style)).toBe(true);
+
+    let merged = createWorkbook();
+    merged = applyToActiveSheet(merged, (s) => mergeRange(s, 0, 0, 0, 2));
+    expect(workbookHasContent(merged)).toBe(true);
+
+    let named = createWorkbook();
+    named = applyToActiveSheet(named, (s) => defineName(s, "LandCost", { r1: 1, c1: 1, r2: 1, c2: 1 }));
+    expect(workbookHasContent(named)).toBe(true);
+  });
+});
+
+describe("NEW-2 (owner chat block) — a bad .xlsx file gets a plain sentence, never JSZip's own developer error", () => {
+  it("feeding non-xlsx bytes produces a friendly message, with no trace of jszip / \"central directory\" / a URL", async () => {
+    const notAZip = Buffer.from("this is a plain text file renamed .xlsx, not a real workbook at all");
+    await expect(importXlsxToWorkbook(notAZip)).rejects.toThrow();
+    let message = "";
+    try {
+      await importXlsxToWorkbook(notAZip);
+    } catch (e) {
+      message = String(e && e.message);
+    }
+    expect(message.length).toBeGreaterThan(0);
+    const lower = message.toLowerCase();
+    expect(lower).not.toContain("jszip");
+    expect(lower).not.toContain("central directory");
+    expect(lower).not.toMatch(/https?:\/\//);
+    expect(lower).not.toContain("zip file");
+    // Still says something useful, not just an empty/generic string.
+    expect(lower).toContain("excel");
+  });
+
+  it("the app's OWN deliberate error for a real, parseable file with zero worksheets passes through EXACTLY, unreplaced by the generic friendly wrapper", async () => {
+    const raw = new ExcelJS.Workbook(); // a genuinely valid, parseable .xlsx — just no sheets in it
+    const buf = await raw.xlsx.writeBuffer();
+    await expect(importXlsxToWorkbook(Buffer.from(buf))).rejects.toThrow("This Excel file has no worksheets.");
   });
 });

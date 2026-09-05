@@ -1106,6 +1106,27 @@ export function migrateWorkbook(raw) {
   return { version: WORKBOOK_VERSION, nextSheetId: 2, sheets: [makeSheetEntry("sheet1", "Sheet1", migrateSheet(raw))], activeSheetId: "sheet1" };
 }
 
+/** Whether a workbook holds anything a wholesale replace (Import Excel — xlsxIO.js) would
+ *  actually throw away: more than one sheet, or any cell/format/style/merge/name on its one
+ *  sheet. A brand-new workbook (`createWorkbook()`), or one whose only sheet nobody has ever
+ *  typed into, reads as empty — importing over THAT needs no confirmation. (NEW-1, owner chat
+ *  block, 2026-09-05: a two-sheet workbook was silently wiped by an Excel import with no warning
+ *  at all — the trap this exists to close is a test that only tries the empty case, which passes
+ *  on the broken "always replace, never ask" behavior too.) */
+export function workbookHasContent(workbook) {
+  if (!workbook || !Array.isArray(workbook.sheets)) return false;
+  if (workbook.sheets.length > 1) return true;
+  const sheet = workbook.sheets[0] && workbook.sheets[0].sheet;
+  if (!sheet) return false;
+  return (
+    Object.keys(sheet.cells || {}).length > 0 ||
+    Object.keys(sheet.formats || {}).length > 0 ||
+    Object.keys(sheet.styles || {}).length > 0 ||
+    (sheet.merges || []).length > 0 ||
+    Object.keys(sheet.names || {}).length > 0
+  );
+}
+
 export function activeSheetIndex(workbook) {
   const idx = workbook.sheets.findIndex((s) => s.id === workbook.activeSheetId);
   return idx < 0 ? 0 : idx;

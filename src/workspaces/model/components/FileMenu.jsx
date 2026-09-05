@@ -14,7 +14,7 @@
  */
 import { useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
-import { MenuItem, menuPanelStyle } from "../../../shared/ui/controls.jsx";
+import { Button, MenuItem, menuPanelStyle } from "../../../shared/ui/controls.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
 
 function Icon({ children }) {
@@ -33,7 +33,7 @@ const chromeBtnStyle = {
   color: "var(--chrome-text)", font: "inherit", fontSize: 12, fontWeight: 600, cursor: "pointer",
 };
 
-export default function FileMenu({ busy, notice, onExportXlsx, onExportCsv, onImportXlsxFile, onImportCsvFile }) {
+export default function FileMenu({ busy, notice, confirmReplace, onExportXlsx, onExportCsv, onImportXlsxFile, onImportCsvFile }) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef(null);
   const xlsxInputRef = useRef(null);
@@ -60,7 +60,23 @@ export default function FileMenu({ busy, notice, onExportXlsx, onExportCsv, onIm
       >
         <IconFile /><span>File</span><span aria-hidden="true" style={{ fontSize: 10, opacity: 0.7 }}>▾</span>
       </button>
-      {notice && (
+      {confirmReplace ? (
+        // NEW-1 (owner chat block) — the inline, no-`window.confirm` shape this app already uses
+        // for every other destructive action (ReviewsBar.jsx / VisitPanel.jsx / CompEntryGrid.jsx's
+        // DiscardCloseConfirm). Shown INSTEAD OF `notice` while it's up — a plain click discarding
+        // real work is exactly what this replaces.
+        <span
+          data-testid="model-import-replace-confirm" role="alertdialog"
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 8, padding: "3px 9px 3px 10px",
+            borderRadius: RADIUS.pill, background: "var(--danger-bg)", border: "1px solid var(--danger-border)",
+          }}
+        >
+          <span style={{ fontSize: 10.5, fontWeight: 600, color: "var(--danger)" }}>{confirmReplace.text}</span>
+          <Button size="sm" variant="ghost" onClick={confirmReplace.onCancel}>Keep this workbook</Button>
+          <Button size="sm" variant="danger" onClick={confirmReplace.onConfirm}>Replace</Button>
+        </span>
+      ) : notice && (
         <span
           data-testid="model-file-notice" role="status"
           style={{
@@ -78,8 +94,8 @@ export default function FileMenu({ busy, notice, onExportXlsx, onExportCsv, onIm
           <MenuItem data-testid="model-export-xlsx" onClick={() => pick(onExportXlsx)}>Download as Excel (.xlsx)</MenuItem>
           <MenuItem data-testid="model-export-csv" onClick={() => pick(onExportCsv)}>Download active sheet as CSV</MenuItem>
           <div style={{ height: 1, margin: "4px 0", background: "var(--border-default)" }} />
-          <MenuItem data-testid="model-import-xlsx" title="Replaces this project's workbook — Ctrl+Z undoes it" onClick={() => { setOpen(false); xlsxInputRef.current?.click(); }}>
-            Import Excel (.xlsx)…
+          <MenuItem data-testid="model-import-xlsx" title="Replaces every sheet in this workbook — asks first if you've already got something here" onClick={() => { setOpen(false); xlsxInputRef.current?.click(); }}>
+            Import Excel (replaces workbook)…
           </MenuItem>
           <MenuItem data-testid="model-import-csv" title="Adds a new sheet — your other sheets are untouched" onClick={() => { setOpen(false); csvInputRef.current?.click(); }}>
             Import CSV (new sheet)…

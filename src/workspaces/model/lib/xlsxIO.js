@@ -385,17 +385,15 @@ function isValidPlanyrName(name) {
   return upper !== "TRUE" && upper !== "FALSE" && !FUNCTION_NAME_SET.has(upper);
 }
 
-/** Parse an ArrayBuffer holding a real .xlsx file into a Planyr workbook. Every worksheet, in
- *  order; formulas stay formulas where every function they call is implemented (see
- *  `checkFormulaSupport`), otherwise the cell keeps the file's own cached VALUE and its original
- *  text lands in `unsupportedFormulas` (never dropped, never a whole-import failure). Returns
- *  `{ workbook, unsupportedCount }` so the caller can tell the user how many cells were kept as
- *  values (LOUD-FAILURE — never silent). Throws on a file ExcelJS can't parse at all, or on a
- *  file with zero worksheets — the caller surfaces that as a visible error. */
-export async function importXlsxToWorkbook(arrayBuffer) {
+/** A marker so the outer catch below can tell a message THIS module already wrote in plain
+ *  English (safe to show verbatim) apart from whatever a dependency (ExcelJS, and beneath it
+ *  JSZip) threw on its own — see `importXlsxToWorkbook`'s header for why that distinction matters. */
+class XlsxImportError extends Error {}
+
+async function readWorkbookFile(arrayBuffer) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(arrayBuffer);
-  if (!wb.worksheets.length) throw new Error("This Excel file has no worksheets.");
+  if (!wb.worksheets.length) throw new XlsxImportError("This Excel file has no worksheets.");
 
   const sheetNameToId = new Map();
   wb.worksheets.forEach((ws, i) => sheetNameToId.set(ws.name.trim().toLowerCase(), `sheet${i + 1}`));
@@ -491,4 +489,30 @@ export async function importXlsxToWorkbook(arrayBuffer) {
 
   const workbook = migrateWorkbook({ sheets: rawSheets, activeSheetId: rawSheets[0].id });
   return { workbook, unsupportedCount };
+}
+
+/** Parse an ArrayBuffer holding a real .xlsx file into a Planyr workbook. Every worksheet, in
+ *  order; formulas stay formulas where every function they call is implemented (see
+ *  `checkFormulaSupport`), otherwise the cell keeps the file's own cached VALUE and its original
+ *  text lands in `unsupportedFormulas` (never dropped, never a whole-import failure). Returns
+ *  `{ workbook, unsupportedCount }` so the caller can tell the user how many cells were kept as
+ *  values (LOUD-FAILURE — never silent). Throws on a file ExcelJS can't parse at all, or on a
+ *  file with zero worksheets — the caller surfaces that as a visible error.
+ *
+ *  ⛔ NEW-2 (owner chat block, 2026-09-05) — a file that isn't really a .xlsx (any non-zip bytes,
+ *  a text file renamed .xlsx) used to reach the user as ExcelJS/JSZip's own developer-facing
+ *  error VERBATIM: "Can't find end of central directory : is this a zip file ? If it is, see
+ *  https://stuk.github.io/jszip/documentation/howto/read_zip.html" — a real-estate developer has
+ *  no use for a link to JSZip's own docs. `readWorkbookFile` does the actual parse; anything it
+ *  throws that ISN'T one of this module's own `XlsxImportError`s (i.e. anything that bubbled up
+ *  from ExcelJS/JSZip itself) is logged to the console for a developer to read later and replaced
+ *  here with one plain sentence — never concatenated into the message shown to the user. */
+export async function importXlsxToWorkbook(arrayBuffer) {
+  try {
+    return await readWorkbookFile(arrayBuffer);
+  } catch (e) {
+    if (e instanceof XlsxImportError) throw e;
+    console.error("xlsxIO: could not parse this file as an Excel workbook", e);
+    throw new XlsxImportError("This doesn't look like a valid Excel file. Make sure it opens correctly in Excel, then try importing it again.");
+  }
 }

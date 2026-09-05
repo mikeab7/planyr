@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { DENSITIES, DEFAULT_DENSITY, SINGLE, densityFor, densityStyle, blockFontSize,
+import { DENSITIES, DEFAULT_DENSITY, SINGLE, COMFORTABLE_LINE, densityFor, densityStyle, blockFontSize,
   BLOCK_SPACES, LINE_SPACINGS, spacingFromElement, spacingLabel, spacingStyle,
 } from "../src/workspaces/notes/lib/notesSpacing.js";
 
@@ -155,8 +155,19 @@ describe("the note's density", () => {
     expect(densityFor("compact").listGap).toBeLessThanOrEqual(densityFor("comfortable").listGap);
   });
 
-  it("Comfortable IS Single — the two names must not drift apart", () => {
-    expect(densityFor("comfortable").line).toBe(SINGLE);
+  it("⛔ B1203504 — Comfortable is a genuine PROSE ratio, not Word's Single any more", () => {
+    /* Superseded, deliberately: the earlier version of this test pinned "Comfortable IS
+     * Single" because that was the ship. The owner reported the field read like a spreadsheet
+     * — measured, every note opened at 1.15 by default, the exact ratio Word calls single —
+     * and asked for a lot better, naming Craft/Bear/Notion (1.5–1.7) as the bar. Comfortable now
+     * sits in that band; Single keeps its own name and its own number, both unchanged. */
+    expect(densityFor("comfortable").line).toBe(COMFORTABLE_LINE);
+    expect(densityFor("comfortable").line).toBeGreaterThanOrEqual(1.5);
+    expect(densityFor("comfortable").line).toBeLessThanOrEqual(1.7);
+  });
+
+  it("⛔ Compact IS Single now — the tight option didn't vanish, it moved under its honest name", () => {
+    expect(densityFor("compact").line).toBe(SINGLE);
   });
 
   it("⛔ an unknown id RENDERS rather than throwing — a stored document must always open", () => {
@@ -170,6 +181,6 @@ describe("the note's density", () => {
   });
 
   it("densityStyle hands out both numbers together, so one control moves both", () => {
-    expect(densityStyle("compact")).toEqual({ lineHeight: densityFor("compact").line, listGap: 0 });
+    expect(densityStyle("compact")).toEqual({ lineHeight: densityFor("compact").line, listGap: 2 });
   });
 });
