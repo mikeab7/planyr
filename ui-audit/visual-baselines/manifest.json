@@ -7,89 +7,89 @@
     "map-landing": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "15ddd8a1",
+        "note": "B1171504 follow-up acceptance test (second dispatch, now with the triage-comment workflow version): confirming the new per-baseline triage PR comment actually posts, with a real large diff magnitude from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952454166 on 15ddd8a1d5082159896455b0871605e945767db6]"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "15ddd8a1",
+        "note": "B1171504 follow-up acceptance test (second dispatch, now with the triage-comment workflow version): confirming the new per-baseline triage PR comment actually posts, with a real large diff magnitude from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952454166 on 15ddd8a1d5082159896455b0871605e945767db6]"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "15ddd8a1",
+        "note": "B1171504 follow-up acceptance test (second dispatch, now with the triage-comment workflow version): confirming the new per-baseline triage PR comment actually posts, with a real large diff magnitude from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952454166 on 15ddd8a1d5082159896455b0871605e945767db6]"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "15ddd8a1",
+        "note": "B1171504 follow-up acceptance test (second dispatch, now with the triage-comment workflow version): confirming the new per-baseline triage PR comment actually posts, with a real large diff magnitude from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952454166 on 15ddd8a1d5082159896455b0871605e945767db6]"
       }
     },
     "site-planner-header": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "15ddd8a1",
+        "note": "B1171504 follow-up acceptance test (second dispatch, now with the triage-comment workflow version): confirming the new per-baseline triage PR comment actually posts, with a real large diff magnitude from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952454166 on 15ddd8a1d5082159896455b0871605e945767db6]"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "15ddd8a1",
+        "note": "B1171504 follow-up acceptance test (second dispatch, now with the triage-comment workflow version): confirming the new per-baseline triage PR comment actually posts, with a real large diff magnitude from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952454166 on 15ddd8a1d5082159896455b0871605e945767db6]"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "15ddd8a1",
+        "note": "B1171504 follow-up acceptance test (second dispatch, now with the triage-comment workflow version): confirming the new per-baseline triage PR comment actually posts, with a real large diff magnitude from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952454166 on 15ddd8a1d5082159896455b0871605e945767db6]"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "15ddd8a1",
+        "note": "B1171504 follow-up acceptance test (second dispatch, now with the triage-comment workflow version): confirming the new per-baseline triage PR comment actually posts, with a real large diff magnitude from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952454166 on 15ddd8a1d5082159896455b0871605e945767db6]"
       }
     },
     "site-planner-left-rail": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "15ddd8a1",
+        "note": "B1171504 follow-up acceptance test (second dispatch, now with the triage-comment workflow version): confirming the new per-baseline triage PR comment actually posts, with a real large diff magnitude from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952454166 on 15ddd8a1d5082159896455b0871605e945767db6]"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "15ddd8a1",
+        "note": "B1171504 follow-up acceptance test (second dispatch, now with the triage-comment workflow version): confirming the new per-baseline triage PR comment actually posts, with a real large diff magnitude from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952454166 on 15ddd8a1d5082159896455b0871605e945767db6]"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "15ddd8a1",
+        "note": "B1171504 follow-up acceptance test (second dispatch, now with the triage-comment workflow version): confirming the new per-baseline triage PR comment actually posts, with a real large diff magnitude from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952454166 on 15ddd8a1d5082159896455b0871605e945767db6]"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "15ddd8a1",
+        "note": "B1171504 follow-up acceptance test (second dispatch, now with the triage-comment workflow version): confirming the new per-baseline triage PR comment actually posts, with a real large diff magnitude from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952454166 on 15ddd8a1d5082159896455b0871605e945767db6]"
       }
     },
     "library": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "15ddd8a1",
+        "note": "B1171504 follow-up acceptance test (second dispatch, now with the triage-comment workflow version): confirming the new per-baseline triage PR comment actually posts, with a real large diff magnitude from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952454166 on 15ddd8a1d5082159896455b0871605e945767db6]"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "15ddd8a1",
+        "note": "B1171504 follow-up acceptance test (second dispatch, now with the triage-comment workflow version): confirming the new per-baseline triage PR comment actually posts, with a real large diff magnitude from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952454166 on 15ddd8a1d5082159896455b0871605e945767db6]"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "15ddd8a1",
+        "note": "B1171504 follow-up acceptance test (second dispatch, now with the triage-comment workflow version): confirming the new per-baseline triage PR comment actually posts, with a real large diff magnitude from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952454166 on 15ddd8a1d5082159896455b0871605e945767db6]"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "15ddd8a1",
+        "note": "B1171504 follow-up acceptance test (second dispatch, now with the triage-comment workflow version): confirming the new per-baseline triage PR comment actually posts, with a real large diff magnitude from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952454166 on 15ddd8a1d5082159896455b0871605e945767db6]"
       }
     }
   }
