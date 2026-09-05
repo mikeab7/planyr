@@ -30,7 +30,7 @@ import { collectPartyNames } from "../lib/partySuggest.js";
 import PartyNameField from "./PartyNameField.jsx";
 import {
   fetchAllComps, insertComp, insertComps, updateComp, deleteComp,
-  fetchDeletedComps, restoreComp, permanentlyDeleteComp,
+  fetchDeletedComps, restoreComp, permanentlyDeleteComp, countLiveCompsForProject,
 } from "../lib/compsStore.js";
 import { formatNumberDisplay, sanitizeNumericInput } from "../lib/compSheetColumns.js";
 import { loadSiteSummaries } from "../../../workspaces/site-planner/lib/siteListLight.js";
@@ -42,6 +42,7 @@ import { kmlToDraftRows } from "../lib/kmlImport.js";
 import { siteplanLocationText, pinFallbackText } from "../lib/compLocationText.js";
 import { reverseGeocodeLatLon } from "../../../workspaces/site-planner/lib/geocode.js";
 import { COUNTIES } from "../../../workspaces/site-planner/lib/counties.js";
+import { DELETED_RETENTION_DAYS } from "../../../shared/projects/projectModel.js";
 
 // B986096-HARDENING-14 (owner cycle-4 report, minor: "comp list titles a row by rate when Title
 // is empty — should fall back to the reverse-geocoded address instead" + "comp detail view
@@ -90,6 +91,40 @@ function useCompLocationText(anchor, overlaysById) {
   const key = pinCacheKey(anchor);
   const resolved = key ? _pinAddrCache.get(key) : null;
   return resolved || pinFallbackText(anchor, countyEntry);
+}
+
+/* NEW-1 (adversarial review, 2026-09-05) — a comp's owning site can be BINNED (soft-deleted)
+ * without severing comps.project_id: sites are restorable for 30 days
+ * (sites_soft_delete.sql / the bin confirmation dialog's own promise, "you can restore it … for
+ * 30 days"), so a comp stays linked to its binned site throughout that window rather than being
+ * detached the moment it's binned — restoring the site needs no further action to bring the
+ * comp's link back with it (storage.js's cloudDelete never touches project_id; only a genuine
+ * PURGE does, and that's now LOUD — see cloudSync.cloudHardDelete's own header).
+ *
+ * The read side has to hold up its end: the comp editor's Project <select> falls back to its
+ * FIRST option ("No project") for a value matching no <option> — the exact same trap PR 1430 fixed
+ * for tracked sites — so a binned owning site read as "No project" with no way to see the link
+ * still exists. Checked live (never assumed from this panel's own `projects`/`trackedSites`
+ * props, which only ever carry LIVE sites) only when the id isn't already covered by them, using
+ * the same targeted per-row check Shell.jsx's route gate already relies on
+ * (storage.checkProjectDeletionStatus) rather than a second mechanism. */
+function useOwningSiteBinStatus(projectId, projects, trackedSites) {
+  // A plain BOOLEAN, not the arrays themselves, in the effect's deps — `trackedSites` is a fresh
+  // array every render (CompsPanel computes it inline), so depending on its identity would refire
+  // this effect's network round trip on every keystroke anywhere else in the form.
+  const isLive = !!projectId && ((projects || []).some((p) => p.id === projectId) || (trackedSites || []).some((s) => s.id === projectId));
+  const [info, setInfo] = useState(null);
+  useEffect(() => {
+    setInfo(null);
+    if (!projectId || isLive) return undefined;
+    let cancelled = false;
+    import("../../../workspaces/site-planner/lib/storage.js")
+      .then(({ checkProjectDeletionStatus }) => checkProjectDeletionStatus(projectId))
+      .then((r) => { if (!cancelled && r && r.ok && r.exists) setInfo({ id: projectId, name: r.name || "Untitled site", deleted: !!r.deleted, deletedAt: r.deletedAt }); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [projectId, isLive]);
+  return info;
 }
 
 const TYPE_LABEL = { land: "Land", building_sale: "Building sale", lease: "Lease" };
@@ -229,11 +264,14 @@ function SourceBrochureLink({ comp, overlaysById, onOpenBrochure }) {
   );
 }
 
-export function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysById, onOpenBrochure, assignNotice, onDismissAssignNotice }) {
+export function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysById, onOpenBrochure, assignNotice, onDismissAssignNotice, projects, trackedSites }) {
   const rows = compFieldRows(comp);
   // HARDENING-14 — the detail view showed every structured field EXCEPT where the comp actually
   // is, despite that being real, already-resolved information (an address, an APN, a plan name).
   const locationText = useCompLocationText(comp.anchor, overlaysById);
+  // NEW-1 (adversarial review) — see the hook's own header. Surfaced here too, not just in the
+  // edit form, because the detail view is the one most people actually open.
+  const binStatus = useOwningSiteBinStatus(comp.projectId, projects, trackedSites);
   // B1066369 (owner live-drive report — "delete has no confirmation step") — a comp used to be
   // destroyed on the click that registers, with no way to back out. An inline "Delete? Confirm /
   // Cancel" on the button itself, per the no-dialog-box-edits rule, rather than a modal. Resets
@@ -260,6 +298,13 @@ export function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysBy
           <span style={{ flex: 1 }}>{assignNotice}</span>
           <button onClick={onDismissAssignNotice} aria-label="Dismiss" title="Dismiss"
             style={{ flex: "none", cursor: "pointer", background: "transparent", color: "inherit", border: "none", fontSize: 12, fontWeight: 800, padding: 0, lineHeight: 1 }}>✕</button>
+        </div>
+      )}
+      {/* NEW-1 (adversarial review) — the comp is still linked to its site; the site is just in
+          the bin, restorable for DELETED_RETENTION_DAYS more days. */}
+      {binStatus?.deleted && (
+        <div role="status" style={{ marginTop: 8, padding: "6px 9px", fontSize: 12, lineHeight: 1.4, color: "var(--warn-text)", background: "var(--warn-bg)", borderRadius: 8 }}>
+          Its site, “{binStatus.name}”, is in Recently deleted — restore it from the project switcher within {DELETED_RETENTION_DAYS} days to keep this link.
         </div>
       )}
       {/* NEW-12 (B1123424) — `tight` rows: the label sits at its own width, never wrapped, with
@@ -302,6 +347,8 @@ export function CompForm({ draft, setDraft, teams, projects, trackedSites, party
   // say it stops being true the moment he edits it (STANDING RULE-driven honesty, not decoration).
   const sizeFromParcel = draft.anchor?.acreageAc != null;
   const sizeEdited = sizeFromParcel && draft.landSizeValue !== String(Math.round(draft.anchor.acreageAc * 100) / 100);
+  // NEW-1 (adversarial review) — see the hook's own header, above.
+  const binStatus = useOwningSiteBinStatus(draft.projectId, projects, trackedSites);
   return (
     <div style={{ padding: "10px 14px 14px" }}>
       {/* A real section header, not just a back-link — so this form reads as its OWN block,
@@ -484,13 +531,25 @@ export function CompForm({ draft, setDraft, teams, projects, trackedSites, party
           restore the link. Tracked sites are always offered too (not just the current comp's own
           site, so reassigning to a DIFFERENT tracked site works), visibly labelled so a market
           record never reads as a pipeline project. */}
-      {(projects?.length > 0 || trackedSites?.length > 0) && (
+      {/* NEW-1 (adversarial review) — the same missing-option trap, one hop further: a value that
+          IS present but points at a BINNED site still renders as "No project" (the html <select>
+          spec, again) with no signal the link exists. `binStatus` injects the current value as its
+          own option (never selectable as anyone ELSE's binned site — it only ever appears for the
+          value already on the draft) so opening this form shows the truth instead of erasing it,
+          and reassigning away from it (or leaving it alone) both still work exactly as before. */}
+      {(projects?.length > 0 || trackedSites?.length > 0 || binStatus) && (
         <Field label="Project (optional)" stacked>
           <select value={draft.projectId || ""} onChange={(e) => setDraft((d) => ({ ...d, projectId: e.target.value || null }))} style={inputStyle}>
             <option value="">No project</option>
             {(projects || []).map((p) => <option key={p.id} value={p.id}>{p.site || p.name}</option>)}
             {(trackedSites || []).map((s) => <option key={s.id} value={s.id}>{(s.site || s.name) + " (market record)"}</option>)}
+            {binStatus && <option value={binStatus.id}>{binStatus.name}{binStatus.deleted ? " (in Recently deleted)" : ""}</option>}
           </select>
+          {binStatus?.deleted && (
+            <div style={{ fontSize: 10.5, color: "var(--warn-text)", marginTop: 4, lineHeight: 1.4 }}>
+              Restore “{binStatus.name}” from the project switcher within {DELETED_RETENTION_DAYS} days to keep this link — otherwise it will be lost when the site is removed for good.
+            </div>
+          )}
         </Field>
       )}
 
@@ -749,6 +808,12 @@ export default function CompsPanel({
         if (resolved.groupId) {
           comp.projectId = resolved.groupId;
           if (resolved.matched) matched = { name: resolved.matchedName, by: resolved.matchedBy };
+        } else if (resolved.error) {
+          // NEW-3 (adversarial review of PR 1431) — resolveOrCreateTrackedSiteForComp now REFUSES
+          // to hand back a site id it can't guarantee exists in the cloud (a NOT DEFERRABLE FK
+          // would otherwise fail the insert with a raw Postgres error). Surfaced in plain words,
+          // same slot the "attached to X" notice uses, rather than left silent.
+          matched = { failed: true, message: resolved.error };
         }
       } catch (_) {
         // A hiccup here must never block the comp save itself — that would be a worse failure
@@ -764,7 +829,7 @@ export default function CompsPanel({
     setView("detail");
     setDraft(null);
     setAssignNotice(matched
-      ? `Attached to “${matched.name}” (matched by ${matched.by === "location" ? "location" : "name"}) — reassign it below if that's wrong.`
+      ? (matched.failed ? matched.message : `Attached to “${matched.name}” (matched by ${matched.by === "location" ? "location" : "name"}) — reassign it below if that's wrong.`)
       : null);
   };
 
@@ -799,6 +864,22 @@ export default function CompsPanel({
   const purgeForever = async (c) => {
     const { error } = await permanentlyDeleteComp(c.id);
     if (error) { setTrashError(error.message || "Delete failed"); }
+    // NEW-5 (adversarial review of PR 1431) — a "tracked" (market-record) site auto-created for
+    // this comp is otherwise permanent and invisible once its last comp is gone. Only ever acted
+    // on at PURGE (never an ordinary soft delete, which is restorable for 30 days and would leave
+    // a restore with nothing to reattach to) — see storage.binOrphanedTrackedSite's own header for
+    // the full scoping (role must still be "tracked", the site must still be genuinely empty).
+    // Best-effort: never blocks or reports a failure over this tidy-up step, and skipped outright
+    // if the purge itself didn't actually happen.
+    if (!error && c.projectId) {
+      try {
+        const remaining = await countLiveCompsForProject(c.projectId);
+        if (remaining === 0) {
+          const { binOrphanedTrackedSite } = await import("../../../workspaces/site-planner/lib/storage.js");
+          await binOrphanedTrackedSite(c.projectId);
+        }
+      } catch (_) { /* best-effort tidy-up */ }
+    }
     await loadTrash();
   };
 
@@ -827,6 +908,9 @@ export default function CompsPanel({
     // property in one batch (Building A / Building B on one flyer) attach to ONE new site rather
     // than two.
     const comps = [];
+    let unattached = 0; // NEW-3 — a site that didn't reach the cloud now leaves a row unattached
+    // rather than handing insertComps() a project_id the FK will reject and take the WHOLE batch
+    // down over; counted so a real (if rare) run of failures is still visible, not silent.
     for (const r of toSave) {
       const comp = draftToComp(r.draft);
       if (!comp.projectId && comp.anchor) {
@@ -834,6 +918,7 @@ export default function CompsPanel({
           const { resolveOrCreateTrackedSiteForComp } = await import("../../../workspaces/site-planner/lib/storage.js");
           const resolved = await resolveOrCreateTrackedSiteForComp({ title: comp.title, lat: comp.anchor.lat, lon: comp.anchor.lon, county: comp.anchor.county });
           if (resolved.groupId) comp.projectId = resolved.groupId;
+          else if (resolved.error) unattached += 1;
         } catch (_) {
           // Same non-fatal shape as the single-comp save() path — an unattached comp is still
           // fixable via the Site dropdown, never a blocked save.
@@ -852,6 +937,12 @@ export default function CompsPanel({
       setGridSaveError(conflictRows.length === 1
         ? "1 row wasn't saved — it's pinned to a site plan that isn't shared with the chosen team."
         : `${conflictRows.length} rows weren't saved — pinned to a site plan that isn't shared with the chosen team.`);
+    } else if (unattached > 0) {
+      // NEW-3 — every row still saved; this is informational, not blocking, so the grid stays
+      // open (closing would hide the message on the same tick it appears).
+      setGridSaveError(unattached === 1
+        ? "Saved — 1 row couldn't be linked to a site (offline?). Attach it from the dropdown once you're back online."
+        : `Saved — ${unattached} rows couldn't be linked to a site (offline?). Attach them from the dropdown once you're back online.`);
     } else if (remaining.length === 0) {
       closeGrid();
     }
@@ -998,6 +1089,7 @@ export default function CompsPanel({
             comp={activeComp} canEdit={activeComp.userId === currentUserId} onEdit={openEdit} onDelete={remove} onBack={() => setView("list")}
             overlaysById={overlaysById} onOpenBrochure={onOpenBrochure}
             assignNotice={assignNotice} onDismissAssignNotice={() => setAssignNotice(null)}
+            projects={projects} trackedSites={trackedSites}
           />
         )}
 

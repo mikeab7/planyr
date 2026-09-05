@@ -122,3 +122,16 @@ export async function permanentlyDeleteComp(id) {
   if (!count) return { error: new Error("Not deleted — you can only remove comps you entered") };
   return { error: null };
 }
+
+/** How many LIVE comps still point at a given owning site (project_id) — used by the trash list's
+ * "Delete forever" (NEW-5, adversarial review of PR 1431) to decide whether an auto-created tracked
+ * site the just-purged comp created is now orphaned. RLS-scoped like every other read here (own
+ * rows + shared-team rows) — a comp outside that visibility is invisible to this count too, so
+ * it's a best-effort signal for tidy-up, not a global truth. Returns 0 on any read failure rather
+ * than throwing, since the caller treats "0 remaining" and "couldn't tell" the same way (skip). */
+export async function countLiveCompsForProject(projectId) {
+  if (!supabase || !projectId) return 0;
+  const { count, error } = await supabase.from(TABLE).select("id", { count: "exact", head: true }).eq("project_id", projectId).is("deleted_at", null);
+  if (error) return 0;
+  return count || 0;
+}

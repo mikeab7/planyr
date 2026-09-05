@@ -144,6 +144,20 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V857632 — B1184656: a binned site's owning comp shows its real name and a restore notice instead of "No project" `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** The DB-level mechanism (a bin never touches `comps.project_id`; a purge does, loudly reported) is already live-verified this session directly against production via a throwaway site+comp round trip (see B1184656's own writeup in `BACKLOG.md` for both reads, verbatim). What remains is confirming the owner's own signed-in browser actually RENDERS the read-tolerance fix — the `useOwningSiteBinStatus` hook's live `checkProjectDeletionStatus` round trip and the resulting `<option>`/notice — since the sandbox proxy CORS-blocks the Supabase auth handshake.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner (use a THROWAWAY site + comp you create for this check, not any of his real projects):**
+1. Create a throwaway site and a throwaway comp attached to it (via the map's "Place comp" flow, or the paste grid — either creates the attach automatically).
+2. Bin the site (project switcher → Delete project…). **Expect:** the confirm dialog's copy is unchanged (still promises a 30-day restore, no mention of comps).
+3. Open the throwaway comp's edit form. **Expect:** the Project field shows the site's real name with "(in Recently deleted)" appended, NOT "No project" — and a plain-language notice below the field ("restore it … within 30 days to keep this link").
+4. Open the comp's detail view (without editing). **Expect:** the same "in Recently deleted" notice appears there too.
+5. Restore the site from the project switcher's Recently deleted list. **Expect:** re-opening the comp's edit form now shows the site as an ordinary live option, with no notice.
+6. Soft-delete both throwaways (the comp via its own Delete button, the site via project switcher → Delete project…) to leave nothing behind.
+
+**Result:** ⏳ pending — needs a real signed-in browser session. `Cadence: once`.
+
 ### V655264 — B1166768: the renamed "Model"→"Spreadsheet" tab's routing actually redirects correctly on the DEPLOYED `planyr.io` `Blocker: live-deploy`
 
 **Why this needs its own real pass.** Filed `Verify: live`. Unlike most `Blocker: live-deploy` items in this file, this is not a Chromium-reachability question — `curl` reaches `planyr.io` fine from this sandbox right now (confirmed: `curl -I https://planyr.io/model` returns `HTTP/2 302` → `location: /#/model`, today's PRE-merge behavior). The real wall is that `public/_redirects` is Cloudflare Pages EDGE routing, which does not exist in `npm run dev` or `vite preview` at all — there is no local stand-in for it — so this specific slice is a post-merge check by construction, independent of network reachability.
