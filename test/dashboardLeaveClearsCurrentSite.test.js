@@ -107,11 +107,9 @@ describe("NEW-2 — leaving a project must clear the persisted currentSite point
       fileURLToPath(new URL("../src/workspaces/site-planner/SitePlannerApp.jsx", import.meta.url)),
       "utf8",
     );
-    const preFix = src
-      .replace('const leaveProject = () => { userLeftProjectRef.current = true; setActiveSiteId(null); setCurrentSiteId(null); setMode("map"); };',
-        'const leaveProject = () => { userLeftProjectRef.current = true; setActiveSiteId(null); setMode("map"); };')
-      .replace('const goMap = () => { userLeftProjectRef.current = true; setCurrentSiteId(null); setMode("map"); };',
-        'const goMap = () => { userLeftProjectRef.current = true; setMode("map"); };');
+    // Strip just the `setCurrentSiteId(null);` calls (regex, not an exact-line match) so this
+    // check stays valid as NEW-2(b) and later amendments add more calls to the same lines.
+    const preFix = src.replace(/setCurrentSiteId\(null\);\s*/g, "");
     expect(preFix).not.toBe(src); // the replace actually matched something, or this check is vacuous
     const leaveLine = preFix.slice(preFix.indexOf("const leaveProject = () => {"), preFix.indexOf("\n", preFix.indexOf("const leaveProject = () => {")));
     const goMapLine = preFix.slice(preFix.indexOf("const goMap = () => {"), preFix.indexOf("\n", preFix.indexOf("const goMap = () => {")));
