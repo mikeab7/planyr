@@ -23,7 +23,7 @@ import { getUser } from "../../site-planner/lib/auth.js";
 import { cloudUpsert } from "../../site-planner/lib/cloudSync.js";
 import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn } from "../../../shared/cloud/optimisticUpsert.js";
 import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
-import { STATUSES, STATUS_META, statusOf } from "../../site-planner/lib/siteModel.js";
+import { STATUSES, STATUS_META, statusOf, ROLES, DEFAULT_ROLE } from "../../site-planner/lib/siteModel.js";
 import { uploadFileInChunks } from "../../../shared/files/chunkedUpload.js";
 
 export const BUCKET = "doc-review-files";
@@ -468,13 +468,20 @@ export async function refileReview(id, { projectId = null, project = "", discipl
 
 // A "project" = a Site Planner site group. One entry per group_id with its display
 // name + lifecycle status (read straight from the Site Model jsonb).
+// NEW-1 (B1156864 family, this branch) — a "tracked" site (market intel only: a comp, an asking
+// price, nothing transacted) is never a real project for DOCUMENT purposes either: it has no
+// drawings, no folders, nothing for the Library/Review workspaces to attach to. Excluded here, at
+// the one place every doc-review/Library project list actually reads from (Library.jsx's one-time
+// folder organizer, ReviewsBar's project filter, FileBrowser's cross-project filing picker) —
+// mirrors the identical `roleOf(s) === "pursuit"` filter shared/projects/projects.js already
+// applies for the Site Planner's own project surfaces (see that file's NEW-1 header).
 export async function fetchProjects() {
   if (!supabase) return { ok: false, rows: [], error: "Cloud not configured." };
   if (!(await currentUid())) return { ok: true, rows: [] };
-  // Prefer the richest select (status + team_id); degrade if either column isn't migrated in.
-  let res = await supabase.from("sites").select("group_id,site,updated_at,team_id,status:data->>status").order("updated_at", { ascending: false });
-  if (res.error) res = await supabase.from("sites").select("group_id,site,updated_at,status:data->>status").order("updated_at", { ascending: false });
-  if (res.error) res = await supabase.from("sites").select("group_id,site,updated_at").order("updated_at", { ascending: false }); // tolerate older PostgREST
+  // Prefer the richest select (status + role + team_id); degrade if a column isn't migrated in.
+  let res = await supabase.from("sites").select("group_id,site,updated_at,team_id,status:data->>status,role:data->>role").order("updated_at", { ascending: false });
+  if (res.error) res = await supabase.from("sites").select("group_id,site,updated_at,status:data->>status,role:data->>role").order("updated_at", { ascending: false });
+  if (res.error) res = await supabase.from("sites").select("group_id,site,updated_at").order("updated_at", { ascending: false }); // tolerate older PostgREST (no role column ⇒ can't exclude tracked sites)
   // NEW-F5: only a failure of EVERY tier is an honest read failure — the caller keeps its
   // prior list instead of rendering "no projects" off a network blip.
   if (res.error || !res.data) return { ok: false, rows: [], error: (res.error && res.error.message) || "Couldn't load projects." };
@@ -483,11 +490,11 @@ export async function fetchProjects() {
   for (const r of data) {
     const id = r.group_id;
     if (!id) continue;
-    if (!byId.has(id)) // newest row wins for the name/status
-      byId.set(id, { id, name: r.site || "Untitled site", status: STATUSES.includes(r.status) ? r.status : "unknown", teamId: r.team_id || null });
+    if (!byId.has(id)) // newest row wins for the name/status/role
+      byId.set(id, { id, name: r.site || "Untitled site", status: STATUSES.includes(r.status) ? r.status : "unknown", role: ROLES.includes(r.role) ? r.role : DEFAULT_ROLE, teamId: r.team_id || null });
     else if (r.team_id && !byId.get(id).teamId) byId.get(id).teamId = r.team_id; // any shared plan ⇒ project is shared
   }
-  return { ok: true, rows: [...byId.values()] };
+  return { ok: true, rows: [...byId.values()].filter((p) => p.role !== "tracked") };
 }
 export async function listProjects() {
   const r = await fetchProjects();

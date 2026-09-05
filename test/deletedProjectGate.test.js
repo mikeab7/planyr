@@ -35,6 +35,7 @@ vi.mock("../src/shared/telemetry/clientErrors.js", () => ({ reportClientEvent: (
 
 import { cloudCheckDeleted } from "../src/workspaces/site-planner/lib/cloudSync.js";
 import { checkProjectDeletionStatus, setActiveUser } from "../src/workspaces/site-planner/lib/storage.js";
+import { projectGateStatus } from "../src/shared/projects/projectModel.js";
 
 describe("cloudCheckDeleted — the one question a routed project id must answer before a workspace mounts", () => {
   beforeEach(() => { h.row = null; h.error = null; });
@@ -102,5 +103,58 @@ describe("checkProjectDeletionStatus — the Shell.jsx route gate's own entry po
     expect(res.ok).toBe(true);
     expect(res.deleted).toBe(false);
     setActiveUser(null);
+  });
+});
+
+/* B1202176 (owner chat, 2026-09-05, "NEW-1") — "New project creates nothing and dead-ends on
+ * 'This project doesn't exist'." Reproduced 3-for-3 by the owner against real ids: clicking
+ * "New project" routes to a brand-new, never-saved project id, and Shell.jsx's own deletion gate
+ * (B848833) — proven correct above for a REAL bad link — cannot tell that apart from one, because
+ * project creation is deliberately LAZY (a blank site is never saved until something is drawn in
+ * it; even a located blank's cloud write is a fire-and-forget push). Both answer the identical
+ * `checkProjectDeletionStatus` shape: `{ok:true, exists:false, deleted:false}`.
+ *
+ * `projectGateStatus` is the one place Shell.jsx now resolves that shape into a UI status, folding
+ * in `freshlyCreated` — whether THIS id is one the Site Planner minted locally this session (see
+ * SitePlannerApp.jsx's `locallyMintedGroupsRef` and Shell.jsx's `freshProjectIdsRef`). These are
+ * the exact two cases the backlog item's own regression-test instruction names: a newly created
+ * project must resolve LIVE, and a genuinely soft-deleted (or genuinely nonexistent, unrelated)
+ * project must still be caught — proven together so neither guard can be satisfied by breaking
+ * the other. */
+describe("projectGateStatus — B1202176: a lazily-created project must not read as a bad deep link", () => {
+  it("THE CORE REPRO: a project this session just created (no cloud row yet) resolves LIVE, not missing", () => {
+    const res = { ok: true, exists: false, deleted: false };
+    const g = projectGateStatus({ res, freshlyCreated: true });
+    expect(g.status).toBe("live");
+  });
+
+  it("the SAME 'no row' answer for an id we did NOT mint still reads missing (a real bad/expired link)", () => {
+    const res = { ok: true, exists: false, deleted: false };
+    const g = projectGateStatus({ res, freshlyCreated: false });
+    expect(g.status).toBe("missing");
+  });
+
+  it("freshlyCreated defaults to false when the caller omits it (never accidentally permissive)", () => {
+    const res = { ok: true, exists: false, deleted: false };
+    expect(projectGateStatus({ res }).status).toBe("missing");
+  });
+
+  it("a genuinely soft-deleted project is STILL caught even if (impossibly) flagged freshlyCreated — exists wins", () => {
+    const res = { ok: true, exists: true, deleted: true, name: "Concept A", deletedAt: "2026-09-03T20:13:59+00:00" };
+    const g = projectGateStatus({ res, freshlyCreated: true });
+    expect(g.status).toBe("deleted");
+    expect(g.name).toBe("Concept A");
+    expect(g.deletedAt).toBe("2026-09-03T20:13:59+00:00");
+  });
+
+  it("a live, pre-existing project is unaffected by the freshlyCreated flag either way", () => {
+    const res = { ok: true, exists: true, deleted: false };
+    expect(projectGateStatus({ res, freshlyCreated: true }).status).toBe("live");
+    expect(projectGateStatus({ res, freshlyCreated: false }).status).toBe("live");
+  });
+
+  it("an inconclusive answer still fails OPEN regardless of freshlyCreated", () => {
+    expect(projectGateStatus({ res: { ok: false }, freshlyCreated: false }).status).toBe("live");
+    expect(projectGateStatus({ res: null, freshlyCreated: false }).status).toBe("live");
   });
 });

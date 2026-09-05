@@ -537,42 +537,51 @@ export function rateFromImpervious(rule, impPct, acres = null) {
 // ---------------------------------------------------------------------------
 // computeRequiredDetention — the rate method, always carrying its rule record.
 // ---------------------------------------------------------------------------
-export function computeRequiredDetention({
-  acres,
-  impPct = null,
-  authorityId,
-  inCityLimits = false,
-  drainsToHcfcdChannel = null, // true | false | null(unknown)
-  singleFamily = false,
-  lotSf = null,
-  addedImperviousAcres = null,
-  removedImperviousAcres = 0,
-  outfallType = null, // null | "stormSewer" | "roadsideDitch" | "unknown" — HCED outfall-type minimum (unincorporated Harris)
-  hcfcdMethod = null, // null (default → outfall-type minimum) | "pcpm" (→ 0.65 HCFCD PCPM methods baseline)
-  hcfcdApplicable = true, // B789 — false when the identify county excludes Harris: HCFCD ends at the Harris line, so neither the greater-of candidate nor the PCPM deferral may price
-  onDate = null,
-  siteState = null, // NEW-8 — "TX" | "CO" | null. The region guard below; null keeps pre-Colorado behaviour exactly.
-  /* NEW-1 (B1105) — the COLORADO REGIME SEAM, and it is deliberately fail-CLOSED.
-   *
-   * `coRegime` is the regime id from `coloradoRegions.coloradoRegimeFor()` ("mhfd" | "larimer" |
-   * "weld" | "elpaso" | null) and `coDetention` is the injected MHFD evaluator
-   * (`mhfdDetention.computeMhfdDetention`). BOTH must be present, and the regime must be exactly
-   * "mhfd", for a Colorado site to price at all.
-   *
-   * Why injection rather than an import: `mhfdDetention.js` is Colorado prose + a Colorado engine,
-   * and this module is on the boot path. Importing it here would drag the whole Colorado tier into
-   * the entry chunk for every Texas user — the same bundle-budget reason `siteRegion.js` was split
-   * out of `coloradoRegions.js`. The caller composes the two (SitePlanner's lazily-loaded `coTier`),
-   * exactly as it already does for the regime label and the drawdown statute.
-   *
-   * Why fail-closed matters: absent either argument — a chunk that has not landed, a caller that
-   * does not know about the seam, a regime that is Larimer/Weld/El Paso, a `coRegime` that failed to
-   * resolve because every GIS endpoint is down — the ORIGINAL hard guard runs unchanged. Larimer,
-   * Weld and El Paso can therefore never receive an MHFD number by omission, only by someone
-   * deliberately mis-wiring the regime, and the evaluator itself re-checks membership. */
-  coRegime = null,
-  coDetention = null,
-} = {}) {
+export function computeRequiredDetention(args = {}) {
+  /* ⛔ NEW-1 (B1205296) — `args` IS KEPT, so every recursive dispatch below spreads the FULL
+   * incoming bag (`{ ...args, authorityId: … }`) instead of re-listing a subset of params by hand.
+   * The municipal-overlay recursion used to name nine of these explicitly and silently reset the
+   * other seven to their defaults on every dispatch — resetting `hcfcdApplicable` to `true` walks
+   * straight around the B789 Harris-only guard, and dropping `singleFamily`/`lotSf`/
+   * `removedImperviousAcres` skips the COH single-family exemption and the redevelopment credit.
+   * Destructuring below still binds every named local exactly as before; only the RECURSIVE calls
+   * change, so a param added later can't be forgotten at a call site again. */
+  const {
+    acres,
+    impPct = null,
+    authorityId,
+    inCityLimits = false,
+    drainsToHcfcdChannel = null, // true | false | null(unknown)
+    singleFamily = false,
+    lotSf = null,
+    addedImperviousAcres = null,
+    removedImperviousAcres = 0,
+    outfallType = null, // null | "stormSewer" | "roadsideDitch" | "unknown" — HCED outfall-type minimum (unincorporated Harris)
+    hcfcdMethod = null, // null (default → outfall-type minimum) | "pcpm" (→ 0.65 HCFCD PCPM methods baseline)
+    hcfcdApplicable = true, // B789 — false when the identify county excludes Harris: HCFCD ends at the Harris line, so neither the greater-of candidate nor the PCPM deferral may price
+    onDate = null,
+    siteState = null, // NEW-8 — "TX" | "CO" | null. The region guard below; null keeps pre-Colorado behaviour exactly.
+    /* NEW-1 (B1105) — the COLORADO REGIME SEAM, and it is deliberately fail-CLOSED.
+     *
+     * `coRegime` is the regime id from `coloradoRegions.coloradoRegimeFor()` ("mhfd" | "larimer" |
+     * "weld" | "elpaso" | null) and `coDetention` is the injected MHFD evaluator
+     * (`mhfdDetention.computeMhfdDetention`). BOTH must be present, and the regime must be exactly
+     * "mhfd", for a Colorado site to price at all.
+     *
+     * Why injection rather than an import: `mhfdDetention.js` is Colorado prose + a Colorado engine,
+     * and this module is on the boot path. Importing it here would drag the whole Colorado tier into
+     * the entry chunk for every Texas user — the same bundle-budget reason `siteRegion.js` was split
+     * out of `coloradoRegions.js`. The caller composes the two (SitePlanner's lazily-loaded `coTier`),
+     * exactly as it already does for the regime label and the drawdown statute.
+     *
+     * Why fail-closed matters: absent either argument — a chunk that has not landed, a caller that
+     * does not know about the seam, a regime that is Larimer/Weld/El Paso, a `coRegime` that failed to
+     * resolve because every GIS endpoint is down — the ORIGINAL hard guard runs unchanged. Larimer,
+     * Weld and El Paso can therefore never receive an MHFD number by omission, only by someone
+     * deliberately mis-wiring the regime, and the evaluator itself re-checks membership. */
+    coRegime = null,
+    coDetention = null,
+  } = args;
   /* ⛔ NEW-8 — THE COLORADO GUARD, and it is deliberately the FIRST thing this function does.
    *
    * Every rule record below is a Texas rate method. Colorado sizes detention by a different
@@ -697,7 +706,7 @@ export function computeRequiredDetention({
   // ---- municipal overlays: dispatch through the parent -------------------
   if (rule.ruleType === "overlay") {
     if (p.parentAuthority) {
-      const parent = computeRequiredDetention({ acres, impPct, authorityId: p.parentAuthority, inCityLimits, drainsToHcfcdChannel, outfallType, hcfcdMethod, onDate, siteState });
+      const parent = computeRequiredDetention({ ...args, authorityId: p.parentAuthority });
       parent.flags = [...parent.flags, "municipal-overlay"];
       parent.basis += ` · via ${rule.authorityLabel} adopt-by-reference${p.runoffReductionPct ? ` (+${p.runoffReductionPct}% runoff-reduction requirement)` : ""}`;
       parent.overlayRule = rule;
@@ -718,7 +727,7 @@ export function computeRequiredDetention({
     }
     // ≥ 20 ac: parent is hcfcd|fortbend by watershed drained to — surfaced, not guessed.
     const candidates = (p.largeParent?.parentAuthorities || []).map((pa) => {
-      const c = computeRequiredDetention({ acres, impPct, authorityId: pa, inCityLimits, drainsToHcfcdChannel, outfallType, hcfcdMethod, onDate, siteState });
+      const c = computeRequiredDetention({ ...args, authorityId: pa });
       return { authorityId: pa, acFt: c.requiredAcFt ?? (c.bandAcFt ? c.bandAcFt[1] : 0), basis: c.basis, rule: c.rule, result: c };
     });
     return {

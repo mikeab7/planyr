@@ -37,6 +37,18 @@ import { recordCloudWriteFailure, readCloudWriteFailures, clearAllCloudWriteFail
 import { noteLayerContext } from "../../shared/telemetry/perfRecorderHandle.js";
 import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability, resumeTargetAfterSignIn, routeProjectJustChanged } from "./lib/bootResume.js";
 import { RADIUS } from "../../shared/ui/radius.js";
+// NEW-2(b) — a SECOND "open where I left off" pointer, entirely separate from `currentSite`
+// above: the Shell's own `planyr:lastRoute:v1` (src/app/lastRoute.js), which is what a
+// bare-domain cold boot actually reads (`seedBootRoute`/`pickBootRoute`) to decide which
+// module+project to redirect an empty hash into. It is normally kept in sync indirectly (this
+// component's own effGroup→URL sync calls `onProjectChange`, which changes the hash, which fires
+// Shell's own `writeLastRoute(route)` effect) — but a live-verify pass found that indirect chain
+// does not reliably clear it on a deliberate exit: a fresh tab still resumed straight into the
+// project just left, even though `currentSite` and the URL were both already correct. Writing it
+// directly here, from the one place that KNOWS the user just left, removes the dependency on that
+// downstream propagation entirely — the same principle NEW-2(a) already applied to `currentSite`.
+import { writeLastRoute } from "../../app/lastRoute.js";
+import { DEFAULT_MODULE } from "../../app/route.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
 migrateSiteGroups();  // give every legacy record a site (location) group
@@ -127,6 +139,15 @@ export default function App({
    * meant to authorise has already been skipped. `routeMissing` is the honest answer when the
    * URL names a project this device genuinely does not have. */
   const userLeftProjectRef = useRef(false);
+  /* B1202176 — ids THIS MOUNT minted locally (newBlankSite / newSiteFromMap), so effect (2)'s
+   * `onProjectChange` call can tell Shell.jsx's route-level deletion gate "not saved YET" apart
+   * from "never existed at all" — both otherwise answer the identical cloud `{exists:false}`.
+   * `newBlankSite`'s own header documents WHY creation is lazy: a blank site never edited is
+   * never saved, and even a located blank's cloud write (`pushLoud`) is fire-and-forget, so a
+   * fresh id can reach the URL well before any row exists anywhere. A plain component ref is
+   * enough — it only has to survive from "id minted" to effect (2) observing it, which happens
+   * within this same mount's lifetime (this stays the active tab throughout "New project"). */
+  const locallyMintedGroupsRef = useRef(new Set());
   const [routeMissing, setRouteMissing] = useState(null);
   // Clear a dangling currentSite pointer (e.g. a never-persisted site from before
   // the fix) so it doesn't linger in storage. The finder fallback already handles
@@ -298,14 +319,10 @@ export default function App({
       refreshParcelSummary(null);
       refreshElementRecency(null);
     }
-    // B471 — log the auth transition so a "saving stopped after my session changed" report is
-    // diagnosable from telemetry (the cloud-save path is gated on being signed in; a silent token
-    // lapse is exactly the kind of cause we couldn't see before). Only fires on a REAL change (the
-    // same-user re-emit returned early above).
-    if ((prevUid.current || null) !== uid) {
-      reportClientEvent(uid ? "auth-signed-in" : "auth-signed-out",
-        uid ? "session active" : "session ended (signed out or token lapsed)", { event });
-    }
+    // NEW-3 — B471's auth-transition telemetry (event:auth-signed-in / event:auth-signed-out) was
+    // removed: a successful sign-in is not an error, and it was 1,246 rows across 477 builds on
+    // production, 11% of the whole client_errors table on its own. `prevUid` still tracks the last
+    // seen uid for the same-user re-emit guard above.
     prevUid.current = uid;
     // V13 — the first auth event + pull has now settled the store + the resume view; release
     // the boot gate so the URL sync + the dangling-pointer cleanup may run. Batched with the
@@ -314,14 +331,33 @@ export default function App({
     setBootResolved(true);
   };
 
+  /* NEW-2(c) — a live report ("I click Map, and it takes me out to the map for a split second
+   * before returning me straight to the Goose Creek site") traced to a STALE CLOSURE here, not to
+   * `lastRoute`/`currentSite` (both already correctly cleared by the fixes above — this is a
+   * DIFFERENT mechanism the same report's own hypothesis guessed wrong, confirmed by reading the
+   * code rather than assumed). The subscription below is created ONCE (`useEffect(..., [])`, on
+   * purpose — `onAuthChange` must not be re-subscribed on every render), so the `applyUser`
+   * closure it captured is FROZEN at whatever `resumeAllowed`/other component-scope values were
+   * at the very first render — for the ENTIRE life of this mount, not just briefly. `applyUser`'s
+   * own resume logic (`resumeTargetAfterSignIn`) reads `resumeAllowed`, which Shell recomputes as
+   * `false` the instant the routed project actually clears — but the STALE closure never sees
+   * that: it keeps reasoning as if the tab is still on its ORIGINAL boot route. So a real
+   * signed-in account's still-in-flight `pullCloud` (or literally any later auth event — a token
+   * refresh, hours later) can resolve, read the frozen `resumeAllowed === true` a boot-time deep
+   * link/resume produced, and re-open the very project the user has since deliberately left.
+   * `applyUserRef` is the standard fix for a subscription that must stay subscribed once but must
+   * always run the LATEST render's logic: kept in sync on every render (a plain assignment, like
+   * `projectIdRef` above), read at CALL time rather than closed over at SUBSCRIBE time. */
+  const applyUserRef = useRef(applyUser); applyUserRef.current = applyUser;
   useEffect(() => {
     if (!supabaseConfigured()) return;
     return onAuthChange((event, u) => {
       // Recovery UI + token refresh don't change which data store is active.
       if (event === "PASSWORD_RECOVERY" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") return;
-      applyUser(u, event); // INITIAL_SESSION, SIGNED_IN, SIGNED_OUT
+      applyUserRef.current(u, event); // INITIAL_SESSION, SIGNED_IN, SIGNED_OUT
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // No exhaustive-deps suppression needed: the only component-scope value this effect reads is
+    // applyUserRef.current, a ref read at call time — the whole point of NEW-2(c) above.
   }, []);
 
   const refreshSites = () => setSites(loadSitesList());
@@ -462,8 +498,13 @@ export default function App({
    * race: a boot that should not be resuming a project at all is what makes the main thread busy
    * enough to widen that race. `userLeftProjectRef` is UNRELATED and stays — it keeps the URL
    * writer honest (mayWriteRouteProject) and must not be touched here. */
-  const leaveProject = () => { userLeftProjectRef.current = true; setActiveSiteId(null); setCurrentSiteId(null); setMode("map"); };
-  const goMap = () => { userLeftProjectRef.current = true; setCurrentSiteId(null); setMode("map"); };
+  // NEW-2(b) — the neutral, no-project route this exit always lands on. Written directly to
+  // BOTH pointers (currentSite above, lastRoute here) rather than left to propagate through the
+  // URL-sync effect, so neither can strand a stale project id if that propagation is ever late,
+  // deferred, or (as measured live) skipped.
+  const clearLastRouteProject = () => writeLastRoute({ module: DEFAULT_MODULE, projectId: null, cross: false, org: false });
+  const leaveProject = () => { userLeftProjectRef.current = true; setActiveSiteId(null); setCurrentSiteId(null); clearLastRouteProject(); setMode("map"); };
+  const goMap = () => { userLeftProjectRef.current = true; setCurrentSiteId(null); clearLastRouteProject(); setMode("map"); };
 
   // NEW-F6 (LOUD-FAILURE): the fire-and-forget cloud mirrors below (new site, duplicate, rename,
   // status) used to `.catch(() => {})` — the op looked done while the cloud copy silently lagged.
@@ -497,6 +538,7 @@ export default function App({
   // stamped afterwards would need an UPDATE — which the database now refuses outright.
   const newSiteFromMap = async (payload) => {
     const id = newId();
+    locallyMintedGroupsRef.current.add(id); // B1202176 — see the ref's own header
     const parcels = (payload.parcels || [])
       .filter((p) => p.points?.length >= 3)
       .map((p, i) => ({ id: `p${id}_${i}`, points: p.points, locked: true, addr: p.addr || null, acct: p.acct || null, attrs: p.attrs || null }));
@@ -529,6 +571,7 @@ export default function App({
    * keeping even before anything is drawn (and `persistOrDrop` keeps a blank plan that has one). */
   const newBlankSite = async (opts) => {
     const id = newId();
+    locallyMintedGroupsRef.current.add(id); // B1202176 — see the ref's own header; covers BOTH branches below
     const o = opts && opts.origin && Number.isFinite(opts.origin.lat) && Number.isFinite(opts.origin.lon)
       ? { lat: opts.origin.lat, lon: opts.origin.lon } : null;
     if (o) {
@@ -687,7 +730,9 @@ export default function App({
     });
     if (!allowed) return;
     userLeftProjectRef.current = false; // the intent is spent once it has been written
-    onProjectChange?.(effGroup);
+    // B1202176 — tell Shell.jsx's deletion gate whether THIS group is one we just minted locally
+    // (see `locallyMintedGroupsRef`'s header), so it never asks the cloud about it cold.
+    onProjectChange?.(effGroup, { freshlyCreated: locallyMintedGroupsRef.current.has(effGroup) });
   }, [effGroup, bootResolved, isActive]);
 
   // Keep-alive: returning to this tab re-reads the local site list (cheap, synchronous) so a

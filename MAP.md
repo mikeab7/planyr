@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-05 @ `751e6d49` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-05 @ `6349c899` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -26,7 +26,7 @@ _693 source files mapped._
 - **`src/app/chunkReload.js`** — Stale-chunk-after-deploy recovery: vite:preloadError listener, cache-busting reloadFresh, cooldown/stuck loop guard, flushAll on unload
   - _exports_: `arrivedViaFreshReload`, `chunkNameOf`, `clearRecovery`, `clearReloadGuard`, `hasReloadParam`, `installChunkReloadGuard`, `isChunkLoadError`, `isChunkRecoveryStuck`, `landingReport`, `noteRecoveryAttempt`, `readRecovery`, `RECOVERY_EPISODE_MAX_MS`, `RECOVERY_KEY`, `RECOVERY_SETTLE_MS`, `recoveryLine`, `recoveryStage`, `RELOAD_COOLDOWN_MS`, `RELOAD_GUARD_KEY`, `RELOAD_PARAM`, `reloadFresh`, `shouldReloadAfterPreloadError`, `shouldReportFailure`, `stripReloadParam`, `subscribeChunkRecoveryStuck`, `writeRecovery`
 - **`src/app/ErrorBoundary.jsx`** — Per-workspace React class error boundary: contains render crashes, detects chunk-load errors, offers cache-busting reload vs mid-deploy 'try again'
-  - _exports_: `default (ErrorBoundary)`
+  - _exports_: `crashModuleSlug`, `default (ErrorBoundary)`
 - **`src/app/flushRegistry.js`** — Cross-workspace flush-before-navigate registry: registerFlush/flushAll give each live workspace one synchronous local-save + keepalive cloud push before a forced reload
   - _exports_: `_flushers`, `flushAll`, `registerFlush`
 - **`src/app/HelpReportControl.jsx`** — the global help/report FAB the shell mounts on every route (B842864): "Report a problem" / "Something was slow" / "Help".
@@ -491,9 +491,9 @@ _693 source files mapped._
 - **`src/shared/profile/useProfile.js`** — useProfile hook: load signed-in user's profiles row and expose a never-blank display name / first name / org / initial fallback chain plus save+reload
   - _exports_: `default`, `displayNameFor`, `firstNameFor`, `initialFor`, `orgFor`, `useProfile`
 - **`src/shared/projects/projectModel.js`** — Pure project-model helpers: collapse site records into one project per site-group, name-match suggest, dropdown filter, and relative-time formatting for the breadcrumb switcher
-  - _exports_: `DELETED_RETENTION_DAYS`, `filterProjects`, `groupProjects`, `normalizeProjectName`, `relTime`, `resolveCurrentName`, `suggestNameMatch`, `unionProjectLists`, `withCurrentProject`
+  - _exports_: `DELETED_RETENTION_DAYS`, `filterProjects`, `groupProjects`, `normalizeProjectName`, `projectGateStatus`, `relTime`, `resolveCurrentName`, `suggestNameMatch`, `unionProjectLists`, `withCurrentProject`
 - **`src/shared/projects/projects.js`** — Live project list for the breadcrumb switcher: groups the RLS-scoped site store, warms an empty on-device cache via cloud pull, and rename/delete a site-group project
-  - _exports_: `activeUid`, `checkProjectDeletionStatus`, `DELETED_RETENTION_DAYS`, `deleteProject`, `filterProjects`, `groupProjects`, `listDeletedProjects`, `listProjects`, `normalizeProjectName`, `notifyProjectsChanged`, `onProjectsChanged`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `reconcileProjects`, `relTime`, `renameProject`, `restoreDeletedProject`, `suggestNameMatch`, `warmProjects`, `warmProjectsIfEmpty`
+  - _exports_: `activeUid`, `checkProjectDeletionStatus`, `DELETED_RETENTION_DAYS`, `deleteProject`, `filterProjects`, `groupProjects`, `listDeletedProjects`, `listProjects`, `normalizeProjectName`, `notifyProjectsChanged`, `onProjectsChanged`, `projectGateStatus`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `reconcileProjects`, `relTime`, `renameProject`, `restoreDeletedProject`, `suggestNameMatch`, `warmProjects`, `warmProjectsIfEmpty`
 - **`src/shared/recents/recentDocs.js`** — Library-Home Recent list: local recently-OPENED drawings (not updated_at), per-uid, deduped by id, newest-first, capped at 15
   - _exports_: `listRecents`, `RECENTS_CAP`, `recordOpen`, `removeRecent`
 - **`src/shared/reports/reportsStore.js`** — problem-report context + submit/queue/retry model behind `HelpReportControl.jsx` (B842866).
@@ -1010,7 +1010,7 @@ _693 source files mapped._
 - **`src/workspaces/site-planner/lib/mapillaryClient.js`** — Leaflet-free Mapillary request shaping: builds bbox map_features URL (same-origin token-injecting proxy, or direct Graph API with a user token) and filters to pole/hydrant detections
   - _exports_: `mapillaryRequestUrl`, `MLY_FIELDS`, `MLY_LIMIT`, `MLY_PROXY_PATH`, `pickDetections`
 - **`src/workspaces/site-planner/lib/mapLock.js`** — THE projection welding the planner's feet frame to the Web-Mercator basemap — scaled-Mercator feet↔lat/lng plus the matching ppf↔zoom, both anchored at the site origin
-  - _exports_: `basemapWrapPoint`, `basemapWrapPointTransformed`, `exactContainerPoint`, `feetToLatLngPair`, `FT_PER_DEG`, `ftPerDeg`, `invMercDeg`, `lngLatToFeet`, `lockOffsetPx`, `mercDeg`, `ppfToZoom`, `REGISTRATION_SANITY_PX`, `registrationLayoutMayHaveChanged`, `registrationShift`, `sanitizeShift`, `tileNwFeet`, `zoomToPpf`
+  - _exports_: `basemapWrapPoint`, `basemapWrapPointTransformed`, `exactContainerPoint`, `feetToLatLngPair`, `FT_PER_DEG`, `ftPerDeg`, `hasRegisterableContainer`, `invMercDeg`, `lngLatToFeet`, `lockOffsetPx`, `mercDeg`, `ppfToZoom`, `REGISTRATION_SANITY_PX`, `registrationLayoutMayHaveChanged`, `registrationShift`, `sanitizeShift`, `tileNwFeet`, `zoomToPpf`
 - **`src/workspaces/site-planner/lib/mapStack.js`** — NEW-1 THE map stacking model: one fixed semantic order (basemap → GIS area fills → references → parcel → setback → elements → promoted references → LIFTED GIS area fills → GIS line strokes → labels → handles), the declared per-source area/line/point role + its role-split form, the per-layer "Show above plan" lift (the escape hatch opacity cannot be) with its band pane names + rebuild key, the three export bands, and the audit that fails the build on an unclassified GIS source
   - _exports_: `auditLayerRoles`, `bandKey`, `canLiftRole`, `CANVAS_Z`, `configCanLift`, `EXPORT_BANDS`, `exportBandFor`, `exportsOverPlan`, `FRONT_BAND_ATTR`, `GIS_ROLES`, `isRoleSplit`, `layerOverPlan`, `LIFTABLE_ROLE`, `MAP_STACK`, `PANE_AREA`, `PANE_AREA_FRONT`, `PANE_AREA_FRONT_LABEL`, `PANE_AREA_LABEL`, `PANE_LINE`, `PANE_LINE_LABEL`, `panesForLayer`, `panesForRole`, `roleOverElements`, `ROLES_OVER_ELEMENTS`, `rolesOf`, `STACK_Z`, `stackOrder`, `SVG_TIERS`, `SVG_Z`, `tierForLayer`, `tierForRole`
 - **`src/workspaces/site-planner/lib/mapSymbols.js`** — leaflet point symbology: the `pointToLayer` circleMarker factory every GeoJSON-consuming layer must pass, plus the `L.Icon.Default` image-path fix so an accidental default marker is a pin, not a broken image.
@@ -1362,7 +1362,7 @@ _693 source files mapped._
 - **`src/workspaces/doc-review/lib/compareRegister.js`** — Revision-compare browser glue: rasterize+binarize two PDF pages, run the pure register/resample/diff core on budgeted rasters
   - _exports_: `binImageData`, `compareBinaries`, `comparePdfPages`, `resampleBinary`
 - **`src/workspaces/doc-review/lib/fileIndex.js`** — Pure auto-filing file-facts view-model: filing decision to Postgres index row, and merge stored placement/needs-filing facts onto review rows
-  - _exports_: `factsRowToPatch`, `mergeFactsIntoReviews`, `toFactsRow`
+  - _exports_: `DUPLICATE_RAPID_REPEAT_MS`, `factsRowToPatch`, `findDuplicateReview`, `isRapidRepeatUpload`, `mergeFactsIntoReviews`, `toFactsRow`
 - **`src/workspaces/doc-review/lib/lastDoc.js`** — Per-PROJECT last-document map for Review resume ({projectId: {id,mode}}) + legacy-global fallback and resolveResume boot-candidate ordering
   - _exports_: `readLastDoc`, `readLastDocMap`, `readLegacyPointers`, `resolveResume`, `resumeAllowedForRoute`, `writeLastDoc`
 - **`src/workspaces/doc-review/lib/layerVisibilityReads.js`** — the Doc Review hidden-content verdicts: which PDF render paths MUST honour the optional-content (layer) toggle and which are correct without it, plus which markup reads are page-scoped and which are correctly whole-document. Records both answers with reasons (B503184).
