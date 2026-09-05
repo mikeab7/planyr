@@ -39,11 +39,15 @@ was never clicked" quietly ships broken.
 >   then `getByTestId("map-start-blank-menu-item")` is the reliable two-step click); drive the SVG
 >   canvas with `page.mouse` (CDP mouse events fire React's pointer handlers); `page.screenshot({clip})`
 >   then read the PNG back to eyeball it.
-> - **⛔ WEBKIT IS INSTALLABLE HERE (amended 2026-09-05, B1168128 fourth pass) — but it is still not
->   Safari, and getting it running needs two steps most sessions will miss on the first try.**
->   `npx playwright install chromium` does NOT install WebKit — that part of the old note still
->   holds, and a fresh container starts with Chromium only. But `npx playwright install webkit` DOES
->   work from here: the download hits a 403 on its first two CDN mirrors
+> - **⛔ WEBKIT INSTALLS ON DEMAND HERE (amended 2026-09-05, B1168128 fourth pass) — USE IT for any
+>   iOS-class bug, not just Chromium's phone-device emulation.** An earlier version of this note said
+>   WebKit was unavailable in this sandbox; that was true when written and is now WRONG — don't let a
+>   future session read this note, see "no WebKit", and settle for Chromium when the real engine is
+>   one command away. It is still not Safari (see the specifics below), and getting it running needs
+>   two steps most sessions will miss on the first try. `npx playwright install chromium` does NOT
+>   install WebKit — that part of the old note still holds, and a fresh container starts with
+>   Chromium only. But `npx playwright install webkit` DOES work from here: the download hits a 403
+>   on its first two CDN mirrors
 >   (`cdn.playwright.dev/dbazure/...`, `playwright.download.prss.microsoft.com` — a real, narrow
 >   block on those two hosts specifically) and then succeeds on Playwright's own third fallback
 >   mirror automatically — no manual retry needed, just let the command finish. The binary then
@@ -57,7 +61,7 @@ was never clicked" quietly ships broken.
 >   Playwright exposes no CDP-equivalent for WebKit (no `Emulation.setSafeAreaInsetsOverride`
 >   analog), so `env(safe-area-inset-*)` still resolves to 0 here with no way to override it —
 >   confirmed by trying, not assumed (Chromium's CDP override IS available and DOES let you inject a
->   real inset value; that asymmetry is real and worth knowing before reaching for WebkKit expecting
+>   real inset value; that asymmetry is real and worth knowing before reaching for WebKit expecting
 >   parity with the Chromium simulation path). Playwright's `touchscreen` API on WebKit (like
 >   Chromium) exposes only a single-point `.tap()` — no drag primitive on either engine — so a real
 >   held-and-moved touch gesture still can't be produced through Playwright's public API; Chromium's
