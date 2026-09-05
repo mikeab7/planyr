@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-05 @ `4e5101e1` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-05 @ `59f7874b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -297,7 +297,7 @@ _677 source files mapped._
 - **`src/shared/comps/components/CompEntryMobileSheet.jsx`** — the TRANSPOSED comp entry layout below MOBILE_BREAKPOINT_PX: pager + status dots, sticky identity strip, one-comp-per-screen field list grouped by compMobileLayout.js, a jump sheet for the whole batch
   - _exports_: `default (CompEntryMobileSheet)`
 - **`src/shared/comps/components/CompsPanel.jsx`** — Leasing Comps right-side panel (B711328): list/detail/create-edit for land, building-sale and lease comps; owner-only Edit/Delete, empty fields never render
-  - _exports_: `CompDetail`, `CompRow`, `default (CompsPanel)`
+  - _exports_: `CompDetail`, `CompForm`, `CompRow`, `default (CompsPanel)`
 - **`src/shared/comps/components/PartyNameField.jsx`** — Comp form party-name field: plain text input + a loose-match suggestion listbox (accessible combobox, independent of the map toolbar's PlaceSearchField)
   - _exports_: `default (PartyNameField)`
 - **`src/shared/comps/lib/compDates.js`** — comp date display/parse: ISO <-> mm/dd/yy, flexible typed-date parsing (slash/dash-numeric, month-name, 2- or 4-digit year) — storage is always ISO, this is the one crossing point to what a person reads/types
