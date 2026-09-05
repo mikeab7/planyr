@@ -174,6 +174,15 @@ comment on function public.prune_client_errors(timestamptz) is
 revoke all on function public.prune_client_errors(timestamptz) from public;
 revoke all on function public.prune_client_errors(timestamptz) from anon, authenticated;
 
+-- B1205298 (2026-09-05 db-hygiene sweep) — pin search_path on both functions this file defines.
+-- Both are already SECURITY INVOKER (no privilege-escalation exposure — the Supabase advisor's
+-- function_search_path_mutable WARN is about an unqualified identifier resolving against
+-- whatever search_path the CALLING session set, not elevated rights), but these were 2 of the
+-- only 9 functions in the schema without the pin. Plain ALTER FUNCTION, not CREATE OR REPLACE —
+-- additive, doesn't touch either body.
+alter function public.is_manual_perf_capture(text, text) set search_path = public, pg_temp;
+alter function public.prune_client_errors(timestamptz) set search_path = public, pg_temp;
+
 -- ── The status answer: ran-and-found-nothing vs never-ran ────────────────────────────────────
 create or replace view public.client_errors_retention_status as
 with last as (

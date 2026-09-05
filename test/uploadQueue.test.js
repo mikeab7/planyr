@@ -85,15 +85,16 @@ describe("uploadQueue — derived two-group view (Amendment B)", () => {
   const now = 1_000_000;
   const item = (over) => ({ ...makeQueueItem(pdf()), ...over });
 
-  it("processing / needs-filing / failed / rejected are ALWAYS active (never auto-dismiss)", () => {
+  it("processing / needs-filing / failed / rejected / duplicate are ALWAYS active (never auto-dismiss)", () => {
     const queue = [
       item({ status: QUEUE_STATUS.PROCESSING }),
       item({ status: QUEUE_STATUS.NEEDS_FILING, filedAt: now - 10 * RECENT_BEAT_MS }),
       item({ status: QUEUE_STATUS.FAILED }),
       item({ status: QUEUE_STATUS.REJECTED }),
+      item({ status: QUEUE_STATUS.DUPLICATE }), // B1205297 — stays until Replace/Keep both/Cancel
     ];
     const { active, recent } = splitQueue(queue, now);
-    expect(active).toHaveLength(4);
+    expect(active).toHaveLength(5);
     expect(recent).toHaveLength(0);
   });
 
