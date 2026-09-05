@@ -7,89 +7,89 @@
     "map-landing": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       }
     },
     "site-planner-header": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       }
     },
     "site-planner-left-rail": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       }
     },
     "library": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "8f7752bf",
+        "note": "B1166768 — the Model tab's nav label is now Spreadsheet; the only pixels that moved are the tab text itself, re-approved with the CI-pinned r1228 Chromium (byte-identical local reproduction of the real CI failure numbers confirmed first)"
       }
     }
   }
