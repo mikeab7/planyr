@@ -1,6 +1,19 @@
 -- Retention for public.client_errors (B270913) — 90 days ordinary, ONE YEAR for manual captures.
 -- Run ONCE in the Supabase SQL editor. Idempotent (safe to re-run). Sits beside client_errors.sql,
--- which must have been applied first.
+-- which must have been applied first — AND after client_errors_kind.sql, whose generated `kind`
+-- column the fast-track sweep below reads.
+--
+-- ── NEW-3 — A FAST TIER FOR TIMING/EVENT ROWS, so they age out well short of an error's 90 days.
+-- Measured 2026-09-05: the table is 96% telemetry (timing measurements + diagnostic events) and
+-- 4% actual errors, and the two were ageing out on the identical schedule. `kind IN ('event',
+-- 'timing')` rows now go at 45 days — half an error's window, and a number chosen because it
+-- deletes NOTHING from the 'timing' bucket today (its oldest row was 30 days old when measured)
+-- and only trims the oldest tail of 'event' (908 of 8,371 rows) — a bounded first activation, not
+-- a wholesale purge of this table's diagnostic history. The manual-capture carve-out below is
+-- UNCHANGED and still wins over this: a manual perf capture is `kind='timing'` but keeps its own
+-- 365-day life regardless of the fast sweep. The fast sweep's count folds into `ordinary_deleted`
+-- (below) rather than a new column — from the retention LOG's point of view "ordinary" has always
+-- meant "not the precious manual capture", and that stays true whichever cutoff caught a row.
 --
 -- ── THE POLICY, and why these two numbers ────────────────────────────────────────────────────
 -- • 90 DAYS for an ordinary row. Measured 2026-08-08 and again 2026-08-09: 0 of 5,279 rows are
@@ -93,18 +106,35 @@ language plpgsql
 as $$
 declare
   v_ordinary_cutoff timestamptz := p_now - interval '90 days';
+  v_fast_cutoff     timestamptz := p_now - interval '45 days';
   v_manual_cutoff   timestamptz := p_now - interval '365 days';
   v_started         timestamptz := clock_timestamp();
   v_before          bigint;
   v_after           bigint;
   v_ordinary        integer;
+  v_fast            integer;
   v_manual          integer;
   v_run             public.client_errors_retention_runs;
 begin
   select count(*) into v_before from public.client_errors;
 
+  -- NEW-3 — the fast tier, BEFORE the ordinary sweep below: a timing/event row eligible here is
+  -- gone before the 90-day sweep ever sees it, so that sweep never has to know this tier exists.
+  -- Same manual carve-out as below, for the same reason (a manual capture is `kind='timing'`).
+  with gone as (
+    delete from public.client_errors
+     where kind in ('event', 'timing')
+       and at < v_fast_cutoff
+       and not public.is_manual_perf_capture(source, message)
+    returning 1
+  )
+  select count(*) into v_fast from gone;
+
   -- Ordinary rows past 90 days. The `not is_manual_perf_capture(...)` term is the whole carve-out:
-  -- without it a manual capture would be swept by the 90-day rule long before its own year.
+  -- without it a manual capture would be swept by the 90-day rule long before its own year. The
+  -- fast tier above already removed every eligible event/timing row, so this is now the error-kind
+  -- sweep in practice — left UNSCOPED deliberately, so any row this file doesn't yet know a faster
+  -- rule for still ages out somewhere rather than being retained forever by omission.
   with gone as (
     delete from public.client_errors
      where at < v_ordinary_cutoff
@@ -112,6 +142,7 @@ begin
     returning 1
   )
   select count(*) into v_ordinary from gone;
+  v_ordinary := v_ordinary + v_fast;
 
   -- Manual captures past a year.
   with gone as (
