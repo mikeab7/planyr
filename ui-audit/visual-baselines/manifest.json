@@ -7,89 +7,89 @@
     "map-landing": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "b487f11d",
+        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "b487f11d",
+        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "b487f11d",
+        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "b487f11d",
+        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
       }
     },
     "site-planner-header": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "b487f11d",
+        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "b487f11d",
+        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "b487f11d",
+        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "b487f11d",
+        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
       }
     },
     "site-planner-left-rail": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "b487f11d",
+        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "b487f11d",
+        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "b487f11d",
+        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "b487f11d",
+        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
       }
     },
     "library": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "b487f11d",
+        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "b487f11d",
+        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "b487f11d",
+        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e65428e9",
-        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
+        "approvedCommit": "b487f11d",
+        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
       }
     }
   }

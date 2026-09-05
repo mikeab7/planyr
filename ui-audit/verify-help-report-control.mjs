@@ -2,12 +2,28 @@
 /* verify-help-report-control — B842864/B842865: the global help/report control the app shell
  * mounts on every route, and the adversarial-review questions the dispatch asked for by name.
  *
- * PART A — reachable, unobstructed, on the MAP screen (MapFinder.jsx) and the PLAN screen
- * (SitePlanner.jsx canvas), at a desktop and a narrow width: no overlap with Leaflet's zoom/
- * attribution controls, the canvas's own scale bar / north arrow / zoom stack, or the narrow-
- * only "✎ Tools" FAB. Real `elementFromPoint` hit tests, not bounding-box math alone
- * (FOREGROUND-OR-VOID's sibling: a clipped box can report an overlapping rect while painting
- * nothing there).
+ * ⛔ B1167120 (owner report, 2026-09-05) — PART A now also proves the control's `bottom` offset
+ * is MEASURED, never a constant. The shipped control fixed `bottom:292` at every breakpoint on
+ * every route, sized to clear the tallest thing that could ever occupy this corner anywhere in
+ * the app (the Site Planner canvas's own narrow-width zoom stack) — so on the map root, a
+ * schedule route and a project-model route (none of which has that stack, or anything else, in
+ * the corner) it rendered byte-identically at `bottom:292`, which on the owner's real viewport
+ * put it 63% of the way up the screen. Fixed in `shared/ui/cornerClearance.js`: the control now
+ * measures the real DOM and clears only what is genuinely there. Two things this file now
+ * proves that it did not before: **(a)** on a route with no bottom-right chrome at all
+ * (schedule, model, and the desktop-width plan canvas — where the docked tool rail insets the
+ * canvas's own furniture away from the true viewport edge), the control's distance from the
+ * bottom edge is SMALL — this assertion is what would have failed against the old 292px
+ * constant. **(b)** on the map screen, the control clears BOTH of Leaflet's bottom-right
+ * controls — attribution AND the graphic scale (`L.control.scale(...,{position:"bottomright"})`,
+ * MapFinder.jsx) — not just attribution, which is all the original harness checked.
+ *
+ * PART A — reachable, unobstructed, on the MAP screen (MapFinder.jsx), the PLAN screen
+ * (SitePlanner.jsx canvas), and two chrome-free routes (Scheduler, Model), at a desktop and a
+ * narrow width: no overlap with Leaflet's zoom/attribution/scale controls, the canvas's own
+ * scale bar / north arrow / zoom stack, or the narrow-only "✎ Tools" FAB. Real `elementFromPoint`
+ * hit tests, not bounding-box math alone (FOREGROUND-OR-VOID's sibling: a clipped box can report
+ * an overlapping rect while painting nothing there).
  * PART B — a drag starting just outside the control's own small box still pans the map/canvas
  * (the control is not a full-viewport pointer-events layer).
  * PART C — keyboard reachable: Tab focuses it, Enter opens the menu, Escape closes it.
@@ -60,44 +76,52 @@ try {
     if (mode === "plan") await ctx.addInitScript(seedPlan);
     const page = await ctx.newPage();
     await assertMeasurable(page, "verify-help-report-control");
-    await page.goto(URL, { waitUntil: "load" });
+    const hash = mode === "schedule" ? "#/schedule" : mode === "model" ? "#/model" : "";
+    await page.goto(URL + hash, { waitUntil: "load" });
     if (mode === "plan") {
       await page.waitForSelector('svg[aria-label="Site plan canvas"]', { timeout: 15000 }).catch(() => {});
-    } else {
+    } else if (mode === "map") {
       // Map mode: wait for the Leaflet map container to exist.
       await page.waitForSelector(".leaflet-container", { timeout: 15000 }).catch(() => {});
     }
+    // "schedule"/"model" — chrome-free routes, no canvas/Leaflet selector to wait for; the FAB
+    // wait below is the only readiness signal they need.
     await page.waitForSelector('[data-testid="help-report-fab"]', { timeout: 15000 });
     await pacedWait(page, 1500);
     return { ctx, page };
   }
 
   // ─────────────────────────────────────────── PART A — no overlap, every screen/breakpoint
-  console.log("\nPART A — no overlap with Leaflet controls / canvas furniture / the ✎ Tools FAB");
+  console.log("\nPART A — no overlap with Leaflet controls / canvas furniture / the ✎ Tools FAB, and no more than a small clearance where none of that exists");
+  // "chromeFree" routes carry NOTHING that could occupy the bottom-right corner — no Leaflet map,
+  // no Site Planner canvas — so a control measuring correctly must sit close to the true corner
+  // there. This is the assertion that fails outright against the old 292px constant.
   const SCENES = [
     { mode: "map", width: 1440, label: "map@1440" },
     { mode: "map", width: 390, label: "map@390" },
-    { mode: "plan", width: 1440, label: "plan@1440" },
+    { mode: "plan", width: 1440, label: "plan@1440", chromeFree: true }, // desktop: canvas furniture is inset off the true corner
     { mode: "plan", width: 390, label: "plan@390" },
+    { mode: "schedule", width: 1440, label: "schedule@1440", chromeFree: true },
+    { mode: "model", width: 1440, label: "model@1440", chromeFree: true },
   ];
+  // Michael's own production measurement: byte-identical bottom:292 puts the control 63% of the
+  // way up a 465px-tall viewport. A genuinely adaptive control on a chrome-free route should sit
+  // within a small multiple of its own right-inset of the corner — generous enough to allow for
+  // a themed border/shadow, nowhere close to what a leftover reservation would produce.
+  const SMALL_CLEARANCE_PX = 40;
 
   for (const scene of SCENES) {
     const { ctx, page } = await openScreen(scene);
     const data = await page.evaluate(() => {
       const rectOf = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height }; };
       return {
+        viewportH: window.innerHeight,
         fab: rectOf(document.querySelector('[data-testid="help-report-fab"]')),
         leafletZoom: rectOf(document.querySelector(".leaflet-control-zoom")),
         leafletAttr: rectOf(document.querySelector(".leaflet-control-attribution")),
-        toolsFab: (() => {
-          const btns = Array.from(document.querySelectorAll("button"));
-          const b = btns.find((x) => x.textContent && x.textContent.trim() === "✎ Tools");
-          return rectOf(b);
-        })(),
-        zoomStack: (() => {
-          const el = document.querySelector('[data-testid="report-slow"]');
-          return el ? rectOf(el.closest("div")) : null;
-        })(),
+        leafletScale: rectOf(document.querySelector(".leaflet-control-scale")),
+        toolsFab: rectOf(document.querySelector('[data-canvas-corner="tools-fab"]')),
+        zoomStack: rectOf(document.querySelector('[data-canvas-corner="zoom-stack"]')),
       };
     });
     check(`${scene.label}: FAB present`, !!data.fab, data.fab ? `${Math.round(data.fab.w)}×${Math.round(data.fab.h)} at (${Math.round(data.fab.l)},${Math.round(data.fab.t)})` : "missing");
@@ -109,6 +133,10 @@ try {
       const ov = overlapArea(data.fab, data.leafletAttr);
       check(`${scene.label}: clear of Leaflet attribution control`, ov === 0, ov > 0 ? `${ov}px² overlap` : "");
     }
+    if (data.leafletScale) {
+      const ov = overlapArea(data.fab, data.leafletScale);
+      check(`${scene.label}: clear of Leaflet graphic-scale control`, ov === 0, ov > 0 ? `${ov}px² overlap` : "");
+    }
     if (data.zoomStack) {
       const ov = overlapArea(data.fab, data.zoomStack);
       check(`${scene.label}: clear of the canvas zoom/report-slow stack`, ov === 0, ov > 0 ? `${ov}px² overlap (stack ${JSON.stringify(data.zoomStack)})` : "");
@@ -116,6 +144,10 @@ try {
     if (data.toolsFab) {
       const ov = overlapArea(data.fab, data.toolsFab);
       check(`${scene.label}: clear of the "✎ Tools" FAB`, ov === 0, ov > 0 ? `${ov}px² overlap` : "");
+    }
+    if (scene.chromeFree && data.fab) {
+      const distanceFromBottom = data.viewportH - data.fab.b;
+      check(`${scene.label}: sits close to the true bottom-right corner (no chrome to clear here)`, distanceFromBottom <= SMALL_CLEARANCE_PX, `${Math.round(distanceFromBottom)}px from the bottom edge (would be 292 - fab height against the old constant)`);
     }
     if (SHOTS) await page.screenshot({ path: `${OUT}/${scene.label}.png` }).catch(() => {});
     await ctx.close();

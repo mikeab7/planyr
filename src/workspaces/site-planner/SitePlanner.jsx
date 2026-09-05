@@ -23244,7 +23244,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // plate height) at every width, rather than inventing a second breakpoint.
             const zoomBottom = narrow ? 100 + FAB_RESERVE_PX : 100;
             return (
-              <div data-export="skip" style={{ position: "absolute", right: 14, bottom: zoomBottom, display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: MAP_CHROME_Z.control }}>
+              // data-canvas-corner: read by the shared help/report control (shared/ui/
+              // cornerClearance.js) so it can clear this stack when — and only when — it
+              // genuinely reaches the true viewport corner (narrow width; on desktop the
+              // docked tool rail insets this pane away from that corner, so the measured
+              // rect naturally stops overlapping and this stack is ignored for free).
+              <div data-export="skip" data-canvas-corner="zoom-stack" style={{ position: "absolute", right: 14, bottom: zoomBottom, display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: MAP_CHROME_Z.control }}>
                 <button className="gbtn" aria-label="Zoom in" title="Zoom in" style={{ ...zb, borderRadius: 0 }} onClick={() => zoomBy(1.25)}>＋</button>
                 <button className="gbtn" aria-label="Zoom out" title="Zoom out" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={() => zoomBy(1 / 1.25)}>－</button>
                 <button className="gbtn" aria-label="Zoom to fit" title="Zoom to fit" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={fit}>⤢</button>
@@ -23536,6 +23541,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         {/* phone-only floating button to summon the tool rail (B113) */}
         {narrow && !mobileTools && (
           <button onClick={() => setMobileTools(true)} title="Show the drawing tools"
+            data-canvas-corner="tools-fab"
             style={{ position: "absolute", right: 12, bottom: 16, zIndex: 1190, display: "flex", alignItems: "center", gap: 6, padding: "11px 16px", borderRadius: RADIUS.pill, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 800, color: "#fff", background: PAL.ember, boxShadow: "0 6px 18px rgba(0,0,0,0.45)" }}>
             ✎ Tools
           </button>

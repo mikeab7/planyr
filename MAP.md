@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-05 @ `4cbb15b04` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-05 @ `b487f11d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_671 source files mapped._
+_672 source files mapped._
 
 ## infra
 
@@ -548,6 +548,8 @@ _671 source files mapped._
   - _exports_: `placeContextMenu`
 - **`src/shared/ui/controls.jsx`** — shared control primitives (B657-5B): one radius/padding/typography scale + Button/ToggleChip/IconButton/Field/Section/MenuItem, token-driven, with a threaded `accent` prop so each module keeps its hue.
   - _exports_: `Button`, `CONTROL_RADIUS`, `Field`, `FONT`, `IconButton`, `MenuItem`, `menuPanelStyle`, `MenuTrigger`, `PAD`, `Section`, `SIZE`, `Tab`, `ToggleChip`
+- **`src/shared/ui/cornerClearance.js`** — measures the real DOM to tell a fixed bottom-right control how far to clear (a Leaflet map's corner controls, or anything marked `data-canvas-corner`), instead of reserving a worst-case constant on every route.
+  - _exports_: `cornerClearanceFromBottom`
 - **`src/shared/ui/dashboardNav.js`** — Pure wordmark/crumb Dashboard action+tooltip split (B1128272), so Schedule's header can leave-vs-stay differently.
   - _exports_: `crumbDashboardTitle`, `logoDashboardAction`
 - **`src/shared/ui/DeletedProjectNotice.jsx`** — Shell.jsx's blocked-route screen for a soft-deleted or missing project (Restore / Dashboard-only), swapped in for the workspace so no editor is ever mounted to write through.
