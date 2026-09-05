@@ -1,6 +1,6 @@
 // B629/B630 — the detention rules engine: versioned records, the rate method,
 // the greater-of conflict rule, band discipline, overlays. Pure — no fetch.
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import {
   DETENTION_RULES,
   MUNICIPAL_OVERLAYS,
@@ -411,6 +411,59 @@ describe("computeRequiredDetention — municipal overlays", () => {
     expect(r.flags).toContain("municipal-overlay");
     expect(r.basis).toMatch(/10% runoff-reduction/);
     expect(r.overlayRule.id).toBe("magnolia-adopt");
+  });
+});
+
+// B1205296 — the overlay recursion (`ruleType === "overlay"`) used to forward only 9 of the
+// function's 16 named params, silently resetting hcfcdApplicable/singleFamily/lotSf/
+// removedImperviousAcres (and 3 others) to their defaults on every overlay dispatch. Not
+// reachable today (the only overlay carrying parentAuthority is magnolia→montgomery, whose
+// branch never reads the dropped keys), but the seam itself was the defect: the moment ANY
+// overlay's parent resolves to "coh", these three facts must survive the recursion. A
+// synthetic overlay→coh authority is added/removed per test so this doesn't depend on a real
+// overlay ever pointing at coh, and doesn't leak into the "rule records — integrity sweep"
+// test above (which enumerates DETENTION_RULES and runs earlier in this file).
+describe("computeRequiredDetention — overlay recursion forwards the FULL argument set (B1205296)", () => {
+  const TEST_AUTH = "__test_overlay_to_coh__";
+  function seedCohOverlay() {
+    DETENTION_RULES[TEST_AUTH] = [{
+      id: "test-overlay-to-coh",
+      authority: TEST_AUTH,
+      authorityLabel: "Test overlay (adopts City of Houston)",
+      ruleType: "overlay",
+      effectiveDate: "2020-01-01",
+      verifiedOn: "2026-09-05",
+      source: { name: "test fixture — B1205296", url: "https://example.com/test-overlay" },
+      params: { parentAuthority: "coh" },
+    }];
+  }
+  afterEach(() => {
+    delete DETENTION_RULES[TEST_AUTH];
+  });
+
+  it("preserves hcfcdApplicable:false through the >20ac large-tract dispatch (the B789 guard)", () => {
+    seedCohOverlay();
+    const r = computeRequiredDetention({ acres: 25, impPct: 40, authorityId: TEST_AUTH, hcfcdApplicable: false });
+    expect(r.flags).toContain("hcfcd-not-applicable");
+    expect(r.flags).toContain("municipal-overlay");
+    expect(r.basis).toMatch(/HCFCD compare does not apply/);
+    expect(r.requiredAcFt).toBeCloseTo(7.5, 4); // 0.75 ac-ft/ac × 10 ac impervious
+  });
+
+  it("preserves singleFamily/lotSf through the Tables 9.3/9.4 small-lot exemption", () => {
+    seedCohOverlay();
+    const r = computeRequiredDetention({ acres: 0.3, impPct: 50, authorityId: TEST_AUTH, singleFamily: true, lotSf: 10000 });
+    expect(r.kind).toBe("none");
+    expect(r.requiredAcFt).toBe(0);
+    expect(r.flags).toContain("municipal-overlay");
+  });
+
+  it("preserves removedImperviousAcres through the Table 9.5 redevelopment credit", () => {
+    seedCohOverlay();
+    const r = computeRequiredDetention({ acres: 5, impPct: 60, authorityId: TEST_AUTH, removedImperviousAcres: 2 });
+    expect(r.basis).toMatch(/removed impervious/);
+    expect(r.requiredAcFt).toBeCloseTo(1.6, 4); // (3 ac impervious × 0.8) − (2 ac removed × 0.4)
+    expect(r.flags).toContain("municipal-overlay");
   });
 });
 

@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-05 @ `d04a6ea9` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-05 @ `b648226` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -1340,7 +1340,7 @@ _682 source files mapped._
 - **`src/workspaces/doc-review/lib/compareRegister.js`** — Revision-compare browser glue: rasterize+binarize two PDF pages, run the pure register/resample/diff core on budgeted rasters
   - _exports_: `binImageData`, `compareBinaries`, `comparePdfPages`, `resampleBinary`
 - **`src/workspaces/doc-review/lib/fileIndex.js`** — Pure auto-filing file-facts view-model: filing decision to Postgres index row, and merge stored placement/needs-filing facts onto review rows
-  - _exports_: `factsRowToPatch`, `mergeFactsIntoReviews`, `toFactsRow`
+  - _exports_: `DUPLICATE_RAPID_REPEAT_MS`, `factsRowToPatch`, `findDuplicateReview`, `isRapidRepeatUpload`, `mergeFactsIntoReviews`, `toFactsRow`
 - **`src/workspaces/doc-review/lib/lastDoc.js`** — Per-PROJECT last-document map for Review resume ({projectId: {id,mode}}) + legacy-global fallback and resolveResume boot-candidate ordering
   - _exports_: `readLastDoc`, `readLastDocMap`, `readLegacyPointers`, `resolveResume`, `resumeAllowedForRoute`, `writeLastDoc`
 - **`src/workspaces/doc-review/lib/layerVisibilityReads.js`** — the Doc Review hidden-content verdicts: which PDF render paths MUST honour the optional-content (layer) toggle and which are correct without it, plus which markup reads are page-scoped and which are correctly whole-document. Records both answers with reasons (B503184).

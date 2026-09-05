@@ -25,7 +25,7 @@ import {
   downloadFromDrive, downloadSource,
 } from "../../doc-review/lib/reviewStore.js";
 import { friendlySaveError } from "../../../shared/sitePlans/lib/overlayErrors.js";
-import { toFactsRow, mergeFactsIntoReviews } from "../../doc-review/lib/fileIndex.js";
+import { toFactsRow, mergeFactsIntoReviews, findDuplicateReview, isRapidRepeatUpload } from "../../doc-review/lib/fileIndex.js";
 import { fileWarn } from "../../doc-review/lib/sourceState.js";
 import { buildFilingPlan } from "../../../shared/files/disciplineSplit.js";
 import { splitPdfByPlan } from "../../doc-review/lib/pdfSplit.js";
@@ -136,6 +136,10 @@ export default function FileBrowser({
   // child fires enter/leave pairs, and the naive `currentTarget === target` check made the
   // highlight flicker. The counter only clears when every enter has matched a leave.
   const dragDepth = useRef(0);
+  // B1205297 — a queue item parked at QUEUE_STATUS.DUPLICATE keeps the (targetFolderId, opts)
+  // its processItem() call was made with here, so the Replace/Keep-both button can re-run the
+  // EXACT SAME routing decision with a resolved dupChoice, instead of re-deriving it.
+  const pendingResumeRef = useRef(new Map());
 
   // ANY folder-rail click exits the "Needs filing" view AND an active search (parity with
   // the classic tree — clicking a folder means "show me that folder"; leaving a search in
@@ -274,7 +278,27 @@ export default function FileBrowser({
   // File one blob as a review + its facts row. Returns the fileNewReview result (or null on fail).
   // `folderId` (B686) files the bytes into an explicitly-picked tree folder (Drive + on-screen).
   // `onProgress(sent,total)` surfaces the chunked upload's byte progress in the tray (B409).
-  const fileOne = async ({ pid, discipline, item_, docDate, blob, fileName, facts, needsFiling, folderId = null, onProgress = null, org = false }) => {
+  //
+  // B1205297 — duplicate-upload screening, the single choke point every filing path in this
+  // component routes through. `dupChoice` is unset on the first attempt: a filename match
+  // against an already-filed, non-deleted review in the SAME scope (project, or Organization)
+  // returns `{ duplicate }` instead of filing — UNLESS it's a rapid repeat (a second ingest of
+  // the same name inside DUPLICATE_RAPID_REPEAT_MS, i.e. a double-click or an upload retry),
+  // which collapses onto the existing row silently. `dupChoice: "replace"` soft-deletes the
+  // existing review first (reversible — it lands in Recently Deleted, same as any other delete)
+  // then files the new one in its place; `"keepBoth"` skips the screen entirely and files a
+  // second, independent copy.
+  const fileOne = async ({ pid, discipline, item_, docDate, blob, fileName, facts, needsFiling, folderId = null, onProgress = null, org = false, dupChoice = null }) => {
+    if (!dupChoice) {
+      const dup = findDuplicateReview(reviews, { projectId: pid, orgScope: org, sourceFile: fileName });
+      if (dup) {
+        if (isRapidRepeatUpload(dup)) return { ok: true, id: dup.id, collapsedInto: dup.id };
+        return { ok: false, duplicate: dup };
+      }
+    } else if (dupChoice === "replace") {
+      const dup = findDuplicateReview(reviews, { projectId: pid, orgScope: org, sourceFile: fileName });
+      if (dup) { try { await deleteReview(dup.id); } catch (_) { /* best-effort — the new file still files */ } }
+    }
     const r = await fileNewReview({ projectId: pid, project: pid ? projName(pid) : "", discipline, item: item_, docDate, blob, fileName, folderId, onProgress, orgScope: org });
     if (!r || !r.ok) return r || null;
     const factsIn = facts ? { ...facts } : { discipline, item: item_, docDate };
@@ -283,7 +307,32 @@ export default function FileBrowser({
     return r;
   };
 
-  const processItem = async (item, targetFolderId = null, { forceNeedsFiling = false } = {}) => {
+  // Parks the item at QUEUE_STATUS.DUPLICATE and remembers how to resume it. Returns true when
+  // `r` WAS a duplicate (caller must stop — nothing else to do this call), false otherwise.
+  const handleDuplicate = (r, item, targetFolderId, opts) => {
+    if (!r || !r.duplicate) return false;
+    pendingResumeRef.current.set(item.uploadId, { targetFolderId, opts });
+    patchItem(item.uploadId, {
+      status: QUEUE_STATUS.DUPLICATE, error: null, warn: null,
+      duplicate: { reviewId: r.duplicate.id, filedAt: r.duplicate.updated_at || null },
+    });
+    return true;
+  };
+
+  // The three DUPLICATE-row actions. "cancel" drops the item untouched (nothing was ever
+  // uploaded); "replace"/"keepBoth" re-run the SAME routing decision with dupChoice resolved.
+  const resolveDuplicate = async (uploadId, choice) => {
+    const resume = pendingResumeRef.current.get(uploadId);
+    pendingResumeRef.current.delete(uploadId);
+    if (choice === "cancel" || !resume) { removeItem(uploadId); return; }
+    const item = queue.find((it) => it.uploadId === uploadId);
+    if (!item) return;
+    patchItem(uploadId, { status: QUEUE_STATUS.PROCESSING, duplicate: null });
+    await processItem(item, resume.targetFolderId, { ...resume.opts, dupChoice: choice });
+    refresh();
+  };
+
+  const processItem = async (item, targetFolderId = null, { forceNeedsFiling = false, dupChoice = null } = {}) => {
     patchItem(item.uploadId, { status: QUEUE_STATUS.PROCESSING, error: null, warn: null, progress: null });
     // Byte progress from the chunked Drive upload (B409) → the row's progress bar. A 125 MB
     // set uploads for minutes; a bar beats an inscrutable spinner for that long.
@@ -294,7 +343,8 @@ export default function FileBrowser({
       // a human decision, not a title-block guess. Straight to the holding area.
       if (forceNeedsFiling) {
         const pid = cross ? null : projectId;
-        const r = await fileOne({ pid, discipline: "Other", item_: "", docDate: null, blob: item.file, fileName: item.name, facts: null, needsFiling: true, onProgress });
+        const r = await fileOne({ pid, discipline: "Other", item_: "", docDate: null, blob: item.file, fileName: item.name, facts: null, needsFiling: true, onProgress, dupChoice });
+        if (handleDuplicate(r, item, targetFolderId, { forceNeedsFiling, dupChoice })) return;
         if (!r || !r.ok) { patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: (r && r.error) || "Couldn’t file." }); return; }
         const warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError, large: r.large });
         patchItem(item.uploadId, { status: QUEUE_STATUS.NEEDS_FILING, reviewId: r.id, filedAt: Date.now(), warn, target: "Needs filing" });
@@ -306,7 +356,8 @@ export default function FileBrowser({
       // list to match against) and never "needs filing". Tier A has no org folder tree yet
       // (a real, scoped follow-on — see the item), so this is the whole of org filing today.
       if (orgScope) {
-        const r = await fileOne({ pid: null, org: true, discipline: "Other", item_: "", docDate: null, blob: item.file, fileName: item.name, facts: null, needsFiling: false, onProgress });
+        const r = await fileOne({ pid: null, org: true, discipline: "Other", item_: "", docDate: null, blob: item.file, fileName: item.name, facts: null, needsFiling: false, onProgress, dupChoice });
+        if (handleDuplicate(r, item, targetFolderId, { forceNeedsFiling, dupChoice })) return;
         if (!r || !r.ok) { patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: (r && r.error) || "Couldn’t file." }); return; }
         const warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError, large: r.large });
         patchItem(item.uploadId, { status: QUEUE_STATUS.DONE, reviewId: r.id, filedAt: Date.now(), warn, target: "Organization" });
@@ -323,7 +374,8 @@ export default function FileBrowser({
         // slips past DRAWING_DISCIPLINES/classifyDocClass and mis-categorizes the file).
         const rawLabel = (folder && displayLabel(folder.name)) || "Other";
         const discipline = DISCIPLINES.find((d) => d.toLowerCase() === rawLabel.toLowerCase()) || rawLabel;
-        const r = await fileOne({ pid: projectId, discipline, item_: "", docDate: null, blob: item.file, fileName: item.name, facts: { discipline }, needsFiling: false, folderId: targetFolderId, onProgress });
+        const r = await fileOne({ pid: projectId, discipline, item_: "", docDate: null, blob: item.file, fileName: item.name, facts: { discipline }, needsFiling: false, folderId: targetFolderId, onProgress, dupChoice });
+        if (handleDuplicate(r, item, targetFolderId, { forceNeedsFiling, dupChoice })) return;
         if (!r || !r.ok) { patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: (r && r.error) || "Couldn’t file." }); return; }
         const warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError, large: r.large });
         patchItem(item.uploadId, { status: QUEUE_STATUS.DONE, reviewId: r.id, filedAt: Date.now(), warn, target: folder ? displayLabel(folder.name) : projName(projectId) });
@@ -361,7 +413,12 @@ export default function FileBrowser({
             // One CONTINUOUS bar across all parts — a per-part sent/total would snap back to
             // 0% between disciplines and read like a stalled/restarting upload.
             const partProgress = (sent, t) => onProgress(pi * (t || 1) + Math.min(sent, t || 0), (t || 1) * parts.length);
-            const r = await fileOne({ pid, discipline: part.discipline, item_: part.item, docDate, blob: part.blob, fileName: part.fileName, facts: route && route.facts, needsFiling: need, onProgress: partProgress });
+            // dupChoice: "keepBoth" — a re-split of the same source document regenerates the SAME
+            // per-discipline filenames deterministically, so the duplicate screen would fire on
+            // every re-drop of a multi-discipline set. That's a distinct decision (per-part, mid
+            // batch) from the single-file Replace/Keep-both/Cancel row this item ships; bypassed
+            // here rather than half-built.
+            const r = await fileOne({ pid, discipline: part.discipline, item_: part.item, docDate, blob: part.blob, fileName: part.fileName, facts: route && route.facts, needsFiling: need, onProgress: partProgress, dupChoice: "keepBoth" });
             if (r && r.ok) { filed.push({ d: part.discipline, n: part.pageNums.length }); firstId = firstId || r.id; }
             else lastErr = (r && r.error) || "Couldn't file a split.";
           }
@@ -384,7 +441,8 @@ export default function FileBrowser({
       // can be re-filed anytime) instead of piling every upload into the holding area; with no
       // project (cross mode) it still needs a home, so it goes to Needs filing.
       const needsFiling = isPdf ? (!pid || !discipline || discipline === "Other") : !pid;
-      const r = await fileOne({ pid, discipline, item_, docDate, blob: item.file, fileName: item.name, facts: route && route.facts, needsFiling, onProgress });
+      const r = await fileOne({ pid, discipline, item_, docDate, blob: item.file, fileName: item.name, facts: route && route.facts, needsFiling, onProgress, dupChoice });
+      if (handleDuplicate(r, item, targetFolderId, { forceNeedsFiling, dupChoice })) return;
       if (!r || !r.ok) { patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: (r && r.error) || "Couldn't file." }); return; }
       const warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError, large: r.large });
       patchItem(item.uploadId, { status: needsFiling ? QUEUE_STATUS.NEEDS_FILING : QUEUE_STATUS.DONE, reviewId: r.id, filedAt: Date.now(), warn, target: pid ? projName(pid) : "Holding area" });
@@ -941,7 +999,7 @@ export default function FileBrowser({
         </div>
 
         {/* persistent processing queue (B260 lean) */}
-        <DropQueue queue={queue} onDismiss={removeItem} onTriage={(id) => { setSearchQ(""); setShowHolding(true); removeItem(id); }} />
+        <DropQueue queue={queue} onDismiss={removeItem} onTriage={(id) => { setSearchQ(""); setShowHolding(true); removeItem(id); }} onResolveDuplicate={resolveDuplicate} />
 
         {/* Hidden pickers (the toolbar + empty-state buttons click these). Any file type
             (B685) — no `accept` filter, so the OS picker never hides a DWG/spreadsheet/image.
@@ -1058,10 +1116,13 @@ function ShareRow({ state = {}, onCreate, onClose }) {
   );
 }
 
+// B1205297 — the existing row's own filed date, for the duplicate-resolution prompt below.
+const fmtFiledDate = (iso) => { try { return iso ? new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : ""; } catch (_) { return ""; } };
+
 /* The persistent processing queue: a row per in-flight / needs-attention file. Filed rows
  * fade out shortly (splitQueue's recent group); exceptions stay until acted on. Never a
  * vanishing toast — a silent processing state is a failure. */
-function DropQueue({ queue, onDismiss, onTriage }) {
+function DropQueue({ queue, onDismiss, onTriage, onResolveDuplicate }) {
   const { active } = splitQueue(queue, Date.now());
   if (!active.length) return null;
   const S = QUEUE_STATUS;
@@ -1073,29 +1134,44 @@ function DropQueue({ queue, onDismiss, onTriage }) {
     [S.NEEDS_FILING]: { color: "var(--warn-text)", label: "Needs filing — confirm a discipline" },
     [S.FAILED]: { color: "var(--danger-text)", label: it.error || "Failed" },
     [S.REJECTED]: { color: "var(--danger-text)", label: it.error || "Couldn’t read this file" },
+    // B1205297 — a file of this name is already filed in this scope; nothing has been
+    // uploaded yet for THIS attempt (the duplicate is caught before the byte upload starts).
+    [S.DUPLICATE]: { color: "var(--warn-text)", label: it.duplicate?.filedAt ? `Already filed · ${fmtFiledDate(it.duplicate.filedAt)}` : "Already filed here" },
   })[it.status] || { color: "var(--text-secondary)", label: it.status };
   return (
     <div style={{ flex: "none", margin: "0 12px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
       {active.map((it) => {
         const m = meta(it);
         return (
-          <div key={it.uploadId} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 9px", borderRadius: 7, border: "1px solid var(--border-default)", background: "var(--surface-raised)" }}>
-            <span style={{ flex: "none", width: 12, textAlign: "center", color: m.color, fontSize: 12 }}>
-              {it.status === S.PROCESSING
-                ? <span style={{ display: "inline-block", width: 10, height: 10, border: "2px solid var(--border-default)", borderTopColor: "var(--text-secondary)", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
-                : it.status === S.DONE ? "✓" : "⚠"}
-            </span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 11.5, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</div>
-              <div style={{ fontSize: 10, color: m.color, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.label}{it.warn ? ` · ${it.warn}` : ""}</div>
-              {it.status === S.PROCESSING && it.progress != null && it.progress < 1 && (
-                <div style={{ marginTop: 3, height: 3, borderRadius: 2, background: "var(--border-default)", overflow: "hidden" }}>
-                  <div style={{ width: `${Math.floor(it.progress * 100)}%`, height: "100%", background: "var(--accent-library)", transition: "width 0.3s ease" }} />
-                </div>
-              )}
+          <div key={it.uploadId} style={{ display: "flex", flexDirection: "column", padding: "5px 9px", borderRadius: 7, border: "1px solid var(--border-default)", background: "var(--surface-raised)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ flex: "none", width: 12, textAlign: "center", color: m.color, fontSize: 12 }}>
+                {it.status === S.PROCESSING
+                  ? <span style={{ display: "inline-block", width: 10, height: 10, border: "2px solid var(--border-default)", borderTopColor: "var(--text-secondary)", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+                  : it.status === S.DONE ? "✓" : "⚠"}
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11.5, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</div>
+                <div style={{ fontSize: 10, color: m.color, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.label}{it.warn ? ` · ${it.warn}` : ""}</div>
+                {it.status === S.PROCESSING && it.progress != null && it.progress < 1 && (
+                  <div style={{ marginTop: 3, height: 3, borderRadius: 2, background: "var(--border-default)", overflow: "hidden" }}>
+                    <div style={{ width: `${Math.floor(it.progress * 100)}%`, height: "100%", background: "var(--accent-library)", transition: "width 0.3s ease" }} />
+                  </div>
+                )}
+              </div>
+              {it.status === S.NEEDS_FILING && <button onClick={() => onTriage(it.uploadId)} style={miniBtn}>Triage</button>}
+              {(it.status === S.FAILED || it.status === S.REJECTED) && <button onClick={() => onDismiss(it.uploadId)} style={miniBtn}>Dismiss</button>}
             </div>
-            {it.status === S.NEEDS_FILING && <button onClick={() => onTriage(it.uploadId)} style={miniBtn}>Triage</button>}
-            {(it.status === S.FAILED || it.status === S.REJECTED) && <button onClick={() => onDismiss(it.uploadId)} style={miniBtn}>Dismiss</button>}
+            {it.status === S.DUPLICATE && (
+              <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6, paddingTop: 6, borderTop: "1px solid var(--border-default)", flexWrap: "wrap" }}>
+                <span style={{ fontSize: 10.5, color: "var(--text-secondary)", flex: "1 1 auto", minWidth: 120, lineHeight: 1.4 }}>
+                  Replace it, keep both, or cancel this upload.
+                </span>
+                <button onClick={() => onResolveDuplicate(it.uploadId, "replace")} style={miniBtn} title="Move the existing file to Recently deleted and file this one in its place">Replace existing</button>
+                <button onClick={() => onResolveDuplicate(it.uploadId, "keepBoth")} style={miniBtn} title="File this as a separate, additional copy">Keep both</button>
+                <button onClick={() => onResolveDuplicate(it.uploadId, "cancel")} style={miniBtn}>Cancel</button>
+              </div>
+            )}
           </div>
         );
       })}

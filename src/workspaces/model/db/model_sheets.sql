@@ -22,10 +22,10 @@
 -- — a pre-Stage-3 row (one bare sheet's fields directly in `data`) still loads correctly,
 -- migrateWorkbook wraps it into a one-sheet workbook named "Sheet1" on read.
 --
--- NOT YET APPLIED to production as of this PR — the session that wrote this had read-only
--- (SELECT-only) production access, so it is handed to the owner to run rather than applied
--- here (same precedent as the Comps migrations — see src/shared/CLAUDE.md → `comps/`). Until
--- this runs, the Model module saves to this device's local storage only and says so.
+-- Applied to production (lyeqzkuiwngunutlkkmi) — confirmed 2026-09-05 via a direct read
+-- (public.model_sheets exists, RLS enabled). The note that used to stand here — "NOT YET APPLIED,
+-- handed to the owner to run" — was written by a session with read-only production access and
+-- had gone stale; a later session with write access ran it.
 
 create table if not exists public.model_sheets (
   id          text not null,
@@ -69,3 +69,9 @@ create policy "Users update own model sheets" on public.model_sheets
   for update to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
 create policy "Users delete own model sheets" on public.model_sheets
   for delete to authenticated using ((select auth.uid()) = user_id);
+
+-- B1205298 (2026-09-05 db-hygiene sweep) — pin search_path on the trigger function this file
+-- defines. It fires as a BEFORE trigger on public.model_sheets, so it runs with the CALLING
+-- session's search_path; it was 1 of the only 9 functions in the schema without the pin. Plain
+-- ALTER FUNCTION, not CREATE OR REPLACE — additive, doesn't touch the body.
+alter function public.model_sheets_set_updated_at() set search_path = public, pg_temp;
