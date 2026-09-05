@@ -182,6 +182,36 @@ was never clicked" quietly ships broken.
 
 **Result:** ⏳ pending — needs a real signed-in browser session. `Cadence: once`.
 
+### V650128 — B1156864: the Sites list stays at 37 pursuit projects after the comps-to-sites migration, the three new tracked sites stay off it, and a comp's owning site shows correctly `Blocker: auth` `Blocker: real-data`
+
+NEW-1 collapsed the Site/comp split: every site now carries a `role` ("pursuit" vs "tracked"),
+and the three live comps ("Core 5 - West Hardy", "Tesla - TGS 800K SF", "Tesla - TGS DC4") were
+each attached to a brand-new "tracked" site (none matched an existing pursuit site's location).
+The data-layer migration was fully verified against production directly (byte-for-byte snapshot
+diff, before/after row counts, the role-flip RPC proven live) — see B1156864's own writeup. What
+that could NOT confirm is what the owner's own signed-in browser actually renders, which is the
+one thing this check exists for.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner (this is his
+real account and real data; do not create, delete, or edit anything beyond what a step says to):**
+1. Open the Site Planner's map view (the Sites/Comps rail). **Expect:** the Sites list count reads
+   **37** (not 40, not some other number) — the three new tracked sites (`trk8eef7db4d0`,
+   `trk4c75bf98dd`, `trk0892cf7b73`) must NOT appear anywhere in this list or as map pins.
+2. Switch to the Comps tab. **Expect:** still exactly **3** comps listed (Core 5 - West Hardy,
+   Tesla - TGS 800K SF, Tesla - TGS DC4) — unchanged from before this migration.
+3. Open "Core 5 - West Hardy" for edit (the single-comp edit form, not the paste grid). **Expect:**
+   its project dropdown now shows a real selected project — a site named "Core 5 - West Hardy" —
+   instead of the "no project" default it had before this session. Do NOT change the selection;
+   just confirm it reads correctly, then close without saving.
+4. Repeat step 3 for the two Tesla comps, confirming each shows its own matching project name.
+5. Confirm nothing else about the 37 pre-existing projects changed — pick 2-3 at random from the
+   Sites list and spot-check their names/counties/status read exactly as they did before this
+   session (cross-reference against the owner's own memory or an earlier screenshot if available;
+   this is a sanity check on top of the machine-verified snapshot diff, not a substitute for it).
+
+**Result:** ⏳ pending — needs a real signed-in browser session; not reachable from this sandbox
+(the sandbox proxy CORS-blocks the Supabase auth handshake). `Cadence: once`.
+
 ### V644080 — B1146960: the row's new "Edit / adjust…" menu item and clicking a placed plan on the map both arm #1409's manipulation mode, with opacity/rotation controls visible and Escape leaving it, on a real signed-in account `Blocker: auth` `Blocker: real-data`
 
 **Why this needs its own real pass.** Filed `Verify: live` per CLAUDE.md's LIVE-VERIFY rule (the repro cites real project data — the owner's real Airtex plan and row `aa2d8163`). This sandbox's egress proxy CORS-blocks the Supabase auth handshake, and unlike most features, site plan overlays have **no logged-out or local mode at all** (a per-account, cloud-only table) — the identical wall V636768 already named for this same feature, so ATTEMPT-BEFORE-YOU-PARK has nothing further to drive headless here: there is no way to have even ONE overlay to click on without being signed in.

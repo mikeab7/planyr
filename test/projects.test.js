@@ -24,6 +24,16 @@ describe("groupProjects", () => {
     expect(proj.status).toBe("active");
   });
 
+  // B843792 (NEW-1) — role (pursuit vs tracked) is carried the same way status is.
+  it("carries role the same way status is carried: the newest record wins", () => {
+    const recs = [
+      { id: "p1", groupId: "g1", site: "Old", updatedAt: 100, role: "tracked" },
+      { id: "p2", groupId: "g1", site: "New", updatedAt: 500, role: "pursuit" },
+    ];
+    const [proj] = groupProjects(recs);
+    expect(proj.role).toBe("pursuit");
+  });
+
   it("sorts projects most-recently-edited first", () => {
     const recs = [
       { id: "a", groupId: "a", site: "A", updatedAt: 10 },
@@ -35,7 +45,7 @@ describe("groupProjects", () => {
 
   it("falls back to id when groupId is absent and to 'Untitled site' for a nameless record", () => {
     const out = groupProjects([{ id: "lonely", updatedAt: 1 }]);
-    expect(out).toEqual([{ id: "lonely", name: "Untitled site", updatedAt: 1, status: null, scheduleProjectId: null }]);
+    expect(out).toEqual([{ id: "lonely", name: "Untitled site", updatedAt: 1, status: null, role: null, scheduleProjectId: null }]);
   });
 
   it("ignores null/blank records and never throws on junk", () => {

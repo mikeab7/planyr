@@ -9,7 +9,7 @@
  * loadSite migrates on read, saveSite normalizes on write.
  */
 import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs, countJunkEntries,
-  shareMirrorOf, withShareMirror } from "./siteModel.js";
+  shareMirrorOf, withShareMirror, normRole } from "./siteModel.js";
 import { cloudUpsert, cloudDelete, cloudHardDelete, cloudRestore, cloudDeletedRows, cloudCheckDeleted, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile } from "./cloudSync.js";
 import { reconcileGroupNames, resolveNameFor, groupKeyOf, maxStampOf } from "./projectName.js";
 import { idbGet, idbPut, idbAvailable, idbDelete, idbDeleteByPrefix } from "./localDb.js";
@@ -953,6 +953,25 @@ export function renameSiteGroup(idOrGroup, site) {
   return import("./cloudRename.js").then((m) => m.cloudRenameGroup(activeUid(), groupId, name, at))
     .then((cloud) => ({ ok: !!(cloud && cloud.ok), groupId, name, at, plans: localPlans.length, cloud, error: cloud && cloud.error }))
     .catch((e) => ({ ok: false, groupId, name, at, plans: localPlans.length, error: (e && e.message) || "rename failed" }));
+}
+
+/* B843792 (NEW-1) — THE ONE ROLE FLIP, mirroring renameSiteGroup's exact shape above (LOCAL
+ * synchronously + CLOUD as one statement over the whole group). "A site can be flipped from
+ * tracked to pursuit later without re-entering anything" is a required NEW-1 outcome — this is
+ * the write path that makes it real. No UI calls this yet (that's NEW-2's site-centric view); it
+ * exists now so the capability is genuinely provable, not merely designed. */
+export function setSiteGroupRole(idOrGroup, role) {
+  const r = normRole(role, null);
+  const rec = loadSite(idOrGroup);
+  const groupId = rec ? groupOf(rec) : idOrGroup;
+  if (!groupId || !r) return Promise.resolve({ ok: false, groupId, role: r, error: "Not a valid role." });
+  const localPlans = loadPlansOfGroup(groupId);
+  localPlans.forEach((s) => saveSite({ id: s.id, role: r }));
+  if (!activeUid()) return Promise.resolve({ ok: true, groupId, role: r, plans: localPlans.length, cloud: { skipped: true } });
+  // LOADED ON DEMAND — see lib/cloudRole.js.
+  return import("./cloudRole.js").then((m) => m.cloudSetSiteRole(activeUid(), groupId, r))
+    .then((cloud) => ({ ok: !!(cloud && cloud.ok), groupId, role: r, plans: localPlans.length, cloud, error: cloud && cloud.error }))
+    .catch((e) => ({ ok: false, groupId, role: r, plans: localPlans.length, error: (e && e.message) || "role flip failed" }));
 }
 
 /* NEW-3 — REPAIR the projects already split by the old rename, and keep them repaired.
