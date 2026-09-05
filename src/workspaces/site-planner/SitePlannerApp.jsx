@@ -33,7 +33,7 @@ import { idbPersist } from "./lib/localDb.js";
 const SiteReviewModal = lazy(() => import("./components/SiteReviewModal.jsx").then((m) => ({ default: m.SiteReviewModal })));
 import { nextConceptName } from "./lib/conceptName.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
-import { recordCloudWriteFailure, readCloudWriteFailures, clearAllCloudWriteFailures, replayCloudWriteFailures } from "../../shared/cloud/writeFailureLog.js";
+import { recordCloudWriteFailure, readCloudWriteFailures, clearAllCloudWriteFailures, retryCloudWriteFailures, WHAT_RENAME, WHAT_STATUS } from "../../shared/cloud/writeFailureLog.js";
 import { noteLayerContext } from "../../shared/telemetry/perfRecorderHandle.js";
 import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability, resumeTargetAfterSignIn, routeProjectJustChanged } from "./lib/bootResume.js";
 import { RADIUS } from "../../shared/ui/radius.js";
@@ -158,28 +158,61 @@ export default function App({
   const pushErrorRetryRef = useRef(null);
   const setPushErrorWithRetry = (msg, retry) => { setPushError(msg); pushErrorRetryRef.current = retry || null; };
   const dismissPushError = () => { setPushError(""); pushErrorRetryRef.current = null; clearAllCloudWriteFailures(); };
-  // NEW-1 (B######) — LOUD-FAILURE must survive the SAME navigation that can cause the failure
-  // (see shared/cloud/writeFailureLog.js's header). Drain any failure a prior page-load recorded
-  // but never got to show — this is what makes "the page reloaded mid-write" recoverable instead
-  // of silently losing the notice.
-  useEffect(() => {
-    const pending = readCloudWriteFailures();
-    if (!pending.length) return;
+  // NEW-1 (B1204736) — a Retry click must NOT forget the durable log before anything has actually
+  // landed (the "clears the log before a single row is attempted" bug): it clears only the
+  // in-memory banner, so an interrupted retry still has its record to re-surface on the next boot.
+  // The X button (dismissPushError, above) is the deliberately different one — it forgets the log,
+  // because that's the owner saying they've dealt with it.
+  const beginPushRetry = () => { setPushError(""); pushErrorRetryRef.current = null; };
+  // NEW-1 (B1204736) — the ONE atomic replay adapter for the durable write-failure queue: a
+  // queued "rename" entry replays through the SAME renameSiteGroup RPC the live rename path uses
+  // (one statement, one stamp), never a per-row fan-out. The local store's CURRENT name is
+  // authoritative — the local half of a rename always lands even when the cloud half failed, so
+  // replaying a name captured back when the failure was queued could silently revert a rename the
+  // user has since typed over again. Anything this has no atomic path for (a status change has no
+  // group RPC — see siteStatus.js) answers { handled:false } so writeFailureLog's generic per-row
+  // fan-out runs instead.
+  const replayGroupAtomically = async (entry, kind) => {
+    if (kind !== "rename" || !entry.groupId) return { handled: false };
+    const rec = loadSite(entry.groupId);
+    const name = rec && rec.site;
+    if (!name) return { handled: false };
+    const res = await renameSiteGroup(entry.groupId, name);
+    return { handled: true, ok: !!(res && res.ok !== false) };
+  };
+  // NEW-1 (B1204736) — the banner text + retry wiring for whatever the durable queue currently
+  // holds, shared by the one-time boot drain and by a retry that only PARTLY confirmed.
+  // B1048400 (NEW-2) — do not claim the cloud is untouched: a group-scoped write (a rename, a
+  // status change) can have landed on SOME of the group's rows before the failure, so "saved on
+  // this device, please redo it" overstates how clean the starting point is. Say it may only be
+  // PARTLY synced instead — true whether the original action touched one row or many.
+  const raisePendingWriteFailureBanner = (pending) => {
     const last = pending[pending.length - 1];
-    // B1048400 (NEW-2) — do not claim the cloud is untouched: a group-scoped write (a rename,
-    // a status change) can have landed on SOME of the group's rows before the failure, so "saved
-    // on this device, please redo it" overstates how clean the starting point is. Say it may only
-    // be PARTLY synced instead — true whether the original action touched one row or many.
     const summary = pending.length === 1
       ? `${last.what} may not have fully synced to the cloud earlier. It's saved on this device — please check it and try again if anything looks off online.`
       : `${pending.length} changes may not have fully synced to the cloud earlier (most recently: ${last.what}). They're saved on this device — please check them and try again if anything looks off online.`;
-    setPushErrorWithRetry(summary, () => {
-      clearAllCloudWriteFailures();
-      // B1048400 (NEW-1) — a `groupId` entry (a project rename, a status change) touched EVERY
-      // plan in the group, not just one; replaying it against a single representative row is the
-      // "looks like it worked" bug reappearing inside its own fix. See writeFailureLog.js's header.
-      replayCloudWriteFailures(pending, { loadPlansOfGroup, pushLoud });
-    });
+    setPushErrorWithRetry(summary, attemptCloudWriteRetry);
+  };
+  // NEW-1 (B1204736) — replay the durable queue and raise the banner over whatever is STILL
+  // unconfirmed afterward; a fully-confirmed retry clears itself silently. Re-reads the log fresh
+  // each call (rather than closing over a stale snapshot) so a second retry only ever addresses
+  // what the first one left behind — see writeFailureLog.js's `retryCloudWriteFailures` header.
+  const attemptCloudWriteRetry = () => {
+    const pending = readCloudWriteFailures();
+    if (!pending.length) return Promise.resolve({ cleared: 0, remaining: [] });
+    return retryCloudWriteFailures(pending, { loadPlansOfGroup, pushLoud, groupWrite: replayGroupAtomically }, window)
+      .then((r) => {
+        if (r.remaining.length) raisePendingWriteFailureBanner(r.remaining);
+        return r;
+      });
+  };
+  // NEW-1 — LOUD-FAILURE must survive the SAME navigation that can cause the failure (see
+  // shared/cloud/writeFailureLog.js's header). Drain any failure a prior page-load recorded but
+  // never got to show — this is what makes "the page reloaded mid-write" recoverable instead of
+  // silently losing the notice.
+  useEffect(() => {
+    const pending = readCloudWriteFailures();
+    if (pending.length) raisePendingWriteFailureBanner(pending);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- one-time boot drain, before pushLoud exists as a stable ref is fine (it's stable across renders here)
   // NEW-1 — a site-status change (incl. "Dead") is a header write outside the planner's
   // element-level undo stack (Ctrl+Z can't reach it — different component, sometimes not even
@@ -784,7 +817,7 @@ export default function App({
       if (res && res.ok === false) {
         // NEW-1 — see pushLoud's comment: this must be recorded BEFORE anything else in case the
         // same chunk-load failure that caused this also triggers an auto-reload out from under it.
-        recordCloudWriteFailure({ what: "The project rename", groupId, error: (res && res.error) || "" });
+        recordCloudWriteFailure({ what: WHAT_RENAME, kind: "rename", groupId, error: (res && res.error) || "" });
         // B1048400 (NEW-2) — the group's cloud rows can be PARTLY renamed at this point (the
         // non-atomic fallback path writes one row at a time and can fail partway through), so
         // don't claim the cloud side is simply untouched — some plans could already show the new
@@ -841,7 +874,7 @@ export default function App({
           // B1048400 (NEW-1) — record the GROUP, not one representative plan: this write touched
           // every plan in the group, and a `siteId` entry replays against only one row (see
           // writeFailureLog.js's replayCloudWriteFailures header).
-          recordCloudWriteFailure({ what: "The status change", groupId, error: "background push failed (site status)" });
+          recordCloudWriteFailure({ what: WHAT_STATUS, kind: "status", groupId, error: "background push failed (site status)" });
           // B1048400 (NEW-2) — some plans in the group may already have the new status in the
           // cloud even though this push reports a failure; don't claim the cloud is untouched.
           setPushErrorWithRetry("The status change may not have fully synced to the cloud — it's saved on this device, and it'll catch up on your next edit or reload.",
@@ -1019,7 +1052,7 @@ export default function App({
             // retried, even though the failure isn't about the CURRENTLY open plan's own save.
             backgroundPushFailed={!!pushError}
             backgroundPushDetail={pushError || undefined}
-            onRetryBackgroundPush={pushErrorRetryRef.current ? () => { const retry = pushErrorRetryRef.current; dismissPushError(); retry?.(); } : undefined}
+            onRetryBackgroundPush={pushErrorRetryRef.current ? () => { const retry = pushErrorRetryRef.current; beginPushRetry(); retry?.(); } : undefined}
             shellModule={shellModule}
             onShellSwitch={onShellSwitch}
             onOpenReviewInDocReview={onOpenReviewInDocReview}
@@ -1056,7 +1089,7 @@ export default function App({
           {/* NEW-1 — an actual retry, not just "it'll catch up eventually": re-attempts whatever
               write this banner is reporting, wired up by the writer that set it. */}
           {pushErrorRetryRef.current && (
-            <button data-testid="cloud-write-failure-retry" onClick={() => { const retry = pushErrorRetryRef.current; dismissPushError(); retry?.(); }} title="Try again now"
+            <button data-testid="cloud-write-failure-retry" onClick={() => { const retry = pushErrorRetryRef.current; beginPushRetry(); retry?.(); }} title="Try again now"
               style={{ flex: "none", cursor: "pointer", background: "var(--warn-text)", color: "var(--warn-bg)", border: "none", borderRadius: RADIUS.sm, padding: "2px 9px", fontFamily: "inherit", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>Retry now</button>
           )}
           <button onClick={dismissPushError} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "transparent", color: "var(--warn-text)", border: "none", borderRadius: RADIUS.sm, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>

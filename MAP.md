@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-05 @ `751e6d49` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-05 @ `b7f7430c` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -293,7 +293,7 @@ _682 source files mapped._
 - **`src/shared/cloud/serializeWrites.js`** — Per-key write serializer: makeWriteSerializer chains same-key cloud writes in order so a tab can't race itself into a false version conflict
   - _exports_: `makeWriteSerializer`
 - **`src/shared/cloud/writeFailureLog.js`** — Durable (localStorage) record of a cloud write that failed, surviving a same-event auto-reload that can outrun an in-memory banner before it paints
-  - _exports_: `clearAllCloudWriteFailures`, `clearCloudWriteFailure`, `readCloudWriteFailures`, `recordCloudWriteFailure`, `replayCloudWriteFailures`
+  - _exports_: `clearAllCloudWriteFailures`, `clearCloudWriteFailure`, `inferEntryKind`, `PRE_FIX_RETRY`, `readCloudWriteFailures`, `recordCloudWriteFailure`, `replayCloudWriteFailures`, `retryCloudWriteFailures`, `WHAT_RENAME`, `WHAT_STATUS`
 - **`src/shared/cloud/writeSerializer.js`** — per-key async write queue; stops a rapid second write for the same id from racing an unsettled first one
   - _exports_: `createWriteSerializer`
 - **`src/shared/comps/components/CompDraftsPanel.jsx`** — KML-import review/promote surface (B849233): one card per staged draft, pre-filled from best-effort description parsing, confirm-before-commit; reachable only from the KML import action
