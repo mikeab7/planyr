@@ -148,6 +148,38 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V881392 — B1213314: setting a task's Owner in the Scheduler is reachable, saves, and reads back after reload `Blocker: auth`
+
+**Why this needs its own real pass.** The reachability chain (Owner column visible by default → double-click opens `ContactPicker` → commits through the grid's normal save path) was confirmed by reading `public/sequence/index.html` directly, not by driving it: the embedded scheduler loads React/ReactDOM/Babel-standalone/Supabase-js from public CDNs via plain `<script src="https://...">` tags rather than bundling them, and this sandbox's headless Chromium cannot reach any of those hosts (`net::ERR_TUNNEL_CONNECTION_FAILED`/connection-reset on all four) — the grid never finishes booting here, signed in or out, so no interactive check of it is possible in this sandbox at all.
+
+**What was verified here (this session, sandbox).** Code-read confirmation only: `COLS`/`DEFAULT_GRID_COLS` and `MASTER_COL_DEFS`/`DEFAULT_MASTER_COLS` both list `responsibleParty` as a default-visible column; the `Cell` component's Owner-column edit branch renders `ContactPicker` on double-click; `commit()` writes it through the same path as every other field, into the one `planar_data` Supabase row the whole document lives in; `importJSON`'s full-document round trip carries it like any other field. No separate storage path exists for it to fall out of.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner, on any real schedule:**
+1. Read the loaded chunk hash in the same breath as everything below — confirm it names a chunk from a build after this PR merged.
+2. Open a schedule with the per-project grid visible. Confirm the "Owner" column is present (if not, check that project's own Columns picker — it may have been hidden deliberately, e.g. "Pappadoupolos").
+3. Double-click a task's Owner cell. **Expect:** a `ContactPicker` autocomplete opens in place — no dialog box, no page navigation.
+4. Type a name not already in the contact list and commit it. **Expect:** a confirm-add-contact prompt appears (B456208); confirming sets the cell to that name.
+5. Reload the page. **Expect:** the same task's Owner cell still shows the name typed in step 4 — the value survived the reload via the normal cloud save, not just local component state.
+6. Export the schedule to JSON (File/Export, whatever the current menu path is) and re-import it (a copy, or into a scratch project). **Expect:** the imported copy's task still carries the same Owner value.
+
+**Result:** ⏳ pending — needs a real signed-in browser session with working external CDN access (this sandbox has neither). `Cadence: once`.
+
+### V881393 — B1213313: the Dashboard's six cards show correct real-account numbers, and the layout survives across devices `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** Every card's data-fetch degrades gracefully to an empty/no-data state when signed out (proven live in this sandbox), but nothing here can confirm the NUMBERS are right against a real account's actual data, and the cloud half of layout persistence (`profiles.prefs.dashboardLayout`, a Supabase row) needs a real signed-in session to round-trip at all — this sandbox's proxy CORS-blocks the Supabase auth handshake.
+
+**What was verified here (this session, sandbox, signed out).** Headless-browser-driven, not just unit-tested: a bare `"/"` load renders the Dashboard with all six default cards and correct empty-state copy; Customize mode's drag handle, the normal/wide resize toggle, the remove (×) control, and the "Add a card" row all work; removing a card and pressing Done persists through the 900ms debounced save into the `planyr:dashboardLayout:v1` localStorage mirror and survives a full page reload; zero page errors across every interaction. Pure logic covered by 36 new unit tests (`dashboardLayout.test.js`, `dashboardPipeline.test.js`, `scheduleHealth.test.js`).
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner (whose real figures, 2026-09-05, are: 39 site groups, 63 live plans, 787 tasks across 6 schedules with 369 overdue, 20 pursuits — 4 active / 3 on hold / 6 complete / 3 tracked market records):**
+1. Read the loaded chunk hash in the same breath as everything below — confirm it names a chunk from a build after this PR merged.
+2. Load the bare `planyr.io` domain (or click the wordmark from any module). **Expect:** the Dashboard, not a project map; no module tab highlighted.
+3. Read the **Pipeline** card. **Expect:** the open-pipeline count and the per-status breakdown are in the right neighborhood of the real figures above (pursuit/active/onhold/complete/dead + tracked separately) — exact match isn't required (data changes daily), but the shape and rough magnitude should.
+4. Read the **Schedule health** card. **Expect:** entries for real schedules by name, with overdue counts that track the real ~369-overdue figure in aggregate.
+5. Read **Jump back in**, **Pursuits by activity**, **Comps**, and **Going quiet**. **Expect:** each shows real project/document names (not placeholders), and clicking a row in Jump back in / Pursuits / Going quiet actually navigates to that project.
+6. In Customize mode, reorder two cards, resize one to wide, and remove one. Click Done. **Expect:** "Saved" (not "Saved on this device") appears, confirming the cloud write succeeded.
+7. On a SECOND device (or a fresh signed-in session), load the Dashboard. **Expect:** the layout from step 6 is already applied — proving the cloud round-trip, not just the local mirror.
+
+**Result:** ⏳ pending — needs a real signed-in browser session against real production data. `Cadence: once`.
 ### V872976 (×2) — B1202176: "New project" opens a real, editable project for a SIGNED-IN account, never the "doesn't exist" card, and SURVIVES A RELOAD from a non-Site module `Blocker: auth`
 
 **Why this needs its own real pass.** The bug is a race between the deletion gate (`Shell.jsx`) asking the cloud whether a brand-new project's row exists and the fact that lazy creation means it doesn't yet. `checkProjectDeletionStatus` only ever asks the cloud when there's a signed-in `activeUid()` — signed out it fails open unconditionally, so the ORIGINAL bug (and therefore this fix) has no signed-out manifestation beyond "nothing regressed." Confirming the actual repro (the owner's own reported symptom, on his real account) needs a real signed-in session.
