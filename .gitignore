@@ -202,3 +202,4 @@ ui-audit/_shots/
 # .scratch-repro/ script that no longer exists in the tree — this makes that convention explicit
 # instead of relying on every session to know it unprompted).
 .scratch-repro/
+/.tmp-verify/
