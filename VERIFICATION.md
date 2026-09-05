@@ -131,6 +131,54 @@ was never clicked" quietly ships broken.
 6. Permanently delete the test project ("Delete forever" from Recently deleted) once done, so nothing throwaway is left behind.
 
 **Result:** ⏳ pending — needs a real signed-in browser session against a real soft-deleted row; not reachable from this sandbox. `Cadence: once`.
+### V648864 — B1154368: with the map toggle on Comp, an address-search parcel popup offers "Add as comp", never "Plan this site" `Blocker: live-GIS`
+
+**Why this needs its own real pass.** The popup only appears after a real county ArcGIS parcel-identify call — an external host this sandbox's Chromium cannot reach (`ERR_CONNECTION_RESET`, this repo's own standing finding). Everything the fix itself touches (which button renders, which handler it calls) was proven at the component level via `test/parcelCard.test.js` (`renderToStaticMarkup`, mode/onComp props fed directly, no map needed) — what remains is confirming the REAL popup, produced by a REAL parcel click, actually receives `mode="comp"` and a working `onComp`.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, toolbar set to Comp:**
+1. Type an address that resolves to a real parcel (the owner's own repro: "7505 Fisher Rd, Beach City TX") and press Go. **Expect:** the parcel card appears with the parcel's facts (owner/account/acreage), and its ONE action button reads "Add as comp →" — never "Plan this site →".
+2. Click "Add as comp →". **Expect:** a new comp row is armed/created from this parcel (same behavior as the existing "Comp N parcels" toolbar button), never a Site-module plan.
+3. Toggle the map to Site and repeat the same address search. **Expect:** the card now shows "Plan this site →" as before — Site mode is unchanged.
+4. On the new comp (if actually created), confirm `compType` reads blank/unset rather than defaulting to "Land" (B1149586's `emptyDraft` fix, confirmed by this session's code trace to already cover this exact path).
+
+**Result:** ⏳ pending — needs a real signed-in browser with live county GIS reachable. `Cadence: once`.
+
+### V648865 — B1154369: locking a site plan actually stops it moving/resizing/rotating, including mid-edit `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** Site plan overlays are per-account, cloud-only data with no logged-out/local mode — the standing wall for this whole feature. What was verified without a browser: the three code-level gaps (map handles, the Rotation field, `commitPlacement` itself) each now check `locked`, and `test/…`/`npx vitest run` are unaffected (this is UI-wiring, not a pure-lib change with its own unit suite).
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, using a THROWAWAY test upload:**
+1. Upload a test plan, place it, then click Lock. **Expect:** the lock icon shows locked; "Move / resize" and the kebab's edit item are both disabled with a "Locked — unlock…" tooltip; the Rotation field is greyed out and does not accept a typed value.
+2. Unlock it, arm editing (handles visible on the map), then click Lock WHILE still armed. **Expect:** the map's drag/scale/rotate handles disappear immediately, and the row's own primary button stops reading "Editing on map" — both in the SAME click that locked it, not on the next reload.
+3. With it locked, try dragging where the handles used to be. **Expect:** nothing on the map responds — the plan does not move.
+4. Unlock, confirm Move/resize/Rotation are usable again immediately.
+5. Soft-delete the test overlay when done.
+
+**Result:** ⏳ pending — needs a real signed-in browser session. `Cadence: once`.
+
+### V648866 — B1154370: dragging the opacity slider is smooth, with the value persisting after a reload `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** The fix's own claim (a rapid drag no longer queues dozens of network round trips) is a NETWORK-timing property that only a real Supabase connection under real drag input can confirm; a sandbox measurement of local React state updates alone wouldn't reproduce the owner's own "slowed the whole machine" report.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, using a THROWAWAY test upload with a real placed plan visible:**
+1. Drag the opacity slider quickly end to end several times in a row. **Expect:** the plan's transparency updates smoothly on the map with no visible stutter/lag, and the rest of the page (map pan/zoom, other controls) stays responsive during the drag — no longer "the whole computer slows down."
+2. Release the slider partway through a value and wait ~1 second. **Expect:** the % readout matches where you released it.
+3. Reload the page. **Expect:** the overlay's opacity is exactly what you released it at in step 2 — the debounced write was not lost.
+4. Optional: open the browser's Network tab during a drag. **Expect:** at most a small handful of requests to Supabase for the whole drag, not one per pixel of travel.
+
+**Result:** ⏳ pending — needs a real signed-in browser session. `Cadence: once`.
+
+### V648867 — B1154371: the site-plan card shows exactly one "Editing on map" state with a working "Stop editing", a filled Cropped chip, and the filename once `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** All four are visual/interaction claims about the real card rendered over a real placed plan; (b) in particular claims a specific fix to today's earlier B1146960 discoverability change, which itself is still pending its own live pass (V644080) — both should be checked together.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, using a THROWAWAY test upload:**
+1. Upload a test plan WITHOUT renaming it, and check its card. **Expect:** the subtitle line shows only the date/page (no filename) — since the title already shows the filename minus its extension; rename the plan to something different and reload. **Expect:** the subtitle now DOES show the original filename (it's no longer redundant with the title).
+2. Arm editing (via the row's own button), then open the "…" menu. **Expect:** the menu item now reads "Stop editing" (never a second "Editing on map"), and clicking it disarms editing (handles disappear from the map) — a genuinely different, working action from the row's own still-visible "Editing on map" primary button.
+3. Crop the plan once. **Expect:** the crop control now reads "Cropped ✓" and visually reads as a filled/bold STATUS chip, distinct from the plain outlined "Move / resize"/"Pin comp here" buttons beside it — while still being clickable to reopen the crop tool.
+4. Click "…" again with nothing armed. **Expect:** it still floats cleanly above the card (never inline, never displacing the row's own controls) — confirming (a) is genuinely unaffected.
+
+**Result:** ⏳ pending — needs a real signed-in browser session. `Cadence: once`.
 
 ### V644080 — B1146960: the row's new "Edit / adjust…" menu item and clicking a placed plan on the map both arm #1409's manipulation mode, with opacity/rotation controls visible and Escape leaving it, on a real signed-in account `Blocker: auth` `Blocker: real-data`
 

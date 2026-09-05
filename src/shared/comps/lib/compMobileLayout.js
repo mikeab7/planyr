@@ -16,10 +16,12 @@
  * columns filter to empty on a lease row. A comp type never named here explicitly stays correct
  * automatically if `compSheetColumns.js` ever grows a fourth deal type.
  *
- * NEEDED_TO_SAVE is a SEPARATE, pinned pseudo-section built from `col.required` — Executed and
- * Location are the two columns already marked required in compSheetColumns.js, so this reads
- * that flag rather than hardcoding the two keys, and stays in lockstep with the desktop sheet's
- * own definition of "required." Deliberately NOT repeated inside PROPERTY (a field is edited in
+ * NEEDED_TO_SAVE is a SEPARATE, pinned pseudo-section built from `col.required` — Location is the
+ * one column marked required in compSheetColumns.js (NEW-5, 2026-09-02, relaxed the Executed-date
+ * requirement at the DB/validateComp/UI layers together — this list is SOURCED from the same flag
+ * so it can't fall out of step and re-demand a date the save gate no longer needs), so this reads
+ * that flag rather than hardcoding the key, and stays in lockstep with the desktop sheet's own
+ * definition of "required." Deliberately NOT repeated inside PROPERTY (a field is edited in
  * exactly one place on this sheet — see PANEL-BREVITY in /CLAUDE.md, "never render the same
  * fact in more than one place"); PROPERTY's own "Deal name" row is the free-text Title field
  * (desktop labels the same column "Title / Address" — mobile already shows the resolved address
@@ -47,10 +49,10 @@ function colFor(key) {
   return SHEET_COLUMNS[columnIndex(key)];
 }
 
-// The owner's spec names the order explicitly ("NEEDED TO SAVE (Executed, Location)") — SHEET_COLUMNS'
-// own declaration order puts Location first (it's the second FROZEN desktop column), so the pinned
-// section's order is stated here rather than inherited. Still SOURCED from `col.required` — a future
-// required column not in this list is appended rather than silently dropped.
+// The owner's spec originally named this order explicitly ("NEEDED TO SAVE (Executed, Location)");
+// Executed dropped out of `required` under NEW-5, leaving Location alone. The list stays an ORDER
+// rather than a single hardcoded key, still SOURCED from `col.required` — a future required column
+// is appended rather than silently dropped.
 const REQUIRED_KEY_ORDER = ["compDate", "location"];
 const REQUIRED_KEYS = [
   ...REQUIRED_KEY_ORDER.filter((k) => colFor(k)?.required),
@@ -99,5 +101,8 @@ export function rowStatusText(row) {
   if (rowHasBlockingFlags(row.cellFlags)) return "rate needs a period";
   const missing = neededToSaveColumns(row.draft.compType).filter((c) => isRequiredColEmpty(c, row.draft));
   if (!missing.length) return "ready";
-  return `needs ${missing.map((c) => (c.key === "compDate" ? "a date" : "a location")).join(" & ")}`;
+  // NEW-5 — Executed is no longer required, so "location" is the only key this can name today;
+  // kept as a lookup rather than a bare string so a future required column names itself here too.
+  const NAMES = { location: "a location", compDate: "a date" };
+  return `needs ${missing.map((c) => NAMES[c.key] || c.label).join(" & ")}`;
 }
