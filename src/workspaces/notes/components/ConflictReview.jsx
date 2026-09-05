@@ -28,7 +28,7 @@
  *  exactly as unhelpful as asymmetric, just unhelpful in the other direction. The fix this time
  *  orients on a fact a reader can actually use — WHICH COPY IS NEWER (`lib/notesVersionOrder.js`)
  *  — matching the reference the owner named, Google Docs' version history: each version is
- *  identified by WHEN, and the action names what it does. See `docs/notes-conflict-critique.md`
+ *  identified by WHEN, and the action names what it does. See `docs/incidents/notes-conflict-critique.md`
  *  for the critique-loop screenshots this design passed before shipping.
  *
  *  ⛔ B1077680/NEW-1 — AN OPAQUE BLOCK (A TABLE, A BOX, A SKETCH, A PICTURE) NOW SHOWS ITS OWN

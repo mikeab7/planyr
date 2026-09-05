@@ -600,7 +600,7 @@ a look-ahead at what that study will produce, clearly labelled as screening and 
       it hides behind planyr.io and only answers signed-in you, behind a secret, with a hard cap on how much
       it can ever run. So the "someone hacks it and runs up my bill" case can't happen, and real use is free.
       The full plan (what to build, the exact deploy commands, and your part) is written up for a Claude
-      Cowork session in **`docs/DWG-DEPLOY-BRIEF.md`** (Claude handed you this file in chat 2026-07-12).
+      Cowork session in **`docs/incidents/DWG-DEPLOY-BRIEF.md`** (Claude handed you this file in chat 2026-07-12).
       **Your part:** pick the host (Google Cloud = cheapest but needs a card; or a no-card free host that's
       slightly slower on the first file of the day), then create the account/project and paste ~2 settings —
       Cowork drives the rest. Until this is done, dropping a DWG just says "export a DXF instead" (which works

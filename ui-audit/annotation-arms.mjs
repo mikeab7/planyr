@@ -7,7 +7,7 @@
  * THE MISS IT ANSWERS, and it is the same shape as the raster one. Every plan this program has ever
  * measured reads **0 / 0 / 0 / 0** on markups, measures, callouts and cross-sections: Goose Creek
  * does, Bain does, and so every null result about annotation cost was structurally guaranteed
- * before the first gesture. `docs/PERF-BAIN.md` §0 made that admission about rasters; this is the
+ * before the first gesture. `docs/perf/PERF-BAIN.md` §0 made that admission about rasters; this is the
  * same admission about the other tier, and it is why the arms below could not exist until the real
  * Sylvestri plan landed (NEW-1).
  *
@@ -132,7 +132,7 @@ function readAnnotations(ids) {
   };
 }
 
-/* ⛔ `leafletTiles` IS REPORTED HERE BECAUSE IT IS THE ANSWER TO SOMETHING ELSE. docs/PERF-BAIN.md
+/* ⛔ `leafletTiles` IS REPORTED HERE BECAUSE IT IS THE ANSWER TO SOMETHING ELSE. docs/perf/PERF-BAIN.md
  * §7.3 left the compositor-layer count as the largest unexplained difference between two plans and
  * called it "the next thing to measure". It is not a property of the plan at all — measured across
  * three real plans, **layers = leafletTiles + 4, exactly**. A layer census reported without the tile
