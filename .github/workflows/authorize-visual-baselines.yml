@@ -1,1 +1,164 @@
-bmFtZTogQXV0aG9yaXplIHZpc3VhbCByZWdyZXNzaW9uIGJhc2VsaW5lcwoKIyBMZXRzIENJIGl0c2VsZiBhdXRob3IgdGhlIHZpc3VhbC1yZWdyZXNzaW9uIGJhc2VsaW5lIFBOR3MgdW5kZXIgdWktYXVkaXQvdmlzdWFsLWJhc2VsaW5lcy8KIyAoQjExNzE1MDQpLiBXSFkgVEhJUyBFWElTVFM6IHRoZSByZXF1aXJlZCBgYnVpbGRgIGNoZWNrJ3MgdmlzdWFsLXJlZ3Jlc3Npb24gZ2F0ZQojICh1aS1hdWRpdC92aXN1YWwtcmVncmVzc2lvbi5tanMgLS1jaGVjaywgd2lyZWQgdmlhIC5naXRodWIvY2ktZ2F0ZXMueW1sKSBjb21wYXJlcyBldmVyeSBQUidzCiMgcmVuZGVyZWQgc2NyZWVuc2hvdHMgYWdhaW5zdCB0aG9zZSBjb21taXR0ZWQgUE5HcywgYW5kIHVudGlsIG5vdyB0aGUgT05MWSB3YXkgdG8gcHJvZHVjZSB0aGVtCiMgd2FzIGEgcGVyc29uIHJ1bm5pbmcgYC0tYXBwcm92ZWAgb24gdGhlaXIgb3duIG1hY2hpbmUuIEEgbG9jYWxseS1yZW5kZXJlZCBpbWFnZSBkb2VzIG5vdAojIGJ5dGUtbWF0Y2ggd2hhdCBUSElTIHJ1bm5lciAodWJ1bnR1LWxhdGVzdCwgR2l0SHViIEFjdGlvbnMnIG93biBjb250YWluZXIgaW1hZ2UpIHJlbmRlcnMsIGV2ZW4KIyB3aXRoIHRoZSBleGFjdCBDSS1waW5uZWQgQ2hyb21pdW0gcmV2aXNpb24gLSBjb25maXJtZWQgdHdpY2Ugb24gdGhpcyByZXBvOiBCMTA5NjAxNydzIG93bgojIHJlY29yZGVkIHJlY3VycmVuY2UgKHJlLWFwcHJvdmVkIGxvY2FsbHkgd2l0aCB0aGUgcGlubmVkIHJldmlzaW9uLCBzaGlwcGVkIGNsZWFuIGluIHRoYXQKIyBzYW5kYm94LCBmYWlsZWQgdGhlIHZlcnkgbmV4dCByZWFsIENJIHJ1biBvbiBhbGwgMTYgc3VyZmFjZS90aGVtZS92aWV3cG9ydCBwYWlycykgYW5kIFBSICMxNDI2CiMgKGFuIGlkZW50aWNhbCAwLjI5LTIuNzIlIHNpZ25hdHVyZSBhZ2FpbnN0IGEgMC4wMiUgdG9sZXJhbmNlLCB0d2ljZSwgYWxzbyBjYXB0dXJlZCB3aXRoIHRoZQojIHBpbm5lZCByZXZpc2lvbikuIEZvbnQgaGludGluZy9hbnRpYWxpYXNpbmcgZGlmZmVyIGJldHdlZW4gYSBzYW5kYm94J3MgY29udGFpbmVyIGltYWdlIGFuZCB0aGlzCiMgcnVubmVyJ3MgaW1hZ2UgYmVsb3cgd2hhdCBhbnkgbG9jYWxseS1hdmFpbGFibGUgYnJvd3NlciBidWlsZCBjYW4gY2xvc2UuIEEgdmFsdWUgbm9ib2R5IGNhbgojIHJlcHJvZHVjZSBsb2NhbGx5IG11c3QgbmV2ZXIgYmUgYSBtZXJnZSBnYXRlIC0gc28gdGhpcyB3b3JrZmxvdyBtb3ZlcyB0aGUgQVVUSE9SSU5HIHN0ZXAgb250bwojIHRoZSBvbmx5IGVudmlyb25tZW50IHRoYXQgY2FuIGxlZ2l0aW1hdGVseSBwcm9kdWNlIGl0OiB0aGlzIG9uZS4KIwojIFdIQVQgVEhJUyBET0VTIE5PVCBETy4gSXQgZG9lcyBub3QgdG91Y2ggdWktYXVkaXQvdmlzdWFsLXJlZ3Jlc3Npb24ubWpzLCB1aS1hdWRpdC9saWIvCiMgdmlzdWFsQmFzZWxpbmUubWpzLCB0aGUgMC4wMiUgdG9sZXJhbmNlLCBvciBhbnl0aGluZyBlbHNlIHRoZSBnYXRlIGNoZWNrcyAtIHNlZSB0aGlzIGl0ZW0ncyBvd24KIyBCQUNLTE9HLm1kIGVudHJ5IGZvciB0aGUgZW1wdHkgYGdpdCBkaWZmYCB0aGF0IHByb3ZlcyBpdC4gVGhpcyB3b3JrZmxvdyBpcyBhbiBBVVRIT1JJTkcgcGF0aCwKIyBub3QgYSBjaGFuZ2UgdG8gd2hhdCAicGFzcyIgbWVhbnMuIFRoZSBnYXRlIHN0aWxsIHJ1bnMsIHN0aWxsIG1lYXN1cmVzLCBhbmQgc3RpbGwgZmFpbHMgYSByZWFsCiMgcmVncmVzc2lvbiBleGFjdGx5IGFzIGJlZm9yZSAoQjExNzE1MDQncyBvd24gYWNjZXB0YW5jZSB0ZXN0IHByb3ZlcyB0aGlzIGJvdGggd2F5cykuCiMKIyDim5sgTUFOVUFMIFRSSUdHRVIgT05MWSAtIG5ldmVyIGFkZCBwdXNoOi9wdWxsX3JlcXVlc3Q6L3NjaGVkdWxlOiBoZXJlLiBUaGUgb25lIHRoaW5nIHRoYXQgbWFrZXMKIyBDSS1hdXRob3JlZCBiYXNlbGluZXMgdHJ1c3R3b3J0aHkgcmF0aGVyIHRoYW4gYSBydWJiZXIgc3RhbXAgaXMgdGhhdCBhIGh1bWFuIGRlY2lkZXMsIG9uCiMgcHVycG9zZSwgb25lIHRpbWUsIHRoYXQgVEhJUyByZW5kZXIgaXMgdGhlIG9uZSB0byBhcHByb3ZlLiBBbnkgdHJpZ2dlciB0aGF0IGZpcmVzIG9uIGFuCiMgb3JkaW5hcnkgcHVzaCB3b3VsZCBzaWxlbnRseSB0dXJuIGV2ZXJ5IFBSIGdyZWVuIGJ5IHJlLWRlZmluaW5nICJjb3JyZWN0IiBhcyAid2hhdGV2ZXIgd2FzIGp1c3QKIyBwdXNoZWQsIiB3aGljaCBpcyB0aGUgZXhhY3QgZmFpbHVyZSB0aGlzIHdob2xlIGdhdGUgZXhpc3RzIHRvIHByZXZlbnQuCm9uOgogIHdvcmtmbG93X2Rpc3BhdGNoOgogICAgaW5wdXRzOgogICAgICByZWFzb246CiAgICAgICAgZGVzY3JpcHRpb246ICJXaHkgdGhlc2UgYmFzZWxpbmVzIGFyZSBjaGFuZ2luZyAobWlycm9ycyB0aGUgbG9jYWwgLS1yZWFzb249IHJlcXVpcmVtZW50IC0gcmVjb3JkZWQgaW4gdGhlIG1hbmlmZXN0ICsgZG9jcy9WSVNVQUwtUkVHUkVTU0lPTi5tZCkiCiAgICAgICAgcmVxdWlyZWQ6IHRydWUKICAgICAgICB0eXBlOiBzdHJpbmcKICAgICAgc3VyZmFjZToKICAgICAgICBkZXNjcmlwdGlvbjogIk9wdGlvbmFsOiBsaW1pdCB0byBvbmUgc3VyZmFjZSBpZCAoZGV2IGNvbnZlbmllbmNlLCBtYXRjaGVzIC0tc3VyZmFjZT0pLiBMZWF2ZSBibGFuayBmb3IgZXZlcnkgc3VyZmFjZS4iCiAgICAgICAgcmVxdWlyZWQ6IGZhbHNlCiAgICAgICAgdHlwZTogc3RyaW5nCiAgICAgIHZpZXdwb3J0OgogICAgICAgIGRlc2NyaXB0aW9uOiAiT3B0aW9uYWw6IGxpbWl0IHRvIG9uZSB2aWV3cG9ydCBpZCwgZGVza3RvcCBvciBwaG9uZSAobWF0Y2hlcyAtLXZpZXdwb3J0PSkuIExlYXZlIGJsYW5rIGZvciBib3RoLiIKICAgICAgICByZXF1aXJlZDogZmFsc2UKICAgICAgICB0eXBlOiBzdHJpbmcKCnBlcm1pc3Npb25zOgogIGNvbnRlbnRzOiB3cml0ZQoKIyBPbmUgYXV0aG9yaW5nIHJ1biBwZXIgYnJhbmNoIGF0IGEgdGltZTsgYSBzZWNvbmQgZGlzcGF0Y2ggb24gdGhlIHNhbWUgYnJhbmNoIHN1cGVyc2VkZXMgdGhlCiMgZmlyc3QgKHRoaXMgb3BlcmF0aW9uIGlzIGEgcHVyZSBmdW5jdGlvbiBvZiB0aGUgYnJhbmNoJ3Mgb3duIGN1cnJlbnQgY29kZSwgc28gY2FuY2VsbGluZyBhbgojIGluLWZsaWdodCBydW4gaW4gZmF2b3Igb2YgYSBuZXdlciBkaXNwYXRjaCBsb3NlcyBub3RoaW5nIC0gdW5saWtlIGJ1aWxkLnltbCdzIG1haW4tYnJhbmNoCiMgY2FydmUtb3V0LCB0aGVyZSBpcyBubyAiZXZlcnkgcnVuIG5lZWRzIGl0cyBvd24gcmVwb3J0ZWQgdmVyZGljdCIgcmVxdWlyZW1lbnQgaGVyZSkuCmNvbmN1cnJlbmN5OgogIGdyb3VwOiBhdXRob3JpemUtdmlzdWFsLWJhc2VsaW5lcy0ke3sgZ2l0aHViLnJlZiB9fQogIGNhbmNlbC1pbi1wcm9ncmVzczogdHJ1ZQoKam9iczoKICBhdXRob3JpemU6CiAgICBydW5zLW9uOiB1YnVudHUtbGF0ZXN0CiAgICBzdGVwczoKICAgICAgIyDim5sgTkVWRVIgbWFpbi4gQmFzZWxpbmVzIGF1dGhvcmVkIGhlcmUgc3RpbGwgaGF2ZSB0byBjbGVhciBub3JtYWwgUFIgcmV2aWV3ICsgdGhlIGdhdGUKICAgICAgIyBpdHNlbGYgYmVmb3JlIG1lcmdpbmcgYW55d2hlcmUgLSB0aGlzIHJlZnVzYWwgaXMgd2hhdCBrZWVwcyB0aGF0IHRydWUuIERpc3BhdGNoaW5nIGFnYWluc3QKICAgICAgIyBtYWluIHdvdWxkIGxldCBhIHBpY3R1cmUgYmVjb21lICJjb3JyZWN0IiB3aXRoIG5vIFBSLCBubyBkaWZmLCBubyByZXZpZXdlciBldmVyIHNlZWluZyBpdC4KICAgICAgLSBuYW1lOiBSZWZ1c2UgdG8gcnVuIGFnYWluc3QgbWFpbgogICAgICAgIGlmOiBnaXRodWIucmVmID09ICdyZWZzL2hlYWRzL21haW4nIHx8IGdpdGh1Yi5yZWZfbmFtZSA9PSAnbWFpbicKICAgICAgICBydW46IHwKICAgICAgICAgIGVjaG8gIjo6ZXJyb3I6OmF1dGhvcml6ZS12aXN1YWwtYmFzZWxpbmVzIG11c3QgbmV2ZXIgcnVuIGFnYWluc3QgbWFpbiAtIGRpc3BhdGNoIGl0IGFnYWluc3QgdGhlIFBSIGJyYW5jaCB0aGF0IG5lZWRzIG5ldyBiYXNlbGluZXMsIHRoZW4gbGV0IHRoZSBub3JtYWwgUFIgcmV2aWV3ICsgYnVpbGQgY2hlY2sganVkZ2UgdGhlIHJlc3VsdC4iCiAgICAgICAgICBleGl0IDEKICAgICAgLSBuYW1lOiBDaGVja291dAogICAgICAgIHVzZXM6IGFjdGlvbnMvY2hlY2tvdXRAdjcKICAgICAgICB3aXRoOgogICAgICAgICAgcmVmOiAke3sgZ2l0aHViLnJlZiB9fQogICAgICAgICAgZmV0Y2gtZGVwdGg6IDAKICAgICAgLSBuYW1lOiBTZXR1cCBOb2RlCiAgICAgICAgdXNlczogYWN0aW9ucy9zZXR1cC1ub2RlQHY2CiAgICAgICAgd2l0aDoKICAgICAgICAgIG5vZGUtdmVyc2lvbjogMjIKICAgICAgICAgIGNhY2hlOiBucG0KICAgICAgLSBuYW1lOiBJbnN0YWxsIGRlcGVuZGVuY2llcwogICAgICAgIHJ1bjogbnBtIGNpCiAgICAgICMgU2FtZSBjYWNoZSBrZXkgYXMgYnVpbGQueW1sJ3Mgb3duICJDYWNoZSBQbGF5d3JpZ2h0IGJyb3dzZXJzIiBzdGVwLCBzbyBhIGJhc2VsaW5lLWF1dGhvcmluZwogICAgICAjIHJ1biBhbmQgYSByZWFsIGJ1aWxkLnltbCBydW4gb24gdGhlIHNhbWUgcGFja2FnZS1sb2NrLmpzb24gc2hhcmUgdGhlIGlkZW50aWNhbCBjYWNoZSBlbnRyeQogICAgICAjIC0gbmV2ZXIgYSBzZWNvbmQsIGluZGVwZW5kZW50bHktZHJpZnRpbmcgY29weSBvZiAid2hpY2ggQ2hyb21pdW0gYnVpbGQuIgogICAgICAtIG5hbWU6IENhY2hlIFBsYXl3cmlnaHQgYnJvd3NlcnMKICAgICAgICBpZDogcHctY2FjaGUKICAgICAgICB1c2VzOiBhY3Rpb25zL2NhY2hlQHY0CiAgICAgICAgd2l0aDoKICAgICAgICAgIHBhdGg6IH4vLmNhY2hlL21zLXBsYXl3cmlnaHQKICAgICAgICAgIGtleTogcGxheXdyaWdodC1jaHJvbWl1bS0ke3sgcnVubmVyLm9zIH19LSR7eyBoYXNoRmlsZXMoJ3BhY2thZ2UtbG9jay5qc29uJykgfX0KICAgICAgIyBSZXNvbHZlcyB0byB0aGUgZXhhY3QgcmV2aXNpb24gcGxheXdyaWdodC1jb3JlJ3MgcGlubmVkIHZlcnNpb24gaW4gcGFja2FnZS1sb2NrLmpzb24KICAgICAgIyBleHBlY3RzIC0gdGhlIFNBTUUgcmVzb2x1dGlvbiBidWlsZC55bWwncyBvd24gZ2F0ZSB1c2VzLiBOZXZlciBvdmVycmlkZGVuIHdpdGggYQogICAgICAjIGxvY2FsbHktY29udmVuaWVudCBQV19DSFJPTUUgcGF0aCAoc2VlIHVpLWF1ZGl0L3Zpc3VhbC1yZWdyZXNzaW9uLm1qcydzIG93biBoZWFkZXIgZm9yIHdoeQogICAgICAjIHRoYXQgc3Vic3RpdHV0aW9uIGlzIGV4YWN0bHkgaG93IHRoZSBvcmlnaW5hbCBDSS12cy1sb2NhbCBtaXNtYXRjaCB3YXMgaW50cm9kdWNlZC4pCiAgICAgIC0gbmFtZTogSW5zdGFsbCBQbGF5d3JpZ2h0IGNocm9taXVtCiAgICAgICAgcnVuOiBucHggcGxheXdyaWdodCBpbnN0YWxsIC0td2l0aC1kZXBzIGNocm9taXVtCiAgICAgICMgU2FtZSBidWlsZC10aW1lIGVudiBhcyBidWlsZC55bWwncyBvd24gIkJ1aWxkIiBzdGVwIChjaS1nYXRlcy55bWwpIC0gQjkyNzEwNCBlc3RhYmxpc2hlZAogICAgICAjIHRoYXQgYSBidWlsZCB3aXRob3V0IHRoZXNlIHNlY3JldHMgaXMgYSBESUZGRVJFTlQgYXJ0aWZhY3QgKHRoZSBoZWFkZXIgYWNjb3VudCBjaGlwCiAgICAgICMgcmVuZGVycyAiQ2xvdWQgb2ZmIiB2cy4gIlNpZ24gaW4iKSwgc28gdGhpcyBoYXMgdG8gbWF0Y2ggZXhhY3RseSwgbm90IGp1c3QgYmUgInNvbWUiIGJ1aWxkLgogICAgICAtIG5hbWU6IEJ1aWxkIChzYW1lIFN1cGFiYXNlLWNvbmZpZ3VyZWQgYnVpbGQtdGltZSBzdGF0ZSB0aGUgcmVxdWlyZWQgYnVpbGQgY2hlY2sgdXNlcykKICAgICAgICBydW46IG5wbSBydW4gYnVpbGQKICAgICAgICBlbnY6CiAgICAgICAgICBWSVRFX1NVUEFCQVNFX1VSTDogJHt7IHNlY3JldHMuVklURV9TVVBBQkFTRV9VUkwgfX0KICAgICAgICAgIFZJVEVfU1VQQUJBU0VfQU5PTl9LRVk6ICR7eyBzZWNyZXRzLlZJVEVfU1VQQUJBU0VfQU5PTl9LRVkgfX0KICAgICAgLSBuYW1lOiBTZXJ2ZSB0aGUgYnVpbHQgYXBwCiAgICAgICAgcnVuOiBucHggdml0ZSBwcmV2aWV3IC0tcG9ydCA0MTczIC0tc3RyaWN0UG9ydCA+IC90bXAvdml0ZS1wcmV2aWV3LmxvZyAyPiYxICYKICAgICAgLSBuYW1lOiBXYWl0IGZvciB0aGUgcHJldmlldyBzZXJ2ZXIKICAgICAgICBydW46IHwKICAgICAgICAgIGZvciBpIGluICQoc2VxIDEgMzApOyBkbwogICAgICAgICAgICBpZiBjdXJsIC1zU2YgaHR0cDovL2xvY2FsaG9zdDo0MTczLyA+L2Rldi9udWxsIDI+JjE7IHRoZW4gZWNobyAicHJldmlldyBzZXJ2ZXIgaXMgdXAiOyBleGl0IDA7IGZpCiAgICAgICAgICAgIHNsZWVwIDEKICAgICAgICAgIGRvbmUKICAgICAgICAgIGVjaG8gInByZXZpZXcgc2VydmVyIG5ldmVyIGNhbWUgdXAgLSBsb2c6IjsgY2F0IC90bXAvdml0ZS1wcmV2aWV3LmxvZzsgZXhpdCAxCiAgICAgICMgVEhFIEFVVEhPUklORyBTVEVQLiBJZGVudGljYWwgc2NyaXB0LCBpZGVudGljYWwgLS1hcHByb3ZlLy0tcmVhc29uIGNvbnRyYWN0IGEgcGVyc29uIHdvdWxkCiAgICAgICMgdXNlIGxvY2FsbHkgKHNlZSBkb2NzL1ZJU1VBTC1SRUdSRVNTSU9OLm1kJ3MgIkFwcHJvdmluZyBhbiBpbnRlbnRpb25hbCBjaGFuZ2UiKSAtIHRoZSBvbmx5CiAgICAgICMgZGlmZmVyZW5jZSBpcyBXSEVSRSBpdCBydW5zLiBJbnB1dHMgYXJlIHBhc3NlZCB0aHJvdWdoIGVudiwgbmV2ZXIgaW50ZXJwb2xhdGVkIGludG8gdGhlCiAgICAgICMgc2hlbGwgc2NyaXB0IGRpcmVjdGx5LCBzbyBhIGRpc3BhdGNoIGlucHV0IGNhbid0IGJyZWFrIG91dCBvZiBhIHF1b3RlZCBhcmd1bWVudCAoc3RhbmRhcmQKICAgICAgIyBHaXRIdWIgQWN0aW9ucyBzY3JpcHQtaW5qZWN0aW9uIGh5Z2llbmU7IGRpc3BhdGNoIGFscmVhZHkgcmVxdWlyZXMgd3JpdGUgYWNjZXNzLCBidXQgdGhlCiAgICAgICMgaGFiaXQgY29zdHMgbm90aGluZy4pCiAgICAgIC0gbmFtZTogUmVuZGVyIGFuZCBhcHByb3ZlIGJhc2VsaW5lcyBmcm9tIFRISVMgcnVubmVyJ3Mgb3duIG91dHB1dAogICAgICAgIGVudjoKICAgICAgICAgIEJBU0VfVVJMOiAiaHR0cDovL2xvY2FsaG9zdDo0MTczLyIKICAgICAgICAgIFJFQVNPTl9JTlBVVDogJHt7IGlucHV0cy5yZWFzb24gfX0KICAgICAgICAgIFNVUkZBQ0VfSU5QVVQ6ICR7eyBpbnB1dHMuc3VyZmFjZSB9fQogICAgICAgICAgVklFV1BPUlRfSU5QVVQ6ICR7eyBpbnB1dHMudmlld3BvcnQgfX0KICAgICAgICBydW46IHwKICAgICAgICAgIHNldCAtZQogICAgICAgICAgUkVBU09OPSIke1JFQVNPTl9JTlBVVH0gW0NJLWF1dGhvcmVkIGJ5IHJ1biAke0dJVEhVQl9SVU5fSUR9IG9uICR7R0lUSFVCX1NIQX1dIgogICAgICAgICAgQVJHUz0oLS1hcHByb3ZlICItLXJlYXNvbj0ke1JFQVNPTn0iKQogICAgICAgICAgaWYgWyAtbiAiJHtTVVJGQUNFX0lOUFVUfSIgXTsgdGhlbiBBUkdTKz0oIi0tc3VyZmFjZT0ke1NVUkZBQ0VfSU5QVVR9Iik7IGZpCiAgICAgICAgICBpZiBbIC1uICIke1ZJRVdQT1JUX0lOUFVUfSIgXTsgdGhlbiBBUkdTKz0oIi0tdmlld3BvcnQ9JHtWSUVXUE9SVF9JTlBVVH0iKTsgZmkKICAgICAgICAgIG5vZGUgdWktYXVkaXQvdmlzdWFsLXJlZ3Jlc3Npb24ubWpzICIke0FSR1NbQF19IgogICAgICAjIENvbW1pdHMgc3RyYWlnaHQgYmFjayB0byB0aGUgU0FNRSBicmFuY2ggdGhhdCB3YXMgZGlzcGF0Y2hlZC4gVGhpcyBpcyB0aGUgb25lIHRoaW5nIHRoYXQKICAgICAgIyBtYWtlcyB0aGUgcmVuZGVyIHVzYWJsZTogYSBodW1hbiBzdGlsbCByZXZpZXdzIHRoZSByZXN1bHRpbmcgY29tbWl0IGxpa2UgYW55IG90aGVyICh0aGUgUFIKICAgICAgIyBkaWZmIHNob3dzIGV4YWN0bHkgd2hpY2ggYmFzZWxpbmUgUE5HcyBjaGFuZ2VkKSwgYnV0IHRoZSBQSVhFTFMgaW4gaXQgd2VyZSByZW5kZXJlZCBieSB0aGUKICAgICAgIyBvbmx5IGVudmlyb25tZW50IHRoYXQgY2FuIGxlZ2l0aW1hdGVseSBqdWRnZSB0aGVtLgogICAgICAtIG5hbWU6IENvbW1pdCBDSS1hdXRob3JlZCBiYXNlbGluZXMgYmFjayB0byB0aGlzIGJyYW5jaAogICAgICAgIGVudjoKICAgICAgICAgIFJFQVNPTl9JTlBVVDogJHt7IGlucHV0cy5yZWFzb24gfX0KICAgICAgICBydW46IHwKICAgICAgICAgIHNldCAtZQogICAgICAgICAgZ2l0IGNvbmZpZyB1c2VyLm5hbWUgImdpdGh1Yi1hY3Rpb25zW2JvdF0iCiAgICAgICAgICBnaXQgY29uZmlnIHVzZXIuZW1haWwgIjQxODk4MjgyK2dpdGh1Yi1hY3Rpb25zW2JvdF1AdXNlcnMubm9yZXBseS5naXRodWIuY29tIgogICAgICAgICAgZ2l0IGFkZCB1aS1hdWRpdC92aXN1YWwtYmFzZWxpbmVzLyBkb2NzL1ZJU1VBTC1SRUdSRVNTSU9OLm1kCiAgICAgICAgICBpZiBnaXQgZGlmZiAtLWNhY2hlZCAtLXF1aWV0OyB0aGVuCiAgICAgICAgICAgIGVjaG8gIk5vIGJhc2VsaW5lIGNoYW5nZXMgdG8gY29tbWl0IC0gdGhpcyBydW5uZXIncyBvd24gcmVuZGVyIGFscmVhZHkgbWF0Y2hlcyB3aGF0J3MgY29tbWl0dGVkIG9uIHRoaXMgYnJhbmNoLiIKICAgICAgICAgICAgZXhpdCAwCiAgICAgICAgICBmaQogICAgICAgICAgQ09NTUlUX01TR19GSUxFPSIkKG1rdGVtcCkiCiAgICAgICAgICB7CiAgICAgICAgICAgIGVjaG8gIkF1dGhvcml6ZSBDSS1yZW5kZXJlZCB2aXN1YWwgcmVncmVzc2lvbiBiYXNlbGluZXMiCiAgICAgICAgICAgIGVjaG8gIiIKICAgICAgICAgICAgZWNobyAiJHtSRUFTT05fSU5QVVR9IgogICAgICAgICAgICBlY2hvICIiCiAgICAgICAgICAgIGVjaG8gIlJlbmRlcmVkIGFuZCBhcHByb3ZlZCBieSB0aGUgJ0F1dGhvcml6ZSB2aXN1YWwgcmVncmVzc2lvbiBiYXNlbGluZXMnIHdvcmtmbG93IgogICAgICAgICAgICBlY2hvICIocnVuICR7R0lUSFVCX1JVTl9JRH0sIGpvYiAke0dJVEhVQl9KT0J9KSBhZ2FpbnN0IGNvbW1pdCAke0dJVEhVQl9TSEF9IC0gdGhlIgogICAgICAgICAgICBlY2hvICJzYW1lIHVidW50dS1sYXRlc3QgcnVubmVyIGltYWdlIGFuZCBwaW5uZWQgQ2hyb21pdW0gcmV2aXNpb24gdGhlIHJlcXVpcmVkIgogICAgICAgICAgICBlY2hvICJidWlsZCBjaGVjaydzIHZpc3VhbC1yZWdyZXNzaW9uIGdhdGUganVkZ2VzIGFnYWluc3QsIG5vdCBhIGxvY2FsbHktY2FwdHVyZWQiCiAgICAgICAgICAgIGVjaG8gImltYWdlLiBTZWUgZG9jcy9WSVNVQUwtUkVHUkVTU0lPTi5tZC4iCiAgICAgICAgICAgIGVjaG8gIiIKICAgICAgICAgICAgZWNobyAiQjExNzE1MDQiCiAgICAgICAgICB9ID4gIiRDT01NSVRfTVNHX0ZJTEUiCiAgICAgICAgICBnaXQgY29tbWl0IC1GICIkQ09NTUlUX01TR19GSUxFIgogICAgICAgICAgcm0gLWYgIiRDT01NSVRfTVNHX0ZJTEUiCiAgICAgICAgICBnaXQgcHVzaCBvcmlnaW4gIkhFQUQ6JHtHSVRIVUJfUkVGX05BTUV9IgogICAgICAgICAgZWNobyAiUHVzaGVkIENJLWF1dGhvcmVkIGJhc2VsaW5lcyB0byAke0dJVEhVQl9SRUZfTkFNRX0uIE5vdGU6IGEgcHVzaCBmcm9tIHRoaXMgd29ya2Zsb3cncyBvd24gdG9rZW4gbWF5IG5vdCBhdXRvLXRyaWdnZXIgdGhlIHJlcXVpcmVkIGJ1aWxkIGNoZWNrIChhIGtub3duLCBkb2N1bWVudGVkIHF1aXJrIG9mIGF1dG9tYXRpb24tdG9rZW4gcHVzaGVzIGluIHRoaXMgcmVwbyAtIHNlZSBDTEFVREUubWQncyAnV29ya2Zsb3cgJiBkZXBsb3knIHNlY3Rpb24pIC0gYSBzbWFsbCBudWRnZSBjb21taXQgb24gdGhlIFBSIGJyYW5jaCBnZXRzIGl0IHJ1bm5pbmcgaWYgdGhlIGNoZWNrIHN0YXlzIGF0ICdFeHBlY3RlZCcuIgo=
+name: Authorize visual regression baselines
+
+# Lets CI itself author the visual-regression baseline PNGs under ui-audit/visual-baselines/
+# (B1171504). WHY THIS EXISTS: the required `build` check's visual-regression gate
+# (ui-audit/visual-regression.mjs --check, wired via .github/ci-gates.yml) compares every PR's
+# rendered screenshots against those committed PNGs, and until now the ONLY way to produce them
+# was a person running `--approve` on their own machine. A locally-rendered image does not
+# byte-match what THIS runner (ubuntu-latest, GitHub Actions' own container image) renders, even
+# with the exact CI-pinned Chromium revision — confirmed twice on this repo: B1096017's own
+# recorded recurrence (re-approved locally with the pinned revision, shipped clean in that
+# sandbox, failed the very next real CI run on all 16 surface/theme/viewport pairs) and PR #1426
+# (an identical 0.29–2.72% signature against a 0.02% tolerance, twice, also captured with the
+# pinned revision). Font hinting/antialiasing differ between a sandbox's container image and this
+# runner's image below what any locally-available browser build can close. A value nobody can
+# reproduce locally must never be a merge gate — so this workflow moves the AUTHORING step onto
+# the only environment that can legitimately produce it: this one.
+#
+# WHAT THIS DOES NOT DO. It does not touch ui-audit/visual-regression.mjs, ui-audit/lib/
+# visualBaseline.mjs, the 0.02% tolerance, or anything else the gate checks — see this item's own
+# BACKLOG.md entry for the empty `git diff` that proves it. This workflow is an AUTHORING path,
+# not a change to what "pass" means. The gate still runs, still measures, and still fails a real
+# regression exactly as before (B1171504's own acceptance test proves this both ways).
+#
+# ⛔ MANUAL TRIGGER ONLY — never add push:/pull_request:/schedule: here. The one thing that makes
+# CI-authored baselines trustworthy rather than a rubber stamp is that a human decides, on
+# purpose, one time, that THIS render is the one to approve. Any trigger that fires on an
+# ordinary push would silently turn every PR green by re-defining "correct" as "whatever was just
+# pushed," which is the exact failure this whole gate exists to prevent.
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why these baselines are changing (mirrors the local --reason= requirement — recorded in the manifest + docs/VISUAL-REGRESSION.md)"
+        required: true
+        type: string
+      surface:
+        description: "Optional: limit to one surface id (dev convenience, matches --surface=). Leave blank for every surface."
+        required: false
+        type: string
+      viewport:
+        description: "Optional: limit to one viewport id, desktop or phone (matches --viewport=). Leave blank for both."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+# One authoring run per branch at a time; a second dispatch on the same branch supersedes the
+# first (this operation is a pure function of the branch's own current code, so cancelling an
+# in-flight run in favor of a newer dispatch loses nothing — unlike build.yml's main-branch
+# carve-out, there is no "every run needs its own reported verdict" requirement here).
+concurrency:
+  group: authorize-visual-baselines-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    steps:
+      # ⛔ NEVER main. Baselines authored here still have to clear normal PR review + the gate
+      # itself before merging anywhere — this refusal is what keeps that true. Dispatching against
+      # main would let a picture become "correct" with no PR, no diff, no reviewer ever seeing it.
+      - name: Refuse to run against main
+        if: github.ref == 'refs/heads/main' || github.ref_name == 'main'
+        run: |
+          echo "::error::authorize-visual-baselines must never run against main — dispatch it against the PR branch that needs new baselines, then let the normal PR review + build check judge the result."
+          exit 1
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      # Same cache key as build.yml's own "Cache Playwright browsers" step, so a baseline-authoring
+      # run and a real build.yml run on the same package-lock.json share the identical cache entry
+      # — never a second, independently-drifting copy of "which Chromium build."
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      # Resolves to the exact revision playwright-core's pinned version in package-lock.json
+      # expects — the SAME resolution build.yml's own gate uses. Never overridden with a
+      # locally-convenient PW_CHROME path (see ui-audit/visual-regression.mjs's own header for why
+      # that substitution is exactly how the original CI-vs-local mismatch was introduced).
+      - name: Install Playwright chromium
+        run: npx playwright install --with-deps chromium
+      # Same build-time env as build.yml's own "Build" step (ci-gates.yml) — B927104 established
+      # that a build without these secrets is a DIFFERENT artifact (the header account chip
+      # renders "Cloud off" vs "Sign in"), so this has to match exactly, not just be "some" build.
+      - name: Build (same Supabase-configured build-time state the required build check uses)
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      - name: Serve the built app
+        run: npx vite preview --port 4173 --strictPort > /tmp/vite-preview.log 2>&1 &
+      - name: Wait for the preview server
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sSf http://localhost:4173/ >/dev/null 2>&1; then echo "preview server is up"; exit 0; fi
+            sleep 1
+          done
+          echo "preview server never came up — log:"; cat /tmp/vite-preview.log; exit 1
+      # THE AUTHORING STEP. Identical script, identical --approve/--reason contract a person would
+      # use locally (see docs/VISUAL-REGRESSION.md's "Approving an intentional change") — the only
+      # difference is WHERE it runs. Inputs are passed through env, never interpolated into the
+      # shell script directly, so a dispatch input can't break out of a quoted argument (standard
+      # GitHub Actions script-injection hygiene; dispatch already requires write access, but the
+      # habit costs nothing).
+      - name: Render and approve baselines from THIS runner's own output
+        env:
+          BASE_URL: "http://localhost:4173/"
+          REASON_INPUT: ${{ inputs.reason }}
+          SURFACE_INPUT: ${{ inputs.surface }}
+          VIEWPORT_INPUT: ${{ inputs.viewport }}
+        run: |
+          set -e
+          REASON="${REASON_INPUT} [CI-authored by run ${GITHUB_RUN_ID} on ${GITHUB_SHA}]"
+          ARGS=(--approve "--reason=${REASON}")
+          if [ -n "${SURFACE_INPUT}" ]; then ARGS+=("--surface=${SURFACE_INPUT}"); fi
+          if [ -n "${VIEWPORT_INPUT}" ]; then ARGS+=("--viewport=${VIEWPORT_INPUT}"); fi
+          node ui-audit/visual-regression.mjs "${ARGS[@]}"
+      # Commits straight back to the SAME branch that was dispatched. This is the one thing that
+      # makes the render usable: a human still reviews the resulting commit like any other (the PR
+      # diff shows exactly which baseline PNGs changed), but the PIXELS in it were rendered by the
+      # only environment that can legitimately judge them.
+      - name: Commit CI-authored baselines back to this branch
+        env:
+          REASON_INPUT: ${{ inputs.reason }}
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ui-audit/visual-baselines/ docs/VISUAL-REGRESSION.md
+          if git diff --cached --quiet; then
+            echo "No baseline changes to commit — this runner's own render already matches what's committed on this branch."
+            exit 0
+          fi
+          COMMIT_MSG_FILE="$(mktemp)"
+          {
+            echo "Authorize CI-rendered visual regression baselines"
+            echo ""
+            echo "${REASON_INPUT}"
+            echo ""
+            echo "Rendered and approved by the 'Authorize visual regression baselines' workflow"
+            echo "(run ${GITHUB_RUN_ID}, job ${GITHUB_JOB}) against commit ${GITHUB_SHA} — the"
+            echo "same ubuntu-latest runner image and pinned Chromium revision the required"
+            echo "build check's visual-regression gate judges against, not a locally-captured"
+            echo "image. See docs/VISUAL-REGRESSION.md."
+            echo ""
+            echo "B1171504"
+          } > "$COMMIT_MSG_FILE"
+          git commit -F "$COMMIT_MSG_FILE"
+          rm -f "$COMMIT_MSG_FILE"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          echo "Pushed CI-authored baselines to ${GITHUB_REF_NAME}. Note: a push from this workflow's own token may not auto-trigger the required build check (a known, documented quirk of automation-token pushes in this repo — see CLAUDE.md's 'Workflow & deploy' section) — a small nudge commit on the PR branch gets it running if the check stays at 'Expected'."
