@@ -466,6 +466,32 @@ html, body, #root {
 @supports (height: 100dvh) {
   html, body, #root { height: 100dvh; }
 }
+/* ⛔ B1168128 (×2) — `overflow: hidden` above stops the DOCUMENT from ever needing to
+   scroll, but on iOS Safari it does not reliably stop the page from being DRAGGED: a
+   one-finger touch that starts over content with nowhere to scroll can still hand the
+   gesture to the browser's own top-level scroller (the native "rubber-band"/edge-bounce
+   behaviour), sliding the whole app sideways or down and revealing bare page background
+   at the edges — exactly the owner's report ("I am panning within the map... it just
+   pans me on the whole web page," reproduced live on iPhone Safari with a screenshot of
+   the app translated off-center and its own header rows overlapping). Four earlier
+   investigation passes (Chromium touch emulation + real Linux WebKit, four widths, two
+   orientations, eight panel states) never reproduced this — it is a real-device-only,
+   Apple-WebKit-specific gesture that no browser available to this sandbox implements the
+   same way, so the fix here is the documented containment pattern for this exact class
+   rather than something provable by a headless run: taking html/body OUT of the page's
+   own native scroll entirely (`position: fixed`, pinned to every edge) so there is no
+   top-level scroller left for a stray touch to hand a gesture to. `overscroll-behavior:
+   none` is additive belt-and-suspenders for browsers that DO scroll-chain (notably
+   Android Chrome) — Safari's edge-swipe/rubber-band gestures are not fully governed by
+   it, which is why this isn't the fix on its own. #root stays a normal block; it fills
+   the now-pinned body exactly as it did the unpinned one. See
+   `src/shared/ui/pageContainmentGuard.js` for the runtime self-heal + telemetry half. */
+html, body {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  overscroll-behavior: none;
+}
 
 body {
   background: var(--surface-page);

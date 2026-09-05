@@ -21750,8 +21750,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             that panel is closed. */}
         <input ref={reAddFileRef} type="file" accept="application/pdf,image/*,.dxf,.dwg" style={{ display: "none" }}
           onChange={(e) => { const f = e.target.files?.[0]; const tid = reAddIdRef.current; reAddIdRef.current = null; if (f) addOverlayFile(f, tid); e.target.value = ""; }} />
-        {/* canvas */}
-        <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2, background: PAL.paper }}
+        {/* canvas — B1168128 (×2): touchAction/overscrollBehavior repeated here (not just on
+            the <svg> below) so a touch landing on a floating badge/FAB stacked over the
+            canvas (the scale bar, the calibration badge, the phone FABs) never hands a drag
+            to the browser's native page gesture either — defence in depth alongside the
+            html/body pin in index.css, which is the actual containment boundary. */}
+        <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2, background: PAL.paper, touchAction: "none", overscrollBehavior: "none" }}
           onDragEnter={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; e.preventDefault(); canvasDragDepth.current += 1; setCanvasDropOver(true); }}
           onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) e.preventDefault(); }}
           onDragLeave={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; canvasDragDepth.current = Math.max(0, canvasDragDepth.current - 1); if (canvasDragDepth.current === 0) setCanvasDropOver(false); }}
