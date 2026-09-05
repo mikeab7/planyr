@@ -10,7 +10,7 @@
  */
 import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs, countJunkEntries,
   shareMirrorOf, withShareMirror } from "./siteModel.js";
-import { cloudUpsert, cloudDelete, cloudHardDelete, cloudRestore, cloudDeletedRows, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile } from "./cloudSync.js";
+import { cloudUpsert, cloudDelete, cloudHardDelete, cloudRestore, cloudDeletedRows, cloudCheckDeleted, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile } from "./cloudSync.js";
 import { reconcileGroupNames, resolveNameFor, groupKeyOf, maxStampOf } from "./projectName.js";
 import { idbGet, idbPut, idbAvailable, idbDelete, idbDeleteByPrefix } from "./localDb.js";
 import { idbKeysReleasableOnPlanDelete, idbKeysHeldByOtherPlans } from "./sharedAssetRefs.js";
@@ -1049,6 +1049,16 @@ export function deleteSiteGroup(groupId) {
  * re-exported here, so the breadcrumb's confirmation copy never has to import this engine just
  * to say "30 days". */
 export { DELETED_RETENTION_DAYS };
+
+/* NEW-2 (B848833) — the ROUTE GATE's own question: is the project id this deep link/route names
+ * still live, soft-deleted, or nonexistent — asked BEFORE a workspace mounts for it, never after.
+ * Thin wrapper over the single-row cloud check (see its own header for the return contract);
+ * signed-out/offline answers `{ ok:false }` so the caller fails OPEN rather than blocking a route
+ * on an inconclusive read (there is no soft-delete concept at all for a local-only, signed-out plan). */
+export async function checkProjectDeletionStatus(id) {
+  if (!activeUid() || !id) return { ok: false, exists: false, deleted: false };
+  return cloudCheckDeleted(activeUid(), id);
+}
 
 // Group the cloud's soft-deleted rows into projects. Returns { ok, supported, projects }:
 // supported:false = db/sites_soft_delete.sql hasn't run on this DB (there is no bin — deletes are
