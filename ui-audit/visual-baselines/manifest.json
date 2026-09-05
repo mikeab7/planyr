@@ -7,89 +7,89 @@
     "map-landing": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a3c775b2",
-        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
+        "approvedCommit": "055ac021",
+        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a3c775b2",
-        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
+        "approvedCommit": "055ac021",
+        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a3c775b2",
-        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
+        "approvedCommit": "055ac021",
+        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a3c775b2",
-        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
+        "approvedCommit": "055ac021",
+        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
       }
     },
     "site-planner-header": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a3c775b2",
-        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
+        "approvedCommit": "055ac021",
+        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a3c775b2",
-        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
+        "approvedCommit": "055ac021",
+        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a3c775b2",
-        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
+        "approvedCommit": "055ac021",
+        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a3c775b2",
-        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
+        "approvedCommit": "055ac021",
+        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
       }
     },
     "site-planner-left-rail": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a3c775b2",
-        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
+        "approvedCommit": "055ac021",
+        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a3c775b2",
-        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
+        "approvedCommit": "055ac021",
+        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a3c775b2",
-        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
+        "approvedCommit": "055ac021",
+        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a3c775b2",
-        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
+        "approvedCommit": "055ac021",
+        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
       }
     },
     "library": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a3c775b2",
-        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
+        "approvedCommit": "055ac021",
+        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a3c775b2",
-        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
+        "approvedCommit": "055ac021",
+        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a3c775b2",
-        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
+        "approvedCommit": "055ac021",
+        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "a3c775b2",
-        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
+        "approvedCommit": "055ac021",
+        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
       }
     }
   }

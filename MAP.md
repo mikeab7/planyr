@@ -1,7 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-05 @ `9e9e0c9f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
-> **Generated 2026-09-05 @ `39f9df72` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-05 @ `055ac021` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -100,7 +99,6 @@ _682 source files mapped._
   - _exports_: `computeVisitAggregates`, `orderAgainEntries`
 - **`src/workspaces/model/components/ContextMenu.jsx`** — The right-click context menu (cell/row-header/column-header), anchored at the click point via a zero-sized virtual anchor into the shared AnchoredMenu.
   - _exports_: `default (ContextMenu)`
-- **`src/workspaces/model/components/FileMenu.jsx`** — The "File" toolbar button + menu: Export/Import .xlsx (the real round trip) and CSV (deliberately the lesser path).
 - **`src/workspaces/model/components/FileMenu.jsx`** — Row-1 "File" button/menu — download active sheet as Excel (.xlsx) or CSV, or open one to import.
   - _exports_: `default (FileMenu)`
 - **`src/workspaces/model/components/FindReplaceBar.jsx`** — The floating Find (Ctrl+F) / Replace (Ctrl+H) bar — searches raw cell text, never displayed values.
@@ -117,7 +115,6 @@ _682 source files mapped._
   - _exports_: `default (SheetView)`, `HEADER_H`, `ROW_H`
 - **`src/workspaces/model/components/TabStrip.jsx`** — The sheet tab strip: add/rename (inline)/duplicate/delete/reorder (drag) a workbook sheet, pinned below the grid, outside its own scroller.
   - _exports_: `default (TabStrip)`, `TAB_STRIP_HEIGHT`
-- **`src/workspaces/model/lib/csvIO.js`** — CSV round trip: exports the active sheet's displayed values as plain CSV and parses CSV rows into a new sheet — the lesser path beside the real .xlsx round trip.
 - **`src/workspaces/model/lib/csvIO.js`** — Dependency-free CSV export (active sheet's displayed values) / import (appended as a new sheet).
   - _exports_: `addSheetFromCsvText`, `csvRowsToSheet`, `parseCsv`, `sheetToCsv`
 - **`src/workspaces/model/lib/formulaConsistency.js`** — Flags a formula whose R1C1-style shape breaks its row/column neighbours' pattern, or a hardcoded value sitting inside one; precision-tuned against a realistic pro-forma fixture.
@@ -148,7 +145,6 @@ _682 source files mapped._
   - _exports_: `beginOrStepTrace`, `cellKey`, `parseCellKey`, `renderableTrace`, `stepTrace`, `TRACE_STEP_CAP`
 - **`src/workspaces/model/lib/undoStack.js`** — General whole-state undo/redo: a snapshot stack keyed on committed edits, agnostic to what kind of edit each one was.
   - _exports_: `useUndoableState`
-- **`src/workspaces/model/lib/xlsxIO.js`** — Real .xlsx export/import for the whole workbook (built on ExcelJS), preserving formulas, formatting and styles across the round trip.
 - **`src/workspaces/model/lib/xlsxIO.js`** — Real .xlsx export/import of the whole workbook via ExcelJS (formulas, formats, styles, freeze panes, named ranges) — dynamically imported, never on the Model workspace's eager chunk.
   - _exports_: `checkFormulaSupport`, `exportWorkbookToXlsxBlob`, `importXlsxToWorkbook`
 - **`src/workspaces/model/ModelApp.jsx`** — Model workspace root: the underwriting spreadsheet — loads/saves the active project's sheet and wires the toolbar, formula bar and grid together.
