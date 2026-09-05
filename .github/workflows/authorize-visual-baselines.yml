@@ -6,22 +6,22 @@ name: Authorize visual regression baselines
 # rendered screenshots against those committed PNGs, and until now the ONLY way to produce them
 # was a person running `--approve` on their own machine. A locally-rendered image does not
 # byte-match what THIS runner (ubuntu-latest, GitHub Actions' own container image) renders, even
-# with the exact CI-pinned Chromium revision - confirmed twice on this repo: B1096017's own
+# with the exact CI-pinned Chromium revision — confirmed twice on this repo: B1096017's own
 # recorded recurrence (re-approved locally with the pinned revision, shipped clean in that
 # sandbox, failed the very next real CI run on all 16 surface/theme/viewport pairs) and PR #1426
-# (an identical 0.29-2.72% signature against a 0.02% tolerance, twice, also captured with the
+# (an identical 0.29–2.72% signature against a 0.02% tolerance, twice, also captured with the
 # pinned revision). Font hinting/antialiasing differ between a sandbox's container image and this
 # runner's image below what any locally-available browser build can close. A value nobody can
-# reproduce locally must never be a merge gate - so this workflow moves the AUTHORING step onto
+# reproduce locally must never be a merge gate — so this workflow moves the AUTHORING step onto
 # the only environment that can legitimately produce it: this one.
 #
 # WHAT THIS DOES NOT DO. It does not touch ui-audit/visual-regression.mjs, ui-audit/lib/
-# visualBaseline.mjs, the 0.02% tolerance, or anything else the gate checks - see this item's own
+# visualBaseline.mjs, the 0.02% tolerance, or anything else the gate checks — see this item's own
 # BACKLOG.md entry for the empty `git diff` that proves it. This workflow is an AUTHORING path,
 # not a change to what "pass" means. The gate still runs, still measures, and still fails a real
 # regression exactly as before (B1171504's own acceptance test proves this both ways).
 #
-# ⛛ MANUAL TRIGGER ONLY - never add push:/pull_request:/schedule: here. The one thing that makes
+# ⛔ MANUAL TRIGGER ONLY — never add push:/pull_request:/schedule: here. The one thing that makes
 # CI-authored baselines trustworthy rather than a rubber stamp is that a human decides, on
 # purpose, one time, that THIS render is the one to approve. Any trigger that fires on an
 # ordinary push would silently turn every PR green by re-defining "correct" as "whatever was just
@@ -30,7 +30,7 @@ on:
   workflow_dispatch:
     inputs:
       reason:
-        description: "Why these baselines are changing (mirrors the local --reason= requirement - recorded in the manifest + docs/VISUAL-REGRESSION.md)"
+        description: "Why these baselines are changing (mirrors the local --reason= requirement — recorded in the manifest + docs/VISUAL-REGRESSION.md)"
         required: true
         type: string
       surface:
@@ -47,7 +47,7 @@ permissions:
 
 # One authoring run per branch at a time; a second dispatch on the same branch supersedes the
 # first (this operation is a pure function of the branch's own current code, so cancelling an
-# in-flight run in favor of a newer dispatch loses nothing - unlike build.yml's main-branch
+# in-flight run in favor of a newer dispatch loses nothing — unlike build.yml's main-branch
 # carve-out, there is no "every run needs its own reported verdict" requirement here).
 concurrency:
   group: authorize-visual-baselines-${{ github.ref }}
@@ -57,13 +57,13 @@ jobs:
   authorize:
     runs-on: ubuntu-latest
     steps:
-      # ⛛ NEVER main. Baselines authored here still have to clear normal PR review + the gate
-      # itself before merging anywhere - this refusal is what keeps that true. Dispatching against
+      # ⛔ NEVER main. Baselines authored here still have to clear normal PR review + the gate
+      # itself before merging anywhere — this refusal is what keeps that true. Dispatching against
       # main would let a picture become "correct" with no PR, no diff, no reviewer ever seeing it.
       - name: Refuse to run against main
         if: github.ref == 'refs/heads/main' || github.ref_name == 'main'
         run: |
-          echo "::error::authorize-visual-baselines must never run against main - dispatch it against the PR branch that needs new baselines, then let the normal PR review + build check judge the result."
+          echo "::error::authorize-visual-baselines must never run against main — dispatch it against the PR branch that needs new baselines, then let the normal PR review + build check judge the result."
           exit 1
       - name: Checkout
         uses: actions/checkout@v7
@@ -79,7 +79,7 @@ jobs:
         run: npm ci
       # Same cache key as build.yml's own "Cache Playwright browsers" step, so a baseline-authoring
       # run and a real build.yml run on the same package-lock.json share the identical cache entry
-      # - never a second, independently-drifting copy of "which Chromium build."
+      # — never a second, independently-drifting copy of "which Chromium build."
       - name: Cache Playwright browsers
         id: pw-cache
         uses: actions/cache@v4
@@ -87,14 +87,14 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       # Resolves to the exact revision playwright-core's pinned version in package-lock.json
-      # expects - the SAME resolution build.yml's own gate uses. Never overridden with a
+      # expects — the SAME resolution build.yml's own gate uses. Never overridden with a
       # locally-convenient PW_CHROME path (see ui-audit/visual-regression.mjs's own header for why
-      # that substitution is exactly how the original CI-vs-local mismatch was introduced.)
+      # that substitution is exactly how the original CI-vs-local mismatch was introduced).
       - name: Install Playwright chromium
         run: npx playwright install --with-deps chromium
-      # Same build-time env as build.yml's own "Build" step (ci-gates.yml) - B927104 established
+      # Same build-time env as build.yml's own "Build" step (ci-gates.yml) — B927104 established
       # that a build without these secrets is a DIFFERENT artifact (the header account chip
-      # renders "Cloud off" vs. "Sign in"), so this has to match exactly, not just be "some" build.
+      # renders "Cloud off" vs "Sign in"), so this has to match exactly, not just be "some" build.
       - name: Build (same Supabase-configured build-time state the required build check uses)
         run: npm run build
         env:
@@ -108,13 +108,13 @@ jobs:
             if curl -sSf http://localhost:4173/ >/dev/null 2>&1; then echo "preview server is up"; exit 0; fi
             sleep 1
           done
-          echo "preview server never came up - log:"; cat /tmp/vite-preview.log; exit 1
+          echo "preview server never came up — log:"; cat /tmp/vite-preview.log; exit 1
       # THE AUTHORING STEP. Identical script, identical --approve/--reason contract a person would
-      # use locally (see docs/VISUAL-REGRESSION.md's "Approving an intentional change") - the only
+      # use locally (see docs/VISUAL-REGRESSION.md's "Approving an intentional change") — the only
       # difference is WHERE it runs. Inputs are passed through env, never interpolated into the
       # shell script directly, so a dispatch input can't break out of a quoted argument (standard
       # GitHub Actions script-injection hygiene; dispatch already requires write access, but the
-      # habit costs nothing.)
+      # habit costs nothing).
       - name: Render and approve baselines from THIS runner's own output
         env:
           BASE_URL: "http://localhost:4173/"
@@ -141,7 +141,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add ui-audit/visual-baselines/ docs/VISUAL-REGRESSION.md
           if git diff --cached --quiet; then
-            echo "No baseline changes to commit - this runner's own render already matches what's committed on this branch."
+            echo "No baseline changes to commit — this runner's own render already matches what's committed on this branch."
             exit 0
           fi
           COMMIT_MSG_FILE="$(mktemp)"
@@ -151,7 +151,7 @@ jobs:
             echo "${REASON_INPUT}"
             echo ""
             echo "Rendered and approved by the 'Authorize visual regression baselines' workflow"
-            echo "(run ${GITHUB_RUN_ID}, job ${GITHUB_JOB}) against commit ${GITHUB_SHA} - the"
+            echo "(run ${GITHUB_RUN_ID}, job ${GITHUB_JOB}) against commit ${GITHUB_SHA} — the"
             echo "same ubuntu-latest runner image and pinned Chromium revision the required"
             echo "build check's visual-regression gate judges against, not a locally-captured"
             echo "image. See docs/VISUAL-REGRESSION.md."
@@ -161,4 +161,4 @@ jobs:
           git commit -F "$COMMIT_MSG_FILE"
           rm -f "$COMMIT_MSG_FILE"
           git push origin "HEAD:${GITHUB_REF_NAME}"
-          echo "Pushed CI-authored baselines to ${GITHUB_REF_NAME}. Note: a push from this workflow's own token may not auto-trigger the required build check (a known, documented quirk of automation-token pushes in this repo - see CLAUDE.md's 'Workflow & deploy' section) - a small nudge commit on the PR branch gets it running if the check stays at 'Expected'."
+          echo "Pushed CI-authored baselines to ${GITHUB_REF_NAME}. Note: a push from this workflow's own token may not auto-trigger the required build check (a known, documented quirk of automation-token pushes in this repo — see CLAUDE.md's 'Workflow & deploy' section) — a small nudge commit on the PR branch gets it running if the check stays at 'Expected'."

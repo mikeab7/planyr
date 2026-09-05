@@ -80,7 +80,7 @@ import {
   humanizeError,
 } from "./lib/arcgis.js";
 import { elStyle, elToRingFeet, byZ } from "./lib/planStyle.js";
-import { STATUSES, STATUS_META, statusOf } from "./lib/siteModel.js";
+import { STATUSES, STATUS_META, statusOf, roleOf } from "./lib/siteModel.js";
 import { countyAtPoint } from "./lib/jurisdiction.js";
 import { findAttr, situsAddress, siteNameFromParcel } from "./lib/appraisal.js";
 /* LAZY (B1064 tranche). The address-search parcel card renders only AFTER a search resolves a
@@ -1274,6 +1274,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // render below), so this is the only list-narrowing predicate left.
   const nf = nameFilter.trim().toLowerCase();
   const passName = (s) => !nf || (s.site || s.name || "").toLowerCase().includes(nf);
+  // B1165440 (defense-in-depth on B1156864/NEW-1 — an adversarial review of PR 1424 found
+  // "tracked" sites (market intel only — a comp, an asking price with nothing transacted)
+  // sitting in the Pursuit group on planyr.io) — the caller (SitePlannerApp's `siteGroups`)
+  // already filters to role "pursuit" before handing this component its `sites` prop, but this
+  // panel is the one place the reported symptom actually surfaced, so the guard is asserted again
+  // at the point of use rather than trusted from upstream alone. This also closes the second half
+  // of that review's finding on its own: a tracked record never reaches `statusOf`'s status-group
+  // buckets here at all, so a null `status` on one can never be defaulted into "Pursuit."
+  const pursuitSites = useMemo(() => sites.filter((s) => roleOf(s) === "pursuit"), [sites]);
 
   const clearHilites = () => {
     const map = mapRef.current;
@@ -1951,7 +1960,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // below): typing in "Filter by name…" narrowed the list to "1/28" while all 28 pins stayed
     // on the map, including the 0-match case where the map should show nothing at all. The list
     // and the map are two views of the same filtered set; only the list was ever filtered.
-    (showSitesLayer ? sites.filter(passName) : []).forEach((site) => {
+    (showSitesLayer ? pursuitSites.filter(passName) : []).forEach((site) => {
       if (!site.origin) return; // blank-planner sites have no geo anchor
       const status = statusOf(site);
       // NEW-1 — a Dead site stays ON the map (small + dim, same treatment as Complete):
@@ -2944,7 +2953,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     );
   };
   // Sites matching the name filter (for the panel header count).
-  const shownCount = sites.filter((s) => passName(s)).length;
+  const shownCount = pursuitSites.filter((s) => passName(s)).length;
 
   // NEW-MAPCTRL-2 — STEEL-MAN ix's way back: re-run the SAME derived landing view a fresh open
   // would use, so "back to your sites" always means the same thing "open the Map view" does.
@@ -3468,7 +3477,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                   fontSize: FONT_SIZE.control }}>
                 <span style={{ fontSize: 8, lineHeight: 1, transform: sitesPanelOpen ? "none" : "rotate(-90deg)", display: "inline-block" }}>▼</span>
               </button>
-              <RailTab label="Sites" count={nf ? `${shownCount}/${sites.length}` : sites.length}
+              <RailTab label="Sites" count={nf ? `${shownCount}/${pursuitSites.length}` : pursuitSites.length}
                 active={panelTab === "site"} onClick={() => { setPanelTab("site"); if (!sitesPanelOpen) toggleSitesPanel(); }} />
               <RailTab label="Comps" count={comps.length} active={panelTab === "comp"}
                 onClick={() => { setPanelTab("comp"); if (!sitesPanelOpen) toggleSitesPanel(); }} />
@@ -3506,9 +3515,9 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                 hover/focus-revealed grip. Collapsing a group is the only "filter" left (NEW-1). */}
             <div style={{ maxHeight: 340, overflowY: "auto", paddingBottom: 4, borderTop: `1px solid ${PAL.panelLine}` }}>
               {(() => {
-                const pinnedRows = sortRows(sites.filter((s) => pinnedSet.has(s.id) && passName(s)));
+                const pinnedRows = sortRows(pursuitSites.filter((s) => pinnedSet.has(s.id) && passName(s)));
                 const groupBlocks = orderedStatuses.map((st) => {
-                  const rows = sites.filter((s) => statusOf(s) === st && passName(s)); // TRUE group total — pinned included
+                  const rows = pursuitSites.filter((s) => statusOf(s) === st && passName(s)); // TRUE group total — pinned included
                   if (!rows.length) return null;
                   const visibleRows = sortRows(rows.filter((s) => !pinnedSet.has(s.id))); // pinned sites live in the Pinned section instead
                   // While a name filter is active, force matching sections open so a match in a
@@ -3732,7 +3741,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "0 2px 8px", marginBottom: 6, borderBottom: `1px solid ${PAL.panelLine}` }}>
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: PAL.ink, cursor: "pointer", padding: "2px 0" }}>
               <input type="checkbox" checked={showSitesLayer} onChange={(e) => toggleShowSitesLayer(e.target.checked)} data-testid="map-show-sites" />
-              <span>Sites{sites.length ? ` (${sites.length})` : ""}</span>
+              <span>Sites{pursuitSites.length ? ` (${pursuitSites.length})` : ""}</span>
             </label>
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: PAL.ink, cursor: "pointer", padding: "2px 0" }}>
               <input type="checkbox" checked={showCompsLayer} onChange={(e) => toggleShowCompsLayer(e.target.checked)} data-testid="map-show-comps" />

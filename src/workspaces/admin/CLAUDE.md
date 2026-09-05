@@ -38,6 +38,21 @@ modeled-jurisdiction lists the app itself routes against (`detentionRules.COUNTY
 `easementRules.MODELED_COUNTIES`) — the database has no way to know what a given deploy has modeled, and
 this keeps "wired" self-correcting the moment a county is added, with nothing to update by hand.
 
+**Seventh section (B1160721, NEW-2) — `SignupActivitySection.jsx`.** Signup volume visibility —
+reads through `admin_list_signup_attempts()` (the migration lives in the shared `auth/db/` folder), the
+read side of the server-side signup rate-limit trigger on `auth.users`. Only `created` rows are
+ever logged there (a rate-limited attempt can't survive the transaction it aborts — see that
+migration's own table comment); a rejected flood shows up in Supabase's own Auth/Postgres logs
+instead.
+
+**Eighth section (B1160722, NEW-3) — `AdminPasswordResetSection.jsx`.** Reset a user's password
+with no email involved, through `admin_reset_user_password()` (`db/admin_reset_password.sql`) —
+writes a fresh bcrypt hash straight to `auth.users.encrypted_password` via pgcrypto's
+`crypt()`/`gen_salt('bf')`, the same algorithm GoTrue itself checks against. Gated on `is_admin()`
+INSIDE the function (not merely a hidden button); records who reset whom and when in
+`admin_password_resets` (read via `admin_list_password_resets()`). Never displays an EXISTING
+password — bcrypt hashes are one-way — only ever generates and shows a new one, once.
+
 **Sixth section (B842866) — `ReportsSection.jsx`.** Lists everything filed through the global
 "help / report a problem" control the app shell mounts on every route (the shared `reports/`
 folder's model + the shell's own help-control component), newest first — category, who

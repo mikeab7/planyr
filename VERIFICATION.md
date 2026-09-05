@@ -39,6 +39,20 @@ was never clicked" quietly ships broken.
 >   then `getByTestId("map-start-blank-menu-item")` is the reliable two-step click); drive the SVG
 >   canvas with `page.mouse` (CDP mouse events fire React's pointer handlers); `page.screenshot({clip})`
 >   then read the PNG back to eyeball it.
+> - **⛔ THIS SANDBOX HAS NO WEBKIT — every "phone" or "mobile" claim made here is a CHROMIUM claim,
+>   never a Safari one, and this is a standing gap, not a one-off (B1168128, 2026-09-05).**
+>   `npx playwright install chromium` restores Chromium/its headless-shell; it does NOT install
+>   WebKit — `/opt/pw-browsers/webkit-*` does not exist in this environment and nothing here fetches
+>   it. Playwright's `devices["iPhone …"]` descriptors (isMobile/hasTouch/dpr/mobile UA) make Chromium
+>   behave like a phone-shaped browser, which is real evidence for layout, touch-event wiring, and
+>   gesture logic — but it is still Chromium's touch/pointer pipeline, not Safari's, and it cannot
+>   render `env(safe-area-inset-*)` as anything but 0 (no notch/home-indicator to inset around) or
+>   reproduce Mobile Safari's collapsing-address-bar `visualViewport` behavior. **Say "Chromium at
+>   iPhone-13 width" in a report, never "tested on iPhone" or "verified on Safari."** A synthetic
+>   safe-area value can be exercised in an isolated fixture as a SIMULATION of the CSS arithmetic —
+>   labeled as simulation, never reported as device evidence. Closing a real notch/gesture-bar or
+>   Safari-touch-pipeline question needs an actual iPhone; that gap is Michael's own device, not a
+>   task for a self-check here.
 
 >
 > ### 🚚 Confirming a change is actually SERVED (B1119) — use the script, not a hand grep
@@ -115,6 +129,63 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+
+### V848992 — B1163824: a parcel-anchored comp's Location resolves a real place (never the raw APN), and the APN gets its own "Parcel ID (APN)" row `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** The repro is two specific real production comps (Tesla - TGS DC4, parcel_apn `3641471`, county `chambers`; Tesla - TGS 800K SF, parcel_apn `3642165`) on Michael's own account — reading them at all needs a signed-in session this sandbox cannot reach (the egress proxy CORS-blocks the Supabase auth handshake). The fix's async half (reverse-geocoding a parcel's lat/lon into a street address, `reverseGeocodeLatLon`) also needs a live network call this sandbox cannot make.
+
+**What was verified here (this session, sandbox).** `useCompLocationText` (`CompsPanel.jsx`) and `locationCellText` (`CompEntryGrid.jsx`) both used to return the raw APN outright for a `parcel` anchor (`parcelLocationText`) instead of resolving a place the way a `pin` anchor already does; both now treat `pin` and `parcel` identically (reverse-geocode the anchor's own lat/lon, falling back to county/coordinates), and the APN moved to its own `compFieldRows` row ("Parcel ID (APN)"), never substituting for Location again. Proven against the exact real values from the repro (`test/comps.test.js`, new case: a parcel comp with `parcelApn: "3641471"` renders `{ key: "parcelApn", label: "Parcel ID (APN)", value: "3641471" }` as the FIRST row, and never for a `pin`/no-anchor comp) and through the real, unmodified `CompRow`/`CompDetail` React components via `react-dom/server` (`test/compsPanelLocation.test.js`, updated fixture carries DC4's real lat/lon `29.7323267, -94.8692291` + `county: "chambers"` — the synchronous fallback resolves to "Chambers County, TX", matching `pinFallbackText`'s own already-covered logic, and the row/detail never show the bare APN as Location). Full repo suite green (718 files / 14,872 tests), lint clean, build clean, `npm run ci-parity` PASS.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as Michael:**
+1. Read the loaded chunk hash in the same breath as everything below (`document.querySelectorAll('script[src]')`) — confirm it names a chunk from a build after this PR merged.
+2. Open the Comps tab, open "Tesla - TGS DC4". **Expect:** the Location row reads a real place (a reverse-geocoded street address, or "Chambers County, TX" if the geocode hasn't resolved yet) — never the bare digits `3641471`.
+3. Still on that comp's detail view. **Expect:** a separate row labeled "Parcel ID (APN)" shows `3641471`, positioned right after Location and before "Owner/Developer".
+4. Repeat steps 2-3 for "Tesla - TGS 800K SF" (parcel_apn `3642165`). **Expect:** the same pattern — a real place in Location, the APN in its own row.
+5. Open "Core 5 - West Hardy" (a `pin`-anchored comp, already correct before this fix). **Expect:** unchanged — Location still reads "Houston, TX 77073", and no "Parcel ID (APN)" row appears (it's pin-anchored, not parcel-anchored).
+6. In the Comps paste-sheet (CompEntryGrid), pick a parcel via "＋ Location" on a fresh row. **Expect:** the sheet's own Location cell also resolves a real place, not the parcel's APN, once the reverse-geocode settles.
+`Blocker: auth` `Blocker: real-data`
+
+### V848993 — B1163825: a lease comp's displayed Rate reconciles with its displayed totals — no more hidden rounding gap `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** The repro is the same real production comp (Tesla - TGS DC4, `lease_rate: 0.645`) on Michael's own account.
+
+**What was verified here (this session, sandbox).** `compFieldRows`'s "Rate" row and `compHeadline`'s lease branch both always rounded `leaseRate` to 2 decimals (`Number(comp.leaseRate).toFixed(2)`), while every derived total (`annualLeaseRate`, `leaseTotalAnnualRent`, `netEffectiveLeaseRate`) used the full, unrounded value — so DC4's `0.645` rate displayed as `$0.65`, and a reader computing `0.65 × 12 × 1,218,956` by hand found a real-looking `$73,138` gap against the printed `$9,434,719` total that doesn't actually exist. New `fmtRate()` shows the rate at its STORED precision (extending past 2 decimals only when the value genuinely carries more, via `String(n)`'s own shortest round-tripping decimal form — never a floating-point artifact, since `leaseRate` comes straight off a Postgres `numeric` column with no arithmetic in between) — capped at 6 decimals as a sanity ceiling. Proven with DC4's exact real rate (`test/comps.test.js`, new case): `leaseRate: 0.645` now renders `"$0.645/SF/mo NNN"`, and the "Total annual rent (face)" row is verified to equal `0.645 × 12 × 1,218,956` computed independently in the test — i.e., the DISPLAYED rate now reproduces the DISPLAYED total exactly. A round rate (`7.5`, `7`) is unaffected — still renders `"$7.50"` / `"$7.00"`, matching every pre-existing test. Full repo suite green, lint clean, build clean, `npm run ci-parity` PASS.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as Michael:**
+1. Read the loaded chunk hash — confirm it's post-merge.
+2. Open "Tesla - TGS DC4". **Expect:** the Rate row reads `$0.645/SF/mo NNN` (three decimals — not rounded to `$0.65`).
+3. Compute `0.645 × 12 × 1,218,956` by hand (or with the leased SF shown on the same card). **Expect:** it equals the printed "Total annual rent (face)" figure exactly — no gap.
+4. Check "Net effective" on the same card similarly reconciles against the displayed rate.
+5. Open a lease comp with a round rate (e.g. `$7.50/SF/yr`). **Expect:** unchanged — still shows exactly 2 decimals, no regression.
+`Blocker: auth` `Blocker: real-data`
+
+### V848994 — B1163826: the Yield panel's own Buildings row no longer contradicts its own header — "checked Xd ago, stale" never sits above "not checked, flood zones not pulled yet" `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** The repro is Michael's real Goose Creek "Plan II" project (`smqfy48tlk9j`), a specific saved plan whose restored drainage-check state (`settings.drainage.lastCheck`) only exists on that real account row.
+
+**What was verified here (this session, sandbox).** Root-caused (via a dedicated research pass reading the exact source) that the Yield panel's own header (`floodChecked`, `SitePlanner.jsx:14716`) and its Buildings row (`floodExposure`, fed `floodState: floodGeo?.state`) read TWO DIFFERENT FIELDS for the same underlying fact: a restored/remembered drainage check (`settings.drainage.lastCheck.checkedAt`) makes `floodChecked` true, but `slimDrainageContext` deliberately drops the raw flood-zone geometry on restore, so `floodGeo` (and therefore `floodState`) stays null/undefined — `buildingFloodExposure` then reports "not-checked" over a header that says "checked Xd ago, stale," which is the exact self-contradiction reported. Fixed by threading the SAME "has a check ever run" boolean the header already computes into `buildingFloodExposure` as a new `everChecked` parameter, which now yields a genuinely distinct `"remembered"` state ("re-check to screen" / "Flood zones were checked, but this view has no cached geometry to re-screen the buildings — re-check to refresh.") instead of the misleading `"not-checked"`. Proven in `test/buildingFloodExposure.test.js` (new case): `everChecked: true` with no cached zones produces `state: "remembered"` — distinct from `"not-checked"` — while a genuine never-checked call (`everChecked` omitted, matching every pre-existing caller) is byte-for-byte unaffected; a live "failed" flood source still outranks `everChecked` (an outage stays its own honest state). Full repo suite green, lint clean, build clean, `npm run ci-parity` PASS (including a full visual-regression pass — this fix touches only a state-machine branch, no visible layout change to the passing case).
+
+**What this does NOT fix, filed separately as B1163827 (`## 🔲 Open`, deliberately NOT started this session — too large for one session, see that item):** the header's OWN freshness age can still disagree between the Analysis panel ("1m ago") and the Yield panel ("checked 30d ago") for the SAME underlying flood fact, because they read three genuinely separate stores (`gisCache["analysis:flood:<ringsSig>"]`, `gisCache["vec:fema:<bbox>"]`, and `settings.drainage.lastCheck.checkedAt`). This item only closes the WORSE of the two reported symptoms — the internal self-contradiction within the Yield panel alone — not the cross-panel cache unification.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as Michael:**
+1. Read the loaded chunk hash — confirm it's post-merge.
+2. Open project `smqfy48tlk9j` ("Goose Creek", "Plan II"), open the Yield panel, expand Buildings, WITHOUT running a fresh drainage check (i.e., on the restored/remembered state the header already shows as "checked Xd ago, stale"). **Expect:** the "In the floodplain?" row now reads something like "re-check to screen" (an honest "checked before, but this view has no cached geometry to re-screen the buildings" state) — it must NEVER say "not checked" while the header says "checked Xd ago."
+3. Click the header's ↻ re-check. **Expect:** once the fetch completes, the Buildings row resolves to a real per-building answer (touched/clear), and the header/Buildings row agree.
+`Blocker: auth` `Blocker: real-data`
+
+### V848995 — B1163828: the Yield panel's Mitigation summary states a known PROVIDED volume instead of a bare "volume unknown" when only the REQUIREMENT is stale/unresolved `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** The repro is the same Goose Creek "Plan II" project, whose real mitigation pond geometry only exists on that account row.
+
+**What was verified here (this session, sandbox).** Root-caused (via the same research pass) that `mitigationVerdict` (`lib/yieldVerdicts.js`) and the SitePlanner.jsx closed-face chip both early-exit to a bare "volume unknown" the instant the site's mitigation REQUIREMENT pull is stale/blocked (`d.mitStalePending`), discarding `d.mitProvided.creditedCf` — the PROVIDED figure, which is pure pond-ledger geometry math with NO network dependency and was ALREADY a real, reconciled 109.2 AC-FT in the report. That's the reported contradiction: the same panel's own expanded pond detail shows "Storage reconciles — 109.2 claimed / 109.2 exists" one click below a summary claiming nothing is known. Fixed in both places to fold the known provided figure into the existing sentence (`"volume unknown: 109.2 AC-FT already provided"`, reusing the exact same template shape so no new PANEL-BREVITY budget line was minted — see the item for why) rather than a bare "volume unknown". Proven in `test/yieldVerdicts.test.js` (new "NEW-5" describe block, 4 cases): `mitStalePending: true` with `mitProvided.creditedCf` known → states it; with none known → unaffected (still bare "volume unknown", zero regression); the `unknownReason` branch (a different unresolved-requirement path) gets the same treatment; no em dash introduced (G2 house rule). **Separately investigated and CLOSED, no fix needed:** the detention requirement reading "99.4 AC-FT" for a 99.43-acre site is a REAL HCFCD (Harris County Flood Control District) rule, not an acreage leak — `detentionRules.js:747-748`/`:750-759`: an unresolved outfall type resolves to the honest band `[0.75, 1.0] AC-FT/acre` (storm-sewer vs roadside-ditch outfall minimums, HCED Infrastructure Regs), and the panel conservatively plans to the band's upper end (`1.0 × 99.43 = 99.43 → "99.4"`) — already covered by `test/detentionRules.test.js` (roadside-ditch and storm-sewer rates asserted distinctly). Full repo suite green, lint clean, build clean, `npm run ci-parity` PASS.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as Michael:**
+1. Read the loaded chunk hash — confirm it's post-merge.
+2. Open project `smqfy48tlk9j` ("Goose Creek", "Plan II"), open the Yield panel, on the restored/stale state (do NOT re-check flood data). **Expect:** the Mitigation summary line reads something like "volume unknown: 109.2 AC-FT already provided" — never a bare "volume unknown" while the pond detail below shows a real reconciled figure.
+3. Expand the Detention/Mitigation detail. **Expect:** the per-pond "Mitigation Pond" row and "Storage reconciles" line are unchanged (this item touches only the SUMMARY wording, never the underlying math).
+4. Click ↻ re-check. **Expect:** once the requirement resolves, the summary switches to the ordinary provided-vs-required pair (e.g. "X of Y AC-FT"), unaffected by this fix.
+5. Confirm the "Requirement basis" row still reads "HCFCD · CODE" and, if the outfall type control is changed from unset to "Storm sewer", the detention requirement number drops from 99.4 to a smaller figure (99.43 × 0.75 ≈ 74.6) — confirming the rate is real and outfall-dependent, not a fixed acreage echo.
+`Blocker: auth` `Blocker: real-data`
 
 ### V464176 — B842864: the global help/report control renders and works on the DEPLOYED `planyr.io`, on the real map screen, signed out `Blocker: live-deploy`
 
@@ -271,6 +342,58 @@ real account and real data; do not create, delete, or edit anything beyond what 
    Sites list and spot-check their names/counties/status read exactly as they did before this
    session (cross-reference against the owner's own memory or an earlier screenshot if available;
    this is a sanity check on top of the machine-verified snapshot diff, not a substitute for it).
+
+**2026-09-05 addendum — an adversarial review reported this step FAILED live** (Sites header read
+33, Pursuit read 19, with the three tracked sites at the top, "no boundary" badge, sorted by
+recency) **on build b487f11**, contradicting this item's own code trace. Re-read the exact shipped
+`siteGroups` filter and reproduced it in Node against a fixture shaped like the review's own
+numbers (30 pursuit + 3 tracked/`status:null`) — it correctly excludes all 3 and returns 30, so the
+filter as written is not defeated by a null `status`. Could not settle from this sandbox whether
+the live report was a stale cached bundle (this repo's own standing caution — see `/CLAUDE.md` →
+"A LIVE MEASUREMENT ON planyr.io IS ONLY VALID IF THE DEPLOYED CHUNK HASH IS READ IN THE SAME
+CALL") or a real gap. Per STANDING RULE #2, fixed it anyway rather than resting on the trace:
+`MapFinder.jsx` (B1165440) now re-derives its own pursuit-only filter at the point every one of
+these numbers is actually computed (header count, per-status groups, pinned rows, map pins),
+independent of what `siteGroups` upstream already filtered — so step 1's answer is now enforced at
+two layers regardless of which explanation was correct. **Step 1 (and its "37" expectation, now
+whatever the live count is at verify time) is the one to re-run first; if it still misreads,
+capture the served chunk hash (Network tab or `document.querySelectorAll('script[src]')`) in the
+same observation so a stale-bundle explanation can be ruled in or out.**
+
+**Result:** ⏳ pending — needs a real signed-in browser session; not reachable from this sandbox
+(the sandbox proxy CORS-blocks the Supabase auth handshake). `Cadence: once`.
+
+### V850608 — B1165441: saving a comp with no site picked auto-attaches to an existing site or creates a new tracked one, through the real signed-in UI `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** Filed `Verify: live` per the LIVE-VERIFY rule (real project
+data + persistence). The matching rule and the DB round-trip mechanics were verified directly this
+session — the matching rule via 9 unit tests against the real production coordinates for the
+owner's three existing tracked sites (`test/compSiteMatch.test.js`), and the round trip by running
+the actual, unmodified `findMatchingSite`/`resolveOrCreateTrackedSiteForComp` logic (read via the
+Supabase MCP, not guessed) against a real throwaway comp, then performing the identical
+insert/update the app's own code would perform — see B1165441's own writeup for the exact steps and
+cleanup. What that could NOT do is drive the actual React form through a signed-in browser, which
+is the one thing this check exists for.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner, using a
+THROWAWAY comp (title it "verification-only, delete me" so it's never mistaken for a real deal;
+delete it when done):**
+1. Open the Comps tab, click "+ New comp" (or drop a pin and start one), fill in any comp type with
+   a title and a location, and leave the Site field unset (no project picked). Save it.
+   **Expect:** the save succeeds with no error, and the comp's detail view shows a real Site name
+   under Location — never blank/unset.
+2. If the pin was placed far from every existing site (a genuinely new location): **expect** a
+   brand-new site was created (visible in the Sites list, role "tracked" so it does NOT appear in
+   the default Pursuit view) named after the comp's own title, and NO "attached to…" notice (a
+   brand-new site needs no explanation).
+3. If the pin was placed within about half a mile of an existing site's location (pursuit OR
+   tracked): **expect** the comp attaches to THAT site instead of creating a new one, and the detail
+   view shows a dismissible notice naming which site it attached to and why (location or name
+   match) — confirm no duplicate site was created.
+4. Use the existing Site dropdown in the edit form to confirm the attachment can be changed by
+   hand (the manual-reassign path, unaffected by this item).
+5. Delete the throwaway comp (and, if step 2 created one, the throwaway tracked site it made) via
+   the app's own Delete controls. **Expect:** both are gone from the respective lists on reload.
 
 **Result:** ⏳ pending — needs a real signed-in browser session; not reachable from this sandbox
 (the sandbox proxy CORS-blocks the Supabase auth handshake). `Cadence: once`.
@@ -6956,6 +7079,32 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
 4. — Reload the page. **Expect:** the crop survives.
 5. — Use "Change page…" to switch to a different page of the same PDF. **Expect:** the old crop does NOT apply to the new page.
 `Blocker: auth`
+
+### V649216 — B1160720: Turnstile actually renders on the deployed sign-up form and Supabase actually rejects a signup with no/bad token `Blocker: auth`
+
+**Why this needs its own real pass, and why it can't run today.** The widget and the client-side wiring (config gate, disabled-until-solved Submit, reset-on-failed-submit) are unit-tested and code-reviewed this session (`test/turnstileConfig.test.js`, `test/authCaptcha.test.js`, `test/authPanelTurnstile.test.js` — 12/12). What cannot be proven from this sandbox, and genuinely cannot be proven by ANYONE until two owner-only steps happen, is the actual server-side enforcement: Cloudflare Turnstile needs a real widget (Site key + Secret key, created in Michael's own Cloudflare account) and Supabase Auth needs "Enable CAPTCHA protection" turned on with that Secret key pasted in (Project Settings → Authentication → Bot and Abuse Protection). Until both exist, `VITE_TURNSTILE_SITE_KEY` is unset in the deployed build, `turnstileEnabled()` is false, and the sign-up form correctly renders with no widget at all — which is the deliberate, tested degrade path, not a bug, but it also means there's nothing live to click through yet.
+
+**Steps, each with a named expected result — on `planyr.io`, once Michael has done the two steps in OWNER-TODO.md (paste the Site key into Cloudflare Pages' `VITE_TURNSTILE_SITE_KEY` and redeploy; paste the Secret key into Supabase's Bot and Abuse Protection settings):**
+1. Open the sign-up form. **Expect:** the Turnstile widget appears below the password field, and "Create account" is disabled until it's solved (most browsers auto-solve invisibly within a second or two).
+2. Solve it (or wait for the automatic pass) and submit a real throwaway signup. **Expect:** the account is created normally — proves the token round-trips end to end and Supabase accepts a genuine one.
+3. Using the browser devtools network tab (or a raw `fetch`), attempt a signup POST with `captchaToken` omitted or set to garbage, calling `/auth/v1/signup` directly rather than through the app. **Expect:** Supabase rejects it — this is the proof the SERVER enforces the check, not just the UI (a client that skips the widget entirely must still be refused).
+4. Confirm the widget resets (a fresh checkbox/challenge, not a dead stuck one) after a failed submit attempt — e.g. submit with a deliberately-wrong password confirmation if the form has one, or observe the reset call fires by checking the widget re-arms after any Submit click that returns an error.
+5. Delete the throwaway account created in step 2 once confirmed.
+
+**Result:** ⏳ pending — needs Michael's Cloudflare Turnstile Site/Secret keys, which don't exist yet; not reachable from this sandbox even after that (no browser egress here). `Cadence: once`.
+
+### V649217 — B1160722: an admin can reset a user's password from the Admin page and it actually changes their sign-in credential `Blocker: auth`
+
+**Why this needs its own real pass.** The RPC layer (`admin_reset_user_password`, `admin_list_users`, `admin_list_password_resets`) is proven directly against the real production database, self-rolling-back, via the Supabase MCP (`src/workspaces/admin/db/test/admin_reset_password.test.sql`, 10/10 passed: non-admin rejected, admin succeeds, the returned password verifies against the real stored bcrypt hash, the original password no longer verifies, the reset is recorded, and both admin-gated reads correctly show/hide rows). What remains is confirming the Admin page's OWN UI wiring — the picker, the button, the one-time reveal — against a real signed-in admin session, which this sandbox cannot reach (Supabase auth is CORS-blocked here).
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the admin account, `#/admin`:**
+1. Open the "Reset a user's password" section. **Expect:** a searchable list of real accounts (name — email) loads.
+2. Search for a throwaway test account, select it, click "Reset password." **Expect:** a boxed password appears once, labeled "Shown once — copy it now," with the target's email above it.
+3. Sign out, then sign in as that test account using the shown password. **Expect:** it works — the new credential is real and live, not a display-only stub.
+4. Reload the Admin page's password-reset section. **Expect:** the just-performed reset appears in "Reset history," naming the admin and the target, but the password itself is nowhere on screen (it was never stored in the clear, and the UI never re-displays it).
+5. Confirm no path anywhere on the Admin page shows an EXISTING (pre-reset) password for any account — there should be no such control at all, since bcrypt hashes are one-way.
+
+**Result:** ⏳ pending — needs a real signed-in admin browser session; not reachable from this sandbox. `Cadence: once`.
 
 ## ✅ Verified / ❌ Failed — history
 

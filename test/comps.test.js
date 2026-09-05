@@ -518,6 +518,52 @@ describe("comps: empty fields never render", () => {
     const rows = compFieldRows({ compDate: "2026-08-01" });
     expect(rows).toEqual([{ key: "date", label: "Date", value: "08/01/26" }]);
   });
+
+  // ⛔ NEW-3 (owner-adversarial review, 2026-09-05) — the Rate row used to always round to 2
+  // decimals while every derived total (annualized rate, total rent, net effective) is computed
+  // from the FULL stored value, so a rate like 0.645 showed "$0.65" while its totals matched
+  // 0.645 exactly — a reader checking the math by hand found a gap that doesn't exist.
+  it("lease: Rate shows the stored precision, not always 2dp, so it reconciles with the totals", () => {
+    const precise = compFieldRows({
+      compType: "lease", compDate: "2026-08-01", leaseRate: 0.645, leaseRatePeriod: "monthly",
+      leaseRateExpense: "nnn", leaseSizeSf: 1218956,
+    });
+    const rateRow = precise.find((r) => r.key === "rate");
+    expect(rateRow.value).toBe("$0.645/SF/mo NNN"); // never rounds away the third decimal
+    const totalRow = precise.find((r) => r.key === "totalRent");
+    // 0.645 x 12 x 1,218,956 = 9,434,719.284 -> whole-dollar total. Manually checking
+    // 0.645 (the DISPLAYED rate) x 12 x 1,218,956 must land on this exact figure.
+    const expectedTotal = (0.645 * 12 * 1218956).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+    expect(totalRow.value).toBe(expectedTotal);
+
+    // A round rate still shows the familiar 2-decimal form — no regression for the common case.
+    const round = compFieldRows({ compType: "lease", compDate: "2026-08-01", leaseRate: 7.5, leaseRatePeriod: "annual", leaseRateExpense: "nnn" });
+    expect(round.find((r) => r.key === "rate").value).toBe("$7.50/SF/yr NNN");
+    const whole = compFieldRows({ compType: "lease", compDate: "2026-08-01", leaseRate: 7, leaseRatePeriod: "annual", leaseRateExpense: "nnn" });
+    expect(whole.find((r) => r.key === "rate").value).toBe("$7.00/SF/yr NNN");
+  });
+
+  // ⛔ NEW-1 (owner-adversarial review, 2026-09-05) — a parcel anchor's APN (a county appraisal
+  // account number) is an identity, never an address; it gets its own row rather than
+  // substituting for the Location text (which CompsPanel.jsx resolves separately).
+  it("a parcel-anchored comp shows its APN in its own 'Parcel ID (APN)' row, right at the top", () => {
+    const rows = compFieldRows({
+      compType: "land", compDate: "2026-08-01", landPrice: 100, landSizeValue: 1, landSizeUnit: "ac",
+      anchor: { kind: "parcel", parcelApn: "3641471", lat: 29.73, lon: -94.87 },
+    });
+    expect(rows[0]).toEqual({ key: "parcelApn", label: "Parcel ID (APN)", value: "3641471" });
+
+    // A pin or site_plan anchor never gets this row — it's parcel-specific.
+    const pin = compFieldRows({
+      compType: "land", compDate: "2026-08-01", landPrice: 100, landSizeValue: 1, landSizeUnit: "ac",
+      anchor: { kind: "pin", lat: 29.73, lon: -94.87 },
+    });
+    expect(pin.map((r) => r.key)).not.toContain("parcelApn");
+
+    // No anchor at all -> no row, obviously.
+    const noAnchor = compFieldRows({ compType: "land", compDate: "2026-08-01" });
+    expect(noAnchor.map((r) => r.key)).not.toContain("parcelApn");
+  });
 });
 
 // B986096-HARDENING-8 (owner rule, "change the date formatting to something people would

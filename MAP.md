@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-05 @ `481f3c31` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-05 @ `c403e9dc` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_672 source files mapped._
+_678 source files mapped._
 
 ## infra
 
@@ -49,6 +49,8 @@ _672 source files mapped._
   - _exports_: `default (AdminApp)`
 - **`src/workspaces/admin/AdminGate.jsx`** — The one place that decides whether AdminApp mounts: calls checkIsAdmin only while signed in, renders null on anything but a confirmed true
   - _exports_: `default (AdminGate)`
+- **`src/workspaces/admin/AdminPasswordResetSection.jsx`** — TODO — describe
+  - _exports_: `default (AdminPasswordResetSection)`
 - **`src/workspaces/admin/CriteriaRequestsSection.jsx`** — (B877442) Admin table of "Request criteria for this county" filings — most-requested first, with a Wired ✓ / Outstanding status per row
   - _exports_: `default (CriteriaRequestsSection)`
 - **`src/workspaces/admin/lib/adminAccess.js`** — checkIsAdmin(client): the is_admin() RPC wrapper, fails closed (false) on no client/no session/RPC error/thrown exception
@@ -59,6 +61,8 @@ _672 source files mapped._
   - _exports_: `isWired`, `prepareCriteriaRequestRows`
 - **`src/workspaces/admin/ReportsSection.jsx`** — owner-only list of filed problem reports (B842866), read via `admin_list_problem_reports()`.
   - _exports_: `default (ReportsSection)`
+- **`src/workspaces/admin/SignupActivitySection.jsx`** — TODO — describe
+  - _exports_: `default (SignupActivitySection)`
 - **`src/workspaces/design-gallery/DesignGallery.jsx`** — the `#/design` dev-only primitive gallery (NEW-4): every shared control/token in every state, both themes.
   - _exports_: `default (DesignGallery)`
 - **`src/workspaces/food/components/BottomSheet.jsx`** — Generic drag-to-resize mobile bottom sheet (peek/half/full snap points, content-driven height, dismiss-on-drag), content-agnostic
@@ -272,6 +276,8 @@ _672 source files mapped._
 
 ## shared lib
 
+- **`src/shared/auth/rateLimitCopy.js`** — TODO — describe
+  - _exports_: `SIGNUP_RATE_LIMIT_MESSAGE_FRAGMENT`
 - **`src/shared/brand/BrandMark.jsx`** — Planyr coral isometric-stack logo as inline theme-aware SVG: favicon/mark/auto variants plus optional 'planyr' wordmark lockup
   - _exports_: `default (BrandMark)`
 - **`src/shared/brand/tokens.js`** — Planyr brand palette constants (coral tier faces, linework, surfaces, wordmark colors) mirroring the CSS --coral-* vars for inline-styled chrome
@@ -312,6 +318,8 @@ _672 source files mapped._
   - _exports_: `ANCHOR_KINDS`, `anchorCountyFlag`, `anchorTeamConflict`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compDateLabel`, `compFieldRows`, `compHeadline`, `compsSummaryBits`, `compToDraft`, `compToRow`, `draftToComp`, `emptyDraft`, `isCompType`, `landPricePerAreaUnit`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `leaseTotalAnnualRent`, `netEffectiveLeaseRate`, `opexNormalizedRate`, `parseLeaseTermYears`, `partyLabels`, `resolveCapTriangle`, `rowToComp`, `sortCompsByRecency`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
 - **`src/shared/comps/lib/compSheetColumns.js`** — pure column model for the comp-entry spreadsheet: per-cell get/set, polymorphic fields, display formatting, fill-down/paste-spill
   - _exports_: `applyCellEdit`, `BASIS_OPTIONS`, `cellPlaceholder`, `cellState`, `columnIndex`, `computeFlexWidths`, `fillDownColumn`, `formatNumberDisplay`, `frozenLeftOffsets`, `GROUPS`, `matchOption`, `optionsForColumn`, `PERIOD_OPTIONS`, `sanitizeNumericInput`, `saveButtonLabel`, `SHEET_COLUMNS`, `spillPaste`, `TYPE_OPTIONS`, `UNIT_OPTIONS`, `visibleColumnIndices`, `widthFor`
+- **`src/shared/comps/lib/compSiteMatch.js`** — TODO — describe
+  - _exports_: `findMatchingSite`, `milesBetween`, `SITE_MATCH_MILES`
 - **`src/shared/comps/lib/compsStore.js`** — Supabase CRUD for public.comps (team-visible read, owner-only write); every call returns {data,error}, never swallows a failure
   - _exports_: `deleteComp`, `fetchAllComps`, `fetchDeletedComps`, `insertComp`, `insertComps`, `permanentlyDeleteComp`, `restoreComp`, `supabase`, `updateComp`
 - **`src/shared/comps/lib/kmlImport.js`** — pure, hand-rolled KML placemark parsing (B849233): Point/Polygon geometry (a polygon's area-weighted centroid, not a vertex average), plus best-effort description extraction reusing compParse.js's prose parser
@@ -526,6 +534,10 @@ _672 source files mapped._
   - _exports_: `HOUSTON`, `HOUSTON_ROW_STANDARDS`
 - **`src/shared/thoroughfare/ingestTransform.js`** — Pure config-driven transform from an ArcGIS GeoJSON feature → a thoroughfare_segments upsert row (B721): crosswalk classification + status, resolve ROW widths from standards, and build WGS84 + EPSG:2278 MULTILINESTRING EWKT (reusing src/shared/coordinates); the reusable heart of every jurisdiction adapter
   - _exports_: `buildQueryUrl`, `ewkt2278`, `ewkt4326`, `featureToRow`, `geometryToParts`
+- **`src/shared/turnstile/Turnstile.jsx`** — TODO — describe
+  - _exports_: `default`
+- **`src/shared/turnstile/turnstileConfig.js`** — TODO — describe
+  - _exports_: `TURNSTILE_SITE_KEY`, `turnstileEnabled`
 - **`src/shared/ui/AnchoredMenu.jsx`** — Portal-to-body dropdown/flyout that escapes rail stacking-context + overflow clipping; rect-anchored fixed positioning, click-away + Esc
   - _exports_: `default (AnchoredMenu)`
 - **`src/shared/ui/anchoredMenuPlacement.js`** — Pure viewport-placement math for AnchoredMenu: left/below-left/below-right anchoring + edge clamp; returns null for a zero-sized (display:none) anchor so a mis-anchored menu hides instead of pinning top-left (B734)
@@ -1214,7 +1226,7 @@ _672 source files mapped._
 - **`src/workspaces/site-planner/lib/standardsApply.js`** — Standards "Apply now" (NEW-3): push a standard onto existing parcels (stamped → write) or existing elements (render-resolved → clear the per-element override), plus the impact counts the chip shows.
   - _exports_: `allStandardsImpact`, `appliedLabel`, `appliedObjectsLabel`, `applyAllStandards`, `applyMeasureStandard`, `applyParcelStandard`, `applyTypeStandard`, `draftDirty`, `draftHasMeasure`, `draftHasParcel`, `draftHasType`, `draftMeasureValue`, `draftParcelValue`, `draftTypeValue`, `EMPTY_STD_DRAFT`, `MEASURE_STD_KEYS`, `mergeDraftIntoSettings`, `PARCEL_STD_KEYS`, `parcelStandardImpact`, `TYPE_STD_KEYS`, `typeStandardImpact`, `withMeasureDraft`, `withParcelDraft`, `withTypeDraft`
 - **`src/workspaces/site-planner/lib/storage.js`** — Multi-site persistence layer: localStorage primary with per-user cloud mirror, content-union pull merge, per-tab resurrection guards, and an IndexedDB-backed version-history ring
-  - _exports_: `_readSiteTombs`, `_recentlyDeleted`, `_resetHistoryForTest`, `activeUid`, `AUTOSAVE_KEY`, `backupNow`, `checkProjectDeletionStatus`, `clearCloudCache`, `clearHistory`, `clearRecentlyDeleted`, `clearSiteTombstone`, `DELETED_RETENTION_DAYS`, `deleteSite`, `deleteSiteGroup`, `discardLegacySite`, `getCurrentSiteId`, `getVersion`, `groupCountDivergence`, `groupOf`, `importLegacyIntoCloud`, `importOneSiteToCloud`, `initHistoryStore`, `isCloudActive`, `isEmptySite`, `keepaliveFlushSite`, `legacySitesList`, `listDeletedProjects`, `listVersions`, `loadAutosave`, `loadPlansOfGroup`, `loadSite`, `loadSitesList`, `mergePulledSites`, `migrateOldAutosave`, `migrateScenarios`, `migrateSiteGroups`, `pendingLegacyCount`, `pendingLegacySites`, `pruneMigratedLegacy`, `pullCloud`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `pushModelToCloud`, `pushSiteToCloud`, `reconcileSiteFromCloud`, `recordSiteTombstone`, `renameSiteGroup`, `repairSplitProjectNames`, `restoreDeletedProject`, `saveAutosave`, `saveSite`, `scheduleLinkOf`, `setActiveUser`, `setCurrentSiteId`, `setScheduleLink`, `setSiteGroupRole`, `SITE_TOMB_GRACE_MS`, `siteNameOf`, `snapshotVersion`, `stageLegacySite`, `storage`, `summarizeVersion`
+  - _exports_: `_readSiteTombs`, `_recentlyDeleted`, `_resetHistoryForTest`, `activeUid`, `AUTOSAVE_KEY`, `backupNow`, `checkProjectDeletionStatus`, `clearCloudCache`, `clearHistory`, `clearRecentlyDeleted`, `clearSiteTombstone`, `DELETED_RETENTION_DAYS`, `deleteSite`, `deleteSiteGroup`, `discardLegacySite`, `getCurrentSiteId`, `getVersion`, `groupCountDivergence`, `groupOf`, `importLegacyIntoCloud`, `importOneSiteToCloud`, `initHistoryStore`, `isCloudActive`, `isEmptySite`, `keepaliveFlushSite`, `legacySitesList`, `listDeletedProjects`, `listVersions`, `loadAutosave`, `loadPlansOfGroup`, `loadSite`, `loadSitesList`, `mergePulledSites`, `migrateOldAutosave`, `migrateScenarios`, `migrateSiteGroups`, `pendingLegacyCount`, `pendingLegacySites`, `pruneMigratedLegacy`, `pullCloud`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `pushModelToCloud`, `pushSiteToCloud`, `reconcileSiteFromCloud`, `recordSiteTombstone`, `renameSiteGroup`, `repairSplitProjectNames`, `resolveOrCreateTrackedSiteForComp`, `restoreDeletedProject`, `saveAutosave`, `saveSite`, `scheduleLinkOf`, `setActiveUser`, `setCurrentSiteId`, `setScheduleLink`, `setSiteGroupRole`, `SITE_TOMB_GRACE_MS`, `siteNameOf`, `snapshotVersion`, `stageLegacySite`, `storage`, `summarizeVersion`
 - **`src/workspaces/site-planner/lib/storageReconcile.js`** — NEW-1 site storage reconciliation: counted detention plus counted mitigation against total physical pond storage, with a hard FAIL naming the overlap volume and the ponds involved (and undeclared dual-duty ponds)
   - _exports_: `OVERLAP_TOL_CF`, `reconcilePond`, `reconcileStorage`
 - **`src/workspaces/site-planner/lib/subsidence.js`** — Harris-Galveston / Fort Bend subsidence-district cited registry (NEW-B4): county→district flag (groundwater-pumping permit + surface-water-conversion context) with citations + audit. Pure.

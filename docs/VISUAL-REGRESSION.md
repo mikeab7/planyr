@@ -53,6 +53,17 @@ When a PR's diff is real and the new picture is the one you want:
 
 **The approval record is the PR itself** — the diff shows exactly which baseline images changed and the manifest entry records who/when/why, and a human reviewer approves it the same way they approve any other code change in this repo. There is no separate approval system to keep in sync.
 
+## Authoring baselines from CI (B1171504)
+
+A locally-rendered baseline — even one captured with the exact CI-pinned Chromium revision — does not reliably byte-match what this repo's real GitHub Actions runner renders: font hinting and antialiasing differ between a sandbox's container image and the runner's image below what any locally-available browser build can close. Measured twice: a prior baseline re-approval with the pinned revision shipped clean in its own sandbox and then failed the very next real CI run on every surface/theme/viewport pair, and a separate PR carrying one small, universal control failed an identical 0.29–2.72% signature against this file's 0.02% tolerance on two separate local approval attempts. **A value nobody can reproduce locally must never be a merge gate** — so when a real, intentional visual change can't be approved locally with confidence, let CI author its own baseline instead of guessing at the picture it will judge:
+
+1. Push the branch with its real code change (no baseline edits needed).
+2. From the Actions tab, run **Authorize visual regression baselines** (`.github/workflows/authorize-visual-baselines.yml`) against that branch, with a `reason` input describing why the pictures are changing. It is `workflow_dispatch`-only — it never runs on an ordinary push — and it refuses outright if pointed at `main`.
+3. It builds and renders the app on the SAME runner image and Chromium revision the required `build` check's gate uses, runs `--approve` against its own render, and pushes the resulting PNGs/manifest/this file back to the SAME branch as an ordinary commit.
+4. The PR's `build` check then re-runs against that commit (nudge it per this repo's own automation-push quirk in `CLAUDE.md` → "Workflow & deploy" if it stays at "Expected") and judges the CI-authored picture — the same gate, same tolerance, same tables below, just rendered by the only environment qualified to render it.
+
+**This changes who renders the picture, never what "pass" means.** The tolerance, the pass/fail comparison, and the phone-viewport structural gate are the exact same code either way — a CI-authored baseline is reviewed in the PR diff exactly like a hand-approved one, and a later commit that actually changes a control's geometry still fails the gate with real, visible numbers.
+
 ## Current baselines
 
 | surface | theme | viewport | last approved | at commit | note |
