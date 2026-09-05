@@ -56,3 +56,9 @@ set data = jsonb_set(data, '{active}', 'false'::jsonb, true)
 where kind = 'parcel'
   and deleted_at is not null
   and coalesce((data->>'active')::boolean, true) is distinct from false;
+
+-- B1205298 (2026-09-05 db-hygiene sweep) — pin search_path on the trigger function this file
+-- defines. It fires as a BEFORE trigger on public.site_elements, so it runs with the CALLING
+-- session's search_path; it was 1 of the only 9 functions in the schema without the pin. Plain
+-- ALTER FUNCTION, not CREATE OR REPLACE — additive, doesn't touch the body.
+alter function public.enforce_parcel_deleted_inactive() set search_path = public, pg_temp;

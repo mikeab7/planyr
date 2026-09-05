@@ -7194,10 +7194,21 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
 
 **Result:** ⏳ pending — needs a real signed-in admin browser session; not reachable from this sandbox. `Cadence: once`.
 
-## ✅ Verified / ❌ Failed — history
+### V870512 — B1205297: the Library's duplicate-upload screen (Replace / Keep both / Cancel, and silent rapid-repeat collapse) actually fires against a real signed-in account's files `Blocker: auth`
 
-> Passed/failed items are archived to **`VERIFICATION-DONE.md`** to keep this file fast.
-> Move a fully-passed item there (do not add it here).
+**Why this needs its own real pass.** The whole decision layer is pure and unit-tested (`test/fileIndex.test.js`'s `findDuplicateReview`/`isRapidRepeatUpload`, including the exact production repro — the 8 South project's three-times-filed spreadsheet, 17s and 43min apart) and `test/uploadQueue.test.js` proves the new `QUEUE_STATUS.DUPLICATE` state stays active until resolved. The production data itself is fixed and confirmed by direct query (the 8 South project now reads 2 live reviews, not 4). What cannot be proven here: the actual drag-and-drop upload flow against a real signed-in Library, because the Library requires cloud data and this sandbox's proxy CORS-blocks the Supabase auth handshake.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, in the Library workspace, inside any one project:**
+1. Upload any file (e.g. a small PDF) once. **Expect:** it files normally, no prompt.
+2. Immediately (within a few seconds) drop the SAME file into the SAME project again. **Expect:** it collapses silently onto the existing file — no second card appears in the file list, no prompt, and the upload tray shows it as filed with no duplicate warning (this is the double-click/retry case).
+3. Wait at least a minute, then drop the SAME file into the SAME project a third time. **Expect:** the upload tray row now shows "Already filed · <date>" with three buttons — **Replace existing**, **Keep both**, **Cancel** — and the file list still shows only the one card from step 1 (nothing was filed yet for this attempt).
+4. Click **Cancel**. **Expect:** the tray row disappears; the file list is unchanged (still one card).
+5. Repeat the minute-plus wait and re-drop, then click **Keep both**. **Expect:** a SECOND, independent card for the same filename now appears in the file list — both are openable and both are real, separate files.
+6. Repeat once more, then click **Replace existing**. **Expect:** the file list still shows the same count as before this step (the old copy is replaced, not added); open "Recently deleted" and confirm the previous copy is there, reversible via Restore.
+7. Drop a file with a name that is ALREADY filed but in a DIFFERENT project (or in the Organization scope vs. a project). **Expect:** no duplicate prompt at all — the screen is scoped per project/Organization, not global.
+8. Open the 8 South project specifically (the production case this item fixed). **Expect:** it reads 2 files, not 4, and both are openable.
+
+**Result:** ⏳ pending — needs a real signed-in browser session; not reachable from this sandbox. `Cadence: once`.
 
 ## ✅ Verified / ❌ Failed — history
 
