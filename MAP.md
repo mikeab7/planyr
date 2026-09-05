@@ -3,6 +3,7 @@
 > **Generated 2026-09-05 @ `0d7fd6bb7` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > **Generated 2026-09-05 @ `e26a1842` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > **Generated 2026-09-05 @ `e4fff0939` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-05 @ `9cc292c7c` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
