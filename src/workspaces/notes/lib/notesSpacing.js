@@ -34,27 +34,55 @@
  *
  * ⛔ SO THE SCALE IS REBASED: the names now mean what they say, and `SINGLE` is the tightest.
  * `null` still means "inherit the note's density" — that is a real answer and it is what a
- * paragraph starts with — but the DENSITY it inherits is now single, not one-and-two-thirds.
+ * paragraph starts with.
  *
- * ⛔ EXISTING NOTES REFLOW, DELIBERATELY, AND HE WAS TOLD. Every note written before today
- * carries no explicit spacing, so it inherits the density — which means every one of them gets
- * tighter the moment this ships. That is the decision, not an accident: it is the thing he
- * asked for ("must actually tighten his notes today"), it loses no content, it is reversible
- * per-note and per-paragraph, and the alternative — stamping 1.65 onto every existing paragraph
- * to freeze them — would write a setting into thousands of blocks that nobody chose and leave
- * him unable to tighten an old note without re-selecting all of it.
+ * ═══════════════════════════════════════════════════════════════════════════════════════
+ * ⛔ B1203504, 2026-09-05 — "COMFORTABLE" STOPPED BEING SINGLE. READ THIS BEFORE CHANGING
+ * EITHER NUMBER BELOW; IT AMENDS THE DECISION DIRECTLY ABOVE, IT DOES NOT UNDO IT.
+ * ═══════════════════════════════════════════════════════════════════════════════════════
+ *
+ * HIS REPORT, three weeks later, unprompted: *"the field just feels off to me for some
+ * reason, and I can't explain it… I feel like we can do a lot better."* Measured, not
+ * inferred: `DEFAULT_DENSITY` is `"comfortable"`, and `comfortable.line` WAS `SINGLE` (1.15)
+ * — so every note he opens, by default, rendered at the exact ratio Word/OneNote call
+ * "single" (a spreadsheet-cell tightness), because NEW-SPACING-1 above made "Comfortable"
+ * and "Single" the SAME number on purpose. That was correct for what he asked for THEN
+ * ("save space and see more information on screen") and it is why the field now reads as a
+ * form input rather than a document next to Craft, Bear, Notion, Apple Notes — all of which
+ * sit prose at 1.5–1.7, never at Word's single.
+ *
+ * ⛔ THE OLD REQUEST IS NOT WRONG, IT WAS INCOMPLETE. He still gets a real, working, tight
+ * "fit more on screen" option — it just moves under the name that already means that:
+ * **Compact now carries the exact numbers Comfortable used to** (`SINGLE` / a 2px list gap),
+ * so nothing he relied on stops existing, it is simply filed under its honest name. Comfortable
+ * — the density every note STARTS on — becomes a genuine prose ratio, matching the reference
+ * band the owner named (Craft/Bear/Notion sit 1.5–1.7): 1.6, roughly Bear's own number and the
+ * middle of that band. The tightest selectable value, `SINGLE` (1.15), is UNCHANGED and still
+ * exactly what it says on the per-paragraph `LINE_SPACINGS` control — nobody who explicitly
+ * picked "Single" for a paragraph, or "Compact" for a whole note, sees any different number
+ * than before. What changes is only what a note gets with NO explicit choice at all.
  */
 
-/** ⛔ THE DENSITY A NOTE STARTS AT, and the ONE number the whole scale is anchored to. It is
- *  used by the editor stylesheet, by the print sheet and by the Compact control, so the three
- *  cannot drift. Changing it changes what "Single" looks like everywhere at once. */
+/** ⛔ WORD'S TRUE "SINGLE," and it is the tightest number this module offers. Still what the
+ *  per-paragraph `LINE_SPACINGS` "Single" option means, and — since B1203504 — also what the
+ *  `compact` density means: Compact IS single spacing, unchanged from before that item. It is
+ *  used by the editor stylesheet, the print sheet and the density control, so the three cannot
+ *  drift. */
 export const SINGLE = 1.15;
 
-/** How much tighter Compact is than Comfortable. Deliberately modest: Compact is for fitting
- *  more on screen, not for making text hard to read. */
+/** ⛔ THE PROSE RATIO COMFORTABLE STARTS AT (B1203504) — the number a brand-new note, or any
+ *  paragraph left on "Default," actually reads at. Chosen from the reference band the owner
+ *  named directly (Craft, Bear, Notion, iA Writer all sit 1.5–1.7 for body prose; this repo's
+ *  own report measured Notion at 1.5 and Bear at ~1.6) — the middle of that band, not its floor,
+ *  because "a lot better" was the ask, not "technically inside the range." */
+export const COMFORTABLE_LINE = 1.6;
+
+/** How much tighter Compact is than Comfortable. Compact is for fitting more on screen, not for
+ *  making text hard to read — which is why, since B1203504, it is exactly Word's single spacing
+ *  rather than a third, tighter number nobody asked for. */
 export const DENSITIES = [
-  { id: "comfortable", label: "Comfortable", line: SINGLE, listGap: 2 },
-  { id: "compact", label: "Compact", line: 1.02, listGap: 0 },
+  { id: "comfortable", label: "Comfortable", line: COMFORTABLE_LINE, listGap: 6 },
+  { id: "compact", label: "Compact", line: SINGLE, listGap: 2 },
 ];
 export const DEFAULT_DENSITY = "comfortable";
 
