@@ -307,6 +307,22 @@ describe("toMs + mergeSiteContent newer-wins is timestamp-type-safe (B559)", () 
     expect(merged.els.map((e) => e.id).sort()).toEqual(["a", "b"]);
     expect(toMs(newerIso.updatedAt)).toBeGreaterThan(toMs(older.updatedAt));
   });
+
+  // B1181104 — a role flip made through db/set_site_group_role.sql used to bump only the outer
+  // SQL `updated_at` column, never the jsonb's OWN `updatedAt` field this merge actually reads —
+  // so a client holding a stale locally-cached copy with an EQUAL `updatedAt` could never adopt
+  // the corrected role on a later pull (a tie keeps the LOCAL side, by design — see the ISO/number
+  // test above). Reproduced live against production's real `trk8eef7db4d0` row before the RPC fix
+  // shipped (see that file's own header) and fixed by making the RPC stamp `data.updatedAt` too.
+  // This pins the underlying rule so a future change to it doesn't silently reopen that class of
+  // bug for role, status, or any other scalar field a server-side RPC writes directly.
+  it("on a genuine timestamp TIE, the merge keeps the LOCAL scalar — a server-side write that doesn't advance its own updatedAt can get stuck behind a stale local copy forever", () => {
+    const staleLocal = { id: "trk1", updatedAt: 1000, role: "pursuit" };
+    const cloudSameTimestamp = { id: "trk1", updatedAt: 1000, role: "tracked" };
+    expect(mergeSiteContent(staleLocal, cloudSameTimestamp).role).toBe("pursuit"); // stuck, on a tie
+    const cloudBumped = { id: "trk1", updatedAt: 2000, role: "tracked" };
+    expect(mergeSiteContent(staleLocal, cloudBumped).role).toBe("tracked"); // self-heals once genuinely newer
+  });
 });
 
 // B651 — parcel split lineage: `parentId` on children, derived superseded/naming, and the
