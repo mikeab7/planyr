@@ -86,7 +86,7 @@ begin
   return new_password;
 end;
 $$;
-revoke all on function public.admin_reset_user_password(uuid) from public;
+revoke all on function public.admin_reset_user_password(uuid) from public, anon;
 grant execute on function public.admin_reset_user_password(uuid) to authenticated;
 
 -- The picker: every account (id/email/name), admin-gated. No SELECT policy is ever added
@@ -104,7 +104,7 @@ as $$
   where public.is_admin()
   order by u.created_at desc;
 $$;
-revoke all on function public.admin_list_users() from public;
+revoke all on function public.admin_list_users() from public, anon;
 grant execute on function public.admin_list_users() to authenticated;
 
 -- Audit trail read — "record who reset whom and when," made visible without SQL.
@@ -123,5 +123,5 @@ as $$
   order by r.at desc
   limit greatest(1, least(coalesce(p_limit, 100), 500));
 $$;
-revoke all on function public.admin_list_password_resets(int) from public;
+revoke all on function public.admin_list_password_resets(int) from public, anon;
 grant execute on function public.admin_list_password_resets(int) to authenticated;

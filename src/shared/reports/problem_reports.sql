@@ -74,5 +74,5 @@ as $$
   limit 500;
 $$;
 
-revoke all on function public.admin_list_problem_reports() from public;
+revoke all on function public.admin_list_problem_reports() from public, anon;
 grant execute on function public.admin_list_problem_reports() to authenticated;
