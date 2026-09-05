@@ -78,10 +78,10 @@ test.describe("Model workspace — trace precedents/dependents (NEW-1)", () => {
 
     await cell(page, 0, 4).click(); // select E1
     await clickRibbonButton(page, "ribbon-trace-precedents");
-    await expect(page.getByTestId("model-trace-overlay").locator("line")).toHaveCount(1);
+    await expect(page.getByTestId("model-trace-overlay").locator('[data-testid="model-trace-arrow"]')).toHaveCount(1);
 
     await clickRibbonButton(page, "ribbon-trace-precedents"); // step to level 2
-    await expect(page.getByTestId("model-trace-overlay").locator("line")).toHaveCount(3);
+    await expect(page.getByTestId("model-trace-overlay").locator('[data-testid="model-trace-arrow"]')).toHaveCount(3);
     // The named-range hop's dashed rect sits over C1 — nothing asserts pixel position here
     // (SheetView.jsx's own unit-level geometry is covered elsewhere); this proves the SECOND
     // click actually revealed a THIRD edge, i.e. real level-at-a-time stepping.
@@ -102,7 +102,7 @@ test.describe("Model workspace — trace precedents/dependents (NEW-1)", () => {
 
     await cell(page, 0, 0).click(); // select A1
     await clickRibbonButton(page, "ribbon-trace-dependents");
-    await expect(page.getByTestId("model-trace-overlay").locator("line")).toHaveCount(2);
+    await expect(page.getByTestId("model-trace-overlay").locator('[data-testid="model-trace-arrow"]')).toHaveCount(2);
   });
 
   test("a cross-sheet precedent renders as a clickable marker, never an arrow, and navigates on click", async ({ page }) => {
@@ -118,7 +118,7 @@ test.describe("Model workspace — trace precedents/dependents (NEW-1)", () => {
     await cell(page, 0, 0).click(); // Sheet2!A1 still selected
     await clickRibbonButton(page, "ribbon-trace-precedents");
     await expect(page.getByTestId("model-trace-cross-sheet-marker")).toBeVisible();
-    await expect(page.getByTestId("model-trace-overlay").locator("line")).toHaveCount(0);
+    await expect(page.getByTestId("model-trace-overlay").locator('[data-testid="model-trace-arrow"]')).toHaveCount(0);
 
     await page.getByTestId("model-trace-cross-sheet-marker").click();
     await expect(page.getByTestId("model-sheet-tab-0")).toHaveAttribute("data-tab-index", "0");
