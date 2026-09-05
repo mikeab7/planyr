@@ -12506,14 +12506,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const ring = ringOf(e);
     return ring && ring.length >= 3 ? { id: e.id, label: e.name || e.label || null, ring } : null;
   }).filter(Boolean);
+  // NEW-4 (owner-adversarial review, 2026-09-05) — the SAME "has a check ever run" truth the
+  // header's own `floodChecked` field is built from (line ~14716: a live loaded fetch OR a
+  // remembered/restored checkedAt). Threaded into buildingFloodExposure so the Buildings row
+  // can never say "not checked" over a header that says "checked Xd ago" — see that module's
+  // `everChecked` param header for the full reasoning.
+  const fmFloodEverChecked = !!(floodGeo && floodGeo.state === "loaded") || Number.isFinite(drainViewCtx?.checkedAt);
   const fmExposureSig = [
-    fmZonesSig, floodGeo?.state || "",
+    fmZonesSig, floodGeo?.state || "", fmFloodEverChecked ? "1" : "0",
     fmBuildings.map((b) => `${b.id}:${b.ring.length}:${ringHash(b.ring)}`).join(","),
     fmElev.bfeFt ?? "", fmElev.existGradeFt ?? "", fmElev.wse02Ft ?? "",
     fmElev.derivedBfeFt ?? "", fmElev.derivedXsWselFt ?? "", fmElev.derivedWse02Ft ?? "", fmElev.derivedWse1pctFt ?? "",
   ].join("~");
   const floodExposure = useMemo(
-    () => buildingFloodExposure({ buildings: fmBuildings, zones: fmZones, floodState: floodGeo?.state || null, elev: fmElev }),
+    () => buildingFloodExposure({ buildings: fmBuildings, zones: fmZones, floodState: floodGeo?.state || null, everChecked: fmFloodEverChecked, elev: fmElev }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [fmExposureSig],
   );
@@ -30515,7 +30521,20 @@ function YieldPanel({
             // show, the section reads an honest UNKNOWN (we don't know the volume yet) — the header
             // line ("Refreshing…" / "Couldn't refresh — last good · ↻") carries the staleness.
             if (d.mitStalePending) {
-              mitVerdict = "volume unknown"; mitTone = "warn"; mitChip = "UNKNOWN"; mitSub = "";
+              // ⛔ NEW-5 (owner-adversarial review, 2026-09-05) — the site's mitigation REQUIREMENT
+              // being stale/blocked does not make the PROVIDED volume unknown too: `d.mitProvided`
+              // is pure pond-ledger geometry with no network dependency, so a pond already assigned
+              // a mitigation role reports a real, already-reconciled dedicated volume. A bare
+              // "volume unknown" here — right above the SAME collapse's own "109.2 claimed / 109.2
+              // exists — Storage reconciles" detail rows — was the reported contradiction. Never
+              // adds a "re-check" clause: the header's own freshness line already carries that
+              // affordance for this exact state (PANEL-BREVITY).
+              const mitProvCf0 = d.mitProvided ? d.mitProvided.creditedCf : null;
+              if (mitProvCf0 != null && mitProvCf0 / 43560 > ACFT_EPS) {
+                mitVerdict = `providing ${f1(mitProvCf0 / 43560)} AC-FT`; mitTone = "warn"; mitChip = "UNKNOWN"; mitSub = "requirement unknown";
+              } else {
+                mitVerdict = "volume unknown"; mitTone = "warn"; mitChip = "UNKNOWN"; mitSub = "";
+              }
             } else if (mitV && mitV.intersectAcres > 0) {
               const mitTag = mitV.expertBypass ? "expert avg-depth" : d.mitigationStraddle ? "straddle worst-case" : mitV.providers?.wse1pct === "bfe-line-interp" ? "BFE derived" : mitV.providers?.wse1pct === "fbcdd-wse100-draft" ? "DRAFT Atlas-14 100-yr" : "";
               if (mitV.volumeCf != null) {
@@ -30546,7 +30565,17 @@ function YieldPanel({
                   mitChip = short ? "SHORT" : "COVERED";
                   mitSub = `req ${f2(mitV.volumeAcFt)}${mitTag ? ` · ${mitTag}` : ""}`;
                 }
-              } else { mitVerdict = "volume unknown"; mitTone = "warn"; mitChip = "UNKNOWN"; mitSub = mitTag; }
+              } else {
+                // NEW-5 — same reasoning as the mitStalePending branch above: the requirement volume
+                // never resolved (missing elevation input), but a known PROVIDED figure may still exist.
+                const mitProvCf0 = d.mitProvided ? d.mitProvided.creditedCf : null;
+                if (mitProvCf0 != null && mitProvCf0 / 43560 > ACFT_EPS) {
+                  mitVerdict = `providing ${f1(mitProvCf0 / 43560)} AC-FT`; mitTone = "warn"; mitChip = "UNKNOWN";
+                  mitSub = mitTag ? `requirement unknown · ${mitTag}` : "requirement unknown";
+                } else {
+                  mitVerdict = "volume unknown"; mitTone = "warn"; mitChip = "UNKNOWN"; mitSub = mitTag;
+                }
+              }
               if (mitV.flags && mitV.flags.includes("floodway_intersect")) { mitVerdict = `floodway fill · ${mitVerdict}`; mitTone = "danger"; mitChip = "STOP"; }
             } else if (d.mitRememberedMissing) { mitVerdict = "not screened"; mitTone = "warn"; mitChip = "RE-CHECK"; }
             else if (d.floodGeo && d.floodGeo.state === "failed") { mitVerdict = "flood source down"; mitTone = "warn"; mitChip = "RE-CHECK"; }

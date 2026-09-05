@@ -136,11 +136,32 @@ const pondFactsUnknownRow = (key, label) => finish({ key, label, pill: "…", to
  * "volume unknown" / "N/A") and the open detail group's "Mitigation volume UNKNOWN — {reason}"
  * row, neither of which was ever wrong — only the top-line verdict strip fell through to the
  * generic `loadingRow` and stuck there forever, because nothing was actually fetching. */
-const unresolvedMitigationRow = (reason) => finish({
-  key: "mit", label: "Mitigation", pill: "N/A", tone: "warn",
-  sentence: reason ? `volume unknown: ${reason}` : "volume unknown",
-  unavailable: true, loading: false, short: false, action: false, sortRank: 2.5,
-});
+// ⛔ NEW-5 (owner-adversarial review, 2026-09-05) — the REQUIREMENT being unknown does not mean
+// the PROVIDED volume is unknown too: `pondLedger.creditedMitCf` is pure geometry math with no
+// network dependency, so a pond already assigned a mitigation role reports a real, reconciled
+// dedicated volume (`d.mitProvided.creditedCf`) even while the site's requirement pull is stale
+// or blocked. Reporting a bare "volume unknown" here while the SAME panel's pond detail shows
+// "109.2 claimed / 109.2 exists — Storage reconciles" was the reported contradiction: the summary
+// discarded a number the app had already computed. `provided` (d.mitProvided) carries that
+// through so this row can state it honestly instead of pretending nothing is known.
+// PANEL-BREVITY: this reuses the EXISTING `reason ? "volume unknown: {reason}" : "volume
+// unknown"` template shape rather than adding a new sentence — the known-provided fact folds
+// into `reason` at the front, so no new visible-copy line is minted for one already-honest state
+// gaining one more true clause. Never adds a "re-check" clause — the header's own freshness line
+// already carries that affordance for this exact state.
+const unresolvedMitigationRow = (reason, provided) => {
+  const provCf = provided && Number.isFinite(provided.creditedCf) ? provided.creditedCf : null;
+  const provAcFt = provCf != null ? provCf / AC_FT : null;
+  const knowsProvided = provAcFt != null && provAcFt > TRACE_ACFT;
+  const combinedReason = knowsProvided
+    ? `${fmtAcFt(provAcFt)} AC-FT already provided${reason ? `; ${reason}` : ""}`
+    : reason;
+  return finish({
+    key: "mit", label: "Mitigation", pill: "N/A", tone: "warn",
+    sentence: combinedReason ? `volume unknown: ${combinedReason}` : "volume unknown",
+    unavailable: true, loading: false, short: false, action: false, sortRank: 2.5,
+  });
+};
 const okRow = (key, label, sentence) => finish({ key, label, pill: "OK", tone: "good", sentence, sortRank: 2 });
 const pairRow = (key, label, provided, required, short, opts = {}) => {
   // NEW-16 display invariant: a SHORT pair must NEVER show two identical numbers (the
@@ -294,7 +315,7 @@ function mitigationVerdict(d) {
   // captured yet (see SitePlanner.jsx's `drainMitDisplay`/NEW-2). A real refresh isn't running by
   // itself (checks are manual-only, per NEW-4) — nothing is "checking", so this must never say so;
   // the header's own freshness line carries the re-check affordance for this exact state (B867).
-  if (d.mitStalePending) return unresolvedMitigationRow(null);
+  if (d.mitStalePending) return unresolvedMitigationRow(null, d.mitProvided);
   const notRequired = () => okRow("mit", "Mitigation", "not required");
   if (mitV && mitV.intersectAcres === 0) return notRequired();
   if (d.floodGeo && d.floodGeo.state === "loaded" && d.floodGeo.zoneCount === 0) return notRequired();
@@ -352,7 +373,7 @@ function mitigationVerdict(d) {
   // pad FFE entered, no existing-grade source), not a fetch in progress. The open detail group
   // already says "Mitigation volume UNKNOWN — {reason}" for exactly this case; the strip is now
   // the same honest state instead of an eternal "checking flood data".
-  if (mitV && mitV.intersectAcres > 0) return unresolvedMitigationRow(mitV.unknownReason);
+  if (mitV && mitV.intersectAcres > 0) return unresolvedMitigationRow(mitV.unknownReason, d.mitProvided);
   // NEW-6 — a restored (remembered) check with no restorable mitigation ledger. Same wording
   // as the closed-face chip's own verdict below (SitePlanner.jsx) for this exact state — a real
   // ↻ re-check would compute it, so this row keeps the recheck affordance. (PANEL-BREVITY: the

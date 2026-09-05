@@ -300,6 +300,45 @@ describe("NEW-6 — Mitigation never claims 'checking flood data' once nothing i
   });
 });
 
+// ⛔ NEW-5 (owner-adversarial review, 2026-09-05) — a real production case: the mitigation
+// requirement pull was stale/blocked (mitStalePending), and the strip said a bare "volume
+// unknown" while the SAME panel's pond detail showed a mitigation pond with a known, reconciled
+// 109.2 AC-FT ("Storage reconciles — 109.2 claimed / 109.2 exists"). The requirement being
+// unknown never made the PROVIDED figure unknown — `d.mitProvided.creditedCf` is pure pond-ledger
+// geometry with no network dependency — so the summary must say what it already knows.
+describe("NEW-5 — a stale/unresolved REQUIREMENT never hides an already-known PROVIDED volume", () => {
+  const base = { req: detReqPoint(33.8), providedUsableCf: 0 };
+
+  it("mitStalePending with a known provided volume states it, never a bare 'volume unknown'", () => {
+    const [, mit] = yieldVerdictStrip({ ...base, mitStalePending: true, mitProvided: { creditedCf: 109.2 * AC_FT } });
+    expect(mit.sentence).toBe("volume unknown: 109.2 AC-FT already provided");
+    expect(mit.pill).toBe("N/A");
+    expect(mit.tone).toBe("warn");
+    expect(mit.sentence).not.toBe("volume unknown");
+  });
+
+  it("mitStalePending with NO known provided volume is unaffected — still a bare 'volume unknown'", () => {
+    const [, mitNone] = yieldVerdictStrip({ ...base, mitStalePending: true });
+    expect(mitNone.sentence).toBe("volume unknown");
+    const [, mitZero] = yieldVerdictStrip({ ...base, mitStalePending: true, mitProvided: { creditedCf: 0 } });
+    expect(mitZero.sentence).toBe("volume unknown");
+  });
+
+  it("an unresolved requirement (unknownReason) with a known provided volume states both facts", () => {
+    const [, mit] = yieldVerdictStrip({
+      ...base,
+      mitigation: { intersectAcres: 2, volumeCf: null, unknownReason: "no published BFE on this reach — enter the BFE" },
+      mitProvided: { creditedCf: 40 * AC_FT },
+    });
+    expect(mit.sentence).toBe("volume unknown: 40.0 AC-FT already provided; no published BFE on this reach — enter the BFE");
+  });
+
+  it("no em dash in the new sentence shape either (G2 house rule)", () => {
+    const [, mit] = yieldVerdictStrip({ ...base, mitStalePending: true, mitProvided: { creditedCf: 12 * AC_FT } });
+    expect(mit.sentence.includes(EM_DASH), mit.sentence).toBe(false);
+  });
+});
+
 // B853264 (×3, dedupe follow-up, 2026-08-31) — Detention's own sibling of the above. Same root
 // cause, same fix shape, its own describe block since it's a different verdict's row.
 describe("B853264 (×3) — Detention never claims 'checking flood data' once nothing is fetching", () => {

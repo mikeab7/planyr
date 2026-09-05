@@ -38,7 +38,7 @@ import CompEntryGrid, { draftFromParsedRow } from "./CompEntryGrid.jsx";
 import CompDraftsPanel from "./CompDraftsPanel.jsx";
 import { fetchMyDrafts, insertDrafts, promoteDraft, deleteDraft } from "../lib/compDraftsStore.js";
 import { kmlToDraftRows } from "../lib/kmlImport.js";
-import { parcelLocationText, siteplanLocationText, pinFallbackText } from "../lib/compLocationText.js";
+import { siteplanLocationText, pinFallbackText } from "../lib/compLocationText.js";
 import { reverseGeocodeLatLon } from "../../../workspaces/site-planner/lib/geocode.js";
 import { COUNTIES } from "../../../workspaces/site-planner/lib/counties.js";
 
@@ -62,12 +62,19 @@ function pinCacheKey(anchor) {
     ? `${anchor.lat.toFixed(6)},${anchor.lon.toFixed(6)}`
     : null;
 }
-/** A saved comp's Location text — parcel APN / site-plan title synchronously, a pin's reverse-
- * geocoded street address once resolved (the synchronous county/coordinate fallback until then). */
+/** A saved comp's Location text — a real place, resolved the SAME way regardless of anchor kind
+ * (a pin's or a parcel's reverse-geocoded street address once resolved, else the synchronous
+ * county/coordinate fallback; a site plan's own title). ⛔ NEW-1 (owner-adversarial review,
+ * 2026-09-05) — this used to return the raw APN outright for `anchor.kind === "parcel"`
+ * (`parcelLocationText`), so a parcel-anchored comp's Location row showed a county appraisal
+ * account number (e.g. "3641471") instead of a place — even though the parcel anchor carries the
+ * exact same lat/lon a pin does and the reverse-geocode path already works for it. A parcel now
+ * resolves through the identical branch a pin uses; its APN gets its own row instead
+ * (`compFieldRows`'s "Parcel ID (APN)"), never substituting for Location. */
 function useCompLocationText(anchor, overlaysById) {
   const [, bump] = useState(0);
   useEffect(() => {
-    if (!anchor || anchor.kind !== "pin") return;
+    if (!anchor || (anchor.kind !== "pin" && anchor.kind !== "parcel")) return;
     const key = pinCacheKey(anchor);
     if (!key || _pinAddrCache.has(key) || _pinAddrInflight.has(key)) return;
     const p = reverseGeocodeLatLon(anchor.lat, anchor.lon)
@@ -77,8 +84,8 @@ function useCompLocationText(anchor, overlaysById) {
     _pinAddrInflight.set(key, p);
   }, [anchor]);
   if (!anchor) return null;
-  if (anchor.kind === "parcel") return parcelLocationText(anchor, (k) => countyEntry(k)?.name);
   if (anchor.kind === "site_plan") return siteplanLocationText(anchor, overlaysById) || pinFallbackText(anchor, countyEntry);
+  // "pin" and "parcel" both resolve to a real place the same way now.
   const key = pinCacheKey(anchor);
   const resolved = key ? _pinAddrCache.get(key) : null;
   return resolved || pinFallbackText(anchor, countyEntry);
