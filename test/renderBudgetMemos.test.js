@@ -121,7 +121,10 @@ describe("NEW-3 — the yield/stormwater derivation is demand-driven, not uncond
   it("EVERY consumer goes through the accessor — including the two non-obvious ones", () => {
     expect(src).toContain("drainage: drainFacts(),");                  // exportCtx() — the export/print path
     expect(src).toContain("drainFacts()?.floodFailed");                // the pond inspector
-    expect(src).toContain("drainage={drainFacts()} parcelOverlaps=");  // the Yield panel
+    // NEW-1 (2026-09-05) — the drainage accessor's own consumer is now the DrainagePanel (Yield
+    // no longer takes a `drainage` prop at all — see /CLAUDE.md's Drainage-module-split entry).
+    expect(src).toContain("drainage={drainFacts()}");                  // the Drainage panel
+    expect(src).toContain("parcelOverlaps={parcelOverlaps}");          // the Yield panel (unrelated to drainFacts)
     expect(src).toContain("stormwaterBarSpecs(drainFacts())");         // PDF-PARITY: the printed bars
     // No consumer may reach past the accessor to a bare `drainage` binding.
     expect(src.includes("printMetricPairs, printStormwaterBars, drainage,")).toBe(false);

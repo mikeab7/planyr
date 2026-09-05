@@ -300,6 +300,45 @@ describe("NEW-6 — Mitigation never claims 'checking flood data' once nothing i
   });
 });
 
+// NEW-4 (2026-09-05, owner-reported) — the app usually already knows exactly which input(s)
+// are missing (floodplainMitigation.js's per-class `unknown` strings). Two bugs used to lose
+// them: `mitStalePending` discarded the reason outright (passed `null`), and reading only
+// `unknownReason` (singular) dropped a SECOND class's different missing input.
+describe("NEW-4 — the verdict strip surfaces every distinct missing-input reason it already knows", () => {
+  const base = { req: detReqPoint(33.8), providedUsableCf: 0 };
+
+  it("mitStalePending with a real mitigation object (last-good spread) states the known reason, never a bare 'volume unknown'", () => {
+    const [, mit] = yieldVerdictStrip({
+      ...base,
+      mitStalePending: true,
+      mitigation: { intersectAcres: 18.0255, volumeCf: null, unknownReason: "no 0.2% (500-yr) WSE — enter it from the EFFECTIVE FIS profile", unknownReasons: ["no 0.2% (500-yr) WSE — enter it from the EFFECTIVE FIS profile"] },
+    });
+    expect(mit.sentence).toBe("volume unknown: no 0.2% (500-yr) WSE — enter it from the EFFECTIVE FIS profile");
+  });
+
+  it("two DIFFERENT classes each missing a different input both reach the sentence, joined", () => {
+    const [, mit] = yieldVerdictStrip({
+      ...base,
+      mitigation: {
+        intersectAcres: 18.0255, volumeCf: null,
+        unknownReason: "no 0.2% (500-yr) WSE — enter it from the EFFECTIVE FIS profile",
+        unknownReasons: [
+          "pad / finished-floor elevation not entered",
+          "no 0.2% (500-yr) WSE — enter it from the EFFECTIVE FIS profile",
+        ],
+      },
+    });
+    expect(mit.sentence).toBe(
+      "volume unknown: pad / finished-floor elevation not entered; no 0.2% (500-yr) WSE — enter it from the EFFECTIVE FIS profile"
+    );
+  });
+
+  it("a legacy mitigation object with no unknownReasons array still falls back to the singular unknownReason", () => {
+    const [, mit] = yieldVerdictStrip({ ...base, mitigation: { intersectAcres: 2, volumeCf: null, unknownReason: "pad / finished-floor elevation not entered" } });
+    expect(mit.sentence).toBe("volume unknown: pad / finished-floor elevation not entered");
+  });
+});
+
 // ⛔ NEW-5 (owner-adversarial review, 2026-09-05) — a real production case: the mitigation
 // requirement pull was stale/blocked (mitStalePending), and the strip said a bare "volume
 // unknown" while the SAME panel's pond detail showed a mitigation pond with a known, reconciled

@@ -309,13 +309,29 @@ function detentionVerdict(d) {
   return v;
 }
 
+// NEW-4 (2026-09-05, owner-reported) — the app usually knows EXACTLY which input(s) are
+// missing (floodplainMitigation.js's per-class `unknown` strings, rolled up into
+// `unknownReasons`) and the verdict strip was asking for none of them: `mitStalePending`
+// discarded the reason outright (passed `null`), and the other unresolved branch read only the
+// LAST unpriced class's reason, dropping a second, different missing input when two classes were
+// each blocked on something else. Joining every distinct reason means "volume unknown" always
+// carries every actionable ask the engine already computed, never a bare, unexplained state.
+const mitigationUnknownReasons = (mitV) => {
+  if (!mitV) return null;
+  if (Array.isArray(mitV.unknownReasons) && mitV.unknownReasons.length) return mitV.unknownReasons.join("; ");
+  return mitV.unknownReason || null;
+};
+
 function mitigationVerdict(d) {
   const mitV = d.mitigation;
   // NEW-6 — the drawn geometry outgrew the last fetch and no last-good volume has been
   // captured yet (see SitePlanner.jsx's `drainMitDisplay`/NEW-2). A real refresh isn't running by
   // itself (checks are manual-only, per NEW-4) — nothing is "checking", so this must never say so;
   // the header's own freshness line carries the re-check affordance for this exact state (B867).
-  if (d.mitStalePending) return unresolvedMitigationRow(null, d.mitProvided);
+  // NEW-4 — `drainMitDisplay` spreads the last-good/live mitigation object even while pending, so
+  // its `unknownReasons` are real, already-computed facts, not a fetch that never ran — pass them
+  // through instead of the reason `null` used to discard.
+  if (d.mitStalePending) return unresolvedMitigationRow(mitigationUnknownReasons(mitV), d.mitProvided);
   const notRequired = () => okRow("mit", "Mitigation", "not required");
   if (mitV && mitV.intersectAcres === 0) return notRequired();
   if (d.floodGeo && d.floodGeo.state === "loaded" && d.floodGeo.zoneCount === 0) return notRequired();
@@ -373,7 +389,7 @@ function mitigationVerdict(d) {
   // pad FFE entered, no existing-grade source), not a fetch in progress. The open detail group
   // already says "Mitigation volume UNKNOWN — {reason}" for exactly this case; the strip is now
   // the same honest state instead of an eternal "checking flood data".
-  if (mitV && mitV.intersectAcres > 0) return unresolvedMitigationRow(mitV.unknownReason, d.mitProvided);
+  if (mitV && mitV.intersectAcres > 0) return unresolvedMitigationRow(mitigationUnknownReasons(mitV), d.mitProvided);
   // NEW-6 — a restored (remembered) check with no restorable mitigation ledger. Same wording
   // as the closed-face chip's own verdict below (SitePlanner.jsx) for this exact state — a real
   // ↻ re-check would compute it, so this row keeps the recheck affordance. (PANEL-BREVITY: the

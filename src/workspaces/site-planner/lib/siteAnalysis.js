@@ -848,10 +848,18 @@ export function deriveZoning(j, state = null) {
   const etj = (j.etj || []).map((c) => String(c).toLowerCase());
   const st = state === "CO" ? "CO" : state === "TX" ? "TX" : null;
   let summary;
-  if (j.unincorporated) summary = UNINCORPORATED_ZONING[st] || UNINCORPORATED_ZONING.unknown;
-  else if (cities.includes("houston")) summary = "City of Houston — NO zoning (deed restrictions + Ch. 42 development code apply instead).";
+  // ⛔ NEW-5 (2026-09-05, owner-reported) — `j.unincorporated` used to be checked FIRST, so it won
+  // on every non-Houston ETJ site (an ETJ IS unincorporated land by definition — jurisdictionLabel.js's
+  // own model), printing the bare state "no zoning" sentence over land a city's own subdivision/
+  // platting authority actually reaches (Baytown's ETJ, on the Goose Creek site this was found on).
+  // The `etj.includes("houston")` branch below was the ONLY city this ever named — every other city's
+  // ETJ fell straight through it. City limits still win outright over ETJ; ETJ still wins over the
+  // blanket unincorporated sentence, generalized to whichever city's ETJ actually reaches the site.
+  if (cities.includes("houston")) summary = "City of Houston — NO zoning (deed restrictions + Ch. 42 development code apply instead).";
   else if (cities.length) summary = `Within ${j.city.join(", ")} — city zoning likely applies; confirm the district + entitlement path.`;
   else if (etj.includes("houston")) summary = "Houston ETJ — no zoning, but city subdivision/platting authority applies in the ETJ.";
+  else if (etj.length) summary = `${j.etj.join(", ")} ETJ — no zoning, but the city's subdivision/platting authority applies in the ETJ; confirm with the city.`;
+  else if (j.unincorporated) summary = UNINCORPORATED_ZONING[st] || UNINCORPORATED_ZONING.unknown;
   else summary = "Confirm zoning with the jurisdiction.";
   return {
     id: "zoning", category: "Zoning / entitlement", label: "Zoning & entitlement context",
@@ -900,7 +908,14 @@ export async function runSiteAnalysis(rings, opts = {}) {
   const jurFetch = opts.jurFetchJson || pooledFetch;
 
   const arcPromises = ANALYSIS_SOURCES.map((s) => analyzeSource(s, rings, arcOpts));
-  const jurP = Promise.resolve().then(() => idJur(c.lng, c.lat, { ring: rep, cache: opts.cache, fetchJson: jurFetch })).catch((e) => ({ __error: e }));
+  // NEW-5 (2026-09-05, owner-reported) — thread EVERY active parcel's ring, not just the
+  // representative (largest) one: a multi-parcel assemblage's city/ETJ containment is a coin
+  // flip weighted by lot size when only one parcel is tested (jurisdiction.js's own
+  // `parcelProbePoints` fix, already wired into the header's jurisdiction badge — see its
+  // header). Without this the Analysis panel's own zoning/jurisdiction card could read
+  // "Unincorporated" off the one parcel that happened to be largest while the header, testing
+  // every parcel, correctly found the site partly inside a city's ETJ.
+  const jurP = Promise.resolve().then(() => idJur(c.lng, c.lat, { ring: rep, ...(rings.length > 1 ? { rings } : {}), cache: opts.cache, fetchJson: jurFetch })).catch((e) => ({ __error: e }));
   const roadP = Promise.resolve().then(() => idRoad(c.lng, c.lat, { ring: rep, cache: opts.cache, fetchJson: jurFetch })).catch((e) => ({ __error: e }));
 
   const [arc, j, road] = await Promise.all([Promise.all(arcPromises), jurP, roadP]);

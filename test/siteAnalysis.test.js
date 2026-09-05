@@ -392,6 +392,24 @@ describe("derived jurisdiction findings", () => {
     expect(f.summary).toMatch(/Katy/);
     expect(f.summary).toMatch(/zoning likely/i);
   });
+  // NEW-5 (2026-09-05, owner-reported, real Goose Creek/Baytown case) — a non-Houston city's ETJ
+  // used to fall straight through to the blanket state "unincorporated" sentence, because ETJ
+  // land IS unincorporated by definition and that branch was checked first. `j.unincorporated`
+  // is still true here (an ETJ genuinely is unincorporated land) — the fix is ORDER, not the flag.
+  it("deriveZoning: a non-Houston city's ETJ names the city, never the blanket unincorporated sentence", () => {
+    const f = deriveZoning({ ...baseJ, city: [], etj: ["Baytown"], unincorporated: true }, "TX");
+    expect(f.summary).toMatch(/Baytown/);
+    expect(f.summary).toMatch(/ETJ/);
+    expect(f.summary).not.toMatch(/Texas counties have no zoning/);
+  });
+  it("deriveZoning: city LIMITS still win outright over that same city's ETJ", () => {
+    const f = deriveZoning({ ...baseJ, city: ["Baytown"], etj: ["Baytown"], unincorporated: false }, "TX");
+    expect(f.summary).toMatch(/Within Baytown/);
+  });
+  it("deriveZoning: genuinely unincorporated with no city and no ETJ still reads the state's own doctrine", () => {
+    const f = deriveZoning({ ...baseJ, city: [], etj: [], unincorporated: true }, "TX");
+    expect(f.summary).toMatch(/Texas counties have no zoning/);
+  });
   it("buildRoadFinding: unknown + honest note when no roads matched", () => {
     expect(buildRoadFinding({ roads: [] }).status).toBe("unknown");
     expect(buildRoadFinding({ roads: [], note: "No roads matched within 40 m — screening only." }).summary).toMatch(/no roads matched/i);
@@ -575,6 +593,42 @@ describe("runSiteAnalysis — orchestration", () => {
     expect(findings.find((f) => f.id === "flood").status).toBe("absent");
     // jurisdiction/road/zoning fall back to their pending/placeholder rows, not a crash
     expect(findings.find((f) => f.id === "jurisdiction")).toBeTruthy();
+  });
+
+  // NEW-5 (2026-09-05, owner-reported) — a multi-parcel assemblage's city/ETJ containment is a
+  // coin flip weighted by lot size when the jurisdiction identify only ever tests the largest
+  // (representative) ring. `runSiteAnalysis` must thread EVERY parcel's ring through, the same
+  // multi-parcel fix already wired into the header's own jurisdiction badge.
+  it("threads every parcel's ring (not just the representative one) into the jurisdiction identify", async () => {
+    const cache = freshCache();
+    const fetchJson = fakeFetch({
+      "/NFHL/MapServer/28/query": () => [],
+      "Wetlands_gdb_split": () => [],
+      "RRC_Public_Viewer_Srvs/MapServer/1/query": () => [],
+      "RRC_Public_Viewer_Srvs/MapServer/13/query": () => [],
+      "PUC_CCN_2023Dec": () => [],
+      "PUC_CCN_Sewer_Water": () => [],
+      "Public/LPST": () => [],
+      "Cleanups_in_my_Community": () => [],
+      "Fault_Houston": () => [],
+    });
+    const SECOND_RING = [[-95.70, 29.70], [-95.69, 29.70], [-95.69, 29.71], [-95.70, 29.71], [-95.70, 29.70]];
+    let capturedOpts = null;
+    const identifyJurisdiction = async (lng, lat, opts) => {
+      capturedOpts = opts;
+      return { county: ["Harris"], city: [], etj: [], unincorporated: true, straddle: false, ages: {}, sources: [] };
+    };
+    const identifyRoadAuthority = async () => ({ roads: [], authorities: [], ageMs: null, note: "ok" });
+    await runSiteAnalysis([SQUARE, SECOND_RING], { cache, fetchJson, identifyJurisdiction, identifyRoadAuthority });
+    expect(Array.isArray(capturedOpts.rings)).toBe(true);
+    expect(capturedOpts.rings.length).toBe(2);
+    // A single-parcel site must NOT gain a spurious `rings` array — one ring is already the
+    // representative ring, and identifyJurisdiction's own containment test treats `rings` as
+    // "more than one candidate to probe".
+    let singleOpts = null;
+    const identifySingle = async (lng, lat, opts) => { singleOpts = opts; return { county: ["Harris"], city: [], etj: [], unincorporated: true, straddle: false, ages: {}, sources: [] }; };
+    await runSiteAnalysis([SQUARE], { cache: freshCache(), fetchJson, identifyJurisdiction: identifySingle, identifyRoadAuthority });
+    expect(singleOpts.rings).toBeUndefined();
   });
 });
 

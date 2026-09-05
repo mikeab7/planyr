@@ -144,6 +144,44 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V859232 — B1186256: the new Drainage rail tab renders every carried-over section correctly and Yield/Analysis's links jump to it, on a real multi-parcel plan `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** This is a large structural refactor (a ~2256-line panel split into two module-scope components) verified this session by build/lint/test green and ESLint's `no-undef`, but never actually rendered against a real, densely-built project — the repro data throughout this dispatch (Goose Creek, "Plan II - 220K, 440K, 700K GEOTECH") lives on Michael's own signed-in account, which this sandbox's proxy CORS-blocks.
+
+**What was verified here (this session, sandbox).** Full repo suite green (`npx vitest run`), `npm run lint`/`npm run build` clean, `node scripts/build-map.mjs --check` clean, and the two test-suite regressions the split caused (`test/renderBudgetMemos.test.js`, `test/yieldPanelLayout.test.js`) were found and fixed the same session — the latter now separately asserts `YieldPanel`'s own Land Use → Buildings order and `DrainagePanel`'s own verdict-strip → drainage-blocks → drainage-buildings order, scoped to each component's own text range so the split itself is asserted, not just its absence of a crash.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as Michael:**
+1. Read the loaded chunk hash in the same breath as everything below — confirm it names a chunk from a build after this PR merged.
+2. Open Goose Creek, "Plan II - 220K, 440K, 700K GEOTECH". **Expect:** the left rail shows 7 tabs in order: Land, Analysis, **Drainage**, Yield, Properties, Overlays, Standards (Drainage sits between Analysis and Yield).
+3. Click Drainage. **Expect:** the governing authority/rule, required-vs-provided detention, pond sizing/storage reconciliation, mitigation, and buildings-in-floodplain sections all render with real numbers — nothing blank, nothing crashed.
+4. Click Yield. **Expect:** the Land Use table's Pond line shows a **"Drainage →"** link; clicking it switches to the Drainage tab. Yield itself shows coverage/FAR, stall counts/ratios, and costs — no detention/mitigation content.
+5. Click Analysis. **Expect:** the flood row reads present/absent only (no age/freshness text on that row) with an `in Drainage →` link that also switches to the Drainage tab.
+`Blocker: auth` `Blocker: real-data`
+
+### V859233 — B1186259: Analysis, the header, and Drainage's detention row agree on jurisdiction for a multi-parcel site straddling an ETJ line `Blocker: auth` `Blocker: real-data` `Blocker: live-GIS`
+
+**Why this needs its own real pass.** The repro is Goose Creek's actual multi-parcel geometry straddling the Baytown ETJ (extraterritorial jurisdiction — the ring of unincorporated land around a Texas city where it still exercises limited platting/subdivision authority) boundary; this needs both a signed-in account and a live GIS (geographic information system — the county/city map-data services this app queries) round trip this sandbox cannot reach.
+
+**What was verified here (this session, sandbox).** `runSiteAnalysis` was calling `identifyJurisdiction` with only one representative parcel's ring; it now threads every active parcel's ring through (`rings`), exactly matching what `checkDrainage`/`resolveDrainageAuthority` already did — proven with a new rings-threading test in `test/siteAnalysis.test.js`. `deriveZoning`'s blanket "Unincorporated" fallback was also fixed for a genuine ETJ-only case (3 new tests). Full repo suite green, lint clean, build clean.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as Michael:**
+1. Read the loaded chunk hash — confirm it's post-merge.
+2. Open Goose Creek, "Plan II - 220K, 440K, 700K GEOTECH". **Expect:** the project header, the Analysis panel's jurisdiction line, and Drainage's governing-authority line all name the SAME jurisdiction (city/ETJ/county) — no longer three different answers for the same site.
+3. If the header/Drainage read "Baytown ETJ", **expect:** Analysis's own summary also says ETJ (e.g. "Baytown ETJ — no zoning, but the city's subdivision/platting authority applies…"), never a bare "Unincorporated" that contradicts it.
+4. Re-check the stored jurisdiction record (Site settings, if exposed) — **expect:** it no longer reads an empty `etj:[]` while the other three surfaces claim an ETJ applies.
+`Blocker: auth` `Blocker: real-data` `Blocker: live-GIS`
+
+### V859234 — B1186260: a Regime-B pond's dead-storage pool depth computes from a derived water-surface elevation instead of staying null `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** The repro is Goose Creek's actual detention pond, which has a derived water-surface elevation (`wseFt: 35.71`, from a cross-section reading) but no static FEMA BFE (base flood elevation) record — exactly the case that left `estPoolDepthFt` null before this fix. This needs the real project's geometry and a live GIS pull this sandbox cannot reach.
+
+**What was verified here (this session, sandbox).** `assessHydraulicRegime` now falls back to a passed-in `resolvedWseFt`/`resolvedWseSrc` (flagged `"derived-wse"`) only when no static BFE record exists; `SitePlanner.jsx` now threads its own derived cross-section/BFE elevation into that call. 3 new tests in `test/detentionRegime.test.js` cover the fallback firing, a static BFE still winning over it when both exist, and the honest-unknown case holding when neither exists. Full repo suite green, lint clean, build clean.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as Michael:**
+1. Read the loaded chunk hash — confirm it's post-merge.
+2. Open Goose Creek, "Plan II - 220K, 440K, 700K GEOTECH", open the detention pond's inspector on the Drainage tab. **Expect:** a real pool-depth number now shows (roughly the resolved WSE minus existing ground grade, ~8 ft) instead of a blank/unknown pool depth.
+3. Confirm the pond's overall storage reconciliation (usable vs. dead storage) reflects that same non-null pool depth rather than treating the dead-storage band as unknown.
+`Blocker: auth` `Blocker: real-data`
 ### V857632 — B1184656: a binned site's owning comp shows its real name and a restore notice instead of "No project" `Blocker: auth` `Blocker: real-data`
 
 **Why this needs its own real pass.** The DB-level mechanism (a bin never touches `comps.project_id`; a purge does, loudly reported) is already live-verified this session directly against production via a throwaway site+comp round trip (see B1184656's own writeup in `BACKLOG.md` for both reads, verbatim). What remains is confirming the owner's own signed-in browser actually RENDERS the read-tolerance fix — the `useOwningSiteBinStatus` hook's live `checkProjectDeletionStatus` round trip and the resulting `<option>`/notice — since the sandbox proxy CORS-blocks the Supabase auth handshake.

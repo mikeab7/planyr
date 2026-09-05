@@ -11741,6 +11741,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // The identify takes ONE ring — use the largest active parcel (flagged when several).
       const largest = act.reduce((b, p) => (polyArea(p.points) > polyArea(b.points) ? p : b), act[0]);
       const ring = largest.points.map((pt) => { const [la, ln] = feetToLatLng(pt, origin.lat, origin.lon); return [ln, la]; });
+      // NEW-5 (2026-09-05, owner-reported) — the SAME whole-site containment fix `jurActiveRings`
+      // already gives the header badge (B276752-755): a multi-parcel assemblage is a coin flip
+      // weighted by lot size when only the largest parcel's ring is tested, so an ETJ that only
+      // reaches the OTHER parcels was invisible to the drainage authority / detention-rate lookup
+      // (Goose Creek's stored jurisdiction read `etj: []` while the header, testing every parcel,
+      // correctly found Baytown's ETJ). Threaded into resolveDrainageContext below so the
+      // detention rule and the header stop disagreeing about which parcels are in/out of a city.
+      const rings = act.map((p) => p.points.map((pt) => { const [la, ln] = feetToLatLng(pt, origin.lat, origin.lon); return [ln, la]; }));
       const c = ring.reduce((s, [x, y]) => [s[0] + x / ring.length, s[1] + y / ring.length], [0, 0]);
       /* ⛔ NEW-1 / NEW-2 / NEW-3 — GROUND ELEVATION. Started HERE, at t=0, in parallel with every
        * GIS pull below rather than in front of them (B1442(d) did exactly this for three point
@@ -11853,7 +11861,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       timer.start("gis");
       const [ctx, floodGeo, bfeLines, xs, siteGrid] = await Promise.race([
         Promise.all([
-          leg("ctx", resolveDrainageContext({ lng: c[0], lat: c[1], ring }, { sampleGround })),
+          leg("ctx", resolveDrainageContext({ lng: c[0], lat: c[1], ring, rings }, { sampleGround })),
           leg("flood", floodGeoP),
           leg("bfeLines", bfeLinesP),
           leg("xs", crossSectionsP),
@@ -12266,8 +12274,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const detTier = drainCtxData && siteSqft > 0 && drainFloodOk
     ? assessAnalysisTier({ acres: acresActive, authorityId: drainAuthorityId, floodZones: drainCtxData.flood.zones, channel: drainCtxData.channel, channelDataApplicable: drainCountyHarris })
     : null;
+  // NEW-6b (2026-09-05, owner-reported) — most AE reaches leave the polygon's own STATIC_BFE at
+  // FEMA's "none" sentinel and carry the real water surface on the separate S_BFE line layer or a
+  // regulatory cross-section instead (the same derived values the mitigation ledger already prices
+  // against, `floodGeo.derivedXsWsel`/`derivedBfe`) — pass them through so the regime doesn't read
+  // "unknown" (and `estPoolDepthFt` stay permanently null) when a governing surface is already known.
+  const detRegimeResolvedWseFt = drainCtxData?.floodGeo?.derivedXsWsel?.wselFt ?? drainCtxData?.floodGeo?.derivedBfe?.bfeFt ?? null;
+  const detRegimeResolvedWseSrc = drainCtxData?.floodGeo?.derivedXsWsel?.wselFt != null ? "regulatory cross-section"
+    : drainCtxData?.floodGeo?.derivedBfe?.bfeFt != null ? "BFE-line interpolation" : null;
   const detRegime = drainCtxData && siteSqft > 0 && drainFloodOk
-    ? assessHydraulicRegime({ floodZones: drainCtxData.flood.zones, groundElevFt: drainCtxData.groundElevFt, groundDatum: drainCtxData.groundDatum, pondDepthFt: maxPondDepthFt || 8 })
+    ? assessHydraulicRegime({ floodZones: drainCtxData.flood.zones, groundElevFt: drainCtxData.groundElevFt, groundDatum: drainCtxData.groundDatum, pondDepthFt: maxPondDepthFt || 8, resolvedWseFt: detRegimeResolvedWseFt, resolvedWseSrc: detRegimeResolvedWseSrc })
     : null;
   // B634 tier-2 slice: in Regime A, the outfall value-of-information line. The user's
   // cross-section only feeds in when it actually CROSSES the named receiving channel
@@ -17270,6 +17286,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const leftTabs = [
     { id: "parcel", label: PARCEL_SURFACES.panel.name },
     { id: "analysis", label: "Analysis" },
+    // NEW-1 (2026-09-05, owner directive) — Drainage is its own left-rail module, split out of
+    // what used to be Yield's "Stormwater" section: Analysis screens, Drainage decides, Yield
+    // reports what's left over. Sits between the two so the rail reads in that order.
+    { id: "drainage", label: "Drainage" },
     { id: "yield", label: "Yield" },
     { id: "properties", label: "Properties" }, // B733: docked home for the selected-element inspector
     { id: "references", label: "Overlays" }, // B654: Aerial + Overlay merged into one panel. B966630 — user-facing label
@@ -19662,14 +19682,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus}
                         onFindings={(fs) => { const w = fs && fs.find((f) => f.id === "wetlands"); setAnalysisWetlands(w ? w.status : null); }} />
                     </LazyPanel>
-                    {/* B824 — drainage & mitigation live in ONE home now: Yield → Stormwater
-                        (the B712 sibling card was merged there — split-brain fix). Analysis keeps
-                        exactly this screening link row, not a duplicate ledger; the auto-refreshing
-                        flood finding above stays SiteAnalysis's own. */}
-                    <button type="button" onClick={() => setLeftPanel("yield")}
+                    {/* NEW-1 (2026-09-05, owner directive) — Analysis screens, Drainage decides:
+                        the flood finding above is a single present/absent screening row (its own
+                        freshness stamp lives on Drainage, never here — see SiteAnalysis.jsx), and
+                        this link routes to the Drainage module that owns the actual detention/
+                        mitigation working surface (moved out of Yield's old "Stormwater" section). */}
+                    <button type="button" onClick={() => setLeftPanel("drainage")}
                       style={{ marginTop: 8, width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "7px 10px", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.md, background: "transparent", color: PAL.ink, fontWeight: 700, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
                       <span>Floodplain drainage &amp; mitigation</span>
-                      <span style={{ color: PAL.muted, fontWeight: 600, fontSize: 10.5, whiteSpace: "nowrap" }}>in Yield · Stormwater →</span>
+                      <span style={{ color: PAL.muted, fontWeight: 600, fontSize: 10.5, whiteSpace: "nowrap" }}>in Drainage →</span>
                     </button>
                   </>
                 );
@@ -20198,11 +20219,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             bumpCount={bumpCount} bumpArea={bumpArea} bumpsUniform={bumpsUniform}
             inactiveCount={parcels.filter((p) => p.active === false).length}
             easeAll={easeAll} easeArea={easeArea} easeBldgArea={easeBldgArea} easePaveArea={easePaveArea}
-            drainage={drainFacts()} parcelOverlaps={parcelOverlaps}
-            heat={{ available: !!fmHeat, on: fmHeatOn, user: fmHeatUser, onToggle: setFmHeatUser, totals: fmHeatTotals, ledgerAcFt: fmResultView?.volumeAcFt ?? null }}
-            floodExposure={floodExposure} // NEW-3 — per-building floodplain exposure, rendered inside the Buildings group
-            onMitOpenChange={setFmMitOpen}
-            siteId={siteId} siteState={siteStateId} // B877440/B877441 — the "Request criteria" action on a no-data detention row
+            parcelOverlaps={parcelOverlaps}
+            onOpenDrainage={() => setLeftPanel("drainage")} // NEW-1 — the pond's one Land Use line links into Drainage
           />
           {/* v3 A8 — ④ Costs: the road + earthwork cards fold into one group. Closed summary is
               "not priced yet" until unit prices are entered; once priced it shows the totals. */}
@@ -20441,6 +20459,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               muted plain-English definition; Yield panel only). */}
           <YieldFooterDisclaimer />
           <ProvenanceLegend style={{ marginTop: 7, marginBottom: 9 }} />
+          </div>)}
+
+          {/* NEW-1 (2026-09-05, owner directive) — DRAINAGE owns the flood/detention/mitigation
+              working surface split out of Yield's old "Stormwater" section: the governing
+              authority + rule, required-vs-provided detention, pond sizing + storage
+              reconciliation, mitigation, finished-floor/freeboard, and the buildings-in-
+              floodplain check. Reads the SAME `drainFacts()` (ONE fetch, ONE cache, ONE
+              timestamp) Yield used to. */}
+          {_pid === "drainage" && (<div data-testid="drainage-metrics" style={{ display: "contents" }}>
+          <DrainagePanel
+            projectName={siteLabel} conceptName={planLabel}
+            drainage={drainFacts()}
+            heat={{ available: !!fmHeat, on: fmHeatOn, user: fmHeatUser, onToggle: setFmHeatUser, totals: fmHeatTotals, ledgerAcFt: fmResultView?.volumeAcFt ?? null }}
+            floodExposure={floodExposure} // NEW-3 — per-building floodplain exposure, its own Collapse here
+            onMitOpenChange={setFmMitOpen}
+            siteId={siteId} siteState={siteStateId} // B877440/B877441 — the "Request criteria" action on a no-data detention row
+          />
           </div>)}
 
           {/* Standards (B653) — pure per-element-type STARTING VALUES. The what-you-see
@@ -29052,6 +29087,32 @@ function DesignChangeSummaryCard({ summary, onDismiss, onUndo }) {
   );
 }
 
+// NEW-1 (2026-09-05, owner directive — split Yield: Analysis screens, Drainage decides, Yield
+// reports what's left over) — promoted to module scope so BOTH `YieldPanel` and the new
+// `DrainagePanel` (below) can share one copy: MODULE-SCOPE-COMPONENTS means neither component can
+// close over the other's locals, and these three tiny row/label renderers have no state of their
+// own — they only ever read the (module-scope, theme-fixed) `YIELD_PAL` palette.
+const groupHead = (color, label) => (
+  <div style={{ display: "flex", alignItems: "center", gap: 7, margin: "13px 0 5px" }}>
+    <span style={{ width: 7, height: 7, borderRadius: 99, background: color, flex: "none" }} />
+    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: YIELD_PAL.rowLabel }}>{label}</span>
+  </div>
+);
+// B895 — `tag` is an optional { code, basis } naming the headline value's SourceTag
+// (CODE/PLAN/SURVEY/ESTIMATE/YOURS/UNVERIFIED); omitted → no tag (unchanged today).
+const row = (label, value, sub, muted, tag) => (
+  <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: `1px solid ${YIELD_PAL.hairline}`, gap: 8 }}>
+    <span style={{ fontSize: 12, color: muted ? YIELD_PAL.muted : YIELD_PAL.rowLabel }}>{label}</span>
+    <span style={ROWB6}>
+      <span style={{ fontFamily: NUM_FONT, fontSize: 13, color: muted ? YIELD_PAL.muted : YIELD_PAL.text, fontWeight: 650, fontVariantNumeric: TABULAR_NUMS }}>
+        {value}{sub ? <span style={{ color: YIELD_PAL.muted, fontWeight: 400, fontSize: 10.5 }}> {sub}</span> : null}
+      </span>
+      {tag ? <SourceTag code={tag.code} label={label} basis={tag.basis} /> : null}
+    </span>
+  </div>
+);
+const note = (text) => <div style={{ fontSize: 10.5, color: YIELD_PAL.muted, lineHeight: 1.4, margin: "3px 0 0" }}>{text}</div>;
+
 function YieldPanel({
   projectName, conceptName, // v3 A1 — the header subtitle "{project} · {concept}"
   buildingCount, // v3 A6 — the BUILDINGS closed summary "{n} · {sf} SF"
@@ -29059,12 +29120,156 @@ function YieldPanel({
   pondBermRingSf, // v3 C4 — site-wide berm-ring land area (ac source), for the LAND USE Pond legend title
   providedDetCf, pondCount, // B719: site-wide provided detention VOLUME (cf) + pond count — the same accumulator the drainage screen uses
   bumpCount, bumpArea, bumpsUniform, inactiveCount, easeAll, easeArea, easeBldgArea, easePaveArea, collapsed,
-  drainage, // B630–B632: required-vs-provided detention + tier + regime (null until a site exists)
   parcelOverlaps, // B652: {count,names,overlapAcres} when active parcels overlap, else null
+  onOpenDrainage, // NEW-1 (2026-09-05) — jumps the left rail to the new Drainage panel
+}) {
+  const [openPanel, setOpenPanel] = useState(!collapsed);
+  const Y = YIELD_PAL;
+  const acres = siteSqft / SQFT_PER_ACRE;
+  const hasSite = siteSqft > 0;
+
+  // Composition — read engine OUTPUTS, never re-derive geometry. The four shares sum
+  // to 100 by construction (open is the clamped remainder), so the ring always closes.
+  const buildingPct = hasSite ? cov : 0;
+  const pavingPct = hasSite ? Math.max(0, impPct - cov) : 0;
+  const detentionPct = hasSite ? detPct : 0;
+  const openPct = hasSite ? Math.max(0, 100 - buildingPct - pavingPct - detentionPct) : 0;
+
+  return (
+    <div data-testid="yield-panel" style={{ marginBottom: 9, background: Y.panelBg, border: `1px solid ${Y.border}`, borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
+      {/* v3 A1 — header: SITE YIELD + "{project} · {concept}" subtitle. NEW-1 (2026-09-05) —
+          the flood-freshness element moved to the new Drainage panel; Yield now reports only
+          land use, coverage and costs (the pond rides the Land Use bar below, linked to Drainage). */}
+      <div onClick={() => setOpenPanel((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "9px 11px", userSelect: "none" }}>
+        <span style={{ width: 32, height: 32, borderRadius: 9, background: Y.iconTile, display: "grid", placeItems: "center", flex: "none" }}>
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+            <rect x="2.2" y="2.2" width="13.6" height="13.6" rx="2.6" stroke={Y.buildingAccent} strokeWidth="1.4" />
+            <rect x="4.6" y="8" width="5.6" height="5.4" rx="0.7" fill={Y.buildingAccent} />
+            <rect x="10.6" y="4.4" width="3.2" height="3.2" rx="0.6" fill={Y.buildingAccent} opacity="0.5" />
+          </svg>
+        </span>
+        <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: Y.text }}>Site Yield</span>
+          {(projectName || conceptName) && (
+            <span style={{ fontSize: 10.5, color: Y.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{[projectName, conceptName].filter(Boolean).join(" · ")}</span>
+          )}
+        </span>
+        <span style={{ fontSize: 10.5, color: Y.faint, transform: openPanel ? "rotate(90deg)" : "none", transition: "transform .18s ease", width: 10, flex: "none" }}>▶</span>
+      </div>
+
+      {openPanel && (
+        <div style={{ padding: "0 12px 13px" }}>
+          {/* B652 warning + B715 fix: two or more ACTIVE parcels cover the same ground. Site area now
+              DISSOLVES the overlap (counts it once), so the acreage is correct — but an overlap usually
+              means a duplicate/stray outline worth reviewing. Non-blocking; names the offending parcels. */}
+          {parcelOverlaps && (
+            <div role="alert" style={{ margin: "10px 0 2px", padding: "8px 10px", borderRadius: 9, background: "rgba(234,179,8,0.13)", border: `1px solid ${Y.warnText}`, color: Y.warnText, fontSize: 11, lineHeight: 1.45 }}>
+              <div style={{ fontWeight: 700 }}>⚠ Active parcels overlap</div>
+              <div style={{ marginTop: 2 }}>{parcelOverlaps.names.join(", ")} cover the same ground (~{f2(parcelOverlaps.overlapAcres)} AC of overlap). Site area counts the shared ground once — but if one is a duplicate or stray outline, make it inactive in the Parcel panel.</div>
+            </div>
+          )}
+          {/* v3 A5 — LAND USE: a stacked share bar + legend table + site total + impervious ratio.
+              Replaces the donut, the SITE/BUILDING/COVERAGE tiles, and the standalone Impervious /
+              Detention-sf/%/storage rows. Chart fills use the validated fixed palette (raw hex is
+              the established data-viz exception, as the retired donut was). */}
+          <Collapse sectionId="yield-land" title="Land use" defaultOpen={true} summary={hasSite ? `${f2(acres)} AC` : "no site drawn"}>
+            {(() => {
+              const sfShort = (sf) => sf >= 1e6 ? `${(sf / 1e6).toFixed(2)}M` : sf >= 1e3 ? `${Math.round(sf / 1e3).toLocaleString()}k` : `${Math.round(sf)}`;
+              const pavingSf = Math.max(0, siteSqft * pavingPct / 100);
+              const segs = [
+                { key: "building", label: "Buildings", ac: bldg / SQFT_PER_ACRE, pct: buildingPct, fill: "#eda100", title: `${f0(bldg)} SF` },
+                { key: "open", label: "Open space", ac: open / SQFT_PER_ACRE, pct: openPct, fill: "#008300", title: `${f0(open)} SF` },
+                { key: "pond", label: "Pond", ac: pondArea / SQFT_PER_ACRE, pct: detentionPct, fill: "#2a78d6", title: pondBermRingSf > 0 ? `${f2((pondArea - pondBermRingSf) / SQFT_PER_ACRE)} AC water + ${f2(pondBermRingSf / SQFT_PER_ACRE)} AC berm (inside ${f2(pondArea / SQFT_PER_ACRE)} AC footprint)` : `${f0(pondArea)} SF water footprint` },
+                { key: "paving", label: "Paving", ac: pavingSf / SQFT_PER_ACRE, pct: pavingPct, fill: "#eb6834", title: `${f0(pavingSf)} SF` },
+              ];
+              return (
+                <>
+                  <div style={{ display: "flex", height: 22, gap: 2, borderRadius: 6, overflow: "hidden", margin: "4px 0 10px", background: Y.track }}>
+                    {hasSite && segs.filter((s) => s.pct > 0.05).map((s) => (
+                      <div key={s.key} title={`${s.label} ${f2(s.ac)} AC · ${Math.round(s.pct)}%`} style={{ width: `${s.pct}%`, background: s.fill }} />
+                    ))}
+                  </div>
+                  {segs.map((s) => (
+                    // B944 folded the standalone "Detention %" row into this legend, so the pond's
+                    // share of the site is now read here — testid'd so that assertion has a stable
+                    // handle (the legend rows are otherwise addressable only by label text).
+                    <div key={s.key} data-testid={`yield-landuse-${s.key}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 3, background: s.fill, flex: "none" }} />
+                      <span style={{ flex: 1, fontSize: 11.5, color: Y.rowLabel, display: "flex", alignItems: "baseline", gap: 6, minWidth: 0 }}>
+                        {s.label}
+                        {/* NEW-1 (2026-09-05) — the pond is Yield's ONE line of consumed acreage; the
+                            flood/detention/mitigation math that sized it lives in Drainage now. */}
+                        {s.key === "pond" && onOpenDrainage && (
+                          <ActionLink onClick={onOpenDrainage}>Drainage →</ActionLink>
+                        )}
+                      </span>
+                      <span title={s.title} style={{ fontFamily: NUM_FONT, fontSize: 12, fontWeight: 650, color: Y.text, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap", cursor: "help" }}>{f2(s.ac)} AC</span>
+                      <span style={{ width: 40, textAlign: "right", fontFamily: NUM_FONT, fontSize: 11.5, color: Y.muted, fontVariantNumeric: TABULAR_NUMS }}>{Math.round(s.pct)}%</span>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, padding: "6px 0 0", marginTop: 4, borderTop: `1px solid ${Y.hairline}` }}>
+                    <span style={{ fontSize: 11.5, color: Y.rowLabel }}>Site</span>
+                    <span title={`${f0(siteSqft)} SF`} style={{ whiteSpace: "nowrap", cursor: "help" }}>
+                      <span style={{ fontFamily: NUM_FONT, fontSize: 12.5, fontWeight: 650, color: Y.text, fontVariantNumeric: TABULAR_NUMS }}>{f2(acres)} AC</span>
+                      <span style={{ fontSize: 10, color: Y.muted }}> · {sfShort(siteSqft)} SF</span>
+                    </span>
+                  </div>
+                  {inactiveCount > 0 && note(`Excludes ${inactiveCount} inactive parcel${inactiveCount > 1 ? "s" : ""}: toggle in the Parcel panel.`)}
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "4px 0 0", fontSize: 11, color: Y.muted }}>
+                    <span>Impervious (buildings + paving)</span>
+                    <span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{f0(impPct)}%</span>
+                  </div>
+                </>
+              );
+            })()}
+          </Collapse>
+          {/* v3 A6 — BUILDINGS (closed). Aggregates only (per-building rows need building-level data
+              not threaded to this panel); coverage lives here as a building fact, and the parking
+              stall counts ride along so no drawn number is lost. */}
+          <Collapse sectionId="yield-buildings" title="Buildings" defaultOpen={false} summary={hasSite ? `${buildingCount || 0} · ${f0(bldg)} SF` : "none"}>
+            {row("Building", `${f0(bldg)} SF`, bumpCount ? `incl. ${bumpCount} bump-out${bumpCount > 1 ? "s" : ""}` : "")}
+            {bumpCount > 0 && row("· Bump-outs", `${f0(bumpArea)} SF`, bumpsUniform ? `${bumpCount} × ${DOGEAR_W}′×${DOGEAR_D}′` : `${bumpCount} bump-out${bumpCount > 1 ? "s" : ""} · sizes vary`, true)}
+            {row("Coverage", `${f0(cov)}%`)}
+            {row("Car stalls", f0(stalls), ratio ? `· ${f2(ratio)}/1k sf` : "")}
+            {row("Trailer stalls", f0(trailers))}
+          </Collapse>
+          {/* v3 B2 — the BUILDABILITY group is DELETED. Buildability is now a permanent verdict-
+              strip row (see yieldVerdicts.buildabilityVerdict) — "not checked yet" with a ↻ when
+              unassessed, OK/short when assessed — so a second group would only restate it. */}
+
+          {easeAll.length > 0 && (<>
+            {groupHead(Y.faint, "Easements")}
+            {row("Easements", `${f2(easeArea / SQFT_PER_ACRE)} AC`, `${easeAll.length} · ${f0(easeArea)} SF gross`)}
+            {row("· Restrict buildings", `${f0(easeBldgArea)} SF`, easeBldgArea ? `· ${f2(easeBldgArea / SQFT_PER_ACRE)} AC` : "", true)}
+            {easePaveArea > 0 && row("· Restrict paving", `${f0(easePaveArea)} SF`, "", true)}
+            {note("Gross of overlaps; subtracted from buildable area by the future yield engine.")}
+          </>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ⛔ NEW-1 (2026-09-05, owner directive — "Analysis screens, Drainage decides, Yield reports
+// what is left over") — DRAINAGE is its own left-rail module, split out of what used to be
+// Yield's "Stormwater" section. It OWNS: the governing authority and rule, required vs
+// provided detention volume, pond sizing and the storage reconciliation, mitigation, finished-
+// floor/freeboard (buildability), and the buildings-in-floodplain check. Yield keeps land-use/
+// coverage/costs and shows the pond only as one line of consumed acreage that links here.
+// Analysis keeps a single present/absent flood row that links here too. ONE fetch (checkDrainage,
+// in SitePlanner.jsx), ONE cache (settings.drainage.lastCheck), ONE timestamp (checkedAt) —
+// owned by this module, read by the other two (Yield via the Land Use pond link; Analysis via
+// its one-line flood row). MODULE-SCOPE-COMPONENTS: its own top-level component, sharing only
+// the module-scope `groupHead`/`row`/`note` helpers with YieldPanel (see their definitions above).
+function DrainagePanel({
+  projectName, conceptName, // the header subtitle "{project} · {concept}"
+  drainage, // B630–B632: required-vs-provided detention + tier + regime (null until a site exists)
   heat, // B809: { available, on, user, onToggle, totals, ledgerAcFt } — the fill-depth heat map
   onMitOpenChange, // B809: mirrors the mit group's expansion up (heat map defaults ON while open)
   floodExposure, // NEW-3: buildingFloodExposure() result — per-building footprint ∩ flood zone
   siteId, siteState, // B877440/B877441 — for the "Request criteria" action's filed row
+  collapsed,
 }) {
   const [openPanel, setOpenPanel] = useState(!collapsed);
   // ⛔ B877440/B877441 — YieldPanel is its own top-level component (MODULE-SCOPE-COMPONENTS), so
@@ -29106,8 +29311,6 @@ function YieldPanel({
     return () => clearTimeout(t);
   }, [drainage?.sig]);
   const Y = YIELD_PAL;
-  const acres = siteSqft / SQFT_PER_ACRE;
-  const hasSite = siteSqft > 0;
   // B907 — a FORWARD-LOOKING land-take advisory: how much MORE land a detention
   // shortfall (required > provided, the SAME figures the site's "raise TOB" berm-apply
   // screen reads) would consume, at a typical screening pond depth. Advisory only —
@@ -29117,40 +29320,7 @@ function YieldPanel({
     ? detentionLandTakeEstimate({ requiredAcFt: drainage.req.requiredAcFt, providedUsableCf: drainage.providedUsableCf, avgDepthFt: drainage.screeningPondDepthFt })
     : null;
 
-  // Composition — read engine OUTPUTS, never re-derive geometry. The four shares sum
-  // to 100 by construction (open is the clamped remainder), so the ring always closes.
-  const buildingPct = hasSite ? cov : 0;
-  const pavingPct = hasSite ? Math.max(0, impPct - cov) : 0;
-  const detentionPct = hasSite ? detPct : 0;
-  const openPct = hasSite ? Math.max(0, 100 - buildingPct - pavingPct - detentionPct) : 0;
-  // v3 A5 — the composition SHARES (building/paving/pond/open %) feed the LAND USE stacked
-  // bar below. The donut, its arc geometry, and the SITE/BUILDING/COVERAGE KPI tiles were
-  // removed (the bar replaces them); the four percentages above are the only survivors.
-  const groupHead = (color, label) => (
-    <div style={{ display: "flex", alignItems: "center", gap: 7, margin: "13px 0 5px" }}>
-      <span style={{ width: 7, height: 7, borderRadius: 99, background: color, flex: "none" }} />
-      <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: Y.rowLabel }}>{label}</span>
-    </div>
-  );
-  // B895 — `tag` is an optional { code, basis } naming the headline value's SourceTag
-  // (CODE/PLAN/SURVEY/ESTIMATE/YOURS/UNVERIFIED); omitted → no tag (unchanged today).
-  const row = (label, value, sub, muted, tag) => (
-    <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: `1px solid ${Y.hairline}`, gap: 8 }}>
-      <span style={{ fontSize: 12, color: muted ? Y.muted : Y.rowLabel }}>{label}</span>
-      <span style={ROWB6}>
-        <span style={{ fontFamily: NUM_FONT, fontSize: 13, color: muted ? Y.muted : Y.text, fontWeight: 650, fontVariantNumeric: TABULAR_NUMS }}>
-          {value}{sub ? <span style={{ color: Y.muted, fontWeight: 400, fontSize: 10.5 }}> {sub}</span> : null}
-        </span>
-        {tag ? <SourceTag code={tag.code} label={label} basis={tag.basis} /> : null}
-      </span>
-    </div>
-  );
-  const note = (text) => <div style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.4, margin: "3px 0 0" }}>{text}</div>;
 
-  // FINAL UI SPEC Part B (B1.2) — closed-state summaries for the top-level Collapse groups.
-  // v3 A3/A4/A7 — compute the drainage verdict groups ONCE, split so the DETENTION DETAIL /
-  // MITIGATION DETAIL groups (drainageBlocks.sw) and the BUILDABILITY group (ffe) render as
-  // separate top-level sections.
   const drainageBlocks = drainage ? (() => {
             const d = drainage;
             // B823 — warn notes are hard-capped at ONE line (≤110 chars, unit-guarded); the
@@ -30906,20 +31076,20 @@ function YieldPanel({
   const floodAgeMs = drainage ? drainage.floodAgeMs : null;
 
   return (
-    <div data-testid="yield-panel" style={{ marginBottom: 9, background: Y.panelBg, border: `1px solid ${Y.border}`, borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
-      {/* v3 A1 — header: SITE YIELD + "{project} · {concept}" subtitle (left); the ONE freshness
+    <div data-testid="drainage-panel" style={{ marginBottom: 9, background: Y.panelBg, border: `1px solid ${Y.border}`, borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
+      {/* v3 A1 — header: DRAINAGE + "{project} · {concept}" subtitle (left); the ONE freshness
           element "Flood data {age} ago · ↻" (right, neutral gray, amber while a verdict is blocked
-          loading — state D). The old "As of … live check · auto" clock + 3-line flood banner are gone. */}
+          loading — state D). This is the SAME freshness element the Yield panel used to show —
+          moved here wholesale, unchanged, per NEW-1's "one timestamp, owned by Drainage" rule. */}
       <div onClick={() => setOpenPanel((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "9px 11px", userSelect: "none" }}>
         <span style={{ width: 32, height: 32, borderRadius: 9, background: Y.iconTile, display: "grid", placeItems: "center", flex: "none" }}>
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <rect x="2.2" y="2.2" width="13.6" height="13.6" rx="2.6" stroke={Y.buildingAccent} strokeWidth="1.4" />
-            <rect x="4.6" y="8" width="5.6" height="5.4" rx="0.7" fill={Y.buildingAccent} />
-            <rect x="10.6" y="4.4" width="3.2" height="3.2" rx="0.6" fill={Y.buildingAccent} opacity="0.5" />
+            <path d="M9 2.5C9 2.5 3.8 8.6 3.8 12.2a5.2 5.2 0 0 0 10.4 0C14.2 8.6 9 2.5 9 2.5Z" stroke={Y.buildingAccent} strokeWidth="1.4" fill="none" />
+            <path d="M6.6 11.4c0 1.4 1.1 2.5 2.4 2.5" stroke={Y.buildingAccent} strokeWidth="1.2" fill="none" opacity="0.6" />
           </svg>
         </span>
         <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: Y.text }}>Site Yield</span>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: Y.text }}>Drainage</span>
           {(projectName || conceptName) && (
             <span style={{ fontSize: 10.5, color: Y.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{[projectName, conceptName].filter(Boolean).join(" · ")}</span>
           )}
@@ -30975,15 +31145,6 @@ function YieldPanel({
 
       {openPanel && (
         <div style={{ padding: "0 12px 13px" }}>
-          {/* B652 warning + B715 fix: two or more ACTIVE parcels cover the same ground. Site area now
-              DISSOLVES the overlap (counts it once), so the acreage is correct — but an overlap usually
-              means a duplicate/stray outline worth reviewing. Non-blocking; names the offending parcels. */}
-          {parcelOverlaps && (
-            <div role="alert" style={{ margin: "10px 0 2px", padding: "8px 10px", borderRadius: 9, background: "rgba(234,179,8,0.13)", border: `1px solid ${Y.warnText}`, color: Y.warnText, fontSize: 11, lineHeight: 1.45 }}>
-              <div style={{ fontWeight: 700 }}>⚠ Active parcels overlap</div>
-              <div style={{ marginTop: 2 }}>{parcelOverlaps.names.join(", ")} cover the same ground (~{f2(parcelOverlaps.overlapAcres)} AC of overlap). Site area counts the shared ground once — but if one is a duplicate or stray outline, make it inactive in the Parcel panel.</div>
-            </div>
-          )}
           {/* v3 A2 — the VERDICT STRIP: one row per verdict, grid [40px pill | 1fr sentence |
               auto]. Word-only equal-width SHORT/OK/… pills (G5); the provided/required pair is
               bold+nowrap and renders ONCE per panel here (G1). The sentence NEVER ellipsizes — it
@@ -31204,63 +31365,18 @@ function YieldPanel({
               Detention shortfall ≈ +{f2(detentionLandTake.footprintAc)} AC more land (screening estimate)
             </WatchOutChip>
           )}
-          {/* v3 A5 — LAND USE: a stacked share bar + legend table + site total + impervious ratio.
-              Replaces the donut, the SITE/BUILDING/COVERAGE tiles, and the standalone Impervious /
-              Detention-sf/%/storage rows. Chart fills use the validated fixed palette (raw hex is
-              the established data-viz exception, as the retired donut was). */}
-          <Collapse sectionId="yield-land" title="Land use" defaultOpen={true} summary={hasSite ? `${f2(acres)} AC` : "no site drawn"}>
-            {(() => {
-              const sfShort = (sf) => sf >= 1e6 ? `${(sf / 1e6).toFixed(2)}M` : sf >= 1e3 ? `${Math.round(sf / 1e3).toLocaleString()}k` : `${Math.round(sf)}`;
-              const pavingSf = Math.max(0, siteSqft * pavingPct / 100);
-              const segs = [
-                { key: "building", label: "Buildings", ac: bldg / SQFT_PER_ACRE, pct: buildingPct, fill: "#eda100", title: `${f0(bldg)} SF` },
-                { key: "open", label: "Open space", ac: open / SQFT_PER_ACRE, pct: openPct, fill: "#008300", title: `${f0(open)} SF` },
-                { key: "pond", label: "Pond", ac: pondArea / SQFT_PER_ACRE, pct: detentionPct, fill: "#2a78d6", title: pondBermRingSf > 0 ? `${f2((pondArea - pondBermRingSf) / SQFT_PER_ACRE)} AC water + ${f2(pondBermRingSf / SQFT_PER_ACRE)} AC berm (inside ${f2(pondArea / SQFT_PER_ACRE)} AC footprint)` : `${f0(pondArea)} SF water footprint` },
-                { key: "paving", label: "Paving", ac: pavingSf / SQFT_PER_ACRE, pct: pavingPct, fill: "#eb6834", title: `${f0(pavingSf)} SF` },
-              ];
-              return (
-                <>
-                  <div style={{ display: "flex", height: 22, gap: 2, borderRadius: 6, overflow: "hidden", margin: "4px 0 10px", background: Y.track }}>
-                    {hasSite && segs.filter((s) => s.pct > 0.05).map((s) => (
-                      <div key={s.key} title={`${s.label} ${f2(s.ac)} AC · ${Math.round(s.pct)}%`} style={{ width: `${s.pct}%`, background: s.fill }} />
-                    ))}
-                  </div>
-                  {segs.map((s) => (
-                    // B944 folded the standalone "Detention %" row into this legend, so the pond's
-                    // share of the site is now read here — testid'd so that assertion has a stable
-                    // handle (the legend rows are otherwise addressable only by label text).
-                    <div key={s.key} data-testid={`yield-landuse-${s.key}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
-                      <span style={{ width: 10, height: 10, borderRadius: 3, background: s.fill, flex: "none" }} />
-                      <span style={{ flex: 1, fontSize: 11.5, color: Y.rowLabel }}>{s.label}</span>
-                      <span title={s.title} style={{ fontFamily: NUM_FONT, fontSize: 12, fontWeight: 650, color: Y.text, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap", cursor: "help" }}>{f2(s.ac)} AC</span>
-                      <span style={{ width: 40, textAlign: "right", fontFamily: NUM_FONT, fontSize: 11.5, color: Y.muted, fontVariantNumeric: TABULAR_NUMS }}>{Math.round(s.pct)}%</span>
-                    </div>
-                  ))}
-                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, padding: "6px 0 0", marginTop: 4, borderTop: `1px solid ${Y.hairline}` }}>
-                    <span style={{ fontSize: 11.5, color: Y.rowLabel }}>Site</span>
-                    <span title={`${f0(siteSqft)} SF`} style={{ whiteSpace: "nowrap", cursor: "help" }}>
-                      <span style={{ fontFamily: NUM_FONT, fontSize: 12.5, fontWeight: 650, color: Y.text, fontVariantNumeric: TABULAR_NUMS }}>{f2(acres)} AC</span>
-                      <span style={{ fontSize: 10, color: Y.muted }}> · {sfShort(siteSqft)} SF</span>
-                    </span>
-                  </div>
-                  {inactiveCount > 0 && note(`Excludes ${inactiveCount} inactive parcel${inactiveCount > 1 ? "s" : ""}: toggle in the Parcel panel.`)}
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "4px 0 0", fontSize: 11, color: Y.muted }}>
-                    <span>Impervious (buildings + paving)</span>
-                    <span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{f0(impPct)}%</span>
-                  </div>
-                </>
-              );
-            })()}
-          </Collapse>
-          {/* v3 A6 — BUILDINGS (closed). Aggregates only (per-building rows need building-level data
-              not threaded to this panel); coverage lives here as a building fact, and the parking
-              stall counts ride along so no drawn number is lost. */}
-          <Collapse sectionId="yield-buildings" title="Buildings" defaultOpen={false} summary={hasSite ? `${buildingCount || 0} · ${f0(bldg)} SF` : "none"}>
-            {row("Building", `${f0(bldg)} SF`, bumpCount ? `incl. ${bumpCount} bump-out${bumpCount > 1 ? "s" : ""}` : "")}
-            {bumpCount > 0 && row("· Bump-outs", `${f0(bumpArea)} SF`, bumpsUniform ? `${bumpCount} × ${DOGEAR_W}′×${DOGEAR_D}′` : `${bumpCount} bump-out${bumpCount > 1 ? "s" : ""} · sizes vary`, true)}
-            {row("Coverage", `${f0(cov)}%`)}
-            {row("Car stalls", f0(stalls), ratio ? `· ${f2(ratio)}/1k sf` : "")}
-            {row("Trailer stalls", f0(trailers))}
+          {/* NEW-3 — IN THE FLOODPLAIN? The number, not the picture. Verdict + one figure on the
+              headline row; the per-building breakdown only when a building is actually exposed,
+              and the honest non-answers ("didn't answer", "not pulled yet") never read as a
+              clean zero. NEW-1 (2026-09-05) — promoted from a sub-section of Yield's Buildings
+              group to its own Drainage collapse: buildings-in-floodplain is a drainage question. */}
+          <Collapse sectionId="drainage-buildings" title="Buildings in the floodplain" defaultOpen={false}
+            summary={(() => {
+              const fx = floodExposure;
+              if (!fx || fx.state === "no-buildings") return "none";
+              const head = exposureHeadline(fx);
+              return head ? head.text : "—";
+            })()}>
             {/* NEW-3 — IN THE FLOODPLAIN? The number, not the picture. Verdict + one figure on the
                 headline row; the per-building breakdown only when a building is actually exposed,
                 and the honest non-answers ("didn't answer", "not pulled yet") never read as a
@@ -31292,17 +31408,6 @@ function YieldPanel({
               );
             })()}
           </Collapse>
-          {/* v3 B2 — the BUILDABILITY group is DELETED. Buildability is now a permanent verdict-
-              strip row (see yieldVerdicts.buildabilityVerdict) — "not checked yet" with a ↻ when
-              unassessed, OK/short when assessed — so a second group would only restate it. */}
-
-          {easeAll.length > 0 && (<>
-            {groupHead(Y.faint, "Easements")}
-            {row("Easements", `${f2(easeArea / SQFT_PER_ACRE)} AC`, `${easeAll.length} · ${f0(easeArea)} SF gross`)}
-            {row("· Restrict buildings", `${f0(easeBldgArea)} SF`, easeBldgArea ? `· ${f2(easeBldgArea / SQFT_PER_ACRE)} AC` : "", true)}
-            {easePaveArea > 0 && row("· Restrict paving", `${f0(easePaveArea)} SF`, "", true)}
-            {note("Gross of overlaps; subtracted from buildable area by the future yield engine.")}
-          </>)}
         </div>
       )}
     </div>

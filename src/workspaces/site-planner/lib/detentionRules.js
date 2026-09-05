@@ -959,6 +959,18 @@ export function assessHydraulicRegime({
   groundElevFt = null,
   groundDatum = "NAVD88", // 3DEP bare-earth is NAVD88 (US survey feet)
   pondDepthFt = 8,
+  // NEW-6b (2026-09-05, owner-reported) — a DERIVED governing water surface (FEMA regulatory
+  // cross-section WSEL_REG via governingCrossSectionWsel, or a BFE-line interpolation via
+  // deriveBfeFromLines — floodplainMitigation.js), already resolved in feet NAVD88 by the SAME
+  // provider chain the mitigation ledger and every pond's own flood facts price against
+  // (zoneWaterSurface / wse1pctForRing). Used ONLY as a fallback when no zone publishes its own
+  // static BFE. Most AE reaches leave the polygon's STATIC_BFE at FEMA's -9999 "none" sentinel
+  // and carry the real BFE on the separate S_BFE contour layer instead — reading that as "no
+  // published BFE" left the site's hydraulic regime permanently "unknown" even when a governing
+  // water surface ~8 ft above grade had already been resolved and was already driving the
+  // mitigation ledger, so `estPoolDepthFt` (Regime-B-only) silently stayed null forever.
+  resolvedWseFt = null,
+  resolvedWseSrc = null,
 } = {}) {
   const zones = floodZones || [];
   const sfha = zones.filter((z) => isSfhaZone(z.zone));
@@ -973,26 +985,35 @@ export function assessHydraulicRegime({
   }
 
   const withBfe = sfha.filter((z) => z.staticBfeFt != null && z.staticBfeFt > BFE_SENTINEL_MIN);
-  if (!withBfe.length) {
+  let bfeFt, bfeDatum;
+  if (withBfe.length) {
+    // The GOVERNING (highest) BFE drives the regime — read its datum from the SAME zone
+    // it came from, never from a different zone (a borrowed datum could mislabel feet).
+    const governingZone = withBfe.reduce((a, z) => (z.staticBfeFt > a.staticBfeFt ? z : a), withBfe[0]);
+    bfeFt = governingZone.staticBfeFt;
+    bfeDatum = governingZone.vdatum || null;
+    if (!bfeDatum) {
+      out.regime = "unknown";
+      out.label = "Regime unknown";
+      out.flags.push("bfe-datum-unpublished");
+      out.reasons.push(`BFE ${bfeFt.toFixed(1)} ft published WITHOUT a vertical datum — rejected rather than assumed (an elevation without its datum can be off by feet).`);
+      out.consequence = "Confirm the BFE's datum (usually NAVD88) against the FIRM panel before comparing elevations.";
+      return out;
+    }
+  } else if (Number.isFinite(resolvedWseFt) && resolvedWseFt > BFE_SENTINEL_MIN) {
+    // NEW-6b — no zone publishes its own static BFE, but a governing surface was already
+    // resolved (and is already feet-NAVD88 by this engine's own convention — never a raw,
+    // datum-unconfirmed NFHL attribute, so no separate datum check applies here).
+    bfeFt = resolvedWseFt;
+    bfeDatum = "NAVD88";
+    out.flags.push("derived-wse");
+    out.reasons.push(`No published static BFE on this reach — using the ${resolvedWseSrc || "derived"} water surface (${bfeFt.toFixed(1)} ft NAVD88) already resolved for this site.`);
+  } else {
     out.regime = "unknown";
     out.label = "Regime unknown";
     out.reasons.push("regime unknown — floodplain present but no published BFE");
     out.consequence = "Zone A (no static BFE published): the governing water surface can't be established from the map alone — a flood study or the effective model is needed. Never assume a deep outfall helps here.";
     out.flags.push("no-published-bfe");
-    return out;
-  }
-
-  // The GOVERNING (highest) BFE drives the regime — read its datum from the SAME zone
-  // it came from, never from a different zone (a borrowed datum could mislabel feet).
-  const governingZone = withBfe.reduce((a, z) => (z.staticBfeFt > a.staticBfeFt ? z : a), withBfe[0]);
-  const bfeFt = governingZone.staticBfeFt;
-  const bfeDatum = governingZone.vdatum || null;
-  if (!bfeDatum) {
-    out.regime = "unknown";
-    out.label = "Regime unknown";
-    out.flags.push("bfe-datum-unpublished");
-    out.reasons.push(`BFE ${bfeFt.toFixed(1)} ft published WITHOUT a vertical datum — rejected rather than assumed (an elevation without its datum can be off by feet).`);
-    out.consequence = "Confirm the BFE's datum (usually NAVD88) against the FIRM panel before comparing elevations.";
     return out;
   }
   if (groundElevFt == null) {
@@ -1692,13 +1713,19 @@ const shapeSourceState = (r, error) =>
 /* Resolve who reviews this parcel's drainage. Composes identifyJurisdiction (county /
  * city / ETJ — same cache) with the QUERIED TCEQ MUD layer. opts.{cache, fetchJson,
  * onStatus} thread through both, exactly like the jurisdiction identify. */
-export async function resolveDrainageAuthority({ lng, lat, ring = null } = {}, opts = {}) {
+export async function resolveDrainageAuthority({ lng, lat, ring = null, rings = null } = {}, opts = {}) {
   const geom = ring && ring.length >= 3 ? { ring } : { lng, lat };
   // Thread the ring into the jurisdiction identify too — otherwise county/city/ETJ
   // are point-at-centroid queries and a boundary straddle can NEVER be detected
   // (authorityForJurisdiction's straddle branch needs counties.length>1, which a
   // point query can't produce), and city/ETJ membership reads centroid-only.
-  const jurOpts = geom.ring ? { ...opts, ring: geom.ring } : opts;
+  // NEW-5 (2026-09-05) — and thread EVERY active parcel's ring (`rings`), not just the
+  // largest one: a multi-parcel assemblage's city/ETJ containment is a coin flip weighted
+  // by lot size when only the largest parcel is tested (the same jurisdiction.js
+  // `parcelProbePoints` fix already wired into the header badge — see its own header).
+  const jurOpts = geom.ring
+    ? { ...opts, ring: geom.ring, ...(Array.isArray(rings) && rings.length > 1 ? { rings } : {}) }
+    : opts;
   const [jur, mudRes, bkddRes] = await Promise.all([
     identifyJurisdiction(lng, lat, jurOpts),
     identifySource(DETENTION_SOURCES.mud, geom, opts).fresh,
@@ -1770,9 +1797,9 @@ export async function resolveDrainageAuthority({ lng, lat, ring = null } = {}, o
  * injected sampler — lib/elevation.js sampleProfile in the app; absent in tests).
  * Tier / regime / required-volume are NOT computed here — they're pure functions the
  * UI re-derives each render from this context + live metrics (zero refetch on edits). */
-export async function resolveDrainageContext({ lng, lat, ring = null } = {}, opts = {}) {
+export async function resolveDrainageContext({ lng, lat, ring = null, rings = null } = {}, opts = {}) {
   const geom = ring && ring.length >= 3 ? { ring } : { lng, lat };
-  const authorityP = resolveDrainageAuthority({ lng, lat, ring }, opts);
+  const authorityP = resolveDrainageAuthority({ lng, lat, ring, rings }, opts);
   const floodP = identifySource(DETENTION_SOURCES.detFlood, geom, opts).fresh;
   const authority = await authorityP;
   const inHarris = authority.channelAuthority === "hcfcd";
@@ -2002,7 +2029,15 @@ export function slimDrainageContext(ctx) {
     drainageDistrict: ctx.drainageDistrict
       ? { id: ctx.drainageDistrict.id ?? null, source: ctx.drainageDistrict.source ?? null, tested: ctx.drainageDistrict.tested || [] }
       : null,
-    flood: ctx.flood ? { zones: ctx.flood.zones || [], panels: ctx.flood.panels || [], state: ctx.flood.state, ageMs: ctx.flood.ageMs ?? null } : null,
+    // NEW-2 (2026-09-05, owner-reported) — `ageMs` is NEVER persisted here any more. It was the
+    // gisCache fetch's own cache-hit age AT THE INSTANT this check ran (near-zero on a fresh
+    // network pull, larger on a served-from-cache read) — a fact about that one moment, not a
+    // freshness reading that stays true later. Read back after a reload it looked like a live
+    // number ("flood data 0m ago") while `lastCheck.checkedAt` — the one real "how long ago did
+    // this check run" fact — could be weeks old, which is exactly the self-contradiction found in
+    // the stored record (flood.ageMs:0 beside a 30-day-old checkedAt). `hydrateDrainageContext`
+    // now derives age from `checkedAt` alone — see its own header.
+    flood: ctx.flood ? { zones: ctx.flood.zones || [], panels: ctx.flood.panels || [], state: ctx.flood.state } : null,
     channel: ch ? {
       near: ch.near ?? null, unitNo: ch.unitNo ?? null, name: ch.name ?? null, type: ch.type ?? null,
       distFt: ch.distFt ?? null, state: ch.state ?? null,
@@ -2018,7 +2053,8 @@ export function slimDrainageContext(ctx) {
       present: ctx.easements.present ?? null, items: ctx.easements.items || [],
       maxWidthFt: ctx.easements.maxWidthFt ?? null, state: ctx.easements.state ?? null,
     } : null,
-    watershed: ctx.watershed ? { names: ctx.watershed.names || [], sqMiles: ctx.watershed.sqMiles ?? null, state: ctx.watershed.state, ageMs: ctx.watershed.ageMs ?? null } : null,
+    // NEW-2 — same reasoning as `flood` above: no persisted `ageMs` snapshot.
+    watershed: ctx.watershed ? { names: ctx.watershed.names || [], sqMiles: ctx.watershed.sqMiles ?? null, state: ctx.watershed.state } : null,
     groundElevFt: ctx.groundElevFt ?? null,
     groundDatum: ctx.groundDatum ?? "NAVD88",
   };
@@ -2044,9 +2080,21 @@ const AUTHORITY_DERIVED_OVERLAY_KINDS = new Set(["etj", "municipal"]);
  * never self-healed remembered checks. When the raw facts are present we re-run
  * authorityForJurisdiction on them and rebuild primary/channelAuthority/overlays/
  * ambiguous/flags from ITS output, keeping only the stored query-outcome entries the
- * derivation can't reproduce. Factless slims (legacy checks) keep the stored id. */
+ * derivation can't reproduce. Factless slims (legacy checks) keep the stored id.
+ *
+ * NEW-2 (2026-09-05, owner-reported) — ONE freshness fact drives every age reading this function
+ * hands back: `slim.checkedAt`, the same timestamp the Yield header's own "checked Xd ago" line
+ * already reads. `flood.ageMs`/`watershed.ageMs` used to be read straight off the stored slim — a
+ * snapshot of the underlying GIS fetch's cache-hit age AT THE MOMENT the check ran, frozen forever
+ * once written (a fresh network pull reads ~0 and stays 0 no matter how old the check gets). Every
+ * consumer of these two fields (the Layers-panel FIRM-basis hover included) now gets a LIVE age
+ * computed here, at hydrate/render time, so a restored session can never show a "just now" age
+ * beside a checked-30-days-ago header again. */
 export function hydrateDrainageContext(slim) {
   if (!slim) return null;
+  // A negative age (a clock skew, or a `checkedAt` that is momentarily in the future) reads as 0,
+  // never a negative "how long ago" — that would print as nonsense in `formatAge`.
+  const checkedAtAgeMs = Number.isFinite(slim.checkedAt) ? Math.max(0, Date.now() - slim.checkedAt) : null;
   const a = slim.authority || {};
   const jur = {
     city: a.jurisdiction?.city || [],
@@ -2112,7 +2160,7 @@ export function hydrateDrainageContext(slim) {
       sources: [],
       note: SCREENING_CAVEAT,
     },
-    flood: slim.flood ? { zones: slim.flood.zones || [], panels: slim.flood.panels || [], state: slim.flood.state, ageMs: slim.flood.ageMs ?? null } : { zones: [], panels: [], state: "empty", ageMs: null },
+    flood: slim.flood ? { zones: slim.flood.zones || [], panels: slim.flood.panels || [], state: slim.flood.state, ageMs: checkedAtAgeMs } : { zones: [], panels: [], state: "empty", ageMs: checkedAtAgeMs },
     drainageDistrict: {
       id: restoredDistrictId,
       source: restoredDistrictSource,
@@ -2120,7 +2168,7 @@ export function hydrateDrainageContext(slim) {
     },
     channel: slim.channel ? { ...slim.channel, geometry: null } : { near: null, state: "not-applicable" },
     easements: slim.easements ? { ...slim.easements, items: slim.easements.items || [] } : null,
-    watershed: slim.watershed ? { names: watershedNames, sqMiles: slim.watershed.sqMiles ?? null, state: slim.watershed.state, ageMs: slim.watershed.ageMs ?? null } : null,
+    watershed: slim.watershed ? { names: watershedNames, sqMiles: slim.watershed.sqMiles ?? null, state: slim.watershed.state, ageMs: checkedAtAgeMs } : null,
     watershedOverlays,
     groundElevFt: slim.groundElevFt ?? null,
     groundDatum: slim.groundDatum ?? "NAVD88",

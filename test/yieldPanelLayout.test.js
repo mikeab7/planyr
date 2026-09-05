@@ -13,12 +13,29 @@ const at = (needle) => {
 };
 
 describe("A1/A2/A5/A6 — top-to-bottom order", () => {
-  it("verdict strip → LAND USE → BUILDINGS render in order (Buildability is now a strip row, B2)", () => {
+  // NEW-1 (2026-09-05, owner directive) — the verdict strip moved OUT of Yield entirely, into
+  // the new DrainagePanel (Analysis screens, Drainage decides, Yield reports what's left over).
+  // Yield's own body is now just LAND USE → BUILDINGS (no verdict strip, no drainage detail).
+  it("LAND USE → BUILDINGS render in order inside YieldPanel (Buildability is a Drainage strip row now, B2/NEW-1)", () => {
+    const yieldStart = at("function YieldPanel(");
+    const yieldEnd = at("function DrainagePanel(");
+    expect(yieldStart).toBeLessThan(yieldEnd);
     const order = [
-      'data-testid="yield-verdict-strip"',
       'sectionId="yield-land"',
       'sectionId="yield-buildings"',
-    ].map(at);
+    ].map((needle) => src.indexOf(needle, yieldStart));
+    expect(order.every((i) => i > yieldStart && i < yieldEnd)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it("the verdict strip → detention/mitigation detail → buildings-in-floodplain render in order inside DrainagePanel", () => {
+    const drainStart = at("function DrainagePanel(");
+    const order = [
+      'data-testid="yield-verdict-strip"',
+      "drainageBlocks && drainageBlocks.sw",
+      'sectionId="drainage-buildings"',
+    ].map((needle) => src.indexOf(needle, drainStart));
+    expect(order.every((i) => i > drainStart)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 

@@ -54,7 +54,7 @@ backstop, not the headline — see "Known, deliberately-not-fixed findings".
 | Main menu — Settings gear | 2 | 2 | 2 | — | 2 |
 | Main menu — plan menu (▾ next to the plan name) | 0 | 0 | 3 | — | 3 |
 | Tool rail | 2 | 2 | 2 | — | 2 |
-| Left rail + panels (Yield) | 16 | 16 | 15 | 1 | 16 |
+| Left rail + panels (Yield) | 17 | 17 | 15 | 2 | 17 |
 | Library | 1 | 1 | 0 | 1 | 1 |
 | Doc Review (empty state) | 2 | 2 | 1 | 1 | 2 |
 
@@ -66,6 +66,8 @@ left outside its surface's own budget):**
 - **B842864-global-help-report-control** (2026-09-05) — +1 on "Map landing page (no project selected)", "Map landing page (comp mode)", "Map landing page (selecting parcels)", "Left rail + panels (Yield)", "Library", "Doc Review (empty state)": The global help/report control (src/app/HelpReportControl.jsx) is a persistent, fixed bottom-right FAB the app shell mounts once, on every route — the owner's own request, so the control being everywhere is the point, not drift. It renders one uniform signature (radius:999px, height:44px, padding:0px, fontSize:12px) on every whole-page surface this crawl visits; the surfaces that scope to a sub-region only (App header, the Main menu popovers, Tool rail) don't see it because it lives outside that DOM subtree, which is why only the whole-page surfaces above needed a budget lift. A single shared implementation, one exemption line per affected surface, never a per-surface variant.
 
 - **B1038016-leaflet-chrome** (2026-09-01) — +3 on "Map landing page (no project selected)", "Map landing page (comp mode)", "Map landing page (selecting parcels)": Leaflet's own bundled zoom stack (+/− at its vendor font-size), "Find my location" locate button, and the scale bar are third-party chrome — docs/DESIGN.md's radius section (Documented exceptions #4) already carries the zoom-stack/locate-button radius override and the scale-bar non-exception as the accepted boundary of what this token scale reaches. Their child <a>/<div> nodes are deliberately radius:0 BY THE APP'S OWN CSS (the rounded corner the user sees comes from the parent .leaflet-bar container's overflow:hidden clip, not the button), so a per-button override here would fight the exact mechanism that already unified their visible shape with the app's own RADIUS.md. The one thing left off-scale (the zoom glyphs' 22px font) is Leaflet's own vendor CSS (.leaflet-touch .leaflet-control-zoom-in/-out), not an app literal.
+
+- **B1186256-drainage-link** (2026-09-05) — +1 on "Left rail + panels (Yield)": NEW-1 (owner chat block, 2026-09-05) split the old Yield panel's flood/detention/mitigation work into its own Drainage tab and left Yield's Land Use table with a single 'Drainage →' ActionLink in its place — a genuinely new, permanent, deliberate control, not incidental drift. It is the shared ActionLink component (src/workspaces/site-planner/components/ActionLink.jsx) at its own default style, so it is not a bespoke shape; every other ActionLink usage already inside the Yield panel (Set unit prices, Set $/CY, Set $/SY or LF) only renders once its own conditional/disclosure state is reached, which this crawl's default-view pass never opens, so this is the first ActionLink this particular crawl has ever measured inside this surface at all — not a second, competing shape alongside an existing one. A code fix cannot remove this signature without either removing the link the owner's own architecture calls for, or duplicating an already-rendered control's exact style by coincidence, which would be the wrong reason to change either one.
 
 - **B1038016-invisible-logo-hit-target** (2026-09-01) — +1 on "Map landing page (no project selected)", "Map landing page (comp mode)", "Map landing page (selecting parcels)", "App header": AppHeader.jsx's wordmark/logo button (title "Dashboard: all projects") paints no border and no background (background:transparent, border:none) — it is a hit-target around the BrandMark, not a visible chip. Nothing renders for the eye to compare against another shape, so it is not the kind of drift this budget exists to bound. Giving it a real chip's chrome (a border/fill it has never had) to make its signature merge would ADD visible clutter around the logo — the opposite of the ask — so it stays a documented, permanent exception rather than a value change.
 
@@ -548,15 +550,15 @@ _None found on this run._
 | 0px | 25px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(69, 76, 92)` | Schedule, Review, Library (+2 more) ×5 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+95 more matches, best-effort) |
 | 8px | 30px | 12px | 400 | `rgb(234, 238, 243)` | `1px solid rgb(215, 221, 229)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:153:      aria-label={active ? "Leave full screen" : "Full screen"} (+6 more matches, best-effort) |
 | 8px 0px 0px 8px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Undo, Redo ×2 | src/shared/comps/components/CompEntryGrid.jsx:750:  // summary line can say so and Undo can remove precisely those rows, nothing else. (+51 more matches, best-effort) |
-| 0px 8px 8px 0px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Recent actions to undo, Recent actions to redo ×2 | src/workspaces/site-planner/SitePlanner.jsx:19227:            aria-label="Recent actions to undo" title="Recent actions to undo"> |
+| 0px 8px 8px 0px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Recent actions to undo, Recent actions to redo ×2 | src/workspaces/site-planner/SitePlanner.jsx:19247:            aria-label="Recent actions to undo" title="Recent actions to undo"> |
 | 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/dashboardNav.js:27:    title: action ? (logoDashboardTitle || "Dashboard: all projects") : undefined, |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Switch project ×1 | src/shared/ui/ProjectBreadcrumb.jsx:647:        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"} (+1 more match, best-effort) |
-| 8px | 30px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Switch or rename plan ×1 | src/workspaces/site-planner/SitePlanner.jsx:19031:          "Switch project sits 10.7px from Switch or rename plan — height 26px vs 24px" sibling (+1 more match, best-effort) |
+| 8px | 30px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Switch or rename plan ×1 | src/workspaces/site-planner/SitePlanner.jsx:19051:          "Switch project sits 10.7px from Switch or rename plan — height 26px vs 24px" sibling (+1 more match, best-effort) |
 | 8px | 30px | 12px | 400 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Cloud sync: Saved on this device ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:204:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out"> |
 | 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+509 more matches, best-effort) |
-| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(215, 221, 229)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:19178:            title="File — export a PNG or print a PDF" |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(215, 221, 229)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:19198:            title="File — export a PNG or print a PDF" |
 | 8px | 26px | 12px | 500 | `rgba(0, 0, 0, 0.06)` | `1px solid rgba(0, 0, 0, 0)` | Zoom to fit ×1 | src/workspaces/site-planner/MapFinder.jsx:218: * "+ Select parcels", "Turn all 1 layer off", "Zoom to fit", "Export to Google Earth (KMZ)" — none (+5 more matches, best-effort) |
 
 **dark** — 13 distinct style signature(s) over 20 matched element(s):
@@ -566,15 +568,15 @@ _None found on this run._
 | 0px | 25px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(194, 200, 210)` | Schedule, Review, Library (+2 more) ×5 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+95 more matches, best-effort) |
 | 8px | 30px | 12px | 400 | `rgb(17, 19, 25)` | `1px solid rgb(38, 42, 51)` | Full screen, Settings ×2 | src/shared/ui/AppHeader.jsx:153:      aria-label={active ? "Leave full screen" : "Full screen"} (+6 more matches, best-effort) |
 | 8px 0px 0px 8px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Undo, Redo ×2 | src/shared/comps/components/CompEntryGrid.jsx:750:  // summary line can say so and Undo can remove precisely those rows, nothing else. (+51 more matches, best-effort) |
-| 0px 8px 8px 0px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Recent actions to undo, Recent actions to redo ×2 | src/workspaces/site-planner/SitePlanner.jsx:19227:            aria-label="Recent actions to undo" title="Recent actions to undo"> |
+| 0px 8px 8px 0px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Recent actions to undo, Recent actions to redo ×2 | src/workspaces/site-planner/SitePlanner.jsx:19247:            aria-label="Recent actions to undo" title="Recent actions to undo"> |
 | 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/dashboardNav.js:27:    title: action ? (logoDashboardTitle || "Dashboard: all projects") : undefined, |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | Switch project ×1 | src/shared/ui/ProjectBreadcrumb.jsx:647:        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"} (+1 more match, best-effort) |
-| 8px | 30px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | Switch or rename plan ×1 | src/workspaces/site-planner/SitePlanner.jsx:19031:          "Switch project sits 10.7px from Switch or rename plan — height 26px vs 24px" sibling (+1 more match, best-effort) |
+| 8px | 30px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | Switch or rename plan ×1 | src/workspaces/site-planner/SitePlanner.jsx:19051:          "Switch project sits 10.7px from Switch or rename plan — height 26px vs 24px" sibling (+1 more match, best-effort) |
 | 8px | 30px | 12px | 400 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Cloud sync: Saved on this device ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:204:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out"> |
 | 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+509 more matches, best-effort) |
-| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(38, 42, 51)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:19178:            title="File — export a PNG or print a PDF" |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(38, 42, 51)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:19198:            title="File — export a PNG or print a PDF" |
 | 8px | 26px | 12px | 500 | `rgba(255, 255, 255, 0.09)` | `1px solid rgba(0, 0, 0, 0)` | Zoom to fit ×1 | src/workspaces/site-planner/MapFinder.jsx:218: * "+ Select parcels", "Turn all 1 layer off", "Zoom to fit", "Export to Google Earth (KMZ)" — none (+5 more matches, best-effort) |
 
 
@@ -586,13 +588,13 @@ _None found on this run._
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
-| 6px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Save the current view as a PNG image, Pick a print frame, then download a finished PDF (no browser print dialog) ×2 | src/workspaces/site-planner/SitePlanner.jsx:19191:            <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button> |
+| 6px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Save the current view as a PNG image, Pick a print frame, then download a finished PDF (no browser print dialog) ×2 | src/workspaces/site-planner/SitePlanner.jsx:19211:            <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button> |
 
 **dark** — 1 distinct style signature(s) over 2 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
-| 6px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Save the current view as a PNG image, Pick a print frame, then download a finished PDF (no browser print dialog) ×2 | src/workspaces/site-planner/SitePlanner.jsx:19191:            <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button> |
+| 6px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Save the current view as a PNG image, Pick a print frame, then download a finished PDF (no browser print dialog) ×2 | src/workspaces/site-planner/SitePlanner.jsx:19211:            <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button> |
 
 
 ---
@@ -667,7 +669,7 @@ _(nothing matched in this theme/scenario)_
 
 ### Left rail + panels (Yield)
 
-**light** — 21 distinct style signature(s) over 71 matched element(s):
+**light** — 22 distinct style signature(s) over 73 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
@@ -675,25 +677,26 @@ _(nothing matched in this theme/scenario)_
 | 0px | 15px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | [object SVGAnimatedString] ×17 | unattributed (no source match — best-effort text search) |
 | 0px | 13px | 10.5px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | M, ⇧N, L (+6 more) ×9 | unattributed (label too short to search) |
 | 8px | 27px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Parcel tools, Measure modes, Dock layout (+3 more) ×6 | src/workspaces/site-planner/MapFinder.jsx:3894:                  empty state and its Parcel tools ▾ menu use for this same job (get a parcel from (+6 more matches, best-effort) |
-| 0px | 54px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Land, Analysis, Overlays ×3 | src/app/chunkReload.js:306:  let _failedSinceLanding = false; (+71 more matches, best-effort) |
+| 0px | 54px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Land, Analysis, Drainage (+1 more) ×4 | src/app/chunkReload.js:306:  let _failedSinceLanding = false; (+71 more matches, best-effort) |
 | 0px | 30px | 14px | 600 | `rgba(255, 255, 255, 0.94)` | `0px none rgb(27, 30, 38)` | Zoom out, Zoom to fit ×2 | src/workspaces/doc-review/DocReview.jsx:1999:    { kind: "tool", id: "zoomOut", label: "Out", title: "Zoom out (or scroll the wheel over the sheet)", icon: <MkIcon id="zoomOut" />, onClick: () => zoom(1 / 1.2) }, (+3 more matches, best-effort) |
 | 0px | 52px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Properties, Standards ×2 | src/shared/keyboard/keyScope.js:172: * delete suite: with it, clicking the Properties panel's ＋ to add dock zones, pressing Escape to (+31 more matches, best-effort) |
 | 0px | 32px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | ▶Buildings1 · 75,600 SF, ▶Costsnot priced yet ×2 | unattributed (no source match — best-effort text search) |
 | 0px | 31px | 12px | 700 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | What's shown on this drawing — hide groups temporarily, plus grid & snap ×1 | src/workspaces/site-planner/components/ViewMenu.jsx:128:        title="What's shown on this drawing — hide groups temporarily, plus grid & snap" |
-| 0px | 32px | 12px | 700 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Layers — map data layers (flood, utilities, parcels, aerial…) ×1 | src/workspaces/site-planner/SitePlanner.jsx:23049:              <button onClick={() => setLayersOpen((o) => !o)} aria-expanded={layersOpen} aria-label="Layers — map data layers (flood, utilities, parcels, aerial…)" (+1 more match, best-effort) |
+| 0px | 32px | 12px | 700 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Layers — map data layers (flood, utilities, parcels, aerial…) ×1 | src/workspaces/site-planner/SitePlanner.jsx:23084:              <button onClick={() => setLayersOpen((o) => !o)} aria-expanded={layersOpen} aria-label="Layers — map data layers (flood, utilities, parcels, aerial…)" (+1 more match, best-effort) |
 | 0px | 30px | 14px | 600 | `rgba(255, 255, 255, 0.94)` | `1px solid rgb(225, 229, 235)` | Zoom in ×1 | src/shared/sitePlans/components/SitePlansSection.jsx:363:          <Button size="sm" variant="ghost" onClick={() => onZoomToOverlay(o)}>Zoom in</Button> (+22 more matches, best-effort) |
-| 0px | 30px | 13px | 600 | `rgba(255, 255, 255, 0.94)` | `0px none rgb(53, 59, 73)` | Report that this felt slow ×1 | src/workspaces/site-planner/SitePlanner.jsx:23323:                  aria-label="Report that this felt slow" |
+| 0px | 30px | 13px | 600 | `rgba(255, 255, 255, 0.94)` | `0px none rgb(53, 59, 73)` | Report that this felt slow ×1 | src/workspaces/site-planner/SitePlanner.jsx:23358:                  aria-label="Report that this felt slow" |
 | 8px | 27px | 12px | 650 | `rgb(194, 65, 12)` | `1px solid rgba(0, 0, 0, 0)` | Select V ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 15px | 12px | 650 | `rgba(0, 0, 0, 0)` | `0px none rgb(255, 255, 255)` | [object SVGAnimatedString] ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 13px | 10.5px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(255, 255, 255)` | V ×1 | unattributed (label too short to search) |
-| 0px | 54px | 10.5px | 600 | `rgba(0, 0, 0, 0.06)` | `0px none rgb(27, 30, 38)` | Yield ×1 | src/workspaces/model/lib/sheetModel.js:30: * verification pro-forma: a column-level `format` field meant formatting ONE cell (a "Yield on (+37 more matches, best-effort) |
+| 0px | 54px | 10.5px | 600 | `rgba(0, 0, 0, 0.06)` | `0px none rgb(27, 30, 38)` | Yield ×1 | src/workspaces/model/lib/sheetModel.js:30: * verification pro-forma: a column-level `format` field meant formatting ONE cell (a "Yield on (+38 more matches, best-effort) |
 | 6px | 21px | 13px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Detach panel ×1 | src/shared/ui/PanelChrome.jsx:79:        <IconBtn title="Detach to a floating window" aria-label="Detach panel" onClick={onDetach} data-testid={testId ? `${testId}-detach` : undefined}> |
 | 6px | 19px | 13px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Close panel ×1 | src/shared/ui/PanelChrome.jsx:83:      <IconBtn title="Close" aria-label="Close panel" onClick={onClose} data-testid={testId ? `${testId}-close` : undefined}>✕</IconBtn> |
 | 0px | 31px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | ▶Land use ×1 | unattributed (no source match — best-effort text search) |
+| 999px | 19px | 10.5px | 700 | `rgba(0, 0, 0, 0)` | `1px solid rgb(194, 65, 12)` | Drainage → ×1 | src/workspaces/site-planner/SitePlanner.jsx:19693:                      <span style={{ color: PAL.muted, fontWeight: 600, fontSize: 10.5, whiteSpace: "nowrap" }}>in Drainage →</span> (+1 more match, best-effort) |
 | 0px | 12px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(75, 82, 99)` | About Screening disclaimer ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
 
-**dark** — 21 distinct style signature(s) over 71 matched element(s):
+**dark** — 22 distinct style signature(s) over 73 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
@@ -701,21 +704,22 @@ _(nothing matched in this theme/scenario)_
 | 0px | 15px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | [object SVGAnimatedString] ×17 | unattributed (no source match — best-effort text search) |
 | 0px | 13px | 10.5px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | M, ⇧N, L (+6 more) ×9 | unattributed (label too short to search) |
 | 8px | 27px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Parcel tools, Measure modes, Dock layout (+3 more) ×6 | src/workspaces/site-planner/MapFinder.jsx:3894:                  empty state and its Parcel tools ▾ menu use for this same job (get a parcel from (+6 more matches, best-effort) |
-| 0px | 54px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Land, Analysis, Overlays ×3 | src/app/chunkReload.js:306:  let _failedSinceLanding = false; (+71 more matches, best-effort) |
+| 0px | 54px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Land, Analysis, Drainage (+1 more) ×4 | src/app/chunkReload.js:306:  let _failedSinceLanding = false; (+71 more matches, best-effort) |
 | 0px | 30px | 14px | 600 | `rgba(24, 27, 33, 0.93)` | `0px none rgb(232, 235, 240)` | Zoom out, Zoom to fit ×2 | src/workspaces/doc-review/DocReview.jsx:1999:    { kind: "tool", id: "zoomOut", label: "Out", title: "Zoom out (or scroll the wheel over the sheet)", icon: <MkIcon id="zoomOut" />, onClick: () => zoom(1 / 1.2) }, (+3 more matches, best-effort) |
 | 0px | 52px | 10.5px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Properties, Standards ×2 | src/shared/keyboard/keyScope.js:172: * delete suite: with it, clicking the Properties panel's ＋ to add dock zones, pressing Escape to (+31 more matches, best-effort) |
 | 0px | 32px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | ▶Buildings1 · 75,600 SF, ▶Costsnot priced yet ×2 | unattributed (no source match — best-effort text search) |
 | 0px | 31px | 12px | 700 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | What's shown on this drawing — hide groups temporarily, plus grid & snap ×1 | src/workspaces/site-planner/components/ViewMenu.jsx:128:        title="What's shown on this drawing — hide groups temporarily, plus grid & snap" |
-| 0px | 32px | 12px | 700 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Layers — map data layers (flood, utilities, parcels, aerial…) ×1 | src/workspaces/site-planner/SitePlanner.jsx:23049:              <button onClick={() => setLayersOpen((o) => !o)} aria-expanded={layersOpen} aria-label="Layers — map data layers (flood, utilities, parcels, aerial…)" (+1 more match, best-effort) |
+| 0px | 32px | 12px | 700 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Layers — map data layers (flood, utilities, parcels, aerial…) ×1 | src/workspaces/site-planner/SitePlanner.jsx:23084:              <button onClick={() => setLayersOpen((o) => !o)} aria-expanded={layersOpen} aria-label="Layers — map data layers (flood, utilities, parcels, aerial…)" (+1 more match, best-effort) |
 | 0px | 30px | 14px | 600 | `rgba(24, 27, 33, 0.93)` | `1px solid rgb(42, 46, 55)` | Zoom in ×1 | src/shared/sitePlans/components/SitePlansSection.jsx:363:          <Button size="sm" variant="ghost" onClick={() => onZoomToOverlay(o)}>Zoom in</Button> (+22 more matches, best-effort) |
-| 0px | 30px | 13px | 600 | `rgba(24, 27, 33, 0.93)` | `0px none rgb(202, 208, 218)` | Report that this felt slow ×1 | src/workspaces/site-planner/SitePlanner.jsx:23323:                  aria-label="Report that this felt slow" |
+| 0px | 30px | 13px | 600 | `rgba(24, 27, 33, 0.93)` | `0px none rgb(202, 208, 218)` | Report that this felt slow ×1 | src/workspaces/site-planner/SitePlanner.jsx:23358:                  aria-label="Report that this felt slow" |
 | 8px | 27px | 12px | 650 | `rgb(242, 107, 58)` | `1px solid rgba(0, 0, 0, 0)` | Select V ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 15px | 12px | 650 | `rgba(0, 0, 0, 0)` | `0px none rgb(21, 23, 28)` | [object SVGAnimatedString] ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 13px | 10.5px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(21, 23, 28)` | V ×1 | unattributed (label too short to search) |
-| 0px | 54px | 10.5px | 600 | `rgba(255, 255, 255, 0.09)` | `0px none rgb(236, 239, 244)` | Yield ×1 | src/workspaces/model/lib/sheetModel.js:30: * verification pro-forma: a column-level `format` field meant formatting ONE cell (a "Yield on (+37 more matches, best-effort) |
+| 0px | 54px | 10.5px | 600 | `rgba(255, 255, 255, 0.09)` | `0px none rgb(236, 239, 244)` | Yield ×1 | src/workspaces/model/lib/sheetModel.js:30: * verification pro-forma: a column-level `format` field meant formatting ONE cell (a "Yield on (+38 more matches, best-effort) |
 | 6px | 21px | 13px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Detach panel ×1 | src/shared/ui/PanelChrome.jsx:79:        <IconBtn title="Detach to a floating window" aria-label="Detach panel" onClick={onDetach} data-testid={testId ? `${testId}-detach` : undefined}> |
 | 6px | 19px | 13px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Close panel ×1 | src/shared/ui/PanelChrome.jsx:83:      <IconBtn title="Close" aria-label="Close panel" onClick={onClose} data-testid={testId ? `${testId}-close` : undefined}>✕</IconBtn> |
 | 0px | 31px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | ▶Land use ×1 | unattributed (no source match — best-effort text search) |
+| 999px | 19px | 10.5px | 700 | `rgba(0, 0, 0, 0)` | `1px solid rgb(242, 107, 58)` | Drainage → ×1 | src/workspaces/site-planner/SitePlanner.jsx:19693:                      <span style={{ color: PAL.muted, fontWeight: 600, fontSize: 10.5, whiteSpace: "nowrap" }}>in Drainage →</span> (+1 more match, best-effort) |
 | 0px | 12px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(164, 171, 184)` | About Screening disclaimer ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
 
