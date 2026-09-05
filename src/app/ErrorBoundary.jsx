@@ -42,6 +42,14 @@ const S = {
   btnGhost: { padding: "7px 14px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, border: "1px solid rgba(0,0,0,0.18)", background: "transparent", color: "#2b2620" },
 };
 
+// NEW-2 — pure, so the module-slug choice is unit-testable without mounting a React tree.
+// `moduleId` is the machine slug every other telemetry source reports (Shell.jsx's `w.id`,
+// e.g. "site-planner"); `label` is the human-facing crash-card copy ("Site Planyr") and is
+// only a fallback here, for a caller that hasn't been updated to pass `moduleId`.
+export function crashModuleSlug(props) {
+  return (props && (props.moduleId || props.label)) || null;
+}
+
 export default class ErrorBoundary extends Component {
   constructor(props) {
     super(props);
@@ -74,7 +82,7 @@ export default class ErrorBoundary extends Component {
     );
     reportClientError(error, {
       source: "react",
-      module: this.props.label,
+      module: crashModuleSlug(this.props),
       componentStack: info && info.componentStack,
       recovered: recovering ? plan.attempts : 0,
     });

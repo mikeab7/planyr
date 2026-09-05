@@ -305,14 +305,10 @@ export default function App({
       refreshParcelSummary(null);
       refreshElementRecency(null);
     }
-    // B471 — log the auth transition so a "saving stopped after my session changed" report is
-    // diagnosable from telemetry (the cloud-save path is gated on being signed in; a silent token
-    // lapse is exactly the kind of cause we couldn't see before). Only fires on a REAL change (the
-    // same-user re-emit returned early above).
-    if ((prevUid.current || null) !== uid) {
-      reportClientEvent(uid ? "auth-signed-in" : "auth-signed-out",
-        uid ? "session active" : "session ended (signed out or token lapsed)", { event });
-    }
+    // NEW-3 — B471's auth-transition telemetry (event:auth-signed-in / event:auth-signed-out) was
+    // removed: a successful sign-in is not an error, and it was 1,246 rows across 477 builds on
+    // production, 11% of the whole client_errors table on its own. `prevUid` still tracks the last
+    // seen uid for the same-user re-emit guard above.
     prevUid.current = uid;
     // V13 — the first auth event + pull has now settled the store + the resume view; release
     // the boot gate so the URL sync + the dangling-pointer cleanup may run. Batched with the
