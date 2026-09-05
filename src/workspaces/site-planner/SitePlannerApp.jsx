@@ -134,6 +134,15 @@ export default function App({
    * meant to authorise has already been skipped. `routeMissing` is the honest answer when the
    * URL names a project this device genuinely does not have. */
   const userLeftProjectRef = useRef(false);
+  /* B1202176 — ids THIS MOUNT minted locally (newBlankSite / newSiteFromMap), so effect (2)'s
+   * `onProjectChange` call can tell Shell.jsx's route-level deletion gate "not saved YET" apart
+   * from "never existed at all" — both otherwise answer the identical cloud `{exists:false}`.
+   * `newBlankSite`'s own header documents WHY creation is lazy: a blank site never edited is
+   * never saved, and even a located blank's cloud write (`pushLoud`) is fire-and-forget, so a
+   * fresh id can reach the URL well before any row exists anywhere. A plain component ref is
+   * enough — it only has to survive from "id minted" to effect (2) observing it, which happens
+   * within this same mount's lifetime (this stays the active tab throughout "New project"). */
+  const locallyMintedGroupsRef = useRef(new Set());
   const [routeMissing, setRouteMissing] = useState(null);
   // Clear a dangling currentSite pointer (e.g. a never-persisted site from before
   // the fix) so it doesn't linger in storage. The finder fallback already handles
@@ -524,6 +533,7 @@ export default function App({
   // stamped afterwards would need an UPDATE — which the database now refuses outright.
   const newSiteFromMap = async (payload) => {
     const id = newId();
+    locallyMintedGroupsRef.current.add(id); // B1202176 — see the ref's own header
     const parcels = (payload.parcels || [])
       .filter((p) => p.points?.length >= 3)
       .map((p, i) => ({ id: `p${id}_${i}`, points: p.points, locked: true, addr: p.addr || null, acct: p.acct || null, attrs: p.attrs || null }));
@@ -556,6 +566,7 @@ export default function App({
    * keeping even before anything is drawn (and `persistOrDrop` keeps a blank plan that has one). */
   const newBlankSite = async (opts) => {
     const id = newId();
+    locallyMintedGroupsRef.current.add(id); // B1202176 — see the ref's own header; covers BOTH branches below
     const o = opts && opts.origin && Number.isFinite(opts.origin.lat) && Number.isFinite(opts.origin.lon)
       ? { lat: opts.origin.lat, lon: opts.origin.lon } : null;
     if (o) {
@@ -714,7 +725,9 @@ export default function App({
     });
     if (!allowed) return;
     userLeftProjectRef.current = false; // the intent is spent once it has been written
-    onProjectChange?.(effGroup);
+    // B1202176 — tell Shell.jsx's deletion gate whether THIS group is one we just minted locally
+    // (see `locallyMintedGroupsRef`'s header), so it never asks the cloud about it cold.
+    onProjectChange?.(effGroup, { freshlyCreated: locallyMintedGroupsRef.current.has(effGroup) });
   }, [effGroup, bootResolved, isActive]);
 
   // Keep-alive: returning to this tab re-reads the local site list (cheap, synchronous) so a
