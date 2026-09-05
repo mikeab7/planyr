@@ -6973,6 +6973,32 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
 5. — Use "Change page…" to switch to a different page of the same PDF. **Expect:** the old crop does NOT apply to the new page.
 `Blocker: auth`
 
+### V649216 — B1160720: Turnstile actually renders on the deployed sign-up form and Supabase actually rejects a signup with no/bad token `Blocker: auth`
+
+**Why this needs its own real pass, and why it can't run today.** The widget and the client-side wiring (config gate, disabled-until-solved Submit, reset-on-failed-submit) are unit-tested and code-reviewed this session (`test/turnstileConfig.test.js`, `test/authCaptcha.test.js`, `test/authPanelTurnstile.test.js` — 12/12). What cannot be proven from this sandbox, and genuinely cannot be proven by ANYONE until two owner-only steps happen, is the actual server-side enforcement: Cloudflare Turnstile needs a real widget (Site key + Secret key, created in Michael's own Cloudflare account) and Supabase Auth needs "Enable CAPTCHA protection" turned on with that Secret key pasted in (Project Settings → Authentication → Bot and Abuse Protection). Until both exist, `VITE_TURNSTILE_SITE_KEY` is unset in the deployed build, `turnstileEnabled()` is false, and the sign-up form correctly renders with no widget at all — which is the deliberate, tested degrade path, not a bug, but it also means there's nothing live to click through yet.
+
+**Steps, each with a named expected result — on `planyr.io`, once Michael has done the two steps in OWNER-TODO.md (paste the Site key into Cloudflare Pages' `VITE_TURNSTILE_SITE_KEY` and redeploy; paste the Secret key into Supabase's Bot and Abuse Protection settings):**
+1. Open the sign-up form. **Expect:** the Turnstile widget appears below the password field, and "Create account" is disabled until it's solved (most browsers auto-solve invisibly within a second or two).
+2. Solve it (or wait for the automatic pass) and submit a real throwaway signup. **Expect:** the account is created normally — proves the token round-trips end to end and Supabase accepts a genuine one.
+3. Using the browser devtools network tab (or a raw `fetch`), attempt a signup POST with `captchaToken` omitted or set to garbage, calling `/auth/v1/signup` directly rather than through the app. **Expect:** Supabase rejects it — this is the proof the SERVER enforces the check, not just the UI (a client that skips the widget entirely must still be refused).
+4. Confirm the widget resets (a fresh checkbox/challenge, not a dead stuck one) after a failed submit attempt — e.g. submit with a deliberately-wrong password confirmation if the form has one, or observe the reset call fires by checking the widget re-arms after any Submit click that returns an error.
+5. Delete the throwaway account created in step 2 once confirmed.
+
+**Result:** ⏳ pending — needs Michael's Cloudflare Turnstile Site/Secret keys, which don't exist yet; not reachable from this sandbox even after that (no browser egress here). `Cadence: once`.
+
+### V649217 — B1160722: an admin can reset a user's password from the Admin page and it actually changes their sign-in credential `Blocker: auth`
+
+**Why this needs its own real pass.** The RPC layer (`admin_reset_user_password`, `admin_list_users`, `admin_list_password_resets`) is proven directly against the real production database, self-rolling-back, via the Supabase MCP (`src/workspaces/admin/db/test/admin_reset_password.test.sql`, 10/10 passed: non-admin rejected, admin succeeds, the returned password verifies against the real stored bcrypt hash, the original password no longer verifies, the reset is recorded, and both admin-gated reads correctly show/hide rows). What remains is confirming the Admin page's OWN UI wiring — the picker, the button, the one-time reveal — against a real signed-in admin session, which this sandbox cannot reach (Supabase auth is CORS-blocked here).
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the admin account, `#/admin`:**
+1. Open the "Reset a user's password" section. **Expect:** a searchable list of real accounts (name — email) loads.
+2. Search for a throwaway test account, select it, click "Reset password." **Expect:** a boxed password appears once, labeled "Shown once — copy it now," with the target's email above it.
+3. Sign out, then sign in as that test account using the shown password. **Expect:** it works — the new credential is real and live, not a display-only stub.
+4. Reload the Admin page's password-reset section. **Expect:** the just-performed reset appears in "Reset history," naming the admin and the target, but the password itself is nowhere on screen (it was never stored in the clear, and the UI never re-displays it).
+5. Confirm no path anywhere on the Admin page shows an EXISTING (pre-reset) password for any account — there should be no such control at all, since bcrypt hashes are one-way.
+
+**Result:** ⏳ pending — needs a real signed-in admin browser session; not reachable from this sandbox. `Cadence: once`.
+
 ## ✅ Verified / ❌ Failed — history
 
 > Passed/failed items are archived to **`VERIFICATION-DONE.md`** to keep this file fast.

@@ -11,6 +11,12 @@ import { signIn, signUp, signOut, signOutEverywhere, resetPassword, updatePasswo
 // watching for "planyr.io" never finds it otherwise and assumes the signup failed. Both
 // messages are generated from the one sender constant in lib/authMail.js.
 import { SIGNUP_CONFIRM_MSG, PASSWORD_RESET_MSG } from "../lib/authMail.js";
+// Cloudflare Turnstile (B1160720, NEW-1) — config-gated bot check on sign-up only. Not lazy:
+// this component and its config are both dependency-free (no external script loads until
+// mode === "signup" actually mounts the widget), so there's no bundle cost to keep it a
+// plain import the way the Team panel below is deliberately lazy.
+import Turnstile from "../../../shared/turnstile/Turnstile.jsx";
+import { turnstileEnabled } from "../../../shared/turnstile/turnstileConfig.js";
 /* LAZY (B1064 tranche a). This file is reached from the Shell, so it lands in the shared ENTRY
  * chunk — the one chunk EVERY route downloads, planner or not. The Team tab is signed-in-only
  * and opens on an explicit click (the default tab is Profile), so nothing about it belongs on
@@ -253,11 +259,21 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, onCl
   const [org, setOrg] = useState("");
   const [msg, setMsg] = useState(null); // { type: 'err'|'ok', text }
   const [busy, setBusy] = useState(false);
+  // Turnstile (B1160720): "loading" until the widget paints, "ready" once it can be solved,
+  // "error" if the script or Cloudflare itself failed — Submit stays disabled through both
+  // "loading" and "error" so a slow/unreachable Cloudflare degrades to "can't submit yet"
+  // rather than a blank or broken form.
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaState, setCaptchaState] = useState("loading");
+  const turnstileRef = useRef(null);
 
   // `mode` seeds from `recovery` once at mount; if a reset link fires PASSWORD_RECOVERY
   // while this panel is already open, sync into recovery mode so the set-password form
   // shows (never resets a user's signin↔signup choice — only acts when recovery is true).
   useEffect(() => { if (recovery) setMode("recovery"); }, [recovery]);
+  // A stale token from a previous mount of the widget (e.g. signup → signin → signup)
+  // must never re-arm Submit before the freshly-remounted widget reports its own state.
+  useEffect(() => { if (mode !== "signup") setCaptchaToken(""); }, [mode]);
 
   const submit = async () => {
     setBusy(true); setMsg(null);
@@ -267,7 +283,14 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, onCl
         error ? setMsg({ type: "err", text: error }) : onClose();
       } else if (mode === "signup") {
         if (!first.trim() || !last.trim()) { setMsg({ type: "err", text: "First and last name are required." }); return; }
-        const { error, needsConfirm } = await signUp(email.trim(), pw, { firstName: first.trim(), lastName: last.trim(), org: org.trim() });
+        const needsCaptcha = turnstileEnabled();
+        if (needsCaptcha && !captchaToken) { setMsg({ type: "err", text: "Please complete the verification check." }); return; }
+        const { error, needsConfirm } = await signUp(email.trim(), pw, { firstName: first.trim(), lastName: last.trim(), org: org.trim() }, captchaToken || undefined);
+        // A Turnstile token is single-use — whether the signup succeeded or the server
+        // rejected it (a stale/expired token reads as a captcha failure server-side too),
+        // the widget must reset so the NEXT attempt (retry, or the panel reopening) never
+        // resubmits a dead token and gets stuck failing silently.
+        if (needsCaptcha) { turnstileRef.current?.reset(); setCaptchaToken(""); }
         if (error) setMsg({ type: "err", text: error });
         else if (needsConfirm) setMsg({ type: "ok", text: SIGNUP_CONFIRM_MSG });
         else onClose();
@@ -318,7 +341,15 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, onCl
       {mode !== "reset" && (
         <input aria-label="Password" type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
       )}
-      <button data-testid="auth-submit" style={{ ...btn(true), width: "100%", marginTop: 12 }} disabled={busy || !email || (mode !== "reset" && pw.length < 6)}
+      {mode === "signup" && turnstileEnabled() && (
+        <div style={{ marginTop: 10 }}>
+          <Turnstile ref={turnstileRef} onToken={setCaptchaToken} onStateChange={setCaptchaState} />
+          {captchaState === "loading" && <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 4 }}>Loading verification…</div>}
+          {captchaState === "error" && <div style={{ fontSize: 10.5, color: "var(--danger-text)", marginTop: 4 }}>Couldn't load verification — check your connection and try again.</div>}
+        </div>
+      )}
+      <button data-testid="auth-submit" style={{ ...btn(true), width: "100%", marginTop: 12 }}
+        disabled={busy || !email || (mode !== "reset" && pw.length < 6) || (mode === "signup" && turnstileEnabled() && (captchaState !== "ready" || !captchaToken))}
         onClick={submit}>{busy ? "…" : mode === "signin" ? "Sign in" : mode === "signup" ? "Create account" : "Send reset email"}</button>
       <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", fontSize: 12 }}>
         {mode === "reset"
