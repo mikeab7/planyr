@@ -82,5 +82,5 @@ as $$
   order by count(*) desc, max(at) desc;
 $$;
 
-revoke all on function public.admin_list_criteria_requests() from public;
+revoke all on function public.admin_list_criteria_requests() from public, anon;
 grant execute on function public.admin_list_criteria_requests() to authenticated;
