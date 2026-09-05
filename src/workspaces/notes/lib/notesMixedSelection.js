@@ -73,3 +73,17 @@ export function selectionBlockShapes(doc, from, to) {
   });
   return shapes;
 }
+
+/** Every textblock's `lineHeight` attribute touched by `[from, to)` (NEW-SPACING-3) — the Line
+ *  spacing control's own version of `selectionFontSizes`/`selectionBlockShapes`. `lineHeight`
+ *  lives on both `paragraph` and `heading` (notesSpacing.js), so this walks every textblock,
+ *  not one named type; `null` is a real, distinct answer ("this block carries no override"),
+ *  the same convention `selectionFontSizes` uses. */
+export function selectionLineHeights(doc, from, to) {
+  const heights = [];
+  doc.nodesBetween(from, to, (node) => {
+    if (!node.isTextblock) return;
+    heights.push(node.attrs?.lineHeight ?? null);
+  });
+  return heights;
+}
