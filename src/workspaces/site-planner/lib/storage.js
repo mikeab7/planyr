@@ -1176,6 +1176,42 @@ export async function checkProjectDeletionStatus(id) {
   return cloudCheckDeleted(activeUid(), id);
 }
 
+/* B1160480 — follow-on to B1202176. A project minted with no located origin
+ * (`newBlankSite`/`newSiteFromMap` above, when `opts.origin` is absent) has NO local record and
+ * NO `public.sites` row until its first drawing save — `saveSite` is never even called until
+ * then. That's fine for the planner itself (B1202176's `freshlyCreated` rescue covers the gap for
+ * the SAME session), but a non-planner surface (first: the Library) can write something that
+ * OUTLIVES the tab — a filed drawing, a `file_facts` row, bytes in Drive — keyed to that project
+ * id while the id still names no row anywhere. A hard reload then hits Shell's route gate cold
+ * (no `freshlyCreated` context survives a reload) and reports "This project doesn't exist",
+ * stranding the just-filed file with nothing to reopen it from. Measured live: two production
+ * projects (pre-dating this fix) were orphaned exactly this way — see
+ * db/library_upload_orphan_backfill_20260905.sql for the one-time repair.
+ *
+ * This is the one materialization point any such surface calls before writing something durable
+ * into a project id it did not itself just create in this tab. Idempotent and non-destructive:
+ * a project that already has a local record or a live cloud row is left completely untouched
+ * (never overwritten — this must never clobber a project someone else has mid-edit), and a
+ * genuinely soft-deleted project is refused rather than silently resurrected. Signed-out plans
+ * have no cloud-row concept at all, so there's nothing to ensure. */
+export async function ensureProjectRow(id, { name = "Untitled site" } = {}) {
+  if (!id) return { ok: false, created: false, error: "no id" };
+  if (readSites()[id]) return { ok: true, created: false }; // already real on this device
+  if (!activeUid()) return { ok: true, created: false }; // signed-out — no cloud row to ensure
+  const status = await checkProjectDeletionStatus(id).catch(() => ({ ok: false }));
+  if (status && status.ok && status.deleted) {
+    return { ok: false, created: false, deleted: true, error: "This project has been deleted." };
+  }
+  if (status && status.ok && status.exists) return { ok: true, created: false }; // cloud already has it, just not pulled to this device yet
+  saveSite({ id, groupId: id, site: name || "Untitled site", name: "Concept A", origin: null, county: null, parcels: [], els: [], measures: [], settings: {} });
+  const r = await pushSiteToCloud(id).catch((e) => ({ ok: false, error: (e && e.message) || "" }));
+  if (r && r.ok === false) {
+    reportClientEvent("cloud-push-failed", "a project's row failed to reach the cloud while materializing it for a non-planner write", { id });
+    return { ok: false, created: true, error: r.error || "couldn't reach the cloud" };
+  }
+  return { ok: true, created: true };
+}
+
 // Group the cloud's soft-deleted rows into projects. Returns { ok, supported, projects }:
 // supported:false = db/sites_soft_delete.sql hasn't run on this DB (there is no bin — deletes are
 // still immediate + permanent there), so the caller hides the section rather than showing it empty.
