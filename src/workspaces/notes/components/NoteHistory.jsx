@@ -12,14 +12,22 @@
  *
  * ⛔ NOT A DIALOG (house rule). It is a pane beside the note, dismissed with its own ✕ or
  * with Escape, and nothing behind it is blocked while it is open.
- */
+ *
+ * ⛔ ON A PHONE IT NEVER JOINS THE ROW (B1215536, the exact same defect B1203505 fixed for
+ * `NoteOutline`, confirmed independently rather than assumed — measured live at 375px: `note-
+ * mat` shrank to 107px, this panel's own `note-sheet` child still rendered at its full 260px
+ * `minWidth`, clipped to whatever mat's own `overflow:auto` scroller shows at rest). Below the
+ * shared phone breakpoint (`narrow`) the panel renders as a `position: fixed` overlay drawn
+ * OVER the document instead of docking beside it, costing the row zero width. Unlike Outline,
+ * this needs no NEW floating toggle of its own — the toolbar's existing History button is
+ * already the open/close control, on every width. */
 import { useEffect, useRef } from "react";
 import { versionReasonLabel } from "../lib/notesVersions.js";
 import { absoluteStamp, stampLabel } from "../lib/notesTime.js";
 
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 
-export default function NoteHistory({ open, versions = [], busy = false, onRestore, onClose }) {
+export default function NoteHistory({ open, versions = [], busy = false, onRestore, onClose, narrow = false }) {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -32,17 +40,38 @@ export default function NoteHistory({ open, versions = [], busy = false, onResto
 
   if (!open) return null;
 
+  const panelStyle = narrow
+    ? {
+      /* ⛔ ABOVE `AppHeader.jsx` (`position: relative; zIndex: 60`) — same fix, same reason,
+         as `NoteOutline.jsx`'s own overlay: the drawer runs from the very top of the
+         viewport, so anything under 60 renders BEHIND the header instead of over it. */
+      position: "fixed", top: 0, bottom: 0, right: 0, zIndex: 66,
+      width: "min(78vw, 280px)", overflowY: "auto",
+      borderLeft: "1px solid var(--border-default)", background: "var(--surface-raised)",
+      padding: "10px 8px 24px",
+    }
+    : {
+      /* ⛔ SHRINKS BEFORE THE PAGE DOES (B421492), but keeps enough width to read a row. */
+      flex: "0 1 auto", width: 268, minWidth: 180, overflowY: "auto",
+      borderLeft: "1px solid var(--border-default)", background: "var(--surface-raised)",
+      padding: "10px 8px 24px",
+    };
+
   return (
-    <aside
+    <>
+      {narrow ? (
+        <div
+          data-testid="note-history-scrim"
+          aria-hidden="true"
+          onClick={onClose}
+          style={{ position: "fixed", inset: 0, zIndex: 65, background: "transparent" }}
+        />
+      ) : null}
+      <aside
       ref={ref}
       data-testid="note-history"
       aria-label="Version history"
-      style={{
-        /* ⛔ SHRINKS BEFORE THE PAGE DOES (B421492), but keeps enough width to read a row. */
-        flex: "0 1 auto", width: 268, minWidth: 180, overflowY: "auto",
-        borderLeft: "1px solid var(--border-default)", background: "var(--surface-raised)",
-        padding: "10px 8px 24px",
-      }}
+      style={panelStyle}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 2px 8px" }}>
         <span style={{ flex: 1, fontSize: 10, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-tertiary)" }}>
@@ -111,6 +140,7 @@ export default function NoteHistory({ open, versions = [], busy = false, onResto
           History is kept on this computer.
         </p>
       ) : null}
-    </aside>
+      </aside>
+    </>
   );
 }

@@ -39,6 +39,7 @@
 import { supabase, supabaseConfigured } from "../../site-planner/lib/supabase.js";
 import { casUpsert, degradeUpsert } from "../../../shared/cloud/optimisticUpsert.js";
 import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
+import { ensureProjectExists } from "../../../shared/projects/projects.js";
 
 const TABLE = "model_sheets";
 // model_sheets' real primary key is COMPOSITE — (user_id, id), not `id` alone (db/model_sheets.sql;
@@ -95,6 +96,18 @@ export async function loadCloudSheet(projectId) {
 }
 
 async function upsertCore({ uid, projectId, sheet, expected }) {
+  // B1202176 ×2 / B1160480 — this is the FIRST cloud write for a project's workbook, and nothing
+  // guarantees the project's own `sites` row exists yet (creation is deliberately lazy — see
+  // storage.js's `ensureProjectRow`). A `model_sheets` row must never be the only trace of a
+  // project, so this BLOCKS the save (never a silent best-effort) exactly like the already-shipped
+  // Doc Review guard (`reviewStore.js`'s `fileNewReview`/`refileReview`) — a project that can't be
+  // confirmed, or was genuinely soft-deleted, gets no orphaned workbook rows written against it.
+  const ensured = await ensureProjectExists(projectId, { name: "Untitled project" }).catch((e) => ({ ok: false, error: (e && e.message) || "" }));
+  if (!ensured.ok) {
+    return { ok: false, reason: "error", error: ensured.deleted
+      ? "This project has been deleted. Restore it before saving anything to it."
+      : (ensured.error || "Couldn't confirm this project with the cloud, so nothing was saved.") };
+  }
   // ⛔ B891184-FOLLOWUP-2 (live production finding, 2026-08-31) — `row` must carry `id` itself,
   // same as `sites`/`doc_reviews`' row-builders (siteRowFor/reviewRowFor) already do; casUpsert's
   // own contract comment says so. This one didn't, so casUpsert's INSERT branch sent `{ data,

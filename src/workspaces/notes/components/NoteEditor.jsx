@@ -2372,11 +2372,11 @@ export default function NoteEditor({
            the actual words — was the half that clipped off-screen: reproduced live, "No Density
            F[ield]" cut to "lo Density F". Left-aligning on narrow is the pre-existing, working
            shape (B1369's own layout), so this only changes behaviour on the wide panes centring
-           was actually built for. ⛔ B1203505 fixed the Outline panel itself — below the phone
-           breakpoint it never joins this row at all (a floating toggle opens it as a fixed
-           overlay instead) — but this rule stays: it costs nothing on a note with no headings,
-           and it is the same defence against any OTHER future narrow-width sibling of the mat
-           (`NoteHistory` still has no phone treatment of its own; see its own file). */
+           was actually built for. ⛔ B1203505/B1215536 fixed both Outline and History — below
+           the phone breakpoint neither one joins this row at all (Outline's own floating
+           toggle, and History's existing toolbar button, each open a fixed overlay instead) —
+           but this rule stays as the same defence against any OTHER future narrow-width
+           sibling of the mat this row might grow. */
         style={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column", alignItems: narrow ? "flex-start" : "center", position: "relative" }}
       >
         <PasteOptions
@@ -2633,6 +2633,7 @@ export default function NoteEditor({
           busy={historyBusy}
           onRestore={handleRestore}
           onClose={() => setHistoryOpen(false)}
+          narrow={narrow}
         />
       </div>
       <DocMenu

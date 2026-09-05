@@ -1018,6 +1018,18 @@ landed together. What each one is, and the ONE decision inside it that is not ob
   ⛔ Snapshots live in **IndexedDB, never localStorage** (TIER-BY-REBUILDABILITY), and are
   **device-local in this version** — a stated limit, not an oversight; it needs no schema change
   and cannot fight the server-owned `rev`.
+  ⛔ **ON A PHONE IT NEVER JOINS THE ROW EITHER (B1215536) — the same defect B1203505 fixed for
+  `NoteOutline`, CONFIRMED LIVE rather than assumed from the similarity.** Measured at 375px
+  before the fix: `note-mat` shrank to 107px, this panel's own `note-sheet` child still rendered
+  at its full 260px `minWidth`, clipped to whatever `note-mat`'s own `overflow:auto` scroller
+  showed at rest — no page-level `document.scrollWidth` overflow (the mat's own scroller absorbs
+  it), but the same practical symptom: body text effectively unreadable past the mat's shrunk
+  edge. Fixed the same way: below the shared phone breakpoint the panel renders as a
+  `position: fixed` overlay drawn OVER the document instead of docking beside it. Unlike
+  `NoteOutline`, this needed no NEW floating toggle — the toolbar's existing History button is
+  already the open/close control on every width. The combined harness that found and proved both
+  fixes — **verify-notes-outline-history-phone**, under `ui-audit/` — is the one to extend if a
+  THIRD panel ever joins this row.
 - `lib/notesTasks.js` — **every unticked checklist line, across every note** (NEW-4), shown in the
   rail's third view. ⛔ Ticking one goes **through the open editor** when that note is on screen
   (`registerOpenNoteDoc` on the store) — writing its JSON round the back of the editor is a
@@ -1042,8 +1054,9 @@ landed together. What each one is, and the ONE decision inside it that is not ob
   floating toggle instead of joining the row (zero row-width cost by construction), opening the
   same rows in a `position: fixed` panel drawn OVER the document; picking a heading closes it.
   `outlineOpen` defaults to closed on a phone (`!narrow`) so opening a note never launches an
-  unasked full-screen takeover. **`NoteHistory.jsx` still has no phone treatment of its own** —
-  it was in scope for this item's diagnosis but not its fix (see that file and B1203506).
+  unasked full-screen takeover. **`NoteHistory.jsx` had the identical gap, filed separately as
+  B1215536 (this session's own real number — an earlier draft of this note cited a wrong
+  placeholder, B1203506, which names no real item) and fixed the same session, below.**
 - `lib/notesCalloutNode.js` + `lib/notesToggleNode.js` — **callouts and foldable sections**
   (NEW-7). A callout stores a TONE NAME, never a colour, so screen / paper / Markdown each draw
   it their own way — and the five tones are GitHub's five, so the export is `> [!NOTE]` rather
