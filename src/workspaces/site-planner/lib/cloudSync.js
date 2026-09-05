@@ -274,16 +274,34 @@ export async function cloudDelete(uid, id) {
 
 /* The REAL row removal. Only two callers: the pre-migration degrade above, and the 30-day purge /
  * "Delete forever" out of Recently deleted. The `site_elements` cascade firing here is correct —
- * at this point the user (or the expiry) has asked for permanent destruction. */
+ * at this point the user (or the expiry) has asked for permanent destruction.
+ *
+ * ⛔ NEW-1 (B843792 adversarial review) — `comps_project_id_fkey` is `ON DELETE SET NULL`, so this
+ * DELETE can silently sever a Leasing Comp's link to its owning site with nothing recording that
+ * it happened — a bare FK side effect, which is exactly what LOUD-FAILURE (root CLAUDE.md) exists
+ * to close. This is NOT prevented (a purge is genuinely permanent, and the link genuinely cannot
+ * survive it — see storage.js's own header on why binning alone must NOT touch project_id) — it is
+ * RECORDED: a best-effort count of live comps still pointing at this row is taken BEFORE the
+ * delete and reported via telemetry after a successful one, so a severed link is a discoverable
+ * fact (client_errors) rather than invisible. The count is RLS-scoped to whatever this caller can
+ * already see (comps' own SELECT policy — own rows + shared-team rows), so a comp outside that
+ * visibility can undercount here; the DETACH ITSELF is unaffected either way, since the FK acts on
+ * the row regardless of who is watching. */
 export async function cloudHardDelete(uid, id) {
   if (!supabase || !uid || !id) return { ok: true, removed: 0, skipped: true };
   delete siteVersions[id];
   delete lastHeaderSig[id];
+  let linkedComps = 0;
+  try {
+    const { count } = await supabase.from("comps").select("id", { count: "exact", head: true }).eq("project_id", id).is("deleted_at", null);
+    linkedComps = count || 0;
+  } catch (_) { /* best-effort — never blocks the delete itself */ }
   try {
     const { data, error } = await supabase.from("sites").delete().eq("id", id).select("id");
     const out = interpretDelete(data, error);
     if (out.ok === false) reportClientEvent("cloud-write-failed", "delete failed (sites)", { id, error: out.error });
     else if (out.removed === 0) reportClientEvent("delete-zero-rows", "delete matched no rows (sites)", { id });
+    else if (linkedComps > 0) reportClientEvent("comp-project-detached-by-purge", `${linkedComps} comp(s) lost their site link — the site they pointed to was permanently deleted`, { id, count: linkedComps });
     return out;
   } catch (e) {
     reportClientEvent("cloud-write-failed", "delete threw (sites)", { id, error: (e && e.message) || "" });
