@@ -33,6 +33,8 @@ import {
   fetchDeletedComps, restoreComp, permanentlyDeleteComp,
 } from "../lib/compsStore.js";
 import { formatNumberDisplay, sanitizeNumericInput } from "../lib/compSheetColumns.js";
+import { resolveOwningSite, autoAttachNote } from "../lib/compSiteAttach.js";
+import { loadSiteSummaries } from "../../../workspaces/site-planner/lib/siteListLight.js";
 import { listMyTeams, currentIdentity } from "../../../workspaces/site-planner/lib/teams.js";
 import CompEntryGrid, { draftFromParsedRow } from "./CompEntryGrid.jsx";
 import CompDraftsPanel from "./CompDraftsPanel.jsx";
@@ -274,7 +276,7 @@ export function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysBy
   );
 }
 
-function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave, onCancel, saving }) {
+export function CompForm({ draft, setDraft, teams, projects, trackedSites, partyNames, errors, onSave, onCancel, saving }) {
   const set = (k) => (e) => setDraft((d) => ({ ...d, [k]: e.target.value }));
   // NEW-13 — NumField's onChange hands back the plain (already-sanitized) value, not an event.
   const setVal = (k) => (v) => setDraft((d) => ({ ...d, [k]: v }));
@@ -456,11 +458,21 @@ function CompForm({ draft, setDraft, teams, projects, partyNames, errors, onSave
           </select>
         </Field>
       )}
-      {projects?.length > 0 && (
+      {/* NEW-2/NEW-3 correction (owner review, adversarial review of B1156864) — `projects` is
+          deliberately the PURSUIT-ONLY Sites list (MapFinder's own `siteGroups`), so a comp
+          attached to a "tracked" site (market intel only) could never appear as a selected
+          option here: per the HTML select spec, a value matching no option silently renders the
+          FIRST option ("No project"), which is exactly why every one of the owner's three live
+          comps — all correctly linked by the migration — read "No project" with no way to see or
+          restore the link. Tracked sites are always offered too (not just the current comp's own
+          site, so reassigning to a DIFFERENT tracked site works), visibly labelled so a market
+          record never reads as a pipeline project. */}
+      {(projects?.length > 0 || trackedSites?.length > 0) && (
         <Field label="Project (optional)" stacked>
           <select value={draft.projectId || ""} onChange={(e) => setDraft((d) => ({ ...d, projectId: e.target.value || null }))} style={inputStyle}>
             <option value="">No project</option>
-            {projects.map((p) => <option key={p.id} value={p.id}>{p.site || p.name}</option>)}
+            {(projects || []).map((p) => <option key={p.id} value={p.id}>{p.site || p.name}</option>)}
+            {(trackedSites || []).map((s) => <option key={s.id} value={s.id}>{(s.site || s.name) + " (market record)"}</option>)}
           </select>
         </Field>
       )}
@@ -510,6 +522,10 @@ export default function CompsPanel({
   const [draft, setDraft] = useState(null);
   const [errors, setErrors] = useState([]);
   const [saving, setSaving] = useState(false);
+  // NEW-2/NEW-3 (adversarial review of B1156864) — the one-line confirmation shown after a save
+  // that auto-attached (or auto-created) an owning site, so a proximity-based guess is VISIBLE
+  // rather than silent (see compSiteAttach.js's autoAttachNote). Cleared on the next form open.
+  const [autoAttachMsg, setAutoAttachMsg] = useState(null);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [teams, setTeams] = useState([]);
   // B849232/NEW-1 — the paste-grid create surface. `gridRows` is a client-side staging array,
@@ -670,8 +686,23 @@ export default function CompsPanel({
 
   if (!open) return null;
 
-  const openDetail = (c) => { setActiveComp(c); setView("detail"); };
-  const openEdit = (c) => { setDraft(compToDraft(c)); setErrors([]); setView("form"); };
+  // NEW-2/NEW-3 correction (owner review) — every live "tracked" site (market intel only),
+  // computed fresh on every render (cheap: a handful of rows, a plain localStorage read) so a
+  // site this same session just auto-created (compSiteAttach.js) shows up immediately. Deduped
+  // by groupId — a tracked "project" is always single-plan today, but this stays correct if that
+  // ever changes, the same way MapFinder's own siteGroups collapses to one row per group.
+  const trackedSites = (() => {
+    const byGroup = new Map();
+    for (const s of loadSiteSummaries()) {
+      if (s.role !== "tracked") continue;
+      const g = s.groupId || s.id;
+      if (!byGroup.has(g)) byGroup.set(g, s);
+    }
+    return [...byGroup.values()];
+  })();
+
+  const openDetail = (c) => { setActiveComp(c); setView("detail"); setAutoAttachMsg(null); };
+  const openEdit = (c) => { setDraft(compToDraft(c)); setErrors([]); setView("form"); setAutoAttachMsg(null); };
   const cancelForm = () => { setView(activeComp ? "detail" : "list"); setDraft(null); };
 
   const save = async () => {
@@ -683,6 +714,15 @@ export default function CompsPanel({
     if (teamConflict) errs.push(teamConflict);
     if (errs.length) { setErrors(errs); return; }
     setSaving(true);
+    // NEW-2 (adversarial review of B1156864) — a NEW comp with no owning site never leaves the
+    // owner with an extra manual step: find (or create) its site before the insert, exactly like
+    // the migration did for the three pre-existing comps. Never runs for an update, and never
+    // overrides an explicit dropdown choice (resolveOwningSite returns null in both cases).
+    let attachNote = null;
+    if (!draft.id) {
+      const resolution = await resolveOwningSite(comp, { overlaysById });
+      if (resolution) { comp.projectId = resolution.projectId; attachNote = autoAttachNote(resolution); }
+    }
     const result = draft.id ? await updateComp(draft.id, comp) : await insertComp(comp);
     setSaving(false);
     if (result.error) { setErrors([result.error.message || "Save failed"]); return; }
@@ -690,6 +730,7 @@ export default function CompsPanel({
     setActiveComp(result.data);
     setView("detail");
     setDraft(null);
+    setAutoAttachMsg(attachNote);
   };
 
   const remove = async (c) => {
@@ -744,7 +785,21 @@ export default function CompsPanel({
     }
     setGridSaving(true);
     setGridSaveError(null);
-    const result = await insertComps(toSave.map((r) => draftToComp(r.draft)));
+    // NEW-2/NEW-3 (adversarial review of B1156864) — same resolution as the single-comp save(),
+    // applied per row, SEQUENTIALLY (not in parallel): a tracked site this loop just created for
+    // an earlier row in the SAME paste is written to local storage before the next row's own
+    // resolveOwningSite call reads it back, so two rows for the same property in one batch
+    // (Building A / Building B on one flyer) attach to ONE new site rather than two.
+    const comps = [];
+    for (const r of toSave) {
+      const comp = draftToComp(r.draft);
+      if (!comp.projectId) {
+        const resolution = await resolveOwningSite(comp, { overlaysById });
+        if (resolution) comp.projectId = resolution.projectId;
+      }
+      comps.push(comp);
+    }
+    const result = await insertComps(comps);
     setGridSaving(false);
     if (result.error) { setGridSaveError(result.error.message || "Save failed"); return; }
     const savedIds = new Set(toSave.map((r) => r._id));
@@ -897,14 +952,22 @@ export default function CompsPanel({
         )}
 
         {!loading && view === "detail" && activeComp && (
-          <CompDetail
-            comp={activeComp} canEdit={activeComp.userId === currentUserId} onEdit={openEdit} onDelete={remove} onBack={() => setView("list")}
-            overlaysById={overlaysById} onOpenBrochure={onOpenBrochure}
-          />
+          <>
+            {autoAttachMsg && (
+              <div style={{ fontSize: 12, color: "var(--text-secondary)", background: "var(--surface-page)", border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", margin: "0 0 10px" }}>
+                {autoAttachMsg}
+                <button onClick={() => setAutoAttachMsg(null)} style={{ float: "right", border: "none", background: "transparent", cursor: "pointer", color: "var(--text-secondary)", fontSize: 12, lineHeight: 1, padding: 0, marginLeft: 8 }} aria-label="Dismiss">✕</button>
+              </div>
+            )}
+            <CompDetail
+              comp={activeComp} canEdit={activeComp.userId === currentUserId} onEdit={openEdit} onDelete={remove} onBack={() => setView("list")}
+              overlaysById={overlaysById} onOpenBrochure={onOpenBrochure}
+            />
+          </>
         )}
 
         {!loading && view === "form" && draft && (
-          <CompForm draft={draft} setDraft={setDraft} teams={teams} projects={projects} partyNames={collectPartyNames(comps)} errors={errors} onSave={save} onCancel={cancelForm} saving={saving} />
+          <CompForm draft={draft} setDraft={setDraft} teams={teams} projects={projects} trackedSites={trackedSites} partyNames={collectPartyNames(comps)} errors={errors} onSave={save} onCancel={cancelForm} saving={saving} />
         )}
       </div>
     </div>

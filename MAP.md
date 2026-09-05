@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-05 @ `4cbb15b04` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-05 @ `b487f11d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_671 source files mapped._
+_673 source files mapped._
 
 ## infra
 
@@ -291,7 +291,7 @@ _671 source files mapped._
 - **`src/shared/comps/components/CompEntryMobileSheet.jsx`** — the TRANSPOSED comp entry layout below MOBILE_BREAKPOINT_PX: pager + status dots, sticky identity strip, one-comp-per-screen field list grouped by compMobileLayout.js, a jump sheet for the whole batch
   - _exports_: `default (CompEntryMobileSheet)`
 - **`src/shared/comps/components/CompsPanel.jsx`** — Leasing Comps right-side panel (B711328): list/detail/create-edit for land, building-sale and lease comps; owner-only Edit/Delete, empty fields never render
-  - _exports_: `CompDetail`, `CompRow`, `default (CompsPanel)`
+  - _exports_: `CompDetail`, `CompForm`, `CompRow`, `default (CompsPanel)`
 - **`src/shared/comps/components/PartyNameField.jsx`** — Comp form party-name field: plain text input + a loose-match suggestion listbox (accessible combobox, independent of the map toolbar's PlaceSearchField)
   - _exports_: `default (PartyNameField)`
 - **`src/shared/comps/lib/compDates.js`** — comp date display/parse: ISO <-> mm/dd/yy, flexible typed-date parsing (slash/dash-numeric, month-name, 2- or 4-digit year) — storage is always ISO, this is the one crossing point to what a person reads/types
@@ -312,6 +312,10 @@ _671 source files mapped._
   - _exports_: `ANCHOR_KINDS`, `anchorCountyFlag`, `anchorTeamConflict`, `annualLeaseRate`, `buildingPricePerSf`, `COMP_TYPES`, `compDateLabel`, `compFieldRows`, `compHeadline`, `compsSummaryBits`, `compToDraft`, `compToRow`, `draftToComp`, `emptyDraft`, `isCompType`, `landPricePerAreaUnit`, `landPricePerSf`, `landSizeSf`, `LEASE_EXPENSE_BASES`, `LEASE_PERIODS`, `leaseTotalAnnualRent`, `netEffectiveLeaseRate`, `opexNormalizedRate`, `parseLeaseTermYears`, `partyLabels`, `resolveCapTriangle`, `rowToComp`, `sortCompsByRecency`, `summarizeLeaseComps`, `summarizeSaleComps`, `validAnchor`, `validateComp`
 - **`src/shared/comps/lib/compSheetColumns.js`** — pure column model for the comp-entry spreadsheet: per-cell get/set, polymorphic fields, display formatting, fill-down/paste-spill
   - _exports_: `applyCellEdit`, `BASIS_OPTIONS`, `cellPlaceholder`, `cellState`, `columnIndex`, `computeFlexWidths`, `fillDownColumn`, `formatNumberDisplay`, `frozenLeftOffsets`, `GROUPS`, `matchOption`, `optionsForColumn`, `PERIOD_OPTIONS`, `sanitizeNumericInput`, `saveButtonLabel`, `SHEET_COLUMNS`, `spillPaste`, `TYPE_OPTIONS`, `UNIT_OPTIONS`, `visibleColumnIndices`, `widthFor`
+- **`src/shared/comps/lib/compSiteAttach.js`** — resolves a comp's owning site on save (site-plan overlay link, then exact-title/nearest match, else creates a new tracked site) plus the owner-facing auto-attach note
+  - _exports_: `autoAttachNote`, `resolveOwningSite`
+- **`src/shared/comps/lib/compSiteMatch.js`** — pure exact-title-or-nearest-within-radius matching rule for attaching a comp to an existing site instead of creating a duplicate
+  - _exports_: `findMatchingSite`, `haversineMiles`, `MATCH_RADIUS_MILES`
 - **`src/shared/comps/lib/compsStore.js`** — Supabase CRUD for public.comps (team-visible read, owner-only write); every call returns {data,error}, never swallows a failure
   - _exports_: `deleteComp`, `fetchAllComps`, `fetchDeletedComps`, `insertComp`, `insertComps`, `permanentlyDeleteComp`, `restoreComp`, `supabase`, `updateComp`
 - **`src/shared/comps/lib/kmlImport.js`** — pure, hand-rolled KML placemark parsing (B849233): Point/Polygon geometry (a polygon's area-weighted centroid, not a vertex average), plus best-effort description extraction reusing compParse.js's prose parser
@@ -1212,7 +1216,7 @@ _671 source files mapped._
 - **`src/workspaces/site-planner/lib/standardsApply.js`** — Standards "Apply now" (NEW-3): push a standard onto existing parcels (stamped → write) or existing elements (render-resolved → clear the per-element override), plus the impact counts the chip shows.
   - _exports_: `allStandardsImpact`, `appliedLabel`, `appliedObjectsLabel`, `applyAllStandards`, `applyMeasureStandard`, `applyParcelStandard`, `applyTypeStandard`, `draftDirty`, `draftHasMeasure`, `draftHasParcel`, `draftHasType`, `draftMeasureValue`, `draftParcelValue`, `draftTypeValue`, `EMPTY_STD_DRAFT`, `MEASURE_STD_KEYS`, `mergeDraftIntoSettings`, `PARCEL_STD_KEYS`, `parcelStandardImpact`, `TYPE_STD_KEYS`, `typeStandardImpact`, `withMeasureDraft`, `withParcelDraft`, `withTypeDraft`
 - **`src/workspaces/site-planner/lib/storage.js`** — Multi-site persistence layer: localStorage primary with per-user cloud mirror, content-union pull merge, per-tab resurrection guards, and an IndexedDB-backed version-history ring
-  - _exports_: `_readSiteTombs`, `_recentlyDeleted`, `_resetHistoryForTest`, `activeUid`, `AUTOSAVE_KEY`, `backupNow`, `checkProjectDeletionStatus`, `clearCloudCache`, `clearHistory`, `clearRecentlyDeleted`, `clearSiteTombstone`, `DELETED_RETENTION_DAYS`, `deleteSite`, `deleteSiteGroup`, `discardLegacySite`, `getCurrentSiteId`, `getVersion`, `groupCountDivergence`, `groupOf`, `importLegacyIntoCloud`, `importOneSiteToCloud`, `initHistoryStore`, `isCloudActive`, `isEmptySite`, `keepaliveFlushSite`, `legacySitesList`, `listDeletedProjects`, `listVersions`, `loadAutosave`, `loadPlansOfGroup`, `loadSite`, `loadSitesList`, `mergePulledSites`, `migrateOldAutosave`, `migrateScenarios`, `migrateSiteGroups`, `pendingLegacyCount`, `pendingLegacySites`, `pruneMigratedLegacy`, `pullCloud`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `pushModelToCloud`, `pushSiteToCloud`, `reconcileSiteFromCloud`, `recordSiteTombstone`, `renameSiteGroup`, `repairSplitProjectNames`, `restoreDeletedProject`, `saveAutosave`, `saveSite`, `scheduleLinkOf`, `setActiveUser`, `setCurrentSiteId`, `setScheduleLink`, `setSiteGroupRole`, `SITE_TOMB_GRACE_MS`, `siteNameOf`, `snapshotVersion`, `stageLegacySite`, `storage`, `summarizeVersion`
+  - _exports_: `_readSiteTombs`, `_recentlyDeleted`, `_resetHistoryForTest`, `activeUid`, `AUTOSAVE_KEY`, `backupNow`, `checkProjectDeletionStatus`, `clearCloudCache`, `clearHistory`, `clearRecentlyDeleted`, `clearSiteTombstone`, `createTrackedSite`, `DELETED_RETENTION_DAYS`, `deleteSite`, `deleteSiteGroup`, `discardLegacySite`, `getCurrentSiteId`, `getVersion`, `groupCountDivergence`, `groupOf`, `importLegacyIntoCloud`, `importOneSiteToCloud`, `initHistoryStore`, `isCloudActive`, `isEmptySite`, `keepaliveFlushSite`, `legacySitesList`, `listDeletedProjects`, `listVersions`, `loadAutosave`, `loadPlansOfGroup`, `loadSite`, `loadSitesList`, `mergePulledSites`, `migrateOldAutosave`, `migrateScenarios`, `migrateSiteGroups`, `pendingLegacyCount`, `pendingLegacySites`, `pruneMigratedLegacy`, `pullCloud`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `pushModelToCloud`, `pushSiteToCloud`, `reconcileSiteFromCloud`, `recordSiteTombstone`, `renameSiteGroup`, `repairSplitProjectNames`, `restoreDeletedProject`, `saveAutosave`, `saveSite`, `scheduleLinkOf`, `setActiveUser`, `setCurrentSiteId`, `setScheduleLink`, `setSiteGroupRole`, `SITE_TOMB_GRACE_MS`, `siteNameOf`, `snapshotVersion`, `stageLegacySite`, `storage`, `summarizeVersion`
 - **`src/workspaces/site-planner/lib/storageReconcile.js`** — NEW-1 site storage reconciliation: counted detention plus counted mitigation against total physical pond storage, with a hard FAIL naming the overlap volume and the ponds involved (and undeclared dual-duty ponds)
   - _exports_: `OVERLAP_TOL_CF`, `reconcilePond`, `reconcileStorage`
 - **`src/workspaces/site-planner/lib/subsidence.js`** — Harris-Galveston / Fort Bend subsidence-district cited registry (NEW-B4): county→district flag (groundwater-pumping permit + surface-water-conversion context) with citations + audit. Pure.

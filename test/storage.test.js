@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mergePulledSites, groupCountDivergence, saveSite, loadSite, loadSitesList, loadPlansOfGroup, renameSiteGroup, repairSplitProjectNames, snapshotVersion, listVersions, getVersion, summarizeVersion, backupNow, pruneMigratedLegacy, isEmptySite } from "../src/workspaces/site-planner/lib/storage.js";
+import { mergePulledSites, groupCountDivergence, saveSite, loadSite, loadSitesList, loadPlansOfGroup, renameSiteGroup, repairSplitProjectNames, snapshotVersion, listVersions, getVersion, summarizeVersion, backupNow, pruneMigratedLegacy, isEmptySite, createTrackedSite } from "../src/workspaces/site-planner/lib/storage.js";
 import { mergeSiteContent, contentCount, createSiteModel } from "../src/workspaces/site-planner/lib/siteModel.js";
 import { idbAvailable } from "../src/workspaces/site-planner/lib/localDb.js";
 
@@ -868,5 +868,54 @@ describe("overlay hide persists — visible:false survives save/load + the signe
       const rehydrated = { ...o, src: "data:image/png;base64,AAAA", strippedForCloud: false };
       expect(rehydrated.visible).toBe(false);
     });
+  });
+});
+
+// NEW-2 (adversarial review of B1156864, this branch) — the runtime site-creation path
+// resolveOwningSite() calls when no existing site plausibly matches a comp. Reuses saveSite's
+// normal write path, so it must be byte-identical in shape to the historical backfill migration.
+describe("createTrackedSite — the runtime half of site_role_unify_backfill_20260905.sql (NEW-2)", () => {
+  beforeEach(() => {
+    const store = {};
+    globalThis.localStorage = {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; },
+      clear: () => { for (const k of Object.keys(store)) delete store[k]; },
+      key: (i) => Object.keys(store)[i] ?? null,
+      get length() { return Object.keys(store).length; },
+    };
+  });
+
+  it("creates a role:tracked site named 'Market record' from the comp's own title/location, logged out (cloud skipped)", async () => {
+    const r = await createTrackedSite({ site: "Tesla - TGS DC4", county: "chambers", lat: 29.7323267265652, lon: -94.869229076615 });
+    expect(r.ok).toBe(true);
+    expect(r.id).toMatch(/^trk/);
+    expect(r.cloud).toEqual({ skipped: true });
+    const model = loadSite(r.id);
+    expect(model.site).toBe("Tesla - TGS DC4");
+    expect(model.name).toBe("Market record");
+    expect(model.role).toBe("tracked");
+    expect(model.groupId).toBe(r.id); // single-plan project — group anchors on its own id
+    expect(model.origin).toEqual({ lat: 29.7323267265652, lon: -94.869229076615 });
+    expect(model.county).toBe("chambers");
+  });
+
+  it("falls back to 'Tracked property' for a blank/whitespace title, matching the migration's own rule", async () => {
+    const r1 = await createTrackedSite({});
+    expect(loadSite(r1.id).site).toBe("Tracked property");
+    const r2 = await createTrackedSite({ site: "   " });
+    expect(loadSite(r2.id).site).toBe("Tracked property");
+  });
+
+  it("never sets an origin when lat/lon are missing", async () => {
+    const r = await createTrackedSite({ site: "No Location Comp" });
+    expect(loadSite(r.id).origin).toBeNull();
+  });
+
+  it("two calls never collide on id", async () => {
+    const a = await createTrackedSite({ site: "A" });
+    const b = await createTrackedSite({ site: "B" });
+    expect(a.id).not.toBe(b.id);
   });
 });

@@ -1,5 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { groupProjects, filterProjects, relTime, suggestNameMatch, normalizeProjectName, resolveCurrentName, withCurrentProject, unionProjectLists } from "../src/shared/projects/projectModel.js";
+import { listProjects } from "../src/shared/projects/projects.js";
+import { setActiveUser } from "../src/workspaces/site-planner/lib/activeUser.js";
+
+const SITES_KEY = "planarfit:sites:v1";
 
 describe("groupProjects", () => {
   it("collapses plans of one site into a single project entry", () => {
@@ -278,5 +282,44 @@ describe("relTime", () => {
   it("falls back to a short date past ~a month", () => {
     const out = relTime(now - 60 * 86_400_000, now);
     expect(out).not.toMatch(/ago|just now/);
+  });
+});
+
+// Adversarial review of B1156864 (NEW-1) — measured live: three "tracked" market records
+// (comps-only, no plan/layout) polluted every cross-workspace "pick a project" surface this
+// function feeds (AppHeader -> ProjectBreadcrumb, plus the Model/Notes/Scheduler workspaces'
+// own project switchers), because `loadSiteSummaries()` is a plain passthrough of whatever role
+// a record carries and nothing downstream of it filtered. `SitePlannerApp.jsx`'s own `siteGroups`
+// (the map's Sites list) already filtered correctly — this closes the SAME gap at the other
+// choke point every other workspace actually calls through.
+describe("listProjects — pursuit-only by default (NEW-1)", () => {
+  beforeEach(() => {
+    setActiveUser(null); // logged-out store — deterministic, no network
+    const store = {};
+    globalThis.localStorage = {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; },
+      clear: () => { for (const k of Object.keys(store)) delete store[k]; },
+      key: (i) => Object.keys(store)[i] ?? null,
+      get length() { return Object.keys(store).length; },
+    };
+  });
+
+  it("excludes a tracked site from the project switcher", () => {
+    localStorage.setItem(SITES_KEY, JSON.stringify({
+      real: { id: "real", groupId: "real", site: "Goose Creek", role: "pursuit", updatedAt: 100 },
+      trk1: { id: "trk1", groupId: "trk1", site: "Core 5 - West Hardy", name: "Market record", role: "tracked", updatedAt: 200 },
+    }));
+    const out = listProjects();
+    expect(out.map((p) => p.id)).toEqual(["real"]);
+  });
+
+  it("still includes every ordinary (role-less legacy, or explicit pursuit) project", () => {
+    localStorage.setItem(SITES_KEY, JSON.stringify({
+      legacy: { id: "legacy", groupId: "legacy", site: "Pre-feature site", updatedAt: 50 }, // no role key at all
+      fresh: { id: "fresh", groupId: "fresh", site: "Fresh site", role: "pursuit", updatedAt: 60 },
+    }));
+    expect(listProjects().map((p) => p.id).sort()).toEqual(["fresh", "legacy"]);
   });
 });

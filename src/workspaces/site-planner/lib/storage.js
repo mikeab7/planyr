@@ -1344,6 +1344,37 @@ export function saveSite(partial, { skipHistory = false } = {}) {
   lastSeenAt[partial.id] = model.updatedAt;
   return writeSites(sites);
 }
+
+// NEW-2 (adversarial review of B1156864, this branch) — the ONE place a "tracked" site (market
+// intel only — no plan, no layout) gets created OUTSIDE the one-time backfill migration
+// (db/site_role_unify_backfill_20260905.sql). Saving a comp with no owning site must never leave
+// the owner with an extra manual step ("go create a site first") — see BACKLOG.md. Reuses the
+// exact same write path every other site creation goes through (saveSite → cloudUpsert), so a
+// tracked site created this way is byte-identical in shape to one the migration created (same
+// schemaVersion via createSiteModel, same "Market record" internal name) and participates in
+// every existing merge/sync/tombstone rule for free — no second site-creation code path.
+// Returns { ok, id, error? }; `ok` reflects the LOCAL write (always attempted) — a cloud push
+// failure is reported but never blocks the comp save that triggered this (the local copy is real
+// and the next autosave/pull heals the split, same as every other background push in this file).
+export async function createTrackedSite({ site, county, lat, lon } = {}) {
+  const id = "trk" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const partial = {
+    id, groupId: id,
+    site: (site && String(site).trim()) || "Tracked property",
+    name: "Market record",
+    role: "tracked",
+    origin: (typeof lat === "number" && typeof lon === "number") ? { lat, lon } : null,
+    county: county || null,
+  };
+  if (!saveSite(partial)) return { ok: false, id, error: "local write failed" };
+  const uid = activeUid();
+  if (!uid) return { ok: true, id, cloud: { skipped: true } };
+  const model = loadSite(id);
+  const cloud = await cloudUpsert(uid, model);
+  if (!cloud.ok) reportClientEvent("cloud-write-failed", "tracked-site create didn't land (retried on next pull/save)", { id, error: cloud.error || "" });
+  return { ok: true, id, cloud };
+}
+
 // Remove a site locally (instant/optimistic) AND from the cloud when signed in. Returns the
 // cloud-delete promise ({ ok, error?, removed? }) so the caller can AWAIT it and surface a loud
 // error if the cloud removal actually failed (the row would otherwise silently survive and

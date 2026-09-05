@@ -227,6 +227,40 @@ was never clicked" quietly ships broken.
 
 **Result:** ⏳ pending — needs a real signed-in browser session. `Cadence: once`.
 
+### V852304 — B1167136: no cross-workspace project switcher lists a "tracked" site as a selectable project `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** `listProjects()` (the reader behind AppHeader → ProjectBreadcrumb on every route, and the Model/Notes/Scheduler workspaces' own project pickers) now filters to `role === "pursuit"`, but its data source (`loadSiteSummaries()`, the on-device cache) only reflects the tracked sites this account actually holds once a real signed-in pull has run — the sandbox cannot sign in to confirm the filter against the owner's real three tracked sites.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner (real account, real data; do not create, delete, or edit anything):**
+1. Click the project breadcrumb's switcher dropdown from any workspace (Site Planner, Notes, Model, Scheduler). **Expect:** "Core 5 - West Hardy", "Tesla - TGS 800K SF", and "Tesla - TGS DC4" do NOT appear in the list, on any workspace.
+2. Confirm every ordinary project (any of the owner's 37 real pursuit sites) still appears and switches correctly.
+3. Open the Site Planner's own map Sites rail (unaffected by this item, already correct per B1156864) and confirm it still reads the same count it did before this session — a sanity cross-check, not this item's own claim.
+
+**Result:** ⏳ pending — needs a real signed-in browser session. `Cadence: once`.
+
+### V852305 — B1167137: the comp editor's Project field always shows a comp's REAL owning site, tracked or not, never "No project" `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** The data-layer half (a throwaway comp resolving to the correct existing tracked site, no duplicate created) was verified directly against production via the Supabase MCP this session — see B1167137's own writeup. What that cannot confirm is what the owner's own signed-in browser actually RENDERS in the editor, which is the one thing the owner's own review called out as the defect that decides whether any of this is visible at all.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner (real account, real data — do NOT edit or save any of the three comps named below, read the field and cancel):**
+1. Open "Core 5 - West Hardy" for edit (the single-comp edit form, not the paste grid). **Expect:** the Project field reads "Core 5 - West Hardy (market record)" — never "No project" and never the bare internal name "Market record". Cancel without saving.
+2. Repeat for "Tesla - TGS 800K SF" and "Tesla - TGS DC4", each showing its own matching name. Cancel without saving.
+3. Report all three displayed strings verbatim.
+4. Save a genuinely NEW throwaway comp with no project chosen, located near an EXISTING site (any role). **Expect:** on reopen, the Project field shows that site's real name, and a one-line confirmation banner named what happened (attached vs. a new tracked site created). Soft-delete the throwaway comp afterward.
+
+**Result:** ⏳ pending — needs a real signed-in browser session. `Cadence: once`.
+
+### V852306 — B1167138: two comps for one property attach to ONE tracked site, never two `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** The core matching logic (role-agnostic exact-title-or-nearest-within-0.5mi) was proven against the real production `sites` table via the Supabase MCP and against the owner's own real coordinates in `test/compSiteMatch.test.js` — what remains is confirming the PASTE-GRID batch path (sequential intra-batch resolution) behaves the same way when actually driven by a human pasting real rows.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner, using THROWAWAY comps only:**
+1. Open the paste-grid (Comps tab → the batch-entry surface) and enter two comps at the SAME real property (e.g. two buildings on one existing flyer/site), neither with a project chosen. Save. **Expect:** exactly ONE new tracked site is created (or the existing one reused, if that property already has a site), and BOTH comps' Project fields show the same site name.
+2. Enter two comps at genuinely different, far-apart properties (no title match, > 0.5 mi apart) with no project chosen. Save. **Expect:** two DISTINCT sites, one per comp.
+3. Soft-delete every throwaway comp and any throwaway tracked site this check created.
+
+**Result:** ⏳ pending — needs a real signed-in browser session. `Cadence: once`.
+
 ### V650128 — B1156864: the Sites list stays at 37 pursuit projects after the comps-to-sites migration, the three new tracked sites stay off it, and a comp's owning site shows correctly `Blocker: auth` `Blocker: real-data`
 
 NEW-1 collapsed the Site/comp split: every site now carries a `role` ("pursuit" vs "tracked"),
