@@ -14,13 +14,16 @@ function rowOf(compType, overrides = {}, cellFlags = {}) {
 }
 
 describe("compMobileLayout: needed-to-save", () => {
-  it("is Executed then Location, sourced from SHEET_COLUMNS' own `required` flag", () => {
+  // NEW-5 (owner decision, 2026-09-02) relaxed the Executed-date requirement across the DB,
+  // validateComp and every UI layer; `compDate` lost its `required: true` in compSheetColumns.js,
+  // so Location is now the only column this pinned section names.
+  it("is Location alone, sourced from SHEET_COLUMNS' own `required` flag", () => {
     const cols = neededToSaveColumns("lease");
-    expect(cols.map((c) => c.key)).toEqual(["compDate", "location"]);
+    expect(cols.map((c) => c.key)).toEqual(["location"]);
   });
   it("every required column applies to every comp type (nothing to filter out today)", () => {
     for (const t of ["land", "building_sale", "lease"]) {
-      expect(neededToSaveColumns(t).map((c) => c.key)).toEqual(["compDate", "location"]);
+      expect(neededToSaveColumns(t).map((c) => c.key)).toEqual(["location"]);
     }
   });
   it("isRequiredColEmpty reads Location off the anchor, not a string value", () => {
@@ -30,10 +33,8 @@ describe("compMobileLayout: needed-to-save", () => {
   });
   it("neededToSaveRemaining counts down as fields fill in, never below 0", () => {
     const bare = rowOf("lease");
-    expect(neededToSaveRemaining(bare)).toBe(2);
-    const dated = rowOf("lease", { compDate: "2026-06-01" });
-    expect(neededToSaveRemaining(dated)).toBe(1);
-    const complete = rowOf("lease", { compDate: "2026-06-01", anchor: { kind: "pin", lat: 1, lon: 2 } });
+    expect(neededToSaveRemaining(bare)).toBe(1);
+    const complete = rowOf("lease", { anchor: { kind: "pin", lat: 1, lon: 2 } });
     expect(neededToSaveRemaining(complete)).toBe(0);
   });
 });
@@ -83,10 +84,9 @@ describe("compMobileLayout: labels and status text", () => {
     );
     expect(rowStatusText(flagged)).toBe("rate needs a period");
   });
-  it("rowStatusText names what's missing, joined, and 'ready' once complete", () => {
-    expect(rowStatusText(rowOf("land"))).toBe("needs a date & a location");
-    expect(rowStatusText(rowOf("land", { compDate: "2026-06-01" }))).toBe("needs a location");
-    expect(rowStatusText(rowOf("land", { compDate: "2026-06-01", anchor: { kind: "pin", lat: 1, lon: 2 } }))).toBe("ready");
+  it("rowStatusText names what's missing, and 'ready' once complete — a dateless-but-located row is genuinely ready (NEW-5 made Executed optional everywhere)", () => {
+    expect(rowStatusText(rowOf("land"))).toBe("needs a location");
+    expect(rowStatusText(rowOf("land", { anchor: { kind: "pin", lat: 1, lon: 2 } }))).toBe("ready");
   });
 });
 
