@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { parseRoute, buildHash, sameRoute, unknownModuleSlug, isAdminRoute, DEFAULT_MODULE } from "../src/app/route.js";
+import { parseRoute, buildHash, sameRoute, unknownModuleSlug, isAdminRoute, isDashboardRoute, DEFAULT_MODULE } from "../src/app/route.js";
 
 describe("parseRoute", () => {
-  it("empty / root hash is the dashboard (default module, no project)", () => {
+  it("empty / root hash falls back to the default module, no project (isDashboardRoute is the real Dashboard signal)", () => {
     for (const h of ["", "#", "#/", "#//"]) {
       expect(parseRoute(h)).toEqual({ module: "site-planner", projectId: null, cross: false, org: false });
     }
@@ -88,10 +88,31 @@ describe("isAdminRoute", () => {
   });
 });
 
+// NEW-1 (B1213312) — the Dashboard, same shape as isAdminRoute/isDesignRoute: a real
+// destination read straight off the raw hash, never a route.module value. Bare "#/" is its
+// canonical link (so a bare planyr.io lands there); "#/dashboard" is a defensive alias.
+describe("isDashboardRoute", () => {
+  it("recognizes a bare hash and the explicit #/dashboard alias", () => {
+    for (const h of ["", "#", "#/", "#//", "#/dashboard"]) {
+      expect(isDashboardRoute(h)).toBe(true);
+    }
+  });
+
+  it("is false for every named module slug and near-miss, including site-planner's own", () => {
+    for (const h of ["#/site", "#/notes", "#/markup", "#/admin", "#/design", "#/dashboarder", "#/project/x/site"]) {
+      expect(isDashboardRoute(h)).toBe(false);
+    }
+  });
+
+  it("parseRoute treats #/dashboard exactly like any other unresolved slug — DEFAULT_MODULE, no project", () => {
+    expect(parseRoute("#/dashboard")).toEqual({ module: DEFAULT_MODULE, projectId: null, cross: false, org: false });
+  });
+});
+
 describe("buildHash", () => {
-  it("dashboard (default module, no project) is the clean #/", () => {
-    expect(buildHash({ module: "site-planner", projectId: null })).toBe("#/");
-    expect(buildHash({})).toBe("#/");
+  it("every project-less module — including the default — names its own slug; bare '#/' is reserved for the Dashboard", () => {
+    expect(buildHash({ module: "site-planner", projectId: null })).toBe("#/site");
+    expect(buildHash({})).toBe("#/site");
   });
 
   it("a non-default module with no project names its slug", () => {
