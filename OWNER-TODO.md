@@ -5,7 +5,7 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-09-04._
+_Last updated: 2026-09-05._
 
 ## 🔐 One small GitHub setting still open, and two closed hunts (B825232–B825234)
 
@@ -38,13 +38,6 @@ _Last updated: 2026-09-04._
       one, or it exists but doesn't name `build` as required. If there's no rule: add one requiring the
       `build` check to pass before merging. **Nothing is broken while this waits** — a session just has to
       merge each green PR by hand instead of it happening on its own, same as before this automation existed.
-- [ ] **Five stale throwaway probe branches need deleting** — `claude/verify-pr-auto-ready-throwaway`,
-      `claude/verify-pr-auto-ready-20260831-001137`, `claude/verify-pr-auto-ready-20260831-015902`,
-      `claude/v438336-retest-create-approve-hg8wde`, and `claude/v438336-verification-y2wyna`. All five
-      are closed-PR leftovers from the un-drafting hunt and its 2026-09-01 token re-check (both closed,
-      above) — none has an open PR. Re-confirmed 2026-09-04: no session's git credentials can delete a
-      remote branch here (`HTTP 403`), and there's still no GitHub tool for it either. Harmless clutter,
-      delete whenever convenient from the GitHub branches page.
 
 ## 👀 One thing only you can check: does the app actually TELL you when it has stopped saving? (V273520 / B484337)
 
