@@ -18,6 +18,7 @@ import {
   insertColumnAt, insertRowAt, deleteRowAt, setColumnWidth, setRowHeight, rowHeightAt, setFreeze,
   DEFAULT_ROW_H,
   isInconsistencyDismissed, setInconsistencyDismissed,
+  unsupportedFormulaAt,
 } from "../src/workspaces/model/lib/sheetModel.js";
 
 describe("createSheet", () => {
@@ -654,5 +655,83 @@ describe("dismissedInconsistencies — Stage 3, NEW-2 (owner brief 2026-09-03)",
     delete legacy.dismissedInconsistencies;
     const migratedLegacy = migrateSheet(legacy);
     expect(migratedLegacy.dismissedInconsistencies).toEqual({});
+  });
+});
+
+describe("unsupportedFormulas — Excel round-trip (NEW-1, owner chat block)", () => {
+  it("createSheet starts with an empty map; unsupportedFormulaAt reads null for an ordinary cell", () => {
+    const s = createSheet();
+    expect(s.unsupportedFormulas).toEqual({});
+    expect(unsupportedFormulaAt(s, 2, 0)).toBe(null);
+  });
+
+  it("a real edit to the cell CLEARS the marker — the user's own edit supersedes an import artifact", () => {
+    let s = createSheet();
+    s = { ...s, cells: { ...s.cells, "c1:2": "3" }, unsupportedFormulas: { "c1:2": "=VLOOKUP(A1,A1:B1,2,FALSE)" } };
+    expect(unsupportedFormulaAt(s, 2, 0)).toBe("=VLOOKUP(A1,A1:B1,2,FALSE)");
+    s = commitCellText(s, 2, 0, "99");
+    expect(unsupportedFormulaAt(s, 2, 0)).toBe(null);
+    expect(s.cells["c1:2"]).toBe("99");
+  });
+
+  it("re-committing the SAME text is a genuine no-op and does not clear the marker", () => {
+    let s = createSheet();
+    s = { ...s, cells: { ...s.cells, "c1:2": "3" }, unsupportedFormulas: { "c1:2": "=VLOOKUP(A1,A1:B1,2,FALSE)" } };
+    const same = commitCellText(s, 2, 0, "3");
+    expect(same).toBe(s); // no-op — same reference, matching setRaw's own no-op contract
+    expect(unsupportedFormulaAt(same, 2, 0)).not.toBe(null);
+  });
+
+  it("blankRange (Delete) drops the marker along with the content it was about", () => {
+    let s = createSheet();
+    s = { ...s, cells: { ...s.cells, "c1:2": "3" }, unsupportedFormulas: { "c1:2": "=VLOOKUP(A1,A1:B1,2,FALSE)" } };
+    s = blankRange(s, 2, 2, 0, 0);
+    expect(s.cells["c1:2"]).toBeUndefined();
+    expect(unsupportedFormulaAt(s, 2, 0)).toBe(null);
+  });
+
+  it("relocates with the cell on a row insert/delete, exactly like dismissedInconsistencies", () => {
+    let s = createSheet();
+    s = { ...s, unsupportedFormulas: { "c2:5": "=VLOOKUP(1,A1:B1,2,FALSE)" } };
+    s = insertRowAt(s, 2); // above row 5 — moves down to row 6
+    expect(unsupportedFormulaAt(s, 5, 1)).toBe(null);
+    expect(unsupportedFormulaAt(s, 6, 1)).toBe("=VLOOKUP(1,A1:B1,2,FALSE)");
+    s = deleteRowAt(s, 0); // below the marked cell — moves back up to row 5
+    expect(unsupportedFormulaAt(s, 5, 1)).toBe("=VLOOKUP(1,A1:B1,2,FALSE)");
+  });
+
+  it("TOMBSTONE-DELETES: deleting the row drops its own marker, never resurrects on a later insert", () => {
+    let s = createSheet();
+    s = { ...s, unsupportedFormulas: { "c1:3": "=VLOOKUP(1,A1:B1,2,FALSE)" } };
+    s = deleteRowAt(s, 3);
+    expect(Object.keys(s.unsupportedFormulas)).toHaveLength(0);
+    s = insertRowAt(s, 3);
+    expect(unsupportedFormulaAt(s, 3, 0)).toBe(null);
+  });
+
+  it("TOMBSTONE-DELETES: deleting the column drops its own markers, keyed by colId not position", () => {
+    let s = createSheet();
+    s = { ...s, unsupportedFormulas: { "c3:1": "=VLOOKUP(1,A1:B1,2,FALSE)" } }; // column C
+    s = deleteColumn(s, 2);
+    expect(Object.keys(s.unsupportedFormulas)).toHaveLength(0);
+  });
+
+  it("column insert never relocates a marker — colId is stable across position moves", () => {
+    let s = createSheet();
+    s = { ...s, unsupportedFormulas: { "c3:1": "=VLOOKUP(1,A1:B1,2,FALSE)" } }; // column c3 ("C")
+    s = insertColumnAt(s, 0); // c3 is now at display position 3, but it's still c3
+    expect(unsupportedFormulaAt(s, 1, 3)).toBe("=VLOOKUP(1,A1:B1,2,FALSE)");
+  });
+
+  it("round-trips through migrateSheet, and a pre-round-trip blob defaults to an empty map", () => {
+    let s = createSheet();
+    s = { ...s, unsupportedFormulas: { "c1:4": "=VLOOKUP(1,A1:B1,2,FALSE)" } };
+    const round = migrateSheet(JSON.parse(JSON.stringify(s)));
+    expect(unsupportedFormulaAt(round, 4, 0)).toBe("=VLOOKUP(1,A1:B1,2,FALSE)");
+
+    const legacy = createSheet();
+    delete legacy.unsupportedFormulas;
+    const migratedLegacy = migrateSheet(legacy);
+    expect(migratedLegacy.unsupportedFormulas).toEqual({});
   });
 });

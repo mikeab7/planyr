@@ -39,20 +39,34 @@ was never clicked" quietly ships broken.
 >   then `getByTestId("map-start-blank-menu-item")` is the reliable two-step click); drive the SVG
 >   canvas with `page.mouse` (CDP mouse events fire React's pointer handlers); `page.screenshot({clip})`
 >   then read the PNG back to eyeball it.
-> - **⛔ THIS SANDBOX HAS NO WEBKIT — every "phone" or "mobile" claim made here is a CHROMIUM claim,
->   never a Safari one, and this is a standing gap, not a one-off (B1168128, 2026-09-05).**
->   `npx playwright install chromium` restores Chromium/its headless-shell; it does NOT install
->   WebKit — `/opt/pw-browsers/webkit-*` does not exist in this environment and nothing here fetches
->   it. Playwright's `devices["iPhone …"]` descriptors (isMobile/hasTouch/dpr/mobile UA) make Chromium
->   behave like a phone-shaped browser, which is real evidence for layout, touch-event wiring, and
->   gesture logic — but it is still Chromium's touch/pointer pipeline, not Safari's, and it cannot
->   render `env(safe-area-inset-*)` as anything but 0 (no notch/home-indicator to inset around) or
->   reproduce Mobile Safari's collapsing-address-bar `visualViewport` behavior. **Say "Chromium at
->   iPhone-13 width" in a report, never "tested on iPhone" or "verified on Safari."** A synthetic
->   safe-area value can be exercised in an isolated fixture as a SIMULATION of the CSS arithmetic —
->   labeled as simulation, never reported as device evidence. Closing a real notch/gesture-bar or
->   Safari-touch-pipeline question needs an actual iPhone; that gap is Michael's own device, not a
->   task for a self-check here.
+> - **⛔ WEBKIT IS INSTALLABLE HERE (amended 2026-09-05, B1168128 fourth pass) — but it is still not
+>   Safari, and getting it running needs two steps most sessions will miss on the first try.**
+>   `npx playwright install chromium` does NOT install WebKit — that part of the old note still
+>   holds, and a fresh container starts with Chromium only. But `npx playwright install webkit` DOES
+>   work from here: the download hits a 403 on its first two CDN mirrors
+>   (`cdn.playwright.dev/dbazure/...`, `playwright.download.prss.microsoft.com` — a real, narrow
+>   block on those two hosts specifically) and then succeeds on Playwright's own third fallback
+>   mirror automatically — no manual retry needed, just let the command finish. The binary then
+>   FAILS TO LAUNCH the first time, not from network/permissions but from ~27 missing OS shared
+>   libraries (`libgtk-4.so.1` and similar — normal Ubuntu packages this container doesn't ship by
+>   default). Fix: `npx playwright install-deps webkit` (this container runs as root) installs them;
+>   `webkit.launch()` then succeeds. **Do both installs before assuming WebKit is unreachable.**
+>   Once launched, this is Playwright's Linux WebKit build — the real WebKit rendering + pointer-event
+>   engine, materially closer to Safari than Chromium — but it is still **not** Apple's WebKit and
+>   **not** Mobile Safari's browser chrome: no real notch, no real collapsing address bar, and
+>   Playwright exposes no CDP-equivalent for WebKit (no `Emulation.setSafeAreaInsetsOverride`
+>   analog), so `env(safe-area-inset-*)` still resolves to 0 here with no way to override it —
+>   confirmed by trying, not assumed (Chromium's CDP override IS available and DOES let you inject a
+>   real inset value; that asymmetry is real and worth knowing before reaching for WebkKit expecting
+>   parity with the Chromium simulation path). Playwright's `touchscreen` API on WebKit (like
+>   Chromium) exposes only a single-point `.tap()` — no drag primitive on either engine — so a real
+>   held-and-moved touch gesture still can't be produced through Playwright's public API; Chromium's
+>   "genuine touch drag" tests use Chromium-only CDP (`Input.dispatchTouchEvent`), which has no WebKit
+>   equivalent. **Say "WebKit" in a report, never "iPhone" or "Safari" or "Mobile Safari."** A
+>   synthetic safe-area value can still only be exercised as a SIMULATION on Chromium (via its CDP
+>   override), never on WebKit here. Closing a real notch/gesture-bar or true Mobile-Safari-chrome
+>   question still needs an actual iPhone; that gap is Michael's own device, not a task for a
+>   self-check here.
 
 >
 > ### 🚚 Confirming a change is actually SERVED (B1119) — use the script, not a hand grep
@@ -372,88 +386,6 @@ curl -I https://planyr.io/model         → HTTP/2 404                          
 **Result:** ⏳ pending — needs a real signed-in browser session. `Cadence: once`.
 
 (B1167138's own live-verify was folded into `V850608` above — same mechanism, same shipped code, no separate check needed; see B1167138's writeup in `BACKLOG.md`.)
-
-### V650128 — B1156864: the Sites list stays at 37 pursuit projects after the comps-to-sites migration, the three new tracked sites stay off it, and a comp's owning site shows correctly `Blocker: auth` `Blocker: real-data`
-
-NEW-1 collapsed the Site/comp split: every site now carries a `role` ("pursuit" vs "tracked"),
-and the three live comps ("Core 5 - West Hardy", "Tesla - TGS 800K SF", "Tesla - TGS DC4") were
-each attached to a brand-new "tracked" site (none matched an existing pursuit site's location).
-The data-layer migration was fully verified against production directly (byte-for-byte snapshot
-diff, before/after row counts, the role-flip RPC proven live) — see B1156864's own writeup. What
-that could NOT confirm is what the owner's own signed-in browser actually renders, which is the
-one thing this check exists for.
-
-**Steps, each with a named expected result — on `planyr.io`, signed in as the owner (this is his
-real account and real data; do not create, delete, or edit anything beyond what a step says to):**
-1. Open the Site Planner's map view (the Sites/Comps rail). **Expect:** the Sites list count reads
-   **37** (not 40, not some other number) — the three new tracked sites (`trk8eef7db4d0`,
-   `trk4c75bf98dd`, `trk0892cf7b73`) must NOT appear anywhere in this list or as map pins.
-2. Switch to the Comps tab. **Expect:** still exactly **3** comps listed (Core 5 - West Hardy,
-   Tesla - TGS 800K SF, Tesla - TGS DC4) — unchanged from before this migration.
-3. Open "Core 5 - West Hardy" for edit (the single-comp edit form, not the paste grid). **Expect:**
-   its project dropdown now shows a real selected project — a site named "Core 5 - West Hardy" —
-   instead of the "no project" default it had before this session. Do NOT change the selection;
-   just confirm it reads correctly, then close without saving.
-4. Repeat step 3 for the two Tesla comps, confirming each shows its own matching project name.
-5. Confirm nothing else about the 37 pre-existing projects changed — pick 2-3 at random from the
-   Sites list and spot-check their names/counties/status read exactly as they did before this
-   session (cross-reference against the owner's own memory or an earlier screenshot if available;
-   this is a sanity check on top of the machine-verified snapshot diff, not a substitute for it).
-
-**2026-09-05 addendum — an adversarial review reported this step FAILED live** (Sites header read
-33, Pursuit read 19, with the three tracked sites at the top, "no boundary" badge, sorted by
-recency) **on build b487f11**, contradicting this item's own code trace. Re-read the exact shipped
-`siteGroups` filter and reproduced it in Node against a fixture shaped like the review's own
-numbers (30 pursuit + 3 tracked/`status:null`) — it correctly excludes all 3 and returns 30, so the
-filter as written is not defeated by a null `status`. Could not settle from this sandbox whether
-the live report was a stale cached bundle (this repo's own standing caution — see `/CLAUDE.md` →
-"A LIVE MEASUREMENT ON planyr.io IS ONLY VALID IF THE DEPLOYED CHUNK HASH IS READ IN THE SAME
-CALL") or a real gap. Per STANDING RULE #2, fixed it anyway rather than resting on the trace:
-`MapFinder.jsx` (B1165440) now re-derives its own pursuit-only filter at the point every one of
-these numbers is actually computed (header count, per-status groups, pinned rows, map pins),
-independent of what `siteGroups` upstream already filtered — so step 1's answer is now enforced at
-two layers regardless of which explanation was correct. **Step 1 (and its "37" expectation, now
-whatever the live count is at verify time) is the one to re-run first; if it still misreads,
-capture the served chunk hash (Network tab or `document.querySelectorAll('script[src]')`) in the
-same observation so a stale-bundle explanation can be ruled in or out.**
-
-**Result:** ⏳ pending — needs a real signed-in browser session; not reachable from this sandbox
-(the sandbox proxy CORS-blocks the Supabase auth handshake). `Cadence: once`.
-
-### V850608 — B1165441: saving a comp with no site picked auto-attaches to an existing site or creates a new tracked one, through the real signed-in UI `Blocker: auth` `Blocker: real-data`
-
-**Why this needs its own real pass.** Filed `Verify: live` per the LIVE-VERIFY rule (real project
-data + persistence). The matching rule and the DB round-trip mechanics were verified directly this
-session — the matching rule via 9 unit tests against the real production coordinates for the
-owner's three existing tracked sites (`test/compSiteMatch.test.js`), and the round trip by running
-the actual, unmodified `findMatchingSite`/`resolveOrCreateTrackedSiteForComp` logic (read via the
-Supabase MCP, not guessed) against a real throwaway comp, then performing the identical
-insert/update the app's own code would perform — see B1165441's own writeup for the exact steps and
-cleanup. What that could NOT do is drive the actual React form through a signed-in browser, which
-is the one thing this check exists for.
-
-**Steps, each with a named expected result — on `planyr.io`, signed in as the owner, using a
-THROWAWAY comp (title it "verification-only, delete me" so it's never mistaken for a real deal;
-delete it when done):**
-1. Open the Comps tab, click "+ New comp" (or drop a pin and start one), fill in any comp type with
-   a title and a location, and leave the Site field unset (no project picked). Save it.
-   **Expect:** the save succeeds with no error, and the comp's detail view shows a real Site name
-   under Location — never blank/unset.
-2. If the pin was placed far from every existing site (a genuinely new location): **expect** a
-   brand-new site was created (visible in the Sites list, role "tracked" so it does NOT appear in
-   the default Pursuit view) named after the comp's own title, and NO "attached to…" notice (a
-   brand-new site needs no explanation).
-3. If the pin was placed within about half a mile of an existing site's location (pursuit OR
-   tracked): **expect** the comp attaches to THAT site instead of creating a new one, and the detail
-   view shows a dismissible notice naming which site it attached to and why (location or name
-   match) — confirm no duplicate site was created.
-4. Use the existing Site dropdown in the edit form to confirm the attachment can be changed by
-   hand (the manual-reassign path, unaffected by this item).
-5. Delete the throwaway comp (and, if step 2 created one, the throwaway tracked site it made) via
-   the app's own Delete controls. **Expect:** both are gone from the respective lists on reload.
-
-**Result:** ⏳ pending — needs a real signed-in browser session; not reachable from this sandbox
-(the sandbox proxy CORS-blocks the Supabase auth handshake). `Cadence: once`.
 
 ### V644080 — B1146960: the row's new "Edit / adjust…" menu item and clicking a placed plan on the map both arm #1409's manipulation mode, with opacity/rotation controls visible and Escape leaving it, on a real signed-in account `Blocker: auth` `Blocker: real-data`
 

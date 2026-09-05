@@ -81,7 +81,20 @@
  * deleteColumn below) — a name's own target must move when the sheet's structure changes under
  * it, the same reasoning every formula reference already gets via
  * `rewriteFormulaForStructuralShift`.
- */
+ *
+ * ⛔ EXCEL ROUND-TRIP (NEW-1, owner brief) — `unsupportedFormulas` is a NEW map, same `cellKey`
+ * shape as `formats`/`styles`/`dismissedInconsistencies`, holding the ORIGINAL Excel formula text
+ * (with its leading "=") for a cell that an .xlsx IMPORT could not translate into this engine's
+ * formula language (an unimplemented function, e.g. VLOOKUP — see lib/xlsxIO.js's own header for
+ * the exact support test). That cell's `cells[key]` holds the imported file's CACHED VALUE as a
+ * plain literal — never dropped, never silently blanked — while this map remembers what formula
+ * used to compute it, so the ribbon/grid can mark the cell and a user can inspect the original
+ * text on hover (SheetView.jsx's own corner marker). Only ever POPULATED by an import; ordinary
+ * editing never writes it, but DOES clear it — `setRaw` drops a cell's entry the moment its raw
+ * text actually changes (the marker means "this is what an import put here," and a real edit
+ * supersedes that), and `blankRange` drops it too (Delete removes the content the marker was
+ * about). Cascaded on row/column insert/delete exactly like `dismissedInconsistencies` above
+ * (TOMBSTONE-DELETES; relocated on row insert/delete, tombstoned on column delete). */
 import { rewriteFormulaForStructuralShift, rewriteFormulaForSheetRename, dropFormulaSheetRefs } from "../../../shared/formula/formula.js";
 import { shiftNamesForStructuralChange } from "./namedRanges.js";
 
@@ -100,7 +113,7 @@ const DEFAULT_ROW_COUNT = 1000;
 
 /** Excel-style column letters: A, B, … Z, AA, AB, … — used only as the default NAME for a
  *  freshly-added column. Renaming is free-text; this is just a starting point. */
-function colLetterName(index) {
+export function colLetterName(index) {
   let n = index + 1, s = "";
   while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
   return s;
@@ -143,6 +156,10 @@ export function createSheet() {
     // insert/delete exactly like `styles` (see insertRowAt/deleteRowAt/insertColumnAt/
     // deleteColumn below).
     dismissedInconsistencies: {},
+    // Excel round-trip (NEW-1) — "colId:rowIndex" -> the original Excel formula TEXT (with its
+    // leading "=") for a cell an .xlsx import kept as a cached VALUE because its formula used an
+    // unimplemented function. See the file header.
+    unsupportedFormulas: {},
   };
 }
 
@@ -196,10 +213,13 @@ export function migrateSheet(raw) {
     const names = raw.names && typeof raw.names === "object" ? { ...raw.names } : {};
     // Stage 3 (NEW-2) — same defaulting shape again for a pre-audit-tools blob.
     const dismissedInconsistencies = raw.dismissedInconsistencies && typeof raw.dismissedInconsistencies === "object" ? { ...raw.dismissedInconsistencies } : {};
+    // Excel round-trip (NEW-1) — same defaulting shape again for a pre-xlsx-import blob (every
+    // sheet that predates this field, which is every sheet ever saved before now).
+    const unsupportedFormulas = raw.unsupportedFormulas && typeof raw.unsupportedFormulas === "object" ? { ...raw.unsupportedFormulas } : {};
     const migrated = {
       version: SHEET_VERSION, nextColId: raw.nextColId || columns.length + 1, columns,
       rowCount: Math.max(Number(raw.rowCount) || 0, DEFAULT_ROW_COUNT), cells: { ...raw.cells }, formats, styles,
-      rowHeights, freezeRows, freezeCols, merges, names, dismissedInconsistencies,
+      rowHeights, freezeRows, freezeCols, merges, names, dismissedInconsistencies, unsupportedFormulas,
     };
     // Always float capacity up to the current floor — never a stored ceiling. Reuses
     // ensureColumnCount (already used by paste/fill to grow the sheet mid-session) so there is
@@ -278,11 +298,20 @@ export function setRaw(sheet, rowIndex, colIndex, text) {
   const had = Object.prototype.hasOwnProperty.call(sheet.cells, key);
   const next = text ?? "";
   if (next === "" && !had) return sheet; // no-op: never mints an undo frame for nothing
-  if (next === "" && had) { const cells = { ...sheet.cells }; delete cells[key]; return { ...sheet, cells }; }
+  // Excel round-trip (NEW-1) — any REAL edit to this cell's raw text supersedes an import's
+  // "kept as value, formula unsupported" marker (see the file header): the user has now typed
+  // their own content over it, so the original-formula memory is stale and drops with the edit.
+  const dropUnsupported = (base) => {
+    if (!base.unsupportedFormulas || !(key in base.unsupportedFormulas)) return base;
+    const unsupportedFormulas = { ...base.unsupportedFormulas };
+    delete unsupportedFormulas[key];
+    return { ...base, unsupportedFormulas };
+  };
+  if (next === "" && had) { const cells = { ...sheet.cells }; delete cells[key]; return dropUnsupported({ ...sheet, cells }); }
   if (had && sheet.cells[key] === next) return sheet;
   const cells = { ...sheet.cells, [key]: next };
   const rowCount = Math.max(sheet.rowCount, rowIndex + 1);
-  return { ...sheet, cells, rowCount };
+  return dropUnsupported({ ...sheet, cells, rowCount });
 }
 
 /** The ONE commit path every cell edit goes through (typed in-cell, via F2, or via the formula
@@ -300,6 +329,9 @@ export function blankRange(sheet, r1, r2, c1, c2) {
   const rr1 = Math.max(0, Math.min(r1, r2)), rr2 = Math.max(r1, r2);
   const cc1 = Math.max(0, Math.min(c1, c2)), cc2 = Math.min(sheet.columns.length - 1, Math.max(c1, c2));
   let cells = sheet.cells;
+  // Excel round-trip (NEW-1) — Delete removes the CONTENT the "kept as value, formula
+  // unsupported" marker was about (see the file header), so it goes with it, same as `cells`.
+  let unsupportedFormulas = sheet.unsupportedFormulas;
   let changed = false;
   for (let c = cc1; c <= cc2; c++) {
     const col = sheet.columns[c];
@@ -311,9 +343,14 @@ export function blankRange(sheet, r1, r2, c1, c2) {
         delete cells[key];
         changed = true;
       }
+      if (unsupportedFormulas && Object.prototype.hasOwnProperty.call(unsupportedFormulas, key)) {
+        if (unsupportedFormulas === sheet.unsupportedFormulas) unsupportedFormulas = { ...unsupportedFormulas };
+        delete unsupportedFormulas[key];
+        changed = true;
+      }
     }
   }
-  return changed ? { ...sheet, cells } : sheet;
+  return changed ? { ...sheet, cells, unsupportedFormulas } : sheet;
 }
 
 export function renameColumn(sheet, colIndex, name) {
@@ -737,7 +774,8 @@ export function insertColumnAt(sheet, colIndex, ownerSheetName = null, editedShe
   const names = shiftNamesForStructuralChange(sheet.names, "col", at + 1, 1);
   // A new column carries no dismissed flags of its own and touches no existing colId, so
   // `dismissedInconsistencies` (keyed by colId, stable across insert — see the file header on
-  // why columns never need relocation) needs no update here, unlike the row case below.
+  // why columns never need relocation) needs no update here, unlike the row case below. Same
+  // reasoning for `unsupportedFormulas` (Excel round-trip, NEW-1).
   return { ...sheet, columns, cells, names, nextColId: sheet.nextColId + 1 };
 }
 
@@ -766,9 +804,13 @@ export function deleteColumn(sheet, colIndex, ownerSheetName = null, editedSheet
   // to reuse the same id.
   const dismissedInconsistencies = {};
   for (const [k, v] of Object.entries(sheet.dismissedInconsistencies || {})) if (!k.startsWith(prefix)) dismissedInconsistencies[k] = v;
+  // Excel round-trip (NEW-1) — same TOMBSTONE-DELETES cascade for a deleted column's
+  // "kept as value, formula unsupported" markers.
+  const unsupportedFormulas = {};
+  for (const [k, v] of Object.entries(sheet.unsupportedFormulas || {})) if (!k.startsWith(prefix)) unsupportedFormulas[k] = v;
   const merges = mergesAfterColumnDelete(sheet, colIndex);
   const names = shiftNamesForStructuralChange(sheet.names, "col", colIndex + 1, -1);
-  return { ...sheet, columns, cells, formats, styles, dismissedInconsistencies, merges, names };
+  return { ...sheet, columns, cells, formats, styles, dismissedInconsistencies, unsupportedFormulas, merges, names };
 }
 
 // Relocate a rowIndex-keyed map's entries (rowHeights) by the same rule cells/formats use
@@ -817,10 +859,18 @@ export function insertRowAt(sheet, rowIndex, ownerSheetName = null, editedSheetN
     const colId = k.slice(0, sep), r = Number(k.slice(sep + 1));
     dismissedInconsistencies[cellKey(colId, r >= at ? r + 1 : r)] = v;
   }
+  // Excel round-trip (NEW-1) — relocate every "kept as value, formula unsupported" marker the
+  // same way, so a row inserted above one doesn't strand it under the wrong row index.
+  const unsupportedFormulas = {};
+  for (const [k, v] of Object.entries(sheet.unsupportedFormulas || {})) {
+    const sep = k.lastIndexOf(":");
+    const colId = k.slice(0, sep), r = Number(k.slice(sep + 1));
+    unsupportedFormulas[cellKey(colId, r >= at ? r + 1 : r)] = v;
+  }
   const rowHeights = relocateRowMap(sheet.rowHeights, at, 1);
   const merges = relocateMergeRows(sheet.merges, at, 1);
   const names = shiftNamesForStructuralChange(sheet.names, "row", at + 1, 1);
-  return { ...sheet, cells, formats, styles, dismissedInconsistencies, rowHeights, merges, names, rowCount: sheet.rowCount + 1 };
+  return { ...sheet, cells, formats, styles, dismissedInconsistencies, unsupportedFormulas, rowHeights, merges, names, rowCount: sheet.rowCount + 1 };
 }
 
 /** STAGE 1 — delete the row at `rowIndex` entirely (every cell/format stored on it), then
@@ -865,10 +915,19 @@ export function deleteRowAt(sheet, rowIndex, ownerSheetName = null, editedSheetN
     if (r === at) continue;
     dismissedInconsistencies[cellKey(colId, r > at ? r - 1 : r)] = v;
   }
+  // Excel round-trip (NEW-1) — TOMBSTONE-DELETES: the deleted row's own markers vanish with it,
+  // everything below relocates up, same as `dismissedInconsistencies` just above.
+  const unsupportedFormulas = {};
+  for (const [k, v] of Object.entries(sheet.unsupportedFormulas || {})) {
+    const sep = k.lastIndexOf(":");
+    const colId = k.slice(0, sep), r = Number(k.slice(sep + 1));
+    if (r === at) continue;
+    unsupportedFormulas[cellKey(colId, r > at ? r - 1 : r)] = v;
+  }
   const rowHeights = relocateRowMap(sheet.rowHeights, at, -1);
   const merges = relocateMergeRows(sheet.merges, at, -1);
   const names = shiftNamesForStructuralChange(sheet.names, "row", at + 1, -1);
-  return { ...sheet, cells, formats, styles, dismissedInconsistencies, rowHeights, merges, names, rowCount: Math.max(1, sheet.rowCount - 1) };
+  return { ...sheet, cells, formats, styles, dismissedInconsistencies, unsupportedFormulas, rowHeights, merges, names, rowCount: Math.max(1, sheet.rowCount - 1) };
 }
 
 /** How many rows the view should render past the real data, so typing never has to "add a
@@ -917,6 +976,15 @@ export function setInconsistencyDismissed(sheet, rowIndex, colIndex, dismissed) 
   const dismissedInconsistencies = { ...sheet.dismissedInconsistencies };
   if (dismissed) dismissedInconsistencies[key] = true; else delete dismissedInconsistencies[key];
   return { ...sheet, dismissedInconsistencies };
+}
+
+/** Excel round-trip (NEW-1) — the original Excel formula text (with its leading "=") an .xlsx
+ *  import kept as a cached VALUE because it used an unimplemented function, or `null` for an
+ *  ordinary cell. Pure reader, same shape as `isInconsistencyDismissed` above. */
+export function unsupportedFormulaAt(sheet, rowIndex, colIndex) {
+  const col = colAt(sheet, colIndex);
+  if (!col) return null;
+  return (sheet.unsupportedFormulas && sheet.unsupportedFormulas[cellKey(col.id, rowIndex)]) || null;
 }
 
 /* ============================================================================================
@@ -1060,6 +1128,19 @@ export function addSheet(workbook) {
   const id = `sheet${n}`;
   const name = uniqueSheetName(workbook.sheets, `Sheet${workbook.sheets.length + 1}`);
   const sheets = [...workbook.sheets, makeSheetEntry(id, name, createSheet())];
+  return { ...workbook, sheets, nextSheetId: n + 1, activeSheetId: id };
+}
+
+/** Append a new sheet carrying PRE-BUILT content — the CSV-import counterpart of `addSheet`
+ *  above (same dedupe-name / append-at-end / make-active shape), used by lib/csvIO.js so
+ *  "import a CSV" reuses the exact sheet-naming rule every other "add a sheet" path already
+ *  uses rather than re-deriving it. `sheet` is already a full, valid sheet object (the caller
+ *  ran it through `migrateSheet` itself, same as any other foreign blob this module reads). */
+export function addSheetWithContent(workbook, desiredName, sheet) {
+  const n = workbook.nextSheetId;
+  const id = `sheet${n}`;
+  const name = uniqueSheetName(workbook.sheets, desiredName || `Sheet${workbook.sheets.length + 1}`);
+  const sheets = [...workbook.sheets, makeSheetEntry(id, name, sheet)];
   return { ...workbook, sheets, nextSheetId: n + 1, activeSheetId: id };
 }
 

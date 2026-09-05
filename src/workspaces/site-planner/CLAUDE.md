@@ -21,7 +21,19 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   found tracked sites in the Pursuit group on planyr.io) rather than trusting the caller alone, so
   the guard holds even if a future caller of this component ever forgets to pre-filter. Flipping a
   site's role later needs no re-entry: `storage.setSiteGroupRole` → `db/set_site_group_role.sql`,
-  the SAME one-atomic-statement-over-the-group shape `rename_site_group.sql` uses. A comp's owning
+  the SAME one-atomic-statement-over-the-group shape `rename_site_group.sql` uses.
+  **⛔ B1181104 — AND THAT RPC MUST STAMP `data.updatedAt`, not just the outer SQL `updated_at`
+  column — this is the ACTUAL root cause of B1156864's Sites-list recurrence, found only after
+  B1165440's defense-in-depth filter still failed live.** `mergeSiteContent` (siteModel.js)
+  resolves every scalar field — role included — from whichever side of a pull-vs-local merge has
+  the newer jsonb-INTERNAL `updatedAt`, keeping the LOCAL side on a tie (B559). The RPC originally
+  bumped only the outer column, so a role flip through it was invisible to that comparison — any
+  client holding a locally-cached copy could get stuck on the pre-flip role forever, no matter how
+  many times the RPC ran. B1156864's OWN live verification (flipping `trk8eef7db4d0`
+  tracked→pursuit→tracked to prove the RPC works) is what planted this trap on the very rows the
+  review then found broken. See `docs/DATA.md`'s ROLE row for the full mechanism and the fix
+  (stamp `data.updatedAt`, same convention `nextUpdatedAt()` already uses) — proven with the real
+  `mergeSiteContent`, not theorized (the repo-root `test/` suite's B1181104 case). A comp's owning
   site is `comps.project_id` (the comps db folder's own schema header explains why that column —
   not a new one — supersedes into this role); `db/site_role_unify_backfill_20260905.sql` is the
   one-time migration that attached the three pre-existing live comps to sites (creating a new
