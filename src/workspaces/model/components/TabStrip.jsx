@@ -30,8 +30,15 @@
  *     sat on that ground either way), just now stated explicitly since the strip carries its own
  *     border/shadow and can no longer rely on "transparent" to reveal what's behind it.
  *   - No pill shape on the TABS themselves — flat rectangular, per the owner's explicit "not
- *     Excel's skeuomorphic trapezoid, not a pill — flat and connected." (The circular "+"
- *     add-sheet button legitimately keeps `RADIUS.pill` — it's a round icon button, not a tab.)
+ *     Excel's skeuomorphic trapezoid, not a pill — flat and connected."
+ *
+ * ⛔ B1176976 (adjacent-case sweep, 2026-09-05) — THE "+" ADD-SHEET BUTTON'S OWN `RADIUS.pill` WAS
+ * THE SAME DEFECT THIS ITEM FIXED ELSEWHERE (`HelpReportControl.jsx`), JUST NOT YET REPORTED. This
+ * file's own comment above used to read "the circular '+' add-sheet button legitimately keeps
+ * `RADIUS.pill` — it's a round icon button, not a tab," which conflates "visually round" with the
+ * shape rule's actual test (container-vs-standalone, docs/DESIGN.md's shape rule, B942176): this
+ * button holds no sub-controls, performs one action, and is exactly the "standalone action
+ * button's own resting shape" the rule says `pill` may never be — fixed to `RADIUS.md`.
  *   - The 16px dead band is gone outright (SheetView's old 8px bottom margin + this strip's old
  *     8px top padding) — that height goes back to the grid: the strip is now exactly `TAB_H`
  *     tall, tabs fill it edge to edge, and the grid (still `flex: 1`) absorbs the rest.
@@ -208,7 +215,7 @@ export default function TabStrip({ sheets, activeSheetId, onSelect, onAdd, onRen
           // alignSelf: "center" — the strip's outer row is `alignItems: "stretch"` (so a tab's
           // own height:"100%" reaches the strip's full height, edge to edge); this button keeps
           // an explicit size, so it needs its own cross-axis centering rather than stretching.
-          flex: "none", alignSelf: "center", width: ADD_BTN_SIZE, height: ADD_BTN_SIZE, margin: `0 ${STRIP_PAD}px 0 0`, borderRadius: RADIUS.pill,
+          flex: "none", alignSelf: "center", width: ADD_BTN_SIZE, height: ADD_BTN_SIZE, margin: `0 ${STRIP_PAD}px 0 0`, borderRadius: RADIUS.md,
           border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)",
           fontSize: 14, lineHeight: 1, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", // FONT_SIZE.display literal — designTokens.js note above
         }}

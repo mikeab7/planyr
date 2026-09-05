@@ -7,89 +7,89 @@
     "map-landing": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       }
     },
     "site-planner-header": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       }
     },
     "site-planner-left-rail": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       }
     },
     "library": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       }
     }
   }

@@ -92,6 +92,7 @@ import { dirname, resolve, join } from "node:path";
 import { RADIUS } from "../src/shared/ui/radius.js";
 import { FONT_SIZE } from "../src/shared/ui/designTokens.js";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { classifyIsolatedControl, ROW_ALIGN_TOLERANCE_PX, SURFACE_HEIGHT_THRESHOLD_PX } from "./lib/controlKind.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..");
@@ -876,6 +877,147 @@ async function alignmentMismatches(page, surface) {
   }, { menuOnly: !!surface.menuOnly, scope: surface.scope, exclude: surface.exclude, topTolPx: ALIGN_TOP_TOL_PX, heightTolPx: ALIGN_HEIGHT_TOL_PX, bandPx: ALIGN_BAND_PX, radiusOk: [...RADIUS_OK] });
 }
 
+// B1176976 (NEW-2) — isolatedKindMismatches(): the gap nestingMismatches()/siblingMismatches()
+// cannot close BY CONSTRUCTION, because both are relative checks (a control vs. its CONTAINER, a
+// control vs. a rounded ROW PEER) — a control with neither never reaches either one's compliance
+// test at all, it lands in an internal "no ancestor found"/"no row found" bucket. Measured live
+// against the real app before this landed (BASE_URL=http://localhost:4173, the map landing page
+// surface, untouched build): HelpReportControl.jsx's floating help/report FAB —
+// `borderRadius: RADIUS.pill` on a standalone button — reports in exactly those two buckets and
+// in neither check's `findings`. alignmentMismatches() DOES enter this control in its
+// position:fixed/rounded candidate pool, but that check only ever compares top-offset/height
+// between band-peers — it never reads radius at all, so it was never going to catch a wrong
+// TOKEN either way, peer or no peer. See ui-audit/lib/controlKind.mjs's own header for the full
+// reasoning and for why the KIND DECISION itself lives there, in the Node realm, rather than
+// duplicated inline here the way nestedIn() has to be.
+//
+// SCOPE, deliberately narrow: only elements that are THEMSELVES an actionable control
+// (INTERACTIVE_SEL — the same selector siblingSizeMismatches() already scopes to), so a
+// decorative, non-interactive status dot (docs/DESIGN.md's own radius-table carve-out — "pill...
+// status dots" — e.g. this exact control's own unread-report badge, a plain aria-hidden `<span>`)
+// is never a candidate. It was never a "standalone control" the shape rule is talking about,
+// isolated or not — nestingMismatches() already has its own, separate isCircularBadge exemption
+// for exactly this shape when it DOES have a rounded ancestor; a decorative dot with no ancestor
+// at all is simply out of this check's business, not a second exemption to encode here.
+async function isolatedKindMismatches(page, surface) {
+  return page.evaluate(({ interactiveSel, menuOnly, scope, exclude, radiusOk, rowAlignTolPx }) => {
+    const root = menuOnly
+      ? [...document.querySelectorAll('[data-menu-owner]')]
+      : [[...document.querySelectorAll(scope)].find((el) => el.getBoundingClientRect().width > 0) || document.body];
+
+    // Same "uniform, positive, on-scale radius, non-zero box" candidate pool
+    // nestingMismatches()/siblingMismatches() build, so "has a rounded ancestor"/"has a rounded
+    // sibling" below reasons over the identical pool those checks themselves use — a control
+    // this check skips because it found an ancestor/sibling is, by definition, one of THOSE
+    // checks' candidates too, never silently dropped from all three at once.
+    //
+    // ⛔ MEASURED, B1176976 — the SURFACE ROOT ITSELF must be a candidate too, not just its
+    // descendants. `r.querySelectorAll("*")` (the loop below) only ever returns DESCENDANTS of
+    // `r`, so when `r` IS the rounded ancestor — the ordinary case for a `menuOnly` surface, where
+    // `r` is the `[data-menu-owner]` panel `AnchoredMenu` portals to `document.body` — it was
+    // never in the pool a child could walk up to and find. Confirmed live (BASE_URL crawl, "Main
+    // menu — File ▾"): the panel div (`data-menu-owner="app-header"`) computes `border-radius:
+    // 12px`, its two `MenuItem`-style children compute `6px` (a compliant `nestedIn(12, gap)`) —
+    // a real, already-correct nesting relationship this check would have misreported as
+    // "isolated" (and its own STANDALONE-control rule would then have wrongly demanded `md`) had
+    // the root not been added here. This is a pre-existing gap in nestingMismatches()'s own
+    // candidate pool too (same root-exclusion), filed separately (see this item's own PR) rather
+    // than fixed here — this function only needs to not INHERIT it into a brand-new false
+    // positive.
+    const allRounded = [];
+    const considerCandidate = (el, ownerRoot) => {
+      if (exclude && el.closest(exclude) && el.closest(exclude) !== ownerRoot) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      const cs = getComputedStyle(el);
+      const parts = [...new Set(String(cs.borderRadius).split(/\s+/).map((t) => parseFloat(t)).filter((n) => !Number.isNaN(n)))];
+      if (parts.length !== 1) return;
+      const radius = parts[0];
+      if (!radius || !radiusOk.includes(radius)) return;
+      const label = el.getAttribute("aria-label") || el.getAttribute("title")
+        || (el.textContent || "").trim().slice(0, 30) || el.tagName;
+      allRounded.push({ el, radius, rect, label: String(label).replace(/\s+/g, " ").trim() });
+    };
+    for (const r of root) {
+      if (!r) continue;
+      considerCandidate(r, r);
+      for (const el of r.querySelectorAll("*")) considerCandidate(el, r);
+    }
+
+    const hasRoundedAncestor = (child) => {
+      let anc = child.el.parentElement, hops = 0;
+      while (anc && anc !== document.body && hops < 5) {
+        const cand = allRounded.find((c) => c.el === anc);
+        if (cand && cand.label !== child.label) {
+          const r = child.rect, a = cand.rect;
+          const contained = r.left >= a.left - 0.5 && r.right <= a.right + 0.5 && r.top >= a.top - 0.5 && r.bottom <= a.bottom + 0.5;
+          const inset = r.width < a.width - 3 || r.height < a.height - 3;
+          if (contained && inset) return true;
+        }
+        anc = anc.parentElement; hops++;
+      }
+      return false;
+    };
+    // Same bounded flex-row-ancestor walk siblingMismatches() uses (rowRootOf) — a control has a
+    // "rounded row-peer" when some OTHER rounded candidate shares its row root.
+    const rowRootOf = (el) => {
+      let n = el.parentElement, hops = 0;
+      while (n && n !== document.body && hops < 4) {
+        const cs = getComputedStyle(n);
+        if ((cs.display === "flex" || cs.display === "inline-flex") && cs.flexDirection !== "column" && cs.flexDirection !== "column-reverse") {
+          const elementChildren = [...n.children].filter((c) => c.getBoundingClientRect().width > 0 || c.getBoundingClientRect().height > 0);
+          if (elementChildren.length > 1) return n;
+        }
+        n = n.parentElement; hops++;
+      }
+      return null;
+    };
+    const hasRoundedSibling = (child) => {
+      const rowRoot = rowRootOf(child.el);
+      if (!rowRoot) return false;
+      return allRounded.some((c) => c !== child && rowRootOf(c.el) === rowRoot);
+    };
+
+    const candidates = [];
+    for (const r of root) {
+      if (!r) continue;
+      for (const el of r.querySelectorAll(interactiveSel)) {
+        if (exclude && el.closest(exclude) && el.closest(exclude) !== r) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) continue;
+        const cs = getComputedStyle(el);
+        const parts = [...new Set(String(cs.borderRadius).split(/\s+/).map((t) => parseFloat(t)).filter((n) => !Number.isNaN(n)))];
+        if (parts.length !== 1) continue;
+        const radius = parts[0];
+        if (!radius || !radiusOk.includes(radius)) continue;
+        const label = el.getAttribute("aria-label") || el.getAttribute("title")
+          || (el.textContent || "").trim().slice(0, 30) || el.tagName;
+        const child = { el, radius, rect, label: String(label).replace(/\s+/g, " ").trim() };
+        if (hasRoundedAncestor(child)) continue; // governed by nestingMismatches
+        if (hasRoundedSibling(child)) continue; // governed by siblingMismatches
+
+        // Facts only — the KIND DECISION itself is a plain, unit-tested function
+        // (controlKind.mjs's classifyIsolatedControl) applied by the caller in the Node realm,
+        // not here (this whole function runs inside page.evaluate's separate JS realm, which
+        // cannot import that module).
+        const interactiveDescendants = [...el.querySelectorAll(interactiveSel)]
+          .map((d) => d.getBoundingClientRect())
+          .filter((dr) => dr.width > 0 && dr.height > 0);
+        const centers = interactiveDescendants.map((dr) => (dr.top + dr.bottom) / 2);
+        const descendantRowAligned = centers.length < 2 || (Math.max(...centers) - Math.min(...centers)) <= rowAlignTolPx;
+        candidates.push({
+          label: child.label,
+          radius,
+          interactiveDescendantCount: interactiveDescendants.length,
+          descendantRowAligned,
+          height: Math.round(rect.height),
+        });
+      }
+    }
+    return candidates;
+  }, { interactiveSel: INTERACTIVE_SEL, menuOnly: !!surface.menuOnly, scope: surface.scope, exclude: surface.exclude, radiusOk: [...RADIUS_OK], rowAlignTolPx: ROW_ALIGN_TOLERANCE_PX });
+}
+
 // Best-effort file/line attribution: grep src/ for the element's own label as a literal string.
 //
 // ⛔ B1038016 (4th correction) — SORT BEFORE TAKING "FIRST MATCH", OR "FIRST" IS A COIN FLIP.
@@ -1186,6 +1328,7 @@ async function run() {
   const sibling = {}; // surface name -> { light: [...], dark: [...] } of sibling-radius-family findings (B950320)
   const sizeSibling = {}; // surface name -> { light: [...], dark: [...] } of sibling height/padding findings (B982402)
   const alignment = {}; // surface name -> { light: [...], dark: [...] } of top/height alignment findings (B950322)
+  const isolatedKind = {}; // surface name -> { light: [...], dark: [...] } of isolated-control-kind candidates (B1176976)
   try {
     // NEW-15 / B846608 — fail loudly, before spending ~90s crawling every surface, if this
     // build isn't in CI's canonical auth state. See the gate's own header comment above.
@@ -1207,6 +1350,7 @@ async function run() {
         (sibling[surface.name] ||= {})[theme] = await siblingMismatches(page, surface);
         (sizeSibling[surface.name] ||= {})[theme] = await siblingSizeMismatches(page, surface);
         (alignment[surface.name] ||= {})[theme] = await alignmentMismatches(page, surface);
+        (isolatedKind[surface.name] ||= {})[theme] = await isolatedKindMismatches(page, surface);
         await ctx.close();
       }
     }
@@ -1349,6 +1493,40 @@ async function run() {
   }
   if (!totalAlignmentMismatches) alignmentLines.push("_None found on this run._", "");
 
+  // B1176976 (NEW-2) — isolated control KIND mismatches: a rounded, actionable control with no
+  // rounded ancestor (nestingMismatches() blind spot) and no rounded row-peer (siblingMismatches()
+  // blind spot) still has a KIND per docs/DESIGN.md's shape rule; this applies that rule directly
+  // rather than relying on a container or a peer to reveal a mismatch. See
+  // ui-audit/lib/controlKind.mjs for the decision and isolatedKindMismatches() above for what
+  // "isolated" means and why alignmentMismatches() doesn't already cover this (it never reads
+  // radius at all).
+  let totalIsolatedKindMismatches = 0;
+  const isolatedKindLines = ["## Isolated control kind mismatches (NEW-2, B1176976)", "",
+    "A rounded, actionable control with NO rounded containing ancestor (nestingMismatches() has",
+    "nothing to walk up to) and NO rounded row-peer (siblingMismatches() has nothing to compare",
+    "against) — structurally invisible to both checks, and to alignmentMismatches() for a different",
+    "reason (that check never reads radius at all). Classified by KIND from measured facts",
+    `(ui-audit/lib/controlKind.mjs): 2+ separately-interactive descendants sitting in one row within`,
+    `a control-ish height (≤${SURFACE_HEIGHT_THRESHOLD_PX}px) is a segmented CONTAINER (expects`,
+    "`pill`); 2+ descendants otherwise (stacked, or taller) is a SURFACE (expects `lg`); anything",
+    "else is a STANDALONE control (expects `md`) — docs/DESIGN.md's own three roles for the shape",
+    "rule, made mechanical instead of relying on eye judgment.",
+    ""];
+  for (const s of SURFACES) {
+    for (const theme of ["light", "dark"]) {
+      const candidates = (isolatedKind[s.name] || {})[theme] || [];
+      const found = candidates.map((c) => ({ ...c, ...classifyIsolatedControl(c) })).filter((c) => !c.compliant);
+      totalIsolatedKindMismatches += found.length;
+      if (!found.length) continue;
+      isolatedKindLines.push(`**${s.name} — ${theme}:**`, "");
+      for (const f of found) {
+        isolatedKindLines.push(`- "${f.label}" is ${f.radius}px, classified **${f.kind}** — expected ${f.expectedRadius}px.`);
+      }
+      isolatedKindLines.push("");
+    }
+  }
+  if (!totalIsolatedKindMismatches) isolatedKindLines.push("_None found on this run._", "");
+
   // NEW-1/NEW-2 (B1038016) — THE headline metric, now BOUND rather than merely reported. Not "how
   // many values deviate from a list" (a value can be individually on-scale and still be the wrong
   // one to sit next to its neighbour — the account-pill failure this whole item is about), and not
@@ -1454,6 +1632,8 @@ async function run() {
     "",
     `**Total alignment mismatches found (B950322): ${totalAlignmentMismatches}.** See the section below.`,
     "",
+    `**Total isolated control kind mismatches found (NEW-2, B1176976): ${totalIsolatedKindMismatches}.** See the section below.`,
+    "",
     "## Known, deliberately-not-fixed findings",
     "",
     "Classes of ⚠️ row below are investigated and intentionally left as-is, rather than mechanically",
@@ -1519,6 +1699,9 @@ async function run() {
     alignmentLines.join("\n"),
     "---",
     "",
+    isolatedKindLines.join("\n"),
+    "---",
+    "",
     sections.join("\n\n---\n\n"),
     "",
   ].join("\n");
@@ -1537,7 +1720,7 @@ async function run() {
   }
 
   writeFileSync(OUT_MD, md);
-  console.log(`docs/UI-INVENTORY.md written — ${totalDeviations} distinct deviating style signature(s), ${totalNestingMismatches} nesting mismatch(es), ${totalSiblingMismatches} sibling radius mismatch(es), ${totalSizeSiblingMismatches} sibling height/padding mismatch(es), ${totalAlignmentMismatches} alignment mismatch(es) found.`);
+  console.log(`docs/UI-INVENTORY.md written — ${totalDeviations} distinct deviating style signature(s), ${totalNestingMismatches} nesting mismatch(es), ${totalSiblingMismatches} sibling radius mismatch(es), ${totalSizeSiblingMismatches} sibling height/padding mismatch(es), ${totalAlignmentMismatches} alignment mismatch(es), ${totalIsolatedKindMismatches} isolated control kind mismatch(es) found.`);
   if (!signatureCheck.ok) {
     console.warn("⚠ Signature BUDGET check FAILED (see docs/UI-INVENTORY.md's own section):\n" + signatureCheck.problems.map((p) => "  • " + p).join("\n"));
   } else {
