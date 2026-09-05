@@ -26,7 +26,7 @@ vi.mock("../src/workspaces/site-planner/lib/supabase.js", () => ({
           maybeSingle: async () => ({ data: h.row, error: h.error }),
         }),
       }),
-      // ensureSiteRow's cloud push (cloudUpsert → casUpsert) INSERTs a brand-new row — the
+      // ensureProjectRow's cloud push (cloudUpsert → casUpsert) INSERTs a brand-new row — the
       // mock records it and makes it visible to the SAME select().eq().maybeSingle() chain
       // above, so a later checkProjectDeletionStatus() call for the same id sees it, exactly
       // as a real reload's fresh gate check would against the real database.
@@ -42,15 +42,9 @@ vi.mock("../src/workspaces/site-planner/lib/supabase.js", () => ({
   currentAccessToken: () => null,
 }));
 vi.mock("../src/shared/telemetry/clientErrors.js", () => ({ reportClientEvent: () => {} }));
-// Isolate ensureSiteRow's team-sharing lookup — it's a real network round trip (profiles +
-// teams) unrelated to this file's question. Private (teamId: null) is a safe, inert default.
-vi.mock("../src/workspaces/site-planner/lib/newProjectSharing.js", async (importOriginal) => {
-  const actual = await importOriginal();
-  return { ...actual, defaultShareTeam: async () => ({ teamId: null, reason: "test", teamName: null }) };
-});
 
 import { cloudCheckDeleted } from "../src/workspaces/site-planner/lib/cloudSync.js";
-import { checkProjectDeletionStatus, setActiveUser, ensureSiteRow } from "../src/workspaces/site-planner/lib/storage.js";
+import { checkProjectDeletionStatus, setActiveUser, ensureProjectRow } from "../src/workspaces/site-planner/lib/storage.js";
 import { projectGateStatus, markProjectFreshlyMinted, wasProjectFreshlyMinted } from "../src/shared/projects/projectModel.js";
 
 // storage.js's saveSite/readSites (and projectModel.js's persisted freshly-minted list) persist
@@ -199,49 +193,41 @@ describe("projectGateStatus — B1202176: a lazily-created project must not read
  * at which point `checkProjectDeletionStatus` finds nothing and the gate blocks the workspace
  * exactly as before, regardless of how much child data survived elsewhere.
  *
- * THE REGRESSION THIS PROVES, which the first fix's own tests could not: a gate check made with
- * `freshlyCreated: false` — i.e. AFTER a reload, with no session memory at all, the honest
- * post-reload case — for a project `ensureSiteRow` has already run against, resolves LIVE on the
- * strength of a REAL row, not a session flag. A test that only checked the gate with a
- * PRE-EXISTING row (seeded by the mock, never actually written by this code) would pass on the
- * broken behaviour — this one writes the row through the real `ensureSiteRow` → `saveSite` →
- * `pushSiteToCloud` → `cloudUpsert` path and reads it back through the real
- * `checkProjectDeletionStatus` → `cloudCheckDeleted` path, the same two functions the app
- * actually calls.
+ * Landed CONCURRENTLY with an independent session's B1160480 (same root cause, found via the
+ * Library-upload angle), which shipped `storage.js`'s `ensureProjectRow` — the more complete
+ * implementation (it also refuses a genuinely soft-deleted project rather than silently
+ * resurrecting it) — with its own thorough suite in `test/ensureProjectRow.test.js`. This block
+ * does not re-prove that function's own logic; it proves the ONE thing that suite cannot, because
+ * it mocks `cloudSync.js` directly rather than the real `supabase.js` client: that `ensureProjectRow`'s
+ * write is what a SUBSEQUENT, INDEPENDENT `checkProjectDeletionStatus` call — made with
+ * `freshlyCreated: false`, the honest post-reload state with no session memory at all — needs to
+ * resolve the project LIVE. A test that only checked the gate against a PRE-EXISTING row (seeded
+ * by the mock, never actually written by this code) would pass on the broken behaviour; this one
+ * writes the row through the real `ensureProjectRow` → `saveSite` → `pushSiteToCloud` →
+ * `cloudUpsert` path and reads it back through the real `checkProjectDeletionStatus` →
+ * `cloudCheckDeleted` path — the same two functions the app actually calls — via ONE stateful
+ * mock of the Supabase client that an INSERT genuinely makes visible to a later SELECT.
  *
  * NOTE — this is a DIFFERENT, complementary mechanism from the sibling "B1202176 (extended)"
- * describe block below (`markProjectFreshlyMinted`/`wasProjectFreshlyMinted`, landed on `main`
- * concurrently with this branch): that one persists the SESSION-MEMORY grace across a reload/new
- * tab (still no real row, just a longer-lived flag); this one makes the row genuinely EXIST, so
- * neither mechanism needs to fire at all once a module has actually saved something. Both are
- * real fixes for different gaps and neither makes the other redundant — a project that mints an
- * id and is then abandoned with zero content anywhere never gets an `ensureSiteRow` row (by
- * design, per the lazy-creation model), so `markProjectFreshlyMinted`'s grace is still what
- * carries it across a reload for however long its cap allows. */
-describe("ensureSiteRow — B1202176 ×2: closes the gap the session-memory fix left open", () => {
+ * describe block below (`markProjectFreshlyMinted`/`wasProjectFreshlyMinted`): that one persists
+ * the SESSION-MEMORY grace across a reload/new tab (still no real row, just a longer-lived flag);
+ * this one makes the row genuinely EXIST, so neither mechanism needs to fire at all once a module
+ * has actually saved something. Both are real fixes for different gaps and neither makes the
+ * other redundant — a project that mints an id and is then abandoned with zero content anywhere
+ * never gets an `ensureProjectRow` row (by design, per the lazy-creation model), so
+ * `markProjectFreshlyMinted`'s grace is still what carries it across a reload for however long
+ * its cap allows. */
+describe("ensureProjectRow — B1202176 ×2: the reload case, proven end-to-end through the real transport", () => {
   beforeEach(() => { h.row = null; h.error = null; mockLocalStorage(); setActiveUser(null); });
 
-  it("a brand-new id gets a real LOCAL row, signed out (no cloud call needed to keep local work safe)", async () => {
-    const r = await ensureSiteRow("s-newproj-local");
-    expect(r).toEqual({ ok: true, created: true, cloudPushed: false });
-    expect(h.row).toBe(null); // signed out — never touches the cloud at all
-  });
-
-  it("is idempotent — a project that already has a row is left completely alone", async () => {
-    await ensureSiteRow("s-newproj-idem");
-    const r2 = await ensureSiteRow("s-newproj-idem");
-    expect(r2).toEqual({ ok: true, created: false });
-  });
-
-  it("THE CORE REPRO, closed for real: signed in, ensureSiteRow's write is what a POST-RELOAD gate check (freshlyCreated:false — no session memory) needs to read the project LIVE", async () => {
+  it("THE CORE REPRO, closed for real: signed in, ensureProjectRow's write is what a POST-RELOAD gate check (freshlyCreated:false — no session memory) needs to read the project LIVE", async () => {
     setActiveUser("u1");
     const id = "s-newproj-signedin";
     // Before the fix: nothing ever wrote this row, so this is where the reported bug lived.
     expect((await checkProjectDeletionStatus(id)).exists).toBe(false);
-    const ensured = await ensureSiteRow(id, { name: "Untitled project" });
+    const ensured = await ensureProjectRow(id, { name: "Untitled project" });
     expect(ensured.ok).toBe(true);
-    expect(ensured.created).toBe(true);
-    expect(ensured.cloudPushed).toBe(true); // the row genuinely reached the mocked cloud
+    expect(ensured.created).toBe(true); // the row genuinely reached the mocked cloud
     // The reload case: a fresh gate check with NO freshlyCreated memory (a real reload has none).
     const res = await checkProjectDeletionStatus(id);
     expect(res.ok).toBe(true);

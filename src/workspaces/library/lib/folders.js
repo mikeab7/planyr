@@ -64,12 +64,18 @@ export async function ensureSeeded(projectId) {
       .from("project_folders").select("id", { count: "exact", head: true }).eq("project_id", projectId);
     if (error) return { ok: false, error: error.message };
     if ((count || 0) > 0) return { ok: true, seeded: false };
-    // NEW-1 (B1202176 ×2) — this is the project's FIRST folder-tree write, and nothing otherwise
-    // guarantees its own `sites` row exists yet (creation is deliberately lazy — see storage.js's
-    // `ensureSiteRow`). A project opened straight into the Library, never touching the Site
-    // Planner canvas, would otherwise seed 12 real `project_folders` rows with no parent at all.
-    // Best-effort: never blocks/fails the seed if it can't reach the sites table.
-    try { await ensureProjectExists(projectId); } catch (_) { /* the seed below still proceeds */ }
+    // B1202176 ×2 / B1160480 — this is the project's FIRST folder-tree write, and nothing
+    // otherwise guarantees its own `sites` row exists yet (creation is deliberately lazy — see
+    // storage.js's `ensureProjectRow`). A project opened straight into the Library, never
+    // touching the Site Planner canvas, would otherwise seed 12 real `project_folders` rows with
+    // no parent at all. BLOCKS the seed (never a silent best-effort) exactly like the
+    // already-shipped Doc Review guard, so a deleted/unconfirmable project never gets a tree.
+    const ensured = await ensureProjectExists(projectId, { name: "Untitled project" }).catch((e) => ({ ok: false, error: (e && e.message) || "" }));
+    if (!ensured.ok) {
+      return { ok: false, error: ensured.deleted
+        ? "This project has been deleted. Restore it before organizing its files."
+        : (ensured.error || "Couldn't confirm this project with the cloud, so its folders weren't created.") };
+    }
     const rows = buildSeedRows(FOLDER_TEMPLATE, { projectId, templateVersion: TEMPLATE_VERSION, makeId });
     const { error: insErr } = await supabase.from("project_folders").insert(rows);
     if (insErr) {

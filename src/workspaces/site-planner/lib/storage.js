@@ -16,9 +16,6 @@ import { idbGet, idbPut, idbAvailable, idbDelete, idbDeleteByPrefix } from "./lo
 import { idbKeysReleasableOnPlanDelete, idbKeysHeldByOtherPlans } from "./sharedAssetRefs.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { DELETED_RETENTION_DAYS } from "../../../shared/projects/projectModel.js";
-import { defaultShareTeam } from "./newProjectSharing.js";
-import { loadUserPrefs } from "./userPrefs.js";
-import { listMyTeams } from "./teams.js";
 // B927105 — WHICH ACCOUNT the store is bound to is now a leaf module (activeUser.js) that a
 // caller who only needs to read/set it (the shell, the project breadcrumb) can import WITHOUT
 // pulling in the rest of this file's heavy siteModel/cloudSync graph. Re-exported here so every
@@ -505,47 +502,6 @@ export async function pushSiteToCloud(id) {
   return cloudUpsert(activeUid(), m);
 }
 
-/* NEW-1 (B1202176 ×2) — a project's OWN `sites` row is now a step every module's first write goes
- * through, not just the Site Planner's. Project creation is deliberately LAZY (see newBlankSite's
- * own header in SitePlannerApp.jsx): a brand-new project id is minted and put in the URL before any
- * row exists anywhere — fine as long as SOMETHING eventually calls saveSite/pushSiteToCloud for it.
- * But Model (model_sheets), Doc Review (doc_reviews) and Library (project_folders) each write their
- * OWN row keyed directly by that same project id, with no such guarantee — a project created and then
- * used ONLY from one of those modules (never touching the Site Planner canvas) ends up with real child
- * data and NO `sites` row at all. Two things break from that, independently: `Shell.jsx`'s route-level
- * deletion gate (B848833) reads the missing row as "this project doesn't exist" and blocks the
- * workspace outright on the very next reload (once this session's `freshlyCreated` grace — B1202176's
- * first fix — has been wiped by the reload), and the project silently drops out of the switcher/
- * breadcrumb (`listProjects()`/`groupProjects()`, which read `sites` alone). This function is the one
- * place that closes the gap: call it from a module's write path the moment it is about to persist real
- * content under a project id, and the row will already be there by the time anyone reloads.
- *
- * Idempotent and safe to call from more than one module "at once": the LOCAL half below is
- * synchronous (no await between the existence check and the write), so two calls in the same tab
- * can't race each other into two different local records; a genuine cross-tab/cross-device race on
- * the CLOUD insert is already handled by casUpsert's unique-violation → {conflict:true} path
- * (optimisticUpsert.js) — a "losing" insert here just means the row now exists, which is exactly the
- * outcome this function is trying to guarantee, so it is reported as success either way. */
-export async function ensureSiteRow(id, { name } = {}) {
-  if (!id) return { ok: false, reason: "no-id" };
-  if (readSites()[id]) return { ok: true, created: false }; // already has a local row — nothing to do
-  const uid = activeUid();
-  let teamId = null;
-  if (uid) {
-    try { ({ teamId } = await defaultShareTeam(uid, { loadPrefs: loadUserPrefs, listTeams: listMyTeams })); }
-    catch (_) { /* private is a safe default if the sharing context can't be resolved */ }
-    if (readSites()[id]) return { ok: true, created: false }; // the row may have landed while we awaited
-  }
-  const saved = saveSite({ id, groupId: id, site: name || "Untitled project", name: "Concept A", parcels: [], els: [], measures: [], settings: {}, teamId });
-  if (!saved) return { ok: false, reason: "local-save-failed" };
-  if (!uid) return { ok: true, created: true, cloudPushed: false };
-  const r = await pushSiteToCloud(id);
-  if (r && r.ok === false && !r.skipped) {
-    reportClientEvent("cloud-write-failed", "ensureSiteRow's cloud push failed — the project exists on this device only until the next successful sync", { id, error: r.error || "" });
-    return { ok: true, created: true, cloudPushed: false, error: r.error || "" };
-  }
-  return { ok: true, created: true, cloudPushed: true };
-}
 /* B1165441 (NEW-2/NEW-3, adversarial review of B1156864/PR 1424) — "Nothing in the app ever
  * creates a site for a comp; the migration was a snapshot, not a mechanism." The one-time backfill
  * (db/site_role_unify_backfill_20260905.sql) attached the three comps that existed the day it ran

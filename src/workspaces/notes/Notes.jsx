@@ -800,9 +800,13 @@ export default function Notes({
     setActivePageId(r.pageId);
     setQuery("");
     setMobileShowList(false);   // NEW-1: a new page opens straight into the editor, phone included
-    // NEW-2 (B1202176 ×2) — a page filed under a project is real content with nothing else
-    // guaranteeing the project's own `sites` row exists (creation is deliberately lazy — see
-    // storage.js's `ensureSiteRow`). Best-effort: never blocks the page from being created.
+    // NEW-2 (B1202176 ×2 / B1160480) — a page filed under a project is real content with nothing
+    // else guaranteeing the project's own `sites` row exists (creation is deliberately lazy — see
+    // storage.js's `ensureProjectRow`). DELIBERATELY best-effort, unlike Model/Library's blocking
+    // guard: a note's own bytes are never at risk (notes_pages is keyed by user id, not project
+    // id) — the only thing this closes is the project staying visible in the switcher/reachable
+    // by its route — and Notes' whole architecture promises an instant, local-first write that
+    // must never wait on a network round trip.
     if (projectId) ensureProjectExists(projectId).catch(() => {});
   }, [projectId, orgScope, persistTree, treeNow]);
 
@@ -817,7 +821,7 @@ export default function Notes({
   /** Re-file a TOP-LEVEL page into a project, or out of every project (B1374, B1420). */
   const handleSetPageProject = useCallback((pageId, pid) => {
     persistTree(setPageProject(treeNow(), pageId, pid));
-    // NEW-2 (B1202176 ×2) — see handleAddPage's note.
+    // NEW-2 (B1202176 ×2 / B1160480) — see handleAddPage's note.
     if (pid) ensureProjectExists(pid).catch(() => {});
   }, [persistTree, treeNow]);
 
@@ -1106,7 +1110,7 @@ export default function Notes({
    *  re-file and nothing else. */
   const handleFileRecovered = useCallback((pageId, pid) => {
     persistTree(movePage(treeNow(), pageId, null, 0, { projectId: pid }));
-    // NEW-2 (B1202176 ×2) — see handleAddPage's note.
+    // NEW-2 (B1202176 ×2 / B1160480) — see handleAddPage's note.
     if (pid) ensureProjectExists(pid).catch(() => {});
     setRecovered((prev) => prev.filter((r) => r.pageId !== pageId));
     const where = pid == null ? NO_PROJECT_LABEL : (projects.find((p) => p.id === pid)?.name || "that project");
