@@ -71,7 +71,23 @@ was never clicked" quietly ships broken.
 >   override), never on WebKit here. Closing a real notch/gesture-bar or true Mobile-Safari-chrome
 >   question still needs an actual iPhone; that gap is Michael's own device, not a task for a
 >   self-check here.
-
+>
+> - **⛔ AND WEBKIT REACHES EXTERNAL HOSTS WHERE CHROMIUM CANNOT (2026-09-05, B1215536) — this
+>   REFINES the "standing wall" below (line ~823/V477 and its siblings), it does not repeat it.**
+>   Those entries measured Chromium alone dying with `net::ERR_CONNECTION_RESET` /
+>   `ws_closed_mid_exchange` against `planyr.io` and a Cloudflare preview URL, and read that as
+>   "no browser here can open an external URL, only `curl` can." Measured directly this round: the
+>   SAME proxy-side failure (`ws_closed_mid_exchange`, tunnel closed ~6s in, ~39 bytes received)
+>   reproduces identically against unrelated third-party hosts too (`accounts.google.com`), which is
+>   the tell that this is Chromium's own TLS handshake shape tripping something in the egress
+>   proxy's TLS termination — not a policy block on this app's domains specifically. `webkit.launch()`
+>   with the SAME `proxy: { server: process.env.HTTPS_PROXY, bypass: "localhost,127.0.0.1" }` launch
+>   option (Chromium reads `HTTPS_PROXY` only via this explicit option too, never on its own — see the
+>   WebKit note above) reached both a Cloudflare Pages preview URL and `https://planyr.io/` cleanly,
+>   repeatedly, including a full real-UI flow (create a note, type, click through several controls) —
+>   not just a bare page load. **So: a same-session live check against a real deployed URL is
+>   possible here, it just needs WebKit, not Chromium, for the network hop** — reach for it before
+>   filing "no browser reachable" against a deployed build.
 >
 > ### 🚚 Confirming a change is actually SERVED (B1119) — use the script, not a hand grep
 > `node ui-audit/verify-deploy.mjs <marker> [marker…]` (`--origin=` for a preview URL, `--json` for
