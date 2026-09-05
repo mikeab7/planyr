@@ -7,89 +7,89 @@
     "map-landing": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "b487f11d",
-        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
+        "approvedCommit": "724070ae",
+        "note": "B1171504 acceptance test (clean parallel branch carrying PR #1426's exact code): PR #1426 failed the visual-regression gate twice with an identical 0.29-2.72% signature against a 0.02% tolerance, confined to the new help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision. Letting this workflow render and approve the baselines on the real GitHub Actions runner instead of trusting a local capture. [CI-authored by run 33951071363 on 724070ae5424e66f498adee252230a591281b4e1]"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "b487f11d",
-        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
+        "approvedCommit": "724070ae",
+        "note": "B1171504 acceptance test (clean parallel branch carrying PR #1426's exact code): PR #1426 failed the visual-regression gate twice with an identical 0.29-2.72% signature against a 0.02% tolerance, confined to the new help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision. Letting this workflow render and approve the baselines on the real GitHub Actions runner instead of trusting a local capture. [CI-authored by run 33951071363 on 724070ae5424e66f498adee252230a591281b4e1]"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "b487f11d",
-        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
+        "approvedCommit": "724070ae",
+        "note": "B1171504 acceptance test (clean parallel branch carrying PR #1426's exact code): PR #1426 failed the visual-regression gate twice with an identical 0.29-2.72% signature against a 0.02% tolerance, confined to the new help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision. Letting this workflow render and approve the baselines on the real GitHub Actions runner instead of trusting a local capture. [CI-authored by run 33951071363 on 724070ae5424e66f498adee252230a591281b4e1]"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "b487f11d",
-        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
+        "approvedCommit": "724070ae",
+        "note": "B1171504 acceptance test (clean parallel branch carrying PR #1426's exact code): PR #1426 failed the visual-regression gate twice with an identical 0.29-2.72% signature against a 0.02% tolerance, confined to the new help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision. Letting this workflow render and approve the baselines on the real GitHub Actions runner instead of trusting a local capture. [CI-authored by run 33951071363 on 724070ae5424e66f498adee252230a591281b4e1]"
       }
     },
     "site-planner-header": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "b487f11d",
-        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
+        "approvedCommit": "724070ae",
+        "note": "B1171504 acceptance test (clean parallel branch carrying PR #1426's exact code): PR #1426 failed the visual-regression gate twice with an identical 0.29-2.72% signature against a 0.02% tolerance, confined to the new help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision. Letting this workflow render and approve the baselines on the real GitHub Actions runner instead of trusting a local capture. [CI-authored by run 33951071363 on 724070ae5424e66f498adee252230a591281b4e1]"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "b487f11d",
-        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
+        "approvedCommit": "724070ae",
+        "note": "B1171504 acceptance test (clean parallel branch carrying PR #1426's exact code): PR #1426 failed the visual-regression gate twice with an identical 0.29-2.72% signature against a 0.02% tolerance, confined to the new help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision. Letting this workflow render and approve the baselines on the real GitHub Actions runner instead of trusting a local capture. [CI-authored by run 33951071363 on 724070ae5424e66f498adee252230a591281b4e1]"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "b487f11d",
-        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
+        "approvedCommit": "724070ae",
+        "note": "B1171504 acceptance test (clean parallel branch carrying PR #1426's exact code): PR #1426 failed the visual-regression gate twice with an identical 0.29-2.72% signature against a 0.02% tolerance, confined to the new help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision. Letting this workflow render and approve the baselines on the real GitHub Actions runner instead of trusting a local capture. [CI-authored by run 33951071363 on 724070ae5424e66f498adee252230a591281b4e1]"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "b487f11d",
-        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
+        "approvedCommit": "724070ae",
+        "note": "B1171504 acceptance test (clean parallel branch carrying PR #1426's exact code): PR #1426 failed the visual-regression gate twice with an identical 0.29-2.72% signature against a 0.02% tolerance, confined to the new help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision. Letting this workflow render and approve the baselines on the real GitHub Actions runner instead of trusting a local capture. [CI-authored by run 33951071363 on 724070ae5424e66f498adee252230a591281b4e1]"
       }
     },
     "site-planner-left-rail": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "b487f11d",
-        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
+        "approvedCommit": "724070ae",
+        "note": "B1171504 acceptance test (clean parallel branch carrying PR #1426's exact code): PR #1426 failed the visual-regression gate twice with an identical 0.29-2.72% signature against a 0.02% tolerance, confined to the new help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision. Letting this workflow render and approve the baselines on the real GitHub Actions runner instead of trusting a local capture. [CI-authored by run 33951071363 on 724070ae5424e66f498adee252230a591281b4e1]"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "b487f11d",
-        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
+        "approvedCommit": "724070ae",
+        "note": "B1171504 acceptance test (clean parallel branch carrying PR #1426's exact code): PR #1426 failed the visual-regression gate twice with an identical 0.29-2.72% signature against a 0.02% tolerance, confined to the new help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision. Letting this workflow render and approve the baselines on the real GitHub Actions runner instead of trusting a local capture. [CI-authored by run 33951071363 on 724070ae5424e66f498adee252230a591281b4e1]"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "b487f11d",
-        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
+        "approvedCommit": "724070ae",
+        "note": "B1171504 acceptance test (clean parallel branch carrying PR #1426's exact code): PR #1426 failed the visual-regression gate twice with an identical 0.29-2.72% signature against a 0.02% tolerance, confined to the new help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision. Letting this workflow render and approve the baselines on the real GitHub Actions runner instead of trusting a local capture. [CI-authored by run 33951071363 on 724070ae5424e66f498adee252230a591281b4e1]"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "b487f11d",
-        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
+        "approvedCommit": "724070ae",
+        "note": "B1171504 acceptance test (clean parallel branch carrying PR #1426's exact code): PR #1426 failed the visual-regression gate twice with an identical 0.29-2.72% signature against a 0.02% tolerance, confined to the new help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision. Letting this workflow render and approve the baselines on the real GitHub Actions runner instead of trusting a local capture. [CI-authored by run 33951071363 on 724070ae5424e66f498adee252230a591281b4e1]"
       }
     },
     "library": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "b487f11d",
-        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
+        "approvedCommit": "724070ae",
+        "note": "B1171504 acceptance test (clean parallel branch carrying PR #1426's exact code): PR #1426 failed the visual-regression gate twice with an identical 0.29-2.72% signature against a 0.02% tolerance, confined to the new help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision. Letting this workflow render and approve the baselines on the real GitHub Actions runner instead of trusting a local capture. [CI-authored by run 33951071363 on 724070ae5424e66f498adee252230a591281b4e1]"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "b487f11d",
-        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
+        "approvedCommit": "724070ae",
+        "note": "B1171504 acceptance test (clean parallel branch carrying PR #1426's exact code): PR #1426 failed the visual-regression gate twice with an identical 0.29-2.72% signature against a 0.02% tolerance, confined to the new help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision. Letting this workflow render and approve the baselines on the real GitHub Actions runner instead of trusting a local capture. [CI-authored by run 33951071363 on 724070ae5424e66f498adee252230a591281b4e1]"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "b487f11d",
-        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
+        "approvedCommit": "724070ae",
+        "note": "B1171504 acceptance test (clean parallel branch carrying PR #1426's exact code): PR #1426 failed the visual-regression gate twice with an identical 0.29-2.72% signature against a 0.02% tolerance, confined to the new help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision. Letting this workflow render and approve the baselines on the real GitHub Actions runner instead of trusting a local capture. [CI-authored by run 33951071363 on 724070ae5424e66f498adee252230a591281b4e1]"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "b487f11d",
-        "note": "B1167120: help/report control's bottom offset now measures real DOM clearance instead of a fixed 292px, so the control's screen position moved on every surface (desktop: from bottom:292 to a near-corner clearance; phone plan surfaces with real canvas chrome present are unchanged). Diff confined exactly to the control's own bounding box, proven by diffing this branch directly against unmodified origin/main with the same pinned Chromium — 0 pixels differ outside it on all 16 pairs."
+        "approvedCommit": "724070ae",
+        "note": "B1171504 acceptance test (clean parallel branch carrying PR #1426's exact code): PR #1426 failed the visual-regression gate twice with an identical 0.29-2.72% signature against a 0.02% tolerance, confined to the new help/report control's own footprint, even when re-approved locally with the exact CI-pinned Chromium revision. Letting this workflow render and approve the baselines on the real GitHub Actions runner instead of trusting a local capture. [CI-authored by run 33951071363 on 724070ae5424e66f498adee252230a591281b4e1]"
       }
     }
   }
