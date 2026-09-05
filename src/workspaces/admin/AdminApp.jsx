@@ -12,6 +12,8 @@ import { SECTIONS } from "./lib/adminSections.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 import CriteriaRequestsSection from "./CriteriaRequestsSection.jsx";
 import ReportsSection from "./ReportsSection.jsx";
+import SignupActivitySection from "./SignupActivitySection.jsx";
+import AdminPasswordResetSection from "./AdminPasswordResetSection.jsx";
 
 function Section({ title, blurb }) {
   return (
@@ -66,6 +68,10 @@ export default function AdminApp({ onExit }) {
         <CriteriaRequestsSection />
         {/* B842866 — the "help / report a problem" control's owner-only read side. */}
         <ReportsSection />
+        {/* B1160721, NEW-2 — signup volume visibility (the server-side rate limit's read side). */}
+        <SignupActivitySection />
+        {/* B1160722, NEW-3 — reset a teammate's password with no email involved. */}
+        <AdminPasswordResetSection />
       </div>
     </div>
   );

@@ -754,6 +754,16 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   `is_admin()` (the admin workspace's reports section is the one reader). `test/` holds the
   live, self-rolling-back RLS proof (run via the Supabase MCP against production) — a non-admin
   signed-in user provably gets zero rows back from the admin RPC.
+- `auth/` (B1160720–B1160722) — cross-cutting signup/auth hardening that isn't specific to the
+  site-planner workspace's own client wrapper around Supabase Auth calls (which stays the one
+  place that calls `supabase.auth.*`). `rateLimitCopy.js` holds the ONE message fragment shared
+  between the Postgres trigger that enforces the server-side signup rate limit and the client
+  code that detects it for best-effort telemetry — same "one constant across a boundary, pinned
+  by a test" shape the site-planner workspace's own confirmation-email sender constants use.
+  `db/signup_rate_limit.sql` — a BEFORE INSERT trigger on
+  `auth.users` capping signups per hour/day (config-toggleable with one UPDATE statement,
+  fails OPEN on any error so a bug here can never brick account creation); `db/test/` holds its
+  self-rolling-back proof, including a mutation check (raising the cap lifts the block).
 - `projects/`, `profile/`, `cloud/`, `presence/`, `gis/`, `geometry/`, `placement/`.
 
 **Convention:** shared logic is pure and unit-tested; per-host state/wiring stays in the workspace.

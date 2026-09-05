@@ -7,6 +7,35 @@
 
 _Last updated: 2026-09-05._
 
+## 🤖 Signup now has a bot check built in — two things needed from you to turn it on (B1160720/B1160723)
+
+> **Short version: I built the "prove you're not a robot" check (a small Cloudflare Turnstile widget) into the
+> sign-up form, and a hard cap on how many accounts can be created per hour/day so a script can't flood
+> sign-ups. The cap is already live — it needs nothing from you.** The bot-check widget is built and wired, but
+> it stays invisible (the form just works as it does today) until you do two things in two different places.
+>
+> **1. Create the Cloudflare Turnstile widget and get two keys.** Go to
+> [dash.cloudflare.com](https://dash.cloudflare.com/login) → Turnstile → create a widget for planyr.io. It gives
+> you two keys: a **Site key** (safe to be public) and a **Secret key** (keep it private).
+> - [ ] **Paste the Site key into Cloudflare Pages** — your `planyr` project → Settings → Environment variables
+>       (Production) → add `VITE_TURNSTILE_SITE_KEY` → paste the Site key → redeploy. This is what turns the
+>       widget ON in the sign-up form; nothing shows up until this is set.
+> - [ ] **Paste the Secret key into Supabase** — project `lyeqzkuiwngunutlkkmi` → Project Settings →
+>       Authentication → **Bot and Abuse Protection** → **Enable CAPTCHA protection** → choose **Turnstile** from
+>       the dropdown → paste the Secret key → Save. This is what makes Supabase actually CHECK the widget's
+>       answer — without it, the widget shows but nothing enforces it.
+> - [ ] **Tell a Claude session once both are done** so it can confirm a real sign-up from a real browser both
+>       shows the widget and gets rejected if the widget is skipped — that's the live check nothing here can run
+>       without those two keys.
+>
+> **2. Once that's confirmed working, one more toggle turns off the "check your email" step.** With the bot
+> check doing the job email confirmation used to do, new users can land in the app immediately instead of
+> waiting on an email. **Don't flip this before the bot check above is confirmed live** — doing it out of order
+> would leave sign-up with no gate at all for a while.
+> - [ ] **Supabase → project `lyeqzkuiwngunutlkkmi` → Authentication → Sign In / Providers → Email → turn OFF
+>       "Confirm email."** That's the whole step; say the word once it's flipped and I'll clean up the "check
+>       your email" wording that would otherwise sit there unused.
+
 ## 🔐 One small GitHub setting still open, and two closed hunts (B825232–B825234)
 
 > **Not urgent, and nothing is broken while it waits — it just means a session has to merge a green
@@ -425,27 +454,33 @@ underneath, and a tract with a street address gave all its pieces the identical 
 - [ ] **Rename the Weld County plan** (currently `2221 E LAMAR BLVD STE 790 / Concept A`) to whatever you want it
       called — `4050 CR 50, Johnstown` is what the county has for the property. Nothing else needs touching.
 
-## ✉️ Decide how Planyr sends its sign-up emails — right now most people can't sign up at all (B1167)
+## ✉️ Set up a real email service before real traffic — nobody is blocked today, but the mailer isn't built for this (B1167, corrected 2026-09-05)
 
-> **Short version: your confirmation emails go out through Supabase's free built-in mailer, and that mailer only
-> delivers to people already on your Supabase team.** Everyone else — a colleague, a broker, anyone you show the
-> app to — gets nothing. The app tells them to check their email, and no email is ever coming. It's also capped at
-> a handful of messages an hour for the whole project, and Supabase says outright it isn't meant for real use.
+> **Correction to what this item used to say.** It previously claimed the built-in mailer "only delivers to
+> people already on your Supabase team" and that "most people can't sign up at all." I checked that directly
+> against your account records and it's **not true** — four external addresses (three at hillwood.com, one at
+> planyr.io) each received a confirmation email and clicked it within 80 seconds of signing up. Nobody has ever
+> been left stuck unconfirmed. I'm rewriting this so the record is accurate; the actual concern is still real
+> and still worth doing, just for a different reason than originally stated.
 >
-> **What I changed today, and what I couldn't.** The sign-up and password-reset messages now name the sender, so
-> whoever does get an email knows what to look for and to check junk. That's a real improvement but it doesn't fix
-> delivery — nothing in the app can. Wiring a proper email service needs an account and a password, which is yours
-> to create, not mine.
+> **What's actually true: Supabase's free built-in mailer works today, but it's not meant to keep working.**
+> Supabase's own documentation says outright that this mailer isn't intended for production use, and it's capped
+> at a small number of messages per hour for the whole project. That's fine at today's volume (8 accounts total)
+> — it becomes a real risk the moment more than a handful of people try to sign up in the same hour, because the
+> cap would start silently delaying or dropping confirmation emails for real prospects.
 >
-> **What I'd do:** sign up for a sending service — **Resend**, **Postmark** or **Amazon SES** are the usual three,
-> all with a free or near-free tier at your volume — and paste its username and password into Supabase's email
-> settings. Then your emails come **from planyr.io** instead of from a Supabase address, which also means they
-> look like they're from your company and are far less likely to land in junk. It's a settings-page job, roughly
-> fifteen minutes, and I'll switch the app's wording to the new address in one small change afterwards.
-- [ ] **Pick a sending service and set it up in Supabase** (Authentication → Emails → SMTP settings), sending from
-      a planyr.io address. Then tell a Claude session the exact "from" address and I'll update the wording to match.
-- [ ] **Or tell me you're happy leaving it as-is for now** — that's a fine answer while it's only you and Hillwood
-      using it, and I'll stop raising it. Just know that anyone outside your Supabase team currently cannot sign up.
+> **What I'd do, same as before:** sign up for a sending service — **Resend**, **Postmark** or **Amazon SES** are
+> the usual three, all free or near-free at your volume — and paste its credentials into Supabase's email
+> settings. Your emails would then come **from planyr.io** instead of a generic Supabase address, which also
+> looks more like your company and is less likely to land in spam. Roughly fifteen minutes of settings-page work
+> on your end; I'll update the app's sender wording in one small change once it's live.
+- [ ] **Create an account with a sending service** (Resend, Postmark, or Amazon SES — any of the three works).
+- [ ] **Add the DNS records the service gives you** at your domain registrar (this is what lets planyr.io emails
+      pass spam checks — the service walks you through exactly which records to add).
+- [ ] **Paste the resulting API key/credentials into Supabase** (Authentication → Emails → SMTP settings), then
+      tell a Claude session the exact "from" address and I'll update the app's wording to match.
+- [ ] **Or tell me you're happy leaving it as-is for now** — that's a reasonable answer while it's only a handful
+      of accounts — I'll stop raising it, but flag it again if signups pick up.
 
 ## 📄 Four PDFs I can't download — they're the last piece of Colorado detention sizing (B1105)
 
