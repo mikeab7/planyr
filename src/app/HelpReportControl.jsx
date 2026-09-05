@@ -37,7 +37,7 @@ import { buildReportContext, submitReport, queuedReportCount } from "../shared/r
 // deliberate" note on the map's zoom control: a position that does not depend on the breakpoint
 // cannot drift apart from a chrome change on only one of them. Measured clear (headless, both
 // modes, both breakpoints) via ui-audit/verify-help-report-control.mjs.
-const FAB_SIZE = 44;
+const FAB_SIZE = 70; // THROWAWAY REGRESSION TEST for B1171504 acceptance test - deliberately widened, never merge
 const FAB_RIGHT = 14;
 // 292 clears the tallest occupant of this corner anywhere in the app: the Site Planner
 // canvas's own narrow-width stack (the "✎ Tools" FAB at bottom:16-54, the furniture row
