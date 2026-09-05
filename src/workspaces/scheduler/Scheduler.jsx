@@ -523,6 +523,18 @@ export default function Scheduler({
           // meaningless at org scope — it belongs to the walled iframe, which isn't mounted.
           onSelectProject={(id) => onProjectChange?.(id)}
           onDashboard={onGoDashboard}
+          // NEW-3 (amendment to B1128272) — at org scope there is no in-module dashboard for the
+          // crumb to point at (no routed project exists here; AgendaView already IS the whole
+          // org-wide view), so the wordmark and the crumb legitimately do the SAME thing — matching
+          // Library's and Notes' own wiring, both bare `onDashboard={onGoDashboard}` with no split.
+          // What was actually stale: with neither `logoDashboardTitle` nor `dashboardTitle`
+          // supplied, the two controls fell back to dashboardNav.js's own two DIFFERENT default
+          // strings (see that module's header) — the exact near-identical, confusing wording
+          // B1128272's own body named when it fixed the PROJECT-scope case. Since both controls
+          // here provably do the identical thing (leave Schedule for the Site Planner map), both
+          // get the SAME explicit tooltip, in the wordmark's already-established project-scope wording.
+          logoDashboardTitle="Leave Schedule — go to the Site Planner map"
+          dashboardTitle="Leave Schedule — go to the Site Planner map"
           onNewProject={onNewProject}
         />
         <AgendaView scope={userId || "local"} />
