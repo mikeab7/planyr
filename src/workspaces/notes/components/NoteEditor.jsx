@@ -1270,7 +1270,9 @@ export default function NoteEditor({
    * ago has to appear a second ago — this is cheap (a walk of the JSON), and it is exactly
    * the model-derived kind of work VIEW-INDEPENDENT-ONCE has no quarrel with: it depends on
    * the document and the selection, never on the viewport. */
-  const [outlineOpen, setOutlineOpen] = useState(true);
+  /* ⛔ B1203505 — closed by default on a phone, so opening a note with headings never
+   * launches a full-screen takeover unasked; open by default on a wide pane, unchanged. */
+  const [outlineOpen, setOutlineOpen] = useState(() => !narrow);
   const [foldedHeadings, setFoldedHeadings] = useState(() => new Set());
   const [docTick, setDocTick] = useState(0);
   useEffect(() => {
@@ -2363,15 +2365,18 @@ export default function NoteEditor({
            cap does centring have anything to do. See note-sheet's own comment for why this no
            longer reproduces B1369's "my stuff is aligned to the right" complaint.
            ⛔ NEVER ON NARROW — CAUGHT BY THE CRITIQUE LOOP'S OWN PHONE SCREENSHOT. The Outline
-           panel (below) sits BESIDE the mat in the same row and does not collapse on a phone —
-           a pre-existing condition this item did not create and is not the one to fix — so on
-           a real phone the mat's own available width can end up narrower than the sheet's
+           panel (below) used to sit BESIDE the mat in the same row and not collapse on a
+           phone, so the mat's own available width could end up narrower than the sheet's
            `minWidth` floor. Centring an item wider than its container overflows EQUALLY on both
            sides, and the scroller starts at its left edge, so the sheet's own left portion —
-           the actual words — was the half that clipped off-screen; before this rule existed
-           that was reproduced live: "No Density F[ield]" cut to "lo Density F". Left-aligning
-           on narrow is the pre-existing, working shape (B1369's own layout), so this only
-           changes behaviour on the wide panes centring was actually built for. */
+           the actual words — was the half that clipped off-screen: reproduced live, "No Density
+           F[ield]" cut to "lo Density F". Left-aligning on narrow is the pre-existing, working
+           shape (B1369's own layout), so this only changes behaviour on the wide panes centring
+           was actually built for. ⛔ B1203505 fixed the Outline panel itself — below the phone
+           breakpoint it never joins this row at all (a floating toggle opens it as a fixed
+           overlay instead) — but this rule stays: it costs nothing on a note with no headings,
+           and it is the same defence against any OTHER future narrow-width sibling of the mat
+           (`NoteHistory` still has no phone treatment of its own; see its own file). */
         style={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column", alignItems: narrow ? "flex-start" : "center", position: "relative" }}
       >
         <PasteOptions
@@ -2615,6 +2620,7 @@ export default function NoteEditor({
           open={outlineOpen}
           onToggleOpen={() => setOutlineOpen((v) => !v)}
           onGo={goToHeading}
+          narrow={narrow}
           onToggleRow={(id) => setFoldedHeadings((prev) => {
             const next = new Set(prev);
             if (next.has(id)) next.delete(id); else next.add(id);
