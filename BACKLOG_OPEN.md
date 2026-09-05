@@ -4,12 +4,13 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _246 open · 611 awaiting live verification._
+> _247 open · 613 awaiting live verification._
 
 ## 🔲 Open
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B1160723 | Turn OFF the email-confirmation requirement | [Auth] | #auth | live |
 | B1156865 | A site holds plans, deals and notes in one place | [Site Planner / sites] | #site-planner #comps #ui | sandbox |
 | B1156866 | Several deals on one site plan, each with its own point | [Site Planner / site-plans] | #site-planner #comps | sandbox |
 | B1156867 | Buildings, created implicitly, never as a separate step | [Site Planner / comps] | #site-planner #comps | sandbox |
@@ -872,12 +873,14 @@
 | B890560 | Reach the admin page from the account menu, and only when you are the admin | [Admin] | #admin #auth #ui | ⏳ live — awaiting |
 | B897440 | `enablePullRequestAutoMerge` fails "Protected branch rules not configured for this branch" on PR #1245, a NEW failure mode distinct from B793696 | [Infra / CI] | #infra | ⏳ live — awaiting |
 | B1055088 | A stale window silently re-published its whole local store: 11 pages committed in ~1 second, and the one page the server had newer raised a false conflict | [Notes / sync] | #notes #sync #persistence | ⏳ live — awaiting |
+| B1160720 | Cloudflare Turnstile on the sign-up form | [Auth] | #auth | ⏳ live — awaiting |
+| B1160722 | Admin password reset | [Admin] | #admin #auth | ⏳ live — awaiting |
 
 ## By tag
 
 - **#a11y** — B1026274, B859506, B832391, B748960, B734529
-- **#admin** — B711905, B711906, B711907, B711908, B842866, B877442, B711904, B890560
-- **#auth** — B916, B917, B483, B778, B711330, B711904, B672113, B616672, B616673, B377891, B366384, B366385, B366386, B326416, B326417, B326418, B326419, B312545, B1425, B482, B1291, B676, B714, B1167, B890560
+- **#admin** — B711905, B711906, B711907, B711908, B842866, B877442, B711904, B890560, B1160722
+- **#auth** — B1160723, B916, B917, B483, B778, B711330, B711904, B672113, B616672, B616673, B377891, B366384, B366385, B366386, B326416, B326417, B326418, B326419, B312545, B1425, B482, B1291, B676, B714, B1167, B890560, B1160720, B1160722
 - **#compare** — B471, B1053568, B1053569, B1053570
 - **#comps** — B1156865, B1156866, B1156867, B1156868, B1066370, B1154368, B1154368, B1156864, B1129408, B850016, B850019, B1123425, B1114992, B1090466, B1091712, B850432, B850434, B1066368, B1066368, B1066369, B1066560, B986096, B986096, B986097, B986097, B1063904, B1063904, B978272, B978273, B978274, B978275, B978276, B978277, B978278, B978279, B978280, B978281, B978282, B978283, B978284, B978285, B978286, B978287, B948496, B972225, B972224, B972512, B972513, B941152, B832385, B832387, B832390, B832391, B831779, B711328, B711329
 - **#coordinates** — B290247, B290250, B1422, B217541, B1106, B1134752, B297904, B230080, B1141, B1142, B1122, B1111, B1043, B625, B684
