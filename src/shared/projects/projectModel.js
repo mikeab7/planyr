@@ -30,6 +30,48 @@ export function projectGateStatus({ res, freshlyCreated = false } = {}) {
   return { status: "live", name: null, deletedAt: null };
 }
 
+/* B1202176 (extended) — `freshProjectIdsRef` above (Shell.jsx's copy) only survives THIS TAB'S
+ * mount: it is a plain in-memory Set, so it resets to empty on a bare-domain reload — the exact
+ * moment `lastRoute.js`'s restore-where-I-left-off pointer fires. A brand-new, never-edited
+ * project (see SitePlannerApp.jsx's `newBlankSite` — a fully blank "New project" click saves
+ * NOTHING, locally or to the cloud, until the first draw) writes its id into `lastRoute` the
+ * instant the route changes (Shell.jsx's own `writeLastRoute(route)` effect), well before that
+ * first draw. Close the tab (or just reload) before drawing anything, and the next bare-domain
+ * boot restores a pointer to an id this device minted but the in-memory ref has already
+ * forgotten — the identical `{exists:false}` answer, now with `freshlyCreated` back to false, so
+ * it reads "missing" again: the owner's live repro (`smtouazufbss`, no row anywhere, restored
+ * straight off `lastRoute`).
+ *
+ * This is a small, capped, localStorage-backed twin of that in-memory Set — the part of
+ * "freshly minted" that must outlive a reload. It is a HINT, never load-bearing user data (a
+ * real project's existence is always decided by the cloud row / `res.exists` first — see
+ * `projectGateStatus` above, which checks `!res.exists` before `freshlyCreated` is ever
+ * consulted), so it is fine for the oldest entries to fall off a cap; nothing here needs an
+ * explicit "clear on success" — once a project's row exists, `res.exists` is true and this list
+ * is never even asked. */
+const FRESH_PROJECT_KEY = "planyr:freshProjects:v1";
+const FRESH_PROJECT_CAP = 25;
+
+export function markProjectFreshlyMinted(id) {
+  if (!id || typeof localStorage === "undefined") return;
+  try {
+    const raw = localStorage.getItem(FRESH_PROJECT_KEY);
+    const prev = raw ? JSON.parse(raw) : [];
+    const ids = Array.isArray(prev) ? prev.filter((x) => x !== id) : [];
+    ids.push(id);
+    localStorage.setItem(FRESH_PROJECT_KEY, JSON.stringify(ids.slice(-FRESH_PROJECT_CAP)));
+  } catch (_) { /* storage unavailable/quota — a hint, never blocks project creation */ }
+}
+
+export function wasProjectFreshlyMinted(id) {
+  if (!id || typeof localStorage === "undefined") return false;
+  try {
+    const raw = localStorage.getItem(FRESH_PROJECT_KEY);
+    const ids = raw ? JSON.parse(raw) : [];
+    return Array.isArray(ids) && ids.includes(id);
+  } catch (_) { return false; }
+}
+
 // Collapse a flat list of site-model records (each: { groupId|id, site|name,
 // updatedAt, status }) into one project entry per group, sorted most-recently-edited
 // first. The group's name/status/updatedAt come from its newest record (records are
