@@ -8,6 +8,7 @@ import {
   formatDisplayValue,
   selectionBlockShapes,
   selectionFontSizes,
+  selectionLineHeights,
   uniformValue,
 } from "../src/workspaces/notes/lib/notesMixedSelection.js";
 
@@ -120,5 +121,41 @@ describe("selectionBlockShapes — walks a fake ProseMirror doc's nodesBetween",
   it("skips non-textblock nodes (a bulletList wrapper, a table)", () => {
     const doc = fakeDoc([{ isTextblock: false, type: { name: "bulletList" } }, paragraph()]);
     expect(selectionBlockShapes(doc, 0, 10)).toEqual(["p"]);
+  });
+});
+
+/* NEW-SPACING-3 — the Line spacing control's own version of selectionFontSizes: the toolbar
+ * used to hardcode its `<select>`'s value to "", so it never reported the current paragraph's
+ * spacing (or a mixed one) at all — the write-only report this is the fix for. */
+describe("selectionLineHeights — walks a fake ProseMirror doc's nodesBetween", () => {
+  const fakeDoc = (nodes) => ({
+    nodesBetween(from, to, cb) { nodes.forEach((n) => cb(n)); },
+  });
+  const paragraph = (lineHeight) => ({ isTextblock: true, type: { name: "paragraph" }, attrs: { lineHeight } });
+  const heading = (lineHeight) => ({ isTextblock: true, type: { name: "heading" }, attrs: { level: 2, lineHeight } });
+
+  it("collects each textblock's lineHeight attr, paragraph or heading alike", () => {
+    const doc = fakeDoc([paragraph(2), heading(1.5)]);
+    expect(selectionLineHeights(doc, 0, 10)).toEqual([2, 1.5]);
+  });
+
+  it("a block with no override contributes null, not undefined", () => {
+    const doc = fakeDoc([paragraph(undefined), paragraph(1.5)]);
+    expect(selectionLineHeights(doc, 0, 10)).toEqual([null, 1.5]);
+  });
+
+  it("ignores non-textblock nodes entirely", () => {
+    const doc = fakeDoc([{ isTextblock: false, type: { name: "bulletList" } }, paragraph(1.5)]);
+    expect(selectionLineHeights(doc, 0, 10)).toEqual([1.5]);
+  });
+
+  it("⛔ THE REPORTED CASE: Double then Single, both selected, comes back MIXED — never a value", () => {
+    const doc = fakeDoc([paragraph(2), paragraph(1.15)]);
+    expect(uniformValue(selectionLineHeights(doc, 0, 10))).toBe(MIXED);
+  });
+
+  it("a uniform selection reports the shared spacing", () => {
+    const doc = fakeDoc([paragraph(2), paragraph(2)]);
+    expect(uniformValue(selectionLineHeights(doc, 0, 10))).toBe(2);
   });
 });
