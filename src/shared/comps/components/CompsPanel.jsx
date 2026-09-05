@@ -33,7 +33,6 @@ import {
   fetchDeletedComps, restoreComp, permanentlyDeleteComp,
 } from "../lib/compsStore.js";
 import { formatNumberDisplay, sanitizeNumericInput } from "../lib/compSheetColumns.js";
-import { resolveOwningSite, autoAttachNote } from "../lib/compSiteAttach.js";
 import { loadSiteSummaries } from "../../../workspaces/site-planner/lib/siteListLight.js";
 import { listMyTeams, currentIdentity } from "../../../workspaces/site-planner/lib/teams.js";
 import CompEntryGrid, { draftFromParsedRow } from "./CompEntryGrid.jsx";
@@ -223,7 +222,7 @@ function SourceBrochureLink({ comp, overlaysById, onOpenBrochure }) {
   );
 }
 
-export function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysById, onOpenBrochure }) {
+export function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysById, onOpenBrochure, assignNotice, onDismissAssignNotice }) {
   const rows = compFieldRows(comp);
   // HARDENING-14 — the detail view showed every structured field EXCEPT where the comp actually
   // is, despite that being real, already-resolved information (an address, an APN, a plan name).
@@ -245,6 +244,17 @@ export function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysBy
         <TypeChip type={comp.compType} />
       </div>
       {comp.title && <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6 }}>{comp.title}</div>}
+      {/* B1165441 (NEW-2/NEW-3) — "attach and say so": a save that just auto-matched this comp to
+          an EXISTING site (never a brand-new one — that's obviously new) surfaces which site and
+          how, so a wrong guess is something the owner can see and fix via the Site field below
+          rather than a silent duplicate he never notices. */}
+      {assignNotice && (
+        <div role="status" style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 8, padding: "6px 9px", fontSize: 11.5, lineHeight: 1.4, color: "var(--info-text)", background: "var(--info-bg)", borderRadius: 8 }}>
+          <span style={{ flex: 1 }}>{assignNotice}</span>
+          <button onClick={onDismissAssignNotice} aria-label="Dismiss" title="Dismiss"
+            style={{ flex: "none", cursor: "pointer", background: "transparent", color: "inherit", border: "none", fontSize: 12, fontWeight: 800, padding: 0, lineHeight: 1 }}>✕</button>
+        </div>
+      )}
       {/* NEW-12 (B1123424) — `tight` rows: the label sits at its own width, never wrapped, with
           the value close beside it, rather than the default label-left/value-right row that
           stretches a short pair ("Term" / "126 mo") to opposite ends of the panel. */}
@@ -522,10 +532,11 @@ export default function CompsPanel({
   const [draft, setDraft] = useState(null);
   const [errors, setErrors] = useState([]);
   const [saving, setSaving] = useState(false);
-  // NEW-2/NEW-3 (adversarial review of B1156864) — the one-line confirmation shown after a save
-  // that auto-attached (or auto-created) an owning site, so a proximity-based guess is VISIBLE
-  // rather than silent (see compSiteAttach.js's autoAttachNote). Cleared on the next form open.
-  const [autoAttachMsg, setAutoAttachMsg] = useState(null);
+  // B1165441 (NEW-2/NEW-3) — set right after a save auto-attached the comp to a MATCHED existing
+  // site (never on a brand-new tracked site — that's obviously new and needs no explanation). "A
+  // wrong attachment the owner can see and fix beats a duplicate he never notices" (the review's
+  // own words) — this is the "and SAY SO." Cleared whenever a different comp's detail is opened.
+  const [assignNotice, setAssignNotice] = useState(null);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [teams, setTeams] = useState([]);
   // B849232/NEW-1 — the paste-grid create surface. `gridRows` is a client-side staging array,
@@ -680,7 +691,7 @@ export default function CompsPanel({
   useEffect(() => {
     if (!focusCompId) return;
     const c = comps.find((x) => x.id === focusCompId);
-    if (c) { setActiveComp(c); setView("detail"); }
+    if (c) { setActiveComp(c); setView("detail"); setAssignNotice(null); }
     onFocusHandled?.();
   }, [focusCompId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -688,9 +699,10 @@ export default function CompsPanel({
 
   // NEW-2/NEW-3 correction (owner review) — every live "tracked" site (market intel only),
   // computed fresh on every render (cheap: a handful of rows, a plain localStorage read) so a
-  // site this same session just auto-created (compSiteAttach.js) shows up immediately. Deduped
-  // by groupId — a tracked "project" is always single-plan today, but this stays correct if that
-  // ever changes, the same way MapFinder's own siteGroups collapses to one row per group.
+  // site this same session just auto-created (resolveOrCreateTrackedSiteForComp) shows up
+  // immediately. Deduped by groupId — a tracked "project" is always single-plan today, but this
+  // stays correct if that ever changes, the same way MapFinder's own siteGroups collapses to one
+  // row per group.
   const trackedSites = (() => {
     const byGroup = new Map();
     for (const s of loadSiteSummaries()) {
@@ -701,8 +713,8 @@ export default function CompsPanel({
     return [...byGroup.values()];
   })();
 
-  const openDetail = (c) => { setActiveComp(c); setView("detail"); setAutoAttachMsg(null); };
-  const openEdit = (c) => { setDraft(compToDraft(c)); setErrors([]); setView("form"); setAutoAttachMsg(null); };
+  const openDetail = (c) => { setActiveComp(c); setView("detail"); setAssignNotice(null); };
+  const openEdit = (c) => { setDraft(compToDraft(c)); setErrors([]); setAssignNotice(null); setView("form"); };
   const cancelForm = () => { setView(activeComp ? "detail" : "list"); setDraft(null); };
 
   const save = async () => {
@@ -714,14 +726,28 @@ export default function CompsPanel({
     if (teamConflict) errs.push(teamConflict);
     if (errs.length) { setErrors(errs); return; }
     setSaving(true);
-    // NEW-2 (adversarial review of B1156864) — a NEW comp with no owning site never leaves the
-    // owner with an extra manual step: find (or create) its site before the insert, exactly like
-    // the migration did for the three pre-existing comps. Never runs for an update, and never
-    // overrides an explicit dropdown choice (resolveOwningSite returns null in both cases).
-    let attachNote = null;
-    if (!draft.id) {
-      const resolution = await resolveOwningSite(comp, { overlaysById });
-      if (resolution) { comp.projectId = resolution.projectId; attachNote = autoAttachNote(resolution); }
+    // B1165441 (NEW-2/NEW-3) — a comp with no owning site gets one automatically: attach to an
+    // existing plausible site first (NEW-3's dedupe), else create a new "tracked" site from the
+    // comp's own title/location (NEW-2). The owner should never have to create a site before
+    // recording a deal. `comp.anchor` always carries lat/lon (validateComp already refused a
+    // missing anchor above), regardless of anchor kind (pin/parcel/site_plan).
+    let matched = null;
+    if (!comp.projectId && comp.anchor) {
+      try {
+        // Dynamic import — keeps storage.js's full site-model/geometry-healing engine
+        // (loadSitesList, saveSite, cloudSync, …) off this panel's own chunk; it's only ever
+        // needed on this one path.
+        const { resolveOrCreateTrackedSiteForComp } = await import("../../../workspaces/site-planner/lib/storage.js");
+        const resolved = await resolveOrCreateTrackedSiteForComp({ title: comp.title, lat: comp.anchor.lat, lon: comp.anchor.lon, county: comp.anchor.county });
+        if (resolved.groupId) {
+          comp.projectId = resolved.groupId;
+          if (resolved.matched) matched = { name: resolved.matchedName, by: resolved.matchedBy };
+        }
+      } catch (_) {
+        // A hiccup here must never block the comp save itself — that would be a worse failure
+        // than the pre-this-feature baseline (an unattached comp, still fixable via the Site
+        // dropdown). It's still a real gap, so it's not silent — just not fatal.
+      }
     }
     const result = draft.id ? await updateComp(draft.id, comp) : await insertComp(comp);
     setSaving(false);
@@ -730,7 +756,9 @@ export default function CompsPanel({
     setActiveComp(result.data);
     setView("detail");
     setDraft(null);
-    setAutoAttachMsg(attachNote);
+    setAssignNotice(matched
+      ? `Attached to “${matched.name}” (matched by ${matched.by === "location" ? "location" : "name"}) — reassign it below if that's wrong.`
+      : null);
   };
 
   const remove = async (c) => {
@@ -785,17 +813,24 @@ export default function CompsPanel({
     }
     setGridSaving(true);
     setGridSaveError(null);
-    // NEW-2/NEW-3 (adversarial review of B1156864) — same resolution as the single-comp save(),
-    // applied per row, SEQUENTIALLY (not in parallel): a tracked site this loop just created for
-    // an earlier row in the SAME paste is written to local storage before the next row's own
-    // resolveOwningSite call reads it back, so two rows for the same property in one batch
-    // (Building A / Building B on one flyer) attach to ONE new site rather than two.
+    // B1167137/B1165441 (adversarial review of B1156864) — same resolution as the single-comp
+    // save(), applied per row, SEQUENTIALLY (not in parallel): a tracked site this loop just
+    // created for an earlier row in the SAME paste is written to local storage before the next
+    // row's own resolveOrCreateTrackedSiteForComp call reads it back, so two rows for the same
+    // property in one batch (Building A / Building B on one flyer) attach to ONE new site rather
+    // than two.
     const comps = [];
     for (const r of toSave) {
       const comp = draftToComp(r.draft);
-      if (!comp.projectId) {
-        const resolution = await resolveOwningSite(comp, { overlaysById });
-        if (resolution) comp.projectId = resolution.projectId;
+      if (!comp.projectId && comp.anchor) {
+        try {
+          const { resolveOrCreateTrackedSiteForComp } = await import("../../../workspaces/site-planner/lib/storage.js");
+          const resolved = await resolveOrCreateTrackedSiteForComp({ title: comp.title, lat: comp.anchor.lat, lon: comp.anchor.lon, county: comp.anchor.county });
+          if (resolved.groupId) comp.projectId = resolved.groupId;
+        } catch (_) {
+          // Same non-fatal shape as the single-comp save() path — an unattached comp is still
+          // fixable via the Site dropdown, never a blocked save.
+        }
       }
       comps.push(comp);
     }
@@ -952,18 +987,11 @@ export default function CompsPanel({
         )}
 
         {!loading && view === "detail" && activeComp && (
-          <>
-            {autoAttachMsg && (
-              <div style={{ fontSize: 12, color: "var(--text-secondary)", background: "var(--surface-page)", border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", margin: "0 0 10px" }}>
-                {autoAttachMsg}
-                <button onClick={() => setAutoAttachMsg(null)} style={{ float: "right", border: "none", background: "transparent", cursor: "pointer", color: "var(--text-secondary)", fontSize: 12, lineHeight: 1, padding: 0, marginLeft: 8 }} aria-label="Dismiss">✕</button>
-              </div>
-            )}
-            <CompDetail
-              comp={activeComp} canEdit={activeComp.userId === currentUserId} onEdit={openEdit} onDelete={remove} onBack={() => setView("list")}
-              overlaysById={overlaysById} onOpenBrochure={onOpenBrochure}
-            />
-          </>
+          <CompDetail
+            comp={activeComp} canEdit={activeComp.userId === currentUserId} onEdit={openEdit} onDelete={remove} onBack={() => setView("list")}
+            overlaysById={overlaysById} onOpenBrochure={onOpenBrochure}
+            assignNotice={assignNotice} onDismissAssignNotice={() => setAssignNotice(null)}
+          />
         )}
 
         {!loading && view === "form" && draft && (

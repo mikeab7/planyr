@@ -240,26 +240,16 @@ was never clicked" quietly ships broken.
 
 ### V852305 — B1167137: the comp editor's Project field always shows a comp's REAL owning site, tracked or not, never "No project" `Blocker: auth` `Blocker: real-data`
 
-**Why this needs its own real pass.** The data-layer half (a throwaway comp resolving to the correct existing tracked site, no duplicate created) was verified directly against production via the Supabase MCP this session — see B1167137's own writeup. What that cannot confirm is what the owner's own signed-in browser actually RENDERS in the editor, which is the one thing the owner's own review called out as the defect that decides whether any of this is visible at all.
+**Why this needs its own real pass.** This checks the Project-select DISPLAY fix only — the one surface `V850608` (B1165441's own live-verify, the attach/create mechanism itself) does not cover, since that item never touches `CompForm`. Confirmed directly against real production data via the Supabase MCP that the underlying link is correct (63 live sites, unchanged; the earlier throwaway comp still reads `project_id = trk8eef7db4d0`) — what remains is confirming the owner's own signed-in browser actually RENDERS that link.
 
 **Steps, each with a named expected result — on `planyr.io`, signed in as the owner (real account, real data — do NOT edit or save any of the three comps named below, read the field and cancel):**
 1. Open "Core 5 - West Hardy" for edit (the single-comp edit form, not the paste grid). **Expect:** the Project field reads "Core 5 - West Hardy (market record)" — never "No project" and never the bare internal name "Market record". Cancel without saving.
 2. Repeat for "Tesla - TGS 800K SF" and "Tesla - TGS DC4", each showing its own matching name. Cancel without saving.
 3. Report all three displayed strings verbatim.
-4. Save a genuinely NEW throwaway comp with no project chosen, located near an EXISTING site (any role). **Expect:** on reopen, the Project field shows that site's real name, and a one-line confirmation banner named what happened (attached vs. a new tracked site created). Soft-delete the throwaway comp afterward.
 
 **Result:** ⏳ pending — needs a real signed-in browser session. `Cadence: once`.
 
-### V852306 — B1167138: two comps for one property attach to ONE tracked site, never two `Blocker: auth` `Blocker: real-data`
-
-**Why this needs its own real pass.** The core matching logic (role-agnostic exact-title-or-nearest-within-0.5mi) was proven against the real production `sites` table via the Supabase MCP and against the owner's own real coordinates in `test/compSiteMatch.test.js` — what remains is confirming the PASTE-GRID batch path (sequential intra-batch resolution) behaves the same way when actually driven by a human pasting real rows.
-
-**Steps, each with a named expected result — on `planyr.io`, signed in as the owner, using THROWAWAY comps only:**
-1. Open the paste-grid (Comps tab → the batch-entry surface) and enter two comps at the SAME real property (e.g. two buildings on one existing flyer/site), neither with a project chosen. Save. **Expect:** exactly ONE new tracked site is created (or the existing one reused, if that property already has a site), and BOTH comps' Project fields show the same site name.
-2. Enter two comps at genuinely different, far-apart properties (no title match, > 0.5 mi apart) with no project chosen. Save. **Expect:** two DISTINCT sites, one per comp.
-3. Soft-delete every throwaway comp and any throwaway tracked site this check created.
-
-**Result:** ⏳ pending — needs a real signed-in browser session. `Cadence: once`.
+(B1167138's own live-verify was folded into `V850608` above — same mechanism, same shipped code, no separate check needed; see B1167138's writeup in `BACKLOG.md`.)
 
 ### V650128 — B1156864: the Sites list stays at 37 pursuit projects after the comps-to-sites migration, the three new tracked sites stay off it, and a comp's owning site shows correctly `Blocker: auth` `Blocker: real-data`
 
@@ -287,6 +277,58 @@ real account and real data; do not create, delete, or edit anything beyond what 
    Sites list and spot-check their names/counties/status read exactly as they did before this
    session (cross-reference against the owner's own memory or an earlier screenshot if available;
    this is a sanity check on top of the machine-verified snapshot diff, not a substitute for it).
+
+**2026-09-05 addendum — an adversarial review reported this step FAILED live** (Sites header read
+33, Pursuit read 19, with the three tracked sites at the top, "no boundary" badge, sorted by
+recency) **on build b487f11**, contradicting this item's own code trace. Re-read the exact shipped
+`siteGroups` filter and reproduced it in Node against a fixture shaped like the review's own
+numbers (30 pursuit + 3 tracked/`status:null`) — it correctly excludes all 3 and returns 30, so the
+filter as written is not defeated by a null `status`. Could not settle from this sandbox whether
+the live report was a stale cached bundle (this repo's own standing caution — see `/CLAUDE.md` →
+"A LIVE MEASUREMENT ON planyr.io IS ONLY VALID IF THE DEPLOYED CHUNK HASH IS READ IN THE SAME
+CALL") or a real gap. Per STANDING RULE #2, fixed it anyway rather than resting on the trace:
+`MapFinder.jsx` (B1165440) now re-derives its own pursuit-only filter at the point every one of
+these numbers is actually computed (header count, per-status groups, pinned rows, map pins),
+independent of what `siteGroups` upstream already filtered — so step 1's answer is now enforced at
+two layers regardless of which explanation was correct. **Step 1 (and its "37" expectation, now
+whatever the live count is at verify time) is the one to re-run first; if it still misreads,
+capture the served chunk hash (Network tab or `document.querySelectorAll('script[src]')`) in the
+same observation so a stale-bundle explanation can be ruled in or out.**
+
+**Result:** ⏳ pending — needs a real signed-in browser session; not reachable from this sandbox
+(the sandbox proxy CORS-blocks the Supabase auth handshake). `Cadence: once`.
+
+### V850608 — B1165441: saving a comp with no site picked auto-attaches to an existing site or creates a new tracked one, through the real signed-in UI `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** Filed `Verify: live` per the LIVE-VERIFY rule (real project
+data + persistence). The matching rule and the DB round-trip mechanics were verified directly this
+session — the matching rule via 9 unit tests against the real production coordinates for the
+owner's three existing tracked sites (`test/compSiteMatch.test.js`), and the round trip by running
+the actual, unmodified `findMatchingSite`/`resolveOrCreateTrackedSiteForComp` logic (read via the
+Supabase MCP, not guessed) against a real throwaway comp, then performing the identical
+insert/update the app's own code would perform — see B1165441's own writeup for the exact steps and
+cleanup. What that could NOT do is drive the actual React form through a signed-in browser, which
+is the one thing this check exists for.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner, using a
+THROWAWAY comp (title it "verification-only, delete me" so it's never mistaken for a real deal;
+delete it when done):**
+1. Open the Comps tab, click "+ New comp" (or drop a pin and start one), fill in any comp type with
+   a title and a location, and leave the Site field unset (no project picked). Save it.
+   **Expect:** the save succeeds with no error, and the comp's detail view shows a real Site name
+   under Location — never blank/unset.
+2. If the pin was placed far from every existing site (a genuinely new location): **expect** a
+   brand-new site was created (visible in the Sites list, role "tracked" so it does NOT appear in
+   the default Pursuit view) named after the comp's own title, and NO "attached to…" notice (a
+   brand-new site needs no explanation).
+3. If the pin was placed within about half a mile of an existing site's location (pursuit OR
+   tracked): **expect** the comp attaches to THAT site instead of creating a new one, and the detail
+   view shows a dismissible notice naming which site it attached to and why (location or name
+   match) — confirm no duplicate site was created.
+4. Use the existing Site dropdown in the edit form to confirm the attachment can be changed by
+   hand (the manual-reassign path, unaffected by this item).
+5. Delete the throwaway comp (and, if step 2 created one, the throwaway tracked site it made) via
+   the app's own Delete controls. **Expect:** both are gone from the respective lists on reload.
 
 **Result:** ⏳ pending — needs a real signed-in browser session; not reachable from this sandbox
 (the sandbox proxy CORS-blocks the Supabase auth handshake). `Cadence: once`.

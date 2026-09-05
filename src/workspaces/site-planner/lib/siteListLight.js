@@ -3,9 +3,9 @@
  * `shared/projects/projects.js`'s `listProjects()` — read on literally every workspace's header
  * (AppHeader -> ProjectBreadcrumb) for the project switcher/breadcrumb — only ever needs a
  * handful of scalar fields per site record: id, groupId, site/name, siteRenamedAt, updatedAt,
- * status, role, origin (a plain {lat,lon}, never the drawn geometry), scheduleProjectId/Name (see
- * `projectModel.groupProjects` and `projectName.reconcileGroupNames`, both pure and
- * dependency-free). It never touches drawn geometry (els/parcels/markups/…).
+ * status, role, scheduleProjectId/Name (see `projectModel.groupProjects` and
+ * `projectName.reconcileGroupNames`, both pure and dependency-free). It never touches drawn
+ * geometry (els/parcels/markups/…).
  *
  * `storage.js`'s `loadSitesList()` normalizes every record through the full Site Model
  * (`createSiteModel`), which statically pulls the whole geometry-healing engine —
@@ -54,12 +54,6 @@ function projectSummaryOf(p) {
     role: normRole(p.role),
     scheduleProjectId: p.scheduleProjectId != null ? p.scheduleProjectId : null,
     scheduleProjectName: p.scheduleProjectName || null,
-    // NEW-1 (this branch) — the geo anchor, a plain {lat,lon} scalar pair, never the drawn
-    // geometry this reader otherwise refuses to touch. Needed by the comps auto-attach match
-    // (compSiteMatch.js), which has to compare a comp's location against every candidate site's
-    // origin without pulling in the full Site Model.
-    origin: (p.origin && typeof p.origin.lat === "number" && typeof p.origin.lon === "number")
-      ? { lat: p.origin.lat, lon: p.origin.lon } : null,
   };
 }
 
