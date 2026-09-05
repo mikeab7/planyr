@@ -60,7 +60,12 @@ export function useSitePlanOverlayLayers(map, overlays, { pinTargetId, onPinClic
     if (!h) return;
     const layers = layersRef.current;
     const { overlays: ovs, activeId: aid } = stateRef.current;
-    const active = (ovs || []).find((o) => o.id === aid && o.visible !== false && overlayPlaced(o));
+    // NEW-7 — `locked` used to gate only ARMING a click-to-select on the overlay's own image
+    // (below); an overlay locked WHILE already active kept its drag/scale/rotate handles fully
+    // live, because this lookup never re-checked the flag. Excluding a locked overlay here
+    // means the very next sync (the overlays-changed effect below already re-runs on any
+    // `locked` write) hides its handles even if nothing else about `activeId` changed.
+    const active = (ovs || []).find((o) => o.id === aid && !o.locked && o.visible !== false && overlayPlaced(o));
     if (active) {
       h.show(active, active.imgW, active.imgH, {
         onLive: (placement) => {

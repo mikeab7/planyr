@@ -63,6 +63,13 @@ export default function ParcelInfoCard({
   // NEW-4 — the fallback when the county service is unreachable: start the plan at this point
   // anyway and draw the boundary. Passed only by the map finder; absent → the card just explains.
   onStartBlank = null,
+  // B1149600ish/NEW-6 — the card used to offer "Plan this site" (a SITE-module action)
+  // unconditionally, even while the map's own Site/Comp toggle read Comp — reproduced by the
+  // owner on a real address search. `mode` decides which primary action belongs here; `onComp`
+  // is the comp-creation handler for the currently-selected parcel(s) (absent → the found state
+  // shows only the parcel facts, per the brief: "the comp action, or nothing beyond the facts").
+  // `compAccent` lets the caller match its own comp-mode hue without a second hardcoded color here.
+  mode = "site", onComp = null, compAccent = null,
 }) {
   // `detailsOpen` seeds the disclosure only — it re-seeds per parcel via the `key` the
   // caller sets, so a new search always opens closed (the whole point of the fold).
@@ -128,10 +135,19 @@ export default function ParcelInfoCard({
           )}
 
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
-            <button onClick={onPlan}
-              style={{ height: 30, padding: "0 12px", borderRadius: RADIUS.sm, border: "none", background: PAL.accent, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-              Plan this site →
-            </button>
+            {mode === "comp" ? (
+              onComp && (
+                <button onClick={onComp}
+                  style={{ height: 30, padding: "0 12px", borderRadius: RADIUS.sm, border: "none", background: compAccent || PAL.accent, color: "var(--on-accent)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                  Add as comp →
+                </button>
+              )
+            ) : (
+              <button onClick={onPlan}
+                style={{ height: 30, padding: "0 12px", borderRadius: RADIUS.sm, border: "none", background: PAL.accent, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                Plan this site →
+              </button>
+            )}
           </div>
         </div>
       ) : info.status === "none" ? (
