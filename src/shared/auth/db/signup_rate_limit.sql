@@ -136,5 +136,5 @@ as $$
   order by at desc
   limit greatest(1, least(coalesce(p_limit, 200), 1000));
 $$;
-revoke all on function public.admin_list_signup_attempts(int) from public;
+revoke all on function public.admin_list_signup_attempts(int) from public, anon;
 grant execute on function public.admin_list_signup_attempts(int) to authenticated;
