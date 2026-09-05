@@ -32,13 +32,21 @@ function writeRaw(win, list) {
 const winOf = (win) => win || (typeof window !== "undefined" ? window : undefined);
 const newId = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
+/* NEW-1 (B1204736) — the exact owner-facing labels the two group-scoped writers record their
+ * failures under. `inferEntryKind` matches an entry's `what` against these BY EXACT STRING ONLY —
+ * never fuzzily — to recover a `kind` for a legacy entry queued by a build that predates `kind`. */
+export const WHAT_RENAME = "The project rename";
+export const WHAT_STATUS = "The status change";
+
 /* Record one failed write. `what` is a short owner-facing label ("The project rename"); `groupId`/
- * `siteId` name what to retry against (whichever the caller has); `error` is the raw message for
- * telemetry-grade detail. Never throws — a failed record of a failure must not itself fail loud. */
-export function recordCloudWriteFailure({ what, groupId = null, siteId = null, error = "" } = {}, win) {
+ * `siteId` name what to retry against (whichever the caller has); `kind` ("rename" | "status" |
+ * "row") names WHICH write shape produced it, so a replay can pick the matching write path instead
+ * of guessing from shape alone; `error` is the raw message for telemetry-grade detail. Never
+ * throws — a failed record of a failure must not itself fail loud. */
+export function recordCloudWriteFailure({ what, groupId = null, siteId = null, kind = null, error = "" } = {}, win) {
   const w = winOf(win);
   if (!w) return null;
-  const entry = { id: newId(), what: what || "A change", groupId, siteId, error: String(error || ""), at: Date.now() };
+  const entry = { id: newId(), what: what || "A change", groupId, siteId, kind, error: String(error || ""), at: Date.now() };
   const list = readRaw(w);
   list.push(entry);
   writeRaw(w, list);
@@ -62,17 +70,30 @@ export function clearAllCloudWriteFailures(win) {
   try { w.localStorage.removeItem(KEY); } catch { /* storage blocked */ }
 }
 
-/* B1048400 (NEW-1) — replay every pending failure against the CURRENT local truth, never against
- * a single representative row. This log cannot serialize a closure across the reload it exists to
- * survive, so a drained entry is replayed generically from its recorded `groupId`/`siteId` alone —
- * and that generic replay is exactly where the original "looks like it worked" bug came back inside
- * its own fix. A `groupId` entry names a GROUP-SCOPED action: a project rename or a site-status
- * change writes EVERY plan in the group in one action, so it must replay against every plan
- * `loadPlansOfGroup` currently returns for that group — pushing just the group id's own row (which
- * happens to also be one plan id) silently leaves every sibling plan on its old value while the UI
- * reports success. A `siteId` entry names a genuinely single-row action (a new site/plan, a
- * duplicated plan, a plan's own name) and replays against just that row. */
-export function replayCloudWriteFailures(pending, { loadPlansOfGroup, pushLoud }) {
+/* NEW-1 (B1204736) — which write shape a queued entry names. A `kind` stamped at record time
+ * (every writer now passes one) wins outright. An entry with no `kind` predates this fix — queued
+ * by a build already deployed when it lands — and is inferred from an EXACT match against the
+ * owner-facing label the writer used, never a fuzzy guess: guessing "rename" for a status change
+ * would replay a name and never write the status. A `siteId` entry (no `groupId`) is always a
+ * genuinely single-row action regardless of its label. */
+export function inferEntryKind(e) {
+  if (!e) return null;
+  if (e.kind === "rename" || e.kind === "status" || e.kind === "row") return e.kind;
+  if (!e.groupId) return "row";
+  if (e.what === WHAT_RENAME) return "rename";
+  if (e.what === WHAT_STATUS) return "status";
+  return "row"; // an unrecognized group-scoped label — never guessed, falls to the generic fan-out
+}
+
+/* PRE_FIX_RETRY — the shipped B1048400 fan-out replay, kept byte-for-byte as a regression control
+ * (never called by the app). It fixed "replay only the group's own row" but stayed the wrong SHAPE:
+ * it fires one cloud write per plan with no await and no per-row confirmation, so a fan-out
+ * interrupted partway through (a chunk failure, a tab close, a reload) leaves the group PARTLY
+ * written while the caller — which cleared the whole durable log before ever calling this — reports
+ * nothing wrong. Production repro: three distinct `updated_at` stamps 2.4s apart on one renamed
+ * group. See `test/writeFailureLog.test.js`'s PRE_FIX_RETRY suite for the two control tests this
+ * proves, and `replayCloudWriteFailures`/`retryCloudWriteFailures` below for the fix. */
+export function PRE_FIX_RETRY(pending, { loadPlansOfGroup, pushLoud }) {
   for (const e of pending || []) {
     if (!e) continue;
     if (e.groupId) {
@@ -81,4 +102,61 @@ export function replayCloudWriteFailures(pending, { loadPlansOfGroup, pushLoud }
       pushLoud(e.siteId, e.what);
     }
   }
+}
+
+/* NEW-1 (B1204736) — replay every pending failure through the SAME write shape its live path
+ * uses, never a generic per-row fan-out for a kind that has an atomic group RPC behind it.
+ *
+ *   groupWrite(entry, kind) -> Promise<{handled, ok}> | undefined
+ *     An adapter the caller supplies (SitePlannerApp's `replayGroupAtomically`) that knows how to
+ *     replay ONE kind atomically — a "rename" through the same `renameSiteGroup` RPC the live
+ *     rename path uses, one statement, one stamp. It answers `{handled:false}` for any kind it has
+ *     no atomic path for (a site-status change has no group RPC — its normal path is row-by-row
+ *     too, see siteStatus.js) so the generic fan-out below runs instead; that fan-out is reported
+ *     ok ONLY when every live plan confirms — never on the first success, which is exactly how
+ *     B1048400 already recurred once inside its own fix. `handled:true` OWNS the outcome even when
+ *     `ok` is false: an atomic write that failed must not be retried through the non-atomic shape,
+ *     which would reintroduce the partial-write it exists to prevent.
+ *
+ * A `groupId` entry with no live plans is refused rather than reported as a vacuous success.
+ * Returns one `{ entry, ok }` per input entry, in order, so the caller (`retryCloudWriteFailures`)
+ * can clear only what actually landed. */
+export async function replayCloudWriteFailures(pending, { loadPlansOfGroup, pushLoud, groupWrite } = {}) {
+  const results = [];
+  for (const e of pending || []) {
+    if (!e) { results.push({ entry: e, ok: false }); continue; }
+    const kind = inferEntryKind(e);
+    if (groupWrite) {
+      const r = await groupWrite(e, kind);
+      if (r && r.handled) { results.push({ entry: e, ok: r.ok === true }); continue; }
+    }
+    if (e.groupId) {
+      const plans = (loadPlansOfGroup && loadPlansOfGroup(e.groupId)) || [];
+      if (!plans.length) { results.push({ entry: e, ok: false }); continue; }
+      const oks = await Promise.all(plans.map((p) => pushLoud(p.id, e.what)));
+      results.push({ entry: e, ok: oks.length > 0 && oks.every((ok) => ok === true) });
+    } else if (e.siteId) {
+      const ok = await pushLoud(e.siteId, e.what);
+      results.push({ entry: e, ok: ok === true });
+    } else {
+      results.push({ entry: e, ok: false });
+    }
+  }
+  return results;
+}
+
+/* NEW-1 (B1204736) — THE LOG OUTLIVES THE WRITE: replay, then clear ONLY the entries that are
+ * actually confirmed, and hand the caller back what's still pending so it can re-raise the banner
+ * over exactly that. The bug this replaces cleared the WHOLE log, unconditionally, before a single
+ * row had even been attempted — an interrupted retry then had nothing left to re-surface on the
+ * next boot. Splitting "did the write land" from "what does the log now say" is the whole fix. */
+export async function retryCloudWriteFailures(pending, opts, win) {
+  const results = await replayCloudWriteFailures(pending, opts);
+  let cleared = 0;
+  const remaining = [];
+  for (const r of results) {
+    if (r.ok) { clearCloudWriteFailure(r.entry.id, win); cleared += 1; }
+    else remaining.push(r.entry);
+  }
+  return { cleared, remaining };
 }
