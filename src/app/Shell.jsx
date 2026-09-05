@@ -16,7 +16,7 @@ import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
 import AccountControl from "./AccountControl.jsx";
 import { useProfile } from "../shared/profile/useProfile.js";
 import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
-import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, readRoute, buildHash, INITIAL_HASH_EMPTY } from "./route.js";
+import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, isDashboardRoute, readRoute, buildHash, INITIAL_HASH_EMPTY } from "./route.js";
 import { pageTitle } from "./pageTitle.js";
 import { writeLastRoute, seedBootRoute } from "./lastRoute.js";
 import { installBuildSkewWatch, shouldOfferReload, fetchServedBuild, isBuildSkewed, LOADED_BUILD } from "./buildSkew.js";
@@ -37,6 +37,10 @@ const AdminGate = lazy(() => import("../workspaces/admin/AdminGate.jsx"));
 // AdminGate above: no header tab, never offered by the module switcher, costs nothing on the
 // shipped bundle until someone types the URL.
 const DesignGallery = lazy(() => import("../workspaces/design-gallery/DesignGallery.jsx"));
+// NEW-1 (B1213312) — the Dashboard: a real destination that sits ABOVE the six workspaces, not
+// one of them, so it's deliberately not a WORKSPACES entry either — same lazy/not-a-workspace
+// shape as AdminGate/DesignGallery above (isDashboardHash below, no header tab of its own).
+const Dashboard = lazy(() => import("../workspaces/dashboard/Dashboard.jsx"));
 
 // "Open where I left off": on an empty-hash boot, seed the URL from the stored last-route
 // pointer BEFORE the first render (so useHashRoute's initial read sees it). Runs at module
@@ -64,6 +68,9 @@ const WORKSPACES = [
 // Chrome color is a theme token so the shell themes WITH the app (B318). (The account
 // pill/dropdown styling moved into AccountControl.jsx with the control itself — B734.)
 const CHROME = "var(--chrome-bg)";
+
+// NEW-1 (B1213312) — the Dashboard's canonical hash (see route.js's isDashboardRoute + buildHash).
+const DASHBOARD_HASH = "#/";
 
 // B113/B485's existing phone breakpoint (760px, matchMedia), reused verbatim rather than a
 // third one — same value AppHeader.jsx's own `useNarrow` and Notes.jsx/FoodMap.jsx's local
@@ -167,26 +174,45 @@ export default function Shell() {
   // module-local state that's lost on the way into Document Review. The breadcrumb and
   // every workspace read the project from here, not from their own state.
   const [route, navigate] = useHashRoute();
-  const active    = route.module;     // workspace id
+  const routedModule = route.module;  // the module named by the URL (ignores the admin/design/dashboard overlays)
   const projectId = route.projectId;  // active Site-group id | null
   const cross     = route.cross;      // cross-project mode
   const org       = route.org;        // ORG SCOPE (NEW-1) — standing in the Organization, not any project
   // B711904 (NEW-1) — "admin" is deliberately NOT a module slug (see route.js), so it never
   // shows up in `route.module`; it's read straight off the live hash instead, the same way
-  // `routeMiss` below already has to be. Recomputed on every hashchange (the `route` state
-  // object is fresh each time, so this effect always fires even when the parsed route didn't
-  // change) so leaving/entering #/admin is always caught.
-  const [isAdminHash, setIsAdminHash] = useState(() => (typeof window !== "undefined" ? isAdminRoute(window.location.hash) : false));
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    setIsAdminHash(isAdminRoute(window.location.hash));
-  }, [route]);
+  // `routeMiss` below already has to be.
+  //
+  // ⛔ B1213312 — THESE THREE ARE PLAIN, SYNCHRONOUS COMPUTATIONS, NEVER STATE-PLUS-EFFECT.
+  // They used to be `useState` seeded once at mount, updated by a `useEffect` keyed on `[route]`
+  // — which looks equivalent but ISN'T: `route` updates from the hashchange LISTENER inside
+  // `useHashRoute`, one render pass; the effect that recomputes isAdminHash/isDesignHash/
+  // isDashboardHash from the (by-then-current) `window.location.hash` only runs AFTER that
+  // render commits, one pass LATER. For one render in between, `route.module` already reflects
+  // the NEW hash while `isDashboardHash` still reflects the OLD one. That gap is invisible for
+  // admin/design (nothing else depends on them) but is exactly what turned `active` below (which
+  // DOES depend on isDashboardHash) briefly back into `"site-planner"` on a hashchange landing on
+  // bare "#/" — long enough for the kept-alive Site Planner's isActive-gated URL-sync effect
+  // (SitePlannerApp.jsx) to fire once and overwrite the just-written Dashboard hash with its own
+  // "#/site", reproducing the exact B881664-class bounce this session's fix was supposed to
+  // close. Measured live: clicking the wordmark from Schedule produced `#/schedule → #/ → #/site`,
+  // 55ms apart. Computing all three plain, straight off `window.location.hash`, on every render
+  // — no state, no effect, no lag — closes the gap: whatever render sees the new `route` also
+  // sees the new hash-derived flags, always in the same pass.
+  const isAdminHash = typeof window !== "undefined" && isAdminRoute(window.location.hash);
   // NEW-4 — same shape as isAdminHash above, for the `/design` gallery.
-  const [isDesignHash, setIsDesignHash] = useState(() => (typeof window !== "undefined" ? isDesignRoute(window.location.hash) : false));
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    setIsDesignHash(isDesignRoute(window.location.hash));
-  }, [route]);
+  const isDesignHash = typeof window !== "undefined" && isDesignRoute(window.location.hash);
+  // NEW-1 (B1213312) — the Dashboard: same shape as isAdminHash/isDesignHash above, read
+  // straight off the raw hash rather than through `route.module` (parseRoute can't tell a bare
+  // "#/" apart from "site-planner, no project" — see route.js's own header). Unlike admin/design,
+  // the Dashboard genuinely has no workspace "active" underneath it (see `active` below).
+  const isDashboardHash = typeof window !== "undefined" && isDashboardRoute(window.location.hash);
+  // NEW-1 (B1213312) — NO workspace is "active" while the Dashboard is open: unlike admin/design
+  // (which sit on top of whatever workspace the route still names), the Dashboard is a genuine
+  // peer of the six workspaces, not a layer over one of them. This is what makes "no module tab
+  // active" true for free (AppHeader's tabs highlight on `m.id === module`, and `active` here
+  // never equals a real workspace id while it's null) and keeps a fresh dashboard boot from
+  // mounting the Site Planner's chunk just to hide it underneath.
+  const active = isDashboardHash ? null : routedModule;
   const [user,      setUser]      = useState(null);
   const [authOpen,  setAuthOpen]  = useState(false);
   const [recovery,  setRecovery]  = useState(false);
@@ -209,7 +235,20 @@ export default function Shell() {
   // than needing its own guard everywhere.
   const ORG_CAPABLE_MODULES = new Set(["notes", "library", "scheduler"]);
   const switchModule = (id) => navigate({ module: id, org: org && ORG_CAPABLE_MODULES.has(id) });
-  const goDashboard  = () => navigate({ module: "site-planner", projectId: null, cross: false, org: false });
+  // NEW-1 (B1213312) — the Dashboard is not a `{module, projectId, cross, org}` value (see
+  // route.js's isDashboardRoute), so it can't be reached through `navigate()`'s partial-merge
+  // shape the way every module switch is; it needs the raw hash set directly. The guard against
+  // re-assigning an unchanged hash is the whole fix for the measured bug this replaces: clicking
+  // the wordmark from `#/design` or `#/admin` used to call `navigate({module:"site-planner",
+  // projectId:null})`, which `parseRoute` resolves to the SAME route object those overlays
+  // themselves fall back to — so `navigate`'s own sameRoute check saw "no change" and refused to
+  // write the hash at all (measured: click "succeeds", hash never moves, the overlay never
+  // closes). Comparing the literal hash string here — not the parsed route — means leaving any
+  // of those pages always fires a real hashchange, and clicking the wordmark while already on
+  // the Dashboard is a correct, silent no-op.
+  const goDashboard = () => {
+    if (typeof window !== "undefined" && window.location.hash !== DASHBOARD_HASH) window.location.hash = DASHBOARD_HASH;
+  };
   // "New project" from anywhere: land in the Site Planner and tell it to start a blank
   // site. A monotonic tick (not a project id — the blank isn't saved yet) re-fires on
   // each click; the Site Planner writes the real id into the URL once it exists.
@@ -290,13 +329,18 @@ export default function Shell() {
   // B279 — tag telemetry rows with the workspace the user is in, so a reported error
   // says WHERE it happened (site-planner / doc-review / scheduler). "admin" resolves as its
   // own module here even though it's not in `route.module` (see isAdminHash above), so a
-  // crash inside the admin page is never mislabeled as a Site Planner error.
-  useEffect(() => { setTelemetryModule(isAdminHash ? "admin" : active); }, [active, isAdminHash]);
+  // crash inside the admin page is never mislabeled as a Site Planner error. NEW-1
+  // (B1213312) — same reasoning for "dashboard": `active` is null there, which would
+  // otherwise tag every Dashboard error with a bare "null" module.
+  useEffect(() => { setTelemetryModule(isAdminHash ? "admin" : isDashboardHash ? "dashboard" : active); }, [active, isAdminHash, isDashboardHash]);
 
   // NEW-1 (2026-08-28) — the browser tab title names the module you're in, using the
   // SAME label the nav tabs render (pageTitle.js reads moduleTabLabel.js, the nav's own
   // source), so it updates on every client-side route change with no reload.
-  useEffect(() => { document.title = pageTitle({ module: active, isAdmin: isAdminHash }); }, [active, isAdminHash]);
+  // B1213312 — the Dashboard has no MODULE_TAB_LABEL entry (it's not a tab), so pageTitle's
+  // existing "no label for this module" fallback already renders the bare brand string for it;
+  // no change needed there, just don't pass the null `active` off as some other module's id.
+  useEffect(() => { document.title = pageTitle({ module: isDashboardHash ? "dashboard" : active, isAdmin: isAdminHash }); }, [active, isAdminHash, isDashboardHash]);
 
   // "Open where I left off" — persist every route change as the last-route pointer.
   // Single choke point: catches tab clicks, breadcrumb picks, and programmatic navigates.
@@ -307,7 +351,7 @@ export default function Shell() {
   // pointer, indistinguishable from "on the plain dashboard" — so it's excluded the same way
   // Food is: a visit to /admin must never clobber the pointer to whatever project was
   // actually open before it (B711904).
-  useEffect(() => { if (!isAdminHash && !isDesignHash) writeLastRoute(route); }, [route, isAdminHash, isDesignHash]);
+  useEffect(() => { if (!isAdminHash && !isDesignHash && !isDashboardHash) writeLastRoute(route); }, [route, isAdminHash, isDesignHash, isDashboardHash]);
 
   // B842866 — drain any problem reports that couldn't reach the server on a prior load
   // (offline, a dropped connection). Once per boot; LOUD-FAILURE means a report never
@@ -547,14 +591,35 @@ export default function Shell() {
           // `pointer-events`; nothing there needs a counter-flip.
           <div style={{ position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none" }}>
             <Suspense fallback={null}>
-              {/* Not `onExit={goDashboard}` — `#/design` and the plain dashboard both parse to
-                  the identical { module: "site-planner", projectId: null, cross: false } route
-                  (`design` isn't a real module slug), so `navigate`'s own same-route guard makes
-                  goDashboard() here a silent no-op (measured: click "succeeds", hash never moves).
-                  Setting the hash directly always fires a real hashchange, which is what actually
-                  needs to happen to leave this overlay. */}
-              <DesignGallery onExit={() => { window.location.hash = "#/"; }} />
+              {/* B1213312 — `onExit={goDashboard}` now works here (it used to be a measured
+                  silent no-op: see goDashboard's own header above for the mechanism and fix). */}
+              <DesignGallery onExit={goDashboard} />
             </Suspense>
+          </div>
+        )}
+        {/* NEW-1 (B1213312) — the Dashboard. Unlike admin/design above, it does not sit ON TOP
+            of an active workspace (there isn't one: `active` is null while isDashboardHash is
+            true, so no WORKSPACES entry above claims `isActive`), so it needs none of their
+            pointer-events choreography. Deliberately NOT kept alive (unlike the six
+            workspaces) — a genuinely conditional `{isDashboardHash && ...}` render, same shape
+            as the admin/design blocks above, so it unmounts the instant you leave and a fresh
+            mount re-fetches its cards' data on every visit rather than showing a stale snapshot
+            from whenever it first mounted. */}
+        {isDashboardHash && (
+          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
+            <ErrorBoundary label="Dashboard">
+              <Suspense fallback={<ModuleLoader module="dashboard" />}>
+                <Dashboard
+                  onShellSwitch={switchModule}
+                  authControl={authControl}
+                  accountActive={!!user}
+                  userId={user?.id || null}
+                  onNewProject={newProject}
+                  onNavigate={navigate}
+                  onOpenReviewInDocReview={openReviewInDocReview}
+                />
+              </Suspense>
+            </ErrorBoundary>
           </div>
         )}
       </main>
