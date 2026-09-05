@@ -74,6 +74,13 @@ export const EXPOSURE_NOTE = {
   unavailable: "The FEMA flood-zone service didn't answer, so this is UNKNOWN — not clear.",
   "none-mapped": "FEMA maps no flood hazard zone reaching this site (screening only — an unmapped area is not a studied one).",
   "no-buildings": "No buildings placed yet.",
+  // ⛔ NEW-4 (owner-adversarial review, 2026-09-05) — a REMEMBERED check (the header's own
+  // "checked Xd ago" fact) is a different honest state from a genuine never-run: a restored/
+  // reloaded view holds no cached zone geometry to re-screen the CURRENT footprints against
+  // (see SitePlanner.jsx's slimDrainageContext, which deliberately drops it). Reporting
+  // "not checked" here while the header said "checked Xd ago, stale" was the reported
+  // self-contradiction — two truths about the same fact in one panel.
+  remembered: "Flood zones were checked, but this view has no cached geometry to re-screen the buildings — re-check to refresh.",
 };
 
 /**
@@ -81,18 +88,25 @@ export const EXPOSURE_NOTE = {
  * @param {Array}    o.buildings  [{ id, label, ring }] — rings in planner feet
  * @param {Array}    o.zones      zonesFromFeatureCollection() output (planner feet)
  * @param {string}   o.floodState "loaded" | "failed" | "empty" | null/undefined (never run)
+ * @param {boolean}  o.everChecked  NEW-4 — true when a check has RUN before (live or
+ *                                remembered, the same fact SitePlanner.jsx's `floodChecked`
+ *                                is the one source of truth for), even though `floodState`
+ *                                itself is null/empty for THIS view (no cached geometry to
+ *                                re-screen against). Distinguishes "remembered" from a genuine
+ *                                never-run so this panel cannot contradict the header.
  * @param {object}   o.elev       the fmElev record — passed straight to zoneWaterSurface, so
  *                                the BFE reported here is the SAME one the mitigation ledger
  *                                prices against (never a second, disagreeing derivation)
  * @param {number}   o.maxCells   sampling density for the intersect (screening)
  */
-export function buildingFloodExposure({ buildings = [], zones = [], floodState = null, elev = null, maxCells = 1500 } = {}) {
+export function buildingFloodExposure({ buildings = [], zones = [], floodState = null, everChecked = false, elev = null, maxCells = 1500 } = {}) {
   const rows = (buildings || []).filter((b) => b && b.ring && b.ring.length >= 3);
   if (!rows.length) return { state: "no-buildings", note: EXPOSURE_NOTE["no-buildings"], buildings: [], total: null };
   if (floodState === "failed") return { state: "unavailable", note: EXPOSURE_NOTE.unavailable, buildings: [], total: null };
   if (!floodState || floodState === "empty") {
     // "empty" here means the pull was never made for this site (no bbox), not that FEMA
     // answered with nothing — that case arrives as "loaded" with zero zones.
+    if (everChecked) return { state: "remembered", note: EXPOSURE_NOTE.remembered, buildings: [], total: null };
     return { state: "not-checked", note: EXPOSURE_NOTE["not-checked"], buildings: [], total: null };
   }
   if (!zones.length) return { state: "none-mapped", note: EXPOSURE_NOTE["none-mapped"], buildings: [], total: null };
@@ -180,6 +194,7 @@ export const EXPOSURE_STATE_LABEL = {
   "not-checked": "not checked",
   unavailable: "UNKNOWN",
   "none-mapped": "none mapped",
+  remembered: "re-check to screen",
 };
 
 export function exposureHeadline(res) {

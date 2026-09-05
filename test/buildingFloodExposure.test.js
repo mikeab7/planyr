@@ -119,6 +119,31 @@ describe("NEW-3 — the pure exposure engine", () => {
     expect(none.state).toBe("no-buildings");
   });
 
+  // ⛔ NEW-4 (owner-adversarial review, 2026-09-05) — the Yield header said "checked 30d ago,
+  // stale" while this same panel's Buildings row said "not checked — flood zones not pulled
+  // yet", a self-contradiction: a restored/remembered check (SitePlanner.jsx's `floodChecked`)
+  // has no cached geometry to re-screen buildings against, but that is NOT the same fact as
+  // "never checked". `everChecked:true` must produce a DISTINCT state from a genuine never-run.
+  it("a REMEMBERED check (checked before, no cached geometry this view) is distinct from never-checked", () => {
+    const bs = [rect("b1", 0, 0, 100, 100)];
+    const remembered = buildingFloodExposure({ buildings: bs, zones: [], floodState: null, everChecked: true });
+    expect(remembered.state).toBe("remembered");
+    expect(remembered.state).not.toBe("not-checked");
+    expect(remembered.note).toBe(EXPOSURE_NOTE.remembered);
+    expect(remembered.total).toBe(null);
+    expect(exposureHeadline(remembered).tone).toBe("unknown");
+    expect(exposureHeadline(remembered).text).toBe("re-check to screen");
+    expect(exposureHeadline(remembered).text).not.toBe("not checked");
+
+    // everChecked defaults to false — a caller that never passes it keeps the old behavior.
+    const stillNotRun = buildingFloodExposure({ buildings: bs, zones: [], floodState: null });
+    expect(stillNotRun.state).toBe("not-checked");
+
+    // A live "failed" answer still outranks everChecked — an outage is its own honest state.
+    const failedAnyway = buildingFloodExposure({ buildings: bs, zones: [], floodState: "failed", everChecked: true });
+    expect(failedAnyway.state).toBe("unavailable");
+  });
+
   it("a query that ANSWERED with no zones is the only state allowed to read as clear", () => {
     const res = buildingFloodExposure({ buildings: [rect("b1", 0, 0, 100, 100)], zones: [], floodState: "loaded" });
     expect(res.state).toBe("none-mapped");

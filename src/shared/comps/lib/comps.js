@@ -358,6 +358,27 @@ function fmtPsf(n) {
   return n == null ? null : `$${n.toFixed(2)}/SF`;
 }
 
+/** ⛔ NEW-3 (owner-adversarial review, 2026-09-05) — the LEASE RATE display, extended past the
+ * usual two decimals only when the STORED value actually carries more. Every total derived from
+ * `leaseRate` (`annualLeaseRate`, `leaseTotalAnnualRent`, `netEffectiveLeaseRate`) is computed
+ * from the FULL, unrounded number — a rate of 0.645 always produced a "Total annual rent (face)"
+ * of 0.645 x 12 x SF, but the rate itself always rounded to "$0.65", so a reader checking
+ * 0.65 x 12 x SF against the printed total found a real-looking gap ($73,138 on one production
+ * comp) that doesn't exist. The fix shows the rate honestly rather than rounding the totals to
+ * match it — rounding the totals would misstate the deal's real annual rent, which is worse.
+ * `String(n)` is safe here (never a `0.1+0.2`-style float artifact): `leaseRate` is read straight
+ * off a Postgres `numeric` column via `Number(r.lease_rate)` with no arithmetic in between, and
+ * JS's own number-to-string conversion produces the shortest decimal string that round-trips to
+ * the same double — i.e., exactly what was typed/stored. Never fewer than 2 decimals (matches
+ * every existing "$X.XX" comp figure); capped at 6 so a corrupted value can't produce a wall of
+ * digits. */
+function fmtRate(n) {
+  if (n == null) return null;
+  const stored = (String(n).split(".")[1] || "").length;
+  const decimals = Math.min(6, Math.max(2, stored));
+  return Number(n).toFixed(decimals);
+}
+
 // ⛔ B986096-HARDENING-8 (owner rule, "change the date formatting to something people would
 // normally see") — mm/dd/yy, the Schedule task report's own convention (08/20/26, 06/15/26),
 // never the raw ISO string. AUDIT-FIRST note: FileBrowser.jsx/SiteReviewModal.jsx/MapFinder.jsx
@@ -397,6 +418,16 @@ export function compFieldRows(comp) {
     if (value != null && value !== "") rows.push({ key, label, value });
   };
 
+  // ⛔ NEW-1 (owner-adversarial review, 2026-09-05) — a parcel anchor's APN (a county appraisal
+  // ACCOUNT NUMBER, e.g. "3641471") used to substitute for the Location row entirely
+  // (`useCompLocationText` in CompsPanel.jsx returned it directly for `anchor.kind === "parcel"`,
+  // never attempting the same reverse-geocode the pin branch already does). An APN is an identity,
+  // never an address — it now gets its own labeled row here, right under Location, while Location
+  // itself resolves a real place for a parcel anchor exactly the way it already does for a pin.
+  if (comp?.anchor?.kind === "parcel" && comp.anchor.parcelApn) {
+    push("parcelApn", "Parcel ID (APN)", comp.anchor.parcelApn);
+  }
+
   // Party fields lead — they're facts about who the deal is BETWEEN, not its economics, so they
   // read right under the title rather than buried in the money block (NEW-7 amended).
   const { provider, acquirer } = partyLabels(comp?.compType);
@@ -424,7 +455,7 @@ export function compFieldRows(comp) {
     if (comp?.leaseRate != null) {
       const period = comp.leaseRatePeriod === "monthly" ? "/mo" : comp.leaseRatePeriod === "annual" ? "/yr" : "";
       const basis = comp.leaseRateExpense ? ` ${comp.leaseRateExpense.toUpperCase()}` : "";
-      push("rate", "Rate", `$${Number(comp.leaseRate).toFixed(2)}/SF${period}${basis}`);
+      push("rate", "Rate", `$${fmtRate(comp.leaseRate)}/SF${period}${basis}`);
     }
     if (comp?.leaseSizeSf != null) push("size", "Leased SF", `${Number(comp.leaseSizeSf).toLocaleString()} SF`);
     const totalRent = leaseTotalAnnualRent(comp);
@@ -480,7 +511,7 @@ export function compHeadline(comp) {
     if (comp?.leaseRate != null) {
       const period = comp.leaseRatePeriod === "monthly" ? "/mo" : "/yr";
       const basis = comp.leaseRateExpense ? ` ${comp.leaseRateExpense.toUpperCase()}` : "";
-      return `$${Number(comp.leaseRate).toFixed(2)}/SF${period}${basis}`;
+      return `$${fmtRate(comp.leaseRate)}/SF${period}${basis}`;
     }
     return "Lease comp";
   }
