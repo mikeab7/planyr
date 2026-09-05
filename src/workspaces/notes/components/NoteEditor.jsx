@@ -69,6 +69,7 @@ import NoteHistory from "./NoteHistory.jsx";
 
 const SAVE_DEBOUNCE_MS = 600;
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
+const SHEET_RADIUS = 12; // RADIUS.lg (shared/ui/radius.js) — a surface that CONTAINS other things (DESIGN.md's shape rule); not folded into the local RADIUS const above because test/notesModule.test.js regex-pins that object's exact two-key shape against controls.jsx's own scale.
 
 /* Editor surface styling. It lives here (rather than in src/index.css) so it rides the lazy
  * editor chunk instead of the app's first-paint stylesheet, and it is written entirely
@@ -82,15 +83,42 @@ const EDITOR_CSS = `
    Word and OneNote call ~1.15 single. So the loosest setting in the spacing control's own
    list was also its default, and picking "Single" changed nothing. The value now comes from
    lib/notesSpacing.js through a custom property, so the editor, the Compact control and the
-   print sheet cannot drift. */
+   print sheet cannot drift.
+   ⛔ B1203504 — the FALLBACK (the ", 1.15" in var(--note-line, 1.15)) is deliberately still
+   Word's single, not the new Comfortable prose ratio: it only ever paints for the one instant
+   before the wrapper's own "--note-line" custom property is set, and a stale fallback here can
+   never be more than an unreachable number, never a second density to keep in step. */
 .planyr-note .ProseMirror { outline: none; min-height: 46vh; color: var(--text-primary); line-height: var(--note-line, 1.15); font-size: 15px; tab-size: 4; }
-.planyr-note .ProseMirror > * + * { margin-top: 0.7em; }
-.planyr-note .ProseMirror p { margin: 0; }
-.planyr-note .ProseMirror h1 { font-size: 1.9em; font-weight: 700; line-height: 1.25; margin: 0; }
-.planyr-note .ProseMirror h2 { font-size: 1.5em; font-weight: 700; line-height: 1.3; margin: 0; }
-.planyr-note .ProseMirror h3 { font-size: 1.22em; font-weight: 650; margin: 0; }
-.planyr-note .ProseMirror h4 { font-size: 1.06em; font-weight: 650; margin: 0; }
-.planyr-note .ProseMirror ul, .planyr-note .ProseMirror ol { padding-left: 1.5em; margin: 0; }
+/* ⛔ REAL VERTICAL RHYTHM (B1203504) — read this before touching a margin below.
+   Before this, every block here — paragraphs, lists, all four heading levels, blockquote,
+   table — carried an explicit "margin: 0", which is MORE specific than the catch-all sibling
+   rule directly below and so silently cancelled it for every one of them. Measured live: a
+   note was one undifferentiated slab with the only vertical space coming from line-height.
+   That is the root cause the owner could feel and not name ("the field just feels off").
+   Fixed by giving every block type that used to zero itself out a real, own, explicit margin
+   instead of relying on the cascade to sort two competing rules — no more specificity race.
+   The catch-all below is the FALLBACK for the block kinds that never had (and still don't
+   need) a margin reset of their own — "pre", and every custom node view (a callout, a toggle,
+   a picture, a file chip, a sketch, a positioned box) — so a construct added later inherits
+   real rhythm by default rather than needing its own opt-in. Craft/Bear-generous, not the old
+   0.7em: a paragraph gap you can see without hunting for it. */
+.planyr-note .ProseMirror > * + * { margin-top: 1em; }
+/* The very first block sits flush under the title/metadata row — nothing above it to space
+   away from. Specificity beats every type rule below it regardless of source order (two
+   classes + a pseudo-class outranks two classes + a type selector), so this always wins. */
+.planyr-note .ProseMirror > *:first-child { margin-top: 0 !important; }
+.planyr-note .ProseMirror p { margin: 1em 0 0 0; }
+/* ⛔ THE HEADING SCALE IS OPENED UP, AND EVERY LEVEL GIVES MORE SPACE ABOVE THAN BELOW
+   (B1203504). The old scale (1.9/1.5/1.22/1.06em) put only a 1.22× step between body and h3 —
+   nearly invisible at these sizes, which is why a heading read as "an accident, not a level."
+   The asymmetric margin is Notion's own device: a heading binds visually to the text it
+   introduces by sitting CLOSE to what follows and FAR from what came before, so it reads as
+   owning the paragraph beneath it rather than floating between two unrelated blocks. */
+.planyr-note .ProseMirror h1 { font-size: 2em; font-weight: 700; line-height: 1.2; margin: 1.5em 0 0.5em 0; }
+.planyr-note .ProseMirror h2 { font-size: 1.55em; font-weight: 700; line-height: 1.25; margin: 1.3em 0 0.45em 0; }
+.planyr-note .ProseMirror h3 { font-size: 1.2em; font-weight: 650; margin: 1.1em 0 0.4em 0; }
+.planyr-note .ProseMirror h4 { font-size: 1.05em; font-weight: 650; margin: 1em 0 0.35em 0; }
+.planyr-note .ProseMirror ul, .planyr-note .ProseMirror ol { padding-left: 1.5em; margin: 1em 0 0 0; }
 .planyr-note .ProseMirror li { margin: var(--note-list-gap, 2px) 0; }
 .planyr-note .ProseMirror li p { margin: 0; }
 /* ⛔ THE indent ATTRIBUTE'S ONE STYLESHEET TABLE (B842949) — a fixed step per level, looked up
@@ -98,7 +126,7 @@ const EDITOR_CSS = `
    lib/notesIndentLevel.js → indentAttrs / indentCssRules for why. PDF-PARITY: the print sheet
    (lib/notesPrint.js) carries the identical table for .note-body li. */
 ${indentCssRules(".planyr-note .ProseMirror li")}
-.planyr-note .ProseMirror blockquote { border-left: 3px solid var(--accent-notes); padding-left: 0.9em; color: var(--text-secondary); margin: 0; }
+.planyr-note .ProseMirror blockquote { border-left: 3px solid var(--accent-notes); padding-left: 0.9em; color: var(--text-secondary); margin: 1em 0 0 0; }
 .planyr-note .ProseMirror code { background: var(--surface-page); border: 1px solid var(--border-default); border-radius: 4px; padding: 0.1em 0.32em; font-family: ui-monospace, "Courier New", monospace; font-size: 0.9em; }
 .planyr-note .ProseMirror pre { background: var(--surface-page); border: 1px solid var(--border-default); border-radius: ${RADIUS.control}px; padding: 0.75em 0.9em; overflow-x: auto; }
 .planyr-note .ProseMirror pre code { background: none; border: none; padding: 0; }
@@ -109,7 +137,7 @@ ${indentCssRules(".planyr-note .ProseMirror li")}
 .planyr-note .ProseMirror ul[data-type="taskList"] li > label { margin-top: 0.15em; user-select: none; }
 .planyr-note .ProseMirror ul[data-type="taskList"] li > div { flex: 1 1 auto; min-width: 0; }
 .planyr-note .ProseMirror input[type="checkbox"] { accent-color: var(--accent-notes); width: 15px; height: 15px; cursor: pointer; }
-.planyr-note .ProseMirror table { border-collapse: collapse; table-layout: fixed; width: 100%; overflow: hidden; margin: 0; }
+.planyr-note .ProseMirror table { border-collapse: collapse; table-layout: fixed; width: 100%; overflow: hidden; margin: 1em 0 0 0; }
 .planyr-note .ProseMirror table td, .planyr-note .ProseMirror table th { border: 1px solid var(--border-strong); padding: 6px 9px; vertical-align: top; position: relative; min-width: 2em; }
 .planyr-note .ProseMirror table th { background: var(--surface-page); font-weight: 650; text-align: left; }
 .planyr-note .ProseMirror table .selectedCell:after { content: ""; position: absolute; inset: 0; background: var(--accent-notes); opacity: 0.16; pointer-events: none; }
@@ -2329,7 +2357,22 @@ export default function NoteEditor({
           setDocMenu({ x: e.clientX, y: e.clientY, boxId: box?.getAttribute("data-anchor-id") || null, inTable });
         }}
         ref={scrollerRef}
-        style={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column", position: "relative" }}
+        /* ⛔ B1203504 — `alignItems: "center"` is the WHOLE of how the sheet is centred: it is
+           still `width: "100%"` capped by `maxWidth` below, so on a narrow pane it still fills
+           the available width down to its own floor, and only once the pane is wider than the
+           cap does centring have anything to do. See note-sheet's own comment for why this no
+           longer reproduces B1369's "my stuff is aligned to the right" complaint.
+           ⛔ NEVER ON NARROW — CAUGHT BY THE CRITIQUE LOOP'S OWN PHONE SCREENSHOT. The Outline
+           panel (below) sits BESIDE the mat in the same row and does not collapse on a phone —
+           a pre-existing condition this item did not create and is not the one to fix — so on
+           a real phone the mat's own available width can end up narrower than the sheet's
+           `minWidth` floor. Centring an item wider than its container overflows EQUALLY on both
+           sides, and the scroller starts at its left edge, so the sheet's own left portion —
+           the actual words — was the half that clipped off-screen; before this rule existed
+           that was reproduced live: "No Density F[ield]" cut to "lo Density F". Left-aligning
+           on narrow is the pre-existing, working shape (B1369's own layout), so this only
+           changes behaviour on the wide panes centring was actually built for. */
+        style={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column", alignItems: narrow ? "flex-start" : "center", position: "relative" }}
       >
         <PasteOptions
           offer={pasteAt && pasteOffer ? { ...pasteOffer, ...pasteAt } : null}
@@ -2349,39 +2392,91 @@ export default function NoteEditor({
           onHover={() => {}}
         />
         {/* A DOCUMENT page (the owner's choice over a free-form canvas): a fixed-width sheet.
-            ⛔ IT IS LEFT-ALIGNED, NOT CENTRED (B1369). Centring it read as "my stuff is
-            aligned to the right" on a wide monitor: the toolbar spans the pane, the text
-            column floated to the middle, and the gap between the two left edges grew with
-            every extra inch of screen. A document's left edge does not move when you resize
-            the window. `paddingLeft` matches the toolbar's own inset (its padding plus the
-            first control's), so the two left edges line up and STAY lined up.
+            ⛔ CENTRED, SUPERSEDING B1369 (B1203504 — see the critique-loop write-up on this
+            item for the measured reasoning). B1369 centred a BARE, edgeless text column while
+            a full-width toolbar sat above it — the only fixed reference point on screen was
+            that toolbar, so a centred column with no visible boundary of its own read as
+            "drifting right" as the window widened, because there was nothing ON the column
+            itself to say "this is deliberately placed." The sheet is now a bounded CARD (a
+            real border, radius and shadow — see its surface rules below): it carries its own
+            visible edges, so centring it reads as "this is the page," exactly the way Craft,
+            Bear, Notion and Google Docs all place a capped, centred document under a full-width
+            chrome bar. The toolbar staying full-width above it is not a mismatch to fix; it is
+            the same layout every one of those apps uses.
             AUDIT-FIRST: the alternative explanation — a right/centre TextAlign stuck on the
             paragraphs — was checked against the real stored documents and refuted; not one
             paragraph carries anything but the default. This is layout, not data. */}
         {/* ⛔ THE ZOOM IS ON THE SHEET AND NOWHERE ELSE (NEW-3) — not on the pane, which would
             scale the paste chip and the slash menu with it, and not on the app. `zoom` rather
             than a transform so the text RE-WRAPS at the new size and the caret stays the
-            browser's own. */}
-        <div
-          data-testid="note-sheet"
-          data-zoom={zoom}
-          /* ⛔ THE READING COLUMN HAS A FLOOR, AND THE PANELS BESIDE IT YIELD FIRST (B421492).
+            browser's own.
+            ⛔ THE READING COLUMN HAS A FLOOR, AND THE PANELS BESIDE IT YIELD FIRST (B421492).
              Outline and History were each `flex: none` at a fixed width, so on a narrow window
              the SHEET absorbed the whole shortfall: opening History took the page from 424px to
              **156px** — the same sliver B391075 measured for a sketch inside a box — and the
              header's own status line then painted 96px outside it. A page narrower than a
              sentence is not a page. So the sheet may shrink but never below a readable column,
              and the two panels shrink before it does; if even that is not enough the ROW
-             scrolls, which is honest, rather than the document quietly disappearing. */
+             scrolls, which is honest, rather than the document quietly disappearing.
+             ⛔ THE MEASURE CAP IS A MAX, NOT A WIDTH (B1203504) — `width: "100%"` still lets it
+             shrink all the way to `minWidth` on a narrow pane or a phone; `maxWidth` is the only
+             thing that changes, and it is what stops a line growing past a comfortable reading
+             length no matter how wide the window gets (his own report: 87 characters on a
+             1191px window, heading toward 200 on a 2382px one, with no ceiling at all before
+             this). 580px MEASURED (not guessed) at this font-size and padding — a headless
+             pass counting actual wrapped-line characters, not text-node length, which is its
+             own trap: a paragraph's whole sentence is one text node regardless of how many
+             visual lines it wraps across — holds a line safely under 75 characters (measured
+             71–72), inside the 45–75 range and close to the 66 ideal, with the same discipline
+             iA Writer is named for: the cap holds at ANY window width, it never grows past it. */}
+        <div
+          data-testid="note-sheet"
+          data-zoom={zoom}
           style={{
-            maxWidth: 820, width: "100%", flex: "1 1 auto", minWidth: 260, margin: 0, zoom,
+            maxWidth: 580, width: "100%", flex: "1 1 auto", minWidth: 260, zoom,
+            /* ⛔ A REAL WRITING SURFACE, NOT A FIELD (B1203504) — his exact words, and defect #4
+               of the review: the body painted transparent, sitting directly on the same grey
+               the app chrome uses, so there was nothing on screen that said "this is a page."
+               `--surface-raised` is the app's own established "white card over the grey desk"
+               token pair (the same one the Model workspace's sheet uses, `SheetView.jsx`) — not
+               a new color, the existing raised-card surface everywhere else in the app already
+               uses, applied here for the first time. The border is a hairline; the shadow is
+               deliberately soft (a whisper, not a modal) — Google Docs' and Craft's own weight,
+               not a heavy drop shadow. */
+            background: "var(--surface-raised)",
+            border: "1px solid var(--border-default)",
+            borderRadius: SHEET_RADIUS,
+            boxShadow: "0 2px 6px rgba(0,0,0,0.10)", // design-exempt: no shadow-color token yet repo-wide (matches the Model workspace sheet card's own shadow, SheetView.jsx/TabStrip.jsx)
             /* The bottom pad already clears the browser's own chrome (96px); on a phone it
                must also clear the home indicator when this runs standalone (NEW-1, B849632) —
-               `env()` reads 0 in an ordinary browser tab, so this changes nothing there. */
-            padding: narrow ? "16px 14px max(96px, calc(96px + env(safe-area-inset-bottom))) 14px" : "22px 20px 96px 13px",
+               `env()` reads 0 in an ordinary browser tab, so this changes nothing there.
+               ⛔ PADDING IS NOW SYMMETRIC (B1203504) — the old 13px/20px left/right split
+               existed only to line the sheet's left edge up with the toolbar's own inset, which
+               centring (above) makes moot; a real page's margins read as a deliberate frame, not
+               a leftover alignment hack. Widened on desktop to match the generosity the rest of
+               this item gives the page — Craft/Bear both give a paragraph real room to breathe
+               on every side, not just between lines. */
+            padding: narrow ? "18px 16px max(96px, calc(96px + env(safe-area-inset-bottom))) 16px" : "30px 40px 96px 40px",
+            margin: narrow ? "10px 8px 0" : "24px 0 0",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+          {/* ⛔ THE TITLE IS ITS OWN ROW, AND IT IS UNMISTAKABLY THE LARGEST TEXT ON THE PAGE
+              (B1203504, defect #5). Before this, the title (27px) rendered SMALLER than an
+              inline Heading 1 (28.5px) — the page's own name was outranked by a heading
+              written inside it, backwards from every reference app. ⛔ FIRST DRAFT OF THIS
+              FIX STILL FAILED THE CRITIQUE LOOP'S OWN QUESTION 5 — a screenshot at 36px title
+              next to a 33px h1 (the scale's own first draft, 2.2em) read as "about the same
+              size" at a glance, not "unmistakably." Two numbers moved together to fix it: h1
+              came down to 2em (30px — still a full 2× jump over 15px body, and Bear's own H1
+              is not much more than that either), and the title went up to 42px desktop / 34px
+              phone — roughly 1.4× the biggest heading a document can contain, which is the
+              ratio that actually reads as "this is the page, that is a heading in it" rather
+              than two headings arguing. The metadata that used to share this row (which project,
+              the zoom level, when it was last edited) now sits BELOW as its own quiet
+              secondary line (defect #6) — every reference app named in this item's brief puts
+              that information directly under the title, never floating far right on the same
+              line with a large gap to the name. */}
+          <div style={{ marginBottom: 16 }}>
             <input
               data-testid="note-title"
               value={title}
@@ -2402,16 +2497,16 @@ export default function NoteEditor({
                 editor.commands.focus("start");
               }}
               style={{
-                flex: 1, minWidth: 0, border: "none", borderBottom: "1px solid transparent",
+                display: "block", width: "100%", border: "none", borderBottom: "1px solid transparent",
                 background: "transparent", color: "var(--text-primary)",
                 /* ⛔ THE TITLE MUST NOT CLIP (NEW-1, B849632). Reported off the owner's own
                    phone screenshot; measured, the cause wasn't the title's own size — it was
                    this whole pane being squeezed to ~40% of a 390px screen by the desktop
                    two-pane layout, which the drill-in above already fixes (the pane is now the
-                   full width). This is the one further step: 27px is comfortably wide on a
-                   desktop pane but a smaller size gives a real name more room to actually show
-                   on a 390px-class phone before the input's own internal scroll takes over. */
-                font: "inherit", fontSize: narrow ? 21 : 27, fontWeight: 700, letterSpacing: "-0.01em",
+                   full width). This is the one further step: a smaller size on a phone gives a
+                   real name more room to actually show on a 390px-class phone before the
+                   input's own internal scroll takes over. */
+                font: "inherit", fontSize: narrow ? 34 : 42, fontWeight: 700, letterSpacing: "-0.01em",
                 padding: "2px 0", outline: "none",
               }}
               onFocus={(e) => { e.target.style.borderBottomColor = "var(--accent-notes)"; }}
@@ -2422,54 +2517,58 @@ export default function NoteEditor({
                  two onBlur props on one element and the second silently wins. */
               onBlur={(e) => { e.target.style.borderBottomColor = "transparent"; onTitleCommit?.(); }}
             />
-            {/* ⛔ WHICH PROJECT THIS NOTE BELONGS TO, WHILE YOU ARE READING IT (NEW-2).
-                The owner could not see a note's filing anywhere near the note itself: the
-                rail drops the per-row badge inside a project (everything there belongs where
-                you are standing) and the Dashboard's grouping is a level up from the page. So
-                a note copied into an unrelated pursuit looked exactly like a note in the
-                right place. This is the one surface that is always on screen with the note.
-                It is a LABEL, never a control — re-filing stays on the row's menu, one place,
-                so there is no second way to change the fact. An id that no longer resolves
-                wears the warning colour rather than being captioned as "no project": a failed
-                lookup and a page that genuinely belongs nowhere are different states. */}
-            {projectLabel ? (
-              <span
-                data-testid="note-project-badge"
-                data-project-id={projectLabel.projectId ?? ""}
-                data-resolved={projectLabel.resolved ? "1" : "0"}
-                title={`This note is filed in ${projectLabel.name}`}
-                style={{
-                  flex: "0 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis",
-                  whiteSpace: "nowrap", fontSize: 11, fontWeight: 700, letterSpacing: "0.04em",
-                  color: projectLabel.resolved ? "var(--text-secondary)" : "var(--warn-text)",
-                  border: `1px solid ${projectLabel.resolved ? "var(--border-default)" : "var(--warn-text)"}`,
-                  borderRadius: RADIUS.pill, padding: "3px 9px",
-                }}
-              >{projectLabel.name}</span>
-            ) : null}
-            {/* The level, shown only when it is NOT 100% (PANEL-BREVITY: a chip that always
-                reads "100%" is furniture). Clicking it goes back to 100%, which is the one
-                thing anybody wants from a zoom indicator. */}
-            {zoom !== ZOOM_DEFAULT ? (
-              <button
-                type="button"
-                data-testid="note-zoom-level"
-                title="Back to 100% (Ctrl+0)"
-                onClick={() => applyZoom(ZOOM_DEFAULT)}
-                style={{
-                  flex: "0 0 auto", fontSize: 11, fontWeight: 700, letterSpacing: "0.04em",
-                  color: "var(--text-secondary)", border: "1px solid var(--border-default)",
-                  borderRadius: RADIUS.pill, padding: "3px 9px", background: "transparent",
-                  font: "inherit", cursor: "pointer",
-                }}
-              >{zoomLabel(zoom)}</button>
-            ) : null}
-            {edited ? (
-              <span
-                data-testid="note-edited"
-                title={absoluteStamp(updatedAt)}
-                style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 600, color: "var(--text-tertiary)" }}
-              >{edited}</span>
+            {(projectLabel || zoom !== ZOOM_DEFAULT || edited) ? (
+              <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
+                {/* ⛔ WHICH PROJECT THIS NOTE BELONGS TO, WHILE YOU ARE READING IT (NEW-2).
+                    The owner could not see a note's filing anywhere near the note itself: the
+                    rail drops the per-row badge inside a project (everything there belongs where
+                    you are standing) and the Dashboard's grouping is a level up from the page. So
+                    a note copied into an unrelated pursuit looked exactly like a note in the
+                    right place. This is the one surface that is always on screen with the note.
+                    It is a LABEL, never a control — re-filing stays on the row's menu, one place,
+                    so there is no second way to change the fact. An id that no longer resolves
+                    wears the warning colour rather than being captioned as "no project": a failed
+                    lookup and a page that genuinely belongs nowhere are different states. */}
+                {projectLabel ? (
+                  <span
+                    data-testid="note-project-badge"
+                    data-project-id={projectLabel.projectId ?? ""}
+                    data-resolved={projectLabel.resolved ? "1" : "0"}
+                    title={`This note is filed in ${projectLabel.name}`}
+                    style={{
+                      flex: "0 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis",
+                      whiteSpace: "nowrap", fontSize: 11, fontWeight: 700, letterSpacing: "0.04em",
+                      color: projectLabel.resolved ? "var(--text-secondary)" : "var(--warn-text)",
+                      border: `1px solid ${projectLabel.resolved ? "var(--border-default)" : "var(--warn-text)"}`,
+                      borderRadius: RADIUS.pill, padding: "3px 9px",
+                    }}
+                  >{projectLabel.name}</span>
+                ) : null}
+                {/* The level, shown only when it is NOT 100% (PANEL-BREVITY: a chip that always
+                    reads "100%" is furniture). Clicking it goes back to 100%, which is the one
+                    thing anybody wants from a zoom indicator. */}
+                {zoom !== ZOOM_DEFAULT ? (
+                  <button
+                    type="button"
+                    data-testid="note-zoom-level"
+                    title="Back to 100% (Ctrl+0)"
+                    onClick={() => applyZoom(ZOOM_DEFAULT)}
+                    style={{
+                      flex: "0 0 auto", fontSize: 11, fontWeight: 700, letterSpacing: "0.04em",
+                      color: "var(--text-secondary)", border: "1px solid var(--border-default)",
+                      borderRadius: RADIUS.pill, padding: "3px 9px", background: "transparent",
+                      font: "inherit", cursor: "pointer",
+                    }}
+                  >{zoomLabel(zoom)}</button>
+                ) : null}
+                {edited ? (
+                  <span
+                    data-testid="note-edited"
+                    title={absoluteStamp(updatedAt)}
+                    style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 600, color: "var(--text-tertiary)" }}
+                  >{edited}</span>
+                ) : null}
+              </div>
             ) : null}
             {/* ⛔ THE SAVE INDICATOR IS NOT HERE ANY MORE (NEW-SAVE-BADGE). It used to be a pill
                 in this row, which meant a note showed "SAVED" here AND the app-wide badge said
