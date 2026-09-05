@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-05 @ `e506fa61` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-05 @ `fe38d2f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_693 source files mapped._
+_694 source files mapped._
 
 ## infra
 
@@ -1165,6 +1165,8 @@ _693 source files mapped._
   - _exports_: `loadProfile`, `saveProfile`
 - **`src/workspaces/site-planner/lib/projectName.js`** — THE authority for what a project (site group) is called: resolves the one authoritative name across a group's plans (rename-stamp first, legacy majority second, ambiguous never guessed), reconciles a split group, and supplies the write-path correction that stops a stale plan re-publishing an old name.
   - _exports_: `byGroup`, `groupKeyOf`, `maxStampOf`, `nameAuthority`, `reconcileGroupNames`, `resolveNameFor`
+- **`src/workspaces/site-planner/lib/propertiesSheet.js`** — Pure geometry/decisions for the phone Properties bottom sheet (B1215682): phone-sheet-mode test (narrow AND coarse pointer), the half/tall snap heights, drag-release snap resolution, keyboard-inset reading, the keyboard-safe height clamp, and the selection-cover-shift math
+  - _exports_: `clampSheetHeightForKeyboard`, `heightForSnap`, `isPhoneSheetMode`, `keyboardInsetPx`, `resolveDragSnap`, `selectionCoverDeltaPx`, `SHEET_SNAPS`
 - **`src/workspaces/site-planner/lib/proposedSurface.js`** — B826 proposed-surface engine (pure): per-element grading planes from the B825 class records, composite cut/fill lattice, balance assist, violation classing (ADA legal vs screening)
   - _exports_: `balanceAssist`, `buildPlanes`, `buildProposedSurface`, `classifyGradeElement`, `daylightRings`, `distToRingEdges`, `DOCK_BREAK_FT`, `nearestOnRing`, `netImportCy`, `PL_FILL_EPS_FT`, `sampleProposedAt`, `slopeBand`, `surfaceGrid`, `surfaceViolations`, `TIE_DROP_FT`
 - **`src/workspaces/site-planner/lib/provenance.js`** — B895 pure six-word SourceTag vocabulary (CODE/PLAN/SURVEY/ESTIMATE/YOURS/UNVERIFIED) + color-token map + classifiers from existing engine signals

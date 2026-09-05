@@ -121,6 +121,7 @@
   --control-h-sm: 22px;
   --control-h-md: 26px;
   --control-h-lg: 30px;
+  --control-h-touch: 44px; /* B1215682 — the touch-target floor; see designTokens.js's CONTROL_H header */
 
   --border-default: #E1E5EB;
   --border-strong:  #CDD3DC;
