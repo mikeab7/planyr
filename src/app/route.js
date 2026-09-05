@@ -32,8 +32,17 @@
 import { useCallback, useEffect, useState } from "react";
 
 export const DEFAULT_MODULE = "site-planner";
-export const MODULE_BY_SLUG = { site: "site-planner", schedule: "scheduler", markup: "doc-review", library: "library", notes: "notes", model: "model", food: "food" };
-export const SLUG_BY_MODULE = { "site-planner": "site", scheduler: "schedule", "doc-review": "markup", library: "library", notes: "notes", model: "model", food: "food" };
+// B1166768 — the "model" tab was renamed "Spreadsheet" in user-facing copy (Michael doesn't want
+// Planyr's naming to echo his employer's internal vocabulary, and "pro forma" was rejected for
+// the same reason — it's developer/finance shorthand, and this container is meant for a GC's bid
+// tab or an engineer's drainage calcs just as much). The workspace's internal id, files and
+// storage keys all stay "model" (renaming those is pure churn — see src/workspaces/model/); only
+// the SLUG a new link is built with changes, to "spreadsheet". "model" stays in MODULE_BY_SLUG as
+// a permanent PARSE-ONLY alias so an existing bookmark/deep link naming "#/model" (or
+// "#/project/<id>/model") keeps resolving — SLUG_BY_MODULE is the one-way "what a NEW link looks
+// like" map, so it never grows the reverse alias.
+export const MODULE_BY_SLUG = { site: "site-planner", schedule: "scheduler", markup: "doc-review", library: "library", notes: "notes", model: "model", spreadsheet: "model", food: "food" };
+export const SLUG_BY_MODULE = { "site-planner": "site", scheduler: "schedule", "doc-review": "markup", library: "library", notes: "notes", model: "spreadsheet", food: "food" };
 
 const slugFor = (module) => SLUG_BY_MODULE[module] || SLUG_BY_MODULE[DEFAULT_MODULE];
 
