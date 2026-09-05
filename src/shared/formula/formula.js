@@ -642,6 +642,16 @@ const FUNCTIONS = {
   //    scalars and [@Column] this-row refs contribute a single value — Excel semantics) ──
   SUM:     { rng: (an, ctx, ev) => { need(an, 1, null, "SUM"); return collectNums(an, ctx, ev).reduce((s, v) => s + v, 0); } },
   PRODUCT: { rng: (an, ctx, ev) => { need(an, 1, null, "PRODUCT"); const n = collectNums(an, ctx, ev); return n.length ? n.reduce((s, v) => s * v, 1) : 0; } },
+  // SUMPRODUCT(range1, range2, …) — element-wise multiply across N equal-length ranges, then
+  // sum. `toNumber` coerces each contributing cell (accepting boolean TRUE/FALSE as 1/0, exactly
+  // like every other arithmetic path in this engine); genuinely non-numeric text is a #VALUE!,
+  // matching Excel. A non-range (scalar) argument contributes itself as a length-1 array, so
+  // SUMPRODUCT(range, 2) scales every product by 2 — consistent with how a scalar broadcasts
+  // everywhere else in this engine. Excel's SUMPRODUCT((range="X")*range2) boolean-mask idiom
+  // is a DELIBERATE boundary, not silently unsupported — this engine has no implicit array
+  // evaluation over an arbitrary comparison expression across a range (only the specific
+  // functions in this file know how to expand a range argument at all).
+  SUMPRODUCT: { rng: (an, ctx, ev) => { need(an, 1, null, "SUMPRODUCT"); const arrays = an.map(n => isRangeArg(n) ? colArray(n, ctx) : [ev(n, ctx)]); const len = arrays[0].length; if (arrays.some(a => a.length !== len)) throw ferr(FORMULA_ERRORS.VALUE, "SUMPRODUCT: arrays must be the same size"); let s = 0; for (let i = 0; i < len; i++) { let p = 1; for (const a of arrays) p *= toNumber(a[i]); s += p; } return s; } },
   MIN:     { rng: (an, ctx, ev) => { need(an, 1, null, "MIN"); const k = collectNumsKind(an, ctx, ev); if (!k.nums.length) return 0; const m = Math.min(...k.nums); return k.allDates ? makeDate(m) : m; } },
   MAX:     { rng: (an, ctx, ev) => { need(an, 1, null, "MAX"); const k = collectNumsKind(an, ctx, ev); if (!k.nums.length) return 0; const m = Math.max(...k.nums); return k.allDates ? makeDate(m) : m; } },
   AVERAGE: { rng: (an, ctx, ev) => { need(an, 1, null, "AVERAGE"); const n = collectNums(an, ctx, ev); if (!n.length) throw ferr(FORMULA_ERRORS.DIV0, "AVERAGE of no numbers"); return n.reduce((s, v) => s + v, 0) / n.length; } },
@@ -650,11 +660,33 @@ const FUNCTIONS = {
   COUNTIF:   { rng: (an, ctx, ev) => { need(an, 2, 2, "COUNTIF"); const range = colArray(an[0], ctx), crit = ev(an[1], ctx); let c = 0; range.forEach(v => { raiseIfErr(v); if (matchesCriteria(v, crit)) c++; }); return c; } },
   SUMIF:     { rng: (an, ctx, ev) => { need(an, 2, 3, "SUMIF"); const range = colArray(an[0], ctx), crit = ev(an[1], ctx); const sumRange = an.length > 2 ? colArray(an[2], ctx) : range; let s = 0; range.forEach((v, i) => { raiseIfErr(v); if (matchesCriteria(v, crit)) { const x = sumRange[i]; raiseIfErr(x); if (typeof x === "number") s += x; else if (isDate(x)) s += x.s; } }); return s; } },
   AVERAGEIF: { rng: (an, ctx, ev) => { need(an, 2, 3, "AVERAGEIF"); const range = colArray(an[0], ctx), crit = ev(an[1], ctx); const avgRange = an.length > 2 ? colArray(an[2], ctx) : range; let s = 0, c = 0; range.forEach((v, i) => { raiseIfErr(v); if (matchesCriteria(v, crit)) { const x = avgRange[i]; raiseIfErr(x); if (typeof x === "number") { s += x; c++; } else if (isDate(x)) { s += x.s; c++; } } }); if (!c) throw ferr(FORMULA_ERRORS.DIV0, "AVERAGEIF: no matching numbers"); return s / c; } },
+  // The multi-criteria *IFS family — a row contributes only when EVERY (range, criteria) pair
+  // matches (AND, never OR — Excel's own contract). Each shares `matchesCriteria` with its
+  // single-criterion sibling above, so wildcard/comparison-operator criteria text behaves
+  // identically either way. A criteria range whose length disagrees with the first range is a
+  // #VALUE! (Excel: "all ranges must be the same size"), checked once per range rather than
+  // trusting the caller — a ragged table is exactly the case this guards.
+  SUMIFS: { rng: (an, ctx, ev) => { need(an, 3, null, "SUMIFS"); if ((an.length - 1) % 2 !== 0) throw ferr(FORMULA_ERRORS.VALUE, "SUMIFS expects range/criteria pairs after sum_range"); const sumRange = colArray(an[0], ctx); const pairs = []; for (let i = 1; i < an.length; i += 2) { const range = colArray(an[i], ctx); if (range.length !== sumRange.length) throw ferr(FORMULA_ERRORS.VALUE, "SUMIFS: ranges must be the same size"); pairs.push({ range, crit: ev(an[i + 1], ctx) }); } let s = 0; for (let idx = 0; idx < sumRange.length; idx++) { if (pairs.every(p => { const v = p.range[idx]; raiseIfErr(v); return matchesCriteria(v, p.crit); })) { const x = sumRange[idx]; raiseIfErr(x); if (typeof x === "number") s += x; else if (isDate(x)) s += x.s; } } return s; } },
+  COUNTIFS: { rng: (an, ctx, ev) => { need(an, 2, null, "COUNTIFS"); if (an.length % 2 !== 0) throw ferr(FORMULA_ERRORS.VALUE, "COUNTIFS expects range/criteria pairs"); const pairs = []; let len = null; for (let i = 0; i < an.length; i += 2) { const range = colArray(an[i], ctx); if (len === null) len = range.length; else if (range.length !== len) throw ferr(FORMULA_ERRORS.VALUE, "COUNTIFS: ranges must be the same size"); pairs.push({ range, crit: ev(an[i + 1], ctx) }); } let c = 0; for (let idx = 0; idx < len; idx++) { if (pairs.every(p => { const v = p.range[idx]; raiseIfErr(v); return matchesCriteria(v, p.crit); })) c++; } return c; } },
+  AVERAGEIFS: { rng: (an, ctx, ev) => { need(an, 3, null, "AVERAGEIFS"); if ((an.length - 1) % 2 !== 0) throw ferr(FORMULA_ERRORS.VALUE, "AVERAGEIFS expects range/criteria pairs after average_range"); const avgRange = colArray(an[0], ctx); const pairs = []; for (let i = 1; i < an.length; i += 2) { const range = colArray(an[i], ctx); if (range.length !== avgRange.length) throw ferr(FORMULA_ERRORS.VALUE, "AVERAGEIFS: ranges must be the same size"); pairs.push({ range, crit: ev(an[i + 1], ctx) }); } let s = 0, c = 0; for (let idx = 0; idx < avgRange.length; idx++) { if (pairs.every(p => { const v = p.range[idx]; raiseIfErr(v); return matchesCriteria(v, p.crit); })) { const x = avgRange[idx]; raiseIfErr(x); if (typeof x === "number") { s += x; c++; } else if (isDate(x)) { s += x.s; c++; } } } if (!c) throw ferr(FORMULA_ERRORS.DIV0, "AVERAGEIFS: no matching numbers"); return s / c; } },
 
   // ── Lookup (column-based; the modern XLOOKUP / INDEX+MATCH set) ──
   MATCH:   { rng: (an, ctx, ev) => { need(an, 2, 3, "MATCH"); const target = ev(an[0], ctx); const arr = colArray(an[1], ctx); const type = an.length > 2 ? Math.trunc(toNumber(ev(an[2], ctx))) : 1; return matchIndex(target, arr, type); } },
   INDEX:   { rng: (an, ctx, ev) => { need(an, 2, 2, "INDEX"); const arr = colArray(an[0], ctx); const n = Math.trunc(toNumber(ev(an[1], ctx))); if (n < 1 || n > arr.length) throw ferr(FORMULA_ERRORS.REF, "INDEX out of range"); return arr[n - 1]; } },
   XLOOKUP: { rng: (an, ctx, ev) => { need(an, 3, 5, "XLOOKUP"); const target = ev(an[0], ctx); const look = colArray(an[1], ctx); const ret = colArray(an[2], ctx); for (let i = 0; i < look.length; i++) { if (compareValues(target, look[i]) === 0) return ret[i] === undefined ? BLANK : ret[i]; } if (an.length > 3) return ev(an[3], ctx); throw ferr(FORMULA_ERRORS.NA, "XLOOKUP: no match"); } },
+  // VLOOKUP/HLOOKUP — the classic multi-column-TABLE lookups. `table` is a 2D A1 range, named
+  // range, or [Column] (a bare column degenerates to a single-column table — col/row_index_num
+  // must then be 1). Unlike XLOOKUP/MATCH/INDEX above (which each read one FLAT array via
+  // colArray), the table's row/column STRUCTURE must survive so the search column/row and the
+  // returned column/row stay correctly paired — that's what rangeGrid (below, near colArray) is
+  // for. Exact match reuses matchIndex's type-0 path (so VLOOKUP/HLOOKUP get the SAME */?
+  // wildcard support MATCH already has — Excel's own documented behavior); approximate match
+  // (the default, matching Excel) reuses matchIndex's type-1 "largest value ≤ target" path,
+  // requiring the table's first column/row sorted ascending, exactly like Excel's own contract.
+  // col/row_index_num < 1 → #VALUE!; beyond the table's own column/row count → #REF! — Excel's
+  // own two-way error split, checked in that order.
+  VLOOKUP: { rng: (an, ctx, ev) => { need(an, 3, 4, "VLOOKUP"); const target = ev(an[0], ctx); const table = rangeGrid(an[1], ctx); const colIdx = Math.trunc(toNumber(ev(an[2], ctx))); if (colIdx < 1) throw ferr(FORMULA_ERRORS.VALUE, "VLOOKUP: col_index_num < 1"); if (colIdx > table[0].length) throw ferr(FORMULA_ERRORS.REF, "VLOOKUP: col_index_num out of range"); const approx = an.length > 3 ? toBool(ev(an[3], ctx)) : true; const firstCol = table.map(row => row[0]); const rowIdx = matchIndex(target, firstCol, approx ? 1 : 0) - 1; return table[rowIdx][colIdx - 1]; } },
+  HLOOKUP: { rng: (an, ctx, ev) => { need(an, 3, 4, "HLOOKUP"); const target = ev(an[0], ctx); const table = rangeGrid(an[1], ctx); const rowIdxArg = Math.trunc(toNumber(ev(an[2], ctx))); if (rowIdxArg < 1) throw ferr(FORMULA_ERRORS.VALUE, "HLOOKUP: row_index_num < 1"); if (rowIdxArg > table.length) throw ferr(FORMULA_ERRORS.REF, "HLOOKUP: row_index_num out of range"); const approx = an.length > 3 ? toBool(ev(an[3], ctx)) : true; const colIdx = matchIndex(target, table[0], approx ? 1 : 0) - 1; return table[rowIdxArg - 1][colIdx]; } },
 
   // ── Math ──
   ABS:   { fn: a => { need(a, 1, 1, "ABS"); return Math.abs(num1(a[0])); } },
@@ -1031,6 +1063,39 @@ function colArray(node, ctx) {
   if (!byCol) { byCol = new Map(); colArrayCache.set(rows, byCol); }
   byCol.set(key, arr);
   return arr;
+}
+// rangeGrid: the 2D (array-of-rows) shape of a range/named-range/[Column] argument, for
+// VLOOKUP/HLOOKUP's table_array. Unlike colArray/rangeArray above (which flatten a range to
+// ONE array for SUM/COUNTIF/&c.), VLOOKUP/HLOOKUP need the table's own row/column STRUCTURE
+// preserved — they search one column/row and return from a DIFFERENT column/row of the SAME
+// table row, so flattening first would lose exactly the shape the lookup needs. A bare
+// [Column] table_array degenerates to a single-column table (col_index_num must then be 1 —
+// enforced by VLOOKUP/HLOOKUP's own bounds check, not here). Resolves ctx.grid/ctx.grids and
+// stored error propagation exactly like rangeArray, since a table cell is read the same way a
+// scalar A1 cell is.
+function rangeGrid(node, ctx) {
+  if (node.type === "col") return colArray(node, ctx).map(v => [v]);
+  let r1, r2, c1, c2, grid;
+  if (node.type === "name") {
+    const rect = resolveNamedRange(ctx, node.name);
+    r1 = rect.r1; r2 = rect.r2; c1 = rect.c1; c2 = rect.c2; grid = ctx.grid;
+  } else if (node.type === "range") {
+    grid = node.sheet ? resolveSheetGrid(ctx, node.sheet) : ctx.grid;
+    r1 = Math.min(node.from.row, node.to.row); r2 = Math.max(node.from.row, node.to.row);
+    c1 = Math.min(node.from.col, node.to.col); c2 = Math.max(node.from.col, node.to.col);
+  } else {
+    throw ferr(FORMULA_ERRORS.VALUE, "expected a range, named range, or [Column] reference");
+  }
+  const rows = [];
+  for (let r = r1; r <= r2; r++) {
+    const row = [];
+    for (let c = c1; c <= c2; c++) {
+      const v = grid && grid[r - 1] ? grid[r - 1][c - 1] : undefined;
+      row.push(v === undefined ? BLANK : raiseIfErr(v));
+    }
+    rows.push(row);
+  }
+  return rows;
 }
 // A range-position argument: either a bare (non-"@") [Column] — the whole column —
 // an A1 "range" node (A1:B10), or a named-range "name" node (Model workspace, NEW-1).
@@ -1522,7 +1587,7 @@ const evalBinary = (node, ctx) => {
 // an argument alone (the trap: treating every bare [Col] as hoistable breaks XLOOKUP,
 // whose first argument is a scalar this-row lookup value, not a range — hoisting it
 // would freeze row 0's answer onto every row). RANGE_ARG_POSITIONS is the declared table
-// of which argument slots each of the 13 range-aware functions actually reads as a
+// of which argument slots each of the listed range-aware functions actually reads as a
 // RANGE (i.e. feeds to colArray) rather than a per-row scalar (fed to evalNode) — lifted
 // directly from each function's own `rng` implementation above, not guessed from name:
 //   SUM/PRODUCT/MIN/MAX/AVERAGE/AVERAGEA/COUNT/COUNTA — collectNums &c. treat EVERY
@@ -1530,14 +1595,23 @@ const evalBinary = (node, ctx) => {
 //     ranges (colArray), everything else (a literal, an expression, an [@Column]) is a
 //     per-row scalar — hence "ALL" (checked per-argument, not blanket-assumed).
 //   COUNTIF([0]) · SUMIF([0,2]) · AVERAGEIF([0,2]) · MATCH([1]) · INDEX([0]) ·
-//     XLOOKUP([1,2]) — colArray() itself enforces these are literal [Column] nodes; the
-//     remaining positions (COUNTIF/SUMIF/AVERAGEIF's criteria, MATCH's target/type,
-//     INDEX's index, XLOOKUP's target/fallback) are always scalar, this-row reads.
+//     XLOOKUP([1,2]) · VLOOKUP([1]) · HLOOKUP([1]) — colArray()/rangeGrid() themselves
+//     enforce these are literal [Column]/range/name nodes; the remaining positions
+//     (COUNTIF/SUMIF/AVERAGEIF's criteria, MATCH's target/type, INDEX's index,
+//     XLOOKUP/VLOOKUP/HLOOKUP's target/index/fallback) are always scalar, this-row reads.
+// ⛔ SUMIFS/COUNTIFS/AVERAGEIFS/SUMPRODUCT are deliberately NOT in this table — their range
+// arguments are a variadic sequence of pairs/positions (SUMIFS' Nth criteria_range sits at a
+// different index depending on how many pairs precede it), which this fixed-shape
+// per-function position list can't express without a second lookup mechanism. They simply
+// never qualify as row-invariant here (isCallInvariant falls through to isRowInvariant, which
+// is `false` for every "range"/"col" node reached this way) — always CORRECT, just never
+// memoized across rows. Adding real support for them is a pure performance follow-up, not a
+// correctness gap.
 const RANGE_ARG_POSITIONS = {
   SUM: "ALL", PRODUCT: "ALL", MIN: "ALL", MAX: "ALL", AVERAGE: "ALL", AVERAGEA: "ALL",
   COUNT: "ALL", COUNTA: "ALL",
   COUNTIF: [0], SUMIF: [0, 2], AVERAGEIF: [0, 2],
-  MATCH: [1], INDEX: [0], XLOOKUP: [1, 2],
+  MATCH: [1], INDEX: [0], XLOOKUP: [1, 2], VLOOKUP: [1], HLOOKUP: [1],
 };
 // TODAY/NOW read ctx.today and WORKDAY/NETWORKDAYS read ctx.calendar — both are fixed
 // for one evaluateFormula() CALL but are not part of the {node, ctx.rows} cache key
@@ -2100,15 +2174,21 @@ const planFormulaColumns = (columns, nameToKey) => {
 const FUNCTION_HELP = {
   SUM: "SUM([Column] or n1, n2, …) — add a whole column or numbers",
   PRODUCT: "PRODUCT(n1, n2, …) — multiply numbers",
+  SUMPRODUCT: "SUMPRODUCT(range1, range2, …) — sum of element-wise products across equal-length ranges",
   MIN: "MIN([Column] or n1, …) — smallest", MAX: "MAX([Column] or n1, …) — largest",
   AVERAGE: "AVERAGE([Column] or n1, …) — mean", COUNT: "COUNT([Column]) — count of numbers",
   COUNTA: "COUNTA([Column]) — count of non-empty cells",
   COUNTIF: 'COUNTIF([Column], ">5" | "Done" | …) — count matching',
   SUMIF: 'SUMIF([Column], criteria, [SumColumn]) — sum matching',
   AVERAGEIF: 'AVERAGEIF([Column], criteria, [AvgColumn]) — mean of matching',
+  SUMIFS: 'SUMIFS(SumColumn, Range1, criteria1, [Range2, criteria2], …) — sum where ALL criteria match',
+  COUNTIFS: 'COUNTIFS(Range1, criteria1, [Range2, criteria2], …) — count where ALL criteria match',
+  AVERAGEIFS: 'AVERAGEIFS(AvgColumn, Range1, criteria1, [Range2, criteria2], …) — mean where ALL criteria match',
   MATCH: "MATCH(value, [Column], [type]) — 1-based position",
   INDEX: "INDEX([Column], n) — the n-th value",
   XLOOKUP: "XLOOKUP(value, [LookupColumn], [ReturnColumn], [ifNotFound]) — find across rows",
+  VLOOKUP: "VLOOKUP(value, table, col_index_num, [range_lookup]) — find down the table's first column",
+  HLOOKUP: "HLOOKUP(value, table, row_index_num, [range_lookup]) — find across the table's first row",
   ABS: "ABS(n) — absolute value", ROUND: "ROUND(n, digits) — round half away from 0",
   ROUNDUP: "ROUNDUP(n, digits) — round away from 0", ROUNDDOWN: "ROUNDDOWN(n, digits) — round toward 0",
   INT: "INT(n) — round down to integer", MOD: "MOD(n, divisor) — remainder",
@@ -2137,6 +2217,10 @@ const FUNCTION_HELP = {
   ISERROR: "ISERROR(value)", ISERR: "ISERR(value) — error except #N/A", ISNA: "ISNA(value)",
   ISNUMBER: "ISNUMBER(value)", ISTEXT: "ISTEXT(value)", ISLOGICAL: "ISLOGICAL(value)",
   ISEVEN: "ISEVEN(n)", ISODD: "ISODD(n)", N: "N(value) — coerce to number",
+  // AVERAGEA pre-dates this item; B1179328's own FUNCTION_HELP-completeness test (formula.test.js)
+  // caught it missing an entry here — fixed in the same pass rather than left for the registry
+  // it was meant to guard as a whole.
+  AVERAGEA: "AVERAGEA([Column] or n1, …) — mean",
   NOW: "NOW() — today's date", DATEVALUE: "DATEVALUE(text)", WEEKNUM: "WEEKNUM(date, [type])",
   ISOWEEKNUM: "ISOWEEKNUM(date)", YEARFRAC: "YEARFRAC(start, end, [basis])",
   NPV: "NPV(rate, cf1, cf2, …) — net present value of future cash flows (period 1, 2, …)",
