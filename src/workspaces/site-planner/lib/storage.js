@@ -516,9 +516,36 @@ export async function pushSiteToCloud(id) {
  * property that's currently only "tracked" (market intel from an earlier comp) attaches to that
  * same site instead of minting a duplicate (the Airtex Building A/B case NEW-3 names explicitly).
  *
- * Returns { groupId, created, matched, matchedName?, matchedBy? }. `groupId` is what the caller
- * writes into `comps.project_id`. A failed background cloud push doesn't block the local write —
- * it's saved on this device and mirrors on the next edit/reload, same as every other site write. */
+ * ⛔ B1165441-HARDENING (NEW-3, adversarial review of PR 1431) — a failed background push used to
+ * be swallowed and the function still handed back `{ groupId: id, created: true }` as though the
+ * site were real everywhere. comps.project_id references public.sites(id) with a NOT DEFERRABLE
+ * foreign key, so a comp insert naming a site that only exists in this browser's localStorage
+ * fails at the DATABASE with a raw `comps_project_id_fkey` constraint violation — surfaced to the
+ * owner verbatim, and (via insertComps' atomic multi-row VALUES list) capable of taking a whole
+ * pasted batch down over ONE row's site. A site that didn't reach the cloud must never be handed
+ * out as a project_id: on push failure this now returns `groupId: null` (mirroring the
+ * pre-PR-1431 baseline — the comp saves unattached, fixable via the now-working Site dropdown once
+ * the site itself syncs) rather than a promise the database can't keep. The local tracked-site row
+ * is left in place either way (it still mirrors on the next edit/reload/autosave, same as every
+ * other site write) so nothing already-typed is lost — only the COMP's link to it is withheld
+ * until it's provably real.
+ *
+ * ⛔ A CANDIDATE FOURTH FIX WAS PROPOSED AND REJECTED, deliberately, for the record: pre-warming/
+ * reconciling this device's site cache against the cloud before matching, on the premise that the
+ * owner's cache was "missing 5 of his 63 real cloud sites." Re-measured with the correct RLS scope
+ * (user_id/team_id — the SAME account this comp is being saved for): those 5 rows belong to a
+ * DIFFERENT user_id and a different team_id — the original 63 was an un-scoped count against the
+ * whole `public.sites` table (every account's data), not this account's own rows. His own
+ * account's cache genuinely holds all 56 sites it should; there was no gap to reconcile. Do not
+ * re-add a pull here on the strength of a bare row-count comparison against `public.sites` — any
+ * count against it must be scoped to the caller's own `user_id`/`team_id` or it proves nothing.
+ * (Also, separately: a reconcile here must never widen what this device's cache can hold beyond
+ * this account's own RLS-scoped rows — pulling sites the signed-in user doesn't own would be a
+ * cross-account leak into localStorage, not merely a correctness bug.)
+ *
+ * Returns { groupId, created, matched, matchedName?, matchedBy?, error? }. `groupId: null` with
+ * `error` set means "couldn't resolve a site — save the comp unattached", never a thrown error;
+ * `groupId` is what the caller writes into `comps.project_id`. */
 export async function resolveOrCreateTrackedSiteForComp({ title, lat, lon, county } = {}) {
   if (typeof lat !== "number" || typeof lon !== "number" || !Number.isFinite(lat) || !Number.isFinite(lon)) {
     return { groupId: null, created: false, matched: false };
@@ -532,9 +559,45 @@ export async function resolveOrCreateTrackedSiteForComp({ title, lat, lon, count
   const name = (title && String(title).trim()) || "Tracked property";
   saveSite({ id, groupId: id, site: name, name: "Market record", role: "tracked", origin: { lat, lon }, county: county || null, els: [], measures: [], settings: {} });
   const r = await pushSiteToCloud(id).catch((e) => ({ ok: false, error: (e && e.message) || "" }));
-  if (r && r.ok === false) reportClientEvent("cloud-push-failed", "background push failed (comp-created tracked site)", { id });
+  if (r && r.ok === false) {
+    reportClientEvent("cloud-push-failed", "tracked site created for a comp didn't reach the cloud — comp will save unattached", { id });
+    return { groupId: null, created: false, matched: false, error: "Couldn't create a site to attach this to — saved without one. Pick a site from the dropdown once you're back online." };
+  }
   return { groupId: id, created: true, matched: false };
 }
+
+/* NEW-5 (adversarial review of PR 1431) — a "tracked" (market-record) site auto-minted for a comp
+ * is otherwise permanent and invisible: it's filtered out of the Sites list by design (role !==
+ * "pursuit"), so once its last comp is gone the only place it's still reachable at all is the comp
+ * editor's own "(market record)" dropdown, listing a site that belongs to nothing. Paste ten
+ * comps at ten new locations, delete them all, and ten permanent invisible sites remain.
+ *
+ * DECIDED: bin it at comp PURGE, never at an ordinary comp delete. A comp delete is soft and
+ * restorable for 30 days (comps_soft_delete.sql) — binning the site the moment the comp is merely
+ * deleted would leave a later Restore with nothing to reattach to, the same reasoning NEW-1 uses
+ * to keep a binned SITE's project_id on its comps rather than detaching immediately. Only when the
+ * comp is genuinely gone for good (CompsPanel.jsx's purgeForever, out of Recently deleted) is it
+ * safe to also let its site go.
+ *
+ * Scoped deliberately tight, so this can never remove something the owner actually wants: the
+ * site's role must STILL be "tracked" (flip it to "pursuit" — the same one-way door NEW-1's role
+ * flip already offers — and it opts out of this by construction) and it must still be genuinely
+ * EMPTY (nothing drawn — a market record that quietly grew into a real concept is never binned out
+ * from under someone). The caller (purgeForever) is responsible for confirming no other LIVE comp
+ * still references this site before calling this — this function does not re-check that itself,
+ * since "the last comp" is a fact about the comps table, which this module deliberately does not
+ * import (comps already imports storage.js one-way; the reverse would be a cycle).
+ *
+ * Best-effort tidy-up, not a correctness-critical path: reads the LOCAL cache (this device may
+ * never have hydrated a tracked site created elsewhere, in which case this quietly no-ops rather
+ * than reaching for a network read this module doesn't otherwise need). */
+export async function binOrphanedTrackedSite(id) {
+  if (!activeUid() || !id) return { ok: false, skipped: true };
+  const m = loadSite(id);
+  if (!m || normRole(m.role, null) !== "tracked" || !isEmptySite(m)) return { ok: false, skipped: true };
+  return cloudDelete(activeUid(), id);
+}
+
 // B473 — push a LIVE in-memory model to the cloud, NOT by id. Used when the on-device write FAILED
 // (full localStorage): pushSiteToCloud→loadSite would re-read the failed store and ship a stale,
 // pre-edit copy — losing the very edit in the cloud too. The cloud has no ~5MB cap, so pushing the

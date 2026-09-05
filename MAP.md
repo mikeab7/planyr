@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-05 @ `67a44d33` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-05 @ `39f9df72` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -99,7 +99,7 @@ _682 source files mapped._
   - _exports_: `computeVisitAggregates`, `orderAgainEntries`
 - **`src/workspaces/model/components/ContextMenu.jsx`** — The right-click context menu (cell/row-header/column-header), anchored at the click point via a zero-sized virtual anchor into the shared AnchoredMenu.
   - _exports_: `default (ContextMenu)`
-- **`src/workspaces/model/components/FileMenu.jsx`** — The Excel round-trip entry point in row-1's toolbar: Download/Import as .xlsx (primary) and CSV (deliberately secondary).
+- **`src/workspaces/model/components/FileMenu.jsx`** — Row-1 "File" button/menu — download active sheet as Excel (.xlsx) or CSV, or open one to import.
   - _exports_: `default (FileMenu)`
 - **`src/workspaces/model/components/FindReplaceBar.jsx`** — The floating Find (Ctrl+F) / Replace (Ctrl+H) bar — searches raw cell text, never displayed values.
   - _exports_: `default (FindReplaceBar)`
@@ -115,7 +115,7 @@ _682 source files mapped._
   - _exports_: `default (SheetView)`, `HEADER_H`, `ROW_H`
 - **`src/workspaces/model/components/TabStrip.jsx`** — The sheet tab strip: add/rename (inline)/duplicate/delete/reorder (drag) a workbook sheet, pinned below the grid, outside its own scroller.
   - _exports_: `default (TabStrip)`, `TAB_STRIP_HEIGHT`
-- **`src/workspaces/model/lib/csvIO.js`** — CSV round-trip: values-only export of the active sheet (via displayFor), import as a new appended sheet. Dependency-free.
+- **`src/workspaces/model/lib/csvIO.js`** — Dependency-free CSV export (active sheet's displayed values) / import (appended as a new sheet).
   - _exports_: `addSheetFromCsvText`, `csvRowsToSheet`, `parseCsv`, `sheetToCsv`
 - **`src/workspaces/model/lib/formulaConsistency.js`** — Flags a formula whose R1C1-style shape breaks its row/column neighbours' pattern, or a hardcoded value sitting inside one; precision-tuned against a realistic pro-forma fixture.
   - _exports_: `findInconsistencies`
@@ -145,7 +145,7 @@ _682 source files mapped._
   - _exports_: `beginOrStepTrace`, `cellKey`, `parseCellKey`, `renderableTrace`, `stepTrace`, `TRACE_STEP_CAP`
 - **`src/workspaces/model/lib/undoStack.js`** — General whole-state undo/redo: a snapshot stack keyed on committed edits, agnostic to what kind of edit each one was.
   - _exports_: `useUndoableState`
-- **`src/workspaces/model/lib/xlsxIO.js`** — Real .xlsx export/import on ExcelJS (lazy-loaded): formulas as formulas, styles, number formats, merges, named ranges; an unsupported formula keeps its cached value + original text.
+- **`src/workspaces/model/lib/xlsxIO.js`** — Real .xlsx export/import of the whole workbook via ExcelJS (formulas, formats, styles, freeze panes, named ranges) — dynamically imported, never on the Model workspace's eager chunk.
   - _exports_: `checkFormulaSupport`, `exportWorkbookToXlsxBlob`, `importXlsxToWorkbook`
 - **`src/workspaces/model/ModelApp.jsx`** — Model workspace root: the underwriting spreadsheet — loads/saves the active project's sheet and wires the toolbar, formula bar and grid together.
   - _exports_: `default (ModelApp)`
@@ -327,7 +327,7 @@ _682 source files mapped._
 - **`src/shared/comps/lib/compSiteMatch.js`** — pure exact-title-or-nearest-within-radius matching rule for attaching a comp to an existing site instead of creating a duplicate
   - _exports_: `findMatchingSite`, `milesBetween`, `SITE_MATCH_MILES`
 - **`src/shared/comps/lib/compsStore.js`** — Supabase CRUD for public.comps (team-visible read, owner-only write); every call returns {data,error}, never swallows a failure
-  - _exports_: `deleteComp`, `fetchAllComps`, `fetchDeletedComps`, `insertComp`, `insertComps`, `permanentlyDeleteComp`, `restoreComp`, `supabase`, `updateComp`
+  - _exports_: `countLiveCompsForProject`, `deleteComp`, `fetchAllComps`, `fetchDeletedComps`, `insertComp`, `insertComps`, `permanentlyDeleteComp`, `restoreComp`, `supabase`, `updateComp`
 - **`src/shared/comps/lib/kmlImport.js`** — pure, hand-rolled KML placemark parsing (B849233): Point/Polygon geometry (a polygon's area-weighted centroid, not a vertex average), plus best-effort description extraction reusing compParse.js's prose parser
   - _exports_: `kmlDescriptionToText`, `kmlToDraftRows`, `parseKmlPlacemarks`, `placemarkToDraftRow`, `polygonCentroid`
 - **`src/shared/comps/lib/partySuggest.js`** — Pure party-name suggestion logic: collectPartyNames pools both sides across every comp type, matchPartyNames is a loose case/whitespace-insensitive substring match — suggests only, never forces or merges
@@ -1234,7 +1234,7 @@ _682 source files mapped._
 - **`src/workspaces/site-planner/lib/standardsApply.js`** — Standards "Apply now" (NEW-3): push a standard onto existing parcels (stamped → write) or existing elements (render-resolved → clear the per-element override), plus the impact counts the chip shows.
   - _exports_: `allStandardsImpact`, `appliedLabel`, `appliedObjectsLabel`, `applyAllStandards`, `applyMeasureStandard`, `applyParcelStandard`, `applyTypeStandard`, `draftDirty`, `draftHasMeasure`, `draftHasParcel`, `draftHasType`, `draftMeasureValue`, `draftParcelValue`, `draftTypeValue`, `EMPTY_STD_DRAFT`, `MEASURE_STD_KEYS`, `mergeDraftIntoSettings`, `PARCEL_STD_KEYS`, `parcelStandardImpact`, `TYPE_STD_KEYS`, `typeStandardImpact`, `withMeasureDraft`, `withParcelDraft`, `withTypeDraft`
 - **`src/workspaces/site-planner/lib/storage.js`** — Multi-site persistence layer: localStorage primary with per-user cloud mirror, content-union pull merge, per-tab resurrection guards, and an IndexedDB-backed version-history ring
-  - _exports_: `_readSiteTombs`, `_recentlyDeleted`, `_resetHistoryForTest`, `activeUid`, `AUTOSAVE_KEY`, `backupNow`, `checkProjectDeletionStatus`, `clearCloudCache`, `clearHistory`, `clearRecentlyDeleted`, `clearSiteTombstone`, `DELETED_RETENTION_DAYS`, `deleteSite`, `deleteSiteGroup`, `discardLegacySite`, `getCurrentSiteId`, `getVersion`, `groupCountDivergence`, `groupOf`, `importLegacyIntoCloud`, `importOneSiteToCloud`, `initHistoryStore`, `isCloudActive`, `isEmptySite`, `keepaliveFlushSite`, `legacySitesList`, `listDeletedProjects`, `listVersions`, `loadAutosave`, `loadPlansOfGroup`, `loadSite`, `loadSitesList`, `mergePulledSites`, `migrateOldAutosave`, `migrateScenarios`, `migrateSiteGroups`, `pendingLegacyCount`, `pendingLegacySites`, `pruneMigratedLegacy`, `pullCloud`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `pushModelToCloud`, `pushSiteToCloud`, `reconcileSiteFromCloud`, `recordSiteTombstone`, `renameSiteGroup`, `repairSplitProjectNames`, `resolveOrCreateTrackedSiteForComp`, `restoreDeletedProject`, `saveAutosave`, `saveSite`, `scheduleLinkOf`, `setActiveUser`, `setCurrentSiteId`, `setScheduleLink`, `setSiteGroupRole`, `SITE_TOMB_GRACE_MS`, `siteNameOf`, `snapshotVersion`, `stageLegacySite`, `storage`, `summarizeVersion`
+  - _exports_: `_readSiteTombs`, `_recentlyDeleted`, `_resetHistoryForTest`, `activeUid`, `AUTOSAVE_KEY`, `backupNow`, `binOrphanedTrackedSite`, `checkProjectDeletionStatus`, `clearCloudCache`, `clearHistory`, `clearRecentlyDeleted`, `clearSiteTombstone`, `DELETED_RETENTION_DAYS`, `deleteSite`, `deleteSiteGroup`, `discardLegacySite`, `getCurrentSiteId`, `getVersion`, `groupCountDivergence`, `groupOf`, `importLegacyIntoCloud`, `importOneSiteToCloud`, `initHistoryStore`, `isCloudActive`, `isEmptySite`, `keepaliveFlushSite`, `legacySitesList`, `listDeletedProjects`, `listVersions`, `loadAutosave`, `loadPlansOfGroup`, `loadSite`, `loadSitesList`, `mergePulledSites`, `migrateOldAutosave`, `migrateScenarios`, `migrateSiteGroups`, `pendingLegacyCount`, `pendingLegacySites`, `pruneMigratedLegacy`, `pullCloud`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `pushModelToCloud`, `pushSiteToCloud`, `reconcileSiteFromCloud`, `recordSiteTombstone`, `renameSiteGroup`, `repairSplitProjectNames`, `resolveOrCreateTrackedSiteForComp`, `restoreDeletedProject`, `saveAutosave`, `saveSite`, `scheduleLinkOf`, `setActiveUser`, `setCurrentSiteId`, `setScheduleLink`, `setSiteGroupRole`, `SITE_TOMB_GRACE_MS`, `siteNameOf`, `snapshotVersion`, `stageLegacySite`, `storage`, `summarizeVersion`
 - **`src/workspaces/site-planner/lib/storageReconcile.js`** — NEW-1 site storage reconciliation: counted detention plus counted mitigation against total physical pond storage, with a hard FAIL naming the overlap volume and the ponds involved (and undeclared dual-duty ponds)
   - _exports_: `OVERLAP_TOL_CF`, `reconcilePond`, `reconcileStorage`
 - **`src/workspaces/site-planner/lib/subsidence.js`** — Harris-Galveston / Fort Bend subsidence-district cited registry (NEW-B4): county→district flag (groundwater-pumping permit + surface-water-conversion context) with citations + audit. Pure.
