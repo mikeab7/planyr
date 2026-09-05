@@ -454,6 +454,17 @@ export async function refileReview(id, { projectId = null, project = "", discipl
   if (!(await cloudReady())) return { ok: false, error: "Sign in to file documents." };
   const rec = await loadReview(id);
   if (!rec) return { ok: false, error: "Review not found." };
+  // B1160480 — re-filing into a different project is the same class of write fileNewReview
+  // guards: ensure the target project's row exists before pointing this review at it.
+  if (!orgScope && projectId) {
+    const { ensureProjectRow } = await import("../../site-planner/lib/storage.js");
+    const proj2 = await ensureProjectRow(projectId, { name: project });
+    if (!proj2.ok) {
+      return { ok: false, error: proj2.deleted
+        ? "This project has been deleted. Restore it before filing anything into it."
+        : "Couldn't confirm this project with the cloud, so nothing was filed. Check your connection and try again." };
+    }
+  }
   // ORG SCOPE (NEW-1) — filing into Organization clears the project, and vice versa; mirrors
   // Notes' setPageProject/setPageOrgScope pair.
   const next = orgScope
@@ -680,12 +691,27 @@ export async function getShareLink(driveKey) {
 // upsert the indexed record. Returns { ok, id }.
 export async function fileNewReview({ projectId = null, project = "", discipline = "Other", item = "", docDate = null, blob, fileName, folderId = null, onProgress = null, orgScope = false }) {
   if (!(await cloudReady())) return { ok: false, error: "Sign in to file documents." };
-  const id = newReviewId();
-  const srcId = newSourceId();
   // ORG SCOPE (NEW-1) — one destination, never both: a file filed to Organization carries no
   // project, mirroring Notes' setPageOrgScope.
   const pid = orgScope ? null : projectId;
   const proj = orgScope ? "" : project;
+  // B1160480 — a project born with no located origin has no public.sites row until its first
+  // drawing save (see storage.js's `ensureProjectRow`, whose own header has the full story), so
+  // filing straight into `pid` here could write doc_reviews/file_facts rows — and bytes in Drive
+  // — keyed to a project id that names no row anywhere, orphaning the file the moment the tab
+  // reloads. This is the one choke point every filed review passes through; ensure the row
+  // BEFORE anything is sent to Drive.
+  if (pid) {
+    const { ensureProjectRow } = await import("../../site-planner/lib/storage.js");
+    const proj2 = await ensureProjectRow(pid, { name: proj });
+    if (!proj2.ok) {
+      return { ok: false, error: proj2.deleted
+        ? "This project has been deleted. Restore it before filing anything into it."
+        : "Couldn't confirm this project with the cloud, so nothing was filed. Check your connection and try again." };
+    }
+  }
+  const id = newReviewId();
+  const srcId = newSourceId();
   // Use the drawing's own date when auto-filing supplies one (YYYY-MM-DD); else today.
   const filedDate = (typeof docDate === "string" && /^\d{4}-\d{2}-\d{2}/.test(docDate)) ? docDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
   const itemLabel = item || stripFileExt(fileName || "Document");
