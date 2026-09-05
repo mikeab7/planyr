@@ -13,6 +13,23 @@
 // that owns the delete itself (B927105). storage.js imports it from here.
 export const DELETED_RETENTION_DAYS = 30;
 
+// B1202176 — Shell.jsx's route-level deletion gate (B848833) asks one honest question — does
+// this project id's cloud row exist, and if so is it soft-deleted? — and that question cannot
+// tell "nobody has ever created this row" apart from "this row was just created LOCALLY and
+// hasn't reached the cloud yet." Both answer the identical `{exists:false}`. Project creation is
+// deliberately LAZY (see SitePlannerApp.jsx's `newBlankSite`): a blank site that's never edited
+// is never saved, and even a located blank's cloud write is a fire-and-forget push racing the
+// very check that would block it. So the gate's caller (Shell.jsx) tracks which ids it minted
+// locally this session — `freshlyCreated` — and this function is the ONE place that decides what
+// the DB's answer means once that context is folded in. Pure so the decision is unit-tested
+// directly, without rendering Shell.jsx's very large component tree.
+export function projectGateStatus({ res, freshlyCreated = false } = {}) {
+  if (!res || res.ok === false) return { status: "live", name: null, deletedAt: null }; // fail OPEN — an inconclusive answer never blocks
+  if (!res.exists) return { status: freshlyCreated ? "live" : "missing", name: null, deletedAt: null };
+  if (res.deleted) return { status: "deleted", name: res.name, deletedAt: res.deletedAt };
+  return { status: "live", name: null, deletedAt: null };
+}
+
 // Collapse a flat list of site-model records (each: { groupId|id, site|name,
 // updatedAt, status }) into one project entry per group, sorted most-recently-edited
 // first. The group's name/status/updatedAt come from its newest record (records are

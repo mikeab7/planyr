@@ -148,6 +148,23 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V872976 — B1202176: "New project" opens a real, editable project for a SIGNED-IN account, never the "doesn't exist" card `Blocker: auth`
+
+**Why this needs its own real pass.** The bug is a race between the deletion gate (`Shell.jsx`) asking the cloud whether a brand-new project's row exists and the fact that lazy creation means it doesn't yet. `checkProjectDeletionStatus` only ever asks the cloud when there's a signed-in `activeUid()` — signed out it fails open unconditionally, so the ORIGINAL bug (and therefore this fix) has no signed-out manifestation beyond "nothing regressed." Confirming the actual repro (the owner's own reported symptom, on his real account) needs a real signed-in session.
+
+**What was verified here (this session, sandbox+headless).** The pure decision (`projectGateStatus`, `src/shared/projects/projectModel.js`) is unit-tested and mutation-proven (`test/deletedProjectGate.test.js`) — the exact repro shape (`{exists:false}` + `freshlyCreated:true` → `live`), the identical DB answer for an id NOT minted this session (→ still `missing`, so a real bad/expired link stays caught), and a genuinely soft-deleted project still caught even if impossibly flagged fresh. The wiring between `SitePlannerApp.jsx` (marks every id it mints) and `Shell.jsx` (records the flag, feeds it to the gate) is source-guard tested (`test/newProjectGateWiring.test.js`). Beyond the unit level, a **real headless browser pass against a built preview server, signed OUT**, drove the exact repro steps end to end: opened the project switcher, clicked "New project" — landed on `#/project/<id>/site` with the empty drafting canvas showing (zero `deleted-project-notice` nodes, where the pre-fix build would have shown the blocking card here for a SIGNED-IN account); drew a real building; hard-reloaded — same route, still no blocked notice, the building still present; reopened the switcher — the project now listed as current. Full repo suite green (737 files / 15,051 tests), lint clean (0 errors, warning count unchanged), build clean, `node scripts/build-map.mjs --check` clean.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner:**
+1. Read the loaded chunk hash in the same breath as everything below — confirm it names a chunk from a build after this PR merged.
+2. Open the project switcher (the project name in the top bar, or "Select a project" when none is open) and click **New project**. **Expect:** a real, empty, editable drafting canvas opens (tools rail, drafting grid) — never "This project doesn't exist."
+3. Draw something on it (a building, a parcel, anything). **Expect:** it draws normally, no error.
+4. Hard-reload the page. **Expect:** the same project reopens with what was drawn still present — not the "doesn't exist" card.
+5. Open the project switcher again. **Expect:** the new project is listed (by its default name, e.g. "Untitled site").
+6. Repeat 2-4 a few times in a row (the owner's own repro was 3-for-3) — expect the same result every time, from BOTH the no-project-selected map view and from inside an already-open project.
+7. As a control, navigate directly to a URL naming a project id that was never created and does not belong to this account (e.g. a random id pasted into the URL). **Expect:** this one STILL shows "This project doesn't exist" — the fix must not have opened a hole that lets any bad link through.
+
+**Result:** ⏳ pending — needs a real signed-in browser session. `Cadence: once`.
+
 ### V864432 — B1191456: the boot-time auto-fit no longer overwrites the first few seconds of the owner's own zoom/pan `Blocker: live-GIS` `Blocker: real-data`
 
 **Why this needs its own real pass.** The mechanism is a genuine timing race — a 120ms `setTimeout` that can fire late enough to land after a real wheel/pinch/pan gesture only when the main thread is genuinely busy right after boot, which in practice means real GIS/comp/parcel network calls congesting it. This sandbox's egress proxy blocks every external GIS/tile host, so nothing here can force the congestion that makes the race observable — confirmed the mechanism is otherwise sound via the structural/source-level tests below, but a sandbox pass on the RACE itself cannot be claimed.
