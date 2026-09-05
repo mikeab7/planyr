@@ -28,6 +28,7 @@ import { PGlite } from "@electric-sql/pglite";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const TELEMETRY = join(ROOT, "src/shared/telemetry");
 const TABLE_SQL = readFileSync(join(TELEMETRY, "client_errors.sql"), "utf8");
+const KIND_SQL = readFileSync(join(TELEMETRY, "client_errors_kind.sql"), "utf8");
 const RETENTION_SQL = readFileSync(join(TELEMETRY, "client_errors_retention.sql"), "utf8");
 const CHECK_SQL = readFileSync(join(TELEMETRY, "client_errors_retention_check.sql"), "utf8");
 
@@ -61,6 +62,7 @@ async function freshDb(retentionSql = RETENTION_SQL) {
   const db = new PGlite();
   await db.exec(SUPABASE_SHIM);
   await db.exec(TABLE_SQL);
+  await db.exec(KIND_SQL); // NEW-3 — the retention sweep's fast tier reads the `kind` column
   await db.exec(retentionSql);
   return db;
 }
