@@ -68,13 +68,17 @@ describe("Shell wires the title to the live route, not just the initial load", (
 
   it("imports pageTitle and sets document.title from it inside a useEffect keyed on the route", () => {
     expect(shellSrc).toMatch(/import \{ pageTitle \} from "\.\/pageTitle\.js";/);
-    expect(shellSrc).toMatch(/document\.title\s*=\s*pageTitle\(\{\s*module:\s*active,\s*isAdmin:\s*isAdminHash\s*\}\)/);
+    // B1213312 — the Dashboard has no real `route.module` value (`active` is null there, same
+    // shape as admin), so the title effect names it explicitly rather than letting a null
+    // module fall through to pageTitle's own "no label" bare-brand case by accident.
+    expect(shellSrc).toMatch(/document\.title\s*=\s*pageTitle\(\{\s*module:\s*isDashboardHash\s*\?\s*"dashboard"\s*:\s*active,\s*isAdmin:\s*isAdminHash\s*\}\)/);
   });
 
-  it("the title effect's dep array includes both the module and the admin-route flag, so it re-runs on every client-side route change", () => {
+  it("the title effect's dep array includes the module, the admin-route flag, and the dashboard-route flag, so it re-runs on every client-side route change", () => {
     const m = shellSrc.match(/document\.title\s*=\s*pageTitle\([^)]*\)\s*;\s*\},\s*\[([^\]]*)\]/);
     expect(m, "could not find the title effect's dependency array").toBeTruthy();
     expect(m[1]).toMatch(/active/);
     expect(m[1]).toMatch(/isAdminHash/);
+    expect(m[1]).toMatch(/isDashboardHash/);
   });
 });

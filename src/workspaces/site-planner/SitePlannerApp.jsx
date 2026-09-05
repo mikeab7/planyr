@@ -73,6 +73,11 @@ let lastConsumedNewProject = 0;
  * starting/opening another never loses the one you were on. */
 export default function App({
   shellModule, onShellSwitch, authControl, accountActive = false, onOpenReviewInDocReview,
+  // B1213312 (NEW-1) — the Shell's real "leave to the Dashboard" action. Distinct from `goMap`
+  // below (this workspace's OWN "clear the project, show my map" action, wired as `onDashboard`
+  // for the breadcrumb crumb — B1128272's precedent: the crumb keeps its per-module meaning,
+  // only the wordmark gets this). Wired to AppHeader's `onLogoDashboard`.
+  onGoDashboard,
   // Work Item A — the active project lives in the URL. `projectId` is the route's
   // Site-group id (or null = Dashboard/Map); `onProjectChange` writes our active group
   // back to the URL; `resumeAllowed` (Shell's `mayResumeLastSite`, B881664) is true only
@@ -996,6 +1001,7 @@ export default function App({
           // project crumb invites a pick.
           homeLabel="Map"
           onDashboard={goMap}
+          onLogoDashboard={onGoDashboard}
           currentProject={null}
           onSelectProject={openProjectGroup}
           onNewProject={newBlankSite}
@@ -1083,6 +1089,7 @@ export default function App({
             setLayerStatus={setLayerStatus}
             sites={sites}
             onBackToMap={goMap}
+            onGoDashboard={onGoDashboard}
             onOpenSite={openSite}
             onNewSite={newBlankSite}
             onNewPlanSameParcel={newPlanSameParcel}
