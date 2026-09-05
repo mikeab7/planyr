@@ -6,7 +6,7 @@
  * every load, and that host's latency passed through one-for-one. The landing page fixed the
  * same defect in B1384; the app entry was never carried across, and nothing in the repo noticed
  * for months. Worse, two instruments RECORDED it and responded by MUTING the metrics it spoiled
- * (ui-audit/perf-harness.mjs, docs/PERF-BUDGETS.md) rather than by failing.
+ * (ui-audit/perf-harness.mjs, docs/perf/PERF-BUDGETS.md) rather than by failing.
  *
  * WHY A SOURCE-LEVEL TEST AS WELL AS THE HARNESS. ui-audit/verify-font-blocking.mjs proves the
  * property in a real browser and proves the check can fail (its control arm is the pre-fix

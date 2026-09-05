@@ -1,5 +1,5 @@
 {
-  "_note": "THE OWNER'S REAL BAIN PLAN, VERBATIM. Site `smr9olizi5ue`, \"Concept - Original\" (Fort Bend), pulled from `public.sites` JOINED to `public.site_elements` on 2026-08-07. Every coordinate here is his. This REPLACES ui-audit/fixtures/bain-concept-a.json, whose geometry was synthesised and whose synthesis is what bounded the largest claim docs/PERF-BAIN.md made (its §6, first bullet). Elements are NOT in the site row — `elementsInRows` is true and `data.els` is an empty array, which is why a naive read of the plan row reports zero elements.",
+  "_note": "THE OWNER'S REAL BAIN PLAN, VERBATIM. Site `smr9olizi5ue`, \"Concept - Original\" (Fort Bend), pulled from `public.sites` JOINED to `public.site_elements` on 2026-08-07. Every coordinate here is his. This REPLACES ui-audit/fixtures/bain-concept-a.json, whose geometry was synthesised and whose synthesis is what bounded the largest claim docs/perf/PERF-BAIN.md made (its §6, first bullet). Elements are NOT in the site row — `elementsInRows` is true and `data.els` is an empty array, which is why a naive read of the plan row reports zero elements.",
   "_source": {
     "siteId": "smr9olizi5ue",
     "table": "public.sites JOIN public.site_elements ON site_id, deleted_at IS NULL",
@@ -58,7 +58,7 @@
       "fromIdb": false,
       "encodedBytes": 393216,
       "_srcHost": "server.arcgisonline.com",
-      "_note": "⚠ CORRECTS docs/PERF-BAIN.md §8. The real row's underlay carries a LIVE ArcGIS World_Imagery `export` URL as its `src` and has NO `idbKey` — it is FETCHED, not read out of IndexedDB. `dropIdbBackedSrc` only strips the src of an idb-backed raster, and this one kept its src, which proves it was never idb-backed. It is still never PAINTED on this plan (the plan has an origin, so the live basemap replaces it — §7 stands). `encodedBytes` is the owner's measured ~384 KB and is NOT readable from the row."
+      "_note": "⚠ CORRECTS docs/perf/PERF-BAIN.md §8. The real row's underlay carries a LIVE ArcGIS World_Imagery `export` URL as its `src` and has NO `idbKey` — it is FETCHED, not read out of IndexedDB. `dropIdbBackedSrc` only strips the src of an idb-backed raster, and this one kept its src, which proves it was never idb-backed. It is still never PAINTED on this plan (the plan has an origin, so the live basemap replaces it — §7 stands). `encodedBytes` is the owner's measured ~384 KB and is NOT readable from the row."
     },
     {
       "role": "sheetOverlay",
@@ -78,7 +78,7 @@
       "encodedBytes": 10432512,
       "pdfBacked": true,
       "sheet": { "wi": 24, "hi": 36, "std": true, "label": "ARCH D (24×36)" },
-      "_note": "ROTATION 1.5° — measured, and the reason NEW-2 exists: every arm in raster-arms.mjs ran this raster axis-aligned, so a rotated raster had never been measured. `pdfBacked` records that the source is page 1 of a PDF, which is the gate on B749's up-to-8192px re-raster (docs/PERF-BAIN.md §10) — that path fires on ZOOM and has never run in any arm. `encodedBytes` is the owner's measured ~10,188 KB; the bytes live in HIS IndexedDB, not in Supabase, so the row cannot report them."
+      "_note": "ROTATION 1.5° — measured, and the reason NEW-2 exists: every arm in raster-arms.mjs ran this raster axis-aligned, so a rotated raster had never been measured. `pdfBacked` records that the source is page 1 of a PDF, which is the gate on B749's up-to-8192px re-raster (docs/perf/PERF-BAIN.md §10) — that path fires on ZOOM and has never run in any arm. `encodedBytes` is the owner's measured ~10,188 KB; the bytes live in HIS IndexedDB, not in Supabase, so the row cannot report them."
     }
   ],
   "settings": {

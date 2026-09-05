@@ -10,7 +10,7 @@ import { fixtureCensus, redactText, redactPlan, paintedRasters, heldButUnpainted
  * `bain-concept-a.json` was checked against its own generator, byte for byte, and that check was
  * green for the entire life of the fixture — while the fixture's coordinates were INVENTED. A
  * regeneration guard proves a file matches the thing that produced it; it cannot notice that the
- * thing that produced it was making the plan up. docs/PERF-BAIN.md §6 named that as the bound on
+ * thing that produced it was making the plan up. docs/perf/PERF-BAIN.md §6 named that as the bound on
  * its largest claim, and it was right.
  *
  * These two fixtures come out of `public.sites` JOINED to `public.site_elements`, and the guard on
@@ -66,7 +66,7 @@ describe("Bain — site smr9olizi5ue, \"Concept - Original\"", () => {
     expect(ov.fromIdb).toBe(true);
     /* The whole reason NEW-2 exists: every arm ran this raster axis-aligned. */
     expect(ov.rotation).toBe(1.5);
-    /* And the gate on B749's up-to-8192px zoom re-raster — docs/PERF-BAIN.md §10's open lead. */
+    /* And the gate on B749's up-to-8192px zoom re-raster — docs/perf/PERF-BAIN.md §10's open lead. */
     expect(ov.pdfBacked).toBe(true);
   });
 
@@ -77,7 +77,7 @@ describe("Bain — site smr9olizi5ue, \"Concept - Original\"", () => {
     expect(un.fromMap).toBe(true);
   });
 
-  /* ⛔ CORRECTS docs/PERF-BAIN.md §8, which said the underlay's ~384 KB string is "read out of
+  /* ⛔ CORRECTS docs/perf/PERF-BAIN.md §8, which said the underlay's ~384 KB string is "read out of
    * IndexedDB". The real row carries a live ArcGIS `export` URL as its `src` and has NO `idbKey`.
    * `dropIdbBackedSrc` strips the src of anything idb-backed, so a raster that KEPT its src is
    * proof it never was. It is still never painted (§7 stands, and is asserted below). */

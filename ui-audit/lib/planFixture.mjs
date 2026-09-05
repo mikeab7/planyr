@@ -315,7 +315,7 @@ export const RASTER_ARMS = {
  *
  * Bain: 0 markups, 0 measures, 0 callouts, 0 cross-sections. Goose Creek: 0 / 0 / 0 / 0. Both
  * batteries, every arm, every null result — taken on plans with NO ANNOTATIONS AT ALL. That is the
- * same structural blindness as the raster one (§0 of docs/PERF-BAIN.md): a plan with no callouts
+ * same structural blindness as the raster one (§0 of docs/perf/PERF-BAIN.md): a plan with no callouts
  * cannot show a callout's cost, at any sample size, under any statistic.
  *
  * Sylvestri is the first plan here that is not zero: **16 callouts, 6 markups, 2 measures** — and
@@ -487,7 +487,7 @@ export function bainPairArmFixture(quiddity, original, arm) {
     /* Hold pond COUNT at two and take the rings down to the fast plan's vertex count. `one-pond`
      * removed a pond AND 20 vertices in one move, so its −27% cannot say which of the two it
      * bought; this arm changes only the second. Neither outcome is a product instruction — see the
-     * note on §5.5 in docs/PERF-REAL-PLANS.md. */
+     * note on §5.5 in docs/perf/PERF-REAL-PLANS.md. */
     const target = (original.els || [])
       .filter((e) => e.type === "pond" && Array.isArray(e.points))
       .reduce((m, p) => Math.min(m, p.points.length), FALLBACK_RING_TARGET);

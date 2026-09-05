@@ -16,7 +16,7 @@
  * Independently, Broomfield's OWN parcel service publishes its geometry in EPSG:2876 — NAD83(HARN)
  * / Colorado North (ftUS) — i.e. the county's own GIS already works in North. So Broomfield is
  * assigned NORTH, and the assignment carries `decided:true` + `decisionNote` so every surface that
- * shows a zone can show WHY rather than implying the statute settled it. See docs/COLORADO-AUDIT.md.
+ * shows a zone can show WHY rather than implying the statute settled it. See docs/incidents/COLORADO-AUDIT.md.
  *
  * ⛔ TEXAS IS UNCHANGED, AND THAT IS PROVEN, NOT ASSERTED. This module's generic Lambert Conformal
  * Conic is the SAME formulas in the SAME operation order as the hardcoded EPSG:2278 implementation

@@ -11,7 +11,7 @@
  * `<svg>` pins that element's entire ancestor chain, up to and including a detached tree's root —
  * and the root holds every descendant. **One ignored return value retains a whole app shell.**
  *
- * THAT IS THE ENTIRETY OF B1439. Four attempts, `docs/PERF-PLAN-SWITCH.md`: "~2,342 nodes, ~391 KB
+ * THAT IS THE ENTIRETY OF B1439. Four attempts, `docs/perf/PERF-PLAN-SWITCH.md`: "~2,342 nodes, ~391 KB
  * and ~106 listeners per round trip, released never … every plan the owner has ever opened in a
  * session is still there." Every one of those numbers came from this line, in the harness, twice per
  * A→B→A round trip:

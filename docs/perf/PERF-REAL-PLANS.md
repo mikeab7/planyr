@@ -2,7 +2,7 @@
 
 **Written 2026-08-07.** Both plans the owner has reported as slow are now committed fixtures, pulled
 verbatim from `public.sites` JOINED to `public.site_elements`. This document records what the real
-censuses are, what they CORRECT in `docs/PERF-BAIN.md`, and what they do to the one question that
+censuses are, what they CORRECT in `docs/perf/PERF-BAIN.md`, and what they do to the one question that
 document closed on — the 304 compositor layers.
 
 ---
@@ -51,7 +51,7 @@ owner measured independently — not read off the files.
 
 ---
 
-## 2. Four things the real plans CORRECT in `docs/PERF-BAIN.md`
+## 2. Four things the real plans CORRECT in `docs/perf/PERF-BAIN.md`
 
 ### 2.1 The plan is 47 elements, not 53 — and the mix is different
 
@@ -275,7 +275,7 @@ x/y, same `ftPerPx`. Also the **same aerial underlay**, the **same origin**, the
 That one sentence retires the entire raster hypothesis for Bain, and it does so by IDENTITY rather
 than by statistics — no floor, no sign test, no reps, no p-value. Semi-transparency, pixel count, the
 1.5° rotation and B749's PDF re-raster are all present *in equal measure on both sides*, so however
-real each is on its own, none can be what separates them. Recorded in `docs/PERF-BAIN.md` finding 0.
+real each is on its own, none can be what separates them. Recorded in `docs/perf/PERF-BAIN.md` finding 0.
 
 **What actually differs:**
 
@@ -295,7 +295,7 @@ roads** and **three fewer parcels**. A difference he notices in ordinary use doe
 element delta.
 
 This is quantitative, not rhetorical, because B1435 measured the per-element cost directly
-(`docs/PERF-DESIGN-AUDIT.md`: elements 66 → 96 gave +59.9% work, **38.5 ms per element**, r = 0.927 —
+(`docs/perf/PERF-DESIGN-AUDIT.md`: elements 66 → 96 gave +59.9% work, **38.5 ms per element**, r = 0.927 —
 itself a near-exact reproduction of B1357's r = 0.93):
 
 - **The linear per-element model predicts +5 elements ≈ +193 ms.**

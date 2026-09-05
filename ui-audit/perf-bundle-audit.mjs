@@ -6,7 +6,7 @@
  * of the build with no browser, no network, and no CPU-contention noise, so a breach is
  * unambiguously attributable to the pull request that caused it. The runtime half (frame
  * time, heap, tiles — ui-audit/perf-harness.mjs) is measured in a real browser and is too
- * sensitive to CI-runner load to gate a merge on; see docs/PERF-BUDGETS.md.
+ * sensitive to CI-runner load to gate a merge on; see docs/perf/PERF-BUDGETS.md.
  *
  * The measurement itself lives in ui-audit/lib/bundleMetrics.mjs (shared with the ratchet
  * step); the pass/fail policy lives in ui-audit/lib/perfBudgetPolicy.mjs.
@@ -325,7 +325,7 @@ if (JSON_OUT) {
   }
   console.log();
   if (failures.length) {
-    console.log(`✗ ${failures.length} performance budget breach(es). See docs/PERF-BUDGETS.md.`);
+    console.log(`✗ ${failures.length} performance budget breach(es). See docs/perf/PERF-BUDGETS.md.`);
     console.log("  A feature that breaches a budget ships with a matching optimization, or does not ship.");
     console.log("  Raising a baseline to make this pass requires the same justification as any other product decision.");
   } else {

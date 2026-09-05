@@ -143,7 +143,7 @@ describe("B227888 · the memo cannot serve a stale engineering number", () => {
 
 describe("B227888 · per-vertex cost stays inside a stated bound", () => {
   /* ⛔ MEASURED ON A COLLINEAR-INSERTED RING, which is what makes this a guard on VERTEX COUNT and
-   * not on shape. Decimating a ring — the instrument docs/PERF-REAL-PLANS.md §5.5 used — removes
+   * not on shape. Decimating a ring — the instrument docs/perf/PERF-REAL-PLANS.md §5.5 used — removes
    * concavity along with the vertices, so it confounds "more points" with "a simpler polygon", and
    * that is precisely how §5.5 came to report a superlinear per-vertex law that does not exist.
    * Here area, perimeter, bounding box and the drawn path are identical at every rung. */

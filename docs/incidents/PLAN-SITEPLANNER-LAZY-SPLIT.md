@@ -9,7 +9,7 @@
 > up to implement, §6 is the tranche order and §4 is the measurement gate every tranche must
 > clear before it ships.
 >
-> **This is the bundle-weight axis, not the re-render axis.** `docs/PLAN-SITEPLANNER-DECOMPOSITION.md`
+> **This is the bundle-weight axis, not the re-render axis.** `docs/incidents/PLAN-SITEPLANNER-DECOMPOSITION.md`
 > (B287058) is a separate, already-scoped, not-started programme that splits the same file by
 > STATE OWNERSHIP, to stop a mouse move from re-running a 22,000-line render body. That
 > programme explicitly disclaims byte weight ("Not a bundle-size item. B1064 owns the bytes.").
@@ -330,6 +330,6 @@ conversation — not part of "the whole job" as scoped here.
   honest ceiling of what's achievable through this axis (≈ 2357 KB even doing everything,
   including tranche E) and points at the existing policy question on B329408 rather than
   re-opening it here.
-- **Not the state-ownership programme.** `docs/PLAN-SITEPLANNER-DECOMPOSITION.md` (B287058) is a
+- **Not the state-ownership programme.** `docs/incidents/PLAN-SITEPLANNER-DECOMPOSITION.md` (B287058) is a
   separate, cross-referenced effort on the same file, different axis (re-render frequency, not
   load weight). Tranche E's likely sequencing after it is the one place the two intersect.

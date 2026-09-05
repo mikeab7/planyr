@@ -1,7 +1,7 @@
 {
   "$comment": [
     "Planyr standing performance budgets (NEW-8). THESE ARE THE CEILING \u2014 a feature that",
-    "breaches one ships with a matching optimization, or does not ship. See docs/PERF-BUDGETS.md",
+    "breaches one ships with a matching optimization, or does not ship. See docs/perf/PERF-BUDGETS.md",
     "for the rule, the measurement blockers, and how to change a number here.",
     "",
     "THE BUNDLE METRICS CARRY A BASELINE, NOT A HAND-PINNED CEILING (NEW-1, 2026-07-30):",
@@ -770,7 +770,7 @@
     "$comment": [
       "Browser-measured, by ui-audit/perf-harness.mjs. NOT gated in the required CI build check \u2014",
       "frame timing and heap on a shared CI runner are too noisy to gate a merge on, and the aerial",
-      "budget needs live external tile hosts. Run on demand; see docs/PERF-BUDGETS.md for why and for",
+      "budget needs live external tile hosts. Run on demand; see docs/perf/PERF-BUDGETS.md for why and for",
       "what IS gated.",
       "",
       "THE REFERENCE SCENARIO WAS REPLACED 2026-07-31 (NEW-1), AND THE FRAME SEEDS BEFORE THAT DATE",
