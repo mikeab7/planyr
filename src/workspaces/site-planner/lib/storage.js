@@ -501,6 +501,7 @@ export async function pushSiteToCloud(id) {
   if (!m) return { ok: false, error: "missing" };
   return cloudUpsert(activeUid(), m);
 }
+
 /* B1165441 (NEW-2/NEW-3, adversarial review of B1156864/PR 1424) — "Nothing in the app ever
  * creates a site for a comp; the migration was a snapshot, not a mechanism." The one-time backfill
  * (db/site_role_unify_backfill_20260905.sql) attached the three comps that existed the day it ran
