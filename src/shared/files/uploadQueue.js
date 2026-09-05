@@ -24,6 +24,7 @@ export const QUEUE_STATUS = {
   NEEDS_FILING: "needs_filing", // filed but unrouted (no / low-confidence match) — stays until triaged
   FAILED: "failed",             // pipeline error — stays until retried
   REJECTED: "rejected",         // empty / unreadable file — never entered the pipeline
+  DUPLICATE: "duplicate",       // B1205297 — a file of this name is already filed here; stays until the user picks Replace / Keep both / Cancel
 };
 
 // How long a freshly-filed item stays in the active group before it demotes into the
@@ -207,6 +208,7 @@ export function partitionAccepted(files) {
 
 const ACTIVE_ALWAYS = new Set([
   QUEUE_STATUS.PROCESSING, QUEUE_STATUS.NEEDS_FILING, QUEUE_STATUS.FAILED, QUEUE_STATUS.REJECTED,
+  QUEUE_STATUS.DUPLICATE,
 ]);
 
 // A DONE item that just landed and is still inside its confirmation beat.

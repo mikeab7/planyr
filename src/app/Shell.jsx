@@ -481,7 +481,11 @@ export default function Shell() {
           }
           return (
             <div key={w.id} style={{ position: "absolute", inset: 0, display: isActive ? "flex" : "none", flexDirection: "column" }}>
-              <ErrorBoundary label={w.label}>
+              {/* NEW-2 — `label` is the human-facing crash-card copy ("Site Planyr"); `moduleId`
+                  is the same slug every other telemetry source reports (`w.id`, "site-planner").
+                  Passing only `label` before this made every React crash file under a display
+                  name no other row in client_errors used — see ErrorBoundary.jsx's own note. */}
+              <ErrorBoundary label={w.label} moduleId={w.id}>
                 <Suspense fallback={<ModuleLoader module={w.id} />}>
                   <Comp
                     isActive={isActive}
