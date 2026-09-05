@@ -40,7 +40,7 @@ import {
   SHEET_COLUMNS, cellState, applyCellEdit, fillDownColumn, spillPaste, visibleColumnIndices,
   computeFlexWidths, widthFor, frozenLeftOffsets, saveButtonLabel, matchOption, optionsForColumn,
 } from "../lib/compSheetColumns.js";
-import { parcelLocationText, siteplanLocationText, pinFallbackText } from "../lib/compLocationText.js";
+import { siteplanLocationText, pinFallbackText } from "../lib/compLocationText.js";
 import { todayIso } from "../lib/compDates.js";
 import { FONT_SIZE } from "../../ui/designTokens.js";
 import { reverseGeocodeLatLon } from "../../../workspaces/site-planner/lib/geocode.js";
@@ -165,16 +165,18 @@ function locationCacheKey(anchor) {
 }
 
 /** The Location cell's display text for ONE row — three anchor kinds, three identities (see
- * compLocationText.js's header). A pin resolves through the row's OWN cache
+ * compLocationText.js's header). A pin OR a parcel resolves through the row's OWN cache
  * (`row.locationCache = {key, text, resolving}`, populated async by the effect in
  * CompEntryGrid), falling back to `pinFallbackText` (synchronous, never blank) while that's
- * pending or unavailable. */
+ * pending or unavailable. ⛔ NEW-1 (owner-adversarial review, 2026-09-05) — a parcel anchor used
+ * to render its raw APN here (`parcelLocationText`) instead of resolving a real place the same
+ * way a pin does, even though it carries the identical lat/lon; the APN is shown separately, on
+ * its own row, once the comp is saved (`comps.js`'s `compFieldRows`). */
 export function locationCellText(row, overlaysById) {
   const anchor = row.draft.anchor;
   if (!anchor) return null;
-  if (anchor.kind === "parcel") return parcelLocationText(anchor, (key) => countyEntry(key)?.name);
   if (anchor.kind === "site_plan") return siteplanLocationText(anchor, overlaysById) || pinFallbackText(anchor, countyEntry);
-  // pin
+  // pin or parcel — both resolve to a real place the same way.
   const key = locationCacheKey(anchor);
   if (row.locationCache?.key === key && row.locationCache.text) return row.locationCache.text;
   return pinFallbackText(anchor, countyEntry);
@@ -761,7 +763,9 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
   useEffect(() => {
     rows.forEach((row) => {
       const anchor = row.draft.anchor;
-      if (!anchor || anchor.kind !== "pin") return;
+      // NEW-1 — a parcel anchor reverse-geocodes exactly like a pin (same lat/lon shape); only
+      // site_plan (no street address to resolve) is excluded.
+      if (!anchor || (anchor.kind !== "pin" && anchor.kind !== "parcel")) return;
       const key = locationCacheKey(anchor);
       if (!key || row.locationCache?.key === key) return; // already resolved, or already in flight, for this exact position
       onRowsChangeRef.current(rowsRef.current.map((r) => (r._id === row._id ? { ...r, locationCache: { key, text: null, resolving: true } } : r)));
@@ -770,7 +774,8 @@ export default function CompEntryGrid({ rows, onRowsChange, armedRowId, onArm, o
           if (r._id !== row._id) return r;
           // The anchor may have moved on (re-picked, or the row deleted and a new one reusing
           // nothing) by the time this resolves — only apply a response that still matches.
-          if (r.draft.anchor?.kind !== "pin" || locationCacheKey(r.draft.anchor) !== key) return r;
+          const rKind = r.draft.anchor?.kind;
+          if ((rKind !== "pin" && rKind !== "parcel") || locationCacheKey(r.draft.anchor) !== key) return r;
           return { ...r, locationCache: { key, text: ans?.label || null, resolving: false } };
         }));
       });
