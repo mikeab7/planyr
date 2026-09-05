@@ -539,3 +539,17 @@ alter table public.food_visits add constraint food_visits_rating_ambiance_check
 --   select polname from pg_policy where polrelid = 'public.food_dish_wishlist'::regclass;  -- 4 owner-only rows (select/insert/update/delete), no anon
 --   select numeric_precision, numeric_scale from information_schema.columns
 --     where table_name = 'food_visits' and column_name = 'rating';                    -- expect 4, 2
+
+-- B1205298 (2026-09-05 db-hygiene sweep) — pin search_path on the three functions this file
+-- defines. All three are already SECURITY INVOKER (no privilege-escalation exposure — the
+-- Supabase advisor's function_search_path_mutable WARN is about an unqualified identifier
+-- resolving against whatever search_path the CALLING session set, not elevated rights), but they
+-- were 3 of the only 9 functions in this schema without the pin. Plain ALTER FUNCTION, never
+-- CREATE OR REPLACE — additive, and it must not re-issue `food_places_search_by_name_raw`'s own
+-- `set pg_trgm.word_similarity_threshold = 0.3` clause (see that function's own header: a fresh
+-- CREATE FUNCTION carrying that SET fails 42501 even when the value is unchanged, from both the
+-- migration tool and a direct SQL session — a plain ALTER FUNCTION SET search_path never touches
+-- that clause at all, so it adds a second, independent proconfig entry rather than replacing it).
+alter function public.food_places_in_bounds_sampled(double precision, double precision, double precision, double precision, integer, integer) set search_path = public, pg_temp;
+alter function public.food_places_search_by_name_raw(text, integer, double precision, double precision) set search_path = public, pg_temp;
+alter function public.food_places_search_by_name(text, integer, double precision, double precision) set search_path = public, pg_temp;
