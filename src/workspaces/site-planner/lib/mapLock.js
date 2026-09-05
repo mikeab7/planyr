@@ -225,6 +225,18 @@ export function sanitizeShift(shift, limit = REGISTRATION_SANITY_PX) {
   return { ok: true, reason: null, shift: { dx, dy } };
 }
 
+/* NEW-1 — is there a Leaflet container worth registering the drawing against? A 0×0 container
+ * (no map mounted on this route at all, or the planner's own pre-layout mount frame before
+ * Leaflet has sized it) has no real basemap frame to compare the drawing to — the projection
+ * fallback answers a fixed nominal offset every time regardless, which is what turned "no map"
+ * into a confident false "registration shift exceeded the sub-pixel range" report: measured on
+ * production, 62 of 62 instrumented `how:"projection"` hits carried `leafletW===leafletH===0`,
+ * zero true positives. The tile path never fires here either (no tile can render into a
+ * zero-size container), so gating the whole registration measurement on this costs it nothing. */
+export function hasRegisterableContainer(leafletSize) {
+  return !!leafletSize && leafletSize.w > 0 && leafletSize.h > 0;
+}
+
 /* ── B846384 — skip the forced-layout container read on a pure view gesture (B1359) ─────────
  * `wrap.clientWidth`/`clientHeight` and `map.getSize()` exist only to decide whether the map
  * container itself resized — and every input that can move it is already known without touching

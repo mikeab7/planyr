@@ -62,6 +62,44 @@ export function factsRowToPatch(row = {}) {
   };
 }
 
+/* Duplicate-upload screening (B1205297, owner-reported: the same spreadsheet filed three times
+ * into one project — two ingests 17 SECONDS apart, a third 43 minutes later). `reviews` is the
+ * raw fetchReviews() shape (reviewStore.js) — `project_id` / `sfile` / `updated_at` / `orgScope`
+ * are plain columns/aliases straight off `doc_reviews`, already scoped to non-deleted rows, so
+ * this needs no separate query and can never flag a row already in Recently Deleted. Screening
+ * is FILENAME equality (case/whitespace-insensitive) — the same axis a content-hash check would
+ * refine later if one is ever computed at upload time, never a second, independent rule. */
+export const DUPLICATE_RAPID_REPEAT_MS = 60000; // a second ingest inside this window is a retry, not a re-file
+
+function normalizedFileName(name) {
+  return String(name || "").trim().toLowerCase();
+}
+
+/* The most-recently-filed non-deleted review with the SAME source_file in the SAME filing scope
+ * (a project, or the Organization scope) — or null. `sourceFile` empty/unreadable never matches
+ * anything (an unnamed drop can't collide). */
+export function findDuplicateReview(reviews = [], { projectId = null, orgScope = false, sourceFile = "" } = {}) {
+  const name = normalizedFileName(sourceFile);
+  if (!name) return null;
+  let best = null;
+  for (const r of reviews || []) {
+    const inScope = orgScope ? !!r.orgScope : (!r.orgScope && (r.project_id ?? null) === projectId);
+    if (!inScope) continue;
+    if (normalizedFileName(r.sourceFile ?? r.sfile) !== name) continue;
+    if (!best || new Date(r.updated_at || 0) > new Date(best.updated_at || 0)) best = r;
+  }
+  return best;
+}
+
+/* True when `existingReview` was filed within the rapid-repeat window of `now` — a double-click
+ * or an upload retry, not a deliberate second filing of the same document. Such a repeat
+ * collapses onto the existing row silently (no second file_facts card, no prompt). */
+export function isRapidRepeatUpload(existingReview, now = Date.now()) {
+  if (!existingReview) return false;
+  const t = new Date(existingReview.updated_at || 0).getTime();
+  return Number.isFinite(t) && now >= t && now - t < DUPLICATE_RAPID_REPEAT_MS;
+}
+
 /* Merge stored facts onto the lightweight review rows (matched by review id, newest fact
  * winning). Reviews with no fact row are returned unchanged — so a pre-index file still shows,
  * just without captured placement. Additive + lossless; safe to run on every refresh. */

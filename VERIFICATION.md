@@ -164,6 +164,21 @@ was never clicked" quietly ships broken.
 
 **Result:** ⏳ pending — needs a real signed-in browser session against production Supabase. `Cadence: once`.
 
+### V874144 — B1203344: the Library's org-scope organize job no longer names a comp's tracked market-record site, and no tracked site gets a folder tree `Blocker: auth`
+
+**Why this needs its own real pass.** The fix (excluding `role:"tracked"` sites from `reviewStore.fetchProjects()`) is fully proven against a mocked Supabase in the sandbox (below), but the actual owner-reported symptom — the org-scope Library progress banner reading "Organizing <comp name> (N of M)" — only shows up in a real signed-in session with real comps on the account, which this sandbox's proxy CORS-blocks (can't reach Supabase auth).
+
+**What was verified here (this session, sandbox).** `test/reviewProjectsRoleFilter.test.js` (new, 3 tests) proves against a mocked Supabase client: a `role:"tracked"` group is dropped entirely from `fetchProjects()`'s result while a `role:"pursuit"` group is kept; an absent/legacy `role` column normalizes to pursuit rather than being silently excluded; `listProjects()` (the actual function `Library.jsx`/`ReviewsBar.jsx`/`FileBrowser.jsx` all call) inherits the filter. Also confirmed live against production (this session, via the Supabase MCP, no code deployed needed for this half): the three specific tracked sites named in the report (`trk0892cf7b73`, `trk4c75bf98dd`, `trk8eef7db4d0`) each had their already-provisioned 133-folder `project_folders` tree marked `trashed` (see B1203345) — that DB cleanup is independently done and confirmed regardless of this item's live-verify status. Full repo suite green (738 files / 15,041 tests), build clean.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner, on an account with at least one comp:**
+1. Read the loaded chunk hash in the same breath as everything below — confirm it names a chunk from a build after this PR merged.
+2. Save a new comp (or open one that already exists) so the account has at least one `role:"tracked"` market-record site.
+3. Open the Library module at org scope (the surface the original screenshot showed). **Expect:** no progress banner names the comp's site, and no new 133-folder tree is created for it.
+4. Open the Library's real project picker/switcher. **Expect:** the comp's tracked site never appears in the list (same standing rule B1430/B1431 already enforce for the Sites list and the cross-workspace project switcher — this closes the same gap for Library/Review).
+5. As a control, confirm an ordinary real project (a `role:"pursuit"` site) still organizes normally and still shows in every picker — the fix must exclude tracked sites only, never a real project.
+
+**Result:** ⏳ pending — needs a real signed-in browser session with real comp data. `Cadence: once`.
+
 ### V864432 — B1191456: the boot-time auto-fit no longer overwrites the first few seconds of the owner's own zoom/pan `Blocker: live-GIS` `Blocker: real-data`
 
 **Why this needs its own real pass.** The mechanism is a genuine timing race — a 120ms `setTimeout` that can fire late enough to land after a real wheel/pinch/pan gesture only when the main thread is genuinely busy right after boot, which in practice means real GIS/comp/parcel network calls congesting it. This sandbox's egress proxy blocks every external GIS/tile host, so nothing here can force the congestion that makes the race observable — confirmed the mechanism is otherwise sound via the structural/source-level tests below, but a sandbox pass on the RACE itself cannot be claimed.
