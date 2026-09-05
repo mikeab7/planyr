@@ -729,6 +729,17 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   the review/promote surface, reachable ONLY from the KML import button — hand entry never creates
   a row here. `db/test/comp_import_drafts_rls.test.sql` — the same self-rolling-back proof shape,
   9/9 passed live against production.
+  **⛔ B1165441 (NEW-2/NEW-3, adversarial review of B1156864/PR 1424) — every comp gets an owning
+  site automatically, never a duplicate.** `CompsPanel.jsx`'s `save()` calls the site-planner
+  workspace's storage module's `resolveOrCreateTrackedSiteForComp` whenever `draft.projectId` is
+  unset — a dynamic import (this panel's own chunk must not pull in that module's whole
+  site-model/geometry-healing/cloud-sync graph). `lib/compSiteMatch.js` is the pure matching rule it runs:
+  location (0.5mi, same radius the one-time backfill used, against sites of EVERY role so a
+  second deal on an already-tracked property attaches to it rather than minting a duplicate) then
+  an exact normalized-title fallback (`shared/projects/projectModel.js`'s `normalizeProjectName`)
+  — never blended into one score. A save that auto-attached to a MATCHED existing site (never a
+  brand-new one) surfaces which site and how (`assignNotice` in `CompDetail`) so a wrong guess is
+  reassignable via the existing Site dropdown rather than a silent duplicate.
 - **`reports/` (B842866) — the problem-report submission model behind the global help/report
   control (the app shell's own help-control component, mounted on every route).**
   `reportsStore.js` is the whole thing: `buildReportContext` (the same privacy-allowlist
