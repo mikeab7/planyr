@@ -9,7 +9,7 @@
  * and nothing anywhere was red. The cause was a SHAPE, not a line: a check that is REQUIRED, whose
  * verdict depends on ANOTHER UNMERGED BRANCH, and whose ONLY REMEDY WORSENS THE CONDITION FOR EVERY
  * PEER. Stack those three and you get a livelock with no fixed point and no merge control offered
- * to anyone — see `docs/CI-REQUIRED-CHECK.md`.
+ * to anyone — see `docs/incidents/CI-REQUIRED-CHECK.md`.
  *
  * The offending predicate (`BELOW`: "your id is at or under `claimedMax`, so the next merge will
  * probably take it") is gone from `scripts/check-mint.mjs` and `scripts/idBlocks.mjs`. Nothing

@@ -1,7 +1,7 @@
 /* NEW-4 — GRID vs GROUND: surface the combined scale factor, and flag a survey that looks like it
  * is already in ground coordinates.
  *
- * THE FINDING THIS MODULE EXISTS FOR (audited, not assumed — see docs/COLORADO-AUDIT.md §4).
+ * THE FINDING THIS MODULE EXISTS FOR (audited, not assumed — see docs/incidents/COLORADO-AUDIT.md §4).
  * Planyr uses TWO different feet frames and, until now, never said so:
  *   • DRAWN geometry lives in the planner's own frame (site-planner/lib/mapLock.js) — a uniform
  *     scaling of spherical Mercator anchored at the SITE ORIGIN. That frame is ground-true at the

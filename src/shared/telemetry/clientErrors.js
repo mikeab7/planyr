@@ -148,7 +148,7 @@ const notSent = (reason) => Promise.resolve({ ok: false, reason, error: null, at
  * traffic the same way.
  *
  * ⛔ THE DETECTOR IS `navigator.webdriver` FIRST, AND THE REASON IS MEASURED, NOT STYLISTIC.
- * The obvious gate was `window.__PLANYR_E2E`, which `docs/PERF-PLAN-SWITCH.md` §1 describes as set
+ * The obvious gate was `window.__PLANYR_E2E`, which `docs/perf/PERF-PLAN-SWITCH.md` §1 describes as set
  * by "every performance harness in this repo" — and for the ui-audit perf harnesses that is true.
  * It is NOT true of the e2e suite, which is where the measured noise actually comes from: **62 of
  * 81 specs in `e2e/` never set it**, `assembly-tear-detector.spec.js` — the top producer of three

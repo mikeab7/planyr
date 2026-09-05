@@ -8,7 +8,7 @@
  *
  * Every one of those copies lives in the Site route's chunk, so the duplication was charged to
  * the route's download budget eight times over. Folding them is the B50008–B50011 branch's
- * bundle-budget payback, not a tidy-up — see docs/PERF-BUDGETS.md.
+ * bundle-budget payback, not a tidy-up — see docs/perf/PERF-BUDGETS.md.
  *
  * The degenerate guard is the strictest of the two that had one (footprintEdit's), and it is a
  * superset of the behaviour the unguarded copies had for a real ring: a ring of 0, 1 or 2 points

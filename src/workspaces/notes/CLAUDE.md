@@ -135,7 +135,7 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   old→new direction with real timestamps, covers both the inline underline/strikethrough AND the
   block-level tag encoding, and states the CONSEQUENCE of each ("keeping the older version loses
   it") rather than bare set membership. Two-round screenshot critique loop recorded in
-  `docs/notes-conflict-critique.md` — round 2 caught a real doubled-article grammar bug in the
+  `docs/incidents/notes-conflict-critique.md` — round 2 caught a real doubled-article grammar bug in the
   edit-time-unknown fallback sentence, fixed by `rolePhrase()` (a mid-sentence-safe phrase form,
   separate from the heading-form `roleLabel()`, so no caller ever wraps a label in its own
   external article again).
@@ -196,7 +196,7 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   the two sit centered, close together, as a pair. Critique-loop screenshots (both themes ×
   desktop/narrow, plus a deliberately-injected long-note stress render proving the exact reported
   lines now scroll cleanly under the docked header) judged against the six-question bar in
-  `docs/notes-conflict-critique.md`; proof lives in the notes conflict-review verification
+  `docs/incidents/notes-conflict-critique.md`; proof lives in the notes conflict-review verification
   harness under `ui-audit/` (62 checks).
 - `lib/notesVersionOrder.js` — PURE: `orderConflictVersions()` decides which of the two
   conflicting copies is NEWER (both timestamps known and different), returning `{comparable,

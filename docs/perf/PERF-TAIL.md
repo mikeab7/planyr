@@ -108,7 +108,7 @@ sample in the window landed outside a named rule.
 
 > ### There is no three-second post-draw tail at 1×. It is 453 ms, and 57% of it is idle.
 
-**And the 2,216 ms in `docs/PERF-CONSTRAINTS.md` §7 is not this window.** Two things were folded
+**And the 2,216 ms in `docs/perf/PERF-CONSTRAINTS.md` §7 is not this window.** Two things were folded
 into it:
 
 1. **It was measured at 4× CPU throttle.** Measured here at 4×, the app's own tail is **919 ms** —
@@ -192,7 +192,7 @@ Ranked by what this dispatch actually measured, not by what was expected.
 
 | # | target | predicted saving | basis | owner |
 |---:|---|---|---|---|
-| 1 | **The plan-switch leak** — every project switch strands ~2,342 detached DOM nodes and ~106 listeners, **linearly and without bound** (§ `docs/PERF-PLAN-SWITCH.md`) | removes an **unbounded** per-switch cost; at 3 cycles `rendererNodes` is already **+326%** | MEASURED this dispatch, V8's own detachedness flag | **B1439** |
+| 1 | **The plan-switch leak** — every project switch strands ~2,342 detached DOM nodes and ~106 listeners, **linearly and without bound** (§ `docs/perf/PERF-PLAN-SWITCH.md`) | removes an **unbounded** per-switch cost; at 3 cycles `rendererNodes` is already **+326%** | MEASURED this dispatch, V8's own detachedness flag | **B1439** |
 | 2 | **Layers: ~360 ms of a gesture per enabled layer**, +102.5% across 4 | the largest measured per-gesture amplifier, and the owner never turns them on — the FILE does | MEASURED (B1436) | small fix + **B1424** |
 | 3 | **Panels: +34.4% of an identical gesture at 4 open**, almost all script | ~683 ms of script on unchanged content | MEASURED (B1436) | **B1351** |
 | 4 | **Before first ink, not after it.** 635 ms to first ink at 1×, of which the bulk is `first script → first contentful paint`. The 453 ms tail is 57% idle. | the boot's real cost is upstream of this document's window | MEASURED here + B1431 | **B1349 / B1064** |

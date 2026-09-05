@@ -139,7 +139,7 @@ function listenerGrowth(before, after) {
  * Twice per A→B→A round trip, which is exactly the "linear, ~2,342 nodes per round trip, released
  * never" signature this script was written to explain. Disposing it takes the detached count to 0
  * and `rendererNodes`/`jsEventListeners` to identical before/after. See lib/waitRelease.mjs and
- * §12–§15 of docs/PERF-PLAN-SWITCH.md. */
+ * §12–§15 of docs/perf/PERF-PLAN-SWITCH.md. */
 async function switchPlan(page, groupId) {
   await page.evaluate((g) => { window.location.hash = `#/project/${g}/site`; }, groupId);
   await page.waitForTimeout(2500);
