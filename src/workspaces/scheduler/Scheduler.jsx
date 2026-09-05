@@ -531,10 +531,12 @@ export default function Scheduler({
           // supplied, the two controls fell back to dashboardNav.js's own two DIFFERENT default
           // strings (see that module's header) — the exact near-identical, confusing wording
           // B1128272's own body named when it fixed the PROJECT-scope case. Since both controls
-          // here provably do the identical thing (leave Schedule for the Site Planner map), both
+          // here provably do the identical thing (leave Schedule for the Dashboard), both
           // get the SAME explicit tooltip, in the wordmark's already-established project-scope wording.
-          logoDashboardTitle="Leave Schedule — go to the Site Planner map"
-          dashboardTitle="Leave Schedule — go to the Site Planner map"
+          // B1213312 — reworded from "go to the Site Planner map": that stopped being where the
+          // wordmark leads once the Dashboard became a real, separate destination.
+          logoDashboardTitle="Leave Schedule — go to the Dashboard"
+          dashboardTitle="Leave Schedule — go to the Dashboard"
           onNewProject={onNewProject}
         />
         <AgendaView scope={userId || "local"} />
@@ -582,7 +584,8 @@ export default function Scheduler({
         // own reports view). Distinct tooltips say so in plain words rather than
         // leaving the owner to click either one to find out which does what.
         onLogoDashboard={onGoDashboard}
-        logoDashboardTitle="Leave Schedule — go to the Site Planner map"
+        // B1213312 — reworded from "go to the Site Planner map": see the org-scope branch above.
+        logoDashboardTitle="Leave Schedule — go to the Dashboard"
         dashboardTitle="Schedule dashboard — reports for every project"
         // NEW-1 (B1080545) — while routed on a Planyr project, "+ New project" must create a
         // SCHEDULE FOR THAT PROJECT (linked + named after it, disambiguated if it already has

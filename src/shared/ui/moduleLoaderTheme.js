@@ -19,6 +19,10 @@ export const LOADER_SKINS = {
   "model":        { kind: "gantt", label: "Opening spreadsheet…" }, // B1166768 — user-facing name is "Spreadsheet"
   // ⛔ NO "food" ENTRY (NEW-2) — /food is unlisted; it gets the generic "Loading…" fallback
   // below rather than a named skin, consistent with not naming it anywhere in this file.
+  // ⛔ NO "dashboard" ENTRY EITHER (B1213312) — every LOADER_SKINS key must have a matching
+  // MODULE_ACCENT entry (test/moduleLoaderTheme.test.js's "no drift" guard), and the Dashboard
+  // isn't a themed workspace (no module accent of its own — see moduleAccent.js). It gets the
+  // generic "Loading…" fallback below, same as any other unlisted id.
 };
 
 const FALLBACK = "#e8590c";

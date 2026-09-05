@@ -84,7 +84,7 @@ describe("NEW-3 — Schedule's org-scope Dashboard tooltips no longer carry pre-
     // Without an explicit override neither prop is passed, so dashboardNav.js's own defaults
     // apply — proving these two assertions actually depend on the fix rather than passing blind.
     const preFix = SRC.replace(
-      /\s*logoDashboardTitle="Leave Schedule — go to the Site Planner map"\n\s*dashboardTitle="Leave Schedule — go to the Site Planner map"\n/,
+      /\s*logoDashboardTitle="Leave Schedule — go to the Dashboard"\n\s*dashboardTitle="Leave Schedule — go to the Dashboard"\n/,
       "\n",
     );
     expect(preFix).not.toBe(SRC);
