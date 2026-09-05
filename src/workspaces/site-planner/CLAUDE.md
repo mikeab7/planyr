@@ -11,6 +11,18 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
 - `siteModel.js` — the per-plan schema (`createSiteModel`, `SITE_MODEL_VERSION`); read via
   selectors, persist via `storage.js`. **Additive only** — bump the version, extend `migrate`.
 - `storage.js` — thin model layer (migrate on read, merge+renormalize on save).
+- **`siteStatus.js` (B843792, NEW-1 — "one site entity with a role") now also owns `role`** —
+  "pursuit" (the existing pipeline) vs "tracked" (market intel only: a comp, or a note like
+  "quoting $6/ft, nothing transacted"). Every existing site defaults to "pursuit" with zero bytes
+  written (unlike `status`, role has no legacy-vs-fresh split to make). `SitePlannerApp.jsx`'s
+  `siteGroups` (the map's Sites list) filters to `role === "pursuit"` by default — a tracked site
+  never pollutes the owner's pipeline. Flipping a site's role later needs no re-entry:
+  `storage.setSiteGroupRole` → `db/set_site_group_role.sql`, the SAME one-atomic-statement-over-
+  the-group shape `rename_site_group.sql` uses. A comp's owning site is `comps.project_id`
+  (the comps db folder's own schema header explains why that column — not a new one —
+  supersedes into this role); `db/site_role_unify_backfill_20260905.sql` is the one-time migration
+  that attached the three pre-existing live comps to sites (creating a new "tracked" one for each,
+  since none matched an existing site's location within half a mile).
 - **`splitIntegrity.js` (B540768, B966624/B966629) — parcel split-lineage invariants, pure and
   Node-testable.** `isLiveActive`/`liveActive` (a parcel counts only when active AND not soft-deleted —
   read either half alone and a sum silently vanishes or doubles) · `lineageAudit` (account-wide: any

@@ -21,7 +21,7 @@ import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, initHistorySto
 import { cloudParcelRows, cloudElementRecency } from "./lib/cloudSync.js";
 import { summarizeParcelRows } from "./lib/parcelSummary.js";
 import { summarizeElementRecency, groupRecencyMs } from "./lib/siteRecency.js";
-import { STATUS_META } from "./lib/siteModel.js";
+import { STATUS_META, roleOf } from "./lib/siteModel.js";
 import { isPinnedMapReference } from "./lib/overlayOrder.js";
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
 import { idbPersist } from "./lib/localDb.js";
@@ -855,9 +855,16 @@ export default function App({
 
   // The map lists SITES (locations), so collapse plans to one representative per
   // group — preferring the active plan so its pin highlights correctly.
+  //
+  // B843792 (NEW-1) — the Sites list filters to role "pursuit" BY DEFAULT, so a "tracked" site
+  // (market intel only — a comp, an asking price with nothing transacted) never pollutes the
+  // owner's pipeline. This is a required outcome of NEW-1, stated explicitly: "Nothing about the
+  // existing Sites list changes for the owner." A directly-opened site is never hidden from
+  // itself regardless of role (the `act` override below runs unconditionally), matching the
+  // existing pattern for a site not yet in `siteGroups` at all.
   const siteGroups = useMemo(() => {
     const byGroup = new Map();
-    sites.forEach((s) => { const g = groupOf(s); if (!byGroup.has(g)) byGroup.set(g, s); });
+    sites.forEach((s) => { if (roleOf(s) !== "pursuit") return; const g = groupOf(s); if (!byGroup.has(g)) byGroup.set(g, s); });
     const act = activeSiteId && sites.find((s) => s.id === activeSiteId);
     if (act) byGroup.set(groupOf(act), act);
     return [...byGroup.values()];

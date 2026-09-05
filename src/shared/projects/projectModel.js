@@ -26,17 +26,21 @@ export function groupProjects(records = []) {
     const updatedAt = Number(s.updatedAt) || 0;
     const name = s.site || s.name || "Untitled site";
     const status = s.status || null;
+    // B843792 (NEW-1) — role (pursuit vs tracked), carried the same way status is: the newest
+    // record in the group wins. Not filtered here — callers that need "pursuit only" (the Sites
+    // list) filter on it explicitly; this function still reports every group.
+    const role = s.role || null;
     // Cross-module schedule link hint (schema v9): surface it on the project entry so the
     // breadcrumb's connectedness chip can show "has a schedule" without a second lookup. The
     // hint is mirrored identically across a group's plans, so any plan carrying it is enough.
     const scheduleProjectId = s.scheduleProjectId != null ? s.scheduleProjectId : null;
     const prev = byGroup.get(id);
     if (!prev) {
-      byGroup.set(id, { id, name, updatedAt, status, scheduleProjectId });
+      byGroup.set(id, { id, name, updatedAt, status, role, scheduleProjectId });
     } else if (updatedAt >= prev.updatedAt) {
-      // newer record wins the label + status; always keep the max timestamp and any link hint
-      // found on any plan (a hint on an older plan shouldn't vanish behind a newer unlinked one).
-      byGroup.set(id, { id, name, updatedAt, status: status || prev.status, scheduleProjectId: scheduleProjectId ?? prev.scheduleProjectId });
+      // newer record wins the label + status/role; always keep the max timestamp and any link
+      // hint found on any plan (a hint on an older plan shouldn't vanish behind a newer unlinked one).
+      byGroup.set(id, { id, name, updatedAt, status: status || prev.status, role: role || prev.role, scheduleProjectId: scheduleProjectId ?? prev.scheduleProjectId });
     } else if (scheduleProjectId != null && prev.scheduleProjectId == null) {
       prev.scheduleProjectId = scheduleProjectId;
     }

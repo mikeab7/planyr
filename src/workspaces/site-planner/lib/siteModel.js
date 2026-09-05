@@ -45,8 +45,9 @@ import { normCountyKey } from "../../../shared/gis/countyKeys.js";
 import {
   SITE_MODEL_VERSION, STATUSES, STATUS_META, DEFAULT_STATUS, LEGACY_STATUS,
   normStatus, isLegacyRecord, statusOf,
+  ROLES, ROLE_META, DEFAULT_ROLE, normRole, roleOf,
 } from "./siteStatus.js";
-export { SITE_MODEL_VERSION, STATUSES, STATUS_META, statusOf };
+export { SITE_MODEL_VERSION, STATUSES, STATUS_META, statusOf, ROLES, ROLE_META, DEFAULT_ROLE, normRole, roleOf };
 
 // v12 (B671): every drawn element carries an explicit `z` — the within-type-layer stacking
 // tiebreak that used to be IMPLICIT array position (see planStyle.byZ). `ensureZ` assigns a gapped
@@ -1233,6 +1234,11 @@ export function createSiteModel(p = {}, { onHeal } = {}) {
     // older schemaVersion is a pre-feature site (→ "active", presumed live), while
     // a fresh record (no prior version) starts in "pursuit".
     status: normStatus(p.status, isLegacyRecord(p) ? LEGACY_STATUS : DEFAULT_STATUS),
+    // B843792 (NEW-1) — the site's ROLE: "pursuit" (the existing pipeline) vs "tracked" (market
+    // intel only — a comp, an asking price). Every record, legacy or fresh, defaults to
+    // "pursuit" — see siteStatus.js's own comment for why this differs from status's
+    // legacy-vs-fresh split.
+    role: normRole(p.role),
     // inputs
     parcels: ensureZ(withStableParcelIds(parcelArr(p.parcels))),
     // placed site-plan overlays (B72): backdrop PDFs/images positioned on the map by
