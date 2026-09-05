@@ -49,6 +49,7 @@ import { RADIUS } from "../../shared/ui/radius.js";
 // downstream propagation entirely — the same principle NEW-2(a) already applied to `currentSite`.
 import { writeLastRoute } from "../../app/lastRoute.js";
 import { DEFAULT_MODULE } from "../../app/route.js";
+import { markProjectFreshlyMinted } from "../../shared/projects/projectModel.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
 migrateSiteGroups();  // give every legacy record a site (location) group
@@ -141,7 +142,16 @@ export default function App({
    * never saved, and even a located blank's cloud write (`pushLoud`) is fire-and-forget, so a
    * fresh id can reach the URL well before any row exists anywhere. A plain component ref is
    * enough — it only has to survive from "id minted" to effect (2) observing it, which happens
-   * within this same mount's lifetime (this stays the active tab throughout "New project"). */
+   * within this same mount's lifetime (this stays the active tab throughout "New project").
+   *
+   * B1202176 (extended) — this ref alone does NOT survive a reload, and `lastRoute.js`'s
+   * restore-where-I-left-off pointer is written (Shell.jsx's `writeLastRoute` effect) the moment
+   * the route changes to this id — well before either mint site below gets anywhere near
+   * `saveSite`/`pushLoud`. Close the tab before drawing anything and the next bare-domain boot
+   * restores this exact id with a brand-new (empty) ref, reading "missing" again — the owner's
+   * live repro. Both mint sites also call `markProjectFreshlyMinted(id)`
+   * (`shared/projects/projectModel.js`), a small capped localStorage list that is this ref's
+   * cross-reload twin; Shell.jsx's gate consults both. */
   const locallyMintedGroupsRef = useRef(new Set());
   const [routeMissing, setRouteMissing] = useState(null);
   // Clear a dangling currentSite pointer (e.g. a never-persisted site from before
@@ -534,6 +544,7 @@ export default function App({
   const newSiteFromMap = async (payload) => {
     const id = newId();
     locallyMintedGroupsRef.current.add(id); // B1202176 — see the ref's own header
+    markProjectFreshlyMinted(id); // B1202176 (extended) — this ref's cross-reload twin
     const parcels = (payload.parcels || [])
       .filter((p) => p.points?.length >= 3)
       .map((p, i) => ({ id: `p${id}_${i}`, points: p.points, locked: true, addr: p.addr || null, acct: p.acct || null, attrs: p.attrs || null }));
@@ -567,6 +578,7 @@ export default function App({
   const newBlankSite = async (opts) => {
     const id = newId();
     locallyMintedGroupsRef.current.add(id); // B1202176 — see the ref's own header; covers BOTH branches below
+    markProjectFreshlyMinted(id); // B1202176 (extended) — this ref's cross-reload twin; covers BOTH branches below
     const o = opts && opts.origin && Number.isFinite(opts.origin.lat) && Number.isFinite(opts.origin.lon)
       ? { lat: opts.origin.lat, lon: opts.origin.lon } : null;
     if (o) {

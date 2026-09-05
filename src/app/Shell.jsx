@@ -26,7 +26,7 @@ import FloatingNotice from "../shared/ui/FloatingNotice.jsx";
 import { mayResumeLastSite } from "../workspaces/site-planner/lib/bootResume.js";
 import HelpReportControl from "./HelpReportControl.jsx";
 import { retryQueuedReports } from "../shared/reports/reportsStore.js";
-import { checkProjectDeletionStatus, listDeletedProjects, restoreDeletedProject, projectGateStatus } from "../shared/projects/projects.js";
+import { checkProjectDeletionStatus, listDeletedProjects, restoreDeletedProject, projectGateStatus, wasProjectFreshlyMinted } from "../shared/projects/projects.js";
 
 // NEW-2 (B848833) — lazy, same reasoning as AdminGate/DesignGallery below: a soft-deleted-project
 // notice is rare enough that it has no business riding the entry chunk every route downloads.
@@ -350,6 +350,16 @@ export default function Shell() {
    * B848833's own gate) blocked EVERY "New project" click behind "This project doesn't exist"
    * before the user could do anything to create the row. `projectGateStatus` is the one place
    * that folds this context into the DB's honest `{exists,deleted}` answer — see its own header.
+   *
+   * B1202176 (extended) — this ref is a plain in-memory Set, so it resets to empty on a
+   * bare-domain reload: a fresh mount of THIS component, exactly what `lastRoute.js`'s
+   * restore-where-I-left-off seed triggers. A brand-new, never-drawn-on project writes its id
+   * into `lastRoute` (the `writeLastRoute(route)` effect below) the moment the route changes,
+   * well before it's ever saved anywhere — so closing the tab first and reopening the bare
+   * domain restored a pointer this ref no longer remembered, reading "missing" again (the
+   * owner's live repro). `wasProjectFreshlyMinted` reads the small capped localStorage list
+   * SitePlannerApp.jsx writes at both mint sites — this ref's cross-reload twin — so the two are
+   * ORed together below rather than either alone deciding.
    */
   const freshProjectIdsRef = useRef(new Set());
   useEffect(() => {
@@ -358,8 +368,20 @@ export default function Shell() {
     let live = true;
     checkProjectDeletionStatus(projectId).then((res) => {
       if (!live || gateReqRef.current !== projectId) return; // superseded by a later navigation
-      const g = projectGateStatus({ res, freshlyCreated: freshProjectIdsRef.current.has(projectId) });
+      const freshlyCreated = freshProjectIdsRef.current.has(projectId) || wasProjectFreshlyMinted(projectId);
+      const g = projectGateStatus({ res, freshlyCreated });
       setProjectGate({ id: projectId, ...g });
+      // B1202176 (extended, owner live-measured on production build 89b5c3f) — a CONFIRMED
+      // "missing" id is stuck in `lastRoute` forever otherwise: the notice itself never touches
+      // it, so every subsequent reload/bare-domain boot seeds the URL straight back into the
+      // same dead id and reproduces the identical dead end — sticky until the user happens to
+      // click "Go to Dashboard" (measured: that click is the ONLY thing that currently corrects
+      // it). Overwriting it with the neutral route the instant the id is confirmed dead is what
+      // lastRoute.js's own stated design ("a dead id resolves to the map/dashboard and the URL
+      // self-heals") actually requires, so a future boot never routes into it again. Deliberately
+      // scoped to "missing" only — a genuinely soft-deleted project still offers Restore, so a
+      // reload correctly shows that SAME notice again rather than one this tab silently discarded.
+      if (g.status === "missing") writeLastRoute({ module: "site-planner", projectId: null, cross: false, org: false });
     });
     return () => { live = false; };
   }, [projectId, cross, org, gateRecheck]);

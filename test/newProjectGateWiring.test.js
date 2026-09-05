@@ -52,6 +52,25 @@ describe("SitePlannerApp.jsx marks every freshly-minted project id before it can
   it("the URL-sync effect reports freshlyCreated straight off that same ref", () => {
     expect(SP.includes('onProjectChange?.(effGroup, { freshlyCreated: locallyMintedGroupsRef.current.has(effGroup) });')).toBe(true);
   });
+
+  /* B1202176 (extended) — a restored `lastRoute` pointer to a project id that was minted LOCALLY
+   * but never saved anywhere reads "missing" too, once the mint happened in an earlier tab/mount:
+   * `locallyMintedGroupsRef` is in-memory only and does not survive the reload. Both mint sites
+   * must ALSO write the cross-reload twin (`markProjectFreshlyMinted`, a small capped localStorage
+   * list in projectModel.js), or this exact case regresses silently. */
+  it("both mint sites also call the persisted, cross-reload-surviving twin", () => {
+    expect(SP.includes('import { markProjectFreshlyMinted } from "../../shared/projects/projectModel.js";')).toBe(true);
+    const newSiteStart = SP.indexOf("const newSiteFromMap = async (payload) => {");
+    const newBlankStart = SP.indexOf("const newBlankSite = async (opts) => {");
+    expect(newSiteStart).toBeGreaterThan(-1);
+    expect(newBlankStart).toBeGreaterThan(-1);
+    const persistIdxA = SP.indexOf("markProjectFreshlyMinted(id);", newSiteStart);
+    const persistIdxB = SP.indexOf("markProjectFreshlyMinted(id);", newBlankStart);
+    expect(persistIdxA).toBeGreaterThan(newSiteStart);
+    expect(persistIdxA).toBeLessThan(SP.indexOf("saveSite(", newSiteStart));
+    expect(persistIdxB).toBeGreaterThan(newBlankStart);
+    expect(persistIdxB).toBeLessThan(SP.indexOf("if (o) {", newBlankStart));
+  });
 });
 
 describe("Shell.jsx records the fresh-creation signal and folds it into the gate's verdict", () => {
@@ -67,12 +86,24 @@ describe("Shell.jsx records the fresh-creation signal and folds it into the gate
   });
 
   it("the deletion-check response is resolved through projectGateStatus, not decided inline", () => {
-    expect(SHELL.includes("import { checkProjectDeletionStatus, listDeletedProjects, restoreDeletedProject, projectGateStatus }")).toBe(true);
-    expect(SHELL.includes("const g = projectGateStatus({ res, freshlyCreated: freshProjectIdsRef.current.has(projectId) });")).toBe(true);
+    expect(SHELL.includes("import { checkProjectDeletionStatus, listDeletedProjects, restoreDeletedProject, projectGateStatus, wasProjectFreshlyMinted }")).toBe(true);
+    expect(SHELL.includes("const freshlyCreated = freshProjectIdsRef.current.has(projectId) || wasProjectFreshlyMinted(projectId);")).toBe(true);
+    expect(SHELL.includes("const g = projectGateStatus({ res, freshlyCreated });")).toBe(true);
     expect(SHELL.includes("setProjectGate({ id: projectId, ...g });")).toBe(true);
     // The old inline "!res.exists → missing" branch must be GONE from the gate effect, not merely
     // duplicated beside the new call — otherwise the fix could be dead code sitting next to the
     // still-broken original.
     expect(SHELL.includes('setProjectGate({ id: projectId, status: "missing", name: null, deletedAt: null }); return; }')).toBe(false);
+  });
+
+  /* B1202176 (extended, THE CORE REPRO OF THE RELOAD CASE) — the in-memory ref alone is exactly
+   * the bug: it is scoped to ONE mount, so a genuinely fresh Shell mount (a bare-domain reload,
+   * or a brand-new tab) always starts this ref empty regardless of what an earlier tab minted.
+   * The gate must consult the persisted twin TOO, not only the ref — this is the wiring proof
+   * that a future edit can't quietly drop the OR and still pass every other test here (the ref
+   * alone would still make the SAME-SESSION tests above pass). */
+  it("the freshlyCreated computation ORs the reload-surviving persisted check in, not the ref alone", () => {
+    const idx = SHELL.indexOf("const freshlyCreated = freshProjectIdsRef.current.has(projectId) || wasProjectFreshlyMinted(projectId);");
+    expect(idx).toBeGreaterThan(-1);
   });
 });
