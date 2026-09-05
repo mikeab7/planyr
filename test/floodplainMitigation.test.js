@@ -171,6 +171,53 @@ describe("computeMitigation — the volume core", () => {
     const noWse = computeMitigation({ footprints: [fp100], zones: [noBfeZone], rule: harris, elev: { padElevFt: 100, existGradeFt: 90 } });
     expect(noWse.volumeCf).toBeNull();
     expect(noWse.unknownReason).toMatch(/BFE/);
+    expect(noWse.unknownReasons).toEqual([noWse.unknownReason]);
+  });
+
+  // NEW-4 (2026-09-05, owner-reported) — when TWO trigger classes are each blocked on a
+  // DIFFERENT missing input, `unknownReason` (singular) only ever kept the last one the roll-up
+  // loop saw; `unknownReasons` must carry every distinct reason so neither is lost.
+  it("unknownReasons collects EVERY distinct missing-input reason across classes, never just the last one", () => {
+    const pad100 = { id: "b1", label: "Pad", ring: rect(0, 0, 100, 100) };
+    const z1pct = mkZone("1pct", [rect(0, 0, 60, 100)], { staticBfeFt: 95 });
+    const z02pct = mkZone("02pct", [rect(60, 0, 40, 100)]);
+    // padElevFt is deliberately omitted — the 1pct class can't price without a pad, and the
+    // 02pct class can't price without a 0.2% WSE. Two different classes, two different reasons.
+    const r = computeMitigation({ footprints: [pad100], zones: [z1pct, z02pct], rule: harris, elev: { existGradeFt: 90 } });
+    expect(r.volumeCf).toBeNull();
+    expect(r.unknownReasons.length).toBe(2);
+    expect(r.unknownReasons.some((s) => /pad/.test(s))).toBe(true);
+    expect(r.unknownReasons.some((s) => /0\.2%.*WSE/.test(s))).toBe(true);
+  });
+
+  // NEW-3 (2026-09-05, owner-reported) — offsetBasis.label used to be keyed on `required` alone,
+  // so an unmatched result (priced off the 100-yr line because no 500-yr surface was available)
+  // still stamped itself "0.2% (500-yr) flood elevation" — a label that contradicts its own
+  // `used`/`matched` fields and reads as a compliance claim the number never earned.
+  it("offsetBasis.label follows what was USED, never the required-but-unresolved line (harris trigger owes the 0.2% offset)", () => {
+    const zone = mkZone("1pct", [rect(0, 0, 100, 100)], { staticBfeFt: 95 });
+    // No wse02Ft / derivedWse02Ft — the 500-yr surface is unresolved this check.
+    const r = computeMitigation({ footprints: [fp100], zones: [zone], rule: harris, elev: { padElevFt: 100, existGradeFt: 90 } });
+    expect(r.offsetBasis.required).toBe("02pct");
+    expect(r.offsetBasis.used).toBe("1pct");
+    expect(r.offsetBasis.matched).toBe(false);
+    expect(r.offsetBasis.label).toBe("1% (100-yr) flood elevation");
+    expect(r.offsetBasis.requiredLabel).toBe("0.2% (500-yr) flood elevation");
+    expect(r.flags).toContain("offset-basis-unresolved");
+    // The volume itself is still priced (off the 100-yr line) — unmatched is an honesty flag on
+    // the BASIS, not a reason to blank the number.
+    expect(r.volumeCf).not.toBeNull();
+  });
+
+  it("offsetBasis.label reads 0.2% once the 500-yr surface actually resolves — required and used agree", () => {
+    const zone = mkZone("1pct", [rect(0, 0, 100, 100)], { staticBfeFt: 95 });
+    const r = computeMitigation({ footprints: [fp100], zones: [zone], rule: harris, elev: { padElevFt: 100, existGradeFt: 90, wse02Ft: 97 } });
+    expect(r.offsetBasis.required).toBe("02pct");
+    expect(r.offsetBasis.used).toBe("02pct");
+    expect(r.offsetBasis.matched).toBe(true);
+    expect(r.offsetBasis.label).toBe("0.2% (500-yr) flood elevation");
+    expect(r.offsetBasis.requiredLabel).toBe("0.2% (500-yr) flood elevation");
+    expect(r.flags).not.toContain("offset-basis-unresolved");
   });
   it("COH's 0.2% band without a manual 0.2% WSE is UNKNOWN with the named-source hint", () => {
     const zone = mkZone("02pct", [rect(0, 0, 100, 100)], { zone: "X", subtype: "0.2 PCT ANNUAL CHANCE" });

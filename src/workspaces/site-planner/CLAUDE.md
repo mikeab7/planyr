@@ -1570,7 +1570,14 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `pondSectionModel.js` + `components/PondSection.jsx` (PR-L — the ONE developer-readable pond
   cross-section: pure geometry + collision-free labels → responsive SVG, used by BOTH the Optimize
   card and the pond inspector),
-  surfaced via the Yield → Stormwater collapsed verdict groups (B824 — ONE drainage home; the old Site Analysis sibling card was merged in and deleted; Analysis keeps a link row).
+  surfaced via the **Drainage** module's collapsed verdict groups (B824 — ONE drainage home, moved
+  out of Yield's old "Stormwater" section by the NEW-1 Drainage split, 2026-09-05: Analysis
+  screens, Drainage decides, Yield reports what's left over — see the KEY DECISIONS entry in the
+  root `/CLAUDE.md`). `SitePlanner.jsx`'s `DrainagePanel` (its own module-scope component, right
+  after `YieldPanel`) owns the verdict strip, the detention/mitigation detail groups, buildability,
+  and the buildings-in-floodplain check; `YieldPanel` keeps land use/coverage/costs and shows the
+  pond only as one Land Use line linking into Drainage; Analysis keeps a one-line present/absent
+  flood row (its own freshness stamp suppressed — SiteAnalysis.jsx) linking into Drainage too.
   Estimated-BFE providers for unstudied Zone A (B882): `wseProviders.js` (pure pluggable registry +
   precedence resolver: district → FEMA InFRM EBFE → grade) + `ebfe.js` (FEMA InFRM EBFE /identify
   sampler) + `hcfcdWse.js` (HCFCD MAAPnext WSE sampler, Harris) + `estimateChallenge.js` (the pure

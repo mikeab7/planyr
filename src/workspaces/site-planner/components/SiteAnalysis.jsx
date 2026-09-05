@@ -172,7 +172,11 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
                   ) : (
                     <span style={{ display: "block", marginTop: 2, color: ink }}>
                       {f.summary || (f.status === "unavailable" ? (f.error || "Source temporarily unavailable — not a clear result.") : f.status === "unknown" ? (f.error || "Source unverified — treat as unknown, not clear.") : f.status === "pending" ? "Source not yet connected." : "—")}
-                      {f.ageMs != null && f.summary && <span style={{ color: muted }}> · {formatAge(f.ageMs)}</span>}
+                      {/* NEW-1/NEW-2 (2026-09-05, owner directive) — flood is a single present/absent
+                          screening row here; its own freshness stamp belongs to Drainage alone (the
+                          engine that actually re-checks and prices it), so this row never shows an
+                          age that could disagree with Drainage's "checked Xd ago" header. */}
+                      {f.id !== "flood" && f.ageMs != null && f.summary && <span style={{ color: muted }}> · {formatAge(f.ageMs)}</span>}
                     </span>
                   )}
                   {/* Stale-while-revalidate (B367): the refresh failed but a last-good copy
@@ -195,7 +199,7 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
                       {f.detail.map((d, i) => <li key={i}>{d}</li>)}
                     </ul>
                   )}
-                  {f.sourceName && <div style={{ color: muted, marginTop: 2 }}>Source: {f.sourceName}{f.ageMs != null && ` · updated ${formatAge(f.ageMs)}`}</div>}
+                  {f.sourceName && <div style={{ color: muted, marginTop: 2 }}>Source: {f.sourceName}{f.id !== "flood" && f.ageMs != null && ` · updated ${formatAge(f.ageMs)}`}</div>}
                   {f.caveat && <div style={{ color: "var(--warn-text)", marginTop: 4, fontStyle: "italic", lineHeight: 1.45 }}>{f.caveat}</div>}
                 </div>
               )}

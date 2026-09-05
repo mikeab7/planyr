@@ -638,6 +638,26 @@ describe("B750 — slim / hydrate drainage context", () => {
     expect(hEmpty.channel.near).toBeNull();
     expect(hEmpty.flood.zones).toEqual([]);
   });
+
+  // NEW-2 (2026-09-05, owner-reported, real Goose Creek numbers) — a stored `lastCheck` record
+  // read `flood.ageMs: 0` / `watershed.ageMs: 0` beside a `checkedAt` thirty days old: a snapshot
+  // taken once, at check time, and never refreshed. `slimDrainageContext` must not persist that
+  // snapshot at all, and `hydrateDrainageContext` must report age from `checkedAt` — the ONE real
+  // "how long ago did this check run" fact the Yield header already reads — every time.
+  it("slim never persists a frozen ageMs snapshot; hydrate reports a LIVE age from checkedAt alone", () => {
+    const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+    const checkedAt = Date.now() - THIRTY_DAYS_MS;
+    const slim = slimDrainageContext(ctx); // ctx.flood/watershed carry ageMs: 1000 / 2000 — a live check's cache-fetch age
+    expect(slim.flood.ageMs).toBeUndefined();
+    expect(slim.watershed.ageMs).toBeUndefined();
+    const stored = { ...JSON.parse(JSON.stringify(slim)), checkedAt };
+    const h = hydrateDrainageContext(stored);
+    // A LIVE age derived from the 30-day-old checkedAt — never the frozen 1000/2000 the live
+    // check happened to record, and never a false "0m ago".
+    expect(h.flood.ageMs).toBeGreaterThan(THIRTY_DAYS_MS - 5000);
+    expect(h.watershed.ageMs).toBeGreaterThan(THIRTY_DAYS_MS - 5000);
+    expect(h.flood.ageMs).toBe(h.watershed.ageMs); // ONE freshness fact, read once, applied everywhere
+  });
 });
 
 describe("B788 — hydrate RE-DERIVES the authority verdict from the stored raw facts", () => {
