@@ -34,6 +34,35 @@
  * proves a drag starting on/near the control still pans the map (CHROME-NEVER-EATS-A-PRESS:
  * nothing here is a full-viewport pointer-events layer, so a press anywhere outside the
  * control's own small box reaches whatever's underneath, unchanged).
+ *
+ * ⛔ B1176480 (owner report, 2026-09-05) — THE CORNER-MEASUREMENT FIX ABOVE STILL LEFT THE
+ * CONTROL UNUSABLE ON AN IPHONE-CLASS SCREEN: nothing added the safe-area (the notch/dynamic-
+ * island/home-indicator no-go strip, set via CSS `env()`) to either offset, so on a real device
+ * the button can render partly under the home indicator / off the rounded corner. Every OTHER
+ * safe-area consumer in this app (Food's `BottomSheet.jsx`, the Site Planner's phone FABs,
+ * B1168128) writes `env(safe-area-inset-bottom)` straight into a CSS string, which is the right,
+ * simpler answer when the offset is a fixed literal — but this control's offset is DYNAMIC
+ * (`cornerClearanceFromBottom` measures real occupants and this button must clear whichever
+ * needs the most room), and that occupant-overlap math runs in JS against `window.innerWidth`.
+ * A CSS-only `calc()` would position the button correctly but leave the overlap math blind to
+ * the inset — in LANDSCAPE, where `safe-area-inset-right` is genuinely non-zero (the notch
+ * rotates to a side edge), the column this button occupies would be computed as if it were
+ * flush against the true edge when it is actually shifted in — so the inset has to reach JS as a
+ * number (`shared/ui/safeAreaInsets.js`), not stay CSS-only; see that file's own header for the
+ * full reasoning. `index.html`'s viewport meta already carries `viewport-fit=cover` (confirmed,
+ * not assumed — without it every `env()` call below resolves to 0 and this fix is inert), and it
+ * predates this control, so no change was needed there. Re-measures on `resize`,
+ * `orientationchange`, `visualViewport` `resize`/`scroll` (iOS Safari's collapsing bottom
+ * toolbar changes the visual viewport without firing a plain `resize`) and the existing
+ * `CORNER_POLL_MS` poll. The popover itself (`AnchoredMenu` / `placeMenu`) already clamps into
+ * the viewport with an 8px margin on every side — verified, not re-built, to still fit with zero
+ * overflow at 320/375/390/430 CSS px in `ui-audit/verify-help-report-control.mjs`'s new PART F.
+ * ⛔ THIS SANDBOX HAS NO WEBKIT (standing gap, `VERIFICATION.md` → Self-verification, B1168128) —
+ * every check here that isn't real Playwright/WebKit is a Chromium claim under a real iPhone
+ * device descriptor, and neither engine's headless mode can render `env(safe-area-inset-*)` as
+ * anything but 0 (no physical notch to inset around) — PART F's safe-area assertions run against
+ * a SIMULATED override (a CSS rule forcing the probe element's padding), never real device
+ * evidence. See that file's own header comment for the full three-tier breakdown.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import AnchoredMenu from "../shared/ui/AnchoredMenu.jsx";
@@ -41,6 +70,7 @@ import { MenuItem, menuPanelStyle } from "../shared/ui/controls.jsx";
 import { RADIUS } from "../shared/ui/radius.js";
 import { FONT_SIZE } from "../shared/ui/designTokens.js";
 import { cornerClearanceFromBottom } from "../shared/ui/cornerClearance.js";
+import { safeAreaInsets } from "../shared/ui/safeAreaInsets.js";
 import { requestPerfCapture, perfCaptureDelivery, perfRecorderArmed } from "../shared/telemetry/perfRecorderHandle.js";
 import { SUPPRESSED_AUTOMATED } from "../shared/telemetry/clientErrors.js";
 import { buildReportContext, submitReport, queuedReportCount } from "../shared/reports/reportsStore.js";
@@ -81,22 +111,36 @@ export default function HelpReportControl({ user }) {
   const [submitState, setSubmitState] = useState(null); // null | "sending" | "ok" | "queued"
   const [slowNote, setSlowNote] = useState(null);        // null | "sending" | "ok" | "local" | "undelivered" | "fail"
   const [queued, setQueued] = useState(0);
+  const [fabRight, setFabRight] = useState(FAB_RIGHT);
   const [fabBottom, setFabBottom] = useState(FAB_RIGHT);
 
   useEffect(() => { setQueued(queuedReportCount()); }, [open]);
 
   useLayoutEffect(() => {
     const measure = () => {
-      const next = cornerClearanceFromBottom({ right: FAB_RIGHT, width: FAB_SIZE, base: FAB_RIGHT });
-      setFabBottom((prev) => (Math.abs(prev - next) > 0.5 ? next : prev));
+      // Fold the real safe-area inset into the offsets BEFORE the occupant-overlap math runs
+      // (never a CSS-only calc() — see this file's B1176480 header note for why the overlap
+      // check needs the inset as a number).
+      const insets = safeAreaInsets();
+      const right = FAB_RIGHT + insets.right;
+      const bottom = cornerClearanceFromBottom({ right, width: FAB_SIZE, base: FAB_RIGHT + insets.bottom });
+      setFabRight((prev) => (Math.abs(prev - right) > 0.5 ? right : prev));
+      setFabBottom((prev) => (Math.abs(prev - bottom) > 0.5 ? bottom : prev));
     };
     measure();
     window.addEventListener("resize", measure);
     window.addEventListener("orientationchange", measure);
+    // iOS Safari's collapsing bottom toolbar changes the VISUAL viewport (what's actually on
+    // screen) without firing a plain `resize` on `window` — the layout viewport is unchanged.
+    const vv = window.visualViewport;
+    vv?.addEventListener("resize", measure);
+    vv?.addEventListener("scroll", measure);
     const id = setInterval(measure, CORNER_POLL_MS);
     return () => {
       window.removeEventListener("resize", measure);
       window.removeEventListener("orientationchange", measure);
+      vv?.removeEventListener("resize", measure);
+      vv?.removeEventListener("scroll", measure);
       clearInterval(id);
     };
   }, []);
@@ -159,7 +203,7 @@ export default function HelpReportControl({ user }) {
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         style={{
-          position: "fixed", right: FAB_RIGHT, bottom: fabBottom, zIndex: Z_FAB,
+          position: "fixed", right: fabRight, bottom: fabBottom, zIndex: Z_FAB,
           width: FAB_SIZE, height: FAB_SIZE, borderRadius: RADIUS.pill,
           border: "1px solid var(--border-strong)", background: "var(--surface-raised)",
           color: "var(--text-primary)", display: "flex", alignItems: "center", justifyContent: "center",

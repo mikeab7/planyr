@@ -44,9 +44,37 @@
  * worst (top-sorted) long-task row's name resolves to the real function, not merely that `lt`
  * is non-empty.
  *
+ * ⛔ B1176480 (owner report, 2026-09-05) — PART F checks the control on iPhone-class screens:
+ * safe-area clearance, the 44×44 tap target, popover fit with no horizontal overflow, and that
+ * the new `visualViewport` resize/scroll listeners actually trigger a re-measure (not just that
+ * dispatching them doesn't throw).
+ *
+ * ⛔ HONESTY, three tiers — read before trusting a line of this section's own output, and see
+ * `VERIFICATION.md` → Self-verification for the standing, repo-wide version of the same note
+ * (added 2026-09-05 by B1168128, the same day):
+ *   EMULATED  — real Playwright device descriptors (`devices["iPhone 15"]` etc. — genuine
+ *               isMobile/hasTouch/deviceScaleFactor/mobile UA, never a bare resized viewport),
+ *               on WebKit when it launches, on Chromium (loudly labeled) when it doesn't. This
+ *               sandbox's WebKit binary downloads (`npx playwright install webkit`) but cannot
+ *               LAUNCH — the host is missing shared libraries (`libgtk-4.so.1` and others) that
+ *               `--with-deps` would install via `apt`, which this sandbox has no path to do
+ *               safely — so every run here falls back to Chromium and says so; this is a
+ *               documented environment fact, not a guess, and the fallback path is real,
+ *               exercised code, not a stub. A real WebKit install (a dev machine, or CI with
+ *               `--with-deps webkit`) runs the SAME code on the real engine with no changes.
+ *   SIMULATED — the safe-area assertions. Neither engine's headless mode renders a physical
+ *               notch, so `env(safe-area-inset-*)` resolves to 0 in both — this section forces a
+ *               non-zero reading by overriding `safeAreaInsets.js`'s own probe element's computed
+ *               padding with an injected `!important` CSS rule (targeting its
+ *               `[data-safe-area-probe]` marker), which proves the JS-read-into-pixel-math path
+ *               works without pretending to have measured a real device.
+ *   UNVERIFIED-ON-DEVICE — real iOS Safari's own `env()` resolution and its collapsing-toolbar
+ *               `visualViewport` behavior. Nothing here should be read as "confirmed on an
+ *               iPhone."
+ *
  *   node ui-audit/verify-help-report-control.mjs [--url http://localhost:4173/] [--shots]
  */
-import { chromium } from "playwright";
+import { chromium, webkit, devices } from "playwright";
 import { mkdirSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { pacedWait } from "./lib/tabTiming.mjs";
@@ -319,6 +347,169 @@ try {
     const worstName = worst ? ltNames[worst[3]] : null;
     check("the WORST long-task row is attributed to the real culprit function", worstName === "onFirstPress", `worst=${JSON.stringify(worst)} name=${worstName}`);
     await ctx.close();
+  }
+
+  // ─────────────────────────────────────────── PART F — iPhone-class devices
+  console.log("\nPART F — iPhone-class devices (real Playwright device descriptors: UA/touch/dpr/isMobile, never a bare resized viewport)");
+  {
+    const DEVICE_NAMES = ["iPhone 15", "iPhone SE", "iPhone 14 Pro Max"];
+
+    let webkitBrowser = null;
+    try {
+      webkitBrowser = await webkit.launch({ args: ["--ignore-certificate-errors"] });
+    } catch (e) {
+      console.log(`  ⚠ WebKit unavailable in this environment (${String(e && e.message || e).split("\n")[0]}) — PART F runs on Chromium with the identical iPhone device descriptors instead. Labeled per-check below; real WebKit/Safari engine behavior is UNVERIFIED-ON-DEVICE here, not silently assumed. See this file's header for the three-tier honesty note.`);
+    }
+    const engine = webkitBrowser || browser;
+    const engineLabel = webkitBrowser ? "webkit" : "chromium-fallback";
+
+    // A CSS override forcing safeAreaInsets.js's own probe element (`[data-safe-area-probe]`) to
+    // report a non-zero inset — a SIMULATION, since neither engine renders a real notch/home
+    // indicator. Injected before the app boots so it's in place when the probe is created.
+    const insetOverrideScript = (top, right, bottom, left) => `(() => {
+      const s = document.createElement("style");
+      s.textContent = "[data-safe-area-probe]{padding-top:${top}px !important;padding-right:${right}px !important;padding-bottom:${bottom}px !important;padding-left:${left}px !important;}";
+      document.addEventListener("DOMContentLoaded", () => document.documentElement.appendChild(s));
+      if (document.documentElement) document.documentElement.appendChild(s);
+    })();`;
+
+    async function openPhoneScreen({ device, insets, disablePollMs }) {
+      const ctx = await engine.newContext({ ...device, ignoreHTTPSErrors: true });
+      if (insets) await ctx.addInitScript(insetOverrideScript(...insets));
+      if (disablePollMs) {
+        // Defeats ONLY the CORNER_POLL_MS-cadence setInterval (never blanket — other app
+        // timers must keep working) so a visualViewport-listener check can't be coincidentally
+        // rescued by the poll's own next scheduled tick landing inside the check's short wait.
+        await ctx.addInitScript(`(() => {
+          const real = window.setInterval.bind(window);
+          window.setInterval = (fn, ms, ...rest) => (ms === ${disablePollMs} ? 0 : real(fn, ms, ...rest));
+        })();`);
+      }
+      const page = await ctx.newPage();
+      // Chrome-free route (no Leaflet map, no canvas) — isolates the inset's own contribution
+      // from any occupant-clearance the corner-measurement mechanism would otherwise add.
+      await page.goto(URL + "#/schedule", { waitUntil: "load" });
+      await page.waitForSelector('[data-testid="help-report-fab"]', { timeout: 15000 }).catch(() => {});
+      await pacedWait(page, 400);
+      return { ctx, page };
+    }
+
+    async function fabRect(page) {
+      return page.evaluate(() => {
+        const el = document.querySelector('[data-testid="help-report-fab"]');
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height, vw: window.innerWidth, vh: window.innerHeight, hasVV: !!window.visualViewport };
+      });
+    }
+
+    for (const name of DEVICE_NAMES) {
+      const device = devices[name];
+      const deviceLandscape = devices[`${name} landscape`];
+      if (!device || !deviceLandscape) { check(`${name}: device + landscape descriptors exist in this Playwright version`, !!device && !!deviceLandscape); continue; }
+      const label = `${name} (${engineLabel})`;
+
+      // --- Baseline (portrait, no simulated inset): tap target, no clipping, popover fit, and
+      // the visualViewport listener actually causing a re-measure. ---
+      let baselinePortraitClearance;
+      {
+        const { ctx, page } = await openPhoneScreen({ device, insets: null, disablePollMs: 500 });
+        const r = await fabRect(page);
+        check(`${label}: FAB present at ≥44×44 (never shrink the tap target)`, !!r && r.w >= 43.5 && r.h >= 43.5, JSON.stringify(r));
+        check(`${label}: FAB fully inside the viewport, no clipping at an edge`, !!r && r.l >= 0 && r.t >= 0 && r.r <= r.vw && r.b <= r.vh, JSON.stringify(r));
+
+        // Popover fit: open the widest inner view ("Report a problem") and check the portal
+        // panel has no horizontal overflow / clipping at either viewport edge.
+        await page.evaluate(() => document.querySelector('[data-testid="help-report-fab"]').click());
+        await pacedWait(page, 300);
+        await page.evaluate(() => {
+          const btn = Array.from(document.querySelectorAll("button")).find((b) => b.textContent && b.textContent.includes("Report a problem"));
+          btn && btn.click();
+        });
+        await pacedWait(page, 250);
+        const menuRect = await page.evaluate(() => {
+          const heading = Array.from(document.querySelectorAll("div")).find((d) => d.textContent === "Report a problem");
+          let node = heading;
+          while (node && node.parentElement) {
+            if (window.getComputedStyle(node).position === "fixed") break;
+            node = node.parentElement;
+          }
+          if (!node) return null;
+          const rr = node.getBoundingClientRect();
+          return { l: rr.left, t: rr.top, r: rr.right, b: rr.bottom, w: rr.width, h: rr.height };
+        });
+        check(`${label}: popover has no horizontal overflow (clamped/flipped into the viewport, not clipped)`, !!menuRect && menuRect.l >= 0 && menuRect.r <= r.vw, JSON.stringify({ menuRect, vw: r.vw }));
+        await page.keyboard.press("Escape").catch(() => {});
+        await pacedWait(page, 150);
+
+        // visualViewport re-measure: mount a new tall bottom-right occupant AFTER load, then
+        // dispatch 'resize'/'scroll' on visualViewport (never on window) and confirm the control
+        // moves to clear it — WITHIN the poll interval (500ms), so the poll can't be what moved it.
+        check(`${label}: window.visualViewport is present in this engine`, !!r.hasVV);
+        if (r.hasVV) {
+          await page.evaluate(() => {
+            const el = document.createElement("div");
+            el.setAttribute("data-canvas-corner", "phone-harness-probe");
+            // Wide/tall enough to genuinely overlap the FAB's own hit column (right:14px,
+            // width:44px) — a narrow strip flush against the true edge does NOT (its own
+            // measured [left,right] can sit entirely outside the FAB's [vw-58, vw-14] column).
+            Object.assign(el.style, { position: "fixed", right: "0px", bottom: "0px", width: "60px", height: "260px", background: "transparent" });
+            document.body.appendChild(el);
+          });
+          const before = await fabRect(page);
+          await page.evaluate(() => window.visualViewport.dispatchEvent(new Event("resize")));
+          await pacedWait(page, 180); // well under CORNER_POLL_MS (500) — only the listener could have caused this
+          const afterResize = await fabRect(page);
+          check(`${label}: a visualViewport 'resize' event alone (no window resize, inside one poll interval) moves the control to clear a new occupant`, !!afterResize && (afterResize.b - before.b) < -50, `before.b=${before?.b} afterResize.b=${afterResize?.b}`);
+
+          // Remove the occupant, confirm 'scroll' also re-triggers (moves it back down).
+          await page.evaluate(() => document.querySelector('[data-canvas-corner="phone-harness-probe"]')?.remove());
+          await page.evaluate(() => window.visualViewport.dispatchEvent(new Event("scroll")));
+          await pacedWait(page, 180);
+          const afterScroll = await fabRect(page);
+          check(`${label}: a visualViewport 'scroll' event alone likewise re-measures (control returns once the occupant is gone)`, !!afterScroll && (afterScroll.b - afterResize.b) > 50, `afterResize.b=${afterResize?.b} afterScroll.b=${afterScroll?.b}`);
+        }
+        await ctx.close();
+
+        // Stash the no-inset baseline bottom clearance for the SIMULATED-inset delta check below.
+        baselinePortraitClearance = r.vh - r.b;
+      }
+
+      // --- SIMULATED bottom/top inset (portrait) — proves the inset reaches the pixel math. ---
+      {
+        const SIM_TOP = 47, SIM_BOTTOM = 34; // typical Face-ID-class device values
+        const { ctx, page } = await openPhoneScreen({ device, insets: [SIM_TOP, 0, SIM_BOTTOM, 0] });
+        const r = await fabRect(page);
+        check(`${label}: [SIMULATED inset] FAB still ≥44×44 and fully inside the viewport with a non-zero inset`, !!r && r.w >= 43.5 && r.h >= 43.5 && r.l >= 0 && r.t >= 0 && r.r <= r.vw && r.b <= r.vh, JSON.stringify(r));
+        const clearanceWithInset = r ? r.vh - r.b : -Infinity;
+        const delta = clearanceWithInset - baselinePortraitClearance;
+        check(`${label}: [SIMULATED inset] a ${SIM_BOTTOM}px bottom inset adds ~that much real clearance (mutation-sensitive: reads ~0 if the inset wiring is removed)`, delta >= SIM_BOTTOM - 1.5, `baseline=${baselinePortraitClearance} withInset=${clearanceWithInset} delta=${delta}`);
+        await ctx.close();
+      }
+
+      // --- Landscape baseline vs. SIMULATED right inset — the case the header note calls out:
+      // the notch/dynamic-island rotates to a side edge, so safe-area-inset-RIGHT (or LEFT)
+      // becomes genuinely non-zero and the occupant-overlap column math must account for it. ---
+      let landscapeBaselineOffset;
+      {
+        const { ctx, page } = await openPhoneScreen({ device: deviceLandscape, insets: null });
+        const r = await fabRect(page);
+        check(`${label} [landscape]: FAB present at ≥44×44, fully inside the viewport`, !!r && r.w >= 43.5 && r.h >= 43.5 && r.l >= 0 && r.t >= 0 && r.r <= r.vw && r.b <= r.vh, JSON.stringify(r));
+        landscapeBaselineOffset = r ? r.vw - r.r : -Infinity;
+        await ctx.close();
+      }
+      {
+        const SIM_RIGHT = 44, SIM_BOTTOM = 21;
+        const { ctx, page } = await openPhoneScreen({ device: deviceLandscape, insets: [0, SIM_RIGHT, SIM_BOTTOM, 0] });
+        const r = await fabRect(page);
+        check(`${label} [landscape]: [SIMULATED inset] FAB still ≥44×44 and fully inside the viewport with a non-zero RIGHT inset`, !!r && r.w >= 43.5 && r.h >= 43.5 && r.l >= 0 && r.t >= 0 && r.r <= r.vw && r.b <= r.vh, JSON.stringify(r));
+        const offsetWithInset = r ? r.vw - r.r : -Infinity;
+        const delta = offsetWithInset - landscapeBaselineOffset;
+        check(`${label} [landscape]: [SIMULATED inset] a ${SIM_RIGHT}px RIGHT inset adds ~that much real clearance from the true right edge (proves the overlap math reads the inset, not just the CSS position)`, delta >= SIM_RIGHT - 1.5, `baseline=${landscapeBaselineOffset} withInset=${offsetWithInset} delta=${delta}`);
+        await ctx.close();
+      }
+    }
+    if (webkitBrowser) await webkitBrowser.close();
   }
 
   const failed = results.filter((r) => !r.ok);
