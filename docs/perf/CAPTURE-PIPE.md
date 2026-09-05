@@ -133,7 +133,7 @@ considered and deliberately not added**: the write-only posture is a stated deci
   other series are surrendered before the frames are, which is what the file's own comment already
   said should happen (*"frames go last because the frame track IS the episode"*).
 - **B265539** — the row carries **which** layers are on, not just how many. See
-  `docs/PERF-LAYERS.md`.
+  `docs/perf/PERF-LAYERS.md`.
 
 ## 5. What is still outstanding
 
@@ -160,7 +160,7 @@ programme, the one the owner produces himself, missing from the place people loo
 
 ### The premise the fix could not use
 
-The obvious gate is `window.__PLANYR_E2E`, which `docs/PERF-PLAN-SWITCH.md` §1 describes as set by
+The obvious gate is `window.__PLANYR_E2E`, which `docs/perf/PERF-PLAN-SWITCH.md` §1 describes as set by
 *"every performance harness in this repo"*. **That is true of the ui-audit perf harnesses and false of
 the e2e suite** — 62 of the 81 specs in `e2e/` never set it, `assembly-tear-detector.spec.js` (the top
 producer of three of the five loudest sources) among them. A flag-only gate would have silenced 19

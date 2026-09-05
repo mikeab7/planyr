@@ -19,7 +19,7 @@
  * additionally needs live external tile hosts. So the DETERMINISTIC half (bundle weight, and
  * the route-chunk allowlist that catches the NEW-9 prefetch regression by name) is what gates
  * CI via ui-audit/perf-bundle-audit.mjs; this half runs on demand and before shipping anything
- * that touches render or load. docs/PERF-BUDGETS.md records the split and the reasoning.
+ * that touches render or load. docs/perf/PERF-BUDGETS.md records the split and the reasoning.
  *
  * REFERENCE SCENARIO. ⚠ REPLACED 2026-07-31 (NEW-1). Until then this harness drove a HAND-
  * AUTHORED stand-in whose "road" was a rectangle with no `pts`/`vtx` and which contained no
@@ -192,7 +192,7 @@ const site = perfScenarioSite();
 const seed = perfScenarioSeed();
 
 /* Aerial basemap hosts. Counted as REQUESTS, never summed as bytes — see the header note in
- * docs/PERF-BUDGETS.md: cross-origin tile responses carry no Timing-Allow-Origin, so their
+ * docs/perf/PERF-BUDGETS.md: cross-origin tile responses carry no Timing-Allow-Origin, so their
  * transferSize reads 0 and a byte budget would silently never fire. */
 const TILE_HOST = /(arcgisonline\.com|services\.arcgis\.com|server\.arcgisonline)/i;
 
@@ -871,7 +871,7 @@ if (JSON_OUT) {
   for (const n of notes) console.log(`  · ${n}`);
   console.log();
   console.log(failures.length
-    ? `✗ ${failures.length} performance budget breach(es). See docs/PERF-BUDGETS.md.`
+    ? `✗ ${failures.length} performance budget breach(es). See docs/perf/PERF-BUDGETS.md.`
     : `✓ All measurable runtime budgets within ceiling${aboveTarget.length ? ` (${aboveTarget.length} above target — tracked)` : ""}.`);
 }
 process.exit(failures.length ? 1 : 0);

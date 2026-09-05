@@ -43,7 +43,7 @@ times the view has been MOVED, which is a different question with a different an
   answer, so `Object.is` (all React's memo does) reports "changed" on 100% of them. Needs the probe
   build (`--build`, i.e. `PLANYR_PROBE=1`; see `scripts/vite-plugin-recompute-probe.mjs`, which is
   inert without the flag). Decision layer in `lib/viewIndependence.mjs` + `lib/recomputeHash.mjs`,
-  unit-tested in `test/recomputeProbe.test.js`. Enumeration: `docs/PERF-VIEW-INDEPENDENCE.md`.
+  unit-tested in `test/recomputeProbe.test.js`. Enumeration: `docs/perf/PERF-VIEW-INDEPENDENCE.md`.
 - `verify-view-independent.mjs` — the GATE built on it (`npm run perf:viewindep`): a real pure pan,
   failing if any computation in `lib/viewIndependentRegistry.mjs` ran more than once — **or was
   never observed**, which is how a guard of this shape rots into a permanent green. It counts rather
@@ -58,7 +58,7 @@ times the view has been MOVED, which is a different question with a different an
   as a CURVE — `FLAT` / `STEP` / `SLOPE` / `SAWTOOTH` with each model's residual — because a
   before/after pair fits a step and a slope equally well and the report is explicitly a slope.
   Registry, classifier and the two-axis rule in `lib/sessionGrowth.mjs`, unit-tested in
-  `test/sessionGrowth.test.js`. Findings: `../docs/PERF-SESSION-GROWTH.md`.
+  `test/sessionGrowth.test.js`. Findings: `../docs/perf/PERF-SESSION-GROWTH.md`.
 - `verify-stall-lod-parity.mjs` — the pixel bar. Two builds, five zoom rungs plus the exported
   sheet, byte-identical or one unit of 255. Any render change in this program passes it first.
 
@@ -79,7 +79,7 @@ about rasters, compositing or texture memory taken on it was structurally guaran
 **⛔ THAT IS NO LONGER TRUE, as of 2026-08-07 — BOTH of the owner's reported-slow plans are committed,
 verbatim, and the synthesised stand-in is GONE.** `bain-concept-a.json` and its generator
 `build-bain-fixture.mjs` are DELETED rather than kept beside the real files: its element counts were the
-owner's and its coordinates were invented, which is precisely the bound `../docs/PERF-BAIN.md` §6 put on
+owner's and its coordinates were invented, which is precisely the bound `../docs/perf/PERF-BAIN.md` §6 put on
 its own largest claim, and a synthesised fixture left in the tree is a synthesised fixture someone measures
 again by accident.
 
@@ -104,7 +104,7 @@ again by accident.
   **rotation** · Bain's own geometry · the Goose Creek control), with a cost metric the rest of this program
   does not have: **paint / raster / decode / composite**, read from Chromium's tracing. The existing
   un-quantised work figure is `Script + Layout + RecalcStyle` — all main-thread work that happens *before* a
-  pixel exists — so it is structurally blind to blending. Findings in `../docs/PERF-BAIN.md`.
+  pixel exists — so it is structurally blind to blending. Findings in `../docs/perf/PERF-BAIN.md`.
 - **`fixtures/bain-quiddity.json`** — site `smshwnnijjfi`, "Concept A - Quiddity Hydrologic Analysis":
   the **SLOW half of the owner's own A/B**, and the strongest experiment in this programme.
   52 elements · 2 parcels · **3 pipeline easements** (18/28/4 pts) · 2 ponds carrying **68 vertices**.
@@ -120,7 +120,7 @@ again by accident.
   three and the canvas at 752 nodes, and coarsens both pond rings to the fast plan's 7 points with
   each bounding box preserved exactly — **recovering 89.3% of a 91.1% gap, 6/6 paired reps,
   p = 0.031.** Removing 54 vertices bought 49,806 ms. Raster, easements, element count and pond count
-  are all refuted for this pair; what survives is the vertices. `docs/PERF-REAL-PLANS.md` §5.5.
+  are all refuted for this pair; what survives is the vertices. `docs/perf/PERF-REAL-PLANS.md` §5.5.
 - **`annotation-arms.mjs`** — the same design on the axis every plan ever measured here was ZERO on.
   Sylvestri's 16 callouts, 6 markups and 2 measures, decomposed per kind against the baseline. Its guard is
   the analogue of `decodeFault`: an arm whose annotations never reached the canvas is SUPPRESSED, never

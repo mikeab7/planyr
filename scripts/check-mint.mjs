@@ -88,7 +88,7 @@ const REPO = resolve(HERE, "..");
  * B3005 collided with nothing. And because every renumber is a DOCS-ONLY push, and a docs-only push
  * is exactly the push that fails to produce a `build` check run, each escape attempt left the
  * required check permanently "Expected — waiting for status to be reported" (see
- * `docs/CI-REQUIRED-CHECK.md`). The gate was not catching collisions; it was manufacturing them.
+ * `docs/incidents/CI-REQUIRED-CHECK.md`). The gate was not catching collisions; it was manufacturing them.
  *
  * The strength is not reduced — it is relocated. What was removed is a HEURISTIC that never proved
  * a collision; what remains fatal is TAKEN, backed by `test/idUniqueness.test.js`; and what is

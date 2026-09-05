@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* profile-pond-ring — WHICH FUNCTION is superlinear in pond ring vertices? (B227888)
  *
- * ⛔ THIS INSTRUMENT FIXES NOTHING. It answers one question that `docs/PERF-REAL-PLANS.md` §5.5
+ * ⛔ THIS INSTRUMENT FIXES NOTHING. It answers one question that `docs/perf/PERF-REAL-PLANS.md` §5.5
  * left open and explicitly refused to guess at: the owner's slow Bain plan costs 55,760 ms of
  * main-thread work per pan against 5,955 ms for the same plan with its two pond rings coarsened
  * to 7 points — same 52 elements, same 2 ponds, same 752 canvas nodes, same bounding boxes. 54
