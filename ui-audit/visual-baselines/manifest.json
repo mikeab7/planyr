@@ -7,89 +7,89 @@
     "map-landing": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "47989772",
-        "note": "B1171504 follow-up acceptance test (third dispatch: now the branch actually carries the triage-writing code, not just the updated workflow YAML). Confirming the per-baseline triage PR comment posts with real diff magnitudes from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952667057 on 479897727e110c81d02ec766d28940230760401e]"
+        "approvedCommit": "a8f714c4",
+        "note": "B1171504 follow-up acceptance test (fourth dispatch): FAB_SIZE bumped 70->100 for a real geometry change against the just-committed 70px baseline, so the triage comment shows an actual changed-with-magnitude row rather than all-unchanged. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952833918 on a8f714c48772037883ca639b61ef83dabb1f589f]"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "47989772",
-        "note": "B1171504 follow-up acceptance test (third dispatch: now the branch actually carries the triage-writing code, not just the updated workflow YAML). Confirming the per-baseline triage PR comment posts with real diff magnitudes from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952667057 on 479897727e110c81d02ec766d28940230760401e]"
+        "approvedCommit": "a8f714c4",
+        "note": "B1171504 follow-up acceptance test (fourth dispatch): FAB_SIZE bumped 70->100 for a real geometry change against the just-committed 70px baseline, so the triage comment shows an actual changed-with-magnitude row rather than all-unchanged. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952833918 on a8f714c48772037883ca639b61ef83dabb1f589f]"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "47989772",
-        "note": "B1171504 follow-up acceptance test (third dispatch: now the branch actually carries the triage-writing code, not just the updated workflow YAML). Confirming the per-baseline triage PR comment posts with real diff magnitudes from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952667057 on 479897727e110c81d02ec766d28940230760401e]"
+        "approvedCommit": "a8f714c4",
+        "note": "B1171504 follow-up acceptance test (fourth dispatch): FAB_SIZE bumped 70->100 for a real geometry change against the just-committed 70px baseline, so the triage comment shows an actual changed-with-magnitude row rather than all-unchanged. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952833918 on a8f714c48772037883ca639b61ef83dabb1f589f]"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "47989772",
-        "note": "B1171504 follow-up acceptance test (third dispatch: now the branch actually carries the triage-writing code, not just the updated workflow YAML). Confirming the per-baseline triage PR comment posts with real diff magnitudes from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952667057 on 479897727e110c81d02ec766d28940230760401e]"
+        "approvedCommit": "a8f714c4",
+        "note": "B1171504 follow-up acceptance test (fourth dispatch): FAB_SIZE bumped 70->100 for a real geometry change against the just-committed 70px baseline, so the triage comment shows an actual changed-with-magnitude row rather than all-unchanged. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952833918 on a8f714c48772037883ca639b61ef83dabb1f589f]"
       }
     },
     "site-planner-header": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "47989772",
-        "note": "B1171504 follow-up acceptance test (third dispatch: now the branch actually carries the triage-writing code, not just the updated workflow YAML). Confirming the per-baseline triage PR comment posts with real diff magnitudes from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952667057 on 479897727e110c81d02ec766d28940230760401e]"
+        "approvedCommit": "a8f714c4",
+        "note": "B1171504 follow-up acceptance test (fourth dispatch): FAB_SIZE bumped 70->100 for a real geometry change against the just-committed 70px baseline, so the triage comment shows an actual changed-with-magnitude row rather than all-unchanged. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952833918 on a8f714c48772037883ca639b61ef83dabb1f589f]"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "47989772",
-        "note": "B1171504 follow-up acceptance test (third dispatch: now the branch actually carries the triage-writing code, not just the updated workflow YAML). Confirming the per-baseline triage PR comment posts with real diff magnitudes from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952667057 on 479897727e110c81d02ec766d28940230760401e]"
+        "approvedCommit": "a8f714c4",
+        "note": "B1171504 follow-up acceptance test (fourth dispatch): FAB_SIZE bumped 70->100 for a real geometry change against the just-committed 70px baseline, so the triage comment shows an actual changed-with-magnitude row rather than all-unchanged. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952833918 on a8f714c48772037883ca639b61ef83dabb1f589f]"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "47989772",
-        "note": "B1171504 follow-up acceptance test (third dispatch: now the branch actually carries the triage-writing code, not just the updated workflow YAML). Confirming the per-baseline triage PR comment posts with real diff magnitudes from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952667057 on 479897727e110c81d02ec766d28940230760401e]"
+        "approvedCommit": "a8f714c4",
+        "note": "B1171504 follow-up acceptance test (fourth dispatch): FAB_SIZE bumped 70->100 for a real geometry change against the just-committed 70px baseline, so the triage comment shows an actual changed-with-magnitude row rather than all-unchanged. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952833918 on a8f714c48772037883ca639b61ef83dabb1f589f]"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "47989772",
-        "note": "B1171504 follow-up acceptance test (third dispatch: now the branch actually carries the triage-writing code, not just the updated workflow YAML). Confirming the per-baseline triage PR comment posts with real diff magnitudes from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952667057 on 479897727e110c81d02ec766d28940230760401e]"
+        "approvedCommit": "a8f714c4",
+        "note": "B1171504 follow-up acceptance test (fourth dispatch): FAB_SIZE bumped 70->100 for a real geometry change against the just-committed 70px baseline, so the triage comment shows an actual changed-with-magnitude row rather than all-unchanged. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952833918 on a8f714c48772037883ca639b61ef83dabb1f589f]"
       }
     },
     "site-planner-left-rail": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "47989772",
-        "note": "B1171504 follow-up acceptance test (third dispatch: now the branch actually carries the triage-writing code, not just the updated workflow YAML). Confirming the per-baseline triage PR comment posts with real diff magnitudes from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952667057 on 479897727e110c81d02ec766d28940230760401e]"
+        "approvedCommit": "a8f714c4",
+        "note": "B1171504 follow-up acceptance test (fourth dispatch): FAB_SIZE bumped 70->100 for a real geometry change against the just-committed 70px baseline, so the triage comment shows an actual changed-with-magnitude row rather than all-unchanged. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952833918 on a8f714c48772037883ca639b61ef83dabb1f589f]"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "47989772",
-        "note": "B1171504 follow-up acceptance test (third dispatch: now the branch actually carries the triage-writing code, not just the updated workflow YAML). Confirming the per-baseline triage PR comment posts with real diff magnitudes from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952667057 on 479897727e110c81d02ec766d28940230760401e]"
+        "approvedCommit": "a8f714c4",
+        "note": "B1171504 follow-up acceptance test (fourth dispatch): FAB_SIZE bumped 70->100 for a real geometry change against the just-committed 70px baseline, so the triage comment shows an actual changed-with-magnitude row rather than all-unchanged. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952833918 on a8f714c48772037883ca639b61ef83dabb1f589f]"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "47989772",
-        "note": "B1171504 follow-up acceptance test (third dispatch: now the branch actually carries the triage-writing code, not just the updated workflow YAML). Confirming the per-baseline triage PR comment posts with real diff magnitudes from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952667057 on 479897727e110c81d02ec766d28940230760401e]"
+        "approvedCommit": "a8f714c4",
+        "note": "B1171504 follow-up acceptance test (fourth dispatch): FAB_SIZE bumped 70->100 for a real geometry change against the just-committed 70px baseline, so the triage comment shows an actual changed-with-magnitude row rather than all-unchanged. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952833918 on a8f714c48772037883ca639b61ef83dabb1f589f]"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "47989772",
-        "note": "B1171504 follow-up acceptance test (third dispatch: now the branch actually carries the triage-writing code, not just the updated workflow YAML). Confirming the per-baseline triage PR comment posts with real diff magnitudes from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952667057 on 479897727e110c81d02ec766d28940230760401e]"
+        "approvedCommit": "a8f714c4",
+        "note": "B1171504 follow-up acceptance test (fourth dispatch): FAB_SIZE bumped 70->100 for a real geometry change against the just-committed 70px baseline, so the triage comment shows an actual changed-with-magnitude row rather than all-unchanged. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952833918 on a8f714c48772037883ca639b61ef83dabb1f589f]"
       }
     },
     "library": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "47989772",
-        "note": "B1171504 follow-up acceptance test (third dispatch: now the branch actually carries the triage-writing code, not just the updated workflow YAML). Confirming the per-baseline triage PR comment posts with real diff magnitudes from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952667057 on 479897727e110c81d02ec766d28940230760401e]"
+        "approvedCommit": "a8f714c4",
+        "note": "B1171504 follow-up acceptance test (fourth dispatch): FAB_SIZE bumped 70->100 for a real geometry change against the just-committed 70px baseline, so the triage comment shows an actual changed-with-magnitude row rather than all-unchanged. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952833918 on a8f714c48772037883ca639b61ef83dabb1f589f]"
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "47989772",
-        "note": "B1171504 follow-up acceptance test (third dispatch: now the branch actually carries the triage-writing code, not just the updated workflow YAML). Confirming the per-baseline triage PR comment posts with real diff magnitudes from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952667057 on 479897727e110c81d02ec766d28940230760401e]"
+        "approvedCommit": "a8f714c4",
+        "note": "B1171504 follow-up acceptance test (fourth dispatch): FAB_SIZE bumped 70->100 for a real geometry change against the just-committed 70px baseline, so the triage comment shows an actual changed-with-magnitude row rather than all-unchanged. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952833918 on a8f714c48772037883ca639b61ef83dabb1f589f]"
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "47989772",
-        "note": "B1171504 follow-up acceptance test (third dispatch: now the branch actually carries the triage-writing code, not just the updated workflow YAML). Confirming the per-baseline triage PR comment posts with real diff magnitudes from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952667057 on 479897727e110c81d02ec766d28940230760401e]"
+        "approvedCommit": "a8f714c4",
+        "note": "B1171504 follow-up acceptance test (fourth dispatch): FAB_SIZE bumped 70->100 for a real geometry change against the just-committed 70px baseline, so the triage comment shows an actual changed-with-magnitude row rather than all-unchanged. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952833918 on a8f714c48772037883ca639b61ef83dabb1f589f]"
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "47989772",
-        "note": "B1171504 follow-up acceptance test (third dispatch: now the branch actually carries the triage-writing code, not just the updated workflow YAML). Confirming the per-baseline triage PR comment posts with real diff magnitudes from the deliberately-widened FAB_SIZE 44->70 change. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952667057 on 479897727e110c81d02ec766d28940230760401e]"
+        "approvedCommit": "a8f714c4",
+        "note": "B1171504 follow-up acceptance test (fourth dispatch): FAB_SIZE bumped 70->100 for a real geometry change against the just-committed 70px baseline, so the triage comment shows an actual changed-with-magnitude row rather than all-unchanged. This PR is throwaway and will be closed without merging regardless of the result. [CI-authored by run 33952833918 on a8f714c48772037883ca639b61ef83dabb1f589f]"
       }
     }
   }
