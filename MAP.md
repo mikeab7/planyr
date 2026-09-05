@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-05 @ `9854e527` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-05 @ `4cbb15b04` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_668 source files mapped._
+_671 source files mapped._
 
 ## infra
 
@@ -29,6 +29,8 @@ _668 source files mapped._
   - _exports_: `default (ErrorBoundary)`
 - **`src/app/flushRegistry.js`** — Cross-workspace flush-before-navigate registry: registerFlush/flushAll give each live workspace one synchronous local-save + keepalive cloud push before a forced reload
   - _exports_: `_flushers`, `flushAll`, `registerFlush`
+- **`src/app/HelpReportControl.jsx`** — the global help/report FAB the shell mounts on every route (B842864): "Report a problem" / "Something was slow" / "Help".
+  - _exports_: `default (HelpReportControl)`
 - **`src/app/lastRoute.js`** — "Open where I left off": last {module,projectId,cross} pointer written on every navigate; pickBootRoute/seedBootRoute seed an empty-hash boot pre-render (deep links win)
   - _exports_: `pickBootRoute`, `readLastRoute`, `RESTORE_LAST_MODULE`, `seedBootRoute`, `shouldPersistRoute`, `writeLastRoute`
 - **`src/app/modulePrefetch.js`** — Warm a non-active workspace chunk (and the heavy /sequence/ Gantt iframe doc) on NAVIGATION INTENT only — tab hover/pointerdown, never at boot (NEW-9) — so tab switches feel instant without taxing a Site-only session
@@ -55,6 +57,8 @@ _668 source files mapped._
   - _exports_: `SECTIONS`
 - **`src/workspaces/admin/lib/criteriaRequestsAdmin.js`** — (B877442) Cross-references a criteria request's county against the app's own modeled-jurisdiction lists to decide "Wired ✓" vs "Outstanding"
   - _exports_: `isWired`, `prepareCriteriaRequestRows`
+- **`src/workspaces/admin/ReportsSection.jsx`** — owner-only list of filed problem reports (B842866), read via `admin_list_problem_reports()`.
+  - _exports_: `default (ReportsSection)`
 - **`src/workspaces/design-gallery/DesignGallery.jsx`** — the `#/design` dev-only primitive gallery (NEW-4): every shared control/token in every state, both themes.
   - _exports_: `default (DesignGallery)`
 - **`src/workspaces/food/components/BottomSheet.jsx`** — Generic drag-to-resize mobile bottom sheet (peek/half/full snap points, content-driven height, dismiss-on-drag), content-agnostic
@@ -456,6 +460,8 @@ _668 source files mapped._
   - _exports_: `activeUid`, `checkProjectDeletionStatus`, `DELETED_RETENTION_DAYS`, `deleteProject`, `filterProjects`, `groupProjects`, `listDeletedProjects`, `listProjects`, `normalizeProjectName`, `notifyProjectsChanged`, `onProjectsChanged`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `reconcileProjects`, `relTime`, `renameProject`, `restoreDeletedProject`, `suggestNameMatch`, `warmProjects`, `warmProjectsIfEmpty`
 - **`src/shared/recents/recentDocs.js`** — Library-Home Recent list: local recently-OPENED drawings (not updated_at), per-uid, deduped by id, newest-first, capped at 15
   - _exports_: `listRecents`, `RECENTS_CAP`, `recordOpen`, `removeRecent`
+- **`src/shared/reports/reportsStore.js`** — problem-report context + submit/queue/retry model behind `HelpReportControl.jsx` (B842866).
+  - _exports_: `buildReportContext`, `queuedReportCount`, `reportSessionId`, `retryQueuedReports`, `submitReport`
 - **`src/shared/sitePlans/components/ImageCropTool.jsx`** — reusable non-destructive crop UI for a site-plan overlay (8 handles, scrim, rule-of-thirds), used before or after placement
   - _exports_: `default (ImageCropTool)`
 - **`src/shared/sitePlans/components/SitePlansSection.jsx`** — upload a site plan, pick which page is the site plan, anchor it on the map, and pin comps to buildings on it (rendered by MapFinder above the Comps list)
@@ -544,7 +550,7 @@ _668 source files mapped._
   - _exports_: `Button`, `CONTROL_RADIUS`, `Field`, `FONT`, `IconButton`, `MenuItem`, `menuPanelStyle`, `MenuTrigger`, `PAD`, `Section`, `SIZE`, `Tab`, `ToggleChip`
 - **`src/shared/ui/dashboardNav.js`** — Pure wordmark/crumb Dashboard action+tooltip split (B1128272), so Schedule's header can leave-vs-stay differently.
   - _exports_: `crumbDashboardTitle`, `logoDashboardAction`
-- **`src/shared/ui/DeletedProjectNotice.jsx`** — the blocked-route screen Shell.jsx swaps in for a soft-deleted or nonexistent project (restore / go-to-dashboard)
+- **`src/shared/ui/DeletedProjectNotice.jsx`** — Shell.jsx's blocked-route screen for a soft-deleted or missing project (Restore / Dashboard-only), swapped in for the workspace so no editor is ever mounted to write through.
   - _exports_: `default (DeletedProjectNotice)`
 - **`src/shared/ui/designTokens.js`** — B809906 design tokens: spacing (`SPACE`), type scale (`FONT_SIZE`) and standard control heights (`CONTROL_H`) — the audited-value siblings of `radius.js`'s `RADIUS`.
   - _exports_: `CONTROL_H`, `FONT_SIZE`, `SPACE`
@@ -719,7 +725,7 @@ _668 source files mapped._
   - _exports_: `clampCloudArcFt`, `CLOUD_ARC_DEFAULT_FT`, `CLOUD_ARC_MAX_FT`, `CLOUD_ARC_MIN_FT`, `CLOUD_ARC_PRESETS`, `CLOUD_STATUS_OPTIONS`, `cloudMetaDefaults`, `cloudScallopPath`, `edgeScallopCount`, `simplifyPath`
 - **`src/workspaces/site-planner/lib/cloudRename.js`** — the project-rename CLOUD write, LOADED ON DEMAND: one atomic `rename_site_group` RPC over the whole site group (so a rename reaches plans this browser has never loaded and cannot half-land), plus the server-side read-then-write degrade for a DB without the migration. Reached only by a dynamic import from `storage.renameSiteGroup` — never static-import it from the boot path.
   - _exports_: `cloudRenameGroup`
-- **`src/workspaces/site-planner/lib/cloudRole.js`** — the site-ROLE-flip CLOUD write, LOADED ON DEMAND: one atomic `set_site_group_role` RPC over the whole site group (mirrors cloudRename.js exactly), plus the server-side read-then-write degrade for a DB without the migration. Reached only by a dynamic import from `storage.setSiteGroupRole` — never static-import it from the boot path.
+- **`src/workspaces/site-planner/lib/cloudRole.js`** — Dynamic-import-only cloud write that flips a site group's role (tracked/pursuit/etc.) atomically via the `set_site_group_role` RPC, with a per-row fallback.
   - _exports_: `cloudSetSiteRole`
 - **`src/workspaces/site-planner/lib/cloudSync.js`** — RLS-scoped Supabase site read/write: per-tab version CAS + thin-clobber guard, keepalive push, delete-tombstone reconcile
   - _exports_: `_lastHeaderSig`, `_siteVersions`, `clearSiteVersions`, `cloudCheckDeleted`, `cloudDelete`, `cloudDeletedRows`, `cloudElementRecency`, `cloudHardDelete`, `cloudList`, `cloudParcelRows`, `cloudRestore`, `cloudUpsert`, `fetchSiteForReconcile`, `headerSig`, `interpretDelete`, `keepaliveCloudPush`, `siteRowFor`, `slimForCloud`

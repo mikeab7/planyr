@@ -24,6 +24,8 @@ import { reloadFresh, isChunkRecoveryStuck, subscribeChunkRecoveryStuck } from "
 import { RADIUS } from "../shared/ui/radius.js";
 import FloatingNotice from "../shared/ui/FloatingNotice.jsx";
 import { mayResumeLastSite } from "../workspaces/site-planner/lib/bootResume.js";
+import HelpReportControl from "./HelpReportControl.jsx";
+import { retryQueuedReports } from "../shared/reports/reportsStore.js";
 import { checkProjectDeletionStatus, listDeletedProjects, restoreDeletedProject } from "../shared/projects/projects.js";
 
 // NEW-2 (B848833) — lazy, same reasoning as AdminGate/DesignGallery below: a soft-deleted-project
@@ -307,6 +309,11 @@ export default function Shell() {
   // actually open before it (B711904).
   useEffect(() => { if (!isAdminHash && !isDesignHash) writeLastRoute(route); }, [route, isAdminHash, isDesignHash]);
 
+  // B842866 — drain any problem reports that couldn't reach the server on a prior load
+  // (offline, a dropped connection). Once per boot; LOUD-FAILURE means a report never
+  // silently vanishes, so this is the retry half of that promise. Fire-and-forget.
+  useEffect(() => { retryQueuedReports(); }, []);
+
   // Keep-alive (owner request, 2026-07-05: "cleaner/faster switch between modules"): every
   // workspace the user has VISITED stays mounted, hidden with display:none, instead of being
   // torn down on each tab switch. Switching back is instant — the open drawing, map view,
@@ -551,6 +558,13 @@ export default function Shell() {
           </div>
         )}
       </main>
+      {/* B842864 — the global help/report control. Rendered here (outside every per-workspace
+          absolutely-positioned wrapper) so it renders on every route at every breakpoint,
+          including the map screen and every non-Site workspace, and survives a module switch
+          without remounting. It reads the active route straight off the URL hash itself
+          (reportsStore.js's routeId(), the same source Shell's own isAdminHash/active read),
+          so it needs no route prop threaded down. */}
+      <HelpReportControl user={user} />
       {authOpen && (
         <AuthPanel
           user={user}

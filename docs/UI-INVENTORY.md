@@ -45,23 +45,25 @@ backstop, not the headline — see "Known, deliberately-not-fixed findings".
 
 | surface | light | dark | budget | exemptions | effective ceiling |
 |---|---|---|---|---|---|
-| Map landing page (no project selected) | 22 | 22 | 18 | 4 | 22 |
-| Map landing page (comp mode) | 22 | 22 | 18 | 4 | 22 |
-| Map landing page (selecting parcels) | 22 | 22 | 18 | 4 | 22 |
+| Map landing page (no project selected) | 23 | 23 | 18 | 5 | 23 |
+| Map landing page (comp mode) | 23 | 23 | 18 | 5 | 23 |
+| Map landing page (selecting parcels) | 23 | 23 | 18 | 5 | 23 |
 | App header | 8 | 8 | 7 | 1 | 8 |
 | Main menu — File ▾ | 1 | 1 | 1 | — | 1 |
 | Main menu — Undo history | 0 | 0 | 0 | — | 0 |
 | Main menu — Settings gear | 2 | 2 | 2 | — | 2 |
 | Main menu — plan menu (▾ next to the plan name) | 0 | 0 | 3 | — | 3 |
 | Tool rail | 2 | 2 | 2 | — | 2 |
-| Left rail + panels (Yield) | 15 | 15 | 15 | — | 15 |
-| Library | 0 | 0 | 0 | — | 0 |
-| Doc Review (empty state) | 1 | 1 | 1 | — | 1 |
+| Left rail + panels (Yield) | 16 | 16 | 15 | 1 | 16 |
+| Library | 1 | 1 | 0 | 1 | 1 |
+| Doc Review (empty state) | 2 | 2 | 1 | 1 | 2 |
 
 **✅ Every crawled surface is within its budget.**
 
 **Named, dated exemptions (printed every run — this is the permanent cost of every signature
 left outside its surface's own budget):**
+
+- **B842864-global-help-report-control** (2026-09-05) — +1 on "Map landing page (no project selected)", "Map landing page (comp mode)", "Map landing page (selecting parcels)", "Left rail + panels (Yield)", "Library", "Doc Review (empty state)": The global help/report control (src/app/HelpReportControl.jsx) is a persistent, fixed bottom-right FAB the app shell mounts once, on every route — the owner's own request, so the control being everywhere is the point, not drift. It renders one uniform signature (radius:999px, height:44px, padding:0px, fontSize:12px) on every whole-page surface this crawl visits; the surfaces that scope to a sub-region only (App header, the Main menu popovers, Tool rail) don't see it because it lives outside that DOM subtree, which is why only the whole-page surfaces above needed a budget lift. A single shared implementation, one exemption line per affected surface, never a per-surface variant.
 
 - **B1038016-leaflet-chrome** (2026-09-01) — +3 on "Map landing page (no project selected)", "Map landing page (comp mode)", "Map landing page (selecting parcels)": Leaflet's own bundled zoom stack (+/− at its vendor font-size), "Find my location" locate button, and the scale bar are third-party chrome — docs/DESIGN.md's radius section (Documented exceptions #4) already carries the zoom-stack/locate-button radius override and the scale-bar non-exception as the accepted boundary of what this token scale reaches. Their child <a>/<div> nodes are deliberately radius:0 BY THE APP'S OWN CSS (the rounded corner the user sees comes from the parent .leaflet-bar container's overflow:hidden clip, not the button), so a per-button override here would fight the exact mechanism that already unified their visible shape with the app's own RADIUS.md. The one thing left off-scale (the zoom glyphs' 22px font) is Leaflet's own vendor CSS (.leaflet-touch .leaflet-control-zoom-in/-out), not an app literal.
 
@@ -296,7 +298,7 @@ look aligned because they float over the same surface.
 
 ### Map landing page (no project selected)
 
-**light** — 29 distinct style signature(s) over 35 matched element(s):
+**light** — 30 distinct style signature(s) over 36 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
@@ -311,7 +313,7 @@ look aligned because they float over the same surface.
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Choose a project or organization ×1 | src/shared/ui/ProjectBreadcrumb.jsx:647:        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"} |
 | 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:204:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out"> |
 | 999px | 20px | 10.5px | 800 | `rgb(234, 238, 243)` | `0px none rgb(27, 30, 38)` | › ×1 | unattributed (label too short to search) |
-| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+497 more matches, best-effort) |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+500 more matches, best-effort) |
 | 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1336:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
 | 0px | 18px | 12px | 400 | `rgba(255, 255, 255, 0.8)` | `0px none rgb(51, 51, 51)` | 500 mi ×1 | unattributed (no source match — best-effort text search) |
 | 6px | 26px | 12px | 700 | `rgb(194, 65, 12)` | `0px none rgb(255, 255, 255)` | Address search creates a new site ×1 | src/workspaces/site-planner/MapFinder.jsx:536:      {seg("site", "Site", PAL.accent, "Address search creates a new site")} |
@@ -324,13 +326,14 @@ look aligned because they float over the same surface.
 | 6px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Comps0 ×1 | unattributed (no source match — best-effort text search) |
 | 6px | 29px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Filter sites by name ×1 | src/workspaces/site-planner/MapFinder.jsx:3489:              <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name" (+1 more match, best-effort) |
 | 6px | 29px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Sort sites within each group ×1 | src/workspaces/site-planner/MapFinder.jsx:3493:                  "Filter sites by name sits 6px from Sort sites within each group — padding (+1 more match, best-effort) |
-| 0px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Collapse ×1 | src/shared/comps/components/CompEntryGrid.jsx:1796:          <table style={{ borderCollapse: "collapse", tableLayout: "fixed" }}> (+28 more matches, best-effort) |
+| 0px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Collapse ×1 | src/shared/comps/components/CompEntryGrid.jsx:1796:          <table style={{ borderCollapse: "collapse", tableLayout: "fixed" }}> (+29 more matches, best-effort) |
 | 999px | 14px | 10px | 400 | `rgb(216, 90, 48)` | `0px none rgb(255, 255, 255)` | SPAN ×1 | src/shared/files/matchLineFit.js:131:  // Least-squares refit on inliers for sub-pixel accuracy; also track how far the inliers SPAN (+22 more matches, best-effort) |
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Imagery & layers ×1 | src/shared/ui/controls.jsx:56: * chip — the account pill, "Drop a pin", the collapsed "Imagery & layers" pill, the nav tabs' (+5 more matches, best-effort) |
+| 999px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:131:        aria-label="Help and report a problem" |
 
-**dark** — 29 distinct style signature(s) over 35 matched element(s):
+**dark** — 30 distinct style signature(s) over 36 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
@@ -345,7 +348,7 @@ look aligned because they float over the same surface.
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Choose a project or organization ×1 | src/shared/ui/ProjectBreadcrumb.jsx:647:        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"} |
 | 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:204:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out"> |
 | 999px | 20px | 10.5px | 800 | `rgb(17, 19, 25)` | `0px none rgb(236, 239, 244)` | › ×1 | unattributed (label too short to search) |
-| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+497 more matches, best-effort) |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+500 more matches, best-effort) |
 | 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(236, 239, 244)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1336:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
 | 0px | 18px | 12px | 400 | `rgba(255, 255, 255, 0.8)` | `0px none rgb(51, 51, 51)` | 500 mi ×1 | unattributed (no source match — best-effort text search) |
 | 6px | 26px | 12px | 700 | `rgb(242, 107, 58)` | `0px none rgb(255, 255, 255)` | Address search creates a new site ×1 | src/workspaces/site-planner/MapFinder.jsx:536:      {seg("site", "Site", PAL.accent, "Address search creates a new site")} |
@@ -358,18 +361,19 @@ look aligned because they float over the same surface.
 | 6px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Comps0 ×1 | unattributed (no source match — best-effort text search) |
 | 6px | 29px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Filter sites by name ×1 | src/workspaces/site-planner/MapFinder.jsx:3489:              <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name" (+1 more match, best-effort) |
 | 6px | 29px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Sort sites within each group ×1 | src/workspaces/site-planner/MapFinder.jsx:3493:                  "Filter sites by name sits 6px from Sort sites within each group — padding (+1 more match, best-effort) |
-| 0px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Collapse ×1 | src/shared/comps/components/CompEntryGrid.jsx:1796:          <table style={{ borderCollapse: "collapse", tableLayout: "fixed" }}> (+28 more matches, best-effort) |
+| 0px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Collapse ×1 | src/shared/comps/components/CompEntryGrid.jsx:1796:          <table style={{ borderCollapse: "collapse", tableLayout: "fixed" }}> (+29 more matches, best-effort) |
 | 999px | 14px | 10px | 400 | `rgb(216, 90, 48)` | `0px none rgb(255, 255, 255)` | SPAN ×1 | src/shared/files/matchLineFit.js:131:  // Least-squares refit on inliers for sub-pixel accuracy; also track how far the inliers SPAN (+22 more matches, best-effort) |
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Imagery & layers ×1 | src/shared/ui/controls.jsx:56: * chip — the account pill, "Drop a pin", the collapsed "Imagery & layers" pill, the nav tabs' (+5 more matches, best-effort) |
+| 999px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:131:        aria-label="Help and report a problem" |
 
 
 ---
 
 ### Map landing page (comp mode)
 
-**light** — 29 distinct style signature(s) over 35 matched element(s):
+**light** — 30 distinct style signature(s) over 36 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
@@ -384,7 +388,7 @@ look aligned because they float over the same surface.
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Choose a project or organization ×1 | src/shared/ui/ProjectBreadcrumb.jsx:647:        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"} |
 | 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:204:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out"> |
 | 999px | 20px | 10.5px | 800 | `rgb(234, 238, 243)` | `0px none rgb(27, 30, 38)` | › ×1 | unattributed (label too short to search) |
-| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+497 more matches, best-effort) |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+500 more matches, best-effort) |
 | 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1336:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
 | 0px | 18px | 12px | 400 | `rgba(255, 255, 255, 0.8)` | `0px none rgb(51, 51, 51)` | 500 mi ×1 | unattributed (no source match — best-effort text search) |
 | 6px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Address search creates a new site ×1 | src/workspaces/site-planner/MapFinder.jsx:536:      {seg("site", "Site", PAL.accent, "Address search creates a new site")} |
@@ -397,13 +401,14 @@ look aligned because they float over the same surface.
 | 6px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Comps0 ×1 | unattributed (no source match — best-effort text search) |
 | 6px | 29px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Filter sites by name ×1 | src/workspaces/site-planner/MapFinder.jsx:3489:              <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name" (+1 more match, best-effort) |
 | 6px | 29px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Sort sites within each group ×1 | src/workspaces/site-planner/MapFinder.jsx:3493:                  "Filter sites by name sits 6px from Sort sites within each group — padding (+1 more match, best-effort) |
-| 0px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Collapse ×1 | src/shared/comps/components/CompEntryGrid.jsx:1796:          <table style={{ borderCollapse: "collapse", tableLayout: "fixed" }}> (+28 more matches, best-effort) |
+| 0px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Collapse ×1 | src/shared/comps/components/CompEntryGrid.jsx:1796:          <table style={{ borderCollapse: "collapse", tableLayout: "fixed" }}> (+29 more matches, best-effort) |
 | 999px | 14px | 10px | 400 | `rgb(216, 90, 48)` | `0px none rgb(255, 255, 255)` | SPAN ×1 | src/shared/files/matchLineFit.js:131:  // Least-squares refit on inliers for sub-pixel accuracy; also track how far the inliers SPAN (+22 more matches, best-effort) |
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Imagery & layers ×1 | src/shared/ui/controls.jsx:56: * chip — the account pill, "Drop a pin", the collapsed "Imagery & layers" pill, the nav tabs' (+5 more matches, best-effort) |
+| 999px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:131:        aria-label="Help and report a problem" |
 
-**dark** — 29 distinct style signature(s) over 35 matched element(s):
+**dark** — 30 distinct style signature(s) over 36 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
@@ -418,7 +423,7 @@ look aligned because they float over the same surface.
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Choose a project or organization ×1 | src/shared/ui/ProjectBreadcrumb.jsx:647:        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"} |
 | 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:204:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out"> |
 | 999px | 20px | 10.5px | 800 | `rgb(17, 19, 25)` | `0px none rgb(236, 239, 244)` | › ×1 | unattributed (label too short to search) |
-| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+497 more matches, best-effort) |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+500 more matches, best-effort) |
 | 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(236, 239, 244)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1336:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
 | 0px | 18px | 12px | 400 | `rgba(255, 255, 255, 0.8)` | `0px none rgb(51, 51, 51)` | 500 mi ×1 | unattributed (no source match — best-effort text search) |
 | 6px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Address search creates a new site ×1 | src/workspaces/site-planner/MapFinder.jsx:536:      {seg("site", "Site", PAL.accent, "Address search creates a new site")} |
@@ -431,18 +436,19 @@ look aligned because they float over the same surface.
 | 6px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Comps0 ×1 | unattributed (no source match — best-effort text search) |
 | 6px | 29px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Filter sites by name ×1 | src/workspaces/site-planner/MapFinder.jsx:3489:              <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name" (+1 more match, best-effort) |
 | 6px | 29px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Sort sites within each group ×1 | src/workspaces/site-planner/MapFinder.jsx:3493:                  "Filter sites by name sits 6px from Sort sites within each group — padding (+1 more match, best-effort) |
-| 0px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Collapse ×1 | src/shared/comps/components/CompEntryGrid.jsx:1796:          <table style={{ borderCollapse: "collapse", tableLayout: "fixed" }}> (+28 more matches, best-effort) |
+| 0px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Collapse ×1 | src/shared/comps/components/CompEntryGrid.jsx:1796:          <table style={{ borderCollapse: "collapse", tableLayout: "fixed" }}> (+29 more matches, best-effort) |
 | 999px | 14px | 10px | 400 | `rgb(216, 90, 48)` | `0px none rgb(255, 255, 255)` | SPAN ×1 | src/shared/files/matchLineFit.js:131:  // Least-squares refit on inliers for sub-pixel accuracy; also track how far the inliers SPAN (+22 more matches, best-effort) |
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Imagery & layers ×1 | src/shared/ui/controls.jsx:56: * chip — the account pill, "Drop a pin", the collapsed "Imagery & layers" pill, the nav tabs' (+5 more matches, best-effort) |
+| 999px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:131:        aria-label="Help and report a problem" |
 
 
 ---
 
 ### Map landing page (selecting parcels)
 
-**light** — 29 distinct style signature(s) over 35 matched element(s):
+**light** — 30 distinct style signature(s) over 36 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
@@ -457,7 +463,7 @@ look aligned because they float over the same surface.
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Choose a project or organization ×1 | src/shared/ui/ProjectBreadcrumb.jsx:647:        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"} |
 | 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:204:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out"> |
 | 999px | 20px | 10.5px | 800 | `rgb(234, 238, 243)` | `0px none rgb(27, 30, 38)` | › ×1 | unattributed (label too short to search) |
-| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+497 more matches, best-effort) |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+500 more matches, best-effort) |
 | 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(27, 30, 38)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1336:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
 | 0px | 18px | 12px | 400 | `rgba(255, 255, 255, 0.8)` | `0px none rgb(51, 51, 51)` | 500 mi ×1 | unattributed (no source match — best-effort text search) |
 | 6px | 26px | 12px | 700 | `rgb(194, 65, 12)` | `0px none rgb(255, 255, 255)` | Address search creates a new site ×1 | src/workspaces/site-planner/MapFinder.jsx:536:      {seg("site", "Site", PAL.accent, "Address search creates a new site")} |
@@ -469,14 +475,15 @@ look aligned because they float over the same surface.
 | 6px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Comps0 ×1 | unattributed (no source match — best-effort text search) |
 | 6px | 29px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Filter sites by name ×1 | src/workspaces/site-planner/MapFinder.jsx:3489:              <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name" (+1 more match, best-effort) |
 | 6px | 29px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Sort sites within each group ×1 | src/workspaces/site-planner/MapFinder.jsx:3493:                  "Filter sites by name sits 6px from Sort sites within each group — padding (+1 more match, best-effort) |
-| 0px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Collapse ×1 | src/shared/comps/components/CompEntryGrid.jsx:1796:          <table style={{ borderCollapse: "collapse", tableLayout: "fixed" }}> (+28 more matches, best-effort) |
+| 0px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Collapse ×1 | src/shared/comps/components/CompEntryGrid.jsx:1796:          <table style={{ borderCollapse: "collapse", tableLayout: "fixed" }}> (+29 more matches, best-effort) |
 | 999px | 14px | 10px | 400 | `rgb(216, 90, 48)` | `0px none rgb(255, 255, 255)` | SPAN ×1 | src/shared/files/matchLineFit.js:131:  // Least-squares refit on inliers for sub-pixel accuracy; also track how far the inliers SPAN (+22 more matches, best-effort) |
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Imagery & layers ×1 | src/shared/ui/controls.jsx:56: * chip — the account pill, "Drop a pin", the collapsed "Imagery & layers" pill, the nav tabs' (+5 more matches, best-effort) |
+| 999px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:131:        aria-label="Help and report a problem" |
 | 12px | 48px | 12px | 400 | `rgba(255, 255, 255, 0.94)` | `1px solid rgb(225, 229, 235)` | Click any lot on the map to add it (＋) — ×1 | src/workspaces/site-planner/MapFinder.jsx:3888:                ? "Click any lot on the map to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines." |
 
-**dark** — 29 distinct style signature(s) over 35 matched element(s):
+**dark** — 30 distinct style signature(s) over 36 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
@@ -491,7 +498,7 @@ look aligned because they float over the same surface.
 | 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | Choose a project or organization ×1 | src/shared/ui/ProjectBreadcrumb.jsx:647:        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"} |
 | 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:204:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out"> |
 | 999px | 20px | 10.5px | 800 | `rgb(17, 19, 25)` | `0px none rgb(236, 239, 244)` | › ×1 | unattributed (label too short to search) |
-| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+497 more matches, best-effort) |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+500 more matches, best-effort) |
 | 0px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `0px none rgb(236, 239, 244)` | Find my location ×1 | src/workspaces/site-planner/MapFinder.jsx:1336:      btn.href = "#"; btn.setAttribute("role", "button"); btn.setAttribute("aria-label", "Find my location"); btn.setAttribute("data-testid", "locate-me-btn"); btn.setAttribute("data-locate-state", "idle"); (+2 more matches, best-effort) |
 | 0px | 18px | 12px | 400 | `rgba(255, 255, 255, 0.8)` | `0px none rgb(51, 51, 51)` | 500 mi ×1 | unattributed (no source match — best-effort text search) |
 | 6px | 26px | 12px | 700 | `rgb(242, 107, 58)` | `0px none rgb(255, 255, 255)` | Address search creates a new site ×1 | src/workspaces/site-planner/MapFinder.jsx:536:      {seg("site", "Site", PAL.accent, "Address search creates a new site")} |
@@ -503,11 +510,12 @@ look aligned because they float over the same surface.
 | 6px | 22px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Comps0 ×1 | unattributed (no source match — best-effort text search) |
 | 6px | 29px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Filter sites by name ×1 | src/workspaces/site-planner/MapFinder.jsx:3489:              <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name" (+1 more match, best-effort) |
 | 6px | 29px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Sort sites within each group ×1 | src/workspaces/site-planner/MapFinder.jsx:3493:                  "Filter sites by name sits 6px from Sort sites within each group — padding (+1 more match, best-effort) |
-| 0px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Collapse ×1 | src/shared/comps/components/CompEntryGrid.jsx:1796:          <table style={{ borderCollapse: "collapse", tableLayout: "fixed" }}> (+28 more matches, best-effort) |
+| 0px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Collapse ×1 | src/shared/comps/components/CompEntryGrid.jsx:1796:          <table style={{ borderCollapse: "collapse", tableLayout: "fixed" }}> (+29 more matches, best-effort) |
 | 999px | 14px | 10px | 400 | `rgb(216, 90, 48)` | `0px none rgb(255, 255, 255)` | SPAN ×1 | src/shared/files/matchLineFit.js:131:  // Least-squares refit on inliers for sub-pixel accuracy; also track how far the inliers SPAN (+22 more matches, best-effort) |
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Imagery & layers ×1 | src/shared/ui/controls.jsx:56: * chip — the account pill, "Drop a pin", the collapsed "Imagery & layers" pill, the nav tabs' (+5 more matches, best-effort) |
+| 999px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:131:        aria-label="Help and report a problem" |
 | 12px | 48px | 12px | 400 | `rgba(24, 27, 33, 0.93)` | `1px solid rgb(42, 46, 55)` | Click any lot on the map to add it (＋) — ×1 | src/workspaces/site-planner/MapFinder.jsx:3888:                ? "Click any lot on the map to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines." |
 
 
@@ -529,7 +537,7 @@ look aligned because they float over the same surface.
 | 8px | 30px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Switch or rename plan ×1 | src/workspaces/site-planner/SitePlanner.jsx:18985:          "Switch project sits 10.7px from Switch or rename plan — height 26px vs 24px" sibling (+1 more match, best-effort) |
 | 8px | 30px | 12px | 400 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Cloud sync: Saved on this device ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:204:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out"> |
-| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+497 more matches, best-effort) |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+500 more matches, best-effort) |
 | 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(215, 221, 229)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:19132:            title="File — export a PNG or print a PDF" |
 | 8px | 26px | 12px | 500 | `rgba(0, 0, 0, 0.06)` | `1px solid rgba(0, 0, 0, 0)` | Zoom to fit ×1 | src/workspaces/site-planner/MapFinder.jsx:218: * "+ Select parcels", "Turn all 1 layer off", "Zoom to fit", "Export to Google Earth (KMZ)" — none (+5 more matches, best-effort) |
 
@@ -547,7 +555,7 @@ look aligned because they float over the same surface.
 | 8px | 30px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | Switch or rename plan ×1 | src/workspaces/site-planner/SitePlanner.jsx:18985:          "Switch project sits 10.7px from Switch or rename plan — height 26px vs 24px" sibling (+1 more match, best-effort) |
 | 8px | 30px | 12px | 400 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Cloud sync: Saved on this device ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:204:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out"> |
-| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+497 more matches, best-effort) |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+500 more matches, best-effort) |
 | 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(38, 42, 51)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:19132:            title="File — export a PNG or print a PDF" |
 | 8px | 26px | 12px | 500 | `rgba(255, 255, 255, 0.09)` | `1px solid rgba(0, 0, 0, 0)` | Zoom to fit ×1 | src/workspaces/site-planner/MapFinder.jsx:218: * "+ Select parcels", "Turn all 1 layer off", "Zoom to fit", "Export to Google Earth (KMZ)" — none (+5 more matches, best-effort) |
 
@@ -641,7 +649,7 @@ _(nothing matched in this theme/scenario)_
 
 ### Left rail + panels (Yield)
 
-**light** — 20 distinct style signature(s) over 70 matched element(s):
+**light** — 21 distinct style signature(s) over 71 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
@@ -665,8 +673,9 @@ _(nothing matched in this theme/scenario)_
 | 6px | 19px | 13px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Close panel ×1 | src/shared/ui/PanelChrome.jsx:83:      <IconBtn title="Close" aria-label="Close panel" onClick={onClose} data-testid={testId ? `${testId}-close` : undefined}>✕</IconBtn> |
 | 0px | 31px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | ▶Land use ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 12px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(75, 82, 99)` | About Screening disclaimer ×1 | unattributed (no source match — best-effort text search) |
+| 999px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:131:        aria-label="Help and report a problem" |
 
-**dark** — 20 distinct style signature(s) over 70 matched element(s):
+**dark** — 21 distinct style signature(s) over 71 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
@@ -690,36 +699,43 @@ _(nothing matched in this theme/scenario)_
 | 6px | 19px | 13px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Close panel ×1 | src/shared/ui/PanelChrome.jsx:83:      <IconBtn title="Close" aria-label="Close panel" onClick={onClose} data-testid={testId ? `${testId}-close` : undefined}>✕</IconBtn> |
 | 0px | 31px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | ▶Land use ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 12px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(164, 171, 184)` | About Screening disclaimer ×1 | unattributed (no source match — best-effort text search) |
+| 999px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:131:        aria-label="Help and report a problem" |
 
 
 ---
 
 ### Library
 
-**light** — 0 distinct style signature(s) over 0 matched element(s):
+**light** — 1 distinct style signature(s) over 1 matched element(s):
 
-_(nothing matched in this theme/scenario)_
+| radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
+|---|---|---|---|---|---|---|---|
+| 999px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:131:        aria-label="Help and report a problem" |
 
-**dark** — 0 distinct style signature(s) over 0 matched element(s):
+**dark** — 1 distinct style signature(s) over 1 matched element(s):
 
-_(nothing matched in this theme/scenario)_
+| radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
+|---|---|---|---|---|---|---|---|
+| 999px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:131:        aria-label="Help and report a problem" |
 
 
 ---
 
 ### Doc Review (empty state)
 
-**light** — 2 distinct style signature(s) over 3 matched element(s):
+**light** — 3 distinct style signature(s) over 4 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
 | 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Open PDF…, ⇄ Compare revisions… ×2 | src/workspaces/doc-review/DocReview.jsx:675:    if (!file) { setOpenErr("No file was received from that drop. Try the Open PDF… button, or drop a single .pdf."); return; } (+3 more matches, best-effort) |
 | 8px | 30px | 12px | 700 | `rgb(14, 116, 144)` | `1px solid rgb(14, 116, 144)` | 🗂 Browse the Library ×1 | src/workspaces/doc-review/DocReview.jsx:2283:                🗂 Browse the Library |
+| 999px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:131:        aria-label="Help and report a problem" |
 
-**dark** — 2 distinct style signature(s) over 3 matched element(s):
+**dark** — 3 distinct style signature(s) over 4 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
 | 8px | 30px | 12px | 600 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Open PDF…, ⇄ Compare revisions… ×2 | src/workspaces/doc-review/DocReview.jsx:675:    if (!file) { setOpenErr("No file was received from that drop. Try the Open PDF… button, or drop a single .pdf."); return; } (+3 more matches, best-effort) |
 | 8px | 30px | 12px | 700 | `rgb(14, 116, 144)` | `1px solid rgb(14, 116, 144)` | 🗂 Browse the Library ×1 | src/workspaces/doc-review/DocReview.jsx:2283:                🗂 Browse the Library |
+| 999px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:131:        aria-label="Help and report a problem" |
 

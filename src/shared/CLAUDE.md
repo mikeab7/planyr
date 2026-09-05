@@ -729,6 +729,20 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   the review/promote surface, reachable ONLY from the KML import button — hand entry never creates
   a row here. `db/test/comp_import_drafts_rls.test.sql` — the same self-rolling-back proof shape,
   9/9 passed live against production.
+- **`reports/` (B842866) — the problem-report submission model behind the global help/report
+  control (the app shell's own help-control component, mounted on every route).**
+  `reportsStore.js` is the whole thing: `buildReportContext` (the same privacy-allowlist
+  discipline as the performance recorder's capture payload — route/build/viewport/browser/
+  sanitised-plan-id/GIS-layer-keys only, never drawing geometry or names), `submitReport`
+  (writes to `public.problem_reports` via the existing anon Supabase client; NEVER attaches an
+  email to a signed-out row) and `retryQueuedReports` (LOUD-FAILURE: a report that can't reach
+  the server queues to localStorage and retries on the next load rather than vanishing — the
+  Shell calls it once at boot). `problem_reports.sql` is the migration: INSERT-only RLS for
+  anon + authenticated (same discipline as `client_errors.sql` — no client SELECT policy, ever),
+  read back only through `admin_list_problem_reports()`, a SECURITY DEFINER RPC gated on
+  `is_admin()` (the admin workspace's reports section is the one reader). `test/` holds the
+  live, self-rolling-back RLS proof (run via the Supabase MCP against production) — a non-admin
+  signed-in user provably gets zero rows back from the admin RPC.
 - `projects/`, `profile/`, `cloud/`, `presence/`, `gis/`, `geometry/`, `placement/`.
 
 **Convention:** shared logic is pure and unit-tested; per-host state/wiring stays in the workspace.

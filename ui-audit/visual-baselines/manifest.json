@@ -6,90 +6,90 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-09-03",
-        "approvedCommit": "a8f42d04",
-        "note": "B1099937: re-approve with a verified rev-1228 capture after the earlier approval was proven stale (vanilla-vs-origin byte-match proved this sandbox IS CI-accurate for this surface; the prior approval simply wasn't captured with the verified binary)"
+        "approvedAt": "2026-09-05",
+        "approvedCommit": "9e65428e9",
+        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
       },
       "dark": {
-        "approvedAt": "2026-09-03",
-        "approvedCommit": "a8f42d04",
-        "note": "B1099937: re-approve with a verified rev-1228 capture after the earlier approval was proven stale (vanilla-vs-origin byte-match proved this sandbox IS CI-accurate for this surface; the prior approval simply wasn't captured with the verified binary)"
+        "approvedAt": "2026-09-05",
+        "approvedCommit": "9e65428e9",
+        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
       },
       "light--phone": {
-        "approvedAt": "2026-09-03",
-        "approvedCommit": "f94412eb",
-        "note": "Model Round 4 token move (--surface-page/--success-text) shifted phone baselines too; re-captured with CI's exact pinned Chromium (rev 1228, confirmed available this session) while here, closing B1096017's playwright-install blocker in the same commit."
+        "approvedAt": "2026-09-05",
+        "approvedCommit": "9e65428e9",
+        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-03",
-        "approvedCommit": "f94412eb",
-        "note": "Model Round 4 token move (--surface-page/--success-text) shifted phone baselines too; re-captured with CI's exact pinned Chromium (rev 1228, confirmed available this session) while here, closing B1096017's playwright-install blocker in the same commit."
+        "approvedAt": "2026-09-05",
+        "approvedCommit": "9e65428e9",
+        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
       }
     },
     "site-planner-header": {
       "light": {
-        "approvedAt": "2026-09-03",
-        "approvedCommit": "a8f42d04",
-        "note": "B1096017 (×2): re-approve with a verified rev-1228 capture of the current code — the darkened --surface-page/--success-text tokens visibly change this surface's chrome (AppHeader, left rail), a real intended consequence of the Model Round 4 fix, not sandbox noise (origin/main's own CI run 33717394337 passed clean on the old baseline, ruling out a pre-existing CI-side gap)"
+        "approvedAt": "2026-09-05",
+        "approvedCommit": "9e65428e9",
+        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
       },
       "dark": {
-        "approvedAt": "2026-09-03",
-        "approvedCommit": "a8f42d04",
-        "note": "B1096017 (×2): re-approve with a verified rev-1228 capture of the current code — the darkened --surface-page/--success-text tokens visibly change this surface's chrome (AppHeader, left rail), a real intended consequence of the Model Round 4 fix, not sandbox noise (origin/main's own CI run 33717394337 passed clean on the old baseline, ruling out a pre-existing CI-side gap)"
+        "approvedAt": "2026-09-05",
+        "approvedCommit": "9e65428e9",
+        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
       },
       "light--phone": {
-        "approvedAt": "2026-09-03",
-        "approvedCommit": "a8f42d04",
-        "note": "B1096017 (×2): re-approve with a verified rev-1228 capture of the current code — the darkened --surface-page/--success-text tokens visibly change this surface's chrome (AppHeader, left rail), a real intended consequence of the Model Round 4 fix, not sandbox noise (origin/main's own CI run 33717394337 passed clean on the old baseline, ruling out a pre-existing CI-side gap)"
+        "approvedAt": "2026-09-05",
+        "approvedCommit": "9e65428e9",
+        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-03",
-        "approvedCommit": "a8f42d04",
-        "note": "B1096017 (×2): re-approve with a verified rev-1228 capture of the current code — the darkened --surface-page/--success-text tokens visibly change this surface's chrome (AppHeader, left rail), a real intended consequence of the Model Round 4 fix, not sandbox noise (origin/main's own CI run 33717394337 passed clean on the old baseline, ruling out a pre-existing CI-side gap)"
+        "approvedAt": "2026-09-05",
+        "approvedCommit": "9e65428e9",
+        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
       }
     },
     "site-planner-left-rail": {
       "light": {
-        "approvedAt": "2026-09-03",
-        "approvedCommit": "a8f42d04",
-        "note": "B1096017 (×2): same as site-planner-header — real token-driven chrome change, re-approved with verified rev-1228"
+        "approvedAt": "2026-09-05",
+        "approvedCommit": "9e65428e9",
+        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
       },
       "dark": {
-        "approvedAt": "2026-09-03",
-        "approvedCommit": "a8f42d04",
-        "note": "B1096017 (×2): same as site-planner-header — real token-driven chrome change, re-approved with verified rev-1228"
+        "approvedAt": "2026-09-05",
+        "approvedCommit": "9e65428e9",
+        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
       },
       "light--phone": {
-        "approvedAt": "2026-09-03",
-        "approvedCommit": "a8f42d04",
-        "note": "B1096017 (×2): same as site-planner-header — real token-driven chrome change, re-approved with verified rev-1228"
+        "approvedAt": "2026-09-05",
+        "approvedCommit": "9e65428e9",
+        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-03",
-        "approvedCommit": "a8f42d04",
-        "note": "B1096017 (×2): same as site-planner-header — real token-driven chrome change, re-approved with verified rev-1228"
+        "approvedAt": "2026-09-05",
+        "approvedCommit": "9e65428e9",
+        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
       }
     },
     "library": {
       "light": {
-        "approvedAt": "2026-09-03",
-        "approvedCommit": "a8f42d04",
-        "note": "B1096017 (×2): same as site-planner-header — the darkened --surface-page background is directly visible on this workspace's page background, re-approved with verified rev-1228"
+        "approvedAt": "2026-09-05",
+        "approvedCommit": "9e65428e9",
+        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
       },
       "dark": {
-        "approvedAt": "2026-09-03",
-        "approvedCommit": "a8f42d04",
-        "note": "B1096017 (×2): same as site-planner-header — the darkened --surface-page background is directly visible on this workspace's page background, re-approved with verified rev-1228"
+        "approvedAt": "2026-09-05",
+        "approvedCommit": "9e65428e9",
+        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
       },
       "light--phone": {
-        "approvedAt": "2026-09-03",
-        "approvedCommit": "a8f42d04",
-        "note": "B1096017 (×2): same as site-planner-header — the darkened --surface-page background is directly visible on this workspace's page background, re-approved with verified rev-1228"
+        "approvedAt": "2026-09-05",
+        "approvedCommit": "9e65428e9",
+        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-03",
-        "approvedCommit": "a8f42d04",
-        "note": "B1096017 (×2): same as site-planner-header — the darkened --surface-page background is directly visible on this workspace's page background, re-approved with verified rev-1228"
+        "approvedAt": "2026-09-05",
+        "approvedCommit": "9e65428e9",
+        "note": "B842864 — the new global help/report FAB (bottom-right, every route) intentionally adds a 44x44 circular button to every surface's screenshot; approving the new baselines to reflect it"
       }
     }
   }
