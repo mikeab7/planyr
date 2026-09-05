@@ -127,6 +127,43 @@ const FILL_HANDLE_PX = 7;
  *  Right/Left arrows all share this so wrapping to the next/previous row stays consistent. */
 function stepCol(colCount, c, dir) { return Math.max(0, Math.min(colCount - 1, c + dir)); }
 
+// ⛔ B1157361 (owner chat block 2026-09-04, "trace arrows overdraw the cell values they cross")
+// — the waypoints for one trace-precedent/dependent arrow, routed to clear the vertically
+// CENTERED text band every intervening cell renders into (vAlign defaults to "center" — see
+// this file's own cellStyle.valign handling — regardless of the cell's own horizontal
+// alignment, so a lane inset from the rect's near edge clears left/right/center text alike).
+// MEASURED live: a same-row precedent (A1 -> E1) previously drew ITS ENTIRE line at the row's
+// own vertical center (`cy`) — exactly where B1/C1/D1's own values sit — striking through them.
+// A precedent range that shares the TARGET's row or column is the common, previously-broken
+// case: the line now runs along a lane near the rect's top (same-row) or left (same-column)
+// edge instead of straight through the center, with a short stub at each end connecting to the
+// real source/target points (so the dot still marks the source's own edge and the arrowhead
+// still lands on the target's own center, same as before). A genuinely diagonal precedent
+// (target shares neither the source's row nor its column) keeps the original corner-to-corner
+// line — it never ran through a row/column's own center band to begin with.
+const ROUTE_LANE_FRAC = 0.16; // inset from the rect's near edge, as a fraction of its own height/width
+function routeArrowPath(rect, to) {
+  const cx = (rect.left + rect.right) / 2, cy = (rect.top + rect.bottom) / 2;
+  const sameRow = to.y >= rect.top && to.y <= rect.bottom;
+  const sameCol = to.x >= rect.left && to.x <= rect.right;
+  if (sameRow) {
+    const sx = to.x < rect.left ? rect.left : to.x > rect.right ? rect.right : cx;
+    const laneY = rect.top + (rect.bottom - rect.top) * ROUTE_LANE_FRAC;
+    return [{ x: sx, y: cy }, { x: sx, y: laneY }, { x: to.x, y: laneY }, { x: to.x, y: to.y }];
+  }
+  if (sameCol) {
+    const sy = to.y < rect.top ? rect.top : to.y > rect.bottom ? rect.bottom : cy;
+    const laneX = rect.left + (rect.right - rect.left) * ROUTE_LANE_FRAC;
+    return [{ x: cx, y: sy }, { x: laneX, y: sy }, { x: laneX, y: to.y }, { x: to.x, y: to.y }];
+  }
+  let sx = cx, sy = cy;
+  if (to.y < rect.top) sy = rect.top; else if (to.y > rect.bottom) sy = rect.bottom;
+  if (to.x < rect.left) sx = rect.left; else if (to.x > rect.right) sx = rect.right;
+  return [{ x: sx, y: sy }, { x: to.x, y: to.y }];
+}
+/** `routeArrowPath`'s waypoints as an SVG path `d` string — one `<path>` element per arrow. */
+function arrowPathD(path) { return path.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" "); }
+
 const TEXT_ALIGN = { number: "right", date: "right", bool: "center", error: "left", text: "left", blank: "left" };
 // STAGE 3 (NEW-2) — the input/formula/cross-sheet-link colour convention's token map. "formula"
 // (same-sheet, black) has no entry — it's the plain default the lookup already falls back to.
@@ -363,14 +400,10 @@ export default function SheetView({
       const rect = rectEdgePx(a.fromRect.r1, a.fromRect.c1, a.fromRect.r2, a.fromRect.c2);
       const to = cellCenterPx(a.toCell.row, a.toCell.col);
       if (!rect || !to) continue;
-      const cx = (rect.left + rect.right) / 2, cy = (rect.top + rect.bottom) / 2;
-      // Start the line from whichever edge of the source rect sits nearest the target cell, so
-      // a long vertical/horizontal precedent range doesn't draw a line slicing diagonally
-      // through its own middle cells — Excel's own convention for a range precedent arrow.
-      let sx = cx, sy = cy;
-      if (to.y < rect.top) sy = rect.top; else if (to.y > rect.bottom) sy = rect.bottom;
-      if (to.x < rect.left) sx = rect.left; else if (to.x > rect.right) sx = rect.right;
-      arrows.push({ rect, sx, sy, tx: to.x, ty: to.y, label: a.label, kind: a.kind });
+      // routeArrowPath (B1157361) — routed to clear intervening cells' own centered text,
+      // rather than a straight line from whichever edge of the source rect sits nearest the
+      // target cell (which used to slice straight through a shared row/column's own center).
+      arrows.push({ rect, path: routeArrowPath(rect, to), label: a.label, kind: a.kind });
     }
     const byCell = new Map();
     for (const mk of trace.markers) {
@@ -1005,12 +1038,17 @@ export default function SheetView({
       // (ModelApp.jsx) the identical shadow, which read as one flat weight everywhere rather than
       // "the paper sits heavier than the tools held above it" — the toolbar card keeps the lighter
       // of the two, unchanged.
+      // ⛔ B1157360 — the BOTTOM edge (margin/border/radius/shadow) moved to TabStrip.jsx, which is
+      // now this card's own bottom section (see that file's header). This element ends in a flat,
+      // square-bottomed edge on purpose — the strip supplies the rest of the card, flush beneath
+      // it, so the two together read as one continuous panel instead of a card floating above a
+      // separate strip.
       style={{
         flex: 1, minHeight: 0, overflow: "auto", position: "relative", outline: "none",
-        margin: "0 8px 8px", // SPACE.md literal — see designTokens.js note above
+        margin: "0 8px 0", // SPACE.md literal — see designTokens.js note above
         background: "var(--surface-raised)",
-        border: "1px solid var(--border-default)", borderRadius: RADIUS.lg,
-        boxShadow: "0 2px 6px rgba(0,0,0,0.10)", // design-exempt: no shadow-color token yet repo-wide
+        borderTop: "1px solid var(--border-default)", borderLeft: "1px solid var(--border-default)", borderRight: "1px solid var(--border-default)",
+        borderTopLeftRadius: RADIUS.lg, borderTopRightRadius: RADIUS.lg,
       }}
     >
       {/* Stage 2 visual pass — resize-handle hover affordance. A plain inline `style` prop can't
@@ -1149,7 +1187,12 @@ export default function SheetView({
             a hit target — selecting/editing the cells underneath it must keep working exactly as
             before (CHROME-NEVER-EATS-A-PRESS). Cross-sheet markers are a SEPARATE, small,
             corner-positioned layer with real pointer events (like the fill/resize handles this
-            file already uses) — deliberately not part of the SVG. */}
+            file already uses) — deliberately not part of the SVG.
+            ⛔ B1157361 — one `<path>` per arrow (routeArrowPath's multi-segment waypoints), not a
+            single `<line>`: a straight line from the source rect to the target cell's own center
+            ran straight through every intervening cell's own vertically-centered text (measured:
+            A1 -> E1 struck through B1/C1's values). `marker-end` still orients to the path's own
+            final segment, so the arrowhead still points true into the target cell. */}
         {traceGeometry && (
           <svg
             data-testid="model-trace-overlay"
@@ -1167,8 +1210,11 @@ export default function SheetView({
                   x={a.rect.left + 1} y={a.rect.top + 1} width={Math.max(0, a.rect.right - a.rect.left - 2)} height={Math.max(0, a.rect.bottom - a.rect.top - 2)}
                   fill="none" stroke="var(--accent-model)" strokeDasharray="4 3" strokeWidth={1.25} rx={2}
                 />
-                <circle cx={a.sx} cy={a.sy} r={3} fill="var(--accent-model)" />
-                <line x1={a.sx} y1={a.sy} x2={a.tx} y2={a.ty} stroke="var(--accent-model)" strokeWidth={1.5} markerEnd="url(#model-trace-arrowhead)" />
+                <circle cx={a.path[0].x} cy={a.path[0].y} r={3} fill="var(--accent-model)" />
+                {/* data-testid, not just the tag name: the arrowhead marker above is ALSO a
+                    `<path>` (inside `<defs>`, but still queryable in the DOM), so a bare
+                    `svg path` locator would over-count by one whenever the overlay mounts at all. */}
+                <path data-testid="model-trace-arrow" d={arrowPathD(a.path)} fill="none" stroke="var(--accent-model)" strokeWidth={1.5} strokeLinejoin="round" markerEnd="url(#model-trace-arrowhead)" />
               </g>
             ))}
           </svg>
