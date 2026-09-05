@@ -714,7 +714,8 @@ const ImageIcon = () => (
  * collapse into an indistinct blob once rendered at this bar's actual 15px, which is the only
  * size that matters. Side-by-side boxes with a straight horizontal arrow between them read at
  * a glance instead; the arrowhead is the same vertex-plus-two-wings chevron this file already
- * draws for Undo/Redo, just pointing the other way, rather than a new shape to get wrong. */
+ * draws for the history-step icons at the start of the row, just pointing the other way,
+ * rather than a new shape to get wrong. */
 const SketchIcon = () => (
   <Icon><rect x="0.5" y="5.2" width="5.4" height="5.6" rx="1.2" /><rect x="10.1" y="5.2" width="5.4" height="5.6" rx="1.2" /><path d="M6.3 8H9.5M7.5 6.1L9.5 8L7.5 9.9" /></Icon>
 );
