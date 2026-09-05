@@ -27,6 +27,28 @@
 -- GROUP MATCHING — `coalesce(data->>'groupId', id)`, exactly what the client's `groupOf()` reads
 -- and exactly what rename_site_group.sql matches on (never the `group_id` COLUMN, a denormalized
 -- mirror known to drift from the jsonb — see that file's own header for the production evidence).
+--
+-- ⛔ B1181104 — AMENDED (adversarial live-verify of B1156864/B1165440, 2026-09-05): THE ORIGINAL
+-- VERSION OF THIS FUNCTION LEFT `data->'updatedAt'` UNTOUCHED, AND THAT MADE A ROLE FLIP
+-- PERMANENTLY UNDETECTABLE TO A CLIENT WITH A STALE LOCAL COPY. `mergeSiteContent` (siteModel.js)
+-- resolves every SCALAR field — including `role` — from whichever side's `data.updatedAt` (the
+-- jsonb-INTERNAL client model timestamp, NOT the outer SQL `updated_at` column this function was
+-- already bumping) is newer; ON A TIE it keeps the LOCAL side. This function bumped only the outer
+-- column, so a role flip written here left the jsonb's own `updatedAt` frozen at whatever it was —
+-- meaning ANY device holding a locally-cached copy with the OLD role and an equal-or-newer
+-- `data.updatedAt` could never self-heal on a later pull, no matter how many times this ran.
+-- PROVEN, not theorized: reproduced with the real, unmodified `mergeSiteContent` — a synthetic
+-- stale local copy of `trk8eef7db4d0` (role "pursuit", `updatedAt` equal to the row's actual
+-- production jsonb value) merged against a fresh pull of the REAL current row (role "tracked",
+-- same frozen `updatedAt`) and the merge kept "pursuit"; bumping only the cloud copy's
+-- `data.updatedAt` past the stale copy's flipped the merged result to "tracked" immediately. This
+-- is very likely why B1156864's own live verification — which flipped this exact row
+-- tracked→pursuit→tracked to prove the RPC works — left it in a state where role reads correctly
+-- in the DATABASE but can get stuck wrong on any client that cached it across that flip: `version`
+-- went 1→2→3 while `data.updatedAt` never moved, so the tie-breaker default (local wins) never let
+-- go once contaminated. Fixed here by stamping `data.updatedAt` the same way every ordinary
+-- client-driven write already does (`storage.js`'s `nextUpdatedAt()` — an epoch-ms integer), so a
+-- flip through this RPC is finally recognized as strictly newer everywhere, every time.
 
 create or replace function public.set_site_group_role(
   p_group_id text,
@@ -39,7 +61,10 @@ security invoker
 set search_path = public, pg_temp
 as $$
   update public.sites s
-     set data       = jsonb_set(coalesce(s.data, '{}'::jsonb), '{role}', to_jsonb(p_role), true),
+     set data       = jsonb_set(
+                         jsonb_set(coalesce(s.data, '{}'::jsonb), '{role}', to_jsonb(p_role), true),
+                         '{updatedAt}', to_jsonb((extract(epoch from now()) * 1000)::bigint), true
+                       ),
          version    = coalesce(s.version, 1) + 1,
          updated_at = now()
    where coalesce(s.data->>'groupId', s.id) = p_group_id

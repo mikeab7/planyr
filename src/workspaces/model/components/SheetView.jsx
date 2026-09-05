@@ -37,7 +37,7 @@
  * Stage 2 item, so Stage 1 exposes them here first.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { colAt, rawAt, usedRangeEnd, rowHeightAt, DEFAULT_ROW_H, styleAt, mergeAt, isFormulaText } from "../lib/sheetModel.js";
+import { colAt, rawAt, usedRangeEnd, rowHeightAt, DEFAULT_ROW_H, styleAt, mergeAt, isFormulaText, unsupportedFormulaAt } from "../lib/sheetModel.js";
 import { displayFor, displayKindFor, displayColorFor, cellColorKind } from "../lib/sheetEngine.js";
 import { ctrlArrowTarget } from "../lib/sheetOps.js";
 import { buildRowOffsets, visibleRowRange, rowAtOffset } from "../lib/rowLayout.js";
@@ -974,6 +974,25 @@ export default function SheetView({
                     position: "absolute", top: 0, right: 0, width: 0, height: 0, pointerEvents: "none",
                     borderStyle: "solid", borderWidth: `${7 * zoom}px ${7 * zoom}px 0 0`,
                     borderColor: "var(--warn-text) transparent transparent transparent",
+                  }}
+                />
+              )}
+              {/* Excel round-trip (NEW-1) — a small unobtrusive TOP-LEFT corner triangle (the
+                  inconsistency flag above owns the top-right corner, so the two can never be
+                  mistaken for each other) marking a cell an .xlsx import kept as a plain VALUE
+                  because its original formula called a function this engine doesn't implement
+                  (VLOOKUP, say). `pointerEvents:"none"` (CHROME-NEVER-EATS-A-PRESS) — the cell
+                  underneath is an ordinary editable cell; typing over it clears the marker
+                  (sheetModel.js's `setRaw`). The original formula text is the tooltip. */}
+              {unsupportedFormulaAt(sheet, r, c) && (
+                <span
+                  aria-hidden="true"
+                  data-testid="model-unsupported-formula-marker"
+                  title={`Kept as a value — the original formula uses a function this app doesn't support: ${unsupportedFormulaAt(sheet, r, c)}`}
+                  style={{
+                    position: "absolute", top: 0, left: 0, width: 0, height: 0, pointerEvents: "none",
+                    borderStyle: "solid", borderWidth: `${7 * zoom}px 0 0 ${7 * zoom}px`,
+                    borderColor: "transparent transparent transparent var(--info-text)",
                   }}
                 />
               )}

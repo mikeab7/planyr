@@ -70,8 +70,32 @@ import { readZoom, writeZoom } from "./lib/sheetZoom.js";
 import { readAutoColor, writeAutoColor } from "./lib/sheetColorMode.js";
 import { readLocalSheet, writeLocalSheet, loadCloudSheet, saveCloudSheet } from "./lib/modelStore.js";
 import { listProjects, reconcileProjects, onProjectsChanged } from "../../shared/projects/projects.js";
+import FileMenu from "./components/FileMenu.jsx";
+import { addSheetFromCsvText, sheetToCsv } from "./lib/csvIO.js";
 
 const CLOUD_PUSH_DEBOUNCE_MS = 800;
+// Excel round-trip (NEW-1) — lib/xlsxIO.js is dynamically imported (never a static import here)
+// so ExcelJS never rides this workspace's own eager chunk; only opening the File menu's Export/
+// Import actions ever fetches it. Both directions share one loader so the file downloads once
+// regardless of which action the user reaches for first.
+let xlsxIOModulePromise = null;
+function loadXlsxIO() {
+  if (!xlsxIOModulePromise) xlsxIOModulePromise = import("./lib/xlsxIO.js");
+  return xlsxIOModulePromise;
+}
+
+function sanitizeFilename(name) {
+  return String(name || "Workbook").replace(/[\\/:*?"<>|]+/g, "_").trim() || "Workbook";
+}
+
+/** The DocReview.jsx-established pattern for "hand the browser a Blob to save" — a throwaway
+ *  object URL + a synthetic <a download>, clicked and immediately discarded. */
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 function EmptyProjectState({ onGoDashboard }) {
   return (
@@ -379,6 +403,80 @@ export default function ModelApp({
   }, [commit, workbook]);
   const onReorderSheetTab = useCallback((from, to) => commit((wb) => reorderSheet(wb, from, to)), [commit]);
 
+  // Excel round-trip (NEW-1, owner chat block) — FileMenu.jsx's four actions. `fileBusy` disables
+  // the File button for the duration of an export/import (both are async — ExcelJS's own parse/
+  // write is not instant on a real multi-sheet workbook); `fileNotice` is the one LOUD-FAILURE /
+  // import-summary line FileMenu renders next to the button, auto-dismissed below. A plain
+  // successful EXPORT gets no notice at all (the browser's own download UI is feedback enough,
+  // PANEL-BREVITY) — only an IMPORT (which changes what's on screen) or a genuine error does.
+  const [fileBusy, setFileBusy] = useState(false);
+  const [fileNotice, setFileNotice] = useState(null); // { kind: "warn" | "error", text } | null
+  useEffect(() => {
+    if (!fileNotice) return undefined;
+    const t = setTimeout(() => setFileNotice(null), 9000);
+    return () => clearTimeout(t);
+  }, [fileNotice]);
+
+  const currentFileBaseName = useCallback(() => {
+    let name = "Workbook";
+    if (projectId) { try { const p = listProjects().find((pp) => pp.id === projectId); if (p?.name) name = p.name; } catch (_) {} }
+    return sanitizeFilename(name);
+  }, [projectId]);
+
+  const onExportXlsx = useCallback(async () => {
+    setFileBusy(true);
+    try {
+      const { exportWorkbookToXlsxBlob } = await loadXlsxIO();
+      const blob = await exportWorkbookToXlsxBlob(workbook);
+      downloadBlob(blob, `${currentFileBaseName()}.xlsx`);
+    } catch (e) {
+      setFileNotice({ kind: "error", text: `Export to Excel failed: ${e?.message || e}` });
+    } finally { setFileBusy(false); }
+  }, [workbook, currentFileBaseName]);
+
+  const onExportCsv = useCallback(() => {
+    try {
+      const csv = sheetToCsv(sheet, evalResult);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      downloadBlob(blob, `${sanitizeFilename(sheetName)}.csv`);
+    } catch (e) {
+      setFileNotice({ kind: "error", text: `Export to CSV failed: ${e?.message || e}` });
+    }
+  }, [sheet, evalResult, sheetName]);
+
+  const onImportXlsxFile = useCallback(async (file) => {
+    setFileBusy(true);
+    try {
+      const { importXlsxToWorkbook } = await loadXlsxIO();
+      const buf = await file.arrayBuffer();
+      const { workbook: imported, unsupportedCount } = await importXlsxToWorkbook(buf);
+      commit(imported);
+      setActiveSheetId(imported.activeSheetId);
+      setFileNotice({
+        kind: "warn",
+        text: unsupportedCount > 0
+          ? `Imported "${file.name}" — ${unsupportedCount} formula${unsupportedCount === 1 ? "" : "s"} used an unsupported function and were kept as values (hover the marked cells). Ctrl+Z undoes the import.`
+          : `Imported "${file.name}". Ctrl+Z undoes the import.`,
+      });
+    } catch (e) {
+      setFileNotice({ kind: "error", text: `Could not read "${file.name}" as an Excel file: ${e?.message || e}` });
+    } finally { setFileBusy(false); }
+  }, [commit]);
+
+  const onImportCsvFile = useCallback(async (file) => {
+    setFileBusy(true);
+    try {
+      const text = await file.text();
+      const desiredName = file.name.replace(/\.csv$/i, "") || "Imported";
+      const next = addSheetFromCsvText(workbook, text, desiredName);
+      commit(next);
+      setActiveSheetId(next.activeSheetId);
+      setFileNotice({ kind: "warn", text: `Imported "${file.name}" as a new sheet. Ctrl+Z undoes the import.` });
+    } catch (e) {
+      setFileNotice({ kind: "error", text: `Could not read "${file.name}" as CSV: ${e?.message || e}` });
+    } finally { setFileBusy(false); }
+  }, [workbook, commit]);
+
   // Copy/paste/fill-down (items 6/7) — the internal clipboard round-trips a snapshot of raw
   // cell text (see lib/sheetOps.js); paste and fill-down both shift a formula's relative A1
   // references by the destination delta, exactly like dragging Excel's fill handle. All three
@@ -605,8 +703,19 @@ export default function ModelApp({
         multiEditOk
         // STAGE 2 ICONOGRAPHY PASS — Undo/Redo moved OUT of row 1 and into the Ribbon's own
         // leading "Actions" group (icon buttons, matching Google Sheets' own toolbar, where
-        // Undo/Redo open the row rather than living in a separate header bar). Row 1 no longer
-        // needs a toolbarContent at all for this workspace.
+        // Undo/Redo open the row rather than living in a separate header bar). Row 1 keeps
+        // exactly ONE toolbarContent control for this workspace now — the Excel round-trip
+        // File menu (NEW-1) — since there's no workbook to export/import before a project is open.
+        toolbarContent={openProject ? (
+          <FileMenu
+            busy={fileBusy}
+            notice={fileNotice}
+            onExportXlsx={onExportXlsx}
+            onExportCsv={onExportCsv}
+            onImportXlsxFile={onImportXlsxFile}
+            onImportCsvFile={onImportCsvFile}
+          />
+        ) : undefined}
       />
 
       {!openProject ? (

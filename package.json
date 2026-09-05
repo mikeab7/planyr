@@ -73,6 +73,7 @@
     "d3-contour": "^4.0.2",
     "dxf-parser": "^1.1.2",
     "esri-leaflet": "^3.0.12",
+    "exceljs": "4.4.0",
     "leaflet": "^1.9.4",
     "lerc": "^2.0.0",
     "pbf": "^4.0.2",

@@ -60,8 +60,11 @@ async function cloudSetSiteRoleFallback(uid, groupId, role) {
   if (!rows.length) return { ok: false, rows: 0, atomic: false, error: "That didn't match any project in your account." };
   let failed = 0;
   for (const r of rows) {
+    // B1181104 — stamp the jsonb's OWN `updatedAt` too, same as the primary RPC now does: without
+    // it a role flip here is invisible to `mergeSiteContent`'s newer-wins tie-break, and a client
+    // holding a stale locally-cached copy of this row can never self-heal on a later pull.
     const { error } = await supabase.from("sites")
-      .update({ data: { ...r.data, role } }).eq("id", r.id);
+      .update({ data: { ...r.data, role, updatedAt: Date.now() } }).eq("id", r.id);
     if (error) failed += 1;
     else { delete lastHeaderSig[r.id]; delete siteVersions[r.id]; }
   }
