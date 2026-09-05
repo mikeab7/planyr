@@ -3382,6 +3382,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             cachedAsOfLabel={parcelInfo.cached ? fmtAsOf(parcelInfo.cached.asOf) : ""}
             onDismiss={() => setParcelInfo(null)}
             onPlan={planSelected}
+            // NEW-6 — while the toolbar's Site/Comp toggle reads Comp, this card's primary
+            // action must be the comp action, never the Site-module "Plan this site" (owner
+            // report, screenshot, 2026-09-04: an address search in Comp mode still offered
+            // "Plan this site"). `addParcelHit` always pushes the found parcel into `selected`
+            // before `parcelInfo` is set (a few lines above this component's own mount), so
+            // `selected` already names the exact parcel this card is showing.
+            mode={mode}
+            onComp={selected.length > 0 ? placeCompOnSelectedParcel : undefined}
+            compAccent={COMP_ACCENT}
             // NEW-4 — the unavailable state offers the fallback instead of dead-ending.
             onStartBlank={parcelInfo.status === "unavailable" ? () => { const m = mapRef.current; startBlankHere(m ? m.getCenter() : null); setParcelInfo(null); } : null}
           />
