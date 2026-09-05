@@ -14,6 +14,19 @@
  * PART D — the acceptance test that matters: pressing "Something was slow" on the MAP SCREEN
  * (where no other trigger for the always-on recorder exists at all) actually reaches the SAME
  * global recorder main.jsx installs, and a capture is taken.
+ * PART E — ⛔ THE ACCEPTANCE TEST TAKEN LITERALLY (owner pushback, 2026-09-05): "a capture was
+ * taken" is not "the payload names what was responsible." Induces a REAL ~350ms main-thread
+ * stall on the map screen via a real, named function wired to a real `pointerdown` listener —
+ * injected as an actual `<script>` element (a genuine script resource with its own source
+ * position), never a `page.evaluate()` snippet, which a first attempt found reports EMPTY
+ * attribution (no sourceFunctionName, no sourceURL — a real Chromium limitation on anonymous/
+ * CDP-evaluated code, not a flaw in the recorder). Reads the FULL on-device capture back
+ * directly from this origin's IndexedDB (`planyr`/`kv`, `perfcap:` keys) — the actual payload a
+ * real send/local-store round trip carries — because `window.pfRec.captures()` is a small
+ * live-console triage summary with no task table at all by design (`perfRecorder.js`'s
+ * `_captures`), and asserting against that instead would silently prove nothing. Asserts the
+ * worst (top-sorted) long-task row's name resolves to the real function, not merely that `lt`
+ * is non-empty.
  *
  *   node ui-audit/verify-help-report-control.mjs [--url http://localhost:4173/] [--shots]
  */
@@ -207,6 +220,72 @@ try {
     const captures = await page.evaluate(() => window.pfRec.captures());
     const last = captures[captures.length - 1];
     check("the capture is recorded on this device", !!last, JSON.stringify(last || {}));
+    await ctx.close();
+  }
+
+  // ─────────────────────────────────────────── PART E — the payload actually names the culprit
+  console.log("\nPART E — a genuine induced stall is correctly ATTRIBUTED, not just captured");
+  {
+    const { ctx, page } = await openScreen({ mode: "map", width: 1440 });
+
+    // Real <script> injection, not page.evaluate() — a CDP-evaluated function carries no source
+    // position or URL and would understate real attribution fidelity (measured: empty name AND
+    // empty url on a page.evaluate()-injected function, vs. the real bundle's own long tasks
+    // correctly naming themselves in the same run).
+    await page.addScriptTag({ content: `
+      function onFirstPress() {
+        const end = performance.now() + 350;
+        let x = 0;
+        while (performance.now() < end) { x += Math.sqrt(x + 1); }
+        window.__stallResult = x;
+      }
+      document.body.addEventListener("pointerdown", onFirstPress, { once: true });
+    ` });
+
+    await page.mouse.move(400, 400);
+    await page.mouse.move(700, 500, { steps: 10 });
+    await pacedWait(page, 300);
+    await page.mouse.click(600, 400); // fires the real pointerdown -> the 350ms busy loop
+    await pacedWait(page, 1200); // let the platform's own LoAF reporting queue flush
+
+    const stallRan = await page.evaluate(() => typeof window.__stallResult === "number");
+    check("the induced stall actually ran", stallRan);
+
+    await page.evaluate(() => document.querySelector('[data-testid="help-report-fab"]').click());
+    await pacedWait(page, 300);
+    await page.evaluate(() => {
+      const items = Array.from(document.querySelectorAll("button"));
+      const btn = items.find((b) => b.textContent && b.textContent.includes("Something was slow"));
+      btn.click();
+    });
+    await pacedWait(page, 500);
+
+    // Read the FULL on-device capture directly from IndexedDB — pfRec.captures() is a triage
+    // summary with no task table by design (perfRecorder.js's `_captures`).
+    const fullCapture = await page.evaluate(() => new Promise((resolve) => {
+      const req = indexedDB.open("planyr");
+      req.onsuccess = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains("kv")) return resolve(null);
+        const tx = db.transaction("kv", "readonly");
+        const range = IDBKeyRange.bound("perfcap:", "perfcap:￿", false, true);
+        const cur = tx.objectStore("kv").openCursor(range, "prev"); // newest first
+        cur.onsuccess = () => {
+          const c = cur.result;
+          if (!c) return resolve(null);
+          try { resolve(JSON.parse(c.value)); } catch (_) { resolve(null); }
+        };
+        cur.onerror = () => resolve(null);
+      };
+      req.onerror = () => resolve(null);
+    }));
+
+    const lt = (fullCapture && Array.isArray(fullCapture.lt)) ? fullCapture.lt : [];
+    const ltNames = (fullCapture && Array.isArray(fullCapture.ltNames)) ? fullCapture.ltNames : [];
+    check("the full capture carries a long-task table", lt.length > 0, JSON.stringify(lt));
+    const worst = lt.slice().sort((a, b) => b[1] - a[1])[0]; // [startMs, durMs, blockingMs, nameIdx]
+    const worstName = worst ? ltNames[worst[3]] : null;
+    check("the WORST long-task row is attributed to the real culprit function", worstName === "onFirstPress", `worst=${JSON.stringify(worst)} name=${worstName}`);
     await ctx.close();
   }
 

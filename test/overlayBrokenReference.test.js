@@ -2,7 +2,7 @@
  * self-heal what it can and be CLEANLY REMOVABLE from where the owner is actually looking.
  *
  * Ground truth (queried directly against production, not re-derived — see
- * docs/INCIDENT-2026-08-13-shared-asset-delete.md): plan `smsrrlk9u576` ("Concept A 1M SF", Woods
+ * docs/incidents/INCIDENT-2026-08-13-shared-asset-delete.md): plan `smsrrlk9u576` ("Concept A 1M SF", Woods
  * Road) carries an overlay named "Untitled picture.png" whose `storageKey` names a `storage.objects`
  * row that no longer exists (a cross-plan-duplicate delete destroyed it on 2026-08-13, fixed for
  * FUTURE deletes by `sharedAssetRefs.js`, B487600). The bytes are provably unrecoverable — no bucket

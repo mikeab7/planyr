@@ -23,7 +23,7 @@
  * flow CompsPanel already has — no new comp-creation plumbing here.
  */
 import { useEffect, useRef, useState } from "react";
-import { Button, Field, IconButton, MenuItem } from "../../ui/controls.jsx";
+import { Button, Field, IconButton, MenuItem, ToggleChip } from "../../ui/controls.jsx";
 import { RADIUS } from "../../ui/radius.js";
 import { FONT_SIZE } from "../../ui/designTokens.js";
 import AnchoredMenu from "../../ui/AnchoredMenu.jsx";
@@ -225,8 +225,8 @@ function emptyFlow() {
 
 /** One overlay's row — module scope (MODULE-SCOPE-COMPONENTS). */
 function OverlayRow({
-  o, expanded, onToggleExpand, isActive, onActivate, pinning, onStartPin, onStopPin,
-  onSetOpacity, onSetRotation, onToggleVisible, onRename, onConfirmChangePage, onDelete, rasterFailed,
+  o, expanded, onToggleExpand, isActive, onActivate, onDeactivate, pinning, onStartPin, onStopPin,
+  onSetOpacity, onOpacityCommit, onSetRotation, onToggleVisible, onRename, onConfirmChangePage, onDelete, rasterFailed,
   teams, onShareTeam, duplicateCount, isOwner, onToggleLocked, zoomBelowGate, onZoomToOverlay, onStartCrop,
 }) {
   const [editingName, setEditingName] = useState(false);
@@ -281,8 +281,15 @@ function OverlayRow({
               fontSize: FONT_SIZE.control, fontWeight: 600, color: "var(--text-primary)", width: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
             }}>{o.docTitle || "Untitled site plan"}</button>
           )}
+          {/* NEW-9(d) (owner report, build 9c35724: "the filename is printed twice") — a fresh
+              upload seeds `docTitle` from the filename minus its extension (`stripFileExt`,
+              above), so on every UNRENAMED plan — the common case right after upload — this
+              subtitle used to repeat the exact same name a second time, with the extension put
+              back on. The filename is only worth a second line once it says something the title
+              doesn't (the owner renamed the plan to something else) — otherwise this row prints
+              the date/page only, once. */}
           <div style={metaText} title={o.sourceFileName || undefined}>
-            {o.sourceFileName ? `${o.sourceFileName} · ` : ""}{o.docDate || ""} · p.{o.page}
+            {o.sourceFileName && stripFileExt(o.sourceFileName) !== (o.docTitle || "") ? `${o.sourceFileName} · ` : ""}{o.docDate || ""} · p.{o.page}
           </div>
         </div>
         <IconButton ref={menuBtnRef} size={24} onClick={() => setMenuOpen(true)} aria-label="More actions" title="More actions" style={{ flex: "none" }}>⋯</IconButton>
@@ -296,9 +303,15 @@ function OverlayRow({
                   handler that button already calls (`onActivate`: expands the row AND arms the
                   map's placement handles, self-placing the plan first if it has none yet), just
                   reachable one click sooner and from the row's most obvious control. */}
-              <MenuItem onClick={() => { setMenuOpen(false); onActivate(); }} disabled={placed && o.locked}
-                title={placed && o.locked ? "Locked — unlock to move or resize" : undefined}>
-                {isActive ? "Editing on map" : placed ? "Edit / adjust…" : "Place on map…"}
+              {/* NEW-9(b) (owner report, build 9c35724) — while active this row's card already
+                  shows "Editing on map" on its own primary button (below), so repeating the
+                  identical label here read as two copies of the same state with neither one able
+                  to end it. This is now the exit instead — a genuinely different action, in
+                  words and in effect — so there is exactly one "Editing on map" label in the
+                  card and exactly one place that stops it. */}
+              <MenuItem onClick={() => { setMenuOpen(false); isActive ? onDeactivate() : onActivate(); }} disabled={placed && o.locked && !isActive}
+                title={placed && o.locked && !isActive ? "Locked — unlock to move or resize" : undefined}>
+                {isActive ? "Stop editing" : placed ? "Edit / adjust…" : "Place on map…"}
               </MenuItem>
               <MenuItem onClick={() => setConfirmingDelete(true)} style={{ color: "var(--danger-text)" }}>Delete site plan…</MenuItem>
             </>
@@ -372,7 +385,14 @@ function OverlayRow({
             </IconButton>
             <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
               <span style={metaText}>Opacity</span>
-              <input type="range" min={0.2} max={1} step={0.05} value={o.opacity} onChange={(e) => onSetOpacity(Number(e.target.value))} style={{ flex: 1 }} />
+              {/* NEW-8 — dragging used to write to Supabase and refetch the whole overlay list
+                  on every `onChange` tick. `onSetOpacity` is now local-only + debounced (see
+                  the parent's `setOpacityLive`); `onOpacityCommit` flushes the pending value the
+                  instant the drag ends instead of waiting out the debounce window. */}
+              <input type="range" min={0.2} max={1} step={0.05} value={o.opacity}
+                onChange={(e) => onSetOpacity(Number(e.target.value))}
+                onMouseUp={onOpacityCommit} onTouchEnd={onOpacityCommit} onKeyUp={onOpacityCommit}
+                style={{ flex: 1 }} />
               <span style={{ ...metaText, width: 32, textAlign: "right" }}>{Math.round(o.opacity * 100)}%</span>
             </div>
           </div>
@@ -383,7 +403,11 @@ function OverlayRow({
           {placed && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
               <span style={metaText}>Rotation</span>
-              <input type="number" step={0.1}
+              {/* NEW-7 — this typed-value path commits through the same commitPlacement() the
+                  map handles do, but had no `locked` gate of its own: it was the one way left
+                  to rotate a locked plan after the map click-to-arm and the panel's own
+                  Move/resize button were both closed off. */}
+              <input type="number" step={0.1} disabled={o.locked}
                 value={rotDraft != null ? rotDraft : Math.round((o.rotationDeg || 0) * 10) / 10}
                 onChange={(e) => setRotDraft(e.target.value)}
                 onFocus={() => setRotDraft(String(Math.round((o.rotationDeg || 0) * 10) / 10))}
@@ -392,7 +416,8 @@ function OverlayRow({
                   if (e.key === "Enter") { e.currentTarget.blur(); }
                   if (e.key === "Escape") { rotCancelingRef.current = true; e.currentTarget.blur(); }
                 }}
-                style={{ ...inputStyle, width: 72 }} />
+                title={o.locked ? "Locked — unlock to rotate" : undefined}
+                style={{ ...inputStyle, width: 72, ...(o.locked ? { opacity: 0.5, cursor: "not-allowed" } : null) }} />
               <span style={metaText}>°</span>
             </div>
           )}
@@ -429,12 +454,17 @@ function OverlayRow({
             </Button>
             {/* B1134754 NEW-21 — crop is available whether or not the overlay has been placed
                 yet ("crop should be available BEFORE placement as well as after… avoids fighting
-                the alignment twice"); disabled only while there's no raster to crop at all. */}
-            <Button size="sm" variant="ghost" disabled={!o.rasterKey}
-              onClick={onStartCrop} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+                the alignment twice"); disabled only while there's no raster to crop at all.
+                NEW-9(c) (owner report, build 9c35724) — "Cropped ✓" used to render as the exact
+                same ghost Button as every action beside it, so a completed STATUS read as one
+                more thing to click. A ToggleChip (filled/bold once `active`) reads as status at
+                a glance while staying exactly as clickable — reopening the crop tool to edit or
+                reset it is still one click, unchanged. */}
+            <ToggleChip active={hasCrop(o)} disabled={!o.rasterKey}
+              onClick={onStartCrop} style={{ display: "inline-flex", alignItems: "center", gap: 5, opacity: !o.rasterKey ? 0.5 : 1, cursor: !o.rasterKey ? "not-allowed" : "pointer" }}
               title={!o.rasterKey ? "This plan doesn't have an image yet" : hasCrop(o) ? "Already cropped — edit or reset it" : undefined}>
               <CropIcon />{hasCrop(o) ? "Cropped ✓" : "Crop…"}
-            </Button>
+            </ToggleChip>
             {placed && (pinning ? (
               <Button size="sm" variant="danger" onClick={onStopPin}>Cancel pin</Button>
             ) : (
@@ -505,6 +535,10 @@ export default function SitePlansSection({
   const writeSerializerRef = useRef(null);
   if (!writeSerializerRef.current) writeSerializerRef.current = createWriteSerializer();
   const serialized = (id, fn) => writeSerializerRef.current.run(id, fn);
+  // NEW-8 — declared here, above the `if (!open) return null` early return below (rules of
+  // hooks), even though only setOpacityLive/flushOpacityWrite (declared further down) use it.
+  const opacityDebounceRef = useRef({});
+  useEffect(() => () => { for (const entry of Object.values(opacityDebounceRef.current)) clearTimeout(entry.timer); }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -558,6 +592,11 @@ export default function SitePlansSection({
   const commitPlacement = (id, placement) => serialized(id, async () => {
     const existing = overlaysRef.current.find((o) => o.id === id);
     if (!existing) return;
+    // NEW-7 — defense in depth: every UI entry point into a placement change (the map handles,
+    // the numeric Rotation field) is gated on `locked` at the control, but the write itself must
+    // refuse too, so a stale closure or a future caller can never move/resize/rotate a plan the
+    // owner explicitly locked.
+    if (existing.locked) { console.warn("[sitePlanOverlays] commitPlacement refused — overlay is locked:", id); return; }
     const next = { ...existing, ...placement };
     setOverlays((list) => { const l = list.map((o) => (o.id === id ? next : o)); notifiedRef.current?.(l); return l; });
 
@@ -837,7 +876,37 @@ export default function SitePlansSection({
     await reload();
   });
   const rename = (o, docTitle) => patchAndReload(o, { docTitle });
-  const setOpacity = (o, opacity) => patchAndReload(o, { opacity });
+  // NEW-8 (owner report, build 9c35724: "changing opacity noticeably slowed his computer") —
+  // MEASURED, not assumed: the map's own opacity write (rotatedImageLayer.js's setOpacity) is
+  // already a plain CSS `img.style.opacity` set with no re-raster of any kind, so the drag
+  // itself was never the cost. The real cost was this function — every `onChange` tick called
+  // `patchAndReload`, i.e. one Supabase UPDATE *plus* one full-list refetch+re-render, with no
+  // debounce, so a rapid slider drag (which can fire dozens of `input` events) queued dozens of
+  // serialized network round trips. `setOpacityLive` applies the value LOCALLY (no network) on
+  // every tick — the map already reads opacity straight off `overlays` state, so this alone
+  // keeps the drag itself compositor-only — and defers the actual persist to one debounced
+  // write per pause, flushed early by `flushOpacityWrite` the instant the drag/keypress ends
+  // (OverlayRow's `onMouseUp`/`onTouchEnd`/`onKeyUp`) so the value is never left waiting out the
+  // full debounce window for no reason.
+  const OPACITY_DEBOUNCE_MS = 300;
+  const setOpacityLive = (o, opacity) => {
+    setOverlays((list) => list.map((x) => (x.id === o.id ? { ...x, opacity } : x)));
+    const entry = opacityDebounceRef.current[o.id] || {};
+    clearTimeout(entry.timer);
+    entry.opacity = opacity;
+    entry.timer = setTimeout(() => {
+      delete opacityDebounceRef.current[o.id];
+      patchAndReload(o, { opacity });
+    }, OPACITY_DEBOUNCE_MS);
+    opacityDebounceRef.current[o.id] = entry;
+  };
+  const flushOpacityWrite = (o) => {
+    const entry = opacityDebounceRef.current[o.id];
+    if (!entry) return;
+    clearTimeout(entry.timer);
+    delete opacityDebounceRef.current[o.id];
+    patchAndReload(o, { opacity: entry.opacity });
+  };
   // Rotation is a PLACEMENT field (it moves any pinned comp's derived position), so it goes
   // through the same atomic commit the map's own rotate handle uses — never the plain
   // patchAndReload path opacity/visible/locked use, which never touches pinned comps.
@@ -870,7 +939,19 @@ export default function SitePlansSection({
   // the SAME owner-only rule, applied consistently app-wide. Adding the control now means that
   // rule is finally real, so it also needs to be LEGIBLE for a non-owner rather than a dead
   // toggle — see OverlayRow's lock button, gated on `isOwner`.
-  const toggleLocked = (o) => patchAndReload(o, { locked: !o.locked });
+  // NEW-7 (owner report, build 9c35724) — locking an overlay that is CURRENTLY armed for
+  // editing used to leave it that way: the panel's own "Editing on map" buttons only ever
+  // gated *re-arming* (`disabled={placed && o.locked}`), and neither the map handles
+  // controller (`useSitePlanOverlayLayers.js`'s `syncHandles`) nor the placement-commit path
+  // ever consulted `locked` at all — so a plan locked mid-edit stayed fully draggable until
+  // the next reload. `syncHandles`'s own `active` lookup now excludes a locked overlay (the
+  // map-layer half of the fix); this is the panel half — locking an already-active overlay
+  // disarms it in the same click, so the row's own label/button state and the map agree instantly.
+  const toggleLocked = (o) => {
+    const locking = !o.locked;
+    if (locking && activeOverlayId === o.id) onActivateOverlay && onActivateOverlay(null);
+    return patchAndReload(o, { locked: locking });
+  };
   // B1114992 — deleting a site plan is now UNCONDITIONAL: no proactive "N comps are still
   // pinned" block. A comp pinned to this overlay (own-owner or a teammate's) is detached to a
   // plain 'pin' anchor at its already-current lat/lon in the same statement as the delete —
@@ -952,10 +1033,15 @@ export default function SitePlansSection({
             }
             onActivateOverlay && onActivateOverlay(o.id);
           }}
+          // NEW-9(b) (owner report, build 9c35724) — the only way out of "Editing on map" used
+          // to be an Escape press or a click on empty map (MapFinder.jsx), neither reachable
+          // from the panel itself. This is the in-panel exit, wired into the kebab menu item.
+          onDeactivate={() => onActivateOverlay && onActivateOverlay(null)}
           pinning={pinningOverlayId === o.id}
           onStartPin={() => onStartPinOnOverlay?.(o.id)}
           onStopPin={() => onStopPinOnOverlay?.()}
-          onSetOpacity={(v) => setOpacity(o, v)}
+          onSetOpacity={(v) => setOpacityLive(o, v)}
+          onOpacityCommit={() => flushOpacityWrite(o)}
           onSetRotation={(deg) => setRotation(o, deg)}
           onStartCrop={() => startCrop(o)}
           onToggleVisible={() => toggleVisible(o)}

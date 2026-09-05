@@ -206,7 +206,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   ⛔ FIRST: AUTOMATED RUNS DO NOT WRITE TO PRODUCTION (B270912).** `networkReportSuppression(win)` gates
   the NETWORK write only — the `_recent` ring, `pfTelemetry.recent()` and the IndexedDB capture store all
   still work under test, because several harnesses assert against exactly those. **The detector is
-  `navigator.webdriver`, NOT `__PLANYR_E2E`**, and that is measured rather than stylistic: `docs/PERF-PLAN-SWITCH.md`
+  `navigator.webdriver`, NOT `__PLANYR_E2E`**, and that is measured rather than stylistic: `docs/perf/PERF-PLAN-SWITCH.md`
   §1's "every performance harness sets it" is true of the ui-audit perf harnesses and **false of the e2e
   suite — 62 of 81 specs never set it**, including the top producer of three of the five loudest sources,
   so a flag-only gate would have silenced 19 specs and left every top row untouched. The flag is a second
@@ -226,7 +226,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   owns the privacy ALLOWLIST (never a denylist) and the encoder — whose frame floor is a LADDER, not
   a wall (B265541: on a real stall nearly every frame also costs an `fx` pair, and the old wall threw
   the whole episode away on exactly the captures worth having). Proof + what is still unproven:
-  `/docs/CAPTURE-PIPE.md`; the layer-arm standing note: `/docs/PERF-LAYERS.md`. Guards: the repo-root
+  `/docs/perf/CAPTURE-PIPE.md`; the layer-arm standing note: `/docs/perf/PERF-LAYERS.md`. Guards: the repo-root
   `test/` suites **capturePipe**, **perfRecorder**, **perfInstrument**, **clientErrors**, plus the
   ui-audit harness **verify-capture-pipe** (`npm run perf:capturepipe`), whose `rejected` arm is the
   anti-rot one — before B265536 it was un-failable.

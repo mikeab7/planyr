@@ -452,7 +452,7 @@ governs, and citing `RADIUS`/`FONT_SIZE` at a road curb return would be a catego
 
 - `src/workspaces/site-planner/SitePlanner.jsx` — the canvas render component. **Known limitation,
   stated rather than hidden:** this 27,000-line file also contains some chrome (menus, toolbar,
-  inspector fields) not yet split from the canvas it renders — see `docs/PLAN-SITEPLANNER-DECOMPOSITION.md`
+  inspector fields) not yet split from the canvas it renders — see `docs/incidents/PLAN-SITEPLANNER-DECOMPOSITION.md`
   (B287058), which is the tracked, deliberately-not-yet-started effort to separate them by state
   ownership. Until that lands, the whole file is exempted from the hex/rgb check as drawing
   surface; its few genuinely-chrome menus (the `File ▾` toolbar, its `AnchoredMenu` popovers)

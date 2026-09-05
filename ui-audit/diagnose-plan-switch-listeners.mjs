@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* diagnose-plan-switch-listeners — WHOLE-TREE listener census + Blink's own detached-tree roots.
  *
- * Written for B1439's fourth attempt (docs/PERF-PLAN-SWITCH.md §13) and kept because both readings
+ * Written for B1439's fourth attempt (docs/perf/PERF-PLAN-SWITCH.md §13) and kept because both readings
  * are generally useful and neither existed here before. B1439 itself is CLOSED — its cause was the
  * harness's own undisposed ElementHandle, not a listener — so treat what follows as a description of
  * two instruments, not of an open bug.

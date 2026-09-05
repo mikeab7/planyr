@@ -290,7 +290,12 @@ export const SHEET_COLUMNS = [
   // real data) — a date's own format (mm/dd/yy) isn't a guessed value, it's the format the cell
   // will parse, and it only shows once you're already mid-edit, so it can never be mistaken for a
   // real stored value while scanning the sheet at rest.
-  simpleColumn({ key: "compDate", label: "Executed", group: "DEAL", width: 68, align: "right", kind: "date", required: true, editHint: "mm/dd/yy" }),
+  // NEW-5 (owner decision, 2026-09-02) — Executed is no longer a required field (comp_date is
+  // nullable in the DB and validateComp no longer blocks a save over it); this column must not
+  // carry `required: true` any more or the mobile sheet's "Needed to save"/footer machinery
+  // (compMobileLayout.js, sourced from this flag) re-demands it on its own, contradicting the
+  // very save gate it's supposed to describe.
+  simpleColumn({ key: "compDate", label: "Executed", group: "DEAL", width: 68, align: "right", kind: "date", editHint: "mm/dd/yy" }),
   simpleColumn({ key: "leaseCommencementDate", label: "Commence", fullLabel: "Commencement", group: "DEAL", width: 68, align: "right", kind: "date", appliesTo: (t) => t === "lease", editHint: "mm/dd/yy" }),
   {
     // HARDENING-10 — the STORED field stays free text (a real term can be "10 yr + 2x5 options",

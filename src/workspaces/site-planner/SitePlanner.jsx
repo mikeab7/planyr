@@ -9716,7 +9716,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // put this overlay on the storageKey path in the first place — so an idbKey on the record
           // is no longer evidence a local copy exists on THIS device. Keeping the old, narrower guard
           // left a confirmed-dead cloud object (verified against production storage.objects — see
-          // docs/INCIDENT-2026-08-13-shared-asset-delete.md) re-attempting the same doomed download
+          // docs/incidents/INCIDENT-2026-08-13-shared-asset-delete.md) re-attempting the same doomed download
           // on every single load, forever, instead of healing to the honest "re-add or remove" state.
           if (reason === "missing" && o.storageKey && isCloudActive())
             setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, storageKey: null, storageMissing: true } : x)));
@@ -17042,7 +17042,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // B719777 — every terminal (non-loading) state ALSO offers a direct, one-click way to drop
           // the reference entirely, right where the owner is looking at it. Before this, the only
           // visible escape from a reference whose source bytes are confirmed gone forever (see
-          // docs/INCIDENT-2026-08-13-shared-asset-delete.md) was the References panel's own ✕ —
+          // docs/incidents/INCIDENT-2026-08-13-shared-asset-delete.md) was the References panel's own ✕ —
           // the canvas placeholder gave no hint that existed, so an unrecoverable reference read as a
           // permanently-stuck error with no way out except re-adding a file the owner may not have.
           return (<g data-export="skip"

@@ -1009,7 +1009,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   that the keyed array is treated as IMMUTABLE. Guards: the repo-root `test/` suites **pureCache**,
   **recomputeProbe** and **viewIndependentRegistry**, the ui-audit gate **verify-view-independent**
   (a counter — every visual test in this repo passes on this defect), and the instrument that finds
-  the class, **detect-view-recompute**. Enumeration: `/docs/PERF-VIEW-INDEPENDENCE.md`.
+  the class, **detect-view-recompute**. Enumeration: `/docs/perf/PERF-VIEW-INDEPENDENCE.md`.
 - **⛔ THE VIEW ANCHOR (B1440 pan · B1449 zoom) — `renderView` / `rppf` are the frame the RENDER BODY
   reasons at, and `view` is the frame everything ELSE does. Read the shared `viewport/` module
   **viewAnchor** before touching either.** During a gesture the emitted geometry is pinned at an ANCHOR view and
@@ -1266,7 +1266,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   question and re-scanned thousands of inscribed rectangles for the same answer. **A pond is the only
   element type handed a `ring` AND marked `mustLabel`**, so it was the only one paying: measured at
   16.7 → 93.4 ms of "Label layout & collision" per pan gesture going 0 → 16 ponds, and `labelFitLadder` was
-  the hottest application function in the profile (`docs/PERF-POND.md`). The cache's lifetime IS the ring's —
+  the hottest application function in the profile (`docs/perf/PERF-POND.md`). The cache's lifetime IS the ring's —
   `fitterCache` is a WeakMap keyed on the ring array, so an edited pond arrives as a NEW array and gets a
   new fitter and **can never be placed against its old interior**. The returned array is SHARED: read-only.
   Guards: the repo-root `test/` suites **labelFitLadder** (the invariant, over a battery of hostile shapes,
@@ -1499,7 +1499,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   gesture and is EXONERATED (B221761's memo works); and **there is no superlinear per-vertex law** —
   collinear midpoint insertion, which raises vertex count while holding area, perimeter, bbox and the
   drawn path exactly, measures an exponent of **0.20**. Decimation preserved the bounding box but not
-  the CONCAVITY that loads clipper, which is why `docs/PERF-REAL-PLANS.md` §5.5 read a recurrence as a
+  the CONCAVITY that loads clipper, which is why `docs/perf/PERF-REAL-PLANS.md` §5.5 read a recurrence as a
   vertex law; §5.6 is the correction. Guards, all counting INVOCATIONS rather than milliseconds:
   the repo-root `test/` suites **pondViewIndependence** (mutation-checked 16 green → 4 red) and
   **pondStorageGoldenMaster** (78 assertions of EXACT equality — these numbers size his basins, so
