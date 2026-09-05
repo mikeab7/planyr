@@ -57,7 +57,7 @@ import {
   setColumnWidth, setRowHeight, setFreeze,
   styleAt, setCellStyle, applyBorder, clearFormatting,
   paintedStyleAt, applyPaintedStyle, mergeAt, mergeRange, unmergeAt, sortRange, usedRangeEnd,
-  isInconsistencyDismissed, setInconsistencyDismissed,
+  isInconsistencyDismissed, setInconsistencyDismissed, workbookHasContent,
 } from "./lib/sheetModel.js";
 import { defineName, renameName, retargetName, deleteName } from "./lib/namedRanges.js";
 import { evaluateWorkbook, displayFor } from "./lib/sheetEngine.js";
@@ -416,6 +416,14 @@ export default function ModelApp({
     const t = setTimeout(() => setFileNotice(null), 9000);
     return () => clearTimeout(t);
   }, [fileNotice]);
+  // NEW-1 (owner chat block, 2026-09-05) — Import Excel replaces the WHOLE workbook, and used to
+  // do it unconditionally: importing a two-sheet file into a workbook that already had a real
+  // Sheet1 silently discarded it, with nothing in the label or the flow saying so (Ctrl+Z recovers
+  // it, but that doesn't survive a reload, so it isn't a substitute for asking first). A file is
+  // only ever queued here — never read/parsed yet — while `workbookHasContent(workbook)` says the
+  // CURRENT workbook has something in it to lose; an empty workbook (a brand-new project, or one
+  // nobody has typed into) still imports immediately, no prompt, exactly as before.
+  const [pendingXlsxImport, setPendingXlsxImport] = useState(null); // { file, sheetCount } | null
 
   const currentFileBaseName = useCallback(() => {
     let name = "Workbook";
@@ -444,7 +452,7 @@ export default function ModelApp({
     }
   }, [sheet, evalResult, sheetName]);
 
-  const onImportXlsxFile = useCallback(async (file) => {
+  const runXlsxImport = useCallback(async (file) => {
     setFileBusy(true);
     try {
       const { importXlsxToWorkbook } = await loadXlsxIO();
@@ -459,9 +467,26 @@ export default function ModelApp({
           : `Imported "${file.name}". Ctrl+Z undoes the import.`,
       });
     } catch (e) {
+      // NEW-2 (owner chat block, 2026-09-05) — xlsxIO.js's own importXlsxToWorkbook already turns
+      // any raw ExcelJS/JSZip failure into one plain sentence before it ever reaches here (see its
+      // header), so `e.message` is always safe to show verbatim now — never string-built from a
+      // dependency's own developer-facing text.
       setFileNotice({ kind: "error", text: `Could not read "${file.name}" as an Excel file: ${e?.message || e}` });
     } finally { setFileBusy(false); }
   }, [commit]);
+
+  const onImportXlsxFile = useCallback((file) => {
+    if (workbookHasContent(workbook)) { setPendingXlsxImport({ file, sheetCount: workbook.sheets.length }); return; }
+    runXlsxImport(file);
+  }, [workbook, runXlsxImport]);
+
+  const onConfirmXlsxImport = useCallback(() => {
+    const pending = pendingXlsxImport;
+    setPendingXlsxImport(null);
+    if (pending) runXlsxImport(pending.file);
+  }, [pendingXlsxImport, runXlsxImport]);
+
+  const onCancelXlsxImport = useCallback(() => setPendingXlsxImport(null), []);
 
   const onImportCsvFile = useCallback(async (file) => {
     setFileBusy(true);
@@ -473,6 +498,10 @@ export default function ModelApp({
       setActiveSheetId(next.activeSheetId);
       setFileNotice({ kind: "warn", text: `Imported "${file.name}" as a new sheet. Ctrl+Z undoes the import.` });
     } catch (e) {
+      // NEW-2's "check the CSV path too" (owner chat block): csvIO.js's parser is hand-rolled with
+      // no dependency to leak a developer-facing error out of (parseCsv never throws — any bytes
+      // decode to SOME set of rows/cells; `file.text()` reading a real File object doesn't throw
+      // either). Nothing here composes a library's own internal message, so this is left as is.
       setFileNotice({ kind: "error", text: `Could not read "${file.name}" as CSV: ${e?.message || e}` });
     } finally { setFileBusy(false); }
   }, [workbook, commit]);
@@ -710,6 +739,11 @@ export default function ModelApp({
           <FileMenu
             busy={fileBusy}
             notice={fileNotice}
+            confirmReplace={pendingXlsxImport ? {
+              text: `Replace this workbook's ${pendingXlsxImport.sheetCount} sheet${pendingXlsxImport.sheetCount === 1 ? "" : "s"} with "${pendingXlsxImport.file.name}"?`,
+              onConfirm: onConfirmXlsxImport,
+              onCancel: onCancelXlsxImport,
+            } : null}
             onExportXlsx={onExportXlsx}
             onExportCsv={onExportCsv}
             onImportXlsxFile={onImportXlsxFile}
