@@ -75,35 +75,41 @@ export function writeLastRoute(route) {
 /* Whether a stored pointer names somewhere SPECIFIC enough to be worth seeding into a
  * fresh boot: a real project, or a deliberate cross-project view the user explicitly
  * toggled on (Notes' "All Notes" dashboard, a cross-project Library tree, …). A
- * non-default module sitting on no project and not in cross mode is a generic
- * placeholder — a project picker, an empty canvas, "nothing selected" — indistinguishable
- * from just landing on the default workspace, so restoring it is never restoring a place
- * the user was actually working; it only reproduces the food-tab bug in miniature
- * (B710736). Food is refused outright regardless of project/cross, matching
- * PROJECTLESS_MODULES above, in case a stale pointer written before this fix (or by a
- * future regression) still carries one. */
+ * module sitting on no project and not in cross/org mode is a generic placeholder — a
+ * project picker, an empty canvas, "nothing selected" — indistinguishable from just
+ * landing on the default workspace, so restoring it is never restoring a place the user
+ * was actually working; it only reproduces the food-tab bug in miniature (B710736).
+ * Food is refused outright regardless of project/cross, matching PROJECTLESS_MODULES
+ * above, in case a stale pointer written before this fix (or by a future regression)
+ * still carries one.
+ *
+ * B1213312 — the DEFAULT_MODULE special case this used to carry ("already a no-op —
+ * buildHash gives '#/'") is GONE, because it is no longer true: buildHash now gives
+ * "#/site" for `{module: "site-planner", projectId: null}` (bare "#/" is reserved for
+ * the Dashboard — see route.js's own header), so treating that shape as "worth
+ * restoring" would have `seedBootRoute` redirect a fresh, empty-hash boot AWAY from the
+ * Dashboard and onto the Site Planner's blank map — exactly the placeholder this
+ * function exists to refuse, just for a module that used to get a free pass. Every
+ * module is judged by the same rule now. */
 function isWorthRestoring(route) {
   if (PROJECTLESS_MODULES.has(route.module)) return false;
-  if (route.module === DEFAULT_MODULE) return true; // already a no-op — buildHash gives "#/"
   // ORG SCOPE (NEW-1) — a deliberate destination the user toggled on, same standing as `cross`.
   return !!route.projectId || !!route.cross || !!route.org;
 }
 
 /* Pure boot decision: which route (if any) to seed into an empty-hash boot.
- * Returns null when the current URL must be honoured verbatim, when nothing is stored,
- * when the stored pointer names no specific place worth restoring (isWorthRestoring), or
- * when it resolves to the plain default dashboard (seeding "#/" would be a visible
- * no-op). The parse(build(x)) round-trip normalizes junk — an unknown module falls back
- * to the default, malformed ids stay strings — so a stale pointer can never produce an
- * invalid hash. */
+ * Returns null when the current URL must be honoured verbatim, when nothing is stored, or
+ * when the stored pointer names no specific place worth restoring (isWorthRestoring — which
+ * now covers every module, the Dashboard's own default module included: B1213312). The
+ * parse(build(x)) round-trip normalizes junk — an unknown module falls back to the default,
+ * malformed ids stay strings — so a stale pointer can never produce an invalid hash. */
 export function pickBootRoute({ initialHashEmpty, stored, restoreLastModule = RESTORE_LAST_MODULE }) {
   if (!initialHashEmpty || !stored) return null;
   const wanted = restoreLastModule
     ? stored
     : { module: DEFAULT_MODULE, projectId: stored.projectId, cross: false };
   if (!isWorthRestoring(wanted)) return null;
-  const route = parseRoute(buildHash(wanted));
-  return buildHash(route) === "#/" ? null : route;
+  return parseRoute(buildHash(wanted));
 }
 
 /* Called once from Shell module scope, before the first render, so useHashRoute's initial

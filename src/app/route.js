@@ -22,12 +22,22 @@
  *               routing, never a sentinel `projectId`).
  *
  * Hash grammar:
- *   #/                       -> dashboard (default module, no project)
+ *   #/                       -> the Dashboard (see isDashboardRoute below — NOT a module)
+ *   #/dashboard              -> same, explicit alias
  *   #/<slug>                 -> module, no project (e.g. #/markup = pick-a-project)
  *   #/all/<slug>             -> cross-project mode for that module
  *   #/project/<id>/<slug>    -> project + module
  *   #/org/<slug>             -> ORG SCOPE for that module (Notes, Library)
  * The URL uses friendly module slugs (site/schedule/markup), matching the header tabs.
+ *
+ * NEW-1 (B1213312) — bare "#/" used to be a plain alias for "site-planner, no project", which
+ * is why the wordmark, the Dashboard breadcrumb crumb, and a bare planyr.io all used to land on
+ * the Site Planner's map. `isDashboardRoute` (below) reads the raw hash directly, the same way
+ * `isAdminRoute`/`isDesignRoute` do, so the Dashboard is a real destination outside the
+ * `{module, projectId, cross, org}` shape rather than a value that shape can express. Because of
+ * that, `buildHash` no longer special-cases the default module — EVERY project-less module now
+ * gets its own named slug (`#/site`, not `#/`), so "site-planner with no project" (reached via
+ * New Project, or by leaving a project) stays a real, distinct place from the Dashboard.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -93,6 +103,9 @@ export function unknownModuleSlug(hash) {
   // Same reasoning for "design" (see isDesignRoute, NEW-4) — a real, resolvable destination
   // that isn't a tabbed workspace either.
   if (slug === DESIGN_SLUG) return null;
+  // Same reasoning for "dashboard" (see isDashboardRoute, NEW-1/B1213312) — a real,
+  // resolvable destination that isn't a tabbed workspace either.
+  if (slug === DASHBOARD_SLUG) return null;
   return MODULE_BY_SLUG[slug] ? null : slug;
 }
 
@@ -117,14 +130,28 @@ export function isDesignRoute(hash) {
   return segs[0] === DESIGN_SLUG;
 }
 
-/* Pure: { module, projectId, cross, org } -> a "#/..." hash string. */
+/* NEW-1 (B1213312) — the Dashboard: a real destination that sits above the six modules, never
+ * one of them. Bare "#/" (no segments at all) IS the Dashboard's canonical, shareable link — the
+ * explicit "#/dashboard" slug is a defensive alias so a hand-typed/bookmarked URL naming it
+ * resolves too. Deliberately not a `route.module` value, same shape as isAdminRoute/isDesignRoute
+ * above: Shell reads this directly off the raw hash rather than through parseRoute. */
+const DASHBOARD_SLUG = "dashboard";
+export function isDashboardRoute(hash) {
+  const segs = String(hash || "").replace(/^#/, "").split("/").filter(Boolean);
+  return segs.length === 0 || segs[0] === DASHBOARD_SLUG;
+}
+
+/* Pure: { module, projectId, cross, org } -> a "#/..." hash string.
+ * NEW-1 (B1213312) — every project-less module gets its own named slug now, the default module
+ * included ("#/site", never a bare "#/"), because bare "#/" is reserved for the Dashboard
+ * (isDashboardRoute above). This is what lets goDashboard() and the Dashboard route target a
+ * place that "site-planner, no project" can never collide with. */
 export function buildHash({ module = DEFAULT_MODULE, projectId = null, cross = false, org = false } = {}) {
   const slug = slugFor(module);
   if (cross) return `#/all/${slug}`;
   if (org) return `#/org/${slug}`;
   if (projectId) return `#/project/${encodeURIComponent(projectId)}/${slug}`;
-  // No project = dashboard. Default module gets the clean "#/" home; others name the slug.
-  return module === DEFAULT_MODULE ? "#/" : `#/${slug}`;
+  return `#/${slug}`;
 }
 
 export function sameRoute(a, b) {
@@ -159,8 +186,19 @@ export function useHashRoute() {
   const navigate = useCallback((partial) => {
     const cur = readRoute();
     const next = { ...cur, ...partial };
-    if (sameRoute(cur, next)) return; // no-op: don't spam history with identical hashes
-    window.location.hash = buildHash(next);
+    const nextHash = buildHash(next);
+    // NEW-1 (B1213312) — compare the actual HASH STRING navigate() is about to write, not the
+    // parsed route shape. `sameRoute(cur, next)` used to gate this, and it made every non-module
+    // route that shares a parsed fallback with "{module: DEFAULT_MODULE, projectId: null}" —
+    // the Dashboard, `#/admin`, `#/design` — a silent no-op to leave: parseRoute resolves all of
+    // them to the identical object, so navigating from one to "the same-looking" one wrote
+    // nothing and no hashchange ever fired (Shell.jsx's DesignGallery onExit needed a direct
+    // `window.location.hash =` workaround for exactly this). Comparing the real hash string this
+    // call would produce against the one already in the URL fixes the whole class at the root:
+    // a call that would genuinely leave nothing changed is still a no-op (no added history
+    // entry), and a call that changes the URL — even to a hash that parses "the same" — writes.
+    if (typeof window !== "undefined" && window.location.hash === nextHash) return;
+    window.location.hash = nextHash;
   }, []);
   return [route, navigate];
 }
