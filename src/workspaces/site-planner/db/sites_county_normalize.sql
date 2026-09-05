@@ -89,6 +89,16 @@ create trigger sites_normalize_county
   before insert or update on public.sites
   for each row execute function public.sites_normalize_county();
 
+-- B1205298 (2026-09-05 db-hygiene sweep) — pin search_path on both functions this file defines.
+-- sites_normalize_county fires as a BEFORE trigger on public.sites, so it runs with the CALLING
+-- session's search_path — an unqualified identifier inside it would otherwise resolve against
+-- whatever that session set. Both functions already qualify every call (public.norm_county_key),
+-- so this closes a latent gap rather than a live one; they were 2 of the only 9 functions in the
+-- schema without the pin. Plain ALTER FUNCTION, not CREATE OR REPLACE — additive, doesn't touch
+-- either body.
+alter function public.norm_county_key(text) set search_path = public, pg_temp;
+alter function public.sites_normalize_county() set search_path = public, pg_temp;
+
 commit;
 
 -- Verification (run after):
