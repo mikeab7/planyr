@@ -71,7 +71,7 @@ const CACHE = join(HERE, ".raster-cache");
 
 /* ⛔ THE REAL PLAN, NOT THE SYNTHESISED ONE. Until 2026-08-07 this read `bain-concept-a.json`,
  * whose element COUNTS were the owner's and whose COORDINATES were invented — the bound
- * docs/PERF-BAIN.md §6 put on its own largest claim. That file and its generator are gone; this is
+ * docs/perf/PERF-BAIN.md §6 put on its own largest claim. That file and its generator are gone; this is
  * `public.sites` JOINED to `public.site_elements` for site `smr9olizi5ue`, verbatim. Two of its
  * facts were absent from the synthesis and both are load-bearing: the overlay is rotated **1.5°**
  * (every arm here had run it axis-aligned — see the `rot-0` / `rot-1.5` pair below), and the
@@ -411,7 +411,7 @@ else {
   /* ⚠ PRINT EVERY REP, NOT ONLY THE MEDIAN. The floor above is a RANGE — (max − min) / median — and a
    * range is a monotonically increasing function of the sample size, so ONE contaminated rep sets it
    * for the whole run and more data makes it WIDER rather than tighter. That is a real defect in the
-   * estimator this repo uses everywhere, and it is named in docs/PERF-BAIN.md rather than quietly
+   * estimator this repo uses everywhere, and it is named in docs/perf/PERF-BAIN.md rather than quietly
    * swapped for a kinder one after the fact. Printing the reps lets a reader see whether a wide floor
    * is genuine spread or one bad run, which is a judgement the median alone hides. */
   console.log(`\n  EVERY REP (render total, ms) — so a wide floor can be told from a genuinely noisy arm:`);

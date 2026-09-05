@@ -25,7 +25,7 @@
  * `scripts/idBlocks.mjs` (B6866). Nothing, however, forbade the SHAPE from coming back, and the
  * shape is easy to re-derive from first principles: "your id is below what everyone else picked, so
  * the next merge will probably take it" is a perfectly reasonable-sounding sentence. It is also
- * false in a sparse id space, and it has no fixed point — see `docs/CI-REQUIRED-CHECK.md` §2.
+ * false in a sparse id space, and it has no fixed point — see `docs/incidents/CI-REQUIRED-CHECK.md` §2.
  *
  * So this file turns the lesson into a property that CI re-proves on every build. It checks the
  * verdict function two independent ways, because either alone can be fooled:

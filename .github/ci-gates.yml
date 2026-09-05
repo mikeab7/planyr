@@ -90,7 +90,7 @@ jobs:
       # Site-route chunk allowlist, computed from dist/.vite/manifest.json with no browser.
       # A breach names the metric and its delta. The runtime half (frame time, heap, tiles)
       # is deliberately NOT gated here: it is too sensitive to shared-runner CPU contention
-      # to gate a merge on. See docs/PERF-BUDGETS.md.
+      # to gate a merge on. See docs/perf/PERF-BUDGETS.md.
       # NEW-3 — build the base ref and snapshot its bundle, so the budget step below can name
       # WHICH modules and packages moved rather than only that a number did. Diagnosis, not a
       # gate: this script never exits non-zero, and it prints why when it cannot run.

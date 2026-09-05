@@ -15,7 +15,7 @@ He was right, and the answer to the second question was no.
 > been pulled from `public.sites` JOINED to `public.site_elements` and committed as
 > `ui-audit/fixtures/bain-concept-original.json`; the synthesised fixture and its generator are DELETED.
 >
-> **What that changed, in one line each — the full account is `docs/PERF-REAL-PLANS.md`:**
+> **What that changed, in one line each — the full account is `docs/perf/PERF-REAL-PLANS.md`:**
 >
 > - The plan is **47 elements, not 53**, in a different mix. Six elements measured here do not exist.
 > - **The sheet overlay is rotated 1.5°.** The synthesis said 0, so **every arm in this document
@@ -30,7 +30,7 @@ He was right, and the answer to the second question was no.
 > - **§7.3's 304-layer question is ANSWERED, and the answer is that the count was never about the plan:
 >   `layers = leafletTiles + 4`, exactly, on all three real plans and in every arm of both batteries.**
 >   Bain has the fewest elements of the three and the most layers; Sylvestri has more than twice Bain's
->   elements and 118 fewer. See `docs/PERF-REAL-PLANS.md` §3.
+>   elements and 118 fewer. See `docs/perf/PERF-REAL-PLANS.md` §3.
 > - **Two measured results the arms below did not contain**, both at 6/6 paired reps, p = 0.031:
 >   removing the overlay's **rotation** is −10.2% render (−12.6% raster), and removing Sylvestri's
 >   **annotations** is −12.6% render.
@@ -237,7 +237,7 @@ property of the overlay, including the three this document spent sixty runs on:
 |---|---|
 | semi-transparency (finding 1) | already refuted statistically — **now also by identity** |
 | pixel count (finding 2) | already refuted statistically — **now also by identity** |
-| the 1.5° rotation (`docs/PERF-REAL-PLANS.md` §2.2) | **real, 6/6 reps, p = 0.031 — and it cannot be what separates these two, because both carry it** |
+| the 1.5° rotation (`docs/perf/PERF-REAL-PLANS.md` §2.2) | **real, 6/6 reps, p = 0.031 — and it cannot be what separates these two, because both carry it** |
 | B749's PDF re-raster on zoom (finding 10) | **eliminated for this pair** — the same PDF, the same `pdfBacked` gate, available to both equally |
 
 ⚠ **What is NOT retired.** The rotation arm and its result stand: a rotated raster genuinely costs
@@ -250,7 +250,7 @@ This is a stronger form of argument than anything else in this document. The pai
 need reps, a floor and a p-value; identity needs none of them. It also required no new instrument —
 only reading two rows out of the database and noticing they matched.
 
-**Where the difference actually is:** `docs/PERF-REAL-PLANS.md` §5.
+**Where the difference actually is:** `docs/perf/PERF-REAL-PLANS.md` §5.
 
 ---
 

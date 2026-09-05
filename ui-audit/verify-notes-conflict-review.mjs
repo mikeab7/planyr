@@ -29,7 +29,7 @@
  *
  * Screenshots (both themes × desktop/narrow) are written for the critique loop under
  * /tmp/claude-conflict-review-shots/ — this script does not judge them; a human/model read of
- * the PNGs is the actual critique pass (see docs/notes-conflict-critique.md).
+ * the PNGs is the actual critique pass (see docs/incidents/notes-conflict-critique.md).
  *
  * Run:  npm run dev &  then  node ui-audit/verify-notes-conflict-review.mjs
  */

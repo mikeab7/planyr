@@ -69,7 +69,7 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > mergeable, every one reading `build — Expected — Waiting for status to be reported` with **no merge
 > control available to anyone**, and one PR's ids moved six times. Main's max was B1449; the claimed mark
 > passed **B100002**. Full diagnosis, including every hypothesis that was refuted:
-> **`docs/CI-REQUIRED-CHECK.md`**. That the shape can never come back is now a guard, not a memory —
+> **`docs/incidents/CI-REQUIRED-CHECK.md`**. That the shape can never come back is now a guard, not a memory —
 > `test/mintFatality.test.js` (B226401) fails the build if a fatal mint verdict is ever again a function
 > of an aggregate of peer state (a max, a mean, a high-water mark) rather than a present, proven collision.
 > **The practical consequences for you:** (a) mint from your block and you will never need to renumber;
@@ -555,7 +555,7 @@ Runtime deps are kept few and deliberate. New client dependency added 2026-07-10
   token" — IS UNVERIFIED, NOT RE-MEASURED SINCE THAT ONE 2026-06-22 OBSERVATION. Measure again before
   citing it as settled fact, or before repeating it in a brief as an established second cause of a
   stuck PR.** A brief circulating 2026-08-31 relayed exactly this claim while flagging itself that it
-  was repeating this note, not a fresh check. `docs/CI-REQUIRED-CHECK.md` separately found a case
+  was repeating this note, not a fresh check. `docs/incidents/CI-REQUIRED-CHECK.md` separately found a case
   where what looked like permanent suppression was actually a temporary delay (B226400) — the same
   kind of mistake this claim invites if treated as proven. The operational fix — push the nudge commit
   — stays safe and cheap regardless of which explanation is true, so keep doing that; just don't

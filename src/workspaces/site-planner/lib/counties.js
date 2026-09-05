@@ -62,7 +62,7 @@ const TXGIO_STATEWIDE_LAYER =
  * important half — there IS a statewide bottom tier, so a Colorado county server outage degrades
  * to the same honest statewide backup a Texas one does, rather than to nothing. (There is no clean
  * MIDDLE tier: the regional bodies are partial — DRCOG for the metro, PPACG for El Paso — so
- * Planyr does not model one. See docs/COLORADO-AUDIT.md §3.) */
+ * Planyr does not model one. See docs/incidents/COLORADO-AUDIT.md §3.) */
 const CO_STATEWIDE_LAYER =
   "https://gis.colorado.gov/public/rest/services/Address_and_Parcel/Colorado_Public_Parcels/FeatureServer/0";
 

@@ -51,7 +51,7 @@ const EPS = 1e-6;
  * translation at constant scale (B1440); a pond's stage table is a function of (ring, det, opts) and
  * of nothing about the view. 155 of those 156 answers were bit-for-bit identical to the first.
  *
- * ⛔ AND THIS IS WHY THE FIX IS A MEMO AND NOT A FASTER ALGORITHM. §5.5 of docs/PERF-REAL-PLANS.md
+ * ⛔ AND THIS IS WHY THE FIX IS A MEMO AND NOT A FASTER ALGORITHM. §5.5 of docs/perf/PERF-REAL-PLANS.md
  * read the same gap as "something superlinear in ring vertex count" and pointed at the label-fit
  * ladder. Both halves of that are refuted below and in the doc: the ladder costs 0.5 ms of a 55,760
  * ms gesture (B221761's memo hits, exactly as designed), and collinear-midpoint insertion — which
