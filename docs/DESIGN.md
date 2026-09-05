@@ -161,6 +161,37 @@ that two adjacent, on-scale curves disagree with each other. Findings are printe
 `docs/UI-INVENTORY.md`'s "Nesting mismatches" section, regenerated the same way as the rest of that
 file.
 
+### The isolated-control clause (NEW-2, B1176976) — no container, no peer, still a KIND
+
+The nesting rule governs a control against its **container**; the sibling clause below governs it
+against a **row-peer**. Neither has anything to say about a control with **neither** — no rounded
+containing ancestor to walk up to, no rounded row-peer to compare against. This is not a
+theoretical gap: `HelpReportControl.jsx`'s floating help/report button (`position: fixed`, mounted
+once by the app shell, alone on the page) shipped as `RADIUS.pill` on a standalone action button —
+a container-only token per the shape rule above — and was measured live to be genuinely invisible
+to `nestingMismatches()` (reports in its own "no ancestor found" bucket, never in `findings`) and
+to `siblingMismatches()` (same, "no row found"). `alignmentMismatches()` (below) does enter this
+control in its candidate pool, but that check only ever compares top-offset/height between peers —
+it never reads radius at all, so it was never going to catch a wrong *token* either way.
+
+A control this isolated still has a KIND, and the shape rule already names the three roles: a
+**CONTAINER** that holds several sub-controls in one row at a control-ish height (a segmented
+shell, a toggle bar whose height *is* its shape) is `pill`; a **SURFACE** that contains other
+things, stacked or taller (a floating panel, a menu, a dialog) is `lg`; anything else — a lone
+actionable control — is `md`. `ui-audit/lib/controlKind.mjs`'s `classifyIsolatedControl` makes
+this mechanical from measured facts (how many separately-interactive descendants a candidate has,
+whether they sit in one row, its own rendered height), scoped deliberately to elements that are
+themselves an actionable control — a decorative, non-interactive status dot (this scale's own
+"pill... status dots" carve-out, e.g. this exact control's own unread-report badge) is never a
+candidate, isolated or not.
+
+**Machine-enforced:** `ui-audit/ui-inventory.mjs`'s `isolatedKindMismatches()` gathers the DOM
+facts for every rounded, actionable candidate that neither `nestingMismatches()` nor
+`siblingMismatches()` would have governed (same candidate pool both of those build from, so a
+control they DO see is never silently dropped from all three at once), then applies
+`classifyIsolatedControl` in the Node realm. Findings print in `docs/UI-INVENTORY.md`'s "Isolated
+control kind mismatches" section. Pure decision unit-tested in `test/controlKind.test.js`.
+
 ### The sibling clause (B950320, 2026-08-31) — two correctly-shaped controls can still be wrong together
 
 The nesting rule above governs a control against its **container**; it has nothing to say about two
