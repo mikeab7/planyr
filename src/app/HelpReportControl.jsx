@@ -63,6 +63,20 @@
  * anything but 0 (no physical notch to inset around) — PART F's safe-area assertions run against
  * a SIMULATED override (a CSS rule forcing the probe element's padding), never real device
  * evidence. See that file's own header comment for the full three-tier breakdown.
+ *
+ * ⛔ B1176976 (owner report, 2026-09-05) — THE FAB SHIPPED AS RADIUS.pill (999, a full circle at
+ * this 44×44 size); docs/DESIGN.md's shape rule (B942176) reserves `pill` for a CONTAINER that
+ * holds several sub-controls — a segmented shell, the account chip, a toggle bar whose height IS
+ * its shape — never a standalone action button's own resting shape, which is `RADIUS.md`
+ * regardless of the button's own aspect ratio. Measured on the deployed build (after PR 1439):
+ * this was the only circular chrome control on the map landing page (the one other >=90px-radius
+ * element, the 20×20 account avatar "M", is a legitimately round BADGE, not a control). Fixed to
+ * `RADIUS.md` — the button keeps its 44×44 hit area and its popover anchoring, only its own
+ * corner curve changes. `design-drift-audit.mjs` never caught this because `999` is a legal value
+ * on the RADIUS scale, just the wrong step for this role — `nestingMismatches()`/
+ * `siblingMismatches()` couldn't either, because this control has no rounded containing ancestor
+ * and no rounded row-peer (it renders fixed, alone, outside every workspace's own chrome tree) —
+ * see `ui-audit/lib/controlKind.mjs` (NEW-2, the mechanism that now catches exactly this).
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import AnchoredMenu from "../shared/ui/AnchoredMenu.jsx";
@@ -204,7 +218,7 @@ export default function HelpReportControl({ user }) {
         onClick={() => setOpen((o) => !o)}
         style={{
           position: "fixed", right: fabRight, bottom: fabBottom, zIndex: Z_FAB,
-          width: FAB_SIZE, height: FAB_SIZE, borderRadius: RADIUS.pill,
+          width: FAB_SIZE, height: FAB_SIZE, borderRadius: RADIUS.md,
           border: "1px solid var(--border-strong)", background: "var(--surface-raised)",
           color: "var(--text-primary)", display: "flex", alignItems: "center", justifyContent: "center",
           cursor: "pointer", padding: 0, font: "inherit", fontSize: FONT_SIZE.control,
