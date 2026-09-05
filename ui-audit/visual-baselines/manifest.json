@@ -7,89 +7,89 @@
     "map-landing": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e9e0c9f4",
-        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e9e0c9f4",
-        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e9e0c9f4",
-        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e9e0c9f4",
-        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       }
     },
     "site-planner-header": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e9e0c9f4",
-        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e9e0c9f4",
-        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e9e0c9f4",
-        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e9e0c9f4",
-        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       }
     },
     "site-planner-left-rail": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e9e0c9f4",
-        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e9e0c9f4",
-        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e9e0c9f4",
-        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e9e0c9f4",
-        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       }
     },
     "library": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e9e0c9f4",
-        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e9e0c9f4",
-        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e9e0c9f4",
-        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "9e9e0c9f4",
-        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
+        "approvedCommit": "a3c775b2",
+        "note": "B1176976: HelpReportControl's floating help/report FAB corrected from RADIUS.pill (999, a full circle) to RADIUS.md (8) per docs/DESIGN.md's shape rule — pill is reserved for containers, this is a standalone control. Only the button's own corner curve changes (44x44 hit area, popover anchoring, position all unchanged)."
       }
     }
   }

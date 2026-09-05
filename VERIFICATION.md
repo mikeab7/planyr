@@ -182,6 +182,33 @@ was never clicked" quietly ships broken.
 2. Open Goose Creek, "Plan II - 220K, 440K, 700K GEOTECH", open the detention pond's inspector on the Drainage tab. **Expect:** a real pool-depth number now shows (roughly the resolved WSE minus existing ground grade, ~8 ft) instead of a blank/unknown pool depth.
 3. Confirm the pond's overall storage reconciliation (usable vs. dead storage) reflects that same non-null pool depth rather than treating the dead-storage band as unknown.
 `Blocker: auth` `Blocker: real-data`
+### V857632 — B1184656: a binned site's owning comp shows its real name and a restore notice instead of "No project" `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** The DB-level mechanism (a bin never touches `comps.project_id`; a purge does, loudly reported) is already live-verified this session directly against production via a throwaway site+comp round trip (see B1184656's own writeup in `BACKLOG.md` for both reads, verbatim). What remains is confirming the owner's own signed-in browser actually RENDERS the read-tolerance fix — the `useOwningSiteBinStatus` hook's live `checkProjectDeletionStatus` round trip and the resulting `<option>`/notice — since the sandbox proxy CORS-blocks the Supabase auth handshake.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner (use a THROWAWAY site + comp you create for this check, not any of his real projects):**
+1. Create a throwaway site and a throwaway comp attached to it (via the map's "Place comp" flow, or the paste grid — either creates the attach automatically).
+2. Bin the site (project switcher → Delete project…). **Expect:** the confirm dialog's copy is unchanged (still promises a 30-day restore, no mention of comps).
+3. Open the throwaway comp's edit form. **Expect:** the Project field shows the site's real name with "(in Recently deleted)" appended, NOT "No project" — and a plain-language notice below the field ("restore it … within 30 days to keep this link").
+4. Open the comp's detail view (without editing). **Expect:** the same "in Recently deleted" notice appears there too.
+5. Restore the site from the project switcher's Recently deleted list. **Expect:** re-opening the comp's edit form now shows the site as an ordinary live option, with no notice.
+6. Soft-delete both throwaways (the comp via its own Delete button, the site via project switcher → Delete project…) to leave nothing behind.
+
+**Result:** ⏳ pending — needs a real signed-in browser session. `Cadence: once`.
+
+### V852800 — B1176977: the Model workspace's "+" add-sheet button renders as a rounded square (RADIUS.md), not a full circle `Blocker: real-data`
+
+**Why this needs its own real pass.** `src/workspaces/model/components/TabStrip.jsx`'s "+" add-sheet button was changed from `borderRadius: RADIUS.pill` (999, a full circle) to `RADIUS.md` (8) as an adjacent-case fold-in of B1176977's shape-rule fix. The Model ("Spreadsheet") workspace is not reachable logged-out in this sandbox — confirmed live: opening `#/model` with no project renders "No spreadsheet open… Pick or start a project," and the map-based "start a project" flow Site Planner uses signed-out does not itself open a spreadsheet workbook. It is also not yet one of `ui-inventory.mjs`/`visual-regression.mjs`'s crawled surfaces (a pre-existing, already-documented gap — see `ui-audit/lib/visualBaseline.mjs`'s own coverage note naming Model as needing its own seed data), so neither of this session's two headless crawl tools could screenshot or measure it either.
+
+**What was verified here, without a live account.** The change is a single property (`RADIUS.pill` → `RADIUS.md`), both are pre-existing tokens already imported in the file (no new import), and `node ui-audit/design-drift-audit.mjs --check` passes unchanged (a token reference, not a raw literal, was never counted either way). The identical change (a standalone icon button's own resting shape, `pill` → `md`) was fully live-verified elsewhere in the same session on `HelpReportControl.jsx` — screenshotted in both themes, both the light/dark rest state and the `:focus-visible`/`:active` states, confirming the token swap alone changes only the corner curve — so the class of change is proven; only this specific instance's own screen has not been seen rendered.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, with any project open:**
+1. Read the loaded chunk hash in the same breath as everything below (`document.querySelectorAll('script[src]')` or the Network tab) — confirm it names a chunk from a build after this PR merged, not a cached pre-merge bundle.
+2. Open the Spreadsheet (Model) workspace for that project. **Expect:** the sheet-tab strip along the bottom of the grid renders as before (flat rectangular tabs, no change there).
+3. Look at the "+" button at the trailing edge of the tab strip (`data-testid="model-add-sheet"`). **Expect:** it renders as a rounded SQUARE with an 8px corner radius — matching every other small icon button in the app (e.g. the header's Full screen/Settings buttons) — never a full circle.
+4. Click it. **Expect:** a new sheet tab is added, exactly as before — the shape change touches only the button's own corner curve, nothing about its click behavior, size, or position.
+
+**Result:** ⏳ pending — needs a signed-in account with a real project to open the Spreadsheet workspace. `Cadence: once`.
 
 ### V655264 — B1166768: the renamed "Model"→"Spreadsheet" tab's routing actually redirects correctly on the DEPLOYED `planyr.io` `Blocker: live-deploy`
 
