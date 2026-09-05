@@ -29200,7 +29200,7 @@ function YieldPanel({
                         {/* NEW-1 (2026-09-05) — the pond is Yield's ONE line of consumed acreage; the
                             flood/detention/mitigation math that sized it lives in Drainage now. */}
                         {s.key === "pond" && onOpenDrainage && (
-                          <ActionLink onClick={onOpenDrainage} style={{ fontSize: 10 }}>Drainage →</ActionLink>
+                          <ActionLink onClick={onOpenDrainage}>Drainage →</ActionLink>
                         )}
                       </span>
                       <span title={s.title} style={{ fontFamily: NUM_FONT, fontSize: 12, fontWeight: 650, color: Y.text, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap", cursor: "help" }}>{f2(s.ac)} AC</span>

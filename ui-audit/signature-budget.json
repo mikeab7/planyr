@@ -40,6 +40,15 @@
       "reason": "Leaflet's own bundled zoom stack (+/− at its vendor font-size), \"Find my location\" locate button, and the scale bar are third-party chrome — docs/DESIGN.md's radius section (Documented exceptions #4) already carries the zoom-stack/locate-button radius override and the scale-bar non-exception as the accepted boundary of what this token scale reaches. Their child <a>/<div> nodes are deliberately radius:0 BY THE APP'S OWN CSS (the rounded corner the user sees comes from the parent .leaflet-bar container's overflow:hidden clip, not the button), so a per-button override here would fight the exact mechanism that already unified their visible shape with the app's own RADIUS.md. The one thing left off-scale (the zoom glyphs' 22px font) is Leaflet's own vendor CSS (.leaflet-touch .leaflet-control-zoom-in/-out), not an app literal."
     },
     {
+      "id": "B1186256-drainage-link",
+      "date": "2026-09-05",
+      "surfaces": [
+        "Left rail + panels (Yield)"
+      ],
+      "count": 1,
+      "reason": "NEW-1 (owner chat block, 2026-09-05) split the old Yield panel's flood/detention/mitigation work into its own Drainage tab and left Yield's Land Use table with a single 'Drainage →' ActionLink in its place — a genuinely new, permanent, deliberate control, not incidental drift. It is the shared ActionLink component (src/workspaces/site-planner/components/ActionLink.jsx) at its own default style, so it is not a bespoke shape; every other ActionLink usage already inside the Yield panel (Set unit prices, Set $/CY, Set $/SY or LF) only renders once its own conditional/disclosure state is reached, which this crawl's default-view pass never opens, so this is the first ActionLink this particular crawl has ever measured inside this surface at all — not a second, competing shape alongside an existing one. A code fix cannot remove this signature without either removing the link the owner's own architecture calls for, or duplicating an already-rendered control's exact style by coincidence, which would be the wrong reason to change either one."
+    },
+    {
       "id": "B1038016-invisible-logo-hit-target",
       "date": "2026-09-01",
       "surfaces": [

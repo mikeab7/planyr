@@ -7,89 +7,89 @@
     "map-landing": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "9e9e0c9f4",
+        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "9e9e0c9f4",
+        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "9e9e0c9f4",
+        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "9e9e0c9f4",
+        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
       }
     },
     "site-planner-header": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "9e9e0c9f4",
+        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "9e9e0c9f4",
+        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "9e9e0c9f4",
+        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "9e9e0c9f4",
+        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
       }
     },
     "site-planner-left-rail": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "9e9e0c9f4",
+        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "9e9e0c9f4",
+        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "9e9e0c9f4",
+        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "9e9e0c9f4",
+        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
       }
     },
     "library": {
       "light": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "9e9e0c9f4",
+        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
       },
       "dark": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "9e9e0c9f4",
+        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
       },
       "light--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "9e9e0c9f4",
+        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
       },
       "dark--phone": {
         "approvedAt": "2026-09-05",
-        "approvedCommit": "feacd674",
-        "note": "PR #1426 (B1167120): retry -- the prior dispatch (run 33961284162) rendered correctly (0.24% desktop-only diffs, consistent with the help/report control's repositioning showing on every route via the Shell) but its own push-back failed because the branch moved (a BACKLOG_OPEN.md drift fix) between dispatch and push. No branch changes since; retrying against the current tip. [CI-authored by run 33961458285 on feacd674e1578bdfa85934cebc108294704244dd]"
+        "approvedCommit": "9e9e0c9f4",
+        "note": "NEW-1 (B1186256): Yield split into a new Drainage rail tab (7th item, between Analysis and Yield) — the site-planner-header and left-rail baselines correctly show the new tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link; visually confirmed against actual screenshots before approving, light+dark."
       }
     }
   }
