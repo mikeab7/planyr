@@ -7656,6 +7656,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         }
       }
     }
+    // B1168128 (NEW-1) — same phone pan-instead-of-move as startMoveEl, for a not-yet-selected
+    // markup (a user-drawn shape can just as easily blanket a phone screen as a building can).
+    if (narrow && !(sel?.kind === "markup" && sel.id === selId)) {
+      setPanning(true);
+      drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY, tapMarkup: selId, downX: e.clientX, downY: e.clientY, downT: Date.now() };
+      svgRef.current.setPointerCapture(e.pointerId);
+      return;
+    }
     if (!selM || selM.locked) { setSel({ kind: "markup", id: selId }); return; }
     setSel({ kind: "markup", id: selId });
     const fp = p2f(e.clientX, e.clientY);
@@ -8864,6 +8872,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         && Date.now() - d.downT <= PARCEL_CLICK_MS) {
       setSel({ kind: "parcel", id: d.tapParcel });
       setCombineSel([]); // B735: a plain click is a fresh single-select — drop any accumulated merge picks
+    }
+    // B1168128: the phone twins of B310 above — a press that began on a not-yet-selected element
+    // or markup panned the canvas instead of grabbing it; a brief, small-travel release is a genuine
+    // tap and selects it now (any larger movement just panned and leaves selection untouched).
+    if (d && d.mode === "pan" && d.tapEl != null
+        && Math.hypot(e.clientX - d.downX, e.clientY - d.downY) <= PARCEL_CLICK_SLOP_PX
+        && Date.now() - d.downT <= PARCEL_CLICK_MS) {
+      setSel({ kind: "el", id: d.tapEl });
+    }
+    if (d && d.mode === "pan" && d.tapMarkup != null
+        && Math.hypot(e.clientX - d.downX, e.clientY - d.downY) <= PARCEL_CLICK_SLOP_PX
+        && Date.now() - d.downT <= PARCEL_CLICK_MS) {
+      setSel({ kind: "markup", id: d.tapMarkup });
     }
     // NEW-3 (c): a plain TAP on empty canvas clears the SELECTION (and with it the inspector), on
     // release rather than on press. Same slop + duration test as B310/B735 below, so a real drag of
@@ -10964,6 +10985,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // The pond's discoverability affordances that are NOT a plain click all survive — the double-tap
     // above (which still routes through revealPondInspector, so the card scroll-flashes), the map
     // label's double-click, the right-click menu's pond rows, and Enter on a selected pond.
+    // B1168128 (NEW-1) — phone: a press on an element that is NOT already selected starts a PAN,
+    // not a select-and-move, mirroring B310's "a locked parcel pans, it doesn't move" fix. A real,
+    // densely built industrial site plan leaves very little truly empty canvas to grab on a small
+    // screen with no scroll-wheel or Space hand-pan, so without this any attempt to pan across a
+    // built-out plan snags on whatever building/paving is under the finger. A brief, small-travel
+    // press (a genuine tap, tested in onUp against the same slop+duration B310 already uses) still
+    // selects on release; a real drag just pans, exactly like the locked-parcel case. Drag the SAME
+    // element again — now selected — to actually move it. Desktop is untouched (`narrow`-gated).
+    if (narrow && !(sel?.kind === "el" && sel.id === id)) {
+      setPanning(true);
+      drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY, tapEl: id, downX: e.clientX, downY: e.clientY, downT: Date.now() };
+      svgRef.current.setPointerCapture(e.pointerId);
+      return;
+    }
     if (el.locked) { setSel({ kind: "el", id }); return; } // locked: select only, don't move
     setSel({ kind: "el", id });
     /* NEW-2 — pushHistory() USED TO FIRE HERE, on pointer DOWN, before a single pixel of movement.
@@ -17281,7 +17316,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left",
     // NEW-2 (B915536) — was 12.5, off-scale after the FONT_SIZE reduction; the tool rail's own row
     // label text takes FONT_SIZE.control, the app-wide default for standard control text.
-    padding: "5px 10px", fontSize: FONT_SIZE.control, borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap",
+    // B1168128 — on phone this row is a TOUCH target, not a mouse target: the 5px vertical padding
+    // measured at 27px tall against Apple's 44px / Material's 48dp floor. `minHeight` (not just more
+    // padding) is what actually guarantees the floor — a caret sibling overrides this padding to 0
+    // (see the `▾` buttons below) and would otherwise stay tiny. Desktop is untouched.
+    padding: narrow ? "12px 10px" : "5px 10px", minHeight: narrow ? 44 : undefined,
+    fontSize: FONT_SIZE.control, borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap",
     border: `1px solid ${open ? PAL.chromeMuted : "transparent"}`, fontFamily: "inherit",
     background: active ? PAL.ember : (open ? "var(--hover-chrome)" : "transparent"),
     color: active ? PAL.onAccent : PAL.chromeInk,
@@ -23217,7 +23257,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               the explicit affordance: tap it to open the Properties companion as an overlay. */}
           {narrow && companionSel && !leftPanel && !narrowProps && (
             <button data-export="skip" onClick={() => { setNarrowProps(true); }}
-              style={{ position: "absolute", left: 12, bottom: 16, zIndex: 1190, display: "flex", alignItems: "center", gap: 6, background: PAL.ember, color: PAL.onAccent, border: "none", borderRadius: RADIUS.pill, padding: "9px 14px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", boxShadow: "0 4px 14px rgba(0,0,0,0.28)", cursor: "pointer" }}>
+              style={{ position: "absolute", left: 12, bottom: "calc(16px + env(safe-area-inset-bottom))", zIndex: 1190, display: "flex", alignItems: "center", gap: 6, background: PAL.ember, color: PAL.onAccent, border: "none", borderRadius: RADIUS.pill, padding: "9px 14px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", boxShadow: "0 4px 14px rgba(0,0,0,0.28)", cursor: "pointer" }}>
               ✎ Properties
             </button>
           )}
@@ -23536,7 +23576,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         {/* phone-only floating button to summon the tool rail (B113) */}
         {narrow && !mobileTools && (
           <button onClick={() => setMobileTools(true)} title="Show the drawing tools"
-            style={{ position: "absolute", right: 12, bottom: 16, zIndex: 1190, display: "flex", alignItems: "center", gap: 6, padding: "11px 16px", borderRadius: RADIUS.pill, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 800, color: "#fff", background: PAL.ember, boxShadow: "0 6px 18px rgba(0,0,0,0.45)" }}>
+            style={{ position: "absolute", right: 12, bottom: "calc(16px + env(safe-area-inset-bottom))", zIndex: 1190, display: "flex", alignItems: "center", gap: 6, padding: "11px 16px", borderRadius: RADIUS.pill, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 800, color: "#fff", background: PAL.ember, boxShadow: "0 6px 18px rgba(0,0,0,0.45)" }}>
             ✎ Tools
           </button>
         )}
@@ -23572,7 +23612,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <div ref={boundaryAnchor} style={{ position: "relative" }}>
             <div style={{ display: "flex", gap: 2 }}>
               <button className={`rbtn${["parcel", "split"].includes(tool) || mergePick || boundaryEdit ? " on" : ""}`} style={{ ...rbtn(["parcel", "split"].includes(tool) || mergePick || boundaryEdit, toolMenu), flex: 1 }} onClick={() => setToolMenu((o) => !o)} aria-haspopup="menu" aria-expanded={toolMenu} data-testid="rail-parcel-tools" title="Everything you can do to a parcel — draw, plot from a deed, split, combine, reshape, remove"><ToolIcon id="parcel" /> {PARCEL_SURFACES.rail.name}</button>
-              <button className={`rbtn${["parcel", "split"].includes(tool) || mergePick || boundaryEdit ? " on" : ""}`} style={{ ...rbtn(["parcel", "split"].includes(tool) || mergePick || boundaryEdit, toolMenu), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setToolMenu((o) => !o)} aria-haspopup="menu" aria-expanded={toolMenu} aria-label="Parcel tools">▾</button>
+              <button className={`rbtn${["parcel", "split"].includes(tool) || mergePick || boundaryEdit ? " on" : ""}`} style={{ ...rbtn(["parcel", "split"].includes(tool) || mergePick || boundaryEdit, toolMenu), width: narrow ? 44 : 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setToolMenu((o) => !o)} aria-haspopup="menu" aria-expanded={toolMenu} aria-label="Parcel tools">▾</button>
             </div>
             {/* NEW-3 (B849586) — `gap={0}` gives the flyout an UNBROKEN shared edge with the rail
                 instead of floating with a visible seam: the panel's right edge sits flush against
@@ -23653,7 +23693,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure", measureMenu), flex: 1 }} onClick={() => selectTool("measure")} aria-pressed={tool === "measure"} aria-expanded={measureMenu}>
                 <ToolIcon id="measure" /> Measure
               </button>
-              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure", measureMenu), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-haspopup="menu" aria-expanded={measureMenu} aria-label="Measure modes">▾</button>
+              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure", measureMenu), width: narrow ? 44 : 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-haspopup="menu" aria-expanded={measureMenu} aria-label="Measure modes">▾</button>
             </div>
             {/* NEW-4 (B849587) — `below-right`, anchored on the WHOLE split control: the panel's
                 right edge lands under the caret's own right edge (the control actually pressed),
@@ -23681,7 +23721,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <button className={`rbtn${tool === "building" ? " on" : ""}`} style={{ ...rbtn(tool === "building", buildingMenu), flex: 1 }} onClick={() => selectTool("building")} aria-pressed={tool === "building"} aria-expanded={buildingMenu}>
                       <ToolIcon id="building" /> Building
                     </button>
-                    <button className={`rbtn${tool === "building" ? " on" : ""}`} style={{ ...rbtn(tool === "building", buildingMenu), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setBuildingMenu((o) => !o)} aria-haspopup="menu" aria-expanded={buildingMenu} aria-label="Dock layout">▾</button>
+                    <button className={`rbtn${tool === "building" ? " on" : ""}`} style={{ ...rbtn(tool === "building", buildingMenu), width: narrow ? 44 : 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setBuildingMenu((o) => !o)} aria-haspopup="menu" aria-expanded={buildingMenu} aria-label="Dock layout">▾</button>
                   </div>
                   <AnchoredMenu open={buildingMenu} onClose={() => setBuildingMenu(false)} anchorRef={buildingAnchor} placement="below-right" width={200} panelStyle={menuPanel}>
                     <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Dock layout</div>
@@ -23706,7 +23746,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <button className={`rbtn${parkingOn ? " on" : ""}`} style={{ ...rbtn(parkingOn, parkingMenu), flex: 1 }} onClick={() => selectTool(parkingKind === "trailer" ? "trailer" : "parking")} aria-pressed={parkingOn} aria-expanded={parkingMenu} title={parkingKind === "trailer" ? "Trailer Parking" : "Car Parking"}>
                       <ToolIcon id="parking" /> Parking
                     </button>
-                    <button className={`rbtn${parkingOn ? " on" : ""}`} style={{ ...rbtn(parkingOn, parkingMenu), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setParkingMenu((o) => !o)} aria-haspopup="menu" aria-expanded={parkingMenu} aria-label="Parking type">▾</button>
+                    <button className={`rbtn${parkingOn ? " on" : ""}`} style={{ ...rbtn(parkingOn, parkingMenu), width: narrow ? 44 : 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setParkingMenu((o) => !o)} aria-haspopup="menu" aria-expanded={parkingMenu} aria-label="Parking type">▾</button>
                   </div>
                   {/* Car's own row-preset rows, then Trailer's single entry — one flat list, no
                       divider between the two sub-options (see change 2 of the rail redesign). */}
@@ -23729,7 +23769,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road", roadMenu), flex: 1 }} onClick={() => selectTool("road")} aria-pressed={tool === "road"} aria-expanded={roadMenu}>
                       <ToolIcon id="road" /> Road
                     </button>
-                    <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road", roadMenu), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setRoadMenu((o) => !o)} aria-haspopup="menu" aria-expanded={roadMenu} aria-label="Road presets">▾</button>
+                    <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road", roadMenu), width: narrow ? 44 : 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setRoadMenu((o) => !o)} aria-haspopup="menu" aria-expanded={roadMenu} aria-label="Road presets">▾</button>
                   </div>
                   {/* NEW-1/NEW-2/NEW-3/NEW-4 — a row is JUST the width (no per-row how-to repeated five
                       times), the how-to + the curb-face-to-curb-face meaning live once in the footer,
@@ -23784,7 +23824,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <button className={`rbtn${tool === "easement" ? " on" : ""}`} style={{ ...rbtn(tool === "easement", easeMenu), flex: 1 }} onClick={() => selectTool("easement")} aria-pressed={tool === "easement"} aria-expanded={easeMenu}>
                 <ToolIcon id="easement" /> Easement
               </button>
-              <button className={`rbtn${tool === "easement" ? " on" : ""}`} style={{ ...rbtn(tool === "easement", easeMenu), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setEaseMenu((o) => !o)} aria-haspopup="menu" aria-expanded={easeMenu} aria-label="Easement options">▾</button>
+              <button className={`rbtn${tool === "easement" ? " on" : ""}`} style={{ ...rbtn(tool === "easement", easeMenu), width: narrow ? 44 : 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setEaseMenu((o) => !o)} aria-haspopup="menu" aria-expanded={easeMenu} aria-label="Easement options">▾</button>
             </div>
             <AnchoredMenu open={easeMenu} onClose={() => setEaseMenu(false)} anchorRef={easeAnchor} placement="below-right" width={248} panelStyle={menuPanel}>
               <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Input mode</div>
@@ -23842,7 +23882,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               same corner. */}
           {narrow && !leftPanel && !companionOpen && !mobileSections && (
             <button onClick={() => setMobileSections(true)} title="Show Land / Analysis / Yield / Properties / Overlays / Standards"
-              style={{ position: "absolute", left: 12, bottom: (companionSel && !narrowProps) ? 68 : 16, zIndex: 1190, display: "flex", alignItems: "center", gap: 6, padding: "11px 16px", borderRadius: RADIUS.pill, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 800, color: "#fff", background: PAL.ember, boxShadow: "0 6px 18px rgba(0,0,0,0.45)" }}>
+              style={{ position: "absolute", left: 12, bottom: `calc(${(companionSel && !narrowProps) ? 68 : 16}px + env(safe-area-inset-bottom))`, zIndex: 1190, display: "flex", alignItems: "center", gap: 6, padding: "11px 16px", borderRadius: RADIUS.pill, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 800, color: "#fff", background: PAL.ember, boxShadow: "0 6px 18px rgba(0,0,0,0.45)" }}>
               ☰ Sections
             </button>
           )}
