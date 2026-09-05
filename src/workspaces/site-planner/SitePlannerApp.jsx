@@ -448,8 +448,17 @@ export default function App({
    * and treating the first as the second is precisely the bug. So every deliberate exit —
    * the Map crumb, the planner's Back to map, a sign-out, a discarded staging site — goes
    * through here, and nothing else may set `mode` to "map" while a project is routed. */
-  const leaveProject = () => { userLeftProjectRef.current = true; setActiveSiteId(null); setMode("map"); };
-  const goMap = () => { userLeftProjectRef.current = true; setMode("map"); };
+  /* NEW-2 — a deliberate exit also clears the PERSISTED currentSite pointer (`planarfit:
+   * currentSite:v1`, storage.js), not just this tab's URL/state. `leaveProject`/`goMap` used to
+   * leave that pointer standing, so Dashboard correctly cleared THIS tab's route while a brand
+   * new tab — or this same tab reloaded on the bare domain — silently resumed the project just
+   * left via `bootActiveId`/`pickResumeTarget`, landing straight back in its heavy canvas. This
+   * is also most of the every-cold-start-paints-the-heaviest-module contributor to NEW-1's boot
+   * race: a boot that should not be resuming a project at all is what makes the main thread busy
+   * enough to widen that race. `userLeftProjectRef` is UNRELATED and stays — it keeps the URL
+   * writer honest (mayWriteRouteProject) and must not be touched here. */
+  const leaveProject = () => { userLeftProjectRef.current = true; setActiveSiteId(null); setCurrentSiteId(null); setMode("map"); };
+  const goMap = () => { userLeftProjectRef.current = true; setCurrentSiteId(null); setMode("map"); };
 
   // NEW-F6 (LOUD-FAILURE): the fire-and-forget cloud mirrors below (new site, duplicate, rename,
   // status) used to `.catch(() => {})` — the op looked done while the cloud copy silently lagged.

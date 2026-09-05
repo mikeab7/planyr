@@ -2688,6 +2688,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * `layerGateReady` is a ONE-SHOT latch: it exists to close the opening window, and keeping it
    * a latch is what stops the overlay sync from re-running on every frame of a zoom gesture. */
   const [viewFramed, setViewFramed] = useState(false);
+  /* NEW-1 — has the user already taken the wheel/pinch/pan themselves? Mirrors MapFinder.jsx's
+   * `userMovedRef`, built for the identical bug class: the "reframe when this view becomes
+   * active" effect below fires an UNCONDITIONAL requestFit() 120ms after mount, and under real
+   * main-thread load that timer's actual fire time stretches well past 120ms — routinely
+   * landing AFTER the user has already started zooming or panning, and silently overwriting the
+   * gesture ("the map fights back"). Set at the three real view-changing gestures (a wheel
+   * notch, a pinch move, a drag-pan actually arming past its dead zone) — never at a mere
+   * click/tap — so USER-INITIATED fits (Zoom to fit, drawing a parcel, placing a looked-up
+   * parcel) stay untouched; this guards only the automatic boot-time one. */
+  const userMovedViewRef = useRef(false);
   const [layerGateReady, setLayerGateReady] = useState(false);
   const geoSrcRef = useRef(null); // which BASEMAPS source the live tile layers were built from
   // "Make sure the aerial is on" (identify mode, analysis-layer framing, geocoded add):
@@ -3739,6 +3749,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!pinch2Ref.current || e.touches.length < 2) return;
     const a = touchPt(e.touches[0]), b = touchPt(e.touches[1]);
     pinchNextRef.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
+    userMovedViewRef.current = true;        // NEW-1 — a real pinch move, the boot-fit race guard
     if (!pinchRafRef.current) pinchRafRef.current = requestAnimationFrame(flushPinch);
   };
   // `cancelled` distinguishes a native touchcancel (an interruption — scroll-chaining, an OS
@@ -5946,8 +5957,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [narrow]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reframe when this view becomes active — its real size is known only once shown.
+  // NEW-1 — under real load this timer's actual fire time stretches well past 120ms, so it can
+  // land AFTER the user has already started zooming/panning; skip the automatic fit in that
+  // case so it never overwrites a gesture already in flight (userMovedViewRef, above).
   useEffect(() => {
-    if (active) { const t = setTimeout(() => { requestFit(); setViewFramed(true); }, 120); return () => clearTimeout(t); }
+    if (active) {
+      const t = setTimeout(() => {
+        if (!userMovedViewRef.current) requestFit();
+        setViewFramed(true);
+      }, 120);
+      return () => clearTimeout(t);
+    }
   }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ------------ wheel zoom (non-passive) ------------
@@ -6039,6 +6059,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const mx = e.clientX - r.left, my = e.clientY - r.top;
       const f = wheelZoomFactor(e);
       if (f === 1) return;                    // a zero/garbage delta zooms nothing and starts no gesture
+      userMovedViewRef.current = true;        // NEW-1 — a real wheel notch, the boot-fit race guard
       const prev = wheelAccum.current;
       wheelAccum.current = { f: (prev ? prev.f : 1) * f, mx, my };
       if (!wheelRaf.current) wheelRaf.current = requestAnimationFrame(flushWheel);
@@ -8289,6 +8310,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // nodes. Batches into the same commit as the setView below. See the pan-anchor block.
       if (!d.panArmed) armViewAnchor(view.ppf, d.ox, d.oy);
       d.panArmed = true;
+      userMovedViewRef.current = true;        // NEW-1 — a real drag-pan, the boot-fit race guard
       setView((v) => ({ ...v, offX: d.ox + (e.clientX - d.sx), offY: d.oy + (e.clientY - d.sy) }));
       return;
     }

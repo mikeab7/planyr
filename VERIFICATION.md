@@ -144,6 +144,35 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V864432 — B1191456: the boot-time auto-fit no longer overwrites the first few seconds of the owner's own zoom/pan `Blocker: live-GIS` `Blocker: real-data`
+
+**Why this needs its own real pass.** The mechanism is a genuine timing race — a 120ms `setTimeout` that can fire late enough to land after a real wheel/pinch/pan gesture only when the main thread is genuinely busy right after boot, which in practice means real GIS/comp/parcel network calls congesting it. This sandbox's egress proxy blocks every external GIS/tile host, so nothing here can force the congestion that makes the race observable — confirmed the mechanism is otherwise sound via the structural/source-level tests below, but a sandbox pass on the RACE itself cannot be claimed.
+
+**What was verified here (this session, sandbox).** `test/reframeUserGesture.test.js` (new, 7 tests) proves the guard's shape directly against source: `userMovedViewRef` exists; the "reframe when this view becomes active" effect conditions its `requestFit()` call on it; a real wheel notch, a real pinch move, and an armed drag-pan (past its dead zone) all set the flag; every OTHER `requestFit()` call site (Fit view button, etc.) stays unconditional. Red-proofed by stashing the fix and rerunning — 6 of 7 assertions failed exactly as expected. Full repo suite green (736 files / 15,023 tests), lint clean, build clean.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, on a real project heavy enough to load real GIS/comp/parcel data on open (a large multi-parcel site with several GIS layers on):**
+1. Read the loaded chunk hash in the same breath as everything below — confirm it names a chunk from a build after this PR merged.
+2. Open the heavy project so the Site Planner canvas becomes the active view. Within the first 1-2 seconds, before the view settles, start a wheel-zoom or a drag-pan. **Expect:** the gesture holds — the view does NOT snap back to the pre-gesture framing partway through or right after.
+3. Repeat 2 several times across a fresh reload each time (the reported symptom is "for the first 5 to 10 seconds," not always) — expect the same result every time.
+4. As a control, reload and do NOT touch the view for several seconds. **Expect:** the automatic whole-site framing still happens normally (unchanged) when no gesture ever intervenes.
+
+**Result:** ⏳ pending — needs a real signed-in browser session on a real, GIS-heavy project. `Cadence: once`.
+
+### V864433 — B1191457: a signed-in second tab/device no longer resumes a project just left on this device `Blocker: auth`
+
+**Why this needs its own real pass.** The fix (`leaveProject`/`goMap` clearing `localStorage["planarfit:currentSite:v1"]`) is fully proven for the LOCAL, signed-out resume path (below). The SAME storage key also feeds the SIGNED-IN cloud resume path — a second tab or device pulling the just-cleared local pointer, or a fresh sign-in reading a server-side mirror of "last open plan" if one exists — which this sandbox cannot reach (the egress proxy CORS-blocks the Supabase auth handshake).
+
+**What was verified here (this session, sandbox).** `test/dashboardLeaveClearsCurrentSite.test.js` (new, 5 tests) proves, against the REAL `pickResumeTarget` + the real `getCurrentSiteId`/`setCurrentSiteId`: a stale pointer left standing resumes into the just-left project (proving the bug); clearing it resumes nothing; a real routed deep-link boot is unaffected; a source guard confirms `leaveProject`/`goMap` actually call the fix. Red-proofed by stashing the fix and rerunning — the source-guard assertion failed exactly as expected. Full repo suite green, lint clean, build clean.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in as the owner, in TWO tabs (or one tab + a fresh reload on the bare domain):**
+1. Read the loaded chunk hash in the same breath as everything below — confirm it's post-merge, in both tabs.
+2. Tab A: open a real project. Tab B (or the same tab, freshly opened on `planyr.io` with no hash): confirm it resumes wherever it was before (unchanged baseline behavior).
+3. Tab A: press the Dashboard breadcrumb (or the `planyr` wordmark) to leave the project. **Expect:** Tab A lands on the map/dashboard, as before.
+4. Open a brand-new tab (or reload Tab B) on the bare `planyr.io` domain with no project routed. **Expect:** it does NOT silently resume the project left in step 3 — it lands on the map/dashboard, not straight into that project's canvas.
+5. As a control, open a project, leave it via a route change alone (never through Dashboard/Map), and confirm ordinary resume behavior elsewhere is unaffected by this fix.
+
+**Result:** ⏳ pending — needs a real signed-in multi-tab/device session. `Cadence: once`.
+
 ### V859232 — B1186256: the new Drainage rail tab renders every carried-over section correctly and Yield/Analysis's links jump to it, on a real multi-parcel plan `Blocker: auth` `Blocker: real-data`
 
 **Why this needs its own real pass.** This is a large structural refactor (a ~2256-line panel split into two module-scope components) verified this session by build/lint/test green and ESLint's `no-undef`, but never actually rendered against a real, densely-built project — the repro data throughout this dispatch (Goose Creek, "Plan II - 220K, 440K, 700K GEOTECH") lives on Michael's own signed-in account, which this sandbox's proxy CORS-blocks.
