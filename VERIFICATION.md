@@ -39,6 +39,20 @@ was never clicked" quietly ships broken.
 >   then `getByTestId("map-start-blank-menu-item")` is the reliable two-step click); drive the SVG
 >   canvas with `page.mouse` (CDP mouse events fire React's pointer handlers); `page.screenshot({clip})`
 >   then read the PNG back to eyeball it.
+> - **⛔ THIS SANDBOX HAS NO WEBKIT — every "phone" or "mobile" claim made here is a CHROMIUM claim,
+>   never a Safari one, and this is a standing gap, not a one-off (B1168128, 2026-09-05).**
+>   `npx playwright install chromium` restores Chromium/its headless-shell; it does NOT install
+>   WebKit — `/opt/pw-browsers/webkit-*` does not exist in this environment and nothing here fetches
+>   it. Playwright's `devices["iPhone …"]` descriptors (isMobile/hasTouch/dpr/mobile UA) make Chromium
+>   behave like a phone-shaped browser, which is real evidence for layout, touch-event wiring, and
+>   gesture logic — but it is still Chromium's touch/pointer pipeline, not Safari's, and it cannot
+>   render `env(safe-area-inset-*)` as anything but 0 (no notch/home-indicator to inset around) or
+>   reproduce Mobile Safari's collapsing-address-bar `visualViewport` behavior. **Say "Chromium at
+>   iPhone-13 width" in a report, never "tested on iPhone" or "verified on Safari."** A synthetic
+>   safe-area value can be exercised in an isolated fixture as a SIMULATION of the CSS arithmetic —
+>   labeled as simulation, never reported as device evidence. Closing a real notch/gesture-bar or
+>   Safari-touch-pipeline question needs an actual iPhone; that gap is Michael's own device, not a
+>   task for a self-check here.
 
 >
 > ### 🚚 Confirming a change is actually SERVED (B1119) — use the script, not a hand grep
