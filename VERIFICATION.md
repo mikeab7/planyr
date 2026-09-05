@@ -71,7 +71,23 @@ was never clicked" quietly ships broken.
 >   override), never on WebKit here. Closing a real notch/gesture-bar or true Mobile-Safari-chrome
 >   question still needs an actual iPhone; that gap is Michael's own device, not a task for a
 >   self-check here.
-
+>
+> - **⛔ AND WEBKIT REACHES EXTERNAL HOSTS WHERE CHROMIUM CANNOT (2026-09-05, B1215536) — this
+>   REFINES the "standing wall" below (line ~823/V477 and its siblings), it does not repeat it.**
+>   Those entries measured Chromium alone dying with `net::ERR_CONNECTION_RESET` /
+>   `ws_closed_mid_exchange` against `planyr.io` and a Cloudflare preview URL, and read that as
+>   "no browser here can open an external URL, only `curl` can." Measured directly this round: the
+>   SAME proxy-side failure (`ws_closed_mid_exchange`, tunnel closed ~6s in, ~39 bytes received)
+>   reproduces identically against unrelated third-party hosts too (`accounts.google.com`), which is
+>   the tell that this is Chromium's own TLS handshake shape tripping something in the egress
+>   proxy's TLS termination — not a policy block on this app's domains specifically. `webkit.launch()`
+>   with the SAME `proxy: { server: process.env.HTTPS_PROXY, bypass: "localhost,127.0.0.1" }` launch
+>   option (Chromium reads `HTTPS_PROXY` only via this explicit option too, never on its own — see the
+>   WebKit note above) reached both a Cloudflare Pages preview URL and `https://planyr.io/` cleanly,
+>   repeatedly, including a full real-UI flow (create a note, type, click through several controls) —
+>   not just a bare page load. **So: a same-session live check against a real deployed URL is
+>   possible here, it just needs WebKit, not Chromium, for the network hop** — reach for it before
+>   filing "no browser reachable" against a deployed build.
 >
 > ### 🚚 Confirming a change is actually SERVED (B1119) — use the script, not a hand grep
 > `node ui-audit/verify-deploy.mjs <marker> [marker…]` (`--origin=` for a preview URL, `--json` for
@@ -234,6 +250,22 @@ was never clicked" quietly ships broken.
 5. As a control, confirm an ordinary real project (a `role:"pursuit"` site) still organizes normally and still shows in every picker — the fix must exclude tracked sites only, never a real project.
 
 **Result:** ⏳ pending — needs a real signed-in browser session with real comp data. `Cadence: once`.
+
+### V879664 — B1208864: a retried group rename lands on EVERY plan with the exact same commit, and an interrupted retry never forgets it happened `Blocker: auth`
+
+**Why this needs its own real pass.** The write shape (atomic RPC vs. non-atomic fan-out) and the log lifecycle (clear only on confirmation) are both fully proven without a browser — a fake `public.sites` table + a fake one-statement RPC + a killable row transport in `test/writeFailureLog.test.js` prove every row shares one name and one `updated_at`, and that the killable transport is never touched. What's unprovable here is the real Supabase round trip: whether `rename_site_group` really is atomic on production Postgres, and whether a genuinely interrupted browser tab (a real chunk failure or reload mid-retry) really leaves the durable log intact.
+
+**What was verified here (this session, sandbox).** `test/writeFailureLog.test.js` (22 tests, up from 8) and the new `test/cloudWriteRetryWiring.test.js` (3 tests, source guard on the retry-button wiring). Red-proofed three ways: disabling the atomic-first branch, restoring the old clear-before-replay ordering, and routing a retry button back through `dismissPushError()` — each broke a distinct, named set of tests; restored, everything is green. Full repo suite green (737 files / 15,055 tests), lint clean, build clean, `MAP.md` regenerated.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, on a project with at least two plans:**
+1. Read the loaded chunk hash in the same breath as everything below — confirm it names a build after this merged.
+2. Open DevTools → Network, add a request-blocking rule for `*cloudRename*.js`, then rename the project from the map list or header breadcrumb. **Expect:** the write-failure banner + red badge + warning triangle (unchanged from V577312/V584992).
+3. **THE SHARPEST STEP.** Independently of the app (a Supabase table view or equivalent), read `public.sites.updated_at` for every plan in that group, TO THE MICROSECOND, before doing anything else. Note the values — they should still be the OLD ones, since the cloud write never landed. Matching NAMES alone cannot tell the fixed build from the broken one, because the broken (pre-B1208864, still-B1048400) one eventually wrote every row too, just not in one commit — the microsecond comparison is what separates them.
+4. Unblock the network rule and click **Retry now**. **Expect:** the banner clears and the badge returns to green "Synced".
+5. Re-read `public.sites.updated_at` for every plan in the group. **Expect:** every plan shares the exact same name AND the exact same `updated_at` timestamp, to the microsecond — not a spread of stamps a couple of seconds apart (the literal production repro this item closes).
+6. **The interrupted-retry leg.** Reproduce the block again (step 2), click Retry now, and this time re-block the network (or kill the tab's connection) within the same second, before the request can complete. Reload the tab. **Expect:** the write-failure banner reappears — the durable log was not forgotten by the attempt that didn't land.
+
+**Result:** ⏳ pending — needs a real signed-in browser session against production Supabase. `Cadence: once`.
 
 ### V864432 — B1191456: the boot-time auto-fit no longer overwrites the first few seconds of the owner's own zoom/pan `Blocker: live-GIS` `Blocker: real-data`
 
@@ -7216,6 +7248,7 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
 **(c) THE FIX'S OWN CLAIM:** independently of the app (a Supabase table view or equivalent), read `public.sites` for **every plan in that project's group**, not just the one you had open. **Expect:** ALL of them show the new name and the SAME `data->>'siteRenamedAt'` stamp — not just the plan that was active when you clicked Retry. This is the exact check that would have caught B1048400 before it shipped in B1037952 and didn't, because it only ever checked the active row.
 `Blocker: auth`
 
+- **Note, 2026-09-05:** this item covers the row SCOPE only (every live plan, not just the group's own row) — real and unchanged. **B1208864/V879664** is the separate write-SHAPE fix (one atomic RPC commit instead of N separate non-atomic writes) and its own step (5) supersedes this item's step (c) with a stricter to-the-microsecond comparison. A live pass of V879664 also satisfies this item's own criteria.
 ### V591680 — B1055088 (a stale Notes window no longer re-publishes its whole local store, and an automatic housekeeping write can never raise a conflict). `Blocker: auth` — the two fixed mechanisms are both proven live-shaped at the store level this session, no browser needed: a throwaway reproduction against the UNMODIFIED shipped code showed one page's server `rev` climb 1→2→3→4→5 across four `refreshNotesSync()` calls with zero edits and no sibling window, and the fixed code (`test/notesTwoClientConflict.test.js`) proves the same sequence now holds the rev steady; the litter-sweep-vs-real-edit collision and the B1391 genuine-conflict case are both proven end to end against the real store code (two real client instances, one fake server enforcing the real revision-guard shape). What's unprovable here: the real Supabase round-trip and a genuinely idle browser tab across real focus/visibility/poll events. On **planyr.io**, signed in, TWO WINDOWS, same account, confirm —
 **(a) THE SELF-RESURRECTION FIX — a page you are not touching must stop re-publishing itself.** In window A, open any note, type a sentence, and wait for the header's cloud badge to show "Synced". Independently of the app (a Supabase table view or equivalent), read `public.notes_pages` for that page's `id` and note its `rev`. Do nothing else in window A for at least 90 seconds (long enough for the 60-second background poll to fire at least once), or switch away to another tab and back once or twice to trigger a few refreshes. **Expect:** the row's `rev` is UNCHANGED from what you read right after the first save — not incremented by 1 (or more) per poll/focus tick with no edit behind it. This is the literal defect: before the fix, `rev` climbed by exactly one on every such tick, forever, for any page ever edited.
 **(b) A STALE WINDOW ADOPTS SILENTLY, WITH NO PUSH, WHEN IT HAS NOTHING OF ITS OWN TO DEFEND.** Open the SAME note in both windows A and B. In window A, edit it and let it save (badge green). Leave window B open and genuinely idle (no typing) until it goes stale — at least a couple of minutes, or long enough that its own last sync predates A's edit — then bring window B to the foreground (click into the tab / alt-tab back). **Expect:** window B silently shows A's newer text with no conflict bar, and — the part (a) makes checkable for real — re-reading `notes_pages.updated_at` for that page (and ideally a couple of OTHER pages B has open locally) shows nothing was re-written by B: only A's own save moved the row.
