@@ -228,7 +228,7 @@ function SourceBrochureLink({ comp, overlaysById, onOpenBrochure }) {
   );
 }
 
-export function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysById, onOpenBrochure }) {
+export function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysById, onOpenBrochure, assignNotice, onDismissAssignNotice }) {
   const rows = compFieldRows(comp);
   // HARDENING-14 — the detail view showed every structured field EXCEPT where the comp actually
   // is, despite that being real, already-resolved information (an address, an APN, a plan name).
@@ -250,6 +250,17 @@ export function CompDetail({ comp, canEdit, onEdit, onDelete, onBack, overlaysBy
         <TypeChip type={comp.compType} />
       </div>
       {comp.title && <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6 }}>{comp.title}</div>}
+      {/* B1165441 (NEW-2/NEW-3) — "attach and say so": a save that just auto-matched this comp to
+          an EXISTING site (never a brand-new one — that's obviously new) surfaces which site and
+          how, so a wrong guess is something the owner can see and fix via the Site field below
+          rather than a silent duplicate he never notices. */}
+      {assignNotice && (
+        <div role="status" style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 8, padding: "6px 9px", fontSize: 11.5, lineHeight: 1.4, color: "var(--info-text)", background: "var(--info-bg)", borderRadius: 8 }}>
+          <span style={{ flex: 1 }}>{assignNotice}</span>
+          <button onClick={onDismissAssignNotice} aria-label="Dismiss" title="Dismiss"
+            style={{ flex: "none", cursor: "pointer", background: "transparent", color: "inherit", border: "none", fontSize: 12, fontWeight: 800, padding: 0, lineHeight: 1 }}>✕</button>
+        </div>
+      )}
       {/* NEW-12 (B1123424) — `tight` rows: the label sits at its own width, never wrapped, with
           the value close beside it, rather than the default label-left/value-right row that
           stretches a short pair ("Term" / "126 mo") to opposite ends of the panel. */}
@@ -517,6 +528,11 @@ export default function CompsPanel({
   const [draft, setDraft] = useState(null);
   const [errors, setErrors] = useState([]);
   const [saving, setSaving] = useState(false);
+  // B1165441 (NEW-2/NEW-3) — set right after a save auto-attached the comp to a MATCHED existing
+  // site (never on a brand-new tracked site — that's obviously new and needs no explanation). "A
+  // wrong attachment the owner can see and fix beats a duplicate he never notices" (the review's
+  // own words) — this is the "and SAY SO." Cleared whenever a different comp's detail is opened.
+  const [assignNotice, setAssignNotice] = useState(null);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [teams, setTeams] = useState([]);
   // B849232/NEW-1 — the paste-grid create surface. `gridRows` is a client-side staging array,
@@ -671,14 +687,14 @@ export default function CompsPanel({
   useEffect(() => {
     if (!focusCompId) return;
     const c = comps.find((x) => x.id === focusCompId);
-    if (c) { setActiveComp(c); setView("detail"); }
+    if (c) { setActiveComp(c); setView("detail"); setAssignNotice(null); }
     onFocusHandled?.();
   }, [focusCompId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!open) return null;
 
-  const openDetail = (c) => { setActiveComp(c); setView("detail"); };
-  const openEdit = (c) => { setDraft(compToDraft(c)); setErrors([]); setView("form"); };
+  const openDetail = (c) => { setActiveComp(c); setView("detail"); setAssignNotice(null); };
+  const openEdit = (c) => { setDraft(compToDraft(c)); setErrors([]); setAssignNotice(null); setView("form"); };
   const cancelForm = () => { setView(activeComp ? "detail" : "list"); setDraft(null); };
 
   const save = async () => {
@@ -690,6 +706,29 @@ export default function CompsPanel({
     if (teamConflict) errs.push(teamConflict);
     if (errs.length) { setErrors(errs); return; }
     setSaving(true);
+    // B1165441 (NEW-2/NEW-3) — a comp with no owning site gets one automatically: attach to an
+    // existing plausible site first (NEW-3's dedupe), else create a new "tracked" site from the
+    // comp's own title/location (NEW-2). The owner should never have to create a site before
+    // recording a deal. `comp.anchor` always carries lat/lon (validateComp already refused a
+    // missing anchor above), regardless of anchor kind (pin/parcel/site_plan).
+    let matched = null;
+    if (!comp.projectId && comp.anchor) {
+      try {
+        // Dynamic import — keeps storage.js's full site-model/geometry-healing engine
+        // (loadSitesList, saveSite, cloudSync, …) off this panel's own chunk; it's only ever
+        // needed on this one path.
+        const { resolveOrCreateTrackedSiteForComp } = await import("../../../workspaces/site-planner/lib/storage.js");
+        const resolved = await resolveOrCreateTrackedSiteForComp({ title: comp.title, lat: comp.anchor.lat, lon: comp.anchor.lon, county: comp.anchor.county });
+        if (resolved.groupId) {
+          comp.projectId = resolved.groupId;
+          if (resolved.matched) matched = { name: resolved.matchedName, by: resolved.matchedBy };
+        }
+      } catch (_) {
+        // A hiccup here must never block the comp save itself — that would be a worse failure
+        // than the pre-this-feature baseline (an unattached comp, still fixable via the Site
+        // dropdown). It's still a real gap, so it's not silent — just not fatal.
+      }
+    }
     const result = draft.id ? await updateComp(draft.id, comp) : await insertComp(comp);
     setSaving(false);
     if (result.error) { setErrors([result.error.message || "Save failed"]); return; }
@@ -697,6 +736,9 @@ export default function CompsPanel({
     setActiveComp(result.data);
     setView("detail");
     setDraft(null);
+    setAssignNotice(matched
+      ? `Attached to “${matched.name}” (matched by ${matched.by === "location" ? "location" : "name"}) — reassign it below if that's wrong.`
+      : null);
   };
 
   const remove = async (c) => {
@@ -907,6 +949,7 @@ export default function CompsPanel({
           <CompDetail
             comp={activeComp} canEdit={activeComp.userId === currentUserId} onEdit={openEdit} onDelete={remove} onBack={() => setView("list")}
             overlaysById={overlaysById} onOpenBrochure={onOpenBrochure}
+            assignNotice={assignNotice} onDismissAssignNotice={() => setAssignNotice(null)}
           />
         )}
 

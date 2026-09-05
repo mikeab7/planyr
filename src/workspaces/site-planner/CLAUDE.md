@@ -16,13 +16,24 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   "quoting $6/ft, nothing transacted"). Every existing site defaults to "pursuit" with zero bytes
   written (unlike `status`, role has no legacy-vs-fresh split to make). `SitePlannerApp.jsx`'s
   `siteGroups` (the map's Sites list) filters to `role === "pursuit"` by default — a tracked site
-  never pollutes the owner's pipeline. Flipping a site's role later needs no re-entry:
-  `storage.setSiteGroupRole` → `db/set_site_group_role.sql`, the SAME one-atomic-statement-over-
-  the-group shape `rename_site_group.sql` uses. A comp's owning site is `comps.project_id`
-  (the comps db folder's own schema header explains why that column — not a new one —
-  supersedes into this role); `db/site_role_unify_backfill_20260905.sql` is the one-time migration
-  that attached the three pre-existing live comps to sites (creating a new "tracked" one for each,
-  since none matched an existing site's location within half a mile).
+  never pollutes the owner's pipeline; `MapFinder.jsx`'s own `pursuitSites` memo re-asserts the
+  same filter at the point of use (B1165440, defense-in-depth — an adversarial review of PR 1424
+  found tracked sites in the Pursuit group on planyr.io) rather than trusting the caller alone, so
+  the guard holds even if a future caller of this component ever forgets to pre-filter. Flipping a
+  site's role later needs no re-entry: `storage.setSiteGroupRole` → `db/set_site_group_role.sql`,
+  the SAME one-atomic-statement-over-the-group shape `rename_site_group.sql` uses. A comp's owning
+  site is `comps.project_id` (the comps db folder's own schema header explains why that column —
+  not a new one — supersedes into this role); `db/site_role_unify_backfill_20260905.sql` is the
+  one-time migration that attached the three pre-existing live comps to sites (creating a new
+  "tracked" one for each, since none matched an existing site's location within half a mile).
+  **⛔ B1165441 (NEW-2/NEW-3) — that backfill was a SNAPSHOT, not a MECHANISM: it judged the comps
+  that existed the day it ran and nothing else.** `storage.resolveOrCreateTrackedSiteForComp` (in
+  this same `lib/storage.js`; called from the Leasing Comps save flow whenever a comp has no
+  owning site, see `shared/CLAUDE.md` → comps/ for that half) is the real, ongoing runtime path —
+  it matches against `loadSitesList()` (the SAME 0.5mi radius the backfill used, against sites of
+  EVERY role so a second deal on an already-tracked property attaches to it instead of minting a
+  duplicate, then an exact normalized-title fallback) and mints a new "tracked" site only when
+  nothing plausible matches. The owner must never have to create a site before recording a deal.
 - **`splitIntegrity.js` (B540768, B966624/B966629) — parcel split-lineage invariants, pure and
   Node-testable.** `isLiveActive`/`liveActive` (a parcel counts only when active AND not soft-deleted —
   read either half alone and a sum silently vanishes or doubles) · `lineageAudit` (account-wide: any
