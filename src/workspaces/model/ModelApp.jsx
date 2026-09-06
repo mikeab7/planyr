@@ -44,7 +44,8 @@ import FormulaBar from "./components/FormulaBar.jsx";
 import FindReplaceBar from "./components/FindReplaceBar.jsx";
 import NameManager from "./components/NameManager.jsx";
 import InconsistencyPanel from "./components/InconsistencyPanel.jsx";
-import Ribbon from "./components/Ribbon.jsx";
+import CommandPalette from "./components/CommandPalette.jsx";
+import Ribbon, { AuditGroup } from "./components/Ribbon.jsx";
 import TabStrip from "./components/TabStrip.jsx";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { useUndoableState } from "./lib/undoStack.js";
@@ -221,6 +222,13 @@ export default function ModelApp({
   // Stage 3 pt 2 (NEW-1) — the Name Manager panel's own open/closed state, the same "plain view
   // state, not sheet data" convention findOpen already uses one line above.
   const [nameManagerOpen, setNameManagerOpen] = useState(false);
+  // NEW-1 (command palette, owner chat block) — the palette's own open/closed state, same
+  // convention. `tabStripRef`/`fileMenuRef` let a palette command ("Rename Sheet", "Import
+  // Excel File") drive the SAME imperative entry points (`startRename`/`openImportXlsx`/
+  // `openImportCsv`) those components' own UI already uses — see their own headers.
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const tabStripRef = useRef(null);
+  const fileMenuRef = useRef(null);
   // STAGE 3 (NEW-1) — trace precedents/dependents. Plain view state, like `zoom`/`painter` below
   // — never through the undo stack, never synced to the cloud. `null` = no trace active; see
   // lib/traceAudit.js's own header for the shape. Cleared on ANY real workbook edit (the effect
@@ -232,6 +240,12 @@ export default function ModelApp({
   // `nameManagerOpen` — mutually exclusive with Find/Replace and the Name Manager (see
   // `onToggleInconsistencyPanel` below and the two other panels' own toggles).
   const [inconsistencyPanelOpen, setInconsistencyPanelOpen] = useState(false);
+  // Stage 1's Ctrl+F / Ctrl+H opened Find/Replace inline in the keydown handler below; pulled
+  // out into named callbacks (NEW-1, command palette) so the palette's "Find"/"Replace" commands
+  // open the exact SAME bar the same way — one definition of "what opening Find means," not a
+  // second copy of these four lines.
+  const onOpenFind = useCallback(() => { setFindShowReplace(false); setFindOpen(true); setNameManagerOpen(false); setInconsistencyPanelOpen(false); }, []);
+  const onOpenReplace = useCallback(() => { setFindShowReplace(true); setFindOpen(true); setNameManagerOpen(false); setInconsistencyPanelOpen(false); }, []);
   // B1007280 — sheet zoom is a per-project VIEW preference (like a browser's own zoom level),
   // never sheet DATA: it doesn't ride the undo stack and doesn't sync to the cloud, so two
   // people (or two tabs) looking at the same model have no reason to share a zoom level.
@@ -368,12 +382,16 @@ export default function ModelApp({
       if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
       else if ((k === "z" && e.shiftKey) || k === "y") { e.preventDefault(); redo(); }
       else if (k === "g") { e.preventDefault(); nameBoxRef.current?.focus(); }
-      else if (k === "f") { e.preventDefault(); setFindShowReplace(false); setFindOpen(true); setNameManagerOpen(false); setInconsistencyPanelOpen(false); }
-      else if (k === "h") { e.preventDefault(); setFindShowReplace(true); setFindOpen(true); setNameManagerOpen(false); setInconsistencyPanelOpen(false); }
+      else if (k === "f") { e.preventDefault(); onOpenFind(); }
+      else if (k === "h") { e.preventDefault(); onOpenReplace(); }
+      // NEW-1 (command palette, owner chat block) — Ctrl/Cmd+K. Notes' own QuickOpen already
+      // claims this chord for that (separate, mounted-but-hidden when this workspace is active)
+      // workspace, so there's no live collision to guard against.
+      else if (k === "k") { e.preventDefault(); setPaletteOpen(true); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isActive, undo, redo]);
+  }, [isActive, undo, redo, onOpenFind, onOpenReplace]);
 
   // STAGE 3 (NEW-1) — evaluated across the WHOLE WORKBOOK, always, regardless of which sheet is
   // currently visible: a cross-sheet formula on one sheet needs every OTHER sheet's cells (its
@@ -435,6 +453,14 @@ export default function ModelApp({
     setActiveSheetId(next.activeSheetId);
   }, [commit, workbook]);
   const onReorderSheetTab = useCallback((from, to) => commit((wb) => reorderSheet(wb, from, to)), [commit]);
+  // NEW-1 (command palette) — "add/rename/duplicate/delete sheet" from the palette acts on the
+  // CURRENTLY VIEWED sheet, calling the exact same onXSheetTab handlers TabStrip's own UI does
+  // (a click, the right-click menu, a double-click-to-rename). `onRenameSheetCurrent` opens the
+  // SAME inline editor a double-click does, via TabStrip's own imperative handle — never a second
+  // rename mechanism.
+  const onDuplicateSheetCurrent = useCallback(() => onDuplicateSheetTab(activeSheetId), [onDuplicateSheetTab, activeSheetId]);
+  const onRenameSheetCurrent = useCallback(() => tabStripRef.current?.startRename(activeSheetId), [activeSheetId]);
+  const onDeleteSheetCurrent = useCallback(() => onDeleteSheetTab(activeSheetId), [onDeleteSheetTab, activeSheetId]);
 
   // Excel round-trip (NEW-1, owner chat block) — FileMenu.jsx's four actions. `fileBusy` disables
   // the File button for the duration of an export/import (both are async — ExcelJS's own parse/
@@ -538,6 +564,12 @@ export default function ModelApp({
       setFileNotice({ kind: "error", text: `Could not read "${file.name}" as CSV: ${e?.message || e}` });
     } finally { setFileBusy(false); }
   }, [workbook, commit]);
+
+  // NEW-1 (command palette) — "Import Excel File"/"Import CSV File" click the SAME hidden file
+  // input FileMenu's own "Import Excel…"/"Import CSV…" menu items click, via its imperative
+  // handle — never a second file-picker trigger.
+  const onOpenImportXlsx = useCallback(() => fileMenuRef.current?.openImportXlsx(), []);
+  const onOpenImportCsv = useCallback(() => fileMenuRef.current?.openImportCsv(), []);
 
   // Copy/paste/fill-down (items 6/7) — the internal clipboard round-trips a snapshot of raw
   // cell text (see lib/sheetOps.js); paste and fill-down both shift a formula's relative A1
@@ -738,6 +770,34 @@ export default function ModelApp({
     return hidden;
   }, [sheet, evalResult, columnFilters]);
 
+  // ⛔ NEW-1 (command palette, owner chat block) — THE ONE `ctx` BAG, built once per render and
+  // handed to three consumers: the Ribbon (the reduced Home ribbon), the permanent Formula
+  // Auditing toolbar (`AuditGroup`, AppHeader row 1) and the command palette itself. Every
+  // handler below is the SAME function a UI control this session already renders calls — this
+  // object is assembly, not a second implementation of any of them (lib/commandRegistry.js's own
+  // header spells out why that's the whole point).
+  const ctx = {
+    activeFormat, activeStyle: activeStyle || {}, mergedHere, freezeRows: sheet.freezeRows, freezeCols: sheet.freezeCols,
+    painterArmed: !!painter, filterOn, autoColor, onAutoColorToggle,
+    canUndo, canRedo, onUndo: undo, onRedo: redo,
+    onSetCellStyle, onApplyBorder: onApplyBorderCmd, onApplyFormat, onNumberFormatOp, onClearFormatting: onClearFormattingCmd,
+    onFormatPainterToggle, onMergeToggle,
+    onInsertRow: onRibbonInsertRow, onInsertColumn: onRibbonInsertColumn, onDeleteRow: onRibbonDeleteRow, onDeleteColumn,
+    canDeleteColumn: sheet.columns.length > 1,
+    onSetFreezeTopRow, onSetFreezeFirstColumn, onSetFreezeAtSelection, onUnfreeze,
+    onSort, onFilterToggle,
+    nameManagerOpen, onToggleNameManager,
+    traceMode: renderedTrace?.mode || null, traceLevel: renderedTrace?.level ?? 0,
+    traceTruncated: !!renderedTrace?.truncated, traceNoFurther: !!renderedTrace?.noFurther, traceCellCount: renderedTrace?.cellCount ?? 0,
+    onTracePrecedents, onTraceDependents, onClearTrace,
+    inconsistencyCount: activeInconsistencies.length, inconsistencyPanelOpen, onToggleInconsistencyPanel,
+    // Palette-only reach (never rendered as their own ribbon group — see ribbonLayout.js's header).
+    onOpenFind, onOpenReplace,
+    onAddSheetTab, onDuplicateSheetCurrent, onRenameSheetCurrent, onDeleteSheetCurrent, sheetCount: workbook.sheets.length,
+    onExportXlsx, onExportCsv, onOpenImportXlsx, onOpenImportCsv,
+    zoom, onZoomChange,
+  };
+
   let projectName = "";
   if (projectId) { try { const p = listProjects().find((pp) => pp.id === projectId); if (p) projectName = p.name; } catch (_) {} }
   const currentProject = projectId ? { id: projectId, name: projectName || "Untitled project" } : null;
@@ -765,23 +825,33 @@ export default function ModelApp({
         multiEditOk
         // STAGE 2 ICONOGRAPHY PASS — Undo/Redo moved OUT of row 1 and into the Ribbon's own
         // leading "Actions" group (icon buttons, matching Google Sheets' own toolbar, where
-        // Undo/Redo open the row rather than living in a separate header bar). Row 1 keeps
-        // exactly ONE toolbarContent control for this workspace now — the Excel round-trip
-        // File menu (NEW-1) — since there's no workbook to export/import before a project is open.
+        // Undo/Redo open the row rather than living in a separate header bar). Row 1 carries the
+        // Excel round-trip File menu (NEW-1) — since there's no workbook to export/import before
+        // a project is open — plus, since this pass, the module's OWN differentiators
+        // (NEW-1, command palette): Trace Precedents/Dependents/Remove Arrows + the
+        // Inconsistencies toggle now have a PERMANENT, always-visible home here rather than
+        // riding the Home ribbon's own width-aware collapse (lib/ribbonLayout.js no longer lists
+        // an "audit" group at all — see its header). `AuditGroup` is the SAME component/buttons/
+        // testids Stage 3 shipped, just reused from a different call site with the same `ctx`.
         toolbarContent={openProject ? (
-          <FileMenu
-            busy={fileBusy}
-            notice={fileNotice}
-            confirmReplace={pendingXlsxImport ? {
-              text: `Replace this workbook's ${pendingXlsxImport.sheetCount} sheet${pendingXlsxImport.sheetCount === 1 ? "" : "s"} with "${pendingXlsxImport.file.name}"?`,
-              onConfirm: onConfirmXlsxImport,
-              onCancel: onCancelXlsxImport,
-            } : null}
-            onExportXlsx={onExportXlsx}
-            onExportCsv={onExportCsv}
-            onImportXlsxFile={onImportXlsxFile}
-            onImportCsvFile={onImportCsvFile}
-          />
+          <>
+            <FileMenu
+              ref={fileMenuRef}
+              busy={fileBusy}
+              notice={fileNotice}
+              confirmReplace={pendingXlsxImport ? {
+                text: `Replace this workbook's ${pendingXlsxImport.sheetCount} sheet${pendingXlsxImport.sheetCount === 1 ? "" : "s"} with "${pendingXlsxImport.file.name}"?`,
+                onConfirm: onConfirmXlsxImport,
+                onCancel: onCancelXlsxImport,
+              } : null}
+              onExportXlsx={onExportXlsx}
+              onExportCsv={onExportCsv}
+              onImportXlsxFile={onImportXlsxFile}
+              onImportCsvFile={onImportCsvFile}
+            />
+            <span aria-hidden="true" style={{ width: 1, height: 18, flex: "none", background: "var(--chrome-divider)" }} />
+            <AuditGroup ctx={ctx} />
+          </>
         ) : undefined}
       />
 
@@ -823,51 +893,7 @@ export default function ModelApp({
               boxShadow: "0 1px 3px rgba(0,0,0,0.07)", // design-exempt: no shadow-color token yet repo-wide
             }}
           >
-          <Ribbon
-            activeFormat={activeFormat}
-            activeStyle={activeStyle}
-            mergedHere={mergedHere}
-            freezeRows={sheet.freezeRows}
-            freezeCols={sheet.freezeCols}
-            painterArmed={!!painter}
-            filterOn={filterOn}
-            autoColor={autoColor}
-            onAutoColorToggle={onAutoColorToggle}
-            canUndo={canUndo}
-            canRedo={canRedo}
-            onUndo={undo}
-            onRedo={redo}
-            onSetCellStyle={onSetCellStyle}
-            onApplyBorder={onApplyBorderCmd}
-            onApplyFormat={onApplyFormat}
-            onNumberFormatOp={onNumberFormatOp}
-            onClearFormatting={onClearFormattingCmd}
-            onFormatPainterToggle={onFormatPainterToggle}
-            onMergeToggle={onMergeToggle}
-            onInsertRow={onRibbonInsertRow}
-            onInsertColumn={onRibbonInsertColumn}
-            onDeleteRow={onRibbonDeleteRow}
-            onDeleteColumn={onDeleteColumn}
-            onSetFreezeTopRow={onSetFreezeTopRow}
-            onSetFreezeFirstColumn={onSetFreezeFirstColumn}
-            onSetFreezeAtSelection={onSetFreezeAtSelection}
-            onUnfreeze={onUnfreeze}
-            onSort={onSort}
-            onFilterToggle={onFilterToggle}
-            nameManagerOpen={nameManagerOpen}
-            onToggleNameManager={onToggleNameManager}
-            traceMode={renderedTrace?.mode || null}
-            traceLevel={renderedTrace?.level ?? 0}
-            traceTruncated={!!renderedTrace?.truncated}
-            traceNoFurther={!!renderedTrace?.noFurther}
-            traceCellCount={renderedTrace?.cellCount ?? 0}
-            onTracePrecedents={onTracePrecedents}
-            onTraceDependents={onTraceDependents}
-            onClearTrace={onClearTrace}
-            inconsistencyCount={activeInconsistencies.length}
-            inconsistencyPanelOpen={inconsistencyPanelOpen}
-            onToggleInconsistencyPanel={onToggleInconsistencyPanel}
-          />
+          <Ribbon ctx={ctx} />
           <FormulaBar sheet={sheet} row={selRange.r1} col={selRange.c1} onCommit={onCommitCell} onGoTo={onGoTo} nameBoxRef={nameBoxRef} />
           </div>
           <SheetView
@@ -902,8 +928,12 @@ export default function ModelApp({
             trace={renderedTrace}
             onNavigateTrace={onNavigateTrace}
             inconsistencies={activeInconsistencies}
+            onApplyBorder={onApplyBorderCmd}
+            onSort={onSort}
+            onToggleNameManager={onToggleNameManager}
           />
           <TabStrip
+            ref={tabStripRef}
             sheets={workbook.sheets}
             activeSheetId={activeEntry.id}
             onSelect={onSelectSheetTab}
@@ -940,6 +970,7 @@ export default function ModelApp({
             onGoTo={onGoTo}
             onDismiss={onDismissInconsistency}
           />
+          <CommandPalette open={paletteOpen} ctx={ctx} onClose={() => setPaletteOpen(false)} />
         </>
       )}
     </div>

@@ -60,9 +60,21 @@ export function computeRibbonLayout(containerWidth, groups, reserveForMore = 0) 
 // controls each renders). `priority` decides collapse order, LOWEST collapsing first. Font style
 // (Bold/Italic/Underline/Strike) and Actions are kept visible longest — a spreadsheet with no
 // Bold button at all reads as broken, and Undo/Redo are the two controls used every single edit.
-// Number and Borders (currency/% and the subtotal/total border convention) are the next to go,
-// ahead of the geometry-only groups (Font face, Colour, Alignment, Cells, Sort & Filter) that a
-// narrow window can live without for a moment behind "…".
+// Number is the next to go, ahead of the geometry-only groups (Font face, Colour, Alignment)
+// that a narrow window can live without for a moment behind "…".
+//
+// ⛔ REDUCED HOME RIBBON (NEW-1, owner chat block: "reduce the Home ribbon to the controls
+// actually used daily … let the rest live in the palette and the right-click menu"). Borders,
+// Names and Sort & Filter — occasional, not daily, operations — moved OFF this list entirely;
+// they're unchanged as ACTIONS (every handler still exists, wired the same as before) but no
+// longer render as their own ribbon group or overflow entry. Reach them from the command palette
+// (Ctrl/Cmd+K, lib/commandRegistry.js — the one place that now lists them) or the cell right-
+// click menu (SheetView.jsx). Formula Auditing moved OFF too, but for the opposite reason: it
+// was the module's own differentiator and was getting lost IN the overflow this same mechanism
+// produces — it now has a permanent, always-visible home in row 1 (AppHeader's toolbar, next to
+// File — see Ribbon.jsx's exported `AuditGroup` and ModelApp.jsx's toolbarContent), never subject
+// to this collapse math at all. `cells` is now the lowest-priority survivor and is the first of
+// the remaining seven to collapse (a pre-existing checkpoint test pins that).
 const DIVIDER_FOOTPRINT = 17; // 1px rule + 8px margin each side (docs/DESIGN.md's divider rule)
 export const RIBBON_GROUPS = [
   { key: "actions", label: "Actions", width: 116 + DIVIDER_FOOTPRINT, priority: 9 },
@@ -73,23 +85,6 @@ export const RIBBON_GROUPS = [
   { key: "color", label: "Colour", width: 88 + DIVIDER_FOOTPRINT, priority: 3 },
   { key: "alignment", label: "Alignment", width: 233 + DIVIDER_FOOTPRINT, priority: 2 },
   { key: "number", label: "Number", width: 237 + DIVIDER_FOOTPRINT, priority: 6 },
-  { key: "borders", label: "Borders", width: 87 + DIVIDER_FOOTPRINT, priority: 5 },
   { key: "cells", label: "Cells", width: 90 + DIVIDER_FOOTPRINT, priority: 1 },
-  // Stage 3, formula-auditing (NEW-1/NEW-2, owner brief 2026-09-03) — Trace Precedents/
-  // Dependents/Remove Arrows (3 icon buttons + an occasional "L2" level readout, sized into the
-  // width for the widest state) + the Inconsistencies toggle (1 icon button + its own count
-  // badge, which overlays rather than adding width). Priority 2, tied with Alignment: a real
-  // auditing tool the owner asked for by name ("the single most useful auditing tool in Excel"),
-  // so it survives longer than the structural-editing/naming groups as the window narrows.
-  { key: "audit", label: "Formula Auditing", width: 130 + DIVIDER_FOOTPRINT, priority: 2 },
-  // Stage 3 pt 2 (NEW-1) — a single icon button opening the Name Manager (list/search/jump,
-  // rename, retarget, delete, plus the "define from selection" fast path — see
-  // components/NameManager.jsx). Placed after Cells: a real spreadsheet's structural-editing
-  // tools (Cells) matter more moment to moment than naming a range, but naming still earns a
-  // spot ahead of Sort & Filter (the LOWEST-priority group, still first to collapse — a
-  // pre-existing checkpoint test pins that). Tied with Cells at priority 1 so it collapses
-  // before Cells but strictly after Sort & Filter as the window narrows.
-  { key: "names", label: "Names", width: 26 + DIVIDER_FOOTPRINT, priority: 1 },
-  { key: "sortfilter", label: "Sort & Filter", width: 87 + DIVIDER_FOOTPRINT, priority: 0 },
 ];
 export const MORE_BUTTON_WIDTH = 26 + DIVIDER_FOOTPRINT;
