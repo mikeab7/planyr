@@ -599,7 +599,7 @@ export default function ProjectBreadcrumb({
   // "Delete forever" — the only user-facing HARD delete, and the only path that destroys elements.
   const doPurge = (p) => {
     setBinBusy(p.id); setPurgeFor(null);
-    Promise.resolve(purgeDeletedProject(p.ids)).then((res) => {
+    Promise.resolve(purgeDeletedProject(p.ids, p.id)).then((res) => {
       if (!res || res.ok === false) flashToast((res && res.error) || `“${p.name}” couldn't be permanently deleted — check your connection and try again.`);
       refreshBin();
     }).catch(() => flashToast(`“${p.name}” couldn't be permanently deleted — check your connection and try again.`))

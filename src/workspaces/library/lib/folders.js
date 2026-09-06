@@ -70,7 +70,13 @@ export async function ensureSeeded(projectId) {
     // touching the Site Planner canvas, would otherwise seed 12 real `project_folders` rows with
     // no parent at all. BLOCKS the seed (never a silent best-effort) exactly like the
     // already-shipped Doc Review guard, so a deleted/unconfirmable project never gets a tree.
-    const ensured = await ensureProjectExists(projectId, { name: "Untitled project" }).catch((e) => ({ ok: false, error: (e && e.message) || "" }));
+    // ⛔ B1235168 — `confirmLive: true` is load-bearing: this write creates a durable EXTERNAL
+    // side effect (a real Google Drive folder tree via syncFoldersToDrive), so it must NEVER trust
+    // `ensureProjectRow`'s ordinary fast path, which answers "already real" off a stale local
+    // `sites` row without checking whether the project was binned from another tab/device since.
+    // Measured on production: three binned projects each grew a full 133-folder Drive tree one to
+    // two days after being binned, because this call used to skip the deletion check entirely.
+    const ensured = await ensureProjectExists(projectId, { name: "Untitled project", confirmLive: true }).catch((e) => ({ ok: false, error: (e && e.message) || "" }));
     if (!ensured.ok) {
       return { ok: false, error: ensured.deleted
         ? "This project has been deleted. Restore it before organizing its files."
@@ -311,4 +317,45 @@ export async function planFolderDelete(projectId, folderId) {
       ? { ok: true, folders: jr.folders || [], files: jr.files || [], truncated: !!jr.truncated }
       : { ok: false, error: jr.error || `HTTP ${resp.status}` };
   } catch (e) { return { ok: false, error: (e && e.message) || "Network error." }; }
+}
+
+/* B1235169 — permanently remove a PURGED project's whole folder tree: the project-wide
+ * counterpart to `trashSubtree` above, called only from storage.js's "Delete forever" and the
+ * 30-day expiry purge — never from an ordinary in-app folder delete (an ordinary delete goes
+ * through `trashSubtree` + `planFolderDelete`, which stay soft/recoverable by design).
+ *
+ * Order matters: the Drive trash is asked for FIRST, while this project's `project_folders` rows
+ * still exist server-side (the server needs them to know whether — and where — a Drive tree was
+ * ever mirrored; see `purgeProjectDrive` in server/storage/folderMirror.js). The rows are then
+ * deleted regardless of whether the Drive half succeeded, so a purge never again leaves orphaned
+ * `project_folders` rows behind even when Drive itself couldn't be reached — the caller is told
+ * about that honestly (LOUD-FAILURE) rather than left to discover it the way this bug was found.
+ * Signed-out / unconfigured → skipped (there is nothing to purge). */
+export async function purgeProjectFolders(projectId) {
+  if (!supabase || !projectId) return { ok: true, skipped: true };
+  let drive = { ok: true, trashed: false };
+  const token = await authToken();
+  if (!token) {
+    drive = { ok: false, error: "Not signed in." };
+  } else {
+    try {
+      const resp = await fetch("/api/folders", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ action: "purge-project", projectId }),
+      });
+      if (resp.status === 404 || resp.status === 503) drive = { ok: true, trashed: false, skipped: true }; // Drive not enabled — nothing there to trash
+      else {
+        let jr = {}; try { jr = await resp.json(); } catch (_) { /* keep */ }
+        drive = resp.ok && jr.ok ? jr : { ok: false, error: jr.error || `HTTP ${resp.status}` };
+      }
+    } catch (e) { drive = { ok: false, error: (e && e.message) || "Network error." }; }
+  }
+  const { error: delErr } = await supabase.from("project_folders").delete().eq("project_id", projectId);
+  return {
+    ok: !delErr && drive.ok !== false,
+    rowsDeleted: !delErr,
+    driveTrashed: !!drive.trashed,
+    error: delErr ? delErr.message : (drive.ok === false ? drive.error : null),
+  };
 }

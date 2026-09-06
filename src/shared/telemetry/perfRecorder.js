@@ -47,7 +47,7 @@ import {
   createFrameRing, pushFrame, createTaskRing, pushTask, createCounterRing, pushCounters,
   createStringTable, internString, ringOrder, ringOrderSince, COUNTER_COLUMNS,
 } from "./perfRing.js";
-import { createTrigger, feedFrame, sealBaselineLate, triggerState, worstWindow } from "./perfTrigger.js";
+import { createTrigger, feedFrame, feedBootTask, sealBaselineLate, triggerState, worstWindow } from "./perfTrigger.js";
 import { buildCapture, encodeCapture, assertCaptureClean, frameStats, attributionLabel, CAPTURE_MAX_CHARS } from "./perfCapture.js";
 import { savePerfCapture } from "./perfCaptureStore.js";
 
@@ -75,6 +75,17 @@ export const RECORDER_DEFAULTS = {
    *  every row the app sends (SESSION_MAX 100); a recorder that could spend it would blind the
    *  error channel, which is a worse regression than any data it collects is worth. */
   maxSent: 9,
+  /** NEW-3 — how long the frame loop free-runs at install, REGARDLESS of interaction, so
+   *  a boot-window capture (perfTrigger.feedBootTask) carries real frame deltas instead of an
+   *  empty "no-frames" track. This is the one deliberate exception to "the frame loop is gated on
+   *  interaction" above: that gating exists because an idle tab's frame deltas describe the
+   *  browser's throttling policy rather than the app (see this file's point 2) — but a BOOT is not
+   *  an idle tab. The app does real, visible work during boot (an auto-fit, layer mounts, an
+   *  animated zoom) whether or not the user's pointer has moved yet, and a resumed plan can open
+   *  on a hard reload with ZERO prior interaction at all (`bootResume.js`), which would otherwise
+   *  leave the loop never started for the entire window the owner reports. Bounded and short, so
+   *  the cost stays what the recorder's own header already measures in microseconds per frame. */
+  bootRunMs: 10_000,
 };
 
 /* ── module state (one recorder per page) ───────────────────────────────────────────────────── */
@@ -138,7 +149,11 @@ function schedule() {
 function noteActivity() {
   let t = 0;
   try { t = _win.performance.now(); } catch (_) { return; }
-  _activeUntil = t + _cfg.idleStopMs;
+  /* NEW-3 — never SHORTEN an already-scheduled run. In ordinary use `t + idleStopMs` only grows
+   * from one call to the next, so this changes nothing there; it only matters against the boot
+   * free-run's own later `_activeUntil` (see RECORDER_DEFAULTS.bootRunMs), which an interaction
+   * early in the boot window must not cut short. */
+  _activeUntil = Math.max(_activeUntil, t + _cfg.idleStopMs);
   if (!_running) {
     _running = true;
     _prevFrameT = 0;
@@ -200,6 +215,11 @@ function observeTasks() {
     _taskTotal += dur; _taskCount++;
     if (dur > _taskMax) _taskMax = dur;
     pushTask(_tasks, t, dur, blk, internString(_strings, name));
+    /* NEW-3 — the BOOT-WINDOW judgment. This observer is the one piece of the recorder that is
+     * NOT gated on interaction (installed once, unconditionally, `buffered: true`), so it is the
+     * signal that can actually see a genuinely idle boot — see perfTrigger.js's feedBootTask
+     * header for the full reasoning. */
+    try { if (feedBootTask(_trig, t, dur)) capture("auto"); } catch (_) { /* a recorder fault must never break the frame */ }
   };
   let loaf = false;
   try {
@@ -276,6 +296,12 @@ export function capture(reason) {
     const ctx = perfContext();
     const scene = readScene(_win.document);
     const v = _trig.lastVerdict || {};
+    /* NEW-3 — a BOOT capture carries a differently-shaped verdict (perfTrigger.feedBootTask): no
+     * baseline exists yet to derive windowMeanMs/slowFraction/ratio from, so those are correctly
+     * left absent (buildCapture's `num()` omits any non-finite value) and these three fields carry
+     * the boot judgment's own facts instead. Gated on `kind === "auto"` for the same reason the
+     * steady-state fields above are — a manual capture must never inherit a stale verdict. */
+    const isBootVerdict = kind === "auto" && v.source === "boot";
 
     const cap = buildCapture({
       kind,
@@ -297,6 +323,9 @@ export function capture(reason) {
       sustainMs: ts.sustainMs,
       floorMs: ts.floorMs,
       fires: ts.fires,
+      bootTrigger: isBootVerdict ? v.trigger : null,
+      bootTaskMs: isBootVerdict ? v.taskMs : null,
+      bootTaskCount: isBootVerdict ? v.taskCount : null,
       worstWindowMeanMs: worst ? worst.meanMs : null,
       worstWindowSlowFraction: worst ? worst.slowFraction : null,
       worstWindowRatio: worst && ts.baselineMs ? worst.meanMs / ts.baselineMs : null,
@@ -363,7 +392,7 @@ export function capture(reason) {
      * just now") the one most able to vanish without trace, and it would have taken a week of his
      * normal use producing nothing before anyone noticed. The record now carries what actually
      * happened, and `perfCaptureDelivery()` hands the promise to the UI so the ✓ means DELIVERED. */
-    const rec = { kind, atMs: Math.round(t), ratio: cap.ratio, p95Ms: cap.p95Ms, frames: cap.frames, chars: enc.chars, delivered: null, reason: null };
+    const rec = { kind, atMs: Math.round(t), ratio: cap.ratio, p95Ms: cap.p95Ms, frames: cap.frames, chars: enc.chars, delivered: null, reason: null, bootTrigger: cap.bootTrigger || null };
     _captures.push(rec);
     if (_captures.length > 10) _captures.shift();
 
@@ -420,6 +449,20 @@ export function installPerfRecorder(win = typeof window !== "undefined" ? window
   _strings = createStringTable();
   _scratch = new Float64Array(COUNTER_COLUMNS.length);
   _trig = createTrigger(triggerOver);
+
+  /* NEW-3 — free-run the frame loop for the boot window, independent of interaction (see
+   * RECORDER_DEFAULTS.bootRunMs's header for why a boot is a deliberate, bounded exception to
+   * "gated on interaction"). Skipped if the tab is not visible at install — FOREGROUND-OR-VOID: a
+   * hidden tab's rAF is suspended by the browser regardless, so scheduling here would do nothing
+   * except mislabel the first frame back on visibility as the start of a fresh run. */
+  try {
+    if (!win.document || win.document.visibilityState === "visible") {
+      _activeUntil = now() + _cfg.bootRunMs;
+      _running = true;
+      _prevFrameT = 0;
+      schedule();
+    }
+  } catch (_) { /* ignore */ }
 
   /* Passive + capture-phase, so the app's own handlers can neither delay nor cancel the note.
    * `pointermove` is included because a pan is one long move stream with a single down at the

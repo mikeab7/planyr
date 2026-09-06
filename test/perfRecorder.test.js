@@ -7,11 +7,12 @@ import {
   createStringTable, internString, ringOrder, ringOrderSince, COUNTER_COLUMNS, STRING_TABLE_MAX,
 } from "../src/shared/telemetry/perfRing.js";
 import {
-  createTrigger, feedFrame, sealBaselineLate, triggerState, TRIGGER_DEFAULTS,
+  createTrigger, feedFrame, feedBootTask, sealBaselineLate, triggerState, TRIGGER_DEFAULTS,
 } from "../src/shared/telemetry/perfTrigger.js";
 import {
   buildCapture, encodeCapture, decodeFrames, encodeFrames, assertCaptureClean, frameStats,
   safePlanId, sanitizeAttribution, attributionLabel, CAPTURE_MAX_CHARS, CAPTURE_NUMERIC_KEYS, CAPTURE_ENUM_KEYS,
+  BOOT_TRIGGER_VOCAB,
 } from "../src/shared/telemetry/perfCapture.js";
 import {
   notePlanContext, noteViewScale, perfContext, requestPerfCapture, bindPerfRecorder,
@@ -217,7 +218,82 @@ describe("the trigger is SELF-CALIBRATING — it compares the machine to itself"
     expect(triggerState(s).baselineMs).toBe(16);
     expect(triggerState(s).baselineLate).toBe(true);
   });
+});
 
+/* ── the BOOT-WINDOW judgment (NEW-3) ─────────────────────────────────────────────────────────
+ * The self-calibrating test above CANNOT fire before a baseline exists, and a baseline cannot
+ * seal before `baselineSkipMs` (typically `baselineSkipMs + baselineWindowMs`) — precisely the
+ * owner's own reported "first 5 to 10 seconds" window. `feedBootTask` is the boot-only path that
+ * can still produce a capture inside that window, judged on long-task/LoAF data rather than a
+ * self-relative frame-delta comparison (see perfTrigger.js's header on feedBootTask for why). */
+describe("the BOOT-WINDOW judgment fires where the self-calibrating test structurally cannot", () => {
+  it("does nothing on an ordinary boot's long tasks — well under either bar", () => {
+    const s = createTrigger();
+    // A handful of short tasks, well under bootSingleTaskMs and never summing past bootTaskBudgetMs.
+    expect(feedBootTask(s, 500, 40)).toBe(false);
+    expect(feedBootTask(s, 1200, 60)).toBe(false);
+    expect(feedBootTask(s, 3000, 50)).toBe(false);
+    expect(s.fires).toBe(0);
+    expect(s.lastVerdict).toBe(null);
+  });
+
+  it("fires on ONE task alone at least bootSingleTaskMs", () => {
+    const s = createTrigger();
+    const fired = feedBootTask(s, 2_000, TRIGGER_DEFAULTS.bootSingleTaskMs);
+    expect(fired).toBe(true);
+    expect(s.fires).toBe(1);
+    expect(s.lastVerdict.source).toBe("boot");
+    expect(s.lastVerdict.trigger).toBe("single");
+  });
+
+  it("fires on CUMULATIVE task time crossing bootTaskBudgetMs, none alone past the single bar", () => {
+    const s = createTrigger();
+    const each = TRIGGER_DEFAULTS.bootSingleTaskMs - 50;   // well under the single-task bar
+    let fired = false;
+    let t = 500;
+    for (let i = 0; i < 10 && !fired; i++) { t += 400; fired = feedBootTask(s, t, each); }
+    expect(fired).toBe(true);
+    expect(s.lastVerdict.trigger).toBe("cumulative");
+    expect(s.bootTaskMs).toBeGreaterThanOrEqual(TRIGGER_DEFAULTS.bootTaskBudgetMs);
+  });
+
+  it("never fires past bootWindowMs — that is the self-calibrating test's territory once a baseline exists", () => {
+    const s = createTrigger();
+    const fired = feedBootTask(s, TRIGGER_DEFAULTS.bootWindowMs + 1, 10_000);
+    expect(fired).toBe(false);
+    expect(s.fires).toBe(0);
+  });
+
+  it("never fires once a baseline has sealed — the two judgments do not overlap", () => {
+    const s = createTrigger();
+    drive(s, { fromMs: TRIGGER_DEFAULTS.baselineSkipMs, toMs: 60_000, dtAt: () => 16 });
+    expect(triggerState(s).baselineMs).toBe(16);
+    const fired = feedBootTask(s, 2_000, 10_000);   // a huge task, but time has already moved on
+    expect(fired).toBe(false);
+  });
+
+  it("shares the steady-state fire budget and cooldown — a boot capture still counts against maxAuto", () => {
+    const s = createTrigger({ cooldownMs: 1 });
+    let t = 0, fires = 0;
+    for (let i = 0; i < 10; i++) { t += 500; if (feedBootTask(s, t, TRIGGER_DEFAULTS.bootSingleTaskMs)) fires++; }
+    expect(fires).toBe(TRIGGER_DEFAULTS.maxAuto);
+  });
+
+  it("ignores a non-positive or missing duration", () => {
+    const s = createTrigger();
+    expect(feedBootTask(s, 1_000, 0)).toBe(false);
+    expect(feedBootTask(s, 1_000, -50)).toBe(false);
+    expect(feedBootTask(s, 1_000, NaN)).toBe(false);
+  });
+
+  it("a boot verdict's own `bootTrigger` values are on the capture's fixed vocabulary", () => {
+    const s = createTrigger();
+    feedBootTask(s, 1_000, TRIGGER_DEFAULTS.bootSingleTaskMs);
+    expect(BOOT_TRIGGER_VOCAB).toContain(s.lastVerdict.trigger);
+  });
+});
+
+describe("the hot path stays cheap — allocation-free and bounded, guarded structurally", () => {
   /* ⛔ THE NO-ALLOCATION GUARD, and it is a SOURCE rule on purpose — that decision was measured,
    * not preferred. Two runtime approaches were built and both failed to discriminate:
    *   · the timing microbenchmark below cannot see it. Planting `_sink = { t, dt, s: \`frame ${t}\` }`
