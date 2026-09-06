@@ -695,7 +695,7 @@ _702 source files mapped._
   - _exports_: `default (PlaceSearchField)`
 - **`src/workspaces/site-planner/components/PondSection.jsx`** — PR-L the one developer-readable pond cross-section component (used by the ⚡ Optimize what-changed card AND the pond inspector): maps pondSectionModel marks to a responsive, theme-tokened SVG (grade, berm hatch, storage bands, flood/groundwater/receiving lines, outlet, depth dimension, collision-free labels)
   - _exports_: `default (PondSection)`
-- **`src/workspaces/site-planner/components/PresenceChip.jsx`** — TODO — describe
+- **`src/workspaces/site-planner/components/PresenceChip.jsx`** — the header's "who's here" chip: a two-person silhouette + other real users' initials (capped, "+N" overflow, full breakdown on hover/tap), never counting this account's own extra tabs as people (those render as a bare tab count instead)
   - _exports_: `default (PresenceChip)`
 - **`src/workspaces/site-planner/components/PrintCompose.jsx`** — the dedicated full-screen "compose exhibit" step (B765985): sheet size/orientation/scale, title block, content toggles, and the live sheet preview, all outside the drawing canvas
   - _exports_: `default (PrintCompose)`

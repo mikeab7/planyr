@@ -225,7 +225,9 @@ describe("both clusters are wired to it, and to the RENDER view AND the canvas w
   });
 
   it("the building cluster AND the parking cluster both refuse to render below it", () => {
-    expect(body).toContain('if (tool !== "select" || !featActiveId || !featEditOpacity) return null;');
+    // NEW-1 (B1264944) — both gates also refuse while "Edit boundary corners" is active (its own
+    // crosshair, not a "+" quick-add button), added identically to both so they can't drift apart.
+    expect(body).toContain('if (tool !== "select" || editingCorners || !featActiveId || !featEditOpacity) return null;');
     expect((body.match(/!featEditOpacity\) return null;/g) || []).length).toBe(2);
   });
 
