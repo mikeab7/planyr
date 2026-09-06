@@ -21,6 +21,7 @@ import { RADIUS } from "../../shared/ui/radius.js";
 import DashboardCard from "./components/DashboardCard.jsx";
 import {
   JumpBackInCard, PipelineCard, PursuitsByActivityCard, GoingQuietCard, CompsSummaryCard, ScheduleHealthCard,
+  CardSkeleton,
 } from "./components/DashboardCards.jsx";
 import { CARD_DEFS, normalizeLayout, availableToAdd, addCard, removeCard, toggleCardSize, moveCard } from "./lib/dashboardLayout.js";
 import { loadDashboardLayout, saveDashboardLayout } from "./lib/dashboardPrefs.js";
@@ -70,12 +71,21 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
   const [comps, setComps] = useState(null);
   const [doc, setDoc] = useState(null);
   const [scheduleProjects, setScheduleProjects] = useState(null);
+  // NEW-1 — every card's row count is unknown until its own source resolves, so a card that
+  // resolves quickly used to show its final content (and take real taps) before a slower sibling
+  // card had grown into its own final height, shoving the whole grid below it down the page out
+  // from under a tap already in flight (event:click-swallowed, "moved": true). Nothing renders a
+  // real, variable-height card until every source has resolved — see CardSkeleton's own header.
+  const [dataReady, setDataReady] = useState(false);
   useEffect(() => {
     let live = true;
-    fetchSiteSummaries().then((v) => { if (live) setSites(v); });
-    fetchCompsCounts().then((v) => { if (live) setComps(v); });
-    fetchLastTouchedDoc().then((v) => { if (live) setDoc(v); });
-    fetchScheduleProjects().then((v) => { if (live) setScheduleProjects(v); });
+    setDataReady(false);
+    Promise.allSettled([
+      fetchSiteSummaries().then((v) => { if (live) setSites(v); }),
+      fetchCompsCounts().then((v) => { if (live) setComps(v); }),
+      fetchLastTouchedDoc().then((v) => { if (live) setDoc(v); }),
+      fetchScheduleProjects().then((v) => { if (live) setScheduleProjects(v); }),
+    ]).then(() => { if (live) setDataReady(true); });
     return () => { live = false; };
   }, [userId]);
 
@@ -93,14 +103,17 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
   const openSchedule = (p) => onNavigate?.({ module: "scheduler", projectId: p.linkedSiteId, cross: false, org: false });
   const openDoc = (d) => onOpenReviewInDocReview?.({ id: d.id, project_id: d.projectId });
 
-  const CARD_RENDERERS = {
+  // NEW-1 — while data is still loading every slot renders the SAME stable-height skeleton
+  // instead of its real (variable-height) card; see the `dataReady` effect above.
+  const SKELETON_ROWS = { jumpBackIn: 2, pipelineStatus: 2, scheduleHealth: 3, pursuitsByActivity: 3, compsSummary: 2, goingQuiet: 3 };
+  const CARD_RENDERERS = dataReady ? {
     jumpBackIn: () => <JumpBackInCard {...cardData.jumpBackIn} onOpenProject={openProject} onOpenDoc={openDoc} />,
     pipelineStatus: () => <PipelineCard {...cardData.pipelineStatus} />,
     pursuitsByActivity: () => <PursuitsByActivityCard {...cardData.pursuitsByActivity} onOpenProject={openProject} />,
     goingQuiet: () => <GoingQuietCard {...cardData.goingQuiet} onOpenProject={openProject} />,
     compsSummary: () => <CompsSummaryCard {...cardData.compsSummary} />,
     scheduleHealth: () => <ScheduleHealthCard {...cardData.scheduleHealth} onOpenSchedule={openSchedule} />,
-  };
+  } : Object.fromEntries(Object.keys(CARD_DEFS).map((k) => [k, () => <CardSkeleton rows={SKELETON_ROWS[k]} />]));
 
   const toAdd = availableToAdd(layout);
 

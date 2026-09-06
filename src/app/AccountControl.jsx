@@ -88,7 +88,7 @@ const ICON = {
   signout:  (<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5M21 12H9" /></>),
 };
 
-export default function AccountControl({ user, profileApi, onOpenAuth, onOpenAccount }) {
+export default function AccountControl({ user, authKnown = true, profileApi, onOpenAuth, onOpenAccount }) {
   const [acctOpen, setAcctOpen] = useState(false);  // account dropdown (signed-in pill, B298)
   const [cloudNote, setCloudNote] = useState(false); // "Cloud off" explainer popover
   const acctAnchor = useRef(null);
@@ -188,6 +188,28 @@ export default function AccountControl({ user, profileApi, onOpenAuth, onOpenAcc
           </>
         )}
       </div>
+    );
+  }
+
+  if (!authKnown) {
+    // NEW-1 — Supabase's auth listener hasn't reported back yet (always at least one paint,
+    // even for an already-signed-in visitor with a valid cached session — the check itself is
+    // async). Rendering "Sign in" here and then swapping to the real, usually WIDER, named pill
+    // a moment later grows this row's right zone, which squeezes the left zone's breadcrumb via
+    // plain flexbox — moving a control someone may already be pressing (event:click-swallowed,
+    // "moved": true).
+    //
+    // The placeholder bar below is deliberately wide enough (300px, comfortably past
+    // MenuTrigger's own hard `maxWidth: 220`) to FORCE this pill to its ceiling from the very
+    // first paint — the same ceiling the eventual real pill (signed-in name, or "Sign in") can
+    // never exceed either. So this transition can only ever SHRINK the right zone (or leave it
+    // unchanged), never GROW it — the direction that was actually squeezing the breadcrumb.
+    // (Only that one direction is closed by construction; a short resolved name can still shrink
+    // the zone a little, releasing — not adding — pressure on the crumb next to it.)
+    return (
+      <MenuTrigger aria-hidden="true" tabIndex={-1} caret leading={<span style={{ ...avatar(true), background: "var(--chrome-divider)" }} />} data-testid="account-auth-pending">
+        <span style={{ display: "inline-block", width: 300, height: 10, borderRadius: RADIUS.sm, background: "var(--chrome-divider)" }} />
+      </MenuTrigger>
     );
   }
 

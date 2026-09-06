@@ -122,9 +122,20 @@ export function ScheduleCenter({ toolbar, post }) {
         title="Review suggested updates from forwarded emails"
         style={btn(toolbar.reviewOpen || toolbar.reviewCount > 0)}>
         <Glyph size={15}><polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></Glyph>
-        {toolbar.reviewCount > 0 && (
-          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--on-accent)", background: ACCENT, borderRadius: 20, padding: "1px 7px", minWidth: 18, textAlign: "center", lineHeight: 1.5 }}>{toolbar.reviewCount}</span>
-        )}
+        {/* NEW-1 — ALWAYS mounted once this button is (was conditional on reviewCount > 0), just
+            invisible at 0: the iframe re-posts the whole planar:toolbar-state payload whenever
+            ANYTHING it tracks changes, including its own review-suggestions count arriving a beat
+            after the report that first revealed Grid/Split/Gantt here. A badge that MOUNTS later
+            grows this button, and this whole group is `justifyContent:"center"` — widening it
+            re-centers everything in it, sliding the already-pressable Grid tab sideways out from
+            under a tap in flight (event:click-swallowed, "moved": true). Reserving the badge's box
+            from the first render (visibility, never display/mount) keeps the group's width — and
+            Grid's position — fixed regardless of when the real count lands. */}
+        <span aria-hidden={!(toolbar.reviewCount > 0)} style={{
+          fontSize: 11, fontWeight: 700, color: "var(--on-accent)", background: ACCENT, borderRadius: 20,
+          padding: "1px 7px", minWidth: 18, textAlign: "center", lineHeight: 1.5,
+          visibility: toolbar.reviewCount > 0 ? "visible" : "hidden",
+        }}>{toolbar.reviewCount > 0 ? toolbar.reviewCount : 0}</span>
       </button>
     </>
   );
@@ -138,11 +149,19 @@ export function ScheduleActions({ toolbar, post }) {
   const projects = toolbar.section === "projects";
   return (
     <>
-      {toolbar.zoomable && (
-        <div style={{ display: "flex", alignItems: "center", gap: 1, paddingRight: 7, marginRight: 1, borderRight: "1px solid var(--chrome-divider)" }}>
-          <button title="Zoom out" aria-label="Zoom out" onClick={() => post({ type: "planar:zoom", dir: "out" })} style={{ ...btn(false), padding: "0 8px", fontSize: 15 }}>−</button>
+      {/* NEW-1 — reserved (mounted, visibility-toggled) rather than conditionally MOUNTED only
+          while the toolbar hasn't SETTLED yet (toolbar.settled — first flips true on a REAL
+          planar:toolbar-state report, never on markToolbarReadyFallback's bare ready-only flip).
+          Before settling, `zoomable` can be a stale fallback guess; if the real report then
+          confirms zoomable:true, mounting this block for the first time INSERTS it before Version
+          History (flex:"none", right-flush), pushing that already-pressable icon button sideways
+          (event:click-swallowed, "moved": true). Once settled, a genuine view switch is the user's
+          own doing — this collapses back to the original plain conditional mount, unchanged. */}
+      {(toolbar.settled ? toolbar.zoomable : true) && (
+        <div aria-hidden={!toolbar.zoomable} style={{ display: "flex", alignItems: "center", gap: 1, paddingRight: 7, marginRight: 1, borderRight: "1px solid var(--chrome-divider)", visibility: toolbar.zoomable ? "visible" : "hidden" }}>
+          <button title="Zoom out" aria-label="Zoom out" tabIndex={toolbar.zoomable ? 0 : -1} onClick={() => post({ type: "planar:zoom", dir: "out" })} style={{ ...btn(false), padding: "0 8px", fontSize: 15 }}>−</button>
           <span style={{ fontSize: 11, color: "var(--chrome-text)", width: 36, textAlign: "center", userSelect: "none" }}>{toolbar.zoomPct}%</span>
-          <button title="Zoom in" aria-label="Zoom in" onClick={() => post({ type: "planar:zoom", dir: "in" })} style={{ ...btn(false), padding: "0 8px", fontSize: 15 }}>+</button>
+          <button title="Zoom in" aria-label="Zoom in" tabIndex={toolbar.zoomable ? 0 : -1} onClick={() => post({ type: "planar:zoom", dir: "in" })} style={{ ...btn(false), padding: "0 8px", fontSize: 15 }}>+</button>
         </div>
       )}
       <ExportMenu post={post} />
@@ -157,10 +176,23 @@ export function ScheduleActions({ toolbar, post }) {
         <Glyph size={13}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></Glyph>
         Automation
       </button>
-      {projects && (
-        <IconCmd title="Format — row height & bar labels" cmd="planar:format" post={post} active={toolbar.activePanel === "format"}>
-          <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" />
-        </IconCmd>
+      {/* NEW-1 — reserved (mounted, visibility-toggled) rather than conditionally MOUNTED only
+          while unsettled, exactly like the zoom block above, and for a reason that is easy to
+          miss: this RIGHT ZONE is anchored to the row's right edge (the center zone is the only
+          growing item, so this one's own left edge sits wherever the center zone happens to end).
+          Widening this zone by inserting Format therefore moves EVERY control already in it,
+          including ones that render BEFORE Format in the markup — "Version history" measurably
+          shifted left the moment `section` first confirmed "projects" (the same message that also
+          reveals Format), not because anything moved Version history's own markup, but because
+          the zone it sits in grew and is pinned by its right edge, not its left. Once settled, a
+          genuine Dashboard↔Projects section switch is the user's own doing and reflows normally,
+          same as before this fix. */}
+      {(toolbar.settled ? projects : true) && (
+        <span aria-hidden={!projects} style={{ display: "inline-flex", visibility: projects ? "visible" : "hidden" }}>
+          <IconCmd title="Format — row height & bar labels" cmd="planar:format" post={post} active={toolbar.activePanel === "format"}>
+            <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" />
+          </IconCmd>
+        </span>
       )}
       <IconCmd title="Settings" cmd="planar:settings" post={post} active={toolbar.activePanel === "settings"}>
         <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><circle cx="12" cy="12" r="3" />

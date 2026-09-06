@@ -1083,7 +1083,18 @@ export default function AppHeader({
       {toolbarCenter ? (
         // On narrow, scroll sideways (nowrap) instead of wrapping to a 2nd line — the owner's
         // explicit ask. Above the breakpoint the original wrap layout is untouched.
-        <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ minHeight: 26, display: "flex", alignItems: "center", flexWrap: narrow ? "nowrap" : "wrap", justifyContent: "flex-end", rowGap: 2, borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
+        // NEW-1 (B1218496) — `minHeight` raised 26 → 30. The icon-button cluster (toolbarContent)
+        // is a fixed 26px tall, but the Schedule view switcher (toolbarCenter's ViewToggle) is
+        // genuinely a hair taller (measured 29px: its own padding on top of each segment's own
+        // padding). Before ScheduleCenter has anything to render (`ready`/`section` still
+        // unconfirmed), this row's cross-axis size — `alignItems:"center"`'s sizing, driven by
+        // its TALLEST child — was set by the icon buttons alone (26px); the moment the view
+        // switcher first mounts, the row grows to fit it, and EVERY child re-centers within the
+        // now-taller row, nudging the icon buttons (and anything already pressed among them)
+        // down by the difference. 30 covers both children at their real measured heights from
+        // the very first paint, so the row's cross-axis size — and therefore where every child
+        // centers — never depends on which of the two has rendered yet.
+        <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ minHeight: 30, display: "flex", alignItems: "center", flexWrap: narrow ? "nowrap" : "wrap", justifyContent: "flex-end", rowGap: 2, borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
           {/* Left zone — module tabs. B1012560: content-sized (`"none"` = `0 0 auto`) and
               never shrinks, same as the 2-zone layout's tabs zone below — primary navigation
               is the last thing to lose space. Omitted entirely when showModuleTabs is false

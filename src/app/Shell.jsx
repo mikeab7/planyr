@@ -214,6 +214,15 @@ export default function Shell() {
   // mounting the Site Planner's chunk just to hide it underneath.
   const active = isDashboardHash ? null : routedModule;
   const [user,      setUser]      = useState(null);
+  // NEW-1 — `user` starts null on every load and only resolves once Supabase's auth listener
+  // reports back, so a signed-in visitor briefly sees the SIGNED-OUT "Sign in" pill before the
+  // real, usually wider, named account pill replaces it. AccountControl's rendered width is part
+  // of row 1's right zone, which grows into (and squeezes) the left zone's breadcrumb via plain
+  // flexbox the moment it changes size — so that swap moved a still-mounted, already-pressed
+  // header control (the project/plan crumb) out from under a tap in flight
+  // (event:click-swallowed, "moved": true). `authKnown` lets AccountControl hold a neutral,
+  // stable-width placeholder until the real state is in, instead of asserting "Sign in" first.
+  const [authKnown, setAuthKnown] = useState(false);
   const [authOpen,  setAuthOpen]  = useState(false);
   const [recovery,  setRecovery]  = useState(false);
   const [authTab,   setAuthTab]   = useState("profile"); // which tab the account modal opens on
@@ -311,10 +320,11 @@ export default function Shell() {
    * sake of this one function plus `setScheduleLink` below. `activeUser.js` has no such import,
    * so calling it here costs none of that. */
   useEffect(() => {
-    if (!supabaseConfigured()) return;
+    if (!supabaseConfigured()) { setAuthKnown(true); return; }
     return onAuthChange((event, u) => {
       try { setActiveUser((u && u.id) || null); } catch (_) {}
       setUser(u);
+      setAuthKnown(true);
       if (event === "PASSWORD_RECOVERY") { setRecovery(true); setAuthOpen(true); }
     });
   }, []);
@@ -510,6 +520,7 @@ export default function Shell() {
   const authControl = (
     <AccountControl
       user={user}
+      authKnown={authKnown}
       profileApi={profileApi}
       onOpenAuth={openAuth}
       onOpenAccount={openAccount}
