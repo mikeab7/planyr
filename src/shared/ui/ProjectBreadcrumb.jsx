@@ -95,24 +95,12 @@ const OrgIcon = ({ size = 13 }) => (
   </svg>
 );
 
-// Private-by-default lock (Work Item A gotcha): a project a user lands on is one only
-// they can see. The lock keeps that visible, so any future sharing always reads as a
-// deliberate act — never an accidental exposure.
-const LockIcon = ({ size = 11 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
-    strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
-    style={{ flex: "none", display: "block" }}>
-    <rect x="5" y="11" width="14" height="9" rx="2" />
-    <path d="M8 11V8a4 4 0 0 1 8 0v3" />
-  </svg>
-);
-
 /* NEW-2 — the floor a crumb may be squeezed to. Below this the ▾ caret and the icons start to
  * crowd out the name entirely, and a chip too small to aim at is a different way to lose the same
  * click the owner lost to the jurisdiction pill. */
 export const CRUMB_MIN_W = 92;
 /* NEW-3 — Rename / Delete get REAL icons, in this file's own idiom (stroke, currentColor, the
- * DashboardIcon/LockIcon shape above). What was there: a bare Unicode pencil `✎` and an emoji
+ * DashboardIcon shape above). What was there: a bare Unicode pencil `✎` and an emoji
  * wastebasket `🗑`. The owner's read — "they just look kinda like shit" — has a precise cause: `✎`
  * is a TEXT glyph, so it renders flat and monochrome in the UI font, while `🗑` resolves to a
  * full-COLOUR emoji from the OS font. Two items in one menu that don't belong to the same visual
@@ -197,7 +185,7 @@ const CalendarIcon = ({ size = 12 }) => (
 // closing two of the seven signatures the item measured ("Map"/"Select a project" were their own
 // 22px-tall family, distinct from everything beside them). Kept as a literal token nudge rather
 // than swapping in a `Chip`/`MenuTrigger` component: this crumb's hover-color-swap, aria-current
-// and lock/warn-icon slots are all bespoke to the breadcrumb's own controlled-vs-uncontrolled
+// and warn-icon slot are all bespoke to the breadcrumb's own controlled-vs-uncontrolled
 // project list, not a shape a shared primitive should own. Row 1 is 30px tall, so a 26-tall crumb
 // still fits with no clipping (`alignItems:"center"` centers it, same as before).
 // ⛔ NEW-2 (signature-budget convergence, B1038016) — height 26→30, padding "0 10px"→"0 12px":
@@ -637,7 +625,15 @@ export default function ProjectBreadcrumb({
       <span style={{ color: MUTED, opacity: 0.55, flex: "none", fontSize: 13, padding: "0 1px" }}>/</span>
 
       {/* Project crumb (B191) — opens the switcher dropdown. In cross-project mode it
-          reads "All projects"; on a single project it carries a Private lock. */}
+          reads "All projects".
+          ⛔ NEW-1 (owner rule, "not relevant enough and it doesn't work") — this crumb used to
+          carry a Private padlock glyph (a bare, non-interactive `<span title=…>`, never a button
+          or a click handler — so "doesn't work" meant it read as tappable and wasn't) ahead of the
+          name on every single-project route. Removed outright, not replaced: on a solo account
+          every project is private, so the glyph carried no information. Do not re-add it here —
+          shared-vs-private state for a project already has a real, working surface: the Site
+          Planner's own site list (MapFinder.jsx) shows a "shared with <team>" chip per project via
+          sharedWithTeam.js, sourced from the same team_id a project actually shares on. */}
       <button
         ref={anchorRef}
         data-testid="project-crumb"
@@ -648,16 +644,10 @@ export default function ProjectBreadcrumb({
         aria-haspopup="menu"
         aria-expanded={open}
         /* NEW-2 — shrinkable BETWEEN two bounds. The name ellipsises down to the floor and no
-           further, so the lock, the ⚠ and the ▾ always have room and the crumb never becomes a
+           further, so the ⚠ and the ▾ always have room and the crumb never becomes a
            sliver you cannot aim at. */
         style={crumbBtn({ color: (currentProject || cross || org) ? INK : MUTED, flex: "0 1 auto", maxWidth: 240, minWidth: CRUMB_MIN_W })}
       >
-        {currentProject && !cross && !org && (
-          <span title="Private: only you can see this project. Sharing is always a deliberate act."
-            style={{ flex: "none", color: MUTED, display: "flex", alignItems: "center" }}>
-            <LockIcon />
-          </span>
-        )}
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {/* NEW-2 — the same fix, on the crumb's own visible text: it used to fall straight
               to "Select a project" whenever nothing was picked, which is wrong the moment the
