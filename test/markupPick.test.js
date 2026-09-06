@@ -45,6 +45,13 @@ describe("markupUnderPoint — the B920 fill-aware rule", () => {
     expect(markupUnderPoint(m, { x: 50, y: 50 }, 6)).toBe(null);
   });
 
+  it("a visible hatch makes a zero-opacity closed markup body selectable", () => {
+    const m = square("h", 100, { fillOpacity: 0, hatch: "diagonal" });
+    expect(markupUnderPoint(m, { x: 50, y: 50 }, 6)).toMatchObject({ area: 10000 });
+    const none = square("hn", 100, { fillOpacity: 0, hatch: "none" });
+    expect(markupUnderPoint(none, { x: 50, y: 50 }, 6)).toBe(null);
+  });
+
   it("an open line/polyline hits near its stroke only, never an 'interior'", () => {
     const line = { id: "l", kind: "line", a: { x: 0, y: 0 }, b: { x: 100, y: 0 } };
     expect(markupUnderPoint(line, { x: 50, y: 0.5 }, 4)).toMatchObject({ area: 0 });
