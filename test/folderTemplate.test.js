@@ -4,38 +4,35 @@ import { flattenTemplate, countTemplate, buildSeedRows } from "../src/shared/fol
 
 const byName = (nodes, name) => (nodes || []).find((n) => n.name === name);
 
-describe("FOLDER_TEMPLATE — canonical default structure (B650)", () => {
-  it("has exactly the 12 numbered top-level categories in order", () => {
+describe("FOLDER_TEMPLATE — canonical default structure v2 (B1238864)", () => {
+  it("has exactly the 10 numbered top-level categories in order", () => {
     expect(FOLDER_TEMPLATE.map((n) => n.name)).toEqual([
-      "01. Hillwood",
-      "02. Design",
-      "03. Sustainability",
-      "04. Governmental",
-      "05. General Contractor",
-      "06. Insurance",
-      "07. Financing",
-      "08. Land",
-      "09. Testing Contractor",
-      "10. Utilities",
-      "11. Close-Out",
-      "12. Bldg Acq",
+      "01. Deal",
+      "02. Land",
+      "03. Entity & Legal",
+      "04. Entitlements & Approvals",
+      "05. Design",
+      "06. Sustainability",
+      "07. Construction",
+      "08. Financing",
+      "09. Marketing & Leasing",
+      "10. Close-Out",
     ]);
   });
 
-  it("01. Hillwood ships all 20 subfolders (through 20. Financing)", () => {
-    const hillwood = byName(FOLDER_TEMPLATE, "01. Hillwood");
-    expect(hillwood.children).toHaveLength(20);
-    expect(hillwood.children[0].name).toBe("01. Correspondence");
-    expect(hillwood.children[19].name).toBe("20. Financing");
+  it("never names a company anywhere in the tree", () => {
+    for (const r of flattenTemplate(FOLDER_TEMPLATE)) {
+      expect(r.name.toLowerCase()).not.toMatch(/hillwood/);
+    }
   });
 
-  it("02. Design → 01. Drawings holds 9 disciplines, each with Current + Archive", () => {
-    const design = byName(FOLDER_TEMPLATE, "02. Design");
+  it("05. Design → 01. Drawings holds 7 disciplines, each with Current + Archive", () => {
+    const design = byName(FOLDER_TEMPLATE, "05. Design");
     const drawings = byName(design.children, "01. Drawings");
-    expect(drawings.children).toHaveLength(9);
+    expect(drawings.children).toHaveLength(7);
     expect(drawings.children.map((d) => d.name)).toEqual([
       "01. Exhibits", "02. Site Plans", "03. Architectural", "04. Structural",
-      "05. Civil", "06. Landscape", "07. Mechanical", "08. Electrical", "09. Plumbing",
+      "05. Civil", "06. Landscape", "07. MEP",
     ]);
     for (const disc of drawings.children) {
       expect(disc.children.map((c) => c.name)).toEqual(["01. Current", "02. Archive"]);
@@ -43,21 +40,33 @@ describe("FOLDER_TEMPLATE — canonical default structure (B650)", () => {
   });
 
   it("02. Specifications is a SIBLING of Drawings, not nested inside it", () => {
-    const design = byName(FOLDER_TEMPLATE, "02. Design");
+    const design = byName(FOLDER_TEMPLATE, "05. Design");
     expect(byName(design.children, "02. Specifications")).toBeTruthy();
     const drawings = byName(design.children, "01. Drawings");
     expect(byName(drawings.children, "02. Specifications")).toBeFalsy();
     expect(design.children.map((c) => c.name)).toEqual([
-      "01. Drawings", "02. Specifications", "03. Contracts",
-      "04. Reports & Studies", "05. Correspondence", "06. Invoices",
+      "01. Drawings", "02. Specifications", "03. Reports & Studies",
+      "04. Consultant Contracts", "05. Correspondence", "06. Invoices",
     ]);
   });
 
-  it("ships the intentionally-short categories exactly as scoped", () => {
-    expect(byName(FOLDER_TEMPLATE, "08. Land").children).toHaveLength(13); // 01–13
-    expect(byName(FOLDER_TEMPLATE, "11. Close-Out").children).toHaveLength(10); // 01–10
-    const bldg = byName(FOLDER_TEMPLATE, "12. Bldg Acq");
-    expect(bldg.children).toBeUndefined(); // empty top-level category
+  it("Financing appears exactly once (08. Financing) — no duplicate category across the tree", () => {
+    const rows = flattenTemplate(FOLDER_TEMPLATE);
+    const financingTop = rows.filter((r) => r.depth === 0 && /financing/i.test(r.name));
+    expect(financingTop).toHaveLength(1);
+    expect(financingTop[0].name).toBe("08. Financing");
+  });
+
+  it("bare 'Permits' (the entitlement application folder) appears exactly once, not duplicated the way v1 did", () => {
+    // v1 had a literal duplicate: "Permits" under both Governmental (04.02) and Close-Out
+    // (11.02). v2's Close-Out folder is a DIFFERENT, more specific thing — permit/inspection
+    // ACCEPTANCE LETTERS filed at project close, not a second copy of the application folder —
+    // so it's deliberately not named identically.
+    const rows = flattenTemplate(FOLDER_TEMPLATE);
+    const barePermits = rows.filter((r) => /^\d{2}\.\s*permits\s*$/i.test(r.name));
+    expect(barePermits).toHaveLength(1);
+    expect(barePermits[0].path).toBe("04. Entitlements & Approvals/03. Permits");
+    expect(byName(byName(FOLDER_TEMPLATE, "10. Close-Out").children, "02. Permits & Acceptance Letters")).toBeTruthy();
   });
 
   it("every folder name uses the zero-padded 'NN. ' prefix at every level", () => {
@@ -66,26 +75,28 @@ describe("FOLDER_TEMPLATE — canonical default structure (B650)", () => {
     }
   });
 
-  it("totals 133 folders (12 top-level + 121 subfolders) and exposes a version", () => {
-    expect(countTemplate(FOLDER_TEMPLATE)).toBe(133);
-    expect(flattenTemplate(FOLDER_TEMPLATE)).toHaveLength(133);
-    expect(TEMPLATE_VERSION).toBe(1);
+  it("totals 119 folders (10 top-level + 109 subfolders), max depth 4, and exposes version 2", () => {
+    expect(countTemplate(FOLDER_TEMPLATE)).toBe(119);
+    const rows = flattenTemplate(FOLDER_TEMPLATE);
+    expect(rows).toHaveLength(119);
+    expect(Math.max(...rows.map((r) => r.depth))).toBe(3); // depth 0..3 = 4 levels deep
+    expect(TEMPLATE_VERSION).toBe(2);
   });
 });
 
 describe("flattenTemplate — orderable rows for seeding (B650)", () => {
   it("assigns a parentPath, 1-based sibling order, and depth-ascending order", () => {
     const rows = flattenTemplate(FOLDER_TEMPLATE);
-    const hillwood = rows.find((r) => r.path === "01. Hillwood");
-    expect(hillwood.parentPath).toBe(null);
-    expect(hillwood.order).toBe(1);
-    expect(hillwood.depth).toBe(0);
+    const deal = rows.find((r) => r.path === "01. Deal");
+    expect(deal.parentPath).toBe(null);
+    expect(deal.order).toBe(1);
+    expect(deal.depth).toBe(0);
 
     const civilCurrent = rows.find(
-      (r) => r.path === "02. Design/01. Drawings/05. Civil/01. Current",
+      (r) => r.path === "05. Design/01. Drawings/05. Civil/01. Current",
     );
     expect(civilCurrent).toBeTruthy();
-    expect(civilCurrent.parentPath).toBe("02. Design/01. Drawings/05. Civil");
+    expect(civilCurrent.parentPath).toBe("05. Design/01. Drawings/05. Civil");
     expect(civilCurrent.order).toBe(1);
     expect(civilCurrent.depth).toBe(3);
   });
@@ -103,15 +114,15 @@ describe("flattenTemplate — orderable rows for seeding (B650)", () => {
 describe("buildSeedRows — insert rows for a new project (B650)", () => {
   it("mints one row per template folder with resolved parent_id + snake_case columns", () => {
     let n = 0;
-    const rows = buildSeedRows(FOLDER_TEMPLATE, { projectId: "grp1", templateVersion: 1, makeId: () => `id${++n}` });
-    expect(rows).toHaveLength(133);
+    const rows = buildSeedRows(FOLDER_TEMPLATE, { projectId: "grp1", templateVersion: 2, makeId: () => `id${++n}` });
+    expect(rows).toHaveLength(119);
 
     // Top-level categories have a null parent and carry the project id + version.
-    const hillwood = rows.find((r) => r.name === "01. Hillwood");
-    expect(hillwood.parent_id).toBe(null);
-    expect(hillwood.project_id).toBe("grp1");
-    expect(hillwood.template_version).toBe(1);
-    expect(hillwood.sort_order).toBe(1);
+    const deal = rows.find((r) => r.name === "01. Deal");
+    expect(deal.parent_id).toBe(null);
+    expect(deal.project_id).toBe("grp1");
+    expect(deal.template_version).toBe(2);
+    expect(deal.sort_order).toBe(1);
 
     // A deep child resolves to its parent's minted id (not a path).
     const byId = new Map(rows.map((r) => [r.id, r]));
