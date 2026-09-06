@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-06 @ `70f69331` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-06 @ `1f2caf13` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_701 source files mapped._
+_702 source files mapped._
 
 ## infra
 
@@ -214,7 +214,7 @@ _701 source files mapped._
 - **`src/workspaces/notes/lib/notesBlockKeys.js`** — Backspace at the START of a block undoes a formatting difference before it restructures anything, so one keypress can never silently merge a multi-block region.
   - _exports_: `BLOCK_KEYS_PRIORITY`, `blockStartAction`, `default`
 - **`src/workspaces/notes/lib/notesBoxResize.js`** — The placed box's geometry: the floors, the edge pad, and the pure rule for resizing one from any of its eight handles (corners hold the ratio, edges stretch, Shift inverts, the edges you are not holding never move). Also decides which handles a box may offer, read off its content.
-  - _exports_: `ANCHOR_EDGE_PAD`, `ANCHOR_MIN_HEIGHT`, `ANCHOR_MIN_WIDTH`, `ANCHOR_WIDTH`, `default`, `HANDLE_CURSOR`, `HANDLES`, `handlesFor`, `hasFixedHeight`, `isCorner`, `locksAspect`, `moveAnchorPoint`, `MOVES_ORIGIN`, `resizeBox`
+  - _exports_: `ANCHOR_EDGE_PAD`, `ANCHOR_MIN_HEIGHT`, `ANCHOR_MIN_WIDTH`, `ANCHOR_WIDTH`, `anchorExtent`, `anchorExtentX`, `default`, `HANDLE_CURSOR`, `HANDLES`, `handlesFor`, `hasFixedHeight`, `isCorner`, `locksAspect`, `moveAnchorPoint`, `MOVES_ORIGIN`, `resizeBox`
 - **`src/workspaces/notes/lib/notesCalloutNode.js`** — The `noteCallout` schema node: a coloured block storing a TONE NAME, never a colour.
   - _exports_: `CALLOUT_TONE_IDS`, `CALLOUT_TONES`, `default`, `DEFAULT_CALLOUT_TONE`, `NoteCallout`
 - **`src/workspaces/notes/lib/notesCloud.js`** — The cloud tier under the notes storage seam: pure sync decisions (tree merge, which-copy-wins page seed, picture plan, sign-in adoption) plus the revision-guarded Supabase transport for `notes_trees` / `notes_pages` / `notes_images` and the private `notes-images` bucket. Imported only by `notesStore.js`, and only dynamically.
@@ -260,7 +260,7 @@ _701 source files mapped._
 - **`src/workspaces/notes/lib/notesPastePlain.js`** — Word's three paste modes (keep source · merge formatting · keep text only) plus the structural sanitisation — nbsp spacer collapse, layout-table unwrap, list-lift — that runs in all three.
   - _exports_: `default`, `isLayoutTable`, `isSpacerParagraph`, `MEANINGFUL_ALIGN`, `PASTE_MODES`, `pastePlainKey`, `plainTextToContent`, `sliceCarriesFormatting`, `STYLE_MARKS`, `textOfNode`, `tidyPastedFragment`
 - **`src/workspaces/notes/lib/notesPrint.js`** — The Notes print / Save-as-PDF sheet — a pure HTML document builder whose paper CSS mirrors the screen's editor CSS, plus the hidden-iframe driver that opens the print dialogue.
-  - _exports_: `buildPrintDocument`, `printHtmlDocument`
+  - _exports_: `buildPrintDocument`, `pageAnchorExtentPx`, `printHtmlDocument`
 - **`src/workspaces/notes/lib/notesProjectFiling.js`** — PURE: what a project is holding (`projectNoteCensus`, incl. the bin) and how to move it (`moveProjectNotes`). A leaf with no imports, so the shared header's delete confirmation can reach it without dragging the model onto every route.
   - _exports_: `isLegacyTree`, `moveProjectNotes`, `projectNoteCensus`
 - **`src/workspaces/notes/lib/notesProjectLink.js`** — "what is this project holding?", asked from OUTSIDE the Notes route — account passed in EXPLICITLY, reads the tree blob directly, marks the ledger dirty on a move, and answers `unknown` rather than a confident zero on a legacy tree.
@@ -674,7 +674,7 @@ _701 source files mapped._
 - **`src/workspaces/site-planner/components/elementMenuIcons.jsx`** — the B845584 element context-menu rebuild's own 14px/stroke-1.3 icon family (a finer, denser idiom than icons.jsx's 24px/stroke-2 set, matching the owner-approved mockup); every row in the rebuilt menu gets one in a 16px gutter
   - _exports_: `AlignRotationIcon`, `AttachIcon`, `BringForwardIcon`, `BringToFrontIcon`, `BumpOutIcon`, `CopyIcon`, `DeleteIcon`, `DetachIcon`, `DockZonesIcon`, `DuplicateIcon`, `GroupIcon`, `LockIcon`, `PondSettingsIcon`, `PondSizingIcon`, `PropertiesIcon`, `ResetFootprintIcon`, `ReshapeIcon`, `RoadBranchIcon`, `SendBackwardIcon`, `SendToBackIcon`, `SplitRowsIcon`, `SwapIcon`, `UngroupIcon`
 - **`src/workspaces/site-planner/components/icons.jsx`** — Small stroke icons (pin / empty-circle / warn-triangle) shared by the planner's panel components, replacing the 📍 emoji that ignored its row's theme colour; route-local on purpose so the bytes stay off every other route's chunk. — `PinIcon`, `EmptyCircleIcon`, `WarnTriangleIcon`
-  - _exports_: `CloseXIcon`, `DuplicateIcon`, `EmptyCircleIcon`, `HistoryIcon`, `LayersIcon`, `PadlockIcon`, `PinIcon`, `PlusIcon`, `RedoIcon`, `SaveIcon`, `StorageIcon`, `UndoIcon`, `WarnTriangleIcon`, `ZoomFitIcon`
+  - _exports_: `CloseXIcon`, `DuplicateIcon`, `EmptyCircleIcon`, `HistoryIcon`, `LayersIcon`, `PadlockIcon`, `PeopleIcon`, `PinIcon`, `PlusIcon`, `RedoIcon`, `SaveIcon`, `StorageIcon`, `UndoIcon`, `WarnTriangleIcon`, `ZoomFitIcon`
 - **`src/workspaces/site-planner/components/JurisdictionBadge.jsx`** — Passive site-header chip showing the active parcel's jurisdiction (city/ETJ/county) from the auto-run B93 identify; display-only, ⚑ on straddle (B763)
   - _exports_: `default (JurisdictionBadge)`
 - **`src/workspaces/site-planner/components/LayerPanel.jsx`** — Shared map-layer toggle UI (both finder + planner): checkbox/opacity/status/vintage per layer + coverage relevance picker
@@ -695,6 +695,8 @@ _701 source files mapped._
   - _exports_: `default (PlaceSearchField)`
 - **`src/workspaces/site-planner/components/PondSection.jsx`** — PR-L the one developer-readable pond cross-section component (used by the ⚡ Optimize what-changed card AND the pond inspector): maps pondSectionModel marks to a responsive, theme-tokened SVG (grade, berm hatch, storage bands, flood/groundwater/receiving lines, outlet, depth dimension, collision-free labels)
   - _exports_: `default (PondSection)`
+- **`src/workspaces/site-planner/components/PresenceChip.jsx`** — TODO — describe
+  - _exports_: `default (PresenceChip)`
 - **`src/workspaces/site-planner/components/PrintCompose.jsx`** — the dedicated full-screen "compose exhibit" step (B765985): sheet size/orientation/scale, title block, content toggles, and the live sheet preview, all outside the drawing canvas
   - _exports_: `default (PrintCompose)`
 - **`src/workspaces/site-planner/components/RoadCrossSectionDialog.jsx`** — The "Design road cross-section" dialog: a row-per-band editor with a live to-scale plan-view preview, dimension strings, running totals, and named presets
@@ -1166,7 +1168,7 @@ _701 source files mapped._
 - **`src/workspaces/site-planner/lib/powerScreen.js`** — PHASE 5 power screening (pure): turns HIFLD transmission lines + substations near the parcel into findings — a line crossing the footprint flags a likely transmission easement (present), the nearest substation is a service/interconnect proxy (info); cleans the dataset's withheld voltages and anonymized ("UNKNOWN…") substation names
   - _exports_: `ownerLabel`, `subName`, `summarizeSubstations`, `summarizeTransmission`, `voltLabel`
 - **`src/workspaces/site-planner/lib/presencePill.js`** — pure "N here" presence summary (B674): distinct people from the channel roster, quiet when alone, You-first hover names
-  - _exports_: `presenceSummary`
+  - _exports_: `PRESENCE_INITIALS_CAP`, `presenceChipContent`, `presenceDisplayName`, `presenceInitials`, `presenceParties`
 - **`src/workspaces/site-planner/lib/printScale.js`** — the explicit engineering-scale math (B765985): the standard scale list, a scale's implied frame footprint, and the "does the picked area fit" check
   - _exports_: `checkScaleFits`, `frameFootprintForScale`, `scaleLabel`, `STANDARD_SCALES`
 - **`src/workspaces/site-planner/lib/printSheet.js`** — Pure single-SVG print sheet composer: page geometry, buildings table, metrics band, title block, export filename builder
