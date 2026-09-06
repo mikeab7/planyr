@@ -26,7 +26,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   BAND_TYPES, bandTypeOf, normalizeBands, makeXSection, curbToCurbWidth, pavedWidth, rowWidth,
   pavementArea, bandLayout, bandStripeMarks, BAND_FILL_TOKEN, BAND_FILL_OPACITY, BUILT_IN_XSECTION_PRESETS,
-  MIN_BAND_WIDTH_FT, parseWidthDraft, designatedRowFt, rowMarginFt,
+  MIN_BAND_WIDTH_FT, parseWidthDraft, designatedRowFt, rowMarginFt, rowMarginsBySide,
 } from "../lib/roadCrossSection.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 
@@ -408,7 +408,18 @@ export default function RoadCrossSectionDialog({ mode = "edit", initialXSection,
   const c2c = curbToCurbWidth(x), row = rowWidth(x);
   const designatedRow = designatedRowFt(x);
   const rowMargin = designatedRow != null ? rowMarginFt(x) : null;
-  const rowExceeded = designatedRow != null && row > designatedRow; // LOUD-FAILURE — never silently clamped
+  // NEW-4 — the two margins SEPARATELY: `rowMargin` above is only a true single number for a
+  // SYMMETRIC section (its two sides happen to be equal); an asymmetric one (a sidewalk on only one
+  // side, say) needs both, both to decide validity and to show a truthful per-side figure below.
+  const marginsBySide = designatedRow != null ? rowMarginsBySide(x) : null;
+  // NEW-4 — validity is judged against the section's actual EXTENTS on each side (either side
+  // running past the designated ROW is invalid), not against the bare width SUM: an asymmetric
+  // section can total less than the designated ROW and still overrun on ONE side while the other has
+  // slack — the case the old `row > designatedRow` sum check missed entirely.
+  const rowInvalid = marginsBySide != null && (marginsBySide.left < 0 || marginsBySide.right < 0); // LOUD-FAILURE — never silently clamped
+  const rowOverrunMsg = !rowInvalid ? null : marginsBySide.left < 0 && marginsBySide.right < 0
+    ? `The modeled bands total ${f1(row)}′ — wider than the designated ${f1(designatedRow)}′ right-of-way.`
+    : `The modeled bands run past the designated ${f1(designatedRow)}′ right-of-way on the ${marginsBySide.left < 0 ? "left" : "right"} side by ${f1(Math.abs(marginsBySide.left < 0 ? marginsBySide.left : marginsBySide.right))}′ — the section isn't centered on the ROW.`;
   const areaLenFt = mode === "edit" && lengthFt > 0 ? lengthFt : 100;
   const area = pavementArea(x, areaLenFt);
   const allPresets = [...BUILT_IN_XSECTION_PRESETS, ...(Array.isArray(presets) ? presets : [])];
@@ -470,7 +481,11 @@ export default function RoadCrossSectionDialog({ mode = "edit", initialXSection,
           {/* NEW-1 — the two DESIGNATED figures, shown only once a real ROW has been committed
            * (below the field it derives from a bare band total is nothing new to say). */}
           {designatedRow != null && <span>Designated ROW <b style={{ color: "var(--text-primary)" }}>{f1(designatedRow)}′</b></span>}
-          {rowMargin != null && <span>ROW margin <b style={{ color: "var(--text-primary)" }}>{f1(rowMargin)}′</b> each side</span>}
+          {/* NEW-4 — an asymmetric section's two margins differ; show them separately rather than
+           * the single averaged figure, which reads as "each side" when it plainly is not. */}
+          {rowMargin != null && marginsBySide && (Math.abs(marginsBySide.left - marginsBySide.right) > 0.05
+            ? <span>ROW margin <b style={{ color: "var(--text-primary)" }}>{f1(marginsBySide.left)}′</b> left · <b style={{ color: "var(--text-primary)" }}>{f1(marginsBySide.right)}′</b> right</span>
+            : <span>ROW margin <b style={{ color: "var(--text-primary)" }}>{f1(rowMargin)}′</b> each side</span>)}
         </div>
 
         {/* NEW-1 (owner: "id like to designate the ROW to like a 100' row should be shown") — a real
@@ -487,12 +502,14 @@ export default function RoadCrossSectionDialog({ mode = "edit", initialXSection,
             </button>
           )}
         </div>
-        {/* NEW-1 (g) — LOUD-FAILURE: an over-modeled section is never silently clamped to fit the
-         * designated ROW. This is the one place that state is surfaced; the canvas simply skips
-         * drawing a ROW boundary it cannot honestly place (see SitePlanner.jsx's rowMarginFt gate). */}
-        {rowExceeded && (
+        {/* NEW-1 (g) / NEW-4 — LOUD-FAILURE: an over-modeled section is never silently clamped to fit
+         * the designated ROW, and NEW-4 catches the case a bare width-sum check missed — an
+         * asymmetric section overrunning on just ONE side while the total still fits. This is the
+         * one place that state is surfaced; the canvas simply skips drawing a ROW boundary it cannot
+         * honestly place (see SitePlanner.jsx's rowMarginFt gate). */}
+        {rowInvalid && (
           <div role="alert" style={{ marginTop: 8, padding: "7px 10px", borderRadius: 8, background: "var(--danger-bg)", border: "1px solid var(--danger-border)", color: "var(--danger-text)", fontSize: 12, fontWeight: 600 }}>
-            ⚠ The modeled bands total {f1(row)}′ — wider than the designated {f1(designatedRow)}′ right-of-way. Widen the ROW or narrow the bands; it is not auto-clamped.
+            ⚠ {rowOverrunMsg} Widen the ROW or narrow the bands; it is not auto-clamped.
           </div>
         )}
 
