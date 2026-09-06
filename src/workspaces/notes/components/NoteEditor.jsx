@@ -71,6 +71,15 @@ const SAVE_DEBOUNCE_MS = 600;
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 const SHEET_RADIUS = 12; // RADIUS.lg (shared/ui/radius.js) — a surface that CONTAINS other things (DESIGN.md's shape rule); not folded into the local RADIUS const above because test/notesModule.test.js regex-pins that object's exact two-key shape against controls.jsx's own scale.
 
+/* ⛔ THE SHEET'S OWN LAYOUT NUMBERS, NAMED ONCE (NOTES-PAGE-GROWTH). They already governed the
+ * `note-sheet` inline style below; they are pulled out here so the page-growth measurement
+ * effect can compute the SAME "how wide is the page before anything grows it" answer the style
+ * itself produces — one set of numbers, not a style object and a second guess of it that can
+ * drift apart (the exact two-sources-of-truth shape that produced B539648). */
+const SHEET_MAX_WIDTH = 580;
+const SHEET_PAD_X = { narrow: 16, wide: 40 };   // left+right padding, per side
+const SHEET_MARGIN_X = { narrow: 8, wide: 0 };  // left+right margin, per side
+
 /* Editor surface styling. It lives here (rather than in src/index.css) so it rides the lazy
  * editor chunk instead of the app's first-paint stylesheet, and it is written entirely
  * against theme tokens so the document themes with the app.
@@ -88,7 +97,16 @@ const EDITOR_CSS = `
    Word's single, not the new Comfortable prose ratio: it only ever paints for the one instant
    before the wrapper's own "--note-line" custom property is set, and a stale fallback here can
    never be more than an unreachable number, never a second density to keep in step. */
-.planyr-note .ProseMirror { outline: none; min-height: 46vh; color: var(--text-primary); line-height: var(--note-line, 1.15); font-size: 15px; tab-size: 4; }
+/* ⛔ A WORD WITH NOWHERE TO BREAK MUST BREAK ANYWAY (NOTES-PAGE-GROWTH) — an unbroken run (a long
+   URL, a hash, a run-on string with no spaces) is the one case anchorExtentX's "grow the page"
+   rule cannot honestly answer: growing the page to fit ONE overlong word would make the page as
+   wide as the word, on every reload, forever. overflow-wrap: anywhere is the same rule every
+   other reading surface in the app already uses for exactly this (never letting one word dictate
+   the whole column's width) — mirrored into PRINT_CSS in lib/notesPrint.js.
+   ⛔ NO BACKTICKS IN A COMMENT INSIDE THIS TEMPLATE LITERAL — one backtick ends EDITOR_CSS and
+   the module stops parsing. This file's own PRINT_CSS sibling in lib/notesPrint.js carries the
+   identical warning, so this is a re-statement of a known trap, not a new discovery of one. */
+.planyr-note .ProseMirror { outline: none; min-height: 46vh; color: var(--text-primary); line-height: var(--note-line, 1.15); font-size: 15px; tab-size: 4; overflow-wrap: anywhere; }
 /* ⛔ REAL VERTICAL RHYTHM (B1203504) — read this before touching a margin below.
    Before this, every block here — paragraphs, lists, all four heading levels, blockquote,
    table — carried an explicit "margin: 0", which is MORE specific than the catch-all sibling
@@ -1502,10 +1520,16 @@ export default function NoteEditor({
   }, [editor]);
 
   /* Every box needs an identity before a selection can refer to it; old documents have none.
-   * It is stamped outside the undo history — see the command's own note. */
+   * It is stamped outside the undo history — see the command's own note.
+   *
+   * ⛔ AND EVERY BOX IS BROUGHT BACK ONTO THE PAGE, SAME BREATH (NOTES-PAGE-GROWTH). A box
+   * placed or dragged today can never land at a negative x/y (`placeAnchor`/`moveAnchorPoint`/
+   * `resizeBox` all hold that floor) — this repairs the ones that predate the floor, the same
+   * way `ensureNoteAnchorIds` repairs boxes that predate `aid`. See the command's own note. */
   useEffect(() => {
     if (!editor || editor.isDestroyed || readOnly) return;
     editor.commands.ensureNoteAnchorIds();
+    editor.commands.repairOffPageAnchors();
   }, [editor, readOnly, docTick]);
 
   /* ⛔ THE SELECTION IS VISIBLE, and it is painted onto the real elements rather than mirrored
@@ -1892,6 +1916,14 @@ export default function NoteEditor({
   const [zoom, setZoom] = useState(() => normalizeZoom(readNotesZoom()));
   const scrollerRef = useRef(null);
   const noteRootRef = useRef(null);
+  /* ⛔ THE PAGE'S OWN GROWN WIDTH, AS STATE RATHER THAN AN IMPERATIVE DOM WRITE
+   * (NOTES-PAGE-GROWTH) — unlike `dom.style.minHeight`/`minWidth` below, `note-sheet` is a
+   * React-owned element, so writing its style from outside React risks exactly the kind of
+   * fight-with-the-reconciler bug this repo has hit before. React already bails out of a
+   * re-render when a state update carries the SAME value (`Object.is`), so setting this on
+   * every keystroke costs nothing on the overwhelmingly common case — nothing to grow — and
+   * only actually re-renders on the rare keystroke that changes it. */
+  const [sheetGrowWidth, setSheetGrowWidth] = useState(null);
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
 
@@ -2088,43 +2120,68 @@ export default function NoteEditor({
    * a block's height IS its text and only the browser knows that; the arithmetic is pure
    * (`anchorExtent`). A `min-height` cannot feed back into the anchors' own heights — they are
    * out of flow and sized by their width — so there is no loop to guard against. */
+  /* ⛔ CORRECTED (NOTES-PAGE-GROWTH, owner report 2026-09-06): "if I type outside of the note...
+   * it would just expand the page" DID ship (B421490, above) — and then REGRESSED the moment
+   * `note-sheet` became its own bounded, centred CARD (B1203504), narrower than the pane around
+   * it. The horizontal grow decision below used to read the SCROLLER's width (`note-mat`, the
+   * whole pane — nearly the full window) as "how much room does the page have", which was the
+   * right denominator before B1203504 existed: back then the editor's own box WAS the pane, so
+   * growing "past the scroller" and growing "past the visible page" were the same event.
+   * B1203504 made them two different things and nobody re-pointed this measurement at the new
+   * one: a box could overflow the narrow white CARD while sitting comfortably inside the wide
+   * grey PANE around it, so the grow condition read false and nothing ever grew — measured on
+   * the owner's own production note (a box needing 751px against a 923px pane that never once
+   * triggers growth, while the 580px card it actually had to fit inside was 251px too narrow for
+   * it). See `measure`'s own comment below for the full fix, including the second denominator
+   * (`fitAnchorBox`'s own reachability question) that has to stay pointed at the pane rather
+   * than follow the page narrower, or a deliberately widened box springs back the instant its
+   * own drag commits. */
   useLayoutEffect(() => {
     if (!editor || editor.isDestroyed) return undefined;
     const dom = editor.view.dom;
     const measure = () => {
       const nodes = [...dom.querySelectorAll(".planyr-anchor")];
-      /* ⛔ AND THE HORIZONTAL HALF OF THE SAME QUESTION (B421490). The vertical rule grows the page
-       * so a low block still has somewhere to be; there is no equivalent sideways, so a box wider
-       * than the room left to it hangs off the sheet — under the outline panel, which paints later
-       * and takes its presses. Same rule as placement: keep the left edge, spend the width. The
-       * stored width is not touched, so widening the window gives it straight back. */
-      /* ⛔ THE ROOM IS THE SCROLLER'S, NOT THE EDITOR'S OWN (NEW-RIGHT-EDGE). Reading
-       * `dom.clientWidth` here creates a genuine FEEDBACK LOOP once the page can grow: the fit
-       * narrows a box to the room, the extent widens `dom` to hold it, the next measure reads the
-       * WIDER dom as "the room", re-fits the box wider, and round again. It happened to settle
-       * rather than oscillate, which is worse than failing — a loop that settles at the wrong
-       * number looks correct. The SCROLLER's width is the one thing in this chain that a box
-       * cannot change, so it is the honest denominator, and the loop cannot form. */
-      const hostWidth = scrollerRef.current?.clientWidth || dom.clientWidth;
+      /* ⛔ TWO DIFFERENT QUESTIONS, TWO DIFFERENT DENOMINATORS — conflating them into one
+       * `hostWidth` was the bug in this fix's own first draft, caught by re-measuring rather
+       * than trusting the reasoning: `fitAnchorBox` answers "can this box's own HANDLES still be
+       * reached" (B421490 — a box hanging off the visible PANE ends up under the Outline panel,
+       * which paints later and steals its presses), which is genuinely a question about the
+       * PANE, unchanged since before this fix. Pointing it at the narrower natural PAGE width
+       * instead made it fire on ANY box past the ordinary page column — including one just
+       * dragged wider by hand — clamping it right back down the instant the drag committed, a
+       * spring-back this file's own tests caught (`measure-notes-right-edge.mjs`'s drag section:
+       * stored width 180→660, and the very next measure re-clamped the RENDER to 256). The page
+       * growing to hold a box and a box's own resize handles staying reachable are not the same
+       * fact, and only the first of them is what NOTES-PAGE-GROWTH is about. */
+      const paneWidth = scrollerRef.current?.clientWidth || dom.clientWidth;
       const blocks = nodes.map((el) => {
         const x = parseFloat(el.getAttribute("data-anchor-x")) || parseFloat(el.style.left) || 0;
         const w = parseFloat(el.getAttribute("data-anchor-w")) || parseFloat(el.style.width);
-        const fit = fitAnchorBox({ x, w, hostWidth });
+        const fit = fitAnchorBox({ x, w, hostWidth: paneWidth });
         if (Math.round(parseFloat(el.style.width)) !== fit.w) el.style.width = `${fit.w}px`;
         if (Math.round(parseFloat(el.style.left)) !== fit.x) el.style.left = `${fit.x}px`;
         return { x: fit.x, w: fit.w, y: parseFloat(el.style.top) || 0, height: el.offsetHeight };
       });
       const need = anchorExtent(blocks);
       dom.style.minHeight = need ? `max(46vh, ${need}px)` : "";
-      /* ⛔ AND THE PAGE GROWS SIDEWAYS TOO (NEW-RIGHT-EDGE). This is the line that was missing,
-       * and its absence is the whole of his *"there's a wall"*: vertically the sheet has always
-       * stretched to hold a block that runs past the bottom, horizontally it did not, so the only
-       * way to keep a block on the sheet was to crush it. Now the sheet widens and the scroller
-       * takes over — the page grows, the content does not get squeezed. `minWidth` cannot feed
-       * back into a block's own width (they are out of flow and positioned absolutely), so there
-       * is no loop here, exactly as there is none on the vertical side. */
+      /* ⛔ AND THE PAGE GROWS SIDEWAYS TOO (NEW-RIGHT-EDGE) — restored against the right
+       * denominator. `naturalPageWidth` is the page's OWN width before anything grows it —
+       * computed from the pane's width and the sheet's fixed layout constants
+       * (`SHEET_MAX_WIDTH`/`SHEET_PAD_X`/`SHEET_MARGIN_X`), never from the sheet's or the
+       * editor's own rendered width, which keeps it immune to the feedback loop
+       * `fitAnchorBox`'s own header warns about (grow → the grown width becomes "the room" →
+       * grow again — a pane width and three constants cannot be moved by anything this effect
+       * writes). Past this width a box no longer narrows; the SHEET widens instead, using the
+       * PANE-fitted `blocks` above, so a box already fitted for reachability is never re-fitted
+       * a second time against a second, smaller number. `sheetGrowWidth` is `null` — leaving the
+       * sheet at its ordinary 580px card — the moment nothing needs it. */
+      const padX = (narrow ? SHEET_PAD_X.narrow : SHEET_PAD_X.wide) * 2;
+      const marginX = (narrow ? SHEET_MARGIN_X.narrow : SHEET_MARGIN_X.wide) * 2;
+      const naturalSheetWidth = Math.max(1, Math.min(SHEET_MAX_WIDTH, paneWidth - marginX));
+      const naturalPageWidth = Math.max(1, naturalSheetWidth - padX);
       const needX = anchorExtentX(blocks);
-      dom.style.minWidth = needX > hostWidth ? `${needX}px` : "";
+      const grow = needX > naturalPageWidth;
+      setSheetGrowWidth(grow ? needX + padX : null);
     };
     measure();
     /* Re-measured as the text inside a block reflows, which is the half that matters: the
@@ -2138,7 +2195,11 @@ export default function NoteEditor({
      * outline panel. */
     if (ro) ro.observe(dom);
     return () => ro?.disconnect();
-  }, [editor, docTick]);
+    /* ⛔ `narrow` IS A REAL DEPENDENCY NOW (NOTES-PAGE-GROWTH) — `measure`'s padding/margin
+     * numbers are read off it, so crossing the phone breakpoint has to re-run this closure with
+     * the fresh value immediately rather than wait on the ResizeObserver to fire against a
+     * still-stale `narrow` from the render this effect was last registered under. */
+  }, [editor, docTick, narrow]);
 
   /* ---- PASTE JUST THE TEXT (B36051) ------------------------------------------------------
    *
@@ -2255,7 +2316,12 @@ export default function NoteEditor({
     const html = buildPrintDocument({
       title: title || "Untitled page",
       meta: (trail || []).filter(Boolean).join(" › "),
-      pages: [{ title, html: docToHtml(json, images), updatedAt }],
+      /* `doc: json` (NOTES-PAGE-GROWTH) — buildPrintDocument's own page-growth question needs the
+         raw document, same as Notes.jsx's tree-print handler passes; this is the toolbar's
+         single-page print button, a SEPARATE call site that was missed on the first pass and
+         caught only by driving the real Print button rather than trusting the pure-function
+         tests alone (`verify-notes-page-growth.mjs` §6). */
+      pages: [{ title, html: docToHtml(json, images), updatedAt, doc: json }],
       density: json?.attrs?.density,          // PDF-PARITY: the sheet gets the note's own density
     });
     const r = await printHtmlDocument(html);
@@ -2284,6 +2350,11 @@ export default function NoteEditor({
         historyOpen={historyOpen}
         narrow={narrow}
         onBack={onBack}
+        /* ⛔ THE ZOOM INDICATOR NOW LIVES HERE (NEW-2) — see note-sheet's own comment for why.
+           `null` when the level is 100% (PANEL-BREVITY: a chip that always reads "100%" is
+           furniture), so the toolbar renders nothing rather than a dead control. */
+        zoomIndicator={zoom !== ZOOM_DEFAULT ? zoomLabel(zoom) : null}
+        onZoomReset={() => applyZoom(ZOOM_DEFAULT)}
       />
       <FindBar term={find.term} count={find.count} index={find.index} onStep={stepFind} onClear={onClearSearch} />
 
@@ -2389,8 +2460,22 @@ export default function NoteEditor({
            the phone breakpoint neither one joins this row at all (Outline's own floating
            toggle, and History's existing toolbar button, each open a fixed overlay instead) —
            but this rule stays as the same defence against any OTHER future narrow-width
-           sibling of the mat this row might grow. */
-        style={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column", alignItems: narrow ? "flex-start" : "center", position: "relative" }}
+           sibling of the mat this row might grow.
+           ⛔ AND A SECOND, SHARPER VERSION OF THE SAME TRAP SHOWS UP THE MOMENT THE PAGE GROWS AT
+           ALL (NOTES-PAGE-GROWTH) — caught by re-measuring the actual gesture, not by reasoning
+           about it: centring redistributes a GROWN sheet's extra width EQUALLY onto both its
+           edges, so the sheet's own LEFT edge — everything already on the page, the title
+           included — visibly slides left the instant a box near the margin makes the page grow,
+           even though nothing about that content's OWN position changed. Measured live: placing
+           one box shifted the whole page (and every word on it) 48px left in the same gesture
+           that grew it 96px wider. That is "the page jumped," not "the page grew" — the exact
+           class VIEWPORT-STABLE exists to forbid. So the sheet stops centring the MOMENT anything
+           has grown it (`sheetGrowWidth != null`) rather than waiting until the grown page
+           outgrows the whole pane: growing only ever adds room to the RIGHT of what was already
+           there, and the pane-overflow case (this same rule, one door further) is already
+           subsumed — a sheet wide enough to outgrow the pane was already wide enough to have
+           grown at all. */
+        style={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column", alignItems: (narrow || sheetGrowWidth != null) ? "flex-start" : "center", position: "relative" }}
       >
         <PasteOptions
           offer={pasteAt && pasteOffer ? { ...pasteOffer, ...pasteAt } : null}
@@ -2451,7 +2536,14 @@ export default function NoteEditor({
           data-testid="note-sheet"
           data-zoom={zoom}
           style={{
-            maxWidth: 580, width: "100%", flex: "1 1 auto", minWidth: 260, zoom,
+            /* ⛔ THE PAGE GROWS PAST THIS WHEN AN ANCHOR NEEDS MORE ROOM (NOTES-PAGE-GROWTH) — see
+             * `sheetGrowWidth`, computed by the page-growth measurement effect below. `580` is
+             * the page's own natural width; `sheetGrowWidth` OVERRIDES both `width` and
+             * `maxWidth` together (a `width` alone would still be clipped by this `maxWidth`),
+             * and is `null` — changing nothing here — the moment nothing needs the extra room. */
+            maxWidth: sheetGrowWidth ?? SHEET_MAX_WIDTH,
+            width: sheetGrowWidth ? `${sheetGrowWidth}px` : "100%",
+            flex: "1 1 auto", minWidth: 260, zoom,
             /* ⛔ A REAL WRITING SURFACE, NOT A FIELD (B1203504) — his exact words, and defect #4
                of the review: the body painted transparent, sitting directly on the same grey
                the app chrome uses, so there was nothing on screen that said "this is a page."
@@ -2474,8 +2566,10 @@ export default function NoteEditor({
                a leftover alignment hack. Widened on desktop to match the generosity the rest of
                this item gives the page — Craft/Bear both give a paragraph real room to breathe
                on every side, not just between lines. */
-            padding: narrow ? "18px 16px max(96px, calc(96px + env(safe-area-inset-bottom))) 16px" : "30px 40px 96px 40px",
-            margin: narrow ? "10px 8px 0" : "24px 0 0",
+            padding: narrow
+              ? `18px ${SHEET_PAD_X.narrow}px max(96px, calc(96px + env(safe-area-inset-bottom))) ${SHEET_PAD_X.narrow}px`
+              : `30px ${SHEET_PAD_X.wide}px 96px ${SHEET_PAD_X.wide}px`,
+            margin: narrow ? `10px ${SHEET_MARGIN_X.narrow}px 0` : `24px ${SHEET_MARGIN_X.wide}px 0`,
           }}
         >
           {/* ⛔ THE TITLE IS ITS OWN ROW, AND IT IS UNMISTAKABLY THE LARGEST TEXT ON THE PAGE
@@ -2535,7 +2629,17 @@ export default function NoteEditor({
                  two onBlur props on one element and the second silently wins. */
               onBlur={(e) => { e.target.style.borderBottomColor = "transparent"; onTitleCommit?.(); }}
             />
-            {(projectLabel || zoom !== ZOOM_DEFAULT || edited) ? (
+            {/* ⛔ THE ZOOM LEVEL IS NOT SHOWN HERE ANY MORE (NEW-2, owner report 2026-09-06:
+                "the zoom shouldn't be shown on the page"). It rendered as a real `<button>` inside
+                `note-sheet` — the document itself, not chrome around it — which is a control
+                sitting on the paper it is meant to control. It moved into `NoteToolbar` (below),
+                beside History/Print/Export — "things you do TO the page" is that toolbar's own
+                stated reason for that group, and this is exactly one more of those. Zoom itself
+                is unchanged (Ctrl+wheel, Ctrl+=/-/0, and clicking the relocated pill still resets
+                to 100%); only where its indicator sits moved. Same `data-testid="note-zoom-level"`
+                on the relocated control, so nothing that already asks "is a level shown, and does
+                it say what it is" had to change — only where it's rooted did. */}
+            {(projectLabel || edited) ? (
               <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
                 {/* ⛔ WHICH PROJECT THIS NOTE BELONGS TO, WHILE YOU ARE READING IT (NEW-2).
                     The owner could not see a note's filing anywhere near the note itself: the
@@ -2561,23 +2665,6 @@ export default function NoteEditor({
                       borderRadius: RADIUS.pill, padding: "3px 9px",
                     }}
                   >{projectLabel.name}</span>
-                ) : null}
-                {/* The level, shown only when it is NOT 100% (PANEL-BREVITY: a chip that always
-                    reads "100%" is furniture). Clicking it goes back to 100%, which is the one
-                    thing anybody wants from a zoom indicator. */}
-                {zoom !== ZOOM_DEFAULT ? (
-                  <button
-                    type="button"
-                    data-testid="note-zoom-level"
-                    title="Back to 100% (Ctrl+0)"
-                    onClick={() => applyZoom(ZOOM_DEFAULT)}
-                    style={{
-                      flex: "0 0 auto", fontSize: 11, fontWeight: 700, letterSpacing: "0.04em",
-                      color: "var(--text-secondary)", border: "1px solid var(--border-default)",
-                      borderRadius: RADIUS.pill, padding: "3px 9px", background: "transparent",
-                      font: "inherit", cursor: "pointer",
-                    }}
-                  >{zoomLabel(zoom)}</button>
                 ) : null}
                 {edited ? (
                   <span

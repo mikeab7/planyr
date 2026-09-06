@@ -757,7 +757,10 @@ const HEADING_OPTIONS = [
  * scroll container needed, and the row's own `overflowX: auto` is untouched. It shares the
  * row's 44px `big` sizing so it never separately grows the bar's height. */
 
-export default function NoteToolbar({ editor, onExport, onPrint, onAttach, onHistory, historyOpen, onBack, narrow = false }) {
+export default function NoteToolbar({
+  editor, onExport, onPrint, onAttach, onHistory, historyOpen, onBack, narrow = false,
+  zoomIndicator = null, onZoomReset,
+}) {
   const fileRef = useRef(null);
   if (!editor) return null;
 
@@ -941,6 +944,17 @@ export default function NoteToolbar({ editor, onExport, onPrint, onAttach, onHis
       <PrintIcon />
     </TBButton>
   );
+  /* ⛔ THE ZOOM LEVEL (NEW-2, owner report 2026-09-06: "the zoom shouldn't be shown on the
+     page"). It used to render as a real button ON the sheet — the document, not the chrome
+     around it — which reads as a control living on paper it is meant to control. It belongs
+     beside History because both are the same kind of thing: something you do TO the page, not
+     to the words in it. `zoomIndicator` is `null` at 100% (PANEL-BREVITY — a chip that always
+     reads "100%" is furniture), so nothing renders here most of the time. Same testid the
+     on-page control carried (`note-zoom-level`), so a check that only asks "is a level shown,
+     and does it say what it is" needed no change — only where this control is rooted did. */
+  const zoomBtn = zoomIndicator ? (
+    <TBButton title="Back to 100% (Ctrl+0)" testid="note-zoom-level" wide big={narrow} label={zoomIndicator} onClick={onZoomReset} />
+  ) : null;
   const exportBtn = (
     <TBButton title="Export this page to Markdown" testid="nt-export" wide big={narrow} label="Markdown" onClick={onExport}>
       <Icon><path d="M8 2.5v8" /><path d="M5 7.5L8 10.5l3-3" /><path d="M2.5 12.5h11" /></Icon>
@@ -1110,6 +1124,7 @@ export default function NoteToolbar({ editor, onExport, onPrint, onAttach, onHis
 
         {narrow && (
           <MenuGroup label="Page">
+            {zoomBtn}
             {historyBtn}
             {printBtn}
             {exportBtn}
@@ -1119,6 +1134,7 @@ export default function NoteToolbar({ editor, onExport, onPrint, onAttach, onHis
         {narrow && tableGroupControls && <MenuGroup label="Table">{tableGroupControls}</MenuGroup>}
       </OverflowMenu>
 
+      {!narrow && zoomBtn}
       {!narrow && historyBtn}
       {!narrow && printBtn}
       {!narrow && exportBtn}

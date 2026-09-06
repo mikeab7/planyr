@@ -569,11 +569,69 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
     use the press driver **pressFeature** under `ui-audit/lib/`, and **verify-press-drive** re-measures the whole verdict
     table every run, so the day the wiring moves again it says so rather than a harness reporting
     a working feature as broken.
+  - **⛔ THE SEVENTH ROUND (B1273296, NOTES-PAGE-GROWTH, owner report 2026-09-06) — THE PAGE-GROWS
+    RULE REGRESSED, IT DID NOT NEVER SHIP.** His words: *"I thought we had an edit to where, like,
+    if I type outside of the note… it would just expand the page… but it's not doing it."* AUDIT-
+    FIRST found he was right on both counts: B421490 (NEW-RIGHT-EDGE, above) DID ship "the page
+    grows to hold a box that overflows," and it regressed the moment B1203504 gave the page its
+    own narrower, centred CARD (`note-sheet`, 580px) separate from the wide PANE around it
+    (`note-mat`) — `anchorExtentX`'s own "does this need more room" comparison kept reading the
+    PANE's width (nearly the whole window) as "the room," which was correct before B1203504 and
+    silently wrong after: a box could overflow the visible white page while sitting comfortably
+    inside the much wider grey pane, so the grow condition never fired. Measured on his own
+    production note: a box needing 751px against a 923px pane (no growth) while the 580px page it
+    had to fit inside was 251px short. **Fixed by giving the grow DECISION its own denominator**
+    — the page's natural width, computed from the pane's width and the sheet's fixed layout
+    constants, never from anything this effect itself writes (the same anti-feedback-loop
+    reasoning B421490 already used, just re-pointed at the right target). `fitAnchorBox`'s OWN
+    denominator (the pane, for keeping a box's handles reachable under the Outline panel) was
+    LEFT ALONE — a first draft of this fix pointed it at the narrower page too, and
+    **measure-notes-right-edge**'s own drag section caught the spring-back immediately (a box
+    dragged to 660px committed, then the very next measure clamped its RENDER back to 256px).
+    Two different questions, two different rooms; conflating them was the second, narrower bug
+    inside the first one.
+    ⛔ **AND CENTRING A GROWN PAGE SHIFTS ITS OWN LEFT EDGE — a second, invisible-to-the-eye defect
+    caught only by re-measuring the real gesture.** Centring redistributes a wider sheet's extra
+    width onto BOTH edges, so placing one box near the margin measurably shifted the WHOLE PAGE
+    (title included) 48px left in the same gesture that grew it 96px wider — "the page jumped,"
+    not "the page grew," the exact class VIEWPORT-STABLE forbids. Fixed by left-aligning the sheet
+    the moment anything has grown it, not only once a grown page outgrows the whole pane.
+    ⛔ **LEGACY OFF-PAGE DATA IS REPAIRED, NOT LEFT.** His own scratch anchor (junk text
+    "assdsasasssada") was stored at `y: -21` — above the origin no live placement/drag/resize path
+    can produce today, evidence of data from before those floors existed. `repairOffPageAnchors`
+    (new editor command, mirrors `ensureNoteAnchorIds`'s "bookkeeping, outside the undo history"
+    shape exactly) clamps any such anchor back onto the page using the SAME `moveAnchorPoint`
+    floor a drag already enforces, on every load — non-destructive (repositions only, never
+    touches content/width/identity) and durable (writes through a real transaction, survives a
+    reload, proven).
+    ⛔ **AND THE ACTUAL PRINT BUTTON HAD ITS OWN, SEPARATE, MISSED CALL SITE.** PDF-PARITY meant
+    mirroring the same grow rule into `lib/notesPrint.js`'s `.sheet` (`anchorExtentX`/`anchorExtent`
+    moved to the tiptap-free `notesBoxResize.js` so the PURE print module could import them
+    without pulling `@tiptap/core` in). The pure-function tests passed from the first commit —
+    they call `buildPrintDocument` directly. Driving the REAL toolbar Print button
+    (**verify-notes-page-growth** §6) found `NoteEditor.jsx`'s own `printPage` — a
+    SEPARATE function from `Notes.jsx`'s tree-print handler, used by the toolbar's single-page
+    Print button — never passed a `doc` at all, so the real button never grew a single sheet.
+    Caught only by driving the app, not by trusting the unit suite. Guard:
+    **verify-notes-page-growth**, whose §6 now drives that exact button end to end and reads the
+    hidden print iframe's rendered attributes directly, so a second missed call site says so
+    rather than passing silently.
+    ⛔ **TWO PRE-EXISTING, UNRELATED FAILURES FOUND WHILE VERIFYING, filed separately as B1273298**
+    (**verify-notes-anchor-zoom** §9's 20px sweep, **verify-notes-anchor-soak**'s multi-press
+    soak) — confirmed via `git stash` to fail identically with none of this round's changes
+    applied. Out of scope for this round; do not re-diagnose them as caused by it.
 - **HOW BIG THE WRITING IS (B342994, `lib/notesZoom.js`).** Ctrl+wheel and Ctrl+=/−/0 scale the
   **document**, never the app; the browser's own zoom is suppressed for those gestures so the two
   cannot fight; the level is per-scope, persisted, and does not sync (a comfortable size belongs to
   the screen you are at). CSS `zoom`, not a transform — the text must RE-WRAP and the caret must
   stay the browser's own.
+  - **⛔ THE INDICATOR IS IN THE TOOLBAR, NOT ON THE PAGE (B1273297, owner report 2026-09-06:
+    "the zoom shouldn't be shown on the page").** It used to render as a real `<button>` inside
+    `note-sheet`'s own metadata row — a control sitting on the document it controls. Moved into
+    `NoteToolbar.jsx`, beside History/Print/Markdown ("things you do TO the page," that group's
+    own stated reason), same `data-testid="note-zoom-level"`, same PANEL-BREVITY behaviour
+    (absent at 100%, resets on click). Zoom itself is unchanged — only where its indicator is
+    rooted moved.
 - **A COPY NEVER CHANGES PROJECT — four files, one rule.** A note was copied into an unrelated
   pursuit and nobody was told; it was found by hand a week later under a "from a project you
   deleted" heading. **A page's `projectId` is a property of the PAGE, never of whoever happens to

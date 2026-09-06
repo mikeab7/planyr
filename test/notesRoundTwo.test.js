@@ -463,4 +463,37 @@ describe("the print sheet", () => {
       expect(sheet, `the sheet must style ${construct} too — a screen fix that skips paper is half-done`).toContain(construct);
     }
   });
+
+  /* ⛔ NOTES-PAGE-GROWTH, PDF-PARITY (2026-09-06) — the screen grows the page to hold an
+   * anchored block that would otherwise print past the sheet's own margin; this is that same
+   * rule mirrored onto paper. `pageAnchorExtentPx` reads a page's RAW stored JSON (no schema, no
+   * live DOM), so this exercises the exact path `Notes.jsx`'s print handler drives. */
+  describe("the sheet grows for an anchored block, mirroring the screen (NOTES-PAGE-GROWTH)", () => {
+    it("an ordinary page — nothing to grow for — carries no width override at all", () => {
+      const html = buildPrintDocument({ title: "T", pages: [{ title: "T", html: "<p>x</p>", doc: { type: "doc", content: [{ type: "paragraph" }] } }] });
+      expect(html).not.toContain('style="max-width');
+    });
+
+    it("a page whose stored anchor reaches past the ordinary sheet width grows the sheet", () => {
+      const doc = { type: "doc", content: [{ type: "noteAnchor", attrs: { x: 575, y: 0, w: 180 } }] };
+      const html = buildPrintDocument({ title: "T", pages: [{ title: "T", html: "<p>x</p>", doc }] });
+      // x + w + the default 16px pad = 771, plus the sheet's own 60px of side padding.
+      expect(html).toContain('<div class="sheet" style="max-width: max(190mm, 831px)">');
+    });
+
+    it("the WIDEST page across a whole notebook decides the one shared sheet width", () => {
+      const narrow = { type: "doc", content: [{ type: "paragraph" }] };
+      const wide = { type: "doc", content: [{ type: "noteAnchor", attrs: { x: 2000, y: 0, w: 100 } }] };
+      const html = buildPrintDocument({
+        title: "T",
+        pages: [{ title: "A", html: "<p>a</p>", doc: narrow }, { title: "B", html: "<p>b</p>", doc: wide }],
+      });
+      expect(html).toContain("max(190mm, 2176px)");
+    });
+
+    it("a missing or unreadable doc grows nothing — one bad page does not take the print run down", () => {
+      const html = buildPrintDocument({ title: "T", pages: [{ title: "T", html: "<p>x</p>", doc: null }, { title: "U", html: "<p>y</p>" }] });
+      expect(html).not.toContain('style="max-width');
+    });
+  });
 });
