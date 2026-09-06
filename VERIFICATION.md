@@ -164,6 +164,20 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V891648 — B1228864: pressing a control mid-load no longer misses because the control moved (timing/race class)
+
+**Why this needs a live pass even though the fix is proven at the e2e level.** The original bug came from real `event:click-swallowed` telemetry rows (`client_errors`, `src/shared/ui/clickDiag.js`), so the strongest close is the same instrument that found it: confirm no NEW rows matching these three signatures appear once the fix is live. Three fully offline, deterministic Playwright specs (`e2e/dashboard-card-growth.spec.js`, `e2e/header-account-resolve.spec.js`, `e2e/schedule-toolbar-settle.spec.js`) reproduce and then close each mechanism — red-proofed against the pre-fix source (all four assertions failed with magnitudes matching the original report; green again after the fix) — but a mocked, single-run e2e cannot stand in for the thing that actually matters here: real, variable network/paint timing across real repeated production usage, which is exactly the class of condition that produced the original six rows in the first place.
+
+**What was verified here (this session, sandbox).** All three specs pass headlessly against the real built app, at desktop width; each asserts the pressed control's bounding box is pixel-identical (<1px) across the exact transition that used to move it, and that zero `event:click-swallowed` reports fire during the run. Full repo suite (754 files / 15215 tests) green; lint clean; `npm run ci-parity` (all 21 required-CI gates, including visual regression and the signature-budget gate) passes.
+
+**Steps, each with a named expected result:**
+1. Read the loaded chunk hash at the time of each check below — confirm it names a chunk from a build after this PR merged.
+2. **Phone width too, not just desktop** (the brief's explicit ask): on `planyr.io` at a phone viewport, sign in, and repeat the same three presses described below — the Dashboard card press, the header account-pill press, and the Scheduler "Grid"/near-"Version history" press — during the app's initial load window (the first second or two after the page appears interactive). **Expect:** the pressed control never visibly shifts position mid-press on any of the three surfaces.
+3. Query `client_errors` (Supabase `execute_sql` or the admin Reports view) for `source = 'event:click-swallowed'` rows with a press timestamp AFTER this PR's merge/deploy time, filtered to `rectAtPress`/`rectNow` payloads whose route matches `/`(Dashboard), the Site Planner header crumb, or `/schedule`(Scheduler toolbar). **Expect:** zero matching rows over a real usage window (at minimum a few days of the owner's ordinary use, so genuine repeated real-world timing has had a chance to occur) — the same instrument that surfaced the original six rows now staying quiet for these three patterns.
+4. If any new row appears matching one of these three signatures, it is a recurrence of **B1228864** (not a new number) — reopen it with the new `rectAtPress`/`rectNow` payload attached.
+
+**Result:** ⏳ pending — needs a real signed-in browser pass (incl. phone width) and a real production usage window for step 3's telemetry check. `Cadence: once`.
+
 ### V881392 — B1213314: setting a task's Owner in the Scheduler is reachable, saves, and reads back after reload `Blocker: auth`
 
 **Why this needs its own real pass.** The reachability chain (Owner column visible by default → double-click opens `ContactPicker` → commits through the grid's normal save path) was confirmed by reading `public/sequence/index.html` directly, not by driving it: the embedded scheduler loads React/ReactDOM/Babel-standalone/Supabase-js from public CDNs via plain `<script src="https://...">` tags rather than bundling them, and this sandbox's headless Chromium cannot reach any of those hosts (`net::ERR_TUNNEL_CONNECTION_FAILED`/connection-reset on all four) — the grid never finishes booting here, signed in or out, so no interactive check of it is possible in this sandbox at all.

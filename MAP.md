@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-05 @ `fe38d2f5` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-05 @ `0ba1e611` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -66,7 +66,7 @@ _693 source files mapped._
 - **`src/workspaces/dashboard/components/DashboardCard.jsx`** — the one card shell (title + Customize-mode drag handle/resize/remove) every Dashboard card renders inside.
   - _exports_: `default (DashboardCard)`
 - **`src/workspaces/dashboard/components/DashboardCards.jsx`** — the six default Dashboard card renderers (pure presentational, token-only).
-  - _exports_: `CompsSummaryCard`, `GoingQuietCard`, `JumpBackInCard`, `PipelineCard`, `PursuitsByActivityCard`, `ScheduleHealthCard`
+  - _exports_: `CardSkeleton`, `CompsSummaryCard`, `GoingQuietCard`, `JumpBackInCard`, `PipelineCard`, `PursuitsByActivityCard`, `ScheduleHealthCard`
 - **`src/workspaces/dashboard/Dashboard.jsx`** — the real Dashboard landing page (B1213312/B1213313): the arrangeable card grid + Customize mode, above the six workspaces.
   - _exports_: `default (Dashboard)`
 - **`src/workspaces/dashboard/lib/dashboardCompsFetch.js`** — the one minimal `comps` read (type counts) the Comps summary card needs.

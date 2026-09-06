@@ -120,6 +120,14 @@ export default function Scheduler({
       if (m && m.source === "planar-seq" && m.type === "planar:toolbar-state") {
         setToolbar({
           ready: true,
+          // NEW-1 — true only from a REAL report, never from markToolbarReadyFallback's bare
+          // `{...t, ready:true}` flip. ScheduleToolbar reserves the zoom-control block's width
+          // (rather than mounting it) until this is true, so the fallback's unknown `zoomable`
+          // can't cause a later real report to insert that block and shove the icon buttons
+          // after it (Version history, …) sideways out from under a tap already in flight. Once
+          // settled, a genuine view switch is the user's own doing and reflows normally, same as
+          // before this fix.
+          settled: true,
           view: m.view, section: m.section, isMobile: !!m.isMobile,
           zoomPct: Number(m.zoomPct) || 0, zoomable: !!m.zoomable,
           reviewCount: Number(m.reviewCount) || 0, reviewOpen: !!m.reviewOpen,
