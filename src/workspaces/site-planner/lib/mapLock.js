@@ -248,6 +248,21 @@ export function registrationLayoutMayHaveChanged(li, w, h, overscan) {
   return !li || li.w !== w || li.h !== h || li.overscan !== overscan;
 }
 
+/* ⛔ NEW-1 (site-route render-loop crash, B1189's own class recurring at a different call site) —
+ * whether two `view` objects ({ppf, offX, offY}) carry the SAME field values. `setView` guards its
+ * dispatch with this, the same way `setSize`/`setRegShift` already guard theirs: a functional
+ * updater (or a plain object) that lands on the SAME numbers must return the CURRENT object rather
+ * than a fresh one, or every effect keyed on `view`'s whole identity (the basemap registration
+ * commit chief among them — the exact effect B1189 fixed for `size`) re-runs on an allocation that
+ * carries no new information. The registration effect's own comment claimed "[view's] writers
+ * replace it only on a real change" as the reason it was safe to leave as a whole-object dep; this
+ * closes the gap that made that claim false — several call sites (`fit()` on a blank plan is the
+ * one that matches the initial state exactly) dispatched a brand-new `{ppf,offX,offY}` object even
+ * when every field already matched. Pure. */
+export function viewValuesEqual(a, b) {
+  return !!a && !!b && a.ppf === b.ppf && a.offX === b.offX && a.offY === b.offY;
+}
+
 /* ── the lock invariant ───────────────────────────────────────────────────────────────
  * Where a feet point lands on screen, computed TWO independent ways:
  *   • the planner's own SVG transform (feet × ppf + offset), and
