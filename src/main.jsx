@@ -77,6 +77,16 @@ const armClickDiag = () => import("./shared/ui/clickDiag.js").then((m) => m.inst
 if (typeof requestIdleCallback === "function") requestIdleCallback(armClickDiag, { timeout: 9000 });
 else setTimeout(armClickDiag, 4500);
 
+/* B1168128 (×2) — "I am panning within the map... it just pans me on the whole web page" on
+ * iPhone Safari, reproduced live with a screenshot; unreproducible from this sandbox (see the
+ * module's own header). Same disposition and shape as clickDiag above: deferred + idle +
+ * unconditional, silent by construction (html/body are pinned, so an ordinary session never
+ * scrolls the document and this never fires), and the next real occurrence reports itself. */
+const armPageContainmentGuard = () => import("./shared/ui/pageContainmentGuard.js")
+  .then((m) => m.installPageContainmentGuard(window)).catch(() => {});
+if (typeof requestIdleCallback === "function") requestIdleCallback(armPageContainmentGuard, { timeout: 9000 });
+else setTimeout(armPageContainmentGuard, 4500);
+
 // Recover from "stale chunk after deploy" failures (B221): when a new build ships
 // while this tab is open, switching to a not-yet-loaded workspace would otherwise
 // fail to fetch its now-replaced hashed chunk. Reload once to pick up the fresh
