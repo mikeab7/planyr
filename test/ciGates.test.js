@@ -42,6 +42,7 @@ describe("jobSteps() against build.yml — the CI-only plumbing that calls the s
       "Setup Node", "Cache Playwright browsers",
       "Run CI gates (scripts/ci-parity.mjs — the single source of truth for what this build checks)",
       "Upload visual regression diffs",
+      "Backfill required status for a sweep-repaired PR",
     ]);
   });
 
@@ -143,12 +144,12 @@ describe("jobSteps() against .github/ci-gates.yml — the actual gate list", () 
 });
 
 describe("splitSteps / classifyInfra — gates vs CI-only plumbing", () => {
-  it("build.yml's real steps split into 2 run-steps (the detector + the delegator) + 4 infra", () => {
+  it("build.yml's real steps split into 2 run-steps (the detector + the delegator) + 5 infra", () => {
     const { steps } = jobSteps(readBuild(), "build");
     const { gates, infra } = splitSteps(steps);
     expect(gates.length).toBe(2);
     expect(infra.map((s) => s.uses.split("@")[0])).toEqual([
-      "actions/checkout", "actions/setup-node", "actions/cache", "actions/upload-artifact",
+      "actions/checkout", "actions/setup-node", "actions/cache", "actions/upload-artifact", "actions/github-script",
     ]);
   });
 
@@ -260,12 +261,13 @@ describe("resolveStepEnv — one gate's env:, given the global secret resolution
 });
 
 describe("scripts/ci-parity.mjs --list — the two files actually wire together (integration, no gates run)", () => {
-  it("reports 21 gates from ci-gates.yml and 4 infra steps from build.yml", () => {
+  it("reports 21 gates from ci-gates.yml and 5 infra steps from build.yml", () => {
     const out = execFileSync("node", ["scripts/ci-parity.mjs", "--list"], { cwd: REPO, encoding: "utf8" });
     expect(out).toContain("Gates (21), in order, read from .github/ci-gates.yml:");
-    expect(out).toContain("Infra steps NOT covered (4)");
+    expect(out).toContain("Infra steps NOT covered (5)");
     expect(out).toContain("Checkout (actions/checkout)");
     expect(out).toContain("Upload visual regression diffs (actions/upload-artifact)");
+    expect(out).toContain("Backfill required status for a sweep-repaired PR (actions/github-script)");
     // the delegator step itself must never be listed as a gate to run — that would recurse
     expect(out).not.toContain("Run CI gates (scripts/ci-parity.mjs");
     // nor the docs-only detector, which also lives in build.yml, not the gate manifest
