@@ -47,6 +47,27 @@ function ClickableRow({ onClick, children }) {
   );
 }
 
+/* ── Loading skeleton (NEW-1) ──────────────────────────────────────────────────────────────────
+ * Every card's real content is a different height depending on how many rows its data resolves
+ * to (0 rows vs several) — rendering the SHORT "no data yet" message while a fetch is still in
+ * flight, then swapping it for several real rows once the fetch resolves, grows the card and
+ * shoves every card below it down the page. If a control in a lower card was already showing its
+ * FINAL content and a user pressed it before that later growth landed, the press and the
+ * click(that follows land on two different rows — the press's own target slid out from under it.
+ * So the whole grid renders this identical, stable-height placeholder for every card until every
+ * card's data source has resolved, and only then swaps every card to its real content in one
+ * synchronized paint — nothing can grow later out from under an already-rendered row. */
+const SKELETON_BAR = { height: 10, borderRadius: RADIUS.sm, background: "var(--border-default)", opacity: 0.6 };
+export function CardSkeleton({ rows = 3 }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }} aria-hidden="true">
+      {Array.from({ length: rows }, (_, i) => (
+        <span key={i} style={{ ...SKELETON_BAR, width: i === rows - 1 ? "55%" : "100%" }} />
+      ))}
+    </div>
+  );
+}
+
 /* ── Jump back in ─────────────────────────────────────────────────────────────────────────── */
 export function JumpBackInCard({ project, doc, onOpenProject, onOpenDoc }) {
   if (!project && !doc) return <div style={EMPTY}>Nothing to jump back into yet.</div>;
