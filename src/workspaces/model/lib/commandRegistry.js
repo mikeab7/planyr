@@ -70,7 +70,7 @@ export const COMMANDS = [
   { id: "strikethrough", label: label("Strikethrough"), group: "fontstyle", keywords: kw("text strike"), run: (ctx) => ctx.onSetCellStyle(toggleStrikePatch(ctx.activeStyle)) },
 
   // ---- Colour ----
-  { id: "autocolor-toggle", label: (ctx) => (ctx.autoColor ? "Turn Off Automatic Cell Colouring" : "Turn On Automatic Cell Colouring"), group: "color", keywords: kw("color coding input formula link blue black green"), run: (ctx) => ctx.onAutoColorToggle() },
+  { id: "autocolor-toggle", label: (ctx) => (ctx.autoColor ? "Turn Off Automatic Cell Coloring" : "Turn On Automatic Cell Coloring"), group: "color", keywords: kw("color coding input formula link blue black green"), run: (ctx) => ctx.onAutoColorToggle() },
 
   // ---- Alignment ----
   { id: "align-left", label: label("Align Left"), group: "alignment", run: (ctx) => ctx.onSetCellStyle({ align: "left" }) },

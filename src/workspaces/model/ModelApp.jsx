@@ -863,6 +863,42 @@ export default function ModelApp({
           <Ribbon ctx={ctx} />
           <FormulaBar sheet={sheet} row={selRange.r1} col={selRange.c1} onCommit={onCommitCell} onGoTo={onGoTo} nameBoxRef={nameBoxRef} />
           </div>
+          {/* NEW-1 (B1251888) — Find/Replace, Name Manager, and the Inconsistencies panel all
+              render IN NORMAL FLOW here, below the header row and the ribbon/formula-bar card
+              above it, never as a `position: fixed` overlay guessing a top offset. A fixed-offset
+              overlay is exactly what let all three drift over the header row's File menu +
+              Formula Auditing buttons once pull request 1487 moved Formula Auditing there — a
+              flow sibling structurally cannot cover chrome that sits earlier in the same column,
+              at any window width, so the class of bug can't recur here. The three are mutually
+              exclusive (opening one closes the others — see onOpenFind/onToggleNameManager/
+              onToggleInconsistencyPanel below), so only one ever occupies this flow slot at once. */}
+          <FindReplaceBar
+            open={findOpen}
+            showReplace={findShowReplace}
+            sheet={sheet}
+            onClose={() => setFindOpen(false)}
+            onGoTo={onGoTo}
+            onReplaceOne={onReplaceOne}
+            onReplaceAll={onReplaceAll}
+          />
+          <NameManager
+            open={nameManagerOpen}
+            sheet={sheet}
+            selRange={selRange}
+            onClose={() => setNameManagerOpen(false)}
+            onGoTo={onGoTo}
+            onDefineName={onDefineName}
+            onRenameName={onRenameName}
+            onRetargetName={onRetargetName}
+            onDeleteName={onDeleteName}
+          />
+          <InconsistencyPanel
+            open={inconsistencyPanelOpen}
+            flags={activeInconsistencies}
+            onClose={() => setInconsistencyPanelOpen(false)}
+            onGoTo={onGoTo}
+            onDismiss={onDismissInconsistency}
+          />
           <SheetView
             sheet={sheet}
             sheetName={sheetName}
@@ -909,33 +945,6 @@ export default function ModelApp({
             onDuplicate={onDuplicateSheetTab}
             onDelete={onDeleteSheetTab}
             onReorder={onReorderSheetTab}
-          />
-          <FindReplaceBar
-            open={findOpen}
-            showReplace={findShowReplace}
-            sheet={sheet}
-            onClose={() => setFindOpen(false)}
-            onGoTo={onGoTo}
-            onReplaceOne={onReplaceOne}
-            onReplaceAll={onReplaceAll}
-          />
-          <NameManager
-            open={nameManagerOpen}
-            sheet={sheet}
-            selRange={selRange}
-            onClose={() => setNameManagerOpen(false)}
-            onGoTo={onGoTo}
-            onDefineName={onDefineName}
-            onRenameName={onRenameName}
-            onRetargetName={onRetargetName}
-            onDeleteName={onDeleteName}
-          />
-          <InconsistencyPanel
-            open={inconsistencyPanelOpen}
-            flags={activeInconsistencies}
-            onClose={() => setInconsistencyPanelOpen(false)}
-            onGoTo={onGoTo}
-            onDismiss={onDismissInconsistency}
           />
           <CommandPalette open={paletteOpen} ctx={ctx} onClose={() => setPaletteOpen(false)} />
         </>
