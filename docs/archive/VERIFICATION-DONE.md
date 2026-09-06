@@ -2598,3 +2598,18 @@ itself is ever in doubt, the steps above are still here to re-run.
 
 **Result:** ✅ PASSED (closed per reporter instruction — see caveat above). `Cadence: once` — done.
 
+### V908224 — B1246384: the Spreadsheet's command palette actually runs actions, Escape closes it without running anything, and Ctrl+F is untouched
+
+**✅ PASS — this session, headless, logged out (this is NOT a LIVE-VERIFY class — not timing/race, not concurrency, not GIS endpoint behavior, not zoom-density-dependent rendering, not PDF/export parity, not real-project-data-dependent — a plain logged-out draw/type/keyboard check, Claude-doable per ATTEMPT-BEFORE-YOU-PARK), run via `e2e/model-command-palette.spec.js` against a real headless Chromium, driven with real `page.keyboard` events (never a synthetic dispatch — SYNTHETIC-KEYS-DONT-EDIT).**
+- **Method, exactly as the brief asked: open the Spreadsheet, press Ctrl+K, type a few letters of an action, press Enter, and confirm the action actually happened — not just that a menu opened or closed.** Done for three different actions per run, one of them an audit tool, in BOTH Light and Dark theme (`localStorage["planyr.theme"]`):
+  1. **"bold"** → Enter — the palette closed itself, and the target cell's rendered `font-weight` is `700` (`getComputedStyle`, via Playwright's `toHaveCSS`) — the format genuinely applied, not merely a menu item highlighted.
+  2. **"insert row above"** → Enter — the cell that held "hello" is now empty and the cell one row below holds "hello" — the sheet's actual content shifted, proving a real structural edit ran.
+  3. **"trace precedents"** (the audit tool) → Enter — `model-trace-overlay` is visible with a real drawn arrow; a follow-up Escape (the pre-existing shortcut) clears it — proving the palette's audit command reaches the SAME trace mechanism the row-1 toolbar button does.
+- **Escape without Enter runs nothing:** typed "bold" into the palette, pressed Escape, palette closed, and the cell under test does NOT carry `font-weight: 700` — a typed-but-uncommitted query never silently applies.
+- **Ctrl+F is untouched:** after the palette's own Ctrl+K binding has been exercised repeatedly in the same test, Ctrl+F still opens the pre-existing Find bar (`model-find-input` visible) — the new chord did not shadow or break the old one.
+- **The permanent Formula Auditing toolbar (row 1)** — the module's own differentiators, moved off the collapsible Home ribbon per this item's brief — is reachable with `ribbon-trace-precedents`/`ribbon-trace-dependents`/`ribbon-inconsistencies` all directly visible, no "More ▾" click needed, confirmed in a fresh project at this suite's default viewport, both themes.
+- **12 assertions × 2 themes, all passing.** Full spec + neighbouring `e2e/model-audit-tools.spec.js` (updated: its Name Manager repro now opens via the palette, since the ribbon's Names button was removed per this item) also green.
+- **What this run does NOT cover:** Michael has not personally clicked through the palette on `planyr.io`. Since this feature has no auth/live-GIS/real-project-data dependency at all, that is not a stated gap under ATTEMPT-BEFORE-YOU-PARK — if it reads wrong there after deploy, that is new information and reopens **B1246384** (STANDING RULE #2) rather than being assumed fixed.
+
+**Result:** ✅ PASSED. `Cadence: once` — done.
+

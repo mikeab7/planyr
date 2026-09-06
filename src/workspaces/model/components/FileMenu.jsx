@@ -12,7 +12,7 @@
  * Hidden <input type="file"> elements are the standard way to reach the OS file picker from a
  * plain button — clicking the visible button proxies a click onto the hidden input.
  */
-import { useRef, useState } from "react";
+import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { Button, MenuItem, menuPanelStyle } from "../../../shared/ui/controls.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
@@ -33,11 +33,20 @@ const chromeBtnStyle = {
   color: "var(--chrome-text)", font: "inherit", fontSize: 12, fontWeight: 600, cursor: "pointer",
 };
 
-export default function FileMenu({ busy, notice, confirmReplace, onExportXlsx, onExportCsv, onImportXlsxFile, onImportCsvFile }) {
+// ⛔ NEW-1 (command palette) — `forwardRef` exposing `openImportXlsx`/`openImportCsv`, which just
+// click the SAME hidden `<input type=file>` refs the menu's own "Import Excel…"/"Import CSV…"
+// rows already click — so a palette-driven import opens the identical OS file picker through the
+// identical DOM node, never a second import trigger.
+const FileMenu = forwardRef(function FileMenu({ busy, notice, confirmReplace, onExportXlsx, onExportCsv, onImportXlsxFile, onImportCsvFile }, ref) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef(null);
   const xlsxInputRef = useRef(null);
   const csvInputRef = useRef(null);
+
+  useImperativeHandle(ref, () => ({
+    openImportXlsx: () => xlsxInputRef.current?.click(),
+    openImportCsv: () => csvInputRef.current?.click(),
+  }), []);
 
   const pick = (fn, ...args) => { setOpen(false); fn(...args); };
   const onXlsxFileChosen = (e) => {
@@ -106,4 +115,6 @@ export default function FileMenu({ busy, notice, confirmReplace, onExportXlsx, o
       <input ref={csvInputRef} type="file" accept=".csv" onChange={onCsvFileChosen} style={{ display: "none" }} data-testid="model-import-csv-input" />
     </span>
   );
-}
+});
+
+export default FileMenu;

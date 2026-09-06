@@ -222,6 +222,12 @@ export default function SheetView({
   // non-dismissed ones (ModelApp.jsx applies `isInconsistencyDismissed`) — a plain array of
   // `{row, col, kind, axes, message}` from lib/formulaConsistency.js.
   inconsistencies = null,
+  // ⛔ NEW-1 (command palette + reduced Home ribbon) — Borders/Sort/Name Manager moved OFF the
+  // Home ribbon (occasional, not daily, operations — lib/commandRegistry.js and the palette are
+  // now their primary home); the cell right-click menu is their SECOND reachable place, per the
+  // owner's own "let the rest live in the palette and the right-click menu" instruction. Each
+  // calls the identical ModelApp.jsx handler the palette does.
+  onApplyBorder, onSort, onToggleNameManager,
 }) {
   const outerRef = useRef(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -714,6 +720,19 @@ export default function SheetView({
       freezeLabel
         ? { key: "unfreeze", label: freezeLabel, onClick: () => onSetFreeze(0, 0) }
         : { key: "freeze", label: "Freeze panes", onClick: () => onSetFreeze(r, c) },
+      // ⛔ NEW-1 (command palette + reduced Home ribbon) — the same three action families the
+      // ribbon used to render as their own groups, reached here now that they're occasional
+      // rather than daily. Calls the SAME onApplyBorder/onSort/onToggleNameManager handlers the
+      // palette does — see this component's own header note above.
+      "divider",
+      { key: "borderOutline", label: "Outline border", onClick: () => onApplyBorder({ edges: ["top", "right", "bottom", "left"], style: "thin", mode: "outline" }) },
+      { key: "borderAll", label: "All borders", onClick: () => onApplyBorder({ edges: ["top", "right", "bottom", "left"], style: "thin", mode: "all" }) },
+      { key: "borderNone", label: "No border", onClick: () => onApplyBorder({ edges: ["top", "right", "bottom", "left"], style: null, mode: "all" }) },
+      "divider",
+      { key: "sortAsc", label: "Sort A to Z", onClick: () => onSort("asc") },
+      { key: "sortDesc", label: "Sort Z to A", onClick: () => onSort("desc") },
+      "divider",
+      { key: "nameManager", label: "Name Manager…", onClick: () => onToggleNameManager() },
     ];
     setContextMenu({ point: { x: e.clientX, y: e.clientY }, items });
   };
