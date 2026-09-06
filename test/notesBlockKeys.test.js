@@ -92,6 +92,52 @@ describe("blockStartAction — which single step a Backspace at position zero ta
     expect(actionAt(d, [1, 0, 0])).toBe("list-item-to-paragraph");
   });
 
+  /* ── B1260000: the owner's iPhone repro — an EMPTY item WITH a nested child, the one cell of
+   * the matrix REPRO A/B never drove (both used a NON-empty item's own text). The decision does
+   * not read the item's own text at all, so it must be identical to REPRO A/B; a divergence here
+   * would mean the table itself, not just an input path, treats "empty" as a special case it
+   * should not be. ─────────────────────────────────────────────────────────────────────────── */
+  it("⛔ B1260000 — an EMPTY top-level bullet WITH a nested child still just leaves the list", () => {
+    const d = doc(P("Tell Talbert I'll be the main POC"), UL(LI("", UL(LI("9/21 for striping of Bass Blvd.")))), P("Figure out who Talbert sent the email to"));
+    expect(actionAt(d, [1, 0, 0])).toBe("list-item-to-paragraph");
+  });
+
+  it("⛔ B1260000 — an EMPTY NESTED bullet WITH a nested child of its own still just outdents", () => {
+    const d = doc(P("para one"), UL(LI("bullet one", UL(LI("", UL(LI("grandchild")))))));
+    expect(actionAt(d, [1, 0, 1, 0, 0])).toBe("outdent-list-item");
+  });
+
+  it("⛔ B1260000 — an EMPTY NESTED bullet with NO children of its own still just outdents", () => {
+    const d = doc(P("para one"), UL(LI("bullet one", UL(LI("")))));
+    expect(actionAt(d, [1, 0, 1, 0, 0])).toBe("outdent-list-item");
+  });
+
+  it("⛔ B1260000 — the same EMPTY-item-with-nested-child shape for numbered lists and checklists", () => {
+    expect(actionAt(doc(P("x"), OL(LI("", OL(LI("child"))))), [1, 0, 0])).toBe("list-item-to-paragraph");
+    expect(actionAt(doc(P("x"), TL(TI("", TL(TI("child"))))), [1, 0, 0])).toBe("list-item-to-paragraph");
+    const w = verdictAt(doc(P("x"), TL(TI("outer", TL(TI("", TL(TI("grandchild"))))))), [1, 0, 1, 0, 0]);
+    expect(w.action).toBe("outdent-list-item");
+    expect(w.itemType).toBe("taskItem");
+  });
+
+  it("⛔ B1260000 — an EMPTY top-level item is still the DOCUMENT'S FIRST block, with a child", () => {
+    // No preceding paragraph at all — "nothing above to join with" still applies with a child.
+    expect(actionAt(doc(UL(LI("", UL(LI("child"))))), [0, 0, 0])).toBe("list-item-to-paragraph");
+  });
+
+  it("⛔ B1260000 — a list item immediately after a HEADING, empty, with a nested child", () => {
+    expect(actionAt(doc(H("Heading"), UL(LI("", UL(LI("child"))))), [1, 0, 0])).toBe("list-item-to-paragraph");
+  });
+
+  it("a NON-empty bullet at the start is still the ordinary join into the block above (control)", () => {
+    // The counterpart the brief asks for explicitly: this must MERGE, never delete, the block
+    // above — distinguishing "the caret is at position zero of a later block inside the item"
+    // (join, within the item) is out of scope here since this IS the item's first block, so the
+    // verdict is the structural one (list-item-to-paragraph); the actual merge is press 2 — see
+    // REPRO B's "second press joins" case in the e2e harness for the destructive step itself.
+    expect(actionAt(doc(P("para one"), UL(LI("bullet one"))), [1, 0, 0])).toBe("list-item-to-paragraph");
+  });
+
   /* ── the rest of the list surface ─────────────────────────────────────────────────────── */
   it("reads a numbered list and a checklist by the same rule as bullets", () => {
     expect(actionAt(doc(P("x"), OL(LI("one"), LI("two"))), [1, 0, 0])).toBe("list-item-to-paragraph");

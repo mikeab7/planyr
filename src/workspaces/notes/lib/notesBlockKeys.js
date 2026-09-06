@@ -33,6 +33,35 @@
  * against the real built app and asserts the resulting DOCUMENT TREE — node types, nesting
  * depth, child counts, and that no empty node appeared.
  *
+ * ⛔ B1260000, reported from his iPhone: an EMPTY top-level bullet carrying a NESTED, non-empty
+ * child deleted the PARAGRAPH ABOVE THE LIST on one press. AUDIT-FIRST found that this exact
+ * combination — empty item, non-empty child — was the one cell of the matrix nothing here had
+ * ever driven: `test/notesBlockKeys.test.js` and this file's own e2e harness each covered
+ * "non-empty item + nested child" (REPRO B) and "empty item, no children" separately, never
+ * together, and `ui-audit/find-backspace-symptoms.mjs`'s sweep never generated an EMPTY outer
+ * item either. Measured against the real built app with a real keypress: `blockStartAction`'s
+ * existing "list-item-to-paragraph" row and Chromium's own fallback keymap BOTH already handle
+ * this shape correctly — no data loss reproduces on desktop with either path. The mechanism is
+ * the one thing that differs between his platform and this sandbox's: `addKeyboardShortcuts`
+ * is a `keydown` keymap, and iOS Safari's software keyboard is documented to delete backward as
+ * a `beforeinput` (`deleteContentBackward`) that does not always carry a `keydown` a keymap can
+ * intercept — the platform's own native list-editing runs FIRST and ProseMirror's DOM-diffing
+ * only gets to interpret whatever that native edit already did, which is not obliged to agree
+ * with the table below. `addProseMirrorPlugins()`'s `beforeinput` handler asks the SAME
+ * question on the SAME state and prevents the native edit before it can run, so the outcome no
+ * longer depends on which event the platform happens to deliver — proven by disabling the
+ * `keydown` path alone and re-running the owner's exact document through a REAL physical
+ * Backspace: the `beforeinput` handler took over and produced the identical correct result,
+ * and `ui-audit/verify-notes-backspace-beforeinput.mjs` red/green-proves it independently of
+ * `keydown` entirely (a synthetic `beforeinput` dispatch, which Chromium performs no native
+ * edit for, so only the plugin itself can produce the transaction). Also re-run this file's
+ * whole table against real WebKit (Playwright's Linux build, installable per VERIFICATION.md) —
+ * every B1260000 row passed there too. What none of this can reach: real Mobile Safari's
+ * on-screen keyboard bridge, which is what actually produces a `beforeinput` with no matching
+ * `keydown` — Playwright's keyboard automation always synthesizes a full physical-key sequence
+ * on every engine available here, WebKit included. Not independently confirmed on a real
+ * iPhone — see VERIFICATION.md.
+ *
  * ═══════════════════════════════════════════════════════════════════════════════════════
  * WHAT BACKSPACE DOES AT POSITION ZERO. This table is the specification.
  * ═══════════════════════════════════════════════════════════════════════════════════════
@@ -73,7 +102,7 @@
  * position zero.
  */
 import { Extension } from "@tiptap/core";
-import { Selection } from "@tiptap/pm/state";
+import { Plugin, PluginKey, Selection } from "@tiptap/pm/state";
 
 /** Above Tiptap's default (100) so this is asked before `joinBackward` AND before
  *  `ListKeymap`, and nowhere near `notesTabKey`'s deliberately LOW priority. */
@@ -221,6 +250,43 @@ const NoteBlockKeys = Extension.create({
         return runBlockStartAction(editor, verdict);
       },
     };
+  },
+
+  /* ⛔ THE SAFETY NET `addKeyboardShortcuts` CANNOT REACH (NEW-1, reported from an iPhone).
+   * That hook is a `keydown`-bound keymap, and some mobile software keyboards delete backward
+   * as a `beforeinput` (`inputType: "deleteContentBackward"`) with no `keydown` a keymap can
+   * see — the platform's own contenteditable edit runs FIRST, and ProseMirror's DOM-diffing
+   * (`domObserver`) only gets to interpret whatever that native edit already did to the DOM. A
+   * native list-editing routine is not obliged to agree with the table above, and there is no
+   * reason to trust that it does for a nested, otherwise-empty list item.
+   *
+   * This plugin asks `blockStartAction` the identical question, on the identical state, and —
+   * if this press is one of the table's rows — calls `preventDefault()` on the `beforeinput`
+   * itself (which IS cancelable, same as a `keydown`) and runs the same decision. On a normal
+   * desktop keydown this branch never runs at all: the keymap's own `preventDefault` already
+   * cancelled the browser's default action, so no `beforeinput` for it is ever dispatched. It
+   * is purely a backstop for the path that skips `keydown` — same table, same outcome, whichever
+   * event the platform actually gives us. */
+  addProseMirrorPlugins() {
+    const { editor } = this;
+    return [
+      new Plugin({
+        key: new PluginKey("noteBlockKeysBeforeInput"),
+        props: {
+          handleDOMEvents: {
+            beforeinput: (view, event) => {
+              if (event.inputType !== "deleteContentBackward") return false;
+              if (editor.isDestroyed || !editor.isEditable) return false;
+              if (editor.commands.undoInputRule()) { event.preventDefault(); return true; }
+              const verdict = blockStartAction(view.state);
+              if (!verdict) return false;
+              event.preventDefault();
+              return runBlockStartAction(editor, verdict);
+            },
+          },
+        },
+      }),
+    ];
   },
 });
 

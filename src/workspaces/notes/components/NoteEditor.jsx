@@ -1203,6 +1203,19 @@ export default function NoteEditor({
        *  schema rule a click would) — for a harness that needs to state "run X" precisely
        *  rather than reconstruct the exact click/keypress that reaches it. */
       runCommand: (name, ...args) => (editor.isDestroyed ? false : !!editor.commands[name]?.(...args)),
+      /** ⛔ B1260000 — the `beforeinput` path a `keydown`-only test can never reach on its own.
+       *  A real keypress in Chromium always fires a `keydown` first, so a harness driving the
+       *  keyboard can never independently prove the `beforeinput` backstop in `notesBlockKeys.js`
+       *  is what actually ran — it could just as easily be `keydown` doing the work with the
+       *  backstop sitting dead. This dispatches a SYNTHETIC `beforeinput` directly on the
+       *  editor's DOM node — untrusted, so the browser performs no native edit of its own for
+       *  it — which exercises ONLY the plugin's `handleDOMEvents.beforeinput`, exactly the event
+       *  class his platform is documented to deliver without a usable `keydown`. */
+      dispatchBeforeInput: (inputType = "deleteContentBackward") => {
+        if (editor.isDestroyed) return;
+        const event = new InputEvent("beforeinput", { inputType, cancelable: true, bubbles: true });
+        editor.view.dom.dispatchEvent(event);
+      },
     };
     window.__noteEditor = hook;
     return () => { if (window.__noteEditor === hook) window.__noteEditor = null; };

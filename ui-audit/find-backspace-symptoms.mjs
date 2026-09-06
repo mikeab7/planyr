@@ -1,5 +1,5 @@
-/* SEARCH for the owner's two reported SYMPTOMS across list-shaped documents, on whatever
- * build is being served (B291536).
+/* SEARCH for the owner's reported SYMPTOMS across list-shaped documents, on whatever build is
+ * being served (B291536, extended by B1260000).
  *
  * ⛔ WHY THIS EXISTS AND WHY IT IS COMMITTED. The first pass at B291536 could not reproduce
  * *"bullet onebullet two"* as ONE item, or the EMPTY ORPHAN bullet, on a plain three-block
@@ -7,7 +7,15 @@
  * met, and 26 of 37 rows stayed green with the fix reverted. A row that passes on the broken
  * build is not evidence. This is the instrument that closes that: it sweeps list-shaped
  * documents and caret positions, presses a REAL Backspace once at each, and reports every
- * position that produces either symptom BY NAME.
+ * position that produces any of THREE symptoms BY NAME.
+ *
+ * ⛔ B1260000 ADDED THE THIRD SYMPTOM AND THE ONE CELL OF THE MATRIX THAT WAS MISSING. Every
+ * row here used to give the OUTER item its own text ("A1"); the owner's iPhone report was an
+ * EMPTY outer item carrying a non-empty nested child, which this sweep had never once
+ * generated. And a whole paragraph OUTSIDE any list disappearing (his "Tell Talbert…") is
+ * invisible to the first two symptoms — both only look INSIDE list items. LOST CONTENT below
+ * closes that: any label present anywhere in the document before the press that is gone from
+ * the whole document after it.
  *
  * Run it against a build with the fix REVERTED to find the defect rows; run it against the
  * fixed build and it must come back with NOTHING.
@@ -49,6 +57,11 @@ for (const [oname, O, OI] of OUTER) {
     CORPUS.push([`${oname} > ${iname}, two inner items`, doc(P("A0"), O(OI("A1", I(II("A2"), II("A3")))))]);
     CORPUS.push([`${oname} > ${iname}, sibling after`, doc(P("A0"), O(OI("A1", I(II("A2"))), OI("A3")))]);
     CORPUS.push([`${oname} > ${iname}, EMPTY inner item`, doc(P("A0"), O(OI("A1", I(II("")))))]);
+    /* B1260000: the owner's iPhone repro — the OUTER item itself is empty and carries a
+     * non-empty nested child. Never generated before this line: every other row here gives the
+     * outer item its own text ("A1"), so this exact combination was the one cell of the matrix
+     * nothing had ever driven. */
+    CORPUS.push([`${oname} > ${iname}, EMPTY OUTER item WITH a nested child`, doc(P("A0"), O(OI("", I(II("A2")))), P("A3"))]);
     CORPUS.push([`${oname} > ${iname} > ${iname}, three deep`, doc(P("A0"), O(OI("A1", I(II("A2", I(II("A3")))))))]);
     CORPUS.push([`${oname} > ${iname}, item with TWO paragraphs`, doc(P("A0"), O({ ...OI("A1"), content: [P("A1"), P("A1b"), I(II("A2"))] }))]);
     CORPUS.push([`${oname} then ${iname}, two SIBLING lists`, doc(O(OI("A1")), I(II("A2")), P("A3"))]);
@@ -63,6 +76,20 @@ const itemsOf = (d) => allNodes(d).filter((n) => n.type === "listItem" || n.type
 const textOfNode = (n) => allNodes(n).filter((x) => x.type === "text").map((x) => x.text).join("");
 const labelsIn = (s) => (s.match(/A\d+b?/g) || []);
 const emptyItems = (d) => itemsOf(d).filter((n) => textOfNode(n).trim() === "").length;
+/* B1260000: an item whose OWN first paragraph is already empty, counted WITHOUT looking at its
+ * descendants — distinct from `emptyItems`, which counts an item as empty only when its WHOLE
+ * recursive text is empty. An item that is empty at heart (its own line has nothing on it) but
+ * carries a non-empty nested child is invisible to `emptyItems` — and OUTDENTING that child is
+ * SUPPOSED to reveal the parent's already-latent emptiness as its own standalone empty bullet.
+ * That reveal is not a new husk; it is the expected result of "NESTED list item OUTDENTS one
+ * level" applied to exactly this shape, so it must not itself read as the ORPHAN symptom. */
+const shallowEmptyItems = (d) => itemsOf(d).filter((n) => textOfNode(n.content?.[0] || {}).trim() === "").length;
+/* B1260000: every label anywhere in the WHOLE document — not just inside list items — so a
+ * paragraph outside any list (his "Tell Talbert…" / "A0") that silently vanishes is caught too.
+ * Every caret this sweep presses sits at a TEXTBLOCK START, so a single Backspace there can
+ * never truncate a label's own text (it only restructures, merges, or selects) — a label that
+ * disappears entirely is content loss, never an expected partial edit. */
+const allLabels = (d) => new Set(labelsIn(allNodes(d).filter((n) => n.type === "text").map((n) => n.text).join(" ")));
 
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
 const ctx = await browser.newContext({ viewport: { width: 1500, height: 950 } });
@@ -92,7 +119,7 @@ for (const [name, d] of CORPUS) {
     window.__noteEditor.eachTextblockStart((pos, name) => out.push({ pos, name }));
     return out;
   }, d);
-  const before = { items: itemsOf(d).length, empties: emptyItems(d) };
+  const before = { items: itemsOf(d).length, empties: emptyItems(d), shallowEmpties: shallowEmptyItems(d), labels: allLabels(d) };
   /* The labels that were an item's OWN first line before the press — the only ones whose
    * co-occurrence afterwards means two ITEMS merged. */
   const ownLabelsBefore = new Set(itemsOf(d).flatMap((n) => labelsIn(n.content?.[0] ? textOfNode(n.content[0]) : "")));
@@ -114,14 +141,24 @@ for (const [name, d] of CORPUS) {
     const merged = itemsOf(after)
       .map((n) => ({ text: textOfNode(n), own: labelsIn(n.content?.[0] ? textOfNode(n.content[0]) : "") }))
       .filter((x) => new Set(x.own.filter((l) => ownLabelsBefore.has(l))).size > 1);
-    /* SYMPTOM 2 — an EMPTY ORPHAN list item that was not there before. */
-    const orphan = emptyItems(after) > before.empties;
+    /* SYMPTOM 2 — an EMPTY ORPHAN list item that was not there before. Guarded against
+     * B1260000's false positive: an item already empty at heart (own paragraph blank, a
+     * non-empty child masking it from the recursive count) LEGITIMATELY becomes a standalone
+     * recursively-empty item once that child outdents away — that reveal is the correct result
+     * of outdenting, not a new husk, so it must not count as more orphans than were already
+     * latent. */
+    const orphan = emptyItems(after) > Math.max(before.empties, before.shallowEmpties);
+    /* SYMPTOM 3 (B1260000) — LOST CONTENT: a label present anywhere in the document before the
+     * press is gone from the WHOLE document after it. This is the owner's "the paragraph above
+     * got deleted" class, which lives outside any list item and so symptoms 1/2 cannot see it. */
+    const lost = [...before.labels].filter((l) => !allLabels(after).has(l));
 
-    if (merged.length || orphan) {
-      hits.push({ name, caret: s.name, pos: s.pos, merged: merged.map((m) => m.text), orphan });
+    if (merged.length || orphan || lost.length) {
+      hits.push({ name, caret: s.name, pos: s.pos, merged: merged.map((m) => m.text), orphan, lost });
       console.log(`  ⛔ ${name}  ·  caret at start of "${s.name}"`);
       if (merged.length) console.log(`       MERGE — one item now reads ${merged.map((m) => JSON.stringify(m.text)).join(", ")}`);
       if (orphan) console.log(`       EMPTY ORPHAN list item (${before.empties} → ${emptyItems(after)})`);
+      if (lost.length) console.log(`       LOST CONTENT — ${lost.join(", ")} no longer anywhere in the document`);
     }
   }
 }
