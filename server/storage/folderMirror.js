@@ -286,6 +286,32 @@ export async function treeParentForUpload({ store, projectId, discipline, folder
   }
 }
 
+/* B1235169 — trash a PURGED project's ENTIRE Drive folder tree in one call: the whole-project
+ * counterpart to the per-subtree `trashes` loop inside `syncProjectFolders`. A project's Drive
+ * root is `<uid>/project-<slug>` (the same path `folderId()` resolves everywhere else in this
+ * file — see the module header), so trashing it needs no per-folder bookkeeping at all: Drive
+ * cascades the trash to every mirrored subfolder AND every document filed under it (functions/
+ * api/files.js shares this exact root with the folder mirror).
+ *
+ * Only trashes when the tree was ACTUALLY mirrored (some row carries a `driveFolderId`) — a
+ * project whose folders never reached Drive has nothing there to remove, and calling `folderId()`
+ * unconditionally would silently CREATE an empty folder just to immediately trash it. */
+export async function purgeProjectDrive({ projectId, userId, client, store }) {
+  if (!projectId) return { ok: false, error: "Missing projectId." };
+  const rows = await store.list(projectId);
+  // A failed index read must be LOUD, not a false "nothing to trash" (same discipline as every
+  // other null-store guard in this file) — the caller's row-delete still proceeds regardless.
+  if (rows === null) return { ok: false, error: "Couldn't read the folder index — the Drive folder may still remain." };
+  if (!rows.some((r) => r.driveFolderId)) return { ok: true, trashed: false }; // never mirrored — nothing in Drive
+  try {
+    const projectRoot = await client.folderId(`${userId}/project-${slugSeg(projectId)}`);
+    await client.trash(projectRoot);
+    return { ok: true, trashed: true };
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || "Couldn't trash the project's Drive folder." };
+  }
+}
+
 /* Enumerate exactly what deleting `folderId`'s subtree would remove from Drive, for the loud
  * confirmation the brief requires. Returns { ok, folders:[{id,name}], files:[{name,folder}] }.
  * Folders come from the index (always known); files are read LIVE from Drive (so it catches
