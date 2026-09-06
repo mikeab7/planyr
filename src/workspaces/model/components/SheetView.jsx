@@ -1245,20 +1245,29 @@ export default function SheetView({
               key={`${group[0].atCell.row}:${group[0].atCell.col}`}
               style={{ position: "absolute", left: rect.right, top: rect.top, transform: "translate(-100%, 0)", zIndex: 4, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1, pointerEvents: "none" }}
             >
-              {group.map((mk, i) => (
+              {group.map((mk, i) => {
+                // spreadsheet-live-data-refs — a "project" marker (Site.Acres, Comp.<title>.…)
+                // names where a number came from (the TRACEABLE requirement) but has no cell to
+                // jump to — same pill, no click-through, and the title names the real source
+                // rather than "another sheet".
+                const isProjectRef = !mk.targetSheetId;
+                return (
                 <button
                   key={i}
                   type="button"
-                  data-testid="model-trace-cross-sheet-marker"
-                  title={`${mk.direction === "in" ? "Precedent on another sheet" : "Feeds a cell on another sheet"} — ${mk.label}. Click to go there.`}
-                  onClick={() => onNavigateTrace && onNavigateTrace(mk.targetSheetId, mk.targetCell.row, mk.targetCell.col)}
+                  data-testid={isProjectRef ? "model-trace-project-marker" : "model-trace-cross-sheet-marker"}
+                  title={isProjectRef
+                    ? `Live project reference — ${mk.sourceLabel || mk.label}`
+                    : `${mk.direction === "in" ? "Precedent on another sheet" : "Feeds a cell on another sheet"} — ${mk.label}. Click to go there.`}
+                  onClick={isProjectRef ? undefined : () => onNavigateTrace && onNavigateTrace(mk.targetSheetId, mk.targetCell.row, mk.targetCell.col)}
                   style={{
                     pointerEvents: "auto", border: "1px solid var(--accent-model)", borderRadius: RADIUS.pill,
                     background: "var(--accent-model)", color: "var(--on-accent-model)", font: "inherit", fontSize: 10 * Math.max(zoom, 0.6), // FONT_SIZE.micro literal — designTokens.js note above (SheetView.jsx file header)
-                    lineHeight: 1, padding: "2px 5px", cursor: "pointer", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    lineHeight: 1, padding: "2px 5px", cursor: isProjectRef ? "default" : "pointer", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                   }}
                 >{mk.direction === "in" ? "← " : "→ "}{mk.label}</button>
-              ))}
+                );
+              })}
             </div>
           );
         })}

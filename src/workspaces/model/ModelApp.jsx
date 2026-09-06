@@ -72,6 +72,15 @@ import { readLocalSheet, writeLocalSheet, loadCloudSheet, saveCloudSheet } from 
 import { listProjects, reconcileProjects, onProjectsChanged } from "../../shared/projects/projects.js";
 import FileMenu from "./components/FileMenu.jsx";
 import { addSheetFromCsvText, sheetToCsv } from "./lib/csvIO.js";
+// spreadsheet-live-data-refs — the project's own data (site plan + comps), exposed read-only as
+// Site.*/Plan.*/Comp.* formula names (lib/projectRefs.js's own header). `onSiteModelChanged` is a
+// cross-workspace notification this feature added to storage.js (mirroring the pre-existing
+// `onProjectsChanged` shape exactly) so a live edit made in the still-mounted Site Planner tab
+// recalculates a formula here without a reload. `fetchAllComps` is the same async/Supabase-only
+// read CompsPanel.jsx uses — there is no synchronous comps cache anywhere in this repo.
+import { buildProjectNames } from "./lib/projectRefs.js";
+import { onSiteModelChanged } from "../site-planner/lib/storage.js";
+import { fetchProjectNameComps } from "./lib/projectCompsFetch.js";
 
 const CLOUD_PUSH_DEBOUNCE_MS = 800;
 // Excel round-trip (NEW-1) — lib/xlsxIO.js is dynamically imported (never a static import here)
@@ -169,6 +178,30 @@ export default function ModelApp({
     const off = onProjectsChanged(() => { if (live) setProjectsTick((n) => n + 1); });
     return () => { live = false; off(); };
   }, []);
+  // spreadsheet-live-data-refs — the two live inputs Site.*/Plan.*/Comp.* project names are built
+  // from (lib/projectRefs.js). `comps` is re-fetched on mount and on every project switch
+  // (compsStore.js is async/Supabase-only, no sync cache — see that module's own header);
+  // `siteTick` bumps on a DEBOUNCED site-content-changed notification, so a burst of drag-frame
+  // saves in the (possibly hidden) Site Planner tab recomputes the site model once, not per save.
+  const [comps, setComps] = useState([]);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const { data } = await fetchProjectNameComps();
+      if (live) setComps(data || []);
+    })();
+    return () => { live = false; };
+  }, [projectId]);
+  const [siteTick, setSiteTick] = useState(0);
+  const siteTickTimer = useRef(0);
+  useEffect(() => {
+    const off = onSiteModelChanged(() => {
+      clearTimeout(siteTickTimer.current);
+      siteTickTimer.current = window.setTimeout(() => setSiteTick((n) => n + 1), 600);
+    });
+    return () => { off(); clearTimeout(siteTickTimer.current); };
+  }, []);
+  const projectNames = useMemo(() => buildProjectNames(projectId, { comps }), [projectId, comps, siteTick]);
   const cloudVersionRef = useRef(null);
   const pushTimer = useRef(0);
   const loadTokenRef = useRef(0);
@@ -347,7 +380,7 @@ export default function ModelApp({
   // own formulas included) to be live inputs, not just the one tab the user happens to be
   // looking at. `.get(activeSheetId)` slices out the visible sheet's own results for
   // SheetView/displayFor/etc, which stay unaware anything changed.
-  const workbookEval = useMemo(() => evaluateWorkbook(workbook), [workbook]);
+  const workbookEval = useMemo(() => evaluateWorkbook(workbook, { projectNames }), [workbook, projectNames]);
   const evalResult = workbookEval.get(activeEntry.id);
   const totalRows = sheet.rowCount + padRowCount(sheet, 20);
 
@@ -435,12 +468,12 @@ export default function ModelApp({
     setFileBusy(true);
     try {
       const { exportWorkbookToXlsxBlob } = await loadXlsxIO();
-      const blob = await exportWorkbookToXlsxBlob(workbook);
+      const blob = await exportWorkbookToXlsxBlob(workbook, { projectNames });
       downloadBlob(blob, `${currentFileBaseName()}.xlsx`);
     } catch (e) {
       setFileNotice({ kind: "error", text: `Export to Excel failed: ${e?.message || e}` });
     } finally { setFileBusy(false); }
-  }, [workbook, currentFileBaseName]);
+  }, [workbook, currentFileBaseName, projectNames]);
 
   const onExportCsv = useCallback(() => {
     try {
