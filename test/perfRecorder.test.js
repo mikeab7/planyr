@@ -640,6 +640,7 @@ describe("wiring guards — the parts that only exist as a call site", () => {
   const recorder = src("shared/telemetry/perfRecorder.js");
   const main = src("main.jsx");
   const planner = src("workspaces/site-planner/SitePlanner.jsx");
+  const helpControl = src("app/HelpReportControl.jsx");
   const census = src("shared/storage/storageCensus.js");
   const panel = src("shared/storage/StoragePanel.jsx");
 
@@ -677,10 +678,15 @@ describe("wiring guards — the parts that only exist as a call site", () => {
     expect(planner).toMatch(/noteViewScale\(view\.ppf\)[^\n]*\}, \[view\.ppf\]\)/);
   });
 
-  it("the planner offers the manual control and it says when it failed", () => {
-    expect(planner).toContain('data-testid="report-slow"');
-    expect(planner).toContain('requestPerfCapture("manual")');
-    expect(planner).toContain('slowNote === "fail"');
+  /* B1231280/B1231281 — the manual control moved from the planner's own zoom stack into the
+   * global help/report control the app shell mounts on every route (one door, not two — see that
+   * file's own header note). The planner no longer carries any of this. */
+  it("the manual control lives in the global help/report control, not the planner canvas", () => {
+    expect(planner).not.toContain('data-testid="report-slow"');
+    expect(planner).not.toContain('requestPerfCapture("manual")');
+    expect(helpControl).toContain('data-testid="report-slow"');
+    expect(helpControl).toContain('requestPerfCapture("manual")');
+    expect(helpControl).toContain('slowNote === "fail"');
   });
 
   it("captures are stored in the LARGE tier and are declared non-reclaimable", () => {

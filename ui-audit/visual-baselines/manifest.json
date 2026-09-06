@@ -6,90 +6,90 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-09-05",
-        "approvedCommit": "055ac021",
-        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
+        "approvedAt": "2026-09-06",
+        "approvedCommit": "4e4bc104",
+        "note": "B1231281: removed the zoom stack's 4th button (the retired report-slow control), shrinking it from 4 to 3 buttons"
       },
       "dark": {
-        "approvedAt": "2026-09-05",
-        "approvedCommit": "055ac021",
-        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
+        "approvedAt": "2026-09-06",
+        "approvedCommit": "4e4bc104",
+        "note": "B1231281: removed the zoom stack's 4th button (the retired report-slow control), shrinking it from 4 to 3 buttons"
       },
       "light--phone": {
-        "approvedAt": "2026-09-05",
-        "approvedCommit": "055ac021",
-        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
+        "approvedAt": "2026-09-06",
+        "approvedCommit": "4e4bc104",
+        "note": "B1231281: removed the zoom stack's 4th button (the retired report-slow control), shrinking it from 4 to 3 buttons"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-05",
-        "approvedCommit": "055ac021",
-        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
+        "approvedAt": "2026-09-06",
+        "approvedCommit": "4e4bc104",
+        "note": "B1231281: removed the zoom stack's 4th button (the retired report-slow control), shrinking it from 4 to 3 buttons"
       }
     },
     "site-planner-header": {
       "light": {
-        "approvedAt": "2026-09-05",
-        "approvedCommit": "055ac021",
-        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
+        "approvedAt": "2026-09-06",
+        "approvedCommit": "4e4bc104",
+        "note": "B1231281: removed the zoom stack's 4th button (the retired report-slow control), shrinking it from 4 to 3 buttons"
       },
       "dark": {
-        "approvedAt": "2026-09-05",
-        "approvedCommit": "055ac021",
-        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
+        "approvedAt": "2026-09-06",
+        "approvedCommit": "4e4bc104",
+        "note": "B1231281: removed the zoom stack's 4th button (the retired report-slow control), shrinking it from 4 to 3 buttons"
       },
       "light--phone": {
-        "approvedAt": "2026-09-05",
-        "approvedCommit": "055ac021",
-        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
+        "approvedAt": "2026-09-06",
+        "approvedCommit": "4e4bc104",
+        "note": "B1231281: removed the zoom stack's 4th button (the retired report-slow control), shrinking it from 4 to 3 buttons"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-05",
-        "approvedCommit": "055ac021",
-        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
+        "approvedAt": "2026-09-06",
+        "approvedCommit": "4e4bc104",
+        "note": "B1231281: removed the zoom stack's 4th button (the retired report-slow control), shrinking it from 4 to 3 buttons"
       }
     },
     "site-planner-left-rail": {
       "light": {
-        "approvedAt": "2026-09-05",
-        "approvedCommit": "055ac021",
-        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
+        "approvedAt": "2026-09-06",
+        "approvedCommit": "4e4bc104",
+        "note": "B1231281: removed the zoom stack's 4th button (the retired report-slow control), shrinking it from 4 to 3 buttons"
       },
       "dark": {
-        "approvedAt": "2026-09-05",
-        "approvedCommit": "055ac021",
-        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
+        "approvedAt": "2026-09-06",
+        "approvedCommit": "4e4bc104",
+        "note": "B1231281: removed the zoom stack's 4th button (the retired report-slow control), shrinking it from 4 to 3 buttons"
       },
       "light--phone": {
-        "approvedAt": "2026-09-05",
-        "approvedCommit": "055ac021",
-        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
+        "approvedAt": "2026-09-06",
+        "approvedCommit": "4e4bc104",
+        "note": "B1231281: removed the zoom stack's 4th button (the retired report-slow control), shrinking it from 4 to 3 buttons"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-05",
-        "approvedCommit": "055ac021",
-        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
+        "approvedAt": "2026-09-06",
+        "approvedCommit": "4e4bc104",
+        "note": "B1231281: removed the zoom stack's 4th button (the retired report-slow control), shrinking it from 4 to 3 buttons"
       }
     },
     "library": {
       "light": {
-        "approvedAt": "2026-09-05",
-        "approvedCommit": "055ac021",
-        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
+        "approvedAt": "2026-09-06",
+        "approvedCommit": "4e4bc104",
+        "note": "B1231281: removed the zoom stack's 4th button (the retired report-slow control), shrinking it from 4 to 3 buttons"
       },
       "dark": {
-        "approvedAt": "2026-09-05",
-        "approvedCommit": "055ac021",
-        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
+        "approvedAt": "2026-09-06",
+        "approvedCommit": "4e4bc104",
+        "note": "B1231281: removed the zoom stack's 4th button (the retired report-slow control), shrinking it from 4 to 3 buttons"
       },
       "light--phone": {
-        "approvedAt": "2026-09-05",
-        "approvedCommit": "055ac021",
-        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
+        "approvedAt": "2026-09-06",
+        "approvedCommit": "4e4bc104",
+        "note": "B1231281: removed the zoom stack's 4th button (the retired report-slow control), shrinking it from 4 to 3 buttons"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-05",
-        "approvedCommit": "055ac021",
-        "note": "NEW-1 (B1186256), re-approved on the tree merged with main's PR #1443/#1445 changes: the site-planner-header and left-rail baselines correctly show the new Drainage rail tab and the Land Use table's new 'Drainage \\xe2\\x86\\x92' link, visually confirmed against actual screenshots (light+dark) on the merged tree before approving. map-landing was untouched by this diff."
+        "approvedAt": "2026-09-06",
+        "approvedCommit": "4e4bc104",
+        "note": "B1231281: removed the zoom stack's 4th button (the retired report-slow control), shrinking it from 4 to 3 buttons"
       }
     }
   }
