@@ -106,8 +106,10 @@ console.log("Scenario A — georeferenced plan (Identify enabled):");
 {
   const { ctx, page, errors, addBtn } = await openPanel(geoSite);
   ok(await addBtn.count() > 0 && await addBtn.isVisible(), "＋ Add parcel button present in the Parcel panel");
-  const bg = await addBtn.evaluate((el) => getComputedStyle(el).backgroundColor);
-  ok(["rgb(194, 65, 12)", "rgb(242, 107, 58)"].includes(bg), `＋ Add parcel reads as a primary action (accent bg: ${bg})`);
+  // NEW-1 (B1239328) — the Land tab redesign shrank ＋ Add from a full-width accent CTA to a single
+  // icon control in the header (draw/deed/identify/address all still live behind it). It no longer
+  // reads as a primary-action chip on purpose; assert its accessible name instead of its fill.
+  ok((await addBtn.getAttribute("aria-label")) === "＋ Add", "＋ Add is now the header's compact icon control");
 
   await addBtn.click();
   await page.waitForTimeout(350);

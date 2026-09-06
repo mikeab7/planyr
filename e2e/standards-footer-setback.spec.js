@@ -15,6 +15,7 @@
  * as it goes logged out (the control disables and says why); the write itself is the live check.
  */
 import { test, expect } from "@playwright/test";
+import { openModule } from "./helpers.js";
 import { PALETTES } from "../src/shared/theme/palette.js";
 
 /* The setback ring's default colour is a THEME token, not a constant this spec gets to restate:
@@ -32,6 +33,9 @@ const parcelCount = async (page) => ((await site(page)).parcels || []).length;
 
 async function startBlank(page) {
   await page.goto("/");
+  // Incidental fix, found while verifying B1239328/B1239329 live: the app now boots into a
+  // Dashboard landing page (unrelated to this spec) rather than straight into a workspace.
+  await openModule(page, "site-planner");
   await page.getByTestId("map-start-blank-menu-btn").click();
   await page.getByTestId("map-start-blank-menu-item").click();
   await expect(canvas(page)).toBeVisible();
@@ -39,7 +43,8 @@ async function startBlank(page) {
 
 async function drawParcel(page) {
   await page.locator('[data-rail-tab="parcel"]').click();
-  await page.getByTitle(/Add land to this plan/i).click();
+  const addLandBtn = page.getByTitle(/Add land to this plan/i);
+  if (await addLandBtn.count()) await addLandBtn.click(); // NEW-1 (B1239328): zero parcels renders the empty state directly, no ＋ Add icon to open first
   await page.getByRole("button", { name: /Draw a new boundary/i }).click();
   const box = await canvas(page).boundingBox();
   const ring = [[box.x + 220, box.y + 150], [box.x + 480, box.y + 150], [box.x + 480, box.y + 360], [box.x + 220, box.y + 360]];
@@ -133,11 +138,11 @@ test.describe("the setback line has the same tools as the parcel line", () => {
   test("one parcel can override the setback line without touching the others", async ({ page }) => {
     await startBlank(page);
     await drawParcel(page);
-    // Select the parcel by a LINE, not its interior (the interior stays free for building work).
-    // The setback ring is a grab target for its lot (B420), and the view zoom-to-fits after a
-    // draw, so take the target off the rendered ring rather than the coordinates we clicked.
-    const rb = await page.getByTestId("setback-ring").first().boundingBox();
-    await page.mouse.click(Math.round(rb.x + rb.width / 2), Math.round(rb.y));
+    // NEW-1 (B1239328): a freshly drawn parcel is born locked, and a locked parcel is click-through
+    // on the CANVAS by design (lock only ever affects the map, never the list — see the Land tab
+    // row's own comment). So select it from the Land tab list row instead of the canvas ring.
+    const pid = (await site(page)).parcels[0].id;
+    await page.getByTestId(`parcel-row-${pid}`).click();
     await expect(page.getByText("Boundary", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: /^Setback line color$/i }).first()).toBeVisible();
     await page.getByRole("button", { name: /^Reset setback line$/i }).first().click();  // reachable, no-op on a clean parcel

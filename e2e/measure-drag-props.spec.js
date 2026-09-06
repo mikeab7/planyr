@@ -7,6 +7,7 @@
  *  3. A measurement's value label HIDES at overview zoom (the B911-family LOD gate) and returns.
  */
 import { test, expect } from "@playwright/test";
+import { openModule } from "./helpers.js";
 
 const canvas = (p) => p.getByTestId("planner-canvas");
 const selected = (p) => p.getByTestId("measure-selected");
@@ -22,6 +23,9 @@ const measureCount = async (p) => (await measures(p)).length;
 
 async function startBlank(page) {
   await page.goto("/");
+  // Incidental fix, found while verifying B1239328/B1239329 live: the app now boots into a
+  // Dashboard landing page (unrelated to this spec) rather than straight into a workspace.
+  await openModule(page, "site-planner");
   await page.getByTestId("map-start-blank-menu-btn").click();
   await page.getByTestId("map-start-blank-menu-item").click();
   await expect(canvas(page)).toBeVisible();
@@ -159,7 +163,8 @@ test.describe("measurement drag / properties / label LOD (logged out)", () => {
 
     // Draw an axis-aligned rectangle parcel (top edge horizontal), via the Parcel draw tool.
     await page.locator('[data-rail-tab="parcel"]').click();
-    await page.getByTitle(/Add land to this plan/i).click();
+    const addLandBtn = page.getByTitle(/Add land to this plan/i);
+    if (await addLandBtn.count()) await addLandBtn.click(); // NEW-1 (B1239328): zero parcels renders the empty state directly, no ＋ Add icon to open first
     await page.getByRole("button", { name: /Draw a new boundary/i }).click();
     await expect(page.getByRole("button", { name: /Draw/, pressed: true })).toBeVisible();
     const box = await canvas(page).boundingBox();

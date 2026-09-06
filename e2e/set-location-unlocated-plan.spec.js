@@ -24,6 +24,7 @@
  * from `applyOriginState`, turns cases here red (see the run log on the item).
  */
 import { test, expect } from "@playwright/test";
+import { openModule } from "./helpers.js";
 
 const SITE_ID = "e2eSetLoc1";
 const P1 = "pSetLoc1";
@@ -58,6 +59,9 @@ async function openUnlocated(page) {
     localStorage.setItem("planarfit:currentSite:v1", id);
   }, [SITE_ID, unlocatedSite()]);
   await page.goto("/");
+  // Incidental fix, found while verifying B1239328/B1239329 live: the app now boots into a
+  // Dashboard landing page (unrelated to this spec) rather than straight into a workspace.
+  await openModule(page, "site-planner");
   await expect(canvas(page)).toBeVisible({ timeout: 30_000 });
   await expect.poll(async () => page.locator(`[data-feature="parcel:${P1}"]`).count(), { timeout: 20_000 })
     .toBeGreaterThan(0);
@@ -92,12 +96,17 @@ async function openParcelPanel(page) {
   await expect(tab).toHaveAttribute("aria-pressed", "true");
 }
 
-/* Select the parcel by clicking its rendered body, with the panel ALREADY open — the Parcel
+/* Select the parcel from the Land tab's own LIST, with the panel ALREADY open — the Parcel
  * record section is gated on there being a selected lot, so opening the panel afterward would
- * race the selection and read as "the panel never rendered". */
+ * race the selection and read as "the panel never rendered".
+ *
+ * NEW-1 (B1239328) — this parcel is seeded `locked: true` (the default for a freshly drawn/plotted
+ * boundary), and a locked parcel is now click-through on the CANVAS by design — the per-parcel
+ * replacement for the old plan-wide "Select parcels" toggle. Selecting it from the LIST still
+ * works unconditionally (lock only ever gates the map), so that's the route here now. */
 async function selectParcelWithPanel(page) {
   await openParcelPanel(page);
-  await page.locator(`[data-feature="parcel:${P1}"]`).first().click({ force: true, position: { x: 5, y: 5 } });
+  await page.getByTestId(`parcel-row-${P1}`).click();
   // The record body is lazily loaded (its own chunk) — wait for the real content, not the fallback.
   await expect(page.getByTestId("parcel-provenance")).toBeVisible({ timeout: 20_000 });
 }
@@ -177,42 +186,11 @@ test.describe("NEW-1 · a plan drawn with the GIS down can be put on the earth a
     expect(await ringFromStore(page)).toEqual(before);
   });
 
-  test("placement: TURN moves the drawing, SLIDE moves only where it sits", async ({ page }) => {
-    await openUnlocated(page);
-    await openParcelPanel(page);
-    await page.getByTestId("set-location-cta").click();
-    await page.getByTestId("set-location-search").fill("29.7858, -95.8244");
-    await page.getByTestId("set-location-find").click();
-    await page.getByTestId("set-location-confirm").click();
-    await expect.poll(async () => (await originFromStore(page))?.lat, { timeout: 10_000 }).toBeCloseTo(29.7858, 3);
-
-    // The Placement section only exists once the plan HAS a location.
-    await page.getByRole("button", { name: /^Placement/i }).first().click();
-    const before = await ringFromStore(page);
-    const originBefore = await originFromStore(page);
-
-    // SLIDE — the anchor moves, every drawn coordinate is untouched.
-    await page.getByTestId("placement-nudge-e").click();
-    await expect.poll(async () => (await originFromStore(page)).lon, { timeout: 10_000 }).toBeGreaterThan(originBefore.lon);
-    expect(await ringFromStore(page)).toEqual(before);
-
-    // TURN — the drawing rotates rigidly; side lengths are preserved, the anchor does not move.
-    const originAfterSlide = await originFromStore(page);
-    await page.getByTestId("placement-rot-cw").click();
-    await expect.poll(async () => JSON.stringify(await ringFromStore(page)), { timeout: 10_000 })
-      .not.toBe(JSON.stringify(before));
-    const turned = await ringFromStore(page);
-    const side = (r, i) => Math.hypot(r[(i + 1) % 4].x - r[i].x, r[(i + 1) % 4].y - r[i].y);
-    for (let i = 0; i < 4; i++) expect(side(turned, i)).toBeCloseTo(side(before, i), 3);
-    const originAfterTurn = await originFromStore(page);
-    expect(originAfterTurn.lat).toBeCloseTo(originAfterSlide.lat, 12);
-    expect(originAfterTurn.lon).toBeCloseTo(originAfterSlide.lon, 12);
-
-    // Both are ordinary undo frames.
-    await page.keyboard.press("Control+z");
-    await expect.poll(async () => JSON.stringify(await ringFromStore(page)), { timeout: 10_000 })
-      .toBe(JSON.stringify(before));
-  });
+  // "placement: TURN moves the drawing, SLIDE moves only where it sits" — REMOVED (B1239329). The
+  // whole Placement section (Turn the plan / Slide the plan / Move to a different spot…) was
+  // deleted along with its `plannerPlacementCmds.rotatePlan`/`nudgePlan` bodies (owner decision).
+  // `commitOrigin`'s own rotate-on-locate fold (the `rotateDeg` option, still exercised by the
+  // initial "set a location" flow above) is untouched.
 });
 
 test.describe("NEW-3 · a hand-drawn parcel carries a record, and says where it came from", () => {

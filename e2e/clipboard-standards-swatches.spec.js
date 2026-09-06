@@ -10,6 +10,7 @@
  * than being parked for a live pass (ATTEMPT-BEFORE-YOU-PARK).
  */
 import { test, expect } from "@playwright/test";
+import { openModule } from "./helpers.js";
 
 const canvas = (p) => p.getByTestId("planner-canvas");
 
@@ -30,6 +31,9 @@ const counts = async (page) => {
 
 async function startBlank(page) {
   await page.goto("/");
+  // Incidental fix, found while verifying B1239328/B1239329 live: the app now boots into a
+  // Dashboard landing page (unrelated to this spec) rather than straight into a workspace.
+  await openModule(page, "site-planner");
   await page.getByTestId("map-start-blank-menu-btn").click();
   await page.getByTestId("map-start-blank-menu-item").click();
   await expect(canvas(page)).toBeVisible();
@@ -162,7 +166,8 @@ test.describe("Ctrl+C / Ctrl+V copies whatever is selected (NEW-2 / NEW-6)", () 
     await startBlank(page);
 
     await page.locator('[data-rail-tab="parcel"]').click();
-    await page.getByTitle(/Add land to this plan/i).click();
+    const addLandBtn = page.getByTitle(/Add land to this plan/i);
+    if (await addLandBtn.count()) await addLandBtn.click(); // NEW-1 (B1239328): zero parcels renders the empty state directly, no ＋ Add icon to open first
     await page.getByRole("button", { name: /Draw a new boundary/i }).click();
     const box = await canvas(page).boundingBox();
     const ring = [[box.x + 220, box.y + 150], [box.x + 480, box.y + 150], [box.x + 480, box.y + 360], [box.x + 220, box.y + 360]];
@@ -256,7 +261,8 @@ test.describe("Standards: one Apply for the whole panel", () => {
 
     // Two parcels, so "Apply" has to be retroactive across more than one object.
     await page.locator('[data-rail-tab="parcel"]').click();
-    await page.getByTitle(/Add land to this plan/i).click();
+    const addLandBtn = page.getByTitle(/Add land to this plan/i);
+    if (await addLandBtn.count()) await addLandBtn.click(); // NEW-1 (B1239328): zero parcels renders the empty state directly, no ＋ Add icon to open first
     await page.getByRole("button", { name: /Draw a new boundary/i }).click();
     const box = await canvas(page).boundingBox();
     const ring = [[box.x + 220, box.y + 150], [box.x + 480, box.y + 150], [box.x + 480, box.y + 360], [box.x + 220, box.y + 360]];

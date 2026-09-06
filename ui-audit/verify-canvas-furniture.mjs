@@ -80,15 +80,14 @@ try {
   // ─────────────────────────────────────────── PART A — Site Planner canvas furniture
   console.log("\nPART A — Site Planner canvas furniture (north arrow · scale bar · calibration badge · coordinate chip · Properties/Tools FABs · the bottom-centre canvas toast · road-draft status strip)");
   const PARCEL = [{ x: 0, y: 0 }, { x: 800, y: 0 }, { x: 800, y: 600 }, { x: 0, y: 600 }];
-  /* parcelSelect: false — so a press on the seeded parcel's boundary fires the SAME
-   * `parcel-select-hint` toast B311/NEW-1 already ships, which renders through the identical
-   * shared `toastPill` object (position, background, everything) as every other bottom-centre
-   * canvas toast on this surface — the pob/route/deed-align pill, the overlay-calibration pill,
-   * and the B754752 keyboard scope-guard hint ("Delete went to the box you're typing in" /
-   * "the keyboard is still on the panel"). Proving ONE toast never collides with this furniture
-   * proves it for all of them, because they share one positioning rule (`toastCenterX`,
-   * SitePlanner.jsx) rather than each computing their own. */
-  const site = { s_furn: { id: "s_furn", groupId: "s_furn", site: "Furniture Verify", name: "Plan 1", status: "active", origin: { lat: 29.80, lon: -95.83 }, county: "harris", parcels: [{ id: "pA", points: PARCEL, locked: true }], els: [], measures: [], callouts: [], markups: [], deletedIds: [], settings: { parcelSelect: false }, underlay: null, updatedAt: 1755000000000 } };
+  // NOTE (B1239328): the `parcel-select-hint` toast this section used to raise (by seeding a
+  // LOCKED parcel with the old plan-wide "Select parcels" toggle OFF, so a boundary press was a
+  // provable click-through) was removed along with that whole mechanism — locking is now a
+  // per-parcel attribute with no toast of its own. The parcel below stays LOCKED (still exercises
+  // real click-through geometry for other purposes in this file) but no longer produces a toast to
+  // check against this furniture; the road-draft-status strip check further down still exercises a
+  // bottom-centre surface against the same furniture set.
+  const site = { s_furn: { id: "s_furn", groupId: "s_furn", site: "Furniture Verify", name: "Plan 1", status: "active", origin: { lat: 29.80, lon: -95.83 }, county: "harris", parcels: [{ id: "pA", points: PARCEL, locked: true }], els: [], measures: [], callouts: [], markups: [], deletedIds: [], settings: {}, underlay: null, updatedAt: 1755000000000 } };
   const seedSite = `(() => { try { localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify(site)})); localStorage.setItem('planarfit:currentSite:v1', 's_furn'); } catch (e) {} })();`;
 
   for (const width of WIDTHS) {
@@ -102,21 +101,6 @@ try {
     const svgBox = await page.locator('svg[aria-label="Site plan canvas"]').boundingBox().catch(() => null);
     if (svgBox) { await page.mouse.move(svgBox.x + svgBox.width / 2, svgBox.y + svgBox.height / 2, { steps: 3 }); await pacedWait(page, 500); }
 
-    // Press the rendered parcel's own boundary (its `data-feature="parcel:pA"` group, an
-    // axis-aligned rect on screen since the view is north-up) with parcelSelect off — this is
-    // B311's real click-through repro and fires the parcel-select-hint toast honestly, not a
-    // synthetic state poke (SYNTHETIC-KEYS-DONT-EDIT's sibling caution for a click).
-    const parcelBox = await page.evaluate(() => {
-      const g = document.querySelector('[data-feature="parcel:pA"]');
-      if (!g) return null;
-      const r = g.getBoundingClientRect();
-      return { left: r.left, top: r.top, height: r.height };
-    });
-    if (parcelBox) {
-      await page.mouse.click(parcelBox.left + 2, parcelBox.top + parcelBox.height / 2);
-      await pacedWait(page, 500);
-    }
-
     const data = await page.evaluate(() => {
       const rectOf = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height }; };
       const toolsFab = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").trim() === "✎ Tools");
@@ -128,7 +112,6 @@ try {
       const plates = furnContainer ? [...furnContainer.children] : [];
       const scaleBarWrap = plates.find((p) => p.style.right);
       const northWrap = plates.find((p) => p.style.left);
-      const toast = document.querySelector('[data-testid="parcel-select-hint"]');
       // B914500 — the bottom-right zoom control column (+/−/fit/report-slow, "gbtn" buttons)
       // joins the furniture-collision set. It is positioned independently of FURNITURE_ROW
       // (a fixed `bottom:100`, nudged by the same narrow-width reserve as of the fix), so a
@@ -138,7 +121,7 @@ try {
       return {
         narrow: window.matchMedia("(max-width: 760px)").matches,
         toolsFab: rectOf(toolsFab), badge: rectOf(badge), cursorChip: rectOf(cursorChip),
-        scaleBar: rectOf(scaleBarWrap), north: rectOf(northWrap), toast: rectOf(toast),
+        scaleBar: rectOf(scaleBarWrap), north: rectOf(northWrap),
         zoomStack: rectOf(zoomStack),
       };
     });
@@ -177,20 +160,11 @@ try {
     check(`${width}px · zoom control does not overlap the scale bar`, overlapArea(data.zoomStack, data.scaleBar) === 0, `overlap=${overlapArea(data.zoomStack, data.scaleBar).toFixed(0)}px²`);
     check(`${width}px · zoom control does not overlap the north arrow`, overlapArea(data.zoomStack, data.north) === 0, `overlap=${overlapArea(data.zoomStack, data.north).toFixed(0)}px²`);
 
-    // B754752 — the bottom-centre canvas toast joins the furniture set. It must clear every
-    // OTHER piece the same way the badge already has to; a fixed viewport-centred toast could
-    // land under it at some width nobody had tested, which is exactly the class this item exists
-    // to close (the toast previously covered the Properties panel's own Length field, a fixed
-    // "50%" that ignored every other occupant of the corner it shares).
-    check(`${width}px · parcel-select-hint toast renders`, !!data.toast);
-    if (data.toast) {
-      check(`${width}px · toast does not overlap the north arrow`, overlapArea(data.toast, data.north) === 0, `overlap=${overlapArea(data.toast, data.north).toFixed(0)}px²`);
-      check(`${width}px · toast does not overlap the scale bar`, overlapArea(data.toast, data.scaleBar) === 0, `overlap=${overlapArea(data.toast, data.scaleBar).toFixed(0)}px²`);
-      check(`${width}px · toast does not overlap the calibration badge`, overlapArea(data.toast, data.badge) === 0, `overlap=${overlapArea(data.toast, data.badge).toFixed(0)}px²`);
-      if (data.narrow && data.toolsFab) {
-        check(`${width}px · toast does not overlap the Tools FAB`, overlapArea(data.toast, data.toolsFab) === 0, `overlap=${overlapArea(data.toast, data.toolsFab).toFixed(0)}px²`);
-      }
-    }
+    // B754752 — the bottom-centre canvas toast joins the furniture set: it must clear every
+    // OTHER piece, the same way the badge already has to (a fixed viewport-centred toast could
+    // land under it at some width nobody had tested). The `parcel-select-hint` toast this used to
+    // drive no longer exists (B1239328, see the seed comment above); the road-draft-status strip
+    // check below is what still exercises a bottom-centre toast against this same furniture set.
 
     // B750096 — the road-draft "finish" status strip (bottom-center, replaces the old in-canvas
     // click-swallowing chip) must join this SAME collision-aware furniture set: assert it never

@@ -9,6 +9,7 @@
  *     text" clears it back to auto.
  * Runs with no seeded account (like smoke.spec.js / click-behavior.spec.js). */
 import { test, expect } from "@playwright/test";
+import { openModule } from "./helpers.js";
 
 const canvas = (p) => p.getByTestId("planner-canvas");
 const panel = (p) => p.getByTestId("property-panel");
@@ -25,6 +26,9 @@ const firstCallout = (page) => firstSite(page).then((s) => (s.callouts || [])[0]
 
 async function startBlank(page) {
   await page.goto("/");
+  // Incidental fix, found while verifying B1239328/B1239329 live: the app now boots into a
+  // Dashboard landing page (unrelated to this spec) rather than straight into a workspace.
+  await openModule(page, "site-planner");
   await page.getByTestId("map-start-blank-menu-btn").click();
   await page.getByTestId("map-start-blank-menu-item").click();
   await expect(canvas(page)).toBeVisible();
@@ -55,7 +59,8 @@ test.describe("B911 — parcel edge dimension labels declutter on zoom-out", () 
     // Arm the parcel DRAW tool: Parcel panel → "＋ Add" → "Draw a new boundary". This docks the left
     // Parcel panel, which shifts the canvas — so capture the canvas box AFTER arming, not before.
     await page.locator('[data-rail-tab="parcel"]').click();
-    await page.getByTitle(/Add land to this plan/i).click();
+    const addLandBtn = page.getByTitle(/Add land to this plan/i);
+    if (await addLandBtn.count()) await addLandBtn.click(); // NEW-1 (B1239328): zero parcels renders the empty state directly, no ＋ Add icon to open first
     await page.getByRole("button", { name: /Draw a new boundary/i }).click();
     await expect(page.getByRole("button", { name: /Draw/, pressed: true })).toBeVisible();
     const box = await canvas(page).boundingBox();

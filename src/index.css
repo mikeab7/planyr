@@ -636,6 +636,14 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
    specificity + `!important`, matching the rule it overrides. */
 .menu button[data-hist-hi="1"]:hover:not(:disabled) { background: var(--canvas-accent-soft) !important; }
 
+/* NEW-1 (B1239328) — the Land tab's per-row zoom/lock/remove cluster reveals on row hover or
+   keyboard focus, rather than sitting on screen all the time (the always-visible ✕ column it
+   replaces cluttered every row). `:focus-within` keeps the cluster reachable by keyboard: tabbing
+   into the row's own select button reveals it, same as a mouse hover would. */
+.land-row-actions { opacity: 0; transition: opacity .12s; }
+.land-parcel-row:hover .land-row-actions,
+.land-parcel-row:focus-within .land-row-actions { opacity: 1; }
+
 /* card section headers */
 .sec-head:hover .sec-title { color: var(--text-primary); }
 

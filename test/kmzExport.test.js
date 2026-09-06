@@ -256,7 +256,7 @@ describe("buildKmz + kmzFilename", () => {
  *     so this bullet is historical only.
  */
 describe("no model-built export reads a canvas display toggle", () => {
-  const DISPLAY_ONLY = ["showDocks", "showGrid", "showDims", "showAreas", "showSetback", "parcelSelect"];
+  const DISPLAY_ONLY = ["showDocks", "showGrid", "showDims", "showAreas", "showSetback"];
   const MODEL_BUILT_EXPORTS = [
     "kmzExport.js", "printSheet.js", "imagePdf.js", "overlayVectorSvg.js",
     "sheetFurnitureLayout.js", "exportStyle.js", "exportLabelScale.js", "measureSheet.js",

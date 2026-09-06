@@ -17,6 +17,7 @@
  * merge complete and conserves area.
  */
 import { test, expect } from "@playwright/test";
+import { openModule } from "./helpers.js";
 
 const canvas = (page) => page.locator('[data-testid="planner-canvas"]');
 const warnToast = (page) => page.locator("text=/excluded from yield totals/i");
@@ -46,6 +47,9 @@ async function open(page, id, rec) {
     localStorage.setItem("planarfit:currentSite:v1", sid);
   }, [id, rec]);
   await page.goto("/");
+  // Incidental fix, found while verifying B1239328/B1239329 live: the app now boots into a
+  // Dashboard landing page (unrelated to this spec) rather than straight into a workspace.
+  await openModule(page, "site-planner");
   await expect(canvas(page)).toBeVisible({ timeout: 30_000 });
   await page.locator('[data-rail-tab="parcel"]').click();
   await expect(page.getByTestId("parcel-row-pA")).toBeVisible({ timeout: 20_000 });
@@ -65,8 +69,10 @@ test.describe("Merge-picking an inactive parcel refuses loudly, never silently (
 
     await expect(page.getByTestId("parcel-row-pB")).toContainText("· inactive");
 
-    // Enter merge-pick mode.
-    await page.getByRole("button", { name: /⧉ Merge/ }).click();
+    // Enter merge-pick mode — armed from the rail's Parcel tools flyout (B1239328: the Land tab's
+    // own "⧉ Merge" button was removed; "Combine parcels" in the flyout is the one home now).
+    await page.getByTestId("rail-parcel-tools").click();
+    await page.getByRole("button", { name: /^Combine parcels/ }).click();
 
     // Click the EXCLUDED parcel — must warn, never silently do nothing.
     await page.getByTestId("parcel-row-pB").click();

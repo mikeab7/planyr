@@ -1,10 +1,9 @@
-/* Parcel RECORD + plan PLACEMENT — the two Parcel-panel bodies from the "GIS is down" tranche.
+/* Parcel RECORD — the Parcel-panel body from the "GIS is down" tranche.
  *
  * Lifted out of `SitePlanner.jsx` and lazily loaded, for the reason `ParcelDataPanel.jsx` states in
- * its own header (the B1064 tranche): both of these render ONLY inside the Parcel panel, one of them
- * only for a selected lot and the other only once a plan has a location — a small fraction of
- * sessions — and the Site route's largest chunk has no headroom to spend on code most sessions
- * never reach. Extracting them is what pays for the tranche shipping at all.
+ * its own header (the B1064 tranche): it renders ONLY inside the Parcel panel, only for a selected
+ * lot — a small fraction of sessions — and the Site route's largest chunk has no headroom to spend
+ * on code most sessions never reach. Extracting it is what pays for the tranche shipping at all.
  *
  * PARCEL RECORD (NEW-3) — a lot pulled from a county identify arrives with an appraisal record; a
  * lot DRAWN by hand (what you do when the county service is down) arrived with geometry and nothing
@@ -13,18 +12,14 @@
  * provenance chip is the load-bearing part: a plan that is later reviewed must never present a
  * hand-drawn boundary as though it came from the county.
  *
- * PLACEMENT (NEW-1) — a boundary plotted from a deed never lands square on the aerial first try, so
- * the owner can TURN the plan onto true north and SLIDE where it sits. Those are deliberately
- * different words for deliberately different operations: turning moves the drawing, sliding moves
- * only the anchor (see lib/sitePlacement.js).
+ * NEW-2 (B1239329) — this module used to also export `PlacementControls` (the "TURN"/"SLIDE the
+ * plan" body). Removed along with the rest of the Placement section (owner decision).
  *
  * Props are passed rather than imported (`PAL`, `chip`, the border/surface tokens) exactly like every
  * other extracted panel — a module that reached back into the planner's palette would be hoisted
  * straight back onto the boot chunk.
  */
 import { PARCEL_FIELDS, parcelProvenance, provenanceLabel } from "../lib/parcelRecord.js";
-import { PinIcon } from "./icons.jsx";
-import { RADIUS } from "../../../shared/ui/radius.js";
 
 const label = { display: "block", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 2 };
 
@@ -107,46 +102,6 @@ export function ParcelRecord({ parcel, PAL, border, surface, onField, chip, onSe
           ↩ Go to the deed this came from
         </button>
       )}
-    </>
-  );
-}
-
-export function PlacementControls({
-  PAL, chip, border, surface, numFont, tabularNums,
-  rotApplied, stepDeg, onStepDeg, stepFt, onStepFt, onRotate, onNudge, onMove,
-}) {
-  const sel = { flex: "none", padding: "5px 6px", fontSize: 11.5, fontFamily: "inherit", border, borderRadius: RADIUS.sm, background: surface, color: PAL.ink };
-  const btn = { ...chip, flex: "none", minWidth: 34 };
-  return (
-    <>
-      <div style={{ fontSize: 11.5, color: PAL.muted, lineHeight: 1.5, marginBottom: 8 }}>
-        Line the drawing up with the aerial. Every step is undoable.
-      </div>
-      <div style={{ ...label, color: PAL.muted, marginBottom: 4 }}>Turn the plan</div>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
-        <button style={btn} title="Turn counter-clockwise" data-testid="placement-rot-ccw" onClick={() => onRotate(-stepDeg)}>↺</button>
-        <button style={btn} title="Turn clockwise" data-testid="placement-rot-cw" onClick={() => onRotate(stepDeg)}>↻</button>
-        <select value={stepDeg} onChange={(e) => onStepDeg(Number(e.target.value))} aria-label="Turn step" style={sel}>
-          {[0.1, 0.5, 1, 5, 15, 90].map((d) => <option key={d} value={d}>{d}°</option>)}
-        </select>
-        <span style={{ flex: 1 }} />
-        <span data-testid="placement-rot-readout" style={{ fontSize: 11.5, color: PAL.muted, fontFamily: numFont, fontVariantNumeric: tabularNums }}>
-          {rotApplied ? `${rotApplied > 0 ? "+" : ""}${rotApplied.toFixed(1)}°` : "—"}
-        </span>
-      </div>
-      <div style={{ ...label, color: PAL.muted, marginBottom: 4 }}>Slide the plan</div>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-        <button style={btn} title="Slide west" data-testid="placement-nudge-w" onClick={() => onNudge(-stepFt, 0)}>←</button>
-        <button style={btn} title="Slide north" data-testid="placement-nudge-n" onClick={() => onNudge(0, -stepFt)}>↑</button>
-        <button style={btn} title="Slide south" data-testid="placement-nudge-s" onClick={() => onNudge(0, stepFt)}>↓</button>
-        <button style={btn} title="Slide east" data-testid="placement-nudge-e" onClick={() => onNudge(stepFt, 0)}>→</button>
-        <select value={stepFt} onChange={(e) => onStepFt(Number(e.target.value))} aria-label="Slide step" style={sel}>
-          {[1, 5, 25, 100, 500].map((d) => <option key={d} value={d}>{d}′</option>)}
-        </select>
-      </div>
-      <button style={{ ...chip, width: "100%" }} data-testid="placement-move" onClick={onMove}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><PinIcon size={11} /> Move to a different spot…</span>
-      </button>
     </>
   );
 }

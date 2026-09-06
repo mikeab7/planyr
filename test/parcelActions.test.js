@@ -113,9 +113,14 @@ describe("gating: a row a plan can't use is VISIBLE and disabled, with the reaso
     }
   });
 
-  it("Combine needs two ACTIVE parcels — one active of three is not enough", () => {
-    expect(rowIn({ ...rich, activeCount: 1 }, "combine").enabled).toBe(false);
-    expect(rowIn({ ...rich, activeCount: 2 }, "combine").enabled).toBe(true);
+  it("Combine needs two parcels — active or not (NEW-1, B1239328)", () => {
+    // Gated on parcelCount, not activeCount: startMergePick itself has no active-count
+    // requirement, and gating entry on active count would make the B966626 refusal flow
+    // (pick an INACTIVE parcel while merge-picking → a named "reactivate it first" warning)
+    // unreachable the moment fewer than two parcels are active — exactly the owner's Bain report.
+    expect(rowIn({ ...rich, parcelCount: 1, activeCount: 1 }, "combine").enabled).toBe(false);
+    expect(rowIn({ ...rich, parcelCount: 2, activeCount: 1 }, "combine").enabled).toBe(true);
+    expect(rowIn({ ...rich, parcelCount: 2, activeCount: 0 }, "combine").enabled).toBe(true);
   });
 
   it("county identify and address lookup need a georeferenced plan", () => {

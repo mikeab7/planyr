@@ -119,7 +119,10 @@ describe("NEW-3 — real SVG icons, inheriting their row's colour", () => {
 });
 
 describe("NEW-3 (sweep) — the 📍 emoji is gone from every Site Planner control that used it", () => {
-  const files = ["LayerPanel", "ParcelRecordPanel", "JurisdictionBadge", "ParcelInfoCard"];
+  // ParcelRecordPanel dropped OFF this list (B1239329): its one PinIcon consumer was
+  // PlacementControls' "Move to a different spot…" button, removed with the whole Placement
+  // section. The file carries no 📍/PinIcon reference of its own any more — nothing to sweep.
+  const files = ["LayerPanel", "JurisdictionBadge", "ParcelInfoCard"];
   for (const f of files) {
     it(`${f}.jsx uses PinIcon instead of the emoji`, () => {
       const src = code(`../src/workspaces/site-planner/components/${f}.jsx`);
