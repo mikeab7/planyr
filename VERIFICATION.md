@@ -494,7 +494,7 @@ was never clicked" quietly ships broken.
 
 **Step 5 below is superseded: `window.__plannerViewChanges()` now returns far more than timestamps and stacks** (see **V881504** / `B1219152`) — every change carries the view before and after, whether a TRUSTED gesture authorised it, and a timeline of what arrived just before. **Read it with step 5' instead:**
 
-5'. Navigate to `?planyrDiag=1#/project/smqfy48tlk9j/site` (Goose Creek), open **Plan II — 220K, 440K, 700K GEOTECH**, let it settle, **leave the phone alone for several minutes**, come back, and pinch-zoom in. Then run `window.__plannerViewChanges()`. **Expect:** `counts.unrequested === 0` for everything after the initial boot framing, and `events` containing zero or more `frame:suppressed` rows (a suppressed row is the fix WORKING — it is a framing that was cancelled because you had already moved the view). **A FAIL looks like:** any row with `unrequested: true` and `kind: "zoom"` after you pinched. Report that row's `site`, `stack` and `precededBy` verbatim — they name exactly what did it, which is the thing no previous attempt could produce.
+5'. **On a throwaway DUPLICATE of Plan II** (owner constraint #7 — never one of his real plans; the duplicate carries the same geometry, overlay and parcels, and this check writes nothing, see V881504's corrected header), opened with `?planyrDiag=1`, let it settle, **leave the phone alone for several minutes**, come back, and pinch-zoom in. Then run `window.__plannerViewChanges()`. **Expect:** `counts.unrequested === 0` for everything after the initial boot framing, and `events` containing zero or more `frame:suppressed` rows (a suppressed row is the fix WORKING — it is a framing that was cancelled because you had already moved the view). **A FAIL looks like:** any row with `unrequested: true` and `kind: "zoom"` after you pinched. Report that row's `site`, `stack` and `precededBy` verbatim — they name exactly what did it, which is the thing no previous attempt could produce.
 
 **⛔ AMENDED 2026-09-06 — RECURRENCE (×3), THE ACTUAL ROOT CAUSE (found by his own instrument), AND A CLEAN TEETH PROOF.** He reported the same evening the (×2) fix merged: *"It's still going the buggy start up… it's something that's hitting the renderer."* `window.__plannerViewChanges()` — the very instrument (×2) shipped — caught it live on production build `4e4bc10`, Goose Creek: one `setView`, `gesture: null`, **`visibility: "hidden"`**, `ppf 0.35 → 0.0424` (an ~8× zoom-out), 3,978 ms after a cold load. Root cause: the (×2) gate answers "has the user taken the view?" and has no opinion on "can the view be honestly measured?" — a hidden cold boot has nobody at the wheel, so ownership is uncontested, and `fit()` divides by a `ResizeObserver`-fed `size` that a never-laid-out (backgrounded) container reports as a plausible-but-degenerate box. Fix: `mayFrame` takes a second `{ visible, measured }` readiness check (`lib/viewFramingGate.js`), refused before the ownership check, with a suppression **deferred and retried** against the same ticket (never dropped) once the tab is genuinely visible and measured. Full detail on `B1191456`'s NEW-3 amendment in `BACKLOG.md`.
 
@@ -519,14 +519,31 @@ was never clicked" quietly ships broken.
 
 **What was verified here (this session, sandbox).** `test/viewChangeRecorder.test.js` (16 tests) pins attribution in both directions, the untrusted-event refusal, the available-time window and its inverse, the replay dedupe and its inverse, and the ring bounds. The rig (`ui-audit/diagnose-idle-gesture-zoom.mjs`) drove the real build through the idle matrix — its mandatory known-good control arm recorded **12 gesture-attributed zoom changes from one real CDP touch pinch** and **4 from a wheel**, so the instrument is proven to SEE a gesture before any of its other rows are believed. Full repo suite, lint and build green.
 
+**⛔ CORRECTED 2026-09-06 — RUN THIS ON A THROWAWAY DUPLICATE OF PLAN II, NOT ON PLAN II.** As originally
+filed, every step below named his real **"Plan II — 220K, 440K, 700K GEOTECH"**, which contradicts the
+standing owner constraint *"a live check runs on a throwaway duplicate of a real plan, never on one of
+Michael's real plans — and the session says exactly what was touched"* (`/CLAUDE.md` → Owner product
+constraints #7). Caught on a later re-read of that section by the session that filed this item.
+**The read-only nature of the check is NOT an exemption and was not treated as one** — the constraint is
+stated flatly, the duplicate costs nothing, and a duplicate of Plan II carries the same geometry, the same
+site-plan overlay and the same three parcels, so it reproduces the condition exactly. **The DEVICE half is
+not negotiable and does not change:** it must be his own iPhone, signed in, because that is where the
+defect lives.
+**What this check touches, stated as the constraint requires:** nothing. It arms a read-only diagnostic,
+performs ordinary pinch gestures, and reads a log. The recorder writes no data, and the planner's view is
+component state with no persisted copy — so even the gestures leave nothing behind. **Delete the duplicate
+when done.**
+
 **Steps, each with a named expected result — on `planyr.io`, signed in, on his iPhone:**
+0. **Duplicate Plan II first** (plan menu → duplicate) and do every step below on the COPY. Note its plan id.
 1. Read the loaded chunk hash in the same observation as everything below (`document.querySelectorAll('script[src]')`) — confirm it names a chunk from a build after this PR merged. **A tab on a pre-fix bundle will reproduce the OLD behaviour and prove nothing.**
-2. Open `?planyrDiag=1#/project/smqfy48tlk9j/site` and pick **Plan II — 220K, 440K, 700K GEOTECH**. **Expect:** `typeof window.__plannerViewChanges === "function"` and calling it returns an object (not `null`) — that is the arming confirmed. If it returns `null`, the URL arming did not take; report that, it is a defect in the arming path.
+2. Open the DUPLICATE with `?planyrDiag=1` on the URL. **Expect:** `typeof window.__plannerViewChanges === "function"` and calling it returns an object (not `null`) — that is the arming confirmed. If it returns `null`, the URL arming did not take; report that, it is a defect in the arming path.
 3. Let it settle, then pinch-zoom in and out a few times. Run `window.__plannerViewChanges()`. **Expect:** every row has `unrequested: false` with a `gesture` naming `touchmove`.
 4. **The reported sequence.** Leave the app alone for several minutes (lock the phone, or switch apps). Come back and pinch-zoom in. Run `window.__plannerViewChanges()` again. **Expect:** no row with `unrequested: true` and `kind: "zoom"` after the point you came back. **If there IS one:** copy that row's `site`, `stack`, `precededBy`, `sinceGestureMs` and `blockedSinceGestureMs`, plus the surrounding `events` — that is the evidence three previous attempts could not obtain, and it names the culprit outright.
 5. **Control, so a clean result is not a vacuous one.** Confirm the log is not simply empty: step 3 must have produced rows. A recorder that records nothing would report a clean sheet for the wrong reason.
+6. **Delete the throwaway duplicate when done**, and say which plan id was created and removed.
 
-**Result:** ⏳ pending — needs his own signed-in phone on Goose Creek Plan II. `Cadence: once`.
+**Result:** ⏳ pending — needs his own signed-in phone, on a throwaway duplicate of Goose Creek Plan II. `Cadence: once`.
 
 ### V864433 — B1191457/NEW-2(b): a fresh tab on the bare domain no longer resumes the project just left (timing/race class)
 
