@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-06 @ `df8bb6c6` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-06 @ `820702ec` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_697 source files mapped._
+_699 source files mapped._
 
 ## infra
 
@@ -119,10 +119,12 @@ _697 source files mapped._
   - _exports_: `supabase`, `supabaseConfigured`
 - **`src/workspaces/food/lib/visitAggregates.js`** — Pure aggregation over a place's loaded visits: averages, visit count, first/last date, deduped "order again" entries
   - _exports_: `computeVisitAggregates`, `orderAgainEntries`
+- **`src/workspaces/model/components/CommandPalette.jsx`** — Model workspace command palette (Ctrl/Cmd+K, fuzzy search over commandRegistry.js, arrow keys + Enter, no mouse required)
+  - _exports_: `default (CommandPalette)`
 - **`src/workspaces/model/components/ContextMenu.jsx`** — The right-click context menu (cell/row-header/column-header), anchored at the click point via a zero-sized virtual anchor into the shared AnchoredMenu.
   - _exports_: `default (ContextMenu)`
 - **`src/workspaces/model/components/FileMenu.jsx`** — The Excel round-trip entry point in row-1's toolbar: Download/Import as .xlsx (primary) and CSV (deliberately secondary).
-  - _exports_: `default (FileMenu)`
+  - _exports_: `default`
 - **`src/workspaces/model/components/FindReplaceBar.jsx`** — The floating Find (Ctrl+F) / Replace (Ctrl+H) bar — searches raw cell text, never displayed values.
   - _exports_: `default (FindReplaceBar)`
 - **`src/workspaces/model/components/FormulaBar.jsx`** — The formula bar: shows the active cell's underlying formula/raw text (never the displayed value) and commits edits the same way as the in-cell editor.
@@ -132,11 +134,13 @@ _697 source files mapped._
 - **`src/workspaces/model/components/NameManager.jsx`** — The Name Manager panel: list/search/jump-to-target named ranges, plus a fast-path "New name" row bound live to the current selection.
   - _exports_: `default (NameManager)`
 - **`src/workspaces/model/components/Ribbon.jsx`** — The Home-tab ribbon (Clipboard/Font/Borders/Alignment/Number/Cells/Sort & Filter), responsive via ribbonLayout.js — every group collapses into its own "…" popover as the container narrows.
-  - _exports_: `default (Ribbon)`
+  - _exports_: `AuditGroup`, `default (Ribbon)`
 - **`src/workspaces/model/components/SheetView.jsx`** — The virtualised sheet grid: row virtualization, rectangular selection, keyboard nav and the inline cell editor, mechanism lifted from the Schedule module's GridView.
   - _exports_: `default (SheetView)`, `HEADER_H`, `ROW_H`
 - **`src/workspaces/model/components/TabStrip.jsx`** — The sheet tab strip: add/rename (inline)/duplicate/delete/reorder (drag) a workbook sheet, pinned below the grid, outside its own scroller.
-  - _exports_: `default (TabStrip)`, `TAB_STRIP_HEIGHT`
+  - _exports_: `default`, `TAB_STRIP_HEIGHT`
+- **`src/workspaces/model/lib/commandRegistry.js`** — the ONE list of every Model workspace action, shared by the command palette and the Ribbon so neither can drift from what the other does
+  - _exports_: `COMMAND_GROUPS`, `COMMANDS`, `decreaseIndentPatch`, `fuzzyScore`, `increaseIndentPatch`, `isCommandDisabled`, `resolveLabel`, `searchCommands`, `toggleBoldPatch`, `toggleItalicPatch`, `toggleStrikePatch`, `toggleUnderlinePatch`, `toggleWrapPatch`
 - **`src/workspaces/model/lib/csvIO.js`** — CSV round-trip: values-only export of the active sheet (via displayFor), import as a new appended sheet. Dependency-free.
   - _exports_: `addSheetFromCsvText`, `csvRowsToSheet`, `parseCsv`, `sheetToCsv`
 - **`src/workspaces/model/lib/formulaConsistency.js`** — Flags a formula whose R1C1-style shape breaks its row/column neighbours' pattern, or a hardcoded value sitting inside one; precision-tuned against a realistic pro-forma fixture.
