@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-05 @ `fe38d2f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-06 @ `2bbe426f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -493,7 +493,7 @@ _694 source files mapped._
 - **`src/shared/projects/projectModel.js`** — Pure project-model helpers: collapse site records into one project per site-group, name-match suggest, dropdown filter, and relative-time formatting for the breadcrumb switcher
   - _exports_: `DELETED_RETENTION_DAYS`, `filterProjects`, `groupProjects`, `markProjectFreshlyMinted`, `normalizeProjectName`, `projectGateStatus`, `relTime`, `resolveCurrentName`, `suggestNameMatch`, `unionProjectLists`, `wasProjectFreshlyMinted`, `withCurrentProject`
 - **`src/shared/projects/projects.js`** — Live project list for the breadcrumb switcher: groups the RLS-scoped site store, warms an empty on-device cache via cloud pull, and rename/delete a site-group project
-  - _exports_: `activeUid`, `checkProjectDeletionStatus`, `DELETED_RETENTION_DAYS`, `deleteProject`, `filterProjects`, `groupProjects`, `listDeletedProjects`, `listProjects`, `markProjectFreshlyMinted`, `normalizeProjectName`, `notifyProjectsChanged`, `onProjectsChanged`, `projectGateStatus`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `reconcileProjects`, `relTime`, `renameProject`, `restoreDeletedProject`, `suggestNameMatch`, `warmProjects`, `warmProjectsIfEmpty`, `wasProjectFreshlyMinted`
+  - _exports_: `activeUid`, `checkProjectDeletionStatus`, `DELETED_RETENTION_DAYS`, `deleteProject`, `ensureProjectExists`, `filterProjects`, `groupProjects`, `listDeletedProjects`, `listProjects`, `markProjectFreshlyMinted`, `normalizeProjectName`, `notifyProjectsChanged`, `onProjectsChanged`, `projectGateStatus`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `reconcileProjects`, `relTime`, `renameProject`, `restoreDeletedProject`, `suggestNameMatch`, `warmProjects`, `warmProjectsIfEmpty`, `wasProjectFreshlyMinted`
 - **`src/shared/recents/recentDocs.js`** — Library-Home Recent list: local recently-OPENED drawings (not updated_at), per-uid, deduped by id, newest-first, capped at 15
   - _exports_: `listRecents`, `RECENTS_CAP`, `recordOpen`, `removeRecent`
 - **`src/shared/reports/reportsStore.js`** — problem-report context + submit/queue/retry model behind `HelpReportControl.jsx` (B842866).
