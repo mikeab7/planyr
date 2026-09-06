@@ -33,7 +33,7 @@ import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
  * silently drift from the real files. */
 const FONT_SIZE = { micro: 10, label: 10.5, control: 12, emphasis: 13, display: 14 }; // design-exempt: literal mirror of designTokens.js, guarded by test/designGallery.test.js
 const SPACE = { xxs: 2, xs: 4, sm: 6, md: 8, lg: 10, xl: 12, xxl: 16 }; // design-exempt: literal mirror of designTokens.js, guarded by test/designGallery.test.js
-const CONTROL_H = { sm: 22, md: 26, lg: 30 }; // design-exempt: literal mirror of designTokens.js, guarded by test/designGallery.test.js
+const CONTROL_H = { sm: 22, md: 26, lg: 30, touch: 44 }; // design-exempt: literal mirror of designTokens.js, guarded by test/designGallery.test.js
 
 const STATUS_PREVIEW = {
   pursuit:  { color: "#D85A30", glyph: "", dim: false }, // design-exempt: literal mirror of statusTokens.js, guarded by test/designGallery.test.js
