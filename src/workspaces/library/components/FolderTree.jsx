@@ -10,12 +10,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   treeify, childrenOf, subtreeIds, wouldCreateCycle,
-  validateFolderName, suggestNextNumberedName, liveRows, displayLabel,
+  validateFolderName, suggestNextNumberedName, liveRows, displayLabel, countTemplate,
 } from "../../../shared/folders/folderTree.js";
+import { FOLDER_TEMPLATE } from "../../../shared/folders/folderTemplate.js";
 import {
   listFolders, ensureSeeded, addFolder, renameFolder, moveFolder,
   trashSubtree, syncFoldersToDrive, planFolderDelete,
 } from "../lib/folders.js";
+
+// The template's total folder count, for the "Create the standard N-folder structure" button —
+// computed once from the same pure template the seed itself uses, never a hand-typed number.
+const TEMPLATE_FOLDER_COUNT = countTemplate(FOLDER_TEMPLATE);
 import { loadIdSet, saveIdSet, pruneSet } from "../../../shared/ui/persistedSet.js";
 import { relTime } from "../../../shared/projects/projectModel.js";
 import ContextMenu from "../../../shared/ui/ContextMenu.jsx";
@@ -40,6 +45,21 @@ const T = {
   accent: "var(--accent-library)", onAccent: "var(--on-accent-library)", accentText: "var(--accent-library-text)",
   danger: "var(--danger)", dangerText: "var(--danger-text)", warn: "var(--warn-text)",
 };
+
+// An inert, dimmed rendering of the (nested, pure) FOLDER_TEMPLATE — what "Create the standard
+// N-folder structure" would produce, shown before anything is actually written to Supabase or
+// mirrored to Drive. No ids, no state, no interaction — just what the tree will look like.
+const previewRows = (nodes, depth = 0) =>
+  (nodes || []).map((n, i) => (
+    <div key={`${depth}-${i}-${n.name}`}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 8px", paddingLeft: 8 + depth * 16, minHeight: 26 }}>
+        <span aria-hidden style={{ width: 16 }} />
+        <span aria-hidden>📁</span>
+        <span style={{ flex: 1, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.name}</span>
+      </div>
+      {n.children && n.children.length ? previewRows(n.children, depth + 1) : null}
+    </div>
+  ));
 
 const centered = (children) => (
   <div data-testid="folder-tree" style={{ height: "100%", display: "grid", placeItems: "center", color: T.sub, padding: 24, textAlign: "center" }}>
@@ -72,6 +92,7 @@ export default function FolderTree({
   const [menu, setMenu] = useState(null); // right-click actions: { node, x, y } (node null = empty space)
   const [pendingDelete, setPendingDelete] = useState(null); // { id, name, folders, files, empty, loading }
   const [drive, setDrive] = useState({ state: "idle", msg: "", at: 0 }); // idle|syncing|ok|off|error
+  const [creating, setCreating] = useState(false); // "Create the standard N-folder structure" in flight
   const [dropTargetId, setDropTargetId] = useState(undefined); // undefined = none; null = the "All files" row
   const dropTargetRef = useRef(undefined); // ref mirror — dragover/dragleave race without re-render lag
   const setDropTarget = (id, label) => { dropTargetRef.current = id; setDropTargetId(id); onDragTarget?.(label); };
@@ -91,8 +112,14 @@ export default function FolderTree({
     return list;
   }, [signedIn, projectId, setRows]);
 
-  // Seed-on-first-open (idempotent) → load → restore this project's remembered expansion
-  // (default: everything collapsed) → kick a background mirror sync.
+  // Load → restore this project's remembered expansion (default: everything collapsed) → kick a
+  // background mirror sync IF the project already has a tree. B1162192/B1162193 — this no longer
+  // auto-SEEDS: merely opening a project's Library used to silently create the whole 133-folder
+  // template and mirror every one of them to Google Drive, with no upload, no save, and often no
+  // deliberate action at all — the direct cause of thousands of real orphan folders reaching the
+  // owner's actual Drive, some for projects that never existed. An empty project now renders the
+  // template as an inert PREVIEW (below) with an explicit "Create the standard N-folder
+  // structure" button; seeding otherwise happens on a real upload (reviewStore.pushFileToDrive).
   useEffect(() => {
     let live = true;
     expandedLoadedFor.current = null;
@@ -100,9 +127,6 @@ export default function FolderTree({
     if (!signedIn || !projectId) { setRows([]); return; }
     (async () => {
       setLoading(true); setError("");
-      const seed = await ensureSeeded(projectId);
-      if (!live) return;
-      if (seed && seed.ok === false && !seed.skipped) setError(seed.error || "Couldn't set up folders.");
       const list = await listFolders(projectId);
       if (!live) return;
       setRows(list);
@@ -120,7 +144,7 @@ export default function FolderTree({
       if (at && liveList.length > 0 && liveList.every((r) => r.driveFolderId)) {
         setDrive({ state: "ok", msg: "", at });
       }
-      scheduleSync(seed && seed.seeded ? 0 : 400); // seed → sync now so Drive materializes promptly
+      if (list.length > 0) scheduleSync(400); // an already-seeded project keeps its background reconcile
     })();
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -154,6 +178,19 @@ export default function FolderTree({
   }, [projectId]);
 
   useEffect(() => () => { if (syncTimer.current) clearTimeout(syncTimer.current); }, []);
+
+  // The ONE explicit "set up the folder structure" action (B1162192/B1162193) — the deliberate
+  // real-intent trigger that replaces the old seed-on-mount. `ensureSeeded` is still idempotent,
+  // so a double-click (or a second tab) can't double-seed.
+  const createStandardFolders = useCallback(async () => {
+    if (!projectId || creating) return;
+    setCreating(true); setError("");
+    const seed = await ensureSeeded(projectId);
+    if (seed && seed.ok === false) setError(seed.error || "Couldn't set up folders.");
+    await reload();
+    setCreating(false);
+    scheduleSync(0); // seed → sync now so Drive materializes promptly
+  }, [projectId, creating, reload, scheduleSync]);
 
   // Right-click context menu closes on Escape (the backdrop handles click-away).
   useEffect(() => {
@@ -431,7 +468,29 @@ export default function FolderTree({
           </div>
         )}
         {loading ? <div style={{ color: T.sub, padding: 16, fontSize: 13 }}>Loading folders…</div>
-          : tree.length === 0 ? <div style={{ color: T.sub, padding: 16, fontSize: 13 }}>No folders yet. Right-click here to create one.</div>
+          : tree.length === 0 ? (
+            <div>
+              <div style={{ padding: "8px 8px 2px" }}>
+                <button
+                  onClick={createStandardFolders}
+                  disabled={creating}
+                  style={{
+                    width: "100%", padding: "8px 12px", borderRadius: 8, border: "none",
+                    background: T.accent, color: T.onAccent, fontWeight: 700, fontSize: 12,
+                    cursor: creating ? "default" : "pointer", opacity: creating ? 0.7 : 1,
+                  }}
+                >
+                  {creating ? "Creating folders…" : `Create the standard ${TEMPLATE_FOLDER_COUNT}-folder structure`}
+                </button>
+                <div style={{ padding: "8px 4px 6px", fontSize: 10.5, color: T.sub }}>
+                  Nothing’s been created yet — this is a preview. Or right-click below to add just one folder.
+                </div>
+              </div>
+              <div aria-hidden data-testid="folder-template-preview" style={{ opacity: 0.4, pointerEvents: "none" }}>
+                {previewRows(FOLDER_TEMPLATE)}
+              </div>
+            </div>
+          )
             : tree.map((n) => renderRow(n, 0))}
         {/* Guaranteed right-clickable empty space even when the rows fill the rail — without
             it a full tree would leave NO reachable spot for a top-level "New folder". */}
