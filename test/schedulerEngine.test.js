@@ -734,7 +734,13 @@ describe("anti-drift: the scheduler bug-batch fixes still exist in the real sour
   });
   it("#4 a narrow viewport NEVER mutates the persisted view (render-time gating only)", () => {
     expect(src).not.toMatch(/d\.view = "grid"/);          // all three load-path mutations removed
-    expect(src).toMatch(/\(isMobile\?"grid":data\.view\)==="split"/);
+    // B1241744/B1241745 — Split's TWO-PANE render now explicitly requires !isMobile (a phone
+    // collapses to one pane via `phonePane` instead of silently downgrading to Grid), and the
+    // Grid/Gantt render lines resolve `data.view` through the SAME phone-collapse ternary that
+    // used to always answer "grid". `data.view` itself is read, never written, in all three —
+    // the property this test guards (no render-time gating ever mutates the persisted view).
+    expect(src).toMatch(/!isMobile && data\.view==="split" && <SplitView/);
+    expect(src).toMatch(/\(isMobile \? \(data\.view === "split" \? phonePane : \(data\.view \?\? "grid"\)\) : \(data\.view \?\? "grid"\)\)==="grid"/);
   });
   it("#5 undo/redo push the LIVE current state (dataRef.current), not the stale closure", () => {
     expect(src).toMatch(/future\.current = \[\.\.\.future\.current, dataRef\.current\]/);

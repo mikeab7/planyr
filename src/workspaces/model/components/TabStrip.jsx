@@ -57,7 +57,7 @@
  * that curve (a flush, full-height tab would otherwise poke a square corner past the curve —
  * cheaper and more robust than computing exactly how much horizontal inset would clear it).
  */
-import { useCallback, useRef, useState } from "react";
+import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from "react";
 import { RADIUS, nestedIn } from "../../../shared/ui/radius.js";
 import ContextMenu from "./ContextMenu.jsx";
 
@@ -108,12 +108,18 @@ function tabStyle(active, dragging, dropTarget) {
   };
 }
 
-export default function TabStrip({ sheets, activeSheetId, onSelect, onAdd, onRename, onDuplicate, onDelete, onReorder }) {
+// ⛔ NEW-1 (command palette) — `forwardRef` + `startRename` so the palette's "Rename Sheet"
+// command can open the SAME inline editor a double-click or the right-click menu's "Rename" row
+// already open — never a second rename mechanism (this app's own "no dialog-box edits" rule
+// means there is exactly one way to rename a sheet: this inline field).
+const TabStrip = forwardRef(function TabStrip({ sheets, activeSheetId, onSelect, onAdd, onRename, onDuplicate, onDelete, onReorder }, ref) {
   const [renaming, setRenaming] = useState(null); // sheetId | null
   const [contextMenu, setContextMenu] = useState(null); // { point, items } | null
   const [dragIndex, setDragIndex] = useState(null); // the sheet currently being dragged, by index
   const [dropIndex, setDropIndex] = useState(null); // the index it would land at if released now
   const dropIndexRef = useRef(null); // mirrors dropIndex — read at drag-end, where React state would be stale (SheetView.jsx's fillTo/fillToRef pattern)
+
+  useImperativeHandle(ref, () => ({ startRename: (id) => setRenaming(id) }), []);
 
   const renameCommit = (id, name) => { onRename(id, name); setRenaming(null); };
 
@@ -223,4 +229,6 @@ export default function TabStrip({ sheets, activeSheetId, onSelect, onAdd, onRen
       {contextMenu && <ContextMenu point={contextMenu.point} items={contextMenu.items} onClose={() => setContextMenu(null)} />}
     </div>
   );
-}
+});
+
+export default TabStrip;
