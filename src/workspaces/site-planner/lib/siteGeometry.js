@@ -16,6 +16,7 @@ import { classDefaultRadius, classReturnRadius, roadClassOf } from "./roadClasse
 import { roadCenterline } from "./roadGeometry.js";
 import { trimPolylineEnds, roundaboutNodes, roundaboutGeometry, roundaboutDiameterFor, legTrimFor, roundaboutArea } from "./roundabout.js";
 import { bufferPolyline, offsetPolyline } from "./metesAndBounds.js";
+import { imperviousCorrectionWidths } from "./roadCrossSection.js";
 
 export const SQFT_PER_ACRE = 43560;
 
@@ -229,6 +230,25 @@ export const roadCurbLines = (el, settings, sharpAt, trim) => {
 export const roadStripArea = (el, settings, sharpAt, trim, extraSf = 0) => {
   const ring = roadStripRing(el, settings, sharpAt, trim);
   return (ring.length >= 3 ? Math.abs(polyArea(ring)) : 0) + (+extraSf || 0);
+};
+
+// NEW-2 — impervious area for a centerline road, correcting `roadStripArea`'s curb-to-curb ring for
+// a designed cross-section: a modeled MEDIAN sits inside the curb line (so the ring already counts
+// it) but is landscaped or painted, not impervious; a modeled SIDEWALK sits outside the curb line (so
+// the ring never counts it) but IS impervious. `roadStripRing`/`el.travelW`/every junction dissolve
+// are read completely UNCHANGED — this corrects only the AREA, over the same centerline length the
+// ring itself is built from, so every curve and junction fillet the ring already captures carries
+// straight into the correction. A road with no xsection (or one with nothing to correct) returns
+// exactly `roadStripArea`'s own figure, unchanged.
+export const roadImperviousArea = (el, settings, sharpAt, trim, extraSf = 0) => {
+  const base = roadStripArea(el, settings, sharpAt, trim, extraSf);
+  if (!el || !el.xsection) return base;
+  const { perviousWithinCurb, imperviousOutsideCurb } = imperviousCorrectionWidths(el.xsection);
+  if (!perviousWithinCurb && !imperviousOutsideCurb) return base;
+  const dense = roadDenseCenterline(el, settings, sharpAt, trim);
+  let L = 0;
+  for (let i = 1; i < dense.length; i++) L += Math.hypot(dense[i].x - dense[i - 1].x, dense[i].y - dense[i - 1].y);
+  return base - perviousWithinCurb * L + imperviousOutsideCurb * L;
 };
 
 // Junction (tee) coincidence tolerance — see teeTargetOf/roadJunctionVerticesOf.

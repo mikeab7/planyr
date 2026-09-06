@@ -38,18 +38,23 @@
  *
  * Pure (no React, no canvas) — unit-tested in test/roadCrossSection.test.js. */
 
-// key            label                              default ft  paved?  within the curb line?
+// key            label                              default ft  paved?  within curb? impervious?
+// NEW-2 — `impervious` is a THIRD, independent boolean: it is NOT a synonym for `paved` (concrete —
+// curb & gutter, sidewalk — is impervious and is not asphalt) and NOT a synonym for `withinCurb` (a
+// grass/painted median sits within the curb line but is NOT impervious). It answers exactly one
+// question: does rain run off this band rather than soak in, which is what a detention volume is
+// priced off. See `imperviousCorrectionWidths` below for how this feeds the site's impervious total.
 export const BAND_TYPES = [
-  { key: "travel",     label: "Travel lane",               defaultFt: 12, paved: true,  withinCurb: true },
-  { key: "turnLane",   label: "Centre turn lane",          defaultFt: 12, paved: true,  withinCurb: true },
-  { key: "median",     label: "Median",                    defaultFt: 16, paved: false, withinCurb: true },
-  { key: "shoulder",   label: "Shoulder",                  defaultFt: 8,  paved: true,  withinCurb: true },
-  { key: "curbGutter", label: "Curb & gutter",             defaultFt: 2,  paved: false, withinCurb: true },
-  { key: "parking",    label: "Parking lane",              defaultFt: 8,  paved: true,  withinCurb: true },
-  { key: "bike",       label: "Bike lane",                 defaultFt: 5,  paved: true,  withinCurb: true },
-  { key: "sidewalk",   label: "Sidewalk",                  defaultFt: 5,  paved: false, withinCurb: false },
-  { key: "parkway",    label: "Parkway / landscape strip", defaultFt: 6,  paved: false, withinCurb: false },
-  { key: "ditch",      label: "Ditch / swale",             defaultFt: 10, paved: false, withinCurb: false },
+  { key: "travel",     label: "Travel lane",               defaultFt: 12, paved: true,  withinCurb: true,  impervious: true },
+  { key: "turnLane",   label: "Centre turn lane",          defaultFt: 12, paved: true,  withinCurb: true,  impervious: true },
+  { key: "median",     label: "Median",                    defaultFt: 16, paved: false, withinCurb: true,  impervious: false },
+  { key: "shoulder",   label: "Shoulder",                  defaultFt: 8,  paved: true,  withinCurb: true,  impervious: true },
+  { key: "curbGutter", label: "Curb & gutter",             defaultFt: 2,  paved: false, withinCurb: true,  impervious: true },
+  { key: "parking",    label: "Parking lane",              defaultFt: 8,  paved: true,  withinCurb: true,  impervious: true },
+  { key: "bike",       label: "Bike lane",                 defaultFt: 5,  paved: true,  withinCurb: true,  impervious: true },
+  { key: "sidewalk",   label: "Sidewalk",                  defaultFt: 5,  paved: false, withinCurb: false, impervious: true },
+  { key: "parkway",    label: "Parkway / landscape strip", defaultFt: 6,  paved: false, withinCurb: false, impervious: false },
+  { key: "ditch",      label: "Ditch / swale",             defaultFt: 10, paved: false, withinCurb: false, impervious: false },
 ];
 export const BAND_TYPE_BY_KEY = Object.fromEntries(BAND_TYPES.map((t) => [t.key, t]));
 export const DEFAULT_BAND_TYPE = "travel";
@@ -79,6 +84,22 @@ export function bandTypeOf(key) { return BAND_TYPE_BY_KEY[key] || BAND_TYPE_BY_K
 // The floor a band width is clamped to AT COMMIT (never while typing) — matches the dialog's
 // pre-existing `Math.max(0.1, …)` clamp; named here so the dialog and its tests share one number.
 export const MIN_BAND_WIDTH_FT = 0.1;
+
+/* NEW-1 — the canvas legibility floors for a designed section's DECORATION, screen px per foot of
+ * the CANVAS's own scale (ppf). Two separate floors, not one: the pre-fix renderer gated the WHOLE
+ * section (every band fill AND every lane-marking seam) on the section's single NARROWEST band —
+ * usually a 2' curb & gutter — so one thin band collapsed the entire cross-section to plain
+ * undifferentiated asphalt while every OTHER band (12' travel lanes, a 20' median) was still
+ * perfectly resolvable on screen. A band's own fill now gates on ITS OWN width against
+ * `XSEC_BAND_FILL_MIN_PX`; a lane-marking seam gates independently, on the narrower of the two bands
+ * it separates (`bandStripeMarksWithWidth`'s `minBandFt`), against the much smaller
+ * `XSEC_STRIPE_MIN_PX` — a hairline stripe stays legible at a zoom where a solid fill of the same
+ * width would just be visual noise, so striping now outlasts the fills as the road zooms out rather
+ * than vanishing with them. The designated-ROW boundary stays ungated entirely (drawn in
+ * SitePlanner.jsx, never gated on either floor) — a thin ROW line reads fine at any zoom a section is
+ * legible at all. */
+export const XSEC_BAND_FILL_MIN_PX = 3;
+export const XSEC_STRIPE_MIN_PX = 1;
 
 /* NEW-1 follow-up (owner report, 2026-08-26 — "when I type two it seems to bug out … I'm just
  * typing 2 to get to 25"): A PREFIX OF A VALID NUMBER IS NOT AN ERROR. RoadCrossSectionDialog's
@@ -153,6 +174,28 @@ export function rowWidth(xsection) {
   return normalizeBands(xsection && xsection.bands).reduce((s, b) => s + b.w, 0);
 }
 
+/* NEW-2 — the two width corrections `siteGeometry.roadImperviousArea` applies to a road's plain
+ * curb-to-curb pavement RING (`roadStripRing`, `el.travelW`, every junction dissolve — all read
+ * UNCHANGED; this never touches drawn geometry, only the AREA number derived from it):
+ *   • `perviousWithinCurb` — width of every WITHIN-curb band that is NOT impervious (a median: it
+ *     sits inside the curb line, so it is already counted in the ring's area, but it's landscaped or
+ *     painted, not impervious, so its width is SUBTRACTED from that area.
+ *   • `imperviousOutsideCurb` — width of every OUTSIDE-curb band that IS impervious (a sidewalk): it
+ *     sits entirely beyond the ring `roadStripRing` draws, so its width is ADDED.
+ * A road with no xsection, or one whose within-curb bands are all impervious and whose outside-curb
+ * bands are all pervious (every road drawn before this shipped, whose sole implicit band is `travel`)
+ * returns {0, 0} — its existing impervious figure is unchanged by construction. */
+export function imperviousCorrectionWidths(xsection) {
+  const bands = normalizeBands(xsection && xsection.bands);
+  let perviousWithinCurb = 0, imperviousOutsideCurb = 0;
+  for (const b of bands) {
+    const t = bandTypeOf(b.type);
+    if (t.withinCurb && !t.impervious) perviousWithinCurb += b.w;
+    else if (!t.withinCurb && t.impervious) imperviousOutsideCurb += b.w;
+  }
+  return { perviousWithinCurb, imperviousOutsideCurb };
+}
+
 /* NEW-1 (owner report, 2026-08-26 — "id like to designate the ROW to like a 100' row should be
  * shown") — a DESIGNATED right-of-way, distinct from `rowWidth` above, which only ever DERIVES the
  * modeled-band total. A real ROW is a legal dedication, normally WIDER than every band the section
@@ -172,24 +215,54 @@ export function designatedRowFt(xsection) {
   return Number.isFinite(v) && v > 0 ? v : null;
 }
 
-/* The undesignated margin PER SIDE, beyond every modeled band — split evenly, per the brief's own
- * "(Y-X)/2 each side". X here is the FULL modeled band total (`rowWidth`, which already includes any
- * explicit outside-curb sidewalk/parkway/ditch band), not the curb-to-curb width alone: an explicit
- * parkway band is already accounted-for ROW, not "margin", so double-counting it as margin ON TOP of
- * its own modeled width would overstate the true undesignated strip. This is also why the dialog's
- * ROW field defaults to the band total — an untouched default then reads as zero margin, not some
- * mystery leftover.
- *
- * Returns `null` (never a negative number) when the section is not designated, OR when the modeled
- * band total already EXCEEDS the designated ROW — that invalid state is surfaced as a loud warning
- * by the caller (never silently clamped), and `null` here is what keeps the canvas from drawing a
- * ROW boundary that would sit INSIDE the paved section. */
-export function rowMarginFt(xsection) {
+/* NEW-4 — the band assembly's actual EXTENTS either side of the true drawn centerline (`bandLayout`'s
+ * own offset 0), each a non-negative distance. This is deliberately NOT the same question as
+ * `rowWidth` (the bare WIDTH SUM): for an ASYMMETRIC section — a sidewalk modeled on only one side,
+ * say — the assembly is not centered on 0, so how far it actually reaches on each side differs from
+ * half the total. The two extents still always sum to exactly `rowWidth(xsection)` (bandLayout is one
+ * contiguous walk outward from the centerline, so nothing is ever double-counted or left out), which
+ * is what keeps `rowMarginFt`'s existing AVERAGE-margin arithmetic below unchanged even though the
+ * VALIDITY test now reads these per-side numbers instead of the bare sum — see that function's own
+ * header. An empty section reports {0, 0}. */
+export function bandExtents(xsection) {
+  const { edges } = bandLayout(xsection);
+  if (!edges.length) return { left: 0, right: 0 };
+  return { left: Math.max(0, edges[0].from), right: Math.max(0, -edges[edges.length - 1].to) };
+}
+
+/* NEW-4 — the undesignated margin on EACH SIDE, independently, replacing a single averaged figure
+ * that was only ever a true description of a SYMMETRIC section. `left`/`right` are how much
+ * undesignated ROW remains beyond this side's own modeled extent (`bandExtents` above); `null` when
+ * nothing is designated. A NEGATIVE entry means this side's modeled bands already reach PAST the
+ * designated ROW line — the invalid, loudly-surfaced state. This is the case the old width-SUM check
+ * missed: an asymmetric section (a sidewalk on one side only) can overrun on that one side while the
+ * OTHER side still has slack, even though the section's own total is comfortably under the designated
+ * ROW — the owner's repro (29' modeled bands under a 30' ROW, one side over by 2') is exactly this. */
+export function rowMarginsBySide(xsection) {
   const designated = designatedRowFt(xsection);
   if (designated == null) return null;
-  const modeled = rowWidth(xsection);
-  if (modeled > designated) return null;
-  return (designated - modeled) / 2;
+  const { left, right } = bandExtents(xsection);
+  return { left: designated / 2 - left, right: designated / 2 - right };
+}
+
+/* The undesignated margin, AVERAGED across both sides — a true, single "(Y-X)/2 each side" figure
+ * only for a SYMMETRIC section (the common case, and every pre-NEW-4 caller's expectation); an
+ * asymmetric section's two real per-side numbers are `rowMarginsBySide` above, which the dialog now
+ * shows separately when they differ. X here is the FULL modeled band total (`rowWidth`, which already
+ * includes any explicit outside-curb sidewalk/parkway/ditch band), not the curb-to-curb width alone —
+ * an explicit parkway band is already accounted-for ROW, not "margin" on top of its own modeled width.
+ *
+ * Returns `null` (never a negative number) when the section is not designated, OR when EITHER side's
+ * modeled bands actually reach past the designated ROW (`rowMarginsBySide` negative on that side) —
+ * NEW-4 replaces the old "is the WIDTH SUM under the designated total" test with this per-side extent
+ * test, because a section can total less than its ROW and still paint bands outside the ROW line on
+ * one side when it isn't centered on the centerline. That invalid state is surfaced as a loud warning
+ * by the caller (never silently clamped), and `null` here is what keeps the canvas from drawing a ROW
+ * boundary that would sit INSIDE the paved section on either side. */
+export function rowMarginFt(xsection) {
+  const m = rowMarginsBySide(xsection);
+  if (m == null || m.left < 0 || m.right < 0) return null;
+  return (m.left + m.right) / 2;
 }
 
 /* Pavement area from a paved width + a centerline length — mirrors costTakeoff's SF_PER_SY. */
@@ -228,9 +301,23 @@ export function bandLayout(xsection) {
  *     seam nearest the road's real centerline (offset 0) is double solid yellow (the opposing-flow
  *     split); every other travel/travel seam is dashed white
  *   • the edge of a shoulder / parking lane / bike lane → solid white
- * Returns [{ atOffset, style }], style one of "yellow-solid" | "white-dash" | "yellow-double" |
- * "white-solid", in section order. */
-export function bandStripeMarks(xsection) {
+ * An EVEN undivided lane count always has one seam exactly at offset 0, which wins outright. An ODD
+ * undivided lane count (NEW-5, owner-reported: three 12' lanes painted the double-yellow a whole lane
+ * off-center depending on how the bands happened to be listed) has no true center seam — two
+ * candidates tie for "nearest 0", symmetric about it. `chooseCenterSeam` breaks that tie by the
+ * OFFSET VALUE alone (the more positive of the tied seams wins, every time), never by which one this
+ * function's own loop happened to build first — a tie can only arise when the section is itself
+ * left-right symmetric (see test/roadCrossSection.test.js's own derivation), so this makes the
+ * choice a property of the geometry, not an accident of array iteration order. */
+function chooseCenterSeam(seams) {
+  const dashSeams = seams.filter((s) => s.style === "white-dash");
+  if (!dashSeams.length) return;
+  const minAbs = Math.min(...dashSeams.map((s) => Math.abs(s.atOffset)));
+  const tied = dashSeams.filter((s) => Math.abs(Math.abs(s.atOffset) - minAbs) < 1e-9);
+  tied.reduce((best, s) => (s.atOffset > best.atOffset ? s : best), tied[0]).style = "yellow-double";
+}
+
+function stripeSeams(xsection) {
   const { edges } = bandLayout(xsection);
   const within = edges.filter((e) => bandTypeOf(e.band.type).withinCurb);
   if (within.length < 2) return [];
@@ -247,14 +334,24 @@ export function bandStripeMarks(xsection) {
     } else {
       style = "white-solid";
     }
-    seams.push({ atOffset, style, i });
+    seams.push({ atOffset, style, i, minBandFt: Math.min(a.band.w, b.band.w) });
   }
-  if (!hasSplit) {
-    let centerI = -1, centerD = Infinity;
-    seams.forEach((s, i) => { if (s.style === "white-dash") { const d = Math.abs(s.atOffset); if (d < centerD) { centerD = d; centerI = i; } } });
-    if (centerI >= 0) seams[centerI].style = "yellow-double";
-  }
-  return seams.map(({ atOffset, style }) => ({ atOffset, style }));
+  if (!hasSplit) chooseCenterSeam(seams);
+  return seams;
+}
+
+// Returns [{ atOffset, style }], style one of "yellow-solid" | "white-dash" | "yellow-double" |
+// "white-solid", in section order. The dialog's preview reads this — no per-seam width in it.
+export function bandStripeMarks(xsection) {
+  return stripeSeams(xsection).map(({ atOffset, style }) => ({ atOffset, style }));
+}
+
+/* NEW-1 — the same seams, each also carrying `minBandFt`: the width of the NARROWER of the two
+ * within-curb bands that seam separates. The canvas render (SitePlanner.jsx) gates each stripe on
+ * this against `XSEC_STRIPE_MIN_PX`, independently of whether either band's own FILL clears its own
+ * (larger) floor — see the constants' own header above. */
+export function bandStripeMarksWithWidth(xsection) {
+  return stripeSeams(xsection).map(({ atOffset, style, minBandFt }) => ({ atOffset, style, minBandFt }));
 }
 
 // A handful of sensible built-ins so the dialog is useful the first time it opens — one matches the

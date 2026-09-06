@@ -329,7 +329,8 @@ import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDog
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import {
   bandTypeOf, normalizeBands, makeXSection, xsectionFromRoad, hasXSection, curbToCurbWidth, pavedWidth,
-  bandLayout, bandStripeMarks, BAND_FILL_TOKEN, BAND_FILL_OPACITY, designatedRowFt, rowMarginFt, rowWidth,
+  bandLayout, bandStripeMarksWithWidth, BAND_FILL_TOKEN, BAND_FILL_OPACITY, designatedRowFt, rowMarginFt, rowWidth,
+  XSEC_BAND_FILL_MIN_PX, XSEC_STRIPE_MIN_PX,
 } from "./lib/roadCrossSection.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, stallStripesExplicit, segmentsPath, featureNameLabelVisible, featureNameFontPx, featureExtentFt } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
@@ -28483,27 +28484,41 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
         rparts.push(<path key="edge" d={dPath} fill="none" stroke={stroke} strokeWidth={curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX * lfK)} />);
       }
       if (texFill) rparts.push(<path key="tex" d={dPath} fill={texFill} stroke="none" pointerEvents="none" />);
-      // NEW-1 — a road carrying a REAL designed cross-section (2+ bands) paints its within-curb
-      // bands as distinct fills + lane markings, INSIDE the same pavement ring computed above: the
-      // outer pavement outline, curb lines and junction dissolve are UNCHANGED (still driven by
-      // el.travelW, which setRoadXSection keeps in sync as the sum of within-curb band widths — see
-      // lib/roadCrossSection.js's header). Clipped to THIS road's own strip ring via an SVG clipPath
-      // (the same idiom the overlay crop above already uses), so the decoration can never paint past
-      // the pavement even at a junction — a lighter-weight substitute for the precise per-neighbor
-      // trim the outer curb lines get (roadNet.stripes); stated as a known approximation for interior
-      // decoration, not hidden — median-openings-at-junctions is its own filed follow-on (B768163).
-      // Collapses to nothing extra (the plain strip already drawn above) when the narrowest band
-      // would be sub-pixel — "collapse to the simple strip rather than drawing mud".
-      if (hasXSection(el)) {
-        const xsLayout = bandLayout(el.xsection);
-        const minBandFt = xsLayout.edges.length ? Math.min(...xsLayout.edges.map((e) => e.band.w)) : 0;
-        // NEW-1/NEW-2 — hoisted out of the legibility gate below: the trimmed dense centerline and the
-        // point-string helper are needed by BOTH the band fills (gated on minBandFt) and the designated
-        // ROW lines further down (never gated on band width — a thin ROW line reads fine at any zoom a
-        // section is legible at all, and a road can carry a designated ROW with no narrow band on it).
+      // NEW-1/NEW-3 — any road carrying an xsection at all (even the dialog's own single-band
+      // wrapper — `xsectionFromRoad`) reaches this block now; a REAL designed section (2+ bands,
+      // `hasXSection`) additionally gets band fills + lane markings. Pulling the outer gate back from
+      // `hasXSection` to bare `el.xsection` is the NEW-3 fix: a designated ROW used to only draw once
+      // a road had a real multi-band design, even though the Properties panel's own ROW field (and
+      // `designatedRowFt` itself) never required one — a single-band road with a designated ROW
+      // stored a real `rowDesignFt` that the canvas simply never looked at.
+      if (el.xsection) {
+        // NEW-1/NEW-3 — hoisted out of both gates below: the trimmed dense centerline and the
+        // point-string helper are needed by the band fills (real sections only) AND by the designated
+        // ROW lines (any section at all — a thin ROW line reads fine at any zoom a section is legible
+        // at all, and a single-band road can carry a designated ROW with no bands to gate on).
         const xsDense = roadDenseCenterline(el, settings, sharpFor(el), roadNet && roadNet.trims ? roadNet.trims.get(el.id) : undefined);
         const toPts = (line) => line.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
-        if (minBandFt * ppf >= 3) {
+
+        // NEW-1 — a road carrying a REAL designed cross-section (2+ bands) paints its within-curb
+        // bands as distinct fills + lane markings, INSIDE the same pavement ring computed above: the
+        // outer pavement outline, curb lines and junction dissolve are UNCHANGED (still driven by
+        // el.travelW, which setRoadXSection keeps in sync as the sum of within-curb band widths — see
+        // lib/roadCrossSection.js's header). Clipped to THIS road's own strip ring via an SVG clipPath
+        // (the same idiom the overlay crop above already uses), so the decoration can never paint past
+        // the pavement even at a junction — a lighter-weight substitute for the precise per-neighbor
+        // trim the outer curb lines get (roadNet.stripes); stated as a known approximation for interior
+        // decoration, not hidden — median-openings-at-junctions is its own filed follow-on (B768163).
+        // ⛔ NEW-1 fix — GATED PER BAND / PER SEAM, never on the section's single narrowest band. The
+        // pre-fix single `minBandFt * ppf >= 3` gate collapsed the WHOLE section — every fill AND
+        // every stripe — the moment ANY one band (usually a 2' curb & gutter) got too small on
+        // screen, even while every other band (12' travel lanes, a 20' median) was still perfectly
+        // resolvable: a road with a real section reverted to plain undifferentiated asphalt while
+        // zooming out, long before it needed to. Each band's own fill now gates on ITS OWN width; each
+        // lane-marking seam gates independently, on the narrower of its two adjacent bands, against
+        // the much smaller `XSEC_STRIPE_MIN_PX` floor — a hairline stripe stays legible far past the
+        // point a solid fill of the same width would just be visual noise.
+        if (hasXSection(el)) {
+          const xsLayout = bandLayout(el.xsection);
           const clipId = `xsclip-${el.id}`;
           // NEW-2 (owner report, 2026-08-26 — "the 30ft parkway renders on the plan as... nothing at
           // all. Actual: it renders nothing at all") — every typed band paints now, not only the
@@ -28517,17 +28532,20 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
             if (!left || !right) return null;
             return <polygon key={`xb${e.index}`} points={toPts([...left, ...right.slice().reverse()])} fill={BAND_FILL_TOKEN[e.band.type]} fillOpacity={BAND_FILL_OPACITY[e.band.type]} stroke="none" pointerEvents="none" />;
           };
-          const bandFillsIn = xsLayout.edges.filter((e) => bandTypeOf(e.band.type).withinCurb && BAND_FILL_TOKEN[e.band.type]).map(bandFillFor).filter(Boolean);
-          const bandFillsOut = xsLayout.edges.filter((e) => !bandTypeOf(e.band.type).withinCurb && BAND_FILL_TOKEN[e.band.type]).map(bandFillFor).filter(Boolean);
+          const bandVisible = (e) => e.band.w * ppf >= XSEC_BAND_FILL_MIN_PX;
+          const bandFillsIn = xsLayout.edges.filter((e) => bandTypeOf(e.band.type).withinCurb && BAND_FILL_TOKEN[e.band.type] && bandVisible(e)).map(bandFillFor).filter(Boolean);
+          const bandFillsOut = xsLayout.edges.filter((e) => !bandTypeOf(e.band.type).withinCurb && BAND_FILL_TOKEN[e.band.type] && bandVisible(e)).map(bandFillFor).filter(Boolean);
           const markW = Math.max(0.8, lfK);
           const drawSeam = (offFt, key, style) => {
             const line = offsetPolyline(xsDense, offFt);
             if (!line || line.length < 2) return null;
             return <polyline key={key} points={toPts(line)} fill="none" stroke={style.startsWith("yellow") ? "#e6b800" : "#f2f2f2"} strokeWidth={markW} strokeDasharray={style === "white-dash" ? `${8 * lfK} ${6 * lfK}` : undefined} pointerEvents="none" />;
           };
-          const laneMarks = bandStripeMarks(el.xsection).flatMap((m, i) => m.style === "yellow-double"
-            ? [drawSeam(m.atOffset + 0.25, `xm${i}a`, m.style), drawSeam(m.atOffset - 0.25, `xm${i}b`, m.style)]
-            : [drawSeam(m.atOffset, `xm${i}`, m.style)]).filter(Boolean);
+          const laneMarks = bandStripeMarksWithWidth(el.xsection)
+            .filter((m) => m.minBandFt * ppf >= XSEC_STRIPE_MIN_PX)
+            .flatMap((m, i) => m.style === "yellow-double"
+              ? [drawSeam(m.atOffset + 0.25, `xm${i}a`, m.style), drawSeam(m.atOffset - 0.25, `xm${i}b`, m.style)]
+              : [drawSeam(m.atOffset, `xm${i}`, m.style)]).filter(Boolean);
           if (bandFillsIn.length || laneMarks.length) {
             rparts.push(
               <g key="xsec" clipPath={`url(#${clipId})`}>
@@ -28547,10 +28565,12 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
         // the ribbon, per the brief's own instruction. Plus an inline "N′ R.O.W." label styled like the
         // existing width-dimension callout (same font/scale/halo idiom, a neutral tone rather than the
         // dimension's red so the two are never mistaken for one control). Gated on the section actually
-        // being valid — `rowMarginFt` returns null both when nothing is designated and when the modeled
-        // bands already exceed the designated ROW (that invalid state is a loud warning in the dialog,
-        // never a silently-clamped line here) — and on the View ▾ "ROW lines" toggle
-        // (settings.showRowLines, default on: the same settings.show* shape as showGrid/showDims).
+        // being valid — `rowMarginFt` returns null both when nothing is designated and when either side
+        // of the modeled bands runs past the designated ROW (NEW-4 — that invalid state is a loud
+        // warning in the dialog, never a silently-clamped line here) — and on the View ▾ "ROW lines"
+        // toggle (settings.showRowLines, default on: the same settings.show* shape as showGrid/showDims).
+        // NEW-3 — deliberately NOT gated on `hasXSection(el)`: a single-band road with a designated
+        // ROW draws this boundary exactly like a real multi-band one.
         const rowFt = designatedRowFt(el.xsection);
         const rowMargin = rowFt != null ? rowMarginFt(el.xsection) : null;
         if (rowMargin != null && settings.showRowLines !== false) {
