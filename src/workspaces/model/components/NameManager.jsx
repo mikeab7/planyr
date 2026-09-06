@@ -1,7 +1,16 @@
 /* Model workspace — Stage 3 pt 2: the Name Manager (NEW-1).
  *
  * A floating in-app panel, same family as FindReplaceBar.jsx (never window.prompt/confirm —
- * this repo's own KEY DECISIONS ban dialog-box edits outright). Two jobs in one surface, per the
+ * this repo's own KEY DECISIONS ban dialog-box edits outright).
+ *
+ * ⛔ NEW-1 (B1251888) — like its two siblings (FindReplaceBar.jsx, InconsistencyPanel.jsx), this
+ * used to be `position: fixed; top: 46`, the same guessed offset that broke the moment Formula
+ * Auditing moved into the header row it was floating over. It now renders in normal document
+ * flow instead (ModelApp.jsx mounts it in the same flow slot as Find/Replace and Inconsistencies
+ * — only one is ever open at a time, so they never compete for that slot), which cannot cover
+ * chrome that renders earlier in the column at any window width.
+ *
+ * Two jobs in one surface, per the
  * build brief: (1) the list/search/jump-to-target Name Manager itself, and (2) the FAST PATH to
  * define a name from the current selection — rather than a second popup for that, the "New
  * name" row at the top is always live-bound to whatever is currently selected (its "Refers to"
@@ -145,13 +154,17 @@ export default function NameManager({ open, sheet, selRange, onClose, onGoTo, on
   const rows = namesList(sheet).filter((n) => !q || n.name.toLowerCase().includes(q));
 
   return (
+    // NEW-1 (B1251888) — same fix as FindReplaceBar.jsx: renders IN NORMAL FLOW, never
+    // `position: fixed`. This panel carried the identical `top: 46, right: 16` overlay that
+    // broke the moment Formula Auditing moved into the header row it was floating over.
+    <div data-testid="name-manager-row" style={{ flex: "none", display: "flex", justifyContent: "flex-end", margin: "0 8px" }}>
     <div
       role="dialog"
       aria-label="Name Manager"
       data-testid="name-manager"
       onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); onClose(); } }}
       style={{
-        position: "fixed", top: 46, right: 16, zIndex: 60, display: "flex", flexDirection: "column",
+        display: "flex", flexDirection: "column", marginBottom: 8,
         width: 320, maxHeight: "min(70vh, 520px)",
         borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: "var(--surface-raised)",
         boxShadow: "0 8px 24px rgba(0,0,0,0.18)", // design-exempt: no shadow-color token exists repo-wide (FindReplaceBar's own popPanel carries the identical gap)
@@ -187,6 +200,7 @@ export default function NameManager({ open, sheet, selRange, onClose, onGoTo, on
           ))
         )}
       </div>
+    </div>
     </div>
   );
 }

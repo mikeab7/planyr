@@ -54,7 +54,7 @@ backstop, not the headline — see "Known, deliberately-not-fixed findings".
 | Main menu — Settings gear | 2 | 2 | 2 | — | 2 |
 | Main menu — plan menu (▾ next to the plan name) | 0 | 0 | 3 | — | 3 |
 | Tool rail | 2 | 2 | 2 | — | 2 |
-| Left rail + panels (Yield) | 17 | 17 | 15 | 2 | 17 |
+| Left rail + panels (Yield) | 16 | 16 | 15 | 2 | 17 |
 | Library | 1 | 1 | 0 | 1 | 1 |
 | Doc Review (empty state) | 2 | 2 | 1 | 1 | 2 |
 
@@ -351,7 +351,7 @@ _None found on this run._
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Imagery & layers ×1 | src/app/HelpReportControl.jsx:29: * the screen, tucked under "Imagery & layers", nowhere near the corner he asked for. Fixed by (+more matches elsewhere, best-effort) |
-| 8px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:287:        aria-label="Help and report a problem" |
 
 **dark** — 30 distinct style signature(s) over 36 matched element(s):
 
@@ -386,7 +386,7 @@ _None found on this run._
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Imagery & layers ×1 | src/app/HelpReportControl.jsx:29: * the screen, tucked under "Imagery & layers", nowhere near the corner he asked for. Fixed by (+more matches elsewhere, best-effort) |
-| 8px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:287:        aria-label="Help and report a problem" |
 
 
 ---
@@ -426,7 +426,7 @@ _None found on this run._
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Imagery & layers ×1 | src/app/HelpReportControl.jsx:29: * the screen, tucked under "Imagery & layers", nowhere near the corner he asked for. Fixed by (+more matches elsewhere, best-effort) |
-| 8px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:287:        aria-label="Help and report a problem" |
 
 **dark** — 30 distinct style signature(s) over 36 matched element(s):
 
@@ -461,7 +461,7 @@ _None found on this run._
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Imagery & layers ×1 | src/app/HelpReportControl.jsx:29: * the screen, tucked under "Imagery & layers", nowhere near the corner he asked for. Fixed by (+more matches elsewhere, best-effort) |
-| 8px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:287:        aria-label="Help and report a problem" |
 
 
 ---
@@ -500,7 +500,7 @@ _None found on this run._
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Imagery & layers ×1 | src/app/HelpReportControl.jsx:29: * the screen, tucked under "Imagery & layers", nowhere near the corner he asked for. Fixed by (+more matches elsewhere, best-effort) |
-| 8px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:287:        aria-label="Help and report a problem" |
 | 12px | 48px | 12px | 400 | `rgba(255, 255, 255, 0.94)` | `1px solid rgb(225, 229, 235)` | Click any lot on the map to add it (＋) — ×1 | src/workspaces/site-planner/MapFinder.jsx:3902:                ? "Click any lot on the map to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines." |
 
 **dark** — 30 distinct style signature(s) over 36 matched element(s):
@@ -535,7 +535,7 @@ _None found on this run._
 | 6px | 17px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Reorder the Pursuit group ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 30px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | ▼Imagery & layers ×1 | unattributed (no source match — best-effort text search) |
 | 8px | 28px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Imagery & layers ×1 | src/app/HelpReportControl.jsx:29: * the screen, tucked under "Imagery & layers", nowhere near the corner he asked for. Fixed by (+more matches elsewhere, best-effort) |
-| 8px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:287:        aria-label="Help and report a problem" |
 | 12px | 48px | 12px | 400 | `rgba(24, 27, 33, 0.93)` | `1px solid rgb(42, 46, 55)` | Click any lot on the map to add it (＋) — ×1 | src/workspaces/site-planner/MapFinder.jsx:3902:                ? "Click any lot on the map to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines." |
 
 
@@ -559,6 +559,15 @@ _None found on this run._
 | 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:226:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out"> |
 | 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+more matches elsewhere, best-effort) |
 | 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(215, 221, 229)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:19613:            title="File — export a PNG or print a PDF" |
+| 0px 8px 8px 0px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Recent actions to undo, Recent actions to redo ×2 | src/workspaces/site-planner/SitePlanner.jsx:19640:            aria-label="Recent actions to undo" title="Recent actions to undo"> |
+| 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/dashboardNav.js:27:    title: action ? (logoDashboardTitle || "Dashboard: all projects") : undefined, |
+| 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
+| 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Switch project ×1 | src/shared/ui/ProjectBreadcrumb.jsx:647:        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"} (+more matches elsewhere, best-effort) |
+| 8px | 30px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Switch or rename plan ×1 | src/workspaces/site-planner/SitePlanner.jsx:19444:          "Switch project sits 10.7px from Switch or rename plan — height 26px vs 24px" sibling (+more matches elsewhere, best-effort) |
+| 8px | 30px | 12px | 400 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Cloud sync: Saved on this device ×1 | unattributed (no source match — best-effort text search) |
+| 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:226:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out"> |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+more matches elsewhere, best-effort) |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(215, 221, 229)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:19591:            title="File — export a PNG or print a PDF" |
 | 8px | 26px | 12px | 500 | `rgba(0, 0, 0, 0.06)` | `1px solid rgba(0, 0, 0, 0)` | Zoom to fit ×1 | src/workspaces/site-planner/MapFinder.jsx:218: * "+ Select parcels", "Turn all 1 layer off", "Zoom to fit", "Export to Google Earth (KMZ)" — none (+more matches elsewhere, best-effort) |
 
 **dark** — 13 distinct style signature(s) over 20 matched element(s):
@@ -577,6 +586,15 @@ _None found on this run._
 | 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:226:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out"> |
 | 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+more matches elsewhere, best-effort) |
 | 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(38, 42, 51)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:19613:            title="File — export a PNG or print a PDF" |
+| 0px 8px 8px 0px | 26px | 12px | 500 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Recent actions to undo, Recent actions to redo ×2 | src/workspaces/site-planner/SitePlanner.jsx:19640:            aria-label="Recent actions to undo" title="Recent actions to undo"> |
+| 6px | 23px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | Dashboard: all projects ×1 | src/shared/ui/dashboardNav.js:27:    title: action ? (logoDashboardTitle || "Dashboard: all projects") : undefined, |
+| 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(166, 173, 186)` | All projects: Map ×1 | unattributed (no source match — best-effort text search) |
+| 8px | 30px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | Switch project ×1 | src/shared/ui/ProjectBreadcrumb.jsx:647:        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"} (+more matches elsewhere, best-effort) |
+| 8px | 30px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(236, 239, 244)` | Switch or rename plan ×1 | src/workspaces/site-planner/SitePlanner.jsx:19444:          "Switch project sits 10.7px from Switch or rename plan — height 26px vs 24px" sibling (+more matches elsewhere, best-effort) |
+| 8px | 30px | 12px | 400 | `rgba(0, 0, 0, 0)` | `1px solid rgba(0, 0, 0, 0)` | Cloud sync: Saved on this device ×1 | unattributed (no source match — best-effort text search) |
+| 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:226:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out"> |
+| 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+more matches elsewhere, best-effort) |
+| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(38, 42, 51)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:19591:            title="File — export a PNG or print a PDF" |
 | 8px | 26px | 12px | 500 | `rgba(255, 255, 255, 0.09)` | `1px solid rgba(0, 0, 0, 0)` | Zoom to fit ×1 | src/workspaces/site-planner/MapFinder.jsx:218: * "+ Select parcels", "Turn all 1 layer off", "Zoom to fit", "Export to Google Earth (KMZ)" — none (+more matches elsewhere, best-effort) |
 
 
@@ -589,12 +607,14 @@ _None found on this run._
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
 | 6px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Save the current view as a PNG image, Pick a print frame, then download a finished PDF (no browser print dialog) ×2 | src/workspaces/site-planner/SitePlanner.jsx:19626:            <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button> |
+| 6px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Save the current view as a PNG image, Pick a print frame, then download a finished PDF (no browser print dialog) ×2 | src/workspaces/site-planner/SitePlanner.jsx:19604:            <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button> |
 
 **dark** — 1 distinct style signature(s) over 2 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
 | 6px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Save the current view as a PNG image, Pick a print frame, then download a finished PDF (no browser print dialog) ×2 | src/workspaces/site-planner/SitePlanner.jsx:19626:            <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button> |
+| 6px | 24px | 12px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Save the current view as a PNG image, Pick a print frame, then download a finished PDF (no browser print dialog) ×2 | src/workspaces/site-planner/SitePlanner.jsx:19604:            <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button> |
 
 
 ---
@@ -669,7 +689,7 @@ _(nothing matched in this theme/scenario)_
 
 ### Left rail + panels (Yield)
 
-**light** — 22 distinct style signature(s) over 73 matched element(s):
+**light** — 21 distinct style signature(s) over 72 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
@@ -685,6 +705,8 @@ _(nothing matched in this theme/scenario)_
 | 0px | 32px | 12px | 700 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Layers — map data layers (flood, utilities, parcels, aerial…) ×1 | src/workspaces/site-planner/SitePlanner.jsx:23520:              <button onClick={() => setLayersOpen((o) => !o)} aria-expanded={layersOpen} aria-label="Layers — map data layers (flood, utilities, parcels, aerial…)" (+more matches elsewhere, best-effort) |
 | 0px | 30px | 14px | 600 | `rgba(255, 255, 255, 0.94)` | `1px solid rgb(225, 229, 235)` | Zoom in ×1 | src/shared/sitePlans/components/SitePlansSection.jsx:363:          <Button size="sm" variant="ghost" onClick={() => onZoomToOverlay(o)}>Zoom in</Button> (+more matches elsewhere, best-effort) |
 | 0px | 30px | 13px | 600 | `rgba(255, 255, 255, 0.94)` | `0px none rgb(53, 59, 73)` | Report that this felt slow ×1 | src/workspaces/site-planner/SitePlanner.jsx:23794:                  aria-label="Report that this felt slow" |
+| 0px | 32px | 12px | 700 | `rgba(0, 0, 0, 0)` | `0px none rgb(27, 30, 38)` | Layers — map data layers (flood, utilities, parcels, aerial…) ×1 | src/workspaces/site-planner/SitePlanner.jsx:23482:              <button onClick={() => setLayersOpen((o) => !o)} aria-expanded={layersOpen} aria-label="Layers — map data layers (flood, utilities, parcels, aerial…)" (+more matches elsewhere, best-effort) |
+| 0px | 30px | 14px | 600 | `rgba(255, 255, 255, 0.94)` | `1px solid rgb(225, 229, 235)` | Zoom in ×1 | src/shared/sitePlans/components/SitePlansSection.jsx:363:          <Button size="sm" variant="ghost" onClick={() => onZoomToOverlay(o)}>Zoom in</Button> (+more matches elsewhere, best-effort) |
 | 8px | 27px | 12px | 650 | `rgb(194, 65, 12)` | `1px solid rgba(0, 0, 0, 0)` | Select V ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 15px | 12px | 650 | `rgba(0, 0, 0, 0)` | `0px none rgb(255, 255, 255)` | [object SVGAnimatedString] ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 13px | 10.5px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(255, 255, 255)` | V ×1 | unattributed (label too short to search) |
@@ -693,10 +715,11 @@ _(nothing matched in this theme/scenario)_
 | 6px | 19px | 13px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(53, 59, 73)` | Close panel ×1 | src/shared/ui/PanelChrome.jsx:83:      <IconBtn title="Close" aria-label="Close panel" onClick={onClose} data-testid={testId ? `${testId}-close` : undefined}>✕</IconBtn> |
 | 0px | 31px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | ▶Land use ×1 | unattributed (no source match — best-effort text search) |
 | 999px | 19px | 10.5px | 700 | `rgba(0, 0, 0, 0)` | `1px solid rgb(194, 65, 12)` | Drainage → ×1 | src/workspaces/site-planner/SitePlanner.jsx:20108:                      <span style={{ color: PAL.muted, fontWeight: 600, fontSize: 10.5, whiteSpace: "nowrap" }}>in Drainage →</span> (+more matches elsewhere, best-effort) |
+| 999px | 19px | 10.5px | 700 | `rgba(0, 0, 0, 0)` | `1px solid rgb(194, 65, 12)` | Drainage → ×1 | src/workspaces/site-planner/SitePlanner.jsx:20086:                      <span style={{ color: PAL.muted, fontWeight: 600, fontSize: 10.5, whiteSpace: "nowrap" }}>in Drainage →</span> (+more matches elsewhere, best-effort) |
 | 0px | 12px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(75, 82, 99)` | About Screening disclaimer ×1 | unattributed (no source match — best-effort text search) |
-| 8px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:287:        aria-label="Help and report a problem" |
 
-**dark** — 22 distinct style signature(s) over 73 matched element(s):
+**dark** — 21 distinct style signature(s) over 72 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
@@ -712,6 +735,8 @@ _(nothing matched in this theme/scenario)_
 | 0px | 32px | 12px | 700 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Layers — map data layers (flood, utilities, parcels, aerial…) ×1 | src/workspaces/site-planner/SitePlanner.jsx:23520:              <button onClick={() => setLayersOpen((o) => !o)} aria-expanded={layersOpen} aria-label="Layers — map data layers (flood, utilities, parcels, aerial…)" (+more matches elsewhere, best-effort) |
 | 0px | 30px | 14px | 600 | `rgba(24, 27, 33, 0.93)` | `1px solid rgb(42, 46, 55)` | Zoom in ×1 | src/shared/sitePlans/components/SitePlansSection.jsx:363:          <Button size="sm" variant="ghost" onClick={() => onZoomToOverlay(o)}>Zoom in</Button> (+more matches elsewhere, best-effort) |
 | 0px | 30px | 13px | 600 | `rgba(24, 27, 33, 0.93)` | `0px none rgb(202, 208, 218)` | Report that this felt slow ×1 | src/workspaces/site-planner/SitePlanner.jsx:23794:                  aria-label="Report that this felt slow" |
+| 0px | 32px | 12px | 700 | `rgba(0, 0, 0, 0)` | `0px none rgb(232, 235, 240)` | Layers — map data layers (flood, utilities, parcels, aerial…) ×1 | src/workspaces/site-planner/SitePlanner.jsx:23482:              <button onClick={() => setLayersOpen((o) => !o)} aria-expanded={layersOpen} aria-label="Layers — map data layers (flood, utilities, parcels, aerial…)" (+more matches elsewhere, best-effort) |
+| 0px | 30px | 14px | 600 | `rgba(24, 27, 33, 0.93)` | `1px solid rgb(42, 46, 55)` | Zoom in ×1 | src/shared/sitePlans/components/SitePlansSection.jsx:363:          <Button size="sm" variant="ghost" onClick={() => onZoomToOverlay(o)}>Zoom in</Button> (+more matches elsewhere, best-effort) |
 | 8px | 27px | 12px | 650 | `rgb(242, 107, 58)` | `1px solid rgba(0, 0, 0, 0)` | Select V ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 15px | 12px | 650 | `rgba(0, 0, 0, 0)` | `0px none rgb(21, 23, 28)` | [object SVGAnimatedString] ×1 | unattributed (no source match — best-effort text search) |
 | 0px | 13px | 10.5px | 500 | `rgba(0, 0, 0, 0)` | `0px none rgb(21, 23, 28)` | V ×1 | unattributed (label too short to search) |
@@ -720,8 +745,9 @@ _(nothing matched in this theme/scenario)_
 | 6px | 19px | 13px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(202, 208, 218)` | Close panel ×1 | src/shared/ui/PanelChrome.jsx:83:      <IconBtn title="Close" aria-label="Close panel" onClick={onClose} data-testid={testId ? `${testId}-close` : undefined}>✕</IconBtn> |
 | 0px | 31px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(0, 0, 0)` | ▶Land use ×1 | unattributed (no source match — best-effort text search) |
 | 999px | 19px | 10.5px | 700 | `rgba(0, 0, 0, 0)` | `1px solid rgb(242, 107, 58)` | Drainage → ×1 | src/workspaces/site-planner/SitePlanner.jsx:20108:                      <span style={{ color: PAL.muted, fontWeight: 600, fontSize: 10.5, whiteSpace: "nowrap" }}>in Drainage →</span> (+more matches elsewhere, best-effort) |
+| 999px | 19px | 10.5px | 700 | `rgba(0, 0, 0, 0)` | `1px solid rgb(242, 107, 58)` | Drainage → ×1 | src/workspaces/site-planner/SitePlanner.jsx:20086:                      <span style={{ color: PAL.muted, fontWeight: 600, fontSize: 10.5, whiteSpace: "nowrap" }}>in Drainage →</span> (+more matches elsewhere, best-effort) |
 | 0px | 12px | 12px | 400 | `rgba(0, 0, 0, 0)` | `0px none rgb(164, 171, 184)` | About Screening disclaimer ×1 | unattributed (no source match — best-effort text search) |
-| 8px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:287:        aria-label="Help and report a problem" |
 
 
 ---
@@ -732,13 +758,13 @@ _(nothing matched in this theme/scenario)_
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
-| 8px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:287:        aria-label="Help and report a problem" |
 
 **dark** — 1 distinct style signature(s) over 1 matched element(s):
 
 | radius | height | font | weight | background | border | label(s) | file/line (best-effort) |
 |---|---|---|---|---|---|---|---|
-| 8px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:287:        aria-label="Help and report a problem" |
 
 
 ---
@@ -751,7 +777,7 @@ _(nothing matched in this theme/scenario)_
 |---|---|---|---|---|---|---|---|
 | 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(225, 229, 235)` | Open PDF…, ⇄ Compare revisions… ×2 | src/workspaces/doc-review/DocReview.jsx:675:    if (!file) { setOpenErr("No file was received from that drop. Try the Open PDF… button, or drop a single .pdf."); return; } (+more matches elsewhere, best-effort) |
 | 8px | 30px | 12px | 700 | `rgb(14, 116, 144)` | `1px solid rgb(14, 116, 144)` | 🗂 Browse the Library ×1 | src/workspaces/doc-review/DocReview.jsx:2283:                🗂 Browse the Library |
-| 8px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(255, 255, 255)` | `1px solid rgb(205, 211, 220)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:287:        aria-label="Help and report a problem" |
 
 **dark** — 3 distinct style signature(s) over 4 matched element(s):
 
@@ -759,5 +785,5 @@ _(nothing matched in this theme/scenario)_
 |---|---|---|---|---|---|---|---|
 | 8px | 30px | 12px | 600 | `rgb(29, 32, 39)` | `1px solid rgb(42, 46, 55)` | Open PDF…, ⇄ Compare revisions… ×2 | src/workspaces/doc-review/DocReview.jsx:675:    if (!file) { setOpenErr("No file was received from that drop. Try the Open PDF… button, or drop a single .pdf."); return; } (+more matches elsewhere, best-effort) |
 | 8px | 30px | 12px | 700 | `rgb(14, 116, 144)` | `1px solid rgb(14, 116, 144)` | 🗂 Browse the Library ×1 | src/workspaces/doc-review/DocReview.jsx:2283:                🗂 Browse the Library |
-| 8px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:215:        aria-label="Help and report a problem" |
+| 8px | 44px | 12px | 400 | `rgb(29, 32, 39)` | `1px solid rgb(58, 63, 75)` | Help and report a problem ×1 | src/app/HelpReportControl.jsx:287:        aria-label="Help and report a problem" |
 

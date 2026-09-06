@@ -49,6 +49,26 @@
  * the new `visualViewport` resize/scroll listeners actually trigger a re-measure (not just that
  * dispatching them doesn't throw).
  *
+ * ⛔ B1231280/B1231281 (owner chat block, 2026-09-06) — PART D was rewritten and PART G added.
+ * "The capture is taken at open, not at send" is now asserted literally: `pfRec.state().sent`
+ * must increment on the FAB press that opens the control (before any menu choice exists) and
+ * must NOT increment again when "Something was slow" (PART D) or "Report a problem" (PART G) is
+ * then chosen — both attach the one capture already taken, never a second one. PART G also checks
+ * the "Report a problem" disclosure honestly names the attached performance snapshot before he
+ * sends anything (it never used to attach one at all). The old PART D read `before`/`after`
+ * bracketing only the row's own click, which is why it went from a pass to `1 -> 1` under the new
+ * behaviour — that failure IS the acceptance test working, not a regression; see this file's git
+ * history if a future session needs the old (pre-B1231280) shape for reference.
+ *
+ * ⛔ B1231282 (found this session, AUDIT-FIRST) — `openScreen`'s "map"/"plan" modes used to
+ * navigate to a bare hash (""), which B1213312 repointed from the Site Planner to the Dashboard
+ * (route.js: "bare '#/' used to be a plain alias for 'site-planner, no project'... EVERY
+ * project-less module now gets its own named slug"). Every PART here still "passed" on the wrong
+ * screen — no Leaflet, no canvas, nothing this file's own PART B/D/E claims to exercise was ever
+ * actually reached — until the hash was corrected to the named slug (`#/site`). Filed as its own
+ * item rather than silently fixed in passing, because it affects `verify-capture-pipe.mjs` too
+ * and predates this session's own changes (reproduces byte-identically on an unmodified build).
+ *
  * ⛔ HONESTY, three tiers — read before trusting a line of this section's own output, and see
  * `VERIFICATION.md` → Self-verification for the standing, repo-wide version of the same note
  * (added 2026-09-05 by B1168128, the same day):
@@ -104,7 +124,25 @@ try {
     if (mode === "plan") await ctx.addInitScript(seedPlan);
     const page = await ctx.newPage();
     await assertMeasurable(page, "verify-help-report-control");
-    const hash = mode === "schedule" ? "#/schedule" : mode === "model" ? "#/model" : "";
+    /* ⛔ B1231282 (found this session, AUDIT-FIRST) — a bare "#/" no longer reaches the Site
+     * Planner at all. B1213312 gave "#/" to the Dashboard (route.js's own header: "bare '#/' used
+     * to be a plain alias for 'site-planner, no project'... EVERY project-less module now gets its
+     * own named slug"), so every mode here landing on the empty hash silently opened the Dashboard
+     * instead — no Leaflet, no canvas, and every check downstream of that failed for a reason that
+     * had nothing to do with what it claimed to test (measured: this reproduces byte-identically
+     * on an UNMODIFIED build, so it predates and is unrelated to B1231280/B1231281).
+     * ⛔ AND A SECOND, DISTINCT LAYER UNDER "plan" MODE, found while proving the first fix: `#/site`
+     * (the named slug that replaced the bare default) is "site-planner, NO PROJECT" — the picker,
+     * per route.js's own grammar table. It is not, and was never, "open whatever `currentSite`
+     * points at": `bootResume.js`'s own header states the URL is authoritative for which project is
+     * open ("the route is the source of truth for WHICH project is open"), so a project-less route
+     * shows the picker regardless of what's in `planarfit:currentSite:v1`. Confirmed directly:
+     * `#/site` with this file's seeded plan renders the Sites list with "Help Control Verify" as an
+     * entry to click into, never the open canvas; `#/project/s_help/site` (the seeded groupId) opens
+     * it immediately. So "plan" mode names the project explicitly; "map" mode deliberately keeps the
+     * project-less `#/site` — the picker/Leaflet screen IS the map screen this file means. */
+    const hash = mode === "schedule" ? "#/schedule" : mode === "model" ? "#/model"
+      : mode === "plan" ? "#/project/s_help/site" : "#/site";
     await page.goto(URL + hash, { waitUntil: "load" });
     if (mode === "plan") {
       await page.waitForSelector('svg[aria-label="Site plan canvas"]', { timeout: 15000 }).catch(() => {});
@@ -261,22 +299,29 @@ try {
     await page.mouse.move(700, 500, { steps: 20 });
     await pacedWait(page, 600);
 
+    // ⛔ B1231280 — THE ACCEPTANCE TEST: the capture is taken at the press that OPENS the
+    // control, not at the "Something was slow" row's own click. `before`/`beforeOpen` brackets
+    // the OPEN click; a second bracket around the row's own click then proves it does NOT take a
+    // second capture — it attaches the one already taken.
+    const beforeOpen = await page.evaluate(() => window.pfRec.state().sent);
     await page.evaluate(() => document.querySelector('[data-testid="help-report-fab"]').click());
     await pacedWait(page, 300);
+    const afterOpen = await page.evaluate(() => window.pfRec.state().sent);
+    check("opening the control took the capture immediately (\"the capture is taken at open, not at send\")", afterOpen > beforeOpen, `${beforeOpen} -> ${afterOpen}`);
+
     const slowRow = await page.evaluate(() => {
       const items = Array.from(document.querySelectorAll("button"));
       return items.find((b) => b.textContent && b.textContent.includes("Something was slow"));
     });
     check("the menu offers \"Something was slow\" on the map screen", !!slowRow);
-    const before = await page.evaluate(() => window.pfRec.state().sent);
     await page.evaluate(() => {
       const items = Array.from(document.querySelectorAll("button"));
       const btn = items.find((b) => b.textContent && b.textContent.includes("Something was slow"));
       btn.click();
     });
     await pacedWait(page, 500);
-    const after = await page.evaluate(() => window.pfRec.state().sent);
-    check("pressing it took a real capture (pfRec.state().sent incremented)", after > before, `${before} -> ${after}`);
+    const afterSubmit = await page.evaluate(() => window.pfRec.state().sent);
+    check("clicking \"Something was slow\" does NOT take a second capture — it attaches the one already taken at open", afterSubmit === afterOpen, `${afterOpen} -> ${afterSubmit}`);
     const captures = await page.evaluate(() => window.pfRec.captures());
     const last = captures[captures.length - 1];
     check("the capture is recorded on this device", !!last, JSON.stringify(last || {}));
@@ -510,6 +555,48 @@ try {
       }
     }
     if (webkitBrowser) await webkitBrowser.close();
+  }
+
+  // ─────────────────────────────────────────── PART G — B1231280: "Report a problem" carries
+  // the SAME frozen capture "Something was slow" does, disclosed honestly before sending, and
+  // never takes a second one of its own.
+  console.log("\nPART G — \"Report a problem\" attaches the SAME frozen capture, disclosed honestly before sending");
+  {
+    const { ctx, page } = await openScreen({ mode: "map", width: 1440 });
+    await page.mouse.move(400, 400);
+    await page.mouse.move(700, 500, { steps: 20 });
+    await pacedWait(page, 600);
+
+    const beforeOpen = await page.evaluate(() => window.pfRec.state().sent);
+    await page.evaluate(() => document.querySelector('[data-testid="help-report-fab"]').click());
+    await pacedWait(page, 300);
+    const afterOpen = await page.evaluate(() => window.pfRec.state().sent);
+    check("opening the control took the capture before any menu choice is made", afterOpen > beforeOpen, `${beforeOpen} -> ${afterOpen}`);
+
+    await page.evaluate(() => {
+      const btn = Array.from(document.querySelectorAll("button")).find((b) => b.textContent && b.textContent.includes("Report a problem"));
+      btn && btn.click();
+    });
+    await pacedWait(page, 300);
+    const disclosure = await page.evaluate(() => {
+      const summary = Array.from(document.querySelectorAll("summary")).find((s) => s.textContent.includes("What will be sent"));
+      return summary ? summary.parentElement.textContent : null;
+    });
+    check(
+      "the disclosure honestly says a performance snapshot is included before he sends anything",
+      !!disclosure && disclosure.includes("recent app performance"),
+      disclosure || "(not found)",
+    );
+
+    await page.fill("textarea", "verify-help-report-control PART G probe — safe to ignore, never actually sent (no cloud config in this build)");
+    await page.evaluate(() => {
+      const btn = Array.from(document.querySelectorAll("button")).find((b) => (b.textContent || "").trim().startsWith("Send"));
+      btn && btn.click();
+    });
+    await pacedWait(page, 400);
+    const afterSubmit = await page.evaluate(() => window.pfRec.state().sent);
+    check("submitting \"Report a problem\" does NOT take a second capture either — same frozen one", afterSubmit === afterOpen, `${afterOpen} -> ${afterSubmit}`);
+    await ctx.close();
   }
 
   const failed = results.filter((r) => !r.ok);
