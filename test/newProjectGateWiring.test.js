@@ -20,6 +20,7 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const SP = readFileSync(join(here, "../src/workspaces/site-planner/SitePlannerApp.jsx"), "utf8");
 const SHELL = readFileSync(join(here, "../src/app/Shell.jsx"), "utf8");
+const PLANNER = readFileSync(join(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
 
 describe("SitePlannerApp.jsx marks every freshly-minted project id before it can reach the URL", () => {
   it("declares the tracking ref", () => {
@@ -105,5 +106,48 @@ describe("Shell.jsx records the fresh-creation signal and folds it into the gate
   it("the freshlyCreated computation ORs the reload-surviving persisted check in, not the ref alone", () => {
     const idx = SHELL.indexOf("const freshlyCreated = freshProjectIdsRef.current.has(projectId) || wasProjectFreshlyMinted(projectId);");
     expect(idx).toBeGreaterThan(-1);
+  });
+});
+
+/* B1202176 (amendment ×2, 2026-09-06) — `SitePlanner.jsx`'s `persistOrDrop` fires the moment a
+ * workspace tab switch makes the Site Planner canvas inactive, and for a still-blank draft it
+ * drops the site rather than saving it. Two shipped shapes, in order:
+ *   (1) unconditional `deleteSite(id)` — tombstoned every drop, poisoning any LATER module's
+ *       `ensureProjectRow` for the same id.
+ *   (2) `deleteSite(id, { tombstone: !!stored })` gated on `!stored?.origin` — closed (1), but
+ *       STILL deleted a project the instant a record existed with no origin, which is exactly what
+ *       `ensureProjectRow` always writes. Reproduced independently on production TWICE (the owner,
+ *       and a separate live measurement) on the SAME repro: New project → Notes → "+ New page"
+ *       writes a real row (origin still null) → hard reload remounts Site Planner inactive on the
+ *       Notes route → this effect re-fires, sees that now-real record, and (2)'s gate still called
+ *       `deleteSite(id, {tombstone:true})` on it — a row written at 00:18:56 was soft-deleted at
+ *       00:19:30, 34 seconds later, no delete action ever taken.
+ * The fix is gating on `!stored` ALONE — a local record existing at all, however it got there,
+ * means something considered this project worth keeping, and only an id that has NEVER been saved
+ * anywhere on this device (which can therefore never carry an origin either) may be dropped. This
+ * is the wiring proof that `persistOrDrop` makes exactly that check, in that order, and that
+ * neither of the two superseded shapes is still reachable. */
+describe("SitePlanner.jsx's persistOrDrop only drops an id that has NEVER had a local record", () => {
+  it("reads the local record BEFORE deciding whether to drop it", () => {
+    const fnStart = PLANNER.indexOf("const persistOrDrop = () => {");
+    expect(fnStart).toBeGreaterThan(-1);
+    const storedIdx = PLANNER.indexOf("const stored = loadSite(siteId);", fnStart);
+    const blankCheckIdx = PLANNER.indexOf("if (isBlankSite(s) && !stored) {", fnStart);
+    expect(storedIdx).toBeGreaterThan(fnStart);
+    expect(blankCheckIdx).toBeGreaterThan(storedIdx);
+  });
+
+  it("passes tombstone: false to deleteSite, and neither superseded call shape is reachable", () => {
+    const fnStart = PLANNER.indexOf("const persistOrDrop = () => {");
+    const callIdx = PLANNER.indexOf("deleteSite(siteId, { tombstone: false });", fnStart);
+    expect(callIdx).toBeGreaterThan(fnStart);
+    // Neither the original unconditional call NOR the first amendment's `!stored?.origin` /
+    // `!!stored` shape may still be reachable — otherwise a superseded fix could be dead code
+    // sitting next to a still-broken one.
+    const fnEnd = PLANNER.indexOf("\n  };", fnStart);
+    const body = PLANNER.slice(fnStart, fnEnd);
+    expect(body.includes("deleteSite(siteId);")).toBe(false);
+    expect(body.includes("!stored?.origin")).toBe(false);
+    expect(body.includes("tombstone: !!stored")).toBe(false);
   });
 });

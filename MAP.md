@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-06 @ `36240df47` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-06 @ `d723fcdb` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -618,7 +618,7 @@ _695 source files mapped._
   - _exports_: `MODULE_TAB_LABEL`
 - **`src/shared/ui/noAutofill.js`** — Shared NO_AUTOFILL attribute bag spread onto inline cell / free-text editors so password managers (1Password/LastPass/Bitwarden/Dashlane) don't inject an autofill card over them; never on auth forms (B865)
   - _exports_: `default`, `NO_AUTOFILL`
-- **`src/shared/ui/pageContainmentGuard.js`** — Watches for the whole page ever being scrolled/zoomed off its pinned html/body (B1168128); self-heals and reports it via telemetry
+- **`src/shared/ui/pageContainmentGuard.js`** — Read-only self-heal + telemetry watcher for the whole-page-drags-instead-of-the-map iOS Safari class (B1168128): asserts html/body stay pinned at scroll (0,0) and the viewport stays at its intended zoom scale, self-healing and reporting the instant either drifts on a real device.
   - _exports_: `detectDrift`, `installPageContainmentGuard`
 - **`src/shared/ui/PanelChrome.jsx`** — NEW-1/NEW-2 shared panel title bar for both docked + floating hosts: title + detach(PiP)/dock/close icons + double-click-to-toggle + optional drag handle
   - _exports_: `default (PanelChrome)`
@@ -1167,7 +1167,7 @@ _695 source files mapped._
   - _exports_: `loadProfile`, `saveProfile`
 - **`src/workspaces/site-planner/lib/projectName.js`** — THE authority for what a project (site group) is called: resolves the one authoritative name across a group's plans (rename-stamp first, legacy majority second, ambiguous never guessed), reconciles a split group, and supplies the write-path correction that stops a stale plan re-publishing an old name.
   - _exports_: `byGroup`, `groupKeyOf`, `maxStampOf`, `nameAuthority`, `reconcileGroupNames`, `resolveNameFor`
-- **`src/workspaces/site-planner/lib/propertiesSheet.js`** — Pure geometry/decisions for the phone Properties bottom sheet (B1215682): phone-sheet-mode test (narrow AND coarse pointer), the half/tall snap heights, drag-release snap resolution, keyboard-inset reading, the keyboard-safe height clamp, and the selection-cover-shift math
+- **`src/workspaces/site-planner/lib/propertiesSheet.js`** — Pure geometry/decisions for the phone Properties bottom sheet (B1215682): phone+coarse-pointer mode gate, the half/tall snap heights and drag-to-snap/dismiss resolution, keyboard-inset clamping. Properties panel only — no other panel.
   - _exports_: `clampSheetHeightForKeyboard`, `heightForSnap`, `isPhoneSheetMode`, `keyboardInsetPx`, `resolveDragSnap`, `selectionCoverDeltaPx`, `SHEET_SNAPS`
 - **`src/workspaces/site-planner/lib/proposedSurface.js`** — B826 proposed-surface engine (pure): per-element grading planes from the B825 class records, composite cut/fill lattice, balance assist, violation classing (ADA legal vs screening)
   - _exports_: `balanceAssist`, `buildPlanes`, `buildProposedSurface`, `classifyGradeElement`, `daylightRings`, `distToRingEdges`, `DOCK_BREAK_FT`, `nearestOnRing`, `netImportCy`, `PL_FILL_EPS_FT`, `sampleProposedAt`, `slopeBand`, `surfaceGrid`, `surfaceViolations`, `TIE_DROP_FT`
