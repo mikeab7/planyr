@@ -1,7 +1,8 @@
-/* dashboardPipeline — pure grouping/derivation for the Dashboard's Pipeline, Pursuits-by-
- * activity, and Going-quiet cards (B1213313, NEW-2). All three read the SAME per-plan `sites`
- * rows (see dashboardSitesFetch.js) and just look at them differently, so the fetch happens
- * once and these three pure functions each answer a different question over it.
+/* dashboardPipeline — pure grouping/derivation for the Dashboard's Pipeline, Jump-back-in and
+ * Going-quiet cards (B1213313, NEW-2). Reads the SAME per-plan `sites` rows (see
+ * dashboardSitesFetch.js) `pursuitsList.js`'s Pursuits card also builds on. `pursuitsByActivity`
+ * (the placeholder "Pursuits by activity" card) was removed in B1161793 (NEW-2, Direction C) —
+ * directly superseded by the richer, sortable `pursuitsTable` in pursuitsList.js.
  *
  * A `sites` row is one PLAN, not one project — a project (what the owner calls a "site") can
  * hold several plans sharing one `group_id`. `groupProjectsByGroupId` collapses to one entry per
@@ -12,7 +13,6 @@
 
 const DEFAULT_STATUS = "pursuit"; // siteStatus.js's own new-site default
 const DEFAULT_ROLE = "pursuit";   // role has no legacy split — absent means "pursuit" (B843792)
-const PURSUIT_ACTIVITY_ORDER = { pursuit: 0, active: 1, onhold: 2 };
 const OPEN_STATUSES = new Set(["pursuit", "active", "onhold"]);
 
 /** `siteRows` — the raw `sites` table rows (one per plan). Returns one summary per `group_id`. */
@@ -30,12 +30,24 @@ export function groupProjectsByGroupId(siteRows) {
     const newest = rows.reduce((a, b) => (Date.parse(b.updated_at || 0) > Date.parse(a.updated_at || 0) ? b : a));
     out.push({
       groupId,
+      // B1161793 (NEW-2) — the representative PLAN's own row id, distinct from `groupId` (which
+      // is a separate value shared across sibling plans, or falls back to a solo plan's id when
+      // it has no group). The Pursuits card's Yield/Quiet columns key off `site_elements.site_id`,
+      // which is always a PLAN id — never the group id — so this is what lets those two per-plan
+      // reads land on the same representative plan `name`/`status`/`county` already come from.
+      siteId: newest.id,
       name: (newest.site || newest.name || "").trim() || "Untitled",
       county: newest.county || null,
       status: newest.status || DEFAULT_STATUS,
       role: newest.role || DEFAULT_ROLE,
       updatedAt: newest.updated_at || null,
       planCount: rows.length,
+      // B1161793 (NEW-2) — the pursuit's contractual dates (feasibility expiry / LOI response /
+      // closing), read straight through from the representative plan. Absent on every pursuit
+      // until entered via the "Deal dates…" editor — see pursuitsList.js's own header.
+      feasibilityExpiry: newest.feasibilityExpiry || null,
+      loiDate: newest.loiDate || null,
+      closingDate: newest.closingDate || null,
     });
   }
   return out;
@@ -51,16 +63,6 @@ export function pipelineCounts(projects) {
     counts[p.status]++;
   }
   return counts;
-}
-
-/** The open pipeline (Pursuit/Active/On hold, tracked records excluded — they aren't a stage of
- * anything), ordered loudest-first (matching the map marker salience rule), newest within a
- * stage first. */
-export function pursuitsByActivity(projects, { limit = 8 } = {}) {
-  return (projects || [])
-    .filter((p) => p.role !== "tracked" && PURSUIT_ACTIVITY_ORDER[p.status] !== undefined)
-    .sort((a, b) => (PURSUIT_ACTIVITY_ORDER[a.status] - PURSUIT_ACTIVITY_ORDER[b.status]) || (Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0)))
-    .slice(0, limit);
 }
 
 /** The single most recently updated project, of any status/role — "Jump back in" is a literal

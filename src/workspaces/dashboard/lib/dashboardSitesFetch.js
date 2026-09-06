@@ -22,7 +22,7 @@ export async function fetchSiteSummaries() {
   try {
     const { data, error } = await supabase
       .from("sites")
-      .select("id, group_id, site, name, county, updated_at, status:data->>status, role:data->>role")
+      .select("id, group_id, site, name, county, updated_at, status:data->>status, role:data->>role, feasibilityExpiry:data->>feasibilityExpiry, loiDate:data->>loiDate, closingDate:data->>closingDate")
       .is("deleted_at", null)
       .order("updated_at", { ascending: false });
     if (error || !Array.isArray(data)) return [];

@@ -124,22 +124,6 @@ export function PipelineCard({ counts }) {
   );
 }
 
-/* ── Pursuits by activity ─────────────────────────────────────────────────────────────────── */
-export function PursuitsByActivityCard({ rows, onOpenProject }) {
-  if (!rows.length) return <div style={EMPTY}>No open pursuits right now.</div>;
-  return (
-    <div>
-      {rows.map((p) => (
-        <ClickableRow key={p.groupId} onClick={() => onOpenProject?.(p)}>
-          <StatusDot status={p.status} />
-          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-          <span style={{ ...MUTED, flex: "none" }}>{p.county ? `${p.county} · ` : ""}{p.planCount} plan{p.planCount === 1 ? "" : "s"}</span>
-        </ClickableRow>
-      ))}
-    </div>
-  );
-}
-
 /* ── Going quiet ──────────────────────────────────────────────────────────────────────────── */
 export function GoingQuietCard({ rows, onOpenProject }) {
   if (!rows.length) return <div style={EMPTY}>Nothing's gone quiet — every open project has been touched recently.</div>;
