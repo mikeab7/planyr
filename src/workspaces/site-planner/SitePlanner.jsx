@@ -22,9 +22,9 @@ import { writeJournal, readJournal, clearJournal, sweepJournals, journalSessionI
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
 import { createNameResolver, describeElement, SELF_ACTOR } from "./lib/editorNames.js";
 import { toastForSyncEvent, describeCoalescedLabel } from "./lib/conflictToasts.js";
-import { listMembers } from "./lib/teams.js";
+import { listMembers, currentIdentity } from "./lib/teams.js";
 import { multiwriterEnabled } from "./lib/multiwriter.js";
-import { presenceSummary } from "./lib/presencePill.js";
+import { presenceParties } from "./lib/presencePill.js";
 import { loadProfile } from "./lib/profile.js";
 import { commitElements, fetchElements, keepaliveCommit } from "./lib/elementApi.js";
 import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
@@ -116,6 +116,7 @@ import CursorChip from "./components/CursorChip.jsx";
 import ViewMenu from "./components/ViewMenu.jsx";
 // NEW-4 (B366389 ×2) — the plan menu's icons, in the route-local stroke idiom. See components/icons.jsx.
 import { SaveIcon, HistoryIcon, StorageIcon, PadlockIcon, PlusIcon, DuplicateIcon, CloseXIcon, UndoIcon, RedoIcon, ZoomFitIcon, LayersIcon } from "./components/icons.jsx";
+import PresenceChip from "./components/PresenceChip.jsx";
 /* LAZY (B1064 tranche a). Site Analysis mounts ONLY when the Analysis panel is the open one
  * (`_pid === "analysis"`, and `leftPanel` starts at null), so it is never on the first-paint
  * path — and it drags lib/siteAnalysis.js with it, which is the larger half of what moves.
@@ -246,13 +247,13 @@ import { HATCH_OPTIONS, hatchSpec } from "../../shared/style/hatchPatterns.js";
 // rescale is exactly as zoom-dependent for a pattern tile as it is for the callout arrowhead this
 // item also fixes. `patternTransform` composing a uniform `scale(labelK)` with any existing
 // rotation is safe because a uniform scale commutes with rotation.
-function HatchPatternDef({ id, hatchKey, color, wash = 0, lineOpacity = 0.5, labelK = 1 }) {
+function HatchPatternDef({ id, hatchKey, color, washColor = color, wash = 0, lineOpacity = 0.5, labelK = 1 }) {
   const spec = hatchSpec(hatchKey);
   const size = spec ? spec.size : 7;
   const tf = [spec ? `rotate(${spec.rotate})` : null, labelK !== 1 ? `scale(${labelK})` : null].filter(Boolean).join(" ") || undefined;
   return (
     <pattern id={id} width={size} height={size} patternUnits="userSpaceOnUse" patternTransform={tf}>
-      {wash > 0 && <rect width={size} height={size} fill={color} opacity={wash} />}
+      {wash > 0 && <rect width={size} height={size} fill={washColor} opacity={wash} />}
       {spec && spec.lines && spec.lines.map(([x1, y1, x2, y2], i) => (
         <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth="1.1" opacity={lineOpacity} />
       ))}
@@ -4616,9 +4617,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const ch = supabase
       .channel("site-elements:" + siteId, { config: { presence: { key: uid || "anon" } } })
       .on("presence", { event: "sync" }, () => {
-        // B674 — the live "who's here" roster; counts SESSIONS (two windows of one account =
-        // "2 here" — V231 #13), names grouped by person. Quiet when this window is alone.
-        try { setPeers(presenceSummary(ch.presenceState(), uid)); } catch (_) {}
+        // B674 — the live "who's here" roster, split into THIS account's own sessions vs other
+        // real people (NEW-1, rebuilt): presence already groups by uid, so "own tabs vs other
+        // people" falls out of the existing payload for free. Quiet when this window is alone.
+        try { setPeers(presenceParties(ch.presenceState(), uid)); } catch (_) {}
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "site_elements", filter: "site_id=eq." + siteId }, (payload) => {
         if (elSyncRef.current !== eng) return;
@@ -4633,11 +4635,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (elSyncRef.current !== eng) return;
         if (status === "SUBSCRIBED") {
           refetchReplace(eng); // initial load AND reconnect re-true from rows
-          // B674 — announce THIS session on the roster (display name only, never the email).
-          loadProfile(uid).then((prof) => {
-            const name = prof ? [prof.first_name, prof.last_name].filter(Boolean).join(" ").trim() : "";
-            try { ch.track({ uid, name: name || "Someone" }); } catch (_) {}
-          }).catch(() => { try { ch.track({ uid, name: "Someone" }); } catch (_) {} });
+          // B674 — announce THIS session on the roster. NEW-1 also sends this account's own
+          // email (already available from the auth session — no new lookup, no new backend):
+          // the header presence chip falls back to it for a teammate's initials when their
+          // profile has no display name set. Never shown in the chip itself, only used to derive
+          // a one-letter fallback badge.
+          Promise.all([loadProfile(uid).catch(() => null), currentIdentity().catch(() => ({ email: null }))])
+            .then(([prof, identity]) => {
+              const name = prof ? [prof.first_name, prof.last_name].filter(Boolean).join(" ").trim() : "";
+              try { ch.track({ uid, name, email: (identity && identity.email) || "" }); } catch (_) {}
+            })
+            .catch(() => { try { ch.track({ uid, name: "", email: "" }); } catch (_) {} });
         }
       });
     // Fallback: if the channel can't join (proxy/WebSocket blocked), a plain fetch still seeds the
@@ -7931,6 +7939,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      a user could not lock, and a legacy or pasted locked one could never be freed. */
   const toggleCalloutLock = (id) => { pushHistory(); setCallouts((a) => a.map((c) => (c.id === id ? { ...c, locked: !c.locked } : c))); };
   const selMarkup = sel?.kind === "markup" ? markups.find((m) => m.id === sel.id) : null;
+  const simpleClosedMarkup = !!selMarkup && ["rect", "ellipse", "polygon"].includes(selMarkup.kind);
+  const simpleClosedMarkupLabel = simpleClosedMarkup
+    ? `${selMarkup.kind[0].toUpperCase()}${selMarkup.kind.slice(1)}`
+    : "";
   const setSelMarkup = (patch) => { pushHistory(); setMarkups((a) => a.map((m) => m.id === selMarkup.id ? { ...m, ...patch } : m)); setMkStyle((s) => ({ ...s, ...patch })); };
   // Geometry patch (w/h/rot) — kept out of mkStyle so new shapes don't inherit a past size/angle.
   const setSelMarkupGeom = (patch) => { pushHistory(); setMarkups((a) => a.map((m) => m.id === selMarkup.id ? { ...m, ...patch } : m)); };
@@ -21758,9 +21770,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // unfilled ~5,000-ft polygon swallowed every off-road click, and "Send to Back" was
                 // powerless because it's a hit-AREA problem, not paint order). Small FILLED annotations
                 // still select by interior (B155/B156 preserved). markupPick.js reads the SAME
-                // fillOpacity>0 rule, so the JS cycle (B921) and this declarative hit area never diverge.
-                const closedFill = (m.fillOpacity ?? 0) > 0;
-                const visFill = closedFill ? { fill: m.fill, fillOpacity: m.fillOpacity } : { fill: "none" };
+                // visible-fill rule (solid opacity or supported hatch), so the JS cycle (B921) and
+                // this declarative hit area never diverge.
+                const hasHatch = ["rect", "ellipse", "polygon"].includes(m.kind) && !!m.hatch && m.hatch !== "none";
+                const closedFill = (m.fillOpacity ?? 0) > 0 || hasHatch;
+                const visFill = hasHatch
+                  ? { fill: `url(#pat-markup-${m.id})` }
+                  : closedFill ? { fill: m.fill, fillOpacity: m.fillOpacity } : { fill: "none" };
+                const visibleStroke = { strokeOpacity: m.strokeOpacity ?? 1 };
                 const closedHitPE = closedFill ? "all" : "stroke"; // whole-body vs stroke-only grab (B920)
                 // Top-centre screen anchor for the selected-locked 🔒 cue (B922/NEW-3), per markup kind.
                 const mkLockAnchor = () => {
@@ -21924,7 +21941,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   return (
                     <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={common.onPointerDown} onContextMenu={common.onContextMenu}>
                       <polygon points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinejoin="round" pointerEvents={closedHitPE} />
-                      <polygon points={s} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} {...visFill} pointerEvents="none" />
+                      <polygon points={s} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} {...visibleStroke} {...visFill} pointerEvents="none" />
                     </g>
                   );
                 }
@@ -21942,7 +21959,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   return (
                     <g key={m.id} data-markup={m.id} style={mkCursor} opacity={m.opacity ?? 1} onPointerDown={common.onPointerDown} onContextMenu={common.onContextMenu}>
                       <polygon points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinejoin="round" pointerEvents={closedHitPE} />
-                      <path d={scallopD} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} strokeLinejoin="round" {...visFill} pointerEvents="none" />
+                      <path d={scallopD} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} strokeLinejoin="round" {...visibleStroke} {...visFill} pointerEvents="none" />
                     </g>
                   );
                 }
@@ -21951,13 +21968,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (m.kind === "ellipse") return (
                   <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={common.onPointerDown} onContextMenu={common.onContextMenu}>
                     <ellipse cx={c.x} cy={c.y} rx={w / 2} ry={h / 2} transform={rotTf} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} pointerEvents={closedHitPE} />
-                    <ellipse cx={c.x} cy={c.y} rx={w / 2} ry={h / 2} transform={rotTf} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} {...visFill} pointerEvents="none" />
+                    <ellipse cx={c.x} cy={c.y} rx={w / 2} ry={h / 2} transform={rotTf} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} {...visibleStroke} {...visFill} pointerEvents="none" />
                   </g>
                 );
                 return (
                   <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={common.onPointerDown} onContextMenu={common.onContextMenu}>
                     <rect x={c.x - w / 2} y={c.y - h / 2} width={w} height={h} transform={rotTf} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} pointerEvents={closedHitPE} />
-                    <rect x={c.x - w / 2} y={c.y - h / 2} width={w} height={h} transform={rotTf} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} {...visFill} pointerEvents="none" />
+                    <rect x={c.x - w / 2} y={c.y - h / 2} width={w} height={h} transform={rotTf} stroke={nStroke} strokeWidth={vsw} strokeDasharray={da} {...visibleStroke} {...visFill} pointerEvents="none" />
                   </g>
                 );
                 })();
@@ -22033,22 +22050,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         onRenameProject={renameProjectFromHeader}
         saveState={headerSaveState}
         multiEditOk={multiwriterEnabled()}
-        saveSlot={peers ? (
-          <span
-            title={peers.names.join(" · ")}
-            data-testid="presence-pill"
-            // NEW-1 (B972096) — was borderRadius:999 (pill) + fontSize:11.5 (off-scale after the
-            // FONT_SIZE reduction). This is a single standalone control sitting in row-1's right
-            // zone alongside FullscreenButton/SettingsMenu/CloudSyncBadge/the account chip — not a
-            // container — so it converges to RADIUS.md with the rest of that row.
-            style={{ display: "inline-flex", alignItems: "center", gap: 5, background: SURF_RAISED,
-              border: "1px solid var(--border-strong)", borderRadius: RADIUS.md, padding: "2px 9px",
-              fontSize: FONT_SIZE.control, fontWeight: 800, color: "var(--text-primary)", whiteSpace: "nowrap" }}
-          >
-            <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: RADIUS.pill, background: "var(--accent-site)" }} />
-            {peers.label}
-          </span>
-        ) : undefined}
+        saveSlot={<PresenceChip data={peers} />}
         // Conflict needs a reload, not a blind retry — so only offer "Retry now" for a plain
         // failed write; the conflict case gets its own explanation (the loud banner handles reload).
         // NEW-1 — also retries a failed BACKGROUND push (rename/status/new-site) when that's what's
@@ -22352,6 +22354,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const st = encumbranceStyle(m);
                 return <HatchPatternDef key={`pat-ec-${m.id}`} id={`pat-encumber-el-${m.id}`} hatchKey={st.hatch} color={st.fill} wash={st.fillOpacity} lineOpacity={0.55} labelK={labelK} />;
               })}
+              {/* Closed markup hatch uses the shared catalog. Fill color remains the wash while
+                  hatch color controls only the pattern, matching the two controls in Properties. */}
+              {markups.filter((m) => ["rect", "ellipse", "polygon"].includes(m.kind) && m.hatch && m.hatch !== "none").map((m) => (
+                <HatchPatternDef key={`pat-mk-${m.id}`} id={`pat-markup-${m.id}`} hatchKey={m.hatch}
+                  color={m.hatchColor || m.stroke || m.fill} washColor={m.fill} wash={m.fillOpacity ?? 0}
+                  lineOpacity={1} labelK={labelK} />
+              ))}
             </defs>
 
             {!(origin && basemapOn && showAerial) && <g data-export="skip">{gridLines()}</g>}
@@ -24459,8 +24468,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPropsCollapsed((c) => !c); } }}
             style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "2px 0 6px" }}>
             <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: PAL.muted, flex: 1 }}>
-              {multiStyleable ? `${multi.length} selected` : selMeasure ? "Measurement" : <>Element{(() => { const l = selEl ? (selEl.type === "pond" ? pondDisplayNameFor(detWithAuto(selEl.det), pondSplitOf(selEl)) : (TYPE[selEl.type]?.label || "").split(" / ")[0]) : selCallout ? "Callout" : selMarkup ? (selMarkup.kind === "easement" ? "Easement" : "Markup") : ""; return l ? ` · ${l}` : ""; })()}</>}
+              {multiStyleable ? `${multi.length} selected` : selMeasure ? "Measurement" : simpleClosedMarkup ? simpleClosedMarkupLabel : <>Element{(() => { const l = selEl ? (selEl.type === "pond" ? pondDisplayNameFor(detWithAuto(selEl.det), pondSplitOf(selEl)) : (TYPE[selEl.type]?.label || "").split(" / ")[0]) : selCallout ? "Callout" : selMarkup ? (selMarkup.kind === "easement" ? "Easement" : "Markup") : ""; return l ? ` · ${l}` : ""; })()}</>}
             </span>
+            {simpleClosedMarkup && <>
+              <button type="button" style={{ ...chip, width: 30, height: 30, padding: 0 }}
+                title={`${selMarkup.locked ? "Unlock" : "Lock"} ${simpleClosedMarkupLabel.toLowerCase()}`}
+                aria-label={`${selMarkup.locked ? "Unlock" : "Lock"} ${simpleClosedMarkupLabel.toLowerCase()}`}
+                onClick={(e) => { e.stopPropagation(); toggleMarkupLock(selMarkup.id); }}>
+                {selMarkup.locked ? "🔒" : "🔓"}
+              </button>
+              <details style={{ position: "relative" }} onClick={(e) => e.stopPropagation()}>
+                <summary style={{ ...chip, width: 30, height: 30, padding: 0, display: "grid", placeItems: "center", listStyle: "none" }} aria-label={`More ${simpleClosedMarkupLabel.toLowerCase()} actions`}>•••</summary>
+                <div style={{ position: "absolute", right: 0, top: 34, zIndex: 20, minWidth: 112, padding: 4, background: SURF_RAISED, border: BORDER_1, borderRadius: 8, boxShadow: "0 8px 22px rgba(28,25,20,0.16)" }}>
+                  <button type="button" style={{ ...chip, width: "100%", border: "none", color: PAL.danger, justifyContent: "flex-start" }}
+                    onClick={() => deleteSel(null, { entry: "panel:markup" })}>Delete {simpleClosedMarkupLabel.toLowerCase()}</button>
+                </div>
+              </details>
+            </>}
             {/* Explicit close. The element STAYS selected — double-click it again to reopen. On DESKTOP
                 ✕ releases the dock back to whatever panel the inspector replaced; on NARROW it closes
                 the ✎-pill overlay. NEW-1 — with the panel no longer derived from selection, this (and
@@ -24647,17 +24671,44 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             return (
               // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
               <div>
-              <Section title={isCloud ? "Markup · Cloud" : `Markup · ${selMarkup.kind[0].toUpperCase()}${selMarkup.kind.slice(1)}`}>
-                <Field label="Outline"><ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveStyle({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} /></Field>
-                <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setStyle({ weight: n })} /></Field>
-                <Field label="Dash">
-                  <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setStyle({ dash: e.target.value })}>
-                    {DASH_OPTIONS}
-                  </select>
-                </Field>
-                {isCloud && (
-                  <Field label="Opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.opacity ?? 1} {...sliderHistory((e) => liveStyle({ opacity: +e.target.value }))} /></Field>
-                )}
+              <Section title={simpleClosedMarkup ? null : (isCloud ? "Markup · Cloud" : `Markup · ${selMarkup.kind[0].toUpperCase()}${selMarkup.kind.slice(1)}`)}>
+                {simpleClosedMarkup ? (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", border: BORDER_1, borderRadius: 8, overflow: "hidden" }}>
+                    <div style={{ padding: 12, borderRight: BORDER_1 }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", marginBottom: 10 }}>Outline</div>
+                      <Field label="Color"><ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveStyle({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} /></Field>
+                      <Field label="Line width"><span style={{ display: "flex", alignItems: "center", gap: 4 }}><NumInput style={{ ...numInput, width: 62 }} value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setStyle({ weight: n })} /><span style={{ fontSize: 11, color: PAL.muted }}>pt</span></span></Field>
+                      <Field label="Line style">
+                        <select style={{ ...numInput, width: 104, fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setStyle({ dash: e.target.value })}>
+                          {DASH_OPTIONS}
+                        </select>
+                      </Field>
+                      <Field label="Opacity"><span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}><input style={{ minWidth: 0, width: "100%" }} type="range" min={0} max={1} step={0.05} value={selMarkup.strokeOpacity ?? 1} {...sliderHistory((e) => liveStyle({ strokeOpacity: +e.target.value }))} /><span style={{ fontSize: 10.5, minWidth: 30, textAlign: "right" }}>{Math.round((selMarkup.strokeOpacity ?? 1) * 100)}%</span></span></Field>
+                    </div>
+                    <div style={{ padding: 12 }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", marginBottom: 10 }}>Fill</div>
+                      <Field label="Color"><ColorField value={toHex6(selMarkup.fill)} {...colorCtl((v) => liveStyle({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /></Field>
+                      <Field label="Hatch">
+                        <select style={{ ...numInput, width: 122, fontFamily: "inherit" }} value={selMarkup.hatch || "none"} onChange={(e) => setStyle({ hatch: e.target.value })}>
+                          {HATCH_OPTIONS.map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}
+                        </select>
+                      </Field>
+                      <Field label="Hatch color"><ColorField value={toHex6(selMarkup.hatchColor || selMarkup.stroke || selMarkup.fill)} {...colorCtl((v) => liveStyle({ hatchColor: v }))} seed={COLOR_SEED} title="Hatch color" style={swatch} /></Field>
+                      <Field label="Opacity"><span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}><input style={{ minWidth: 0, width: "100%" }} type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} {...sliderHistory((e) => liveStyle({ fillOpacity: +e.target.value }))} /><span style={{ fontSize: 10.5, minWidth: 30, textAlign: "right" }}>{Math.round((selMarkup.fillOpacity ?? 0) * 100)}%</span></span></Field>
+                    </div>
+                  </div>
+                ) : (<>
+                  <Field label="Outline"><ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveStyle({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} /></Field>
+                  <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setStyle({ weight: n })} /></Field>
+                  <Field label="Dash">
+                    <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setStyle({ dash: e.target.value })}>
+                      {DASH_OPTIONS}
+                    </select>
+                  </Field>
+                  {isCloud && (
+                    <Field label="Opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.opacity ?? 1} {...sliderHistory((e) => liveStyle({ opacity: +e.target.value }))} /></Field>
+                  )}
+                </>)}
                 {/* B620 — inline label riding the line (open paths only; double-click the line also opens this in
                     place). NON-sticky (direct setMarkups, never setMkStyle) so the text can't bleed into the next
                     drawn shape; onFocus pushes ONE undo frame per edit (not one per keystroke). */}
@@ -24669,7 +24720,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {/* B678 — per-label repeat spacing / text size / background halo (only once a label is typed) */}
                   {inlineLabelControls(selMarkup, selMarkup.kind, coalesceLabelWrite(selMarkup.id, (p) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, ...p } : m)))))}
                 </>)}
-                {closed && <>
+                {closed && !simpleClosedMarkup && <>
                   <Field label="Fill"><ColorField value={toHex6(selMarkup.fill)} {...colorCtl((v) => liveStyle({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /></Field>
                   <Field label="Fill opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} {...sliderHistory((e) => liveStyle({ fillOpacity: +e.target.value }))} /></Field>
                 </>}
@@ -24729,7 +24780,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {est.hasOverride && <button style={{ ...chip, marginTop: 4 }} onClick={() => setSelMarkup({ fill: null, fillOpacity: null, hatch: null })} title="Revert to the default encumbrance appearance">↺ Reset to default</button>}
                   </>;
                 })()}
-                {MK_BOX_KINDS.includes(selMarkup.kind) && <>
+                {!simpleClosedMarkup && MK_BOX_KINDS.includes(selMarkup.kind) && <>
                   <Field label="Width / Height"><span style={{ display: "flex", gap: 5 }}>
                     <NumInput style={{ ...numInput, width: 56 }} value={Math.round(selMarkup.w)} min={1} step={1} coarse={10} onCommit={(n) => setSelMarkupGeom({ w: n })} />
                     <NumInput style={{ ...numInput, width: 56 }} value={Math.round(selMarkup.h)} min={1} step={1} coarse={10} onCommit={(n) => setSelMarkupGeom({ h: n })} />
@@ -24785,10 +24836,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         // (only adds, on an edge); removal is right-click a dot, or select + Delete.
                         : "Drag a dot to reshape; Shift-click an edge to add a point, right-click a dot to remove one."}
                 </div>
-                <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                {!simpleClosedMarkup && <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                   <button style={chip} onClick={() => toggleMarkupLock(selMarkup.id)}>{selMarkup.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
                   <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:markup" })}>Delete</button>
-                </div>
+                </div>}
               </Section>
               </div>
             );

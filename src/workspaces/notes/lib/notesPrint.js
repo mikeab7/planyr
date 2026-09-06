@@ -22,9 +22,36 @@
 import { absoluteStamp } from "./notesTime.js";
 import { DEFAULT_DENSITY, SINGLE, densityFor } from "./notesSpacing.js";
 import { indentCssRules } from "./notesIndentLevel.js";
+import { anchorExtentX } from "./notesBoxResize.js";
 
 const esc = (s) => String(s == null ? "" : s)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+/* ⛔ PDF-PARITY FOR NOTES-PAGE-GROWTH — the screen's own "the page grows to hold a box that
+ * doesn't fit" rule, mirrored onto paper. Print never runs the editor, so there is no rendered
+ * DOM to measure a box's height from (which is why only the HORIZONTAL half is mirrored here —
+ * a box running past the BOTTOM of one physical sheet already flows onto the next one, the same
+ * way any tall content does; there is no "physical sheet is too short" failure mode to fix). A
+ * box running past the RIGHT edge of the sheet is the one real case: nothing here clips it, so
+ * without this it would print past the paper's own margin.
+ *
+ * `anchorExtentX` — moved to notesBoxResize.js for exactly this reason (NOTES-PAGE-GROWTH) — is
+ * imported directly rather than through notesAnchorNode.js, which pulls `@tiptap/core`; this
+ * file's own header says it is PURE, and importing the schema module here would make that false. */
+function anchorBoxesInDoc(doc, out = []) {
+  if (!doc || typeof doc !== "object") return out;
+  if (doc.type === "noteAnchor" && doc.attrs) out.push({ x: doc.attrs.x, w: doc.attrs.w });
+  for (const child of doc.content || []) anchorBoxesInDoc(child, out);
+  return out;
+}
+
+/** One page's raw document → how many print-pixels wide its widest anchored block needs the
+ *  sheet to be. `null`/unreadable docs answer 0, the same "nothing to grow for" answer an empty
+ *  page gives — one bad page's shape must not take the whole print run down (this file's own
+ *  `docToHtml` caller already follows that rule; this keeps it). */
+export function pageAnchorExtentPx(doc) {
+  try { return anchorExtentX(anchorBoxesInDoc(doc)); } catch (_) { return 0; }
+}
 
 /* Mirrors src/workspaces/notes/components/NoteEditor.jsx → EDITOR_CSS, construct for
  * construct, translated to paper: ink is black, surfaces are white (a theme token here
@@ -53,7 +80,10 @@ body { font: 11.5pt/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sa
    property anywhere in the sheet. One constant, two stylesheets, no drift.
    ⛔ NO BACKTICKS IN THIS COMMENT: it lives INSIDE the PRINT_CSS template literal, so one
    backtick ends the string and the whole module stops parsing. Sixth time in this repo. */
-.note-body { line-height: ${SINGLE}; }
+/* ⛔ MIRRORS EDITOR_CSS's IDENTICAL overflow-wrap RULE (NOTES-PAGE-GROWTH, PDF-PARITY) — a run
+   with nowhere to break (a long URL, a run-on string) must break on paper too, not push a
+   printed page wider than the sheet it is meant to sit on. */
+.note-body { line-height: ${SINGLE}; overflow-wrap: anywhere; }
 /* ⛔ REAL VERTICAL RHYTHM ON PAPER TOO (B1203504) — mirrors EDITOR_CSS's identical fix,
    construct for construct. ".note-body p"/"h1"-"h4"/"ul"/"ol"/"blockquote" used to reset
    "margin: 0", which is more specific than this catch-all and silently cancelled it for every
@@ -224,6 +254,18 @@ export function buildPrintDocument({ title, meta = "", pages = [], density = DEF
     body.push(pageBlock({ ...p, showTitle: !single, breakBefore: !single && i > 0 && !trail }));
   });
 
+  /* ⛔ NOTES-PAGE-GROWTH, PDF-PARITY — the widest anchored block across every printed page
+   * decides whether the sheet needs more than its ordinary 190mm. `max(190mm, ...)` picks
+   * whichever is larger, so the ordinary case (nothing to grow for) is untouched CSS with no
+   * branch here to keep in step with it — the same shape components/NoteEditor.jsx's own
+   * `dom.style.minHeight = max(46vh, Npx)` already uses for the identical reason. The extra
+   * 60px covers the sheet's own 8mm side padding, doubled (`8mm ≈ 30.24px` at 96dpi) — the
+   * anchor's stored x/w are unconverted screen pixels (PDF-PARITY by construction: `renderHTML`
+   * writes them as literal "Npx", the same string on paper as on screen), so no other unit
+   * conversion belongs here. */
+  const growPx = pages.reduce((m, p) => Math.max(m, pageAnchorExtentPx(p.doc)), 0);
+  const sheetStyle = growPx ? ` style="max-width: max(190mm, ${growPx + 60}px)"` : "";
+
   return [
     "<!doctype html>",
     '<html lang="en"><head><meta charset="utf-8">',
@@ -235,7 +277,7 @@ export function buildPrintDocument({ title, meta = "", pages = [], density = DEF
        lib/notesSpacing.js feeds both the screen and this. */
     `<style>${PRINT_CSS}${densityCss(density)}</style>`,
     "</head><body>",
-    `<div class="sheet">${body.join("\n")}</div>`,
+    `<div class="sheet"${sheetStyle}>${body.join("\n")}</div>`,
     "</body></html>",
   ].join("\n");
 }

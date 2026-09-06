@@ -67,10 +67,22 @@ describe("placeAnchor — a block starts where you clicked, and is NARROWED to f
     expect(slid).toEqual([]);
   });
 
-  it("⛔ THERE IS NO VERTICAL CLAMP AT ALL — y comes back untouched, however far down", () => {
+  it("⛔ NO CLAMP DOWNWARD — y comes back untouched, however far down", () => {
     // His other measurement: a click at y=470 landed at 461, a silent 9 px nudge upward.
     expect(placeAnchor({ x: 10, y: 470, ...box }).y).toBe(470);
     expect(placeAnchor({ x: 10, y: 99999, ...box }).y).toBe(99999);
+  });
+
+  /* ⛔ NOTES-PAGE-GROWTH (2026-09-06): the floor above IS a real clamp, added defensively after
+   * a production note was found with an anchor stored at y: -21 — data from before this file's
+   * own moveAnchorPoint/resizeBox floors existed, or from a click geometry edge case this test
+   * suite cannot reconstruct. `placeAnchor` never had the floor those two functions have always
+   * had; it does now, for the same reason they do — the page's own top edge is a fixed origin
+   * and nothing may be placed above it. */
+  it("⛔ AND THE PAGE'S OWN TOP EDGE IS A FLOOR, THE SAME ONE moveAnchorPoint HOLDS", () => {
+    expect(placeAnchor({ x: 10, y: -21, ...box }).y).toBe(0);
+    expect(placeAnchor({ x: 10, y: -1, ...box }).y).toBe(0);
+    expect(placeAnchor({ x: 10, y: 0, ...box }).y).toBe(0);
   });
 
   it("never starts left of the margin", () => {

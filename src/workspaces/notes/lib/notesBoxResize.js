@@ -108,6 +108,42 @@ export function moveAnchorPoint({ x, y, edgePad = ANCHOR_EDGE_PAD } = {}) {
   };
 }
 
+/** ⛔ HOW FAR DOWN THE PAGE THE ANCHORED BLOCKS REACH (NEW-RIGHT-EDGE's vertical sibling, moved
+ *  here from notesAnchorNode.js so it can be called PURE — no schema, no engine — by the print
+ *  path too (NOTES-PAGE-GROWTH). So the editor can be told to be at least that tall. Pure, and
+ *  deliberately takes the measured heights rather than guessing them — a block's height is its
+ *  text, which only the browser knows. */
+export function anchorExtent(blocks = [], { pad = 40 } = {}) {
+  let bottom = 0;
+  for (const b of blocks || []) {
+    const y = num(b?.y);
+    const h = num(b?.height, 24);
+    if (y + h > bottom) bottom = y + h;
+  }
+  return bottom > 0 ? Math.ceil(bottom + pad) : 0;
+}
+
+/** ⛔ HOW FAR RIGHT THE BLOCKS REACH — the horizontal twin of `anchorExtent` (B421490,
+ *  NEW-RIGHT-EDGE). Vertically the page has always grown to hold a block that runs past the
+ *  bottom; horizontally there was no equivalent, so a block near the right margin was narrowed
+ *  into a sliver instead. Same arithmetic, same shape, one axis over.
+ *
+ *  The pad is smaller than the vertical one on purpose: a reader needs breathing room BELOW the
+ *  last line far more than they need it to the right of a box they placed deliberately.
+ *
+ *  ⛔ MOVED HERE FROM notesAnchorNode.js (NOTES-PAGE-GROWTH) so `notesPrint.js` — which is
+ *  deliberately PURE and must never import `@tiptap/*` — can compute the same page-growth
+ *  answer from a page's raw stored JSON, with no schema and no live DOM in sight. */
+export function anchorExtentX(blocks = [], { pad = 16 } = {}) {
+  let right = 0;
+  for (const b of blocks || []) {
+    const x = num(b?.x);
+    const w = num(b?.w, ANCHOR_WIDTH);
+    if (x + w > right) right = x + w;
+  }
+  return right > 0 ? Math.ceil(right + pad) : 0;
+}
+
 /** Every handle, in the order they are painted. `""` would be the box itself and is not one. */
 export const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 
