@@ -33,7 +33,7 @@ import { idbPersist } from "./lib/localDb.js";
 const SiteReviewModal = lazy(() => import("./components/SiteReviewModal.jsx").then((m) => ({ default: m.SiteReviewModal })));
 import { nextConceptName } from "./lib/conceptName.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
-import { recordCloudWriteFailure, readCloudWriteFailures, clearAllCloudWriteFailures, retryCloudWriteFailures, WHAT_RENAME, WHAT_STATUS } from "../../shared/cloud/writeFailureLog.js";
+import { recordCloudWriteFailure, readCloudWriteFailures, clearAllCloudWriteFailures, retryCloudWriteFailures, WHAT_RENAME, WHAT_STATUS, WHAT_DATES } from "../../shared/cloud/writeFailureLog.js";
 import { noteLayerContext } from "../../shared/telemetry/perfRecorderHandle.js";
 import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability, resumeTargetAfterSignIn, routeProjectJustChanged } from "./lib/bootResume.js";
 import { RADIUS } from "../../shared/ui/radius.js";
@@ -957,6 +957,27 @@ export default function App({
     }
   };
 
+  // B1161793 (NEW-2) — set a pursuit's contractual dates (feasibility expiry / LOI response /
+  // closing). Same shape as setSiteStatus above: the map shows one marker per SITE group, so
+  // apply the patch to every plan in the group; `patch` is a partial object naming only the
+  // field(s) actually changed (e.g. {loiDate: "2026-09-12"}), never a full replacement.
+  const setSiteDates = (id, patch) => {
+    const rec = loadSite(id); if (!rec) return;
+    const groupId = groupOf(rec);
+    const plans = loadPlansOfGroup(groupId);
+    plans.forEach((s) => saveSite({ id: s.id, ...patch }));
+    Promise.all(plans.map((s) => pushSiteToCloud(s.id).then((r) => !(r && r.ok === false)).catch(() => false)))
+      .then((oks) => {
+        if (oks.some((ok) => !ok)) {
+          recordCloudWriteFailure({ what: WHAT_DATES, kind: "dates", groupId, error: "background push failed (site dates)" });
+          setPushErrorWithRetry("The date change may not have fully synced to the cloud — it's saved on this device, and it'll catch up on your next edit or reload.",
+            () => setSiteDates(id, patch));
+          reportClientEvent("cloud-push-failed", "background push failed (site dates)", { id });
+        }
+      });
+    refreshSites();
+  };
+
   // The map lists SITES (locations), so collapse plans to one representative per
   // group — preferring the active plan so its pin highlights correctly.
   //
@@ -1065,6 +1086,7 @@ export default function App({
             onOpenSite={openSite}
             onDeleteSite={deleteSiteGroup}
             onSetStatus={setSiteStatus}
+            onSetDates={setSiteDates}
             onRenameSite={renameSite}
             onSharedChange={refreshSites}
             onUseParcels={newSiteFromMap}

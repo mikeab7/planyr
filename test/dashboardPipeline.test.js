@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupProjectsByGroupId, pipelineCounts, pursuitsByActivity, goingQuiet, mostRecentProject } from "../src/workspaces/dashboard/lib/dashboardPipeline.js";
+import { groupProjectsByGroupId, pipelineCounts, goingQuiet, mostRecentProject } from "../src/workspaces/dashboard/lib/dashboardPipeline.js";
 
 const NOW = Date.parse("2026-09-05T00:00:00Z");
 const daysAgo = (n) => new Date(NOW - n * 86400000).toISOString();
@@ -11,7 +11,7 @@ describe("groupProjectsByGroupId", () => {
       { id: "p2", group_id: "g1", site: "Goose Creek", county: "chambers", status: "active", role: "pursuit", updated_at: daysAgo(1) },
     ];
     const out = groupProjectsByGroupId(rows);
-    expect(out).toEqual([{ groupId: "g1", name: "Goose Creek", county: "chambers", status: "active", role: "pursuit", updatedAt: daysAgo(1), planCount: 2 }]);
+    expect(out).toEqual([{ groupId: "g1", siteId: "p2", name: "Goose Creek", county: "chambers", status: "active", role: "pursuit", updatedAt: daysAgo(1), planCount: 2, feasibilityExpiry: null, loiDate: null, closingDate: null }]);
   });
 
   it("uses the MOST RECENTLY UPDATED plan as the group's representative status/name/county", () => {
@@ -26,7 +26,7 @@ describe("groupProjectsByGroupId", () => {
 
   it("a plan with no group_id falls back to its own id (never dropped)", () => {
     const rows = [{ id: "solo", group_id: null, site: "Solo Plan", status: "pursuit", role: "pursuit", updated_at: daysAgo(1) }];
-    expect(groupProjectsByGroupId(rows)).toEqual([{ groupId: "solo", name: "Solo Plan", county: null, status: "pursuit", role: "pursuit", updatedAt: daysAgo(1), planCount: 1 }]);
+    expect(groupProjectsByGroupId(rows)).toEqual([{ groupId: "solo", siteId: "solo", name: "Solo Plan", county: null, status: "pursuit", role: "pursuit", updatedAt: daysAgo(1), planCount: 1, feasibilityExpiry: null, loiDate: null, closingDate: null }]);
   });
 
   it("missing status/role default to pursuit; missing name reads Untitled", () => {
@@ -38,6 +38,12 @@ describe("groupProjectsByGroupId", () => {
   it("handles empty/missing input without throwing", () => {
     expect(groupProjectsByGroupId([])).toEqual([]);
     expect(groupProjectsByGroupId(null)).toEqual([]);
+  });
+
+  it("carries the representative plan's own id (siteId) and contractual date fields through", () => {
+    const rows = [{ id: "p9", group_id: "g9", site: "Grand Port", status: "active", role: "pursuit", updated_at: daysAgo(1), feasibilityExpiry: "2026-09-20", loiDate: null, closingDate: "2026-11-01" }];
+    const out = groupProjectsByGroupId(rows);
+    expect(out[0]).toMatchObject({ siteId: "p9", feasibilityExpiry: "2026-09-20", loiDate: null, closingDate: "2026-11-01" });
   });
 });
 
@@ -59,23 +65,6 @@ describe("pipelineCounts", () => {
   });
 });
 
-describe("pursuitsByActivity", () => {
-  it("excludes tracked and settled (complete/dead) records, orders loudest stage first then newest", () => {
-    const projects = [
-      { groupId: "a", status: "onhold", role: "pursuit", updatedAt: daysAgo(1) },
-      { groupId: "b", status: "pursuit", role: "pursuit", updatedAt: daysAgo(10) },
-      { groupId: "c", status: "active", role: "pursuit", updatedAt: daysAgo(2) },
-      { groupId: "d", status: "complete", role: "pursuit", updatedAt: daysAgo(0) },
-      { groupId: "e", status: "active", role: "tracked", updatedAt: daysAgo(0) },
-    ];
-    expect(pursuitsByActivity(projects).map((p) => p.groupId)).toEqual(["b", "c", "a"]);
-  });
-
-  it("respects the limit", () => {
-    const projects = Array.from({ length: 12 }, (_, i) => ({ groupId: String(i), status: "pursuit", role: "pursuit", updatedAt: daysAgo(i) }));
-    expect(pursuitsByActivity(projects, { limit: 3 })).toHaveLength(3);
-  });
-});
 
 describe("mostRecentProject", () => {
   it("picks the single most recently updated project regardless of status or role", () => {

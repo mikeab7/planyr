@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   recordCloudWriteFailure, readCloudWriteFailures, clearCloudWriteFailure, clearAllCloudWriteFailures,
-  replayCloudWriteFailures, retryCloudWriteFailures, inferEntryKind, PRE_FIX_RETRY, WHAT_RENAME, WHAT_STATUS,
+  replayCloudWriteFailures, retryCloudWriteFailures, inferEntryKind, PRE_FIX_RETRY, WHAT_RENAME, WHAT_STATUS, WHAT_DATES,
 } from "../src/shared/cloud/writeFailureLog.js";
 import { saveSite, loadSite, loadPlansOfGroup, renameSiteGroup } from "../src/workspaces/site-planner/lib/storage.js";
 
@@ -174,6 +174,7 @@ describe("inferEntryKind — recovers a write's shape, never by guessing (B12047
   it("a legacy (no-kind) groupId entry infers from an EXACT what match — and refuses to guess on anything else", () => {
     expect(inferEntryKind({ groupId: "g1", what: WHAT_RENAME })).toBe("rename");
     expect(inferEntryKind({ groupId: "g1", what: WHAT_STATUS })).toBe("status");
+    expect(inferEntryKind({ groupId: "g1", what: WHAT_DATES })).toBe("dates"); // B1161793 (NEW-2)
     // Never fuzzy: an unrecognized label on a group-scoped entry falls to the generic fan-out
     // rather than being guessed as a rename or a status change.
     expect(inferEntryKind({ groupId: "g1", what: "Some other group write" })).toBe("row");

@@ -164,6 +164,46 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V922048 — B1268016: the "Needs attention" dashboard card reads in real descending-day order ACROSS every project, and a row's click-through lands on the exact task `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass, and why it can't run today.** The sort key (`needsAttentionSince`) only exists once real tasks in a real, signed-in account have actually sat in the "Needs Attn." state — this sandbox's proxy CORS-blocks the Supabase auth handshake (no sign-in reachable) and has no account with real cross-project schedule data to seed even if it could sign in. The sort RULE itself (descending by days, never grouped, `waiting` = successor count) is proven against synthetic fixtures in `test/needsAttentionList.test.js`, including the exact "across every project, not within one" shape — what remains is confirming it against real numbers on a real account.
+
+**What was verified here (this session, sandbox).**
+1. `test/needsAttentionList.test.js` (9 tests): a flat list across two synthetic projects sorts strictly by days descending regardless of which project each row belongs to; parent/summary rows are excluded; the successor (`waiting`) count is correct; a task with no `needsAttentionSince` stamp never appears (no days-past-due substitution).
+2. `public/sequence/index.html`'s new `reconcileNeedsAttention` reconciliation (stamps/clears the field on every real data change and on the existing day-rollover `refresh()` callback) passes the repo's Scheduler syntax guard (`ui-audit/stress/check-babel.mjs`) and was traced by hand against `computeDisplayHealth`'s existing leaf/parent split — it never stamps a summary row, matching the Master view's own existing rule.
+3. `test/dashboardCardGrowth.test.js`: the card's title and skeleton render correctly on a server-rendered pass alongside every other default card, with no post-reveal growth.
+4. The click-through's new `planar:nav-select-task` message and `Scheduler.jsx`'s `scheduleTaskIntent` consumer were read end-to-end against the existing, already-shipped `goToTask`/`docIntent` mechanisms they reuse — no new state machine, so the review surface is small — but never driven through a real iframe boot signed in.
+
+**Steps, each with a named expected result — on a real signed-in account with tasks overdue/at-risk across at least two different schedules:**
+1. Open the Dashboard. **Expect:** the "Needs attention" card's rows read in DAYS-DESCENDING order top to bottom, and that order does NOT reset to "by project" anywhere — a task from Project B with more days can sit above a task from Project A with fewer, back to back.
+2. Check the sub-line under a couple of rows. **Expect:** "Project · due &lt;date&gt; · N waiting" — the due date should match that task's real end date in the Scheduler, and N should match how many other tasks in that schedule are chained after it.
+3. Click a row. **Expect:** the Scheduler opens on that task's own project, scrolled to and briefly highlighting that exact task's row — not just the project's Dashboard/first task.
+4. Press "Show all N" in the footer. **Expect:** a modal listing every needs-attention task (not just the top 8), in the same day-descending order, each still clickable to the same effect as step 3.
+5. Check the footer's left side. **Expect:** one per-project count per line ("Grand Port 153 · Goose Creek 147 · …"), summing to N, loudest (highest count) project first.
+
+**Result:** ⏳ pending — needs a real signed-in account with real overdue/at-risk tasks spanning more than one schedule. `Cadence: once`.
+
+### V922049 — B1268017: the "Pursuits" dashboard card places a near-deadline pursuit above a quiet one, and Quiet-for survives an unedited open `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass, and why it can't run today.** The sort (soonest contractual date) and the Quiet-for column (real element-edit recency) both need real dated pursuits and real drawn geometry on a real signed-in account; this sandbox has neither. The RULES themselves are proven against synthetic fixtures: `test/pursuitsList.test.js`'s own "never lets quiet time drive the sort" case builds exactly the scenario this V# asks for (a near-deadline pursuit vs. a 400-day-quiet one) and asserts the near-deadline one leads.
+
+**What was verified here (this session, sandbox).**
+1. `test/pursuitsList.test.js` (16 tests): ascending sort by soonest upcoming contractual date; undated pursuits sort to the bottom; a near-deadline pursuit outranks a quiet-but-dated one AND a fresh-but-undated one in the same list; `quietDaysByGroupFromRows` never resets on a header-only touch (no new element row) — only a real element edit moves it, matching the brief's own "opening a pursuit without editing it must not reset Quiet" instruction.
+2. `test/siteModel.test.js` (+3): the three new date fields default to `null`, round-trip through `migrate`, and resolve via `mergeSiteContent` like any other scalar field (newer `updatedAt` wins).
+3. `test/buildingYield.test.js` (7): the Yield figure sums only `type === "building"` elements, ignores paving/parking/ponds, and is rotation-invariant.
+4. `node ui-audit/perf-bundle-audit.mjs`: confirms the Yield/Quiet-for network fetches don't leak into the Site Planner route's own bundle (the fix for a real regression caught mid-session — see B1268017's own entry).
+5. `test/dashboardCardGrowth.test.js`: the card renders correctly empty, no post-reveal growth.
+
+**Steps, each with a named expected result — on a real signed-in account with at least one pursuit that has a contractual date within the next two weeks and one that has gone quiet for 10+ days with no date set:**
+1. Open the Dashboard. **Expect:** the near-deadline pursuit sits ABOVE the quiet/undated one, regardless of which has been touched more recently.
+2. Check the near-deadline row's Next cell. **Expect:** two lines — the label ("Feasibility ends" / "LOI response due" / "Closing") on top, then "&lt;date&gt; · N days" below it, colored red if N &lt; 7, the accent color if N &lt; 14, muted otherwise.
+3. Check the undated row's Next cell. **Expect:** "Nothing scheduled" on top, "no date set" (muted) below — never a blank cell.
+4. Check the quiet row's "Quiet for" cell. **Expect:** "N days" spelled out (never "Nd"), visually emphasized (bolder/darker) once N reaches about 10.
+5. Open that quiet pursuit (view it, don't edit anything), return to the Dashboard, and re-check its Quiet-for value. **Expect:** unchanged — merely opening/viewing must never reset it.
+6. Use the site's right-click menu → "Deal dates…" to set or change a date. **Expect:** an inline popover with three plain date fields, no dialog-box OK/confirm; the change reflects in the Pursuits card's Next column and sort order on the next Dashboard load.
+
+**Result:** ⏳ pending — needs a real signed-in account with the two contrasting pursuits described above. `Cadence: once`.
+
 ### V916800 — B1260000: Backspace on an empty bullet with a nested child no longer deletes the paragraph above it, on Michael's own iPhone `Blocker: real-device`
 
 **Why this needs its own real pass, and why it can't run today.** The reported mechanism is specific to iOS Safari's on-screen keyboard: it is documented to delete backward via a `beforeinput` event that does not reliably carry a `keydown` a keymap can intercept, so the platform's own native list-editing logic can run before any of this app's code sees the press. Nothing in this sandbox can synthesize that — not Chromium, and not even a real WebKit engine (Playwright's Linux WebKit build, installed and used this session): Playwright's keyboard automation always dispatches a full, well-formed physical-key sequence (`keydown` → `beforeinput` → `input`) on every engine, because it is simulating a hardware key, not iOS's virtual-keyboard-to-DOM bridge. Only a real iPhone's own software keyboard can exercise the actual gap.

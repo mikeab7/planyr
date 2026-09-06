@@ -44,6 +44,10 @@ export default function Scheduler({
   // per project — see agendaStore.js). `onNewProject` is the same "＋ New project" the switcher
   // already wires everywhere else; org mode still offers it.
   org = false, onSelectOrg, onNewProject, userId = null,
+  // B1161792 (NEW-1) — a one-shot "jump to this task" request from the Dashboard's "Needs
+  // attention" card. Shell.jsx stashes it (token-stamped, same shape as `docIntent`) because the
+  // Dashboard unmounts before this component does; consumed below once the iframe is ready.
+  scheduleTaskIntent = null,
 } = {}) {
   const iframeRef = useRef(null);
   const [projects, setProjects] = useState([]);   // [{id, name}] from the embedded app
@@ -283,6 +287,21 @@ export default function Scheduler({
       );
     } catch (_) {}
   };
+
+  // B1161792 (NEW-1) — apply a pending "jump to this task" request once the iframe is ready.
+  // `scheduleTaskIntent.token` makes a repeat click on the SAME task re-fire (Shell stamps a
+  // fresh token every call, same convention as `docIntent`); the ref below is what stops this
+  // effect re-posting the same intent on every unrelated re-render. Gated on `siteId` matching
+  // the routed `projectId` — a stale intent left over from navigating elsewhere must never fire
+  // once some other project's schedule happens to become ready.
+  const appliedTaskIntentRef = useRef(null);
+  useEffect(() => {
+    if (!ready || !scheduleTaskIntent) return;
+    if (scheduleTaskIntent.token === appliedTaskIntentRef.current) return;
+    if (scheduleTaskIntent.siteId !== projectId) return;
+    appliedTaskIntentRef.current = scheduleTaskIntent.token;
+    post({ type: "planar:nav-select-task", siteId: scheduleTaskIntent.siteId, taskId: scheduleTaskIntent.taskId });
+  }, [ready, scheduleTaskIntent, projectId]);
 
   // Project-aware header tabs (the cross-module payoff): when the route carries a Site Planner
   // project (group_id), keep the embedded app's ACTIVE schedule pinned to the schedule linked to it,

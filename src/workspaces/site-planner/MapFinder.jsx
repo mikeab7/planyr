@@ -69,6 +69,7 @@ import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import FloatingNotice from "../../shared/ui/FloatingNotice.jsx";
 import { menuPanelStyle, MenuItem } from "../../shared/ui/controls.jsx";
+import DealDatesForm from "./components/DealDatesForm.jsx";
 import {
   resolveLayerUrl,
   identifyParcelEager,
@@ -562,7 +563,7 @@ function RailTab({ label, count, active, onClick }) {
   );
 }
 
-export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], parcelSummary = null, lastEditedByGroup = null, activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip, comps = [], onPlaceComp, onCompClick, pendingCompAnchor = null, onCompAnchorConsumed, focusCompId = null, onCompFocusHandled, onCompsChange, onOpenReviewInDocReview }) {
+export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], parcelSummary = null, lastEditedByGroup = null, activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onSetDates, onRenameSite, onSharedChange, onUseParcels, onSkip, comps = [], onPlaceComp, onCompClick, pendingCompAnchor = null, onCompAnchorConsumed, focusCompId = null, onCompFocusHandled, onCompsChange, onOpenReviewInDocReview }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const addrTokRef = useRef(0); // B545: address-search generation — a newer search invalidates an older in-flight one
@@ -1087,6 +1088,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   };
   const setSitesSort = (sort) => patchSitesPanel({ sort });
   const [statusMenu, setStatusMenu] = useState(null); // {site, x, y} — right-click status picker
+  const [dateEditor, setDateEditor] = useState(null); // {site, x, y} — B1161793 (NEW-2) "Deal dates…" popover
   const [mapMenu, setMapMenu] = useState(null);       // {x, y} — right-click-on-empty-map menu (KMZ export) (B684)
   const [hoverLL, setHoverLL] = useState(null);       // {lat, lng} — live "you are here" GPS readout (B683)
   // B706 / NEW-2: always a STATE, never silence. `zoom` picks the lattice band the cursor
@@ -3944,6 +3946,24 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                 </button>
               );
             })}
+            {onSetDates && (
+              <>
+                <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "4px 0" }} />
+                {/* B1161793 (NEW-2) — the pursuit's contractual dates. Same menu as the status
+                    picker above (this IS the established place for per-site metadata edits —
+                    Pin/Rename/Delete already live here), opening a small inline date-field
+                    popover rather than a second full menu. */}
+                <button onClick={(e) => { e.stopPropagation(); const s = statusMenu.site; setStatusMenu(null); setDateEditor({ site: s, x: statusMenu.x, y: statusMenu.y }); }}
+                  title="Set this deal's feasibility/LOI/closing dates"
+                  style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
+                    background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 600 }}>
+                  <span style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", lineHeight: 0 }}>
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="12" height="11" rx="1.5" /><path d="M2 6.5h12M5 1.5v3M11 1.5v3" /></svg>
+                  </span>
+                  <span style={{ flex: 1 }}>Deal dates…</span>
+                </button>
+              </>
+            )}
             {/* Share with team (owner only; needs at least one team) */}
             {myTeams.length > 0 && (() => {
               const s = statusMenu.site;
@@ -4045,6 +4065,24 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               <span style={{ flex: 1 }}>Delete project…</span>
             </button>
           </>
+        </ContextMenu>
+      )}
+      {/* B1161793 (NEW-2) — the "Deal dates…" inline popover: three native date fields, each
+          committing the instant it changes (no dialog-box confirm/OK — root CLAUDE.md's standing
+          inline-editor rule). Reuses the same ContextMenu primitive (positioning/clamping/
+          click-away) the status menu above does, opened at the same cursor point. */}
+      {dateEditor && (
+        <ContextMenu x={dateEditor.x} y={dateEditor.y} onClose={() => setDateEditor(null)} width={220} zIndex={4200}
+          ariaLabel="Deal dates"
+          panelStyle={{ background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, boxShadow: "0 14px 40px rgba(0,0,0,0.28)", padding: "4px 0 8px" }} // design-exempt: mirrors the status menu's own panelStyle verbatim (line 3933) — no shadow-color token exists repo-wide yet
+        >
+          <DealDatesForm
+            site={dateEditor.site}
+            onChange={(patch) => {
+              onSetDates?.(dateEditor.site.id, patch);
+              setDateEditor((d) => (d ? { ...d, site: { ...d.site, ...patch } } : d));
+            }}
+          />
         </ContextMenu>
       )}
       {confirmDel && (

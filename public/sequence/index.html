@@ -3934,6 +3934,46 @@ const computeDisplayHealth = (task, settings, taskById) => {
   return task.health;
 };
 
+// B1161792 (NEW-1, Planyr Dashboard "Needs attention" card) — stamp/clear `needsAttentionSince`
+// the moment a LEAF task's RULE-COMPUTED health (computeDisplayHealth) enters/leaves "red"
+// ("Needs Attn."). This is a NEW field, distinct from the raw stored `.health` a user sets via
+// the HealthPicker: a task can be promoted to red purely by an overdue/due-soon RULE while its
+// own `.health` stays "gray"/"yellow", and computeDisplayHealth's derivation is deliberately
+// never written back to `.health` (see its own comment above) — so before this, there was no
+// record anywhere of WHEN a task became "Needs Attn.", only whether it currently is. The
+// Dashboard reads only this stamp; it never re-derives health itself (that rule engine — custom
+// per-account health statuses, overdue/due-soon config — stays here, the one place it's defined).
+// Pure: takes the whole `data` document, returns it UNCHANGED (same reference) when nothing
+// needs restamping, so a caller's `setData(d => reconcileNeedsAttention(d))` is a safe no-op
+// React bails out of re-rendering for. Only ever evaluates LEAF tasks — same rule
+// computeDisplayHealth's own doc states: a parent/summary row's stale rollup fields must never
+// reach a health rule, so a parent is left untouched here exactly as computeRolledHealth leaves
+// it to the worst-of-children rollup instead.
+const reconcileNeedsAttention = (d) => {
+  if (!d || !d.projects) return d;
+  let changedAny = false;
+  const nowIso = new Date().toISOString();
+  const nextProjects = {};
+  for (const [pid, proj] of Object.entries(d.projects)) {
+    const tasks = proj && Array.isArray(proj.tasks) ? proj.tasks : [];
+    const byId = {};
+    tasks.forEach(t => { byId[t.id] = t; });
+    const parentIds = new Set();
+    tasks.forEach(t => { if (t && t.parentId != null) parentIds.add(t.parentId); });
+    let changed = false;
+    const nextTasks = tasks.map(t => {
+      if (!t || parentIds.has(t.id)) return t; // summary rows use the worst-of-children rollup, not their own
+      const isRed = computeDisplayHealth(t, d.settings, byId) === "red";
+      if (isRed && !t.needsAttentionSince) { changed = true; return { ...t, needsAttentionSince: nowIso }; }
+      if (!isRed && t.needsAttentionSince) { changed = true; const { needsAttentionSince, ...rest } = t; return rest; }
+      return t;
+    });
+    if (changed) { changedAny = true; nextProjects[pid] = { ...proj, tasks: nextTasks }; }
+    else nextProjects[pid] = proj;
+  }
+  return changedAny ? { ...d, projects: nextProjects } : d;
+};
+
 // Worst-of-descendants rolled status for each PARENT task — the value the grid shows on a
 // collapsed parent. Shared by the project grid (rolledHealthMap) and the cross-project
 // dashboard (MasterView) so the two never disagree about a parent's status. Pure.
@@ -6947,7 +6987,12 @@ function App() {
   const [, setTodayTick] = useState(0);
   const [, setHealthTick] = useState(0); // bumped after rebuildHEALTH so a new/renamed status renders this beat, not next (B5/M3)
   useEffect(() => {
-    const refresh = () => { const t = fdLocal(new Date()); if (t !== NOW) { NOW = t; setTodayTick(x => x + 1); } };
+    // B1161792 (NEW-1) — a health RULE transition (overdue/due-soon) can fire purely from the
+    // clock rolling over a day, with no data edit at all, and the reconciliation this effect's
+    // sibling `[data]` effect runs (below) only fires on a real edit (`coreChanged`) — it has no
+    // notion of the clock. So a genuine date rollover reconciles here too, the one place that
+    // already detects one.
+    const refresh = () => { const t = fdLocal(new Date()); if (t !== NOW) { NOW = t; setTodayTick(x => x + 1); setData(d => reconcileNeedsAttention(d)); } };
     const onVis = () => { if (!document.hidden) refresh(); };
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", onVis);
@@ -7334,6 +7379,12 @@ function App() {
         if (skipHolRecasc.current) skipHolRecasc.current = false;
         else prevHolKey.current = holKey;
       }
+      // B1161792 (NEW-1) — reconcile needsAttentionSince on every real data change (a task edit,
+      // a rule/settings change, or the first load of an existing schedule). `reconcileNeedsAttention`
+      // is a no-op (same `d` back) when nothing needs restamping, so this can't loop against its own
+      // write. The complementary date-rollover case (health flips red with no edit at all) is
+      // covered by the `refresh()` callback above.
+      setData(d => reconcileNeedsAttention(d));
     }
     if (fileHandleRef.current && fileHtmlRef.current) {
       clearTimeout(fileSaveTimer.current);
@@ -8838,11 +8889,19 @@ function App() {
         // Only route home when a delete actually happens — deleteProject refuses to remove the LAST
         // project, so routing unconditionally kicked the user to the Dashboard on a no-op.
         if (wasActive && projCount > 1) setData(d => ({ ...d, section: "reports" }));
+      } else if (m.type === "planar:nav-select-task" && m.siteId != null && m.taskId != null) {
+        // B1161792 (NEW-1) — the Dashboard's "Needs attention" card jumping straight to one task,
+        // not just its project. Resolve the schedule linked to the Site Planner project (same
+        // lookup planar:nav-select-by-site uses above), then reuse the existing internal
+        // goToTask jump — the same one the in-app Master view's row and the successor-prompt
+        // modal already use — rather than inventing a second "select a task" mechanism.
+        const match = latestData.current && Object.values(latestData.current.projects || {}).find(p => p && p.linkedSiteId != null && p.linkedSiteId === m.siteId);
+        if (match) goToTask(match.id, m.taskId);
       }
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [inShell, addProject, renameProject, deleteProject, duplicateProject]);
+  }, [inShell, addProject, renameProject, deleteProject, duplicateProject, goToTask]);
 
   // ── Embedded-mode TOOLBAR bridge (Planyr shell, B388) ──────────────────────
   // The shell hides our in-iframe action toolbar (`.in-iframe .app-header`) and re-renders

@@ -20,6 +20,9 @@
     "county": "harris",
     "status": "active",
     "role": "pursuit",
+    "feasibilityExpiry": null,
+    "loiDate": null,
+    "closingDate": null,
     "parcels": [
       {
         "id": "e2e-parcel-1",

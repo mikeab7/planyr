@@ -18,7 +18,11 @@ export const CARD_DEFS = {
   jumpBackIn:          { title: "Jump back in" },
   pipelineStatus:       { title: "Pipeline" },
   scheduleHealth:       { title: "Schedule health" },
-  pursuitsByActivity:   { title: "Pursuits by activity" },
+  // B1161792/B1161793 (NEW-1/NEW-2, Direction C) — the first two real content cards, replacing
+  // the placeholder "Pursuits by activity" card (directly superseded by the richer sortable
+  // "pursuitsTable" below) with two data-backed cards the owner reviewed and approved in chat.
+  needsAttention:       { title: "Needs attention" },
+  pursuitsTable:        { title: "Pursuits" },
   compsSummary:         { title: "Comps" },
   goingQuiet:           { title: "Going quiet" },
 };
@@ -32,8 +36,9 @@ export const CARD_KEYS = Object.keys(CARD_DEFS);
 export const DEFAULT_LAYOUT = [
   { key: "jumpBackIn", size: "wide" },
   { key: "pipelineStatus", size: "normal" },
+  { key: "needsAttention", size: "wide" },
+  { key: "pursuitsTable", size: "wide" },
   { key: "scheduleHealth", size: "wide" },
-  { key: "pursuitsByActivity", size: "wide" },
   { key: "compsSummary", size: "normal" },
   { key: "goingQuiet", size: "normal" },
 ];
