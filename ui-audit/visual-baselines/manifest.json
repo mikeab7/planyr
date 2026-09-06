@@ -7,89 +7,89 @@
     "map-landing": {
       "light": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "4e4bc104",
-        "note": "B1238304: scale bar/north arrow plate + Leaflet zoom/locate/scale/attribution now follow the app theme instead of a fixed white box; light-mode furniture ink is byte-identical, only the sub-pixel tick-mark AA rounding shifted"
+        "approvedCommit": "13814337",
+        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
       },
       "dark": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "4e4bc104",
-        "note": "B1238304: scale bar/north arrow plate + Leaflet zoom/locate/scale/attribution now follow the app theme instead of a fixed white box; light-mode furniture ink is byte-identical, only the sub-pixel tick-mark AA rounding shifted"
+        "approvedCommit": "13814337",
+        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
       },
       "light--phone": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "4e4bc104",
-        "note": "B1238304: scale bar/north arrow plate + Leaflet zoom/locate/scale/attribution now follow the app theme instead of a fixed white box; light-mode furniture ink is byte-identical, only the sub-pixel tick-mark AA rounding shifted"
+        "approvedCommit": "13814337",
+        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
       },
       "dark--phone": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "4e4bc104",
-        "note": "B1238304: scale bar/north arrow plate + Leaflet zoom/locate/scale/attribution now follow the app theme instead of a fixed white box; light-mode furniture ink is byte-identical, only the sub-pixel tick-mark AA rounding shifted"
+        "approvedCommit": "13814337",
+        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
       }
     },
     "site-planner-header": {
       "light": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "4e4bc104",
-        "note": "B1238304: scale bar/north arrow plate + Leaflet zoom/locate/scale/attribution now follow the app theme instead of a fixed white box; light-mode furniture ink is byte-identical, only the sub-pixel tick-mark AA rounding shifted"
+        "approvedCommit": "13814337",
+        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
       },
       "dark": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "4e4bc104",
-        "note": "B1238304: scale bar/north arrow plate + Leaflet zoom/locate/scale/attribution now follow the app theme instead of a fixed white box; light-mode furniture ink is byte-identical, only the sub-pixel tick-mark AA rounding shifted"
+        "approvedCommit": "13814337",
+        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
       },
       "light--phone": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "4e4bc104",
-        "note": "B1238304: scale bar/north arrow plate + Leaflet zoom/locate/scale/attribution now follow the app theme instead of a fixed white box; light-mode furniture ink is byte-identical, only the sub-pixel tick-mark AA rounding shifted"
+        "approvedCommit": "13814337",
+        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
       },
       "dark--phone": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "4e4bc104",
-        "note": "B1238304: scale bar/north arrow plate + Leaflet zoom/locate/scale/attribution now follow the app theme instead of a fixed white box; light-mode furniture ink is byte-identical, only the sub-pixel tick-mark AA rounding shifted"
+        "approvedCommit": "13814337",
+        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
       }
     },
     "site-planner-left-rail": {
       "light": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "4e4bc104",
-        "note": "B1238304: scale bar/north arrow plate + Leaflet zoom/locate/scale/attribution now follow the app theme instead of a fixed white box; light-mode furniture ink is byte-identical, only the sub-pixel tick-mark AA rounding shifted"
+        "approvedCommit": "13814337",
+        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
       },
       "dark": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "4e4bc104",
-        "note": "B1238304: scale bar/north arrow plate + Leaflet zoom/locate/scale/attribution now follow the app theme instead of a fixed white box; light-mode furniture ink is byte-identical, only the sub-pixel tick-mark AA rounding shifted"
+        "approvedCommit": "13814337",
+        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
       },
       "light--phone": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "4e4bc104",
-        "note": "B1238304: scale bar/north arrow plate + Leaflet zoom/locate/scale/attribution now follow the app theme instead of a fixed white box; light-mode furniture ink is byte-identical, only the sub-pixel tick-mark AA rounding shifted"
+        "approvedCommit": "13814337",
+        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
       },
       "dark--phone": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "4e4bc104",
-        "note": "B1238304: scale bar/north arrow plate + Leaflet zoom/locate/scale/attribution now follow the app theme instead of a fixed white box; light-mode furniture ink is byte-identical, only the sub-pixel tick-mark AA rounding shifted"
+        "approvedCommit": "13814337",
+        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
       }
     },
     "library": {
       "light": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "4e4bc104",
-        "note": "B1238304: scale bar/north arrow plate + Leaflet zoom/locate/scale/attribution now follow the app theme instead of a fixed white box; light-mode furniture ink is byte-identical, only the sub-pixel tick-mark AA rounding shifted"
+        "approvedCommit": "13814337",
+        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
       },
       "dark": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "4e4bc104",
-        "note": "B1238304: scale bar/north arrow plate + Leaflet zoom/locate/scale/attribution now follow the app theme instead of a fixed white box; light-mode furniture ink is byte-identical, only the sub-pixel tick-mark AA rounding shifted"
+        "approvedCommit": "13814337",
+        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
       },
       "light--phone": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "4e4bc104",
-        "note": "B1238304: scale bar/north arrow plate + Leaflet zoom/locate/scale/attribution now follow the app theme instead of a fixed white box; light-mode furniture ink is byte-identical, only the sub-pixel tick-mark AA rounding shifted"
+        "approvedCommit": "13814337",
+        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
       },
       "dark--phone": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "4e4bc104",
-        "note": "B1238304: scale bar/north arrow plate + Leaflet zoom/locate/scale/attribution now follow the app theme instead of a fixed white box; light-mode furniture ink is byte-identical, only the sub-pixel tick-mark AA rounding shifted"
+        "approvedCommit": "13814337",
+        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
       }
     }
   }

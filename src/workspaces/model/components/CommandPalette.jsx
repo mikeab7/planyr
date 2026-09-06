@@ -140,16 +140,22 @@ export default function CommandPalette({ open, ctx, onClose }) {
                   font: "inherit",
                 }}
               >
-                <span style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0, overflow: "hidden" }}>
+                {/* NEW-2 (B1251889) — the command NAME is the row's single leading column, always
+                    starting at the same x (this span is the first flex child after the button's own
+                    fixed padding). The category used to sit to its LEFT at a variable width, so the
+                    name's own start x drifted row to row — the opposite of scannable. Category moves
+                    to a muted trailing tag on the right, beside the shortcut, where its width never
+                    pushes the name around. */}
+                <span style={{ flex: "1 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13 }}>{r.label}</span>
+                <span style={{ flex: "0 0 auto", display: "flex", alignItems: "baseline", gap: 8 }}>
+                  {r.shortcut && (
+                    <span aria-hidden="true" style={{ fontSize: 10.5, fontWeight: 600, opacity: 0.7 }}>{r.shortcut}</span>
+                  )}
                   <span style={{
-                    flex: "0 0 auto", fontSize: 10, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", // FONT_SIZE.micro
+                    fontSize: 10, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", // FONT_SIZE.micro
                     color: activeRow ? "var(--on-accent-model)" : "var(--text-tertiary)", opacity: activeRow ? 0.85 : 1,
                   }}>{COMMAND_GROUPS[r.group] || r.group}</span>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13 }}>{r.label}</span>
                 </span>
-                {r.shortcut && (
-                  <span aria-hidden="true" style={{ flex: "0 0 auto", fontSize: 10.5, fontWeight: 600, opacity: 0.7 }}>{r.shortcut}</span>
-                )}
               </button>
             );
           })}

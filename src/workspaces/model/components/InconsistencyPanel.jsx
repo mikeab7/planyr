@@ -1,9 +1,15 @@
 /* Model workspace — Stage 3 (NEW-2, owner brief 2026-09-03): the Inconsistencies panel — "a way
  * to list every instance in the sheet, so someone can sweep a model." Same floating-panel family
  * as NameManager.jsx/FindReplaceBar.jsx (never window.prompt/confirm — this repo's own KEY
- * DECISIONS ban dialog-box edits outright), same fixed screen position (top-right) since the
- * three never coexist — ModelApp.jsx closes the others whenever this one opens, exactly the
- * existing Find/Replace <-> Name Manager convention.
+ * DECISIONS ban dialog-box edits outright), same screen position (top-right, in normal document
+ * flow — see NEW-1/B1251888) since the three never coexist — ModelApp.jsx closes the others
+ * whenever this one opens, exactly the existing Find/Replace <-> Name Manager convention.
+ *
+ * ⛔ NEW-1 (B1251888) — like its two siblings, this used to be `position: fixed; top: 46`, the
+ * same guessed offset that broke the moment Formula Auditing moved into the header row it was
+ * floating over. It now renders in normal flow instead (ModelApp.jsx mounts it in the same flow
+ * slot as FindReplaceBar/NameManager — only one is ever open at a time, so they never compete for
+ * that slot), which cannot cover chrome that renders earlier in the column at any window width.
  *
  * Dismissing a flag never blocks or asks for confirmation — the brief is explicit that "the tool
  * flags, the modeller decides," so Dismiss is a single click, immediately reversible only by the
@@ -68,13 +74,14 @@ export default function InconsistencyPanel({ open, flags, onClose, onGoTo, onDis
     : flags;
 
   return (
+    <div data-testid="inconsistency-panel-row" style={{ flex: "none", display: "flex", justifyContent: "flex-end", margin: "0 8px" }}>
     <div
       role="dialog"
       aria-label="Inconsistent Formulas"
       data-testid="inconsistency-panel"
       onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); onClose(); } }}
       style={{
-        position: "fixed", top: 46, right: 16, zIndex: 60, display: "flex", flexDirection: "column",
+        display: "flex", flexDirection: "column", marginBottom: 8,
         width: 320, maxHeight: "min(70vh, 520px)",
         borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: "var(--surface-raised)",
         boxShadow: "0 8px 24px rgba(0,0,0,0.18)", // design-exempt: no shadow-color token exists repo-wide (NameManager's/FindReplaceBar's own popPanel carries the identical gap)
@@ -109,6 +116,7 @@ export default function InconsistencyPanel({ open, flags, onClose, onGoTo, onDis
           rows.map((f) => <FlagRow key={`${f.row}:${f.col}`} flag={f} onGoTo={onGoTo} onDismiss={onDismiss} />)
         )}
       </div>
+    </div>
     </div>
   );
 }
