@@ -82,3 +82,37 @@ describe("fetchProjects — excludes role:tracked market-record sites (comps)", 
     expect(rows).toEqual([]);
   });
 });
+
+/* B1162193 — a soft-deleted project (sites.deleted_at set) must never appear in this list either:
+ * it feeds the Library's one-time folder organizer (migrateAllProjects → ensureSeeded), which
+ * would otherwise seed a fresh 133-folder tree and mirror it to Google Drive on behalf of a
+ * project the owner already deleted (part of the ~2,700-orphan-folder finding). */
+describe("fetchProjects — excludes soft-deleted sites (deleted_at set)", () => {
+  const ALL_ROWS = [
+    { group_id: "g-live", site: "Live One", updated_at: "2026-09-05T19:00:00Z", team_id: null, status: "active", role: "pursuit", deleted_at: null },
+    { group_id: "g-deleted", site: "Deleted One", updated_at: "2026-09-03T20:13:59Z", team_id: null, status: "active", role: "pursuit", deleted_at: "2026-09-03T20:13:59Z" },
+  ];
+  const stripDeletedAt = (rows) => rows.map(({ deleted_at, ...rest }) => rest);
+  const appliedDeletedAtFilter = (ops) => ops.some(([m, f, v]) => m === "is" && f === "deleted_at" && v === null);
+
+  it("the query asks Supabase to exclude deleted_at rows, and a soft-deleted project is dropped", async () => {
+    h.exec = ({ ops }) => ({
+      data: stripDeletedAt(appliedDeletedAtFilter(ops) ? ALL_ROWS.filter((r) => r.deleted_at == null) : ALL_ROWS),
+      error: null,
+    });
+    const r = await fetchProjects();
+    expect(r.ok).toBe(true);
+    expect(r.rows.map((p) => p.id)).toEqual(["g-live"]);
+    expect(h.calls.some((c) => appliedDeletedAtFilter(c.ops))).toBe(true);
+  });
+
+  it("degrades gracefully on a pre-migration DB with no deleted_at column — lists everything rather than failing", async () => {
+    h.exec = ({ ops }) =>
+      appliedDeletedAtFilter(ops)
+        ? { data: null, error: { message: 'column "deleted_at" does not exist', code: "42703" } }
+        : { data: stripDeletedAt(ALL_ROWS), error: null };
+    const r = await fetchProjects();
+    expect(r.ok).toBe(true);
+    expect(r.rows.map((p) => p.id).sort()).toEqual(["g-deleted", "g-live"]);
+  });
+});

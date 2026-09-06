@@ -499,9 +499,17 @@ export async function fetchProjects() {
   if (!supabase) return { ok: false, rows: [], error: "Cloud not configured." };
   if (!(await currentUid())) return { ok: true, rows: [] };
   // Prefer the richest select (status + role + team_id); degrade if a column isn't migrated in.
-  let res = await supabase.from("sites").select("group_id,site,updated_at,team_id,status:data->>status,role:data->>role").order("updated_at", { ascending: false });
-  if (res.error) res = await supabase.from("sites").select("group_id,site,updated_at,status:data->>status,role:data->>role").order("updated_at", { ascending: false });
-  if (res.error) res = await supabase.from("sites").select("group_id,site,updated_at").order("updated_at", { ascending: false }); // tolerate older PostgREST (no role column ⇒ can't exclude tracked sites)
+  // B1162193 — a soft-deleted project (sites.deleted_at set) must never appear here: this list
+  // feeds the Library's one-time folder organizer (migrateAllProjects), which would otherwise
+  // seed a fresh folder tree and mirror it to Google Drive on behalf of a project the owner
+  // already deleted. `.is("deleted_at", null)` degrades away on a pre-migration DB (no such
+  // column) exactly like every other deleted_at read in this codebase (isMissingColumn).
+  let res = await supabase.from("sites").select("group_id,site,updated_at,team_id,status:data->>status,role:data->>role").is("deleted_at", null).order("updated_at", { ascending: false });
+  if (res.error && isMissingColumn(res.error, "deleted_at")) res = await supabase.from("sites").select("group_id,site,updated_at,team_id,status:data->>status,role:data->>role").order("updated_at", { ascending: false });
+  if (res.error) res = await supabase.from("sites").select("group_id,site,updated_at,status:data->>status,role:data->>role").is("deleted_at", null).order("updated_at", { ascending: false });
+  if (res.error && isMissingColumn(res.error, "deleted_at")) res = await supabase.from("sites").select("group_id,site,updated_at,status:data->>status,role:data->>role").order("updated_at", { ascending: false });
+  if (res.error) res = await supabase.from("sites").select("group_id,site,updated_at").is("deleted_at", null).order("updated_at", { ascending: false }); // tolerate older PostgREST (no role column ⇒ can't exclude tracked sites)
+  if (res.error && isMissingColumn(res.error, "deleted_at")) res = await supabase.from("sites").select("group_id,site,updated_at").order("updated_at", { ascending: false });
   // NEW-F5: only a failure of EVERY tier is an honest read failure — the caller keeps its
   // prior list instead of rendering "no projects" off a network blip.
   if (res.error || !res.data) return { ok: false, rows: [], error: (res.error && res.error.message) || "Couldn't load projects." };
@@ -630,6 +638,17 @@ export async function pushFileToDrive(file, { projectId = null, discipline = "Ot
   if (!(await getToken())) return { ok: false, skipped: true, error: "Not signed in." };
   const name = fileName || "document.pdf";
   const driveKey = buildDriveKey({ projectId, discipline, fileName, srcId, orgScope }); // unique per source (NEW-F1); server prefixes the uid
+  // B1162193 — a real upload is the "first real intent" that earns a project its standard
+  // folder tree: FolderTree.jsx no longer seeds merely because the Library was opened (that
+  // silently materialized a full folder tree in Google Drive for projects nobody ever really
+  // used — some of which never existed at all). Fire-and-forget: `ensureSeeded` already carries
+  // its own confirmed-live-project guard (B1235168), and a failure here just means the next
+  // Library visit's "Create folder structure" button (or another upload) tries again.
+  if (!orgScope && projectId) {
+    import("../../library/lib/folders.js")
+      .then((m) => m.ensureSeeded(String(projectId)).then((r) => { if (r && r.ok && r.seeded) m.syncFoldersToDrive(String(projectId)); }))
+      .catch(() => { /* best-effort — the upload itself must never wait on or fail from this */ });
+  }
   return uploadFileInChunks({
     file, token: getToken, planyrKey: driveKey, name, contentType: guessContentType(name, file.type),
     // Tree targeting (B650 follow-on): the server files the bytes into the project's standard
