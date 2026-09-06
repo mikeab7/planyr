@@ -24,6 +24,14 @@ const LIGHT = {
   accent: "#C2410C", onAccent: "#FFFFFF",
   /* Work surfaces — drafting canvas + Markup mat */
   canvasBg: "#EDF1F6", canvasGridMinor: "#DCE3EB", canvasGridMajor: "#C5CED9",
+  /* NEW-1 — the scale bar / north arrow "plate" background (sheetFurniture.js). Those are map
+     CHROME sitting over the aerial — like the Layers/View panels' frosted surface — not drawn
+     site content, so they must follow the theme the way their neighbouring status chips already
+     do; owner report: a fixed-light plate stayed white while the numerals on it correctly went
+     light-on-dark, reading as low-contrast on an iPhone in night mode. LIGHT is deliberately
+     byte-identical to the plate's old hardcoded-only value (sheetFurniture.js's own `PLATE_FILL`)
+     so this fix changes nothing anyone could already see in light mode — only DARK is new. */
+  canvasPlateFill: "rgba(249, 248, 244, 0.84)",
   /* NEW-2 — parcel boundary + setback ring default to the owner's property-line GREEN #34E802
      (mirrors --canvas-parcel / --canvas-setback; supersedes the indigo default of B1187, whose
      --indigo alias is retired so there is one source of truth). A parcel that carries its own
@@ -62,6 +70,11 @@ const DARK = {
   accent: "#F26B3A", onAccent: "#15171C",
   /* Work surfaces */
   canvasBg: "#0E1014", canvasGridMinor: "rgba(232,235,240,0.05)", canvasGridMajor: "rgba(232,235,240,0.10)",
+  // NEW-1 — the scale bar / north arrow plate on dark: a translucent dark card, matching the
+  // "frosted floating panel" look every other dark-theme overlay panel already uses (see
+  // --surface-overlay). There is no prior dark-mode appearance to preserve here — the plate was
+  // simply the wrong (fixed-light) colour before this fix.
+  canvasPlateFill: "rgba(24, 27, 33, 0.93)",
   // NEW-2 — the same property-line green on dark: it is read against aerial imagery, not against
   // the app surface, and its contrast comes from the casing rather than from a per-theme tint.
   canvasParcel: "#34E802", canvasSetback: "#34E802", canvasSelection: "#F26B3A",
