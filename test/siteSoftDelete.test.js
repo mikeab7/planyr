@@ -68,6 +68,13 @@ vi.mock("../src/workspaces/site-planner/lib/cloudSync.js", () => ({
     if (!server.guard) return { ok: true, supported: false, rows: [] }; // pre-migration / pre-fix world
     return { ok: true, supported: true, rows: [...server.rows.values()].filter((r) => r.deleted_at) };
   }),
+  // ensureProjectRow's own pre-write check — reflects the SAME `server.rows` map every other mock
+  // here reads/writes, so a row a mocked cloudUpsert/cloudDelete just touched is visible to it too.
+  cloudCheckDeleted: vi.fn(async (uid, id) => {
+    const row = server.rows.get(id);
+    if (!row) return { ok: true, exists: false, deleted: false };
+    return { ok: true, exists: true, deleted: !!row.deleted_at, deletedAt: row.deleted_at || null, name: row.site || row.name || null, groupId: row.group_id || row.id };
+  }),
   cloudList: vi.fn(async () => liveRows().map((r) => r.data)),
   clearSiteVersions: vi.fn(),
   keepaliveCloudPush: vi.fn(() => true),
@@ -78,7 +85,7 @@ import {
   mergePulledSites, pullCloud, saveSite, loadSite, deleteSite, loadSitesList,
   clearRecentlyDeleted, recordSiteTombstone, _readSiteTombs, setActiveUser,
   listDeletedProjects, restoreDeletedProject, purgeExpiredDeletedProjects,
-  SITE_TOMB_GRACE_MS,
+  SITE_TOMB_GRACE_MS, ensureProjectRow,
 } from "../src/workspaces/site-planner/lib/storage.js";
 
 const UID = "u-1";
@@ -267,5 +274,106 @@ describe("two clients, one delete — the live repro (NEW-1)", () => {
     expect(purged.ok).toBe(true);
     expect(purged.purged).toBe(1);
     expect(server.rows.has("sms3z8jwlyf0")).toBe(false); // now the cascade is correct
+  });
+});
+
+/* ── B1202176 amendment (2026-09-05) — `deleteSite`'s `tombstone` option. ─────────────────────────
+ *
+ * Live-reproduced on production build db094ca: "New project" → straight to Notes (Site Planner
+ * canvas never touched) → "+ New page" → the note saved fine (notes_pages is user-keyed, never at
+ * risk) but `public.sites` NEVER got a row, confirmed by two direct queries. Root cause was NOT in
+ * Notes at all — `ensureProjectExists`/`ensureProjectRow` were wired exactly as the backlog
+ * describes. It was `SitePlanner.jsx`'s `persistOrDrop`: switching workspace tabs away from Site
+ * Planner (mode="notes") fires it on the still-blank, still-unlocated draft the SAME "New project"
+ * click had minted, and it called the general-purpose `deleteSite(id)` — which ALWAYS wrote both
+ * the in-tab AND the durable per-account tombstone (B372's resurrection guard), even though this
+ * id had never had a local record and nothing had ever been pushed to the cloud for it. That
+ * tombstone then silently blocked `saveSite` (the guard at NEW-1 hole 3, proven in the earlier
+ * describe block above) the moment Notes' `handleAddPage` tried to materialize the SAME still-open
+ * project id via `ensureProjectRow` — before Notes had done anything wrong at all.
+ *
+ * `tombstone: false` (only `persistOrDrop`'s never-materialized-draft path passes it) skips both
+ * tombstone writes and the pointless cloud soft-delete network call, since there is nothing to
+ * protect against resurrection and nothing was ever pushed. An ordinary, real delete (a project
+ * that already has a local or cloud record) is untouched — `deleteSite(id)` with no options keeps
+ * the exact pre-fix behavior, which the last case below re-proves. */
+describe("deleteSite({ tombstone }) — B1202176 amendment: dropping a NEVER-materialized draft must not poison a later module's ensureProjectRow", () => {
+  beforeEach(() => { resetServer(); makeBrowser().activate(); clearRecentlyDeleted(); setActiveUser(UID); });
+
+  it("THE MECHANISM, reproduced — persistOrDrop's OLD unconditional deleteSite(id) call shape silently blocks Notes' later ensureProjectRow forever", async () => {
+    const id = "smtp17mwi649";
+    expect(loadSite(id)).toBeNull(); // never realized by Site Planner (the deliberate lazy-creation case)
+    await deleteSite(id); // the call shape persistOrDrop used before this fix
+    const ensured = await ensureProjectRow(id, { name: "Untitled project" });
+    expect(ensured.ok).toBe(false); // THE BUG this amendment closes: silently refused, forever
+    expect(loadSite(id)).toBeNull();
+    expect(server.rows.has(id)).toBe(false); // exactly the production symptom: no public.sites row
+  });
+
+  it("THE FIX, red-proofed — persistOrDrop's tombstone:false leaves nothing behind, so a later ensureProjectRow succeeds (fails against the pre-fix deleteSite signature)", async () => {
+    const id = "smtp17mwi649";
+    expect(loadSite(id)).toBeNull();
+    await deleteSite(id, { tombstone: false });
+    // Neither tombstone was written, and the pointless cloud call was skipped:
+    expect(_readSiteTombs(UID)[id]).toBeUndefined();
+    expect(server.rows.has(id)).toBe(false);
+    const ensured = await ensureProjectRow(id, { name: "Untitled project" });
+    expect(ensured.ok).toBe(true);
+    expect(ensured.created).toBe(true);
+    expect(loadSite(id)).toBeTruthy(); // the row Notes' page creation needed now exists
+    expect(server.rows.has(id)).toBe(true);
+  });
+
+  it("an ORDINARY delete of a real, already-materialized project is completely unchanged (default tombstone: true)", async () => {
+    const id = "real-project";
+    saveSite({ id, site: "Real project", els: [bld("a")] });
+    await pullCloud(UID); // pushes the local-only site, exactly like an ordinary save reaching the cloud
+    expect(server.rows.has(id)).toBe(true);
+    await deleteSite(id); // no options — an ordinary user-initiated / genuine-content delete
+    expect(_readSiteTombs(UID)[id]).toBeTruthy(); // still fully tombstoned, same as before this fix
+    saveSite({ id, site: "Real project", els: [bld("a")] }); // a late flush must not resurrect it
+    expect(loadSite(id)).toBeNull();
+  });
+});
+
+/* B1202176 amendment ×2 (2026-09-06) — THE ORDERING RACE the first amendment (above) missed,
+ * cross-verified independently on production TWICE (the owner, and a separate live measurement):
+ * `ensureProjectRow` can WRITE the row (local + cloud, `origin` still null — it never resolves one)
+ * before `persistOrDrop` ever re-evaluates the same id. A hard reload remounts Site Planner
+ * inactive on whatever route the URL names, so its `[active]` effect fires on that very first
+ * render too — this is not limited to a second tab switch in the same session. The first
+ * amendment's gate, `!stored?.origin`, still read TRUE for exactly this record (a local row with
+ * no origin) and called `deleteSite(id, {tombstone:true})` on it — production evidence: a row
+ * written at 00:18:56 was soft-deleted at 00:19:30, 34 seconds later, no delete action ever taken.
+ * The fix drops the origin check entirely: `!stored` alone. Any local record, however it got
+ * there, means something considered this project worth keeping. */
+describe("persistOrDrop's gate must survive ensureProjectRow having ALREADY written the row (B1202176 amendment ×2)", () => {
+  beforeEach(() => { resetServer(); makeBrowser().activate(); clearRecentlyDeleted(); setActiveUser(UID); });
+
+  it("THE BUG the first amendment missed: a record ensureProjectRow already wrote still reads !stored?.origin === true", async () => {
+    const id = "smtp2dcu4i53";
+    const ensured = await ensureProjectRow(id, { name: "Untitled project" });
+    expect(ensured.ok).toBe(true);
+    const stored = loadSite(id);
+    expect(stored).toBeTruthy();       // persistOrDrop's re-mount check now sees a real record
+    expect(stored.origin).toBeFalsy(); // ensureProjectRow never resolves one — this is exactly why
+                                        // the first amendment's `!stored?.origin` gate still read true
+    // TEETH: replaying the SUPERSEDED gate's own decision destroys the row it should have protected.
+    if (!stored?.origin) await deleteSite(id, { tombstone: true });
+    expect(server.rows.get(id)?.deleted_at).toBeTruthy(); // exactly the reproduced production symptom
+  });
+
+  it("THE FIX: gating on !stored alone leaves the ensureProjectRow-written row untouched across a re-evaluation", async () => {
+    const id = "smtp2dcu4i53";
+    await ensureProjectRow(id, { name: "Untitled project" });
+    const stored = loadSite(id);
+    expect(stored).toBeTruthy();
+    // persistOrDrop's fixed decision — `isBlankSite(s) && !stored` — is false here (`stored` is
+    // truthy), so it falls to the `else saveSite(...)` branch, never `deleteSite`, regardless of
+    // `origin`.
+    saveSite({ id, ...stored });
+    expect(loadSite(id)).toBeTruthy();
+    expect(server.rows.get(id)?.deleted_at).toBeFalsy();
+    expect(_readSiteTombs(UID)[id]).toBeUndefined();
   });
 });
