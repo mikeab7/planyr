@@ -82,7 +82,7 @@ export const RIBBON_GROUPS = [
   { key: "fontstyle", label: "Bold / Italic / Underline / Strike", width: 116 + DIVIDER_FOOTPRINT, priority: 8 },
   // STAGE 3 (NEW-2) added a third control (the auto-colour toggle, a plain 26px icon button +
   // its own 3px gap) to this group — 59 -> 88.
-  { key: "color", label: "Colour", width: 88 + DIVIDER_FOOTPRINT, priority: 3 },
+  { key: "color", label: "Color", width: 88 + DIVIDER_FOOTPRINT, priority: 3 },
   { key: "alignment", label: "Alignment", width: 233 + DIVIDER_FOOTPRINT, priority: 2 },
   { key: "number", label: "Number", width: 237 + DIVIDER_FOOTPRINT, priority: 6 },
   { key: "cells", label: "Cells", width: 90 + DIVIDER_FOOTPRINT, priority: 1 },
