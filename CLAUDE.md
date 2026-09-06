@@ -544,15 +544,19 @@ Runtime deps are kept few and deliberate. New client dependency added 2026-07-10
   combination there was to try (B793696): "Workflow permissions: Read and write" (on), "Allow
   GitHub Actions to create and approve pull requests" (on), and the installed "Claude" GitHub App
   (mechanically unusable from a workflow — it can only act as that App if it holds the App's
-  private key, and Anthropic, not this repo, holds this one). The owner reviewed the full evidence
-  2026-08-31 and declined the one remaining fix (a PAT or a self-owned GitHub App) — the manual
-  step costs him nothing, since a session already opens the PR itself. Reading that same evidence
-  again the same day, he then went further and had the workflow removed outright (B934400/
-  B934401): a permanently red job that cannot do either of its two jobs is worse than no job,
-  because it trains sessions to wave off red checks as environmental. **This was NOT the risk
-  being imagined away — it was tried for five days, confirmed dead by three separate live re-tests,
-  and removed because it never worked, not because the collision it was built for stopped
-  mattering.**
+  private key, and Anthropic, not this repo, holds this one). **The credential question (a PAT or
+  a self-owned GitHub App) is UNDECIDED, not declined — correction, B1266592, 2026-09-06.** An
+  earlier version of this section said the owner "reviewed the full evidence 2026-08-31 and
+  declined" that fix; he did not — he pushed back asking why this wasn't being fixed properly,
+  said he wanted "set it and forget it," and asked what the automation was even for, and the offer
+  of a self-owned GitHub App was left open and unanswered. On 2026-09-06 he confirmed only that he
+  is fine with the workflow being deleted, which is a separate question from the credential one.
+  Reading that same evidence on 2026-08-31, he then went further and had the workflow removed
+  outright (B934400/B934401): a permanently red job that cannot do either of its two jobs is worse
+  than no job, because it trains sessions to wave off red checks as environmental. **This was NOT
+  the risk being imagined away — it was tried for five days, confirmed dead by three separate live
+  re-tests, and removed because it never worked, not because the collision it was built for stopped
+  mattering.** The credential question stays open and moot while no workflow exists to hold one.
   **`pr-auto-ready.yml` is DELETED. There is no automation here, and none is coming back without a
   fresh, explicit owner go-ahead.** So, plainly:
   - **The session that opens a PR is the one that marks it ready and arms the merge, every time,
