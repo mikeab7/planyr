@@ -127,6 +127,15 @@ export function renderableTrace(trace, graph, activeSheetId) {
       const hops = graph.hopsFor(sheetId, row, col);
       if (!hops) continue;
       for (const hop of hops) {
+        // spreadsheet-live-data-refs — a "project" hop (Site.Acres, Comp.<title>.RentPSF, …) has
+        // no cells to reveal at all — its value comes from outside the grid entirely
+        // (sheetEngine.js's collectRefHops) — so it can never pass the `revealed.length` gate
+        // below. Surface it unconditionally as a marker instead, or it silently vanishes from
+        // every trace the moment it's typed (the exact under-reporting this was built to avoid).
+        if (hop.kind === "project") {
+          markers.push({ atCell: { row, col }, label: hop.label, sourceLabel: hop.sourceLabel, targetSheetId: null, targetCell: null, direction: "in" });
+          continue;
+        }
         const revealed = hop.cells.filter((c) => trace.visited.has(cellKey(hop.sheetId, c.row, c.col)));
         if (revealed.length === 0) continue;
         if (hop.sheetId === activeSheetId) {

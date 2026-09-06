@@ -6,6 +6,7 @@ import { createSheet, commitCellText } from "../src/workspaces/model/lib/sheetMo
 import {
   validateNameText, defineName, retargetName, deleteName, renameName, namesList, nameUsageCount,
   rectFromSelRange, rectToSelRange, rectToAddressText, shiftNamesForStructuralChange,
+  RESERVED_NAME_PREFIXES,
 } from "../src/workspaces/model/lib/namedRanges.js";
 
 describe("validateNameText — naming rules, each with its own reason", () => {
@@ -50,6 +51,19 @@ describe("validateNameText — naming rules, each with its own reason", () => {
   it("XFE1/ABCD1/A0/A1048577 are NOT valid addresses, so they're legal names (they read as plain identifiers)", () => {
     expect(validateNameText("XFE1", createSheet())).toMatchObject({ ok: true });
     expect(validateNameText("ABCD1", createSheet())).toMatchObject({ ok: true });
+  });
+  // spreadsheet-live-data-refs — RESERVED_NAME_PREFIXES (Site/Plan/Comp/Schedule) are what a
+  // project-derived built-in name (lib/projectRefs.js) lives under; a user name starting with one
+  // of them is refused here, at the ONE naming-rule gate, so a collision can never be CREATED.
+  it("rejects a name starting with a reserved project-data prefix, case-insensitively", () => {
+    for (const p of RESERVED_NAME_PREFIXES) {
+      expect(validateNameText(`${p}.Foo`, createSheet())).toMatchObject({ ok: false, reason: expect.stringMatching(new RegExp(p, "i")) });
+      expect(validateNameText(`${p.toLowerCase()}.Foo`, createSheet())).toMatchObject({ ok: false });
+    }
+  });
+  it("does not reject a bare reserved word with no dot, or a name merely starting with the same letters", () => {
+    expect(validateNameText("Site", createSheet())).toMatchObject({ ok: true });
+    expect(validateNameText("SiteworksCost", createSheet())).toMatchObject({ ok: true }); // "Site" + more, no dot
   });
 });
 

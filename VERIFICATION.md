@@ -164,6 +164,19 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V901057 — B1239216: a `Comp.<title>.RentPSF/SizeSF/Date` formula reference resolves a REAL signed-in comp `Blocker: auth`
+
+**Why this needs its own real pass.** V901056 (`docs/archive/VERIFICATION-DONE.md`) already proved the whole Site.*/Plan.*/Comp.* mechanism live end to end in headless Chromium, including the `Comp.*` NAME-RESOLUTION path signed out (`Comp.NoSuchComp.RentPSF` → `#NAME?`, zero network calls). What that pass could not reach is a `Comp.*` reference resolving a REAL comp's rent/size/date, because that needs a genuine signed-in account with at least one saved Leasing Comp — this sandbox has no Supabase credentials at all (`lib/projectCompsFetch.js`'s own `!supabase` guard is what made the signed-out path even testable). The pure resolution logic for this exact case (a real `compType`/`leaseRate`/`leaseSizeSf`/`compDate` object) is unit-tested end to end in `test/modelProjectRefs.test.js`'s "Comp.<title>.*" suite — not re-litigated here.
+
+**Steps, each with a named expected result:**
+1. Read the loaded chunk hash in the same breath as everything below — confirm it names a chunk from a build after this PR merged.
+2. Signed in, open (or create) a Leasing Comp on a real or throwaway project, with a title (e.g. "Test Comp"), a lease rate, a lease size, and an executed date.
+3. Open that SAME project's Spreadsheet tab and type `=Comp.TestComp.RentPSF` (sanitize the title per `lib/projectRefs.js`'s rule — strip spaces/punctuation) into a cell — **expect** it resolves to the comp's real `lease_rate`, matching what the Leasing Comps panel shows for that comp, not `#NAME?`/`#N/A`.
+4. Type `=Comp.TestComp.SizeSF` and `=Comp.TestComp.Date` in two more cells — **expect** the real `lease_size_sf` and the executed date (as a real date value, not text).
+5. Edit the comp's rent in the Leasing Comps panel, return to the Spreadsheet tab (no reload) — **expect** the `RentPSF` cell to follow the change on the next project switch or comps re-fetch (comps have no push-based live sync — see `lib/projectRefs.js`'s own header on what "live" means for this source).
+6. As a control: type `=Comp.TestComp.RentPSF` on a DIFFERENT project than the comp's own `projectId` — **expect** `#NAME?` (comps are project-scoped).
+
+**Result:** ⏳ pending — needs a signed-in account with a real saved comp. `Cadence: once`.
 ### V901088 — B1238304: the map's scale bar/north arrow (canvas), Map Finder's Leaflet chrome, and the PDF/PNG export all handle dark mode correctly `Blocker: live-GIS`
 
 **Why this needs a live pass even though every code path was already driven live, headless, in this session.** PDF/export parity and theme-dependent rendering are both mandatory LIVE-VERIFY classes in `CLAUDE.md` regardless of how thorough a sandbox self-test is — the rule doesn't carve out an exception for "but it was fully proven offline." The one piece that genuinely could not be exercised here is the full aerial-imagery Compose/Download-PDF screen, which needs an external GIS/tile fetch (`Blocker: live-GIS`) this sandbox's egress cannot reach — the same standing wall this repo already documents for FEMA/hazards.fema.gov-class hosts.
