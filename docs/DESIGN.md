@@ -340,11 +340,20 @@ makes two different radius families sitting in one row acceptable — an invisib
 ```js
 export const SPACE      = { xxs: 2, xs: 4, sm: 6, md: 8, lg: 10, xl: 12, xxl: 16 };
 export const FONT_SIZE  = { micro: 10, label: 10.5, control: 12, emphasis: 13, display: 14 };
-export const CONTROL_H  = { sm: 22, md: 26, lg: 30 };
+export const CONTROL_H  = { sm: 22, md: 26, lg: 30, touch: 44 };
 ```
 
 CSS mirrors: `--space-*`, `--font-*`, `--control-h-*` in `index.css`. `SPACE`/`CONTROL_H` are **the
 tree's own dominant value, promoted** from a 738-button audit (B809906) — never invented.
+
+**`CONTROL_H.touch` (44, B1215682)** is the one exception to "promoted, never invented" — it's the
+WCAG/platform touch-target floor, added because sm/md/lg's ceiling (30) sits below it: no control
+built from the original three tiers can ever be finger-sized. It is a fourth tier, not a
+replacement — every existing desktop/mouse control is unaffected — reached for only inside a
+coarse-pointer (touch) surface that needs a real 44×44 hit target, first used by the Site
+Planner's phone Properties bottom sheet (`src/workspaces/site-planner/lib/propertiesSheet.js`).
+It governs height only; a control's RADIUS still resolves from the shape rule above exactly as it
+would at any other height.
 
 ### The type scale's five roles (B915536's NEW-1, 2026-08-31) — a role for every step, not just a rung
 

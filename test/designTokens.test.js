@@ -9,8 +9,8 @@ import { CONTROL_H, FONT_SIZE, SPACE } from "../src/shared/ui/designTokens.js";
 // same "two representations of one fact must agree" shape as palette.js vs index.css's color vars.
 
 describe("designTokens — the values are the audited modal values, not invented", () => {
-  it("CONTROL_H has the three real height tiers found on <button> elements", () => {
-    expect(CONTROL_H).toEqual({ sm: 22, md: 26, lg: 30 });
+  it("CONTROL_H has the three real height tiers found on <button> elements, plus the touch floor", () => {
+    expect(CONTROL_H).toEqual({ sm: 22, md: 26, lg: 30, touch: 44 });
   });
 
   it("FONT_SIZE is the reduced 5-role scale (B915536's NEW-1), ascending", () => {
