@@ -2,8 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   BAND_TYPES, BAND_TYPE_BY_KEY, DEFAULT_BAND_TYPE, bandTypeOf, normalizeBands, makeXSection,
   xsectionFromRoad, hasXSection, curbToCurbWidth, pavedWidth, rowWidth, pavementArea, bandLayout,
-  bandStripeMarks, BUILT_IN_XSECTION_PRESETS, parseWidthDraft, MIN_BAND_WIDTH_FT,
-  designatedRowFt, rowMarginFt,
+  bandStripeMarks, bandStripeMarksWithWidth, BUILT_IN_XSECTION_PRESETS, parseWidthDraft, MIN_BAND_WIDTH_FT,
+  designatedRowFt, rowMarginFt, bandExtents, rowMarginsBySide, imperviousCorrectionWidths,
+  XSEC_BAND_FILL_MIN_PX, XSEC_STRIPE_MIN_PX,
 } from "../src/workspaces/site-planner/lib/roadCrossSection.js";
 
 const OWNER_EXAMPLE = [
@@ -34,6 +35,46 @@ describe("BAND_TYPES coverage — the brief's minimum list", () => {
   const required = ["travel", "median", "turnLane", "shoulder", "curbGutter", "parking", "bike", "sidewalk", "parkway", "ditch"];
   it("supports every band type named in the brief", () => {
     for (const key of required) expect(BAND_TYPE_BY_KEY[key]).toBeTruthy();
+  });
+  /* NEW-2 — the brief's own imperviousness table, verbatim: travel/turnLane/shoulder/parking/bike/
+   * curbGutter/sidewalk are impervious; median/parkway/ditch are not. Every BAND_TYPES entry declares
+   * a boolean (never undefined), so a future band type can't silently fall through the impervious math. */
+  it("every band type declares a boolean `impervious`, matching the brief's table", () => {
+    const impervious = { travel: true, turnLane: true, median: false, shoulder: true, curbGutter: true, parking: true, bike: true, sidewalk: true, parkway: false, ditch: false };
+    for (const t of BAND_TYPES) {
+      expect(typeof t.impervious).toBe("boolean");
+      expect(t.impervious).toBe(impervious[t.key]);
+    }
+  });
+});
+
+/* NEW-2 (owner-measured repro) — the divided-boulevard-with-sidewalks section: 5' sidewalk / 6'
+ * parkway / 2' curb & gutter / 12' / 12' / 20' median / 12' / 12' / 2' curb & gutter / 6' parkway /
+ * 5' sidewalk. Curb-to-curb 72', modeled total 94'. The pre-fix impervious math (via
+ * `roadStripArea`'s curb-to-curb ring alone) counted the whole 72' as impervious — including the 20'
+ * grass median — and the 10' of sidewalk (5' each side) outside the ring counted as nothing. */
+describe("imperviousCorrectionWidths — the NEW-2 fix", () => {
+  const DIVIDED_WITH_SIDEWALKS = [
+    { type: "sidewalk", w: 5 }, { type: "parkway", w: 6 }, { type: "curbGutter", w: 2 },
+    { type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "median", w: 20 },
+    { type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "curbGutter", w: 2 },
+    { type: "parkway", w: 6 }, { type: "sidewalk", w: 5 },
+  ];
+  it("matches the owner's own measured repro: curb-to-curb 72', modeled total 94'", () => {
+    expect(curbToCurbWidth({ bands: DIVIDED_WITH_SIDEWALKS })).toBe(72);
+    expect(rowWidth({ bands: DIVIDED_WITH_SIDEWALKS })).toBe(94);
+  });
+  it("subtracts the median (pervious, within curb) and adds both sidewalks (impervious, outside curb)", () => {
+    const { perviousWithinCurb, imperviousOutsideCurb } = imperviousCorrectionWidths({ bands: DIVIDED_WITH_SIDEWALKS });
+    expect(perviousWithinCurb).toBe(20); // the median only — the curb & gutter bands are impervious, no correction
+    expect(imperviousOutsideCurb).toBe(10); // 5' + 5', both sidewalks — the parkways stay pervious
+  });
+  it("a road with no median/sidewalk (a plain travel-only section) needs no correction", () => {
+    expect(imperviousCorrectionWidths({ bands: [{ type: "travel", w: 24 }] })).toEqual({ perviousWithinCurb: 0, imperviousOutsideCurb: 0 });
+  });
+  it("a road with no xsection at all needs no correction", () => {
+    expect(imperviousCorrectionWidths(undefined)).toEqual({ perviousWithinCurb: 0, imperviousOutsideCurb: 0 });
+    expect(imperviousCorrectionWidths(null)).toEqual({ perviousWithinCurb: 0, imperviousOutsideCurb: 0 });
   });
 });
 
@@ -168,6 +209,59 @@ describe("bandStripeMarks — the simplified striping convention", () => {
     const marks = bandStripeMarks(makeXSection([{ type: "sidewalk", w: 5 }, { type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "sidewalk", w: 5 }]));
     expect(marks).toHaveLength(1); // only the travel/travel seam
     expect(marks[0].style).toBe("yellow-double");
+  });
+
+  /* NEW-5 (owner-measured repro) — three undivided 12' travel lanes, no median/turn-lane: there is
+   * no seam exactly at the centerline (an ODD lane count), so two candidate seams (±6') tie for
+   * "nearest 0". The fix picks the more-positive-offset seam on a tie, deterministically — a
+   * property of the offset VALUES, never of which seam this module's own loop happened to build
+   * first (see chooseCenterSeam's header for why that distinction actually matters). */
+  describe("odd undivided lane count — the NEW-5 tie-break fix", () => {
+    it("three equal-width undivided lanes: exactly one double-yellow, at the more-positive tied offset, never both and never neither", () => {
+      const marks = bandStripeMarks(makeXSection([{ type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "travel", w: 12 }]));
+      expect(marks).toHaveLength(2);
+      const yellows = marks.filter((m) => m.style === "yellow-double");
+      expect(yellows).toHaveLength(1);
+      expect(yellows[0].atOffset).toBeCloseTo(6, 9);
+      const dashes = marks.filter((m) => m.style === "white-dash");
+      expect(dashes).toHaveLength(1);
+      expect(dashes[0].atOffset).toBeCloseTo(-6, 9);
+    });
+    it("is deterministic across repeated calls on the identical input (no reliance on object/array iteration quirks)", () => {
+      const x = makeXSection([{ type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "travel", w: 12 }]);
+      const a = bandStripeMarks(x), b = bandStripeMarks(x);
+      expect(a).toEqual(b);
+    });
+    it("five equal-width undivided lanes: still exactly one double-yellow, at the centermost tied seam", () => {
+      const marks = bandStripeMarks(makeXSection([
+        { type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "travel", w: 12 },
+      ]));
+      const yellows = marks.filter((m) => m.style === "yellow-double");
+      expect(yellows).toHaveLength(1);
+      expect(Math.abs(yellows[0].atOffset)).toBeCloseTo(6, 9); // the pair of seams nearest 0, not the outer ±18 pair
+    });
+    it("a genuine tie can only arise from a left-right symmetric section, so reversing the (symmetric) band list changes nothing — reordering can never flip the result", () => {
+      const bands = [{ type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "travel", w: 12 }];
+      const marks = bandStripeMarks(makeXSection(bands));
+      const reversed = bandStripeMarks(makeXSection([...bands].reverse()));
+      expect(reversed).toEqual(marks);
+    });
+  });
+});
+
+describe("bandStripeMarksWithWidth — NEW-1's per-seam legibility width", () => {
+  it("carries the narrower of each seam's two adjacent bands, alongside the same atOffset/style bandStripeMarks reports", () => {
+    const x = makeXSection([{ type: "curbGutter", w: 2 }, { type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "curbGutter", w: 2 }]);
+    const withWidth = bandStripeMarksWithWidth(x);
+    const plain = bandStripeMarks(x);
+    expect(withWidth.map(({ atOffset, style }) => ({ atOffset, style }))).toEqual(plain);
+    // the two travel/curbGutter seams: narrower band is the 2' curb & gutter
+    const edgeSeams = withWidth.filter((m) => m.style === "white-solid");
+    expect(edgeSeams).toHaveLength(2);
+    for (const s of edgeSeams) expect(s.minBandFt).toBe(2);
+    // the travel/travel seam: both bands are 12'
+    const centerSeam = withWidth.find((m) => m.style === "yellow-double");
+    expect(centerSeam.minBandFt).toBe(12);
   });
 });
 
@@ -311,6 +405,42 @@ describe("rowMarginFt — the undesignated margin each side", () => {
     expect(rowWidth({ bands: bandsWithOneParkway })).toBe(78);
     // a 90' designated ROW over this: leftover is 90 - 78 = 12, split 6' each side — NOT computed against the 68' curb-to-curb figure
     expect(rowMarginFt({ bands: bandsWithOneParkway, rowDesignFt: 90 })).toBe(6);
+  });
+});
+
+/* NEW-4 (owner-measured repro) — a section 5' sidewalk / 12' travel / 12' travel (sidewalk on ONE
+ * side only), a 30' designated ROW. Modeled total is 29' (5+12+12), comfortably under the 30' ROW, so
+ * the OLD width-sum validity check called this valid and reported a single "0.5' each side" margin —
+ * while the assembly is not centered on 0 (the sidewalk pushes it 5' one way), so the sidewalk side
+ * actually reaches 2' PAST the ROW line while the bare-curb side has 3' of untouched slack. */
+describe("bandExtents / rowMarginsBySide — per-SIDE extents, the NEW-4 fix", () => {
+  const ASYM = [{ type: "sidewalk", w: 5 }, { type: "travel", w: 12 }, { type: "travel", w: 12 }];
+  it("bandExtents reports the assembly's true, unequal reach on each side of the centerline", () => {
+    const { left, right } = bandExtents({ bands: ASYM });
+    expect(left).toBeCloseTo(17, 9); // 12' half-curb-to-curb + the 5' sidewalk pushing this side out
+    expect(right).toBeCloseTo(12, 9); // bare curb-to-curb half, no flank band on this side
+  });
+  it("the two extents always sum to rowWidth, symmetric or not", () => {
+    const { left, right } = bandExtents({ bands: ASYM });
+    expect(left + right).toBeCloseTo(rowWidth({ bands: ASYM }), 9);
+  });
+  it("rowMarginsBySide: the sidewalk side is NEGATIVE (already past the ROW) while the bare side still has slack", () => {
+    const m = rowMarginsBySide({ bands: ASYM, rowDesignFt: 30 });
+    expect(m.left).toBeCloseTo(-2, 9); // 30/2=15, reach=17 → 15-17=-2
+    expect(m.right).toBeCloseTo(3, 9); // 15-12=3
+  });
+  it("rowMarginFt: NEW-4 fix — null (invalid) even though the bare WIDTH SUM (29') is under the designated ROW (30'), because one side individually overruns", () => {
+    expect(rowWidth({ bands: ASYM })).toBe(29);
+    expect(rowMarginFt({ bands: ASYM, rowDesignFt: 30 })).toBeNull();
+  });
+  it("a SYMMETRIC section is unaffected — both sides equal, the average margin is exact and still reported", () => {
+    const m = rowMarginsBySide({ bands: OWNER_EXAMPLE, rowDesignFt: 100 });
+    expect(m.left).toBeCloseTo(16, 9);
+    expect(m.right).toBeCloseTo(16, 9);
+    expect(rowMarginFt({ bands: OWNER_EXAMPLE, rowDesignFt: 100 })).toBe(16);
+  });
+  it("null when nothing is designated", () => {
+    expect(rowMarginsBySide({ bands: ASYM })).toBeNull();
   });
 });
 

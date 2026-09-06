@@ -16,6 +16,7 @@ import { overlappingParcelPairs, dissolvedParcelSqft } from "../src/workspaces/s
 import { carStalls, trailerStalls, estStalls, estTrailers, SQFT_PER_ACRE } from "../src/workspaces/site-planner/lib/siteGeometry.js";
 import { detentionStorage } from "../src/workspaces/site-planner/lib/pondGeom.js";
 import { DOGEAR_W, DOGEAR_D } from "../src/workspaces/site-planner/lib/dogEar.js";
+import { makeXSection } from "../src/workspaces/site-planner/lib/roadCrossSection.js";
 
 const SETTINGS = {
   stallW: 9, stallDepth: 18, aisle: 24, parkAngle: 90,
@@ -190,6 +191,33 @@ describe("siteMetrics — road pavement area", () => {
     const m = metricsFor([road], [rectParcel()]);
     // 600 ft long, (24 + 2×0.5) = 25 ft back-of-curb-to-back-of-curb, flat ends (no extra fillet SF).
     expect(m.paving).toBeCloseTo(600 * 25, 0);
+  });
+
+  /* NEW-2 (owner-measured repro) — a road carrying a designed cross-section corrects the impervious
+   * total for a landscaped median (excluded) and any modeled sidewalk (included, even though it sits
+   * outside the curb-to-curb ring `roadStripArea` draws). `travelW` is kept in sync with the
+   * section's curb-to-curb width by `setRoadXSection` in the real app; the fixture sets both directly
+   * since this is a pure-library test. */
+  it("a designed section's median is EXCLUDED from paving/impervious, even though it sits inside the curb-to-curb ring", () => {
+    const bands = [{ type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "median", w: 20 }, { type: "travel", w: 12 }, { type: "travel", w: 12 }]; // curb-to-curb 68'
+    const plain = { id: "r1", type: "road", pts: [{ x: -300, y: 0 }, { x: 300, y: 0 }], vtx: [], travelW: 68, curb: 0.5 };
+    const divided = { ...plain, id: "r2", xsection: makeXSection(bands) };
+    const mPlain = metricsFor([plain], [rectParcel()]);
+    const mDivided = metricsFor([divided], [rectParcel()]);
+    // base ring area is identical (travelW/curb unchanged) — only the impervious CORRECTION differs.
+    expect(mPlain.paving).toBeCloseTo(600 * (68 + 1), 0);
+    // the 20' median × 600' centerline length is subtracted from the plain figure.
+    expect(mDivided.paving).toBeCloseTo(mPlain.paving - 20 * 600, 0);
+  });
+
+  it("a designed section's sidewalk (outside the curb-to-curb ring) is ADDED to paving/impervious", () => {
+    const bands = [{ type: "sidewalk", w: 5 }, { type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "median", w: 20 }, { type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "sidewalk", w: 5 }];
+    const plain = { id: "r1", type: "road", pts: [{ x: -300, y: 0 }, { x: 300, y: 0 }], vtx: [], travelW: 68, curb: 0.5 };
+    const withSidewalks = { ...plain, id: "r2", xsection: makeXSection(bands) };
+    const mPlain = metricsFor([plain], [rectParcel()]);
+    const mWithSidewalks = metricsFor([withSidewalks], [rectParcel()]);
+    // net change: −20' median + 10' (5'+5') sidewalks, over the 600' centerline.
+    expect(mWithSidewalks.paving).toBeCloseTo(mPlain.paving + (-20 + 10) * 600, 0);
   });
 
   it("a road with a declared roundabout adds the annulus to paving, over and above the straight strip", () => {

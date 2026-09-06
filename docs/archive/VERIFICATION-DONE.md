@@ -1,3 +1,35 @@
+### V915552 — B1258752: Road cross-section per-band zoom gate — no all-or-nothing collapse across three zoom levels ✅ **PASSED 2026-09-06 — Claude, headless Chromium (signed out, no external GIS, throwaway seeded plan — ATTEMPT-BEFORE-YOU-PARK)**
+
+**Method.** `ui-audit/verify-road-xsection-review.mjs` (new), Playwright/Chromium against a real built+served app (`npm run build && vite preview`). A road carrying the exact reported repro section (5' sidewalk / 6' parkway / 2' curb & gutter / 12' / 12' / 20' median / 12' / 12' / 2' curb & gutter / 6' parkway / 5' sidewalk — curb-to-curb 72', modeled total 94') was seeded directly into a throwaway plan's `els` (the app's own render code is what's under test, so seeding the exact `xsection` under Playwright's control is more precise than building it through the dialog's UI) and driven through real mouse-wheel zoom, reading the app's own `data-render-ppf` attribute to confirm the actual zoom reached at each step, then querying the rendered SVG's polygons/polylines by clip-membership and stroke color.
+
+**Results, 12/12 checks in this section:**
+- **At ~1.5 px/ft** (every band, including the 2' curb & gutter, clears the 3px band-fill floor): 3 clipped within-curb fills (median + 2 curb & gutter), 4 unclipped outside-curb fills (2 sidewalks + 2 parkways), all 6 lane-marking seams render.
+- **At ~1.0 px/ft — the fix's own case.** The curb & gutter's 2' fill (2px) correctly drops below the floor and stops painting, while the 20' median fill and all 4 sidewalk/parkway fills (5-6px, well clear of the floor) keep painting, and all 6 lane-marking seams still render (their legibility floor is far lower than the fill floor). Pre-fix, the single section-wide `minBandFt*ppf>=3` gate would have zeroed EVERY fill and EVERY seam at this exact zoom — reproduced by reading the pre-fix source, not re-run against a reverted build (the fix's own unit tests in `test/roadCrossSection.test.js` already mutation-guard the pure math).
+- **At a deep zoom-out (~0.2-0.3 px/ft):** the 20' median fill is still resolvable and still paints, and the travel/median seams (12' bands) still render — the section never collapses to plain undifferentiated asphalt while any band remains legible.
+- No page errors throughout.
+
+**Not run here (no gap):** nothing in this item needs auth, live GIS, or real project data — the fix is 100% client-side canvas rendering driven by locally-seeded plan data.
+
+### V915553 — B1258754: A designated ROW on a single-band (undesigned) road draws on the canvas ✅ **PASSED 2026-09-06 — Claude, headless Chromium (signed out, no external GIS, throwaway seeded plan — ATTEMPT-BEFORE-YOU-PARK)**
+
+**Method.** Same harness/run as V915552 (`ui-audit/verify-road-xsection-review.mjs`). A second seeded road carries a single travel-lane band (24') plus `xsection.rowDesignFt: 60` — the dialog's own single-band wrapper shape, for which `hasXSection()` is `false` by design.
+
+**Results, 3/3 checks:** the road's rendered `<g>` carries exactly 2 dashed boundary polylines (`stroke="var(--text-tertiary)"` with a `stroke-dasharray`) and the inline label reads exactly "60′ R.O.W." — both previously absent for this exact shape, since the pre-fix ROW-line block sat under `hasXSection(el)`. The same road paints zero band-fill polygons (correct — it has no real multi-band design), confirming the two concerns are now independently gated.
+
+**Not run here (no gap):** client-side canvas rendering only; no auth/GIS/real-data dependency.
+
+### V915554 — B1258755: Asymmetric-section ROW validity (per-side extents) — both the invalid and valid cases, canvas + dialog ✅ **PASSED 2026-09-06 — Claude, headless Chromium (signed out, no external GIS, throwaway seeded plan — ATTEMPT-BEFORE-YOU-PARK)**
+
+**Method.** Same harness/run as V915552 (`ui-audit/verify-road-xsection-review.mjs`). Two more seeded roads, both carrying the reported repro section (5' sidewalk / 12' travel / 12' travel — a sidewalk on one side only): one designated at a 30' ROW (invalid — the sidewalk side overruns by 2' even though the 29' modeled total reads under the 30' ROW), one at a 40' ROW (valid, asymmetric margins of 3'/8').
+
+**Results, 6/6 checks:**
+- **Invalid (30' ROW):** the canvas draws NO ROW boundary lines and no label — never silently clamped to fit.
+- **Valid (40' ROW):** the canvas draws both boundary lines and the "40′ R.O.W." label normally.
+- **Dialog, invalid case, reopened via Properties → "Edit cross-section…":** the warning reads exactly *"The modeled bands run past the designated 30′ right-of-way on the left side by 2′ — the section isn't centered on the ROW. Widen the ROW or narrow the bands; it is not auto-clamped."* — naming the overrunning side and the amount, not a bare total-mismatch message. Screenshotted (`07-dialog-asym-invalid-warning.png`).
+- **Dialog, valid case:** the summary line reads exactly *"ROW margin 3′ left · 8′ right"* (not a single misleading averaged figure) with no overrun warning. Screenshotted (`08-dialog-asym-valid-split-margins.png`).
+
+**Not run here (no gap):** client-side canvas + dialog only; no auth/GIS/real-data dependency.
+
 ### V901056 — B1239216: Spreadsheet Site.*/Plan.*/Comp.* project-data references, live end to end ✅ **PASSED 2026-09-06 — Claude, headless Chromium (signed out, no external GIS — Claude-doable here per ATTEMPT-BEFORE-YOU-PARK, so run rather than parked)**
 
 **Why this could be run here, not deferred.** Every piece exercised — a local Site Planner "project" (a site group, seeded via `localStorage` the same way `e2e/model-spreadsheet.spec.js` already does), the Model workspace's own formula grid, and the Name Manager — works fully signed out with no live GIS endpoint. Only a real Comp.* value round-trip against a signed-in account's actual comps needs `Blocker: auth` (below); everything else about the mechanism does not.
