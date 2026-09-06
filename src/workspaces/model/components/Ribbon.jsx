@@ -58,6 +58,10 @@ import { MenuItem, menuPanelStyle } from "../../../shared/ui/controls.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { NUMBER_FORMATS, formatLabelFor } from "../lib/numberFormats.js";
 import { computeRibbonLayout, RIBBON_GROUPS, MORE_BUTTON_WIDTH } from "../lib/ribbonLayout.js";
+import {
+  toggleBoldPatch, toggleItalicPatch, toggleUnderlinePatch, toggleStrikePatch,
+  toggleWrapPatch, increaseIndentPatch, decreaseIndentPatch,
+} from "../lib/commandRegistry.js";
 
 const FONT_FAMILIES = [
   { id: "system-ui, sans-serif", label: "Default" },
@@ -136,7 +140,6 @@ function IconEraser() { return <Icon><rect x="6" y="9" width="12" height="7" rx=
 // weakest three of the set on close inspection — legible with a tooltip, but not the instant,
 // literal read the rest of the icon set already had. Redrawn to read at a glance:
 function IconBucket() { return <Icon><path d="M5 9h14l-1.3 9.5a2 2 0 0 1-2 1.5H8.3a2 2 0 0 1-2-1.5z" /><path d="M8 9a4 4 0 0 1 8 0" /></Icon>; } // a real bucket silhouette (rim, tapered body, arched handle) — was an abstract diamond
-function IconBorderGrid() { return <Icon><rect x="3" y="3" width="18" height="18" rx="1" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="12" y1="3" x2="12" y2="21" /></Icon>; }
 function IconValign() { return <Icon><rect x="6" y="3" width="12" height="5" rx="1" /><line x1="3" y1="12" x2="21" y2="12" /><rect x="6" y="16" width="12" height="5" rx="1" /></Icon>; }
 function IconWrap() { return <Icon><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="17" y2="12" /><polyline points="21 12 21 16 13 16" /><polyline points="16 19 13 16 16 13" /></Icon>; }
 function IconIndentInc() { return <Icon><line x1="3" y1="5" x2="21" y2="5" /><polyline points="3 10 7 12 3 14" /><line x1="11" y1="9" x2="21" y2="9" /><line x1="11" y1="15" x2="21" y2="15" /><line x1="3" y1="19" x2="21" y2="19" /></Icon>; }
@@ -145,9 +148,6 @@ function IconMerge() { return <Icon><rect x="2" y="6" width="20" height="12" rx=
 function IconInsert() { return <Icon><rect x="3" y="3" width="18" height="18" rx="2" /><line x1="12" y1="8" x2="12" y2="16" /><line x1="8" y1="12" x2="16" y2="12" /></Icon>; }
 function IconDelete() { return <Icon><polyline points="4 7 20 7" /><path d="M6 7V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2" /><path d="M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></Icon>; }
 function IconFreeze() { return <Icon><rect x="3" y="3" width="18" height="18" rx="1" /><rect x="3" y="3" width="18" height="6" fill="currentColor" stroke="none" /><line x1="9" y1="9" x2="9" y2="21" /><line x1="15" y1="9" x2="15" y2="21" /></Icon>; } // a real frozen-top-row glyph (Excel/Sheets' own convention) — was a generic asterisk/snowflake that read as decoration, not "freeze"
-function IconFilter() { return <Icon><path d="M4 4h16l-6.5 8v7l-3 2v-9z" /></Icon>; }
-function IconSortAsc() { return <Icon><line x1="3" y1="6" x2="9" y2="6" /><line x1="3" y1="12" x2="13" y2="12" /><line x1="3" y1="18" x2="17" y2="18" /><line x1="20" y1="5" x2="20" y2="19" /><polyline points="17 16 20 19 23 16" /></Icon>; }
-function IconSortDesc() { return <Icon><line x1="3" y1="6" x2="17" y2="6" /><line x1="3" y1="12" x2="13" y2="12" /><line x1="3" y1="18" x2="9" y2="18" /><line x1="20" y1="5" x2="20" y2="19" /><polyline points="17 16 20 19 23 16" /></Icon>; }
 // STAGE 3 (NEW-2) — three dots in the actual convention's own colours (blue input / black
 // formula / green cross-sheet link — the SAME tokens SheetView.jsx paints cell text with), not
 // a `currentColor` outline like the rest of this icon set: the glyph IS the feature it toggles,
@@ -161,10 +161,6 @@ function IconAutoColor() {
     </Icon>
   );
 }
-// Stage 3 pt 2 (NEW-1) — a name TAG: a pentagon tag shape + its punch hole, the plainest literal
-// read for "named range" available in this app's own hand-drawn convention (no text label — see
-// the file header's iconography rule).
-function IconTag() { return <Icon><path d="M3 11.5 12.5 2H21v8.5L11.5 21z" /><circle cx="16.5" cy="7.5" r="1.6" fill="currentColor" stroke="none" /></Icon>; }
 // STAGE 3 (NEW-1) — Trace Precedents: several small nodes converging into one, the plainest
 // literal read for "these feed this" in the icon set's hand-drawn convention. Trace Dependents
 // (below) is its mirror — one node radiating out to several.
@@ -302,22 +298,6 @@ function ColorSwatchButton({ label, icon, title, value, palette, onPick, default
   );
 }
 
-function edgeCSS(token) {
-  if (!token) return "1px solid transparent";
-  return token === "double" ? "3px double currentColor" : "2px solid currentColor";
-}
-/** A tiny CSS-only preview of which edges a border button applies — no icon font or SVG
- *  dependency needed for four rectangle edges. Kept for the two first-class border buttons (Top,
- *  double-Bottom) — the "More" trigger beside them uses IconBorderGrid instead, since it opens a
- *  menu of many edge combinations rather than applying one fixed shape. */
-function BorderGlyph({ top, right, bottom, left }) {
-  return (
-    <span aria-hidden="true" style={{
-      display: "inline-block", width: 15, height: 11, boxSizing: "border-box", flex: "none",
-      borderTop: edgeCSS(top), borderRight: edgeCSS(right), borderBottom: edgeCSS(bottom), borderLeft: edgeCSS(left),
-    }} />
-  );
-}
 function AlignGlyph({ align }) {
   const widths = ["100%", "65%", "85%"];
   const justify = align === "center" ? "center" : align === "right" ? "flex-end" : "flex-start";
@@ -368,10 +348,10 @@ function FontStyleGroup({ ctx }) {
   const s = ctx.activeStyle;
   return (
     <span style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
-      <button type="button" data-testid="ribbon-bold" title="Bold" aria-label="Bold" aria-pressed={!!s.bold} onClick={() => ctx.onSetCellStyle({ bold: s.bold ? null : true })} style={ribbonBtnStyle(!!s.bold, { fontWeight: 800 })}>B</button>
-      <button type="button" data-testid="ribbon-italic" title="Italic" aria-label="Italic" aria-pressed={!!s.italic} onClick={() => ctx.onSetCellStyle({ italic: s.italic ? null : true })} style={ribbonBtnStyle(!!s.italic, { fontStyle: "italic" })}>I</button>
-      <button type="button" data-testid="ribbon-underline" title="Underline" aria-label="Underline" aria-pressed={!!s.underline} onClick={() => ctx.onSetCellStyle({ underline: s.underline ? null : true })} style={ribbonBtnStyle(!!s.underline, { textDecoration: "underline" })}>U</button>
-      <button type="button" data-testid="ribbon-strike" title="Strikethrough" aria-label="Strikethrough" aria-pressed={!!s.strike} onClick={() => ctx.onSetCellStyle({ strike: s.strike ? null : true })} style={ribbonBtnStyle(!!s.strike, { textDecoration: "line-through" })}>S</button>
+      <button type="button" data-testid="ribbon-bold" title="Bold" aria-label="Bold" aria-pressed={!!s.bold} onClick={() => ctx.onSetCellStyle(toggleBoldPatch(s))} style={ribbonBtnStyle(!!s.bold, { fontWeight: 800 })}>B</button>
+      <button type="button" data-testid="ribbon-italic" title="Italic" aria-label="Italic" aria-pressed={!!s.italic} onClick={() => ctx.onSetCellStyle(toggleItalicPatch(s))} style={ribbonBtnStyle(!!s.italic, { fontStyle: "italic" })}>I</button>
+      <button type="button" data-testid="ribbon-underline" title="Underline" aria-label="Underline" aria-pressed={!!s.underline} onClick={() => ctx.onSetCellStyle(toggleUnderlinePatch(s))} style={ribbonBtnStyle(!!s.underline, { textDecoration: "underline" })}>U</button>
+      <button type="button" data-testid="ribbon-strike" title="Strikethrough" aria-label="Strikethrough" aria-pressed={!!s.strike} onClick={() => ctx.onSetCellStyle(toggleStrikePatch(s))} style={ribbonBtnStyle(!!s.strike, { textDecoration: "line-through" })}>S</button>
     </span>
   );
 }
@@ -394,29 +374,6 @@ function ColorGroup({ ctx }) {
   );
 }
 
-function BordersGroup({ ctx }) {
-  return (
-    <span style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
-      {/* First-class buttons — a subtotal row's TOP border and a total row's DOUBLE BOTTOM
-          border, one click each, never buried inside the "More" menu below. */}
-      <button type="button" data-testid="ribbon-border-top" title="Top Border (subtotal row)" aria-label="Top Border" onClick={() => ctx.onApplyBorder({ edges: ["top"], style: "thin", mode: "outline" })} style={ribbonBtnStyle(false)}><BorderGlyph top="thin" /></button>
-      <button type="button" data-testid="ribbon-border-bottom-double" title="Bottom Border, double (total row)" aria-label="Double Bottom Border" onClick={() => ctx.onApplyBorder({ edges: ["bottom"], style: "double", mode: "outline" })} style={ribbonBtnStyle(false)}><BorderGlyph bottom="double" /></button>
-      <IconDropdownButton icon={<IconBorderGrid />} title="More border options" width={190}>
-        <MenuItem onClick={() => ctx.onApplyBorder({ edges: ["top", "right", "bottom", "left"], style: "thin", mode: "outline" })}><BorderGlyph top="thin" right="thin" bottom="thin" left="thin" /> <span style={{ marginLeft: 6 }}>Outline</span></MenuItem>
-        <MenuItem onClick={() => ctx.onApplyBorder({ edges: ["top", "right", "bottom", "left"], style: "thin", mode: "all" })}><BorderGlyph top="thin" right="thin" bottom="thin" left="thin" /> <span style={{ marginLeft: 6 }}>All borders</span></MenuItem>
-        <div style={{ height: 1, margin: "4px 0", background: "var(--border-default)" }} />
-        <MenuItem onClick={() => ctx.onApplyBorder({ edges: ["top"], style: "thin", mode: "outline" })}>Top edge</MenuItem>
-        <MenuItem onClick={() => ctx.onApplyBorder({ edges: ["right"], style: "thin", mode: "outline" })}>Right edge</MenuItem>
-        <MenuItem onClick={() => ctx.onApplyBorder({ edges: ["bottom"], style: "thin", mode: "outline" })}>Bottom edge</MenuItem>
-        <MenuItem onClick={() => ctx.onApplyBorder({ edges: ["left"], style: "thin", mode: "outline" })}>Left edge</MenuItem>
-        <MenuItem onClick={() => ctx.onApplyBorder({ edges: ["bottom"], style: "double", mode: "outline" })}>Bottom edge, double</MenuItem>
-        <div style={{ height: 1, margin: "4px 0", background: "var(--border-default)" }} />
-        <MenuItem onClick={() => ctx.onApplyBorder({ edges: ["top", "right", "bottom", "left"], style: null, mode: "all" })}>No border</MenuItem>
-      </IconDropdownButton>
-    </span>
-  );
-}
-
 function AlignmentGroup({ ctx }) {
   const s = ctx.activeStyle;
   return (
@@ -430,9 +387,9 @@ function AlignmentGroup({ ctx }) {
       <IconDropdownButton icon={<IconValign />} title="Vertical alignment" width={110}>
         {VALIGN_OPTIONS.map((v) => <MenuItem key={v.id} active={(s.valign || "middle") === v.id} onClick={() => ctx.onSetCellStyle({ valign: v.id === "middle" ? null : v.id })}>{v.label}</MenuItem>)}
       </IconDropdownButton>
-      <button type="button" data-testid="ribbon-wrap" title="Wrap text" aria-label="Wrap text" aria-pressed={!!s.wrap} onClick={() => ctx.onSetCellStyle({ wrap: s.wrap ? null : true })} style={ribbonBtnStyle(!!s.wrap)}><IconWrap /></button>
-      <button type="button" data-testid="ribbon-indent-dec" title="Decrease indent" aria-label="Decrease indent" onClick={() => ctx.onSetCellStyle({ indent: Math.max(0, (s.indent || 0) - 1) || null })} style={ribbonBtnStyle(false)}><IconIndentDec /></button>
-      <button type="button" data-testid="ribbon-indent-inc" title="Increase indent" aria-label="Increase indent" onClick={() => ctx.onSetCellStyle({ indent: (s.indent || 0) + 1 })} style={ribbonBtnStyle(false)}><IconIndentInc /></button>
+      <button type="button" data-testid="ribbon-wrap" title="Wrap text" aria-label="Wrap text" aria-pressed={!!s.wrap} onClick={() => ctx.onSetCellStyle(toggleWrapPatch(s))} style={ribbonBtnStyle(!!s.wrap)}><IconWrap /></button>
+      <button type="button" data-testid="ribbon-indent-dec" title="Decrease indent" aria-label="Decrease indent" onClick={() => ctx.onSetCellStyle(decreaseIndentPatch(s))} style={ribbonBtnStyle(false)}><IconIndentDec /></button>
+      <button type="button" data-testid="ribbon-indent-inc" title="Increase indent" aria-label="Increase indent" onClick={() => ctx.onSetCellStyle(increaseIndentPatch(s))} style={ribbonBtnStyle(false)}><IconIndentInc /></button>
       <IconDropdownButton icon={<IconMerge />} title="Merge cells" width={170}>
         <MenuItem onClick={ctx.onMergeToggle}>{ctx.mergedHere ? "Unmerge Cells" : "Merge Cells"}</MenuItem>
       </IconDropdownButton>
@@ -478,21 +435,6 @@ function CellsGroup({ ctx }) {
   );
 }
 
-// Stage 3 pt 2 (NEW-1) — a single button, not an IconDropdownButton: there is only ONE
-// destination (the Name Manager panel — components/NameManager.jsx), which itself carries the
-// "define from the current selection" fast path in its own top row, so a second menu item here
-// would just be an extra click to reach the same place.
-function NamesGroup({ ctx }) {
-  return (
-    <span style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
-      <button
-        type="button" data-testid="ribbon-names" title="Name Manager — define, rename, or jump to a named cell or range" aria-label="Name Manager"
-        aria-pressed={ctx.nameManagerOpen} onClick={ctx.onToggleNameManager} style={ribbonBtnStyle(ctx.nameManagerOpen)}
-      ><IconTag /></button>
-    </span>
-  );
-}
-
 // STAGE 3 (NEW-1/NEW-2, owner brief 2026-09-03) — Trace Precedents/Dependents/Remove Arrows +
 // the Inconsistencies list toggle. The trace buttons are TOGGLE-AND-STEP, matching Excel's own
 // behaviour: clicking the SAME button again on the SAME selected cell extends the trace one
@@ -501,7 +443,13 @@ function NamesGroup({ ctx }) {
 // its own). The small "L2"/"L2+" readout next to the buttons is the ONLY visible trace status —
 // PANEL-BREVITY: a full sentence status line was considered and dropped in favour of a `title`
 // tooltip carrying the same detail (level, "no further precedents", a truncation note) on demand.
-function AuditGroup({ ctx }) {
+//
+// ⛔ NEW-1 (command palette + reduced Home ribbon) — EXPORTED and no longer part of this
+// component's own inline/overflow rendering (removed from ribbonLayout.js's RIBBON_GROUPS): the
+// module's own differentiators were getting lost IN the overflow this ribbon collapses into, so
+// they now have a permanent, always-visible home instead — ModelApp.jsx renders this SAME
+// component (same buttons, same `ctx`, same testids) in AppHeader's row-1 toolbar, next to File.
+export function AuditGroup({ ctx }) {
   const traceActive = !!ctx.traceMode;
   const traceDetail = () => {
     const bits = [`level ${ctx.traceLevel}`];
@@ -553,20 +501,9 @@ function AuditGroup({ ctx }) {
   );
 }
 
-function SortFilterGroup({ ctx }) {
-  return (
-    <span style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
-      <button type="button" data-testid="ribbon-sort-asc" title="Sort A to Z" aria-label="Sort ascending" onClick={() => ctx.onSort("asc")} style={ribbonBtnStyle(false)}><IconSortAsc /></button>
-      <button type="button" data-testid="ribbon-sort-desc" title="Sort Z to A" aria-label="Sort descending" onClick={() => ctx.onSort("desc")} style={ribbonBtnStyle(false)}><IconSortDesc /></button>
-      <button type="button" data-testid="ribbon-filter" title="Toggle AutoFilter" aria-label="Toggle AutoFilter" aria-pressed={ctx.filterOn} onClick={ctx.onFilterToggle} style={ribbonBtnStyle(ctx.filterOn)}><IconFilter /></button>
-    </span>
-  );
-}
-
 const GROUP_RENDER = {
   actions: ActionsGroup, fontface: FontFaceGroup, fontstyle: FontStyleGroup, color: ColorGroup,
-  alignment: AlignmentGroup, number: NumberGroup, borders: BordersGroup, cells: CellsGroup,
-  audit: AuditGroup, names: NamesGroup, sortfilter: SortFilterGroup,
+  alignment: AlignmentGroup, number: NumberGroup, cells: CellsGroup,
 };
 
 /** The SINGLE overflow trigger — replaces the first cut's one-trigger-per-collapsed-group
@@ -611,22 +548,13 @@ function MoreMenu({ overflowKeys, ctx }) {
   );
 }
 
-export default function Ribbon({
-  activeFormat, activeStyle, mergedHere, freezeRows, freezeCols, painterArmed, filterOn,
-  autoColor, onAutoColorToggle,
-  canUndo, canRedo, onUndo, onRedo,
-  onSetCellStyle, onApplyBorder, onApplyFormat, onNumberFormatOp, onClearFormatting,
-  onFormatPainterToggle, onMergeToggle,
-  onInsertRow, onInsertColumn, onDeleteRow, onDeleteColumn,
-  onSetFreezeTopRow, onSetFreezeFirstColumn, onSetFreezeAtSelection, onUnfreeze,
-  onSort, onFilterToggle,
-  nameManagerOpen, onToggleNameManager,
-  // STAGE 3 (NEW-1) — trace precedents/dependents. `traceMode` is `"precedents"|"dependents"|null`.
-  traceMode, traceLevel, traceTruncated, traceNoFurther, traceCellCount,
-  onTracePrecedents, onTraceDependents, onClearTrace,
-  // STAGE 3 (NEW-2) — inconsistent-formula flags.
-  inconsistencyCount, inconsistencyPanelOpen, onToggleInconsistencyPanel,
-}) {
+// ⛔ NEW-1 (command palette) — Ribbon now takes ONE `ctx` prop instead of ~35 individual ones.
+// ModelApp.jsx builds this bag ONCE and hands the SAME object to this component, to the
+// permanent audit toolbar (AppHeader row 1, `AuditGroup` above) and to `CommandPalette` — so a
+// palette command and the equivalent ribbon button call the literal same `ctx.onXxx` function,
+// never two independently-wired copies that could drift apart. See lib/commandRegistry.js's own
+// header for the rest of that argument.
+export default function Ribbon({ ctx }) {
   const outerRef = useRef(null);
   const [containerWidth, setContainerWidth] = useState(0);
 
@@ -639,21 +567,6 @@ export default function Ribbon({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-
-  const ctx = {
-    activeFormat, activeStyle: activeStyle || {}, mergedHere, freezeRows, freezeCols, painterArmed, filterOn,
-    autoColor, onAutoColorToggle,
-    canUndo, canRedo, onUndo, onRedo,
-    onSetCellStyle, onApplyBorder, onApplyFormat, onNumberFormatOp, onClearFormatting,
-    onFormatPainterToggle, onMergeToggle,
-    onInsertRow, onInsertColumn, onDeleteRow, onDeleteColumn,
-    onSetFreezeTopRow, onSetFreezeFirstColumn, onSetFreezeAtSelection, onUnfreeze,
-    onSort, onFilterToggle,
-    nameManagerOpen, onToggleNameManager,
-    traceMode, traceLevel, traceTruncated, traceNoFurther, traceCellCount,
-    onTracePrecedents, onTraceDependents, onClearTrace,
-    inconsistencyCount, inconsistencyPanelOpen, onToggleInconsistencyPanel,
-  };
 
   const { visibleKeys, overflowKeys } = computeRibbonLayout(containerWidth, RIBBON_GROUPS, MORE_BUTTON_WIDTH);
 
