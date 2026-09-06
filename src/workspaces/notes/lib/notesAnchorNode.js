@@ -48,15 +48,21 @@ import { anchorIsEmpty } from "./notesAnchorPrune.js";
 import { moveSelection } from "./notesMarquee.js";
 import {
   ANCHOR_EDGE_PAD, ANCHOR_MIN_HEIGHT, ANCHOR_MIN_WIDTH, ANCHOR_WIDTH,
-  HANDLES, HANDLE_CURSOR, handlesFor, hasFixedHeight, moveAnchorPoint, resizeBox,
+  HANDLES, HANDLE_CURSOR, anchorExtent, anchorExtentX, handlesFor, hasFixedHeight,
+  moveAnchorPoint, resizeBox,
 } from "./notesBoxResize.js";
 
 /* ⛔ THE GEOMETRY CONSTANTS LIVE IN `notesBoxResize.js` AND ARE RE-EXPORTED HERE. A resize has to
  * honour the same floor a placement does; the two modules importing each other would be a cycle,
  * and each declaring its own copy of the floor is the two-sources-of-truth bug that produced
  * B539648. Their reasoning moved with them — read it there. Nothing that already imported these
- * names from this file had to change. */
-export { ANCHOR_EDGE_PAD, ANCHOR_MIN_HEIGHT, ANCHOR_MIN_WIDTH, ANCHOR_WIDTH };
+ * names from this file had to change.
+ *
+ * ⛔ `anchorExtent`/`anchorExtentX` MOVED THERE TOO (NOTES-PAGE-GROWTH) FOR THE SAME REASON —
+ * `notesPrint.js` is deliberately PURE (no `@tiptap/*` on its import graph) and needs the exact
+ * same page-growth arithmetic the screen uses, run over a page's raw stored JSON with no schema
+ * in sight. Re-exported here so nothing that already imported them from this file had to change. */
+export { ANCHOR_EDGE_PAD, ANCHOR_MIN_HEIGHT, ANCHOR_MIN_WIDTH, ANCHOR_WIDTH, anchorExtent, anchorExtentX };
 
 
 const num = (v, fallback = 0) => {
@@ -88,11 +94,19 @@ function boxStyle({ x, y, w, h }) {
  *  `ANCHOR_MIN_WIDTH`. Only past that floor, where a column would be unreadable anyway, does
  *  the left edge move — and then by the smallest amount that buys a usable column.
  *
- *  ⛔ AND THERE IS NO VERTICAL CLAMP AT ALL ANY MORE. `y` is returned untouched. A click near
- *  the bottom used to be nudged up (measured: a click at y=470 landed at 461) and a block that
- *  GREW while being typed into was pushed around by the same reasoning one layer up. The page
- *  extends to hold it instead — see `anchorExtent` and its use in NoteEditor.
- */
+ *  ⛔ THE VERTICAL FLOOR IS THE SAME ONE `moveAnchorPoint` HAS ALWAYS HELD — never above the
+ *  page's own top edge — but otherwise `y` is untouched: nudging DOWN never happens (a click
+ *  near the bottom used to be nudged up, measured: a click at y=470 landed at 461) and a block
+ *  that GREW while being typed into was pushed around by the same reasoning one layer up. The
+ *  page extends to hold it instead — see `anchorExtent` and its use in NoteEditor.
+ *
+ *  ⛔ AND THE FLOOR WAS MISSING HERE UNTIL NOTES-PAGE-GROWTH (owner report, 2026-09-06):
+ *  `moveAnchorPoint`/`resizeBox` have clamped `y` to the page's own top edge for rounds now, but
+ *  this function — the PLACEMENT gesture, the one that runs before either of those ever could —
+ *  never did, on the assumption that a click's own geometry can never land above the editor's
+ *  own top edge. A stray anchor on a real production note proved that assumption wrong (stored
+ *  at `y: -21`, years of history behind it, likely predating this file's own clamps), so the
+ *  floor is added here too, defensively, rather than trusted to the caller's math. */
 export function placeAnchor({ x, y, width, minWidth = ANCHOR_MIN_WIDTH, preferred = ANCHOR_WIDTH }) {
   const boxW = num(width);
   // The left edge is what was chosen, and it is kept — always. The only thing that ever moves
@@ -100,37 +114,7 @@ export function placeAnchor({ x, y, width, minWidth = ANCHOR_MIN_WIDTH, preferre
   const left = Math.max(ANCHOR_EDGE_PAD, num(x));
   const room = boxW - left - ANCHOR_EDGE_PAD;
   const w = Math.max(minWidth, Math.min(preferred, room));
-  return { x: Math.round(left), y: Math.round(num(y)), w: Math.round(w) };
-}
-
-/** How far down the page the anchored blocks reach, so the editor can be told to be at least
- *  that tall. Pure, and deliberately takes the measured heights rather than guessing them —
- *  a block's height is its text, which only the browser knows. */
-/** ⛔ HOW FAR RIGHT THE BLOCKS REACH — the horizontal twin of `anchorExtent`, and the half that
- *  was missing (NEW-RIGHT-EDGE). Vertically the page has always grown to hold a block that runs
- *  past the bottom; horizontally there was no equivalent, so a block near the right margin was
- *  narrowed into a sliver instead. Same arithmetic, same shape, one axis over.
- *
- *  The pad is smaller than the vertical one on purpose: a reader needs breathing room BELOW the
- *  last line far more than they need it to the right of a box they placed deliberately. */
-export function anchorExtentX(blocks = [], { pad = 16 } = {}) {
-  let right = 0;
-  for (const b of blocks || []) {
-    const x = num(b?.x);
-    const w = num(b?.w, ANCHOR_WIDTH);
-    if (x + w > right) right = x + w;
-  }
-  return right > 0 ? Math.ceil(right + pad) : 0;
-}
-
-export function anchorExtent(blocks = [], { pad = 40 } = {}) {
-  let bottom = 0;
-  for (const b of blocks || []) {
-    const y = num(b?.y);
-    const h = num(b?.height, 24);
-    if (y + h > bottom) bottom = y + h;
-  }
-  return bottom > 0 ? Math.ceil(bottom + pad) : 0;
+  return { x: Math.round(left), y: Math.round(Math.max(0, num(y))), w: Math.round(w) };
 }
 
 /** ⛔ HOW WIDE A BOX IS ALLOWED TO *RENDER*, WHICH IS NOT THE SAME AS HOW WIDE IT IS (B421490).
@@ -420,6 +404,47 @@ export const NoteAnchor = Node.create({
             if (!node || node.type.name !== "noteAnchor") continue;
             n += 1;
             tr.setNodeMarkup(pos, undefined, { ...node.attrs, aid: `a${Date.now().toString(36)}${n}${Math.floor(Math.random() * 1e6).toString(36)}` });
+          }
+          dispatch(tr.setMeta("addToHistory", false));
+        }
+        return true;
+      },
+
+      /** ⛔ BRING ANY BOX BACK ONTO THE PAGE, IN ONE TRANSACTION THAT DOES NOT COUNT AS AN EDIT
+       *  (NOTES-PAGE-GROWTH, owner report 2026-09-06 — "if I type outside of the note... it
+       *  would just expand the page", found not to hold for a box sitting above the page's own
+       *  top edge). The page's own top-left corner is a fixed origin: nothing may be PLACED or
+       *  DRAGGED to a negative `x`/`y` (`placeAnchor`, `moveAnchorPoint`, `resizeBox` all hold
+       *  that floor already) — the page may only grow away from it, to the right and down
+       *  (`anchorExtentX`/`anchorExtent`). A box stored at a negative coordinate predates one of
+       *  those floors and is data from before the rule existed, not a case the rule permits
+       *  today, so it is repaired rather than left to render off the page forever.
+       *
+       *  ⛔ NON-DESTRUCTIVE: this only ever REPOSITIONS a box back onto the page — the exact
+       *  clamp `moveAnchorPoint` already applies to every drag — and never touches its content,
+       *  its width, or its identity. It reuses that same function so a box repaired here lands
+       *  exactly where a drag would have stopped it, never a second rule that could disagree.
+       *
+       *  ⛔ `setMeta("addToHistory", false)`, same reasoning as `ensureNoteAnchorIds` right
+       *  above: this is bookkeeping the editor does on your behalf, not a keystroke you made, so
+       *  it must not cost you an undo frame or make Ctrl+Z appear to do nothing on an old note.
+       *  It DOES run through `onUpdate` like any other transaction, so the repaired position is
+       *  saved and survives a reload — a silent fix that reverted itself on the next load would
+       *  not be a fix. */
+      repairOffPageAnchors: () => ({ tr, dispatch, state }) => {
+        const fixes = [];
+        state.doc.descendants((node, pos) => {
+          if (node.type.name !== "noteAnchor") return;
+          const { x, y } = node.attrs;
+          const at = moveAnchorPoint({ x, y });
+          if (at.x !== num(x) || at.y !== num(y)) fixes.push({ pos, at });
+        });
+        if (!fixes.length) return false;
+        if (dispatch) {
+          for (const { pos, at } of fixes) {
+            const node = tr.doc.nodeAt(pos);
+            if (!node || node.type.name !== "noteAnchor") continue;
+            tr.setNodeMarkup(pos, undefined, { ...node.attrs, x: at.x, y: at.y });
           }
           dispatch(tr.setMeta("addToHistory", false));
         }

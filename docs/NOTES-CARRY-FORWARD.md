@@ -408,6 +408,33 @@ position**.
    against `model_sheets`/`doc_reviews`/`project_folders`) — left untouched as ordinary user
    deletes, per STANDING RULE #2/CONSTRAINT-CAPTURE: decide from evidence, never touch a row on an
    unverified claim alone.
+10. **A "GROW THE PAGE" DENOMINATOR THAT WAS RIGHT BEFORE A REDESIGN CAN BE SILENTLY WRONG AFTER
+    ONE (B1273296, NOTES-PAGE-GROWTH, 2026-09-06) — a shipped fix regressing when an UNRELATED
+    layout change moves what "the page" means.** `anchorExtentX` (B421490) compared a box's
+    needed room against `note-mat`'s (the whole pane's) width — correct while the editor's own box
+    WAS the pane. B1203504 later gave the page a narrower, centred CARD (`note-sheet`) inside that
+    pane, and nobody re-pointed the comparison at the new, smaller thing: a box could overflow the
+    visible white page while sitting comfortably inside the much wider grey pane, so growth never
+    fired. **The lesson: when a layout change introduces a new "the visible thing" narrower than
+    an existing container, grep every EXISTING measurement that used to treat the container AS
+    that visible thing** — they will silently keep comparing against the wrong one forever, since
+    nothing about them looks wrong in isolation.
+    ⛔ **AND TWO DIFFERENT "HOW MUCH ROOM" QUESTIONS LOOK LIKE ONE UNTIL YOU RE-MEASURE.**
+    `fitAnchorBox` (does a box's own resize handles stay reachable, a question about the PANE) and
+    the grow decision above (does the PAGE need to widen, a question about the narrower CARD) share
+    a name-shaped intuition — "how much room is there" — but are not the same question, and a first
+    draft of this fix pointed BOTH at the same, narrower number. The result was a real spring-back:
+    a box dragged to 660px committed, then the very next measurement pass clamped its own RENDER
+    back to 256px — caught only because `measure-notes-right-edge.mjs`'s drag section re-measures
+    the actual gesture rather than trusting the arithmetic on paper.
+    ⛔ **AND A FIX VERIFIED ONLY THROUGH A PURE FUNCTION CAN MISS A SECOND, REAL CALL SITE.**
+    `buildPrintDocument`'s own page-growth math was unit-tested from the first commit and passed
+    throughout — because unit tests call it directly. Driving the actual toolbar Print button found
+    `NoteEditor.jsx`'s `printPage` (a SEPARATE function from `Notes.jsx`'s tree-print handler) never
+    passed a `doc` at all, so the real button never grew a single sheet despite every pure test
+    being green. **When a fix touches more than one call site, find EVERY real caller by driving the
+    actual UI control, not by grepping for the function name** — a grep would have found both, but
+    only the real button surfaced that one of them was wired wrong.
 
 ---
 
