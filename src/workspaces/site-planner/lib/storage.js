@@ -1209,10 +1209,22 @@ export async function checkProjectDeletionStatus(id) {
  * `checkProjectDeletionStatus`, which is cheap and correct either way. */
 const unconfirmedProjectPush = new Set();
 
-export async function ensureProjectRow(id, { name = "Untitled site" } = {}) {
+/* B1235168 — `confirmLive` opts a caller OUT of the fast path below. Without it, a device that
+ * still holds a STALE local `sites` row (the project was binned from another tab/device/session
+ * this device never re-pulled) reads "already real" and returns ok:true without ever asking the
+ * cloud whether the project still exists — so a caller that treats ok:true as license to create a
+ * durable EXTERNAL side effect (a Google Drive folder tree, in library/lib/folders.js's
+ * `ensureSeeded`) does so for a project that is soft-deleted server-side. Measured on production:
+ * three binned projects (smqhghfljd99, smtjb0lrexb3, zzclaudetmp1) each grew a full 133-folder
+ * Drive tree one to two days AFTER being binned. `confirmLive` forces the real cloud check every
+ * time — never the fast path — for exactly the callers that mint something outside this app's own
+ * storage. Ordinary in-app saves (Model/Notes/Scheduler/Doc Review content) do NOT pass it: they
+ * have nothing to protect a deleted project FROM, and the fast path's whole purpose is sparing
+ * them a network round trip on every write. */
+export async function ensureProjectRow(id, { name = "Untitled site", confirmLive = false } = {}) {
   if (!id) return { ok: false, created: false, error: "no id" };
   const retryingPush = unconfirmedProjectPush.has(id);
-  if (readSites()[id] && !retryingPush) return { ok: true, created: false }; // already real on this device
+  if (readSites()[id] && !retryingPush && !confirmLive) return { ok: true, created: false }; // already real on this device
   if (!activeUid()) return { ok: true, created: false }; // signed-out — no cloud row to ensure
   const status = await checkProjectDeletionStatus(id).catch(() => ({ ok: false }));
   if (status && status.ok && status.deleted) {
@@ -1222,6 +1234,12 @@ export async function ensureProjectRow(id, { name = "Untitled site" } = {}) {
   if (status && status.ok && status.exists) { // cloud already has it, just not pulled to this device yet
     unconfirmedProjectPush.delete(id);
     return { ok: true, created: false };
+  }
+  // The deletion check itself failed (offline, a blip) — a `confirmLive` caller must refuse rather
+  // than fall through to the plain-path behaviour below, which would happily create/push a row (or
+  // trust an already-real local one) without ever having confirmed it isn't deleted.
+  if (confirmLive && !(status && status.ok)) {
+    return { ok: false, created: false, error: "Couldn't confirm this project with the cloud, so its folders weren't created." };
   }
   if (!readSites()[id]) {
     // B1227984 — don't trust this blindly: a blocked local write (e.g. a stale delete-tombstone
@@ -1283,14 +1301,45 @@ export async function restoreDeletedProject(ids) {
   return { ok: !failed, restored, error: failed ? failed.error : null };
 }
 
+/* B1235169 — a purge (either path below) must also remove the project's `project_folders` index
+ * rows and trash its Google Drive folder tree; neither `cloudHardDelete` nor anything else in this
+ * file ever touched `project_folders` (grep confirms the string doesn't appear elsewhere here), so
+ * "Delete forever" and the 30-day expiry purge were destroying the `sites` row and abandoning its
+ * folder tree — permanently and untraceably, since once the row is gone nothing points at the
+ * orphaned Drive folders any more. Measured on production: 15 abandoned trees, 1,995 real Drive
+ * folders, none with a surviving `sites` or `project_folders` row.
+ *
+ * A project is a site GROUP (`project_folders.project_id` = `sites.group_id`), not a single plan,
+ * so this runs ONCE PER GROUP, not once per purged plan id. Dynamically imported (never a static
+ * import of Library code into this workspace's boot bundle — see this file's own bundle-budget
+ * notes) and best-effort: a Drive/index failure here must never block the `sites` purge that
+ * already happened, but it must never be silent either (LOUD-FAILURE).
+ */
+async function purgeProjectFoldersFor(groupId) {
+  if (!groupId) return;
+  try {
+    const { purgeProjectFolders } = await import("../../library/lib/folders.js");
+    const r = await purgeProjectFolders(groupId);
+    if (r && r.ok === false) {
+      reportClientEvent("project-folder-purge-failed", "a purged project's folder tree/Drive root couldn't be fully cleaned up", { groupId, error: r.error || "" });
+    }
+  } catch (e) {
+    reportClientEvent("project-folder-purge-failed", "folder purge threw while permanently deleting a project", { groupId, error: (e && e.message) || "" });
+  }
+}
+
 // "Delete forever" — the only user-facing HARD delete. The site_elements cascade firing here is
-// correct: this is the point at which permanent destruction was actually asked for.
-export async function purgeDeletedProject(ids) {
+// correct: this is the point at which permanent destruction was actually asked for. `groupId`
+// (the project id `project_folders` is keyed on) defaults to the first purged plan id — true for
+// every brand-new project (its group anchors on its own first plan's id, per `ensureProjectRow`)
+// and the caller (ProjectBreadcrumb's "Delete forever") passes the real group id explicitly anyway.
+export async function purgeDeletedProject(ids, groupId) {
   const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
   if (!activeUid() || !list.length) return { ok: false, purged: 0, error: "not signed in" };
   const results = await Promise.all(list.map((id) => cloudHardDelete(activeUid(), id).catch((e) => ({ ok: false, error: (e && e.message) || "purge threw" }))));
   const failed = results.find((r) => r && r.ok === false);
   const purged = results.filter((r) => r && r.ok !== false).length;
+  if (purged > 0) await purgeProjectFoldersFor(groupId || list[0]);
   return { ok: !failed, purged, error: failed ? failed.error : null };
 }
 
@@ -1305,9 +1354,14 @@ export async function purgeExpiredDeletedProjects({ days = DELETED_RETENTION_DAY
   const cutoff = Date.now() - days * 86400000;
   const expired = (r.rows || []).filter((row) => row && row.id && toMs(row.deleted_at) < cutoff);
   let purged = 0, failed = 0;
+  const purgedGroups = new Set(); // one folder purge per group, even when several of its plans expire together
   for (const row of expired) {
     const out = await cloudHardDelete(activeUid(), row.id).catch(() => ({ ok: false }));
-    if (out && out.ok) purged += 1; else failed += 1;
+    if (out && out.ok) {
+      purged += 1;
+      const gid = row.group_id || row.id;
+      if (!purgedGroups.has(gid)) { purgedGroups.add(gid); await purgeProjectFoldersFor(gid); }
+    } else failed += 1;
   }
   return { ok: failed === 0, purged, failed };
 }

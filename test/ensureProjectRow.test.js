@@ -193,3 +193,71 @@ describe("ensureProjectRow retries a failed cloud push once the connection retur
     expect(cloudUpsert).toHaveBeenCalledTimes(2);
   });
 });
+
+/* B1235168 — `confirmLive` opts a caller OUT of the fast path above, for exactly the callers that
+ * mint a durable EXTERNAL side effect off an "already real" verdict (library/lib/folders.js's
+ * `ensureSeeded`, which materializes 12+ `project_folders` rows and mirrors a Drive tree). Measured
+ * on production: a project binned from another tab/device still read "already real" here — via the
+ * plain fast path — and grew a full 133-folder Drive tree one to two days after being binned. */
+describe("ensureProjectRow — confirmLive forces the deletion check even when a local row already exists (B1235168)", () => {
+  beforeEach(() => {
+    const store = {};
+    globalThis.localStorage = {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; },
+      clear: () => { for (const k of Object.keys(store)) delete store[k]; },
+      key: (i) => Object.keys(store)[i] ?? null,
+      get length() { return Object.keys(store).length; },
+    };
+    h.cloudListResult = [];
+    h.cloudDeletedRowsResult = { ok: true, supported: true, rows: [] };
+    h.cloudUpsertResult = { ok: true };
+    h.cloudCheckDeletedResult = { ok: true, exists: false, deleted: false };
+    vi.clearAllMocks();
+    setActiveUser(null);
+  });
+
+  it("without confirmLive, a local row short-circuits and never asks the cloud (unchanged — ordinary saves stay cheap)", async () => {
+    setActiveUser("u-owner");
+    await ensureProjectRow("smstale1", { name: "Untitled project" }); // materializes a local row
+    cloudCheckDeleted.mockClear();
+    const r = await ensureProjectRow("smstale1", { name: "Untitled project" });
+    expect(r).toEqual({ ok: true, created: false });
+    expect(cloudCheckDeleted).not.toHaveBeenCalled();
+  });
+
+  it("with confirmLive, a project binned from another device is refused even though THIS device's local row is stale", async () => {
+    setActiveUser("u-owner");
+    await ensureProjectRow("smstale2", { name: "Untitled project" }); // this device still thinks it's real
+    h.cloudCheckDeletedResult = { ok: true, exists: true, deleted: true }; // binned elsewhere since
+    const r = await ensureProjectRow("smstale2", { name: "Untitled project", confirmLive: true });
+    expect(r.ok).toBe(false);
+    expect(r.deleted).toBe(true);
+    expect(cloudCheckDeleted).toHaveBeenCalled();
+  });
+
+  it("with confirmLive, a genuinely live project (still real everywhere) proceeds exactly like the fast path would", async () => {
+    setActiveUser("u-owner");
+    await ensureProjectRow("smstale3", { name: "Untitled project" });
+    h.cloudCheckDeletedResult = { ok: true, exists: true, deleted: false };
+    const r = await ensureProjectRow("smstale3", { name: "Untitled project", confirmLive: true });
+    expect(r).toEqual({ ok: true, created: false });
+  });
+
+  it("with confirmLive, a failed deletion check (offline) refuses rather than trusting the stale local row", async () => {
+    setActiveUser("u-owner");
+    await ensureProjectRow("smstale4", { name: "Untitled project" });
+    h.cloudCheckDeletedResult = { ok: false }; // the check itself failed — no answer either way
+    const r = await ensureProjectRow("smstale4", { name: "Untitled project", confirmLive: true });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/couldn't confirm/i);
+  });
+
+  it("with confirmLive, a brand-new project (never persisted anywhere) still creates + pushes normally", async () => {
+    setActiveUser("u-owner");
+    const r = await ensureProjectRow("smbrandnewcl", { name: "Untitled project", confirmLive: true });
+    expect(r).toEqual({ ok: true, created: true });
+    expect(loadSite("smbrandnewcl")).toBeTruthy();
+  });
+});

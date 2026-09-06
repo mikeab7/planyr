@@ -51,8 +51,8 @@ export async function listDeletedProjects() {
 export async function restoreDeletedProject(ids) {
   return (await storageEngine()).restoreDeletedProject(ids);
 }
-export async function purgeDeletedProject(ids) {
-  return (await storageEngine()).purgeDeletedProject(ids);
+export async function purgeDeletedProject(ids, groupId) {
+  return (await storageEngine()).purgeDeletedProject(ids, groupId);
 }
 export async function purgeExpiredDeletedProjects(opts) {
   return (await storageEngine()).purgeExpiredDeletedProjects(opts);
