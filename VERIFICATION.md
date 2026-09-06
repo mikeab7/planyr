@@ -148,6 +148,19 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V887648 — B1225296: the site-route render-loop crash (React error #185) stops recurring in production `Blocker: real-data`
+
+**Why this needs its own real pass.** The fix closes a real, sourcemap-verified structural defect (`setView` dispatching a fresh object on unchanged values, re-triggering the basemap registration effect B1189 already named as the source of its own runaway) and is proven mutation-red/green in a sandbox e2e spec. What it CANNOT prove is whether this is the ONLY mechanism producing the 34 recorded `client_errors` crashes — the exact trigger (27 distinct real projects crashing in an 11-minute window, 2026-07-30) could not be reproduced here despite trying: synthetic fixtures, the owner's real 28-site jurisdiction-portfolio geometry, full real plan snapshots with drawn elements, hard reloads, in-app project switching, and a simulated signed-in boot with a fake Supabase session all stayed stable. This needs real traffic and time, not a signed-in click-through.
+
+**What was verified here (this session, sandbox).** The crash's own minified stack, resolved via a from-source sourcemap build of the exact crashing commit, lands in `SitePlanner.jsx`'s basemap-registration effect exactly where B1189's own comment claimed `view`'s writer "replaces it only on a real change" — a claim proven false (a blank plan's boot-time auto-fit dispatches `setView` with values byte-identical to the initial state). The fix — guarding `setView`'s dispatch the same way `setSize`/`setRegShift` already are — is proven with a new E2E-gated `identityEpoch` counter: `e2e/view-identity-guard.spec.js` measured `Expected: 3, Received: 4` on the reverted (pre-fix) code and passes clean after restoring it. Full repo suite green (751 files / 15,200 tests), lint clean, build clean.
+
+**Steps, each with a named expected result:**
+1. Once this ships and deploys, read `public.client_errors` for `source='react'` rows on the `/site` module whose `componentStack`/message matches this crash's signature (`Maximum update depth exceeded` / `Minified React error #185`), filtered to builds AFTER this PR's merge commit. **Expect:** zero such rows over at least the next two weeks of normal usage — long enough to span the kind of multi-project sweep the July 30 burst was.
+2. Signed in on `planyr.io`, open six or more DIFFERENT real projects' Site routes back to back (a hard reload or a fresh deep link for each, not just switching within one open tab) — the exact access pattern that produced the July 30 burst. **Expect:** no crash card, no "Redrawing…" flash (B1189's auto-recovery placeholder) on any of them.
+3. If a NEW occurrence of this exact signature does appear post-merge, capture the project id and whether the session was freshly signed in (cloud pull in flight) or already warm — that is the ONE variable every reproduction attempt in this item could not control for, and it is the next thing to try.
+
+**Result:** ⏳ pending — needs real production traffic to elapse post-deploy. `Cadence: once` (a recurrence re-opens B1225296, not a new item).
+
 ### V881392 — B1213314: setting a task's Owner in the Scheduler is reachable, saves, and reads back after reload `Blocker: auth`
 
 **Why this needs its own real pass.** The reachability chain (Owner column visible by default → double-click opens `ContactPicker` → commits through the grid's normal save path) was confirmed by reading `public/sequence/index.html` directly, not by driving it: the embedded scheduler loads React/ReactDOM/Babel-standalone/Supabase-js from public CDNs via plain `<script src="https://...">` tags rather than bundling them, and this sandbox's headless Chromium cannot reach any of those hosts (`net::ERR_TUNNEL_CONNECTION_FAILED`/connection-reset on all four) — the grid never finishes booting here, signed in or out, so no interactive check of it is possible in this sandbox at all.
