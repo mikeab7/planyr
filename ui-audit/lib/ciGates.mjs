@@ -49,6 +49,7 @@ export const KNOWN_INFRA_USES = {
   "actions/setup-node": "installs a pinned Node runtime on the runner; this script checks your Node version against the same pin and warns (never silently substitutes a different Node) rather than installing one.",
   "actions/cache": "restores/saves the Playwright browser cache between CI runs — a speed optimization with no correctness effect and no local equivalent (your machine keeps its own browsers on disk).",
   "actions/upload-artifact": "uploads .perf/visual-regression/ as a downloadable CI artifact on failure — the same files are already on your disk, so there's nothing to upload to.",
+  "actions/github-script": "backfills the required \"build\" commit status for a PR that build-check-sweep.yml re-dispatched (NEW-3) — it calls the live GitHub API against a real PR number and run id, which only exist inside an actual Actions run; inert (its `if:` is false) on an ordinary run, and there's nothing for a local script to re-execute either way.",
 };
 
 /** `${{ secrets.NAME }}` (or `${{secrets.NAME}}`, any spacing) → "NAME"; else null. */
