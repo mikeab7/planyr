@@ -1204,7 +1204,11 @@ export default function Notes({
          describes WHAT IS ON THE PAPER — and every one of those sections really is printed,
          so the total is the honest number. */
       meta: `${pages.length === 1 ? "1 page" : `${pages.length} pages`} · Planyr Notes`,
-      pages: pages.map((p) => ({ ...p, html: docToHtml(bodies[p.id], images) })),
+      /* `doc` rides alongside `html` so buildPrintDocument can ask NOTES-PAGE-GROWTH's own
+         question (how far right does this page's widest anchored block reach) without a second
+         document walk — it is the same raw stored JSON `docToHtml` was just handed, not a new
+         read. */
+      pages: pages.map((p) => ({ ...p, html: docToHtml(bodies[p.id], images), doc: bodies[p.id] })),
       /* PDF-PARITY (NEW-SPACING-3): a branch print carries the ROOT note's density. One sheet
          has one line height, and the root is the note the person asked to print. */
       density: bodies[pages[0]?.id]?.attrs?.density,
