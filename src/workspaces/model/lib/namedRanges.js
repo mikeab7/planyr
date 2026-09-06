@@ -58,6 +58,14 @@ const NAME_SHAPE_RE = /^[A-Za-z_][A-Za-z0-9_.]*$/;
 const RESERVED_WORDS = new Set(["TRUE", "FALSE"]);
 const FUNCTION_NAME_SET = new Set(FUNCTION_NAMES.map((n) => n.toUpperCase()));
 
+// Project-data references (spreadsheet-live-data-refs) — the dotted namespaces
+// lib/projectRefs.js resolves read-only project facts under (Site.Acres, Plan.Building1.SF,
+// Comp.<title>.RentPSF, …). Reserved here, at the ONE naming-rule gate every user-defined name
+// already passes through, so a user can never define a name that a project reference could
+// later collide with or be shadowed by. `projectRefs.js` imports this list back rather than
+// each module keeping its own copy.
+export const RESERVED_NAME_PREFIXES = ["Site", "Plan", "Comp", "Schedule"];
+
 /** A cell's own raw text is a formula iff it starts with "=" — the same predicate sheetModel.js
  *  exports as `isFormulaText`, duplicated here (rather than imported) to keep this module's only
  *  dependency the shared formula engine, not sheetModel.js — sheetModel.js is one of this task's
@@ -122,6 +130,10 @@ export function validateNameText(rawText, sheet, { excludeKey } = {}) {
   if (RESERVED_WORDS.has(upper)) return { ok: false, reason: `"${text}" is a reserved word and can't be used as a name.` };
   if (FUNCTION_NAME_SET.has(upper)) return { ok: false, reason: `"${text}" is already a built-in function name.` };
   const key = text.toLowerCase();
+  const reservedPrefix = RESERVED_NAME_PREFIXES.find((p) => key.startsWith(`${p.toLowerCase()}.`));
+  if (reservedPrefix) {
+    return { ok: false, reason: `Names starting with "${reservedPrefix}." are reserved for Planyr's own project data and can't be used here.` };
+  }
   const existing = sheet.names && sheet.names[key];
   if (existing && key !== excludeKey) return { ok: false, reason: `A name called "${existing.name}" already exists.` };
   return { ok: true, key, text };

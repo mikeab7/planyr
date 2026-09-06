@@ -1589,6 +1589,50 @@ describe("named ranges — parser defers, evaluator resolves via ctx.names", () 
   });
 });
 
+// ── Computed (project-data) name entries (Model workspace, spreadsheet-live-data-refs) — a
+// SECOND ctx.names entry shape, `{computed:true, value}`, resolved through the SAME "name" AST
+// node as an ordinary cell-range named range above. lib/projectRefs.js is what actually builds
+// these from the open project's site plan/comps; this only proves the ENGINE's own resolution of
+// the shape, independent of that module.
+describe("computed name entries — a project-data reference resolves to its OWN value, not a cell", () => {
+  const COMPUTED = { "site.acres": { name: "Site.Acres", computed: true, value: 12.4 } };
+  it("resolves as a plain scalar, exactly like a single-cell named range would", () => {
+    expect(namedVal("Site.Acres", COMPUTED)).toBe(12.4);
+    expect(namedVal("Site.Acres*2", COMPUTED)).toBe(24.8);
+  });
+  it("is case-insensitive, like every other name", () => {
+    expect(namedVal("SITE.ACRES", COMPUTED)).toBe(12.4);
+  });
+  it("feeds a range-aware function as a one-element array, like a single-cell named range does", () => {
+    expect(namedVal("SUM(Site.Acres)", COMPUTED)).toBe(12.4);
+    expect(namedVal("COUNT(Site.Acres)", COMPUTED)).toBe(1);
+  });
+  it("a computed entry holding an ERROR VALUE propagates it exactly like an errored grid cell would", () => {
+    const withError = { "site.acres": { name: "Site.Acres", computed: true, value: errVal(FORMULA_ERRORS.REF) } };
+    expect(namedErr("Site.Acres", withError)).toBe(FORMULA_ERRORS.REF);
+    expect(namedErr("Site.Acres+1", withError)).toBe(FORMULA_ERRORS.REF);
+    expect(namedErr("SUM(Site.Acres)", withError)).toBe(FORMULA_ERRORS.REF);
+  });
+  it("a computed entry can hold a date value, read like any other date", () => {
+    const withDate = { "comp.foo.date": { name: "Comp.Foo.Date", computed: true, value: D("2027-01-15") } };
+    const r = evaluateFormula("Comp.Foo.Date", { names: withDate, today: isoToSerial("2026-06-29") });
+    expect(r.ok).toBe(true);
+    expect(isDate(r.value)).toBe(true);
+  });
+  it("an unresolved (not-injected) name is the SAME #NAME? as any other unknown name — never special-cased", () => {
+    expect(namedErr("Site.Acres", {})).toBe(FORMULA_ERRORS.NAME);
+    expect(namedErr("Plan.Building9.SF", COMPUTED)).toBe(FORMULA_ERRORS.NAME);
+  });
+  it("a computed entry and an ordinary cell-range named range coexist in the same names map", () => {
+    const mixed = { ...COMPUTED, landcost: { r1: 1, c1: 1, r2: 1, c2: 1 } };
+    expect(namedVal("Site.Acres + LandCost", mixed)).toBe(12.4 + 1); // A1=1 (GRID3)
+  });
+  it("XLOOKUP/VLOOKUP treat a computed entry as a 1×1 table, exactly like a single-cell named range", () => {
+    const twoAcres = { "site.acres": { name: "Site.Acres", computed: true, value: 12.4 } };
+    expect(namedVal("XLOOKUP(12.4,Site.Acres,Site.Acres)", twoAcres)).toBe(12.4);
+  });
+});
+
 // ── rewriteFormulaForCopy — the relative-reference rewrite on copy/fill ─────────
 // Pure, separately testable: (formula, sourceAddr, targetAddr) -> rewritten formula.
 describe("rewriteFormulaForCopy", () => {

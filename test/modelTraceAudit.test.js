@@ -186,6 +186,28 @@ describe("dedupe — a formula referencing the same cell twice draws ONE arrow, 
   });
 });
 
+// spreadsheet-live-data-refs — a formula reading a project-derived built-in name (Site.Acres, …)
+// must never silently vanish from a precedents trace: it has no grid cell to reveal, which is
+// exactly the case renderableTrace's ordinary `revealed.length === 0` skip would otherwise drop.
+describe("Trace Precedents surfaces a project-data reference (spreadsheet-live-data-refs)", () => {
+  it("shows a marker naming the source, at LEVEL 1, with no cell to jump to", () => {
+    let s = createSheet();
+    s = commitCellText(s, 0, 0, "=Site.Acres*2"); // A1
+    const projectNames = { "site.acres": { name: "Site.Acres", computed: true, value: 12.4, sourceLabel: "Site plan · total acreage" } };
+    const r = evaluateWorkbook(wb([{ id: "sheet1", name: "Sheet1", sheet: s }]), { projectNames });
+    expect(r.get("sheet1").get(0, 0)).toEqual({ ok: true, value: 24.8 });
+
+    const t = beginOrStepTrace(null, "precedents", "sheet1", 0, 0, r.graph);
+    const render = renderableTrace(t, r.graph, "sheet1");
+    expect(render.arrows).toHaveLength(0); // nothing to draw an arrow TO
+    expect(render.markers).toHaveLength(1);
+    expect(render.markers[0]).toMatchObject({
+      atCell: { row: 0, col: 0 }, label: "Site.Acres", sourceLabel: "Site plan · total acreage",
+      targetSheetId: null, direction: "in",
+    });
+  });
+});
+
 describe("stepTrace — a plain step over an already-fully-explored frontier is a safe no-op", () => {
   it("returns noFurther without corrupting levels/visited", () => {
     let s = createSheet();

@@ -139,9 +139,13 @@ function collectCellDeps(node, ownerSheetId, colNameToIndex, resolveSheetId, she
     // out of this for free, no separate invalidation step needed). An undefined name adds no
     // edge — the eval-time #NAME? (formula.js's own resolveNamedRange) is what reports it;
     // over-depending on nothing is as harmless here as it already is for an unknown [Column].
+    // ⛔ spreadsheet-live-data-refs — a COMPUTED (project-data) entry has no cell dep at all: its
+    // value comes from outside the grid entirely (lib/projectRefs.js) and is already fully
+    // resolved before this dependency graph is even built (see evaluateWorkbook below), so there
+    // is nothing here for the topological sort to wait on.
     case "name": {
-      const rect = namesMap && namesMap[node.name.toLowerCase()];
-      if (rect) for (let r = rect.r1 - 1; r <= rect.r2 - 1; r++) for (let c = rect.c1 - 1; c <= rect.c2 - 1; c++) addDep(ownerSheetId, r, c);
+      const entry = namesMap && namesMap[node.name.toLowerCase()];
+      if (entry && !entry.computed) for (let r = entry.r1 - 1; r <= entry.r2 - 1; r++) for (let c = entry.c1 - 1; c <= entry.c2 - 1; c++) addDep(ownerSheetId, r, c);
       return;
     }
     case "unary":
@@ -207,8 +211,23 @@ function collectRefHops(node, ownerSheetId, colNameToIndex, resolveSheetId, idTo
     // sheet-scoping evaluateWorkbook already uses below for the eval-time "name" case. The
     // hop's label is the name's own display text ("Revenue"), which is the whole point: this
     // is the ONE reference kind whose typed form is already more legible than its address.
+    //
+    // ⛔ spreadsheet-live-data-refs — a COMPUTED (project-data) entry gets its own hop KIND
+    // ("project"), with an EMPTY `cells` list (there is no grid cell behind it to reveal or jump
+    // to) and a `sourceLabel` naming where the number actually came from. Without this a project
+    // reference would silently vanish from every trace — `cells.length === 0` skips it in
+    // evaluateWorkbook's dependents-graph build below (correctly: nothing depends FROM it), but
+    // renderableTrace (traceAudit.js) special-cases `kind === "project"` so it is never dropped
+    // from PRECEDENTS the same way (see that file's own header on why `revealed.length === 0`
+    // would otherwise make it invisible — the exact "trace precedents does not silently
+    // under-report" requirement this feature was built to satisfy).
     case "name": {
-      const rect = namesMap && namesMap[node.name.toLowerCase()];
+      const entry = namesMap && namesMap[node.name.toLowerCase()];
+      if (entry && entry.computed) {
+        out.push({ kind: "project", sheetId: ownerSheetId, crossSheet: false, label: entry.name, sourceLabel: entry.sourceLabel || null, cells: [] });
+        return out;
+      }
+      const rect = entry;
       if (rect) {
         const cells = [];
         for (let r = rect.r1 - 1; r <= rect.r2 - 1; r++) for (let c = rect.c1 - 1; c <= rect.c2 - 1; c++) cells.push({ row: r, col: c });
@@ -257,8 +276,15 @@ const EMPTY_SHEET_EVAL = { get: () => null };
  *  the user IS looking at. Returns `{ get(sheetId) }` -> `{ get(rowIndex, colIndex) }` ->
  *  `{ok, value, error, detail} | null`, so `displayFor`/`displayColorFor`/`displayKindFor`
  *  below (unchanged, per-sheet) keep working exactly as before once handed the right sheet's
- *  own slice. */
-export function evaluateWorkbook(workbook) {
+ *  own slice.
+ *
+ * `projectNames` (spreadsheet-live-data-refs, optional) — the CALLER's own already-resolved
+ * project-derived name map (lib/projectRefs.js's `buildProjectNames`), merged into EVERY sheet's
+ * own names table below. These are workbook/project-level facts (the open project's site plan,
+ * its comps), not sheet-scoped ones, so unlike `sheet.names` they are the SAME map on every
+ * sheet — a user's own sheet-scoped name still wins on the rare case its text collides (defensive
+ * only: `namedRanges.js`'s reserved-prefix check stops a NEW collision from ever being created). */
+export function evaluateWorkbook(workbook, { projectNames } = {}) {
   const entries = workbook.sheets;
   const nameToId = new Map();
   const idToName = new Map();
@@ -288,7 +314,10 @@ export function evaluateWorkbook(workbook) {
     // own ctx.names/resolveNamedRange contract expects, so it's handed straight through with no
     // translation. Named ranges are sheet-scoped (resolved against the OWNER sheet's own grid,
     // never a cross-sheet lookup), so this is keyed by sheetId, not shared workbook-wide.
-    namesBySheet[s.id] = sheet.names || {};
+    //
+    // spreadsheet-live-data-refs — `projectNames` spreads in FIRST so a genuine (pre-feature)
+    // user name collision wins over it; see this function's own header note.
+    namesBySheet[s.id] = { ...(projectNames || null), ...(sheet.names || {}) };
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < numCols; c++) {
         const col = cols[c];

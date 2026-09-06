@@ -1496,6 +1496,26 @@ export function loadSite(id, { persistHeal = false } = {}) {
   }
   return m;
 }
+// spreadsheet-live-data-refs — a cross-workspace "this site's CONTENT changed" notification,
+// mirroring `shared/projects/projects.js`'s own `onProjectsChanged`/`notifyProjectsChanged`
+// EXACTLY (a plain `window` `StorageEvent("storage", …)` re-dispatch — the deliberate workaround
+// for same-tab localStorage writes firing no native `storage` event at all; see that file's own
+// header). Nothing in this repo previously fired on an ordinary geometry/building/acreage edit —
+// `onProjectsChanged` only fires on a project-NAME/list change — so the Model workspace's
+// project-derived names (lib/projectRefs.js: `Site.Acres`, `Plan.<building>.SF`, …) had no way to
+// hear about a live edit made in the (still-mounted-but-hidden) Site Planner tab. `saveSite`
+// below is the ONE funnel every content save goes through ("every local write lands here" — see
+// its own header), which is what makes this call site sufficient rather than one of many.
+const SITE_CONTENT_EVENT_KEY = "planarfit:siteContent:v1";
+export function notifySiteModelChanged(id) {
+  try { window.dispatchEvent(new StorageEvent("storage", { key: `${SITE_CONTENT_EVENT_KEY}:${id || ""}` })); } catch (_) {}
+}
+export function onSiteModelChanged(cb) {
+  if (typeof window === "undefined") return () => {};
+  const onStorage = (e) => { if (!e.key || e.key.startsWith(SITE_CONTENT_EVENT_KEY)) cb(); };
+  window.addEventListener("storage", onStorage);
+  return () => window.removeEventListener("storage", onStorage);
+}
 // `skipHistory` writes the local mirror WITHOUT taking a version-history snapshot. Used by the
 // immediate per-edit local write (B458): the device mirror must be current within ~50ms so a reload
 // can never lose the edit, but snapshotting on every drag frame would spam the ring — the debounced
@@ -1559,7 +1579,9 @@ export function saveSite(partial, { skipHistory = false } = {}) {
   }
   sites[partial.id] = model;
   lastSeenAt[partial.id] = model.updatedAt;
-  return writeSites(sites);
+  const ok = writeSites(sites);
+  if (ok) notifySiteModelChanged(partial.id);
+  return ok;
 }
 
 // Remove a site locally (instant/optimistic) AND from the cloud when signed in. Returns the

@@ -248,3 +248,57 @@ describe("NEW-2 (owner chat block) — a bad .xlsx file gets a plain sentence, n
     await expect(importXlsxToWorkbook(Buffer.from(buf))).rejects.toThrow("This Excel file has no worksheets.");
   });
 });
+
+// spreadsheet-live-data-refs — a formula reading a project-derived built-in name (Site.Acres, …)
+// has nothing for Excel to resolve it against, so export must flatten it to its resolved VALUE
+// (never ship a formula string Excel would recalculate straight into #NAME?), and re-importing
+// that same file must never silently re-animate it as a live (now-dead) formula either.
+describe("exportWorkbookToXlsxBlob — a project-data reference is exported as its resolved VALUE", () => {
+  function fixtureWithProjectRef() {
+    let wb = createWorkbook();
+    wb = applyToActiveSheet(wb, (s) => commitCellText(s, 0, 0, "=Site.Acres*2"));
+    return wb;
+  }
+  const PROJECT_NAMES = { "site.acres": { name: "Site.Acres", computed: true, value: 12.4 } };
+
+  it("writes the RESOLVED VALUE, never the formula text, plus an explanatory note", async () => {
+    const wb = fixtureWithProjectRef();
+    const blob = await exportWorkbookToXlsxBlob(wb, { projectNames: PROJECT_NAMES });
+    const raw = new ExcelJS.Workbook();
+    await raw.xlsx.load(Buffer.from(await blob.arrayBuffer()));
+    const cell = raw.worksheets[0].getCell("A1");
+    expect(cell.type).not.toBe(ExcelJS.ValueType.Formula);
+    expect(cell.value).toBeCloseTo(24.8);
+    expect(String(cell.note || "")).toMatch(/Site\.Acres/);
+  });
+
+  it("re-importing that file reads back a plain value — never a dead formula pretending to be live", async () => {
+    const wb = fixtureWithProjectRef();
+    const blob = await exportWorkbookToXlsxBlob(wb, { projectNames: PROJECT_NAMES });
+    const { workbook: reimported } = await importXlsxToWorkbook(Buffer.from(await blob.arrayBuffer()));
+    const cell0 = reimported.sheets[0].sheet.cells["c1:0"];
+    expect(cell0).not.toMatch(/^=/);
+    expect(Number(cell0)).toBeCloseTo(24.8);
+  });
+
+  it("a formula reading a project reference that is currently an ERROR exports the error, not a stale/blank cell", async () => {
+    let wb = createWorkbook();
+    wb = applyToActiveSheet(wb, (s) => commitCellText(s, 0, 0, "=Site.Acres"));
+    const errNames = { "site.acres": { name: "Site.Acres", computed: true, value: { k: "error", code: "#REF!" } } };
+    const blob = await exportWorkbookToXlsxBlob(wb, { projectNames: errNames });
+    const raw = new ExcelJS.Workbook();
+    await raw.xlsx.load(Buffer.from(await blob.arrayBuffer()));
+    const cell = raw.worksheets[0].getCell("A1");
+    expect(cell.value).toMatchObject({ error: "#REF!" });
+  });
+
+  it("an ordinary formula with NO project reference is unaffected — still a real live formula", async () => {
+    let wb = createWorkbook();
+    wb = applyToActiveSheet(wb, (s) => commitCellText(s, 0, 0, "10"));
+    wb = applyToActiveSheet(wb, (s) => commitCellText(s, 1, 0, "=SUM(A1)"));
+    const blob = await exportWorkbookToXlsxBlob(wb, { projectNames: PROJECT_NAMES });
+    const raw = new ExcelJS.Workbook();
+    await raw.xlsx.load(Buffer.from(await blob.arrayBuffer()));
+    expect(raw.worksheets[0].getCell("A2").type).toBe(ExcelJS.ValueType.Formula);
+  });
+});

@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-06 @ `1319bb5b` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-06 @ `80414d30` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_698 source files mapped._
+_700 source files mapped._
 
 ## infra
 
@@ -150,9 +150,13 @@ _698 source files mapped._
 - **`src/workspaces/model/lib/modelStore.js`** — Sheet persistence: local-storage write-through save plus a guarded cloud save (serializeWrites + optimisticUpsert) against `model_sheets`.
   - _exports_: `loadCloudSheet`, `readLocalSheet`, `saveCloudSheet`, `writeLocalSheet`
 - **`src/workspaces/model/lib/namedRanges.js`** — Named ranges (define/rename/retarget/delete, validation, structural-edit reshape, rename's formula rewrite), sheet-scoped, resolved at eval time via the shared engine's `ctx.names`.
-  - _exports_: `defineName`, `deleteName`, `namesList`, `nameUsageCount`, `rectFromSelRange`, `rectToAddressText`, `rectToSelRange`, `renameName`, `retargetName`, `shiftNamesForStructuralChange`, `validateNameText`
+  - _exports_: `defineName`, `deleteName`, `namesList`, `nameUsageCount`, `rectFromSelRange`, `rectToAddressText`, `rectToSelRange`, `renameName`, `RESERVED_NAME_PREFIXES`, `retargetName`, `shiftNamesForStructuralChange`, `validateNameText`
 - **`src/workspaces/model/lib/numberFormats.js`** — The number-format picker's preset list, each token handed straight to the shared engine's `formatValue`.
   - _exports_: `decreaseDecimals`, `formatLabelFor`, `increaseDecimals`, `NUMBER_FORMATS`, `toggleThousands`
+- **`src/workspaces/model/lib/projectCompsFetch.js`** — Minimal, narrowly-scoped read of `public.comps` (own+team rows) for the `Comp.<title>.*` live data refs — deliberately not the shared comps lib, to avoid pulling its unused derivations into the Site route's bundle.
+  - _exports_: `fetchProjectNameComps`
+- **`src/workspaces/model/lib/projectRefs.js`** — Exposes the open project's site plan / leasing comps as read-only, namespaced formula names (`Site.Acres`, `Plan.Building1.SF`, `Comp.<title>.RentPSF`), resolved through the same "name" AST node as a user-defined named range.
+  - _exports_: `buildProjectNames`, `RESERVED_NAME_PREFIXES`
 - **`src/workspaces/model/lib/ribbonLayout.js`** — Pure, DOM-free math deciding which ribbon groups fit inline vs. collapse into a "More ▾" popover at a given container width.
   - _exports_: `computeRibbonLayout`, `MORE_BUTTON_WIDTH`, `RIBBON_GROUPS`
 - **`src/workspaces/model/lib/rowLayout.js`** — Pure variable-row-height offset/search math behind SheetView's virtualized window (cumulative offsets + binary search), DOM-free for unit testing.
@@ -1262,7 +1266,7 @@ _698 source files mapped._
 - **`src/workspaces/site-planner/lib/standardsApply.js`** — Standards "Apply now" (NEW-3): push a standard onto existing parcels (stamped → write) or existing elements (render-resolved → clear the per-element override), plus the impact counts the chip shows.
   - _exports_: `allStandardsImpact`, `appliedLabel`, `appliedObjectsLabel`, `applyAllStandards`, `applyMeasureStandard`, `applyParcelStandard`, `applyTypeStandard`, `draftDirty`, `draftHasMeasure`, `draftHasParcel`, `draftHasType`, `draftMeasureValue`, `draftParcelValue`, `draftTypeValue`, `EMPTY_STD_DRAFT`, `MEASURE_STD_KEYS`, `mergeDraftIntoSettings`, `PARCEL_STD_KEYS`, `parcelStandardImpact`, `TYPE_STD_KEYS`, `typeStandardImpact`, `withMeasureDraft`, `withParcelDraft`, `withTypeDraft`
 - **`src/workspaces/site-planner/lib/storage.js`** — Multi-site persistence layer: localStorage primary with per-user cloud mirror, content-union pull merge, per-tab resurrection guards, and an IndexedDB-backed version-history ring
-  - _exports_: `_readSiteTombs`, `_recentlyDeleted`, `_resetHistoryForTest`, `activeUid`, `AUTOSAVE_KEY`, `backupNow`, `binOrphanedTrackedSite`, `checkProjectDeletionStatus`, `clearCloudCache`, `clearHistory`, `clearRecentlyDeleted`, `clearSiteTombstone`, `DELETED_RETENTION_DAYS`, `deleteSite`, `deleteSiteGroup`, `discardLegacySite`, `ensureProjectRow`, `getCurrentSiteId`, `getVersion`, `groupCountDivergence`, `groupOf`, `importLegacyIntoCloud`, `importOneSiteToCloud`, `initHistoryStore`, `isCloudActive`, `isEmptySite`, `keepaliveFlushSite`, `legacySitesList`, `listDeletedProjects`, `listVersions`, `loadAutosave`, `loadPlansOfGroup`, `loadSite`, `loadSitesList`, `mergePulledSites`, `migrateOldAutosave`, `migrateScenarios`, `migrateSiteGroups`, `pendingLegacyCount`, `pendingLegacySites`, `pruneMigratedLegacy`, `pullCloud`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `pushModelToCloud`, `pushSiteToCloud`, `reconcileSiteFromCloud`, `recordSiteTombstone`, `renameSiteGroup`, `repairSplitProjectNames`, `resolveOrCreateTrackedSiteForComp`, `restoreDeletedProject`, `saveAutosave`, `saveSite`, `scheduleLinkOf`, `setActiveUser`, `setCurrentSiteId`, `setScheduleLink`, `setSiteGroupRole`, `SITE_TOMB_GRACE_MS`, `siteNameOf`, `snapshotVersion`, `stageLegacySite`, `storage`, `summarizeVersion`
+  - _exports_: `_readSiteTombs`, `_recentlyDeleted`, `_resetHistoryForTest`, `activeUid`, `AUTOSAVE_KEY`, `backupNow`, `binOrphanedTrackedSite`, `checkProjectDeletionStatus`, `clearCloudCache`, `clearHistory`, `clearRecentlyDeleted`, `clearSiteTombstone`, `DELETED_RETENTION_DAYS`, `deleteSite`, `deleteSiteGroup`, `discardLegacySite`, `ensureProjectRow`, `getCurrentSiteId`, `getVersion`, `groupCountDivergence`, `groupOf`, `importLegacyIntoCloud`, `importOneSiteToCloud`, `initHistoryStore`, `isCloudActive`, `isEmptySite`, `keepaliveFlushSite`, `legacySitesList`, `listDeletedProjects`, `listVersions`, `loadAutosave`, `loadPlansOfGroup`, `loadSite`, `loadSitesList`, `mergePulledSites`, `migrateOldAutosave`, `migrateScenarios`, `migrateSiteGroups`, `notifySiteModelChanged`, `onSiteModelChanged`, `pendingLegacyCount`, `pendingLegacySites`, `pruneMigratedLegacy`, `pullCloud`, `purgeDeletedProject`, `purgeExpiredDeletedProjects`, `pushModelToCloud`, `pushSiteToCloud`, `reconcileSiteFromCloud`, `recordSiteTombstone`, `renameSiteGroup`, `repairSplitProjectNames`, `resolveOrCreateTrackedSiteForComp`, `restoreDeletedProject`, `saveAutosave`, `saveSite`, `scheduleLinkOf`, `setActiveUser`, `setCurrentSiteId`, `setScheduleLink`, `setSiteGroupRole`, `SITE_TOMB_GRACE_MS`, `siteNameOf`, `snapshotVersion`, `stageLegacySite`, `storage`, `summarizeVersion`
 - **`src/workspaces/site-planner/lib/storageReconcile.js`** — NEW-1 site storage reconciliation: counted detention plus counted mitigation against total physical pond storage, with a hard FAIL naming the overlap volume and the ponds involved (and undeclared dual-duty ponds)
   - _exports_: `OVERLAP_TOL_CF`, `reconcilePond`, `reconcileStorage`
 - **`src/workspaces/site-planner/lib/subsidence.js`** — Harris-Galveston / Fort Bend subsidence-district cited registry (NEW-B4): county→district flag (groundwater-pumping permit + surface-water-conversion context) with citations + audit. Pure.
