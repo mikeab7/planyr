@@ -6915,11 +6915,13 @@ function App() {
     return () => (mq.removeEventListener ? mq.removeEventListener('change', h) : mq.removeListener(h));
   }, []);
   // Which half of Split view shows at phone width (isMobile) — Split cannot show two panes on a
-  // phone (each would be an unusable strip), so it collapses to ONE SCREEN AT A TIME with this as
-  // the "deliberate way to switch between them." Irrelevant at tablet/desktop width, where Split
-  // still renders both panes exactly as before. Defaults to "grid" — the same pane phone width
-  // showed (silently, with no way off it) before this fix, so a phone session that never touches
-  // the new switcher sees no change.
+  // phone (each would be an unusable strip), so it collapses to ONE SCREEN AT A TIME. B1241747
+  // (NEW-4) — set by tapping Grid/Gantt on the EXISTING header pill (never a second, phone-only
+  // switcher — see that pill's own comment for the mechanism), so `data.view` itself never leaves
+  // "split" and a wider screen still opens on the real two-pane Split with nothing forgotten.
+  // Irrelevant at tablet/desktop width, where Split still renders both panes exactly as before.
+  // Defaults to "grid" — the same pane phone width showed (silently, with no way off it) before
+  // #1490's fix, so a phone session that never taps Gantt sees no change.
   const [phonePane, setPhonePane] = useState("grid");
   const [pdfExportOpen, setPdfExportOpen] = useState(false);
   const [projCtx,    setProjCtx]    = useState(null);
@@ -8853,11 +8855,12 @@ function App() {
     if (!inShell || !data) return;
     const sec = data.section ?? "projects";
     const section = sec === "suggestions" ? "projects" : sec;
-    // B1241744/B1241745 — effective view: never persisted to data.view. At phone width, Gantt/Grid
-    // render exactly what the user picked (no silent override); Split collapses to whichever pane
-    // `phonePane` names (the phone one-screen-at-a-time switcher) since it cannot show two panes on
-    // a phone. Must match the body switch below exactly, or the shell's lifted zoom control (which
-    // reads `zoomable` off this) can disagree with what is actually on screen.
+    // B1241744/B1241745/B1241747 — effective view: never persisted to data.view. At phone width,
+    // Gantt/Grid render exactly what the user picked (no silent override); Split collapses to
+    // whichever pane `phonePane` names (set via the header's own Grid/Split/Gantt pill — see its
+    // comment — never a second switcher) since it cannot show two panes on a phone. Must match the
+    // body switch below exactly, or the shell's lifted zoom control (which reads `zoomable` off
+    // this) can disagree with what is actually on screen.
     const view = isMobile ? (data.view === "split" ? phonePane : (data.view ?? "grid")) : (data.view ?? "grid");
     const state = {
       view, section, isMobile: !!isMobile,
@@ -9266,19 +9269,46 @@ function App() {
           </div>
         )}
 
-        {/* View switcher — hidden while reviewing (review is grid-only; prevents losing review state on remount) */}
+        {/* View switcher — hidden while reviewing (review is grid-only; prevents losing review state on remount).
+            B1241747 (NEW-4) — this is the ONLY view switcher at every width. #1490 first fixed
+            Split-at-phone-width by adding a second, phone-only Grid/Gantt pill underneath this one
+            — correct to the letter of that brief, wrong because this pill already does the job, so
+            a phone screen showed two stacked switchers (owner screenshot, 2026-09-06: "I just want
+            the existing Gantt and Split buttons to work"). Deleted; this pill now does double duty.
+            THE GENERAL LESSON: when a brief asks for "a way to do X," check whether the app
+            already has one before building a second — a duplicated control is worse than the bug
+            it was meant to fix, because now two things must stay in sync and the user has to guess
+            which one is real.
+            THE MECHANISM: at phone width, Split can't show two panes, so it shows ONE — and the
+            way to see the other is this pill, not a parallel control. While already in Split at
+            phone width (`inPhoneSplit`), tapping Grid or Gantt does NOT leave Split — it updates
+            `phonePane` (kept from #1490) so a wider screen, or the same phone rotated wide enough,
+            still opens on the real two-pane Split with nothing forgotten. Tapping Split itself, or
+            any tap at desktop width or away from Split, is the ORIGINAL, untouched behavior: a
+            direct `data.view` write. The active/highlighted tab always matches what's actually on
+            screen — never "Split" while `inPhoneSplit`, since the screen is showing Grid or Gantt,
+            full width, not a two-pane split; that is a deliberate, disclosed choice (see the
+            B1241747 backlog item for the product question it raises: Split then LOOKS identical to
+            picking Grid or Gantt directly on a phone, differing only in what a wider screen remembers). */}
         {section === "projects" && !reviewOpen && (
           <div className="hdr-view" style={{display:"flex",background:"#f0f0f0",borderRadius:7,padding:"3px",gap:2,marginLeft:8,flexShrink:0}}>
-            {[["grid","Grid"],["split","Split"],["gantt","Gantt"]].map(([v,label]) => (
-              <button key={v} onClick={()=>setData(d=>({...d,view:v}))}
-                style={{border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:data.view===v?600:500,
-                  letterSpacing:".01em",padding:"5px 12px",borderRadius:5,transition:"all .15s",
-                  background:data.view===v?"#fff":"transparent",
-                  color:data.view===v?"var(--amber)":"var(--mut)",
-                  boxShadow:data.view===v?"0 1px 3px rgba(0,0,0,0.12)":"none"}}>
-                {label}
-              </button>
-            ))}
+            {[["grid","Grid"],["split","Split"],["gantt","Gantt"]].map(([v,label]) => {
+              const inPhoneSplit = isMobile && data.view === "split";
+              const active = inPhoneSplit ? (v !== "split" && phonePane === v) : data.view === v;
+              return (
+                <button key={v} onClick={()=>{
+                    if (inPhoneSplit && v !== "split") setPhonePane(v);
+                    else setData(d=>({...d,view:v}));
+                  }}
+                  style={{border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:active?600:500,
+                    letterSpacing:".01em",padding:"5px 12px",borderRadius:5,transition:"all .15s",
+                    background:active?"#fff":"transparent",
+                    color:active?"var(--amber)":"var(--mut)",
+                    boxShadow:active?"0 1px 3px rgba(0,0,0,0.12)":"none"}}>
+                  {label}
+                </button>
+              );
+            })}
           </div>
         )}
 
@@ -9564,21 +9594,14 @@ function App() {
         />
       )}
 
-      {/* B1241745 — the phone one-screen-at-a-time switcher for Split: only ever rendered when
-          Split cannot show both its panes (isMobile), and only for Split — Grid/Gantt picked
-          directly already show exactly what the user asked for, with nothing to switch between.
-          Its own row, above the body, rather than an overlay — the body below stays exactly the
-          single-flex-child layout GridView/GanttView already expect. */}
-      {section === "projects" && !reviewOpen && isMobile && data.view === "split" && (
-        <PhonePaneSwitcher pane={phonePane} setPane={setPhonePane} coarsePointer={coarsePointer} />
-      )}
-
       {/* BODY */}
       <div style={{flex:1,overflow:"hidden",display:"flex"}}>
         <ErrorBoundary key={data.view}>
-        {/* B1241744/B1241745 — effective view (must match the toolbar-bridge copy above exactly).
-            Split never renders below at phone width; a phone session that picked Split instead
-            gets ONE of its two panes, chosen by the phone pane switcher just above. */}
+        {/* B1241744/B1241745/B1241747 — effective view (must match the toolbar-bridge copy above
+            exactly). Split never renders below at phone width; a phone session that picked Split
+            instead gets ONE of its two panes, chosen via the SAME header Grid/Split/Gantt pill
+            (its onClick below sets `phonePane` instead of leaving Split, exactly when this applies)
+            — never a second, separate switcher. See the pill's own comment for the full mechanism. */}
         {section === "projects" && !reviewOpen && (isMobile ? (data.view === "split" ? phonePane : (data.view ?? "grid")) : (data.view ?? "grid"))==="grid"  && <GridView   {...shared} />}
         {section === "projects" && !reviewOpen && (isMobile ? (data.view === "split" ? phonePane : (data.view ?? "grid")) : (data.view ?? "grid"))==="gantt" && <GanttView  tasks={flatTasks} updateTask={updateTask} pxPerDay={ganttPPD} onZoomChange={setGanttPPD} rolledHealthMap={rolledHealthMap} proj={proj} onMouseEnter={()=>setHoverZone('gantt')} selectedId={selectedId} setSelectedId={setSelectedId} settings={data.settings} />}
         {section === "projects" && !reviewOpen && !isMobile && data.view==="split" && <SplitView  {...shared} />}
@@ -14102,33 +14125,6 @@ function AutomationPanel({data, setData, onClose}) {
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:10,paddingTop:10,borderTop:"1px solid var(--bd)"}}>
         <span onClick={addRule} style={{fontSize:11.5,color:"var(--amber)",fontWeight:600,cursor:"pointer"}}>+ Add rule</span>
         <span onClick={resetDefaults} style={{fontSize:11,color:"var(--mut)",cursor:"pointer"}}>Reset to suggested defaults</span>
-      </div>
-    </div>
-  );
-}
-
-// ── PhonePaneSwitcher ─────────────────────────────────────
-// B1241745 — the "deliberate way to switch between them" the phone Split collapse needs. Visually
-// the SAME segmented-pill pattern as the header's own Grid/Split/Gantt view switcher (never a new
-// phone-only control shape), just two options instead of three and sized for the pointer that's
-// actually driving it: 44px (the WCAG/platform touch floor, the same one
-// src/shared/ui/designTokens.js's CONTROL_H.touch pilot uses) under a coarse pointer, a smaller
-// comfortable size for the narrow-desktop-window-with-a-mouse case that also trips `isMobile`.
-function PhonePaneSwitcher({ pane, setPane, coarsePointer }) {
-  const h = coarsePointer ? 44 : 30;
-  return (
-    <div style={{display:"flex",justifyContent:"center",padding:"6px 10px",background:"var(--surf)",borderBottom:"1px solid var(--bd)",flexShrink:0}}>
-      <div style={{display:"flex",background:"#f0f0f0",borderRadius:7,padding:"3px",gap:2}}>
-        {[["grid","Grid"],["gantt","Gantt"]].map(([v,label]) => (
-          <button key={v} onClick={()=>setPane(v)}
-            style={{border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:pane===v?600:500,
-              letterSpacing:".01em",padding:"0 18px",height:h,minWidth:h,borderRadius:5,transition:"all .15s",
-              background:pane===v?"#fff":"transparent",
-              color:pane===v?"var(--amber)":"var(--mut)",
-              boxShadow:pane===v?"0 1px 3px rgba(0,0,0,0.12)":"none"}}>
-            {label}
-          </button>
-        ))}
       </div>
     </div>
   );
