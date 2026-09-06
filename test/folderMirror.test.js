@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { syncProjectFolders, planDelete, slugSeg, treeParentForUpload, parseFiledKey, migrateFilesToTree, moveKeyToTree } from "../server/storage/folderMirror.js";
+import { syncProjectFolders, planDelete, slugSeg, treeParentForUpload, parseFiledKey, migrateFilesToTree, moveKeyToTree, purgeProjectDrive } from "../server/storage/folderMirror.js";
 
 // A fake project_folders store: holds rows, applies drive_* patches like Supabase would.
 function fakeStore(initial) {
@@ -26,10 +26,10 @@ function fakeStore(initial) {
 // A fake Drive client that mints folder ids + records ops.
 function fakeClient({ children = {}, parents = {} } = {}) {
   let n = 0;
-  const calls = { created: [], updated: [], trashed: [], listed: [] };
+  const calls = { created: [], updated: [], trashed: [], listed: [], folderIds: [] };
   return {
     calls,
-    async folderId(path) { return `root:${path}`; },
+    async folderId(path) { calls.folderIds.push(path); return `root:${path}`; },
     async createSubfolder({ name, parentFolderId }) { n += 1; calls.created.push({ name, parentFolderId }); return { id: `d${n}` }; },
     async update(fileId, patch) { calls.updated.push({ fileId, ...patch }); return { id: fileId }; },
     async trash(fileId) { calls.trashed.push(fileId); },
@@ -480,5 +480,43 @@ describe("planDelete — enumerate what a delete removes (B650)", () => {
     const r = await planDelete({ projectId: "p1", folderId: "a", client, store });
     expect(r.folders.map((f) => f.name)).toEqual(["01. Land"]);
     expect(r.files).toEqual([]);
+  });
+});
+
+describe("purgeProjectDrive — trash the WHOLE project Drive root on a permanent purge (B1235169)", () => {
+  it("never mirrored (no row carries a driveFolderId) — nothing to trash, and the root is never resolved (no wasted create)", async () => {
+    const store = fakeStore([{ id: "a", parentId: null, name: "01. Civil" }]);
+    const client = fakeClient();
+    const r = await purgeProjectDrive({ projectId: "p1", userId: "u1", client, store });
+    expect(r).toEqual({ ok: true, trashed: false });
+    expect(client.calls.folderIds).toEqual([]); // folderId() would CREATE an empty folder if called
+    expect(client.calls.trashed).toEqual([]);
+  });
+
+  it("a mirrored tree resolves the project's Drive root and trashes it (Drive cascades to every subfolder + filed document)", async () => {
+    const store = fakeStore([
+      { id: "a", parentId: null, name: "01. Civil", driveFolderId: "d1" },
+      { id: "b", parentId: "a", name: "01. Current", driveFolderId: "d2" },
+    ]);
+    const client = fakeClient();
+    const r = await purgeProjectDrive({ projectId: "p1", userId: "u1", client, store });
+    expect(r).toEqual({ ok: true, trashed: true });
+    expect(client.calls.folderIds).toEqual(["u1/project-p1"]);
+    expect(client.calls.trashed).toEqual(["root:u1/project-p1"]);
+  });
+
+  it("a failed index read is LOUD, never a false 'nothing to trash' (the sites purge still proceeds — see storage.js)", async () => {
+    const nullStore = { async list() { return null; } };
+    const r = await purgeProjectDrive({ projectId: "p1", userId: "u1", client: fakeClient(), store: nullStore });
+    expect(r.ok).toBe(false);
+  });
+
+  it("a Drive failure while trashing is surfaced, never silently swallowed", async () => {
+    const store = fakeStore([{ id: "a", parentId: null, name: "01. Civil", driveFolderId: "d1" }]);
+    const client = fakeClient();
+    client.trash = async () => { throw new Error("Drive 500"); };
+    const r = await purgeProjectDrive({ projectId: "p1", userId: "u1", client, store });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/Drive 500/);
   });
 });

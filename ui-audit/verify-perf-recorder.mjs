@@ -78,6 +78,7 @@ const AB_MS_MAX = 0.6;
 const FAST = {
   counterMs: 500,
   idleStopMs: 1200,
+  bootRunMs: 2500,
   trigger: {
     baselineSkipMs: 300,
     baselineWindowMs: 2500,
@@ -87,6 +88,7 @@ const FAST = {
     sustainMinFrames: 6,
     cooldownMs: 2000,
     maxAuto: 3,
+    bootWindowMs: 2500,
   },
 };
 
@@ -246,6 +248,66 @@ let failures = [];
   if (out.manual.kind !== "manual") failures.push("a manual capture is not marked as owner-reported — his perception must stay distinguishable from the threshold's");
 }
 
+/* ── GUARD 3 — BOOT WINDOW (NEW-3): a capture must be producible for the boot window, WITH ZERO
+ * interaction — the exact case the owner reports (a resumed plan opening on a hard reload) and
+ * the exact case the steady-state trigger structurally cannot see (no baseline exists yet).
+ *
+ * ⛔ THE EARLY-BURN ARM IS THE ONE THAT MATTERS MOST, and it exists because of what reading
+ * `main.jsx` found: `installPerfRecorder` is itself deferred to `requestIdleCallback(…, {timeout:
+ * 9000})` — DELIBERATELY, so the recorder's own arrival never competes with the four busy seconds
+ * B1431 attributed to the boot. So on a genuinely busy boot the recorder may not even be
+ * INSTALLED until several seconds in — which sounds like it defeats this whole fix, except that
+ * `observeTasks()` subscribes with `{buffered: true}`, and a buffered PerformanceObserver
+ * retroactively delivers every matching entry recorded since navigation start, however late the
+ * observer itself was created. This arm proves that property holds for real rather than assuming
+ * it: it burns the main thread from an `addInitScript` — BEFORE the page's own first script runs,
+ * long before any idle callback could possibly fire — and only then waits for the recorder to
+ * install and checks that the boot capture still landed. If this arm goes red, the whole design
+ * is unsound on a real busy boot even though the "burn right after install" case would look fine. */
+async function openPageWithEarlyBurn(burnMs) {
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 850 } });
+  await ctx.addInitScript((cfg) => { window.__PLANYR_PERFREC = cfg; }, FAST);
+  await ctx.addInitScript((ms) => {
+    const end = Date.now() + ms;
+    while (Date.now() < end) { /* deliberate stall, before the recorder can possibly install */ }
+  }, burnMs);
+  await ctx.route(/^https?:\/\//, (route) => (route.request().url().startsWith(BASE) ? route.continue() : route.abort()));
+  const page = await ctx.newPage();
+  await assertMeasurable(page, "verify-perf-recorder");
+  await page.goto(BASE, { waitUntil: "load" });
+  await page.waitForFunction(() => !!window.pfRec, null, { timeout: 30000 });
+  return { ctx, page };
+}
+
+{
+  out.boot = {};
+
+  // CONTROL: zero interaction, zero induced stall, for the whole boot free-run window. Must NOT
+  // fire, but frames must still have been collected — the free-run itself has to be running.
+  const { ctx: c1, page: p1 } = await openPage({ recorder: true });
+  await p1.waitForTimeout(FAST.bootRunMs + 500);
+  out.boot.control = await p1.evaluate(() => ({ ...window.pfRec.state(), captures: window.pfRec.captures() }));
+  await c1.close();
+
+  // EARLY BURN: the main thread is busy from before the recorder could possibly install.
+  const { ctx: c2, page: p2 } = await openPageWithEarlyBurn(300);
+  await p2.waitForTimeout(1500);   // let the buffered PerformanceObserver entry land
+  out.boot.earlyBurn = await p2.evaluate(() => ({ ...window.pfRec.state(), captures: window.pfRec.captures() }));
+  await c2.close();
+
+  const controlBootFires = (out.boot.control.captures || []).filter((c) => c.bootTrigger).length;
+  const earlyBurnFires = (out.boot.earlyBurn.captures || []).filter((c) => c.bootTrigger).length;
+  out.boot.controlFramesCollected = out.boot.control.frames || 0;
+  out.boot.controlBootFires = controlBootFires;
+  out.boot.earlyBurnBootFires = earlyBurnFires;
+  const burnCap = (out.boot.earlyBurn.captures || []).find((c) => c.bootTrigger);
+  out.boot.earlyBurnFrames = burnCap ? burnCap.frames : null;
+
+  if (out.boot.controlFramesCollected === 0) failures.push("BOOT FREE-RUN NOT OBSERVING: zero frames were collected with no interaction at all — the boot free-run window is not running");
+  if (controlBootFires > 0) failures.push(`the boot CONTROL arm fired ${controlBootFires} time(s) with no induced task — the boot judgment is not discriminating`);
+  if (earlyBurnFires === 0) failures.push("BOOT TRIGGER NOT OBSERVING: a 300 ms task that ran BEFORE the recorder could install produced no boot capture — the buffered PerformanceObserver pickup did not work as assumed");
+}
+
 await browser.close();
 server.close();
 
@@ -265,6 +327,11 @@ console.log(`    captures on the CONTROL       ${out.antiRot.firedOnControl}   �
 console.log(`    stall window mean             ${out.antiRot.stall?.windowMeanMs} ms over ${out.antiRot.stall?.windowFrames} frames`);
 console.log("\n  MANUAL CONTROL");
 console.log(`    a press produced a capture    ${out.manual?.took ? "yes" : "NO"}, marked "${out.manual?.kind}"`);
+console.log("\n  BOOT WINDOW (guard 3)");
+console.log(`    frames collected, zero interaction   ${out.boot?.controlFramesCollected}   ← must be > 0 (the free-run proof)`);
+console.log(`    boot captures on the CONTROL         ${out.boot?.controlBootFires}   ← must be 0`);
+console.log(`    boot captures on an EARLY burn        ${out.boot?.earlyBurnBootFires}   ← must be ≥ 1, or this guard is not observing`);
+console.log(`    that capture's own frame count       ${out.boot?.earlyBurnFrames}`);
 
 if (failures.length) {
   console.error(`\n⛔ ${failures.length} failure(s):`);

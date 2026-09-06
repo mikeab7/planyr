@@ -69,6 +69,12 @@ export const TRIGGER_DEFAULTS = {
   maxAuto: 3,
   maxFrameMs: 1_500,          // beyond this it is not a frame — a debugger, a throttle, a sleep
   windowCap: 600,             // preallocated sustain-window capacity (≈10 s at 60 Hz)
+
+  /* ── the BOOT-WINDOW judgment (NEW-3) — see the header block above `feedBootTask` for why this
+   * cannot reuse the self-relative test above. */
+  bootWindowMs: 10_000,       // matches the owner's own "5 to 10 seconds" report, plus margin
+  bootTaskBudgetMs: 400,      // cumulative long-task/LoAF blocking time inside the boot window…
+  bootSingleTaskMs: 250,      // …OR one task alone at least this slow (an unambiguous single stall)
 };
 
 /* Create the trigger state. All storage is allocated here and never again. */
@@ -91,6 +97,9 @@ export function createTrigger(overrides) {
     fires: 0,
     lastFireAt: -Infinity,
     lastVerdict: null,
+    /* boot-window judgment (NEW-3) */
+    bootTaskMs: 0,
+    bootTaskCount: 0,
   };
 }
 
@@ -160,6 +169,83 @@ function fire(s, t, mean, frac) {
    * verdict of the NEXT capture independent of this one.) */
   s.winHead = s.winTail = s.winN = 0; s.winSum = 0; s.winSlow = 0;
   return true;
+}
+
+/* ── the BOOT-WINDOW judgment (NEW-3) ─────────────────────────────────────────────────────────
+ * ⛔ WHY THE TEST ABOVE STRUCTURALLY CANNOT FIRE DURING BOOT, CONFIRMED AGAINST THE REAL SOURCE
+ * RATHER THAN ASSUMED: `feedFrame` returns `false` unconditionally while `s.baseline === null`
+ * (the branch above), and the baseline itself cannot seal before `cfg.baselineSkipMs` (5 s) and
+ * typically not before `cfg.baselineSkipMs + cfg.baselineWindowMs` (50 s) — the owner's own
+ * reported window, "the first 5 to 10 seconds", is the exact interval the sustained-deviation
+ * test is BUILT to skip. This is not bad luck: the instrument was calibrated to exclude the
+ * interval the complaint is about, and no amount of running it longer would have changed that.
+ *
+ * The frames themselves are NOT lost — `perfRecorder.js`'s `onFrame` calls `pushFrame` into the
+ * ring unconditionally, before `feedFrame` ever judges them — so the fix here is a JUDGMENT over
+ * data already flowing in, not a new ring or a new listener.
+ *
+ * ⛔ AND IT MUST BE A DIFFERENT SHAPE, NOT THE SAME TEST RUN EARLY. The steady-state test asks
+ * "is this machine, right now, meaningfully slower than itself a minute ago" — during boot there
+ * is no "itself a minute ago" to compare against, so the self-relative (a)/(b)/(c) test above has
+ * no baseline to key off even if it were allowed to run. An absolute floor on FRAME DELTAS would
+ * also be the wrong instrument here: the frame loop that fills `_frames` is gated on interaction
+ * (`perfRecorder.js`'s `noteActivity`), and a genuinely idle boot — no click, no pointer move, a
+ * resumed plan loading straight off a hard reload (`bootResume.js`) — never starts that loop at
+ * all, so there may be no frame data to judge regardless of the floor chosen.
+ *
+ * The signal used instead is the one thing that is ALREADY observing the boot window
+ * unconditionally: `perfRecorder.js`'s `observeTasks()` installs its `PerformanceObserver` for
+ * `long-animation-frame` (falling back to `longtask`) once, at recorder install, with
+ * `buffered: true` — it is never gated on `noteActivity`/`_running` the way the frame loop is,
+ * so it sees every main-thread stall from the first paint on, interaction or none. This is
+ * candidate signal 2 from the brief ("long animation frames during the first N seconds"), chosen
+ * over "an unrequested view/zoom change" because that data does not yet reach this recorder at
+ * all — reusing it here would mean wiring a NEW gesture-correlation listener (what
+ * `site-planner/lib/viewChangeRecorder.js` already does, in full, behind its own diagArm gate),
+ * which is exactly the "second always-on instrument" the brief says not to ship. The long-task
+ * observer needs no new listener: it already runs, for every page, unconditionally.
+ *
+ * THE NUMBERS: `bootWindowMs` (10 s) matches the owner's own "5 to 10 seconds" report with a
+ * small margin. `bootTaskBudgetMs` (400 ms cumulative) and `bootSingleTaskMs` (250 ms alone) are
+ * set well above B1448's own measured NORMAL 1×-CPU boot cost — 195 ms busy in total, largest
+ * single named phase 44.8 ms — so an ordinary load does not trip either bar; a boot that is
+ * visibly churning (the reported "zooms in, out and back in") is expected to clear both by a wide
+ * margin. These are a first cut: revisit once real boot captures start arriving (never silently —
+ * PANEL-BREVITY's "raise it, but never quietly" convention applies to a threshold like this too).
+ *
+ * Reuses the SAME `fires`/`lastFireAt`/`cooldownMs`/`maxAuto` budget the steady-state trigger uses
+ * — a boot capture is still an auto capture and must not blow the page's capture allowance. */
+export function feedBootTask(s, t, dur) {
+  const cfg = s.cfg;
+  if (s.baseline !== null) return false;        // the boot judgment only ever applies pre-baseline
+  if (!(t < cfg.bootWindowMs)) return false;    // outside the boot window entirely
+  if (!(dur > 0)) return false;
+  if (s.fires >= cfg.maxAuto) return false;
+  if (t - s.lastFireAt < cfg.cooldownMs) return false;
+
+  s.bootTaskMs += dur;
+  s.bootTaskCount++;
+
+  const single = dur >= cfg.bootSingleTaskMs;
+  const cumulative = s.bootTaskMs >= cfg.bootTaskBudgetMs;
+  if (!single && !cumulative) return false;
+
+  fireBoot(s, t, single ? "single" : "cumulative");
+  return true;
+}
+
+/* The boot FIRE branch, split out for the same reason `fire()` is: it is the only part of the
+ * boot judgment that allocates, and it runs at most once (the cooldown covers the rest). */
+function fireBoot(s, t, trigger) {
+  s.fires++;
+  s.lastFireAt = t;
+  s.lastVerdict = {
+    source: "boot",      // distinct from the outer capture's own "auto"/"manual" `kind`
+    trigger,              // "single" | "cumulative" — which bar tripped
+    taskMs: round1(s.bootTaskMs),
+    taskCount: s.bootTaskCount,
+    bootWindowMs: s.cfg.bootWindowMs,
+  };
 }
 
 /* Seal the baseline as the MEDIAN of the collected frames. Median, not mean: a collection pause
