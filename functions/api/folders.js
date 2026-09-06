@@ -5,9 +5,14 @@
  * The client writes the tree straight to Supabase (own-row RLS) for instant, authoritative
  * edits, then calls here to reconcile the Drive mirror.
  *
- *   POST /api/folders  { action:"sync",        projectId }            → reconcile tree → Drive
- *   POST /api/folders  { action:"plan-delete", projectId, folderId }  → enumerate what a
- *                                                                        delete would remove
+ *   POST /api/folders  { action:"sync",          projectId }            → reconcile tree → Drive
+ *   POST /api/folders  { action:"plan-delete",   projectId, folderId }  → enumerate what a
+ *                                                                          delete would remove
+ *   POST /api/folders  { action:"purge-project", projectId }            → trash the project's
+ *                                                                          WHOLE Drive folder tree
+ *                                                                          (B1235169 — the caller
+ *                                                                          then removes the
+ *                                                                          project_folders rows)
  *
  * Auth: a valid Supabase session (Authorization: Bearer <access token>). Drive gating matches
  * /api/files — when the backend isn't "drive" or creds are missing, returns 503 so the client
@@ -18,7 +23,7 @@ import { verifySupabaseUser } from "../../server/auth/supabaseAuth.js";
 import { storageConfig, defaultDriveClientFactory } from "../../server/storage/index.js";
 import { folderStoreSupabase } from "../../server/storage/folderStoreSupabase.js";
 import { supabaseIdStore } from "../../server/storage/idStoreSupabase.js";
-import { syncProjectFolders, planDelete, migrateFilesToTree, moveKeyToTree } from "../../server/storage/folderMirror.js";
+import { syncProjectFolders, planDelete, migrateFilesToTree, moveKeyToTree, purgeProjectDrive } from "../../server/storage/folderMirror.js";
 
 const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8" } });
@@ -79,6 +84,13 @@ export async function onRequestPost(context) {
     if (action === "plan-delete") {
       if (!folderId) return json({ ok: false, error: "Missing folderId." }, 400);
       const r = await planDelete({ projectId, folderId, client: c.client, store: c.store });
+      return json(r, r.ok ? 200 : 502);
+    }
+    if (action === "purge-project") {
+      // "Delete forever" / the 30-day expiry purge (B1235169) — trash the project's whole Drive
+      // root. The caller (library/lib/folders.js's purgeProjectFolders) removes the
+      // project_folders rows itself once this returns, succeed or fail.
+      const r = await purgeProjectDrive({ projectId, userId: c.user.id, client: c.client, store: c.store });
       return json(r, r.ok ? 200 : 502);
     }
     return json({ ok: false, error: `Unknown action "${action}".` }, 400);
