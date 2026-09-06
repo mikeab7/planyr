@@ -15,6 +15,10 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 >   plumbing, Supabase DDL/RLS, persistence internals, the sandbox Playwright quirk).
 > - **`docs/DATA.md`** — the data bible: entity ownership, invariants, one-answer functions,
 >   causal units, the failure contract, the destructive-action contract (read below).
+> - **`docs/AGENT-RULES.md`** — the verification, measurement, and merge rules already paid for
+>   by real incidents on this repo (a false bug filed, a working feature reported broken, a
+>   wrong number written into the backlog, a gate quietly weakened to go green). **Must be read
+>   before judging whether any change works.**
 >
 > **⛔ TOUCHING PERSISTENCE, SYNC, UNDO, OR DELETE? READ `docs/DATA.md` FIRST.** It is the single
 > place that answers who owns a fact and how it may change — the entity table, the numbered
