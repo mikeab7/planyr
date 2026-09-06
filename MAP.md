@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-06 @ `7bf457d38` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-06 @ `9cb1768` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_700 source files mapped._
+_701 source files mapped._
 
 ## infra
 
@@ -145,6 +145,8 @@ _700 source files mapped._
   - _exports_: `addSheetFromCsvText`, `csvRowsToSheet`, `parseCsv`, `sheetToCsv`
 - **`src/workspaces/model/lib/formulaConsistency.js`** — Flags a formula whose R1C1-style shape breaks its row/column neighbours' pattern, or a hardcoded value sitting inside one; precision-tuned against a realistic pro-forma fixture.
   - _exports_: `findInconsistencies`
+- **`src/workspaces/model/lib/generalFit.js`** — Excel-style column-width fit for General-format numbers: reduce displayed precision, then scientific notation, then a "#" fill — never spill.
+  - _exports_: `fitGeneralNumber`
 - **`src/workspaces/model/lib/modelSaveState.js`** — This module's status → the shared CloudSyncBadge's vocabulary; never claims "synced" for an unprovisioned cloud table.
   - _exports_: `modelSaveState`
 - **`src/workspaces/model/lib/modelStore.js`** — Sheet persistence: local-storage write-through save plus a guarded cloud save (serializeWrites + optimisticUpsert) against `model_sheets`.
