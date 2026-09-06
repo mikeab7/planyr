@@ -45,6 +45,9 @@ export const CAPTURE_NUMERIC_KEYS = [
   "tasksDropped", "countersDropped",
   "baselineMs", "baselineFrames", "baselineSealedAtMs", "windowMeanMs", "slowFraction",
   "ratio", "multiplier", "sustainMs", "floorMs", "fires",
+  /* NEW-3 — the boot-window judgment's own facts (perfTrigger.feedBootTask). Absent from every
+   * ordinary steady-state capture; present only when a boot capture fired. */
+  "bootTaskMs", "bootTaskCount",
   /* NEW-2 (this session) — the WORST window found anywhere in the retained frame history, not
    * just the live sustain window above. See perfTrigger.js's worstWindow() header for why this
    * exists: a manual capture pressed just after a lag ends must not report a clean "right now"
@@ -69,7 +72,11 @@ export const CAPTURE_ENUM_KEYS = [
                  // this app's own table; sanitised, sorted, bounded, `+`-terminated when cut.
 
   "note",        // free-form ONLY from a fixed internal vocabulary — see NOTE_VOCAB
+  "bootTrigger", // NEW-3 — "single" | "cumulative", which bar the boot judgment tripped; see BOOT_TRIGGER_VOCAB
 ];
+
+/* A capture's `bootTrigger` may only ever be one of these — same discipline as NOTE_VOCAB. */
+export const BOOT_TRIGGER_VOCAB = ["", "single", "cumulative"];
 
 /* A capture's `note` may only ever be one of these. It exists so a capture can say something
  * about itself ("baseline never sealed") without opening a free-text channel.
@@ -153,6 +160,10 @@ export function buildCapture(parts) {
   num("sustainMs", p.sustainMs);
   num("floorMs", p.floorMs);
   num("fires", p.fires);
+  /* NEW-3 — present only on a boot-window capture (perfTrigger.feedBootTask's verdict). */
+  num("bootTaskMs", p.bootTaskMs, 1);
+  num("bootTaskCount", p.bootTaskCount);
+  enu("bootTrigger", p.bootTrigger);
   /* NEW-2 — the worst sub-window found anywhere in the retained frame history. Omitted (not just
    * zero) when there wasn't enough retained history to find one — `num()` already does that for
    * any non-finite value, so a capture with no worst window simply carries none of these keys. */
@@ -267,6 +278,7 @@ export function assertCaptureClean(cap) {
       if (typeof v !== "string") bad.push(`${k}: not a string`);
       else if (v.length > 48) bad.push(`${k}: over-long`);
       else if (k === "note" && !NOTE_VOCAB.includes(v)) bad.push(`note: outside the fixed vocabulary`);
+      else if (k === "bootTrigger" && !BOOT_TRIGGER_VOCAB.includes(v)) bad.push(`bootTrigger: outside the fixed vocabulary`);
       else if (k === "plan" && !/^[A-Za-z0-9_-]*$/.test(v)) bad.push(`plan: unsanitised`);
       else if (k === "layers" && !/^[a-z0-9_,+]*$/i.test(v)) bad.push(`layers: unsanitised`);
     } else if (series.has(k)) {
