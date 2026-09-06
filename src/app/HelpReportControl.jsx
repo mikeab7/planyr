@@ -114,7 +114,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import AnchoredMenu from "../shared/ui/AnchoredMenu.jsx";
-import { MenuItem, menuPanelStyle } from "../shared/ui/controls.jsx";
+import { MenuItem } from "../shared/ui/controls.jsx";
 import { RADIUS } from "../shared/ui/radius.js";
 import { FONT_SIZE } from "../shared/ui/designTokens.js";
 import { cornerClearanceFromBottom } from "../shared/ui/cornerClearance.js";
@@ -308,7 +308,7 @@ export default function HelpReportControl({ user }) {
         )}
       </button>
 
-      <AnchoredMenu open={open} onClose={closeAll} anchorRef={anchorRef} placement="above-left" width={280} zIndex={Z_MENU} panelStyle={menuPanelStyle}>
+      <AnchoredMenu open={open} onClose={closeAll} anchorRef={anchorRef} placement="above-left" width={280} zIndex={Z_MENU}>
         {view === "menu" && (
           <>
             <MenuItem onClick={openReportForm} style={rowStyle}>Report a problem</MenuItem>
