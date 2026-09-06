@@ -11,15 +11,19 @@ _Last updated: 2026-09-06._
 
 > **Short version: on your phone, tapping "✎ Properties" after selecting something now pulls up a
 > panel that slides up from the bottom of the screen (like Google Maps), instead of the old
-> narrow drawer that slid in from the side.** Once this PR merges, open **planyr.io** on your
-> iPhone, open any site plan, select a building or other object, tap the "✎ Properties" pill, and
-> try to break it: drag the little handle up for more room, drag it down to close it, and tap into
-> a number field to confirm the on-screen keyboard doesn't cover what you're typing. I tested this
-> in a browser wearing an "iPhone costume" (a simulated phone), but a phone-shaped simulation isn't
-> the same as your actual phone — so this is the one thing that genuinely needs your real device.
-> - [ ] **Open planyr.io on your iPhone and try it** — select something, open Properties, edit a
->       field, confirm you can still see what you're editing and the keyboard doesn't bury it.
->       Nothing else on this is waiting on you; this is purely "does it feel right in your hand."
+> narrow drawer that slid in from the side.** You can try it RIGHT NOW, before this even merges,
+> at this preview link on your iPhone: **https://claude-properties-bottom-she.planyr.pages.dev**
+> (it stays live and updates itself while the pull request is open; once merged, the same behavior
+> is on planyr.io as usual). Open any site plan, select a building or other object, tap the
+> "✎ Properties" pill, and try to break it: drag the little handle up for more room, drag it down
+> to close it, and tap into a number field to confirm the on-screen keyboard doesn't cover what
+> you're typing. I tested this in a browser wearing an "iPhone costume" (a simulated phone), but a
+> phone-shaped simulation isn't the same as your actual phone — so this is the one thing that
+> genuinely needs your real device.
+> - [ ] **Open that link (or planyr.io once merged) on your iPhone and try it** — select
+>       something, open Properties, edit a field, confirm you can still see what you're editing
+>       and the keyboard doesn't bury it. Nothing else on this is waiting on you; this is purely
+>       "does it feel right in your hand."
 
 ## 🤖 Signup now has a bot check built in — two things needed from you to turn it on (B1160720/B1160723)
 
