@@ -1,10 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-05 @ `a7464bc8` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
-> **Generated 2026-09-05 @ `fe38d2f5` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
-> **Generated 2026-09-05 @ `622b1f38` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
-> **Generated 2026-09-05 @ `db094cab` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
-> **Generated 2026-09-06 @ `2bbe426f` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-06 @ `0bffe8d4` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -19,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_694 source files mapped._
+_695 source files mapped._
 
 ## infra
 
@@ -1016,7 +1012,7 @@ _694 source files mapped._
 - **`src/workspaces/site-planner/lib/mapillaryClient.js`** — Leaflet-free Mapillary request shaping: builds bbox map_features URL (same-origin token-injecting proxy, or direct Graph API with a user token) and filters to pole/hydrant detections
   - _exports_: `mapillaryRequestUrl`, `MLY_FIELDS`, `MLY_LIMIT`, `MLY_PROXY_PATH`, `pickDetections`
 - **`src/workspaces/site-planner/lib/mapLock.js`** — THE projection welding the planner's feet frame to the Web-Mercator basemap — scaled-Mercator feet↔lat/lng plus the matching ppf↔zoom, both anchored at the site origin
-  - _exports_: `basemapWrapPoint`, `basemapWrapPointTransformed`, `exactContainerPoint`, `feetToLatLngPair`, `FT_PER_DEG`, `ftPerDeg`, `hasRegisterableContainer`, `invMercDeg`, `lngLatToFeet`, `lockOffsetPx`, `mercDeg`, `ppfToZoom`, `REGISTRATION_SANITY_PX`, `registrationLayoutMayHaveChanged`, `registrationShift`, `sanitizeShift`, `tileNwFeet`, `zoomToPpf`
+  - _exports_: `basemapWrapPoint`, `basemapWrapPointTransformed`, `exactContainerPoint`, `feetToLatLngPair`, `FT_PER_DEG`, `ftPerDeg`, `hasRegisterableContainer`, `invMercDeg`, `lngLatToFeet`, `lockOffsetPx`, `mercDeg`, `ppfToZoom`, `REGISTRATION_SANITY_PX`, `registrationLayoutMayHaveChanged`, `registrationShift`, `sanitizeShift`, `tileNwFeet`, `viewValuesEqual`, `zoomToPpf`
 - **`src/workspaces/site-planner/lib/mapStack.js`** — NEW-1 THE map stacking model: one fixed semantic order (basemap → GIS area fills → references → parcel → setback → elements → promoted references → LIFTED GIS area fills → GIS line strokes → labels → handles), the declared per-source area/line/point role + its role-split form, the per-layer "Show above plan" lift (the escape hatch opacity cannot be) with its band pane names + rebuild key, the three export bands, and the audit that fails the build on an unclassified GIS source
   - _exports_: `auditLayerRoles`, `bandKey`, `canLiftRole`, `CANVAS_Z`, `configCanLift`, `EXPORT_BANDS`, `exportBandFor`, `exportsOverPlan`, `FRONT_BAND_ATTR`, `GIS_ROLES`, `isRoleSplit`, `layerOverPlan`, `LIFTABLE_ROLE`, `MAP_STACK`, `PANE_AREA`, `PANE_AREA_FRONT`, `PANE_AREA_FRONT_LABEL`, `PANE_AREA_LABEL`, `PANE_LINE`, `PANE_LINE_LABEL`, `panesForLayer`, `panesForRole`, `roleOverElements`, `ROLES_OVER_ELEMENTS`, `rolesOf`, `STACK_Z`, `stackOrder`, `SVG_TIERS`, `SVG_Z`, `tierForLayer`, `tierForRole`
 - **`src/workspaces/site-planner/lib/mapSymbols.js`** — leaflet point symbology: the `pointToLayer` circleMarker factory every GeoJSON-consuming layer must pass, plus the `L.Icon.Default` image-path fix so an accidental default marker is a pin, not a broken image.

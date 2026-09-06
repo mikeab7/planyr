@@ -70,7 +70,7 @@ import { BASEMAPS } from "./lib/basemaps.js";
 import {
   ppfToZoom, zoomToPpf, exactContainerPoint,
   basemapWrapPoint, registrationShift, sanitizeShift, tileNwFeet, registrationLayoutMayHaveChanged,
-  hasRegisterableContainer,
+  hasRegisterableContainer, viewValuesEqual,
 } from "./lib/mapLock.js";
 import { overscanPx, keepBufferFor, retinaForZoom, tileWeight, tileCacheLimit } from "./lib/tileBudget.js";
 import { preserveTilesAcrossSetView, announceSetView, boundTileCache, releaseLayer, throttleTilePruning, armBlankTileHeal } from "./lib/tileLifecycle.js";
@@ -2080,13 +2080,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * `diagArm.js` way (read at CALL time, armable with no console via `?planyrDiag=1`), so it costs
    * nothing unarmed and needs no remount to switch on. It records; it changes nothing. */
   const viewChangeLogRef = useRef([]);
+  /* ⛔ NEW-2 (the site-route render-loop crash, React error #185 / "Maximum update depth
+   * exceeded") — GUARD THE DISPATCH, the same rule B1189 already applied to `setSize`/
+   * `setRegShift`: a `setState` call that lands on the SAME numbers is still a genuine dispatch
+   * unless the updater returns the CURRENT object, because React only skips re-rendering on
+   * reference equality. Several call sites here hand `setView` a brand-new plain object even when
+   * every field already matches the live view (`fit()` on a blank/just-opened plan matches the
+   * initial `{ppf:0.35,offX:60,offY:60}` state exactly) — and the basemap registration commit
+   * effect a few hundred lines down depends on `view` as a WHOLE OBJECT specifically because its
+   * own comment assumed "view's writers replace it only on a real change". This is the fix that
+   * makes that assumption true, at the one place every `setView` call funnels through, rather than
+   * chasing down each call site (or narrowing every consumer, which was rejected once already for
+   * its bundle-size cost). */
   const setView = useCallback((updater) => {
     if (isDiagArmed(window)) {
       const log = viewChangeLogRef.current;
       log.push({ t: Math.round(performance.now()), stack: (new Error("setView")).stack });
       if (log.length > 200) log.shift(); // bounded ring — a diagnostic must never leak memory
     }
-    setViewRaw(updater);
+    setViewRaw((v) => {
+      const next = typeof updater === "function" ? updater(v) : updater;
+      return viewValuesEqual(v, next) ? v : next;
+    });
   }, []);
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -3508,11 +3523,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * right: nothing in the body can tell two `{w:1058,h:640}` objects apart. The B837 pan
      * compensation below already depends on `size.w` this way; this effect was the outlier.
      *
-     * SCOPED TO `size` DELIBERATELY. `view` and `origin` stay whole-object deps: the trace showed
-     * both hold their identity across the loop (only `size` churned), and their writers replace
-     * them only on a real change, so a new object there IS new information. Listing their fields
-     * too would be belt-and-braces against a churn nothing has ever exhibited, and it is not free
-     * — it cost enough bytes to push `largestChunkBytes` past its ceiling in CI.
+     * SCOPED TO `size` DELIBERATELY. `view` and `origin` stay whole-object deps: `origin` is
+     * stabilised at its source (B519907's `useMemo` keyed on lat/lon), and `view`'s writer
+     * (`setView`) now guards its own dispatch the same way `setSize` does — see the NEW-2 comment
+     * on `setView`'s definition, added after this SAME effect was found to be the crash site for a
+     * DIFFERENT trigger (project-arrival, not the panel-escape race this session fixed): `fit()`
+     * dispatched a fresh `{ppf,offX,offY}` object on a blank/just-opened plan that matched the
+     * initial state's numbers exactly, and `view` being a whole-object dep here is what turned that
+     * harmless-looking allocation into a re-run of this effect's own `commit()` — the same pump
+     * shape as the `size` bug below, just fed by a different writer. Listing `view`'s fields here
+     * too would be belt-and-braces on top of that fix and is not free — it cost enough bytes to
+     * push `largestChunkBytes` past its ceiling in CI when tried for `size` above.
      *
      * NOT fixed by quantising `setSize` (the previous session's proposed next step): the widths
      * never disagreed — RO and the layout effect both reported 1058 exactly — and rounding
@@ -5416,12 +5437,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * CSS pixel) the displayed decimals are the same order as the error being measured. This
    * ref carries the live values so the hook below can expose them without re-registering on
    * every mouse move. */
+  /* ⛔ NEW-2 (site-route render-loop crash) — `viewIdentityEpoch` IS THE INSTRUMENT for the
+   * setView-dispatch-guard fix above, the same shape as `layerIdentityEpoch` (B385040): this
+   * effect already re-runs exactly when `view`'s OBJECT IDENTITY changes, so counting its own
+   * runs is a free, exact answer to "did view actually get a new identity" — which is the one
+   * thing `get()`'s field values can't tell you (two identical-valued views read the same either
+   * way). E2E-gated, read-only, never runs in production. Declared BEFORE `probeRef` below on
+   * purpose — ui-audit/audit-hidden-content-reads.mjs attributes a body to the nearest PRECEDING
+   * named binding, so inserting this AFTER `probeRef` silently reassigned probeRef's own swept
+   * region to this one instead. */
+  const viewIdentityEpoch = useRef(0);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
+    viewIdentityEpoch.current += 1;
+  }, [view]);
   const probeRef = useRef({});
   useEffect(() => { probeRef.current = { view, size, regShift, cursorFt: cursor, cursorLL, measures }; });
   useEffect(() => {
     if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
     const hook = {
-      get: () => ({ ...view, w: size.w, h: size.h }),
+      get: () => ({ ...view, w: size.w, h: size.h, identityEpoch: viewIdentityEpoch.current }),
       centerOn: (fx, fy, ppf) => setView(() => ({ ppf, offX: size.w / 2 - fx * ppf, offY: size.h / 2 - fy * ppf })),
       // read-only probes (NEW-2): the registration shift actually applied, the cursor's own
       // feet/lat-lng answer, and the committed measure geometry a placed point lands in.
