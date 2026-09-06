@@ -11,24 +11,37 @@
 // at a fixed 21px regardless of pointer type, well under the 44px WCAG/platform touch floor.
 //
 // FIX: the render switch now respects `data.view` at every width. Split — which cannot show two
-// USABLE panes on a phone's PORTRAIT width — collapses to one pane with a `PhonePaneSwitcher`
-// pill (Grid | Gantt); the collapse threshold is the file's own existing `isMobile` (768px),
-// consistent with every other phone-layout decision already in this file. Zoom control sizing now
-// reads `coarsePointer` (a `matchMedia('(pointer: coarse)')` check, independent of width) rather
-// than `isMobile` — a real phone in landscape gets 44px buttons even though it clears 768px, and a
-// standard fine-pointer desktop measures coarsePointer=false and renders byte-identical to before.
+// USABLE panes on a phone's PORTRAIT width — collapses to one pane; the collapse threshold is the
+// file's own existing `isMobile` (768px), consistent with every other phone-layout decision
+// already in this file. Zoom control sizing reads `coarsePointer` (a `matchMedia('(pointer:
+// coarse)')` check, independent of width) rather than `isMobile` — a real phone in landscape gets
+// 44px buttons even though it clears 768px, and a standard fine-pointer desktop measures
+// coarsePointer=false and renders byte-identical to before.
+//
+// ⛔ B1241747 (NEW-4) — AMENDMENT, same day. The first cut of the Split collapse (above) built a
+// SECOND, phone-only "Grid | Gantt" pill to pick which pane shows. Correct to the letter of that
+// brief ("a deliberate way to switch between them"), wrong because the app already has a view
+// switcher — the header's own Grid/Split/Gantt pill — so a phone screen showed TWO stacked
+// switchers (the owner's own screenshot; his words: "I just want the existing Gantt and Split
+// buttons to work"). Fixed by deleting the second pill entirely: the header pill now does double
+// duty — while already in Split at phone width, tapping Grid or Gantt updates which pane shows
+// (via the SAME `phonePane` state, now written from the header pill's own onClick) instead of
+// leaving Split, so `data.view` never stops being "split" and a wider screen still opens on the
+// real two-pane Split. THE GENERAL LESSON this cost a round to learn: when a brief asks for "a way
+// to do X," check whether the app already has one before building a second.
 //
 // This harness proves, live, in a real (emulated) touch browser:
 //  1. PORTRAIT phone (390×844, isMobile=true): tapping Gantt actually shows bars (not a no-op);
-//     tapping Split shows the phone pane switcher, defaults to Grid, and switching panes works —
-//     never two panes at once.
+//     Split shows exactly ONE view-switcher control (never two stacked pills), defaults to Grid,
+//     and tapping the SAME header pill's Gantt tab switches the pane — never two panes at once.
 //  2. LANDSCAPE phone (832×380, isMobile=false, pointer stays coarse): Gantt renders (unchanged
 //     from before — this half already worked) AND its zoom buttons are now >=44px tall/wide.
-//  3. Narrow DESKTOP window (760×860, mouse — pointer:fine, no touch): the phone pane switcher and
-//     zoom controls render at their smaller desktop-ish size, never forced to 44px by width alone
-//     — the WIDTH-DRIVES-LAYOUT / POINTER-DRIVES-SIZING split holds in both directions.
+//  3. Narrow DESKTOP window (760×860, mouse — pointer:fine, no touch): controls render at their
+//     smaller desktop-ish size, never forced to 44px by width alone — WIDTH-DRIVES-LAYOUT /
+//     POINTER-DRIVES-SIZING holds in both directions.
 //  4. Standard DESKTOP viewport (1600×900, mouse): Split still renders BOTH panes exactly as
-//     before, and the zoom buttons stay at their original 21px — pixel-identical.
+//     before, the zoom buttons stay at their original 21px, and the pill's click/highlight
+//     behavior is untouched — pixel-identical.
 //
 // Same boot pattern as ui-audit/verify-gantt-arrow-virtualization.mjs (curl-cached CDN deps routed
 // locally — this sandbox's Chromium cannot reach the public internet — real React/react-dom from
@@ -101,6 +114,16 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
 const fails = [];
 const ok = (cond, msg) => { if (!cond) fails.push(msg); console.log(`  ${cond ? "✓" : "✗ FAIL"} ${msg}`); };
 
+// Counts every visible button whose OWN text is exactly "Grid"/"Split"/"Gantt" — the old bug had
+// TWO such buttons for "Grid" and "Gantt" at once (the header pill's own + the phone-only pill's);
+// the fix must show exactly one of each, always.
+const countSwitcherButtons = (page) => page.evaluate(() => {
+  const count = (label) => [...document.querySelectorAll("button")]
+    .filter((b) => b.textContent.trim() === label && b.getBoundingClientRect().width > 0)
+    .length;
+  return { grid: count("Grid"), split: count("Split"), gantt: count("Gantt") };
+});
+
 async function boot(page, view) {
   currentView = view;
   const real = [];
@@ -120,6 +143,8 @@ async function boot(page, view) {
   const ctx = await browser.newContext({ ...devices["iPhone 13"], ignoreHTTPSErrors: true });
   const page = await ctx.newPage();
   const real = await boot(page, "grid");
+  const countsBefore = await countSwitcherButtons(page);
+  ok(countsBefore.grid === 1 && countsBefore.split === 1 && countsBefore.gantt === 1, `exactly one Grid/Split/Gantt button each in plain Grid view (${JSON.stringify(countsBefore)})`);
   await page.locator(".hdr-view button", { hasText: "Gantt" }).tap();
   await page.waitForTimeout(400);
   const bars = await page.locator("[data-gantt-bar]").count();
@@ -132,7 +157,7 @@ async function boot(page, view) {
   await ctx.close();
 }
 
-// ── 2. PORTRAIT phone: Split collapses to ONE pane with a working switcher ──
+// ── 2. PORTRAIT phone: Split collapses to ONE pane, switched via the EXISTING header pill only ──
 {
   console.log("── Portrait phone (390×844, touch), Split view ──");
   const ctx = await browser.newContext({ ...devices["iPhone 13"], ignoreHTTPSErrors: true });
@@ -141,14 +166,30 @@ async function boot(page, view) {
   const gridVisible = await page.locator('[data-grid-scroll="1"]').count();
   const ganttVisible = await page.locator("[data-gantt-bar]").count();
   ok(gridVisible > 0 && ganttVisible === 0, `Split defaults to ONE pane (Grid) at portrait phone width, not both (grid=${gridVisible}, gantt-bars=${ganttVisible})`);
-  const switcher = page.locator("text=Gantt").first();
-  const switcherBox = await switcher.boundingBox().catch(() => null);
-  ok(!!switcherBox, "the phone pane switcher (Grid | Gantt) is present");
-  await switcher.tap();
+
+  // B1241747 — THE regression this amendment exists to catch: #1490's first cut rendered a SECOND
+  // "Grid | Gantt" pill under the header's own Grid/Split/Gantt pill. Assert exactly one of each.
+  const counts = await countSwitcherButtons(page);
+  ok(counts.grid === 1 && counts.split === 1 && counts.gantt === 1, `exactly ONE view-switcher control at phone width in Split — never two stacked pills (${JSON.stringify(counts)})`);
+
+  // Switch panes via the SAME header pill (no separate control exists to tap).
+  await page.locator(".hdr-view button", { hasText: "Gantt" }).tap();
   await page.waitForTimeout(400);
   const ganttAfter = await page.locator("[data-gantt-bar]").count();
   const gridAfter = await page.locator('[data-grid-scroll="1"]').count();
-  ok(ganttAfter > 0 && gridAfter === 0, `tapping the switcher's Gantt segment shows ONLY Gantt (gantt-bars=${ganttAfter}, grid=${gridAfter})`);
+  ok(ganttAfter > 0 && gridAfter === 0, `tapping the header pill's Gantt tab (while in phone Split) shows ONLY Gantt (gantt-bars=${ganttAfter}, grid=${gridAfter})`);
+  const countsAfter = await countSwitcherButtons(page);
+  ok(countsAfter.grid === 1 && countsAfter.split === 1 && countsAfter.gantt === 1, `still exactly one of each button after switching panes (${JSON.stringify(countsAfter)})`);
+
+  // Prove `data.view` genuinely stayed "split" under the hood (never silently became "gantt"):
+  // widen the viewport past the isMobile threshold and confirm the REAL two-pane Split appears,
+  // with nothing forgotten — this is only possible if data.view was never overwritten.
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.waitForTimeout(400);
+  const gridWide = await page.locator('[data-grid-scroll="1"]').count();
+  const ganttWide = await page.locator("[data-gantt-bar]").count();
+  ok(gridWide > 0 && ganttWide > 0, `widening the same session past the phone breakpoint reveals the REAL two-pane Split — proves data.view was never overwritten to "gantt" (grid=${gridWide}, gantt-bars=${ganttWide})`);
+
   ok(real.length === 0, `no uncaught page errors (portrait Split, ${real.length})`);
   await page.screenshot({ path: OUT + "schedule-phone-portrait-split-gantt.png" }).catch(() => {});
   await ctx.close();
@@ -185,7 +226,7 @@ async function boot(page, view) {
   await ctx.close();
 }
 
-// ── 5. Standard DESKTOP viewport (mouse) — Split unchanged, zoom buttons unchanged ──
+// ── 5. Standard DESKTOP viewport (mouse) — Split unchanged, zoom buttons unchanged, pill untouched ──
 {
   console.log("── Standard desktop (1600×900, mouse) — pixel-parity check ──");
   const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1, ignoreHTTPSErrors: true });
@@ -197,9 +238,13 @@ async function boot(page, view) {
   const zoomBtn = page.locator('button[title="Zoom in"]').first();
   const zbox = await zoomBtn.boundingBox().catch(() => null);
   ok(!!zbox && Math.round(zbox.height) === 21, `desktop zoom button height is byte-identical to before this fix (21px, got ${zbox ? zbox.height.toFixed(1) : "n/a"})`);
-  const switcherCount = await page.locator("text=Gantt").count();
-  // "Gantt" also appears as the header view-switcher tab label, so this just confirms no SECOND
-  // phone-only switcher pill leaked onto the desktop layout.
+  const counts = await countSwitcherButtons(page);
+  ok(counts.grid === 1 && counts.split === 1 && counts.gantt === 1, `desktop still shows exactly one of each pill button (${JSON.stringify(counts)})`);
+  // "Split" must still be the highlighted/active tab on desktop (the pill's click/highlight logic
+  // must not have picked up any phone-only branching) — read its own font-weight, matching the
+  // active-tab convention every other tab in this pill already uses.
+  const splitWeight = await page.locator(".hdr-view button", { hasText: "Split" }).evaluate((el) => getComputedStyle(el).fontWeight);
+  ok(splitWeight === "600", `Split tab is still shown as active on desktop (fontWeight 600, got ${splitWeight})`);
   ok(real.length === 0, `no uncaught page errors (desktop split, ${real.length})`);
   await page.screenshot({ path: OUT + "schedule-desktop-split.png" }).catch(() => {});
   await ctx.close();
@@ -208,7 +253,7 @@ async function boot(page, view) {
 await browser.close(); server.close();
 
 console.log("\n" + (fails.length === 0
-  ? "✅ PASS — B1241744/B1241745 verified live (portrait Gantt+Split, landscape touch sizing, narrow-mouse-window untouched, desktop pixel parity)"
+  ? "✅ PASS — B1241744/B1241745/B1241747 verified live (portrait Gantt+Split with ONE switcher, landscape touch sizing, narrow-mouse-window untouched, desktop pixel parity)"
   : `❌ FAIL — ${fails.length} assertion(s):`));
 fails.forEach((f) => console.log("  - " + f));
 process.exit(fails.length === 0 ? 0 : 1);
