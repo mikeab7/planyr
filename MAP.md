@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-06 @ `b8c96cfd9` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-06 @ `c57a1c606` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_701 source files mapped._
+_702 source files mapped._
 
 ## infra
 
@@ -674,7 +674,7 @@ _701 source files mapped._
 - **`src/workspaces/site-planner/components/elementMenuIcons.jsx`** — the B845584 element context-menu rebuild's own 14px/stroke-1.3 icon family (a finer, denser idiom than icons.jsx's 24px/stroke-2 set, matching the owner-approved mockup); every row in the rebuilt menu gets one in a 16px gutter
   - _exports_: `AlignRotationIcon`, `AttachIcon`, `BringForwardIcon`, `BringToFrontIcon`, `BumpOutIcon`, `CopyIcon`, `DeleteIcon`, `DetachIcon`, `DockZonesIcon`, `DuplicateIcon`, `GroupIcon`, `LockIcon`, `PondSettingsIcon`, `PondSizingIcon`, `PropertiesIcon`, `ResetFootprintIcon`, `ReshapeIcon`, `RoadBranchIcon`, `SendBackwardIcon`, `SendToBackIcon`, `SplitRowsIcon`, `SwapIcon`, `UngroupIcon`
 - **`src/workspaces/site-planner/components/icons.jsx`** — Small stroke icons (pin / empty-circle / warn-triangle) shared by the planner's panel components, replacing the 📍 emoji that ignored its row's theme colour; route-local on purpose so the bytes stay off every other route's chunk. — `PinIcon`, `EmptyCircleIcon`, `WarnTriangleIcon`
-  - _exports_: `CloseXIcon`, `DuplicateIcon`, `EmptyCircleIcon`, `HistoryIcon`, `LayersIcon`, `PadlockIcon`, `PinIcon`, `PlusIcon`, `RedoIcon`, `SaveIcon`, `StorageIcon`, `UndoIcon`, `WarnTriangleIcon`, `ZoomFitIcon`
+  - _exports_: `CloseXIcon`, `DuplicateIcon`, `EmptyCircleIcon`, `HistoryIcon`, `LayersIcon`, `PadlockIcon`, `PeopleIcon`, `PinIcon`, `PlusIcon`, `RedoIcon`, `SaveIcon`, `StorageIcon`, `UndoIcon`, `WarnTriangleIcon`, `ZoomFitIcon`
 - **`src/workspaces/site-planner/components/JurisdictionBadge.jsx`** — Passive site-header chip showing the active parcel's jurisdiction (city/ETJ/county) from the auto-run B93 identify; display-only, ⚑ on straddle (B763)
   - _exports_: `default (JurisdictionBadge)`
 - **`src/workspaces/site-planner/components/LayerPanel.jsx`** — Shared map-layer toggle UI (both finder + planner): checkbox/opacity/status/vintage per layer + coverage relevance picker
@@ -695,6 +695,8 @@ _701 source files mapped._
   - _exports_: `default (PlaceSearchField)`
 - **`src/workspaces/site-planner/components/PondSection.jsx`** — PR-L the one developer-readable pond cross-section component (used by the ⚡ Optimize what-changed card AND the pond inspector): maps pondSectionModel marks to a responsive, theme-tokened SVG (grade, berm hatch, storage bands, flood/groundwater/receiving lines, outlet, depth dimension, collision-free labels)
   - _exports_: `default (PondSection)`
+- **`src/workspaces/site-planner/components/PresenceChip.jsx`** — the header's "who's here" chip: a two-person silhouette + other real users' initials (capped, "+N" overflow, full breakdown on hover/tap), never counting this account's own extra tabs as people (those render as a bare tab count instead)
+  - _exports_: `default (PresenceChip)`
 - **`src/workspaces/site-planner/components/PrintCompose.jsx`** — the dedicated full-screen "compose exhibit" step (B765985): sheet size/orientation/scale, title block, content toggles, and the live sheet preview, all outside the drawing canvas
   - _exports_: `default (PrintCompose)`
 - **`src/workspaces/site-planner/components/RoadCrossSectionDialog.jsx`** — The "Design road cross-section" dialog: a row-per-band editor with a live to-scale plan-view preview, dimension strings, running totals, and named presets
@@ -1166,7 +1168,7 @@ _701 source files mapped._
 - **`src/workspaces/site-planner/lib/powerScreen.js`** — PHASE 5 power screening (pure): turns HIFLD transmission lines + substations near the parcel into findings — a line crossing the footprint flags a likely transmission easement (present), the nearest substation is a service/interconnect proxy (info); cleans the dataset's withheld voltages and anonymized ("UNKNOWN…") substation names
   - _exports_: `ownerLabel`, `subName`, `summarizeSubstations`, `summarizeTransmission`, `voltLabel`
 - **`src/workspaces/site-planner/lib/presencePill.js`** — pure "N here" presence summary (B674): distinct people from the channel roster, quiet when alone, You-first hover names
-  - _exports_: `presenceSummary`
+  - _exports_: `PRESENCE_INITIALS_CAP`, `presenceChipContent`, `presenceDisplayName`, `presenceInitials`, `presenceParties`
 - **`src/workspaces/site-planner/lib/printScale.js`** — the explicit engineering-scale math (B765985): the standard scale list, a scale's implied frame footprint, and the "does the picked area fit" check
   - _exports_: `checkScaleFits`, `frameFootprintForScale`, `scaleLabel`, `STANDARD_SCALES`
 - **`src/workspaces/site-planner/lib/printSheet.js`** — Pure single-SVG print sheet composer: page geometry, buildings table, metrics band, title block, export filename builder
