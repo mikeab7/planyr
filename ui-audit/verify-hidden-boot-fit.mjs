@@ -69,7 +69,8 @@ import { spawn, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { perfScenarioSeed, SCENARIO_ID } from "./lib/perf-scenario.mjs";
-import { assertMeasurable, pacedWait } from "./lib/tabTiming.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { pacedWait } from "./lib/tabTiming.mjs";
 
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const argOf = (f, d) => { const hit = process.argv.find((a) => a.startsWith(`${f}=`)); return hit ? hit.slice(f.length + 1) : d; };
@@ -146,7 +147,7 @@ const readLog = (page) => page.evaluate(() => (window.__plannerViewChanges ? win
  * Chromium reports as "visible" for a single foregrounded tab). `gesture` runs right after the flip
  * — the "pinch immediately following the visibility change" case, folded into each hidden cell
  * rather than a fifth cell of its own. */
-async function iteration(browser, base, { device, hiddenMs, gesture, label }) {
+async function iteration(browser, base, { device, hiddenMs, gesture }) {
   const ctx = await browser.newContext(device);
   if (hiddenMs > 0) await ctx.addInitScript(VISIBILITY_SPOOF);
   await ctx.addInitScript(perfScenarioSeed());
@@ -162,7 +163,7 @@ async function iteration(browser, base, { device, hiddenMs, gesture, label }) {
       await pacedWait(page, 250); // let the visibilitychange handlers + a retry frame or two land
     }
     const cdp = await ctx.newCDPSession(page);
-    await assertMeasurable(page, `verify-hidden-boot-fit:${label}`);
+    await assertMeasurable(page, "verify-hidden-boot-fit");
     await pacedWait(page, 1000); // let the 120ms boot-fit (and any retry) settle before the gesture
     const beforeGesture = await readLog(page);
     if (gesture) await gesture(page, cdp);
@@ -214,7 +215,7 @@ async function runAgainst(dir, label) {
       const n = cell.iter;
       const runs = [];
       for (let i = 0; i < n; i++) {
-        try { runs.push(await iteration(browser, base, { ...cell, label: `${label}:${cell.name}#${i + 1}` })); }
+        try { runs.push(await iteration(browser, base, cell)); }
         catch (e) { runs.push({ error: String(e && e.message || e) }); }
       }
       const ok = runs.filter((r) => !r.error);
