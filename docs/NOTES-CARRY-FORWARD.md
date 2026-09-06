@@ -368,6 +368,23 @@ position**.
    the server's row instead of naming a conflict — a genuinely dirty page is unaffected. **When
    adding ANY future automatic (non-interactive) body rewrite, route it through the SAME `auto`
    path — never straight through `writePage`**, or it inherits this exact false-conflict class.
+9. **A PROJECT'S `sites` ROW CAN BE SILENTLY POISONED BY A WORKSPACE-TAB SWITCH THAT HAPPENED
+   BEFORE NOTES EVER RAN (B1202176 amendment, 2026-09-05) — do not re-diagnose this as a Notes
+   wiring bug.** Notes' own `ensureProjectExists` wiring (`handleAddPage`/`handleSetPageProject`/
+   `handleFileRecovered`, the empty-state "+ New page" button included) can be exactly correct and
+   still never create the row. Root cause lived one workspace tab-switch earlier, in Site Planner:
+   `SitePlanner.jsx`'s `persistOrDrop` drops a still-blank, still-unlocated "New project" draft the
+   instant Site Planner goes inactive — which fires the moment you switch TO Notes, before Notes
+   has done anything — and used to call the general `deleteSite(id)` unconditionally, which writes
+   a DURABLE per-account tombstone even for an id that never had a local record to protect. That
+   tombstone then silently, permanently blocks `saveSite`'s own resurrection guard against ANY
+   later module's `ensureProjectRow` (Notes' own materialize call is deliberately best-effort, so
+   the failure surfaces nowhere). **Before spending a session re-auditing Notes' wiring for "the
+   row never gets created," check whether the project was ever opened in Site Planner and abandoned
+   blank first.** Fixed via `deleteSite(id, { tombstone })` — `persistOrDrop` now passes
+   `tombstone: !!stored` (a record that already existed locally still gets the full delete). See
+   `test/siteSoftDelete.test.js`'s B1202176-amendment describe block for the reproduction and fix,
+   proven through the real `ensureProjectRow` → `saveSite` chain.
 
 ---
 

@@ -1067,7 +1067,36 @@ describe("the project a notebook belongs to", () => {
     expect(notes, "AppHeader must be given currentProject or the crumb forgets the project")
       .toMatch(/currentProject=\{/);
     // …and it is the ROUTE's project, so the crumb can never disagree with the URL.
-    expect(notes).toMatch(/projectId \? \{ id: projectId/);
+    expect(notes).toMatch(/projectId \? resolveProjectRef\(projectId\) : null/);
+  });
+
+  /* ⛔ B1202176 amendment (2026-09-05) — the breadcrumb above and a page's own project label
+   * (`activeProjectLabel`, rendered inside NoteEditor) each used to run their OWN lookup against
+   * `projects` with a DIFFERENT fallback for "not found yet" and could name the SAME project id
+   * two contradictory ways on one screen: the crumb read "Untitled project" while the open page
+   * read "A project that no longer exists" — reproduced live on a brand-new project whose
+   * `public.sites` row had not yet materialized. Both reads must go through the ONE function. */
+  it("⛔ the breadcrumb and a page's own project label read project existence from ONE function, never two (B1202176 amendment)", () => {
+    const notes = code("Notes.jsx");
+    expect(notes, "there must be exactly one resolver function").toMatch(/const resolveProjectRef = useCallback\(\(pid\) => \{/);
+    // The route's OWN project id is proven to exist by the fact you are standing in it — a
+    // lazily-created row can legitimately lag behind, so this must be checked BEFORE falling
+    // back to the (possibly stale) list lookup, never after.
+    const resolverStart = notes.indexOf("const resolveProjectRef = useCallback((pid) => {");
+    const resolverEnd = notes.indexOf("}, [projectId, projectName, projects, projectList.state]);", resolverStart);
+    expect(resolverStart).toBeGreaterThan(-1);
+    expect(resolverEnd).toBeGreaterThan(resolverStart);
+    const body = notes.slice(resolverStart, resolverEnd);
+    const routeCheckIdx = body.indexOf("pid === projectId");
+    const listLookupIdx = body.indexOf("projects.find(");
+    expect(routeCheckIdx).toBeGreaterThan(-1);
+    expect(listLookupIdx).toBeGreaterThan(routeCheckIdx);
+    // Both the breadcrumb and the open page's label call the shared resolver — neither may
+    // re-derive its own "is this in the list?" check.
+    expect(notes.includes("resolveProjectRef(projectId)"), "notesProject must call the shared resolver").toBe(true);
+    expect(notes.includes("return resolveProjectRef(pid);"), "activeProjectLabel must call the shared resolver").toBe(true);
+    expect(notes, "activeProjectLabel must not run its own separate list lookup any more")
+      .not.toMatch(/const name = projects\.find\(\(p\) => p\.id === pid\)\?\.name \|\| null;[\s\S]{0,80}A project that no longer exists/);
   });
 
   it("⛔ no caption describes a failed lookup as though it were the user's data (B1419)", () => {

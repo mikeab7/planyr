@@ -533,14 +533,38 @@ export default function Notes({
     [projects, projectId],
   );
 
+  /* ⛔ ONE PROJECT-EXISTENCE READ FOR THE WHOLE SCREEN (B1202176 amendment, 2026-09-05) — the
+   * breadcrumb below and a page's own project label (`activeProjectLabel`, further down) used to
+   * each do their own lookup against `projects` with a DIFFERENT fallback for "not in the list
+   * yet", and could name the SAME project id two contradictory ways on one screen: the crumb read
+   * "Untitled project" (its fallback assumes the route's own project always exists) while the open
+   * page read "A project that no longer exists" (its fallback assumes a missing list entry means
+   * gone) — reproduced live on a brand-new project whose `public.sites` row had not yet been
+   * materialized. The route you are STANDING IN is proven to exist by that fact alone (a lazily
+   * created row can legitimately lag behind — that's what B1202176 itself fixed for the
+   * block-on-open case), so `pid === projectId` short-circuits straight to resolved. Anything else
+   * still goes through the list, and a genuine miss there says so honestly. Both `notesProject`
+   * and `activeProjectLabel` call this one function — never re-derive either read separately. */
+  const resolveProjectRef = useCallback((pid) => {
+    if (pid == null) return null;
+    if (pid === projectId) return { name: projectName || "Untitled project", resolved: true, projectId: pid };
+    const name = projects.find((p) => p.id === pid)?.name || null;
+    if (name) return { name, resolved: true, projectId: pid };
+    return {
+      name: projectList.state === "failed" ? "Project — couldn’t be looked up" : "A project that no longer exists",
+      resolved: false,
+      projectId: pid,
+    };
+  }, [projectId, projectName, projects, projectList.state]);
+
   /* THE HEADER MUST SAY WHERE YOU ACTUALLY ARE (B1343 ×2). Every other workspace hands
    * AppHeader a `currentProject`; Notes never did, so walking into Notes from inside a project
    * left the crumb reading "Dashboard / Select a project" while the URL named the project.
    * Same shape as Review and Library: the route's id, with the store's name when it resolves
    * (the breadcrumb re-resolves the live name itself, so a rename shows without a reload). */
   const notesProject = useMemo(
-    () => (projectId ? { id: projectId, name: projectName || "Untitled project" } : null),
-    [projectId, projectName],
+    () => (projectId ? resolveProjectRef(projectId) : null),
+    [projectId, resolveProjectRef],
   );
 
   /* Keep the open page inside the visible set. Switching projects — or narrowing the scope
@@ -578,14 +602,8 @@ export default function Notes({
     if (active.root.orgScope) return { name: ORG_GROUP_LABEL, resolved: true, projectId: null, org: true };
     const pid = active.root.projectId ?? null;
     if (pid == null) return { name: NO_PROJECT_LABEL, resolved: true, projectId: null };
-    const name = projects.find((p) => p.id === pid)?.name || null;
-    if (name) return { name, resolved: true, projectId: pid };
-    return {
-      name: projectList.state === "failed" ? "Project — couldn’t be looked up" : "A project that no longer exists",
-      resolved: false,
-      projectId: pid,
-    };
-  }, [active, projects, projectList.state]);
+    return resolveProjectRef(pid);
+  }, [active, resolveProjectRef]);
 
   /* ---- THE INTEGRITY SCAN (NEW-4) --------------------------------------------------------
    *

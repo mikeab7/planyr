@@ -20,6 +20,7 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const SP = readFileSync(join(here, "../src/workspaces/site-planner/SitePlannerApp.jsx"), "utf8");
 const SHELL = readFileSync(join(here, "../src/app/Shell.jsx"), "utf8");
+const PLANNER = readFileSync(join(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
 
 describe("SitePlannerApp.jsx marks every freshly-minted project id before it can reach the URL", () => {
   it("declares the tracking ref", () => {
@@ -105,5 +106,38 @@ describe("Shell.jsx records the fresh-creation signal and folds it into the gate
   it("the freshlyCreated computation ORs the reload-surviving persisted check in, not the ref alone", () => {
     const idx = SHELL.indexOf("const freshlyCreated = freshProjectIdsRef.current.has(projectId) || wasProjectFreshlyMinted(projectId);");
     expect(idx).toBeGreaterThan(-1);
+  });
+});
+
+/* B1202176 (amendment, 2026-09-05) — `SitePlanner.jsx`'s `persistOrDrop` fires the moment a
+ * workspace tab switch makes the Site Planner canvas inactive, and for a still-blank, still-
+ * unlocated draft (exactly what "New project" mints and leaves behind the instant you switch to
+ * another workspace tab without drawing anything) it drops the site rather than saving it. Before
+ * this fix it always called the general `deleteSite(id)`, which tombstones unconditionally — and a
+ * project id that never had a local record has nothing for that tombstone to protect, so it only
+ * ever poisoned `saveSite`'s own resurrection guard against a LATER module's `ensureProjectRow`
+ * (proven end-to-end in `test/siteSoftDelete.test.js`'s B1202176-amendment describe block). The
+ * fix is checking whether a local record already existed BEFORE deciding whether to tombstone —
+ * this is the wiring proof that `persistOrDrop` actually makes that check and actually threads it
+ * through, not merely that `deleteSite` supports the option somewhere unused. */
+describe("SitePlanner.jsx's persistOrDrop only tombstones a drop that had a real local record to protect", () => {
+  it("reads the local record BEFORE deciding whether to drop it", () => {
+    const fnStart = PLANNER.indexOf("const persistOrDrop = () => {");
+    expect(fnStart).toBeGreaterThan(-1);
+    const storedIdx = PLANNER.indexOf("const stored = loadSite(siteId);", fnStart);
+    const blankCheckIdx = PLANNER.indexOf("if (isBlankSite(s) && !stored?.origin) {", fnStart);
+    expect(storedIdx).toBeGreaterThan(fnStart);
+    expect(blankCheckIdx).toBeGreaterThan(storedIdx);
+  });
+
+  it("passes tombstone: !!stored to deleteSite, never an unconditional call", () => {
+    const fnStart = PLANNER.indexOf("const persistOrDrop = () => {");
+    const callIdx = PLANNER.indexOf("deleteSite(siteId, { tombstone: !!stored });", fnStart);
+    expect(callIdx).toBeGreaterThan(fnStart);
+    // The old unconditional call shape must be GONE from this function, not merely duplicated
+    // beside the fix — otherwise the fix could be dead code sitting next to the still-broken original.
+    const fnEnd = PLANNER.indexOf("\n  };", fnStart);
+    const body = PLANNER.slice(fnStart, fnEnd);
+    expect(body.includes("deleteSite(siteId);")).toBe(false);
   });
 });
