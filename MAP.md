@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-06 @ `4e4bc104` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-06 @ `c4d15377` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -529,7 +529,7 @@ _697 source files mapped._
 - **`src/shared/telemetry/gestureTelemetry.js`** — Pinch-gesture telemetry: sampled event:pinch rows (surface, touch/pointer source, finger count, completed/cancelled/anomaly, cancel reason) via reportClientEvent
   - _exports_: `PINCH_COMPLETE_SAMPLE_RATE`, `PINCH_OUTCOMES`, `pinchEventDetail`, `recordPinchGesture`, `shouldLogPinch`
 - **`src/shared/telemetry/perfCapture.js`** — Builds and encodes a performance capture — the privacy ALLOWLIST (counters/timings/view state only, proved before every send), plan-id sanitisation, frame statistics, and the compact encoder that trims oldest-first to fit one telemetry row.
-  - _exports_: `assertCaptureClean`, `attributionLabel`, `buildCapture`, `CAPTURE_ENUM_KEYS`, `CAPTURE_MAX_CHARS`, `CAPTURE_NUMERIC_KEYS`, `CAPTURE_VERSION`, `decodeFrames`, `encodeCapture`, `encodeFrames`, `frameStats`, `hash32`, `NOTE_VOCAB`, `safePlanId`, `sanitizeAttribution`
+  - _exports_: `assertCaptureClean`, `attributionLabel`, `BOOT_TRIGGER_VOCAB`, `buildCapture`, `CAPTURE_ENUM_KEYS`, `CAPTURE_MAX_CHARS`, `CAPTURE_NUMERIC_KEYS`, `CAPTURE_VERSION`, `decodeFrames`, `encodeCapture`, `encodeFrames`, `frameStats`, `hash32`, `NOTE_VOCAB`, `safePlanId`, `sanitizeAttribution`
 - **`src/shared/telemetry/perfCaptureStore.js`** — The bounded on-device copy of a performance capture — IndexedDB (the LARGE tier, per TIER-BY-REBUILDABILITY), pruned to three on every write, summarised for the storage panel.
   - _exports_: `CAPTURE_PREFIX`, `clearPerfCaptures`, `listCaptureKeys`, `MAX_CAPTURES`, `perfCaptureSummary`, `readPerfCaptures`, `savePerfCapture`
 - **`src/shared/telemetry/perfInstrument.js`** — Always-on sampled client PERFORMANCE telemetry: longtask + Event Timing/INP observers plus a periodic scene sample (heap, canvas nodes, elements drawn, layers on, panels open, edits since load) through the existing reportClientEvent sink, with its own row ceiling so it can never spend the error budget
@@ -545,7 +545,7 @@ _697 source files mapped._
 - **`src/shared/telemetry/perfScene.js`** — Reads the scene off the DOM (document/canvas nodes, elements drawn, layers, panels, tiles) — shared by the sampled perf instrument and the always-on recorder.
   - _exports_: `readScene`
 - **`src/shared/telemetry/perfTrigger.js`** — The self-calibrating trigger: a baseline median taken from the window right after a load, then a sustained-deviation test (level × slow-fraction × perceptibility floor) over a time-qualified window.
-  - _exports_: `createTrigger`, `feedFrame`, `sealBaselineLate`, `TRIGGER_DEFAULTS`, `triggerState`, `worstWindow`
+  - _exports_: `createTrigger`, `feedBootTask`, `feedFrame`, `sealBaselineLate`, `TRIGGER_DEFAULTS`, `triggerState`, `worstWindow`
 - **`src/shared/theme/familyInk.js`** — the default ink of each drawn family + the rule that keeps them perceptually apart (a measurement and a markup shared #c2410c, so the number vanished into the shape)
   - _exports_: `ELEMENT_DEFAULT_PAINT`, `FAMILY_DEFAULT_INK`, `INK_DISTINCT_MIN_DE`, `MEASURE_INK`, `parseHex`
 - **`src/shared/theme/palette.js`** — JS mirror of index.css theme tokens as concrete light/dark hex for the SVG canvas and Markup viewer where var() cannot resolve; paletteFor(resolved) selector
