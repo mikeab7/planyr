@@ -14,7 +14,7 @@
  */
 import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
-import { Button, MenuItem, menuPanelStyle } from "../../../shared/ui/controls.jsx";
+import { Button, MenuItem } from "../../../shared/ui/controls.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
 
 function Icon({ children }) {
@@ -98,7 +98,7 @@ const FileMenu = forwardRef(function FileMenu({ busy, notice, confirmReplace, on
           title={notice.text}
         >{notice.text}</span>
       )}
-      <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} placement="below-left" width={260} panelStyle={menuPanelStyle}>
+      <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} placement="below-left" width={260}>
         <div>
           <MenuItem data-testid="model-export-xlsx" onClick={() => pick(onExportXlsx)}>Download as Excel (.xlsx)</MenuItem>
           <MenuItem data-testid="model-export-csv" onClick={() => pick(onExportCsv)}>Download active sheet as CSV</MenuItem>
