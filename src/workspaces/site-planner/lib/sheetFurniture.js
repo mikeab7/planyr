@@ -95,6 +95,16 @@ const fmtTick = (n, fmt) => (Number.isInteger(n) ? fmt(n) : String(n));
 
 // Subtle, warm semi-opaque backing — keeps labels legible over busy aerial imagery
 // without reading as a hard white box.
+//
+// ⛔ NEW-1 — THIS IS THE PRINT/NO-THEME FALLBACK ONLY, never the live on-screen value. It used to
+// be the ONLY value: the plate always painted this fixed near-white regardless of the app's
+// theme, while `ink`/`muted`/`panelLine` right below it already resolved through `pal` to the
+// live theme — so a dark-mode session got theme-correct (light) ink drawn on a plate that never
+// stopped being near-white, which is an owner-reported "white box, low-contrast grey numerals"
+// bug, not a design choice. The plate now reads `pal.plateFill` when the caller supplies one
+// (the live on-screen furniture does, via SitePlanner's theme-aware PAL); a caller that doesn't
+// — the PDF/PNG export, deliberately, so a printed sheet never goes dark with the app — falls
+// back to this fixed light constant, same as `ink`/`muted`/`panelLine` already did.
 const PLATE_FILL = "rgba(249,248,244,0.84)";
 
 // Graphic scale bar drawn with its plate top-left at the local origin. Alternating
@@ -105,6 +115,7 @@ export function scaleBarPlate({ lengthU, feet, m, pal = {}, fmtFeet = (n) => Str
   const ink = pal.ink || "#2c2a26";
   const muted = pal.muted || "#8a8473";
   const line = pal.panelLine || "#cfc6af";
+  const plate = pal.plateFill || PLATE_FILL;
   const seg = lengthU / 4;
   const padX = Math.max(m.pad, m.fs * 1.4); // room for the end labels to overhang the bar
   const barTop = m.pad, barBot = barTop + m.barTh;
@@ -115,9 +126,13 @@ export function scaleBarPlate({ lengthU, feet, m, pal = {}, fmtFeet = (n) => Str
   const plateH = unitBase + m.pad * 0.4;
   const ticks = [0, lengthU / 2, lengthU];
   const labels = [0, feet / 2, feet];
-  let s = `<rect x="0" y="0" width="${r2(plateW)}" height="${r2(plateH)}" rx="${r2(m.rx)}" fill="${PLATE_FILL}" stroke="${line}" stroke-width="${r2(m.plateStroke)}"/>`;
+  let s = `<rect x="0" y="0" width="${r2(plateW)}" height="${r2(plateH)}" rx="${r2(m.rx)}" fill="${plate}" stroke="${line}" stroke-width="${r2(m.plateStroke)}"/>`;
+  // The "unfilled" alternating segment reads as the PLATE's own colour (the classic ink-vs-paper
+  // scale bar convention), never a hardcoded white — a hardcoded white here would sit beside a
+  // dark-mode `ink` (also light, so it stays legible against a themed plate) and the two would
+  // read as nearly the same tone, erasing the alternation the bar exists to show.
   for (let i = 0; i < 4; i++)
-    s += `<rect x="${r2(padX + seg * i)}" y="${r2(barTop)}" width="${r2(seg)}" height="${r2(m.barTh)}" fill="${i % 2 ? "#fff" : ink}" stroke="${ink}" stroke-width="${r2(m.segStroke)}"/>`;
+    s += `<rect x="${r2(padX + seg * i)}" y="${r2(barTop)}" width="${r2(seg)}" height="${r2(m.barTh)}" fill="${i % 2 ? plate : ink}" stroke="${ink}" stroke-width="${r2(m.segStroke)}"/>`;
   ticks.forEach((t) => {
     s += `<line x1="${r2(padX + t)}" y1="${r2(barBot)}" x2="${r2(padX + t)}" y2="${r2(tickBot)}" stroke="${ink}" stroke-width="${r2(m.segStroke)}"/>`;
   });
@@ -138,6 +153,7 @@ export function scaleBarPlate({ lengthU, feet, m, pal = {}, fmtFeet = (n) => Str
 export function northArrowPlate({ m, pal = {}, bearingDeg = 0 }) {
   const ink = pal.ink || "#2c2a26";
   const line = pal.panelLine || "#cfc6af";
+  const plate = pal.plateFill || PLATE_FILL;
   const contentW = Math.max(m.arrowW, m.nFs * 0.8);
   const plateW = contentW + 2 * m.pad;
   const nBase = m.pad + m.nFs; // "N" baseline
@@ -157,7 +173,7 @@ export function northArrowPlate({ m, pal = {}, bearingDeg = 0 }) {
     `<path d="${west}" fill="none" stroke="${ink}" stroke-width="${sw}" stroke-linejoin="round"/>` +
     `<path d="${east}" fill="${ink}" stroke="${ink}" stroke-width="${sw}" stroke-linejoin="round"/>`;
   if (bearingDeg) needle = `<g transform="rotate(${r2(-bearingDeg)} ${r2(cx)} ${r2(aCy)})">${needle}</g>`;
-  let s = `<rect x="0" y="0" width="${r2(plateW)}" height="${r2(plateH)}" rx="${r2(m.rx)}" fill="${PLATE_FILL}" stroke="${line}" stroke-width="${r2(m.plateStroke)}"/>`;
+  let s = `<rect x="0" y="0" width="${r2(plateW)}" height="${r2(plateH)}" rx="${r2(m.rx)}" fill="${plate}" stroke="${line}" stroke-width="${r2(m.plateStroke)}"/>`;
   s += `<text x="${r2(cx)}" y="${r2(nBase)}" text-anchor="middle" font-size="${r2(m.nFs)}" font-weight="600" fill="${ink}">N</text>`;
   s += needle;
   return { markup: s, plateW, plateH };

@@ -118,6 +118,52 @@ describe("buildSheetFurnitureSvg — renders the expected sheet furniture", () =
   });
 });
 
+// The owner's iPhone-night-mode report: the scale bar + north arrow plate stayed a fixed
+// near-white regardless of theme while ink/muted/panelLine already followed it, so a dark-mode
+// session got theme-correct (light) numerals drawn on a plate that never got any darker.
+import { scaleBarPlate, northArrowPlate } from "../src/workspaces/site-planner/lib/sheetFurniture.js";
+
+describe("plate fill follows the caller's theme, and print gets a safe fallback (NEW-1)", () => {
+  const m = { pad: 8, fs: 11, unitFs: 9, barTh: 6, tickLen: 4, rx: 6, plateStroke: 1, segStroke: 1, nFs: 12, arrowW: 14, arrowH: 30 };
+
+  it("scaleBarPlate paints the plate rect with pal.plateFill when given one", () => {
+    const dark = scaleBarPlate({ lengthU: 100, feet: 200, m, pal: { plateFill: "rgba(1,2,3,0.9)" } });
+    // the FIRST rect emitted is the plate itself (the bar segments/ticks/text follow)
+    const firstRect = dark.markup.match(/<rect[^>]*\/>/)[0];
+    expect(firstRect).toContain('fill="rgba(1,2,3,0.9)"');
+  });
+
+  it("northArrowPlate paints the plate rect with pal.plateFill when given one", () => {
+    const dark = northArrowPlate({ m, pal: { plateFill: "rgba(1,2,3,0.9)" } });
+    const firstRect = dark.markup.match(/<rect[^>]*\/>/)[0];
+    expect(firstRect).toContain('fill="rgba(1,2,3,0.9)"');
+  });
+
+  it("no pal.plateFill (the print/export path) falls back to the fixed light print plate, never blank/transparent", () => {
+    const printed = scaleBarPlate({ lengthU: 100, feet: 200, m, pal: {} });
+    const firstRect = printed.markup.match(/<rect[^>]*\/>/)[0];
+    expect(firstRect).toMatch(/fill="rgba\(249,\s*248,\s*244,\s*0\.84\)"/);
+  });
+
+  it("the alternating 'unfilled' bar segment reads as the PLATE colour, never a hardcoded #fff — " +
+    "so it can never read as near-identical to a theme-following light ink", () => {
+    const dark = scaleBarPlate({ lengthU: 100, feet: 200, m, pal: { plateFill: "rgba(24,27,33,0.93)", ink: "#E8EBF0" } });
+    expect(dark.markup).not.toContain('fill="#fff"');
+    expect(dark.markup).toContain('fill="rgba(24,27,33,0.93)"');
+  });
+
+  // Source guard: the PDF/PNG export must never hand the furniture the app's LIVE theme PAL —
+  // a printed sheet has to stay paper-colored even when the app was in dark mode at Download time.
+  it("exportSheet.js never passes the live theme PAL into the furniture composition", async () => {
+    const fs = await import("node:fs");
+    const src = fs.readFileSync(new URL("../src/workspaces/site-planner/lib/exportSheet.js", import.meta.url), "utf8");
+    const i = src.indexOf("buildSheetFurnitureSvg(");
+    expect(i).toBeGreaterThan(-1);
+    const call = src.slice(i, src.indexOf(");", i));
+    expect(call).not.toMatch(/pal:\s*PAL\b/);
+  });
+});
+
 describe("chooseFurnitureCorners — no-occlude placement (NEW-1)", () => {
   const fr = { x: 0, y: 0, w: 1000, h: 800, inset: 20 };
   const bar = { plateW: 200, plateH: 70 };

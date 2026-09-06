@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-06 @ `e63dfd11` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-06 @ `47eb7f69` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -119,7 +119,7 @@ _699 source files mapped._
   - _exports_: `supabase`, `supabaseConfigured`
 - **`src/workspaces/food/lib/visitAggregates.js`** — Pure aggregation over a place's loaded visits: averages, visit count, first/last date, deduped "order again" entries
   - _exports_: `computeVisitAggregates`, `orderAgainEntries`
-- **`src/workspaces/model/components/CommandPalette.jsx`** — Model workspace command palette (Ctrl/Cmd+K, fuzzy search over commandRegistry.js, arrow keys + Enter, no mouse required)
+- **`src/workspaces/model/components/CommandPalette.jsx`** — Ctrl/Cmd+K fuzzy-search palette over every action in `lib/commandRegistry.js`; each row calls the same `ctx.onXxx` handler the ribbon/audit toolbar/context menu already call.
   - _exports_: `default (CommandPalette)`
 - **`src/workspaces/model/components/ContextMenu.jsx`** — The right-click context menu (cell/row-header/column-header), anchored at the click point via a zero-sized virtual anchor into the shared AnchoredMenu.
   - _exports_: `default (ContextMenu)`
@@ -139,7 +139,7 @@ _699 source files mapped._
   - _exports_: `default (SheetView)`, `HEADER_H`, `ROW_H`
 - **`src/workspaces/model/components/TabStrip.jsx`** — The sheet tab strip: add/rename (inline)/duplicate/delete/reorder (drag) a workbook sheet, pinned below the grid, outside its own scroller.
   - _exports_: `default`, `TAB_STRIP_HEIGHT`
-- **`src/workspaces/model/lib/commandRegistry.js`** — the ONE list of every Model workspace action, shared by the command palette and the Ribbon so neither can drift from what the other does
+- **`src/workspaces/model/lib/commandRegistry.js`** — The one action registry for the Model workspace's command palette and Ribbon.jsx's stateful toggle buttons; pure `run(ctx)`/`label`/`disabled` functions, no second hand-maintained copy of what a control does.
   - _exports_: `COMMAND_GROUPS`, `COMMANDS`, `decreaseIndentPatch`, `fuzzyScore`, `increaseIndentPatch`, `isCommandDisabled`, `resolveLabel`, `searchCommands`, `toggleBoldPatch`, `toggleItalicPatch`, `toggleStrikePatch`, `toggleUnderlinePatch`, `toggleWrapPatch`
 - **`src/workspaces/model/lib/csvIO.js`** — CSV round-trip: values-only export of the active sheet (via displayFor), import as a new appended sheet. Dependency-free.
   - _exports_: `addSheetFromCsvText`, `csvRowsToSheet`, `parseCsv`, `sheetToCsv`
