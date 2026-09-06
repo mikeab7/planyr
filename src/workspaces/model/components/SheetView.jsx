@@ -51,7 +51,6 @@ import { RADIUS } from "../../../shared/ui/radius.js";
 // OTHER route's bundle too and breaches ui-audit/perf-bundle-audit.mjs's site-route allowlist.
 // Same literal-duplicate pattern controls.jsx's own RADIUS already uses for the same reason.
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
-import { menuPanelStyle } from "../../../shared/ui/controls.jsx";
 import { markProgrammaticScroll } from "../../../shared/ui/programmaticScroll.js";
 import ContextMenu from "./ContextMenu.jsx";
 import { TAB_STRIP_HEIGHT } from "./TabStrip.jsx";
@@ -83,7 +82,7 @@ function FilterMenu({ colIndex, sheet, evalResult, allowed, onSetFilter }) {
         onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
         style={{ marginLeft: 2, border: "none", background: "transparent", cursor: "pointer", color: allowed ? "var(--accent-model)" : "var(--text-tertiary)", fontSize: 10, padding: "0 2px", flex: "none" }}
       >▾</button>
-      <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} placement="below-left" width={180} panelStyle={menuPanelStyle}>
+      <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} placement="below-left" width={180}>
         <div style={{ padding: 6 }}>
           <button
             type="button"

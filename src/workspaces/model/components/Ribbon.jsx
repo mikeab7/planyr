@@ -232,7 +232,7 @@ function DropdownButton({ label, title, width = 190, minWidth, children }) {
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
         <span aria-hidden="true" style={{ fontSize: 10, opacity: 0.7 }}>▾</span>
       </button>
-      <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} placement="below-left" width={width} panelStyle={menuPanelStyle}>
+      <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} placement="below-left" width={width}>
         <div onClick={() => setOpen(false)}>{children}</div>
       </AnchoredMenu>
     </span>
@@ -252,7 +252,7 @@ function IconDropdownButton({ icon, title, width = 190, children }) {
         {icon}
         <span aria-hidden="true" style={{ fontSize: 10, opacity: 0.7 }}>▾</span>
       </button>
-      <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} placement="below-left" width={width} panelStyle={menuPanelStyle}>
+      <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} placement="below-left" width={width}>
         <div onClick={() => setOpen(false)}>{children}</div>
       </AnchoredMenu>
     </span>
@@ -277,7 +277,7 @@ function ColorSwatchButton({ label, icon, title, value, palette, onPick, default
         {icon || <span style={{ fontSize: 10.5, fontWeight: 700, lineHeight: 1 }}>{label}</span>}
         <span aria-hidden="true" style={{ width: 15, height: 3, marginTop: 2, background: value || "var(--border-default)", border: value ? "none" : "1px solid var(--border-default)" }} />
       </button>
-      <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} placement="below-left" width={148} panelStyle={menuPanelStyle}>
+      <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} placement="below-left" width={148}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 22px)", gap: 4, padding: 6 }}>
           {palette.map((hex) => (
             <button

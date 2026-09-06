@@ -3600,34 +3600,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               })()}
             </div>
             </>)}
-            {/* B831777 (NEW-2) — the Comps tab's content. Mounted whenever the map route is
-                visible (`open={visible}`) so a comp anchored while browsing Sites still loads and
-                renders as a map pin (NEW-3) — only DISPLAY is gated on the tab (`active`). */}
-            {(sitesPanelOpen && panelTab === "comp") && (
-              <PanelErrorBoundary name="SitePlans">
-                <Suspense fallback={<div style={{ padding: 14, fontSize: 12, color: PAL.muted }}>Loading…</div>}>
-                  <SitePlansSection
-                    open={visible}
-                    active={sitesPanelOpen && panelTab === "comp"}
-                    projects={sites}
-                    onOverlaysChange={setSitePlanOverlays}
-                    suggestPlacement={suggestPlacement}
-                    activeOverlayId={activeOverlayId}
-                    onActivateOverlay={selectOverlay}
-                    onStartPinOnOverlay={startPinOnOverlay}
-                    onStopPinOnOverlay={stopPinOnOverlay}
-                    pinningOverlayId={clickableOverlayId}
-                    commitPlacementRef={commitPlacementRef}
-                    dropIntakeRef={dropIntakeRef}
-                    onRejectFile={onRejectDroppedFile}
-                    onCompPositionsChanged={() => setCompsReloadToken((t) => t + 1)}
-                    rasterFailedIds={rasterFailedIds}
-                    zoomBelowGate={zoom != null && zoom < SITE_PLAN_MIN_ZOOM}
-                    onZoomToOverlay={zoomToOverlay}
-                  />
-                </Suspense>
-              </PanelErrorBoundary>
-            )}
+            {/* B1263072 (NEW-1) — COMPS RENDERS FIRST in this tab, and Site Plans is a secondary,
+                collapsed-by-default section below it (SitePlansSection.jsx owns that collapse).
+                Owner: "I can't even see comps anymore... I don't give a shit about site plans." A
+                single expanded site-plan row used to push every comp below the panel's own bottom
+                edge because Site Plans rendered ABOVE Comps in this same scrolling region — the
+                fix is the render order, not a taller panel or a second scroller. Mounted whenever
+                the map route is visible (`open={visible}`) so a comp anchored while browsing
+                Sites still loads and renders as a map pin (NEW-3) — only DISPLAY is gated on the
+                tab (`active`). */}
             <PanelErrorBoundary name="Comps">
               <Suspense fallback={sitesPanelOpen && panelTab === "comp" ? <div style={{ padding: 14, fontSize: 12, color: PAL.muted }}>Loading…</div> : null}>
                 <CompsPanel
@@ -3661,6 +3642,31 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                 />
               </Suspense>
             </PanelErrorBoundary>
+            {(sitesPanelOpen && panelTab === "comp") && (
+              <PanelErrorBoundary name="SitePlans">
+                <Suspense fallback={<div style={{ padding: 14, fontSize: 12, color: PAL.muted }}>Loading…</div>}>
+                  <SitePlansSection
+                    open={visible}
+                    active={sitesPanelOpen && panelTab === "comp"}
+                    projects={sites}
+                    onOverlaysChange={setSitePlanOverlays}
+                    suggestPlacement={suggestPlacement}
+                    activeOverlayId={activeOverlayId}
+                    onActivateOverlay={selectOverlay}
+                    onStartPinOnOverlay={startPinOnOverlay}
+                    onStopPinOnOverlay={stopPinOnOverlay}
+                    pinningOverlayId={clickableOverlayId}
+                    commitPlacementRef={commitPlacementRef}
+                    dropIntakeRef={dropIntakeRef}
+                    onRejectFile={onRejectDroppedFile}
+                    onCompPositionsChanged={() => setCompsReloadToken((t) => t + 1)}
+                    rasterFailedIds={rasterFailedIds}
+                    zoomBelowGate={zoom != null && zoom < SITE_PLAN_MIN_ZOOM}
+                    onZoomToOverlay={zoomToOverlay}
+                  />
+                </Suspense>
+              </PanelErrorBoundary>
+            )}
             </div>
           </div>
 

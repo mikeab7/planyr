@@ -245,6 +245,26 @@ was never clicked" quietly ships broken.
 10. Check at a phone width and at a wide desktop width, in both Light and Dark theme. **Expect:** the chip renders legibly in all four combinations, and a long project name's breadcrumb never gets pushed into truncation by the chip being present.
 
 **Result:** ⏳ pending — needs two real signed-in sessions on a shared project; not reachable from this sandbox (no Supabase auth at all here). `Cadence: once`.
+### V919872 — B1263072/B1263073/B1263074/B1263075: the Comps-tab rail — order, row cleanup, button alignment, and menu contrast — all confirmed on Michael's real account `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass even though every mechanism below was already driven live, headless, this session.** All four fixes are UI-layout changes to `MapFinder.jsx`'s Comps tab (`SitePlansSection.jsx`'s section + `OverlayRow`) and to the shared `AnchoredMenu.jsx`. The owner's own report cited exact pixel measurements against HIS real account — one real site plan, three real comps — which this sandbox cannot sign into (`Blocker: auth`) and cannot fabricate (`Blocker: real-data`, his exact data shape). What was proven here instead is the MECHANISM: the real production `SitePlansSection.jsx`/`OverlayRow` code, driven with realistic fixture props in headless Chromium (no Supabase mocking — `OverlayRow` takes no network dependency of its own; `SitePlansSection`'s own `fetchAllOverlays()` call safely no-ops to an empty list when unconfigured, which is what let its collapse mechanism be tested honestly without auth).
+
+**What was verified here (this session, headless Chromium, real production code, fixture props):**
+1. **B1263072 (order + collapse).** `SitePlansSection` standalone at the real panel width (274px): collapsed by default (`innerText` = header only, no upload prompt, no trash link); clicking the header reveals the rest. The `CompsPanel`-before-`SitePlansSection` reorder in `MapFinder.jsx` is a direct JSX-order change confirmed by diff review (both components are independently `open`/`active`-gated, so order has no behavioral coupling) plus the full test suite and a clean build.
+2. **B1263073 (row cleanup).** Locked-row `innerText` includes `"Rotation\n0° · locked — unlock to rotate"` — no disabled input rendered. Unlocked row renders a real editable `<input type="number">`. `ToggleChip` label reads `"Edit crop"` when a crop exists, `"Crop…"` when it doesn't — never `"Cropped ✓"`. `title` on "Move / resize" reads `"≈ 2,999 × 3,881 ft"` (unlocked) or `"Locked — unlock to move or resize"` (locked) — the sheet-dimensions line no longer prints on the resting row.
+3. **B1263074 (alignment + overflow).** All four action buttons measured at exactly 26px tall in every state tested (locked/unlocked, cropped/uncropped, pinning/not-pinning) — previously 24/26/28px. The opacity slider's right edge sits 54px inside the row's own bounds at the real 274px panel width — previously overflowed by 43px.
+4. **B1263075 (menu surface).** `getComputedStyle` on the exact broken portal (`SitePlansSection`'s three-dot menu) before vs. after: `background-color` went from `rgba(0,0,0,0)` to a real opaque `--surface-raised` fill, with a real border and drop shadow, matching every other menu in the app.
+5. Full repo suite (764 files / 15,504 tests) green; lint clean (0 errors); `npm run build` clean; `npm run ci-parity` run in full for this PR (see the PR for its result).
+
+**Steps still needed, each with a named expected result — all on the DEPLOYED `planyr.io` build once this PR merges, on Michael's own account:**
+1. Read the loaded chunk hash (Network tab or `document.querySelectorAll('script[src]')`) in the same observation as every check below — confirm it names a chunk from a build after this PR merged.
+2. Open the map's Sites/Comps rail and click the **Comps** tab. **Expect:** the comps list is the first thing you see — no scrolling past a Site Plans section to reach it.
+3. Expand the one real site plan (Move/resize or the row's own chevron). **Expect:** the comps list stays visible and reachable — no comp is pushed below the panel's own bottom edge, at any ordinary window height.
+4. On that expanded row: **expect** the opacity slider stays fully inside the panel (no overflow past the right edge); **expect** Rotation shows a plain locked-with-reason line while the plan is locked, and a real editable field once unlocked; **expect** the crop control reads "Crop…" or "Edit crop" (never "Cropped ✓"); **expect** no permanent line prints the sheet's raw dimensions (hovering "Move / resize" may show them as a tooltip).
+5. **Expect** the four action buttons (Move/resize, Crop/Edit crop, Pin comp here, Change page) sit on one clean, evenly-aligned row.
+6. Click the row's three-dot (⋯) menu. **Expect:** a real opaque menu card with a visible border and shadow — never transparent text floating over the row.
+
+**Result:** ⏳ pending — needs the deployed build on a signed-in pass with Michael's real account. `Cadence: once`.
 
 ### V916800 — B1260000: Backspace on an empty bullet with a nested child no longer deletes the paragraph above it, on Michael's own iPhone `Blocker: real-device`
 

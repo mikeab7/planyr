@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { placeMenu } from "./anchoredMenuPlacement.js";
+import { menuPanelStyle } from "./controls.jsx";
 
 /**
  * AnchoredMenu — a dropdown / flyout that renders in a PORTAL at document.body
@@ -31,7 +32,10 @@ import { placeMenu } from "./anchoredMenuPlacement.js";
  *                  matching the app's modal layer — above the map, below AuthPanel). Unchanged by
  *                  B1106256 — kept so a consumer's own override (e.g. TeamPanel's 6000) still lands
  *                  the panel where it always did.
- *  - panelStyle  : visual style for the panel (e.g. the shared `menuPanel`)
+ *  - panelStyle  : OVERRIDES the default panel surface (`menuPanelStyle` — background/border/
+ *                  radius/shadow/padding). Pass this only to genuinely customize the surface
+ *                  (a different width-driving padding, a module's own line color); the panel is
+ *                  never invisible for lack of it (B1263075/NEW-4 — see the style object below).
  *  - className   : panel className (default "menu", for the existing menu styles)
  *  - hoverSafe   : historically opted a HOVER-opened popover (RowInfo/SourcesLegend) out of
  *                  the full-viewport click-away backdrop, which otherwise sat ON TOP of the
@@ -238,6 +242,15 @@ export default function AnchoredMenu({
       className={className}
       data-menu-owner={ownerScope}
       style={{
+        // B1263075/NEW-4 — a caller that forgot `panelStyle` used to get a fully transparent
+        // portal (no background, no border, no shadow — two bare text labels floating over
+        // whatever was underneath, "just about the worst UI I have ever seen" per the owner's
+        // report on the site-plan row's three-dot menu). `menuPanelStyle` (the same shared
+        // token most callers were already passing by hand) is now the DEFAULT surface; a
+        // component whose default rendering is invisible was the defect, not a missing prop at
+        // one call site — `panelStyle` is an override for the rare caller that wants something
+        // different, never a requirement for the menu to be visible at all.
+        ...menuPanelStyle,
         maxHeight: "min(72vh, 540px)",
         overflowY: "auto",
         ...panelStyle,
