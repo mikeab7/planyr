@@ -16,7 +16,6 @@ import { describe, it, expect } from "vitest";
 import {
   FT_PER_DEG, mercDeg, invMercDeg, lngLatToFeet, feetToLatLngPair,
   ppfToZoom, zoomToPpf, lockOffsetPx, exactContainerPoint, registrationLayoutMayHaveChanged,
-  viewValuesEqual,
 } from "../src/workspaces/site-planner/lib/mapLock.js";
 import { lngLatRingToFeet, feetToLatLng } from "../src/workspaces/site-planner/lib/arcgis.js";
 
@@ -232,39 +231,5 @@ describe("registrationLayoutMayHaveChanged — B846384's forced-layout gate", ()
   it("says yes when the overscan alone has moved — the container can resize with the canvas unchanged", () => {
     const li = { w: 800, h: 560, overscan: 107 };
     expect(registrationLayoutMayHaveChanged(li, 800, 560, 176)).toBe(true);
-  });
-});
-
-/* Site-route render-loop crash (React error #185 on project arrival) — `setView`'s dispatch
- * guard, the same class B1189 already fixed for `setSize`/`setRegShift`. A caller handing back a
- * fresh `{ppf,offX,offY}` object with the SAME numbers as the live view must be indistinguishable,
- * from the registration effect's point of view, from calling `setView` not at all — otherwise an
- * allocation with no new information re-triggers the basemap commit on every render it lands in. */
-describe("viewValuesEqual — the setView dispatch guard", () => {
-  it("is equal when every field matches, even across two different object instances", () => {
-    expect(viewValuesEqual({ ppf: 0.35, offX: 60, offY: 60 }, { ppf: 0.35, offX: 60, offY: 60 })).toBe(true);
-  });
-
-  it("is NOT equal when any single field differs", () => {
-    const base = { ppf: 0.35, offX: 60, offY: 60 };
-    expect(viewValuesEqual(base, { ...base, ppf: 0.4 })).toBe(false);
-    expect(viewValuesEqual(base, { ...base, offX: 61 })).toBe(false);
-    expect(viewValuesEqual(base, { ...base, offY: 61 })).toBe(false);
-  });
-
-  it("is false when either side is missing (null/undefined) — never throws", () => {
-    const base = { ppf: 0.35, offX: 60, offY: 60 };
-    expect(viewValuesEqual(null, base)).toBe(false);
-    expect(viewValuesEqual(base, null)).toBe(false);
-    expect(viewValuesEqual(undefined, undefined)).toBe(false);
-  });
-
-  it("matches the app's actual initial view state — the exact case `fit()` re-dispatches on a blank plan", () => {
-    // SitePlanner's `useState({ ppf: 0.35, offX: 60, offY: 60 })` and `fit()`'s empty-content
-    // branch (`if (pts.length === 0) setView({ ppf: 0.35, offX: 60, offY: 60 })`) — a blank or
-    // just-opened plan's boot-time auto-fit dispatches numbers that already match the initial
-    // state exactly, which is the concrete case that was silently re-triggering the registration
-    // effect before this guard existed.
-    expect(viewValuesEqual({ ppf: 0.35, offX: 60, offY: 60 }, { ppf: 0.35, offX: 60, offY: 60 })).toBe(true);
   });
 });

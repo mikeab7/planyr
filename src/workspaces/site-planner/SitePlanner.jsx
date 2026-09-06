@@ -70,7 +70,7 @@ import { BASEMAPS } from "./lib/basemaps.js";
 import {
   ppfToZoom, zoomToPpf, exactContainerPoint,
   basemapWrapPoint, registrationShift, sanitizeShift, tileNwFeet, registrationLayoutMayHaveChanged,
-  hasRegisterableContainer, viewValuesEqual,
+  hasRegisterableContainer,
 } from "./lib/mapLock.js";
 import { overscanPx, keepBufferFor, retinaForZoom, tileWeight, tileCacheLimit } from "./lib/tileBudget.js";
 import { preserveTilesAcrossSetView, announceSetView, boundTileCache, releaseLayer, throttleTilePruning, armBlankTileHeal } from "./lib/tileLifecycle.js";
@@ -148,8 +148,6 @@ import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import PanelChrome from "../../shared/ui/PanelChrome.jsx";
 import FloatingPanel from "../../shared/ui/FloatingPanel.jsx";
 import { clampToBounds, initialFloatPos, reconcileForNarrow, shouldInspectorTakeDock, dockAfterRelinquish, FLOAT_MIN_WIDTH, FLOAT_SIZE } from "../../shared/ui/floatingPanel.js";
-import { safeAreaInsets } from "../../shared/ui/safeAreaInsets.js";
-import { isPhoneSheetMode, heightForSnap, resolveDragSnap, keyboardInsetPx, clampSheetHeightForKeyboard, selectionCoverDeltaPx } from "./lib/propertiesSheet.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 /* NEW-2 — the ONE floor a header crumb may be squeezed to, shared with the project crumb so the
    plan chip beside it cannot be given a different one. No new module reaches any chunk: AppHeader
@@ -1925,18 +1923,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     mq.addEventListener ? mq.addEventListener("change", on) : mq.addListener(on);
     return () => { mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on); };
   }, []);
-  // B1215682/NEW-1 — the phone Properties bottom-sheet pilot needs POINTER TYPE, not just width:
-  // an iPad in landscape is as wide as a laptop and still finger-driven, and a narrow desktop
-  // browser window with a mouse must not turn the Properties panel into a bottom sheet. Width
-  // (`narrow`, above) still drives the docked-only layout; this decides control sizing/presentation
-  // for ONE surface (see lib/propertiesSheet.js's header). Same matchMedia-sync pattern as `narrow`.
-  const [coarsePointer, setCoarsePointer] = useState(() => { try { return window.matchMedia("(pointer: coarse)").matches; } catch (_) { return false; } });
-  useEffect(() => {
-    let mq; try { mq = window.matchMedia("(pointer: coarse)"); } catch (_) { return undefined; }
-    const on = () => setCoarsePointer(mq.matches);
-    mq.addEventListener ? mq.addEventListener("change", on) : mq.addListener(on);
-    return () => { mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on); };
-  }, []);
   const lsGet = (k, d) => { try { return localStorage.getItem("planarfit:" + k) || d; } catch (_) { return d; } };
   // (Its `lsSet` twin went with NEW-1: smooth zoom was its last caller, and that setting is now
   // written by `shared/prefs/smoothZoom.js`, which owns the same `planarfit:` prefix.)
@@ -2080,28 +2066,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * `diagArm.js` way (read at CALL time, armable with no console via `?planyrDiag=1`), so it costs
    * nothing unarmed and needs no remount to switch on. It records; it changes nothing. */
   const viewChangeLogRef = useRef([]);
-  /* ⛔ NEW-2 (the site-route render-loop crash, React error #185 / "Maximum update depth
-   * exceeded") — GUARD THE DISPATCH, the same rule B1189 already applied to `setSize`/
-   * `setRegShift`: a `setState` call that lands on the SAME numbers is still a genuine dispatch
-   * unless the updater returns the CURRENT object, because React only skips re-rendering on
-   * reference equality. Several call sites here hand `setView` a brand-new plain object even when
-   * every field already matches the live view (`fit()` on a blank/just-opened plan matches the
-   * initial `{ppf:0.35,offX:60,offY:60}` state exactly) — and the basemap registration commit
-   * effect a few hundred lines down depends on `view` as a WHOLE OBJECT specifically because its
-   * own comment assumed "view's writers replace it only on a real change". This is the fix that
-   * makes that assumption true, at the one place every `setView` call funnels through, rather than
-   * chasing down each call site (or narrowing every consumer, which was rejected once already for
-   * its bundle-size cost). */
   const setView = useCallback((updater) => {
     if (isDiagArmed(window)) {
       const log = viewChangeLogRef.current;
       log.push({ t: Math.round(performance.now()), stack: (new Error("setView")).stack });
       if (log.length > 200) log.shift(); // bounded ring — a diagnostic must never leak memory
     }
-    setViewRaw((v) => {
-      const next = typeof updater === "function" ? updater(v) : updater;
-      return viewValuesEqual(v, next) ? v : next;
-    });
+    setViewRaw(updater);
   }, []);
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -3523,17 +3494,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * right: nothing in the body can tell two `{w:1058,h:640}` objects apart. The B837 pan
      * compensation below already depends on `size.w` this way; this effect was the outlier.
      *
-     * SCOPED TO `size` DELIBERATELY. `view` and `origin` stay whole-object deps: `origin` is
-     * stabilised at its source (B519907's `useMemo` keyed on lat/lon), and `view`'s writer
-     * (`setView`) now guards its own dispatch the same way `setSize` does — see the NEW-2 comment
-     * on `setView`'s definition, added after this SAME effect was found to be the crash site for a
-     * DIFFERENT trigger (project-arrival, not the panel-escape race this session fixed): `fit()`
-     * dispatched a fresh `{ppf,offX,offY}` object on a blank/just-opened plan that matched the
-     * initial state's numbers exactly, and `view` being a whole-object dep here is what turned that
-     * harmless-looking allocation into a re-run of this effect's own `commit()` — the same pump
-     * shape as the `size` bug below, just fed by a different writer. Listing `view`'s fields here
-     * too would be belt-and-braces on top of that fix and is not free — it cost enough bytes to
-     * push `largestChunkBytes` past its ceiling in CI when tried for `size` above.
+     * SCOPED TO `size` DELIBERATELY. `view` and `origin` stay whole-object deps: the trace showed
+     * both hold their identity across the loop (only `size` churned), and their writers replace
+     * them only on a real change, so a new object there IS new information. Listing their fields
+     * too would be belt-and-braces against a churn nothing has ever exhibited, and it is not free
+     * — it cost enough bytes to push `largestChunkBytes` past its ceiling in CI.
      *
      * NOT fixed by quantising `setSize` (the previous session's proposed next step): the widths
      * never disagreed — RO and the layout effect both reported 1058 exactly — and rounding
@@ -5437,26 +5402,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * CSS pixel) the displayed decimals are the same order as the error being measured. This
    * ref carries the live values so the hook below can expose them without re-registering on
    * every mouse move. */
-  /* ⛔ NEW-2 (site-route render-loop crash) — `viewIdentityEpoch` IS THE INSTRUMENT for the
-   * setView-dispatch-guard fix above, the same shape as `layerIdentityEpoch` (B385040): this
-   * effect already re-runs exactly when `view`'s OBJECT IDENTITY changes, so counting its own
-   * runs is a free, exact answer to "did view actually get a new identity" — which is the one
-   * thing `get()`'s field values can't tell you (two identical-valued views read the same either
-   * way). E2E-gated, read-only, never runs in production. Declared BEFORE `probeRef` below on
-   * purpose — ui-audit/audit-hidden-content-reads.mjs attributes a body to the nearest PRECEDING
-   * named binding, so inserting this AFTER `probeRef` silently reassigned probeRef's own swept
-   * region to this one instead. */
-  const viewIdentityEpoch = useRef(0);
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
-    viewIdentityEpoch.current += 1;
-  }, [view]);
   const probeRef = useRef({});
   useEffect(() => { probeRef.current = { view, size, regShift, cursorFt: cursor, cursorLL, measures }; });
   useEffect(() => {
     if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
     const hook = {
-      get: () => ({ ...view, w: size.w, h: size.h, identityEpoch: viewIdentityEpoch.current }),
+      get: () => ({ ...view, w: size.w, h: size.h }),
       centerOn: (fx, fy, ppf) => setView(() => ({ ppf, offX: size.w / 2 - fx * ppf, offY: size.h / 2 - fy * ppf })),
       // read-only probes (NEW-2): the registration shift actually applied, the cursor's own
       // feet/lat-lng answer, and the committed measure geometry a placed point lands in.
@@ -17423,140 +17374,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B1125 — the exact condition the inspector's own render branch uses, mirrored to a ref for the
   // keydown Escape hatch. Keep the two in lockstep: they are one fact.
   inspectorShowingRef.current = !!(companionOpen || propsTab);
-
-  /* B1215682/NEW-1 — the phone Properties BOTTOM SHEET (the "ONE SURFACE" pilot from the owner's
-   * brief). Scoped deliberately narrow: it replaces the existing narrow-width Properties companion
-   * (the "✎ Properties" pill's overlay) with a Google-Maps-style sheet ONLY when (a) the pointer is
-   * coarse (a real phone/tablet, not a narrowed desktop browser window) and (b) nothing else is
-   * docked — the rarer combo of "another rail panel open AND something also selected" keeps the
-   * existing slide-in-from-the-left drawer untouched (see lib/propertiesSheet.js's header for why).
-   * Land/Analysis/Yield/Standards/References are not touched by any of this. */
-  const phoneSheetSolo = isPhoneSheetMode({ narrow, coarsePointer }) && narrowProps && !leftPanel;
-  const [sheetSnap, setSheetSnap] = useState("half");        // "half" | "tall"
-  const [sheetHeightPx, setSheetHeightPx] = useState(() => { try { return heightForSnap("half", window.innerHeight); } catch (_) { return 0; } });
-  const [sheetAnimated, setSheetAnimated] = useState(false);
-  const [sheetKbInset, setSheetKbInset] = useState(0);       // px the on-screen keyboard covers
-  const [sheetBottomSafe, setSheetBottomSafe] = useState(0); // px of safe-area (home indicator) when the keyboard is closed
-  const sheetDragRef = useRef(null);   // { startY, startHeight, pointerId } while the handle is being dragged
-  const sheetOpenedRef = useRef(false); // did we already reset snap/height for THIS open?
-  const sheetShiftRef = useRef(0);      // px currently subtracted from view.offY to keep the selection clear of the sheet
-  const sheetRef = useRef(null);
-
-  // Reset to the default (half) height every time the sheet freshly opens — a drag that left it
-  // "tall" last time should not carry over ("default height roughly half the viewport").
-  useEffect(() => {
-    if (!phoneSheetSolo) { sheetOpenedRef.current = false; return undefined; }
-    if (sheetOpenedRef.current) return undefined;
-    sheetOpenedRef.current = true;
-    setSheetSnap("half");
-    setSheetAnimated(false);
-    let vh = 0; try { vh = window.innerHeight; } catch (_) {}
-    setSheetHeightPx(heightForSnap("half", vh));
-    const raf = requestAnimationFrame(() => setSheetAnimated(true));
-    return () => cancelAnimationFrame(raf);
-  }, [phoneSheetSolo]);
-
-  // Re-settle to the resolved snap's height whenever it changes (never while a drag is live — the
-  // drag itself is driving heightPx in that case).
-  useEffect(() => {
-    if (!phoneSheetSolo || sheetDragRef.current) return;
-    let vh = 0; try { vh = window.innerHeight; } catch (_) {}
-    setSheetHeightPx(heightForSnap(sheetSnap, vh));
-  }, [phoneSheetSolo, sheetSnap]);
-
-  // Track the on-screen keyboard (visualViewport) + the safe-area inset (reusing B1176480's
-  // approach — shared/ui/safeAreaInsets.js — rather than a second env() probe) so the sheet's
-  // bottom edge rises above whichever is taller right now. This is the brief's second named
-  // "kills this pattern" failure mode: a field buried under the keyboard.
-  useEffect(() => {
-    if (!phoneSheetSolo) return undefined;
-    const measure = () => {
-      setSheetKbInset(keyboardInsetPx(window));
-      setSheetBottomSafe(safeAreaInsets().bottom);
-    };
-    measure();
-    const vv = window.visualViewport;
-    vv?.addEventListener("resize", measure);
-    vv?.addEventListener("scroll", measure);
-    window.addEventListener("orientationchange", measure);
-    return () => {
-      vv?.removeEventListener("resize", measure);
-      vv?.removeEventListener("scroll", measure);
-      window.removeEventListener("orientationchange", measure);
-    };
-  }, [phoneSheetSolo]);
-
-  // The ACTUAL rendered height + bottom offset, clamped so the keyboard can never push the sheet's
-  // top edge off-screen (propertiesSheet.js's clampSheetHeightForKeyboard) — rising above the
-  // keyboard is only safe once the sheet is also allowed to shrink to make room for it.
-  let sheetRenderH = 0, sheetRenderBottom = 0;
-  if (phoneSheetSolo) {
-    let vh = 0; try { vh = window.innerHeight; } catch (_) {}
-    sheetRenderBottom = sheetKbInset > 0 ? sheetKbInset : sheetBottomSafe;
-    sheetRenderH = clampSheetHeightForKeyboard(sheetHeightPx, vh, sheetKbInset);
-  }
-
-  const onSheetHandlePointerDown = (e) => {
-    if (e.button != null && e.button !== 0) return;
-    e.currentTarget.setPointerCapture?.(e.pointerId);
-    sheetDragRef.current = { startY: e.clientY, startHeight: sheetRenderH, pointerId: e.pointerId };
-  };
-  const onSheetHandlePointerMove = (e) => {
-    const d = sheetDragRef.current;
-    if (!d || e.pointerId !== d.pointerId) return;
-    let vh = 0; try { vh = window.innerHeight; } catch (_) {}
-    const deltaUp = d.startY - e.clientY; // dragging UP (finger moves up) grows the sheet
-    setSheetHeightPx(Math.max(0, Math.min(d.startHeight + deltaUp, vh - 24)));
-  };
-  const endSheetHandleDrag = (e) => {
-    const d = sheetDragRef.current;
-    if (!d || (e && e.pointerId !== d.pointerId)) return;
-    sheetDragRef.current = null;
-    let vh = 0; try { vh = window.innerHeight; } catch (_) {}
-    const halfPx = heightForSnap("half", vh), tallPx = heightForSnap("tall", vh);
-    const resolved = resolveDragSnap({ heightPx: sheetHeightPx, halfPx, tallPx, dismissBelowPx: halfPx * 0.45 });
-    if (resolved === "dismiss") { closeInspector(); return; }
-    setSheetHeightPx(heightForSnap(resolved, vh));
-    if (resolved !== sheetSnap) setSheetSnap(resolved);
-  };
-
-  // The brief's hard acceptance criterion: "when the sheet opens over the selected object, the map
-  // must shift so the selection stays visible." Every drawn feature already stamps
-  // `data-feature="<kind>:<id>"` (COUNT-EVERY-KIND), so the selection's on-screen box is read off
-  // the real DOM rather than re-deriving per-kind geometry (rect vs polygon vs polyline) a second
-  // time — the same "measure the real thing" discipline as `panelShiftRef` above, just vertical.
-  useLayoutEffect(() => {
-    if (!phoneSheetSolo) {
-      if (sheetShiftRef.current) {
-        const applied = sheetShiftRef.current;
-        sheetShiftRef.current = 0;
-        setView((v) => ({ ...v, offY: v.offY + applied }));
-      }
-      return;
-    }
-    const sheetEl = sheetRef.current;
-    const key = selFeatureKey(sel);
-    // A deselect (key === null) has nothing left to keep visible — restore to 0. A selection whose
-    // node isn't found (not yet painted this frame) keeps whatever's already applied rather than
-    // snapping back, so a transient miss can't flash the drawing to its unshifted position.
-    let need = sheetShiftRef.current;
-    if (!key) need = 0;
-    else if (sheetEl && typeof document !== "undefined") {
-      let node = null;
-      try { node = document.querySelector(`[data-feature="${CSS.escape(key)}"]`); } catch (_) { node = null; }
-      if (node) {
-        const sheetTopY = sheetEl.getBoundingClientRect().top;
-        const selRect = node.getBoundingClientRect();
-        need = selectionCoverDeltaPx({ selTop: selRect.top, selBottom: selRect.bottom, sheetTopY, margin: 16 });
-      }
-    }
-    const already = sheetShiftRef.current;
-    if (Math.abs(need - already) > 0.5) {
-      sheetShiftRef.current = need;
-      setView((v) => ({ ...v, offY: v.offY - (need - already) }));
-    }
-  }, [phoneSheetSolo, sel, sheetRenderH, setView]);
-
   const railBtn = (on) => ({
     display: "flex", flexDirection: "column", alignItems: "center", gap: 3, width: "100%",
     padding: "10px 2px", border: "none", borderLeft: `3px solid ${on ? PAL.ember : "transparent"}`,
@@ -21933,12 +21750,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             that panel is closed. */}
         <input ref={reAddFileRef} type="file" accept="application/pdf,image/*,.dxf,.dwg" style={{ display: "none" }}
           onChange={(e) => { const f = e.target.files?.[0]; const tid = reAddIdRef.current; reAddIdRef.current = null; if (f) addOverlayFile(f, tid); e.target.value = ""; }} />
-        {/* canvas — B1168128 (×2): touchAction/overscrollBehavior repeated here (not just on
-            the <svg> below) so a touch landing on a floating badge/FAB stacked over the
-            canvas (the scale bar, the calibration badge, the phone FABs) never hands a drag
-            to the browser's native page gesture either — defence in depth alongside the
-            html/body pin in index.css, which is the actual containment boundary. */}
-        <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2, background: PAL.paper, touchAction: "none", overscrollBehavior: "none" }}
+        {/* canvas */}
+        <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2, background: PAL.paper }}
           onDragEnter={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; e.preventDefault(); canvasDragDepth.current += 1; setCanvasDropOver(true); }}
           onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) e.preventDefault(); }}
           onDragLeave={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; canvasDragDepth.current = Math.max(0, canvasDragDepth.current - 1); if (canvasDragDepth.current === 0) setCanvasDropOver(false); }}
@@ -24191,11 +24004,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               positioned assuming this rail's 54px, so hiding it there would leave a blank gap. */}
           <div style={{ width: 54, flex: "none", background: PAL.chrome, borderRight: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", paddingTop: 4,
             ...(narrow ? { position: "absolute", left: 0, top: 0, bottom: 0, zIndex: 1105,
-              // B1215682 — the phone Properties BOTTOM SHEET stays solo: the icon rail is a
-              // left-side drawer affordance that has nothing to do with a sheet rising from the
-              // bottom, so it does not slide in just because the sheet is open (it still does for
-              // every other narrow case — a rail panel, or the sheet's older left-drawer form).
-              transform: (mobileSections || leftPanel || (companionOpen && !phoneSheetSolo)) ? "none" : "translateX(-100%)", transition: "transform 0.2s ease",
+              transform: (mobileSections || leftPanel || companionOpen) ? "none" : "translateX(-100%)", transition: "transform 0.2s ease",
               boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null) }}>
             {leftTabs.map((tb) => (
               // NEW-1 — `data-rail-tab` is the stable hook the click-contract guard reads: which panel
@@ -24226,48 +24035,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </div>
           {/* the open menu (collapsed by default) — drag its right edge to resize */}
           {(leftPanel || companionOpen) && (<>
-          <div data-testid="left-menu-panel" ref={sheetRef}
-            data-bottom-sheet={phoneSheetSolo ? "properties" : undefined}
-            data-sheet-snap={phoneSheetSolo ? sheetSnap : undefined}
-            onFocusCapture={phoneSheetSolo ? (e) => {
-              // B1215682/NEW-1 — the brief's other named failure mode: the iOS keyboard covers the
-              // bottom half of the phone, so a focused field can be visually buried even though the
-              // sheet's own bottom edge already rose above the keyboard (see `sheetRenderBottom`).
-              // Two rAFs let that resize (and the keyboard's own raise animation) settle before
-              // scrolling the field into the now-smaller visible area.
-              const el = e.target;
-              if (!el || typeof el.scrollIntoView !== "function") return;
-              requestAnimationFrame(() => requestAnimationFrame(() => {
-                try { el.scrollIntoView({ block: "nearest", behavior: "smooth" }); } catch (_) {}
-              }));
-            } : undefined}
-            style={phoneSheetSolo ? {
-              // B1215682/NEW-1 — the phone Properties BOTTOM SHEET: rises from the bottom edge
-              // instead of sliding in from the left, defaults to roughly half the viewport (never
-              // the whole screen — seeing the map while editing is the point), rises above the
-              // on-screen keyboard (`sheetRenderBottom`) and never taller than the keyboard-aware
-              // clamp (`sheetRenderH`, from lib/propertiesSheet.js).
-              position: "fixed", left: 0, right: 0, bottom: sheetRenderBottom, zIndex: 1200,
-              background: "var(--planner-panel)", display: "flex", flexDirection: "column", minHeight: 0,
-              height: sheetRenderH, maxHeight: "calc(100vh - 48px)",
-              borderTopLeftRadius: RADIUS.lg, borderTopRightRadius: RADIUS.lg,
-              boxShadow: "0 -10px 28px rgba(0,0,0,0.32)",
-              transition: sheetAnimated ? "height 220ms cubic-bezier(0.2,0.8,0.2,1), bottom 160ms ease-out" : "none",
-            } : {
-              width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "var(--planner-panel)", display: "flex", flexDirection: "column", minHeight: 0,
-              ...(narrow ? { position: "absolute", left: 54, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null),
-            }}>
-          {phoneSheetSolo && (<>
-            {/* B1215682/NEW-1 — CONTROL_H caps at 30 (lg), below the 44px touch floor, so every
-                control INSIDE the sheet is bumped to the new `touch` step via one scoped rule
-                keyed off the token's CSS mirror (`--control-h-touch`, index.css) — never a raw
-                number, and never touching a control anywhere else in the app. */}
-            <style>{`[data-bottom-sheet="properties"] button, [data-bottom-sheet="properties"] input, [data-bottom-sheet="properties"] select, [data-bottom-sheet="properties"] textarea { min-height: var(--control-h-touch); } [data-bottom-sheet="properties"] button { min-width: var(--control-h-touch); }`}</style>
-            <div data-testid="properties-sheet-handle" onPointerDown={onSheetHandlePointerDown} onPointerMove={onSheetHandlePointerMove} onPointerUp={endSheetHandleDrag} onPointerCancel={endSheetHandleDrag}
-              style={{ flex: "0 0 auto", display: "flex", justifyContent: "center", alignItems: "center", height: CONTROL_H.touch, cursor: "grab", touchAction: "none" }}>
-              <span aria-hidden="true" style={{ width: 36, height: 4, borderRadius: RADIUS.pill, background: "var(--border-strong)" }} />
-            </div>
-          </>)}
+          <div data-testid="left-menu-panel" style={{ width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "var(--planner-panel)", display: "flex", flexDirection: "column", minHeight: 0,
+            ...(narrow ? { position: "absolute", left: 54, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null) }}>
           {/* NEW-1 (single-occupancy left dock): on DESKTOP the inspector is ALWAYS the docked
               "properties" panel (full height) — it never stacks above another panel. The 45%-cap /
               bottom-divider "rides above" layout survives ONLY on NARROW, where the companion still

@@ -26,15 +26,7 @@ on:
   pull_request:
     branches:
       - main
-  # `pr_number` is set ONLY by build-check-sweep.yml's repair dispatch (NEW-3, 2026-09-05) — see
-  # that workflow's header for the outage this closes. A plain manual "Run workflow" click leaves
-  # it blank, which is exactly what skips the backfill-status step below (its `if:` reads that
-  # same input), so an ordinary manual dispatch behaves exactly as it always has.
   workflow_dispatch:
-    inputs:
-      pr_number:
-        description: "PR number to backfill the required 'build' status for (set by build-check-sweep.yml; leave blank for an ordinary manual run)"
-        required: false
 
 # ⛔ COST CUT (2026-09-02). The repo went private on 2026-08-31; Actions minutes went from
 # unlimited-and-free to metered, and nothing about the build got slower — the same run volume
@@ -58,12 +50,6 @@ concurrency:
 
 permissions:
   contents: read
-  # Lets the backfill-status step (bottom of this job) post a classic commit status directly —
-  # needed only when `inputs.pr_number` is set (build-check-sweep.yml's repair dispatch); inert
-  # otherwise. `statuses: write` is a plain, same-repo, non-elevated grant on the default
-  # GITHUB_TOKEN — unlike `markPullRequestReadyForReview`/`enablePullRequestAutoMerge` (both
-  # confirmed FORBIDDEN for this token, B793696), the classic Statuses API has no such block.
-  statuses: write
 
 jobs:
   build:
@@ -149,7 +135,6 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - name: Run CI gates (scripts/ci-parity.mjs — the single source of truth for what this build checks)
-        id: ci_gates
         run: npm run ci-parity
         env:
           # Supabase connection (Phase 1). Set these as repository secrets:
@@ -178,34 +163,3 @@ jobs:
           path: .perf/visual-regression/
           if-no-files-found: ignore
           retention-days: 14
-      # Backfill the required "build" status (NEW-3, 2026-09-05). Inert on every ordinary run —
-      # only fires when build-check-sweep.yml dispatched THIS run to repair a PR whose required
-      # "build" check never reported at all (measured live today on PRs #1455/#1456: both sat at
-      # "Expected — Waiting for status to be reported" with zero workflow runs behind them, no
-      # `pull_request` event ever having fired for those branches — a GitHub-side event-delivery
-      # gap, not the docs-only fast path or a path filter: ui-audit/required-check-audit.mjs
-      # already proves no `paths:` filter can hide this job, and it still reports OK). A
-      # `workflow_dispatch` run's own auto-generated check does NOT satisfy a PR's required status
-      # (CLAUDE.md's "Nudge CI" note — a real push is what has always been needed instead), so
-      # this posts a CLASSIC commit status directly via the Statuses API, which required-status
-      # matching honors regardless of which event produced it. `always()` so a failing build still
-      # reports "failure" rather than leaving the PR stuck a second way.
-      - name: Backfill required status for a sweep-repaired PR
-        if: always() && github.event.inputs.pr_number != ''
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const owner = context.repo.owner, repo = context.repo.repo;
-            const prNumber = Number('${{ github.event.inputs.pr_number }}');
-            const outcome = '${{ steps.ci_gates.outcome }}'; // success | failure | cancelled | skipped
-            const state = outcome === 'success' ? 'success' : 'failure';
-            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
-            const sha = pr.head.sha;
-            const runUrl = `https://github.com/${owner}/${repo}/actions/runs/${context.runId}`;
-            await github.rest.repos.createCommitStatus({
-              owner, repo, sha, state, context: "build", target_url: runUrl,
-              description: state === "success"
-                ? "CI gates passed (backfilled by build-check-sweep.yml — the native run never reported)"
-                : "CI gates failed (backfilled by build-check-sweep.yml — the native run never reported)",
-            });
-            core.info(`Posted classic status "${state}" for build on ${owner}/${repo}@${sha} (PR #${prNumber}).`);

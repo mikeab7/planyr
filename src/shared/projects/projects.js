@@ -65,18 +65,6 @@ export async function checkProjectDeletionStatus(id) {
   return (await storageEngine()).checkProjectDeletionStatus(id);
 }
 
-// NEW-1 (B1202176 ×2) — the ONE step any module's first save for a project id goes through, so a
-// project used exclusively from Model/Notes/Library (never the Site Planner canvas) still ends
-// up with a real `sites` row — the row the route gate, the switcher and the breadcrumb all key
-// off. A thin, named re-export of storage.js's `ensureProjectRow` (B1160480 — landed concurrently
-// for the identical Doc Review/Library-upload case; see that function's own header for the full
-// mechanism, incl. why it refuses rather than resurrects a genuinely soft-deleted project) so a
-// lighter workspace can call it without hand-rolling the dynamic-import seam itself. Same seam as
-// everything else in this file.
-export async function ensureProjectExists(id, opts) {
-  return (await storageEngine()).ensureProjectRow(id, opts);
-}
-
 export { groupProjects, filterProjects, relTime, suggestNameMatch, normalizeProjectName, projectGateStatus, markProjectFreshlyMinted, wasProjectFreshlyMinted } from "./projectModel.js";
 
 // NEW-1 (this branch, adversarial review of B1156864) — a "tracked" site (market intel only — a

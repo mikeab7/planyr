@@ -33,16 +33,7 @@ import { strictScale } from "./strictScale.js";
 // without changing what anything currently renders at: pick the tier nearest an existing height.
 // NEW-1 — every export below is wrapped in a dev-only Proxy (strictScale.js) that throws on an
 // unknown key instead of silently returning `undefined`; zero cost in production.
-//
-// `touch` (NEW-2, B1215682) — the WCAG/platform touch-target floor (44 CSS px), added because the
-// existing ceiling (30, `lg`) sits BELOW that floor: no control built from sm/md/lg can ever be
-// finger-sized. Measured on the phone Properties bottom-sheet pilot (the first consumer): 33 of 37
-// interactive elements on the landing screen read under 44×44 before this token existed. This is a
-// FOURTH tier, not a replacement — sm/md/lg are unchanged and still govern every existing desktop/
-// mouse control; `touch` is reached for ONLY inside a coarse-pointer surface that needs a real
-// finger-sized hit target (a control nested inside a rounded surface still resolves its RADIUS via
-// the existing scale/shape rule in docs/DESIGN.md — this token is height only, not shape).
-export const CONTROL_H = strictScale("CONTROL_H", { sm: 22, md: 26, lg: 30, touch: 44 });
+export const CONTROL_H = strictScale("CONTROL_H", { sm: 22, md: 26, lg: 30 });
 
 // Type scale — REDUCED to 5 named ROLES (B915536's NEW-1, 2026-08-31), superseding the previous
 // eight-value half-point ladder below. That ladder was audited-not-invented, but eight values

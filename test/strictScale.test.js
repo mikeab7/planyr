@@ -85,6 +85,6 @@ describe("strictScale — wired onto the four live token scales", () => {
 
   it("CONTROL_H throws on an unknown key and returns every real one", () => {
     expect(() => CONTROL_H.xl).toThrow(/CONTROL_H\.xl is not a valid key/);
-    for (const k of ["sm", "md", "lg", "touch"]) expect(typeof CONTROL_H[k]).toBe("number");
+    for (const k of ["sm", "md", "lg"]) expect(typeof CONTROL_H[k]).toBe("number");
   });
 });

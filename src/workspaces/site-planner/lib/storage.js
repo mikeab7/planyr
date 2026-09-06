@@ -501,7 +501,6 @@ export async function pushSiteToCloud(id) {
   if (!m) return { ok: false, error: "missing" };
   return cloudUpsert(activeUid(), m);
 }
-
 /* B1165441 (NEW-2/NEW-3, adversarial review of B1156864/PR 1424) — "Nothing in the app ever
  * creates a site for a comp; the migration was a snapshot, not a mechanism." The one-time backfill
  * (db/site_role_unify_backfill_20260905.sql) attached the three comps that existed the day it ran
@@ -1195,50 +1194,21 @@ export async function checkProjectDeletionStatus(id) {
  * (never overwritten — this must never clobber a project someone else has mid-edit), and a
  * genuinely soft-deleted project is refused rather than silently resurrected. Signed-out plans
  * have no cloud-row concept at all, so there's nothing to ensure. */
-/* B1227984 — ids this function has locally materialized but has NOT yet confirmed reached the
- * cloud. The `readSites()[id]` fast path a few lines down exists so an ALREADY-established
- * project (the overwhelming common case) never pays a network round trip on every child-module
- * save — but that fast path is unsafe for an id THIS FUNCTION itself just wrote locally moments
- * ago while its OWN cloud push failed (a dropped connection, a deploy blip, a momentary 5xx): the
- * local row now exists, so every later call would short-circuit "already real" and never retry
- * the push, permanently orphaning the project from the cloud even once the connection returns —
- * exactly the "warning cleared, edit landed, still nothing in the database" report this closes.
- * Consulted ONLY to force the retry path back open for an id this function itself left
- * unconfirmed; an id it never touched (or already confirmed) is never in here. In-memory by
- * design — it only needs to survive the current tab; a fresh load re-checks once via
- * `checkProjectDeletionStatus`, which is cheap and correct either way. */
-const unconfirmedProjectPush = new Set();
-
 export async function ensureProjectRow(id, { name = "Untitled site" } = {}) {
   if (!id) return { ok: false, created: false, error: "no id" };
-  const retryingPush = unconfirmedProjectPush.has(id);
-  if (readSites()[id] && !retryingPush) return { ok: true, created: false }; // already real on this device
+  if (readSites()[id]) return { ok: true, created: false }; // already real on this device
   if (!activeUid()) return { ok: true, created: false }; // signed-out — no cloud row to ensure
   const status = await checkProjectDeletionStatus(id).catch(() => ({ ok: false }));
   if (status && status.ok && status.deleted) {
-    unconfirmedProjectPush.delete(id);
     return { ok: false, created: false, deleted: true, error: "This project has been deleted." };
   }
-  if (status && status.ok && status.exists) { // cloud already has it, just not pulled to this device yet
-    unconfirmedProjectPush.delete(id);
-    return { ok: true, created: false };
-  }
-  if (!readSites()[id]) {
-    // B1227984 — don't trust this blindly: a blocked local write (e.g. a stale delete-tombstone
-    // for this id) must be reported as the failure it is, never mistaken for cloud confirmation.
-    const saved = saveSite({ id, groupId: id, site: name || "Untitled site", name: "Concept A", origin: null, county: null, parcels: [], els: [], measures: [], settings: {} });
-    if (!saved) {
-      reportClientEvent("cloud-write-failed", "a project's local row couldn't be created while materializing it for a non-planner write", { id });
-      return { ok: false, created: false, error: "Couldn't create this project — try again in a moment." };
-    }
-  }
+  if (status && status.ok && status.exists) return { ok: true, created: false }; // cloud already has it, just not pulled to this device yet
+  saveSite({ id, groupId: id, site: name || "Untitled site", name: "Concept A", origin: null, county: null, parcels: [], els: [], measures: [], settings: {} });
   const r = await pushSiteToCloud(id).catch((e) => ({ ok: false, error: (e && e.message) || "" }));
   if (r && r.ok === false) {
-    unconfirmedProjectPush.add(id);
     reportClientEvent("cloud-push-failed", "a project's row failed to reach the cloud while materializing it for a non-planner write", { id });
     return { ok: false, created: true, error: r.error || "couldn't reach the cloud" };
   }
-  unconfirmedProjectPush.delete(id);
   return { ok: true, created: true };
 }
 

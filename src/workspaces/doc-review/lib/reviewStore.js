@@ -155,12 +155,6 @@ async function upsertReviewCore(record) {
   const uid = await currentUid();
   if (!uid) return { ok: false, error: "Sign in to save." };
   if (!record || !record.id) return { ok: false, error: "Review has no id." };
-  // B1202176 ×2 / B1160480 — a review filed under a project is a CHILD row keyed by that
-  // project's id, and nothing otherwise guarantees the project's own `sites` row exists (creation
-  // is deliberately lazy — see storage.js's `ensureProjectRow`). Already guarded at the two real
-  // entry points (`fileNewReview`/`refileReview` above, landed as B1160480), which BLOCK the
-  // write on a failed/deleted project rather than saving best-effort — no second guard needed
-  // here, and a second one would just re-check the same thing this call already passed.
   // Core columns (exist since the first persistence migration) + the data jsonb, which
   // always carries every field (incl. the library ones). The library index columns are
   // added on top; if that migration hasn't run yet we fall back to the core row so

@@ -52,27 +52,3 @@ BACKLOG_OPEN.md merge=union
 # the file that is the single source of truth for what is still OPEN, in a way it is not for
 # already-closed history. Do not widen this file to cover them without re-reading that reasoning.
 docs/archive/BACKLOG-DONE.md merge=union
-
-# docs/UI-INVENTORY.md (NEW-2, 2026-09-05) is GENERATED like MAP.md/BACKLOG_OPEN.md above — but
-# unlike them, its generator (ui-audit/ui-inventory.mjs) drives a real headless Chromium crawl of
-# the BUILT app, so it cannot be regenerated inline mid-merge (no live preview server exists at
-# merge time) the way `scripts/post-merge-regen.mjs` regenerates MAP.md/BACKLOG_OPEN.md
-# automatically after every merge. It is still wholly REWRITTEN on nearly every PR that touches any
-# UI surface it crawls, so a plain 3-way text merge conflicts by construction just as often —
-# measured today: PR #1456 collided on this file (among all four named in NEW-2/NEW-1/NEW-2).
-#
-# Gets git's zero-config `union` driver directly, same reasoning as docs/archive/BACKLOG-DONE.md
-# above: whatever a union merge leaves is NOT guaranteed to be an accurate crawl (unlike that
-# file's disjoint-append case, two full-file regenerations unioned together is genuinely garbled
-# content, not a correct merge) — but it can never be WRONGLY TRUSTED, because the required
-# `build` check's Signature-budget gate (`node ui-audit/ui-inventory.mjs --check`, wired via
-# .github/ci-gates.yml) does an exact byte comparison against a fresh crawl on every build that
-# touches this file (build.yml's docs-only fast path explicitly EXCLUDES this path from its
-# "Markdown-only" test for exactly this reason — a change confined to this file still needs the
-# real, browser-based check), and fails loudly, naming the exact line, if the committed content
-# doesn't match. So: no raw conflict ever blocks `mergeable_state` on this file alone, and the
-# existing gate — not a new one — is what actually catches a stale/garbled union result, the same
-# "fails on a specific, named, fixable line" trade the BACKLOG-DONE.md paragraph above describes.
-# A session finishing a merge that touched this file still regenerates it by hand as usual
-# (Definition of Done); this only removes the conflict-marker step that used to precede that.
-docs/UI-INVENTORY.md merge=union

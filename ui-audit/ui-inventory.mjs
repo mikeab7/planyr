@@ -1032,17 +1032,6 @@ async function isolatedKindMismatches(page, surface) {
 // times. Sorting the raw grep output by (file, line) before taking the first entry makes "first
 // match" a property of the CONTENT, never of readdir order, so the choice is now the same on any
 // machine that has the same source tree.
-// ⛔ B1038016 (5th correction) — NEVER EMBED THE RAW MATCH COUNT IN THE COMMITTED ARTIFACT. The
-// gate's own `--check` does a byte-exact diff of docs/UI-INVENTORY.md against a fresh build
-// (`docStale` below), so anything this function writes has to be stable across two builds of the
-// SAME signature columns. The match count is not: it's `grep`'s hit count for the label as a
-// literal substring across the WHOLE `src/` tree, so it moves whenever any file anywhere gains or
-// loses an incidental occurrence of that text — measured on PR #1458, "(+510 more matches,
-// best-effort)" → "(+512 more matches, best-effort)" between a committed row and a freshly built
-// one with zero control-shape changes; an unrelated file added elsewhere in the repo shifted the
-// count. Report only whether other matches exist, never how many — that keeps the column honest
-// (a human can still see "there's more than one hit, treat this attribution loosely") without
-// making the committed file hostage to the total size of unrelated source text.
 function attribute(label) {
   if (!label || label.length < 2) return "unattributed (label too short to search)";
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1058,7 +1047,7 @@ function attribute(label) {
       return fa < fb ? -1 : fa > fb ? 1 : la - lb;
     });
     const first = lines[0];
-    const extra = lines.length > 1 ? " (+more matches elsewhere, best-effort)" : "";
+    const extra = lines.length > 1 ? ` (+${lines.length - 1} more match${lines.length > 2 ? "es" : ""}, best-effort)` : "";
     return first.replace(REPO + "/", "") + extra;
   } catch (_) {
     return "unattributed (no source match — best-effort text search)";
