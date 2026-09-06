@@ -9344,16 +9344,25 @@ function App() {
             `phonePane` (kept from #1490) so a wider screen, or the same phone rotated wide enough,
             still opens on the real two-pane Split with nothing forgotten. Tapping Split itself, or
             any tap at desktop width or away from Split, is the ORIGINAL, untouched behavior: a
-            direct `data.view` write. The active/highlighted tab always matches what's actually on
-            screen — never "Split" while `inPhoneSplit`, since the screen is showing Grid or Gantt,
-            full width, not a two-pane split; that is a deliberate, disclosed choice (see the
-            B1241747 backlog item for the product question it raises: Split then LOOKS identical to
-            picking Grid or Gantt directly on a phone, differing only in what a wider screen remembers). */}
+            direct `data.view` write.
+            ⛔ NEXT-DAY CORRECTION (same B#, owner report on a real iPhone: "Gantt works, split does
+            not") — the FIRST cut of this made Grid/Gantt STEAL the active highlight while
+            `inPhoneSplit`, so tapping Gantt to peek at it made the pill show "Gantt" selected with
+            no visible sign Split was still the real, persisted view — reproduced live (real
+            touch-viewport diagnostic, not assumed): fresh Grid → tap Split renders Grid with NO
+            change at all (Grid stays highlighted), which reads exactly like "Split does nothing."
+            The active tab is now simply `data.view === v`, UNCONDITIONALLY — the same expression
+            this pill has always used outside phone-collapsed Split. "Split" now stays visibly
+            selected for as long as `data.view === "split"`, regardless of which pane `phonePane`
+            is currently showing — Grid/Gantt taps change the PANE, not the VIEW, and the pill says
+            so truthfully the whole time. This is a strict widening of the invariant, not a new one:
+            `inPhoneSplit` only ever differs from `data.view === v` for `v !== "split"`, so desktop
+            (`inPhoneSplit` always false there) is byte-for-byte unaffected. */}
         {section === "projects" && !reviewOpen && (
           <div className="hdr-view" style={{display:"flex",background:"#f0f0f0",borderRadius:7,padding:"3px",gap:2,marginLeft:8,flexShrink:0}}>
             {[["grid","Grid"],["split","Split"],["gantt","Gantt"]].map(([v,label]) => {
               const inPhoneSplit = isMobile && data.view === "split";
-              const active = inPhoneSplit ? (v !== "split" && phonePane === v) : data.view === v;
+              const active = data.view === v;
               return (
                 <button key={v} onClick={()=>{
                     if (inPhoneSplit && v !== "split") setPhonePane(v);

@@ -7,89 +7,89 @@
     "map-landing": {
       "light": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "13814337",
-        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
+        "approvedCommit": "35184a95",
+        "note": "B1258144: removed the project-privacy padlock from the breadcrumb (ProjectBreadcrumb.jsx) per owner request; site-planner-header/site-planner-left-rail baselines updated to reflect its absence"
       },
       "dark": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "13814337",
-        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
+        "approvedCommit": "35184a95",
+        "note": "B1258144: removed the project-privacy padlock from the breadcrumb (ProjectBreadcrumb.jsx) per owner request; site-planner-header/site-planner-left-rail baselines updated to reflect its absence"
       },
       "light--phone": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "13814337",
-        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
+        "approvedCommit": "35184a95",
+        "note": "B1258144: removed the project-privacy padlock from the breadcrumb (ProjectBreadcrumb.jsx) per owner request; site-planner-header/site-planner-left-rail baselines updated to reflect its absence"
       },
       "dark--phone": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "13814337",
-        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
+        "approvedCommit": "35184a95",
+        "note": "B1258144: removed the project-privacy padlock from the breadcrumb (ProjectBreadcrumb.jsx) per owner request; site-planner-header/site-planner-left-rail baselines updated to reflect its absence"
       }
     },
     "site-planner-header": {
       "light": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "13814337",
-        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
+        "approvedCommit": "35184a95",
+        "note": "B1258144: removed the project-privacy padlock from the breadcrumb (ProjectBreadcrumb.jsx) per owner request; site-planner-header/site-planner-left-rail baselines updated to reflect its absence"
       },
       "dark": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "13814337",
-        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
+        "approvedCommit": "35184a95",
+        "note": "B1258144: removed the project-privacy padlock from the breadcrumb (ProjectBreadcrumb.jsx) per owner request; site-planner-header/site-planner-left-rail baselines updated to reflect its absence"
       },
       "light--phone": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "13814337",
-        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
+        "approvedCommit": "35184a95",
+        "note": "B1258144: removed the project-privacy padlock from the breadcrumb (ProjectBreadcrumb.jsx) per owner request; site-planner-header/site-planner-left-rail baselines updated to reflect its absence"
       },
       "dark--phone": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "13814337",
-        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
+        "approvedCommit": "35184a95",
+        "note": "B1258144: removed the project-privacy padlock from the breadcrumb (ProjectBreadcrumb.jsx) per owner request; site-planner-header/site-planner-left-rail baselines updated to reflect its absence"
       }
     },
     "site-planner-left-rail": {
       "light": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "13814337",
-        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
+        "approvedCommit": "35184a95",
+        "note": "B1258144: removed the project-privacy padlock from the breadcrumb (ProjectBreadcrumb.jsx) per owner request; site-planner-header/site-planner-left-rail baselines updated to reflect its absence"
       },
       "dark": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "13814337",
-        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
+        "approvedCommit": "35184a95",
+        "note": "B1258144: removed the project-privacy padlock from the breadcrumb (ProjectBreadcrumb.jsx) per owner request; site-planner-header/site-planner-left-rail baselines updated to reflect its absence"
       },
       "light--phone": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "13814337",
-        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
+        "approvedCommit": "35184a95",
+        "note": "B1258144: removed the project-privacy padlock from the breadcrumb (ProjectBreadcrumb.jsx) per owner request; site-planner-header/site-planner-left-rail baselines updated to reflect its absence"
       },
       "dark--phone": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "13814337",
-        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
+        "approvedCommit": "35184a95",
+        "note": "B1258144: removed the project-privacy padlock from the breadcrumb (ProjectBreadcrumb.jsx) per owner request; site-planner-header/site-planner-left-rail baselines updated to reflect its absence"
       }
     },
     "library": {
       "light": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "13814337",
-        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
+        "approvedCommit": "35184a95",
+        "note": "B1258144: removed the project-privacy padlock from the breadcrumb (ProjectBreadcrumb.jsx) per owner request; site-planner-header/site-planner-left-rail baselines updated to reflect its absence"
       },
       "dark": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "13814337",
-        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
+        "approvedCommit": "35184a95",
+        "note": "B1258144: removed the project-privacy padlock from the breadcrumb (ProjectBreadcrumb.jsx) per owner request; site-planner-header/site-planner-left-rail baselines updated to reflect its absence"
       },
       "light--phone": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "13814337",
-        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
+        "approvedCommit": "35184a95",
+        "note": "B1258144: removed the project-privacy padlock from the breadcrumb (ProjectBreadcrumb.jsx) per owner request; site-planner-header/site-planner-left-rail baselines updated to reflect its absence"
       },
       "dark--phone": {
         "approvedAt": "2026-09-06",
-        "approvedCommit": "13814337",
-        "note": "B1231281: 3-button zoom stack, re-approved against the freshly-merged main baseline (site-canvas-white-buildings fix, PR #1486)"
+        "approvedCommit": "35184a95",
+        "note": "B1258144: removed the project-privacy padlock from the breadcrumb (ProjectBreadcrumb.jsx) per owner request; site-planner-header/site-planner-left-rail baselines updated to reflect its absence"
       }
     }
   }
