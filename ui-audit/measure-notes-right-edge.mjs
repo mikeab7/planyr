@@ -15,7 +15,19 @@
  * steps and assert the stored width never drops below the floor, and that beyond the floor the
  * scrollable canvas width increases instead."* Both halves are asserted here, and the LEFT EDGE
  * is checked at every step too — because the fix must not reintroduce the sliding this replaced.
- */
+ *
+ * ⛔ CORRECTED (NOTES-PAGE-GROWTH, 2026-09-06) — "the scrollable CANVAS width increases" was, at
+ * the time this was written, the same event as "the visible PAGE grows": the editor's own box
+ * WAS the pane. B1203504 later gave the page a narrower, centred, bounded CARD (`note-sheet`)
+ * inside that pane, which decoupled the two — a box can now make the CARD wider while the whole
+ * PANE (this harness's own `canvasClientW`/`canvasScrollW`) stays exactly the same size, because
+ * the grown card still fits inside it. That is not a failure to grow; it is growth that never
+ * needed to trouble the wider pane around it. `roomMade` below checks the CARD first (via `pm`'s
+ * own rendered width, which fills the card's content box) and only asks the PANE the same
+ * question B1203504's `pageOverflowsPane` does — has the card itself now outgrown the visible
+ * window — which is exactly when the pane is the one that has to move. See
+ * `verify-notes-page-growth.mjs` for the fuller page-growth story this file's own narrower
+ * question sits inside. */
 import { chromium } from "playwright";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { pacedWait } from "./lib/tabTiming.mjs";
@@ -25,6 +37,15 @@ const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-lin
 const TREE_KEY = "planyr:notes:tree:v1:local";
 const PAGE_PREFIX = "planyr:notes:page:v1:local:";
 const FLOOR = 160;                       // ANCHOR_MIN_WIDTH — kept in step by the unit suite
+/* ⛔ THE SWEEP STARTS HERE, NOT AT 0 (NOTES-PAGE-GROWTH) — `placeAnchor`'s own left clamp
+ * (`Math.max(ANCHOR_EDGE_PAD, x)`) has ever only produced x=0 by construction: a real click at
+ * x=0 already lands at x=4. A page that is now REPAIRED on load (`repairOffPageAnchors`, the
+ * same floor `moveAnchorPoint`/`resizeBox` already held) correctly treats a hand-seeded x=0 —
+ * this harness's own convenience, never a value the app's own placement path can produce — as
+ * data from before that floor and pulls it in to x=4, which is the CORRECT behaviour and was
+ * previously invisible only because nothing repaired old data yet. Starting the sweep at the
+ * real floor tests the domain his acceptance test was actually about. */
+const EDGE_PAD = 4;                      // ANCHOR_EDGE_PAD — kept in step by the unit suite
 
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
 const page = await (await browser.newContext({ viewport: { width: 1500, height: 950 } })).newPage();
@@ -87,6 +108,10 @@ const readState = () => page.evaluate(() => {
     renderedLeft: el ? Math.round(parseFloat(el.style.left)) : null,
     lines: el ? Math.round(el.getBoundingClientRect().height / 18) : null,
     stored,
+    /* ⛔ THIS IS THE PAGE'S OWN WIDTH, NOT THE PANE'S (NOTES-PAGE-GROWTH). `pm` is the
+     * `.ProseMirror` element, which fills the `note-sheet` CARD's content box by construction
+     * (a plain block, no width of its own) — so its `clientWidth` growing IS the page growing,
+     * exactly the question this file is actually about. */
     hostWidth: pm ? Math.round(pm.clientWidth) : null,
     sheetScrollW: pm ? Math.round(pm.scrollWidth) : null,
     canvasScrollW: scroller ? Math.round(scroller.scrollWidth) : null,
@@ -99,45 +124,49 @@ console.log("\n" + "=".repeat(104));
 console.log("A BOX AT INCREASING x — the stored width must never drop below the floor");
 console.log("=".repeat(104));
 const pad = (s, n) => String(s).padEnd(n);
-console.log(pad("x", 8) + pad("stored w", 11) + pad("rendered w", 13) + pad("left kept", 12) + pad("canvas scrollW", 16) + "verdict");
+console.log(pad("x", 8) + pad("stored w", 11) + pad("rendered w", 13) + pad("left kept", 12) + pad("page width", 12) + "verdict");
 console.log("-".repeat(104));
 
-/* ⛔ THE DENOMINATOR IS THE SCROLLER'S WIDTH, NOT THE SHEET'S — and getting that wrong is the
- * third instrument error of this shape today (TRAPS.md trap 2). The first version asked whether
- * the box passed the SHEET's right edge and demanded the canvas grow; but the sheet is narrower
- * than the scroller, so a box could sit comfortably inside the visible canvas while "overhanging"
- * by that measure, and six perfectly correct rows were reported as failures. Growth is only owed
- * when the box passes what the WINDOW can show. */
-await seed([{ x: 0, y: 40, w: 180 }]);
+/* ⛔ TWO DENOMINATORS, TWO DIFFERENT QUESTIONS (NOTES-PAGE-GROWTH corrected this pair, which the
+ * TRAPS.md-trap-2 comment this replaces got backwards for the shape B1203504 later introduced).
+ * `pageWidth` (`pm`'s own clientWidth) is "how wide is the visible white PAGE right now" — the
+ * thing that actually grows per NEW-RIGHT-EDGE, and the CORRECT thing to assert against, because
+ * B1203504 made the page a narrower, centred CARD than the pane around it. `paneWidth` (the
+ * scroller's clientWidth) only matters for the SEPARATE question "has the grown page now
+ * outgrown the whole visible window" — which only some of these steps reach, and which is
+ * `verify-notes-page-growth.mjs`'s `pageOverflowsPane` case, not this file's own floor/left-edge
+ * acceptance test. */
+await seed([{ x: EDGE_PAD, y: 40, w: 180 }]);
 const first = await readState();
-const host = first.canvasClientW || first.hostWidth;
-const STEP = Math.max(40, Math.round(host / 14));
-console.log(`  (sheet ${first.hostWidth}px · visible canvas ${host}px — growth is owed past the canvas)\n`);
+const paneWidth = first.canvasClientW || first.hostWidth;
+const naturalPageWidth = first.hostWidth;
+const STEP = Math.max(40, Math.round(paneWidth / 14));
+console.log(`  (page ${naturalPageWidth}px, ungrown · visible pane ${paneWidth}px — the page must grow before the pane ever needs to)\n`);
 const failures = [];
-let prevCanvas = 0;
 
-for (let x = 0; x <= host + 200; x += STEP) {
+for (let x = EDGE_PAD; x <= paneWidth + 200; x += STEP) {
   await seed([{ x, y: 40, w: 180 }]);
   const st = await readState();
   const storedW = Number(st.stored?.w) || 0;
   const leftKept = Number(st.stored?.x) === x && st.renderedLeft === x;
   const belowFloor = st.renderedW != null && st.renderedW < FLOOR - 1;
-  // Past the point where the box no longer fits, the canvas must be growing instead.
-  const overhangs = x + (st.renderedW || FLOOR) > host;
-  const canvasGrew = (st.canvasScrollW || 0) > (st.canvasClientW || 0);
+  // Past the point where the box no longer fits ITS OWN PAGE, the PAGE must be growing.
+  const overhangs = x + (st.renderedW || FLOOR) > naturalPageWidth;
+  const pageGrew = (st.hostWidth || 0) > naturalPageWidth;
 
   let verdict = "ok";
   if (belowFloor) { verdict = "⛔ CRUSHED"; failures.push(`x=${x}: rendered ${st.renderedW}px, below the ${FLOOR}px floor`); }
   else if (!leftKept) { verdict = "⛔ LEFT EDGE MOVED"; failures.push(`x=${x}: stored x=${st.stored?.x}, rendered left=${st.renderedLeft}`); }
-  else if (overhangs && !canvasGrew) { verdict = "⛔ NO ROOM MADE"; failures.push(`x=${x}: box overhangs and the canvas did not grow`); }
+  else if (overhangs && !pageGrew) { verdict = "⛔ NO ROOM MADE"; failures.push(`x=${x}: box overhangs its own page and the page did not grow`); }
 
   console.log(pad(x, 8) + pad(storedW, 11) + pad(st.renderedW, 13) + pad(leftKept ? "yes" : "NO", 12)
-    + pad(`${st.canvasScrollW} / ${st.canvasClientW}`, 16) + verdict);
-  prevCanvas = st.canvasScrollW || prevCanvas;
+    + pad(st.hostWidth, 12) + verdict);
 }
 
 /* ════ 2. THE TEXT IS READABLE, NOT ONE LETTER PER LINE ══════════════════════════════════ */
-await seed([{ x: Math.round(host - 30), y: 40, w: 180 }]);
+// Hard against the PAGE's own right margin — the narrow reading column his screenshot showed,
+// not the far edge of a wide monitor window (NOTES-PAGE-GROWTH).
+await seed([{ x: Math.round(naturalPageWidth - 30), y: 40, w: 180 }]);
 const edge = await readState();
 console.log("\nHIS SCREENSHOT'S CASE — a box hard against the right margin");
 console.log(`  rendered width : ${edge.renderedW}px (floor ${FLOOR})`);
@@ -146,8 +175,8 @@ if (edge.renderedW < FLOOR - 1) failures.push("the edge case still renders below
 if ((edge.lines || 0) > 8) failures.push(`the edge case wraps into ~${edge.lines} lines — still crushed`);
 
 /* ════ 3. DRAGGING THE HANDLE RIGHTWARD GROWS THE PAGE RATHER THAN STOPPING DEAD ═════════ */
-// Start close enough to the canvas edge that a rightward drag genuinely has to make room.
-await seed([{ x: Math.round(host - 260), y: 40, w: 180 }]);
+// Start on the page, with just enough room left that a rightward drag genuinely has to grow it.
+await seed([{ x: Math.round(naturalPageWidth - 260), y: 40, w: 180 }]);
 await page.locator(".planyr-anchor").first().click();          // stage 1: select, revealing the handle
 await pacedWait(page, 350);
 const handle = page.locator(".planyr-anchor-size").first();
@@ -166,12 +195,12 @@ if (await handle.count()) {
     dragged = { before: beforeDrag, after: afterDrag };
     console.log("\nDRAGGING THE HANDLE RIGHTWARD, past the old wall");
     console.log(`  stored width : ${beforeDrag.stored?.w} → ${afterDrag.stored?.w}`);
-    console.log(`  canvas       : ${beforeDrag.canvasScrollW} → ${afterDrag.canvasScrollW} (client ${afterDrag.canvasClientW})`);
+    console.log(`  page width   : ${beforeDrag.hostWidth} → ${afterDrag.hostWidth} (pane ${afterDrag.canvasClientW})`);
     if (!(Number(afterDrag.stored?.w) > Number(beforeDrag.stored?.w) + 20)) {
       failures.push(`the drag did not widen the box (${beforeDrag.stored?.w} → ${afterDrag.stored?.w})`);
     }
-    if (!((afterDrag.canvasScrollW || 0) > (afterDrag.canvasClientW || 0))) {
-      failures.push("the drag widened the box but the canvas did not grow to hold it");
+    if (!((afterDrag.hostWidth || 0) > (beforeDrag.hostWidth || 0))) {
+      failures.push("the drag widened the box but the page did not grow to hold it");
     }
   }
 }

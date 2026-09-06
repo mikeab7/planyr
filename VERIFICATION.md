@@ -164,6 +164,24 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V927328 — B1273296: a note whose page had to grow to hold an off-page block prints/saves-as-PDF with the grown page intact, not clipped at the ordinary paper width `Blocker: print-engine`
+
+**Why this needs its own real pass, and why it can't run today.** The fix mirrors the screen's own "the page grows to hold a box that doesn't fit" rule onto the printed sheet (`max-width: max(190mm, Npx)` on `.sheet`, computed from the widest anchored block across the printed pages). Headless Chromium's `window.print()` is a documented no-op — it opens no dialogue and produces no paginated output — so nothing in this sandbox can judge how that wider sheet actually paginates, or what a real "Save as PDF" yields. The DOCUMENT the browser is handed is fully drivable here and was driven; only the step after our code (the browser's own print/PDF engine acting on it) is walled.
+
+**What was verified here (this session, sandbox).**
+1. `test/notesRoundTwo.test.js` (4 new cases) — `buildPrintDocument` carries no width override for an ordinary page; a page whose anchor reaches past the sheet's ordinary width grows it (`max(190mm, 831px)` for a stored `x:575,w:180`, checked against the exact arithmetic); the WIDEST page across a whole printed notebook decides the one shared sheet width; a missing/unreadable `doc` grows nothing rather than taking the print run down.
+2. `ui-audit/verify-notes-page-growth.mjs` §6 drives the REAL toolbar **Print** button end to end (`NoteEditor.jsx`'s own `printPage`, not just the pure `buildPrintDocument` calls) and reads the actual hidden `<iframe data-testid="notes-print-frame">` `printHtmlDocument` writes into — confirming the printed content includes the off-page block's own text, the rendered `.sheet` element's `style` attribute carries the grown `max(190mm, …)` width, the anchor's own `data-anchor-x`/`-w` attributes reached the printed markup unchanged, and no zoom control rides the printed document at all. **This is the check that caught a real bug**: the first version of this fix only wired the page-growth question into `Notes.jsx`'s separate tree-print handler (used for printing a whole branch from the rail) and missed that the toolbar's own single-page Print button calls a second, different function in `NoteEditor.jsx` — the pure-function tests passed throughout because they call `buildPrintDocument` directly, never exercising either real call site; only driving the actual button found the second one was never wired at all. Fixed in the same commit; the harness section stays as a standing guard against it silently regressing a second time.
+3. Full repo suite green; `npm run build` clean.
+
+**Steps, each with a named expected result — any real browser, no sign-in needed (a fresh local build or planyr.io both work):**
+1. Open (or seed) a note with a block dragged or typed far enough right that the page has visibly grown past its ordinary width on screen (see B1273296's own repro, or drag a text box hard against the right margin and keep widening it).
+2. Press **Print** on the toolbar. **Expect:** the print preview shows the WHOLE block — not cut off at the paper's right margin — by the browser scaling the page down to fit (its own "Fit to page"/"Shrink to fit" behavior) or by the sheet printing on a wider virtual page; either is acceptable, but the block's own text must be fully legible somewhere on the printed output, never truncated.
+3. Choose **Save as PDF** and open the resulting file. **Expect:** the off-page block's text is present, complete, and readable in the PDF — not clipped at a page edge, not missing.
+4. Print an ordinary note with no off-page content. **Expect:** unchanged from before this fix — a normal single-column sheet at the standard width.
+5. Repeat once in light theme, once in dark. **Expect:** identical paper output both times (print is always light-on-white regardless of the app's on-screen theme, unchanged from the existing rule).
+
+**Result:** ⏳ pending — needs a real browser's print/PDF engine, which headless Chromium cannot provide. `Cadence: once`.
+
 ### V918032 — B1261232: the rebuilt header presence chip splits Michael's own tabs from real teammates and shows their initials, on a real multi-user, signed-in session `Blocker: auth` `Blocker: real-data`
 
 **Why this needs its own real pass, and why it can't run today.** The whole feature is about correctly rendering MORE THAN ONE genuinely distinct signed-in session on the same project at once — this sandbox's egress proxy CORS-blocks the Supabase auth handshake entirely (no sign-in at all here, per every other `Blocker: auth` item in this file), so there is no way to open even one authenticated session, let alone two different accounts on the same plan concurrently. Also needs a specific real, shared project (`Blocker: real-data`) so a second account has something to be present on.
