@@ -2969,8 +2969,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--surface-page)" }}>
-      {/* map */}
-      <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
+      {/* map — B1168128 (×2): touchAction/overscrollBehavior on the Leaflet host itself so a
+          touch anywhere in this pane declares intent before the browser's native page-gesture
+          recognizer can claim it. Leaflet's own `.leaflet-container` class already sets
+          touch-action once it detects touch support (leaflet.css's `leaflet-touch-drag`/
+          `leaflet-touch-zoom` classes) — this is the same intent stated one layer earlier, on
+          the wrapper Leaflet mounts into, matching the fix in the Site Planner's own canvas. */}
+      <div style={{ position: "relative", flex: 1, minHeight: 0, touchAction: "none", overscrollBehavior: "none" }}>
         <div ref={elRef} style={{ position: "absolute", inset: 0 }} />
 
         {/* B831781 (NEW-6) — A PERSISTENT MODE NEEDS A VISIBLE ARMED STATE. With Comp mode active
