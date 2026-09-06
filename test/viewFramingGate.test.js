@@ -89,6 +89,49 @@ describe("a missing ticket is refused, not waved through", () => {
   });
 });
 
+describe("⛔ B1234400 — a framing must be MEASURABLE, not just unowned", () => {
+  /* The captured production defect, in one assertion: a cold boot with nobody at the wheel — the
+   * move-count check alone says yes — while the document is hidden. Mutation: a `mayFrame` that
+   * ignores `readiness` (the shape before this fix) passes every case in this block. */
+  it("refuses a framing while the document is hidden, even with nothing else in its way", () => {
+    const ticket = g.framingTicket();
+    const v = g.mayFrame(ticket, { visible: false, measured: true });
+    expect(v.ok).toBe(false);
+    expect(v.why).toBe("document-hidden");
+  });
+
+  it("refuses a framing while the container has never been genuinely measured", () => {
+    const ticket = g.framingTicket();
+    const v = g.mayFrame(ticket, { visible: true, measured: false });
+    expect(v.ok).toBe(false);
+    expect(v.why).toBe("container-unmeasured");
+  });
+
+  it("visibility is checked before measurement — a caller retrying wants the more fundamental reason first", () => {
+    const ticket = g.framingTicket();
+    expect(g.mayFrame(ticket, { visible: false, measured: false }).why).toBe("document-hidden");
+  });
+
+  it("readiness defaults to true for every existing caller — pure ownership behaviour is unchanged", () => {
+    const ticket = g.framingTicket();
+    expect(g.mayFrame(ticket).ok).toBe(true);
+    expect(g.mayFrame(ticket, {}).ok).toBe(true);
+  });
+
+  it("a visible, measured framing still falls through to the ownership check", () => {
+    const ticket = g.framingTicket();
+    g.noteUserViewMove();
+    const v = g.mayFrame(ticket, { visible: true, measured: true });
+    expect(v.ok).toBe(false);
+    expect(v.why).toBe("user-moved-since-request");
+  });
+
+  it("a genuinely ready, unowned framing still runs", () => {
+    const ticket = g.framingTicket();
+    expect(g.mayFrame(ticket, { visible: true, measured: true }).ok).toBe(true);
+  });
+});
+
 describe("⛔ the STRUCTURAL guard — every framing path must go through the one door", () => {
   const SRC = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
 
@@ -112,8 +155,8 @@ describe("⛔ the STRUCTURAL guard — every framing path must go through the on
      * moved and spends it after he has — measured live at 40x throttle: a wheel took the view to
      * 0.4594 px/ft and a fit then yanked it to 0.1064. The check must sit immediately before `fit()`.
      * Mutation: moving `mayFrame` back into `requestFit` fails this. */
-    const eff = SRC.slice(SRC.indexOf("    if (!fitReq) return;"), SRC.indexOf("    if (!fitReq) return;") + 400);
-    expect(eff).toMatch(/framingGate\.current\.mayFrame\(fitReq\.ticket\)/);
+    const eff = SRC.slice(SRC.indexOf("    if (!fitReq) return;"), SRC.indexOf("    if (!fitReq) return;") + 1600);
+    expect(eff).toMatch(/framingGate\.current\.mayFrame\(fitReq\.ticket,/);
     expect(eff).toMatch(/frame:suppressed/);
     expect(eff.indexOf("mayFrame")).toBeLessThan(eff.indexOf("fit()"));
     const rfStart = SRC.indexOf("const requestFit = useCallback(");
