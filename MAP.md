@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-06 @ `25a36e6b7` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-06 @ `6baa5fb8c` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -230,7 +230,7 @@ _711 source files mapped._
 - **`src/workspaces/notes/lib/notesBlockKeys.js`** — Backspace at the START of a block undoes a formatting difference before it restructures anything, so one keypress can never silently merge a multi-block region.
   - _exports_: `BLOCK_KEYS_PRIORITY`, `blockStartAction`, `default`
 - **`src/workspaces/notes/lib/notesBoxResize.js`** — The placed box's geometry: the floors, the edge pad, and the pure rule for resizing one from any of its eight handles (corners hold the ratio, edges stretch, Shift inverts, the edges you are not holding never move). Also decides which handles a box may offer, read off its content.
-  - _exports_: `ANCHOR_EDGE_PAD`, `ANCHOR_MIN_HEIGHT`, `ANCHOR_MIN_WIDTH`, `ANCHOR_WIDTH`, `default`, `HANDLE_CURSOR`, `HANDLES`, `handlesFor`, `hasFixedHeight`, `isCorner`, `locksAspect`, `moveAnchorPoint`, `MOVES_ORIGIN`, `resizeBox`
+  - _exports_: `ANCHOR_EDGE_PAD`, `ANCHOR_MIN_HEIGHT`, `ANCHOR_MIN_WIDTH`, `ANCHOR_WIDTH`, `anchorExtent`, `anchorExtentX`, `default`, `HANDLE_CURSOR`, `HANDLES`, `handlesFor`, `hasFixedHeight`, `isCorner`, `locksAspect`, `moveAnchorPoint`, `MOVES_ORIGIN`, `resizeBox`
 - **`src/workspaces/notes/lib/notesCalloutNode.js`** — The `noteCallout` schema node: a coloured block storing a TONE NAME, never a colour.
   - _exports_: `CALLOUT_TONE_IDS`, `CALLOUT_TONES`, `default`, `DEFAULT_CALLOUT_TONE`, `NoteCallout`
 - **`src/workspaces/notes/lib/notesCloud.js`** — The cloud tier under the notes storage seam: pure sync decisions (tree merge, which-copy-wins page seed, picture plan, sign-in adoption) plus the revision-guarded Supabase transport for `notes_trees` / `notes_pages` / `notes_images` and the private `notes-images` bucket. Imported only by `notesStore.js`, and only dynamically.
@@ -276,7 +276,7 @@ _711 source files mapped._
 - **`src/workspaces/notes/lib/notesPastePlain.js`** — Word's three paste modes (keep source · merge formatting · keep text only) plus the structural sanitisation — nbsp spacer collapse, layout-table unwrap, list-lift — that runs in all three.
   - _exports_: `default`, `isLayoutTable`, `isSpacerParagraph`, `MEANINGFUL_ALIGN`, `PASTE_MODES`, `pastePlainKey`, `plainTextToContent`, `sliceCarriesFormatting`, `STYLE_MARKS`, `textOfNode`, `tidyPastedFragment`
 - **`src/workspaces/notes/lib/notesPrint.js`** — The Notes print / Save-as-PDF sheet — a pure HTML document builder whose paper CSS mirrors the screen's editor CSS, plus the hidden-iframe driver that opens the print dialogue.
-  - _exports_: `buildPrintDocument`, `printHtmlDocument`
+  - _exports_: `buildPrintDocument`, `pageAnchorExtentPx`, `printHtmlDocument`
 - **`src/workspaces/notes/lib/notesProjectFiling.js`** — PURE: what a project is holding (`projectNoteCensus`, incl. the bin) and how to move it (`moveProjectNotes`). A leaf with no imports, so the shared header's delete confirmation can reach it without dragging the model onto every route.
   - _exports_: `isLegacyTree`, `moveProjectNotes`, `projectNoteCensus`
 - **`src/workspaces/notes/lib/notesProjectLink.js`** — "what is this project holding?", asked from OUTSIDE the Notes route — account passed in EXPLICITLY, reads the tree blob directly, marks the ledger dirty on a move, and answers `unknown` rather than a confident zero on a legacy tree.
