@@ -6899,6 +6899,28 @@ function App() {
     window.addEventListener('resize', h);
     return () => window.removeEventListener('resize', h);
   }, []);
+  // B1241744/B1241745 — WIDTH drives LAYOUT (isMobile above: the 2-row header, the single overflow
+  // menu, and — new this session — which Schedule view collapses to one pane). POINTER TYPE drives
+  // CONTROL SIZING, and it is a SEPARATE axis: an iPhone in landscape is wide enough (832px+) to
+  // clear the 768px isMobile threshold while still being operated with a finger, so a control sized
+  // for a mouse there is exactly as unreachable as one on a narrow phone. `coarsePointer` is that
+  // second axis — read once, live-updated on the rare device that changes pointer type — and is
+  // never used to decide what's SHOWN (only how big it renders).
+  const [coarsePointer, setCoarsePointer] = useState(() => typeof window!=='undefined' && !!window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+  useEffect(() => {
+    if (typeof window==='undefined' || !window.matchMedia) return;
+    const mq = window.matchMedia('(pointer: coarse)');
+    const h = () => setCoarsePointer(mq.matches);
+    (mq.addEventListener ? mq.addEventListener('change', h) : mq.addListener(h));
+    return () => (mq.removeEventListener ? mq.removeEventListener('change', h) : mq.removeListener(h));
+  }, []);
+  // Which half of Split view shows at phone width (isMobile) — Split cannot show two panes on a
+  // phone (each would be an unusable strip), so it collapses to ONE SCREEN AT A TIME with this as
+  // the "deliberate way to switch between them." Irrelevant at tablet/desktop width, where Split
+  // still renders both panes exactly as before. Defaults to "grid" — the same pane phone width
+  // showed (silently, with no way off it) before this fix, so a phone session that never touches
+  // the new switcher sees no change.
+  const [phonePane, setPhonePane] = useState("grid");
   const [pdfExportOpen, setPdfExportOpen] = useState(false);
   const [projCtx,    setProjCtx]    = useState(null);
   const [taskCtx,    setTaskCtx]    = useState(null);
@@ -8831,7 +8853,12 @@ function App() {
     if (!inShell || !data) return;
     const sec = data.section ?? "projects";
     const section = sec === "suggestions" ? "projects" : sec;
-    const view = isMobile ? "grid" : (data.view ?? "grid");  // effective view: a narrow viewport renders grid without persisting it (matches the body switch)
+    // B1241744/B1241745 — effective view: never persisted to data.view. At phone width, Gantt/Grid
+    // render exactly what the user picked (no silent override); Split collapses to whichever pane
+    // `phonePane` names (the phone one-screen-at-a-time switcher) since it cannot show two panes on
+    // a phone. Must match the body switch below exactly, or the shell's lifted zoom control (which
+    // reads `zoomable` off this) can disagree with what is actually on screen.
+    const view = isMobile ? (data.view === "split" ? phonePane : (data.view ?? "grid")) : (data.view ?? "grid");
     const state = {
       view, section, isMobile: !!isMobile,
       zoomPct: Math.round((ganttPPD || 22) / 6 * 100),
@@ -9288,6 +9315,20 @@ function App() {
         {/* Right action group — desktop: all buttons inline; mobile: overflow menu */}
         <div className="hdr-actions" style={{display:"flex",alignItems:"center",gap:5,flexShrink:0,marginLeft:"auto"}}>
 
+          {/* B1241744 — the phone Gantt zoom control: the desktop pair below is INSIDE the
+              `!isMobile` branch and never reaches a phone at all, which is exactly how the
+              controls-too-small failure was reported ("hit the controls") once Gantt itself
+              stopped being silently replaced by Grid. Same two buttons, touch-sized (44px —
+              the WCAG/platform floor CONTROL_H.touch also uses) under a coarse pointer only;
+              a narrow desktop window with a mouse keeps the desktop pair's own compact size. */}
+          {isMobile && (data.view==="gantt" || (data.view==="split" && phonePane==="gantt")) && (
+            <div style={{display:"flex",alignItems:"center",gap:coarsePointer?4:1}}>
+              <button style={{padding:"0 10px",fontSize:15,height:coarsePointer?44:26,minWidth:coarsePointer?44:26,lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid var(--bd2)",borderRadius:5,background:"none",color:"var(--mut)",cursor:"pointer"}} title="Zoom out" onClick={()=>setGanttPPD(z=>Math.max(1,Math.floor(z/1.35)))}>−</button>
+              <span style={{fontSize:11,color:"var(--mut)",width:30,textAlign:"center",userSelect:"none"}}>{Math.round(ganttPPD/6*100)}%</span>
+              <button style={{padding:"0 10px",fontSize:15,height:coarsePointer?44:26,minWidth:coarsePointer?44:26,lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid var(--bd2)",borderRadius:5,background:"none",color:"var(--mut)",cursor:"pointer"}} title="Zoom in" onClick={()=>setGanttPPD(z=>Math.min(80,Math.ceil(z*1.35)))}>+</button>
+            </div>
+          )}
+
           {isMobile ? (
             /* MOBILE: single overflow button containing Download/Import/Auto-Save */
             <div style={{position:"relative"}}>
@@ -9360,12 +9401,17 @@ function App() {
               </svg>
             </button>
           )}
-          {/* Zoom — only in split/gantt */}
+          {/* Zoom — only in split/gantt. B1241744 — height reads `coarsePointer`, NOT `isMobile`:
+              this branch also serves a phone in LANDSCAPE (832px+ clears the 768px isMobile
+              threshold while the pointer stays exactly as coarse — the "iPad in landscape" case
+              the phone decision names), which is where the reported "controls too small to hit"
+              failure actually lived. A standard fine-pointer desktop measures coarsePointer=false
+              and renders at the original 21px — pixel-identical to before. */}
           {section==="projects" && !isMobile && (data.view==="split"||data.view==="gantt") && (
-            <div style={{display:"flex",alignItems:"center",gap:1,paddingRight:5,borderRight:"1px solid var(--bd2)"}}>
-              <button className="btn" style={{padding:"0 6px",fontSize:13,height:21,lineHeight:1,display:"flex",alignItems:"center",border:"1px solid var(--bd2)"}} title="Zoom out" onClick={()=>setGanttPPD(z=>Math.max(1,Math.floor(z/1.35)))}>−</button>
+            <div style={{display:"flex",alignItems:"center",gap:coarsePointer?4:1,paddingRight:5,borderRight:"1px solid var(--bd2)"}}>
+              <button className="btn" style={{padding:coarsePointer?"0 12px":"0 6px",fontSize:coarsePointer?15:13,height:coarsePointer?44:21,minWidth:coarsePointer?44:undefined,lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid var(--bd2)"}} title="Zoom out" onClick={()=>setGanttPPD(z=>Math.max(1,Math.floor(z/1.35)))}>−</button>
               <span style={{fontSize:11,color:"var(--mut)",width:30,textAlign:"center",userSelect:"none"}}>{Math.round(ganttPPD/6*100)}%</span>
-              <button className="btn" style={{padding:"0 6px",fontSize:13,height:21,lineHeight:1,display:"flex",alignItems:"center",border:"1px solid var(--bd2)"}} title="Zoom in" onClick={()=>setGanttPPD(z=>Math.min(80,Math.ceil(z*1.35)))}>+</button>
+              <button className="btn" style={{padding:coarsePointer?"0 12px":"0 6px",fontSize:coarsePointer?15:13,height:coarsePointer?44:21,minWidth:coarsePointer?44:undefined,lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid var(--bd2)"}} title="Zoom in" onClick={()=>setGanttPPD(z=>Math.min(80,Math.ceil(z*1.35)))}>+</button>
             </div>
           )}
 
@@ -9518,12 +9564,24 @@ function App() {
         />
       )}
 
+      {/* B1241745 — the phone one-screen-at-a-time switcher for Split: only ever rendered when
+          Split cannot show both its panes (isMobile), and only for Split — Grid/Gantt picked
+          directly already show exactly what the user asked for, with nothing to switch between.
+          Its own row, above the body, rather than an overlay — the body below stays exactly the
+          single-flex-child layout GridView/GanttView already expect. */}
+      {section === "projects" && !reviewOpen && isMobile && data.view === "split" && (
+        <PhonePaneSwitcher pane={phonePane} setPane={setPhonePane} coarsePointer={coarsePointer} />
+      )}
+
       {/* BODY */}
       <div style={{flex:1,overflow:"hidden",display:"flex"}}>
         <ErrorBoundary key={data.view}>
-        {section === "projects" && !reviewOpen && (isMobile?"grid":data.view)==="grid"  && <GridView   {...shared} />}
-        {section === "projects" && !reviewOpen && (isMobile?"grid":data.view)==="gantt" && <GanttView  tasks={flatTasks} updateTask={updateTask} pxPerDay={ganttPPD} onZoomChange={setGanttPPD} rolledHealthMap={rolledHealthMap} proj={proj} onMouseEnter={()=>setHoverZone('gantt')} selectedId={selectedId} setSelectedId={setSelectedId} settings={data.settings} />}
-        {section === "projects" && !reviewOpen && (isMobile?"grid":data.view)==="split" && <SplitView  {...shared} />}
+        {/* B1241744/B1241745 — effective view (must match the toolbar-bridge copy above exactly).
+            Split never renders below at phone width; a phone session that picked Split instead
+            gets ONE of its two panes, chosen by the phone pane switcher just above. */}
+        {section === "projects" && !reviewOpen && (isMobile ? (data.view === "split" ? phonePane : (data.view ?? "grid")) : (data.view ?? "grid"))==="grid"  && <GridView   {...shared} />}
+        {section === "projects" && !reviewOpen && (isMobile ? (data.view === "split" ? phonePane : (data.view ?? "grid")) : (data.view ?? "grid"))==="gantt" && <GanttView  tasks={flatTasks} updateTask={updateTask} pxPerDay={ganttPPD} onZoomChange={setGanttPPD} rolledHealthMap={rolledHealthMap} proj={proj} onMouseEnter={()=>setHoverZone('gantt')} selectedId={selectedId} setSelectedId={setSelectedId} settings={data.settings} />}
+        {section === "projects" && !reviewOpen && !isMobile && data.view==="split" && <SplitView  {...shared} />}
         {section === "reports"                         && <MasterView data={data} setData={setData} updateTask={updateTask} setNotesCtx={setNotesCtx} goToTask={goToTask} />}
         {section === "projects" && reviewOpen           && <SuggestionsView data={data} updateTask={updateTask} setData={setData} rows={reviewRows} setRows={setReviewRows} loading={reviewLoading} onClose={()=>setReviewOpen(false)} gridProps={shared} activeIdx={reviewIdx} setActiveIdx={setReviewIdx} />}
         </ErrorBoundary>
@@ -12647,7 +12705,7 @@ const depAnchors = ({ type, src, tgt, fanIndex = 0, fanCount = 1, tgtLabelRightX
 };
 
 // ── GanttView ─────────────────────────────────────────────
-function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScroll, rolledHealthMap, proj, onMouseEnter, selectedId, setSelectedId, settings}) {
+function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScroll, rolledHealthMap, proj, onMouseEnter, selectedId, setSelectedId, settings, rowZoom=1}) {
   const [scrollTop, setScrollTop] = useState(0);
   const localRef = useRef(null);
   const ref = scrollRef || localRef;
@@ -12919,8 +12977,18 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
   return (
     <div style={{flex:1, display:"flex", flexDirection:"column", overflow:"hidden"}}>
 
-      {/* Scrollable chart */}
-      <div ref={ref} style={{flex:1,overflow:"auto",background:"var(--bg)",cursor:"grab"}} onMouseEnter={onMouseEnter}
+      {/* Scrollable chart — B1241746 (NEW-3): `rowZoom` mirrors GridView's own gridZoom ONLY when
+          this instance is the Gantt half of SplitView (its only caller that passes a value other
+          than the default 1). GridView zooms its whole subtree via the CSS `zoom` property
+          (data-grid-scroll="1" below), which — because it re-layouts every descendant px, ROW_H
+          included — changes GridView's OWN rendered row height without touching the module-scope
+          ROW_H the Gantt pane also reads. Two panes reading one ROW_H is not enough when only one
+          of them is then visually rescaled: the grid's rows grow, the Gantt's don't, and the drift
+          compounds one row at a time down the list. Zooming both panes by the SAME factor keeps
+          every row's rendered top/height identical AND keeps the scroll-sync below numerically
+          correct (scrollTop is copied 1:1 between the two refs, which is only meaningful when both
+          sides are scaled the same). Standalone GanttView (no grid to align against) keeps rowZoom=1. */}
+      <div ref={ref} style={{flex:1,overflow:"auto",background:"var(--bg)",cursor:"grab",zoom:rowZoom}} onMouseEnter={onMouseEnter}
         onScroll={handleScroll}
         onMouseDown={onPanDown}
         onMouseMove={onPanMove}
@@ -14039,6 +14107,33 @@ function AutomationPanel({data, setData, onClose}) {
   );
 }
 
+// ── PhonePaneSwitcher ─────────────────────────────────────
+// B1241745 — the "deliberate way to switch between them" the phone Split collapse needs. Visually
+// the SAME segmented-pill pattern as the header's own Grid/Split/Gantt view switcher (never a new
+// phone-only control shape), just two options instead of three and sized for the pointer that's
+// actually driving it: 44px (the WCAG/platform touch floor, the same one
+// src/shared/ui/designTokens.js's CONTROL_H.touch pilot uses) under a coarse pointer, a smaller
+// comfortable size for the narrow-desktop-window-with-a-mouse case that also trips `isMobile`.
+function PhonePaneSwitcher({ pane, setPane, coarsePointer }) {
+  const h = coarsePointer ? 44 : 30;
+  return (
+    <div style={{display:"flex",justifyContent:"center",padding:"6px 10px",background:"var(--surf)",borderBottom:"1px solid var(--bd)",flexShrink:0}}>
+      <div style={{display:"flex",background:"#f0f0f0",borderRadius:7,padding:"3px",gap:2}}>
+        {[["grid","Grid"],["gantt","Gantt"]].map(([v,label]) => (
+          <button key={v} onClick={()=>setPane(v)}
+            style={{border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:pane===v?600:500,
+              letterSpacing:".01em",padding:"0 18px",height:h,minWidth:h,borderRadius:5,transition:"all .15s",
+              background:pane===v?"#fff":"transparent",
+              color:pane===v?"var(--amber)":"var(--mut)",
+              boxShadow:pane===v?"0 1px 3px rgba(0,0,0,0.12)":"none"}}>
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── SplitView (resizable) ────────────────────────────────
 function SplitView(props) {
   const settings = props.data?.settings || DEFAULT_SETTINGS;
@@ -14144,7 +14239,7 @@ function SplitView(props) {
         )}
       </div>
       <div style={{flex:1,overflow:"hidden",display:"flex"}}>
-        <GanttView tasks={props.tasks} updateTask={props.updateTask} pxPerDay={props.ganttPPD} onZoomChange={props.setGanttPPD} scrollRef={ganttRef} onScroll={sync("gantt")} rolledHealthMap={props.rolledHealthMap} proj={props.proj} onMouseEnter={()=>props.setHoverZone?.('gantt')} selectedId={props.selectedId} setSelectedId={props.setSelectedId} settings={props.data?.settings} />
+        <GanttView tasks={props.tasks} updateTask={props.updateTask} pxPerDay={props.ganttPPD} onZoomChange={props.setGanttPPD} scrollRef={ganttRef} onScroll={sync("gantt")} rolledHealthMap={props.rolledHealthMap} proj={props.proj} onMouseEnter={()=>props.setHoverZone?.('gantt')} selectedId={props.selectedId} setSelectedId={props.setSelectedId} settings={props.data?.settings} rowZoom={props.gridZoom || 1} />
       </div>
     </div>
   );
