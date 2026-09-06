@@ -386,7 +386,12 @@ export function createExportSheet(ctx) {
     const furn = document.createElementNS("http://www.w3.org/2000/svg", "g");
     furn.setAttribute("font-family", "Inter, system-ui, sans-serif");
     furn.setAttribute("data-furniture", "1"); // skip the export stroke-thinning pass — sized with its own hairlines
-    furn.innerHTML = buildSheetFurnitureSvg({ x, y, w, h, ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL, obstacles });
+    // NEW-1 — deliberately NOT `pal: PAL`. PAL is the app's LIVE theme, and a printed sheet must
+    // stay paper-colored regardless of whether the app happened to be in dark mode when Download
+    // was pressed — a dark-inked or dark-plated scale bar on a PDF would be worse than the
+    // on-screen bug this fixes. Passing no pal lets scaleBarPlate/northArrowPlate fall back to
+    // their own fixed, print-safe ink/plate defaults (sheetFurniture.js), same as they always have.
+    furn.innerHTML = buildSheetFurnitureSvg({ x, y, w, h, ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: {}, obstacles });
     clone.appendChild(furn);
     return { clone, w, h };
   };

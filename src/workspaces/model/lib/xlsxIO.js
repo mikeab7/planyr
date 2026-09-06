@@ -38,11 +38,35 @@ import {
   formatAt, styleAt, cellKey,
 } from "./sheetModel.js";
 import { evaluateWorkbook, formulaSource, literalTypedValue } from "./sheetEngine.js";
+import { RESERVED_NAME_PREFIXES } from "./namedRanges.js";
 import {
   parseFormula, FUNCTION_NAMES, parseRefText, colNumToLetters, isDate, isErrVal, serialToYMD,
 } from "../../../shared/formula/formula.js";
 
 const FUNCTION_NAME_SET = new Set(FUNCTION_NAMES);
+const RESERVED_PREFIX_DOTS = RESERVED_NAME_PREFIXES.map((p) => `${p.toLowerCase()}.`);
+
+/** Does this formula's AST read a project-derived built-in name (Site.Acres, Plan.Building1.SF,
+ *  Comp.<title>.RentPSF, …)? Excel has no equivalent — there is no cell or workbook-defined-name
+ *  behind one, only a value this app resolves at read time (lib/projectRefs.js) — so a formula
+ *  containing one can never survive as a live Excel formula; see `toExcelScalar`'s own call site
+ *  below for what happens instead (flattened to the resolved value, never silently dropped). */
+function astHasProjectRef(node) {
+  if (!node || typeof node !== "object") return false;
+  switch (node.type) {
+    case "name":
+      return RESERVED_PREFIX_DOTS.some((p) => node.name.toLowerCase().startsWith(p));
+    case "unary":
+    case "percent":
+      return astHasProjectRef(node.arg);
+    case "binary":
+      return astHasProjectRef(node.left) || astHasProjectRef(node.right);
+    case "call":
+      return node.args.some(astHasProjectRef);
+    default:
+      return false;
+  }
+}
 
 /** Does this formula's AST call ONLY functions this engine implements? A "call" node's own
  *  `.name` is already upper-cased by the tokenizer/parser (formula.js), matching `FUNCTION_NAMES`
@@ -202,14 +226,25 @@ function collectWritableKeys(sheet) {
 /** Export the whole workbook to a real .xlsx file — every sheet, formulas written as formulas
  *  (with the live-evaluated result cached alongside, so the file shows a real number even
  *  before Excel's own recalculation), number formats, styles, merges, column widths, row
- *  heights, freeze panes, and named ranges. Returns a Blob ready to hand to a download link. */
-export async function exportWorkbookToXlsxBlob(workbook) {
+ *  heights, freeze panes, and named ranges. Returns a Blob ready to hand to a download link.
+ *
+ *  `projectNames` (spreadsheet-live-data-refs, optional) — the caller's own already-resolved
+ *  project-derived name map (lib/projectRefs.js), the same one the live sheet evaluates
+ *  against. A cell whose formula reads one of these (`astHasProjectRef`, above) is exported as
+ *  its PLAIN RESOLVED VALUE, never as a live Excel formula — Excel has no such name to resolve
+ *  it against, and shipping `{formula:"Site.Acres*2"}` verbatim would silently become a broken
+ *  `#NAME?` the moment Excel itself recalculates. A cell note says so, so opening the file in
+ *  Excel doesn't read as "this used to be a formula and now it's just a number" with no
+ *  explanation — and a RE-IMPORT of this same file reads it back as the plain value it now is,
+ *  never a dead formula pretending to be live (per the build brief's own "make sure a re-import
+ *  does not turn a live reference into a dead literal without the user knowing"). */
+export async function exportWorkbookToXlsxBlob(workbook, { projectNames } = {}) {
   const wb = new ExcelJS.Workbook();
   wb.creator = "Planyr";
   wb.created = new Date();
   wb.calcProperties.fullCalcOnLoad = true; // a Planyr-computed cached value must never look stale
 
-  const evalResult = evaluateWorkbook(workbook);
+  const evalResult = evaluateWorkbook(workbook, { projectNames });
   const usedSheetNames = new Set();
   const excelNameById = new Map();
   for (const entry of workbook.sheets) excelNameById.set(entry.id, sanitizeExcelSheetName(entry.name, usedSheetNames));
@@ -239,7 +274,19 @@ export async function exportWorkbookToXlsxBlob(workbook) {
       if (raw != null && isFormulaText(raw)) {
         const src = formulaSource(raw);
         const res = evalForSheet.get(rowIndex, colIndex);
-        if (res && res.ok) {
+        const { ast } = parseFormula(src);
+        if (ast && astHasProjectRef(ast)) {
+          // A project-data reference has nothing for Excel to resolve it against — export the
+          // resolved value only, plus a note explaining why a formula became a plain number.
+          if (res && res.ok) {
+            const scalar = toExcelScalar(res.value);
+            if (scalar !== undefined) wsCell.value = scalar;
+            valueIsDate = isDate(res.value);
+          } else {
+            wsCell.value = { error: (res && res.error) || "#ERROR!" };
+          }
+          wsCell.note = `Planyr live reference "=${src}" — frozen to its resolved value on export (Excel has no equivalent live reference).`;
+        } else if (res && res.ok) {
           const result = toExcelScalar(res.value);
           wsCell.value = result === undefined ? { formula: src } : { formula: src, result };
           valueIsDate = isDate(res.value);
@@ -382,7 +429,15 @@ function isValidPlanyrName(name) {
   if (!text || /^[0-9]/.test(text) || /\s/.test(text) || !NAME_SHAPE_RE.test(text)) return false;
   if (parseRefText(text)) return false;
   const upper = text.toUpperCase();
-  return upper !== "TRUE" && upper !== "FALSE" && !FUNCTION_NAME_SET.has(upper);
+  if (upper === "TRUE" || upper === "FALSE" || FUNCTION_NAME_SET.has(upper)) return false;
+  // spreadsheet-live-data-refs — a FOREIGN workbook's own defined name could coincidentally read
+  // "Site.Acres" etc.; importing it as an ordinary cell-range named range would let it SHADOW our
+  // live project reference for that exact key (evaluateWorkbook's own sheet.names-wins-on-
+  // collision rule, sheetEngine.js). Refusing it here leaves any formula that already reads that
+  // identifier resolving through the live project reference instead — never a stale foreign cell.
+  const lower = text.toLowerCase();
+  if (RESERVED_PREFIX_DOTS.some((p) => lower.startsWith(p))) return false;
+  return true;
 }
 
 /** A marker so the outer catch below can tell a message THIS module already wrote in plain

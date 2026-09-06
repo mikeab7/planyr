@@ -1767,6 +1767,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     paper: themePal.canvasBg, gridMinor: themePal.canvasGridMinor, gridMajor: themePal.canvasGridMajor,
     ink: themePal.textPrimary, accent: themePal.canvasSelection, accentSoft: themePal.canvasAccentSoft,
     setback: themePal.canvasSetback, parcel: themePal.canvasParcel, panelBg: themePal.surfaceRaised,
+    // NEW-1 — the scale bar / north arrow "plate" background (sheetFurniture.js). These are map
+    // CHROME sitting over the aerial, like the Layers/View panels — not drawn site content — so
+    // the plate must follow the theme the way its neighbouring status chips already do. Only the
+    // ON-SCREEN furniture reads this; the PDF/PNG export deliberately passes no pal at all so a
+    // printed sheet never goes dark just because the app happened to be in night mode.
+    plateFill: themePal.canvasPlateFill,
     // NEW-4 — ink for the small WHITE value plates painted on the canvas (the setback chip).
     // The plate is white in both themes, so its border + numerals are a fixed near-black.
     chipInk: themePal.canvasChipInk,

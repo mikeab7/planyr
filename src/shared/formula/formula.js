@@ -1038,7 +1038,11 @@ function rangeArray(node, ctx) {
 function colArray(node, ctx) {
   if (node && node.type === "range") return rangeArray(node, ctx);
   if (node && node.type === "name") {
-    const rect = resolveNamedRange(ctx, node.name);
+    const entry = resolveNamedRange(ctx, node.name);
+    // A computed (project-data) name feeds a range-aware function as a one-element array,
+    // exactly the same treatment a single-cell named range already gets a few lines below.
+    if (entry.computed) return [entry.value === undefined ? BLANK : raiseIfErr(entry.value)];
+    const rect = entry;
     return rangeArray({ type: "range", from: { row: rect.r1, col: rect.c1 }, to: { row: rect.r2, col: rect.c2 } }, ctx);
   }
   if (!node || node.type !== "col") throw ferr(FORMULA_ERRORS.VALUE, "expected a [Column], A1:B10 range, or named range reference");
@@ -1077,7 +1081,11 @@ function rangeGrid(node, ctx) {
   if (node.type === "col") return colArray(node, ctx).map(v => [v]);
   let r1, r2, c1, c2, grid;
   if (node.type === "name") {
-    const rect = resolveNamedRange(ctx, node.name);
+    const entry = resolveNamedRange(ctx, node.name);
+    // A computed (project-data) name has no table structure to preserve — VLOOKUP/HLOOKUP
+    // against one is a 1×1 "table", matching the one-element-array treatment in colArray above.
+    if (entry.computed) return [[entry.value === undefined ? BLANK : raiseIfErr(entry.value)]];
+    const rect = entry;
     r1 = rect.r1; r2 = rect.r2; c1 = rect.c1; c2 = rect.c2; grid = ctx.grid;
   } else if (node.type === "range") {
     grid = node.sheet ? resolveSheetGrid(ctx, node.sheet) : ctx.grid;
@@ -1478,12 +1486,23 @@ function readGridCell(ctx, row, col, sheetName) {
 // (Schedule, Cost Estimating) — or a name genuinely undefined in a Model sheet — throws the
 // SAME #NAME? the parser itself used to throw before named ranges existed (see the parser's
 // own "id" atom case above).
+//
+// ⛔ Model workspace, project-data references (spreadsheet-live-data-refs) — a SECOND entry
+// shape now lives in the same ctx.names map, alongside the {r1,c1,r2,c2} cell-range one above:
+// a COMPUTED entry, `{computed:true, value}`, for a read-only built-in name resolved from data
+// OUTSIDE the grid entirely (the open project's site plan / comps — e.g. `Site.Acres`,
+// `Comp.<title>.RentPSF`). It reuses the exact same "name" AST node and the exact same
+// unknown-name #NAME? this function already throws — never a second reference syntax — so the
+// three call sites below (evalNode, colArray, rangeGrid) each branch on `entry.computed` and
+// treat a computed entry as a single resolved value rather than a rectangle to read off the
+// grid. `value` may itself be an error sentinel (`errVal(...)`) when the project source the name
+// names is missing/not-applicable — raiseIfErr propagates it exactly like an errored cell would.
 function resolveNamedRange(ctx, name) {
   const names = ctx.names;
   const key = String(name).toLowerCase();
-  const rect = names && Object.prototype.hasOwnProperty.call(names, key) ? names[key] : null;
-  if (!rect) throw ferr(FORMULA_ERRORS.NAME, `unknown name "${name}"`);
-  return rect;
+  const entry = names && Object.prototype.hasOwnProperty.call(names, key) ? names[key] : null;
+  if (!entry) throw ferr(FORMULA_ERRORS.NAME, `unknown name "${name}"`);
+  return entry;
 }
 const evalNode = (node, ctx) => {
   switch (node.type) {
@@ -1513,7 +1532,11 @@ const evalNode = (node, ctx) => {
     // already throws in scalar position — see colArray below for its range-argument use
     // (SUM(SomeRangeName) etc.), which never routes through here.
     case "name": {
-      const rect = resolveNamedRange(ctx, node.name);
+      const entry = resolveNamedRange(ctx, node.name);
+      // A COMPUTED (project-data) entry resolves directly to its own value — there is no grid
+      // rectangle to read (see resolveNamedRange's own header note above).
+      if (entry.computed) return entry.value === undefined ? BLANK : raiseIfErr(entry.value);
+      const rect = entry;
       if (rect.r1 === rect.r2 && rect.c1 === rect.c2) {
         const v = readGridCell(ctx, rect.r1, rect.c1);
         return v === undefined ? BLANK : raiseIfErr(v);
