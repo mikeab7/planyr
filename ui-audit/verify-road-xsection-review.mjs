@@ -1,20 +1,20 @@
-/* B1162048 (NEW-1) / B1162050 (NEW-3) / B1162051 (NEW-4) — live verification of the road
+/* B1258752 (NEW-1) / B1258754 (NEW-3) / B1258755 (NEW-4) — live verification of the road
  * cross-section adversarial-review fixes. Logged-out, no external GIS, a throwaway seeded plan
  * (never one of the owner's real plans) — the ATTEMPT-BEFORE-YOU-PARK class, so it runs here.
  *
- * B1162048 (NEW-1) — the whole cross-section used to collapse to plain asphalt (every band fill AND
+ * B1258752 (NEW-1) — the whole cross-section used to collapse to plain asphalt (every band fill AND
  * every lane-marking seam) the moment the section's single NARROWEST band (usually a 2' curb &
  * gutter) got sub-pixel, even while every other band (12' travel lanes, a 20' median) was still
  * perfectly resolvable. Fixed by gating each band's fill on ITS OWN width, and each lane-marking
  * seam on the narrower of its two adjacent bands, against two independent floors
  * (XSEC_BAND_FILL_MIN_PX / XSEC_STRIPE_MIN_PX in lib/roadCrossSection.js).
  *
- * B1162050 (NEW-3) — a designated right-of-way on a road with only the dialog's own single-band
+ * B1258754 (NEW-3) — a designated right-of-way on a road with only the dialog's own single-band
  * wrapper (no REAL multi-band design) never drew on the canvas, even though the Properties panel's
  * own ROW field never required a real design. Fixed by pulling the ROW-line block out from under
  * `hasXSection(el)` in SitePlanner.jsx.
  *
- * B1162051 (NEW-4) — an asymmetric section (a sidewalk on one side only) could overrun the
+ * B1258755 (NEW-4) — an asymmetric section (a sidewalk on one side only) could overrun the
  * designated ROW on that one side while the section's bare WIDTH SUM still read comfortably under
  * the ROW, so the old validity check (sum vs. designated) called it valid and painted bands outside
  * the ROW line. Fixed by judging validity against the section's actual per-side EXTENTS
