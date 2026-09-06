@@ -164,6 +164,28 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V916800 — B1260000: Backspace on an empty bullet with a nested child no longer deletes the paragraph above it, on Michael's own iPhone `Blocker: real-device`
+
+**Why this needs its own real pass, and why it can't run today.** The reported mechanism is specific to iOS Safari's on-screen keyboard: it is documented to delete backward via a `beforeinput` event that does not reliably carry a `keydown` a keymap can intercept, so the platform's own native list-editing logic can run before any of this app's code sees the press. Nothing in this sandbox can synthesize that — not Chromium, and not even a real WebKit engine (Playwright's Linux WebKit build, installed and used this session): Playwright's keyboard automation always dispatches a full, well-formed physical-key sequence (`keydown` → `beforeinput` → `input`) on every engine, because it is simulating a hardware key, not iOS's virtual-keyboard-to-DOM bridge. Only a real iPhone's own software keyboard can exercise the actual gap.
+
+**What was verified here (this session, sandbox, three independent mechanisms).**
+1. The owner's exact document, real physical Backspace keypress, real Chromium: correct result (no data loss) both with the fix present AND with it fully disabled — confirming Chromium's own fallback also happens to get this shape right, which is why the defect could never be reproduced here and had to be reasoned about instead of chased.
+2. Disabled ONLY the `keydown` handler (kept the new `beforeinput` plugin): a real physical Backspace keypress in Chromium was still handled correctly, entirely by the new plugin — proof the backstop is reachable by a real key event, not dead code.
+3. `ui-audit/verify-notes-backspace-beforeinput.mjs` dispatches a SYNTHETIC `beforeinput` directly (untrusted, so Chromium performs no native edit of its own — only the plugin can produce a transaction): 8/8 green with the fix present, 2/8 (both housekeeping checks) with `addProseMirrorPlugins()` removed and rebuilt — a genuine, mechanism-specific red/green proof.
+4. Re-ran the full 52-row `verify-notes-backspace.mjs` table against a REAL WebKit engine (`npx playwright install webkit && npx playwright install-deps webkit` — confirmed working in this sandbox): every B1260000 row passed; the 2 unrelated failures are a pre-existing WebKit picture-selection rendering quirk, unaffected by this fix.
+5. The full adjacent-case matrix from the brief (empty/non-empty × top-level/nested × bullet/numbered/checklist × with/without children × repeated presses × first-item/after-heading) — 18 new cases across `test/notesBlockKeys.test.js` and `ui-audit/verify-notes-backspace.mjs`, all green.
+
+RED-PROVEN throughout: every new case reproduces the correct-behavior claim only when the fix is present, and the mutation checks (disabling `addKeyboardShortcuts`, disabling `addProseMirrorPlugins`, or both) each reproduce a genuine red state matching what the check is meant to catch.
+
+**Steps, each with a named expected result — on his own iPhone, in the Notes module:**
+1. Create a note with: a plain paragraph, then a bullet, press Enter, press Tab to indent a new bullet under it, type some text in that indented bullet, press Enter then Shift+Tab (or however he normally gets back to the outer bullet) to leave the OUTER bullet EMPTY while the nested one keeps its text, then a plain paragraph below the list. (Or reproduce the reported note directly if it still exists.)
+2. Put the cursor at the very start of the EMPTY outer bullet (right where it was before typing anything on that line).
+3. Press the on-screen keyboard's delete/backspace key ONCE. **Expect:** the empty bullet becomes a plain line (no bullet marker), the paragraph ABOVE the list is completely untouched, and the previously-nested line is still there, still a bullet.
+4. Press delete again. **Expect:** that now-plain empty line merges into the paragraph above it — the words of that paragraph are unchanged, just followed immediately by the (empty) next line's absence; nothing is deleted from the paragraph's own text.
+5. If anything looks wrong at either step, undo (however he normally undoes on his phone) and confirm the note returns to exactly how it looked before step 3.
+
+**Result:** ⏳ pending — needs Michael's own iPhone; not reachable from this sandbox even with a real WebKit engine installed. `Cadence: once`.
+
 ### V901057 — B1239216: a `Comp.<title>.RentPSF/SizeSF/Date` formula reference resolves a REAL signed-in comp `Blocker: auth`
 
 **Why this needs its own real pass.** V901056 (`docs/archive/VERIFICATION-DONE.md`) already proved the whole Site.*/Plan.*/Comp.* mechanism live end to end in headless Chromium, including the `Comp.*` NAME-RESOLUTION path signed out (`Comp.NoSuchComp.RentPSF` → `#NAME?`, zero network calls). What that pass could not reach is a `Comp.*` reference resolving a REAL comp's rent/size/date, because that needs a genuine signed-in account with at least one saved Leasing Comp — this sandbox has no Supabase credentials at all (`lib/projectCompsFetch.js`'s own `!supabase` guard is what made the signed-out path even testable). The pure resolution logic for this exact case (a real `compType`/`leaseRate`/`leaseSizeSf`/`compDate` object) is unit-tested end to end in `test/modelProjectRefs.test.js`'s "Comp.<title>.*" suite — not re-litigated here.
