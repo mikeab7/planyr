@@ -335,3 +335,45 @@ describe("deleteSite({ tombstone }) — B1202176 amendment: dropping a NEVER-mat
     expect(loadSite(id)).toBeNull();
   });
 });
+
+/* B1202176 amendment ×2 (2026-09-06) — THE ORDERING RACE the first amendment (above) missed,
+ * cross-verified independently on production TWICE (the owner, and a separate live measurement):
+ * `ensureProjectRow` can WRITE the row (local + cloud, `origin` still null — it never resolves one)
+ * before `persistOrDrop` ever re-evaluates the same id. A hard reload remounts Site Planner
+ * inactive on whatever route the URL names, so its `[active]` effect fires on that very first
+ * render too — this is not limited to a second tab switch in the same session. The first
+ * amendment's gate, `!stored?.origin`, still read TRUE for exactly this record (a local row with
+ * no origin) and called `deleteSite(id, {tombstone:true})` on it — production evidence: a row
+ * written at 00:18:56 was soft-deleted at 00:19:30, 34 seconds later, no delete action ever taken.
+ * The fix drops the origin check entirely: `!stored` alone. Any local record, however it got
+ * there, means something considered this project worth keeping. */
+describe("persistOrDrop's gate must survive ensureProjectRow having ALREADY written the row (B1202176 amendment ×2)", () => {
+  beforeEach(() => { resetServer(); makeBrowser().activate(); clearRecentlyDeleted(); setActiveUser(UID); });
+
+  it("THE BUG the first amendment missed: a record ensureProjectRow already wrote still reads !stored?.origin === true", async () => {
+    const id = "smtp2dcu4i53";
+    const ensured = await ensureProjectRow(id, { name: "Untitled project" });
+    expect(ensured.ok).toBe(true);
+    const stored = loadSite(id);
+    expect(stored).toBeTruthy();       // persistOrDrop's re-mount check now sees a real record
+    expect(stored.origin).toBeFalsy(); // ensureProjectRow never resolves one — this is exactly why
+                                        // the first amendment's `!stored?.origin` gate still read true
+    // TEETH: replaying the SUPERSEDED gate's own decision destroys the row it should have protected.
+    if (!stored?.origin) await deleteSite(id, { tombstone: true });
+    expect(server.rows.get(id)?.deleted_at).toBeTruthy(); // exactly the reproduced production symptom
+  });
+
+  it("THE FIX: gating on !stored alone leaves the ensureProjectRow-written row untouched across a re-evaluation", async () => {
+    const id = "smtp2dcu4i53";
+    await ensureProjectRow(id, { name: "Untitled project" });
+    const stored = loadSite(id);
+    expect(stored).toBeTruthy();
+    // persistOrDrop's fixed decision — `isBlankSite(s) && !stored` — is false here (`stored` is
+    // truthy), so it falls to the `else saveSite(...)` branch, never `deleteSite`, regardless of
+    // `origin`.
+    saveSite({ id, ...stored });
+    expect(loadSite(id)).toBeTruthy();
+    expect(server.rows.get(id)?.deleted_at).toBeFalsy();
+    expect(_readSiteTombs(UID)[id]).toBeUndefined();
+  });
+});

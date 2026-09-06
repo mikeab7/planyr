@@ -4046,18 +4046,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!siteId || deletedSelfRef.current) return; // B264: this plan was just deleted — don't resurrect it
     const s = liveRef.current;
     const stored = loadSite(siteId);
-    if (isBlankSite(s) && !stored?.origin) {
-      // ⛔ B1202176 (amendment) — a project id that has NEVER had a local record (this device
-      // never called `saveSite` for it — the deliberate no-origin lazy-creation case) has nothing
-      // for a tombstone to protect: nothing was ever pushed to the cloud to resurrect. Tombstoning
-      // it anyway used to permanently block `ensureProjectRow`'s own `saveSite` call the moment
-      // ANY other module (Notes, first) later tried to materialize this SAME still-open project —
-      // reproduced live: switching from a brand-new blank plan straight to Notes, before drawing
-      // anything, silently poisoned the id before Notes ever touched it. A record that DOES
-      // already exist locally is a real (if empty) project and keeps the full delete + tombstone.
-      deleteSite(siteId, { tombstone: !!stored });
+    // ⛔ B1202176 (amendment ×2) — THE GATE IS "does ANY local record exist", never "does it have
+    // an origin". The first cut of this fix gated on whether the record carried a set origin field,
+    // which still deleted a project the instant a record existed with NO origin — and
+    // `ensureProjectRow` (any other module's first write) always creates one with a null origin.
+    // Live-reproduced on production (owner + an independent Cowork measurement, both 2026-09-06):
+    // New project → Notes → "+ New page" → Notes' `ensureProjectRow` WRITES a real local+cloud row
+    // (origin still null, Site Planner's own canvas still blank) → hard reload remounts Site
+    // Planner inactive on the Notes route → this effect fires again on mount, sees that SAME
+    // now-real record, and — under the old origin-only gate — still called
+    // `deleteSite(id, {tombstone:true})` on it: a row written at 00:18:56 was soft-deleted at
+    // 00:19:30, 34 seconds later, with no delete action ever taken. A local record existing AT
+    // ALL — however it got there, whatever module wrote it — is proof something considered this
+    // project worth keeping; only an id that has NEVER been saved anywhere on this device may be
+    // silently forgotten, and that case can never carry an origin either, so checking for the
+    // record's mere presence is both the fix and a strict simplification.
+    if (isBlankSite(s) && !stored) {
+      // Nothing to protect against resurrection (no record, so nothing was ever pushed to the
+      // cloud from here) and nothing to poison a later module's `ensureProjectRow` with.
+      deleteSite(siteId, { tombstone: false });
       onSiteDropped?.(siteId);
     }
+    // A record already exists (any origin, any content) — never delete it here. Re-saving the
+    // current (possibly still-blank) canvas state onto it is a safe no-op: it neither destroys an
+    // existing row nor creates a new one, and cloudUpsert's own header-signature check skips the
+    // network write entirely when nothing actually changed.
     else saveSite({ id: siteId, ...metaRef.current, ...s });
   };
   useEffect(() => {

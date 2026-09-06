@@ -109,35 +109,45 @@ describe("Shell.jsx records the fresh-creation signal and folds it into the gate
   });
 });
 
-/* B1202176 (amendment, 2026-09-05) — `SitePlanner.jsx`'s `persistOrDrop` fires the moment a
- * workspace tab switch makes the Site Planner canvas inactive, and for a still-blank, still-
- * unlocated draft (exactly what "New project" mints and leaves behind the instant you switch to
- * another workspace tab without drawing anything) it drops the site rather than saving it. Before
- * this fix it always called the general `deleteSite(id)`, which tombstones unconditionally — and a
- * project id that never had a local record has nothing for that tombstone to protect, so it only
- * ever poisoned `saveSite`'s own resurrection guard against a LATER module's `ensureProjectRow`
- * (proven end-to-end in `test/siteSoftDelete.test.js`'s B1202176-amendment describe block). The
- * fix is checking whether a local record already existed BEFORE deciding whether to tombstone —
- * this is the wiring proof that `persistOrDrop` actually makes that check and actually threads it
- * through, not merely that `deleteSite` supports the option somewhere unused. */
-describe("SitePlanner.jsx's persistOrDrop only tombstones a drop that had a real local record to protect", () => {
+/* B1202176 (amendment ×2, 2026-09-06) — `SitePlanner.jsx`'s `persistOrDrop` fires the moment a
+ * workspace tab switch makes the Site Planner canvas inactive, and for a still-blank draft it
+ * drops the site rather than saving it. Two shipped shapes, in order:
+ *   (1) unconditional `deleteSite(id)` — tombstoned every drop, poisoning any LATER module's
+ *       `ensureProjectRow` for the same id.
+ *   (2) `deleteSite(id, { tombstone: !!stored })` gated on `!stored?.origin` — closed (1), but
+ *       STILL deleted a project the instant a record existed with no origin, which is exactly what
+ *       `ensureProjectRow` always writes. Reproduced independently on production TWICE (the owner,
+ *       and a separate live measurement) on the SAME repro: New project → Notes → "+ New page"
+ *       writes a real row (origin still null) → hard reload remounts Site Planner inactive on the
+ *       Notes route → this effect re-fires, sees that now-real record, and (2)'s gate still called
+ *       `deleteSite(id, {tombstone:true})` on it — a row written at 00:18:56 was soft-deleted at
+ *       00:19:30, 34 seconds later, no delete action ever taken.
+ * The fix is gating on `!stored` ALONE — a local record existing at all, however it got there,
+ * means something considered this project worth keeping, and only an id that has NEVER been saved
+ * anywhere on this device (which can therefore never carry an origin either) may be dropped. This
+ * is the wiring proof that `persistOrDrop` makes exactly that check, in that order, and that
+ * neither of the two superseded shapes is still reachable. */
+describe("SitePlanner.jsx's persistOrDrop only drops an id that has NEVER had a local record", () => {
   it("reads the local record BEFORE deciding whether to drop it", () => {
     const fnStart = PLANNER.indexOf("const persistOrDrop = () => {");
     expect(fnStart).toBeGreaterThan(-1);
     const storedIdx = PLANNER.indexOf("const stored = loadSite(siteId);", fnStart);
-    const blankCheckIdx = PLANNER.indexOf("if (isBlankSite(s) && !stored?.origin) {", fnStart);
+    const blankCheckIdx = PLANNER.indexOf("if (isBlankSite(s) && !stored) {", fnStart);
     expect(storedIdx).toBeGreaterThan(fnStart);
     expect(blankCheckIdx).toBeGreaterThan(storedIdx);
   });
 
-  it("passes tombstone: !!stored to deleteSite, never an unconditional call", () => {
+  it("passes tombstone: false to deleteSite, and neither superseded call shape is reachable", () => {
     const fnStart = PLANNER.indexOf("const persistOrDrop = () => {");
-    const callIdx = PLANNER.indexOf("deleteSite(siteId, { tombstone: !!stored });", fnStart);
+    const callIdx = PLANNER.indexOf("deleteSite(siteId, { tombstone: false });", fnStart);
     expect(callIdx).toBeGreaterThan(fnStart);
-    // The old unconditional call shape must be GONE from this function, not merely duplicated
-    // beside the fix — otherwise the fix could be dead code sitting next to the still-broken original.
+    // Neither the original unconditional call NOR the first amendment's `!stored?.origin` /
+    // `!!stored` shape may still be reachable — otherwise a superseded fix could be dead code
+    // sitting next to a still-broken one.
     const fnEnd = PLANNER.indexOf("\n  };", fnStart);
     const body = PLANNER.slice(fnStart, fnEnd);
     expect(body.includes("deleteSite(siteId);")).toBe(false);
+    expect(body.includes("!stored?.origin")).toBe(false);
+    expect(body.includes("tombstone: !!stored")).toBe(false);
   });
 });
