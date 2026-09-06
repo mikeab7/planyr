@@ -284,7 +284,7 @@
 | B1205297 | The Library files the same upload again every time, with no duplicate check | [Library] | #library #files #filing | ⏳ live — awaiting |
 | B1203344 | A comp's auto-created "tracked" market-record site gets the full 133-folder document tree, and the Library's org-scope organize job names it in its progress banner | [library] | #library #doc-review #comps | ⏳ live — awaiting |
 | B1208864 | The cloud-write retry path replayed a queued group rename as N separate writes instead of the one atomic RPC, and the durable log was cleared before a single row landed | [Site Planner] | #site-planner #persistence #sync | ⏳ live — awaiting |
-| B1191456 | Boot-time auto-fit races the user's first gesture and silently undoes it (×2) | [Site Planner] | #site-planner #view #ui | ⏳ live — awaiting |
+| B1191456 | Boot-time auto-fit races the user's first gesture and silently undoes it (×3) | [Site Planner] | #site-planner #view #ui | ⏳ live — awaiting |
 | B1191457 | Dashboard clears the URL but a cold boot silently resumes the project you just left | [Site Planner] | #site-planner #persistence | ⏳ live — awaiting |
 | B1186256 | Split Yield into a dedicated Drainage module — Yield keeps only land use, coverage/FAR, stalls, cost | [Site Planner] | #site-planner #floodplain #yield #ui | ⏳ live — awaiting |
 | B1186259 | Four surfaces disagree on jurisdiction because the jurisdiction check only ever tests ONE parcel of a multi-parcel site | [Site Planner / gis] | #site-planner #gis #floodplain | ⏳ live — awaiting |

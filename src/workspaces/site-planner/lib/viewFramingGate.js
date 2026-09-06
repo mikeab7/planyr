@@ -64,6 +64,33 @@
  *
  * Pure: no React, no DOM, no timers. The plan key is passed in, so two plans cannot share ownership
  * and a test needs no browser (test/viewFramingGate.test.js).
+ *
+ * ═══ B1234400 — A SECOND REASON A FRAMING MAY NOT COMMIT, ORTHOGONAL TO OWNERSHIP ═════════════════
+ * The rule above answers "has the user taken the view?". It has no opinion on a different question
+ * that turned out to matter just as much: CAN THE VIEW BE MEASURED RIGHT NOW? The owner reported the
+ * planner zooming itself on a cold start, and the app's own diagnostic recorder (viewChangeRecorder,
+ * armed with `?planyrDiag=1`) caught it live: a `setView` from inside a React commit, 3,978 ms after
+ * load, `gesture: null`, `visibility: "hidden"` — the boot-time auto-frame ran and committed a
+ * garbage zoom while the document itself was backgrounded and the map container had never been laid
+ * out. `mayFrame`'s move-count check correctly said "nothing intervened" (nothing had — the tab was
+ * never seen), which is exactly why THIS check has to be a second, independent gate rather than a
+ * refinement of the first one: a framing can be perfectly OWNED by nobody's contested gesture and
+ * still be computed from numbers that do not describe reality.
+ *
+ * `mayFrame`'s second argument is a `readiness` object, `{ visible, measured }`, supplied by the
+ * caller (SitePlanner.jsx has `document` and the container ref; this module deliberately does not,
+ * staying pure). Both default to `true` so every existing call site — and every existing test —
+ * that only cares about ownership is unaffected. `visible` is `document.visibilityState === "visible"`
+ * at the moment of the verdict; `measured` is whether the caller has a genuine, visible-tab
+ * measurement of the container (never "has SOME number arrived" — a ResizeObserver's mandatory first
+ * callback fires even for a page that was never laid out, and the app's own `Math.max(320, …)` floor
+ * turns that degenerate box into a plausible-looking 320×360 that must NOT be trusted).
+ *
+ * Checked BEFORE the move count on purpose: an unmeasurable view has nothing sensible to say about
+ * ownership either, and naming the more fundamental reason first is what a caller building a retry
+ * loop actually wants back (see SitePlanner.jsx's fitReq effect, which retries a `document-hidden` /
+ * `container-unmeasured` verdict against the SAME ticket rather than dropping it — a suppression for
+ * either of these two reasons is a "not yet", not a "no").
  */
 
 /* One gate per mounted planner (see the scope note above). No module state: two planners, or one
@@ -83,10 +110,17 @@ export function createViewFramingGate() {
   /** Take a ticket at the moment a framing is REQUESTED. Hand it back to `mayFrame` when it runs. */
   const framingTicket = () => ({ at: moves });
 
-  /** May this framing execute? Only if the user has not moved the view since the ticket was taken.
-   *  Returns a reason either way, so a caller can log it and a harness can assert on it. */
-  const mayFrame = (ticket) => {
+  /** May this framing execute? Checks, in order: the ticket is real; the document is visible; the
+   *  container has been genuinely measured; the user has not moved the view since the ticket was
+   *  taken. `readiness` defaults to `{ visible: true, measured: true }` so a caller that has nothing
+   *  to say about measurability (every existing test, and any future caller with no DOM access) gets
+   *  exactly the old ownership-only behaviour. Returns a reason either way, so a caller can log it
+   *  and a harness can assert on it. */
+  const mayFrame = (ticket, readiness = {}) => {
     if (!ticket || !Number.isFinite(ticket.at)) return { ok: false, why: "no-ticket" };
+    const { visible = true, measured = true } = readiness;
+    if (!visible) return { ok: false, why: "document-hidden" };
+    if (!measured) return { ok: false, why: "container-unmeasured" };
     if (moves > ticket.at) return { ok: false, why: "user-moved-since-request", moves: moves - ticket.at };
     return { ok: true, why: "no-user-move-since-request" };
   };
