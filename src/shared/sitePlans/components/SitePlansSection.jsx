@@ -52,6 +52,11 @@ const inputStyle = {
   border: "1px solid var(--border-default)", background: "var(--surface-base)", color: "var(--text-primary)",
 };
 const metaText = { fontSize: FONT_SIZE.label, color: "var(--text-secondary)" };
+// NEW-3 (B1263074) — the ONE height/alignment for the row's four action controls (Move/resize,
+// Crop, Pin comp here, Change page). A Button or ToggleChip's rendered height otherwise depends
+// on what happens to be inside it (an inline icon raises the line-box height above plain text),
+// which is how these landed at three different heights (24/26/28px) with none of them aligned.
+const ACTION_BTN_STYLE = { height: 26, boxSizing: "border-box", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5 };
 
 // The overlay raster is a MAP BACKGROUND (see this file's own header — the original brochure
 // stays untouched in Review/Library), so it's stored as a resolution-capped JPEG rather than a
@@ -366,9 +371,12 @@ function OverlayRow({
 
       {expanded && (
         <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border-default)" }}>
-          {sizeFt && <div style={{ ...metaText, marginBottom: 6 }}>{sizeFt}</div>}
-
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+          {/* NEW-2 (B1263073) — the sheet's own ground dimensions ("(approx) 3,000 x 3,882 ft")
+              used to sit on the resting row as its own line, answering a question nobody asked
+              ("you're giving me the dimensions of the sheet for some reason" — owner). It's real
+              information only where scale actually matters — resizing the plan — so it now rides
+              as a tooltip on Move/resize instead of a permanent line on the card. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, minWidth: 0 }}>
             <IconButton size={26} onClick={() => onToggleVisible()} active={false} aria-label={o.visible ? "Hide on map" : "Show on map"} title={o.visible ? "Hide on map" : "Show on map"}>
               <EyeIcon off={!o.visible} />
             </IconButton>
@@ -383,7 +391,12 @@ function OverlayRow({
               style={!isOwner ? { opacity: 0.4, cursor: "default" } : undefined}>
               <LockIcon locked={o.locked} />
             </IconButton>
-            <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
+            {/* NEW-3 (B1263074) — `minWidth: 0` on BOTH this flex child and the range input
+                itself: a flex item's default min-width is `auto`, which for an `<input
+                type=range>` is its own intrinsic width (well over 100px in most browsers), so
+                without this the slider refused to shrink and blew 43px past the panel's own
+                right edge ("the opacity slider goes outside of the boundaries" — owner). */}
+            <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8 }}>
               <span style={metaText}>Opacity</span>
               {/* NEW-8 — dragging used to write to Supabase and refetch the whole overlay list
                   on every `onChange` tick. `onSetOpacity` is now local-only + debounced (see
@@ -392,22 +405,27 @@ function OverlayRow({
               <input type="range" min={0.2} max={1} step={0.05} value={o.opacity}
                 onChange={(e) => onSetOpacity(Number(e.target.value))}
                 onMouseUp={onOpacityCommit} onTouchEnd={onOpacityCommit} onKeyUp={onOpacityCommit}
-                style={{ flex: 1 }} />
-              <span style={{ ...metaText, width: 32, textAlign: "right" }}>{Math.round(o.opacity * 100)}%</span>
+                style={{ flex: 1, minWidth: 0 }} />
+              <span style={{ ...metaText, width: 32, flex: "none", textAlign: "right" }}>{Math.round(o.opacity * 100)}%</span>
             </div>
           </div>
 
           {/* B1134753 NEW-20 — an exact-value alternative to eyeballing the rotate handle on the
               map. Committed the SAME way a drag is (SitePlansSection's commitPlacement), so a
-              pinned comp on this plan still recomputes and the version guard still applies. */}
-          {placed && (
+              pinned comp on this plan still recomputes and the version guard still applies.
+              NEW-2 (B1263073) — a LOCKED plan used to render this as a permanently greyed,
+              disabled box with no explanation ("give me a rotation option that's grayed out" —
+              owner, as a complaint). The field only renders when it's actually usable; locked
+              shows the REASON instead — matching the Move/resize button's own locked message. */}
+          {placed && (o.locked ? (
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
               <span style={metaText}>Rotation</span>
-              {/* NEW-7 — this typed-value path commits through the same commitPlacement() the
-                  map handles do, but had no `locked` gate of its own: it was the one way left
-                  to rotate a locked plan after the map click-to-arm and the panel's own
-                  Move/resize button were both closed off. */}
-              <input type="number" step={0.1} disabled={o.locked}
+              <span style={metaText}>{Math.round((o.rotationDeg || 0) * 10) / 10}° · locked — unlock to rotate</span>
+            </div>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <span style={metaText}>Rotation</span>
+              <input type="number" step={0.1}
                 value={rotDraft != null ? rotDraft : Math.round((o.rotationDeg || 0) * 10) / 10}
                 onChange={(e) => setRotDraft(e.target.value)}
                 onFocus={() => setRotDraft(String(Math.round((o.rotationDeg || 0) * 10) / 10))}
@@ -416,11 +434,10 @@ function OverlayRow({
                   if (e.key === "Enter") { e.currentTarget.blur(); }
                   if (e.key === "Escape") { rotCancelingRef.current = true; e.currentTarget.blur(); }
                 }}
-                title={o.locked ? "Locked — unlock to rotate" : undefined}
-                style={{ ...inputStyle, width: 72, ...(o.locked ? { opacity: 0.5, cursor: "not-allowed" } : null) }} />
+                style={{ ...inputStyle, width: 72 }} />
               <span style={metaText}>°</span>
             </div>
-          )}
+          ))}
 
           {/* B972512-HARDENING item 8 — sharing is a deliberate, POST-placement action, gated on
               `placed` so a half-set-up plan (still at its auto-suggested default position) can
@@ -435,6 +452,13 @@ function OverlayRow({
             </div>
           )}
 
+          {/* NEW-3 (B1263074) — one action band, one height. These four controls used to render
+              at three different heights (24/26/28px) and land 1px apart where two shared a row,
+              because a Button's height is only as tall as its own content's line-box (an icon
+              inline with text raises it) and ToggleChip's own padding differs from Button's — an
+              unaligned pile ("the buttons... they're not organized whatsoever" — owner). Every
+              control below now shares ACTION_BTN_STYLE (fixed height, centered content), so the
+              height is a design decision instead of an accident of what happens to be inside. */}
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
             {/* B972512-HARDENING item 14 — an unplaced overlay has no map layer at all (the
                 render-sync effect skips anything overlayPlaced() calls false), so "Move / resize"
@@ -446,34 +470,37 @@ function OverlayRow({
                 *clicking the image on the map* to select it) — so this button is the other half
                 of making the lock mean something: disabled while locked, for owner and everyone
                 else alike, since the point of locking is protection from an ACCIDENTAL drag,
-                including the locker's own. */}
+                including the locker's own.
+                NEW-2 (B1263073) — the sheet's ground dimensions (`sizeFt`) ride here as a tooltip
+                now, reachable exactly where scale actually matters, instead of a permanent line
+                on the resting row. */}
             <Button size="sm" variant={isActive ? "primary" : "ghost"} disabled={placed && o.locked}
-              onClick={() => onActivate()} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
-              title={placed && o.locked ? "Locked — unlock to move or resize" : undefined}>
+              onClick={() => onActivate()} style={ACTION_BTN_STYLE}
+              title={placed && o.locked ? "Locked — unlock to move or resize" : (sizeFt || undefined)}>
               <MoveIcon />{isActive ? "Editing on map" : placed ? "Move / resize" : "Place on map"}
             </Button>
             {/* B1134754 NEW-21 — crop is available whether or not the overlay has been placed
                 yet ("crop should be available BEFORE placement as well as after… avoids fighting
                 the alignment twice"); disabled only while there's no raster to crop at all.
-                NEW-9(c) (owner report, build 9c35724) — "Cropped ✓" used to render as the exact
-                same ghost Button as every action beside it, so a completed STATUS read as one
-                more thing to click. A ToggleChip (filled/bold once `active`) reads as status at
-                a glance while staying exactly as clickable — reopening the crop tool to edit or
-                reset it is still one click, unchanged. */}
+                NEW-2 (B1263073) — "Cropped ✓" read as a STATUS wearing a button's clothes ("it
+                shows that it is cropped, but the buttons... they're not organized" — owner). It IS
+                re-editable (clicking reopens the crop tool), so the label now names the ACTION —
+                "Edit crop" once a crop exists, "Crop…" before one does — while the ToggleChip's
+                own filled styling still carries the fact that a crop is already applied. */}
             <ToggleChip active={hasCrop(o)} disabled={!o.rasterKey}
-              onClick={onStartCrop} style={{ display: "inline-flex", alignItems: "center", gap: 5, opacity: !o.rasterKey ? 0.5 : 1, cursor: !o.rasterKey ? "not-allowed" : "pointer" }}
+              onClick={onStartCrop} style={{ ...ACTION_BTN_STYLE, opacity: !o.rasterKey ? 0.5 : 1, cursor: !o.rasterKey ? "not-allowed" : "pointer" }}
               title={!o.rasterKey ? "This plan doesn't have an image yet" : hasCrop(o) ? "Already cropped — edit or reset it" : undefined}>
-              <CropIcon />{hasCrop(o) ? "Cropped ✓" : "Crop…"}
+              <CropIcon />{hasCrop(o) ? "Edit crop" : "Crop…"}
             </ToggleChip>
             {placed && (pinning ? (
-              <Button size="sm" variant="danger" onClick={onStopPin}>Cancel pin</Button>
+              <Button size="sm" variant="danger" onClick={onStopPin} style={ACTION_BTN_STYLE}>Cancel pin</Button>
             ) : (
-              <Button size="sm" variant="ghost" onClick={onStartPin} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><PinIcon />Pin comp here</Button>
+              <Button size="sm" variant="ghost" onClick={onStartPin} style={ACTION_BTN_STYLE}><PinIcon />Pin comp here</Button>
             ))}
             {confirmingChangePage ? (
-              <Button size="sm" variant="danger" onClick={() => { setConfirmingChangePage(false); onConfirmChangePage(); }}>Confirm — this clears its position</Button>
+              <Button size="sm" variant="danger" onClick={() => { setConfirmingChangePage(false); onConfirmChangePage(); }} style={ACTION_BTN_STYLE}>Confirm — this clears its position</Button>
             ) : (
-              <Button size="sm" variant="ghost" onClick={() => setConfirmingChangePage(true)}>Change page…</Button>
+              <Button size="sm" variant="ghost" onClick={() => setConfirmingChangePage(true)} style={ACTION_BTN_STYLE}>Change page…</Button>
             )}
           </div>
         </div>
@@ -495,6 +522,12 @@ export default function SitePlansSection({
   const [panelError, setPanelError] = useState(null);
   const [flow, setFlow] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
+  // B1263072 (NEW-1) — this whole section defaults COLLAPSED: it's secondary to the Comps list
+  // this tab exists to show ("I can't even see comps anymore... I don't give a shit about site
+  // plans"). `sectionOpen` is the section-level disclosure (distinct from `expandedId`, which
+  // still governs one ROW's own detail). `open` below also opens whenever the upload flow is
+  // running, so starting an upload is never gated behind a second click to reveal it.
+  const [sectionOpen, setSectionOpen] = useState(false);
   // B972512-HARDENING item 6 — "Recently deleted": deleting a site plan is now RECOVERABLE
   // (soft delete) rather than permanent, matching sites/doc_reviews' own trash pattern. Fetched
   // lazily, only once the disclosure is opened — empty in the common case, costs nothing until
@@ -514,7 +547,7 @@ export default function SitePlansSection({
   // (MapFinder's onSelect → selectOverlay → activeOverlayId) armed the SAME map handles but
   // never touched this component's local expand state, so the row stayed collapsed and looked
   // like the click had done nothing.
-  useEffect(() => { if (activeOverlayId) setExpandedId(activeOverlayId); }, [activeOverlayId]);
+  useEffect(() => { if (activeOverlayId) { setExpandedId(activeOverlayId); setSectionOpen(true); } }, [activeOverlayId]);
   const notifiedRef = useRef(onOverlaysChange);
   notifiedRef.current = onOverlaysChange;
   const overlaysRef = useRef(overlays);
@@ -986,14 +1019,27 @@ export default function SitePlansSection({
     await loadTrash();
   };
 
+  // B1263072 (NEW-1) — secondary section under Comps: collapsed unless the user opened it, or
+  // the upload flow is running (a drag-dropped/picked file must always be reachable, never hidden
+  // behind a second click to expand the section it's already inside).
+  const sectionContentOpen = sectionOpen || !!flow;
+
   return (
     <>
     <div style={{ borderBottom: "1px solid var(--border-default)", padding: "10px 14px" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: overlays.length ? 8 : 0 }}>
-        <span style={{ fontSize: FONT_SIZE.label, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)" }}>Site plans</span>
-        {!flow && <Button size="sm" variant="ghost" onClick={startNewUpload}>+ Upload site plan</Button>}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: sectionContentOpen ? 8 : 0 }}>
+        <button onClick={() => setSectionOpen((v) => !v)} aria-expanded={sectionContentOpen} style={{
+          display: "flex", alignItems: "center", gap: 6, border: "none", background: "none", padding: 0, cursor: "pointer", fontFamily: "inherit",
+        }}>
+          <span style={{ fontSize: 8, lineHeight: 1, color: "var(--text-secondary)", display: "inline-block", transform: sectionContentOpen ? "none" : "rotate(-90deg)" }}>▼</span>
+          <span style={{ fontSize: FONT_SIZE.label, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)" }}>
+            Site plans{overlays.length ? ` (${overlays.length})` : ""}
+          </span>
+        </button>
+        {!flow && <Button size="sm" variant="ghost" onClick={() => { setSectionOpen(true); startNewUpload(); }}>+ Upload site plan</Button>}
       </div>
 
+      {sectionContentOpen && (<>
       {panelError && (
         <div style={{
           display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 8, padding: "6px 8px",
@@ -1140,8 +1186,11 @@ export default function SitePlansSection({
                   <PagePreview url={flow.previewUrl} />
                   <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
                     <Button size="sm" onClick={confirmPage} disabled={!flow.overlayId && (!flow.title || !flow.docDate)}>{flow.overlayId ? "Use this page" : "Place on map"}</Button>
+                    {/* NEW-2 (B1263073) — same wording fix as OverlayRow's crop control below:
+                        "Cropped ✓" named a completed status, not the reachable action (re-opening
+                        the crop tool). "Edit crop" once a crop exists, matching the other spot. */}
                     <Button size="sm" variant="ghost" onClick={() => setF({ cropping: true })} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                      <CropIcon />{hasCrop(flow) ? "Cropped ✓" : "Crop…"}
+                      <CropIcon />{hasCrop(flow) ? "Edit crop" : "Crop…"}
                     </Button>
                     <Button size="sm" variant="ghost" onClick={cancelFlow}>Cancel</Button>
                   </div>
@@ -1180,6 +1229,7 @@ export default function SitePlansSection({
           )}
         </div>
       )}
+      </>)}
     </div>
 
     {/* B1134754 NEW-21 — cropping an ALREADY-PLACED overlay. A simple centered overlay (this
