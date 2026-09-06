@@ -51,14 +51,14 @@ async function typeAndEnter(page, text) {
   await page.keyboard.press("Enter");
 }
 
-/** Click a ribbon control by testid — directly, or via the "More ▾" overflow popover if
- *  ribbonLayout.js collapsed its group there at this viewport. Same helper
- *  e2e/model-audit-tools.spec.js already uses for the Name Manager toggle. */
-async function clickRibbonButton(page, testId) {
-  const direct = page.getByTestId(testId);
-  if (await direct.count()) { await direct.click(); return; }
-  await page.getByTestId("ribbon-more").click();
-  await page.getByTestId(testId).click();
+/** Open the Name Manager via the command palette (Ctrl+K → "name manager" → Enter) — the
+ *  Ribbon's own "Names" button was retired in favor of the palette (B1246384, the concurrent
+ *  command-palette session), same interaction e2e/model-command-palette.spec.js already uses. */
+async function openNameManager(page) {
+  await page.keyboard.press("Control+K");
+  await expect(page.getByTestId("model-command-palette-input")).toBeVisible();
+  await page.getByTestId("model-command-palette-input").fill("name manager");
+  await page.keyboard.press("Enter");
 }
 
 test.describe("Model workspace — Site.*/Plan.*/Comp.* project-derived names (spreadsheet-live-data-refs)", () => {
@@ -130,7 +130,7 @@ test.describe("Model workspace — Site.*/Plan.*/Comp.* project-derived names (s
     await seedProject(page, id, { parcels: [{ id: "p1", points: SQUARE_660, active: true }] });
     await page.goto(`/#/project/${id}/model`);
     await expect(sheetEl(page)).toBeVisible();
-    await clickRibbonButton(page, "ribbon-names");
+    await openNameManager(page);
     await page.getByTestId("name-manager-new-input").fill("Site.Foo");
     await expect(page.getByTestId("name-manager-new-error")).toContainText(/reserved/i);
     await expect(page.getByTestId("name-manager-create")).toBeDisabled();
