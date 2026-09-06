@@ -762,6 +762,21 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   mixed checklist/bullet list in one press. Driven end to end by the
   headless harness **verify-notes-backspace** under `ui-audit/`, which asserts the resulting document TREE for every
   boundary and is mutation-proven.
+  - **⛔ B1260000 (owner's iPhone) — the table can be exactly right and still miss a press, because
+    `addKeyboardShortcuts` only sees `keydown`.** An EMPTY top-level bullet carrying a NESTED,
+    non-empty child deleted the paragraph above the list on his phone; the decision table already
+    had the right answer and reproduces it correctly on desktop (Chromium AND real WebKit) via
+    either a real keydown or that keydown fully disabled — so the defect lives specifically in
+    iOS Safari's documented gap where its software keyboard deletes backward via a `beforeinput`
+    that does not reliably carry a `keydown` a keymap can intercept. `addProseMirrorPlugins()`
+    now asks the SAME `blockStartAction` question from a `handleDOMEvents.beforeinput` hook and
+    prevents the platform's own edit before it runs — a pure backstop, inert on a normal desktop
+    keydown. Proven reachable and correct via a real keypress with `keydown` alone disabled, and
+    red/green-proven independently of `keydown` entirely by the headless harness
+    **verify-notes-backspace-beforeinput** under `ui-audit/` (a synthetic, untrusted `beforeinput`
+    dispatch via a new `window.__noteEditor.dispatchBeforeInput()` test hook — nothing but the
+    plugin can act on it). Not reachable from a real iPhone in this sandbox — see `VERIFICATION.md`
+    → **V916800**.
 - `lib/notesPastePlain.js` — **paste JUST the text** (B36051), Word's "Keep Text Only". ⛔ The
   DEFAULT PASTE IS UNCHANGED — the owner asked for an *option*, so this WATCHES the paste
   (`handlePaste` returns false) rather than intercepting it. Two ways in: **Ctrl/Cmd+Shift+V**,

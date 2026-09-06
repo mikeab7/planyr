@@ -253,6 +253,118 @@ const CASES = [
     after: doc(P("para one"), UL(LI("one")), P(""), UL(LI("three"))),
   },
 
+  /* ── B1260000: an EMPTY bullet carrying a NESTED, non-empty child — reported from his
+   * iPhone, on a note that read "Tell Talbert I'll be the main POC" / an empty bullet /
+   * "9/21 for striping of Bass Blvd." nested under it / "Figure out who Talbert sent the
+   * email to". One press deleted the paragraph ABOVE the list. This is the exact adjacent-case
+   * matrix the brief asked for — see the pass/fail table this whole block produces.
+   *
+   * ⛔ NOT MARKED `defect: true`, and that is itself a finding, not an oversight. Measured with
+   * `NoteBlockKeys` entirely disabled (the file's own standard mutation check): Chromium's OWN
+   * fallback keymap ALREADY gets this exact document right, so this row cannot be driven red on
+   * Chromium by that check — it would report a false PASS on a broken build precisely the way
+   * this file's own header warns against. The reported defect is a divergence between his
+   * platform and this one; the row that actually red/green-proves the fix is the dedicated
+   * `verify-notes-backspace-beforeinput.mjs` harness, which dispatches the SAME event class his
+   * platform is documented to deliver instead of a keydown. This row stays as a PIN: coverage
+   * for the exact shape that was never in the matrix before, kept green going forward. ───────── */
+  {
+    id: "B1260000 — OWNER REPRO — empty top-level bullet WITH a nested child",
+    why: "the empty bullet becomes a plain paragraph and the nested bullet survives as its sibling — the paragraph ABOVE the list must never be touched, let alone deleted",
+    before: doc(P("Tell Talbert I'll be the main POC"), UL(LI("", UL(LI("9/21 for striping of Bass Blvd.")))), P("Figure out who Talbert sent the email to")),
+    at: [1, 0, 0],
+    after: doc(P("Tell Talbert I'll be the main POC"), P(""), UL(LI("9/21 for striping of Bass Blvd.")), P("Figure out who Talbert sent the email to")),
+  },
+  {
+    id: "B1260000 adjacent — empty bullet, no children, top level",
+    why: "the baseline case: no nested content to lose track of",
+    before: doc(P("above"), UL(LI("")), P("below")),
+    at: [1, 0, 0],
+    after: doc(P("above"), P(""), P("below")),
+  },
+  {
+    id: "B1260000 adjacent — empty NESTED bullet, WITH a nested child of its own",
+    why: "an empty item at a deeper level still just outdents, taking its own child with it",
+    before: doc(P("above"), UL(LI("outer", UL(LI("", UL(LI("grandchild"))))))),
+    at: [1, 0, 1, 0, 0],
+    after: doc(P("above"), UL(LI("outer"), LI("", UL(LI("grandchild"))))),
+  },
+  {
+    id: "B1260000 adjacent — empty NESTED bullet, no children",
+    why: "the plain outdent case one level down, for comparison against the one with a child",
+    before: doc(P("above"), UL(LI("outer", UL(LI(""))))),
+    at: [1, 0, 1, 0, 0],
+    after: doc(P("above"), UL(LI("outer"), LI(""))),
+  },
+  {
+    /* Found by ui-audit/find-backspace-symptoms.mjs's expanded sweep: the caret sits in the
+     * NESTED CHILD's own text (not the empty parent's paragraph). Outdenting the child reveals
+     * the parent's already-latent emptiness as its own standalone empty bullet — that reveal is
+     * the correct, expected result of "NESTED list item OUTDENTS one level", not a new husk. */
+    id: "B1260000 adjacent — caret in the NESTED CHILD's own text, outdenting reveals the empty parent",
+    why: "the child outdents to become a sibling of its (already empty) parent — no text is lost, and the parent's reveal as a standalone empty bullet is expected, not a defect",
+    before: doc(P("A0"), UL(LI("", OL(LI("A2")))), P("A3")),
+    at: [1, 0, 1, 0, 0],
+    after: doc(P("A0"), UL(LI(""), LI("A2")), P("A3")),
+  },
+  {
+    id: "B1260000 adjacent — empty NUMBERED-list item WITH a nested child",
+    why: "the numbered-list twin of the owner's exact repro",
+    before: doc(P("above"), OL(LI("", OL(LI("child")))), P("below")),
+    at: [1, 0, 0],
+    after: doc(P("above"), P(""), OL(LI("child")), P("below")),
+  },
+  {
+    id: "B1260000 adjacent — empty CHECKLIST item WITH a nested child",
+    why: "the checklist twin of the owner's exact repro",
+    before: doc(P("above"), TL(TI("", TL(TI("child")))), P("below")),
+    at: [1, 0, 0],
+    after: doc(P("above"), P(""), TL(TI("child")), P("below")),
+  },
+  {
+    id: "B1260000 adjacent — non-empty bullet, caret at start (control: MERGE on the 2nd press, never delete)",
+    why: "the counterpart the brief asked for by name: this must merge with the block above, never delete it",
+    before: doc(P("above"), UL(LI("text one", UL(LI("child"))))),
+    at: [1, 0, 0],
+    presses: 2,
+    after: doc(P("abovetext one"), UL(LI("child"))),
+  },
+  {
+    id: "B1260000 adjacent — the FIRST list item in the note, nothing above it, empty, with a child",
+    why: "there is nothing to reach backwards into, so this must be identical to every other empty-with-a-child case",
+    before: doc(UL(LI("", UL(LI("child")))), P("below")),
+    at: [0, 0, 0],
+    after: doc(P(""), UL(LI("child")), P("below")),
+  },
+  {
+    id: "B1260000 adjacent — a list item immediately after a HEADING, empty, with a child",
+    why: "a heading above must not change the answer for the list item below it",
+    before: doc(H("Heading"), UL(LI("", UL(LI("child")))), P("below")),
+    at: [1, 0, 0],
+    after: doc(H("Heading"), P(""), UL(LI("child")), P("below")),
+  },
+  {
+    id: "B1260000 adjacent — REPEATED Backspace on the owner's exact document (2 presses)",
+    why: "held/repeated Backspace is how a loss compounds — two presses in a row must still take exactly the two steps the table says, never reach past the paragraph above",
+    before: doc(P("Tell Talbert I'll be the main POC"), UL(LI("", UL(LI("9/21 for striping of Bass Blvd.")))), P("Figure out who Talbert sent the email to")),
+    at: [1, 0, 0],
+    presses: 2,
+    // press 1: item -> paragraph (empty), child bullet survives as its sibling
+    // press 2: that empty paragraph joins "Tell Talbert…" above (ordinary join of an EMPTY
+    // block loses no text) — the caret lands at the JOIN SEAM (end of "…POC"), not position
+    // zero, so a THIRD press is an ordinary one-character delete from there on, exactly like
+    // typing into any paragraph — not a fourth row of this table.
+    after: doc(P("Tell Talbert I'll be the main POC"), UL(LI("9/21 for striping of Bass Blvd.")), P("Figure out who Talbert sent the email to")),
+  },
+  {
+    id: "B1260000 adjacent — a THIRD press after that is an ORDINARY character delete, not a further structural jump",
+    why: "once the caret is mid-paragraph (the join seam), continuing to hold Backspace must behave like any text editor — one character at a time — never skip back into an unrelated block",
+    before: doc(P("Tell Talbert I'll be the main POC"), UL(LI("", UL(LI("9/21 for striping of Bass Blvd.")))), P("Figure out who Talbert sent the email to")),
+    at: [1, 0, 0],
+    presses: 3,
+    after: doc(P("Tell Talbert I'll be the main PO"), UL(LI("9/21 for striping of Bass Blvd.")), P("Figure out who Talbert sent the email to")),
+  },
+
   /* ── paragraphs, headings and the formatting-first rule ───────────────────────────────── */
   {
     id: "plain paragraph after a plain paragraph",
@@ -431,7 +543,11 @@ for (const c of CASES) {
 
   for (let i = 0; i < (c.presses || 1); i += 1) {
     await page.keyboard.press("Backspace");
-    await page.waitForTimeout(90);
+    /* B1260000: 90ms was measured flaky (an occasional false-red on a row nothing here
+     * touched, e.g. REPRO A) — CI's own re-render/transaction-dispatch cycle occasionally
+     * outlasted it. 180ms cleared it across repeated runs; this is a settle margin, not a
+     * behavioural wait, so a real user's keypress is never held up by it. */
+    await page.waitForTimeout(180);
   }
   const got = await page.evaluate(() => ({ json: window.__noteEditor.json(), sel: window.__noteEditor.selection() }));
 
@@ -439,10 +555,17 @@ for (const c of CASES) {
   const have = shape(normalise(got.json));
   const treeOk = want === have;
 
-  /* Litter: an empty structural node that was NOT there before. */
+  /* Litter: an empty structural node that was NOT there before AND that the row's own stated
+   * `after` does not call for. B1260000: outdenting a nested child out from under an already
+   * empty-at-heart parent (its own line was blank; a non-empty child masked that from this
+   * recursive count) legitimately reveals that parent as its own standalone empty bullet — a
+   * row that explicitly SPECIFIES that reveal in `after` must not be flagged as if it were an
+   * unintended husk. `litterBefore` still catches every case where a row's `after` was wrong
+   * about it. */
   const litterBefore = emptyNodes(c.before).length;
+  const litterExpected = emptyNodes(c.after).length;
   const litterAfter = emptyNodes(got.json).length;
-  const noLitter = litterAfter <= litterBefore;
+  const noLitter = litterAfter <= Math.max(litterBefore, litterExpected);
 
   /* Nothing may vanish: every character that was in the document is still in it (the join
    * cases concatenate, they never drop). */
