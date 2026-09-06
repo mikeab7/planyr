@@ -11434,6 +11434,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return arr.map((x) => m.has(x.id) ? { ...x, cx: m.get(x.id).cx0 + sw.out.x * delta, cy: m.get(x.id).cy0 + sw.out.y * delta } : x);
   };
   const startResize = (e, id, sx, sy) => {
+    if (tool !== "select" || e.button !== 0) return; // NEW-1 (B1253248): matches every sibling handle starter
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
     // fixed opposite corner in world feet
@@ -11558,6 +11559,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startRotate = (e, id) => {
+    if (tool !== "select" || e.button !== 0) return; // NEW-1 (B1253248): matches every sibling handle starter
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
     const fp = p2f(e.clientX, e.clientY);
@@ -16860,7 +16862,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   })();
 
   const handleNodes = (() => {
-    if (sel?.kind !== "el" || multi.length > 1) return null; // B740: no single-element transform grips while multi-selecting
+    // NEW-1 (B1253248) — a placement tool owns the cursor: without this, a leftover `sel` from
+    // before a tool switch (selectTool never clears it) kept these resize/rotate/road-vertex
+    // grips live — draggable, with their own "nwse-resize"/"grab" cursors — while placing a brand
+    // new element. Every sibling handle group (elPolyHandles, markupHandles, calloutHandles,
+    // measureHandles) already carries this exact `tool !== "select"` guard; this one was the
+    // outlier.
+    if (sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B740: no single-element transform grips while multi-selecting
     const el = els.find((x) => x.id === sel.id);
     if (!el || el.points || el.locked) return null; // locked / polygon: no resize/rotate handles
     const cpx0 = f2p({ x: el.cx, y: el.cy });
@@ -16923,10 +16931,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         {/* B619 — the thin blue bounding outline is drawn by elSelOutline (one place, so it also
             covers locked + polygon elements); here we draw only the grips + rotate handle. */}
         <line x1={topMid.x} y1={topMid.y} x2={rotPos.x} y2={rotPos.y} stroke={SEL_BLUE} strokeWidth={1.25} />
-        <circle cx={rotPos.x} cy={rotPos.y} r={6} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
+        <circle data-handle="rotate" cx={rotPos.x} cy={rotPos.y} r={6} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
           style={{ cursor: "grab" }} onPointerDown={(e) => startRotate(e, el.id)} />
         {corners.map((c, i) => (
-          <rect key={i} x={c.x - 5} y={c.y - 5} width={10} height={10} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
+          <rect key={i} data-handle="corner" x={c.x - 5} y={c.y - 5} width={10} height={10} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
             style={{ cursor: resizeCursor(c.x - cpx.x, c.y - cpx.y) }} onPointerDown={(e) => startResize(e, el.id, signs[i][0], signs[i][1])} />
         ))}
         {/* side grips: drag one edge to expand/shrink that side (opposite side stays put) */}
@@ -17252,7 +17260,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
          so "what sits on top of what" is answerable for every pair rather than five sixths of them.
          Identification only; it changes no behaviour. */
       <g key={o.id} data-feature={`reference:${o.id}`} transform={o.rotation ? `rotate(${o.rotation} ${cx} ${cy})` : undefined}
-        style={{ cursor: ovAlignBase === o.id ? "crosshair" : (tool === "select" && !o.locked ? "move" : "default") }}
+        // NEW-1 (B1253248) — the idle fallback was "default", not "crosshair": while placing a new
+        // element, hovering a reference image showed a plain arrow instead of the placement
+        // cursor. Functionally harmless (startMoveSheetOverlay already checks tool==="select"
+        // before acting) but exactly the affordance mismatch the owner reported.
+        style={{ cursor: ovAlignBase === o.id ? "crosshair" : (tool === "select" && !o.locked ? "move" : "crosshair") }}
         pointerEvents={o.locked ? "none" : "auto"}
         onPointerDown={(e) => startMoveSheetOverlay(e, o.id)}
         onContextMenu={(e) => onOverlayContext(e, o.id)}>
@@ -17313,7 +17325,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // the canvas placeholder gave no hint that existed, so an unrecoverable reference read as a
           // permanently-stuck error with no way out except re-adding a file the owner may not have.
           return (<g data-export="skip"
-            style={{ cursor: ovLoading ? "default" : "pointer" }}
+            /* NEW-1 (B1253248) — this broken-reference placeholder is standalone chrome, unrelated
+               to any element, and was interactive regardless of tool: a placement click that landed
+               on it showed a "click to re-add" cursor and was swallowed instead of placing. */
+            pointerEvents={tool === "select" ? "auto" : "none"}
+            style={{ cursor: tool !== "select" ? "crosshair" : (ovLoading ? "default" : "pointer") }}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={ovLoading ? undefined : (e) => { e.stopPropagation(); if (ovErr === "network") retryOverlay(o.id); else reAddOverlay(o.id); }}>
             <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
@@ -18911,7 +18927,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const CHIP_H = SETBACK_CHIP.h;
   const chipPlateW = setbackChipPlateW;
   const setbackChipNodes = (() => {
-    if (!settings.showSetback || !selParcel || !selRuns) return null;
+    // NEW-1 (B1253248) — leftover parcel selection: without the tool check, this chip stayed a
+    // live "click to edit the setback" hotspot (pointer cursor + click handler) while a placement
+    // tool was active, exactly like the resize/rotate grips above.
+    if (!settings.showSetback || !selParcel || !selRuns || tool !== "select") return null;
     // The exception to the zoom floor: the user is IN the setback editor (drilled past the
     // four-role default, or with an inline value editor open), so the chips are the edit surface.
     const editing = sbEditMode !== "role" || !!numEdit;
@@ -21310,7 +21329,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {editCallout?.id !== c.id && <rect data-testid={`callout-box-${c.id}`} x={boxRect.x} y={boxRect.y} width={w} height={h} rx={cr} ry={cr}
                       fill={st.fill} stroke={border} strokeWidth={1.4}
                       pointerEvents="all" /* B142: select across the whole box even when the fill is none/transparent (was only the painted area / thin border) */
-                      style={{ cursor: tool === "select" ? "move" : "default" }}
+                      /* NEW-1 (B1253248) — was "default" outside Select: a plain arrow over a
+                         callout while placing something new, instead of the placement crosshair.
+                         Harmless functionally (startMoveCallout already checks tool==="select"). */
+                      style={{ cursor: tool === "select" ? "move" : "crosshair" }}
                       onPointerDown={(e) => startMoveCallout(e, c.id, "box")}
                       onContextMenu={(e) => onCalloutContext(e, c.id, -1)}
                       onDoubleClick={(e) => {
@@ -21547,7 +21569,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // Measure tool (the tool you're still in right after drawing it); startMoveMeasure
                 // drops you back to Select on the click so the grips/×/highlight show (B940: it also
                 // arms a whole-measurement drag on the same press).
-                const canGrab = tool === "select" || tool === "measure";
+                // NEW-1 (B1253248) — but NOT mid-draft: startMoveMeasure already lets a click through
+                // to place the new measurement's next vertex while `measDraft.length > 0` (see the
+                // guard at its top), so the "move" cursor this drove was pure misdirection — it
+                // promised a grab that would not happen, over the exact vertex the user was aiming
+                // past to place their next point.
+                const canGrab = tool === "select" || (tool === "measure" && !measDraft.length);
                 // NEW-1 — per-measurement style, resolved in ONE place (lib/measureStyle.js) for
                 // every mode. The uncalibrated amber still overrides the user's colour there,
                 // because that is a correctness signal rather than decoration.
@@ -22542,8 +22569,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           /* The label is chrome in CLEAR SPACE — it is not over the road, so it keeps
                              the immediate one-click action and deliberately carries no `data-feature`
                              (it can overhang anything, and claiming to BE the road there would be the
-                             same mis-identification in the other direction). */
-                          <g data-testid="road-radius-flag-label" style={{ cursor: el ? "pointer" : "default" }}
+                             same mis-identification in the other direction).
+                             NEW-1 (B1253248) — tool-gated like every selection-only grip in this file:
+                             stays VISIBLE while placing (it never stops warning) but stops answering
+                             the pointer, so a placement click can't be swallowed by "click to Fix". */
+                          <g data-testid="road-radius-flag-label" pointerEvents={tool === "select" ? "auto" : "none"}
+                             style={{ cursor: tool !== "select" ? "crosshair" : (el ? "pointer" : "default") }}
                              onPointerDown={(e) => { e.stopPropagation(); }}
                              onClick={(e) => { e.stopPropagation(); act(); }}>
                             <rect x={bx} y={by} width={w} height={22} rx={11} fill={PAL.paper} stroke={PAL.warn} strokeWidth={1.75} />
@@ -22553,9 +22584,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           </g>
                         )}
                         {/* The corner marker itself — always drawn, and now transparent to the question
-                            "which feature is here": it IS the road, and it answers as the road. */}
+                            "which feature is here": it IS the road, and it answers as the road.
+                            NEW-1 (B1253248) — same tool-gate as the label above: while placing, this
+                            dot must not claim the cursor or the press meant for the road underneath
+                            it (or for the new element being placed). Still always drawn/visible. */}
                         <g data-road-radius-dot={f.id} data-feature={el ? `el:${f.id}` : undefined}
-                           style={{ cursor: el ? "pointer" : "default" }}
+                           pointerEvents={tool === "select" ? "auto" : "none"}
+                           style={{ cursor: tool !== "select" ? "crosshair" : (el ? "pointer" : "default") }}
                            onPointerDown={(e) => {
                              if (e.button !== 0 || !el) return;
                              e.stopPropagation();
