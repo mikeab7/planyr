@@ -22,9 +22,9 @@ import { writeJournal, readJournal, clearJournal, sweepJournals, journalSessionI
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
 import { createNameResolver, describeElement, SELF_ACTOR } from "./lib/editorNames.js";
 import { toastForSyncEvent, describeCoalescedLabel } from "./lib/conflictToasts.js";
-import { listMembers } from "./lib/teams.js";
+import { listMembers, currentIdentity } from "./lib/teams.js";
 import { multiwriterEnabled } from "./lib/multiwriter.js";
-import { presenceSummary } from "./lib/presencePill.js";
+import { presenceParties } from "./lib/presencePill.js";
 import { loadProfile } from "./lib/profile.js";
 import { commitElements, fetchElements, keepaliveCommit } from "./lib/elementApi.js";
 import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
@@ -116,6 +116,7 @@ import CursorChip from "./components/CursorChip.jsx";
 import ViewMenu from "./components/ViewMenu.jsx";
 // NEW-4 (B366389 ×2) — the plan menu's icons, in the route-local stroke idiom. See components/icons.jsx.
 import { SaveIcon, HistoryIcon, StorageIcon, PadlockIcon, PlusIcon, DuplicateIcon, CloseXIcon, UndoIcon, RedoIcon, ZoomFitIcon, LayersIcon } from "./components/icons.jsx";
+import PresenceChip from "./components/PresenceChip.jsx";
 /* LAZY (B1064 tranche a). Site Analysis mounts ONLY when the Analysis panel is the open one
  * (`_pid === "analysis"`, and `leftPanel` starts at null), so it is never on the first-paint
  * path — and it drags lib/siteAnalysis.js with it, which is the larger half of what moves.
@@ -4607,9 +4608,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const ch = supabase
       .channel("site-elements:" + siteId, { config: { presence: { key: uid || "anon" } } })
       .on("presence", { event: "sync" }, () => {
-        // B674 — the live "who's here" roster; counts SESSIONS (two windows of one account =
-        // "2 here" — V231 #13), names grouped by person. Quiet when this window is alone.
-        try { setPeers(presenceSummary(ch.presenceState(), uid)); } catch (_) {}
+        // B674 — the live "who's here" roster, split into THIS account's own sessions vs other
+        // real people (NEW-1, rebuilt): presence already groups by uid, so "own tabs vs other
+        // people" falls out of the existing payload for free. Quiet when this window is alone.
+        try { setPeers(presenceParties(ch.presenceState(), uid)); } catch (_) {}
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "site_elements", filter: "site_id=eq." + siteId }, (payload) => {
         if (elSyncRef.current !== eng) return;
@@ -4624,11 +4626,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (elSyncRef.current !== eng) return;
         if (status === "SUBSCRIBED") {
           refetchReplace(eng); // initial load AND reconnect re-true from rows
-          // B674 — announce THIS session on the roster (display name only, never the email).
-          loadProfile(uid).then((prof) => {
-            const name = prof ? [prof.first_name, prof.last_name].filter(Boolean).join(" ").trim() : "";
-            try { ch.track({ uid, name: name || "Someone" }); } catch (_) {}
-          }).catch(() => { try { ch.track({ uid, name: "Someone" }); } catch (_) {} });
+          // B674 — announce THIS session on the roster. NEW-1 also sends this account's own
+          // email (already available from the auth session — no new lookup, no new backend):
+          // the header presence chip falls back to it for a teammate's initials when their
+          // profile has no display name set. Never shown in the chip itself, only used to derive
+          // a one-letter fallback badge.
+          Promise.all([loadProfile(uid).catch(() => null), currentIdentity().catch(() => ({ email: null }))])
+            .then(([prof, identity]) => {
+              const name = prof ? [prof.first_name, prof.last_name].filter(Boolean).join(" ").trim() : "";
+              try { ch.track({ uid, name, email: (identity && identity.email) || "" }); } catch (_) {}
+            })
+            .catch(() => { try { ch.track({ uid, name: "", email: "" }); } catch (_) {} });
         }
       });
     // Fallback: if the channel can't join (proxy/WebSocket blocked), a plain fetch still seeds the
@@ -22020,22 +22028,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         onRenameProject={renameProjectFromHeader}
         saveState={headerSaveState}
         multiEditOk={multiwriterEnabled()}
-        saveSlot={peers ? (
-          <span
-            title={peers.names.join(" · ")}
-            data-testid="presence-pill"
-            // NEW-1 (B972096) — was borderRadius:999 (pill) + fontSize:11.5 (off-scale after the
-            // FONT_SIZE reduction). This is a single standalone control sitting in row-1's right
-            // zone alongside FullscreenButton/SettingsMenu/CloudSyncBadge/the account chip — not a
-            // container — so it converges to RADIUS.md with the rest of that row.
-            style={{ display: "inline-flex", alignItems: "center", gap: 5, background: SURF_RAISED,
-              border: "1px solid var(--border-strong)", borderRadius: RADIUS.md, padding: "2px 9px",
-              fontSize: FONT_SIZE.control, fontWeight: 800, color: "var(--text-primary)", whiteSpace: "nowrap" }}
-          >
-            <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: RADIUS.pill, background: "var(--accent-site)" }} />
-            {peers.label}
-          </span>
-        ) : undefined}
+        saveSlot={<PresenceChip data={peers} />}
         // Conflict needs a reload, not a blind retry — so only offer "Retry now" for a plain
         // failed write; the conflict case gets its own explanation (the loud banner handles reload).
         // NEW-1 — also retries a failed BACKGROUND push (rename/status/new-site) when that's what's

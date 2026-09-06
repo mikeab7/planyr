@@ -212,6 +212,21 @@ export const ZoomFitIcon = ({ size = 20 }) => (
   </svg>
 );
 
+// Two-person "group" glyph — the ordinary presence/sharing mark used across the industry (the
+// Feather/Material "users" shape), hand-drawn in this file's stroke idiom rather than imported.
+// Replaces the plain filled dot on the header's presence chip (NEW-1) — the dot carried no meaning
+// of its own; this reads as "people" before the count next to it is even parsed.
+export const PeopleIcon = ({ size = 13 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    style={{ flex: "none", display: "block" }}>
+    <path d="M16.5 20v-1.7a3.7 3.7 0 0 0-3.7-3.7H6.7A3.7 3.7 0 0 0 3 18.3V20" />
+    <circle cx="9.8" cy="8.2" r="3.6" />
+    <path d="M21 20v-1.7a3.7 3.7 0 0 0-2.6-3.55" />
+    <path d="M15 4.8a3.6 3.6 0 0 1 0 6.9" />
+  </svg>
+);
+
 // Layers — two offset sheets seen in perspective, the mark Google Maps / Photoshop / Figma all
 // use, so it needs no learning. Replaces the "❖" glyph, which some fonts render as a blank tofu
 // box — indistinguishable from a shape tool, a stop button, or a crop. Stroke idiom (was a filled

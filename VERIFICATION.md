@@ -164,6 +164,31 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V918032 — B1261232: the rebuilt header presence chip splits Michael's own tabs from real teammates and shows their initials, on a real multi-user, signed-in session `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass, and why it can't run today.** The whole feature is about correctly rendering MORE THAN ONE genuinely distinct signed-in session on the same project at once — this sandbox's egress proxy CORS-blocks the Supabase auth handshake entirely (no sign-in at all here, per every other `Blocker: auth` item in this file), so there is no way to open even one authenticated session, let alone two different accounts on the same plan concurrently. Also needs a specific real, shared project (`Blocker: real-data`) so a second account has something to be present on.
+
+**What was verified here (this session, sandbox).**
+1. `test/presencePill.test.js` (21 cases) — every pure derivation the chip renders from: the alone/single-tab null case, alone-with-multiple-tabs (2 and 4), him + one/several teammates, the initials cap + overflow, a teammate with no display name (email-letter fallback), two colliding initials, and the full breakdown text — all against fabricated `presenceState()` payloads shaped exactly like Supabase Realtime Presence's real output.
+2. The PRE-FIX regression is replayed inline (`preFixLabel`) on the SAME fabricated states used above, proving the OLD reduction reads "4 here"/"2 here" (indistinguishable from real people) on exactly the cases the NEW function correctly reports as `selfWindows` with no other people.
+3. Full repo test suite (`npx vitest run`) green; `node scripts/build-map.mjs --check` green (new file `PresenceChip.jsx` mapped + described).
+4. Read-through of the header's row-1 flex zones (`src/shared/CLAUDE.md`'s NAVIGATION WINS section) confirms the chip's bounded width (≤3 initials + one overflow badge) can't grow large enough to force the breadcrumb into truncation even in the worst case (see the B1261232 case table).
+5. Could NOT be driven signed-out with a fabricated presence payload either — the presence channel only tracks/subscribes once a real Supabase Realtime Presence connection exists, which itself needs the auth handshake this sandbox blocks; there is no code path that renders the chip from injected data alone (by design — it is a thin wrapper over live presence, not a mode with its own test hook).
+
+**Steps, each with a named expected result — two different real, signed-in browser sessions (can be two browsers, or one regular + one private-browsing window) on the SAME project's Site Planner:**
+1. Sign in as Michael in one browser tab on a real project. **Expect:** no presence chip at all (alone, one tab).
+2. Open a second tab of the SAME account on the SAME project. **Expect:** a small chip appears reading "2 tabs" (no people-silhouette icon, no initials) — never "2 people"/"2 here."
+3. Open a third tab of the same account. **Expect:** "3 tabs."
+4. Close the two extra tabs, leaving one. **Expect:** the chip disappears again within a few seconds (no lingering ghost count).
+5. Have a second real teammate account sign in on the same project (their profile has a display name set). **Expect:** the chip now shows the two-person silhouette + that teammate's initials (e.g. "SA" for Sam Alvarez); hovering it (or tapping on a phone) shows the full breakdown, e.g. "Sam Alvarez."
+6. With Michael back to 3 tabs AND that teammate present. **Expect:** the chip shows BOTH facts at once — his own tab count and the teammate's initials — never merged into a single people-count.
+7. Add enough additional distinct teammate accounts to exceed 3. **Expect:** exactly 3 initials badges + a "+N" badge; the hover/tap breakdown lists everyone, not just the visible 3.
+8. Use a teammate account whose profile has NO first/last name set. **Expect:** their badge shows the first letter of their account email, and the breakdown shows their bare email.
+9. Have the teammate close their tab / sign out. **Expect:** the chip drops them within a few seconds of the next presence sync — no accumulated "ghost" person.
+10. Check at a phone width and at a wide desktop width, in both Light and Dark theme. **Expect:** the chip renders legibly in all four combinations, and a long project name's breadcrumb never gets pushed into truncation by the chip being present.
+
+**Result:** ⏳ pending — needs two real signed-in sessions on a shared project; not reachable from this sandbox (no Supabase auth at all here). `Cadence: once`.
+
 ### V916800 — B1260000: Backspace on an empty bullet with a nested child no longer deletes the paragraph above it, on Michael's own iPhone `Blocker: real-device`
 
 **Why this needs its own real pass, and why it can't run today.** The reported mechanism is specific to iOS Safari's on-screen keyboard: it is documented to delete backward via a `beforeinput` event that does not reliably carry a `keydown` a keymap can intercept, so the platform's own native list-editing logic can run before any of this app's code sees the press. Nothing in this sandbox can synthesize that — not Chromium, and not even a real WebKit engine (Playwright's Linux WebKit build, installed and used this session): Playwright's keyboard automation always dispatches a full, well-formed physical-key sequence (`keydown` → `beforeinput` → `input`) on every engine, because it is simulating a hardware key, not iOS's virtual-keyboard-to-DOM bridge. Only a real iPhone's own software keyboard can exercise the actual gap.
