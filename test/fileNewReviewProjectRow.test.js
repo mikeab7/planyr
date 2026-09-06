@@ -70,7 +70,7 @@ beforeEach(() => {
 describe("fileNewReview — ensures the target project's row exists before filing (B1160480)", () => {
   it("a real project id: ensureProjectRow is called, and a confirmed row lets the file through", async () => {
     const r = await fileNewReview({ projectId: "smrealproj", project: "Untitled project", fileName: "plan.pdf" });
-    expect(ensureProjectRow).toHaveBeenCalledWith("smrealproj", { name: "Untitled project" });
+    expect(ensureProjectRow).toHaveBeenCalledWith("smrealproj", { name: "Untitled project", confirmLive: true });
     expect(r.ok).toBe(true);
     expect(callsFor("doc_reviews").length).toBeGreaterThan(0); // the review really was written
   });
@@ -116,7 +116,7 @@ describe("refileReview — the same guard applies when moving a review INTO a pr
 
   it("re-filing into a real project ensures its row first, then writes", async () => {
     const r = await refileReview("rv1", { projectId: "smrealproj", project: "Untitled project" });
-    expect(ensureProjectRow).toHaveBeenCalledWith("smrealproj", { name: "Untitled project" });
+    expect(ensureProjectRow).toHaveBeenCalledWith("smrealproj", { name: "Untitled project", confirmLive: true });
     expect(r.ok).toBe(true);
   });
 

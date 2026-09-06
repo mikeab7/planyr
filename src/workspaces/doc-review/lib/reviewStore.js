@@ -462,9 +462,12 @@ export async function refileReview(id, { projectId = null, project = "", discipl
   if (!rec) return { ok: false, error: "Review not found." };
   // B1160480 — re-filing into a different project is the same class of write fileNewReview
   // guards: ensure the target project's row exists before pointing this review at it.
+  // B1235168 — `confirmLive: true`: this write can move the review's Drive bytes into the target
+  // project's folder, a durable external side effect, so it must never trust a stale local `sites`
+  // row as proof the project is still live (see storage.js's `ensureProjectRow` header).
   if (!orgScope && projectId) {
     const { ensureProjectRow } = await import("../../site-planner/lib/storage.js");
-    const proj2 = await ensureProjectRow(projectId, { name: project });
+    const proj2 = await ensureProjectRow(projectId, { name: project, confirmLive: true });
     if (!proj2.ok) {
       return { ok: false, error: proj2.deleted
         ? "This project has been deleted. Restore it before filing anything into it."
@@ -707,9 +710,11 @@ export async function fileNewReview({ projectId = null, project = "", discipline
   // — keyed to a project id that names no row anywhere, orphaning the file the moment the tab
   // reloads. This is the one choke point every filed review passes through; ensure the row
   // BEFORE anything is sent to Drive.
+  // B1235168 — `confirmLive: true`, for the same reason as `refileReview` above: a stale local
+  // `sites` row must never wave through bytes headed for a project's Drive folder.
   if (pid) {
     const { ensureProjectRow } = await import("../../site-planner/lib/storage.js");
-    const proj2 = await ensureProjectRow(pid, { name: proj });
+    const proj2 = await ensureProjectRow(pid, { name: proj, confirmLive: true });
     if (!proj2.ok) {
       return { ok: false, error: proj2.deleted
         ? "This project has been deleted. Restore it before filing anything into it."
