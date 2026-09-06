@@ -44,6 +44,8 @@ import {
 import { EMPTY_TAP, tapTime, stepDoubleTap } from "./lib/doubleTap.js";
 import { DRAG_SLOP_PX, makeDragGate, stepDragGate, dragArmed } from "./lib/dragGate.js";
 import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
+import { createViewChangeRecorder, attachTimeline } from "./lib/viewChangeRecorder.js";
+import { createViewFramingGate } from "./lib/viewFramingGate.js";
 import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody, stackHoldsFeature, parseFeatureKey, stackAtPoint, nextPickIndex } from "./lib/featureTarget.js";
 import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale, overlayRasterKey, HIRES_CACHE_PER_OVERLAY } from "./lib/overlayPdf.js";
@@ -2071,7 +2073,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * MORE THAN ONE automatic view change on a cold load can be settled with real evidence instead
    * of another guess. This session exhaustively enumerated every `setView(`/`requestFit(` call
    * site in this file and in MapFinder.jsx: every one but the boot-time 120ms reframe effect
-   * (already guarded by `userMovedViewRef` above) traces to a genuine user gesture (a drawn
+   * (now gated by lib/viewFramingGate.js above) traces to a genuine user gesture (a drawn
    * parcel, the Fit view button, a looked-up parcel, a paste, a toast's "Show", a locate-me fix,
    * the wheel/pinch/pan gestures the same guard already covers) or is the Leaflet basemap purely
    * MIRRORING this same `view` state (never an independent decision). No second automatic source
@@ -2079,20 +2081,43 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * conclusively, the next time the sequence is reported, rather than re-auditing blind. Gated the
    * `diagArm.js` way (read at CALL time, armable with no console via `?planyrDiag=1`), so it costs
    * nothing unarmed and needs no remount to switch on. It records; it changes nothing. */
-  const viewChangeLogRef = useRef([]);
+  /* ⛔ NEW-1 (2026-09-05) — WIDENED FROM A BOOT-TIME NOTE-TAKER TO A WHOLE-SESSION WITNESS, because
+   * the owner's follow-up report named a SECOND trigger this could not have seen: after #1448 and
+   * #1451 shipped, the cold start was clean, but leaving the app IDLE and coming back to pinch made
+   * it misbehave again. The log above recorded a timestamp and a stack and nothing else — no view
+   * values, no answer to "did a user gesture authorise this", and no timeline of what ARRIVED
+   * before it. Correlation is the deliverable, so the ring now lives in lib/viewChangeRecorder.js,
+   * which also carries the reason both earlier live instruments read nothing: they polled the
+   * Leaflet scale bar and tile z, and the planner's zoom is not Leaflet's zoom. */
+  const viewRecRef = useRef(null);
+  if (viewRecRef.current === null && isDiagArmed(window)) viewRecRef.current = createViewChangeRecorder();
   const setView = useCallback((updater) => {
-    if (isDiagArmed(window)) {
-      const log = viewChangeLogRef.current;
-      log.push({ t: Math.round(performance.now()), stack: (new Error("setView")).stack });
-      if (log.length > 200) log.shift(); // bounded ring — a diagnostic must never leak memory
-    }
-    setViewRaw(updater);
+    const rec = viewRecRef.current;
+    if (!rec || !isDiagArmed(window)) { setViewRaw(updater); return; }
+    /* Captured OUT here: `new Error()` inside the updater would be attributed to React's render,
+       not to whoever called setView, which is the one column that matters. */
+    const stack = (new Error("setView")).stack;
+    const visibility = typeof document !== "undefined" ? document.visibilityState : null;
+    setViewRaw((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      /* React may re-run an updater during a re-render; `recordChange` de-duplicates an identical
+         (stack, from, to) inside a short window so a replay cannot inflate the count. */
+      try { rec.recordChange({ from: prev, to: next, stack, visibility }); } catch (_) { /* a diagnostic never breaks the app */ }
+      return next;
+    });
   }, []);
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const hook = () => (isDiagArmed(window) ? viewChangeLogRef.current.slice() : null);
+    if (typeof window === "undefined") return undefined;
+    const rec = viewRecRef.current;
+    const hook = () => (rec && isDiagArmed(window) ? rec.snapshot() : null);
     window.__plannerViewChanges = hook;
-    return () => { if (window.__plannerViewChanges === hook) window.__plannerViewChanges = null; };
+    const detach = rec ? attachTimeline(window, rec) : null;
+    if (rec) rec.noteEvent("planner:mount");
+    return () => {
+      if (window.__plannerViewChanges === hook) window.__plannerViewChanges = null;
+      if (rec) rec.noteEvent("planner:unmount");
+      if (detach) detach();
+    };
   }, []);
   // `w`/`h` are clamped to a sane minimum for the coordinate math; `rawW` is the TRUE
   // (unclamped) map-pane width, used only to keep the bottom furniture from overlapping
@@ -2731,16 +2756,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * `layerGateReady` is a ONE-SHOT latch: it exists to close the opening window, and keeping it
    * a latch is what stops the overlay sync from re-running on every frame of a zoom gesture. */
   const [viewFramed, setViewFramed] = useState(false);
-  /* NEW-1 — has the user already taken the wheel/pinch/pan themselves? Mirrors MapFinder.jsx's
-   * `userMovedRef`, built for the identical bug class: the "reframe when this view becomes
-   * active" effect below fires an UNCONDITIONAL requestFit() 120ms after mount, and under real
-   * main-thread load that timer's actual fire time stretches well past 120ms — routinely
-   * landing AFTER the user has already started zooming or panning, and silently overwriting the
-   * gesture ("the map fights back"). Set at the three real view-changing gestures (a wheel
-   * notch, a pinch move, a drag-pan actually arming past its dead zone) — never at a mere
-   * click/tap — so USER-INITIATED fits (Zoom to fit, drawing a parcel, placing a looked-up
-   * parcel) stay untouched; this guards only the automatic boot-time one. */
-  const userMovedViewRef = useRef(false);
+  /* ⛔ NEW-1 (2026-09-05) — THE ONE-OFF REF IS GONE; FRAMING IS NOW GATED IN ONE PLACE.
+   * The ref this replaces (B1448) was correct for the report it had, and the owner confirmed the
+   * cold start improved — but it was a `useRef(false)` consulted at exactly ONE call site, so it
+   * protected that single `if` and nothing else: any framing path added later starts life
+   * unguarded, and nothing anywhere says it should not. His follow-up named a trigger a boot-time
+   * guard cannot cover by construction (idle, come back, gesture), so the question moved to where
+   * it belongs — the view itself. `lib/viewFramingGate.js` answers one question for every framing
+   * path there will ever be: has the user moved the view since this framing was REQUESTED? It is
+   * per-MOUNT on purpose, and that file's header explains why sharing it across a remount would
+   * break re-opening a plan rather than protect it. */
+  const framingGate = useRef(null);
+  if (framingGate.current === null) framingGate.current = createViewFramingGate();
   const [layerGateReady, setLayerGateReady] = useState(false);
   const geoSrcRef = useRef(null); // which BASEMAPS source the live tile layers were built from
   // "Make sure the aerial is on" (identify mode, analysis-layer framing, geocoded add):
@@ -3798,7 +3825,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!pinch2Ref.current || e.touches.length < 2) return;
     const a = touchPt(e.touches[0]), b = touchPt(e.touches[1]);
     pinchNextRef.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
-    userMovedViewRef.current = true;        // NEW-1 — a real pinch move, the boot-fit race guard
+    framingGate.current.noteUserViewMove();               // the user has taken the view — see lib/viewFramingGate.js
     if (!pinchRafRef.current) pinchRafRef.current = requestAnimationFrame(flushPinch);
   };
   // `cancelled` distinguishes a native touchcancel (an interruption — scroll-chaining, an OS
@@ -5681,9 +5708,47 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Fit *after* a state change has committed: bump the nonce instead of calling
   // fit() from a stale closure (which would frame the view without the content
   // we just added). The effect runs post-render so fit() sees current state.
-  const [fitNonce, setFitNonce] = useState(0);
-  const requestFit = useCallback(() => setFitNonce((n) => n + 1), []);
-  useEffect(() => { if (fitNonce) fit(); }, [fitNonce]); // eslint-disable-line react-hooks/exhaustive-deps
+  /* ⛔ THE ONE DOOR EVERY FRAMING GOES THROUGH — AND THE TICKET TRAVELS ALL THE WAY TO THE
+   * EXECUTION, WHERE THE VERDICT IS TAKEN. Getting that second half wrong is how the first version
+   * of this fix still reproduced the bug on the very rig built to catch it.
+   *
+   * The rule, in the owner's words: "if some late-arriving thing legitimately needs to fit the view,
+   * it must never do so after the user has moved the view themselves, no matter how long ago that
+   * was." Called with NO ticket (a button, a drawn parcel, a paste) `requestFit` takes one on the
+   * spot, so nothing can have intervened and the framing always runs — an immediate user action is
+   * never blocked. A DEFERRED framing passes the ticket it took when its work was REQUESTED.
+   *
+   * ⛔ WHY THE VERDICT CANNOT BE TAKEN IN `requestFit`. A framing does not happen when it is
+   * requested: `requestFit` bumps a nonce and a React effect runs `fit()` on a LATER tick. That
+   * indirection is load-bearing (a fit called straight from a handler frames the view without the
+   * content the handler just added), but it separates the request from the execution by a gap the
+   * main thread can stretch arbitrarily — so a check at request time grants permission while the
+   * user has not moved and SPENDS it after he has. Measured on the real app at 40x CPU throttling
+   * with the check in that position: a wheel gesture took the view to 0.4594 px/ft and a `fit()`
+   * then yanked it out to 0.1064 — the owner's "it zooms in very close, then zooms out" in one
+   * recorded row, on a build that believed it was guarded.
+   *
+   * B1448's guard has the identical shape (`if (!userMovedViewRef.current) requestFit()` — asked at
+   * the timer, spent an effect later), which is why the cold start got BETTER rather than fixed: the
+   * check is real, it is just asked one hop too early, so it loses the race only when the machine is
+   * slow enough. Intermittently. Exactly as reported.
+   *
+   * A suppression is RECORDED, never silent (LOUD-FAILURE) — that is what makes it observable from
+   * the harness and from the owner's own armed tab.
+   *
+   * ⚠ Never pass `requestFit` straight to `onClick`: the click event would arrive as the ticket. */
+  const [fitReq, setFitReq] = useState(null); // { n, ticket } — `n` only gives each request a distinct identity
+  const requestFit = useCallback((ticket) => {
+    const t = ticket || framingGate.current.framingTicket();
+    setFitReq((prev) => ({ n: (prev ? prev.n : 0) + 1, ticket: t }));
+    return true;
+  }, []);
+  useEffect(() => {
+    if (!fitReq) return;
+    const verdict = framingGate.current.mayFrame(fitReq.ticket);
+    if (!verdict.ok) { viewRecRef.current?.noteEvent("frame:suppressed", verdict.why); return; }
+    fit();
+  }, [fitReq]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* Frame the planner view to the ACTIVE parcels (+ margin) so a just-enabled
      constraint overlay is on-screen — FEMA/NWI are scale-gated and only draw zoomed
@@ -6009,15 +6074,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Reframe when this view becomes active — its real size is known only once shown.
   // NEW-1 — under real load this timer's actual fire time stretches well past 120ms, so it can
   // land AFTER the user has already started zooming/panning; skip the automatic fit in that
-  // case so it never overwrites a gesture already in flight (userMovedViewRef, above).
+  // case so it never overwrites a gesture already in flight (lib/viewFramingGate.js, above).
   useEffect(() => {
-    if (active) {
-      const t = setTimeout(() => {
-        if (!userMovedViewRef.current) requestFit();
-        setViewFramed(true);
-      }, 120);
-      return () => clearTimeout(t);
-    }
+    if (!active) return undefined;
+    /* The ticket is taken HERE — the moment this automatic framing is requested — not when the
+       timer fires. Under real load this timer's actual fire time stretches well past 120 ms, so
+       any gesture the user makes in that gap now cancels it, however long the gap turns out to be. */
+    const ticket = framingGate.current.framingTicket();
+    const t = setTimeout(() => {
+      requestFit(ticket);
+      setViewFramed(true);   // the gate decides whether we FRAMED; the view is settled either way
+    }, 120);
+    return () => clearTimeout(t);
   }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ------------ wheel zoom (non-passive) ------------
@@ -6109,7 +6177,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const mx = e.clientX - r.left, my = e.clientY - r.top;
       const f = wheelZoomFactor(e);
       if (f === 1) return;                    // a zero/garbage delta zooms nothing and starts no gesture
-      userMovedViewRef.current = true;        // NEW-1 — a real wheel notch, the boot-fit race guard
+      framingGate.current.noteUserViewMove();               // the user has taken the view — see lib/viewFramingGate.js
       const prev = wheelAccum.current;
       wheelAccum.current = { f: (prev ? prev.f : 1) * f, mx, my };
       if (!wheelRaf.current) wheelRaf.current = requestAnimationFrame(flushWheel);
@@ -8360,7 +8428,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // nodes. Batches into the same commit as the setView below. See the pan-anchor block.
       if (!d.panArmed) armViewAnchor(view.ppf, d.ox, d.oy);
       d.panArmed = true;
-      userMovedViewRef.current = true;        // NEW-1 — a real drag-pan, the boot-fit race guard
+      framingGate.current.noteUserViewMove();               // the user has taken the view — see lib/viewFramingGate.js
       setView((v) => ({ ...v, offX: d.ox + (e.clientX - d.sx), offY: d.oy + (e.clientY - d.sy) }));
       return;
     }
@@ -19845,7 +19913,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <button style={{ ...chip, flex: 1 }} title="Resize this drawing to fit your current view (use when it came in far too big or small), then set the real scale above"
                               onClick={() => { const f = Math.max(0.01, ((size.w / view.ppf) * 0.6) / Math.max(1, o.imgW)); const vc = p2fStatic(size.w / 2, size.h / 2); patchOverlay(o.id, { ftPerPx: f, x: vc.x - (o.imgW * f) / 2, y: vc.y - (o.imgH * f) / 2 }); }}>Size to view</button>
                             )}
-                            <button style={{ ...chip, flex: 1 }} title="Zoom the canvas to fit everything" onClick={requestFit}>Fit view</button>
+                            <button style={{ ...chip, flex: 1 }} title="Zoom the canvas to fit everything" onClick={() => requestFit()}>Fit view</button>
                           </div>
                           {/* B848736 — item 4: on a georeferenced plan the live map tiles ARE the aerial,
                               so the static image (this row) stands down while they're on — matching the
