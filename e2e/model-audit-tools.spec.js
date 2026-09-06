@@ -56,6 +56,17 @@ async function ribbonButtonText(page, testId) {
   return text;
 }
 
+/* NEW-1 (command palette, owner chat block) — the Names group was moved OFF the Home ribbon
+ * entirely (an occasional, not daily, operation — see ribbonLayout.js's own header), so
+ * "ribbon-names" no longer exists anywhere in the DOM. The command palette is now its primary
+ * reachable path (the cell right-click menu's "Name Manager…" row is the second) — this opens the
+ * SAME NameManager panel the old ribbon button did. */
+async function openNameManagerViaPalette(page) {
+  await page.keyboard.press("Control+K");
+  await page.getByTestId("model-command-palette-input").fill("Name Manager");
+  await page.keyboard.press("Enter");
+}
+
 test.describe("Model workspace — trace precedents/dependents (NEW-1)", () => {
   test("trace precedents draws one arrow at level 1, more at level 2, including a NAMED-RANGE hop", async ({ page }) => {
     const id = "e2e-model-trace-precedents";
@@ -68,7 +79,7 @@ test.describe("Model workspace — trace precedents/dependents (NEW-1)", () => {
     await setCell(page, 0, 2, "0.05");
     // Define the name against the current selection (C1) via the Name Manager's own fast path.
     await cell(page, 0, 2).click();
-    await clickRibbonButton(page, "ribbon-names");
+    await openNameManagerViaPalette(page);
     await page.getByTestId("name-manager-new-input").fill("TaxRate");
     await page.getByTestId("name-manager-create").click();
     await page.getByTestId("name-manager").getByTitle("Close (Esc)").click();
@@ -197,14 +208,14 @@ test.describe("Model workspace — inconsistent-formula detection (NEW-2)", () =
 // discipline, and left here as a permanent regression lock so a future change to this panel that
 // broke Enter-to-define would fail CI immediately instead of silently reaching production.
 test.describe("Model workspace — Name Manager (B1117409)", () => {
-  test("pressing Enter in the New name field defines the name, same as clicking Define — reached via the ribbon overflow path, as reported", async ({ page }) => {
+  test("pressing Enter in the New name field defines the name, same as clicking Define — reached via the command palette, as the Names group moved off the ribbon (NEW-1)", async ({ page }) => {
     const id = "e2e-model-namemgr-enter";
     await seedProject(page, id);
     await page.goto(`/#/project/${id}/model`);
     await expect(sheetEl(page)).toBeVisible();
 
     await cell(page, 0, 0).click(); // "Select a cell" per the repro
-    await clickRibbonButton(page, "ribbon-names"); // opens via the ribbon overflow ("More ▾") at this viewport
+    await openNameManagerViaPalette(page);
     await expect(page.getByTestId("name-manager")).toBeVisible();
 
     const input = page.getByTestId("name-manager-new-input");
