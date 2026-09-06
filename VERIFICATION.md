@@ -164,6 +164,24 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V888832 — B1223120: the phone Properties bottom sheet, on a real iPhone `Blocker: real-device`
+
+**Why this needs its own real pass.** Every mechanical piece (the coarse-pointer + narrow-width gate, the half/tall snap heights, the drag-to-dismiss threshold, the 44×44 control floor, the map panning to keep the selection clear of the sheet, the keyboard-inset math) is verified this session against Chromium's device-emulation mode (a real touch-capable browser engine driven with a simulated iPhone 13 descriptor) and unit-tested in isolation — but emulation cannot raise a real on-screen keyboard, cannot report a real notch/home-indicator safe-area inset (this sandbox always reads 0), and cannot reproduce real finger-drag physics. Those three are the concrete gap a real device closes.
+
+**What was verified here (this session, sandbox, headless Chromium + device emulation, against a real production plan fixture — FM 359 RD, Fulshear).** Selecting a real building and opening its Properties: the sheet renders `position:fixed`, exactly 50% of viewport height, 12px rounded top corners, a drag handle; all 32 buttons inside it measured ≥44×44px; the selected building's own bottom edge measured 15.7px clear of the sheet's top edge (the map-shift acceptance criterion); dragging the handle up reached the coded "tall" detent (85% of viewport height); dragging down past the dismiss threshold closed the sheet. Desktop (1440×900, mouse) and a narrow-width browser window with a mouse (700×900, no touch) both measured zero bottom-sheet elements — the old docked panel and the old left-drawer companion render unchanged in those two cases.
+
+**Steps, each with a named expected result — on `planyr.io`, on Michael's own iPhone, in Safari (not the sandbox, not desktop Chrome):**
+1. Read the loaded chunk hash in the same breath as everything below — confirm it names a chunk from a build after this PR merged.
+2. Open any real site plan and select a building, pond, or other element. **Expect:** the existing "✎ Properties" pill appears near the bottom of the screen (unchanged from before this item).
+3. Tap the pill. **Expect:** a sheet slides up from the bottom of the screen to roughly half the screen's height — never full-screen — with a small drag handle at its top and the map still visible above it, showing the selected object.
+4. Drag the handle up. **Expect:** the sheet grows to a taller height (still leaving a strip of map visible at the top), and every button/field inside it is comfortably tappable with a thumb — no tiny targets.
+5. Drag the handle down and release near the bottom. **Expect:** the sheet dismisses (the pill reappears).
+6. Reopen the sheet, then tap into a numeric field (e.g. Length or Depth) to bring up the keyboard. **Expect:** the sheet's own bottom edge rises to sit just above the keyboard, and the field being typed into is not hidden behind the keyboard — scroll if needed and confirm it comes into view.
+7. With the keyboard up, rotate the phone or dismiss the keyboard and confirm the sheet returns to a sane, non-broken height (no lingering huge gap or a sheet stuck too tall/short).
+8. Confirm the sheet's top corners are visibly rounded and it doesn't cover the whole screen at either detent.
+
+**Result:** ⏳ pending — needs Michael's own iPhone; this sandbox has no physical device and this session's attempt to install a closer engine (Playwright WebKit) failed on both of its download mirrors. `Cadence: once`.
+
 ### V881392 — B1213314: setting a task's Owner in the Scheduler is reachable, saves, and reads back after reload `Blocker: auth`
 
 **Why this needs its own real pass.** The reachability chain (Owner column visible by default → double-click opens `ContactPicker` → commits through the grid's normal save path) was confirmed by reading `public/sequence/index.html` directly, not by driving it: the embedded scheduler loads React/ReactDOM/Babel-standalone/Supabase-js from public CDNs via plain `<script src="https://...">` tags rather than bundling them, and this sandbox's headless Chromium cannot reach any of those hosts (`net::ERR_TUNNEL_CONNECTION_FAILED`/connection-reset on all four) — the grid never finishes booting here, signed in or out, so no interactive check of it is possible in this sandbox at all.
