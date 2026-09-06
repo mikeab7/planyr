@@ -6,10 +6,10 @@
 // stack in PURE JS, independent of the DOM, and this sibling of measureHit.js (B910) provides them:
 //
 //   • B920 / NEW-1 — the ONE fill-aware rule the DOM render also follows: a CLOSED markup grabs by
-//     its whole INTERIOR only when it is FILLED (fillOpacity > 0). An UNFILLED closed markup grabs
+//     its whole INTERIOR only when it is FILLED (fillOpacity > 0 or a hatch is visible). An UNFILLED closed markup grabs
 //     on its STROKE + a tolerance only — so a big invisible boundary can't blanket everything under
 //     it (the reported "can't click the roads — a transparent polygon eats every click" bug). The
-//     canvas render sets pointerEvents "all" vs "stroke" off the very same `fillOpacity > 0` test,
+//     canvas render sets pointerEvents "all" vs "stroke" off the very same visible-fill test,
 //     so the declarative hit area and this predicate agree by construction.
 //   • B921 / NEW-2 — repeat-click / Alt-click must CYCLE down through every markup under the pointer
 //     so a covered shape is always reachable. Smaller-area-first (a small markup on a big one wins,
@@ -22,6 +22,7 @@ import { pointInRing, ringArea } from "./ringMath.js";
 
 const hyp = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const DEG = Math.PI / 180;
+const hasVisibleFill = (m) => (m.fillOpacity || 0) > 0 || (!!m.hatch && m.hatch !== "none");
 
 // Ring area magnitude (feet²) — used only to RANK overlapping hits, so the sign is dropped.
 // One implementation, in ringMath.js; re-exported because callers and tests import it here.
@@ -72,7 +73,7 @@ export function ellipseRing(m, seg = 48) {
 
 // A markup's clickable geometry + whether its BODY captures (the B920 rule in ONE place, so the
 // DOM render and this picker never diverge): { ring, path, closed, filled, area } | null.
-//   - polygon/rect/ellipse — closed; `filled` follows fillOpacity > 0 (B920).
+//   - polygon/rect/ellipse — closed; `filled` follows the shared visible-fill rule (B920).
 //   - line/polyline/traced/infwater — open paths (stroke hit only), area 0.
 //   - encumbrance/easement/utilRoute — semantic markups whose bodies already grab in the DOM
 //     (pattern fill / corridor fill / pointerEvents "all"), so they are always `filled`.
@@ -84,9 +85,9 @@ export function markupHitModel(m) {
     case "traced":
     case "infwater": return { path: m.pts || [], closed: false, filled: false, area: 0 };
     case "polygon":
-    case "cloud": return { ring: m.pts || [], closed: true, filled: (m.fillOpacity || 0) > 0, area: ringArea(m.pts || []) };
-    case "rect": return { ring: boxCorners(m), closed: true, filled: (m.fillOpacity || 0) > 0, area: Math.abs((m.w || 0) * (m.h || 0)) };
-    case "ellipse": return { ring: ellipseRing(m), closed: true, filled: (m.fillOpacity || 0) > 0, area: Math.abs(Math.PI * (m.w || 0) * (m.h || 0) / 4) };
+    case "cloud": return { ring: m.pts || [], closed: true, filled: hasVisibleFill(m), area: ringArea(m.pts || []) };
+    case "rect": return { ring: boxCorners(m), closed: true, filled: hasVisibleFill(m), area: Math.abs((m.w || 0) * (m.h || 0)) };
+    case "ellipse": return { ring: ellipseRing(m), closed: true, filled: hasVisibleFill(m), area: Math.abs(Math.PI * (m.w || 0) * (m.h || 0) / 4) };
     case "encumbrance":
     case "easement": return { ring: m.pts || [], closed: true, filled: true, area: ringArea(m.pts || []) };
     case "utilRoute": return { ring: m.corridor || [], closed: true, filled: true, area: ringArea(m.corridor || []) };
