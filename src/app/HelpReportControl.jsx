@@ -77,6 +77,40 @@
  * `siblingMismatches()` couldn't either, because this control has no rounded containing ancestor
  * and no rounded row-peer (it renders fixed, alone, outside every workspace's own chrome tree) —
  * see `ui-audit/lib/controlKind.mjs` (NEW-2, the mechanism that now catches exactly this).
+ *
+ * ⛔ B1231280 (owner chat block, 2026-09-06, "NEW-1") — THE CAPTURE IS NOW TAKEN AT THE FIRST
+ * PRESS THAT OPENS THIS CONTROL, NOT AT SUBMIT. Owner, verbatim: "the question mark should record
+ * the moments before by default and submit it with the ticket. Like, as soon as you even click on
+ * it. Just always catch it in time." `armCapture()` runs from the SAME `onClick` that flips `open`
+ * true — the earliest point compatible with a keyboard Enter/Space activation too (PART C of
+ * `verify-help-report-control.mjs` opens this control by keyboard, so the arm point cannot be a
+ * mouse-only `pointerdown`) — and freezes `cap` (armed / taken / the delivery promise) for the
+ * WHOLE time the panel stays open. Both "Report a problem" and "Something was slow just now" read
+ * that ONE frozen `cap`; neither takes a second capture. This is why `perfCaptureDelivery()` is
+ * called exactly once per opening, in `armCapture`, not once per action — reusing the same
+ * `requestPerfCapture`/`perfCaptureDelivery` bind seam `perfRecorderHandle.js` already exposes,
+ * never a second capture path. Acceptance test: `verify-help-report-control.mjs` PART D asserts
+ * `pfRec.state().sent` increments on the OPEN click and does NOT increment again on the
+ * "Something was slow" click that follows it.
+ * Three honest states, carried into `context.perf` on EVERY submission (LOUD-FAILURE — an
+ * un-armed recorder or an empty ring must never look like a silently-attached capture):
+ * `captureArmed:false` (the recorder hasn't installed on this page yet — main.jsx defers it to an
+ * idle callback on every route, so a press in the first few seconds after load can race it) ·
+ * `captureArmed:true, captureTaken:false` (armed but this press's budget/allowlist refused it) ·
+ * `captureTaken:true, captureDelivered:<bool>` (taken; delivered or not). An empty ring (no
+ * interaction happened before the press) is NOT a fourth case here — `requestPerfCapture` still
+ * returns `taken:true` for it and the capture itself carries `note:"no-frames"`
+ * (`perfCapture.js`), which is the honest "nothing was happening" answer, not a failure to record.
+ *
+ * ⛔ B1231281 ("NEW-2") — THE PLANNER'S OWN "◷" ZOOM-STACK BUTTON IS GONE; this menu's "Something
+ * was slow just now" row is the only door now (`SitePlanner.jsx`'s own header note on its removal
+ * has the geometry side of this). Traded one press for two (open the control, then this row) —
+ * flagged rather than hidden, because the owner explicitly asked not to make a fast signal slower
+ * without saying so. Two things that keep it close to as fast as it was: the capture is already
+ * taken (and usually already delivered) from the first press by the time this row is reachable, so
+ * the second press adds no capture latency, only one more tap; and the row is the FIRST thing on
+ * screen after opening — no typing, no scrolling — so filing a pure performance report is still
+ * "open, then one more tap," never "open, navigate, then tap."
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import AnchoredMenu from "../shared/ui/AnchoredMenu.jsx";
@@ -125,6 +159,9 @@ export default function HelpReportControl({ user }) {
   const [submitState, setSubmitState] = useState(null); // null | "sending" | "ok" | "queued"
   const [slowNote, setSlowNote] = useState(null);        // null | "sending" | "ok" | "local" | "undelivered" | "fail"
   const [queued, setQueued] = useState(0);
+  // NEW-1 (B1231280) — the capture FROZEN at the press that opened the panel. null until then.
+  // { armed: bool, taken: bool, deliveryPromise: Promise|null }. Never re-armed until the next open.
+  const [cap, setCap] = useState(null);
   const [fabRight, setFabRight] = useState(FAB_RIGHT);
   const [fabBottom, setFabBottom] = useState(FAB_RIGHT);
 
@@ -159,7 +196,36 @@ export default function HelpReportControl({ user }) {
     };
   }, []);
 
-  const closeAll = () => { setOpen(false); setTimeout(() => { setView("menu"); setDesc(""); setSubmitState(null); }, 200); };
+  const closeAll = () => { setOpen(false); setTimeout(() => { setView("menu"); setDesc(""); setSubmitState(null); setCap(null); }, 200); };
+
+  /* NEW-1 (B1231280) — THE ONE PLACE `requestPerfCapture`/`perfCaptureDelivery` ARE CALLED. Runs
+   * once, from the click that OPENS the panel (see `toggleOpen` below) — never again until the
+   * next opening. Every action taken while the panel is open reads this frozen `cap`, so whatever
+   * he writes or picks afterwards is attached to the moment he reacted to, not the moment he
+   * finished acting on it. */
+  const armCapture = () => {
+    if (!perfRecorderArmed()) { setCap({ armed: false, taken: false, deliveryPromise: null }); return; }
+    const taken = requestPerfCapture("manual");
+    setCap({ armed: true, taken, deliveryPromise: taken ? Promise.resolve(perfCaptureDelivery()) : null });
+  };
+
+  const toggleOpen = () => {
+    const opening = !open;
+    setOpen(opening);
+    if (opening) armCapture();
+  };
+
+  /* The same frozen `cap`, resolved into the flat shape every submission attaches under
+   * `context.perf` — LOUD-FAILURE: an un-armed recorder or a refused capture must read as exactly
+   * that, never as a silently-omitted or silently-empty attachment. */
+  const perfOutcome = async () => {
+    if (!cap || !cap.armed) return { captureArmed: false };
+    if (!cap.taken) return { captureArmed: true, captureTaken: false };
+    try {
+      const r = await cap.deliveryPromise;
+      return { captureTaken: true, captureDelivered: !!(r && r.ok) };
+    } catch (_) { return { captureTaken: true, captureDelivered: false }; }
+  };
 
   const openReportForm = () => {
     setCtx(buildReportContext());
@@ -168,22 +234,28 @@ export default function HelpReportControl({ user }) {
 
   const submitProblem = async () => {
     setSubmitState("sending");
-    const context = ctx || buildReportContext();
+    const perf = await perfOutcome();
+    const context = { ...(ctx || buildReportContext()), ...perf };
     const r = await submitReport({ category: "problem", description: desc, userId: user?.id, userEmail: user?.email, context });
     setSubmitState(r.ok ? "ok" : "queued");
     setTimeout(closeAll, 1700);
   };
 
   const somethingWasSlow = () => {
-    const taken = requestPerfCapture("manual");
-    if (!taken) {
+    if (!cap || !cap.armed) {
       setSlowNote("fail");
-      submitReport({ category: "slow", userId: user?.id, userEmail: user?.email, context: buildReportContext({ perf: { captureTaken: false } }) });
+      submitReport({ category: "slow", userId: user?.id, userEmail: user?.email, context: buildReportContext({ perf: { captureArmed: false } }) });
+      setTimeout(() => setSlowNote(null), 3200);
+      return;
+    }
+    if (!cap.taken) {
+      setSlowNote("fail");
+      submitReport({ category: "slow", userId: user?.id, userEmail: user?.email, context: buildReportContext({ perf: { captureArmed: true, captureTaken: false } }) });
       setTimeout(() => setSlowNote(null), 3200);
       return;
     }
     setSlowNote("sending");
-    Promise.resolve(perfCaptureDelivery()).then((r) => {
+    Promise.resolve(cap.deliveryPromise).then((r) => {
       const ok = !!(r && r.ok);
       const local = !ok && r && r.reason === SUPPRESSED_AUTOMATED;
       setSlowNote(ok ? "ok" : local ? "local" : "undelivered");
@@ -215,7 +287,7 @@ export default function HelpReportControl({ user }) {
         aria-label="Help and report a problem"
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggleOpen}
         style={{
           position: "fixed", right: fabRight, bottom: fabBottom, zIndex: Z_FAB,
           width: FAB_SIZE, height: FAB_SIZE, borderRadius: RADIUS.md,
@@ -240,10 +312,29 @@ export default function HelpReportControl({ user }) {
         {view === "menu" && (
           <>
             <MenuItem onClick={openReportForm} style={rowStyle}>Report a problem</MenuItem>
-            <MenuItem onClick={somethingWasSlow} style={rowStyle} disabled={!perfRecorderArmed() || slowNote === "sending"}>
+            <MenuItem
+              data-testid="report-slow"
+              data-slow-note={slowNote || ""}
+              onClick={somethingWasSlow}
+              style={{
+                ...rowStyle,
+                color: (slowNote === "ok" || slowNote === "local") ? "var(--accent)"
+                  : (slowNote === "fail" || slowNote === "undelivered") ? "var(--warn-text)"
+                  : undefined,
+              }}
+              disabled={!(cap && cap.armed) || slowNote === "sending"}
+            >
               {slowLabel || "Something was slow just now"}
             </MenuItem>
             <MenuItem onClick={() => setView("help")} style={rowStyle}>Help</MenuItem>
+            {/* NEW-1 (B1231280) — an un-armed recorder must say so plainly, not just grey the row
+                out with no explanation (LOUD-FAILURE). Races the idle-deferred install every route
+                runs on load; resolves itself within a few seconds without a reopen. */}
+            {cap && !cap.armed && (
+              <div style={{ padding: "6px 10px 2px", fontSize: FONT_SIZE.label, color: "var(--text-tertiary)" }}>
+                Performance recording hasn't started on this device yet — try again in a few seconds.
+              </div>
+            )}
             {queued > 0 && (
               <div style={{ padding: "6px 10px 2px", fontSize: FONT_SIZE.label, color: "var(--text-tertiary)" }}>
                 {queued} report{queued === 1 ? "" : "s"} waiting to send — they'll go out next time you're online.
@@ -273,6 +364,10 @@ export default function HelpReportControl({ user }) {
                 Screen: {ctx?.route || "—"} · Build: {ctx?.build || "—"} · Window: {ctx?.viewportW || "—"}×{ctx?.viewportH || "—"}
                 <br />
                 {user ? `Signed in as ${user.email || "you"}` : "Signed out — no account is attached"}
+                <br />
+                {cap && cap.armed
+                  ? "Also included: a few seconds of recent app performance, from just before you opened this."
+                  : "Performance recording hasn't started on this device yet — none will be attached this time."}
                 <br />
                 Nothing from your drawing (no shapes, addresses, or names) — only this screen, the app version, and your window size.
               </div>
@@ -304,8 +399,9 @@ export default function HelpReportControl({ user }) {
               your window size) to track down.
             </p>
             <p style={{ margin: 0 }}>
-              If something felt slow, "Something was slow just now" saves the last few seconds so
-              it can be looked into — even signed out.
+              The moment you opened this, the app quietly saved the last few seconds of its own
+              performance — even signed out. "Something was slow just now" sends that along by
+              itself, no typing needed; it's attached to "Report a problem" too, automatically.
             </p>
             <button type="button" onClick={() => setView("menu")} style={{ alignSelf: "flex-end", border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)", borderRadius: RADIUS.sm, padding: "5px 10px", fontSize: 12, cursor: "pointer", font: "inherit" }}>Back</button>
           </div>

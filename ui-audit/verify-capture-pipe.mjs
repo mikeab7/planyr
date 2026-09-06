@@ -181,7 +181,20 @@ async function runArm(name, { respond, drive, networkOptIn = true }) {
      and describes a view the app already left. One precondition covers both, rAF liveness probe
      included; see ui-audit/lib/tabTiming.mjs. Fails loudly rather than reporting either. */
   await assertMeasurable(page, "verify-capture-pipe");
-  await page.goto(BASE, { waitUntil: "load" });
+  /* ⛔ B1231282 (found this session, AUDIT-FIRST) — a bare "/" no longer opens the seeded plan.
+   * B1213312 gave the empty hash to the Dashboard (route.js: "bare '#/' used to be a plain alias
+   * for 'site-planner, no project'... EVERY project-less module now gets its own named slug"),
+   * so navigating to BASE with no hash landed on the Dashboard instead of the Site Planner — no
+   * canvas ever mounted, and this reproduces byte-identically on an unmodified build (predates and
+   * is unrelated to B1231280/B1231281).
+   * ⛔ AND A SECOND, DISTINCT LAYER: "#/site" alone is "site-planner, NO PROJECT" — the picker, per
+   * route.js's own grammar — never "open whatever `currentSite` points at". `bootResume.js`'s own
+   * header says the URL is authoritative for which project is open, so a project-less route shows
+   * the picker regardless of the seeded `planarfit:currentSite:v1` pointer (confirmed directly: a
+   * seeded plan opened via `#/site` renders the Sites LIST with the plan as an entry to click into,
+   * never the open canvas). The seeded fixture's `groupId` is the id `fixtureSeed` was called with
+   * ("capture-pipe-site"), and `#/project/<groupId>/site` is what actually opens it. */
+  await page.goto(BASE + "#/project/capture-pipe-site/site", { waitUntil: "load" });
   await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 60000 });
   await page.waitForFunction(() => !!window.pfRec, null, { timeout: 20000 }).catch(() => {});
   const armed = await page.evaluate(() => !!window.pfRec);
@@ -244,6 +257,10 @@ await runArm("manual", {
      * gesture just behind him, and it is the case where the ring must hold the seconds BEFORE the
      * press. Pressing cold is covered by the `manual-cold` arm below. */
     await induceStall(page);
+    // B1231280 — the capture is taken at the press that OPENS the global help/report control, not
+    // at this row's own click; open it first so the capture is already in flight (or resolved) by
+    // the time this row submits it.
+    await page.locator('[data-testid="help-report-fab"]').click();
     await page.locator('[data-testid="report-slow"]').click();
     await page.waitForFunction(() => {
       const b = document.querySelector('[data-testid="report-slow"]');
@@ -263,6 +280,10 @@ await runArm("manual-cold", {
   respond: ok201,
   drive: async (page) => {
     await page.waitForTimeout(800);           // no gesture at all: the frame loop never ran
+    // B1231280 — the capture is taken at the press that OPENS the global help/report control, not
+    // at this row's own click; open it first so the capture is already in flight (or resolved) by
+    // the time this row submits it.
+    await page.locator('[data-testid="help-report-fab"]').click();
     await page.locator('[data-testid="report-slow"]').click();
     await page.waitForFunction(() => {
       const b = document.querySelector('[data-testid="report-slow"]');
@@ -281,6 +302,10 @@ await runArm("rejected", {
   respond: (route) => route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ code: "42501", message: "new row violates row-level security policy" }) }),
   drive: async (page) => {
     await page.waitForTimeout(800);
+    // B1231280 — the capture is taken at the press that OPENS the global help/report control, not
+    // at this row's own click; open it first so the capture is already in flight (or resolved) by
+    // the time this row submits it.
+    await page.locator('[data-testid="help-report-fab"]').click();
     await page.locator('[data-testid="report-slow"]').click();
     // The sink retries once after ~2.5 s before giving up, so allow for both attempts.
     await page.waitForFunction(() => {
@@ -305,6 +330,10 @@ await runArm("offline", {
   respond: (route) => route.abort("internetdisconnected"),
   drive: async (page) => {
     await page.waitForTimeout(800);
+    // B1231280 — the capture is taken at the press that OPENS the global help/report control, not
+    // at this row's own click; open it first so the capture is already in flight (or resolved) by
+    // the time this row submits it.
+    await page.locator('[data-testid="help-report-fab"]').click();
     await page.locator('[data-testid="report-slow"]').click();
     await page.waitForFunction(() => {
       const b = document.querySelector('[data-testid="report-slow"]');
@@ -341,6 +370,10 @@ const suppressedArm = await runArm("suppressed", {
   drive: async (page) => {
     await induceStall(page);
     await page.waitForTimeout(1200);
+    // B1231280 — the capture is taken at the press that OPENS the global help/report control, not
+    // at this row's own click; open it first so the capture is already in flight (or resolved) by
+    // the time this row submits it.
+    await page.locator('[data-testid="help-report-fab"]').click();
     await page.locator('[data-testid="report-slow"]').click();
     await page.waitForFunction(() => {
       const b = document.querySelector('[data-testid="report-slow"]');

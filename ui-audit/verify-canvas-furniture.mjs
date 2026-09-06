@@ -129,10 +129,11 @@ try {
       const scaleBarWrap = plates.find((p) => p.style.right);
       const northWrap = plates.find((p) => p.style.left);
       const toast = document.querySelector('[data-testid="parcel-select-hint"]');
-      // B914500 — the bottom-right zoom control column (+/−/fit/report-slow, "gbtn" buttons)
-      // joins the furniture-collision set. It is positioned independently of FURNITURE_ROW
-      // (a fixed `bottom:100`, nudged by the same narrow-width reserve as of the fix), so a
-      // future change to either one can silently re-open the gap between them.
+      // B914500 — the bottom-right zoom control column (+/−/fit, "gbtn" buttons; the report-slow
+      // 4th button was folded into the global help/report control by B1231281) joins the
+      // furniture-collision set. It is positioned independently of FURNITURE_ROW (a fixed
+      // `bottom:100`, nudged by the same narrow-width reserve as of the fix), so a future change
+      // to either one can silently re-open the gap between them.
       const zoomBtns = [...document.querySelectorAll("button.gbtn")];
       const zoomStack = zoomBtns.length ? zoomBtns[0].parentElement : null;
       return {

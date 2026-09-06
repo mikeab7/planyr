@@ -8,9 +8,9 @@ import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.j
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
 import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
-import { reportClientEvent, SUPPRESSED_AUTOMATED } from "../../shared/telemetry/clientErrors.js";
+import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { notePerfEdit } from "../../shared/telemetry/perfSampling.js";
-import { notePlanContext, noteViewScale, requestPerfCapture, perfCaptureDelivery } from "../../shared/telemetry/perfRecorderHandle.js";
+import { notePlanContext, noteViewScale } from "../../shared/telemetry/perfRecorderHandle.js";
 import { recordPinchGesture } from "../../shared/telemetry/gestureTelemetry.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
 import { createOperationTracker } from "./lib/operationEnvelope.js";
@@ -4899,9 +4899,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * store into the tiny always-loaded handle module and are no-ops if the recorder never armed. */
   useEffect(() => { notePlanContext(siteId); }, [siteId]);
   useEffect(() => { noteViewScale(view.ppf); }, [view.ppf]);
-  /* Transient acknowledgement on the "felt slow" control — LOUD-FAILURE: a press that recorded
-   * nothing must say so rather than look the same as one that worked. */
-  const [slowNote, setSlowNote] = useState(null);
   // B820 — give each freshly-created markup a z that stacks it on TOP of the collection (nextZ), so a
   // newly drawn markup paints above the existing ones now that the markup layer renders in z order
   // (see the [...markups].sort(byZAsc) passes below). Ascending so a multi-markup add (paste, a deed +
@@ -23719,11 +23716,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // The result, measured on a real 390px phone width against the owner's real Bain plan:
             // the scale bar's row lands at bottom:102 while this stack still starts at bottom:100 —
             // the 60px clearance the comment above assumes is gone, and the scale bar's own plate
-            // (32px tall) sits ENTIRELY inside this stack's 120px-tall vertical span. Its right ~30px
-            // (exactly this column's width — the "◷" report-slow button) paints directly over the
-            // scale bar's highest tick label, e.g. reading "…0 FEET" for a covered "500"/"1000"/etc.
-            // Applying the SAME reserve here restores the original 28px clearance (60 − the 32px
-            // plate height) at every width, rather than inventing a second breakpoint.
+            // (32px tall) sits ENTIRELY inside this stack's vertical span. Its right ~30px (exactly
+            // this column's width) paints directly over the scale bar's highest tick label, e.g.
+            // reading "…0 FEET" for a covered "500"/"1000"/etc. Applying the SAME reserve here
+            // restores the original 28px clearance (60 − the 32px plate height) at every width,
+            // rather than inventing a second breakpoint. ⛔ B1231281 removed the stack's fourth
+            // button (the "◷" report-slow control, folded into the global help/report control —
+            // HelpReportControl.jsx) — this container's OWN bottom edge is unchanged by that (it is
+            // anchored via `bottom: zoomBottom`, not by its content height), so "Zoom to fit" now
+            // occupies the slot nearest the scale bar and this reserve is exactly as necessary as
+            // it was with four buttons.
             const zoomBottom = narrow ? 100 + FAB_RESERVE_PX : 100;
             return (
               // data-canvas-corner: read by the shared help/report control (shared/ui/
@@ -23735,53 +23737,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <button className="gbtn" aria-label="Zoom in" title="Zoom in" style={{ ...zb, borderRadius: 0 }} onClick={() => zoomBy(1.25)}>＋</button>
                 <button className="gbtn" aria-label="Zoom out" title="Zoom out" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={() => zoomBy(1 / 1.25)}>－</button>
                 <button className="gbtn" aria-label="Zoom to fit" title="Zoom to fit" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={fit}>⤢</button>
-                {/* NEW-1 — "that felt slow just now". The one signal this whole programme has never
-                    had is the owner's own perception, and it is more authoritative than any
-                    threshold: the symptom has now failed to reproduce twice under instruments we
-                    aimed ourselves. Pressing this keeps the seconds BEFORE the press — which is the
-                    entire reason the recorder holds a ring buffer rather than a start button; by
-                    the time anyone reaches for a control the moment has passed.
-                    PLACEMENT: the smallest addition to chrome that is still one click away while
-                    he is panning — his hand is already here. Deliberately not a menu dive.
-                    The captures are marked owner-reported and stay distinguishable from the ones
-                    the trigger fires on its own. */}
-                {/* ⛔ B265536 — THE ✓ MEANS *DELIVERED*, NOT *TAKEN*. It used to appear the instant
-                    the recorder built a capture, while the telemetry sink swallowed every write
-                    failure underneath it — so this button, the single highest-value signal in the
-                    speed programme, could report "Recorded — thanks" for a row that never reached
-                    Supabase, and nobody would find out until a week of his use produced nothing.
-                    Three honest states now: SENDING while the write is in flight · ✓ only on a
-                    server acknowledgement · ! with a plain-English reason otherwise, and the note
-                    stays up longer in that case because it is the one worth reading. The capture
-                    is kept on this device either way, which is what the failure text says. */}
-                <button className="gbtn" data-export="skip" data-testid="report-slow"
-                  data-slow-note={slowNote || ""}
-                  aria-label="Report that this felt slow"
-                  title={slowNote === "ok" ? "Recorded — thanks"
-                    : slowNote === "sending" ? "Recording…"
-                      : slowNote === "undelivered" ? "Recorded on this device, but it couldn't reach the server — it'll be in the next report"
-                        /* B270912 — an automated run keeps the capture locally and deliberately
-                           sends nothing. Saying "it couldn't reach the server" there would be a
-                           lie about a working pipe, and the ONE state a reader must be able to
-                           trust is this button's. */
-                        : slowNote === "local" ? "Recorded on this device — automated runs don't report to the server"
-                          : slowNote === "fail" ? "Couldn't record it (the recorder isn't running on this page)"
-                            : "That felt slow just now — record the last few seconds"}
-                  style={{ ...zb, borderTop: "none", borderRadius: 0, fontSize: 13, color: slowNote === "ok" ? PAL.accent : (slowNote === "fail" || slowNote === "undelivered") ? "var(--warn-text)" : PAL.muted }}
-                  onClick={() => {
-                    const taken = requestPerfCapture("manual");
-                    if (!taken) { setSlowNote("fail"); setTimeout(() => setSlowNote(null), 2600); return; }
-                    setSlowNote("sending");
-                    const d = perfCaptureDelivery();
-                    Promise.resolve(d).then((r) => {
-                      const ok = !!(r && r.ok);
-                      const local = !ok && r && r.reason === SUPPRESSED_AUTOMATED;
-                      setSlowNote(ok ? "ok" : local ? "local" : "undelivered");
-                      setTimeout(() => setSlowNote(null), ok || local ? 2600 : 6000);
-                    }, () => { setSlowNote("undelivered"); setTimeout(() => setSlowNote(null), 6000); });
-                  }}>
-                  {slowNote === "ok" ? "✓" : slowNote === "local" ? "✓" : slowNote === "sending" ? "…" : (slowNote === "fail" || slowNote === "undelivered") ? "!" : "◷"}
-                </button>
+                {/* ⛔ B1231281 — the "◷" report-slow control that used to live here is GONE. It
+                    duplicated the global help/report control's own "Something was slow just now"
+                    row (`HelpReportControl.jsx`, mounted by the app shell on every route, not just
+                    this canvas) — two doors for one signal, which is exactly what the owner asked
+                    to fold into one. See that file's own B1231280/B1231281 header note for the
+                    capture-at-open mechanics and the one-press-vs-two tradeoff this removal makes. */}
               </div>
             );
           })()}

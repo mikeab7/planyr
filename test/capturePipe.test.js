@@ -17,6 +17,9 @@ const srcOf = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url))
 const clientErrors = srcOf("../src/shared/telemetry/clientErrors.js");
 const recorder = srcOf("../src/shared/telemetry/perfRecorder.js");
 const planner = srcOf("../src/workspaces/site-planner/SitePlanner.jsx");
+// B1231280/B1231281 — the manual control moved from the planner's own zoom stack into the
+// global help/report control the app shell mounts on every route (see that file's own header).
+const helpControl = srcOf("../src/app/HelpReportControl.jsx");
 
 describe("B265536 — the telemetry sink can no longer swallow its own failure", () => {
   it("the fire-and-forget swallow is GONE from the source", () => {
@@ -80,27 +83,55 @@ describe("B265536 — TAKEN and DELIVERED are different facts all the way to the
   });
 
   /* ⛔ THE BUTTON IS THE POINT. It used to set "ok" the instant a capture was BUILT, so his own
-   * highest-value signal reported ✓ for rows that never left the machine. */
+   * highest-value signal reported ✓ for rows that never left the machine.
+   * B1231280 moved the capture ITSELF to the press that opens the control (`armCapture`) — never
+   * again per action — so `perfCaptureDelivery()` now appears there rather than beside the
+   * "Something was slow" row's own logic (`somethingWasSlow`, which reads the already-taken
+   * `cap.deliveryPromise` instead of calling it fresh). Both windows are asserted. */
   it("the ✓ waits for the server; a rejection reads as a warning, not as success", () => {
-    const at = planner.indexOf('data-testid="report-slow"');
-    const block = planner.slice(at - 1200, at + 2600);
+    const armAt = helpControl.indexOf("const armCapture");
+    const armBlock = helpControl.slice(armAt, armAt + 500);
+    expect(armBlock).toContain("perfCaptureDelivery()");
+
+    const at = helpControl.indexOf("const somethingWasSlow");
+    const block = helpControl.slice(at, at + 2000);
     expect(block).toContain('setSlowNote("sending")');
-    expect(block).toContain("perfCaptureDelivery()");
     expect(block).toContain('setSlowNote(ok ? "ok" : local ? "local" : "undelivered")');
     // The old shape — ✓ straight off the local capture — must not come back.
-    expect(planner.includes('setSlowNote(ok ? "ok" : "fail");')).toBe(false);
+    expect(helpControl.includes('setSlowNote(ok ? "ok" : "fail");')).toBe(false);
   });
 
   /* ⛔ B270912 — AND THE THIRD STATE. Under an automated run the row is deliberately not sent, so
    * "it couldn't reach the server" would be a lie told about a working pipe — on the one control
    * in this product whose report has to be trustworthy. `local` says what actually happened. */
   it("an automated run reads as `local`, never as the undelivered warning", () => {
-    const at = planner.indexOf('data-testid="report-slow"');
-    const block = planner.slice(at - 1200, at + 3200);
+    const at = helpControl.indexOf("const somethingWasSlow");
+    const block = helpControl.slice(at, at + 2000);
     expect(block).toContain('r.reason === SUPPRESSED_AUTOMATED');
     expect(block).toContain('slowNote === "local"');
     // The warning colour and the "!" glyph are the UNDELIVERED signal and must not claim this one.
-    expect(block).toContain('(slowNote === "fail" || slowNote === "undelivered") ? "var(--warn-text)"');
+    expect(helpControl).toContain('(slowNote === "fail" || slowNote === "undelivered") ? "var(--warn-text)"');
+  });
+
+  /* B1231280 — the acceptance test in prose: the capture is taken at the FIRST press that opens
+   * the control, not at submit, and it is shared by BOTH "Report a problem" and "Something was
+   * slow" rather than re-taken per action (reusing the one `requestPerfCapture`/
+   * `perfCaptureDelivery` bind seam — never a second capture path). */
+  it("the capture is armed at OPEN, not at submit, and shared by every action", () => {
+    expect(helpControl).toContain("if (opening) armCapture();");
+    const armAt = helpControl.indexOf("const armCapture");
+    const armBlock = helpControl.slice(armAt, armAt + 500);
+    expect(armBlock).toContain('requestPerfCapture("manual")');
+    // submitProblem attaches the SAME frozen outcome, never a fresh capture call.
+    const submitAt = helpControl.indexOf("const submitProblem");
+    const submitBlock = helpControl.slice(submitAt, submitAt + 600);
+    expect(submitBlock).toContain("await perfOutcome()");
+    expect(submitBlock).not.toContain('requestPerfCapture("manual")');
+    // somethingWasSlow reads the frozen `cap`, never calls requestPerfCapture again.
+    const slowAt = helpControl.indexOf("const somethingWasSlow");
+    const slowBlock = helpControl.slice(slowAt, slowAt + 2000);
+    expect(slowBlock).not.toContain('requestPerfCapture("manual")');
+    expect(slowBlock).toContain("cap.deliveryPromise");
   });
 });
 
