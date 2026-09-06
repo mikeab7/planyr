@@ -559,8 +559,6 @@ _None found on this run._
 | 8px | 30px | 12px | 600 | `rgb(255, 255, 255)` | `1px solid rgb(215, 221, 229)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:226:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out"> |
 | 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(15, 110, 86)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+more matches elsewhere, best-effort) |
 | 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(215, 221, 229)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:19591:            title="File — export a PNG or print a PDF" |
-| 8px | 26px | 12px | 500 | `rgba(0, 0, 0, 0.06)` | `1px solid rgba(0, 0, 0, 0)` | Zoom to fit ×1 | src/workspaces/site-planner/MapFinder.jsx:218: * "+ Select parcels", "Turn all 1 layer off", "Zoom to fit", "Export to Google Earth (KMZ)" — none (+more matches elsewhere, best-effort) |
-| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(215, 221, 229)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:19578:            title="File — export a PNG or print a PDF" |
 | 8px | 26px | 12px | 500 | `rgba(0, 0, 0, 0.06)` | `1px solid rgba(0, 0, 0, 0)` | Zoom to fit ×1 | src/workspaces/site-planner/MapFinder.jsx:219: * "+ Select parcels", "Turn all 1 layer off", "Zoom to fit", "Export to Google Earth (KMZ)" — none (+more matches elsewhere, best-effort) |
 
 **dark** — 13 distinct style signature(s) over 20 matched element(s):
@@ -579,8 +577,6 @@ _None found on this run._
 | 8px | 30px | 12px | 600 | `rgb(23, 26, 33)` | `1px solid rgb(38, 42, 51)` | Sign in or create an account ×1 | src/app/AccountControl.jsx:226:      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out"> |
 | 0px | 25px | 12px | 600 | `rgba(0, 0, 0, 0)` | `0px none rgb(93, 202, 165)` | Site ×1 | src/app/AccountControl.jsx:7: * once (Site map header + Site plan header + DocReview + Library + Scheduler), most of them (+more matches elsewhere, best-effort) |
 | 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(38, 42, 51)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:19591:            title="File — export a PNG or print a PDF" |
-| 8px | 26px | 12px | 500 | `rgba(255, 255, 255, 0.09)` | `1px solid rgba(0, 0, 0, 0)` | Zoom to fit ×1 | src/workspaces/site-planner/MapFinder.jsx:218: * "+ Select parcels", "Turn all 1 layer off", "Zoom to fit", "Export to Google Earth (KMZ)" — none (+more matches elsewhere, best-effort) |
-| 8px | 26px | 12px | 600 | `rgba(0, 0, 0, 0)` | `1px solid rgb(38, 42, 51)` | File — export a PNG or print a PDF ×1 | src/workspaces/site-planner/SitePlanner.jsx:19578:            title="File — export a PNG or print a PDF" |
 | 8px | 26px | 12px | 500 | `rgba(255, 255, 255, 0.09)` | `1px solid rgba(0, 0, 0, 0)` | Zoom to fit ×1 | src/workspaces/site-planner/MapFinder.jsx:219: * "+ Select parcels", "Turn all 1 layer off", "Zoom to fit", "Export to Google Earth (KMZ)" — none (+more matches elsewhere, best-effort) |
 
 
