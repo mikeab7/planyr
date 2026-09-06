@@ -52,8 +52,7 @@ export function siteMetrics(elements, parcels, parcelOverlapPairs, settings) {
   let bumpCount = 0, bumpArea = 0, bumpsUniform = true; // dog-ear / bump-out tally (counted within bldg)
   let providedDetCf = 0, pondCount = 0, maxPondDepthFt = 0; // provided detention across ALL ponds (cubic feet)
   els.forEach((e) => {
-    // road area = its generated strip polygon (impervious-corrected for a designed cross-section's
-    // median/sidewalk bands — NEW-2) + any roundabout annulus it owns
+    // road area = its impervious-corrected strip polygon + any roundabout annulus it owns
     const a = isCenterlineRoad(e) ? roadImperviousArea(e, settings, sharpFor(e), roundTrim(e), roundabouts.areaById.get(e.id)) : e.points ? polyArea(e.points) : e.w * e.h;
     // derived curbs count in the SF / impervious math (0 for non-paved types; a road's curb is already inside its strip area)
     const curb = curbAreaOf(e, els);
