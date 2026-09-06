@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-06 @ `f709b874` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-06 @ `0ffa8d32` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_698 source files mapped._
+_699 source files mapped._
 
 ## infra
 
@@ -149,6 +149,8 @@ _698 source files mapped._
   - _exports_: `defineName`, `deleteName`, `namesList`, `nameUsageCount`, `rectFromSelRange`, `rectToAddressText`, `rectToSelRange`, `renameName`, `RESERVED_NAME_PREFIXES`, `retargetName`, `shiftNamesForStructuralChange`, `validateNameText`
 - **`src/workspaces/model/lib/numberFormats.js`** — The number-format picker's preset list, each token handed straight to the shared engine's `formatValue`.
   - _exports_: `decreaseDecimals`, `formatLabelFor`, `increaseDecimals`, `NUMBER_FORMATS`, `toggleThousands`
+- **`src/workspaces/model/lib/projectCompsFetch.js`** — TODO — describe
+  - _exports_: `fetchProjectNameComps`
 - **`src/workspaces/model/lib/projectRefs.js`** — Project-derived, read-only built-in formula names (`Site.Acres`, `Plan.<building>.SF`, `Comp.<title>.RentPSF/SizeSF/Date`) resolved fresh from the open project's site plan + comps, injected into `ctx.names` alongside user-defined named ranges.
   - _exports_: `buildProjectNames`, `RESERVED_NAME_PREFIXES`
 - **`src/workspaces/model/lib/ribbonLayout.js`** — Pure, DOM-free math deciding which ribbon groups fit inline vs. collapse into a "More ▾" popover at a given container width.
