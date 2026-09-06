@@ -47,12 +47,11 @@ const browser = await chromium.launch({
   args: ["--no-sandbox", "--ignore-certificate-errors", "--enable-precise-memory-info"],
 });
 const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1 });
-/* The SAME committed reference scenario, with ONE documented deviation: `settings.parcelSelect`
- * is turned on. B311 made parcels click-through by default, so with the stock seed a press on the
- * boundary falls through to a canvas pan and this harness would measure the wrong gesture
- * entirely (it aborts rather than do that — see below). Nothing else about the scenario changes,
- * so the geometry, element count and derivation load are the standing reference's. */
-const site = { ...perfScenarioSite(), settings: { parcelSelect: true } };
+/* The SAME committed reference scenario, unmodified. B1239328 removed the plan-wide "Select
+ * parcels" toggle this used to force ON — a parcel now selects/drags on a plain click by default
+ * unless it is individually LOCKED, and the scenario's seeded parcels aren't, so no override is
+ * needed for a press on the boundary to reach the vertex-drag gesture this harness measures. */
+const site = perfScenarioSite();
 await ctx.addInitScript(`(() => { try {
   localStorage.setItem('planarfit:sites:v1', ${JSON.stringify(JSON.stringify({ [site.id]: site }))});
   localStorage.setItem('planarfit:currentSite:v1', ${JSON.stringify(site.id)});

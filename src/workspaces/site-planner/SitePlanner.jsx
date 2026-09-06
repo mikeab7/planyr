@@ -33,7 +33,6 @@ import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
 import { assemblyIntegrity, tearPayload, orphanPayload, unhealablePayload } from "./lib/assemblyIntegrity.js";
 import { groupCasEnabled } from "./lib/groupCas.js";
 import { extendMergeSelection } from "./lib/parcelSelect.js";
-import { parcelSelectHintDecision, PARCEL_HINT_COOLDOWN_MS } from "./lib/parcelSelectHint.js";
 import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
 import { nearestBoundaryEdge, constrainToEdgeAngle, edgeLockTolFt } from "./lib/edgeConstrain.js";
 import { markupsUnderPoint, nextMarkupSelection, boxCorners } from "./lib/markupPick.js";
@@ -135,12 +134,10 @@ const SetLocationDialog = lazy(() => import("./components/SetLocationDialog.jsx"
 /* NEW-1 — the road cross-section designer. Lazy for the same reason: a modal a session opens rarely,
  * with its own live-preview SVG, has no business on the planner's boot chunk. */
 const RoadCrossSectionDialog = lazy(() => import("./components/RoadCrossSectionDialog.jsx"));
-/* NEW-1 / NEW-3 — the Parcel panel's record + placement bodies, lazily loaded for exactly the reason
- * the appraisal panels above are: both render only inside the Parcel panel (one only for a selected
- * lot, one only once the plan has a location), and the Site route's largest chunk has no headroom to
- * spend on code most sessions never reach. One module, so they share one chunk and one load. */
+/* NEW-1 / NEW-3 — the Parcel panel's record body, lazily loaded for exactly the reason the appraisal
+ * panels above are: it renders only inside the Parcel panel, only for a selected lot, and the Site
+ * route's largest chunk has no headroom to spend on code most sessions never reach. */
 const ParcelRecord = lazy(() => import("./components/ParcelRecordPanel.jsx").then((m) => ({ default: m.ParcelRecord })));
-const PlacementControls = lazy(() => import("./components/ParcelRecordPanel.jsx").then((m) => ({ default: m.PlacementControls })));
 /* B765985 — the print compose screen. Reached only after File ▾ → Download PDF / pick frame…
  * → Continue, so it has no business on the boot chunk; it also imports lib/printSheet.js
  * (the paper-size list), which must never gain a static edge from the boot path (B1042). */
@@ -1684,7 +1681,6 @@ const saveSnapPref = (on) => { try { sessionStorage.setItem(SNAP_PREF_KEY, on ? 
 
 const DEFAULT_SETTINGS = {
   gridSize: 10, snap: false,
-  parcelSelect: true,   // B311: ON = click a parcel to select it (drag still pans); OFF = pure browse/measure, a click never selects. Persisted per project.
   setback: 25, showSetback: true,
   // B929 — default style for NEW parcels (outline color/weight/style + optional fill),
   // stamped at creation via parcelDefaultStyle(). Empty = the theme-aware built-ins; only
@@ -2619,32 +2615,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (msg && ms > 0) warnTimerRef.current = setTimeout(() => { warnTimerRef.current = null; setOverlapWarn(""); }, ms);
   }, []);
   useEffect(() => () => { if (warnTimerRef.current) clearTimeout(warnTimerRef.current); }, []);
-  // NEW-1 — feedback at the point of failure when "Select parcels" is OFF. B311 deliberately lets
-  // the press fall through to a background pan (that behaviour is untouched); this only ADDS a
-  // short, non-blocking hint on the same bottom-center toast surface the rest of the canvas uses,
-  // with an inline "Turn it on" so the fix is one click from where the click failed. All the
-  // "should we say something?" rules live in the pure lib/parcelSelectHint.js.
-  const [parcelHint, setParcelHint] = useState(false);
-  const parcelHintRef = useRef({ at: 0, gestureId: null }); // last showing (for the per-gesture + cooldown guards)
-  const parcelHintTimerRef = useRef(null);
-  const noteParcelSelectBlocked = useCallback((gestureId) => {
-    const now = Date.now();
-    const last = parcelHintRef.current;
-    const { show } = parcelSelectHintDecision({
-      parcelSelect: false, hitParcel: true, now,
-      lastShownAt: last.at, lastGestureId: last.gestureId, gestureId,
-    });
-    if (!show) return;
-    parcelHintRef.current = { at: now, gestureId };
-    setParcelHint(true);
-    if (parcelHintTimerRef.current) clearTimeout(parcelHintTimerRef.current);
-    parcelHintTimerRef.current = setTimeout(() => { parcelHintTimerRef.current = null; setParcelHint(false); }, PARCEL_HINT_COOLDOWN_MS);
-  }, []);
-  const dismissParcelHint = useCallback(() => {
-    if (parcelHintTimerRef.current) { clearTimeout(parcelHintTimerRef.current); parcelHintTimerRef.current = null; }
-    setParcelHint(false);
-  }, []);
-  useEffect(() => () => { if (parcelHintTimerRef.current) clearTimeout(parcelHintTimerRef.current); }, []);
   // Auto-dismiss the transient "couldn't explode that field" notice (B472).
   useEffect(() => { if (!splitNote) return; const t = setTimeout(() => setSplitNote(null), 4500); return () => clearTimeout(t); }, [splitNote]);
   // Block the browser's default file-drop (navigate to / open the dropped PDF) anywhere in
@@ -5364,14 +5334,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (target) { opTrackerRef.current.beginOperation("edit"); applySnapshot(target); touchHist(); }
   };
 
-  /* ── NEW-1 / NEW-2 — PLACEMENT + DEED PROMOTION, loaded on demand ────────────────────────────
+  /* ── NEW-1 / NEW-2 — LOCATE A PLAN + DEED PROMOTION, loaded on demand ─────────────────────────
    *
    * The bodies live in `lib/plannerPlacementCmds.js`. Measured: kept inline they added 9.9 KB to
    * the Site route's largest chunk, which arrives with 2.3 KB of band left — and every one of them
-   * is reached only by a deliberate, rare act (locate a plan, nudge its placement, promote a deed).
-   * This is `exportSheet.js`'s pattern (B1042): a `ctx` rebuilt per call, so a new dependency is
-   * added to `placeCtx` rather than closed over. `placeRef` keeps the current planner values, so
-   * the ctx never serves a command a stale collection.
+   * is reached only by a deliberate, rare act (locate a plan, promote a deed). This is
+   * `exportSheet.js`'s pattern (B1042): a `ctx` rebuilt per call, so a new dependency is added to
+   * `placeCtx` rather than closed over. `placeRef` keeps the current planner values, so the ctx
+   * never serves a command a stale collection.
+   *
+   * NEW-2 (B1239329) — the ongoing TURN/SLIDE adjusters (`rotatePlan`/`nudgePlan`) and their
+   * Placement UI were removed (owner decision: he never used them and didn't know what they were
+   * for). `commitOrigin` and `rotateSiteCollections` — the one-time locate-and-square-up flow —
+   * are untouched; only the standalone post-locate rotate/nudge controls are gone.
    */
   const placeRef = useRef({});
   const placeCtx = () => {
@@ -5385,7 +5360,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       cloudActive: isCloudActive, loadSite, saveSite, pushModelToCloud, onSiteSaved,
       report: reportClientEvent, flashWarn, flashPolyWarn, pushHistory, flushElems, ensureBasemapOn,
       setOrigin, setLocalSaveFailed, setSaveStatus, setCloudSaveFailed,
-      bumpPlaceRot: setPlaceRot,
       setCollections: (n) => {
         setParcels(n.parcels || []); setEls(n.els || []); setMeasures(n.measures || []);
         setCallouts(n.callouts || []); setMarkups(n.markups || []); setSheetOverlays(n.sheetOverlays || []);
@@ -5399,14 +5373,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const cmds = () => (placeCmds || loadPlaceCmds());
   /* Every command is async ONLY because its module loads on demand; each still runs in one turn. */
   const commitOrigin = (next, opts) => { Promise.resolve(cmds()).then((C) => C.commitOrigin(placeCtx(), next, opts)); return true; };
-  const rotatePlan = async (deg) => (await cmds()).rotatePlan(placeCtx(), deg);
-  const nudgePlan = async (dx, dy) => (await cmds()).nudgePlan(placeCtx(), dx, dy);
   const promoteDeedToParcel = async (id) => { await loadDeed(); (await cmds()).promoteDeedToParcel(placeCtx(), id); };
-  // How far this plan has been turned since the location was set — a readout, not a stored field
-  // (the geometry itself carries the rotation). Reset with the plan; folded to (-180, 180].
-  const [placeRot, setPlaceRot] = useState(0);
-  const [placeStepFt, setPlaceStepFt] = useState(25);   // nudge step
-  const [placeStepDeg, setPlaceStepDeg] = useState(1);  // rotate step
   const [setLocOpen, setSetLocOpen] = useState(false);  // the Set-location dialog
   placeRef.current = { origin, markups, parcels };
   // Cancel an in-progress drag-move (Esc / lost focus mid-drag): restore the
@@ -5984,8 +5951,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return true;
     }
     if (t.kind === "parcel") {
-      if (!settings.parcelSelect) return false;                     // B311: parcels are click-through
-      if (!parcels.some((p) => p.id === t.id)) return false;
+      const pc = parcels.find((p) => p.id === t.id);
+      if (!pc || pc.locked) return false;                           // NEW-1 (B1239328): a locked parcel is click-through on the map
       setSel({ kind: "parcel", id: t.id });
       setCombineSel([]);
       openParcelPanel();
@@ -6012,8 +5979,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (t.kind === "callout") { if (!callouts.some((x) => x.id === t.id)) return false; onCalloutContext(e, t.id, -1); return true; }
     if (t.kind === "measure") { if (!measures[t.i]) return false; onMeasureContext(e, t.i); return true; }
     if (t.kind === "parcel") {
-      if (!settings.parcelSelect) return false;                     // B311: parcels are click-through
-      if (!parcels.some((p) => p.id === t.id)) return false;
+      const pc = parcels.find((p) => p.id === t.id);
+      if (!pc || pc.locked) return false;                           // NEW-1 (B1239328): a locked parcel is click-through on the map
       onParcelContext(e, t.id); return true;
     }
     return false;
@@ -7249,10 +7216,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     if (tool === "select") {
       // B720 — merge pick mode: a PLAIN click on a parcel body toggles it into the merge
-      // set (same as Shift-click), no Shift needed. Topmost parcel under the point wins.
+      // set (same as Shift-click), no Shift needed. Topmost UNLOCKED parcel under the point
+      // wins — a locked parcel's body is click-through, same as its boundary (NEW-1, B1239328).
       // A click on empty canvas falls through to pan (never clears the merge selection).
-      if (mergePick && settings.parcelSelect) {
-        const hit = [...parcels].reverse().find((pc) => pc.points && pc.points.length >= 3 && pointInRing(fp, pc.points));
+      if (mergePick) {
+        const hit = [...parcels].reverse().find((pc) => !pc.locked && pc.points && pc.points.length >= 3 && pointInRing(fp, pc.points));
         if (hit) { toggleMerge(hit.id); setSel({ kind: "parcel", id: hit.id }); return; }
       }
       if (e.shiftKey) {
@@ -7260,11 +7228,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // parcel interior click-through (only its boundary hit-stroke grabs), so a Shift-press
         // in the body lands here on the background — without this it started a marquee and the
         // merge pick was silently missed, which read as "Shift-click needs several tries" (NEW-2).
-        // Topmost (last-drawn) parcel under the point wins, matching the boundary-stroke path.
+        // Topmost (last-drawn) UNLOCKED parcel under the point wins, matching the boundary-stroke path.
         // B735: shiftPickParcel SEEDS the set from the current single selection so a plain-click
         // A then Shift-click B keeps A (a plain click only ever put A in `sel`, not combineSel).
-        if (settings.parcelSelect) {
-          const hit = [...parcels].reverse().find((pc) => pc.points && pc.points.length >= 3 && pointInRing(fp, pc.points));
+        {
+          const hit = [...parcels].reverse().find((pc) => !pc.locked && pc.points && pc.points.length >= 3 && pointInRing(fp, pc.points));
           if (hit) { shiftPickParcel(hit.id); return; } // shiftPickParcel owns `sel` (B735)
         }
         // Shift-drag empty canvas → marquee select
@@ -9123,15 +9091,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     // (Dragging never bonds elements anymore — grouping is the explicit Group tool,
     // B261/B262. A plain/Shift drag only moves; snap only aligns position.)
-    // B310: a press that began on a LOCKED parcel pans the canvas; if the pointer barely moved
-    // and the press was brief, it was a deliberate click → select that parcel (any larger
-    // movement was a pan and leaves the selection untouched).
-    if (d && d.mode === "pan" && d.tapParcel != null
-        && Math.hypot(e.clientX - d.downX, e.clientY - d.downY) <= PARCEL_CLICK_SLOP_PX
-        && Date.now() - d.downT <= PARCEL_CLICK_MS) {
-      setSel({ kind: "parcel", id: d.tapParcel });
-      setCombineSel([]); // B735: a plain click is a fresh single-select — drop any accumulated merge picks
-    }
+    // NEW-1 (B1239328) — a LOCKED parcel is fully click-through on the map (no tap-to-select
+    // fallback): the old B310 pan-then-tap-select branch that lived here is gone along with the
+    // plan-wide "Select parcels" toggle it replaced. Selecting a locked parcel is one click away
+    // from the Land tab's own list instead. `tapEl`/`tapMarkup` below are a separate mechanism
+    // (B1168128) and are untouched.
     // B1168128: the phone twins of B310 above — a press that began on a not-yet-selected element
     // or markup panned the canvas instead of grabbing it; a brief, small-travel release is a genuine
     // tap and selects it now (any larger movement just panned and leaves selection untouched).
@@ -11274,67 +11238,44 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     drag.current = { mode: "move", kind: "el", id, fx: fp.x, fy: fp.y, members, canceler: stateRef.current, ...startGate(e) };
     svgRef.current.setPointerCapture(e.pointerId);
   };
-  // NEW-1 — the ONE place "Select parcels" flips, shared by the header toggle and the hint's
-  // inline "Turn it on" action, so the two can never drift. Turning it OFF now ANNOUNCES itself:
-  // the flag is saved per plan, so a flip nobody noticed used to persist across sessions and
-  // devices and read as "the app stopped letting me click my parcels".
-  const setParcelSelect = (on) => {
-    setSettings((s) => ({ ...s, parcelSelect: on }));
-    if (!on && sel?.kind === "parcel") { setSel(null); setMulti([]); setDrillId(null); } // entering pure-browse → drop any parcel selection
-    dismissParcelHint();
-    parcelHintRef.current = { at: 0, gestureId: null }; // a deliberate flip re-arms the hint immediately
-    flashWarn(on
-      ? "Select parcels is ON — click a lot's edge or setback line to select it."
-      : "Select parcels is OFF — clicks pan the map instead of selecting a lot.", 4500);
-  };
   const startMoveParcel = (e, id) => {
     if (e.button !== 0) return;
     if (identifyMode) { e.stopPropagation(); beginIdentifyPress(e); return; } // B383: in identify→add mode, a press on an existing lot toggles/adds via the same path (click adds, drag pans)
     if (tool !== "select") return;
     const pc = parcels.find((x) => x.id === id);
     const fp = p2f(e.clientX, e.clientY);
-    if (alignFor) { e.stopPropagation(); alignToParcelEdge(fp, pc); return; } // align: this click picks a parcel edge (works regardless of the select toggle)
+    if (alignFor) { e.stopPropagation(); alignToParcelEdge(fp, pc); return; } // align: this click picks a parcel edge
     if (ovAlignBase) { e.stopPropagation(); alignOverlayToParcelEdge(fp, pc); return; } // B462: align the overlay to THIS parcel's nearest edge
-    // B311: "Select parcels" OFF → parcels are click-through for pure browse/measure. Don't
-    // stop propagation: let the press fall through to the background pan (no select, no move),
-    // exactly as if the click had landed on empty canvas.
-    // NEW-1: the click-through STAYS — but it no longer happens in silence. This press provably
-    // landed on a parcel's boundary / setback hit-stroke, so say why nothing happened (rate-limited
-    // in lib/parcelSelectHint.js: once per press gesture, and not again for several seconds, so a
-    // genuine pan across a subdivision never turns into a stream of hints).
-    if (!settings.parcelSelect) { noteParcelSelectBlocked(e.timeStamp); return; }
+    // NEW-1 (B1239328) — LOCK is now the one per-parcel mechanism (replacing the old plan-wide
+    // "Select parcels: on/off" toggle, B311). A locked parcel is click-through on the map: don't
+    // stop propagation, let the press fall through to the background pan exactly as if it had
+    // landed on empty canvas — no select, no move, no tap-to-select fallback either. It stays
+    // reachable from the Land tab's own list (which never gates on lock).
+    if (pc.locked) {
+      setPanning(true);
+      drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
+      capturePidRef.current = e.pointerId;
+      svgRef.current.setPointerCapture(e.pointerId);
+      return;
+    }
     if (mergePick) { e.stopPropagation(); toggleMerge(id); setSel({ kind: "parcel", id }); return; } // B720: plain click picks in merge mode
     if (e.shiftKey) { e.stopPropagation(); shiftPickParcel(id); return; } // Shift-click: additive multi-select to merge (B735 seeds from `sel`; shiftPickParcel owns `sel`)
     // NEW-1 — parcels join B750's click contract. Selecting a lot used to open the Parcel panel from
     // an EFFECT on `sel`, so a single click swung the left rail open (and the panel then belonged to
     // the selection, not to the owner). Now: single click SELECTS, DOUBLE-click opens the Parcel
-    // panel — the parcel's inspector. Checked before the locked/unlocked split so it works on the
-    // county-pulled LOCKED default too (whose single press starts a pan, resolved as a tap in onUp).
+    // panel — the parcel's inspector.
     if (isDoubleTap(e, `parcel:${id}`, sel?.kind === "parcel" && sel.id === id)) {
       e.stopPropagation();
       featureDoubleAction({ kind: "parcel", id }, e);   // NEW-2 — ONE decision, shared with the root dblclick
       return;
     }
     e.stopPropagation();
-    if (!pc.locked) {
-      // Unlocked = the user deliberately unlocked this parcel to reshape/move it, so a press
-      // grabs it to drag (like an element). The pan-instead-of-select fix below is for the
-      // LOCKED default that every county-pulled / drawn lot carries.
-      setSel({ kind: "parcel", id });
-      setCombineSel([]); // B735: a plain click is a fresh single-select — drop any accumulated merge picks
-      // NEW-1/NEW-2 — same gate as the element move: an unlocked lot that is merely CLICKED selects
-      // and does not shift, and costs no undo frame (history moves to first real travel).
-      drag.current = { mode: "move", kind: "parcel", id, fx: fp.x, fy: fp.y, opts: pc.points, canceler: stateRef.current, ...startGate(e) }; // canceler: B315 Esc/abort-mid-drag revert
-      capturePidRef.current = e.pointerId;
-      svgRef.current.setPointerCapture(e.pointerId);
-      return;
-    }
-    // B310: a press on a LOCKED parcel starts a PAN, not a select — selecting on pointer-down
-    // is exactly what turned panning across parcels into a constant accidental select. Tag the
-    // pan with the parcel id + the press origin so a genuine CLICK (tiny travel, brief — tested
-    // in onUp) still selects it; any real drag pans and never selects.
-    setPanning(true);
-    drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY, tapParcel: id, downX: e.clientX, downY: e.clientY, downT: Date.now() };
+    // Unlocked = a press grabs it to drag (like an element).
+    setSel({ kind: "parcel", id });
+    setCombineSel([]); // B735: a plain click is a fresh single-select — drop any accumulated merge picks
+    // NEW-1/NEW-2 — same gate as the element move: an unlocked lot that is merely CLICKED selects
+    // and does not shift, and costs no undo frame (history moves to first real travel).
+    drag.current = { mode: "move", kind: "parcel", id, fx: fp.x, fy: fp.y, opts: pc.points, canceler: stateRef.current, ...startGate(e) }; // canceler: B315 Esc/abort-mid-drag revert
     capturePidRef.current = e.pointerId;
     svgRef.current.setPointerCapture(e.pointerId);
   };
@@ -11813,6 +11754,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const toggleParcelLock = (id) => {
     pushHistory();
     setParcels((a) => a.map((pc) => (pc.id === id ? { ...pc, locked: !pc.locked } : pc)));
+  };
+  // NEW-1 (B1239328) — lock/unlock every parcel in one gesture, the replacement for the old
+  // plan-wide "Select parcels" mode toggle (which made every parcel click-through at once). Locks
+  // everything while any parcel is unlocked; unlocks everything only once every parcel already is —
+  // the same tri-state shape a "select all" checkbox uses.
+  const toggleAllParcelsLock = () => {
+    if (!parcels.length) return;
+    const allLocked = parcels.every((p) => p.locked);
+    pushHistory();
+    setParcels((a) => a.map((p) => ({ ...p, locked: !allLocked })));
   };
   /* NEW-3 — type the facts the county would have supplied. A lot drawn by hand (or promoted from a
    * deed) had geometry and nothing else; a lot pulled from the county could not be corrected when
@@ -17891,6 +17842,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // panel-tier radius (RADIUS.lg — "a surface that CONTAINS other things"). Shared by every
   // right-click menu in the file (parcel/map/vertex/overlay/element), so the fix is one place.
   const menuItem = (on) => ({ display: "block", width: "100%", textAlign: "left", padding: "5px 10px", fontSize: FONT_SIZE.control, lineHeight: 1.15, borderRadius: RADIUS.sm, cursor: "pointer", border: "none", background: on ? PAL.accentSoft : "transparent", color: PAL.ink, fontFamily: "inherit", fontWeight: on ? 650 : 500 });
+  // NEW-1 (B1239328) — the Land tab's empty-state "spelled out" add-method row: menuItem's shape
+  // (used inside the ＋ Add dropdown) plus a border, since these render directly on the panel
+  // rather than inside an already-bordered menu panel.
+  const addMethodCard = { ...menuItem(false), border: BORDER_1, borderRadius: RADIUS.md, marginBottom: 6, padding: "9px 10px" };
   // NEW-2 (B849585) — the ONE disabled-menu-row treatment, shared by every right-click/flyout menu
   // in this file (parcel/map/vertex/element). `PAL.disabled`'s color-token swap alone reads as
   // ordinary secondary text — indistinguishable from an enabled row at a glance, which is exactly
@@ -20115,8 +20070,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <Section>
               {/* NEW-1 — THE LOAD-BEARING ROW. Un-located plan (drawn while the county service was
                   down): this is the way back to the real world, and it sits at the top of the panel
-                  the owner is already in when drawing a boundary. Located plan: the same control
-                  becomes the placement adjuster below. */}
+                  the owner is already in when drawing a boundary. */}
               {!origin && (
                 <button data-testid="set-location-cta" onClick={() => setSetLocOpen(true)}
                   title="Say where this plan sits on the earth — the aerial, flood layer, contours and county rules switch on. Nothing you drew moves."
@@ -20124,38 +20078,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   📍 Set this plan's location
                 </button>
               )}
-              {/* B720 — parcel ops row: Add ▾ · Split · Merge, unified at the top of the panel.
-                  Add ▾ (B383) opens the add-methods menu (draw / identify / address); Split arms
-                  the cut tool; Merge enters click-to-pick mode (plain clicks toggle parcels — no
-                  Shift). Replaces the old scattered layout (Add on top, Split + Merge as separate
-                  full-width blocks below the list, Merge needing Shift-click knowledge). */}
-              <div style={{ display: "flex", gap: 6, marginBottom: 9 }}>
-              <div ref={addParcelAnchor} style={{ position: "relative", flex: 1 }}>
-                <button
-                  aria-haspopup="menu" aria-expanded={addParcelMenu}
-                  style={{ ...chip, width: "100%", background: PAL.accent, color: "#fff", borderColor: PAL.accent, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}
-                  onClick={() => setAddParcelMenu((o) => !o)} title="Add land to this plan — draw a boundary, identify from county GIS, or add by address">
-                  ＋ Add <span style={{ fontSize: 11 }}>▾</span>
-                </button>
-                <AnchoredMenu open={addParcelMenu} onClose={() => setAddParcelMenu(false)} anchorRef={addParcelAnchor} placement="below-left" width={Math.max(248, leftWidth - 48)} panelStyle={menuPanel}>
-                  {/* Identify from the county's parcel map — the headline path (needs a georeferenced frame). */}
+              {/* NEW-1 (B1239328) — the Land tab is a LIST OF LAND, not a tool tray: the old Add ▾ /
+                  Split / Merge / Select-parcels row is gone (Split and Merge already live in the
+                  Parcel tools flyout as "Split a parcel" / "Combine parcels"; Select parcels is gone
+                  entirely, replaced by per-parcel Lock — see startMoveParcel). ＋ Add survives as ONE
+                  icon control, in the header, opening the same four add-methods menu it always did
+                  (now including the deed/title path, which used to live only in the right rail). */}
+              {parcels.length === 0 ? (
+                <>
+                  <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6, marginBottom: 10 }}>No land in this plan yet — add it one of four ways:</div>
                   {origin ? (
-                    <button style={menuItem(identifyMode)} onClick={() => { setIdentifyMode(true); ensureBasemapOn(); setIdentifyRes(null); setJurInfo(null); setAddParcelMenu(false); }}>
+                    <button style={addMethodCard} onClick={() => { setIdentifyMode(true); ensureBasemapOn(); setIdentifyRes(null); setJurInfo(null); }}>
                       <div style={{ fontWeight: 650, fontSize: 13 }}>🔍 Click a lot on the map</div>
                       <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Property lines from the county appraisal district light up on the aerial — click one lot or several.</div>
                     </button>
                   ) : (
-                    // NEW-1 — a dead end no more: the reason this is off is that the plan has no
-                    // location, and that is now fixable right here.
-                    <button style={menuItem(false)} onClick={() => { setSetLocOpen(true); setAddParcelMenu(false); }}>
+                    <button style={addMethodCard} onClick={() => setSetLocOpen(true)}>
                       <div style={{ fontWeight: 650, fontSize: 13 }}>🔍 Click a lot on the map</div>
                       <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Needs a location first — set one and this turns on.</div>
                     </button>
                   )}
-                  {/* Add by address (B384) — geocode a typed address, then identify-and-add the lot
-                      at that point through the SAME quickAddAt path. Needs a georeferenced frame. */}
                   {origin ? (
-                    <div style={{ padding: "7px 10px" }} onClick={(e) => e.stopPropagation()}>
+                    <div style={addMethodCard}>
                       <div style={{ fontWeight: 650, fontSize: 13, color: PAL.ink }}>📍 Add by address</div>
                       <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 6px" }}>We'll look up that address at the county and add the lot.</div>
                       <div style={{ display: "flex", gap: 6 }}>
@@ -20174,119 +20118,175 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </div>
                     </div>
                   ) : (
-                    <button style={menuItem(false)} onClick={() => { setSetLocOpen(true); setAddParcelMenu(false); }}>
+                    <button style={addMethodCard} onClick={() => setSetLocOpen(true)}>
                       <div style={{ fontWeight: 650, fontSize: 13 }}>📍 Add by address</div>
                       <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Needs a location first — set one and this turns on.</div>
                     </button>
                   )}
-                  {/* Draw a new boundary — always available (no GIS frame needed). */}
-                  <button style={menuItem(tool === "parcel")} onClick={() => { selectTool("parcel"); setAddParcelMenu(false); }}>
+                  <button style={addMethodCard} onClick={() => selectTool("parcel")}>
                     <div style={{ fontWeight: 650, fontSize: 13 }}>✏️ Draw a new boundary</div>
                     <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>For a lot that's not in county records yet.</div>
                   </button>
-                </AnchoredMenu>
-              </div>
-              {parcels.length >= 1 && (
-                <button
-                  title="Split a parcel — draw a cut line across one to divide it in two"
-                  style={{ ...chip, flex: 1, ...(tool === "split" ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }}
-                  onClick={() => selectTool("split")}>✂ Split</button>
-              )}
-              {parcels.length > 1 && (
-                <button
-                  title="Merge parcels — click the parcels you want to combine, then Merge"
-                  style={{ ...chip, flex: 1, ...(mergePick ? { background: "#2563eb", color: "#fff", borderColor: "#2563eb" } : {}) }}
-                  onClick={mergePick ? exitMergePick : startMergePick}>⧉ Merge{combineSel.length >= 2 ? ` (${combineSel.length})` : ""}</button>
-              )}
-              </div>
-              {/* ⛔ TOOLBAR PASS (B727504) — relocated here from the permanent top toolbar. This is
-                  the parcel/site-setup context where choosing ground actually happens, and the
-                  control is touched once per site — it doesn't earn a permanent seat beside
-                  Undo/Redo/Fit. Same control, same behavior (setParcelSelect), new home; a route
-                  back from the canvas is a right-click on the parcel itself (onParcelContext →
-                  the parcelMenu, below). */}
-              {parcels.length > 0 && (
-                <button type="button" className="dbtn" data-testid="parcel-select-toggle"
-                  aria-pressed={settings.parcelSelect}
-                  aria-label={`Select parcels — currently ${settings.parcelSelect ? "on" : "off"}`}
-                  style={{ ...chip, width: "100%", marginBottom: 9, display: "flex", alignItems: "center", gap: 7, fontWeight: 600,
-                    borderColor: settings.parcelSelect ? PAL.accent : "var(--border-default)",
-                    color: settings.parcelSelect ? PAL.accent : PAL.ink }}
-                  onClick={() => setParcelSelect(!settings.parcelSelect)}
-                  title="Select parcels — click to turn it on or off. ON: click a lot's edge or setback line to select it; its interior stays free for building work (dragging always pans the map, never selects). OFF: pure browse/measure, so a click never selects a parcel. Saved per project.">
-                  <span aria-hidden style={{ width: 7, height: 7, borderRadius: 99, flex: "none", background: settings.parcelSelect ? "#22c55e" : "var(--chrome-tab-inactive)", display: "inline-block", boxShadow: settings.parcelSelect ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
-                  {settings.parcelSelect ? "Select parcels: on" : "Select parcels: off"}
-                </button>
-              )}
-              {/* NEW-1 — the return half of the cross-link. This panel owns what a parcel HAS;
-                  everything you DO to one lives in the right rail's Parcel tools menu, and landing
-                  on the wrong side should never be a dead end. Opens that menu directly (and slides
-                  the rail in first on a phone, where it's hidden behind the ✎ Tools pill). */}
-              <button type="button" data-testid="land-to-parcel-tools" onClick={openParcelToolsMenu}
-                title="Draw, plot from a deed, split, combine, reshape or remove a parcel"
-                style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "7px 10px", marginBottom: 9, border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.md, background: "transparent", color: PAL.ink, fontWeight: 700, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
-                <span>Draw, split, combine, reshape…</span>
-                <span style={{ color: PAL.muted, fontWeight: 600, fontSize: 10.5, whiteSpace: "nowrap" }}>{PARCEL_SURFACES.rail.name} →</span>
-              </button>
-              {parcels.length === 0 ? (
-                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>No parcels in this plan yet. Use <b>＋ Add</b> above, or draw one from <b>{PARCEL_SURFACES.rail.name}</b> in the right rail.</div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                  {/* B720 — "Active" microlabel over the checkbox column: the checkbox reads as
-                      "counted in the totals," NOT "pick for a bulk action" (merge picking is the
-                      blue row highlight, never the checkbox). */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 1 }}>
-                    <span style={{ flex: "none", fontSize: 8, fontWeight: 700, letterSpacing: "0.02em", textTransform: "uppercase", color: PAL.muted, lineHeight: 1, paddingLeft: 1 }}>Active</span>
-                    <span style={{ flex: 1 }} />
-                  </div>
-                  {/* B651 — lineage-aware list: children of a split nest under their parent (indented),
-                      and the split parent is greyed + labelled "· split" as a SUPERSEDED, non-counting
-                      row (it's inactive, so excluded from yield/coverage/detention) with the original
-                      real parcel still visible. Names follow lineage: Parcel 3 → 3A / 3B. */}
-                  {parcelOutline(parcels).map(({ pc, depth, name, superseded }) => {
-                    const on = selParcel?.id === pc.id;
-                    const picked = combineSel.includes(pc.id);
-                    const inactive = pc.active === false;
-                    const tag = superseded ? " · split" : inactive ? " · inactive" : "";
-                    return (
-                      // Per-row Active checkbox (B175): checked = participates in yield / coverage /
-                      // detention / merge; unchecked = stays listed + on the map but dimmed and excluded.
-                      // The `active` flag persists per-parcel via the Site Model (same path as B100).
-                      <div key={pc.id} style={{ display: "flex", alignItems: "stretch", gap: 7, marginLeft: depth * 16 }}>
-                        <label
-                          title={superseded ? "Split into the parcels nested below — superseded, so excluded from yield / coverage / detention. Check to make it active again (its children go inactive)." : inactive ? "Inactive — excluded from yield / coverage / detention / merge. Check to include." : "Active — counted in yield / coverage / detention. Uncheck to exclude (stays visible, dimmed)."}
-                          onClick={(e) => e.stopPropagation()}
-                          style={{ display: "flex", alignItems: "center", flex: "none", paddingLeft: 2, cursor: "pointer" }}
-                        >
-                          <input type="checkbox" checked={!inactive} onChange={() => toggleParcelActive(pc.id)}
-                            data-testid={`parcel-row-active-${pc.id}`}
-                            style={{ width: 15, height: 15, cursor: "pointer" }} />
-                        </label>
-                        <button onClick={(e) => { if (mergePick) { toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); } else if (e.shiftKey) { shiftPickParcel(pc.id); } else { setCombineSel([]); setSel({ kind: "parcel", id: pc.id }); } }}
-                          data-testid={`parcel-row-${pc.id}`}
-                          style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: RADIUS.md, borderLeft: depth ? `2px solid ${PAL.panelLine || "var(--border-default)"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "var(--border-default)"}`, background: picked ? "rgba(37,99,235,0.14)" : on ? PAL.accentSoft : SURF_RAISED, cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
-                          <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}{tag}{picked ? " ✓" : ""}</div>
-                          <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} AC{pc.acct ? ` · ${pc.acct}` : ""}</div>
-                        </button>
-                        {/* B598 — per-row remove (✕). Undo-able (removeParcelById pushes history); the
-                            tombstone keeps it deleted across reload/merge. The most discoverable place
-                            to remove a parcel, alongside the Parcel tool's Remove mode. */}
-                        <button title="Remove this parcel" aria-label={`Remove ${name}`}
-                          onClick={(e) => { e.stopPropagation(); removeParcelById(pc.id); }}
-                          style={{ flex: "none", width: 30, alignSelf: "stretch", border: BORDER_1, borderRadius: RADIUS.md, background: SURF_RAISED, color: PAL.danger, cursor: "pointer", fontFamily: "inherit", fontSize: 15, fontWeight: 700, lineHeight: 1 }}>✕</button>
+                  <button style={{ ...addMethodCard, marginBottom: 0 }} onClick={() => { setTitleErr(""); setDeedErr(""); setDeedBusy(false); setTitleOpen(true); }}>
+                    <div style={{ fontWeight: 650, fontSize: 13 }}>📜 Deed / Title — metes &amp; bounds…</div>
+                    <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Type in the legal description's calls and it plots the boundary for you.</div>
+                  </button>
+                </>
+              ) : (() => {
+                const rows = parcelOutline(parcels);
+                const counted = rows.filter((r) => !r.superseded);
+                const totalAc = counted.reduce((s, r) => s + parcelNetSqft(r.pc), 0) / SQFT_PER_ACRE;
+                const allLocked = parcels.every((p) => p.locked);
+                return (
+                  <>
+                    {/* NEW-1 (B1239328) — THE HEADER: total acreage across every parcel, prominent
+                        and above the list — nothing in the app showed this sum before. Superseded
+                        (split) parents are excluded so their children aren't double-counted. */}
+                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 14 }}>
+                      <div>
+                        <div style={{ fontSize: 22, fontWeight: 800, color: PAL.ink, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, lineHeight: 1.15 }}>{f2(totalAc)} AC</div>
+                        <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 1 }}>{counted.length} parcel{counted.length === 1 ? "" : "s"}</div>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-              {/* B720 — Split + Merge moved UP into the ops row at the top of the panel; the old
-                  standalone full-width blocks (and the "Shift-click … then Merge" how-to) were
-                  removed. Context now comes from the top-center banner while a mode is active:
-                  the split-note banner for Split, the pick banner for Merge. Merge stays a
-                  working test-fit fuse, not a recorded legal consolidation. */}
+                      <div ref={addParcelAnchor} style={{ position: "relative" }}>
+                        <button
+                          aria-haspopup="menu" aria-expanded={addParcelMenu} aria-label="＋ Add" data-testid="land-add-btn"
+                          style={iconBtn}
+                          onClick={() => setAddParcelMenu((o) => !o)} title="Add land to this plan — draw a boundary, plot a deed, click a lot on the map, or add by address">
+                          ＋
+                        </button>
+                        <AnchoredMenu open={addParcelMenu} onClose={() => setAddParcelMenu(false)} anchorRef={addParcelAnchor} placement="below-left" width={Math.max(248, leftWidth - 48)} panelStyle={menuPanel}>
+                          {/* Identify from the county's parcel map — the headline path (needs a georeferenced frame). */}
+                          {origin ? (
+                            <button style={menuItem(identifyMode)} onClick={() => { setIdentifyMode(true); ensureBasemapOn(); setIdentifyRes(null); setJurInfo(null); setAddParcelMenu(false); }}>
+                              <div style={{ fontWeight: 650, fontSize: 13 }}>🔍 Click a lot on the map</div>
+                              <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Property lines from the county appraisal district light up on the aerial — click one lot or several.</div>
+                            </button>
+                          ) : (
+                            // NEW-1 — a dead end no more: the reason this is off is that the plan has no
+                            // location, and that is now fixable right here.
+                            <button style={menuItem(false)} onClick={() => { setSetLocOpen(true); setAddParcelMenu(false); }}>
+                              <div style={{ fontWeight: 650, fontSize: 13 }}>🔍 Click a lot on the map</div>
+                              <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Needs a location first — set one and this turns on.</div>
+                            </button>
+                          )}
+                          {/* Add by address (B384) — geocode a typed address, then identify-and-add the lot
+                              at that point through the SAME quickAddAt path. Needs a georeferenced frame. */}
+                          {origin ? (
+                            <div style={{ padding: "7px 10px" }} onClick={(e) => e.stopPropagation()}>
+                              <div style={{ fontWeight: 650, fontSize: 13, color: PAL.ink }}>📍 Add by address</div>
+                              <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 6px" }}>We'll look up that address at the county and add the lot.</div>
+                              <div style={{ display: "flex", gap: 6 }}>
+                                <input
+                                  value={addrQuery}
+                                  onChange={(e) => setAddrQuery(e.target.value)}
+                                  onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); addByAddress(); } }}
+                                  placeholder="123 Main St, Katy TX"
+                                  style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.panelLine || "var(--border-default)"}`, borderRadius: 6, outline: "none", color: PAL.ink, background: SURF_RAISED }} />
+                                <button
+                                  onClick={addByAddress} disabled={addrBusy || !addrQuery.trim()}
+                                  title="Find this address and add its parcel"
+                                  style={{ flex: "none", padding: "6px 11px", fontSize: 12, fontWeight: 600, borderRadius: RADIUS.sm, border: `1px solid ${PAL.accent}`, background: addrBusy || !addrQuery.trim() ? SURF_RAISED : PAL.accent, color: addrBusy || !addrQuery.trim() ? PAL.muted : SURF_RAISED, cursor: addrBusy || !addrQuery.trim() ? "default" : "pointer" }}>
+                                  {addrBusy ? "…" : "Find"}
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button style={menuItem(false)} onClick={() => { setSetLocOpen(true); setAddParcelMenu(false); }}>
+                              <div style={{ fontWeight: 650, fontSize: 13 }}>📍 Add by address</div>
+                              <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Needs a location first — set one and this turns on.</div>
+                            </button>
+                          )}
+                          {/* Draw a new boundary — always available (no GIS frame needed). */}
+                          <button style={menuItem(tool === "parcel")} onClick={() => { selectTool("parcel"); setAddParcelMenu(false); }}>
+                            <div style={{ fontWeight: 650, fontSize: 13 }}>✏️ Draw a new boundary</div>
+                            <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>For a lot that's not in county records yet.</div>
+                          </button>
+                          {/* Deed / Title metes & bounds (NEW-1, B1239328) — used to live only in the
+                              right rail's Parcel tools flyout; folded in here so ＋ Add is the one
+                              place that offers every way to add land. Same handler the rail uses. */}
+                          <button style={menuItem(false)} onClick={() => { setAddParcelMenu(false); setTitleErr(""); setDeedErr(""); setDeedBusy(false); setTitleOpen(true); }}>
+                            <div style={{ fontWeight: 650, fontSize: 13 }}>📜 Deed / Title — metes &amp; bounds…</div>
+                            <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Type in the legal description's calls and it plots the boundary for you.</div>
+                          </button>
+                        </AnchoredMenu>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                      {/* B720 — "Active" microlabel over the checkbox column: the checkbox reads as
+                          "counted in the totals," NOT "pick for a bulk action" (merge picking is the
+                          blue row highlight, never the checkbox). NEW-1 (B1239328) — "Lock all" rides
+                          the same row: the one-gesture replacement for the old plan-wide "Select
+                          parcels" toggle, which made every parcel click-through at once. */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 1 }}>
+                        <span style={{ flex: "none", fontSize: 8, fontWeight: 700, letterSpacing: "0.02em", textTransform: "uppercase", color: PAL.muted, lineHeight: 1, paddingLeft: 1 }}>Active</span>
+                        <span style={{ flex: 1 }} />
+                        <button type="button" onClick={toggleAllParcelsLock}
+                          style={{ border: "none", background: "transparent", padding: 0, color: PAL.muted, fontSize: 10.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+                          title={allLocked ? "Unlock every parcel's boundary" : "Lock every parcel's boundary — none can be moved or reshaped on the map until unlocked (selecting from this list still works)"}>
+                          {allLocked ? "🔓 Unlock all" : "🔒 Lock all"}
+                        </button>
+                      </div>
+                      {/* B651 — lineage-aware list: children of a split nest under their parent (indented),
+                          and the split parent is greyed + labelled "· split" as a SUPERSEDED, non-counting
+                          row (it's inactive, so excluded from yield/coverage/detention) with the original
+                          real parcel still visible. Names follow lineage: Parcel 3 → 3A / 3B. */}
+                      {rows.map(({ pc, depth, name, superseded }) => {
+                        const on = selParcel?.id === pc.id;
+                        const picked = combineSel.includes(pc.id);
+                        const inactive = pc.active === false;
+                        const tag = superseded ? " · split" : inactive ? " · inactive" : "";
+                        return (
+                          // Per-row Active checkbox (B175): checked = participates in yield / coverage /
+                          // detention / merge; unchecked = stays listed + on the map but dimmed and excluded.
+                          // The `active` flag persists per-parcel via the Site Model (same path as B100).
+                          <div key={pc.id} className="land-parcel-row" style={{ display: "flex", alignItems: "stretch", gap: 7, marginLeft: depth * 16 }}>
+                            <label
+                              title={superseded ? "Split into the parcels nested below — superseded, so excluded from yield / coverage / detention. Check to make it active again (its children go inactive)." : inactive ? "Inactive — excluded from yield / coverage / detention / merge. Check to include." : "Active — counted in yield / coverage / detention. Uncheck to exclude (stays visible, dimmed)."}
+                              onClick={(e) => e.stopPropagation()}
+                              style={{ display: "flex", alignItems: "center", flex: "none", paddingLeft: 2, cursor: "pointer" }}
+                            >
+                              <input type="checkbox" checked={!inactive} onChange={() => toggleParcelActive(pc.id)}
+                                data-testid={`parcel-row-active-${pc.id}`}
+                                style={{ width: 15, height: 15, cursor: "pointer" }} />
+                            </label>
+                            {/* NEW-1 (B1239328) — the row itself never gates on lock: selecting a
+                                parcel from this LIST always works, even when it's locked against the
+                                map (see startMoveParcel). Lock only ever affects the CANVAS. */}
+                            <button onClick={(e) => { if (mergePick) { toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); } else if (e.shiftKey) { shiftPickParcel(pc.id); } else { setCombineSel([]); setSel({ kind: "parcel", id: pc.id }); } }}
+                              data-testid={`parcel-row-${pc.id}`}
+                              style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8, textAlign: "left", padding: "7px 9px", borderRadius: RADIUS.md, borderLeft: depth ? `2px solid ${PAL.panelLine || "var(--border-default)"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "var(--border-default)"}`, background: picked ? "rgba(37,99,235,0.14)" : on ? PAL.accentSoft : SURF_RAISED, cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}{tag}{picked ? " ✓" : ""}{pc.locked ? " 🔒" : ""}</div>
+                                {pc.acct && <div style={{ fontSize: 10.5, color: PAL.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pc.acct}</div>}
+                              </div>
+                              <div style={{ flex: "none", minWidth: 58, textAlign: "right", fontSize: 12, fontWeight: 600, color: PAL.ink, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} AC</div>
+                            </button>
+                            {/* NEW-1 (B1239328) — the hover cluster: zoom-to (new — nothing used to jump
+                                the map to a parcel), lock/unlock, and remove. Replaces the always-visible
+                                ✕ column; reveals on row hover or keyboard focus (.land-row-actions, index.css). */}
+                            <div className="land-row-actions" style={{ display: "flex", gap: 3, flex: "none" }}>
+                              <button type="button" title="Zoom to this parcel" aria-label={`Zoom to ${name}`}
+                                onClick={(e) => { e.stopPropagation(); zoomToElements([{ kind: "parcel", id: pc.id }]); }}
+                                style={{ ...iconBtn, width: 26, height: 30 }}>🔍</button>
+                              <button type="button" title={pc.locked ? "Unlock this parcel's boundary" : "Lock this parcel's boundary so it can't be moved or reshaped on the map"} aria-label={pc.locked ? `Unlock ${name}` : `Lock ${name}`}
+                                onClick={(e) => { e.stopPropagation(); toggleParcelLock(pc.id); }}
+                                style={{ ...iconBtn, width: 26, height: 30 }}>{pc.locked ? <LockIcon /> : <UnlockIcon />}</button>
+                              {/* B598 — per-row remove. Undo-able (removeParcelById pushes history); the
+                                  tombstone keeps it deleted across reload/merge. */}
+                              <button type="button" title="Remove this parcel" aria-label={`Remove ${name}`}
+                                onClick={(e) => { e.stopPropagation(); removeParcelById(pc.id); }}
+                                style={{ ...iconBtn, width: 26, height: 30, color: PAL.danger }}>✕</button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                );
+              })()}
               {/* identify result + armed status (B383) — the body of the ＋ Add parcel menu's
-                  "Identify from county GIS" path. The entry point lives in ＋ Add parcel above;
-                  no duplicate toggle down here. The status row is the off-switch (so is Esc). */}
+                  "Identify from county GIS" path. The entry point lives in ＋ Add above; no
+                  duplicate toggle down here. The status row is the off-switch (so is Esc). */}
               {(identifyMode || identifyRes) && (
                 <div style={{ marginTop: 10, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 10 }}>
                 {identifyMode && (
@@ -20337,23 +20337,66 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 )}
               </div>
               )}
+              {/* NEW-1 (B1239328) — the return half of the cross-link, now one quiet text line
+                  instead of a bordered card: this panel owns what a parcel HAS; everything you DO
+                  to one lives in the right rail's Parcel tools menu. Opens that menu directly (and
+                  slides the rail in first on a phone, where it's hidden behind the ✎ Tools pill). */}
+              <button type="button" data-testid="land-to-parcel-tools" onClick={openParcelToolsMenu}
+                title="Draw, plot from a deed, split, combine, reshape or remove a parcel"
+                style={{ display: "block", width: "100%", marginTop: 10, padding: 0, border: "none", background: "transparent", color: PAL.muted, fontWeight: 500, fontSize: 11, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                Draw, split, combine, reshape… <span style={{ color: PAL.accent, fontWeight: 700 }}>{PARCEL_SURFACES.rail.name} →</span>
+              </button>
             </Section>
           )}
-          {/* NEW-1 — PLACEMENT. A boundary drawn from a deed never lands square on the aerial first
-              try, so once the plan has a location the owner can turn it to true north and slide the
-              anchor until the drawn lines sit on the imagery. Collapsed by default (it is a
-              once-per-plan adjustment, not a daily control). Body in components/ParcelRecordPanel.jsx
-              — LAZY, for the same reason as the appraisal panels below. */}
-          {_pid === "parcel" && origin && (
-            <Section title="Placement" collapsed>
-              <LazyPanel name="Placement" minHeight={120} label="Loading placement…">
-                <PlacementControls
-                  PAL={PAL} chip={chip} border={BORDER_1} surface={SURF_RAISED} numFont={NUM_FONT} tabularNums={TABULAR_NUMS}
-                  rotApplied={placeRot} stepDeg={placeStepDeg} onStepDeg={setPlaceStepDeg} stepFt={placeStepFt} onStepFt={setPlaceStepFt}
-                  onRotate={rotatePlan} onNudge={nudgePlan} onMove={() => setSetLocOpen(true)} />
-              </LazyPanel>
-            </Section>
-          )}
+          {/* NEW-1 (B1239328) — promoted OUT of the collapsed Boundary section, to the top of the
+              selected-parcel view: a county-vs-drawn (or deed-called-vs-drawn) acreage mismatch used
+              to surface only if you opened Boundary. Both checks share one shape and read as one
+              idea (a stated number vs. what's actually drawn), so they move together. */}
+          {_pid === "parcel" && selParcel && (() => {
+            const cmp = acreageComparison(selParcel);
+            const ca = countyAcres(selParcel.attrs);
+            const hasStated = cmp.stated && cmp.measured;
+            const hasCounty = ca && ca.acres;
+            if (!hasStated && !hasCounty) return null;
+            return (
+              <Section>
+                {hasStated && (() => {
+                  const [color, mark] = cmp.agreement === "match" ? ["#2f7a3e", "✓"] : cmp.agreement === "close" ? ["var(--text-secondary)", "≈"] : ["#b45309", "▲"];
+                  return (
+                    <div data-testid="parcel-stated-check" style={{ fontSize: 11, color, marginBottom: hasCounty ? 8 : 0, lineHeight: 1.5 }}>
+                      <b>{mark} Stated vs measured</b> · stated {f2(cmp.stated)} AC vs {f2(cmp.measured)} AC drawn ({f0(cmp.diffFrac * 100)}% {cmp.agreement === "match" ? "match" : "off"})
+                    </div>
+                  );
+                })()}
+                {hasCounty && (() => {
+                  const mine = parcelNetSqft(selParcel) / SQFT_PER_ACRE;
+                  // A projected Shape area read as ft² but actually in m² lands ~10.76× too small; if
+                  // multiplying it back by that factor matches our geometry, treat it as m² and use the
+                  // corrected county acreage (so a correct parcel reads ✓, not a false ~900% off).
+                  const m2 = ca.fromArea && Math.abs(mine - ca.acres * 10.7639) / (ca.acres * 10.7639) < 0.12;
+                  const county = m2 ? ca.acres * 10.7639 : ca.acres;
+                  const diff = Math.abs(mine - county) / county;
+                  const [color, mark] = diff <= 0.02 ? ["#2f7a3e", "✓"] : diff <= 0.05 ? ["var(--text-secondary)", "≈"] : ["#b45309", "▲"];
+                  // NEW-2 — a split child still carries its PRE-split parent's whole-tract county
+                  // record verbatim (performSplit copies attrs onto both children; nothing re-fetches
+                  // a freshly subdivided CAD account). That is legitimate lineage, not a bad match, so
+                  // telling the user to "check calibration/projection" here is actively wrong — the
+                  // record is real, it just describes the larger tract this piece was cut from.
+                  const inheritedParent = !!selParcel.parentId;
+                  return (
+                    <div style={{ fontSize: 11, color, lineHeight: 1.5 }}>
+                      <b>{mark} Geometry check</b> · county {f2(county)} AC vs {f2(mine)} AC ({f0(diff * 100)}% {diff <= 0.02 ? "match" : "off"})
+                      {m2 && <div style={{ marginTop: 2, color: PAL.muted }}>County area field was in m² — converted to acres.</div>}
+                      {inheritedParent && diff > 0.05 && (
+                        <div style={{ marginTop: 2, color: PAL.muted }}>This county record is inherited from the parcel's pre-split parent tract — it describes the larger original tract, not this piece.</div>
+                      )}
+                      {!m2 && !inheritedParent && diff > 0.05 && <div style={{ marginTop: 2, color: PAL.muted }}>County acreage is approximate; check calibration/projection.</div>}
+                    </div>
+                  );
+                })()}
+              </Section>
+            );
+          })()}
           {/* NEW-3 — PARCEL RECORD. One place the parcel's facts live, whatever the lot came from:
               typed by hand for a drawn or deed-derived boundary, and EDITABLE for a county-pulled
               one (a county record with a wrong address should be correctable). The provenance chip
@@ -20400,47 +20443,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </div>
                 )}
               </div>
-              {/* NEW-3 — the STATED-vs-measured check, for a lot with no county record: a deed-called
-                  12.50 ac and a drawn 12.43 ac are both true, and the gap is information. Same bands
-                  and same shape as the county geometry check below, so the two read as one idea. */}
-              {(() => {
-                const cmp = acreageComparison(selParcel);
-                if (!cmp.stated || !cmp.measured) return null;
-                const [color, mark] = cmp.agreement === "match" ? ["#2f7a3e", "✓"] : cmp.agreement === "close" ? ["var(--text-secondary)", "≈"] : ["#b45309", "▲"];
-                return (
-                  <div data-testid="parcel-stated-check" style={{ fontSize: 11, color, marginBottom: 8, lineHeight: 1.5, background: "var(--planner-raised)", border: "1px solid var(--planner-border)", borderRadius: 8, padding: "6px 9px" }}>
-                    <b>{mark} Stated vs measured</b> · stated {f2(cmp.stated)} AC vs {f2(cmp.measured)} AC drawn ({f0(cmp.diffFrac * 100)}% {cmp.agreement === "match" ? "match" : "off"})
-                  </div>
-                );
-              })()}
-              {(() => {
-                const ca = countyAcres(selParcel.attrs);
-                if (!ca || !ca.acres) return null;
-                const mine = parcelNetSqft(selParcel) / SQFT_PER_ACRE;
-                // A projected Shape area read as ft² but actually in m² lands ~10.76× too small; if
-                // multiplying it back by that factor matches our geometry, treat it as m² and use the
-                // corrected county acreage (so a correct parcel reads ✓, not a false ~900% off).
-                const m2 = ca.fromArea && Math.abs(mine - ca.acres * 10.7639) / (ca.acres * 10.7639) < 0.12;
-                const county = m2 ? ca.acres * 10.7639 : ca.acres;
-                const diff = Math.abs(mine - county) / county;
-                const [color, mark] = diff <= 0.02 ? ["#2f7a3e", "✓"] : diff <= 0.05 ? ["var(--text-secondary)", "≈"] : ["#b45309", "▲"];
-                // NEW-2 — a split child still carries its PRE-split parent's whole-tract county
-                // record verbatim (performSplit copies attrs onto both children; nothing re-fetches
-                // a freshly subdivided CAD account). That is legitimate lineage, not a bad match, so
-                // telling the user to "check calibration/projection" here is actively wrong — the
-                // record is real, it just describes the larger tract this piece was cut from.
-                const inheritedParent = !!selParcel.parentId;
-                return (
-                  <div style={{ fontSize: 11, color, marginBottom: 8, lineHeight: 1.5, background: "var(--planner-raised)", border: "1px solid var(--planner-border)", borderRadius: 8, padding: "6px 9px" }}>
-                    <b>{mark} Geometry check</b> · county {f2(county)} AC vs {f2(mine)} AC ({f0(diff * 100)}% {diff <= 0.02 ? "match" : "off"})
-                    {m2 && <div style={{ marginTop: 2, color: PAL.muted }}>County area field was in m² — converted to acres.</div>}
-                    {inheritedParent && diff > 0.05 && (
-                      <div style={{ marginTop: 2, color: PAL.muted }}>This county record is inherited from the parcel's pre-split parent tract — it describes the larger original tract, not this piece.</div>
-                    )}
-                    {!m2 && !inheritedParent && diff > 0.05 && <div style={{ marginTop: 2, color: PAL.muted }}>County acreage is approximate; check calibration/projection.</div>}
-                  </div>
-                );
-              })()}
+              {/* NEW-1 (B1239328) — the stated-vs-measured / county-geometry checks that used to
+                  render here moved to the top of the selected-parcel view (promoted out of this
+                  collapsed section) — see the standalone Section right after the parcel list. */}
               <div style={{ display: "flex", gap: 6, marginBottom: 9 }}>
                 <button style={chip} onClick={() => toggleParcelActive(selParcel.id)} title={selParcel.active === false ? "Excluded from yield / coverage / detention — click to include" : "Counted in yield / coverage / detention — click to exclude (stays visible, dimmed)"}>{selParcel.active === false ? "◯ Inactive" : "✓ Active"}</button>
                 <button style={chip} onClick={() => toggleParcelLock(selParcel.id)} title="Lock the boundary so it can't be moved or reshaped">{selParcel.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
@@ -27557,7 +27562,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
          * `ui-audit/verify-canvas-furniture.mjs`, which treats this toast as one more piece of the
          * same furniture set rather than trusting its position in isolation. */
         const TOAST_BOTTOM = canvasPillBottom({ northH: furnPlates.north.plateH, scaleBarH: furnPlates.scaleBar.plateH, calibBottom: calibrationState ? calibPlace.bottom : null, row: FURNITURE_ROW });
-        const TOAST_STACK_GAP_PX = 48; // the parcel-select hint's own stacked offset above another toast, unchanged from its prior 84→132 hardcode
         const toastPill = { position: "fixed", left: toastCenterX == null ? "50%" : toastCenterX, bottom: TOAST_BOTTOM, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw", color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" };
         return (<>
           {(pobMode || routeMode || overlapWarn || deedAlignHint) && (
@@ -27571,20 +27575,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <button onClick={() => alignDeedToParcel(deedAlignHint.id)} style={toastActionBtn}>Align to parcel</button>
                 <button onClick={() => setDeedAlignHint(null)} style={toastGhostBtn}>Dismiss</button>
               </>}
-            </div>
-          )}
-
-          {/* NEW-1 — "you clicked a parcel and nothing happened, here's why" — the same bottom-center
-              toast surface as the pill above (same geometry, same type, same shadow), riding one notch
-              higher when that one is already occupied so neither message can swallow the other. The
-              inline action turns selection back ON right where the click failed, so the user never has
-              to go find the header control. Only ever raised by a press that actually hit a parcel. */}
-          {parcelHint && (
-            <div data-testid="parcel-select-hint" role="status"
-              style={{ ...toastPill, background: PAL.accent, bottom: TOAST_BOTTOM + ((pobMode || routeMode || overlapWarn || deedAlignHint) ? TOAST_STACK_GAP_PX : 0) }}>
-              <span>Parcel selection is off — that click panned the map.</span>
-              <button data-testid="parcel-select-hint-on" onClick={() => setParcelSelect(true)} style={toastActionBtn}>Turn it on</button>
-              <button aria-label="Dismiss" onClick={dismissParcelHint} style={toastGhostBtn}>Dismiss</button>
             </div>
           )}
 
@@ -27647,14 +27637,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
       {parcelMenu && (
         <ContextMenu x={parcelMenu.x} y={parcelMenu.y} onClose={() => setParcelMenu(null)} width={196} zIndex={1998} className="menu" panelStyle={menuPanel}>
-          {/* ⛔ TOOLBAR PASS (B727504) — the route back to "Select parcels" now that it's off the
-              permanent toolbar (moved into the Parcels panel). A right-click on a parcel is
-              exactly where you'd land to add one that was missed or swap the one you started
-              from, so the toggle rides along here too. */}
-          <button style={menuItem(false)} onClick={() => { setParcelSelect(!settings.parcelSelect); setParcelMenu(null); }}>
-            {settings.parcelSelect ? "Select parcels: on" : "Select parcels: off"}
-          </button>
-          <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
           <button style={{ ...menuItem(false), opacity: combineSel.length >= 2 ? 1 : 0.5, cursor: combineSel.length >= 2 ? "pointer" : "default" }} disabled={combineSel.length < 2} onClick={() => { mergeParcels(); setParcelMenu(null); }}>Merge parcels ({combineSel.length})</button>
           <button style={menuItem(false)} onClick={() => { setCombineSel([]); setParcelMenu(null); }}>Clear selection</button>
           <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />

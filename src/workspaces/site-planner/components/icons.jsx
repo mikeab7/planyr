@@ -1,8 +1,9 @@
 /* Small stroke icons shared by the Site Planner's panel components.
  *
  * NEW-3 — why this file exists. The planner used the 📍 EMOJI as an icon in four places: two button
- * labels ("📍 Set this plan's location", "📍 Move to a different spot…") and two status badges
- * (JurisdictionBadge, ParcelInfoCard). An emoji resolves to a full-COLOUR glyph from whatever font
+ * labels ("📍 Set this plan's location" and, since removed with the Placement section — B1239329 —
+ * "📍 Move to a different spot…") and two status badges (JurisdictionBadge, ParcelInfoCard). An
+ * emoji resolves to a full-COLOUR glyph from whatever font
  * the OS picks, so it (a) doesn't belong to the same visual family as the monochrome text and SVG
  * icons beside it, (b) ignores the theme token its own row is painted in, and (c) changes shape
  * between Windows, macOS and Linux. ParcelInfoCard was the clearest case: ONE status slot rendered

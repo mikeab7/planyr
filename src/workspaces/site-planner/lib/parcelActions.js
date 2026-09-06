@@ -50,13 +50,16 @@ export const PARCEL_GROUPS = [
  *
  * WHERE ELSE each one is reachable — the rule the owner set is that a gesture or a right-click may
  * stay as the FAST path but may never be the ONLY path, and these are the entries that were:
- *   combine .......... gesture: Shift-click parcels, then Enter · right-click a parcel · Land ⧉ Merge
+ *   combine .......... gesture: Shift-click parcels, then Enter · right-click a parcel
  *   boundary ......... gesture ONLY: drag a corner / ＋ on an edge / Shift-click a corner
  *   chip ............. right-click a parcel · right-click the acreage label
  *   chipReset ........ right-click a parcel
  *   deleteSelected ... right-click a parcel · the Delete key
- *   removeMode ....... the Parcel tool's own banner · the Land panel's per-row ✕
- *   lock / active .... Land panel only        draw / identify / address / split ... Land ＋ Add ▾ / ✂ Split
+ *   removeMode ....... the Parcel tool's own banner · the Land tab's per-row remove (hover)
+ *   lock ............. Land tab's selected-parcel Boundary section · per-row (hover) · header "Lock all"
+ *   active ........... Land tab's selected-parcel Boundary section · per-row Active checkbox
+ *   draw / identify / address ... also the Land tab's ＋ icon (NEW-1, B1239328 — Split moved OFF the
+ *   Land tab entirely; it and Combine live here only now)
  * That list is PROSE on purpose: it is provenance with no runtime consumer, and shipping it as
  * string data cost real bytes in the Site route's bundle for nothing. `test/parcelActions.test.js`
  * states the gesture-only set itself and asserts each member has a row.
@@ -122,8 +125,14 @@ export function parcelMenuModel(state = {}) {
       case "setbacks":
       case "removeMode":
         return hasParcels ? null : "No parcels in this plan yet";
+      // NEW-1 (B1239328) — gated on parcelCount, NOT activeCount. This is the ONLY place Combine
+      // can be armed now that the Land tab's own looser-gated "⧉ Merge" button is gone, and
+      // `startMergePick` itself has no active-count requirement: entering pick mode with an
+      // inactive parcel present is the exact B966626 scenario (pick it → a named refusal tells you
+      // to reactivate it first, never a silent no-op). Gating entry on activeCount would make that
+      // flow unreachable again the moment the count drops to one.
       case "combine":
-        return s.activeCount >= 2 ? null : "Needs two or more active parcels";
+        return s.parcelCount >= 2 ? null : "Needs two or more parcels";
       default:
         return null;
     }

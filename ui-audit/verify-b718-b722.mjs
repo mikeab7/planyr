@@ -88,19 +88,23 @@ ok(!(await strip.count()), "B732 the on-canvas Yield KPI strip is gone (reverted
 await page.locator('[data-rail-tab="parcel"]').first().click();
 await page.waitForTimeout(600);
 
-// ---------- B720 — ops row + click-to-pick merge ----------
+// ---------- B720 (superseded by B1239328, 2026-09-06) — the Land tab is a LIST OF LAND now, not a
+// tool tray. ＋ Add survives as a single icon control (aria-label "＋ Add", same dropdown); Split
+// and Merge moved OFF the Land tab entirely — they're the rail's "Split a parcel" / "Combine
+// parcels" rows now (Parcel tools flyout), never a Land-tab button. ----------
 const menuPanel = page.locator('[data-testid="left-menu-panel"]');
 const opsAdd = menuPanel.getByRole("button", { name: /^＋ Add/ });
-ok(await opsAdd.isVisible().catch(() => false), "B720 ops row has an Add ▾ button");
-const opsSplit = menuPanel.getByRole("button", { name: /✂ Split/ });
-const opsMerge = menuPanel.getByRole("button", { name: /⧉ Merge/ });
-ok(await opsSplit.isVisible().catch(() => false), "B720 ops row has a Split button");
-ok(await opsMerge.isVisible().catch(() => false), "B720 ops row has a Merge button");
+ok(await opsAdd.isVisible().catch(() => false), "B1239328 the Land tab's ＋ Add icon is present");
+ok(!(await menuPanel.getByRole("button", { name: /✂ Split/ }).count()), "B1239328 Split is gone from the Land tab");
+ok(!(await menuPanel.getByRole("button", { name: /⧉ Merge/ }).count()), "B1239328 Merge is gone from the Land tab");
 ok(await menuPanel.getByText("Active", { exact: true }).first().isVisible().catch(() => false),
   "B720 'Active' microlabel over the checkbox column");
 
-// Enter pick mode, click two parcel rows, expect the banner + enabled Merge.
-await opsMerge.click();
+// Click-to-pick merge still works — armed from the rail's Parcel tools flyout ("Combine parcels")
+// instead of a Land-tab button.
+await page.locator('[data-testid="rail-parcel-tools"]').first().click();
+await page.waitForTimeout(300);
+await page.getByRole("button", { name: /^Combine parcels/ }).click();
 await page.waitForTimeout(300);
 const rows = menuPanel.locator("button", { hasText: /^Parcel/ });
 await rows.nth(0).click(); await page.waitForTimeout(150);

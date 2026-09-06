@@ -36,6 +36,7 @@
  * Run: npx playwright test e2e/parcel-escape-during-split.spec.js
  */
 import { test, expect } from "@playwright/test";
+import { openModule } from "./helpers.js";
 
 const canvas = (p) => p.getByTestId("planner-canvas");
 const selectToolBtn = (p) => p.getByRole("button", { name: /^Select V$/ });
@@ -45,6 +46,11 @@ const activeCheckbox = (p) => p.locator('input[type="checkbox"]').first();
 async function startBlank(page) {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
+  // Incidental fix, found while verifying B1239328/B1239329 against a live server: the app now
+  // boots into the Dashboard landing page (unrelated to this spec's own subject) rather than
+  // straight into a workspace, so every other e2e spec that reaches the map finder already opens
+  // the Site Planner module first — this one had gone stale and never picked that up.
+  await openModule(page, "site-planner");
   // NEW-1 (owner report 2026-08-29) — B831776's toolbar rebuild had left TWO "Start blank" buttons
   // on screen at once (the row-1 toolbar one and the map toolbar one), which is exactly what this
   // comment used to route `.first()` around instead of fixing. That duplicate is gone now: there is
@@ -55,10 +61,23 @@ async function startBlank(page) {
   await expect(canvas(page)).toBeVisible();
 }
 
+// NEW-1 (B1239328) — Split and Merge moved OFF the Land tab entirely into the rail's "Parcel
+// tools" flyout ("Split a parcel" / "Combine parcels"). Both open the SAME AnchoredMenu, so arming
+// either is: click the rail trigger, then the row.
+async function armSplit(page) {
+  await page.getByTestId("rail-parcel-tools").click();
+  await page.getByRole("button", { name: "Split a parcel", exact: true }).click();
+}
+async function armMerge(page) {
+  await page.getByTestId("rail-parcel-tools").click();
+  await page.getByRole("button", { name: /^Combine parcels/ }).click();
+}
+
 async function drawRectParcel(page) {
   const box = await canvas(page).boundingBox();
   await page.locator('[data-rail-tab="parcel"]').click();
-  await page.getByTitle(/Add land to this plan/i).click();
+  const addLandBtn = page.getByTitle(/Add land to this plan/i);
+  if (await addLandBtn.count()) await addLandBtn.click(); // NEW-1 (B1239328): zero parcels renders the empty state directly, no ＋ Add icon to open first
   await page.getByRole("button", { name: /Draw a new boundary/i }).click();
   await expect(page.getByText(/drop boundary points/i)).toBeVisible();
   const L = Math.round(box.x + box.width * 0.32), R = Math.round(box.x + box.width * 0.68);
@@ -81,8 +100,9 @@ test.describe("Escape abandons an in-progress Split even while a Parcels-panel c
     await startBlank(page);
     const { L, R, T, B } = await drawRectParcel(page);
 
-    // Same panel the owner had open — the "Active" checkbox column renders beside the parcel list,
-    // in the SAME Section as the ✂ Split / ⧉ Merge buttons and the "Select parcels" toggle.
+    // Same panel the owner had open — the "Active" checkbox column renders beside the parcel list.
+    // (Split/Merge and the old "Select parcels" toggle have since moved off this panel — B1239328 —
+    // but the checkbox this defect turns on is unaffected and still lives right here.)
     await expect(activeCheckbox(page)).toBeVisible();
     await activeCheckbox(page).click();
     await expect(activeCheckbox(page)).toBeFocused();
@@ -90,7 +110,7 @@ test.describe("Escape abandons an in-progress Split even while a Parcels-panel c
     // NOW arm Split and lay down a cut — the dashed "…′ cut" polyline + handles from the owner's
     // screenshot. Record where focus actually lands after each step, so the mechanism is measured
     // rather than assumed.
-    await page.getByTitle(/Split a parcel/i).click();
+    await armSplit(page);
     const afterArm = await page.evaluate(() => ({ tag: document.activeElement?.tagName, type: document.activeElement?.type }));
     const mx = Math.round((L + R) / 2);
     await page.mouse.click(mx, T + 4);
@@ -110,7 +130,7 @@ test.describe("Escape abandons an in-progress Split even while a Parcels-panel c
 
     // Re-arming Split must start with a CLEAN path, not a leftover one — proves setSplitPath([])
     // actually ran rather than the preview merely vanishing because the tool changed.
-    await page.getByTitle(/Split a parcel/i).click();
+    await armSplit(page);
     await expect(cutPreviewText(page)).toHaveCount(0);
 
     expect(errors, errors.join("\n")).toEqual([]);
@@ -128,7 +148,7 @@ test.describe("Escape abandons an in-progress Split even while a Parcels-panel c
 
     await expect(activeCheckbox(page)).toBeVisible();
 
-    await page.getByTitle(/Split a parcel/i).click();
+    await armSplit(page);
     const mx = Math.round((L + R) / 2);
     await page.mouse.click(mx, T + 4);
     await page.mouse.click(mx, B - 4);
@@ -141,7 +161,7 @@ test.describe("Escape abandons an in-progress Split even while a Parcels-panel c
     await expect(cutPreviewText(page)).toHaveCount(0);
     await expect(selectToolBtn(page)).toHaveAttribute("aria-pressed", "true");
 
-    await page.getByTitle(/Split a parcel/i).click();
+    await armSplit(page);
     await expect(cutPreviewText(page)).toHaveCount(0);
 
     expect(errors, errors.join("\n")).toEqual([]);
@@ -170,18 +190,18 @@ test.describe("Escape abandons an in-progress Split even while a Parcels-panel c
     await page.keyboard.press("Escape");
     await selectToolBtn(page).click();
 
-    const mergeBtn = page.getByTitle(/Merge parcels/i);
-    await expect(mergeBtn).toBeVisible();
-    await mergeBtn.click(); // enters merge-pick mode
+    // Enter merge-pick mode from the rail flyout.
+    await armMerge(page);
 
     await expect(activeCheckbox(page).first()).toBeVisible();
     await activeCheckbox(page).first().click();
     await expect(activeCheckbox(page).first()).toBeFocused();
     await page.keyboard.press("Escape");
 
-    // Merge picking is off: the Merge button no longer reads the armed (blue) state — checked via
-    // its accessible name reverting to the un-counted form.
-    await expect(mergeBtn).toHaveText(/^⧉ Merge$/);
+    // Merge picking is off: the top-center pick banner (mergePick || combineSel.length > 0) is
+    // gone entirely — the rail's own "Combine parcels" row was the launcher, not a live readout,
+    // so this banner is the one surface that reports the mode is still armed.
+    await expect(page.locator("text=/parcels (picked|selected)/")).toHaveCount(0);
     await expect(selectToolBtn(page)).toHaveAttribute("aria-pressed", "true");
 
     expect(errors, errors.join("\n")).toEqual([]);
@@ -196,7 +216,7 @@ test.describe("Escape abandons an in-progress Split even while a Parcels-panel c
     await startBlank(page);
     const { L, R, T, B } = await drawRectParcel(page);
 
-    await page.getByTitle(/Split a parcel/i).click();
+    await armSplit(page);
     await expect(page.getByText(/Click a cut line across a parcel/i)).toBeVisible();
     const mx = Math.round((L + R) / 2);
     await page.mouse.click(mx, T + 4);

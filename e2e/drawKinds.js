@@ -111,7 +111,8 @@ export async function drawCallout(page, box, { plan = "Concept A", expect: n = 1
 
 export async function drawParcel(page, box, { plan = "Concept A", expect: n = 1 } = {}) {
   await page.locator('[data-rail-tab="parcel"]').click();
-  await page.getByTitle(/Add land to this plan/i).click();
+  const addLandBtn = page.getByTitle(/Add land to this plan/i);
+  if (await addLandBtn.count()) await addLandBtn.click(); // NEW-1 (B1239328): zero parcels renders the empty state directly, no ＋ Add icon to open first
   await page.getByRole("button", { name: /Draw a new boundary/i }).click();
   await expect(page.getByText(/drop boundary points/i)).toBeVisible();
   // Kept clear of the left rail's docked panel (which the Parcel tool opens over the canvas's

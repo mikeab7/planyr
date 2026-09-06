@@ -54,9 +54,14 @@ describe("B570 — Deed / Title (metes & bounds) tool lives in the Parcel tools 
     expect(src).not.toMatch(/data-testid="tool-deed"/);
   });
 
-  it("opens the reader from exactly one place (no duplicate launcher)", () => {
+  it("opens the reader from exactly three places — the rail flyout and the Land tab's ＋ Add menu (both its icon dropdown and its zero-parcel empty state) — NEW-1, B1239328", () => {
+    // B1239328 folded the deed/title metes-and-bounds method into the Land tab's own ＋ Add
+    // control: the icon dropdown (draw / deed / identify / address) once parcels exist, and the
+    // same four methods spelled out directly in the empty state before any do. Two DELIBERATE
+    // launchers beside the rail's "Parcel tools" flyout row this suite already guards above — not
+    // the accidental duplication this test used to guard against (B570's own File-menu regression).
     const opens = src.match(/setTitleOpen\(true\)/g) || [];
-    expect(opens.length).toBe(1);
+    expect(opens.length).toBe(3);
   });
 });
 

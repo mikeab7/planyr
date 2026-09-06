@@ -2,11 +2,12 @@
  * REACHABLE in the Site Planner. A silent "the control disappeared" regression
  * (silence-is-a-crash class) is exactly what this asserts can't recur uncaught.
  *
- * Split must be reachable from BOTH homes:
- *   • the right-rail "Boundary ▾" flyout  (the drafting-tools home), and
- *   • the Parcel panel, beside "Merge parcels"  (the panel home a user reaches for
- *     after B383 surfaced "＋ Add parcel" / parcel ops into the panel — Split is the
- *     inverse of Merge and belongs next to it).
+ * NEW-1 (B1239328, 2026-09-06) — Split's SECOND home, a button in the Land tab beside
+ * "Merge parcels", is GONE BY DESIGN (owner decision: the Land tab is a list of land, not a
+ * tool tray — Split and Merge already lived in the rail's Parcel tools flyout too, so the
+ * Land-tab copies were redundant). The rail flyout ("Split a parcel") is now Split's ONLY home,
+ * and case B below asserts that removal rather than the old second-home presence.
+ *
  * Plus a full end-to-end smoke test: activate → capture cut points → finish
  * (Enter / double-click) → commit (performSplit) splits one parcel into two.
  *
@@ -102,22 +103,15 @@ console.log("A — reachable from the right-rail Boundary ▾ menu:");
   await ctx.close();
 }
 
-// ---------- B: reachable from the Parcel panel (beside Merge) ----------
-console.log("B — reachable from the Parcel panel (the post-B383 home, beside Merge):");
+// ---------- B (B1239328) — Split's Land-tab second home is GONE, on purpose ----------
+console.log("B — the Land tab no longer offers its own 'Split a parcel' control (B1239328):");
 {
   const { ctx, page, errors } = await open();
   await openParcelPanel(page);
   const panelSplit = page.locator('button[title^="Split a parcel"]');
-  const present = (await panelSplit.count()) > 0 && (await panelSplit.first().isVisible().catch(() => false));
-  ok(present, "Parcel panel shows a 'Split a parcel' control");
+  const absent = (await panelSplit.count()) === 0;
+  ok(absent, "Land tab has no 'Split a parcel' button (moved OFF it entirely — rail flyout is the one home now)");
   await page.screenshot({ path: OUT + "b416-panel-split.png" });
-  if (present) {
-    await panelSplit.first().click();
-    await page.waitForTimeout(300);
-    ok(await splitToolArmed(page), "clicking it arms the Split tool");
-  } else {
-    ok(false, "arm-the-tool check skipped — the panel control is absent (regression)");
-  }
   const ae = appErrors(errors); ok(ae.length === 0, `no app console/page errors (saw ${ae.length}; ${errors.length - ae.length} env GIS lines ignored)`);
   if (ae.length) console.log("    app errors:", ae.slice(0, 5));
   await ctx.close();

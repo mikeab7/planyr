@@ -1,7 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-06 @ `76e28d9bb` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
-> **Generated 2026-09-06 @ `0908e26d` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-06 @ `7bf457d38` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -16,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_701 source files mapped._
+_700 source files mapped._
 
 ## infra
 
@@ -154,9 +153,9 @@ _701 source files mapped._
   - _exports_: `defineName`, `deleteName`, `namesList`, `nameUsageCount`, `rectFromSelRange`, `rectToAddressText`, `rectToSelRange`, `renameName`, `RESERVED_NAME_PREFIXES`, `retargetName`, `shiftNamesForStructuralChange`, `validateNameText`
 - **`src/workspaces/model/lib/numberFormats.js`** — The number-format picker's preset list, each token handed straight to the shared engine's `formatValue`.
   - _exports_: `decreaseDecimals`, `formatLabelFor`, `increaseDecimals`, `NUMBER_FORMATS`, `toggleThousands`
-- **`src/workspaces/model/lib/projectCompsFetch.js`** — A minimal, direct read of the seven `public.comps` columns `Comp.<title>.*` needs, deliberately bypassing `shared/comps/lib/comps.js`/`compsStore.js` to avoid leaking a new shared chunk onto the Site route.
+- **`src/workspaces/model/lib/projectCompsFetch.js`** — Minimal, narrowly-scoped read of `public.comps` (own+team rows) for the `Comp.<title>.*` live data refs — deliberately not the shared comps lib, to avoid pulling its unused derivations into the Site route's bundle.
   - _exports_: `fetchProjectNameComps`
-- **`src/workspaces/model/lib/projectRefs.js`** — Project-derived, read-only built-in formula names (`Site.Acres`, `Plan.<building>.SF`, `Comp.<title>.RentPSF/SizeSF/Date`) resolved fresh from the open project's site plan + comps, injected into `ctx.names` alongside user-defined named ranges.
+- **`src/workspaces/model/lib/projectRefs.js`** — Exposes the open project's site plan / leasing comps as read-only, namespaced formula names (`Site.Acres`, `Plan.Building1.SF`, `Comp.<title>.RentPSF`), resolved through the same "name" AST node as a user-defined named range.
   - _exports_: `buildProjectNames`, `RESERVED_NAME_PREFIXES`
 - **`src/workspaces/model/lib/ribbonLayout.js`** — Pure, DOM-free math deciding which ribbon groups fit inline vs. collapse into a "More ▾" popover at a given container width.
   - _exports_: `computeRibbonLayout`, `MORE_BUTTON_WIDTH`, `RIBBON_GROUPS`
@@ -689,7 +688,7 @@ _701 source files mapped._
 - **`src/workspaces/site-planner/components/ParcelInfoCard.jsx`** — The address-search parcel card: three rows by default (owner / account / acreage), everything else behind a height-capped fold
   - _exports_: `default (ParcelInfoCard)`, `DETAILS_MAX_HEIGHT`, `LEGAL_MAX_HEIGHT`
 - **`src/workspaces/site-planner/components/ParcelRecordPanel.jsx`** — the Parcel panel's typed RECORD (provenance chip · deed misclosure · owner/account/situs/stated acreage) and the plan PLACEMENT controls. Lazily loaded.
-  - _exports_: `ParcelRecord`, `PlacementControls`
+  - _exports_: `ParcelRecord`
 - **`src/workspaces/site-planner/components/PlaceSearchField.jsx`** — B831779 (NEW-4) the map toolbar's address field: a live-suggestion combobox (role=combobox + listbox) replacing the old "Go" button — debounced/abortable, Enter always works, LOUD-FAILURE no-match row
   - _exports_: `default (PlaceSearchField)`
 - **`src/workspaces/site-planner/components/PondSection.jsx`** — PR-L the one developer-readable pond cross-section component (used by the ⚡ Optimize what-changed card AND the pond inspector): maps pondSectionModel marks to a responsive, theme-tokened SVG (grade, berm hatch, storage bands, flood/groundwater/receiving lines, outlet, depth dimension, collision-free labels)
@@ -1094,8 +1093,6 @@ _701 source files mapped._
   - _exports_: `acreageComparison`, `cleanText`, `PARCEL_FIELDS`, `PARCEL_SOURCES`, `parcelExceptSqft`, `parcelGrossSqft`, `parcelNetSqft`, `parcelProvenance`, `parseAcres`, `PROVENANCE_LABEL`, `provenanceLabel`, `SQFT_PER_ACRE`
 - **`src/workspaces/site-planner/lib/parcelSelect.js`** — Pure parcel merge-selection reducer: seeds the Combine set from the current single selection so plain-click-then-Shift-click accumulates, reusing shared nextSelection for toggle math plus the B170 inactive-parcel guard
   - _exports_: `extendMergeSelection`
-- **`src/workspaces/site-planner/lib/parcelSelectHint.js`** — Pure rules for the "Select parcels is off" point-of-failure hint: only on a press that hit a parcel, once per press gesture, rate-limited so a pan across lots can't become a stream.
-  - _exports_: `PARCEL_HINT_COOLDOWN_MS`, `parcelSelectHintDecision`
 - **`src/workspaces/site-planner/lib/parcelSnapshot.js`** — Client loader for nightly Drive county parcel-snapshot cache: IndexedDB-held SWR download, pure viewport-filter/point-in-lot hit-test so a flaky county server never blanks the map
   - _exports_: `_resetSnapshots`, `ensureSnapshot`, `featureAtPoint`, `featureBbox`, `featuresForView`, `getSnapshot`, `onSnapshotChange`, `preferSnapshotForDisplay`, `snapshotEnabled`, `snapshotFootprint`, `snapshotVintage`
 - **`src/workspaces/site-planner/lib/parcelSummary.js`** — B849344: groups flat `site_elements` parcel rows by site_id and dissolves each site's true acreage via `dissolvedParcelSqft`, feeding the Sites panel/map pin's canonical boundary read
@@ -1121,7 +1118,7 @@ _701 source files mapped._
 - **`src/workspaces/site-planner/lib/planClipboardStore.js`** — Module-scope holder for the canvas + overlay clipboards, above every React remount boundary, so a copy survives a plan switch (NEW-1).
   - _exports_: `clearClipboard`, `getCanvasClip`, `getOverlayClip`, `hasAnyClip`, `hasCanvasClip`, `hasOverlayClip`, `setCanvasClip`, `setOverlayClip`
 - **`src/workspaces/site-planner/lib/plannerPlacementCmds.js`** — the placement + deed-promotion COMMANDS, loaded on demand and driven through an `exportSheet`-style `ctx`.
-  - _exports_: `applyOriginState`, `commitOrigin`, `nudgePlan`, `persistPlacement`, `promoteDeedToParcel`, `rotatePlan`
+  - _exports_: `applyOriginState`, `commitOrigin`, `persistPlacement`, `promoteDeedToParcel`
 - **`src/workspaces/site-planner/lib/planStyle.js`** — Shared element style tokens (fills/strokes/weight/pattern per surface type), style resolver, paint z-order, element feet ring outline
   - _exports_: `bandForceOf`, `byZ`, `EL_BANDS`, `elRingFeet`, `elStyle`, `elToRingFeet`, `getAccountStyleDefaults`, `getPreviewStyleDefaults`, `parcelDefaultStyle`, `setAccountStyleDefaults`, `SETBACK_LINE`, `setbackChipStyle`, `setbackDashArray`, `setbackLineStyle`, `setPreviewStyleDefaults`, `standardScope`, `toHex6`, `TYPE`, `typeStyle`, `zOrder`
 - **`src/workspaces/site-planner/lib/polyClip.js`** — Pure polygon intersection-AREA via ear-clip triangulation + Sutherland–Hodgman; pairwise active-parcel overlap detection for the B652 double-count warning; clipper-lib UNION/dissolve of overlapping active parcels for correct site acreage (B715)

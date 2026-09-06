@@ -502,8 +502,9 @@ describe("NEW-3 — a right-click resolves the same way a double-click does", ()
     /* A measurement is addressed by INDEX, not by id — the selection model's asymmetry, and the
      * reason a bare `on${kind}Context` lookup table would be wrong here. */
     expect(block).toMatch(/measures\[t\.i\]/);
-    /* B311 — parcels are click-through when the setting says so; forwarding must respect that. */
-    expect(block).toMatch(/settings\.parcelSelect/);
+    /* NEW-1 (B1239328) — a locked parcel is click-through, same as the map; forwarding must respect
+     * that (the plan-wide "Select parcels" setting this used to read is gone). */
+    expect(block).toMatch(/pc\.locked/);
   });
 
   it("the badge keeps its OWN menu when it is genuinely what was aimed at", () => {

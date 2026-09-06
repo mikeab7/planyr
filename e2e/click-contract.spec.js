@@ -22,6 +22,7 @@
  * one stable fact for open/closed AND which panel, so a takeover reads as a failure too. */
 import { test, expect } from "@playwright/test";
 import { CLICK_CONTRACT, E2E_DRIVEN } from "./clickContract.table.js";
+import { openModule } from "./helpers.js";
 
 const canvas = (p) => p.getByTestId("planner-canvas");
 const panel = (p) => p.getByTestId("property-panel");
@@ -37,6 +38,9 @@ async function dockState(page) {
 
 async function startBlank(page) {
   await page.goto("/");
+  // Incidental fix, found while verifying B1239328/B1239329 live: the app now boots into a
+  // Dashboard landing page (unrelated to this spec) rather than straight into a workspace.
+  await openModule(page, "site-planner");
   await page.getByTestId("map-start-blank-menu-btn").click();
   await page.getByTestId("map-start-blank-menu-item").click();
   await expect(canvas(page)).toBeVisible();
@@ -149,15 +153,21 @@ async function draw(page, type) {
   }
 
   if (type === "parcel") {
-    // The Parcel tool's own arming flow (mirrors e2e/parcel-select-toggle.spec.js).
+    // The Parcel tool's own arming flow.
     await page.locator('[data-rail-tab="parcel"]').first().click();
-    await page.getByTitle(/Add land to this plan/i).click();
+    const addLandBtn = page.getByTitle(/Add land to this plan/i);
+    if (await addLandBtn.count()) await addLandBtn.click(); // NEW-1 (B1239328): zero parcels renders the empty state directly, no ＋ Add icon to open first
     await page.getByRole("button", { name: /Draw a new boundary/i }).click();
     await expect(page.getByText(/drop boundary points/i)).toBeVisible();
     for (const [x, y] of [[L, T], [R, T], [R, B], [L, B]]) { await page.mouse.click(x, y); await page.waitForTimeout(90); }
     await page.mouse.click(L, T);   // close the ring
     await expect.poll(() => count(page, "parcel")).toBeGreaterThanOrEqual(1);
     await page.keyboard.press("Escape");
+    // NEW-1 (B1239328): a freshly drawn parcel is born locked, and a locked parcel is click-through
+    // on the CANVAS by design (lock only ever affects the map, never the list). This generic
+    // contract is about canvas single/double-click semantics, so unlock it first via the Land
+    // tab's own list row — the one place lock never gates.
+    await page.getByTitle("Unlock this parcel's boundary").first().click();
     await page.getByRole("button", { name: /^Select V$/ }).click();
     // The tool docks its own panel; the contract cases start from a CLOSED dock, so put it back.
     const docked = await dockState(page);

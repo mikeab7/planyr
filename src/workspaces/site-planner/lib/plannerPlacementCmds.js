@@ -1,25 +1,27 @@
-/* PLACEMENT + DEED-PROMOTION COMMANDS — the "the GIS is down" command surface, loaded on demand.
+/* LOCATE-A-PLAN + DEED-PROMOTION COMMANDS — the "the GIS is down" command surface, loaded on demand.
  *
  * ⛔ WHY THESE LIVE HERE AND NOT IN `SitePlanner.jsx`. Measured, not assumed: kept inline, this
  * tranche's command bodies and their owner-facing copy added **9.9 KB** to the Site route's largest
  * chunk — a chunk that arrives with 2.3 KB of headroom left in its band. Every command below is
- * reached only by a deliberate, rare act (locating a plan, nudging its placement, promoting a deed),
- * so none of it belongs on the path every session pays for. This is the `exportSheet.js` pattern
- * (B1042) applied again: the planner passes a `ctx` object rebuilt per call, so add a key THERE
- * rather than reaching back into the component, and nothing here closes over planner state.
+ * reached only by a deliberate, rare act (locating a plan, promoting a deed), so none of it belongs
+ * on the path every session pays for. This is the `exportSheet.js` pattern (B1042) applied again:
+ * the planner passes a `ctx` object rebuilt per call, so add a key THERE rather than reaching back
+ * into the component, and nothing here closes over planner state.
  *
- * THE MODEL these encode (full derivation in `lib/sitePlacement.js`):
- *   • the drawing lives in LOCAL FEET and never moves when a location lands; the origin only says
- *     where that local frame sits on the earth;
- *   • NUDGE re-anchors the frame — not one drawn coordinate changes;
- *   • TURN is the one adjustment that moves geometry, because the feet frame is axis-aligned to
- *     true north and has no rotation term to turn.
+ * THE MODEL `commitOrigin` encodes (full derivation in `lib/sitePlacement.js`): the drawing lives
+ * in LOCAL FEET and never moves when a location lands; the origin only says where that local frame
+ * sits on the earth. `rotateDeg` folds a one-time square-up rotation into the same undo frame as
+ * the locate, for a boundary plotted from a deed that never lands square on the aerial first try.
+ *
+ * NEW-2 (B1239329) — the ongoing, standalone "Turn the plan" / "Slide the plan" adjusters and their
+ * Placement UI are GONE (owner decision) — see the note between `commitOrigin` and
+ * `promoteDeedToParcel` below for what that removed and what it didn't.
  *
  * Guards: test/parcelOfflineWiring.test.js (wiring, mutation-proven) plus the live specs
  * e2e/set-location-unlocated-plan.spec.js and e2e/deed-promote-to-parcel.spec.js.
  */
-import { normalizeOrigin, sameOrigin, originAtOffset } from "./sitePlacement.js";
-import { rotateSiteCollections, siteRotationPivot, normalizeRot } from "./sitePlacementRotate.js";
+import { normalizeOrigin, sameOrigin } from "./sitePlacement.js";
+import { rotateSiteCollections } from "./sitePlacementRotate.js";
 
 /* Set the live anchor. `ctx.setMeta` writes it into the save metadata in the SAME turn, because the
  * planner's autosave effect is declared far above the metadata assignment and would otherwise
@@ -82,31 +84,10 @@ export function commitOrigin(ctx, next, { rotateDeg = 0, note = "" } = {}) {
   return true;
 }
 
-/* Rotate the whole plan about its body centre — for a boundary plotted from a deed, which never
- * lands square on the aerial first try. The anchor does not move. */
-export function rotatePlan(ctx, deg) {
-  const d = Number(deg) || 0;
-  if (!d) return;
-  if (!siteRotationPivot(ctx.state())) { ctx.flashWarn("There's nothing drawn to rotate yet.", 5000); return; }
-  ctx.pushHistory();
-  const spun = rotateSiteCollections(ctx.state(), d);
-  persistPlacement(ctx, ctx.origin(), applyRotated(ctx, spun));
-  ctx.bumpPlaceRot((r) => normalizeRot(r + d));
-  if (spun.unrotatable.length)
-    ctx.flashWarn(`Turned the plan ${Math.abs(d).toFixed(1)}° ${d > 0 ? "clockwise" : "counter-clockwise"}. The captured aerial is a fixed north-up picture, so it stayed put.`, 9000);
-}
-
-/* Nudge the plan across the ground. NOT a geometry edit: the anchor moves, so every drawn
- * coordinate is untouched and the plan simply sits somewhere slightly different. */
-export function nudgePlan(ctx, dxFt, dyFt) {
-  const cur = ctx.origin();
-  if (!cur) return;
-  const next = originAtOffset(cur, dxFt, dyFt);
-  if (!next) return;
-  ctx.pushHistory();
-  applyOriginState(ctx, next);
-  persistPlacement(ctx, next, null);
-}
+/* NEW-2 (B1239329) — the standalone "Turn the plan" / "Slide the plan" adjusters (`rotatePlan` /
+ * `nudgePlan`) and their Placement UI were removed (owner decision: he never used them and didn't
+ * know what they were for). `commitOrigin` above still folds a rotation into the initial locate
+ * flow via `rotateSiteCollections` — only the ongoing, standalone post-locate controls are gone. */
 
 /* ── NEW-2 — PROMOTE A PLOTTED DEED TO THE PARCEL BOUNDARY ─────────────────────────────────────
  *

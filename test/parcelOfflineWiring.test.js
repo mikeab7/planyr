@@ -181,7 +181,9 @@ describe("NEW-3 — a hand-drawn parcel carries the same record as a clicked one
     // B520560 moved the LABEL from the bare word "Parcel" to the parcel's own lineage name
     // (Parcel 1A / 1B); the AREA function under test is unchanged and is still the net one.
     expect(planner).toContain('const txt = `${(parcelInfo.get(pc.id) || {}).name || "Parcel"} ${f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} AC`;'); // canvas badge
-    expect(planner).toContain("{f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} AC{pc.acct");                 // panel list
+    // NEW-1 (B1239328) — the Land tab row moved acreage into its own right-aligned column
+    // (account number, when present, now gets its own secondary line instead of sharing this one).
+    expect(planner).toContain("{f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} AC</div>");                   // panel list
     expect(planner).toContain("Area: <b style={{ color: PAL.ink }}>{f0(parcelNetSqft(selParcel))} SF</b>"); // Boundary
     expect(planner).toContain("acres: parcelNetSqft(p) / SQFT_PER_ACRE");                            // report/print
   });
