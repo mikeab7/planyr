@@ -368,6 +368,46 @@ position**.
    the server's row instead of naming a conflict — a genuinely dirty page is unaffected. **When
    adding ANY future automatic (non-interactive) body rewrite, route it through the SAME `auto`
    path — never straight through `writePage`**, or it inherits this exact false-conflict class.
+9. **A PROJECT'S `sites` ROW CAN BE SILENTLY POISONED — OR ACTIVELY DELETED — BY A WORKSPACE-TAB
+   SWITCH THAT HAPPENED BEFORE OR AFTER NOTES RAN (B1202176 amendment ×2, 2026-09-05/06) — do not
+   re-diagnose this as a Notes wiring bug.** Notes' own `ensureProjectExists` wiring
+   (`handleAddPage`/`handleSetPageProject`/`handleFileRecovered`, the empty-state "+ New page"
+   button included) can be exactly correct and still never create the row, or lose it after
+   creating it. Root cause lives one workspace tab-switch earlier, in Site Planner:
+   `SitePlanner.jsx`'s `persistOrDrop` drops a still-blank "New project" draft the instant Site
+   Planner goes inactive (switching TO Notes; also on the FIRST render of a hard reload landing
+   directly on a non-Site route, since the effect fires on mount too, not only on a later change).
+   **Two superseded gates, both wrong the same way — trusting the wrong field to mean "nothing to
+   protect":** (1) called `deleteSite(id)` unconditionally, tombstoning every drop — poisoned
+   `saveSite`'s resurrection guard against any LATER `ensureProjectRow`, before Notes ever touched
+   the id. (2) gated the tombstone on `!stored?.origin` — closed (1), but a record `ensureProjectRow`
+   itself had ALREADY written (origin always null, Site Planner's own canvas still blank) still read
+   `!stored?.origin === true` on a re-mount, so `persistOrDrop` called `deleteSite(id,
+   {tombstone:true})` on a row Notes had just created — active destruction, not merely a block.
+   **The fix drops the origin check entirely: gate on `!stored` alone.** Any local record, however
+   it got there and whatever its `origin`, means something considered this project worth keeping;
+   only an id with NO local record anywhere (which can therefore never carry an origin either) may
+   be dropped. **Before spending a session re-auditing Notes' wiring for "the row never gets
+   created" or "the row disappears after a reload," check whether Site Planner's `persistOrDrop`
+   ran against this id with a stale gate.** See `test/siteSoftDelete.test.js`'s two
+   B1202176-amendment describe blocks for both mechanisms' reproduction and fix, proven through the
+   real `ensureProjectRow` → `saveSite`/`deleteSite` chain.
+   **⛔ AND A CLAIMED REPRO'S SPECIFIC DATABASE EVIDENCE STILL NEEDS ITS OWN VERIFICATION, even
+   when the underlying code correction is right.** A correction citing project id `smtp2dcu4i53`
+   with specific `updated_at`/`deleted_at` timestamps (a row allegedly soft-deleted 34s after being
+   written) did not match production when queried directly — no `sites` row existed for that id at
+   all, soft-deleted or otherwise. What DID check out: a genuine orphaned Notes page filed under
+   that exact id (found via `notes_trees`), unreachable for lack of a `sites` row — consistent with
+   gate (1)'s failure mode (never created), not gate (2)'s (created then destroyed). The CODE
+   correction (`!stored` vs `!stored?.origin`) was independently verified by tracing the actual
+   source and is real regardless; the specific SQL evidence offered for it was not corroborated and
+   was not relied on. **Adopted** the orphaned project (inserted a fresh `sites` row via the exact
+   `ensureProjectRow` shape, built by actually calling `createSiteModel()`) rather than reversing a
+   soft-delete that never happened. A broader sweep for other short-lived-delete rows in production
+   found several, none corroborated by an orphaned child in Model/Review/Library (cross-checked
+   against `model_sheets`/`doc_reviews`/`project_folders`) — left untouched as ordinary user
+   deletes, per STANDING RULE #2/CONSTRAINT-CAPTURE: decide from evidence, never touch a row on an
+   unverified claim alone.
 
 ---
 

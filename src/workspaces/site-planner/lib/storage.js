@@ -1512,7 +1512,19 @@ export function saveSite(partial, { skipHistory = false } = {}) {
 // cloud-delete promise ({ ok, error?, removed? }) so the caller can AWAIT it and surface a loud
 // error if the cloud removal actually failed (the row would otherwise silently survive and
 // reappear on reload — B372). Logged out, it resolves ok (nothing to remove server-side).
-export function deleteSite(id) {
+//
+// ⛔ B1202176 (amendment) — `tombstone` (default true) is false ONLY for `persistOrDrop`'s
+// abandoned-blank-draft cleanup. A tombstone here is a permanent "do not resurrect" fact meant to
+// stop a stale flush from undoing a REAL delete (B372) — but a blank, unlocated project that was
+// never realized (no local record ever written for it: nothing to protect, nothing pushed to the
+// cloud to soft-delete) is not a delete at all, it's the lazy-creation design forgetting a draft
+// nobody used. Tombstoning it anyway permanently poisoned `saveSite`'s resurrection guard for that
+// id, so the FIRST later attempt by any other module (Notes/Model/Library/Review) to materialize
+// the SAME still-open project id via `ensureProjectRow` was silently refused forever — reproduced
+// live: a brand-new project, opened straight into Notes (never touched in Site Planner), got its
+// `public.sites` row poisoned the instant the user switched away from the Site Planner tab, before
+// Notes ever tried to create anything. See `persistOrDrop` in SitePlanner.jsx for the call site.
+export function deleteSite(id, { tombstone = true } = {}) {
   const sites = readSites();
   const all = Object.values(sites);   // read the WHOLE list before the plan leaves it (below)
   delete sites[id];
@@ -1538,14 +1550,19 @@ export function deleteSite(id) {
     // every key a surviving plan still names — a duplicate carries the source plan's idbKey.
     idbDeleteByPrefix(`raster:${id}:`, { keep });
   }
-  recentlyDeleted.add(id); // in-tab tombstone so no in-flight flush can resurrect it this session (B372)
-  if (activeUid() && id) recordSiteTombstone(activeUid(), id, Date.now()); // B757 — DURABLE tombstone: survives reload so a failed/offline cloud delete can't resurrect the plan on the next pull
+  if (tombstone) {
+    recentlyDeleted.add(id); // in-tab tombstone so no in-flight flush can resurrect it this session (B372)
+    if (activeUid() && id) recordSiteTombstone(activeUid(), id, Date.now()); // B757 — DURABLE tombstone: survives reload so a failed/offline cloud delete can't resurrect the plan on the next pull
+  }
   if (getCurrentSiteId() === id) setCurrentSiteId(null);
   // Return the cloud-removal result so the caller can report an honest failure / no-op (B372).
   // TEAM: cloudDelete scopes by id and lets RLS decide (owner or team-admin) — a regular member
   // can't delete a teammate's shared project; that surfaces as removed:0, and the row re-appears
   // on the next pull rather than being lost.
-  return activeUid() ? cloudDelete(activeUid(), id) : Promise.resolve({ ok: true, skipped: true });
+  // A never-tombstoned drop never pushed anything to the cloud either (that's the whole premise —
+  // nothing to protect against resurrection means nothing to soft-delete), so skip the network
+  // round trip rather than issue a guaranteed-zero-rows soft delete.
+  return tombstone && activeUid() ? cloudDelete(activeUid(), id) : Promise.resolve({ ok: true, skipped: true });
 }
 export function getCurrentSiteId() { try { return localStorage.getItem(CURRENT_KEY) || null; } catch (_) { return null; } }
 export function setCurrentSiteId(id) { try { id ? localStorage.setItem(CURRENT_KEY, id) : localStorage.removeItem(CURRENT_KEY); } catch (_) {} }
