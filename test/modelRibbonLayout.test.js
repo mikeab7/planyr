@@ -101,10 +101,13 @@ describe("RIBBON_GROUPS — the real inventory at the brief's own checkpoints", 
     expect(overflowKeys).toEqual([]);
     expect(visibleKeys.length).toBe(RIBBON_GROUPS.length);
   });
-  it("Sort & Filter (the lowest-priority group) is the first to collapse as width shrinks", () => {
-    // Find the narrowest width at which everything still fits, then shrink by one group's worth.
+  it("Cells (the lowest-priority group left on the REDUCED Home ribbon) is the first to collapse as width shrinks", () => {
+    // NEW-1 (command palette + reduced Home ribbon): Borders/Names/Sort & Filter moved off the
+    // ribbon entirely (palette + right-click menu only) and Formula Auditing moved to a
+    // permanent row-1 home — neither rides this collapse math any more. Of what's left, "cells"
+    // is now the lowest priority.
     const full = RIBBON_GROUPS.reduce((s, g) => s + g.width, 0);
     const { overflowKeys } = computeRibbonLayout(full - 1, RIBBON_GROUPS, MORE_BUTTON_WIDTH);
-    expect(overflowKeys[0]).toBe("sortfilter");
+    expect(overflowKeys[0]).toBe("cells");
   });
 });
