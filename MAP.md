@@ -145,7 +145,7 @@ _701 source files mapped._
   - _exports_: `addSheetFromCsvText`, `csvRowsToSheet`, `parseCsv`, `sheetToCsv`
 - **`src/workspaces/model/lib/formulaConsistency.js`** — Flags a formula whose R1C1-style shape breaks its row/column neighbours' pattern, or a hardcoded value sitting inside one; precision-tuned against a realistic pro-forma fixture.
   - _exports_: `findInconsistencies`
-- **`src/workspaces/model/lib/generalFit.js`** — Excel-style column-width fit for General-format number cells (narrows displayed precision, never the stored value).
+- **`src/workspaces/model/lib/generalFit.js`** — Excel-style General-format column-width fit: narrows displayed precision (never the stored value) as a column narrows, falling back to a "#" fill when even a bare/scientific form won't fit.
   - _exports_: `fitGeneralNumber`
 - **`src/workspaces/model/lib/modelSaveState.js`** — This module's status → the shared CloudSyncBadge's vocabulary; never claims "synced" for an unprovisioned cloud table.
   - _exports_: `modelSaveState`
