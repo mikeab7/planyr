@@ -37,8 +37,9 @@
  * Stage 2 item, so Stage 1 exposes them here first.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { colAt, rawAt, usedRangeEnd, rowHeightAt, DEFAULT_ROW_H, styleAt, mergeAt, isFormulaText, unsupportedFormulaAt } from "../lib/sheetModel.js";
+import { colAt, rawAt, usedRangeEnd, rowHeightAt, DEFAULT_ROW_H, styleAt, mergeAt, isFormulaText, unsupportedFormulaAt, formatAt } from "../lib/sheetModel.js";
 import { displayFor, displayKindFor, displayColorFor, cellColorKind } from "../lib/sheetEngine.js";
+import { fitGeneralNumber } from "../lib/generalFit.js";
 import { ctrlArrowTarget } from "../lib/sheetOps.js";
 import { buildRowOffsets, visibleRowRange, rowAtOffset } from "../lib/rowLayout.js";
 import { MIN_ZOOM, MAX_ZOOM, DEFAULT_ZOOM, zoomFromWheelDelta, zoomStepButton } from "../lib/sheetZoom.js";
@@ -888,6 +889,27 @@ export default function SheetView({
           // token needed) — never above the number format's own colour tag, matching the
           // pre-existing precedence order this comment already documents.
           const textColor = cellStyle.color || (cell.kind === "error" ? "var(--danger)" : (cell.color || AUTO_COLOR_TOKEN[cell.colorKind] || "var(--text-primary)"));
+          // NEW-1 — General format must fit the column, never spill past it (Excel's own rule:
+          // reduce DISPLAYED precision as the column narrows, "###" once even that won't fit).
+          // Only for an unformatted ("General") NUMBER cell — an explicit format (Currency,
+          // Percent, …) keeps its own formatNumberToken output untouched, per formatAt's own
+          // null-means-General contract. The stored cell text and the formula bar are untouched
+          // either way — this only decides what gets PAINTED into the span below. `cell.display`
+          // round-trips through Number() cleanly because it's numToGeneralStr's own shortest-
+          // round-trip output.
+          let shownText = cell.display;
+          if (!merge && cell.kind === "number" && cell.display !== "" && formatAt(sheet, r, c) == null) {
+            const rawNum = Number(cell.display);
+            if (Number.isFinite(rawNum)) {
+              const padX = (6 + (cellStyle.indent || 0) * 14) * zoom;
+              // -1 for the cell's own right border, and a little slack so a canvas-measured
+              // "fits" doesn't land 1-2px inside the DOM's own actual (slightly different font
+              // hinting) rendered width and still trip the ellipsis below.
+              const availableWidthPx = Math.max(0, w - 2 * padX - 6 * zoom);
+              const numFont = `${cellStyle.bold ? "700 " : ""}${(cellStyle.fontSize || 12.5) * zoom}px ${cellStyle.fontFamily || "system-ui, sans-serif"}`;
+              shownText = fitGeneralNumber(rawNum, availableWidthPx, (s) => measureTextWidth(s, numFont));
+            }
+          }
           return (
             <div
               key={col.id}
@@ -911,6 +933,16 @@ export default function SheetView({
                 // treatment on the last frozen COLUMN's own right edge.
                 boxShadow: (freezeCols > 0 && c === freezeCols - 1) ? "2px 0 4px -1px rgba(0,0,0,0.18)" : undefined, // design-exempt: no shadow-color token yet repo-wide
                 flex: `0 0 ${w}px`,
+                // NEW-1 — without this, a flex item's AUTOMATIC minimum size defaults to its own
+                // content's min-content width; for `white-space: nowrap` text that's the FULL
+                // unwrapped width, so a long General-format number (or any other non-spilling
+                // nowrap content) silently grew this box past its own column and shoved every
+                // later column in the row rightward — the actual mechanism behind "numbers spill
+                // across the column boundary." Pinning it to 0 restores the flex-basis above as
+                // the box's real, final width regardless of content, the same fix B1076480's own
+                // ellipsis span already relies on `minWidth: 0` for (below) — it was only ever
+                // applied to the INNER span, not this outer flex item that actually owns the box.
+                minWidth: 0,
                 boxSizing: "border-box",
                 display: "flex", alignItems: vAlign,
                 justifyContent: hAlign === "right" ? "flex-end" : hAlign === "center" ? "center" : "flex-start",
@@ -969,7 +1001,7 @@ export default function SheetView({
                 // B1076480 — this cell's own text-clipping wrapper (see the outer box's `overflow`
                 // comment above): `minWidth: 0` is required for a flex child to actually shrink
                 // and ellipsis-clip instead of forcing the flex row to overflow at content size.
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, maxHeight: "100%", whiteSpace: cellStyle.wrap ? "normal" : "nowrap", wordBreak: cellStyle.wrap ? "break-word" : undefined }}>{cell.display}</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, maxHeight: "100%", whiteSpace: cellStyle.wrap ? "normal" : "nowrap", wordBreak: cellStyle.wrap ? "break-word" : undefined }}>{shownText}</span>
               )}
               {c < cols.length && (
                 <div
