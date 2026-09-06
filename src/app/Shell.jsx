@@ -281,6 +281,17 @@ export default function Shell() {
     setDocIntent({ kind: "open-review", row, openAtPage: page || null, token: Date.now() });
     navigate({ module: "doc-review", projectId: pid || null, cross: false, org: false });
   };
+  // B1161792 (NEW-1) — the Dashboard's "Needs attention" card rows click through to the exact
+  // task, not just its project. Same shape as openReviewInDocReview above: the Dashboard isn't
+  // kept alive alongside Scheduler (it unmounts the instant the route leaves it), so the
+  // requested task is stashed here (token-stamped so a repeat click on the same task re-fires)
+  // and handed to Scheduler.jsx once it mounts and the embedded iframe is ready.
+  const [scheduleTaskIntent, setScheduleTaskIntent] = useState(null);
+  const openTaskInScheduler = ({ linkedSiteId, taskId }) => {
+    if (linkedSiteId == null || taskId == null) return;
+    setScheduleTaskIntent({ siteId: linkedSiteId, taskId, token: Date.now() });
+    navigate({ module: "scheduler", projectId: linkedSiteId, cross: false, org: false });
+  };
   // Cross-module schedule link (the Schedule + the Site Planner live in SEPARATE cloud backends
   // and can't read each other). When the embedded Schedule app reports a link set/created, mirror
   // the lightweight hint onto the Site Planner side so the Site dashboard can show "has a schedule"
@@ -601,6 +612,7 @@ export default function Shell() {
                     resumeAllowed={mayResumeLastSite({ initialHashEmpty: INITIAL_HASH_EMPTY, projectId, initialProjectId: INITIAL_ROUTE.projectId })}
                     newProjectTick={newProjectTick}
                     docIntent={docIntent}
+                    scheduleTaskIntent={scheduleTaskIntent}
                     onGoDashboard={goDashboard}
                     onNewProject={newProject}
                     onOpenReviewInDocReview={openReviewInDocReview}
@@ -668,6 +680,7 @@ export default function Shell() {
                   onNewProject={newProject}
                   onNavigate={navigate}
                   onOpenReviewInDocReview={openReviewInDocReview}
+                  onOpenTaskInScheduler={openTaskInScheduler}
                 />
               </Suspense>
             </ErrorBoundary>

@@ -141,6 +141,30 @@ describe("Site Model — schema, lifecycle status, selectors", () => {
     expect(twice.role).toBe("tracked");
   });
 
+  // B1161793 (NEW-2) — a pursuit's contractual dates. Plain optional fields: every existing
+  // record (legacy or fresh) reads all three as unset until explicitly entered.
+  it("contractual dates default to null and round-trip an explicit value", () => {
+    const blank = createSiteModel();
+    expect(blank.feasibilityExpiry).toBe(null);
+    expect(blank.loiDate).toBe(null);
+    expect(blank.closingDate).toBe(null);
+    const dated = createSiteModel({ feasibilityExpiry: "2026-09-20", loiDate: "2026-09-12", closingDate: "2026-11-01" });
+    expect(dated).toMatchObject({ feasibilityExpiry: "2026-09-20", loiDate: "2026-09-12", closingDate: "2026-11-01" });
+  });
+
+  it("contractual dates round-trip through migrate (idempotent, additive)", () => {
+    const once = migrate({ id: "s1", parcels: [{ id: "p" }], closingDate: "2026-11-01" });
+    expect(once.closingDate).toBe("2026-11-01");
+    expect(migrate(once).closingDate).toBe("2026-11-01");
+  });
+
+  it("mergeSiteContent resolves a contractual date like any other scalar field — the NEWER side wins", () => {
+    const older = { id: "s1", updatedAt: 1000, loiDate: null };
+    const newer = { id: "s1", updatedAt: 2000, loiDate: "2026-09-12" };
+    expect(mergeSiteContent(older, newer).loiDate).toBe("2026-09-12");
+    expect(mergeSiteContent(newer, older).loiDate).toBe("2026-09-12");
+  });
+
   it("migrate is idempotent (normalize twice == once, ignoring the timestamp)", () => {
     const once = migrate({ id: "s1", parcels: [{ id: "p" }], status: "onhold" });
     const twice = migrate(once);

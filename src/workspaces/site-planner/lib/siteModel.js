@@ -1239,6 +1239,15 @@ export function createSiteModel(p = {}, { onHeal } = {}) {
     // "pursuit" — see siteStatus.js's own comment for why this differs from status's
     // legacy-vs-fresh split.
     role: normRole(p.role),
+    // B1161793 (NEW-2, Dashboard Pursuits card) — a pursuit's contractual dates: when its
+    // feasibility period ends, when an LOI response is due, and its closing date. Plain optional
+    // ISO date strings (null = not yet set) — no legacy-vs-fresh split to make like `status`
+    // needed, since there is no prior meaning to preserve. Set via MapFinder.jsx's "Deal dates…"
+    // site-menu row (SitePlannerApp.jsx's `setSiteDates`, applied across every plan in the group
+    // like `setSiteStatus`); read by the Dashboard's `pursuitsList.js`.
+    feasibilityExpiry: p.feasibilityExpiry || null,
+    loiDate: p.loiDate || null,
+    closingDate: p.closingDate || null,
     // inputs
     parcels: ensureZ(withStableParcelIds(parcelArr(p.parcels))),
     // placed site-plan overlays (B72): backdrop PDFs/images positioned on the map by

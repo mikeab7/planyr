@@ -20,21 +20,28 @@ import { Button, ToggleChip } from "../../shared/ui/controls.jsx";
 import { RADIUS } from "../../shared/ui/radius.js";
 import DashboardCard from "./components/DashboardCard.jsx";
 import {
-  JumpBackInCard, PipelineCard, PursuitsByActivityCard, GoingQuietCard, CompsSummaryCard, ScheduleHealthCard,
+  JumpBackInCard, PipelineCard, GoingQuietCard, CompsSummaryCard, ScheduleHealthCard,
   CardSkeleton,
 } from "./components/DashboardCards.jsx";
+import { NeedsAttentionCard } from "./components/NeedsAttentionCard.jsx";
+import { PursuitsCard } from "./components/PursuitsCard.jsx";
 import { CARD_DEFS, normalizeLayout, availableToAdd, addCard, removeCard, toggleCardSize, moveCard } from "./lib/dashboardLayout.js";
 import { loadDashboardLayout, saveDashboardLayout } from "./lib/dashboardPrefs.js";
 import { fetchSiteSummaries } from "./lib/dashboardSitesFetch.js";
 import { fetchCompsCounts } from "./lib/dashboardCompsFetch.js";
 import { fetchLastTouchedDoc } from "./lib/dashboardDocFetch.js";
 import { fetchScheduleProjects } from "./lib/dashboardScheduleFetch.js";
-import { groupProjectsByGroupId, pipelineCounts, pursuitsByActivity, goingQuiet, mostRecentProject } from "./lib/dashboardPipeline.js";
+import { fetchAllElementRecency } from "./lib/dashboardElementRecencyFetch.js";
+import { fetchElementsForSites } from "./lib/dashboardYieldFetch.js";
+import { yieldBySite } from "./lib/buildingYield.js";
+import { groupProjectsByGroupId, pipelineCounts, goingQuiet, mostRecentProject } from "./lib/dashboardPipeline.js";
 import { summarizeScheduleHealth } from "./lib/scheduleHealth.js";
+import { needsAttentionList } from "./lib/needsAttentionList.js";
+import { pursuitsTable, quietDaysByGroupFromRows } from "./lib/pursuitsList.js";
 
 const SAVE_DEBOUNCE_MS = 900;
 
-export default function Dashboard({ onShellSwitch, authControl, accountActive, userId, onNewProject, onNavigate, onOpenReviewInDocReview }) {
+export default function Dashboard({ onShellSwitch, authControl, accountActive, userId, onNewProject, onNavigate, onOpenReviewInDocReview, onOpenTaskInScheduler }) {
   const [layout, setLayout] = useState(() => normalizeLayout(null));
   const [customizing, setCustomizing] = useState(false);
   const [saveNote, setSaveNote] = useState(null); // null | "saved" | "local" | "error"
@@ -71,6 +78,15 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
   const [comps, setComps] = useState(null);
   const [doc, setDoc] = useState(null);
   const [scheduleProjects, setScheduleProjects] = useState(null);
+  // B1161793 (NEW-2) — building elements for each open pursuit's own representative plan, for
+  // the Yield column. Fetched as a genuinely SECOND round trip (not a fifth parallel branch):
+  // which plans to ask for isn't known until `sites` resolves — see the effect below.
+  const [yieldRows, setYieldRows] = useState([]);
+  // B1161793 (NEW-2) — per-project real-edit-recency days for the Pursuits card's "Quiet for"
+  // column (never sites.updated_at — see dashboardElementRecencyFetch.js's own header). Computed
+  // inside the effect below, not a useMemo, because deriving it needs `siteRecency.js`'s
+  // aggregation, which is loaded dynamically (see that import's own comment just below).
+  const [quietDaysByGroup, setQuietDaysByGroup] = useState({});
   // NEW-1 — every card's row count is unknown until its own source resolves, so a card that
   // resolves quickly used to show its final content (and take real taps) before a slower sibling
   // card had grown into its own final height, shoving the whole grid below it down the page out
@@ -80,36 +96,56 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
   useEffect(() => {
     let live = true;
     setDataReady(false);
-    Promise.allSettled([
-      fetchSiteSummaries().then((v) => { if (live) setSites(v); }),
-      fetchCompsCounts().then((v) => { if (live) setComps(v); }),
-      fetchLastTouchedDoc().then((v) => { if (live) setDoc(v); }),
-      fetchScheduleProjects().then((v) => { if (live) setScheduleProjects(v); }),
-    ]).then(() => { if (live) setDataReady(true); });
+    (async () => {
+      const results = await Promise.allSettled([
+        fetchSiteSummaries().then((v) => { if (live) setSites(v); return v; }),
+        fetchCompsCounts().then((v) => { if (live) setComps(v); }),
+        fetchLastTouchedDoc().then((v) => { if (live) setDoc(v); }),
+        fetchScheduleProjects().then((v) => { if (live) setScheduleProjects(v); }),
+        fetchAllElementRecency().then((v) => v),
+      ]);
+      if (!live) return;
+      const siteRows = results[0].status === "fulfilled" ? results[0].value || [] : [];
+      const elementRecencyRows = results[4].status === "fulfilled" ? results[4].value || [] : [];
+      const openPursuits = pursuitsTable(groupProjectsByGroupId(siteRows), {});
+      const pursuitSiteIds = [...new Set(openPursuits.map((p) => p.siteId).filter(Boolean))];
+      const elementRows = await fetchElementsForSites(pursuitSiteIds).catch(() => []);
+      if (!live) return;
+      setYieldRows(elementRows);
+      setQuietDaysByGroup(quietDaysByGroupFromRows(elementRecencyRows, siteRows));
+      setDataReady(true);
+    })();
     return () => { live = false; };
   }, [userId]);
 
   const projects = useMemo(() => groupProjectsByGroupId(sites), [sites]);
+  const yieldBySiteMap = useMemo(() => yieldBySite(yieldRows), [yieldRows]);
+  const needsAttentionRows = useMemo(() => (scheduleProjects ? needsAttentionList(scheduleProjects) : []), [scheduleProjects]);
+  const pursuitsRows = useMemo(() => pursuitsTable(projects, quietDaysByGroup), [projects, quietDaysByGroup]);
+
   const cardData = useMemo(() => ({
     jumpBackIn: { project: mostRecentProject(projects), doc },
     pipelineStatus: { counts: pipelineCounts(projects) },
-    pursuitsByActivity: { rows: pursuitsByActivity(projects) },
+    needsAttention: { rows: needsAttentionRows },
+    pursuitsTable: { rows: pursuitsRows, yieldBySite: yieldBySiteMap },
     goingQuiet: { rows: goingQuiet(projects) },
     compsSummary: { counts: comps },
     scheduleHealth: { rows: scheduleProjects ? summarizeScheduleHealth(scheduleProjects) : [] },
-  }), [projects, doc, comps, scheduleProjects]);
+  }), [projects, doc, comps, scheduleProjects, needsAttentionRows, pursuitsRows, yieldBySiteMap]);
 
   const openProject = (p) => onNavigate?.({ module: "site-planner", projectId: p.groupId, cross: false, org: false });
   const openSchedule = (p) => onNavigate?.({ module: "scheduler", projectId: p.linkedSiteId, cross: false, org: false });
   const openDoc = (d) => onOpenReviewInDocReview?.({ id: d.id, project_id: d.projectId });
+  const openTask = (row) => onOpenTaskInScheduler?.({ linkedSiteId: row.linkedSiteId, taskId: row.taskId });
 
   // NEW-1 — while data is still loading every slot renders the SAME stable-height skeleton
   // instead of its real (variable-height) card; see the `dataReady` effect above.
-  const SKELETON_ROWS = { jumpBackIn: 2, pipelineStatus: 2, scheduleHealth: 3, pursuitsByActivity: 3, compsSummary: 2, goingQuiet: 3 };
+  const SKELETON_ROWS = { jumpBackIn: 2, pipelineStatus: 2, scheduleHealth: 3, needsAttention: 4, pursuitsTable: 4, compsSummary: 2, goingQuiet: 3 };
   const CARD_RENDERERS = dataReady ? {
     jumpBackIn: () => <JumpBackInCard {...cardData.jumpBackIn} onOpenProject={openProject} onOpenDoc={openDoc} />,
     pipelineStatus: () => <PipelineCard {...cardData.pipelineStatus} />,
-    pursuitsByActivity: () => <PursuitsByActivityCard {...cardData.pursuitsByActivity} onOpenProject={openProject} />,
+    needsAttention: () => <NeedsAttentionCard {...cardData.needsAttention} onOpenTask={openTask} />,
+    pursuitsTable: () => <PursuitsCard {...cardData.pursuitsTable} onOpenProject={openProject} />,
     goingQuiet: () => <GoingQuietCard {...cardData.goingQuiet} onOpenProject={openProject} />,
     compsSummary: () => <CompsSummaryCard {...cardData.compsSummary} />,
     scheduleHealth: () => <ScheduleHealthCard {...cardData.scheduleHealth} onOpenSchedule={openSchedule} />,
