@@ -2361,6 +2361,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // one on an edge and Shift-clicking one off have always worked in Select with a parcel selected.
   // It arms Select, keeps a parcel selected, and shows the banner that TEACHES the three gestures.
   const [boundaryEdit, setBoundaryEdit] = useState(false);
+  // NEW-1 (B1264944) — RECURRENCE of the B1253248 placement-cursor fix: "Edit boundary corners"
+  // arms the plain Select tool (see startBoundaryEdit above) rather than a distinct mode, so every
+  // "tool === 'select'" cursor ternary in this file — buildings, parcels, markups, the base canvas —
+  // read it as ordinary Select and showed what the object underneath would do there (grab a
+  // building, drag a parcel) instead of what THIS mode is for: editing a boundary's corners.
+  // `boundaryEdit` only ever holds while tool==="select" (selectTool clears it the instant any
+  // other tool is picked), so this flag alone is exactly the condition every such ternary needs to
+  // add, matching how the 17 placement tools already hold crosshair over anything drawn on them.
+  const editingCorners = boundaryEdit && tool === "select";
 
   // B688864 — persisted via `settings.aerialHidden` (sparse; absent = shown), NOT a plain
   // component state, so Hide/Remove survive a reload instead of resetting to shown every mount.
@@ -16514,7 +16523,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
            dblclick itself; every other label is pointer-transparent and the press resolves to the
            shape underneath it, which is the same answer. */
         data-feature={isPondLabel ? `el:${d.el.id}` : undefined}
-        pointerEvents={isPondLabel ? "auto" : "none"} style={isPondLabel ? { cursor: "pointer" } : undefined}
+        pointerEvents={isPondLabel ? "auto" : "none"}
+        // NEW-1 (B1264944) — click/double-click stay live even in "Edit boundary corners" (still
+        // the plain Select tool underneath), so only the CURSOR changes there, matching every
+        // other selectable object's own hover cursor in that mode.
+        style={isPondLabel ? { cursor: editingCorners ? "crosshair" : "pointer" } : undefined}
         onPointerDown={isPondLabel ? (e) => {
           if (e.button !== 0) return;
           e.stopPropagation();
@@ -16588,7 +16601,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           the user has opted into having on top.
        The cursor and the handler read the SAME flag, so the `move` cursor can never appear on a
        badge that will not actually drag (the other half of the owner's report). */
-    const draggable = tool === "select" && hoverChipId === pc.id;
+    const draggable = tool === "select" && !editingCorners && hoverChipId === pc.id;
     return (
       /* ⛔ NEW-1 (B280402) — `data-chrome` makes this badge IDENTITY-TRANSPARENT, and it is the whole
          fix for the owner's second-double-click failure. B1327 gated the badge on HOVER so it could be
@@ -16682,7 +16695,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      site-size independent — nothing here reads the plan. */
   const featEditOpacity = featureEditOpacity(rppf, size.w);
   const sideAddNodes = (() => {
-    if (tool !== "select" || !featActiveId || !featEditOpacity) return null;
+    if (tool !== "select" || editingCorners || !featActiveId || !featEditOpacity) return null; // NEW-1 (B1264944): the mode's own crosshair, not a "+" button
     const el = els.find((x) => x.id === featActiveId);
     if (el && el.locked) return null;
     // dog-ears / bump-outs are building elements but are NOT standalone buildings —
@@ -16842,7 +16855,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // "+ / −" on a selected car-parking field's depth edge: add or remove a row +
   // drive aisle. Keeps stacking, so you can build a multi-aisle lot.
   const parkingAddNodes = (() => {
-    if (tool !== "select" || !featActiveId || !featEditOpacity) return null; // NEW-2: the zoom gate
+    if (tool !== "select" || editingCorners || !featActiveId || !featEditOpacity) return null; // NEW-2: the zoom gate; NEW-1 (B1264944): the mode's own crosshair, not a "+" button
     const el = els.find((x) => x.id === featActiveId);
     if (!el || el.locked || el.points || el.type !== "parking") return null;
     if (Math.min(Math.abs(el.w), Math.abs(el.h)) * rppf < FEAT_BTN_MIN_PX) return null; // B225: hide before it clusters
@@ -17010,7 +17023,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!selParcel || !selRuns) return null;
     const dfz = dimFontPx(labelPpf) * labelK;
     const locked = selParcel.locked;
-    const editable = tool === "select";
+    const editable = tool === "select" && !editingCorners;
     // NEW-2 — the SAME screen-space thinning the setback chips get. A curved boundary's short
     // sides pass detailLabelVisible individually while still landing on top of one another, so
     // the length numbers piled up exactly like the chips did. Longest side wins the space; the
@@ -17265,7 +17278,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // element, hovering a reference image showed a plain arrow instead of the placement
         // cursor. Functionally harmless (startMoveSheetOverlay already checks tool==="select"
         // before acting) but exactly the affordance mismatch the owner reported.
-        style={{ cursor: ovAlignBase === o.id ? "crosshair" : (tool === "select" && !o.locked ? "move" : "crosshair") }}
+        style={{ cursor: ovAlignBase === o.id ? "crosshair" : (tool === "select" && !editingCorners && !o.locked ? "move" : "crosshair") }}
         pointerEvents={o.locked ? "none" : "auto"}
         onPointerDown={(e) => startMoveSheetOverlay(e, o.id)}
         onContextMenu={(e) => onOverlayContext(e, o.id)}>
@@ -17330,7 +17343,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                to any element, and was interactive regardless of tool: a placement click that landed
                on it showed a "click to re-add" cursor and was swallowed instead of placing. */
             pointerEvents={tool === "select" ? "auto" : "none"}
-            style={{ cursor: tool !== "select" ? "crosshair" : (ovLoading ? "default" : "pointer") }}
+            style={{ cursor: (tool !== "select" || editingCorners) ? "crosshair" : (ovLoading ? "default" : "pointer") }}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={ovLoading ? undefined : (e) => { e.stopPropagation(); if (ovErr === "network") retryOverlay(o.id); else reAddOverlay(o.id); }}>
             <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
@@ -18931,7 +18944,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // NEW-1 (B1253248) — leftover parcel selection: without the tool check, this chip stayed a
     // live "click to edit the setback" hotspot (pointer cursor + click handler) while a placement
     // tool was active, exactly like the resize/rotate grips above.
-    if (!settings.showSetback || !selParcel || !selRuns || tool !== "select") return null;
+    if (!settings.showSetback || !selParcel || !selRuns || tool !== "select" || editingCorners) return null; // NEW-1 (B1264944): the mode's own crosshair, not a "click to edit" pointer — the setback RING stays visible, only its numeric chips step aside
     // The exception to the zoom floor: the user is IN the setback editor (drilled past the
     // four-role default, or with an inline value editor open), so the chips are the edit surface.
     const editing = sbEditMode !== "role" || !!numEdit;
@@ -19072,7 +19085,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const ring = o.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
     return (
       <polygon data-testid="setback-grab" points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
-        style={{ cursor: tool === "select" ? (selParcel.locked ? "default" : "move") : "crosshair" }}
+        style={{ cursor: (tool === "select" && !editingCorners) ? (selParcel.locked ? "default" : "move") : "crosshair" }}
         onPointerDown={(e) => startMoveParcel(e, selParcel.id)}
         onContextMenu={(e) => onParcelContext(e, selParcel.id)} />
     );
@@ -21333,7 +21346,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       /* NEW-1 (B1253248) — was "default" outside Select: a plain arrow over a
                          callout while placing something new, instead of the placement crosshair.
                          Harmless functionally (startMoveCallout already checks tool==="select"). */
-                      style={{ cursor: tool === "select" ? "move" : "crosshair" }}
+                      style={{ cursor: (tool === "select" && !editingCorners) ? "move" : "crosshair" }}
                       onPointerDown={(e) => startMoveCallout(e, c.id, "box")}
                       onContextMenu={(e) => onCalloutContext(e, c.id, -1)}
                       onDoubleClick={(e) => {
@@ -21590,7 +21603,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const chipNode = chip ? (
                   <g data-print-chip="measure" data-measure-chip={m.id || `m${i}`}
                     pointerEvents={tool === "select" ? "auto" : "none"}
-                    style={tool === "select" ? { cursor: "move" } : undefined}
+                    style={(tool === "select" && !editingCorners) ? { cursor: "move" } : undefined}
                     onPointerDown={tool === "select" ? (e) => startMeasChip(e, i) : undefined}
                     onContextMenu={(e) => onMeasureContext(e, i)}>
                     {chip.moved && <line x1={chip.anchor.x} y1={chip.anchor.y} x2={chip.c.x} y2={chip.c.y} stroke={mcolor} strokeWidth={1} opacity={0.55} />}
@@ -21633,7 +21646,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           and sized in constant screen px, so it is stripped from the sheet (NEW-1). */}
                       {pts.map((p, k) => (
                         <circle key={`h${k}`} data-export="skip" cx={p.x} cy={p.y} r={12} fill="transparent" stroke="transparent"
-                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: "move" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
+                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: (canGrab && !editingCorners) ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
                       ))}
                       {/* NEW-3 — the chip paints AFTER the hit targets, or the transparent grab
                           layer sits on top of it in document order and swallows the chip drag. */}
@@ -21696,9 +21709,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         constant screen px, so it has no business on a sheet even while it is transparent. */}
                     {isArea
                       ? <polygon data-export="skip" points={ptsStr} fill="transparent" stroke="transparent" strokeWidth={14}
-                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: "move" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
+                          pointerEvents={canGrab ? "all" : "none"} style={{ cursor: (canGrab && !editingCorners) ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />
                       : <polyline data-export="skip" points={ptsStr} fill="none" stroke="transparent" strokeWidth={14}
-                          pointerEvents={canGrab ? "stroke" : "none"} style={{ cursor: "move" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />}
+                          pointerEvents={canGrab ? "stroke" : "none"} style={{ cursor: (canGrab && !editingCorners) ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMeasure(e, i)} onContextMenu={(e) => onMeasureContext(e, i)} />}
                     {/* NEW-3 — the chip paints AFTER the hit path. An AREA's grab layer is a
                         transparent FILLED polygon covering the whole shape, so a chip drawn before
                         it was unreachable: every press over the chip landed on the grab layer and
@@ -21736,7 +21749,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // four-arrow "move" cursor (that false affordance is exactly what the owner hit: a
                 // locked shape shows "move" but nothing happens). It stays selectable (click → Unlock),
                 // so a plain "pointer" reads honestly.
-                const mkCursor = { cursor: tool === "select" ? (m.locked ? "pointer" : "move") : "crosshair" };
+                const mkCursor = { cursor: (tool === "select" && !editingCorners) ? (m.locked ? "pointer" : "move") : "crosshair" };
                 const common = { stroke: nStroke, strokeWidth: vsw, strokeDasharray: da, fill: "none", style: mkCursor, onPointerDown: (e) => startMoveMarkup(e, m.id), onContextMenu: (e) => onMarkupContext(e, m.id) };
                 // B920/NEW-1 — a closed shape (rect/ellipse/polygon) grabs by its whole INTERIOR only
                 // when it is FILLED. An UNFILLED one (fillOpacity 0) grabs on its stroke + a forgiving
@@ -22244,7 +22257,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             data-view-offx={view.offX} data-view-offy={view.offY} data-view-ppf={view.ppf}
             data-reg-dx={regShift.dx} data-reg-dy={regShift.dy}
             data-pan-dx={panDx} data-pan-dy={panDy} data-pan-k={panK} data-render-ppf={rppf}
-            style={{ position: "relative", zIndex: 1, transform: (regShift.dx || regShift.dy) ? `translate(${regShift.dx}px, ${regShift.dy}px)` : undefined, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            style={{ position: "relative", zIndex: 1, transform: (regShift.dx || regShift.dy) ? `translate(${regShift.dx}px, ${regShift.dy}px)` : undefined, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : editingCorners ? "crosshair" : (tool === "select" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => {
               // Don't cancel the default action when the mousedown lands on an inline text
               // editor (a foreignObject <textarea>/<input> — the callout/text box, the inline
@@ -22400,7 +22413,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       that sits hard against the setback line. Every other parcel keeps it here. */}
                   {pc.id !== selParcel?.id && (
                     <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
-                      style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
+                      style={{ cursor: (tool === "select" && !editingCorners) ? (pc.locked ? "default" : "move") : "crosshair" }}
                       onPointerDown={(e) => startMoveParcel(e, pc.id)}
                       onContextMenu={(e) => onParcelContext(e, pc.id)} />
                   )}
@@ -22447,7 +22460,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     strokeDasharray={inactive ? "8 6" : dashArray(pc.dash, baseW)} opacity={inactive ? 0.4 : 1}
                     pointerEvents="none" />
                   <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
-                    style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : (tool === "parcel" && parcelMode === "remove") ? "pointer" : "crosshair" }}
+                    style={{ cursor: (tool === "select" && !editingCorners) ? (pc.locked ? "default" : "move") : (tool === "parcel" && parcelMode === "remove") ? "pointer"
+                      // NEW-1 (B1264944) — the SECOND of the mode's two legitimate cursor variations:
+                      // over the edge where Shift-click/right-click would insert a corner (the same
+                      // spot `insHint`'s dot already marks), the cursor says "add a point" rather than
+                      // the plain corner-editing crosshair. Scoped to the parcel actually being edited
+                      // so a stray insHint from some OTHER selected editable path can't paint this cursor.
+                      : (editingCorners && insHint && sel?.kind === "parcel" && sel.id === pc.id) ? "copy" : "crosshair" }}
                     onPointerDown={(e) => startMoveParcel(e, pc.id)}
                     onContextMenu={(e) => onParcelContext(e, pc.id)} />
                 </g>;
@@ -22504,7 +22523,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   ))}
                 </g>
               )}
-              {drawElsZ.below.map((el) => <ElNode key={el.id} el={el} f2p={f2p} isSel={sel?.kind === "el" && sel.id === el.id} tool={tool} settings={settings} H={elHandlers} nb={elNeighbors.get(el.id)} dimHidden={dimSuppressed?.has(el.id) || false} roadNet={roadNet} lf={labelFrame} />)}
+              {drawElsZ.below.map((el) => <ElNode key={el.id} el={el} f2p={f2p} isSel={sel?.kind === "el" && sel.id === el.id} tool={tool} settings={settings} H={elHandlers} nb={elNeighbors.get(el.id)} dimHidden={dimSuppressed?.has(el.id) || false} roadNet={roadNet} lf={labelFrame} editingCorners={editingCorners} />)}
               {/* NEW-4 — civil radius conflict flags. A corner the leg is too short to carry gets marked
                   ON THE PLAN, so a non-compliant turn can't hide until someone selects the road. Review
                   chrome: data-export="skip" keeps it out of the PDF a consultant receives. */}
@@ -22660,7 +22679,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   lands here, and it needs the same junction-sharpening + roundabout trims the road
                   band gets. It is excluded from the dissolve (see the roadNet memo), so `inNetwork`
                   is false and it paints its own strip here rather than twice. */}
-              {drawElsZ.above.map((el) => <ElNode key={el.id} el={el} f2p={f2p} isSel={sel?.kind === "el" && sel.id === el.id} tool={tool} settings={settings} H={elHandlers} nb={elNeighbors.get(el.id)} dimHidden={dimSuppressed?.has(el.id) || false} roadNet={roadNet} lf={labelFrame} />)}
+              {drawElsZ.above.map((el) => <ElNode key={el.id} el={el} f2p={f2p} isSel={sel?.kind === "el" && sel.id === el.id} tool={tool} settings={settings} H={elHandlers} nb={elNeighbors.get(el.id)} dimHidden={dimSuppressed?.has(el.id) || false} roadNet={roadNet} lf={labelFrame} editingCorners={editingCorners} />)}
               {/* NEW-1 (B806080) — element/dimension labels paint HERE, right after the element pass
                   and before every annotation-above rung (markup/reference/callout/measure). They used
                   to render dead last (after all four), which made "bring to front" on a callout inert
@@ -28330,7 +28349,7 @@ function resolveDockPlan(el, settings, dogEars) {
    `ElNode`'s memo is sound. `isSel`/`dimHidden` are likewise pre-resolved booleans rather than the
    whole `sel` object and the whole suppressed-id Set, so a selection change re-renders the two
    elements it concerns instead of all of them. */
-function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb, startDimMove, onDimNumberDown, onElContext, dimHidden, roadNet, lf = null) {
+function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb, startDimMove, onDimNumberDown, onElContext, dimHidden, roadNet, lf = null, editingCorners = false) {
   // NEW-2 — the junction vertices whose corners render SHARP, read off the road-network data this
   // renderer already receives (renderElPx is module-level, so it cannot close over the memo).
   const sharpFor = (e) => (roadNet && roadNet.junctionVerts && e && e.id != null ? roadNet.junctionVerts.get(e.id) : undefined);
@@ -28441,7 +28460,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
       return out.length ? out : null;
     })() : null;
     return (
-      <g key={el.id} data-el-id={el.id} data-feature={`el:${el.id}`} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
+      <g key={el.id} data-el-id={el.id} data-feature={`el:${el.id}`} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: (tool === "select" && !editingCorners) ? (el.locked ? "pointer" : "move") : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
         onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>
         <path d={dPath} fill={ghostPath ? addF : waterFill} fillOpacity={waterOp} stroke="none" />
@@ -28663,7 +28682,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
     // pavement) so it doesn't sit on the drawn centerline; default rides the centerline as before.
     rparts.push(...inlineLabelEls(roadDenseCenterline(el, settings, sharpFor(el)), el.inlineLabel, st.stroke, el.labelSpacing || INLINE_LABEL_SPACING.road, ppf, f2p, `il${el.id}-`, { size: el.labelSize, halo: el.labelHalo, place: labelPlaceOf(el), lf, insetFt: labelPlaceOf(el) === "inside" ? Math.max(0, (+el.travelW || 0) / 4) : 0 }));
     return (
-      <g key={el.id} data-el-id={el.id} data-feature={`el:${el.id}`} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
+      <g key={el.id} data-el-id={el.id} data-feature={`el:${el.id}`} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: (tool === "select" && !editingCorners) ? (el.locked ? "pointer" : "move") : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
         onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>{rparts}</g>
     );
@@ -28974,7 +28993,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
   // `data-el-id` on the element's own group (NEW-2/NEW-3): a headless harness can measure ONE
   // element's real rendered geometry — the same identifier the junction outline-cut group already
   // carries. Inert markup: no styling, no behaviour, and it rides through the export clone harmlessly.
-  return <g key={el.id} data-el-id={el.id} data-feature={`el:${el.id}`} transform={`rotate(${el.rot} ${c.x} ${c.y})`} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? (el.locked ? "pointer" : "move") : "crosshair" }}
+  return <g key={el.id} data-el-id={el.id} data-feature={`el:${el.id}`} transform={`rotate(${el.rot} ${c.x} ${c.y})`} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: (tool === "select" && !editingCorners) ? (el.locked ? "pointer" : "move") : "crosshair" }}
     onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
     onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>{parts}</g>;
 }
@@ -29010,8 +29029,8 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
  *      an array that changes on every model edit (harmless) OR, worse, tempt someone to key the
  *      memo on `el` alone, which draws stale curbs when a NEIGHBOUR moves.
  */
-const ElNode = memo(function ElNode({ el, f2p, isSel, tool, settings, H, nb, dimHidden, roadNet, lf }) {
-  return renderElPx(el, f2p, isSel, tool, settings, H.startMoveEl, H.onElDouble, nb, H.startDimMove, H.onDimNumberDown, H.onElContext, dimHidden, roadNet, lf);
+const ElNode = memo(function ElNode({ el, f2p, isSel, tool, settings, H, nb, dimHidden, roadNet, lf, editingCorners }) {
+  return renderElPx(el, f2p, isSel, tool, settings, H.startMoveEl, H.onElDouble, nb, H.startDimMove, H.onDimNumberDown, H.onElContext, dimHidden, roadNet, lf, editingCorners);
 });
 
 /* ----------------------------- small UI ----------------------------- */
