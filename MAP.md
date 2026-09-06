@@ -1,6 +1,6 @@
 # MAP.md — Planyr codebase map
 
-> **Generated 2026-09-06 @ `fd1b22412` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
+> **Generated 2026-09-06 @ `6ce7f135` by `scripts/build-map.mjs` — do not hand-edit the inventory.**
 > This file is committed so project-knowledge sync indexes it and a session can orient without
 > cold-searching the repo. Each entry: **path** — one-line responsibility, then its exported symbols.
 >
@@ -15,7 +15,7 @@
 > iframe), **Doc Review**, **Library**. `/server` is listed as folder structure only (below) —
 > never its contents or secrets.
 
-_695 source files mapped._
+_697 source files mapped._
 
 ## infra
 
@@ -1303,8 +1303,12 @@ _695 source files mapped._
   - _exports_: `buildQueryUrl`, `buildVectorQuery`, `decideVectorOrImage`, `douglasPeucker`, `featuresToGeoJson`, `fetchCached`, `fetchVectorFeatures`, `hitFeature`, `identifyRows`, `pickTier`, `simplifyGeoJson`, `snapBbox`, `styleFor`, `VECTOR_SOURCES`, `vectorKey`
 - **`src/workspaces/site-planner/lib/vectorOverlay.js`** — Leaflet glue over the vector cache tier: cachedVectorLayer paints last-good boundaries instantly, background-refreshes, hover/click identify (identifyOk-gated), zoom-gated divIcon name labels, live esri-leaflet fallback
   - _exports_: `appendIdentifyRows`, `cachedCorridorLayer`, `cachedPipelineLayer`, `cachedVectorLayer`, `decodeFieldValue`, `identifyHref`, `identifyRowsFor`, `identifyTitle`, `isPointFeature`
+- **`src/workspaces/site-planner/lib/viewChangeRecorder.js`** — Records every `setView` with its before/after view, call stack and whether a TRUSTED gesture authorised it, on one timeline with visibility/freeze/resume/network/long-task events. Diag-armed, read-only.
+  - _exports_: `attachTimeline`, `classifyChange`, `createViewChangeRecorder`, `GESTURE_EVENTS`, `GESTURE_WINDOW_MS`, `MAX_CHANGES`, `MAX_EVENTS`, `topAppFrame`
 - **`src/workspaces/site-planner/lib/viewCull.js`** — Viewport culling for the feet-frame SVG (screen only — the export always renders the complete model)
   - _exports_: `boundsIntersect`, `CULL_MARGIN`, `CULL_MIN_ELEMENTS`, `CULL_REARM`, `cullRectFor`, `cullToView`, `elementBounds`, `sameRect`, `shouldCull`, `visibleWorldRect`
+- **`src/workspaces/site-planner/lib/viewFramingGate.js`** — The one gate every automatic view framing passes: a framing takes a ticket when REQUESTED and may execute only if the user has not moved the view since.
+  - _exports_: `createViewFramingGate`
 - **`src/workspaces/site-planner/lib/wellStatus.js`** — Pure RRC well status classifier (PHASE 4): SYMNUM/description → producing/plugged/dry/abandoned/injection, and `summarizeWells` turns a proximity result into a status breakdown + an on-site offset/replug risk flag
   - _exports_: `classifyWell`, `summarizeWells`
 - **`src/workspaces/site-planner/lib/wseProviders.js`** — the pluggable estimated-WSE provider registry (B882, pure): per-county precedence (district model → FEMA InFRM EBFE → grade) + provenance labels; `resolveEstimatedWse` picks the winning 1%/0.2% source and reports cross-provider disagreement.
