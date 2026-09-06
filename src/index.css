@@ -272,6 +272,12 @@
      white in BOTH themes, so its border + numerals are a fixed near-black — owner default
      2026-07-30, replacing the amber-on-amber that was unreadable over the setback band. */
   --canvas-chip-ink:    #15171C;
+  /* NEW-1 — the scale bar / north arrow plate background. Map CHROME over the aerial (like the
+     Layers/View panels), not drawn site content, so it follows the theme — unlike --canvas-chip-ink
+     just above, which is a deliberate fixed-white exception. Byte-identical to the plate's old
+     hardcoded-only value in light, so this fix changes nothing already visible there. JS mirror:
+     src/shared/theme/palette.js `canvasPlateFill` (SVG attributes can't read var()). */
+  --canvas-plate-fill:  rgba(249, 248, 244, 0.84);
   --canvas-selection:   #C2410C;   /* drafting red-orange — selection + dimension lines */
   --canvas-accent-soft: #f0d9cc;
   --canvas-mat:         #DCE1E8;
@@ -425,6 +431,9 @@
   --canvas-setback:     var(--canvas-parcel);
   --canvas-line-casing: rgba(0, 0, 0, 0.55);
   --canvas-chip-ink:    #15171C;   /* the chip plate stays white on dark too — same near-black ink */
+  /* NEW-1 — a translucent dark card, matching the "frosted floating panel" every other dark-theme
+     overlay panel already uses (--surface-overlay). No prior dark-mode look to preserve here. */
+  --canvas-plate-fill:  rgba(24, 27, 33, 0.93);
   --canvas-selection:   #F26B3A;
   --canvas-accent-soft: rgba(242, 107, 58, 0.18);
   --canvas-mat:         #0E1014;
@@ -792,4 +801,41 @@ kbd {
 .leaflet-control-locate.leaflet-bar a {
   border-top-left-radius: 0; border-top-right-radius: 0;
   border-bottom-left-radius: 0; border-bottom-right-radius: 0;
+}
+
+/* NEW-1 — MapFinder's bottom-chrome Leaflet controls (zoom, locate, the graphic scale bar, the
+ * attribution line) are vendor Leaflet widgets and vendor `leaflet.css` hardcodes them white with
+ * dark text — completely theme-blind, the same species of bug as the Site Planner canvas's own
+ * scale bar / north arrow furniture (sheetFurniture.js), just inherited from the library instead
+ * of self-inflicted. `:root` is prefixed on every rule (`:root` always matches `<html>`, so this
+ * changes nothing behaviourally) purely to OUTRANK vendor Leaflet, whose own attribution rule is
+ * already `.leaflet-container .leaflet-control-attribution` — measured live: a bare match at that
+ * same specificity lost to it, because Leaflet's stylesheet is imported from inside the lazy
+ * SitePlanner/MapFinder chunks and can land after this file in the bundle. Same specificity
+ * discipline the radius rules above already use, just with a belt-and-suspenders margin.
+ * `--surface-overlay` (the "frosted floating panel over the map" token the Layers/View panels
+ * already use) keeps every piece of bottom map chrome on one consistent look in both themes. */
+:root .leaflet-container .leaflet-bar a {
+  background-color: var(--surface-overlay);
+  color: var(--chrome-text);
+}
+:root .leaflet-container .leaflet-bar a:hover,
+:root .leaflet-container .leaflet-bar a:focus {
+  background-color: var(--chrome-bg-elev);
+}
+:root .leaflet-container .leaflet-bar a.leaflet-disabled {
+  background-color: var(--surface-overlay);
+  color: var(--chrome-muted);
+}
+:root .leaflet-container .leaflet-control-scale-line {
+  background: var(--surface-overlay);
+  border-color: var(--border-default);
+  color: var(--chrome-text);
+}
+:root .leaflet-container .leaflet-control-attribution {
+  background: var(--surface-overlay);
+  color: var(--chrome-muted);
+}
+:root .leaflet-container .leaflet-control-attribution a {
+  color: var(--chrome-text);
 }

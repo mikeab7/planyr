@@ -487,6 +487,24 @@ selection handle is a fixed size because it is a touch target on a drawing, a pr
 the canvas exactly per PDF-PARITY. None of that is a UI-control decision the token scale above
 governs, and citing `RADIUS`/`FONT_SIZE` at a road curb return would be a category error.
 
+**⛔ NEW-1 — THE MAP'S OWN "SHEET FURNITURE" (the scale bar, the north arrow, the calibration
+badge — `lib/sheetFurniture.js`) IS THE ONE EXCEPTION, AND IT CUTS THE OTHER WAY: it IS chrome and
+MUST follow the theme, even though it is drawn with the same SVG primitives as the content above
+it.** Owner report, an iPhone screenshot in night mode: the scale bar and north arrow sat in a
+fixed near-white plate while the neighbouring status chip correctly went dark — *"map CHROME
+(scale bar, north arrow, attribution, zoom stack, status chips) SHOULD follow the theme.
+DRAWING CONTENT (buildings, ponds, paving, parcel lines, labels) should NOT — it represents the
+site."* The tell that separates the two: sheet furniture describes the MAP VIEW itself (how big is
+it, which way is north), not a fact about the SITE, so unlike a building's fill it has no
+real-world color to stay faithful to. `sheetFurniture.js`'s plate now reads a theme-aware
+`pal.plateFill` on screen (`SitePlanner.jsx`'s `PAL.plateFill` ← `palette.js`'s `canvasPlateFill`)
+and falls back to a fixed light default when none is given — which is exactly what the PDF/PNG
+export deliberately does (`exportSheet.js` passes no `pal` to the furniture composer), because a
+printed sheet must stay paper-colored no matter what theme the app happened to be in at Download
+time. The same stock-Leaflet-control theme-blindness exists on the Map Finder's own scale bar,
+attribution and zoom/locate buttons (`index.css`'s `.leaflet-control-*` overrides) — inherited from
+the library rather than self-inflicted, fixed the same way.
+
 **The boundary is a stated, reviewable file/path list**, not a per-line judgment call — see
 `DRAWING_SURFACE_PATHS` in `ui-audit/design-drift-audit.mjs`, currently:
 

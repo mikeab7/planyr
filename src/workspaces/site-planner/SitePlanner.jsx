@@ -1763,6 +1763,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     paper: themePal.canvasBg, gridMinor: themePal.canvasGridMinor, gridMajor: themePal.canvasGridMajor,
     ink: themePal.textPrimary, accent: themePal.canvasSelection, accentSoft: themePal.canvasAccentSoft,
     setback: themePal.canvasSetback, parcel: themePal.canvasParcel, panelBg: themePal.surfaceRaised,
+    // NEW-1 — the scale bar / north arrow "plate" background (sheetFurniture.js). These are map
+    // CHROME sitting over the aerial, like the Layers/View panels — not drawn site content — so
+    // the plate must follow the theme the way its neighbouring status chips already do. Only the
+    // ON-SCREEN furniture reads this; the PDF/PNG export deliberately passes no pal at all so a
+    // printed sheet never goes dark just because the app happened to be in night mode.
+    plateFill: themePal.canvasPlateFill,
     // NEW-4 — ink for the small WHITE value plates painted on the canvas (the setback chip).
     // The plate is white in both themes, so its border + numerals are a fixed near-black.
     chipInk: themePal.canvasChipInk,
@@ -2136,6 +2142,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // (unclamped) map-pane width, used only to keep the bottom furniture from overlapping
   // when a docked left panel narrows the pane below the clamp (NEW-1 / B881).
   const [size, setSize] = useState({ w: 800, h: 560, rawW: 800 });
+  /* ⛔ B1234400 — IS `size` A REAL MEASUREMENT, OR STILL THE FALLBACK DEFAULT ABOVE?
+   * Only ever set true from a measurement taken while `document.visibilityState === "visible"` —
+   * see the ResizeObserver and the visibilitychange effect below, and lib/viewFramingGate.js's
+   * `mayFrame` readiness check, which refuses to commit a framing (`fit()`) until this is true. A
+   * ResizeObserver's mandatory FIRST callback fires even for a container that was never laid out
+   * (a page that loaded backgrounded), and `Math.max(320, r.width)` turns that degenerate box into a
+   * plausible-looking 320×360 that must not be trusted as "the real canvas". */
+  const sizeMeasuredRef = useRef(false);
   // NEW-1 (B881): the calibration badge is text-width (not viewport-capped like the scale
   // bar), so it's the one bottom item that can run into the right-anchored scale bar when
   // the pane narrows. We measure its natural width and, when it WOULD collide, reflow it up
@@ -5430,12 +5444,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const ro = new ResizeObserver((ents) => {
       const r = ents[0].contentRect;
       const w = Math.max(320, r.width), h = Math.max(360, r.height);
+      // B1234400 — trust this observation only if the tab was actually visible when it landed; a
+      // callback delivered while hidden can report a degenerate box for a page never laid out.
+      if (typeof document === "undefined" || document.visibilityState === "visible") sizeMeasuredRef.current = true;
       // Bail when unchanged — the B962 layout effect often syncs the same width one frame earlier
       // (on a panel toggle), so an identical RO callback would otherwise force a redundant re-render.
       setSize((s) => (s.w === w && s.h === h ? s : { w, h, rawW: r.width }));
     });
     ro.observe(wrapRef.current);
     return () => ro.disconnect();
+  }, []);
+
+  /* ⛔ B1234400 — ON BECOMING VISIBLE, FORCE A FRESH MEASUREMENT RATHER THAN HOPE THE OBSERVER
+   * REFIRES. ResizeObserver only calls back when the box CHANGES; a container that reported some
+   * degenerate size while hidden (and was refused above) might coincidentally report the SAME
+   * numbers once really laid out, in which case the observer would never fire again and
+   * `sizeMeasuredRef` would stay false forever. Measuring directly here closes that gap regardless
+   * of what the browser's own resize-change detection does. */
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      const el = wrapRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      sizeMeasuredRef.current = true;
+      const w = Math.max(320, r.width), h = Math.max(360, r.height);
+      setSize((s) => (s.w === w && s.h === h ? s : { w, h, rawW: r.width }));
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
   }, []);
 
   /* ------------ coordinate transforms ------------ */
@@ -5765,7 +5803,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * A suppression is RECORDED, never silent (LOUD-FAILURE) — that is what makes it observable from
    * the harness and from the owner's own armed tab.
    *
-   * ⚠ Never pass `requestFit` straight to `onClick`: the click event would arrive as the ticket. */
+   * ⚠ Never pass `requestFit` straight to `onClick`: the click event would arrive as the ticket.
+   *
+   * ⛔ B1234400 — AND THE VERDICT NOW ASKS A SECOND QUESTION BESIDE OWNERSHIP: CAN THE VIEW HONESTLY
+   * BE MEASURED RIGHT NOW? Captured live via the owner's own diagnostic recorder: a cold load that
+   * boots hidden (a backgrounded tab, a phone lock) reaches this exact effect with `mayFrame`'s
+   * ownership check saying yes — nobody had moved a view nobody could see — and `fit()` then divided
+   * by whatever `size` a never-laid-out container reported. `mayFrame`'s `{ visible, measured }`
+   * readiness (lib/viewFramingGate.js) catches that; a suppression for either reason is a "not yet",
+   * not a "no", so it is DEFERRED against the SAME ticket rather than dropped — a user move in the
+   * meantime still cancels it, exactly as it always did, because the retry re-enters this same door. */
   const [fitReq, setFitReq] = useState(null); // { n, ticket } — `n` only gives each request a distinct identity
   const requestFit = useCallback((ticket) => {
     const t = ticket || framingGate.current.framingTicket();
@@ -5774,9 +5821,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, []);
   useEffect(() => {
     if (!fitReq) return;
-    const verdict = framingGate.current.mayFrame(fitReq.ticket);
-    if (!verdict.ok) { viewRecRef.current?.noteEvent("frame:suppressed", verdict.why); return; }
-    fit();
+    const isVisible = () => typeof document === "undefined" || document.visibilityState === "visible";
+    const verdict = framingGate.current.mayFrame(fitReq.ticket, { visible: isVisible(), measured: sizeMeasuredRef.current });
+    if (verdict.ok) { fit(); return undefined; }
+    viewRecRef.current?.noteEvent("frame:suppressed", verdict.why);
+    if (verdict.why !== "document-hidden" && verdict.why !== "container-unmeasured") return undefined;
+    // A background tab's own requestAnimationFrame is suspended (FOREGROUND-OR-VOID), so polling
+    // with it costs nothing while hidden and resumes on its own the instant the tab is foregrounded
+    // — no separate visibilitychange listener needed here.
+    let raf = 0, cancelled = false;
+    const poll = () => {
+      if (cancelled) return;
+      if (isVisible() && sizeMeasuredRef.current) { requestFit(fitReq.ticket); return; }
+      raf = requestAnimationFrame(poll);
+    };
+    raf = requestAnimationFrame(poll);
+    return () => { cancelled = true; if (raf) cancelAnimationFrame(raf); };
   }, [fitReq]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* Frame the planner view to the ACTIVE parcels (+ margin) so a just-enabled
