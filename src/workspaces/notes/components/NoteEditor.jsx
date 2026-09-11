@@ -202,7 +202,17 @@ ${indentCssRules(".planyr-note .ProseMirror li")}
 .planyr-note .ProseMirror ul[data-type="taskList"] li > label { margin-top: 0.15em; user-select: none; }
 .planyr-note .ProseMirror ul[data-type="taskList"] li > div { flex: 1 1 auto; min-width: 0; }
 .planyr-note .ProseMirror input[type="checkbox"] { accent-color: var(--accent-notes); width: 15px; height: 15px; cursor: pointer; }
-.planyr-note .ProseMirror table { border-collapse: collapse; table-layout: fixed; width: 100%; overflow: hidden; margin: 1em 0 0 0; }
+/* ⛔ NO width: 100% HERE (NEW-1, owner report 2026-09-11) — that is what pinned a table's total
+   width to the text column, so widening one column had nowhere to come from but its neighbours.
+   table-layout: fixed is kept (it is what makes an explicit column width honoured exactly); the
+   table's own width now comes only from the node view's own inline style, which it sets to the
+   sum of its columns once notesTableColumns.js's NoteTableColumns has given every column an
+   explicit one. An untouched table (nothing here yet) still divides the available width evenly —
+   removing this rule changes nothing for it, since a table with no explicit width still fills its
+   container by ordinary block-box rules.
+   (No backticks in this block — that trap has broken this build six times now; see the guard in
+   the notesModule suite.) */
+.planyr-note .ProseMirror table { border-collapse: collapse; table-layout: fixed; margin: 1em 0 0 0; }
 .planyr-note .ProseMirror table td, .planyr-note .ProseMirror table th { border: 1px solid var(--border-strong); padding: 6px 9px; vertical-align: top; position: relative; min-width: 2em; }
 .planyr-note .ProseMirror table th { background: var(--surface-page); font-weight: 650; text-align: left; }
 .planyr-note .ProseMirror table .selectedCell:after { content: ""; position: absolute; inset: 0; background: var(--accent-notes); opacity: 0.16; pointer-events: none; }
@@ -1773,6 +1783,25 @@ export default function NoteEditor({
     editor.commands.ensureNoteAnchorIds();
   }, [editor, readOnly, docTick]);
 
+  /* ⛔ THE RECOVERY PASS FOR AN ALREADY-SQUEEZED TABLE (NEW-2, owner report 2026-09-11).
+   *
+   * ⛔ ONCE ON MOUNT, DELIBERATELY NOT KEYED ON `docTick` — unlike `ensureNoteAnchorIds` just
+   * above, which is idempotent bookkeeping that cannot conflict with anything the owner does.
+   * This one edits width data a later undo can legitimately want to revert, so re-running it on
+   * every doc change fought Ctrl+Z: reverting a drag left the OTHER columns explicit (from this
+   * effect's own earlier, non-history pass), which reads as "touched, one column null" and
+   * re-triggered the SAME repair, silently refilling the column the owner had just undone. Every
+   * LIVE edit (including a resize) is instead covered by `NoteTableColumns`'s own
+   * `appendTransaction` plugin, which rides the SAME undo step as its trigger — see
+   * lib/notesTableColumns.js's header for the full reasoning. This effect's only remaining job is
+   * the note nobody edits after opening: without it, a table that is merely looked at and never
+   * touched would stay squeezed. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || readOnly) return;
+    editor.commands.normalizeTableColumnWidths();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, readOnly]);
+
   /* ⛔ THE SELECTION IS VISIBLE, and it is painted onto the real elements rather than mirrored
    * into a second render tree. A selection you cannot see is a selection you will move by
    * accident — and re-rendering every box through React to show a ring would remount node views
@@ -2489,7 +2518,23 @@ export default function NoteEditor({
       const marginX = (narrow ? SHEET_MARGIN_X.narrow : SHEET_MARGIN_X.wide) * 2;
       const naturalSheetWidth = Math.max(1, Math.min(SHEET_MAX_WIDTH, paneWidth - marginX));
       const naturalPageWidth = Math.max(1, naturalSheetWidth - padX);
-      const needX = anchorExtentX(blocks);
+      /* ⛔ A WIDE TABLE GROWS THE SHEET THE SAME WAY A WIDE BOX DOES (NEW-1, owner report
+       * 2026-09-11) — REUSING this path rather than building a second growth mechanism, per the
+       * owner's own instruction. A table is in-flow content, not a positioned anchor, so it has
+       * no stored `x`/`w` to read — its reach is measured live off the rendered element, the same
+       * way an anchor's `height` already is a few lines up (`el.offsetHeight`). `rectScale`
+       * corrects `getBoundingClientRect()` back into the SAME local/document pixel space
+       * `dom.clientWidth`-style reads already use — the identical correction `beginSize`/
+       * `beginDrag` apply to a box's own drag geometry a little further down this file, needed
+       * because `getBoundingClientRect` reflects the real screen (which the native browser zoom
+       * can inflate) while `offsetWidth` does not. */
+      const domRect = dom.getBoundingClientRect();
+      const rectScale = domRect.width / (dom.offsetWidth || 1) || 1;
+      const tableBlocks = [...dom.querySelectorAll("table")].map((t) => {
+        const r = t.getBoundingClientRect();
+        return { x: (r.left - domRect.left) / rectScale, w: t.offsetWidth };
+      });
+      const needX = anchorExtentX([...blocks, ...tableBlocks]);
       /* ⛔ AND THE SAME QUESTION ASKED OF THE LEFT EDGE (NOTES-FREE-PLACEMENT / NEW-1).
        * `anchorExtentLeft` answers "how far past the page's LEFT origin does anything reach", in
        * the same positive-distance units as the two above. The sheet already has room for some of
@@ -2566,6 +2611,11 @@ export default function NoteEditor({
      * block gets taller as you type and the page has to keep up in the same frame. */
     const ro = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
     if (ro) for (const el of dom.querySelectorAll(".planyr-anchor")) ro.observe(el);
+    /* ⛔ AND EVERY TABLE IS OBSERVED TOO (NEW-1) — a live column drag mutates the table's DOM
+     * width directly, outside any transaction (`@tiptap/pm/tables`' own drag preview), so nothing
+     * else would notice until mouseup. Observing the element itself catches the sheet growing in
+     * real time as the drag happens, the same way a typed-into anchor already does. */
+    if (ro) for (const el of dom.querySelectorAll("table")) ro.observe(el);
     /* ⛔ AND THE EDITOR ITSELF IS OBSERVED, not only the blocks inside it (B421490). The width fit
      * above is a function of the EDITOR's width, and nothing was watching that: a block only
      * re-measured when its own text reflowed, so narrowing the window left every box at the width
