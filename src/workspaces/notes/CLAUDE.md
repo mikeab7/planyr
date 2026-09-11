@@ -855,6 +855,24 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   one: a picture box offers all eight, a **text box offers east and west only**, because a text
   box's height is its words (B391073) and what north/south should mean on one is an open question
   with the owner (B539650).
+- **SET A PAGE'S OWN WIDTH BY HAND (B1561104, `lib/notesPageWidth.js`).** A `pageWidth` DOC
+  attribute — `null` (Fit to content) · a number (a pinned sheet width, Narrow/Normal/Wide, or a
+  completed edge-drag) · the literal `"full"` — set through `setDocAttribute`, the same mechanism
+  `density` already uses, so it rides storage/sync/print/export for free. **A pin is a FLOOR: it
+  replaces the unpinned 580 baseline that feeds `sheetGrowWidth`, never the baseline `matPadX`
+  (the page's left gutter) is centred against** — read `docs/NOTES-CARRY-FORWARD.md` §5-1's own
+  addendum before touching either baseline; the first draft of this feature fed the pin into
+  `naturalSheetWidth` and reproduced NOTES-PAGE-GROWTH's "centring splits the new width across
+  both edges" jump from scratch. The two edge grips (`NoteEditor.jsx`, desktop-only) drive the
+  SAME stored number: a right-edge drag grows `sheetGrowWidth` directly (the left edge already
+  cannot move for that); a left-edge drag ALSO scrolls the mat by the same amount the width grew,
+  so the two numbers moving together make the right edge hold on screen. A drag's own live floor
+  is a SEPARATE ref (`widthContentFloorRef`) holding only genuine box/table overflow with the pin
+  subtracted back out — flooring it against `sheetGrowWidth` itself made narrowing an existing pin
+  silently do nothing (§5-14 of the carry-forward file). `NoteToolbar.jsx`'s page-menu control is
+  a `FormatMenu`, beside Zoom/History/Print/Markdown. `notesPrint.js`'s `pageWidthPinExtentPx`
+  folds a numeric pin into the same `growPx` an overhanging box/table already computes (PDF-PARITY);
+  `"full"` deliberately does not widen paper.
 - **SKETCH MODE — four files, and ONE rule that makes them make sense.** *The **CANVAS** owns
   everything: each **box owns its own text AND its own position**, and the arrows are an explicit
   list of `{from,to}` box references.* There is no second representation, so there is nothing to

@@ -46,6 +46,7 @@ import { HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.
 import { PASTE_MODES } from "../lib/notesPastePlain.js";
 import { bindingShouldDecline } from "../lib/notesKeyScope.js";
 import { DEFAULT_DENSITY, densityFor } from "../lib/notesSpacing.js";
+import { PAGE_WIDTH_MIN, dragWidthFromDelta, resolvePinnedBaseWidth } from "../lib/notesPageWidth.js";
 import { indentCssRules } from "../lib/notesIndentLevel.js";
 import {
   readNoteFiles, readNoteImages, readPage, readPageVersions, registerOpenNoteDoc,
@@ -453,6 +454,20 @@ ${indentCssRules(".planyr-note .ProseMirror li")}
 /* Search marking is a decoration, never a mark — it is not in the document. */
 .planyr-note .note-search-hit { background: var(--warn-bg); box-shadow: 0 0 0 1px var(--warn-text) inset; border-radius: 2px; }
 .planyr-note .note-search-hit-current { background: var(--accent-notes); color: var(--on-accent-notes); box-shadow: none; }
+/* ⛔ SET A PAGE'S OWN WIDTH BY HAND (NEW-1) — the sheet's own edge grips. #1508's own lesson,
+   named in this item's brief: a 9×14px resize target that was invisible until hover shipped as
+   "super buggy" because the obvious gesture found nothing there. This one is a full-height, 14px
+   hit STRIP straddling the sheet's own border (so it never eats a press meant for the page's
+   content — CHROME-NEVER-EATS-A-PRESS), painted with a visible bar only on hover so it never
+   competes with the page for attention at rest, exactly the way the box grip above earns its
+   opacity. */
+.planyr-note .planyr-page-width-grip { position: absolute; top: 0; bottom: 0; width: 14px; cursor: col-resize; z-index: 2; touch-action: none; }
+.planyr-note .planyr-page-width-grip::after { content: ""; position: absolute; top: 12px; bottom: 12px; left: 6px; width: 2px; border-radius: 2px; background: var(--text-tertiary); opacity: 0; transition: opacity 90ms linear; }
+.planyr-note .planyr-page-width-grip:hover::after,
+.planyr-note .planyr-page-width-grip[data-dragging="1"]::after { opacity: 1; }
+.planyr-note .planyr-page-width-grip[data-dragging="1"]::after { background: var(--accent-notes); }
+.planyr-note .planyr-page-width-grip-left { left: -7px; }
+.planyr-note .planyr-page-width-grip-right { right: -7px; }
 `;
 
 function EditorStyles() {
@@ -2255,6 +2270,15 @@ export default function NoteEditor({
   const growAnchorRef = useRef(null);
   /** …and the gutter that reading was taken under, so a gutter change re-bases rather than scrolls. */
   const growPadRef = useRef(null);
+  /* ⛔ SET A PAGE'S OWN WIDTH BY HAND (NEW-1). `widthDragRef` is non-null only for the duration
+   * of an edge-drag gesture — see `beginWidthDrag` below for the full mechanism, and the
+   * measurement effect's own comment on `pinnedPageWidth` for why a pin is folded into
+   * `sheetGrowWidth` rather than into `matPadX`'s own baseline. */
+  const widthDragRef = useRef(null);
+  /** The width the page would need with no pin at all — genuine box/table overflow only. Kept
+   *  fresh by every real measurement run; see that effect's own comment for why a drag must
+   *  floor against THIS, never against `sheetGrowWidth`. */
+  const widthContentFloorRef = useRef(0);
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
 
@@ -2471,6 +2495,16 @@ export default function NoteEditor({
     if (!editor || editor.isDestroyed) return undefined;
     const dom = editor.view.dom;
     const measure = () => {
+      /* ⛔ A LIVE WIDTH DRAG OWNS `sheetGrowWidth`/`sheetGrowLeft`/`sheetBaseWidth` FOR ITS OWN
+       * DURATION (NEW-1). Growing the sheet's rendered width also grows `dom`'s own rendered
+       * width (it fills the sheet's content box), which is exactly what the ResizeObserver a few
+       * lines down this effect watches — so without this guard, every frame of a manual drag
+       * would immediately be overwritten by a fresh, DOM-querying recompute of this same
+       * function, fighting the drag with the STALE (pre-commit) `pageWidth` attribute and
+       * producing a visible fight/flicker rather than a smooth drag. The drag handlers below set
+       * this ref for exactly the frames this function must stand down; `setNotePageWidth`'s own
+       * commit is what makes the next, real run of this function authoritative again. */
+      if (widthDragRef.current) return;
       const nodes = [...dom.querySelectorAll(".planyr-anchor")];
       /* ⛔ TWO DIFFERENT QUESTIONS, TWO DIFFERENT DENOMINATORS — conflating them into one
        * `hostWidth` was the bug in this fix's own first draft, caught by re-measuring rather
@@ -2518,6 +2552,20 @@ export default function NoteEditor({
       const marginX = (narrow ? SHEET_MARGIN_X.narrow : SHEET_MARGIN_X.wide) * 2;
       const naturalSheetWidth = Math.max(1, Math.min(SHEET_MAX_WIDTH, paneWidth - marginX));
       const naturalPageWidth = Math.max(1, naturalSheetWidth - padX);
+      /* ⛔ SET A PAGE'S OWN WIDTH BY HAND (NEW-1) — READ THIS BEFORE TOUCHING EITHER NUMBER
+       * ABOVE. The first draft of this feature fed the pin straight into `naturalSheetWidth`
+       * itself, on the reasoning that everything downstream already treats that baseline as
+       * ordinary. It does — which is exactly the bug: `matPadX` a few lines down is ALSO derived
+       * from `naturalSheetWidth`, so a pin changed the GUTTER, and the moment a completed drag
+       * or menu pick committed, `matPadX` recomputed and the page's own LEFT EDGE JUMPED —
+       * measured live, 100px, the identical "centring splits the new width across both edges"
+       * defect NOTES-PAGE-GROWTH's round 2a already named and rejected, arriving through a new
+       * door. `naturalSheetWidth`/`naturalPageWidth` stay the TRUE, pin-independent baseline —
+       * `matPadX` must never move because of a pin — and the pin instead gets its OWN baseline,
+       * used only for how wide the SHEET renders, exactly parallel to how `sheetGrowWidth`
+       * already overrides the sheet's width without ever touching `matPadX`. */
+      const pinnedBase = resolvePinnedBaseWidth(editor.state.doc.attrs?.pageWidth, { paneWidth });
+      const pinnedPageWidth = pinnedBase != null ? Math.max(1, pinnedBase - padX) : null;
       /* ⛔ A WIDE TABLE GROWS THE SHEET THE SAME WAY A WIDE BOX DOES (NEW-1, owner report
        * 2026-09-11) — REUSING this path rather than building a second growth mechanism, per the
        * owner's own instruction. A table is in-flow content, not a positioned anchor, so it has
@@ -2580,13 +2628,29 @@ export default function NoteEditor({
        * band instead of behind it, which is what makes it reachable rather than merely present. */
       const growLeft = Math.max(0, anchorExtentLeft(blocks) - padSide);
       const growGap = Math.max(0, anchorExtentTop(blocks) - TITLE_BAND_GAP);
-      /* The content column keeps its natural width unless something overhangs the RIGHT; growth
-       * on the left is paid for by the sheet getting wider, never by the column getting narrower
-       * (which would rewrap his words as a side effect of moving a box). */
-      const contentW = Math.max(naturalPageWidth, needX);
-      const grow = growLeft > 0 || needX > naturalPageWidth;
+      /* ⛔ THE PIN IS THE BASELINE THE COLUMN STARTS FROM, AND REAL CONTENT IS STILL A FLOOR ON
+       * TOP OF IT (NEW-1) — `pinnedPageWidth ?? naturalPageWidth` is the ONLY change from the
+       * pre-existing formula here; `Math.max` against `needX` is exactly the same "content wider
+       * than it keeps growing the sheet" rule that already governed the unpinned 580 baseline,
+       * so a table too wide for a Narrow-pinned page still grows the page, and a Wide-pinned page
+       * with ordinary short content still renders at the pin rather than shrinking to fit it. */
+      const effectivePageWidth = pinnedPageWidth ?? naturalPageWidth;
+      const contentW = Math.max(effectivePageWidth, needX);
+      /* A pin always renders as an explicit, fixed sheet width (never the unpinned "100%, capped
+       * at 580" default) — that is what makes Normal (580) a REAL, persistent pin rather than a
+       * same-numbers no-op, and what makes Narrow genuinely narrower than the unpinned default. */
+      const grow = growLeft > 0 || needX > effectivePageWidth || pinnedPageWidth != null;
       const totalSheetWidth = grow ? growLeft + padX + contentW : naturalSheetWidth;
       setSheetGrowWidth(grow ? totalSheetWidth : null);
+      /* ⛔ AND THE DRAG'S OWN FLOOR IS THIS, NEVER `sheetGrowWidth` ITSELF (NEW-1). A live drag
+       * (below) has to know how far it may narrow the page WITHOUT clipping real content — but
+       * `sheetGrowWidth` already carries whatever PIN is currently active, so flooring a drag
+       * against it would make the page's own CURRENT width an artificial minimum, and narrowing
+       * from an existing pin would silently do nothing (measured: dragged to 780, tried to drag
+       * back to 630, stayed at 780 — the drag's own starting width was quietly re-asserted as a
+       * floor on itself). This is the answer with the pin subtracted back out: what the sheet
+       * would need with NOTHING pinned, i.e. genuine box/table overflow only. */
+      widthContentFloorRef.current = growLeft + padX + Math.max(naturalPageWidth, needX);
       setSheetGrowLeft(growLeft);
       setSheetGrowGap(growGap);
       /* ⛔ THE PAGE'S LEFT EDGE IS PINNED WHERE CENTRING WOULD HAVE PUT AN *UNGROWN* PAGE, AND
@@ -2688,6 +2752,97 @@ export default function NoteEditor({
     if (dx) sc.scrollLeft += dx;
     if (dy) sc.scrollTop += dy;
   }, [editor, sheetGrowWidth, sheetGrowLeft, sheetGrowGap, matPadX]);
+
+  /* ---- SET A PAGE'S OWN WIDTH BY HAND, THE DRAG HALF (NEW-1) -----------------------------
+   *
+   * The menu (NoteToolbar's page-width control) commits a preset in one click; this is the
+   * other entry point into the SAME stored value — dragging either side edge of the sheet,
+   * Word/Docs-style. Both edges hold the OTHER edge visually still while you drag, which needs
+   * two different tricks for one reason: the page's own left edge is architecturally PINNED
+   * (NOTES-FREE-PLACEMENT round 9 — growth always extends rightward, on purpose, so a box
+   * placed mid-sentence never silently shifts the words under the reader) and this feature
+   * deliberately does not relitigate that. So:
+   *   RIGHT edge  — just grow `sheetGrowWidth` toward the pointer. The left edge already does
+   *                 not move for this (it never has), so "the opposite edge holds" is free.
+   *   LEFT edge   — ALSO grow `sheetGrowWidth` (rightward, same as above — there is only ever
+   *                 one growth direction at rest), but additionally scroll the mat by the exact
+   *                 same amount the width grew. A page that is `W` wider and a viewport that is
+   *                 scrolled `W` further right show the RIGHT edge at the identical screen
+   *                 position it started at, and the LEFT edge — now `W` further from the
+   *                 viewport's own left edge in content-space, and the viewport shifted `W` to
+   *                 compensate — lands exactly `W` to the left of where it started on screen.
+   *                 That is the whole trick: two numbers moving together, not a second
+   *                 coordinate system. The manual scroll is deliberately LEFT IN PLACE on
+   *                 release, not reset to 0 — `matPadX` (the measurement effect's own gutter,
+   *                 which the commit below re-derives) never depends on the pin (see that
+   *                 effect's own comment on `pinnedPageWidth`), so nothing about the commit moves
+   *                 the sheet's content-space position and there is nothing to re-settle against.
+   *                 A reload, which does not restore scroll position, shows the same width
+   *                 rendered from the app's ordinary left-anchored rest position — identical to a
+   *                 page widened from the right — which is stated here rather than left as a
+   *                 surprise.
+   *
+   * ⛔ WHY THIS DOES NOT FIGHT THE MEASUREMENT EFFECT ABOVE: that effect's `measure()` bails out
+   * immediately while `widthDragRef.current` is set (see its own comment), so the
+   * ResizeObserver it owns cannot see this function's live `setSheetGrowWidth` calls and
+   * overwrite them mid-drag with a recompute based on the STILL-uncommitted `pageWidth`
+   * attribute. The one real commit — `setNotePageWidth` on release — is what hands authority
+   * back, and it is a single `setDocAttribute` step, so the whole drag is ONE undo entry
+   * regardless of how many pixels it covered. A press with no real movement (a plain click on
+   * the grip) commits nothing, matching this module's own standing rule that a press which did
+   * not move writes nothing at all (B391073). */
+  const [widthDragEdge, setWidthDragEdge] = useState(null);
+  const beginWidthDrag = useCallback((edge) => (e) => {
+    if (!editor || editor.isDestroyed || e.button !== 0) return;
+    const sheetEl = noteRootRef.current?.querySelector('[data-testid="note-sheet"]');
+    const scroller = scrollerRef.current;
+    if (!sheetEl || !scroller) return;
+    e.preventDefault();
+    const startWidth = sheetEl.getBoundingClientRect().width;
+    const drag = {
+      edge,
+      startWidth,
+      startClientX: e.clientX,
+      startScrollLeft: scroller.scrollLeft,
+      // Genuine content overflow only — NEVER `sheetGrowWidth`, which already carries whatever
+      // pin is active and would floor a narrowing drag against its own starting point (see the
+      // measurement effect's own comment on `widthContentFloorRef`).
+      baseGrowWidth: widthContentFloorRef.current || 0,
+    };
+    widthDragRef.current = drag;
+    setWidthDragEdge(edge);
+    const prevCursor = document.body.style.cursor;
+    const prevSelect = document.body.style.userSelect;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const liveWidthFor = (clientX) => {
+      const rawDelta = edge === "right" ? clientX - drag.startClientX : drag.startClientX - clientX;
+      return Math.max(dragWidthFromDelta(drag.startWidth, rawDelta), drag.baseGrowWidth);
+    };
+    const onMove = (ev) => {
+      const w = liveWidthFor(ev.clientX);
+      setSheetGrowWidth(w);
+      if (edge === "left") scroller.scrollLeft = drag.startScrollLeft + (w - drag.startWidth);
+    };
+    const onUp = (ev) => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      document.body.style.cursor = prevCursor;
+      document.body.style.userSelect = prevSelect;
+      widthDragRef.current = null;
+      setWidthDragEdge(null);
+      if (!editor || editor.isDestroyed) return;
+      const moved = Math.abs(ev.clientX - drag.startClientX) >= 1;
+      if (!moved) return;                              // a click that did not drag writes nothing
+      const w = liveWidthFor(ev.clientX);
+      editor.commands.setNotePageWidth(Math.round(w));
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  }, [editor]);
 
   /* ---- PASTE JUST THE TEXT (B36051) ------------------------------------------------------
    *
@@ -3051,10 +3206,12 @@ export default function NoteEditor({
              * `sheetGrowWidth`, computed by the page-growth measurement effect below. `580` is
              * the page's own natural width; `sheetGrowWidth` OVERRIDES both `width` and
              * `maxWidth` together (a `width` alone would still be clipped by this `maxWidth`),
-             * and is `null` — changing nothing here — the moment nothing needs the extra room. */
+             * and is `null` — changing nothing here — the moment nothing needs the extra room.
+             * A width PIN (NEW-1) also rides `sheetGrowWidth` — see the measurement effect's own
+             * comment on `pinnedPageWidth` for why. */
             maxWidth: sheetGrowWidth ?? SHEET_MAX_WIDTH,
             width: sheetGrowWidth ? `${sheetGrowWidth}px` : "100%",
-            flex: "1 1 auto", minWidth: 260, zoom,
+            flex: "1 1 auto", minWidth: 260, zoom, position: "relative",
             /* ⛔ A REAL WRITING SURFACE, NOT A FIELD (B1203504) — his exact words, and defect #4
                of the review: the body painted transparent, sitting directly on the same grey
                the app chrome uses, so there was nothing on screen that said "this is a page."
@@ -3095,6 +3252,32 @@ export default function NoteEditor({
             margin: narrow ? `10px ${SHEET_MARGIN_X.narrow}px 0` : `24px ${SHEET_MARGIN_X.wide}px 0`,
           }}
         >
+          {/* ⛔ SET A PAGE'S OWN WIDTH BY HAND (NEW-1) — hidden on a phone: a phone page is
+              already the width of the screen, and a 14px hit strip has no room to hide in
+              beside real content there. `data-dragging` drives the CSS-only hover/active bar
+              (see EDITOR_CSS) so no per-frame inline-style churn rides a drag. */}
+          {!narrow && (
+            <>
+              <div
+                className="planyr-page-width-grip planyr-page-width-grip-left"
+                data-testid="note-page-width-grip-left"
+                data-dragging={widthDragEdge === "left" ? "1" : "0"}
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Drag to change the page's width"
+                onPointerDown={beginWidthDrag("left")}
+              />
+              <div
+                className="planyr-page-width-grip planyr-page-width-grip-right"
+                data-testid="note-page-width-grip-right"
+                data-dragging={widthDragEdge === "right" ? "1" : "0"}
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Drag to change the page's width"
+                onPointerDown={beginWidthDrag("right")}
+              />
+            </>
+          )}
           {/* ⛔ THE TITLE IS ITS OWN ROW, AND IT IS UNMISTAKABLY THE LARGEST TEXT ON THE PAGE
               (B1203504, defect #5). Before this, the title (27px) rendered SMALLER than an
               inline Heading 1 (28.5px) — the page's own name was outranked by a heading

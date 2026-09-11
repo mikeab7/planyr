@@ -42,6 +42,7 @@ import {
 } from "../lib/notesMixedSelection.js";
 import { familyKey, firstFamily, fontDisplayLabel, matchFontOption } from "../lib/notesFontFamily.js";
 import { defaultFontLabel, resolvedColor, resolvedColorsAgree } from "../lib/notesResolvedValue.js";
+import { PAGE_WIDTH_PRESETS, pageWidthLabel } from "../lib/notesPageWidth.js";
 
 /* Mirrored from src/shared/ui/controls.jsx rather than imported — deliberately, and there
  * is a test that fails if the copies drift (test/notesModule.test.js). Importing
@@ -1198,6 +1199,27 @@ export default function NoteToolbar({
   const zoomBtn = zoomIndicator ? (
     <TBButton title="Back to 100% (Ctrl+0)" testid="note-zoom-level" wide big={narrow} label={zoomIndicator} onClick={onZoomReset} />
   ) : null;
+  /* ⛔ SET A PAGE'S OWN WIDTH BY HAND (NEW-1) — the menu's fast path; dragging either side edge
+   * of the sheet is the other entry point into this SAME stored value (NoteEditor.jsx). Sits
+   * beside Zoom/History/Print/Markdown for the identical reason those do — "things you do TO
+   * the page, not to the words in it." A dragged, off-preset width shows as "Custom" and
+   * highlights no row, which is correct: it is a real, persistent pin, just not one of the four
+   * named ones. */
+  const pageWidthAttr = editor.state.doc.attrs?.pageWidth ?? null;
+  const widthControl = (
+    <FormatMenu title="Page width" testid="nt-page-width" width={124} big={narrow}
+      value={pageWidthAttr == null ? "fit" : String(pageWidthAttr)}
+      displayLabel={pageWidthLabel(pageWidthAttr)}
+      options={[
+        { label: "Fit to content", value: "fit" },
+        ...PAGE_WIDTH_PRESETS.map((p) => ({ label: p.label, value: String(p.px) })),
+      ]}
+      onPick={(v) => {
+        if (v === "fit") { editor.commands.setNotePageWidth(null); return; }
+        if (v === "full") { editor.commands.setNotePageWidth("full"); return; }
+        editor.commands.setNotePageWidth(Number(v));
+      }} />
+  );
   const exportBtn = (
     <TBButton title="Export this page to Markdown" testid="nt-export" wide big={narrow} label="Markdown" onClick={onExport}>
       <Icon><path d="M8 2.5v8" /><path d="M5 7.5L8 10.5l3-3" /><path d="M2.5 12.5h11" /></Icon>
@@ -1369,6 +1391,7 @@ export default function NoteToolbar({
         {narrow && (
           <MenuGroup label="Page">
             {zoomBtn}
+            {widthControl}
             {historyBtn}
             {printBtn}
             {exportBtn}
@@ -1379,6 +1402,7 @@ export default function NoteToolbar({
       </OverflowMenu>
 
       {!narrow && zoomBtn}
+      {!narrow && widthControl}
       {!narrow && historyBtn}
       {!narrow && printBtn}
       {!narrow && exportBtn}

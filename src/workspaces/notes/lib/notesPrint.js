@@ -120,6 +120,27 @@ export function pageTableExtentPx(doc) {
   } catch (_) { return 0; }
 }
 
+/** ⛔ PDF-PARITY FOR "SET A PAGE'S OWN WIDTH BY HAND" (NEW-1) — a page pinned Narrow/Normal/Wide
+ *  widens or narrows the printed sheet exactly the way an overhanging box or a wide table
+ *  already does: folded into the SAME `growPx` `buildPrintDocument` already computes, not a
+ *  second mechanism (the owner's own instruction, reused here for the identical reason
+ *  NoteEditor.jsx's screen-side measurement effect reuses `anchorExtentX`'s growth path rather
+ *  than inventing one). A wide table already growing the print past 190mm keeps doing exactly
+ *  that when a page is ALSO pinned — `Math.max` picks whichever is larger, same as the two
+ *  existing contributors to `growPx` already do with each other.
+ *
+ *  ⛔ "Full width" DELIBERATELY DOES NOT WIDEN PAPER. It means "fill my monitor," which paper
+ *  has no equivalent of — a page pinned Full prints at the ordinary page width, exactly like an
+ *  unpinned page, unless its content genuinely needs more room (handled by the two functions
+ *  above, unaffected by this one). Only a NUMERIC pin — Narrow/Normal/Wide, or a completed
+ *  edge-drag — has an honest print-page answer. */
+export function pageWidthPinExtentPx(doc) {
+  try {
+    const pw = doc?.attrs?.pageWidth;
+    return typeof pw === "number" && Number.isFinite(pw) ? Math.max(0, pw) : 0;
+  } catch (_) { return 0; }
+}
+
 /* Mirrors src/workspaces/notes/components/NoteEditor.jsx → EDITOR_CSS, construct for
  * construct, translated to paper: ink is black, surfaces are white (a theme token here
  * would print a dark page), and each block declares how it may break across a sheet. */
@@ -335,7 +356,7 @@ export function buildPrintDocument({ title, meta = "", pages = [], density = DEF
    * unconverted screen pixels (PDF-PARITY by construction: `renderHTML` writes them as literal
    * "Npx", the same string on paper as on screen), so no other unit conversion belongs here. */
   const growPx = pages.reduce(
-    (m, p) => Math.max(m, pageAnchorExtentPx(p.doc), pageTableExtentPx(p.doc)),
+    (m, p) => Math.max(m, pageAnchorExtentPx(p.doc), pageTableExtentPx(p.doc), pageWidthPinExtentPx(p.doc)),
     0,
   );
   /* ⛔ AND THE SAME ARITHMETIC FOR THE OTHER TWO EDGES (NOTES-FREE-PLACEMENT / NEW-7). The screen
