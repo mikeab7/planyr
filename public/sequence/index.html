@@ -3211,6 +3211,20 @@ const nextEligibleMeeting = (body, readyDate, afterDate) => {
   }
   return null;
 };
+// NEW-1 (chat, 2026-09-11) — adjacentMeetingDate: the one meeting date of `body` STRICTLY after
+// (dir="next") or STRICTLY before (dir="prev") `refDate`, within the same ~3-year horizon
+// nextEligibleMeeting uses. Reuses meetingDatesInRange (the SAME resolver the "Snap this row to"
+// flyout reads) rather than a second recurrence engine, so extraDates/blackoutDates apply exactly
+// as they do to snapping. "Strictly" holds even when refDate is itself a meeting date, and also
+// when it isn't (a hand-typed date the body never meets on) — the caller's context-menu row.
+const adjacentMeetingDate = (body, refDate, dir) => {
+  if (!body || !refDate) return null;
+  if (dir === "next") {
+    return meetingDatesInRange(body, addD(refDate, 1), addD(refDate, 366 * 3))[0] || null;
+  }
+  const dates = meetingDatesInRange(body, addD(refDate, -366 * 3), addD(refDate, -1));
+  return dates.length ? dates[dates.length - 1] : null;
+};
 // B817 — the two decision numbers (PURE; mirrored + unit-tested). meetingFloatBD: working days from
 // `todayIso` to the agenda deadline (slack before the packet MUST be filed). meetingCostDays: calendar
 // days from the current meeting to the NEXT eligible one — what one missed deadline actually costs
@@ -10064,7 +10078,6 @@ function App() {
           onCopyTaskFull={() => { copyTaskById(structuralTargets(taskCtx.task.id)); setTaskCtx(null); }}
           onPasteTask={() => { pasteTaskAfter(taskCtx.task.id); setTaskCtx(null); }}
           hasClipboard={!!clipboardRef.current}
-          onCopyName={() => { navigator.clipboard?.writeText(taskCtx.task.name).catch(()=>{}); setTaskCtx(null); }}
           onIndent={() => { indentSelectionByIds(structuralTargets(taskCtx.task.id)); setTaskCtx(null); }}
           onOutdent={() => { outdentSelectionByIds(structuralTargets(taskCtx.task.id)); setTaskCtx(null); }}
           onMoveTo={() => { setMoveToCtx({ ids: structuralTargets(taskCtx.task.id), projId: taskCtx.projId }); setTaskCtx(null); }}
@@ -10074,7 +10087,6 @@ function App() {
             const byId = new Map(ts.map(t => [t.id, t]));
             return targets.some(id => (byId.get(id)?.parentId ?? null) !== null);
           })()}
-          onAddNote={() => { setNotesCtx({taskId: taskCtx.task.id, projectId: taskCtx.projId}); setTaskCtx(null); }}
           meetingBodies={(data.projects[taskCtx.projId] || {}).meetingBodies || []}
           bindCount={(() => { const ids = fullRowSelIds(); return ids.length > 1 && ids.includes(taskCtx.task.id) ? ids.length : 1; })()}
           boundTasks={(() => {
@@ -10106,6 +10118,7 @@ function App() {
           onLinkAsDeadline={anchorId => { updateTask(taskCtx.task.id, {deadlineForTaskId: anchorId, meetingBound:false, meetingBodyId:null, pinnedMeetingDate:undefined}, taskCtx.projId); setTaskCtx(null); }}
           onUnlinkDeadline={() => { updateTask(taskCtx.task.id, {deadlineForTaskId: null}, taskCtx.projId); setTaskCtx(null); }}
           onAddMeetingCalendar={() => { setMeetingCalOpen(true); setSettingsOpen(false); setAutomationOpen(false); setContactsOpen(false); setFormatOpen(false); setTaskCtx(null); }}
+          onStepMeeting={iso => { if (iso) updateTask(taskCtx.task.id, {pinnedMeetingDate: iso}, taskCtx.projId); setTaskCtx(null); }}
           onDelete={() => {
             // Right-click inside a multi-row selection deletes the whole selection — asks first
             // if any row in it has subtasks (requestDelete); otherwise deletes immediately.
@@ -10353,7 +10366,7 @@ function ProjContextMenu({x, y, projId, canDelete, onRename, onDuplicate, onDele
 }
 
 // ── TaskContextMenu ───────────────────────────────────────
-function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCopyName, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onMoveTo, canOutdent, onAddNote, meetingBodies = [], bindCount = 1, boundTasks = [], deadlineAnchorName = null, onBindMeeting, onUnbindMeeting, onAddDeadlineRow, onLinkAsDeadline, onUnlinkDeadline, onAddMeetingCalendar, onDelete, deleteCount = 1, onSetHealth, onSetRowColor, onSetBold, onSetItalic, onClearFormat, fmt, onClose}) {
+function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onMoveTo, canOutdent, meetingBodies = [], bindCount = 1, boundTasks = [], deadlineAnchorName = null, onBindMeeting, onUnbindMeeting, onAddDeadlineRow, onLinkAsDeadline, onUnlinkDeadline, onAddMeetingCalendar, onStepMeeting, onDelete, deleteCount = 1, onSetHealth, onSetRowColor, onSetBold, onSetItalic, onClearFormat, fmt, onClose}) {
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -10368,7 +10381,7 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
   // mh is an estimate of the menu's full rendered height; if y + mh would clip the
   // bottom of the viewport, top shifts up so the menu stays fully visible. Recomputed
   // when row padding / swatch sizing changed below — better to slightly overestimate.
-  const mw = 220, mh = 470;
+  const mw = 220, mh = 510;   // NEW-1 added two rows (Next/Previous meeting) to the worst-case height
   const left = x + mw > vw ? vw - mw - 8 : x;
   const top  = y + mh > vh ? Math.max(8, vh - mh - 8) : y;
 
@@ -10423,9 +10436,17 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
   // deadline link / unbound); the flyout is one radio list ("— none —" + bodies, ✓ on the current
   // choice) plus the deadline-row actions. Opens leftward when the menu is near the right edge.
   const [subMeet, setSubMeet] = useState(false);
-  const curBodyName = task.meetingBound ? ((meetingBodies.find(b => b.id === task.meetingBodyId) || {}).name || "Meeting body") : "";
+  const meetingBody = task.meetingBound ? meetingBodies.find(b => b.id === task.meetingBodyId) : null;
+  const curBodyName = meetingBody ? (meetingBody.name || "Meeting body") : (task.meetingBound ? "Meeting body" : "");
   const isDeadlineRow = task.deadlineForTaskId != null;
   const subOpenLeft = left + mw + 210 > vw;
+  // NEW-1 (chat, 2026-09-11) — "step this bound row to the next/previous meeting" reads off the
+  // SAME resolver (adjacentMeetingDate → meetingDatesInRange) the snap flyout above uses; shown
+  // only when the row is actually bound to a body that resolves (meetingBody truthy), and disabled
+  // (never hidden) when there's no next/previous date to compute one — see (c) in the item.
+  const nextMeetingIso = (meetingBody && task.start) ? adjacentMeetingDate(meetingBody, task.start, "next") : null;
+  const prevMeetingIso = (meetingBody && task.start) ? adjacentMeetingDate(meetingBody, task.start, "prev") : null;
+  const fmtMeetingStep = iso => { const d = new Date(iso + "T12:00:00"); return isNaN(d) ? "" : d.toLocaleDateString("en-US", {weekday:"short", month:"short", day:"numeric"}); };
   const SubCaption = ({children}) => (
     <div style={{padding:"4px 11px 2px",fontSize:9,fontWeight:700,color:"var(--mut)",letterSpacing:".06em",textTransform:"uppercase",userSelect:"none"}}>{children}</div>
   );
@@ -10534,6 +10555,16 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
           </div>
         )}
       </div>
+      {/* NEW-1 (chat, 2026-09-11) — two plain top-level rows (not a submenu, per the owner's ask),
+          shown only for a row genuinely bound to a resolvable body; disabled (not hidden) when
+          there's no next/previous meeting to compute; labeled with the target date so he can see
+          where he's going before he clicks. Moving goes through updateTask({pinnedMeetingDate}) —
+          the SAME pin field + cascade a snap uses — so dependents/deadline rows/meetingDeadline
+          all update exactly as they already do, in one undoable step. */}
+      {meetingBody && (<>
+        <Item icon="ti-chevron-right" label={nextMeetingIso ? `Next meeting · ${fmtMeetingStep(nextMeetingIso)}` : "Next meeting"} disabled={!nextMeetingIso} onClick={() => onStepMeeting(nextMeetingIso)} />
+        <Item icon="ti-chevron-left"  label={prevMeetingIso ? `Previous meeting · ${fmtMeetingStep(prevMeetingIso)}` : "Previous meeting"} disabled={!prevMeetingIso} onClick={() => onStepMeeting(prevMeetingIso)} />
+      </>)}
       <Sep />
       <Item icon="ti-copy"              label="Duplicate Row"                 onClick={onDuplicate} />
       <Sep />
@@ -10541,13 +10572,9 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
       <Item icon="ti-files"             label="Copy"              hint="Ctrl+C" onClick={onCopyTaskFull} />
       <Item icon="ti-clipboard"         label="Paste Below"       hint="Ctrl+V" onClick={onPasteTask} disabled={!hasClipboard} />
       <Sep />
-      <Item icon="ti-clipboard-copy"    label="Copy Task Name"                onClick={onCopyName} />
-      <Sep />
       <Item icon="ti-indent-increase"   label="Indent →"          hint="Alt⇧→" onClick={onIndent} />
       <Item icon="ti-indent-decrease"   label="Outdent ←"         hint="Alt⇧←" onClick={onOutdent} disabled={!canOutdent} />
       <Item icon="ti-folder-symlink"    label="Move to…"                      onClick={onMoveTo} />
-      <Sep />
-      <Item icon="ti-message-circle"    label="Add Note"                      onClick={onAddNote} />
       <Sep />
       <Item icon="ti-trash"             label={deleteCount > 1 ? `Delete ${deleteCount} Rows` : "Delete Row"} danger onClick={onDelete} />
     </div>,

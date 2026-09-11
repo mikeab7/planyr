@@ -142,6 +142,15 @@ export const nextEligibleMeeting = (body, readyDate, afterDate) => {
   }
   return null;
 };
+// NEW-1 (VERBATIM copy of public/sequence/index.html).
+export const adjacentMeetingDate = (body, refDate, dir) => {
+  if (!body || !refDate) return null;
+  if (dir === "next") {
+    return meetingDatesInRange(body, addD(refDate, 1), addD(refDate, 366 * 3))[0] || null;
+  }
+  const dates = meetingDatesInRange(body, addD(refDate, -366 * 3), addD(refDate, -1));
+  return dates.length ? dates[dates.length - 1] : null;
+};
 // B817 — the two decision numbers (VERBATIM copy of public/sequence/index.html).
 export const meetingFloatBD = (task, todayIso) => (task && task.meetingBound && task.meetingDeadline) ? difBD(todayIso, task.meetingDeadline) : null;
 export const meetingCostDays = (task, body) => {
