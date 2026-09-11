@@ -3576,12 +3576,22 @@ const applyMeetingBinding = (t, body, predEarly, drivingMeetingDate, minAfterDat
   if (pinnedDate) {                                   // a person fixed this hearing — pin wins, never roll
     t.start = t.end = pinnedDate;
     t.meetingDeadline = agendaDeadline(body, pinnedDate) || "";
-    // Infeasible: the predecessor chain can't deliver the packet by the pinned meeting's agenda deadline.
-    t.meetingInfeasible = !!(packetReady && t.meetingDeadline && packetReady > t.meetingDeadline);
+    // NEW-1 — a pinned date can be infeasible TWO different ways, and only one of them was ever
+    // checked. `pinnedDate` here is almost always `pinnedStart` (updateTask sets that on ANY direct
+    // date-cell edit — see its own comment — `pinnedMeetingDate` is a distinct deliberate-pin field
+    // that nothing in this app ever sets), so a plain typed/dragged date on a meeting-bound row was
+    // silently accepted even when it doesn't fall on one of the body's actual meeting days at all —
+    // reading as "feasible" while the row isn't parked on a real hearing. Owner repro: Goose Creek
+    // task 168 sat on 2026-09-30 (not a 3rd-Tuesday P&Z date; the real September meeting was
+    // 2026-09-15) with meetingInfeasible reading false. Flag BOTH conditions LOUDLY.
+    t.meetingDateOffCalendar = !meetingDatesInRange(body, pinnedDate, pinnedDate).length;
+    // Infeasible: the predecessor chain can't deliver the packet by the pinned meeting's agenda
+    // deadline, OR the pinned date isn't a real meeting day for this body at all.
+    t.meetingInfeasible = t.meetingDateOffCalendar || !!(packetReady && t.meetingDeadline && packetReady > t.meetingDeadline);
     return;
   }
   if (!packetReady) {                                 // nothing schedules it yet — stays blank (B386)
-    t.start = t.end = ""; t.meetingDeadline = ""; t.meetingInfeasible = false;
+    t.start = t.end = ""; t.meetingDeadline = ""; t.meetingInfeasible = false; t.meetingDateOffCalendar = false;
     return;
   }
   // Fixed-point guard: with NO external constraint (no preds, no pin, no driving meeting, no
@@ -3594,7 +3604,7 @@ const applyMeetingBinding = (t, body, predEarly, drivingMeetingDate, minAfterDat
     if (meetingDatesInRange(body, packetReady, packetReady).length) {
       t.start = t.end = packetReady;
       t.meetingDeadline = agendaDeadline(body, packetReady) || "";
-      t.meetingInfeasible = false;
+      t.meetingInfeasible = false; t.meetingDateOffCalendar = false;
       return;
     }
   }
@@ -3610,8 +3620,8 @@ const applyMeetingBinding = (t, body, predEarly, drivingMeetingDate, minAfterDat
     if (nth) { const before = addD(nth, -1); if (!afterDate || before > afterDate) afterDate = before; }
   }
   const elig = nextEligibleMeeting(body, readyDate, afterDate);
-  if (elig) { t.start = t.end = elig.meetingDate; t.meetingDeadline = elig.deadline; t.meetingInfeasible = false; }
-  else { t.start = t.end = ""; t.meetingDeadline = ""; t.meetingInfeasible = false; }
+  if (elig) { t.start = t.end = elig.meetingDate; t.meetingDeadline = elig.deadline; t.meetingInfeasible = false; t.meetingDateOffCalendar = false; }
+  else { t.start = t.end = ""; t.meetingDeadline = ""; t.meetingInfeasible = false; t.meetingDateOffCalendar = false; }
 };
 // Topological cascade: recompute start/end for all tasks driven by predecessors.
 // `bodies` (B816) = the project's meetingBodies[]; a bound task snaps to its body's cadence.
@@ -3723,9 +3733,9 @@ const cascadeDates = (tasks, bodies = []) => {
     } else if (bodyMissing) {
       // B864: the stored start/end are preserved above; feasibility can't be recomputed without the body,
       // so clear the (now-unverifiable) alert but KEEP the last-known meetingDeadline for context.
-      t.meetingInfeasible = false;
-    } else if (t.meetingDeadline || t.meetingInfeasible) {
-      t.meetingDeadline = ""; t.meetingInfeasible = false;             // stale derived fields on a now-unbound task
+      t.meetingInfeasible = false; t.meetingDateOffCalendar = false;
+    } else if (t.meetingDeadline || t.meetingInfeasible || t.meetingDateOffCalendar) {
+      t.meetingDeadline = ""; t.meetingInfeasible = false; t.meetingDateOffCalendar = false;   // stale derived fields on a now-unbound task
     }
   });
   // ── Deadline rows — a task linked via deadlineForTaskId ALWAYS sits on its anchor's derived
@@ -7309,7 +7319,14 @@ function App() {
     // sibling `[data]` effect runs (below) only fires on a real edit (`coreChanged`) — it has no
     // notion of the clock. So a genuine date rollover reconciles here too, the one place that
     // already detects one.
-    const refresh = () => { const t = fdLocal(new Date()); if (t !== NOW) { NOW = t; setTodayTick(x => x + 1); setData(d => reconcileNeedsAttention(d)); } };
+    const refresh = () => { const t = fdLocal(new Date()); if (t !== NOW) { NOW = t; setTodayTick(x => x + 1);
+      // isDerivedUpdate stays armed only through the ONE state transition it targets — reset it
+      // immediately if reconcileNeedsAttention turns out to be a no-op (same ref back), or the flag
+      // would leak forward and wrongly swallow the NEXT real edit's history entry (that edit's own
+      // setData would be the one to actually change `data` and consume the still-armed flag).
+      isDerivedUpdate.current = true;
+      setData(d => { const next = reconcileNeedsAttention(d); if (next === d) isDerivedUpdate.current = false; return next; });
+    } };
     const onVis = () => { if (!document.hidden) refresh(); };
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", onVis);
@@ -7429,16 +7446,34 @@ function App() {
   const future       = useRef([]);  // Fix #8: redo stack
   const prevData     = useRef(null);
   const isUndoing    = useRef(false);
+  // NEW-1 — a DERIVED-field recompute (reconcileNeedsAttention's needsAttentionSince stamp/clear,
+  // the holiday recascade) is not a user edit: it's a `[data]` effect reacting to data IT JUST
+  // helped produce, so its own `setData` re-triggers this same history-capture effect. Without this
+  // flag that reactive write pushes an extra, invisible snapshot onto `history` right after every
+  // real edit whose side effect flips some task's red/not-red status (most commonly a date edit,
+  // since the default overdue/due-soon rules are date-driven) — and because the flag-mismatch that
+  // triggered the recompute is now fixed, RESTORING that snapshot via Ctrl+Z immediately re-triggers
+  // the same recompute again, which re-pushes an equivalent snapshot right back. The visible fields
+  // (the date the user actually typed) never move, and every further Ctrl+Z repeats the same cycle —
+  // the real prior edit sits one level further back and can never be reached. Owner repro: Goose
+  // Creek Master Schedule task 168, "P&Z Public Hearing & Consideration" 9/10→9/30 — 9/10 was
+  // overdue-red under the default rule (9/11 "today"), 9/30 was not, and Ctrl+Z never got past that
+  // flip. Set this ref (like `isUndoing`) immediately before any `setData` whose ONLY job is to
+  // re-derive a field from `data` that was already current — never for a real user action.
+  const isDerivedUpdate = useRef(false);
   const flatTasksRef = useRef([]);
   const projIdRef    = useRef(null);
   const prevHolKey   = useRef(null);
   const skipHolRecasc = useRef(false);
   const prevHealthKey = useRef(null); // serialized customHealth+labelOverrides; detects real status-config changes (B5/M3)
 
-  // Capture a snapshot AFTER every data change, except undo/redo operations
+  // Capture a snapshot AFTER every data change, except undo/redo operations and derived recomputes
+  // (NEW-1 — a derived recompute folds into the CURRENT snapshot instead of becoming its own step,
+  // exactly like an undo/redo restore already does).
   useEffect(() => {
     if (!data) return;
     if (isUndoing.current) { isUndoing.current = false; prevData.current = data; return; }
+    if (isDerivedUpdate.current) { isDerivedUpdate.current = false; prevData.current = data; return; }
     if (prevData.current !== null) {
       history.current = [...history.current.slice(-19), prevData.current]; // cap undo at 20 deep snapshots (was 50) to bound memory on large boards
       future.current = []; // any new edit invalidates the redo stack
@@ -7680,6 +7715,9 @@ function App() {
         // Recompute from the LIVE `d` inside the updater, not the effect's closure snapshot — otherwise a
         // setData that lands between this effect's render and its callback (a realtime suggestion insert, an
         // autosave merge, a rapid second edit) would be clobbered by the stale projects map (data loss).
+        // NEW-1 — this recascade is the automatic CONSEQUENCE of the holiday-settings edit that
+        // triggered it, not a separate action; fold it into that same undo step (see isDerivedUpdate above).
+        isDerivedUpdate.current = true;
         setData(d => {
           const newProjects = {};
           Object.entries(d.projects).forEach(([id, proj]) => {
@@ -7701,7 +7739,12 @@ function App() {
       // is a no-op (same `d` back) when nothing needs restamping, so this can't loop against its own
       // write. The complementary date-rollover case (health flips red with no edit at all) is
       // covered by the `refresh()` callback above.
-      setData(d => reconcileNeedsAttention(d));
+      // NEW-1 — this write is a DERIVED restamp of a field the edit above already committed, not a
+      // second edit; fold it into the same undo step (isDerivedUpdate — see its declaration for the
+      // undo-stuck bug this fixes). Reset the flag immediately on a no-op (same ref back) so it can
+      // never leak forward and swallow a later, unrelated edit's own history entry.
+      isDerivedUpdate.current = true;
+      setData(d => { const next = reconcileNeedsAttention(d); if (next === d) isDerivedUpdate.current = false; return next; });
     }
     if (fileHandleRef.current && fileHtmlRef.current) {
       clearTimeout(fileSaveTimer.current);
@@ -12828,7 +12871,9 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
               `${b.name || "Meeting body"}${b.jurisdiction ? " · " + b.jurisdiction : ""}`,
               `Meets ${cadenceSummary(b)}; ${agendaLeadSummary(b)}.`,
               task.start ? `Hearing ${fmtD(task.start)} — file the agenda by ${fmtD(info?.deadline)}${b.cutoffTime ? " (" + b.cutoffTime + ")" : ""}.` : "No eligible meeting yet — waiting on a predecessor date.",
-              info?.state === "danger" ? "⚠ INFEASIBLE: this date is pinned but the agenda has already closed — roll to the next meeting or unpin." :
+              info?.state === "danger" ? (task.meetingDateOffCalendar
+                ? "⚠ INFEASIBLE: this date isn't a scheduled meeting day for this body at all — roll to the next meeting or unpin."
+                : "⚠ INFEASIBLE: this date is pinned but the agenda has already closed — roll to the next meeting or unpin.") :
                 info?.state === "warning" ? `⚠ Only ${info.floatBD} working day(s) of float before the agenda deadline.` :
                 "This is a meeting-calendar date: it can't be freely typed, has no duration, and slips by a full cycle if the deadline is missed.",
               b.verifiedOn ? `Calendar verified ${fmtD(b.verifiedOn)}.` : "Calendar is rule-derived (unverified).",
