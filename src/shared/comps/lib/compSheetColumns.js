@@ -84,7 +84,11 @@ import {
 } from "./comps.js";
 import { parseTypedDate, formatDateDisplay } from "./compDates.js";
 
-export const GROUPS = ["TYPE", "PROPERTY", "DEAL", "PRICE", "RENT", "CONCESSIONS", "DERIVED", "PARTIES", "NOTES"];
+// B1519296/B1519297 (owner mockup pick, 2026-09-11) — PROPERTY split into LOCATION (the address/
+// title — where the comp IS) and BUILDING (clear height, year built — physical facts about the
+// improvement, not the deal); Notes left the sheet entirely as its own column (see NOTES_COLUMN
+// below) so NOTES drops out of the band list too. Banding only — no column's meaning moved.
+export const GROUPS = ["TYPE", "LOCATION", "BUILDING", "DEAL", "PRICE", "RENT", "CONCESSIONS", "DERIVED", "PARTIES"];
 
 // HARDENING-10 — leaseTerm's cell boundary: the stored field stays free text (a real deal can be
 // "10 yr + 2x5 options", which a bare-months cell can't hold) but the SHEET CELL itself only ever
@@ -247,12 +251,12 @@ export const SHEET_COLUMNS = [
   // difference back first when there isn't. `frozenLeftOffsets` already reads `widthFor`, so the
   // sticky offsets follow it with no change.
   {
-    key: "location", label: "Location", group: "PROPERTY", width: 188, flexKey: "location",
+    key: "location", label: "Location", group: "LOCATION", width: 188, flexKey: "location",
     align: "left", kind: "action", appliesTo: () => true, required: true, frozen: true,
   },
-  simpleColumn({ key: "title", label: "Title / Address", group: "PROPERTY", width: 108, flexKey: "title", align: "left", kind: "text" }),
+  simpleColumn({ key: "title", label: "Title / Address", group: "LOCATION", width: 108, flexKey: "title", align: "left", kind: "text" }),
   {
-    key: "size", label: "Size", group: "PROPERTY", width: 62, align: "right", kind: "number",
+    key: "size", label: "Size", group: "BUILDING", width: 62, align: "right", kind: "number",
     appliesTo: () => true,
     getValue: (d) => (d.compType === "land" ? d.landSizeValue : d.compType === "building_sale" ? d.bldgSizeSf : d.leaseSizeSf),
     setValue: (d, v) => (d.compType === "land" ? { ...d, landSizeValue: v } : d.compType === "building_sale" ? { ...d, bldgSizeSf: v } : { ...d, leaseSizeSf: v }),
@@ -282,7 +286,7 @@ export const SHEET_COLUMNS = [
     // slack against their own content (see this file's own SHEET_COLUMNS header comment); a small
     // buffer removes the fragility without changing anything about the select-vs-fixed question
     // this comment is otherwise about.
-    key: "landSizeUnit", label: "Unit", group: "PROPERTY", width: 44, align: "left", kind: "select", options: UNIT_OPTIONS,
+    key: "landSizeUnit", label: "Unit", group: "BUILDING", width: 44, align: "left", kind: "select", options: UNIT_OPTIONS,
     appliesTo: () => true,
     optionsFor: (compType) => (compType === "land" ? UNIT_OPTIONS : SF_ONLY_OPTIONS),
     getValue: (d) => (d.compType === "land" ? d.landSizeUnit : "sf"),
@@ -290,12 +294,15 @@ export const SHEET_COLUMNS = [
     flagKey: () => "landSizeUnit",
   },
   // NEW-COMPS-CARD — building-spec facts (clear height, year built): properties of the BUILDING,
-  // not the deal, so they sit in PROPERTY beside Size — and unlike Size they never vary by comp
-  // type, so a plain simpleColumn suffices (no polymorphic getValue/setValue). Land has no
-  // building yet, so both are grey em-dash there, same as every other building_sale/lease-only
-  // PROPERTY column. `db/comps_building_specs.sql`.
-  simpleColumn({ key: "clearHeightFt", label: "Clear Ht (ft)", fullLabel: "Clear height (ft)", group: "PROPERTY", width: 68, align: "right", kind: "number", appliesTo: (t) => t === "building_sale" || t === "lease" }),
-  simpleColumn({ key: "yearBuilt", label: "Yr Built", fullLabel: "Year built", group: "PROPERTY", width: 60, align: "right", kind: "number", appliesTo: (t) => t === "building_sale" || t === "lease" }),
+  // not the deal, so they sit beside Size — and unlike Size they never vary by comp type, so a
+  // plain simpleColumn suffices (no polymorphic getValue/setValue). Land has no building yet, so
+  // both are grey em-dash there, same as every other building_sale/lease-only BUILDING column.
+  // `db/comps_building_specs.sql`.
+  // B1519296 (owner mockup pick) — moved out of PROPERTY into its own BUILDING band: clear height
+  // and year built are physical characteristics of the improvement, not the deal's location, and
+  // grouping them with the street address read as if they were the same kind of fact.
+  simpleColumn({ key: "clearHeightFt", label: "Clear Ht (ft)", fullLabel: "Clear height (ft)", group: "BUILDING", width: 68, align: "right", kind: "number", appliesTo: (t) => t === "building_sale" || t === "lease" }),
+  simpleColumn({ key: "yearBuilt", label: "Yr Built", fullLabel: "Year built", group: "BUILDING", width: 60, align: "right", kind: "number", appliesTo: (t) => t === "building_sale" || t === "lease" }),
 
   // DEAL — facts about the transaction: when, how long.
   // B986096-HARDENING-25 — `editHint` becomes the edit `<input>`'s native `placeholder` while a
@@ -433,14 +440,27 @@ export const SHEET_COLUMNS = [
 
   // PARTIES — who the deal is between. Notes used to live in this group too (B986096-HARDENING-25
   // correction: a note isn't a party — it's freeform commentary on the whole comp, and nesting it
-  // under PARTIES read as a membership error, not a layout choice) — it's its own one-column NOTES
-  // group now. All three `flexKey` columns here (plus Title above) share the dialog's leftover
-  // horizontal space — see CompEntryGrid.jsx's `computeFlexWidths`. `width` here is only the
-  // STATIC fallback (tests, no-DOM contexts); the live sheet always uses the computed value.
+  // under PARTIES read as a membership error, not a layout choice), then got its own one-column
+  // NOTES group — B1519297 removed it from the sheet altogether (see NOTES_COLUMN below). The two
+  // `flexKey` columns here (plus Title above) share the dialog's leftover horizontal space — see
+  // CompEntryGrid.jsx's `computeFlexWidths`. `width` here is only the STATIC fallback (tests,
+  // no-DOM contexts); the live sheet always uses the computed value.
   simpleColumn({ key: "partyProvider", label: "Landlord/Seller", fullLabel: "Landlord / Seller", group: "PARTIES", width: 110, flexKey: "partyProvider", align: "left", kind: "text" }),
   simpleColumn({ key: "partyAcquirer", label: "Tenant/Buyer", fullLabel: "Tenant / Buyer", group: "PARTIES", width: 110, flexKey: "partyAcquirer", align: "left", kind: "text" }),
-  simpleColumn({ key: "notes", label: "Notes", group: "NOTES", width: 80, flexKey: "notes", align: "left", kind: "text" }),
 ];
+
+// B1519297 (owner mockup pick, 2026-09-11) — Notes is the last column, the narrowest one, and it
+// held the row's longest text; the owner's screenshot showed a note running past its own cell and
+// reading as if it belonged to the columns beside it, and no width setting fixes that — the field
+// has to leave the row. It is NOT in SHEET_COLUMNS any more (no sheet cell, no part of
+// visibleColumnIndices/fillDownColumn/spillPaste/computeFlexWidths), but the underlying draft/comp
+// field is completely unchanged — still stored, saved, parsed (compParse.js never touched) and
+// exported. `CompEntryGrid.jsx` renders a small note-mark control per row instead, opening an
+// anchored editor over the map (`AnchoredMenu`) rather than a sheet cell. `compMobileLayout.js`
+// still needs a real column-shaped object for its own "Notes" section (mobile keeps notes as a
+// full-width field — the anchored editor is a desktop-sheet affordance only), so this is exported
+// standalone rather than deleted outright.
+export const NOTES_COLUMN = simpleColumn({ key: "notes", label: "Notes", group: "NOTES", width: 80, align: "left", kind: "text" });
 
 export function columnIndex(key) {
   return SHEET_COLUMNS.findIndex((c) => c.key === key);
@@ -708,11 +728,16 @@ export function groupLabelIsRedundant(groupName, columnLabel) {
  * after every fixed-width visible column, so the sheet fits its container with ZERO horizontal
  * scroll rather than a hand-tuned static budget (two static attempts both overflowed the target
  * by 170-200px — a computed-to-fit approach is the only one that's correct regardless of an
- * imprecise per-column guess). HARDENING-10 NEW-5 (message A) said Notes shrinks first; NEW-3
- * (message B, later and more specific) said Title/Landlord/Tenant share leftover space growing,
- * Title getting the largest share, and said nothing about Notes growing — so Notes is modeled
- * separately: it alone absorbs a squeeze up to its own floor, and only once it's AT that floor do
- * the three growers give up any of their own room. ------------------------------------------- */
+ * imprecise per-column guess).
+ *
+ * ⛔ B1519297 (owner mockup pick, 2026-09-11) — Notes left the sheet as a column entirely (see
+ * NOTES_COLUMN above), so the THREE-regime split this comment used to describe ("Notes shrinks
+ * first, then the growers shrink together") no longer has a Notes column to shrink. There are only
+ * FOUR flex growers now (Location/Title/Landlord-Seller/Tenant-Buyer) and TWO regimes: surplus
+ * shared by weight above everyone's nominal, deficit shared proportional to each grower's own
+ * shrink room below it — collapsing straight to floors once there's no room left to share. The
+ * freed width (what used to go to Notes) now goes to the four growers instead, which is a real
+ * improvement in its own right — they already truncated under squeeze. ----------------------- */
 
 // B986096-HARDENING-27 (NEW-4) — Title's nominal/floor/weight all shrank alongside its column
 // definition above: it no longer carries the row's identity (Location, now frozen, does), so it
@@ -741,58 +766,38 @@ const FLEX_GROWERS = [
   { key: "partyProvider", nominal: 110, floor: 88, weight: 1 },
   { key: "partyAcquirer", nominal: 110, floor: 78, weight: 1 },
 ];
-// NEW-3(b) — the floor was 40 and the word "Notes" itself needs 41, so at full squeeze the Notes
-// column truncated its own header too. 44 is the smallest floor that does not.
-const FLEX_NOTES = { key: "notes", nominal: 80, floor: 44 };
 
 /** Pure: given the horizontal space left over after every FIXED-width visible column (and the
- * remove-row column, and borders — the caller's job to subtract those), returns
- * `{title, partyProvider, partyAcquirer, notes}` widths — never negative, and NEVER below a
- * column's own floor, full stop. The floors are chosen (see the sum at the top of this file's
- * HARDENING-10 note) so that even the narrowest realistic dialog never has to cross one; if
+ * remove-row column, the note-mark column, and borders — the caller's job to subtract those),
+ * returns `{location, title, partyProvider, partyAcquirer}` widths — never negative, and NEVER
+ * below a column's own floor, full stop. The floors are chosen (see the sum at the top of this
+ * file's HARDENING-10 note) so that even the narrowest realistic dialog never has to cross one; if
  * `availableForFlex` is ever smaller than the floor sum anyway (an extreme window), every column
  * still holds its floor and the table is left to overflow by that difference — a readable column
- * that causes a little horizontal scroll beats an unreadable one that doesn't. Three regimes, in
- * order of how tight things are: everyone gets more than nominal (surplus shared by the three
- * growers, weighted) · notes alone shrinks to absorb the squeeze · notes is already at floor and
- * the three growers now shrink together, proportional to their own room. */
+ * that causes a little horizontal scroll beats an unreadable one that doesn't. Two regimes:
+ * everyone gets at least their nominal (surplus shared by weight) · everyone shrinks together,
+ * proportional to their own room, down to (never below) their own floor. */
 export function computeFlexWidths(availableForFlex) {
   const avail = Math.max(0, availableForFlex);
-  const growerNominalTotal = FLEX_GROWERS.reduce((s, g) => s + g.nominal, 0);
-  const growerFloorTotal = FLEX_GROWERS.reduce((s, g) => s + g.floor, 0);
-  const fullNominalTotal = growerNominalTotal + FLEX_NOTES.nominal;
+  const nominalTotal = FLEX_GROWERS.reduce((s, g) => s + g.nominal, 0);
+  const floorTotal = FLEX_GROWERS.reduce((s, g) => s + g.floor, 0);
+  const widths = {};
 
-  if (avail >= fullNominalTotal) {
-    const surplus = avail - fullNominalTotal;
+  if (avail >= nominalTotal) {
+    const surplus = avail - nominalTotal;
     const weightTotal = FLEX_GROWERS.reduce((s, g) => s + g.weight, 0);
-    const widths = { notes: FLEX_NOTES.nominal };
     FLEX_GROWERS.forEach((g) => { widths[g.key] = Math.round(g.nominal + surplus * (g.weight / weightTotal)); });
     return widths;
   }
-
-  const notesShrinkRoom = FLEX_NOTES.nominal - FLEX_NOTES.floor;
-  const deficitFromFullNominal = fullNominalTotal - avail;
-  if (deficitFromFullNominal <= notesShrinkRoom) {
-    const widths = { notes: FLEX_NOTES.nominal - deficitFromFullNominal };
-    FLEX_GROWERS.forEach((g) => { widths[g.key] = g.nominal; });
-    return widths;
-  }
-
-  const remainingForGrowers = Math.max(0, avail - FLEX_NOTES.floor);
-  const widths = { notes: FLEX_NOTES.floor };
-  if (remainingForGrowers >= growerNominalTotal) {
-    FLEX_GROWERS.forEach((g) => { widths[g.key] = g.nominal; });
-    return widths;
-  }
-  if (remainingForGrowers <= growerFloorTotal) {
+  if (avail <= floorTotal) {
     FLEX_GROWERS.forEach((g) => { widths[g.key] = g.floor; });
     return widths;
   }
-  const growerDeficit = growerNominalTotal - remainingForGrowers;
+  const deficit = nominalTotal - avail;
   const shrinkRoom = FLEX_GROWERS.reduce((s, g) => s + (g.nominal - g.floor), 0);
   FLEX_GROWERS.forEach((g) => {
     const share = shrinkRoom > 0 ? (g.nominal - g.floor) / shrinkRoom : 0;
-    widths[g.key] = Math.round(g.nominal - growerDeficit * share);
+    widths[g.key] = Math.round(g.nominal - deficit * share);
   });
   return widths;
 }

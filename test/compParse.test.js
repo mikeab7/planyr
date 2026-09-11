@@ -325,6 +325,36 @@ describe("compParse: spreadsheet (tab-delimited) block paste — DIFFERENT from 
   });
 });
 
+// B1519297 (owner mockup pick, 2026-09-11) — Notes left the desktop SHEET as a column (see
+// NOTES_COLUMN's own header in compSheetColumns.js), but the underlying field is unchanged: a
+// pasted spreadsheet block with a Notes column must still populate it, and that value must still
+// reach the saved comp — this module's own parsing/HEADER_ALIASES/DEFAULT_COLUMN_ORDER handling of
+// `notes` was deliberately left untouched by that change.
+describe("compParse: B1519297 — a paste with a Notes column still round-trips to the saved comp", () => {
+  it("a header-mapped block's Notes column lands in draft.notes and survives into the saved comp", () => {
+    const text = [
+      "Type\tDate\tPrice\tSF\tNotes",
+      "Land\t8/1/2026\t850000\t139392\tCorner lot, seller financing available",
+    ].join("\n");
+    const rows = parsePasteBlock(text);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].draft.notes).toBe("Corner lot, seller financing available");
+    const comp = draftToComp(rows[0].draft);
+    expect(comp.notes).toBe("Corner lot, seller financing available");
+  });
+  it("the 'Comments' header alias also maps to notes", () => {
+    const text = ["Type\tDate\tPrice\tSF\tComments", "Land\t8/1/2026\t850000\t139392\tFlood zone X"].join("\n");
+    const rows = parsePasteBlock(text);
+    expect(rows[0].draft.notes).toBe("Flood zone X");
+  });
+  it("a headerless positional paste still lands its trailing Notes field (DEFAULT_COLUMN_ORDER's last slot)", () => {
+    const text = "Land\t2026-08-01\tAcme Seller\tAcme Buyer\t850000\t3.2\t\t\t\t\tCash deal, quick close";
+    const rows = parsePasteBlock(text);
+    expect(rows[0].draft.notes).toBe("Cash deal, quick close");
+    expect(draftToComp(rows[0].draft).notes).toBe("Cash deal, quick close");
+  });
+});
+
 describe("compParse: splitPasteLines", () => {
   it("normalizes CRLF and drops blank lines", () => {
     expect(splitPasteLines("a\r\nb\r\n\r\nc")).toEqual(["a", "b", "c"]);

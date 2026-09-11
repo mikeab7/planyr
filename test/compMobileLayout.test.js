@@ -40,24 +40,38 @@ describe("compMobileLayout: needed-to-save", () => {
 });
 
 describe("compMobileLayout: sections swap by deal type, never a wall of greyed rows", () => {
+  // B1519296/B1519297 (owner mockup pick, 2026-09-11) — "Property" split into "Location" and
+  // "Building" (mirroring the desktop sheet's own LOCATION/BUILDING band split), and Notes moved
+  // out of Parties into its own section at the end (mirroring Notes leaving the desktop sheet as
+  // a column) — every comp type now carries a Notes section, since notes applies to every type.
   it("a LEASE sheet gets Rent/Term/Concessions, never Price", () => {
     const titles = mobileSections("lease").map((s) => s.title);
-    expect(titles).toEqual(["Property", "Rent", "Term", "Concessions", "Parties"]);
+    expect(titles).toEqual(["Location", "Building", "Rent", "Term", "Concessions", "Parties", "Notes"]);
   });
   it("a LAND sheet gets Price instead, never Rent/Term/Concessions", () => {
     const titles = mobileSections("land").map((s) => s.title);
-    expect(titles).toEqual(["Property", "Price", "Parties"]);
+    expect(titles).toEqual(["Location", "Building", "Price", "Parties", "Notes"]);
   });
   it("a BUILDING SALE sheet also gets Price (with NOI/Cap), never a lease section", () => {
     const price = mobileSections("building_sale").find((s) => s.title === "Price");
     expect(price.cols.map((c) => c.key)).toEqual(["price", "bldgNoi", "bldgCapRate", "salePricePerArea"]);
+  });
+  it("Building drops clear height/year built on a LAND row (buildings-only facts)", () => {
+    const building = mobileSections("land").find((s) => s.title === "Building");
+    expect(building.cols.map((c) => c.key)).toEqual(["size", "landSizeUnit"]);
+  });
+  it("Notes is its own section for every comp type, sourced from NOTES_COLUMN (not SHEET_COLUMNS)", () => {
+    for (const t of ["land", "building_sale", "lease"]) {
+      const notes = mobileSections(t).find((s) => s.title === "Notes");
+      expect(notes.cols.map((c) => c.key)).toEqual(["notes"]);
+    }
   });
   it("no section is ever emitted with zero applicable columns", () => {
     for (const t of ["land", "building_sale", "lease"]) {
       for (const s of mobileSections(t)) expect(s.cols.length).toBeGreaterThan(0);
     }
   });
-  it("Location never repeats inside Property — it lives only in Needed to save", () => {
+  it("Location the ACTION column never repeats inside a section — it lives only in Needed to save", () => {
     for (const t of ["land", "building_sale", "lease"]) {
       const keys = mobileSections(t).flatMap((s) => s.cols.map((c) => c.key));
       expect(keys).not.toContain("location");
