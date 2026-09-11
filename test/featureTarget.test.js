@@ -460,41 +460,47 @@ describe("source guard — the render must keep stamping what the resolver reads
   });
 });
 
-/* ⛔ NEW-3 — THE RIGHT-CLICK PATH, which B280402's fix never reached.
+/* ⛔ NEW-1 (2026-09-11) — A LABEL'S HIT REGION BELONGS TO THE OBJECT IT DESCRIBES. NO FORWARDING.
+ * This SUPERSEDES the "NEW-3" right-click resolver/forward fix these tests used to pin.
  *
- * FOUND ON THE OWNER'S REAL BAIN PLAN, and not findable anywhere else: the parcel acreage badge is
- * a hit target only while HOVERED (B1327, so it can be dragged), so the cursor merely ARRIVING at
- * his detention pond puts the badge's rect above the pond in the stack — measured, both states:
+ * FOUND ON THE OWNER'S REAL PLAN, from a screenshot: right-click his parcel's "Parcel 1 20.xx AC"
+ * acreage badge, sitting (as it always does — `polylabel` parks it on the developed middle of the
+ * lot, B1186) over a 443'×135' dock building, and the BUILDING's menu opened — Reshape…, Bump-outs,
+ * Dock Zones, Arrange, … Delete — with "Hide acreage label" nowhere in it. A misdirected menu on a
+ * Delete is how someone destroys a building while trying to tidy a label.
  *
- *     COLD  : [{feature: "el:e79404lvnvpt", chrome: false}]
- *     HOVER : [{feature: "parcel:psmr9olizi5ue_0", chrome: TRUE}, {feature: "el:e79404lvnvpt", …}]
- *
- * B280402 made `data-chrome` identity-transparent inside `resolveDoubleClickTarget`, and the app's
- * own resolver still answers `el:e79404lvnvpt` at that point. But a right-click is a plain DOM
- * handler on the badge and never asked the resolver — so right-clicking the pond opened the PARCEL
- * menu: "Merge parcels · Hide acreage label · Delete parcel", with the pond's Arrange rows,
- * Properties and Delete nowhere in it. A DESTRUCTIVE row standing where a benign one was aimed at.
- *
- * The live proof is `ui-audit/verify-v91632-real-plan.mjs` (mutation-checked: removing the two
- * lines below turns four of its rows red, including V91632's own lone-instance case). This is the
- * CI-runnable half — no browser here can drive a hover — so it pins the WIRING.
+ * The prior "NEW-3" fix asked `resolveDoubleClickTarget` (which treats `data-chrome` as
+ * see-through, by design, so an in-flight DOUBLE-CLICK resolves to the feature a grip merely
+ * hovers over) and forwarded the right-click to whatever it found underneath. That is the wrong
+ * question for a right-click aimed at a solid, opaque, drawn chip: the badge's hover-gated hit box
+ * is not a coarse guess, it is the EXACT rect the pill paints (`parcelChips`'s
+ * `box: boxOf(c.x, c.y, boxW, boxH)`, the same box the `<rect>` draws) — so reaching the handler at
+ * all means the cursor is genuinely on the label, with nothing of the object beneath it visible at
+ * that pixel. And because the badge is deliberately anchored over the developed middle of the lot,
+ * "something real is under it" is the ORDINARY case on any built-out parcel, not the rare one that
+ * NEW-3 was built around — so forwarding made the badge's own menu practically unreachable on
+ * exactly the plans where the owner is actually working. Live-verified (a real click, over a real
+ * building, in a headless browser): the fix opens "Merge parcels · Hide acreage label · Delete
+ * parcel" and none of the building's own rows.
  */
-describe("NEW-3 — a right-click resolves the same way a double-click does", () => {
+describe("NEW-1 — a label's right-click never forwards to whatever it sits over", () => {
   const SP = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
 
-  it("the acreage badge's context handler asks the ONE resolver before claiming the press", () => {
+  it("the acreage badge's context handler opens its OWN menu unconditionally — no resolver, no forward", () => {
     const at = SP.indexOf("const onChipContext");
     expect(at, "onChipContext not found").toBeGreaterThan(-1);
-    const block = SP.slice(at, at + 3200);
-    expect(block, "the badge must resolve what is actually under the point, via the shared resolver")
-      .toMatch(/resolveDoubleClickTarget\(hitStackAt\(e\.clientX, e\.clientY\)\)/);
-    expect(block, "…and forward the press when the answer is not its own lot")
-      .toMatch(/featureContextAction\(under, e\)\) return;/);
+    const block = SP.slice(at, at + 1200);
+    expect(block, "the badge must not ask what is underneath it")
+      .not.toMatch(/resolveDoubleClickTarget\(hitStackAt\(e\.clientX, e\.clientY\)\)/);
+    expect(block, "…and must not forward the press to some other feature")
+      .not.toMatch(/featureContextAction\(under, e\)/);
+    expect(block, "it always opens its own parcel menu")
+      .toMatch(/setParcelMenu\(\{ x: e\.clientX, y: e\.clientY, id, fromChip: true \}\)/);
   });
 
-  it("there is ONE right-click dispatch, covering every feature family", () => {
+  it("there is still ONE right-click dispatch for the case that legitimately forwards (a selected annotation sent behind the plan)", () => {
     const at = SP.indexOf("const featureContextAction");
-    expect(at, "featureContextAction not found — a per-call-site fix is the next recurrence").toBeGreaterThan(-1);
+    expect(at, "featureContextAction not found").toBeGreaterThan(-1);
     const block = SP.slice(at, at + 1200);
     for (const [kind, call] of [
       ["el", "onElContext"], ["markup", "onMarkupContext"], ["callout", "onCalloutContext"],
@@ -505,18 +511,20 @@ describe("NEW-3 — a right-click resolves the same way a double-click does", ()
     /* A measurement is addressed by INDEX, not by id — the selection model's asymmetry, and the
      * reason a bare `on${kind}Context` lookup table would be wrong here. */
     expect(block).toMatch(/measures\[t\.i\]/);
-    /* NEW-1 (B1239328) — a locked parcel is click-through, same as the map; forwarding must respect
-     * that (the plan-wide "Select parcels" setting this used to read is gone). */
+    /* NEW-1 (B1239328) — a locked parcel is click-through, same as the map. */
     expect(block).toMatch(/pc\.locked/);
   });
 
-  it("the badge keeps its OWN menu when it is genuinely what was aimed at", () => {
-    const at = SP.indexOf("const onChipContext");
-    const block = SP.slice(at, at + 3200);
-    expect(block, "over its own lot with nothing beneath, the chip menu must still open")
-      .toMatch(/setParcelMenu\(\{ x: e\.clientX, y: e\.clientY, id, fromChip: true \}\)/);
-    expect(block, "…and the forward must exclude the badge's own parcel, or it recurses into itself")
-      .toMatch(/under\.kind === "parcel" && under\.id === id/);
+  /* Every OTHER label on the canvas already followed this rule (a direct `on${kind}Context(e, id)`
+   * dispatch, never a resolver lookup) — the acreage badge was the one outlier. Pin the pattern so
+   * a future label doesn't reintroduce a private "ask what's underneath" shortcut. */
+  it("every other label's context menu dispatches directly to its own object, never through a resolver", () => {
+    for (const marker of [
+      'onContextMenu={isPondLabel ? (e) => onElContext(e, d.el.id) : undefined}',
+      "onContextMenu={(e) => onParcelContext(e, pc.id)}",
+    ]) {
+      expect(SP, `expected direct-dispatch marker not found: ${marker}`).toContain(marker);
+    }
   });
 });
 
