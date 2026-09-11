@@ -354,6 +354,96 @@ async function run(label, { width, height, zoomSteps = 0 }) {
       `${before10.length} → ${after10.length}`);
   }
 
+  /* ═══ ATTACK 14 — A REAL POINTER CLICK ON THE ANCHOR'S OWN TEXT, MEASURED THE WAY THE OWNER'S
+   * OWN LIVE-VERIFY DID (B1555152, a failed live-verify on planyr.io reported after B1555152's
+   * first fix merged and deployed — reopened, then re-closed once this attack, and the two
+   * production builds it was checked against, could not reproduce the reported failure).
+   *
+   * ⛔ THE OWNER'S OWN REPRO, driven exactly: click real flow text, verify the native selection is
+   * really there (`getSelection().anchorNode`/`anchorOffset`, `document.activeElement`) — THEN a
+   * single real pointer click on the box's own text, INSIDE `.planyr-anchor-content`'s rect
+   * (never the box's outer bounding-rect centre, which can land on padding or an empty area below
+   * short text) — THEN read `className`/`data-selected`/`activeElement` BEFORE the keypress, THEN
+   * a real Backspace, THEN read the flow text back.
+   *
+   * ⛔ `page.mouse.click()` IS A REAL POINTER EVENT (CDP `Input.dispatchMouseEvent`), NEVER A
+   * SCRIPTED `element.click()` DOM call — this file has used it throughout, but the owner
+   * explicitly asked for it to be asserted rather than assumed, so this attack states it and
+   * checks the intermediate state a scripted click could not fake: the native
+   * `document.getSelection()`/`activeElement` readings a `.click()` call never produces at all. */
+  await seed(page, ONE);
+  const flowPara14 = await page.evaluate(() => {
+    const p = [...document.querySelectorAll(".ProseMirror p")].find((el) => el.textContent.includes("Flow text"));
+    const r = p.getBoundingClientRect();
+    return { x: Math.round(r.left + 10), y: Math.round(r.top + r.height / 2) };
+  });
+  await page.mouse.click(flowPara14.x, flowPara14.y);
+  await pacedWait(page, 300);
+  const nativeAfterFlow = await page.evaluate(() => {
+    const sel = document.getSelection();
+    return { anchorNodeIsFlowText: !!(sel.anchorNode && sel.anchorNode.textContent?.includes("Flow text")), activeElement: document.activeElement?.getAttribute?.("data-testid") };
+  });
+  ok(`${label} · ⛔ (14) A REAL FLOW-TEXT CLICK PRODUCES A REAL NATIVE SELECTION FIRST`,
+    nativeAfterFlow.anchorNodeIsFlowText && nativeAfterFlow.activeElement === "note-body", JSON.stringify(nativeAfterFlow));
+
+  const anchorContentPos14 = await page.evaluate(() => {
+    const content = document.querySelector('[data-testid="note-anchor"] .planyr-anchor-content');
+    const p = content.querySelector("p");
+    const r = (p || content).getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  });
+  await page.mouse.click(anchorContentPos14.x, anchorContentPos14.y);
+  await pacedWait(page, 350);
+  const afterAnchorClick14 = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="note-anchor"]');
+    return {
+      className: el.className,
+      dataSelected: el.getAttribute("data-selected"),
+      activeElement: document.activeElement?.getAttribute?.("data-testid") || document.activeElement?.tagName,
+    };
+  });
+  ok(`${label} · ⛔ (14) A REAL POINTER CLICK ON THE ANCHOR'S OWN TEXT SELECTS IT — className carries "selected", editor is blurred`,
+    /planyr-anchor/.test(afterAnchorClick14.className) && afterAnchorClick14.dataSelected === "1" && afterAnchorClick14.activeElement !== "note-body",
+    JSON.stringify(afterAnchorClick14));
+
+  const flowBefore14 = await page.evaluate(() => [...document.querySelectorAll(".ProseMirror p")].find((el) => el.textContent.includes("Flow text")).textContent);
+  await page.keyboard.press("Backspace");
+  await pacedWait(page, 1300);
+  const flowAfter14 = await page.evaluate(() => [...document.querySelectorAll(".ProseMirror p")].find((el) => el.textContent.includes("Flow text"))?.textContent);
+  ok(`${label} · ⛔ (14) …AND BACKSPACE LEAVES THE FLOW TEXT UNTOUCHED — the owner's exact bar`,
+    flowAfter14 === flowBefore14, JSON.stringify({ flowBefore14, flowAfter14 }));
+
+  /* ═══ ATTACK 15 — A BOX BELOW note-body'S OWN BOTTOM EDGE, SCROLLED PROPERLY INTO VIEW
+   * (interaction check against B1550976/B1550977's new sheet-bottom hit-test, which sits in the
+   * same click-routing function this fix touches). `focusFromMat` gained a NEW branch after
+   * B1555152 first shipped — a press below `note-body`'s own rendered bottom edge, still on the
+   * white sheet, now ends the caret at the document's end instead of falling through to the grey
+   * mat. If that branch's condition were ever accidentally reachable for a press that actually
+   * landed ON an anchor box positioned low on the page, it would silently eat the click before
+   * this fix's own selection logic ever saw it. A box this low overhangs `note-body`'s own flow
+   * height (out-of-flow, absolutely positioned) and the page must be scrolled to actually bring it
+   * on screen — a fixed viewport coordinate past the window's own height hits nothing at all and
+   * would read as a false pass, so this scrolls for real before measuring (DRIVER-SCROLL-IS-NOT-
+   * APP-SCROLL's own caution, the other direction: not the driver scrolling unasked, but the test
+   * failing to scroll when a real user would have to). */
+  await seed(page, [{ x: 60, y: 900, w: 180, t: "low box" }]);
+  await page.evaluate(() => document.querySelector('[data-testid="note-anchor"]').scrollIntoView({ block: "center" }));
+  await pacedWait(page, 350);
+  const lowBoxPos = await page.evaluate(() => {
+    const content = document.querySelector('[data-testid="note-anchor"] .planyr-anchor-content');
+    const p = content.querySelector("p");
+    const r = (p || content).getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  });
+  const stackAtLowBox = await page.evaluate((pos) =>
+    document.elementsFromPoint(pos.x, pos.y).some((el) => el.closest && el.closest(".planyr-anchor")), lowBoxPos);
+  ok(`${label} · ⛔ (15) A BOX BELOW note-body's BOTTOM EDGE IS STILL ON TOP OF THE HIT-TEST STACK`,
+    stackAtLowBox);
+  await page.mouse.click(lowBoxPos.x, lowBoxPos.y);
+  await pacedWait(page, 350);
+  ok(`${label} · ⛔ (15) …AND A REAL CLICK THERE STILL SELECTS THE BOX, NOT THE SHEET-BOTTOM BRANCH`,
+    (await renderedBoxes(page))[0].selected);
+
   /* ═══ ATTACK 11 — A STALE CARET LEFT IN FLOW TEXT MUST NOT EAT THE KEY (B1555152, owner report
    * 2026-09-11: *"I clicked after 'Civil Engineer: ', then clicked one of his margin boxes, then
    * pressed Backspace, and it backspaced the Civil Engineer line."*).

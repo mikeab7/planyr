@@ -167,6 +167,38 @@ Two more found since, each worth its own line because each returned a confident 
    the design-drift ceiling read 580 on "untouched main" when the real number was a passing 572:
    the new file was in both arms. **Use `git stash push -u`**, and treat any baseline that is
    itself failing as a claim to verify rather than a relief.
+18. **A COORDINATE COMPUTED FROM `getBoundingClientRect()` CAN LAND OUTSIDE THE TEST'S OWN
+   VIEWPORT, AND `elementsFromPoint` GOES SILENT THERE RATHER THAN ERRORING (B1555152, ×2 live-verify
+   investigation, 2026-09-11).** A re-test placing a box lower on the page than the fixture had
+   before (to probe an interaction with an unrelated PR's new "below the sheet's body" click
+   branch) computed a click position whose `y` was **past the 950px viewport height passed to
+   `newContext`** — `.planyr-anchor`'s own out-of-flow, absolutely-positioned geometry made this
+   easy to do by accident, since nothing about the number LOOKS wrong (it is a plausible, in-range
+   CSS pixel value; only comparing it against the viewport's own height reveals the problem).
+   `document.elementsFromPoint(x, y)` at such a point returned an **empty array** — no error, no
+   warning — and a synthetic mouse click at the same coordinates hit nothing, which read, for one
+   round, exactly like the reported defect (a click that fails to select a box). **The tell:**
+   compare the computed `y` against the viewport height BEFORE clicking, or — more robustly —
+   `scrollIntoView({ block: "center" })` the target first and re-measure its rect AFTER scrolling,
+   never trust a rect computed before a scroll that was supposed to happen. Same species as
+   DRIVER-SCROLL-IS-NOT-APP-SCROLL, the mirror direction: that rule is about a DRIVER scrolling
+   when a human would not have; this is about a TEST failing to scroll when a human driving a real
+   mouse would have had to. `ui-audit/verify-notes-box-selection.mjs`'s Attack 15 now asserts the
+   pre-click hit-test stack explicitly (`elementsFromPoint(...).some(el => el.closest(".planyr-
+   anchor"))`) before trusting a click's result, specifically so this can't happen silently again.
+19. **DEPLOY-TIMING QUESTIONS ("was production actually current at the moment of a live-verify")
+   HAVE A DIRECT ANSWER: THE GITHUB CHECKS API ON THE COMMIT SHA, NOT AN INFERENCE FROM A BROWSER
+   CHUNK HASH (B1555152 ×2, 2026-09-11).** The owner's live-measurement rule (read the served chunk
+   hash in the same call as the assertion) is the right tool for catching a STALE BROWSER TAB, but
+   it cannot by itself answer "had Cloudflare even finished deploying this commit yet" — that
+   answer lives server-side. `GET /repos/{owner}/{repo}/commits/{sha}/check-runs` returns each
+   commit's "Cloudflare Pages" check with `status`/`conclusion`/`completed_at` directly, for ANY
+   commit sha, not just the PR head — walk it forward through every merge between the commit in
+   question and the report's timestamp to reconstruct exactly which commit was actually live at
+   any given moment. This settled a live-verify dispute in minutes that would otherwise have relied
+   on guessing from "roughly how long Cloudflare usually takes": the fix's own deploy completed 2
+   minutes after merge, 52 minutes before the report that failed to reproduce it, definitively
+   ruling out a slow/delayed build as the explanation.
 
 See also `ui-audit/TRAPS.md`, and the named rules **FOREGROUND-OR-VOID** (a background tab cannot
 be measured — not its clock, not its pixels) and **COUNT-EVERY-KIND**.
