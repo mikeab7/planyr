@@ -1188,6 +1188,53 @@ describe("bound-task fixed point — a pred-less bound task must NOT ratchet a m
   });
 });
 
+// ── NEW-1 — a pinned date on a meeting-bound row that ISN'T a real meeting day must flag LOUDLY.
+// `pinnedStart` (not the never-set `pinnedMeetingDate`) is what a plain grid date-cell edit sets on
+// ANY task, so this is the owner's exact repro shape: type a date directly into a meeting-bound
+// row's Start cell and it used to hold silently with meetingInfeasible reading false even when the
+// date is nowhere on the body's calendar. Owner repro: Goose Creek task 168, P&Z body recurrence
+// [{freq:"monthly", setpos:[3], weekday:2}] — the real September 2026 meeting is the 15th (3rd
+// Tuesday), never the 30th.
+describe("NEW-1 — meetingDateOffCalendar: a pinned date must be checked against the body's real calendar, not just the agenda deadline", () => {
+  const pz = { id: "mb_pz", name: "Baytown P&Z Commission",
+    recurrence: [{ freq: "monthly", setpos: [3], weekday: 2 }],
+    extraDates: ["2026-08-04"], blackoutDates: ["2026-07-28"] };
+  const mk = (id, o = {}) => ({ id, name: "t" + id, start: "", end: "", duration: 0, durValue: 0, durUnit: "d", predecessors: [], parentId: null, ...o });
+
+  it("a pinnedStart date that isn't on the body's calendar is flagged BOTH ways: meetingDateOffCalendar and meetingInfeasible", () => {
+    const r = E.cascadeDates([mk(168, { name: "P&Z Public Hearing & Consideration", meetingBound: true,
+      meetingBodyId: "mb_pz", pinnedStart: true, start: "2026-09-30", end: "2026-09-30" })], [pz]);
+    expect(E.meetingDatesInRange(pz, "2026-09-30", "2026-09-30")).toEqual([]);   // confirms the premise
+    expect(r[0].start).toBe("2026-09-30");            // the pin still holds the typed date (unchanged behavior)
+    expect(r[0].meetingDateOffCalendar).toBe(true);   // NEW: distinct "not a real meeting day" signal
+    expect(r[0].meetingInfeasible).toBe(true);         // NEW: now correctly reads infeasible, not false
+  });
+
+  it("a pinnedStart date that IS on the body's real calendar (the 3rd-Tuesday 9/15 meeting) reads feasible", () => {
+    const r = E.cascadeDates([mk(168, { meetingBound: true, meetingBodyId: "mb_pz",
+      pinnedStart: true, start: "2026-09-15", end: "2026-09-15" })], [pz]);
+    expect(E.meetingDatesInRange(pz, "2026-09-15", "2026-09-15")).toEqual(["2026-09-15"]);
+    expect(r[0].meetingDateOffCalendar).toBe(false);
+    expect(r[0].meetingInfeasible).toBe(false);
+  });
+
+  it("an extraDate (an explicitly added one-off meeting) still reads on-calendar and feasible", () => {
+    const r = E.cascadeDates([mk(1, { meetingBound: true, meetingBodyId: "mb_pz",
+      pinnedStart: true, start: "2026-08-04", end: "2026-08-04" })], [pz]);
+    expect(r[0].meetingDateOffCalendar).toBe(false);
+    expect(r[0].meetingInfeasible).toBe(false);
+  });
+
+  it("unbinding (or losing the body) clears meetingDateOffCalendar alongside meetingInfeasible", () => {
+    const bound = E.cascadeDates([mk(168, { meetingBound: true, meetingBodyId: "mb_pz",
+      pinnedStart: true, start: "2026-09-30", end: "2026-09-30" })], [pz]);
+    expect(bound[0].meetingDateOffCalendar).toBe(true);
+    const unbound = E.cascadeDates([{ ...bound[0], meetingBound: false, meetingBodyId: null }], [pz]);
+    expect(unbound[0].meetingDateOffCalendar).toBe(false);
+    expect(unbound[0].meetingInfeasible).toBe(false);
+  });
+});
+
 // ── Deadline rows (deadlineForTaskId) — a task that always sits on its anchor's derived
 // call/file-by date (anchor.meetingDeadline), recomputed by a cascade post-pass. One-way
 // derivation: deliberately NOT a predecessor link (that would be circular with the anchor's

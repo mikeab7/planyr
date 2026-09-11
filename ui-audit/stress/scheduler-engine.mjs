@@ -599,18 +599,29 @@ export const applyMeetingBinding = (t, body, predEarly, drivingMeetingDate, minA
   if (pinnedDate) {                                   // a person fixed this hearing — pin wins, never roll
     t.start = t.end = pinnedDate;
     t.meetingDeadline = agendaDeadline(body, pinnedDate) || "";
-    t.meetingInfeasible = !!(packetReady && t.meetingDeadline && packetReady > t.meetingDeadline);
+    // NEW-1 — a pinned date can be infeasible TWO different ways, and only one of them was ever
+    // checked. `pinnedDate` here is almost always `pinnedStart` (updateTask sets that on ANY direct
+    // date-cell edit — see its own comment — `pinnedMeetingDate` is a distinct deliberate-pin field
+    // that nothing in this app ever sets), so a plain typed/dragged date on a meeting-bound row was
+    // silently accepted even when it doesn't fall on one of the body's actual meeting days at all —
+    // reading as "feasible" while the row isn't parked on a real hearing. Owner repro: Goose Creek
+    // task 168 sat on 2026-09-30 (not a 3rd-Tuesday P&Z date; the real September meeting was
+    // 2026-09-15) with meetingInfeasible reading false. Flag BOTH conditions LOUDLY.
+    t.meetingDateOffCalendar = !meetingDatesInRange(body, pinnedDate, pinnedDate).length;
+    // Infeasible: the predecessor chain can't deliver the packet by the pinned meeting's agenda
+    // deadline, OR the pinned date isn't a real meeting day for this body at all.
+    t.meetingInfeasible = t.meetingDateOffCalendar || !!(packetReady && t.meetingDeadline && packetReady > t.meetingDeadline);
     return;
   }
   if (!packetReady) {                                 // nothing schedules it yet — stays blank (B386)
-    t.start = t.end = ""; t.meetingDeadline = ""; t.meetingInfeasible = false;
+    t.start = t.end = ""; t.meetingDeadline = ""; t.meetingInfeasible = false; t.meetingDateOffCalendar = false;
     return;
   }
   if (!predEarly && !drivingMeetingDate && !(t.minMeetingsAfter && t.minMeetingsAfter.n > 0 && minAfterDate)) {
     if (meetingDatesInRange(body, packetReady, packetReady).length) {
       t.start = t.end = packetReady;
       t.meetingDeadline = agendaDeadline(body, packetReady) || "";
-      t.meetingInfeasible = false;
+      t.meetingInfeasible = false; t.meetingDateOffCalendar = false;
       return;
     }
   }
@@ -625,8 +636,8 @@ export const applyMeetingBinding = (t, body, predEarly, drivingMeetingDate, minA
     if (nth) { const before = addD(nth, -1); if (!afterDate || before > afterDate) afterDate = before; }
   }
   const elig = nextEligibleMeeting(body, readyDate, afterDate);
-  if (elig) { t.start = t.end = elig.meetingDate; t.meetingDeadline = elig.deadline; t.meetingInfeasible = false; }
-  else { t.start = t.end = ""; t.meetingDeadline = ""; t.meetingInfeasible = false; }
+  if (elig) { t.start = t.end = elig.meetingDate; t.meetingDeadline = elig.deadline; t.meetingInfeasible = false; t.meetingDateOffCalendar = false; }
+  else { t.start = t.end = ""; t.meetingDeadline = ""; t.meetingInfeasible = false; t.meetingDateOffCalendar = false; }
 };
 export const cascadeDates = (tasks, bodies = []) => {
   const bodyMap = {...MEETING_BODY_INDEX};
@@ -708,9 +719,9 @@ export const cascadeDates = (tasks, bodies = []) => {
       const minAfterDate = (t.minMeetingsAfter && map[t.minMeetingsAfter.taskId]) ? map[t.minMeetingsAfter.taskId].start : "";
       applyMeetingBinding(t, bodyMap[t.meetingBodyId], predEarly, drivingMeetingDate, minAfterDate);
     } else if (bodyMissing) {
-      t.meetingInfeasible = false;   // B864: preserve the stored date + last-known deadline; clear the unverifiable alert
-    } else if (t.meetingDeadline || t.meetingInfeasible) {
-      t.meetingDeadline = ""; t.meetingInfeasible = false;
+      t.meetingInfeasible = false; t.meetingDateOffCalendar = false;   // B864: preserve the stored date + last-known deadline; clear the unverifiable alert
+    } else if (t.meetingDeadline || t.meetingInfeasible || t.meetingDateOffCalendar) {
+      t.meetingDeadline = ""; t.meetingInfeasible = false; t.meetingDateOffCalendar = false;
     }
   });
   tasks.forEach(x => {
