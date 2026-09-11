@@ -302,6 +302,10 @@ export async function pullCloud(uid) {
   for (const d of (groupDivergence || []))
     reportClientEvent("cloud-group-count-diverged", "a project's plan count shrank between the cloud fetch and the merged store", { groupId: d.groupId, cloudCount: d.cloudCount, mergedCount: d.mergedCount });
   try { localStorage.setItem(cloudKey(uid), JSON.stringify(map)); } catch (_) {}
+  // B1525088 (NEW-1) — a pull can rewrite names/statuses this device never wrote itself (another
+  // device's edit landing here for the first time — restoreDeletedProject's own pull included), so
+  // announce it on the same shared channel an identity-changing saveSite/delete already uses.
+  notifySitesListChanged();
   // A row the SERVER says is deleted gets a local tombstone too, so this browser's saveSite gate
   // (and a still-mounted planner's late flush) can't re-create it before the next pull.
   for (const id of (tombAdd || [])) recordSiteTombstone(uid, id, Date.now());
@@ -1757,6 +1761,22 @@ export function onSiteModelChanged(cb) {
   window.addEventListener("storage", onStorage);
   return () => window.removeEventListener("storage", onStorage);
 }
+
+// B1525088 (NEW-1) — a NAME/STATUS/ROLE/GROUP write is identity-relevant (it changes what the
+// map pin, the Sites panel and the header project switcher DISPLAY for this record), so it must
+// reach every other already-mounted reader of the sites cache, not just this write's own caller.
+// Fires the SAME literal event key `shared/projects/projects.js`'s `notifyProjectsChanged()` and
+// `ProjectBreadcrumb.jsx`'s `notifyStoreChange()` already use (a plain synthetic `storage` event
+// — the standing workaround in this codebase for same-tab localStorage writes firing no native
+// `storage` event at all) so SitePlannerApp's own "Cross-tab freshness" listener and every other
+// `e.key.startsWith("planarfit:sites")` subscriber pick it up for free, with no new mechanism.
+// Deliberately its OWN thin dispatcher rather than a cross-import of projects.js's — the same
+// choice `notifySiteModelChanged` above already made, and for the same reason (projects.js is
+// kept a light leaf on purpose, see its own B927105 header).
+const SITES_LIST_EVENT_KEY = "planarfit:sites:v1";
+export function notifySitesListChanged() {
+  try { window.dispatchEvent(new StorageEvent("storage", { key: SITES_LIST_EVENT_KEY })); } catch (_) {}
+}
 // `skipHistory` writes the local mirror WITHOUT taking a version-history snapshot. Used by the
 // immediate per-edit local write (B458): the device mirror must be current within ~50ms so a reload
 // can never lose the edit, but snapshotting on every drag frame would spam the ring — the debounced
@@ -1880,7 +1900,16 @@ export function saveSite(partial, { skipHistory = false } = {}) {
   sites[partial.id] = model;
   lastSeenAt[partial.id] = model.updatedAt;
   const ok = writeSites(sites);
-  if (ok) notifySiteModelChanged(partial.id);
+  if (ok) {
+    notifySiteModelChanged(partial.id);
+    // B1525088 (NEW-1) — announce an identity change (name/status/role/which group) on the
+    // shared "planarfit:sites" channel too, so a still-mounted map/Sites panel, project switcher
+    // or Notes/Model project list refreshes without a reload. A plain content edit (geometry,
+    // dates, …) leaves neither of those fields different from `existing` and stays quiet.
+    if (!existing || existing.site !== model.site || existing.status !== model.status ||
+        existing.role !== model.role || groupKeyOf(existing) !== groupKeyOf(model))
+      notifySitesListChanged();
+  }
   return ok;
 }
 
@@ -1941,6 +1970,10 @@ export function deleteSite(id, { tombstone = true } = {}) {
     const now = readSites();
     delete now[id];
     writeSites(now);
+    // B1525088 (NEW-1) — a delete is identity-relevant (the site should vanish from the map/Sites
+    // panel/switcher everywhere it's mounted), so it rides the same shared channel saveSite's
+    // identity-writes use.
+    notifySitesListChanged();
     /* ⛔ NEW-1 — EVICT BY REFERENCE, NEVER BY PREFIX. This evicted `raster:${id}:*` blindly, and a
      * duplicate carries the SOURCE plan's `idbKey` (⧉ Duplicate plan copies the overlay record
      * wholesale) — so deleting the source plan wiped the device copy for every plan copied from it.
