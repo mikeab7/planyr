@@ -34,10 +34,11 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "../../ui/controls.jsx";
+import AnchoredMenu from "../../ui/AnchoredMenu.jsx";
 import { parsePaste, rowHasBlockingFlags, parseProseLine, parseSingleRecord, splitPasteLines } from "../lib/compParse.js";
 import { emptyDraft, draftToComp, validateComp, summarizeLeaseComps, summarizeSaleComps, resolveCapTriangle, validAnchor, isCompType } from "../lib/comps.js";
 import {
-  SHEET_COLUMNS, cellState, applyCellEdit, fillDownColumn, spillPaste, visibleColumnIndices,
+  SHEET_COLUMNS, NOTES_COLUMN, cellState, applyCellEdit, fillDownColumn, spillPaste, visibleColumnIndices,
   computeFlexWidths, widthFor, frozenLeftOffsets, saveButtonLabel, matchOption, optionsForColumn,
   absorbPasteIntoSheet, groupLabelIsRedundant,
 } from "../lib/compSheetColumns.js";
@@ -72,6 +73,9 @@ const ROW_H = 31;
 const GROUP_BAND_H = 22;
 const COL_LABEL_H = 26;
 const REMOVE_COL_W = 32;
+// B1519297 — the note-mark control's own column, between the last data column and the remove
+// column. Narrow on purpose: it carries a small glyph, never a text preview.
+const NOTE_COL_W = 26;
 // B844400 (NEW-2, owner live-measured, 2026-09-03) — SUPERSEDES the ≈5.5-row floor HARDENING-28
 // set below: forcing the grid to a fixed 218.5px floor is exactly what left a 1-3 row sheet
 // sitting in a slab of dead white space (measured: 1 row's table is ~81px tall inside a
@@ -251,6 +255,14 @@ function HeaderRows({ visibleIdx, flexWidths, frozenOffsets }) {
             {run.showLabel ? run.group : null}
           </th>
         ))}
+        {/* B1519297 — the note-mark column's own spacer header, same shape as the remove column's
+            just to its right: content-less, pinned explicitly rather than left to the browser's
+            own <th> UA defaults. */}
+        <th rowSpan={2} scope="col" style={{
+          position: "sticky", top: 0, right: REMOVE_COL_W, zIndex: 4, width: NOTE_COL_W, padding: 0,
+          background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+          fontWeight: 600, textAlign: "left",
+        }} />
         <th rowSpan={2} scope="col" style={{
           position: "sticky", top: 0, right: 0, zIndex: 4, width: REMOVE_COL_W, padding: 0,
           background: "var(--surface-raised)", border: "1px solid var(--border-default)",
@@ -351,7 +363,7 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, touched, selected, i
     // <select> is the correct control for a closed set of options — no typing/matching needed,
     // and it can never land on a value the column doesn't recognize.
     const inputStyle = {
-      width: col.key === "notes" ? "max(100%, 260px)" : "100%", // NEW-3 — Notes widens while editing rather than staying pinned to its rest width
+      width: "100%",
       height: ROW_H, boxSizing: "border-box", padding: "0 5px", margin: 0, verticalAlign: "middle",
       border: "none", outline: "2px solid var(--accent)", outlineOffset: -2,
       background: "var(--surface-base)", color: "var(--text-primary)", fontFamily: "inherit",
@@ -482,12 +494,12 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, touched, selected, i
   // HARDENING-10 (message B NEW-3) — Title/Address and the two party columns are the ones real
   // values got cut off in ("Core5 Industrial Partners"); a hover reveals the untruncated value.
   // B850016 (NEW-10) — extended to `leaseAnnualRate` (still a fixed-width column; widening it
-  // covers the common case but a rare long value can still clip) and `notes` (the one flex column
-  // that deliberately shrinks first under pressure, per this file's own FLEX_NOTES comment, so it
-  // clips the most often of any column here) — both are free-text/derived, exactly the class this
-  // report says truncation is acceptable for AS LONG AS the full value stays reachable on hover.
+  // covers the common case but a rare long value can still clip) — free-text/derived, exactly the
+  // class this report says truncation is acceptable for AS LONG AS the full value stays reachable
+  // on hover. (Notes left the sheet as a column entirely in B1519297 — see NOTES_COLUMN's own
+  // header in compSheetColumns.js.)
   const isLongTextCol = col.key === "title" || col.key === "partyProvider" || col.key === "partyAcquirer"
-    || col.key === "leaseAnnualRate" || col.key === "notes";
+    || col.key === "leaseAnnualRate";
   const hoverTitle = col.key === "location" ? locationText : flag?.reason || (isLongTextCol && st.text ? st.text : undefined);
   // ⛔ HARDENING-12 (B986096, owner P0 live-test) — an ACTION cell (Location) is a real, focusable
   // `<button>` now, not a bare `<span>` inside a `<td>` — the owner tested it with
@@ -581,6 +593,87 @@ function SheetCell({ col, colIdx, rowIdx, draft, cellFlags, touched, selected, i
         </span>
       )}
     </td>
+  );
+}
+
+/* ---- note mark — B1519297 (owner mockup pick, 2026-09-11). Notes left the sheet as a column (it
+ * was the last, narrowest column, holding the row's longest text — it ran past its own cell and
+ * read as belonging to the columns beside it, and no width fixes that once you have to hold a real
+ * note). This is a small, fixed-width control between the last data column and the remove-row
+ * column — deliberately NOT a sheet column: it takes no part in cell selection, arrow-key/Tab
+ * navigation over cells, Ctrl/Cmd+D fill-down, or Excel-style paste-spill (all of that stays scoped
+ * to SHEET_COLUMNS via visibleIdx, untouched). The one bridge to the keyboard model is Tab off the
+ * row's LAST visible cell landing here (see onGridKeyDown's own Tab branch) — a real, separate
+ * control, not a virtual extra column in the selection grid. */
+function NoteMarkGlyph({ hasNote }) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
+      <rect x="1.5" y="1.5" width="11" height="11" rx="2" fill="none" stroke="currentColor" strokeWidth="1.3" />
+      {hasNote && (
+        <>
+          <line x1="4" y1="5.5" x2="10" y2="5.5" stroke="currentColor" strokeWidth="1.1" />
+          <line x1="4" y1="8.5" x2="8" y2="8.5" stroke="currentColor" strokeWidth="1.1" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+function NoteMarkCell({ row, rowIdx, onOpen }) {
+  const hasNote = !!NOTES_COLUMN.getValue(row.draft);
+  return (
+    <td
+      style={{
+        position: "sticky", right: REMOVE_COL_W,
+        width: NOTE_COL_W, minWidth: NOTE_COL_W, maxWidth: NOTE_COL_W, height: ROW_H, boxSizing: "border-box",
+        padding: 0, textAlign: "center", verticalAlign: "middle",
+        background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+        scrollMarginTop: GROUP_BAND_H + COL_LABEL_H,
+      }}
+      tabIndex={-1}
+    >
+      <button
+        type="button"
+        data-note-row={rowIdx}
+        tabIndex={-1}
+        onClick={(e) => onOpen(row._id, e.currentTarget)}
+        title={hasNote ? "Edit note" : "Add note"}
+        aria-label={hasNote ? "Edit note" : "Add note"}
+        style={{
+          width: "100%", height: ROW_H, border: "none", background: "transparent", cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
+          color: hasNote ? "var(--accent)" : "var(--border-default)",
+        }}
+      >
+        <NoteMarkGlyph hasNote={hasNote} />
+      </button>
+    </td>
+  );
+}
+
+/* The note mark's own editor — a real multi-line writing box, anchored to the mark that opened it,
+ * floating over the map (never growing the panel or moving any row). Reuses the app's existing
+ * anchored-menu placement (AnchoredMenu already gives Escape-to-close and click-away-to-close for
+ * free, which is exactly "Escape and click-away close it and keep what was typed" — the value is
+ * committed by the caller's onClose, not here, so this component never itself decides when to save. */
+function NoteEditorPopover({ anchorRef, open, value, onChange, onClose }) {
+  return (
+    <AnchoredMenu open={open} onClose={onClose} anchorRef={anchorRef} placement="above-left" width={280} gap={6}>
+      <div style={{ padding: 8 }}>
+        <textarea
+          autoFocus
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Note…"
+          rows={5}
+          style={{
+            width: "100%", boxSizing: "border-box", padding: "6px 8px", fontSize: 12, fontFamily: "inherit",
+            border: "1px solid var(--border-default)", borderRadius: 6, resize: "vertical",
+            background: "var(--surface-base)", color: "var(--text-primary)",
+          }}
+        />
+      </div>
+    </AnchoredMenu>
   );
 }
 
@@ -820,6 +913,16 @@ export default function CompEntryGrid({
   const editInputRef = useRef(null);
   const undoStackRef = useRef([]);
 
+  // B1519297 — the note mark's own anchored editor. `noteAnchorRef` is one shared, mutable ref
+  // (never a per-row ref map): the button that was pressed/tabbed-to writes itself into it right
+  // before `noteEditorRowId` flips the popover open, so AnchoredMenu always measures the right
+  // trigger. `noteEditorValue` is a LOCAL draft — typing here never touches `rows`/undo until the
+  // popover closes (Escape, click-away, or opening a different row's note), mirroring how a plain
+  // sheet cell only commits on blur, not on every keystroke.
+  const noteAnchorRef = useRef(null);
+  const [noteEditorRowId, setNoteEditorRowId] = useState(null);
+  const [noteEditorValue, setNoteEditorValue] = useState("");
+
   // HARDENING-10 NEW-5 — the sheet must fit its container with ZERO horizontal scroll rather than
   // a hand-tuned static width budget. `gridRef` is the actual scrolling element the table sits
   // in; its measured content width (not an assumed viewport number) is what the four `flexKey`
@@ -845,10 +948,10 @@ export default function CompEntryGrid({
       const col = SHEET_COLUMNS[idx];
       return col.flexKey ? s : s + col.width;
     }, 0);
-    // One hairline border per visible column + the pinned remove-row column, so the computed
-    // total lands AT the real available width rather than a hair over it.
-    const borderAllowance = visibleIdx.length + 2;
-    const availableForFlex = containerWidth - fixedTotal - REMOVE_COL_W - borderAllowance;
+    // One hairline border per visible column + the pinned remove-row column + the note-mark column
+    // (B1519297), so the computed total lands AT the real available width rather than a hair over it.
+    const borderAllowance = visibleIdx.length + 3;
+    const availableForFlex = containerWidth - fixedTotal - REMOVE_COL_W - NOTE_COL_W - borderAllowance;
     return computeFlexWidths(availableForFlex);
   }, [containerWidth, visibleIdx]);
   const frozenOffsets = useMemo(() => frozenLeftOffsets(visibleIdx, flexWidths), [visibleIdx, flexWidths]);
@@ -904,6 +1007,11 @@ export default function CompEntryGrid({
     // guard, committing a paste (which sets `selection` but leaves focus in the textarea) yanked
     // focus into the sheet, so a SECOND paste landed on the grid's own Excel-style spill-paste
     // instead of the textarea's smart-parse — breaking "paste several comps in a row."
+    // B1519297 — a note mark just handed the keyboard focus (finishEdit's own Tab-to-note branch
+    // focuses it synchronously, BEFORE React flushes the `setEditing(null)` this effect reacts
+    // to), and this effect must never steal it straight back onto the cell that was just left —
+    // that raced this exact effect and lost every time until this guard existed.
+    if (document.activeElement?.dataset?.noteRow != null) return;
     if (!editing && gridRef.current?.contains(document.activeElement)) {
       // NEW-6 — the roving tabIndex itself lives on the <td> for EVERY column now, Location
       // included (its inner <button> is permanently tabIndex={-1}, never an independent tab
@@ -1137,6 +1245,17 @@ export default function CompEntryGrid({
       const nextRows = rows.map((r, i) => (i === target.row ? { ...r, draft: newDraft, cellFlags: nextFlags, touched: true } : r));
       commitRows(nextRows);
       if (moveDir) {
+        // B1519297 — Tab forward off the LAST visible column hands off to the row's own note mark
+        // instead of wrapping to the next row (or, on the last row, back to column 0) — the
+        // EDITING counterpart of onGridKeyDown's own Tab branch: a single click auto-enters edit
+        // mode (HARDENING-10 NEW-3), so THIS path, not that one, is what a mouse-driven "type the
+        // last cell, then Tab" flow actually goes through. Returns immediately so the trailing
+        // `gridRef.current?.focus()` below never steals focus back off the note mark.
+        if (moveDir.axis === "col" && moveDir.delta > 0 && visibleIdx.indexOf(target.col) === visibleIdx.length - 1) {
+          setSelection({ row: target.row, col: target.col });
+          gridRef.current?.querySelector(`[data-note-row="${target.row}"]`)?.focus();
+          return;
+        }
         const dest = computeDestination({ row: target.row, col: target.col }, moveDir);
         setSelection(dest);
         // HARDENING-10 NEW-3 — "Enter commits and moves down [into edit]. Tab commits and moves
@@ -1432,6 +1551,29 @@ export default function CompEntryGrid({
     beginEdit(row, col, null, true);
   };
 
+  // B1519297 — opening the note editor commits whatever cell was mid-edit first (the same thing a
+  // click on any other control does), seeds the popover from the row's CURRENT stored note, and
+  // points the shared anchor ref at the exact button that was pressed/activated before flipping the
+  // popover open, so AnchoredMenu measures the right trigger the moment it renders.
+  const openNoteEditor = (rowId, anchorEl) => {
+    if (editing) finishEdit(true, null);
+    const row = rows.find((r) => r._id === rowId);
+    noteAnchorRef.current = anchorEl;
+    setNoteEditorValue(NOTES_COLUMN.getValue(row?.draft) || "");
+    setNoteEditorRowId(rowId);
+  };
+  // Commits on close (Escape or click-away, via AnchoredMenu's own dismissal) — "keep what was
+  // typed" without ever committing per keystroke, the same shape a plain text cell's onBlur commit
+  // already uses. A no-op write (value unchanged) skips `commitRows` so it never burns an undo frame.
+  const closeNoteEditor = () => {
+    const rowId = noteEditorRowId;
+    if (rowId == null) return;
+    setNoteEditorRowId(null);
+    const row = rows.find((r) => r._id === rowId);
+    if (!row || NOTES_COLUMN.getValue(row.draft) === noteEditorValue) return;
+    commitRows(rows.map((r) => (r._id === rowId ? { ...r, draft: NOTES_COLUMN.setValue(r.draft, noteEditorValue), touched: true } : r)));
+  };
+
   const doFillDown = () => {
     if (!selection) return;
     const [start, end] = currentRange();
@@ -1476,6 +1618,28 @@ export default function CompEntryGrid({
   };
 
   const onGridKeyDown = (e) => {
+    // B1519297 — the note mark is reachable by Tab from a row's last cell (below) but is not a
+    // sheet column and takes no other part in the grid's own selection/keyboard model: while it
+    // holds focus, only Shift+Tab is handled here (back to that row's own last cell) — everything
+    // else (forward Tab included) is left alone, so the browser's own default focus movement can
+    // carry it onward (there is nothing else left-to-right in the table for it to land on, so a
+    // plain Tab naturally reaches the footer next).
+    const noteFocusRow = document.activeElement?.dataset?.noteRow;
+    if (noteFocusRow != null) {
+      if (e.key === "Tab" && e.shiftKey) {
+        e.preventDefault();
+        const row = Number(noteFocusRow);
+        const col = visibleIdx[visibleIdx.length - 1];
+        setSelection({ row, col });
+        // Focus the destination cell directly rather than leaving it to the "focus follows
+        // selection" effect below — that effect deliberately declines to steal focus AWAY from an
+        // already-focused note mark (see its own header), which is exactly what this keypress
+        // needs it to do, so this is the one caller that has to do its own focusing.
+        const cellEl = gridRef.current?.querySelector(`[data-cell="${row}-${col}"]`);
+        (cellEl?.querySelector("button") || cellEl)?.focus?.();
+      }
+      return;
+    }
     if (editing || !selection) return;
     const meta = e.metaKey || e.ctrlKey;
     if (meta && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); return; }
@@ -1488,9 +1652,18 @@ export default function CompEntryGrid({
       // browser's native Tab moves focus to whatever real control is next/previous in the
       // document (the footer going forward, the paste box's own controls going backward).
       const pos = visibleIdx.indexOf(selection.col);
-      const atLastCell = selection.row === rows.length - 1 && pos === visibleIdx.length - 1;
       const atFirstCell = selection.row === 0 && pos === 0;
-      if ((e.shiftKey && atFirstCell) || (!e.shiftKey && atLastCell)) return;
+      if (e.shiftKey && atFirstCell) return;
+      // B1519297 — forward Tab off the LAST visible column hands off to that row's own note mark
+      // first (any row, not just the last one) — "from the row's last cell, the note control is
+      // the next tab stop." The note mark itself decides what Tab does from there (see the branch
+      // above): on every row but the last that's effectively "continue to the next row," and on
+      // the last row it's "leave the grid," both via the browser's own default Tab movement.
+      if (!e.shiftKey && pos === visibleIdx.length - 1) {
+        e.preventDefault();
+        gridRef.current?.querySelector(`[data-note-row="${selection.row}"]`)?.focus();
+        return;
+      }
       e.preventDefault();
       moveSelection({ axis: "col", delta: e.shiftKey ? -1 : 1, wrap: true });
       return;
@@ -1739,13 +1912,14 @@ export default function CompEntryGrid({
       // NEW-8 — same whole-panel Escape-to-close path as the desktop sheet (see its own comment):
       // bubbles up from anywhere in the mobile sheet, guarded off while a row is armed for a map
       // pin (CompsPanel.jsx's own window-level Escape-disarm owns that case) or while a field is
-      // mid-edit (`editing` is the DESKTOP grid's own cell-editor state, always null on mobile —
-      // included for the same belt-and-suspenders reason as the desktop handler, harmless here).
+      // mid-edit (`editing`/`noteEditorRowId` are the DESKTOP grid's own state, always null on
+      // mobile — included for the same belt-and-suspenders reason as the desktop handler, harmless
+      // here since the note mark itself isn't reachable from the mobile layout).
       // While the discard prompt is already up, Escape means "Keep editing," never a second
       // discard attempt. This wrapping `<div>` is purely a keydown-catching container — both
       // children keep their own `position: fixed` layout, unaffected by it.
       <div onKeyDown={(e) => {
-        if (e.key !== "Escape" || editing || armedRowId) return;
+        if (e.key !== "Escape" || editing || armedRowId || noteEditorRowId != null) return;
         e.preventDefault();
         if (confirmingClose) keepEditing();
         else requestClose();
@@ -1817,8 +1991,14 @@ export default function CompEntryGrid({
       // off so the two don't both act on the same keypress. While the discard prompt is already up,
       // Escape is treated as "Keep editing" (the safe default for a confirm dialog), never a second
       // discard attempt.
+      // ⛔ B1519297 (found live by this item's own headless verification) — the note editor's
+      // AnchoredMenu is a PORTAL to document.body, but a portal's events still bubble through the
+      // REACT tree it's rendered from (a documented React behavior, not a DOM quirk), so Escape
+      // typed into the note textarea reached this handler too — closing the note popover ALSO armed
+      // "Discard N unsaved comps?" on the very same keypress, and the confirm overlay then covered
+      // the note mark itself. `noteEditorRowId` guards this one off exactly like `armedRowId` does.
       onKeyDown={(e) => {
-        if (e.key !== "Escape" || editing || armedRowId) return;
+        if (e.key !== "Escape" || editing || armedRowId || noteEditorRowId != null) return;
         e.preventDefault();
         if (confirmingClose) keepEditing();
         else requestClose();
@@ -1886,7 +2066,7 @@ export default function CompEntryGrid({
           role="grid"
           aria-label="Comp entry sheet"
           aria-rowcount={rows.length + 1}
-          aria-colcount={visibleIdx.length + 1}
+          aria-colcount={visibleIdx.length + 2}
           onKeyDown={onGridKeyDown}
           onPaste={onGridPaste}
           style={{ flex: "0 1 auto", minHeight: GRID_MIN_HEIGHT, overflow: "auto", outline: "none" }}>
@@ -1919,6 +2099,7 @@ export default function CompEntryGrid({
                     />
                     );
                   })}
+                  <NoteMarkCell row={row} rowIdx={rowIdx} onOpen={openNoteEditor} />
                   <td style={{
                     position: "sticky", right: 0, width: REMOVE_COL_W, height: ROW_H, boxSizing: "border-box",
                     padding: 0, textAlign: "center", verticalAlign: "middle",
@@ -1942,6 +2123,14 @@ export default function CompEntryGrid({
           </table>
         </div>
       )}
+
+      <NoteEditorPopover
+        anchorRef={noteAnchorRef}
+        open={noteEditorRowId != null}
+        value={noteEditorValue}
+        onChange={setNoteEditorValue}
+        onClose={closeNoteEditor}
+      />
 
       <ProblemsList rows={rows} onResolvePeriod={resolvePeriod} attemptedSave={attemptedSave} />
 

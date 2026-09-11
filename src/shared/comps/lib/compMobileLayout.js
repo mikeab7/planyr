@@ -21,13 +21,13 @@
  * requirement at the DB/validateComp/UI layers together — this list is SOURCED from the same flag
  * so it can't fall out of step and re-demand a date the save gate no longer needs), so this reads
  * that flag rather than hardcoding the key, and stays in lockstep with the desktop sheet's own
- * definition of "required." Deliberately NOT repeated inside PROPERTY (a field is edited in
+ * definition of "required." Deliberately NOT repeated inside Location (a field is edited in
  * exactly one place on this sheet — see PANEL-BREVITY in /CLAUDE.md, "never render the same
- * fact in more than one place"); PROPERTY's own "Deal name" row is the free-text Title field
+ * fact in more than one place"); Location's own "Deal name" row is the free-text Title field
  * (desktop labels the same column "Title / Address" — mobile already shows the resolved address
  * in the identity strip and the pinned Location row, so it only needs the free-text half here).
  */
-import { SHEET_COLUMNS, columnIndex } from "./compSheetColumns.js";
+import { SHEET_COLUMNS, columnIndex, NOTES_COLUMN } from "./compSheetColumns.js";
 import { rowHasBlockingFlags } from "./compParse.js";
 
 export const MOBILE_BREAKPOINT_PX = 820;
@@ -36,16 +36,26 @@ export const MOBILE_BREAKPOINT_PX = 820;
 // the resolved address already has its own row (NEEDED_TO_SAVE) and its own strip (identity).
 const MOBILE_LABEL_OVERRIDES = { title: "Deal name" };
 
+// B1519296 (owner mockup pick, 2026-09-11) — "Property" split into "Location" (compType/title —
+// desktop's own LOCATION band) and "Building" (the physical facts about the improvement — desktop's
+// own BUILDING band), so the two layouts can't drift apart on what "Property" even means any more.
+// B1519297 — Notes gets its own section at the end instead of riding inside Parties (a note isn't
+// a party); its column definition is `NOTES_COLUMN` below, not `SHEET_COLUMNS` — see that export's
+// own header in compSheetColumns.js for why (Notes left the DESKTOP sheet as a column; mobile keeps
+// it as a full-width field, since the anchored editor is a desktop-sheet affordance only).
 const SECTION_ORDER = [
-  { title: "Property", keys: ["compType", "title", "size", "landSizeUnit", "clearHeightFt", "yearBuilt"] },
+  { title: "Location", keys: ["compType", "title"] },
+  { title: "Building", keys: ["size", "landSizeUnit", "clearHeightFt", "yearBuilt"] },
   { title: "Rent", keys: ["leaseRate", "leaseRatePeriod", "leaseRateExpense", "leaseOpex", "leaseEscalationPct", "leaseAnnualRate"] },
   { title: "Term", keys: ["leaseCommencementDate", "leaseTerm"] },
   { title: "Concessions", keys: ["leaseFreeRentMonths", "leaseTi"] },
   { title: "Price", keys: ["price", "bldgNoi", "bldgCapRate", "salePricePerArea"] },
-  { title: "Parties", keys: ["partyProvider", "partyAcquirer", "notes"] },
+  { title: "Parties", keys: ["partyProvider", "partyAcquirer"] },
+  { title: "Notes", keys: ["notes"] },
 ];
 
 function colFor(key) {
+  if (key === "notes") return NOTES_COLUMN; // not in SHEET_COLUMNS any more — see its own header
   return SHEET_COLUMNS[columnIndex(key)];
 }
 

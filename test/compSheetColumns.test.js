@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  SHEET_COLUMNS, GROUPS, columnIndex, cellState, cellPlaceholder, applyCellEdit,
+  SHEET_COLUMNS, GROUPS, NOTES_COLUMN, columnIndex, cellState, cellPlaceholder, applyCellEdit,
   fillDownColumn, spillPaste, formatNumberDisplay, sanitizeNumericInput, visibleColumnIndices,
   computeFlexWidths, widthFor, frozenLeftOffsets, optionsForColumn,
   isUnfilledRow, absorbPasteIntoSheet, groupLabelIsRedundant,
@@ -42,6 +42,36 @@ describe("compSheetColumns: column list sanity", () => {
   it("columnIndex finds a real column and -1 for a bogus key", () => {
     expect(columnIndex("leaseRate")).toBeGreaterThanOrEqual(0);
     expect(columnIndex("nope")).toBe(-1);
+  });
+  // B1519296 (owner mockup pick, 2026-09-11) — PROPERTY split into LOCATION (where the comp IS)
+  // and BUILDING (physical facts about the improvement) — banding only, no column's meaning moved.
+  it("B1519296 — GROUPS reflects the LOCATION/BUILDING split; NOTES is gone (Notes left the sheet)", () => {
+    expect(GROUPS).toEqual(["TYPE", "LOCATION", "BUILDING", "DEAL", "PRICE", "RENT", "CONCESSIONS", "DERIVED", "PARTIES"]);
+  });
+  it("B1519296 — location/title are LOCATION; size/unit/clear height/year built are BUILDING", () => {
+    expect(SHEET_COLUMNS[columnIndex("location")].group).toBe("LOCATION");
+    expect(SHEET_COLUMNS[columnIndex("title")].group).toBe("LOCATION");
+    expect(SHEET_COLUMNS[columnIndex("size")].group).toBe("BUILDING");
+    expect(SHEET_COLUMNS[columnIndex("landSizeUnit")].group).toBe("BUILDING");
+    expect(SHEET_COLUMNS[columnIndex("clearHeightFt")].group).toBe("BUILDING");
+    expect(SHEET_COLUMNS[columnIndex("yearBuilt")].group).toBe("BUILDING");
+  });
+  it("B1519296 — column order is unchanged by the band split (a banding change only)", () => {
+    expect(SHEET_COLUMNS.map((c) => c.key).slice(0, 6)).toEqual(["compType", "location", "title", "size", "landSizeUnit", "clearHeightFt"]);
+  });
+  // B1519297 (owner mockup pick, 2026-09-11) — Notes left the sheet as a COLUMN; the underlying
+  // draft/comp field is unaffected (comps.js still stores/parses/exports it unchanged).
+  it("B1519297 — notes is no longer a sheet column", () => {
+    expect(columnIndex("notes")).toBe(-1);
+    expect(SHEET_COLUMNS.some((c) => c.key === "notes")).toBe(false);
+  });
+  it("B1519297 — NOTES_COLUMN is still a real, usable column shape for the mobile layout", () => {
+    expect(NOTES_COLUMN.key).toBe("notes");
+    expect(NOTES_COLUMN.kind).toBe("text");
+    expect(NOTES_COLUMN.appliesTo("land")).toBe(true);
+    const draft = { ...emptyDraft(null), notes: "call before noon" };
+    expect(NOTES_COLUMN.getValue(draft)).toBe("call before noon");
+    expect(NOTES_COLUMN.setValue(draft, "updated").notes).toBe("updated");
   });
 });
 
@@ -207,41 +237,36 @@ describe("compSheetColumns: HARDENING-11 — Type drives the sheet, Basis half",
 // B986096-HARDENING-27 (NEW-4) — Title's nominal/floor/weight all shrank (it no longer carries
 // the row's identity — Location, frozen now, does) and the three growers share weight EQUALLY,
 // so "Title gets the largest share" is no longer the rule; see FLEX_GROWERS's own header.
-describe("compSheetColumns: HARDENING-10 NEW-5 / HARDENING-27 — computeFlexWidths / widthFor / frozenLeftOffsets", () => {
-  it("plenty of room: the three growers share the surplus equally beyond everyone's nominal; Notes never grows past its own nominal", () => {
+// B1519297 (owner mockup pick, 2026-09-11) — Notes left the sheet as a column entirely, so the
+// four growers below are Location/Title/Landlord-Seller/Tenant-Buyer only, and there are just TWO
+// regimes now (surplus shared by weight above nominal; deficit shared proportionally down to each
+// grower's own floor) — the old "Notes shrinks first" middle regime no longer exists.
+describe("compSheetColumns: HARDENING-10 NEW-5 / HARDENING-27 / B1519297 — computeFlexWidths / widthFor / frozenLeftOffsets", () => {
+  it("plenty of room: the four growers share the surplus equally beyond everyone's nominal", () => {
     const w = computeFlexWidths(10000);
     expect(Math.abs(w.title - w.partyProvider)).toBeLessThanOrEqual(2); // equal weight — same additive share, off by rounding only
     expect(Math.abs(w.partyProvider - w.partyAcquirer)).toBeLessThanOrEqual(2);
-    expect(w.notes).toBe(80);
+    expect(w.notes).toBeUndefined(); // not a flex column any more — see NOTES_COLUMN's own header
   });
-  // NEW-3 (owner report, 2026-09-08) updated these constants: `location` JOINED the growers (it
-  // was a fixed 188 that never yielded while Notes starved at its floor) and every floor was
-  // raised to the width its own header genuinely needs. The numbers below track that, and they
-  // are STRICTER than the ones they replace — no floor moved down.
-  it("moderate squeeze: Notes alone absorbs it first, growers stay at nominal", () => {
-    const w = computeFlexWidths(588); // full nominal total is 596 (188+108+110+110+80); 8px short
-    expect(w.notes).toBe(72);
-    expect(w.location).toBe(188);
-    expect(w.title).toBe(108);
-    expect(w.partyProvider).toBe(110);
-    expect(w.partyAcquirer).toBe(110);
+  it("at exactly the nominal total, every grower sits at its own nominal", () => {
+    const w = computeFlexWidths(516); // 188+108+110+110
+    expect(w).toEqual({ location: 188, title: 108, partyProvider: 110, partyAcquirer: 110 });
   });
-  it("severe squeeze: Notes is pinned at its own floor, the growers then shrink together, never below their own floor", () => {
+  it("moderate squeeze: every grower shrinks together, proportional to its own room, never below floor", () => {
+    const w = computeFlexWidths(400); // 116px short of the 516 nominal total
+    expect(w).toEqual({ location: 123, title: 92, partyProvider: 96, partyAcquirer: 89 });
+  });
+  it("severe squeeze: every grower is pinned at its own floor once the deficit exceeds the total shrink room", () => {
     const w = computeFlexWidths(0);
-    expect(w.notes).toBe(44);
-    expect(w.location).toBe(90);
-    expect(w.title).toBe(84);
-    expect(w.partyProvider).toBe(88);
-    expect(w.partyAcquirer).toBe(78);
+    expect(w).toEqual({ location: 90, title: 84, partyProvider: 88, partyAcquirer: 78 });
   });
   it("every regime keeps every column at or above its own floor, and never returns a negative width", () => {
-    for (const avail of [-50, 0, 100, 178, 220, 408, 596, 900, 5000]) {
+    for (const avail of [-50, 0, 100, 178, 220, 340, 408, 516, 900, 5000]) {
       const w = computeFlexWidths(avail);
       expect(w.location).toBeGreaterThanOrEqual(90);
       expect(w.title).toBeGreaterThanOrEqual(84);
       expect(w.partyProvider).toBeGreaterThanOrEqual(88);
       expect(w.partyAcquirer).toBeGreaterThanOrEqual(78);
-      expect(w.notes).toBeGreaterThanOrEqual(44);
     }
   });
   it("widthFor returns the column's static width when there's no flexKey, or an unmeasured flex column falls back to its own static width", () => {
@@ -253,7 +278,7 @@ describe("compSheetColumns: HARDENING-10 NEW-5 / HARDENING-27 — computeFlexWid
   });
   it("frozenLeftOffsets puts Type at 0 and Location right after Type's own width — Location is fixed (never a flexKey), so nothing else can move its offset", () => {
     const idx = SHEET_COLUMNS.map((_, i) => i); // every column visible
-    const flexWidths = { title: 150, partyProvider: 100, partyAcquirer: 100, notes: 70 };
+    const flexWidths = { title: 150, partyProvider: 100, partyAcquirer: 100 };
     const offsets = frozenLeftOffsets(idx, flexWidths);
     expect(offsets.compType).toBe(0);
     expect(offsets.location).toBe(SHEET_COLUMNS[columnIndex("compType")].width);
@@ -607,7 +632,7 @@ describe("NEW-3: width rules the owner's 1600x465 reading caught", () => {
   it("every flex column's FLOOR is wide enough for its own header (HARDENING-10 rule 4)", () => {
     // Measured header text widths in the shipped 10px header face, + the cell's 5px padding pair
     // and its hairline border. Live proof: ui-audit/verify-comp-paste-parcel-0908.
-    const HEADER_NEEDS = { location: 54, title: 83, partyProvider: 86, partyAcquirer: 78, notes: 41 };
+    const HEADER_NEEDS = { location: 54, title: 83, partyProvider: 86, partyAcquirer: 78 };
     const floors = computeFlexWidths(0);
     for (const [key, need] of Object.entries(HEADER_NEEDS)) {
       expect(floors[key], `${key} floor must fit its own header`).toBeGreaterThanOrEqual(need);
