@@ -1225,6 +1225,50 @@ landed together. What each one is, and the ONE decision inside it that is not ob
 - `db/notes_attachments.sql` — the migration NEW-5 needs: relax the `notes-images` bucket's
   image-only MIME list and add `name` + `kind` to `notes_images`. Same "committed as a record"
   discipline as `notes_cloud_sync.sql`.
+- **⛔ WIDENING A TABLE COLUMN USED TO SQUEEZE ITS NEIGHBOURS — B1554272/B1554273, owner report
+  2026-09-11 (`lib/notesTableWidth.js` + `lib/notesTableColumns.js`).** `@tiptap/extension-table`
+  writes a resized column's width onto THAT column alone — the squeeze was never ProseMirror
+  doing pairwise compensation, it was the table's own node view only setting an explicit rendered
+  width once EVERY column has one; the moment even one column is still unset the table falls back
+  to filling its container, and an untouched column gets whatever is left over after the explicit
+  ones are subtracted, clamped at Tiptap's own tiny 25px default (one character per line). Fix:
+  once a table has ANY explicitly resized column, `normalizeTableColumnWidths` gives every OTHER
+  column an explicit width too — defaulted (`TABLE_DEFAULT_COL_WIDTH`, 160) if it was never
+  touched, floored (`TABLE_COL_MIN_WIDTH`, 100 — "wide enough for a short word on one line") if it
+  was dragged or stored below the floor — so the table's own rendered width becomes the
+  deterministic SUM of its columns and the browser never has anything left to reconcile against
+  the sheet. An UNTOUCHED table is left alone, still dividing the available width evenly. An
+  extended `NoteTable` node (`notesExtensions.js`) also raises `cellMinWidth` (the resize plugin's
+  OWN drag floor) to the same `TABLE_COL_MIN_WIDTH`.
+  ⛔ **TWO DEFENCES, not one — read `notesTableColumns.js`'s own header before touching either.**
+  (a) An `appendTransaction` plugin on `NoteTableColumns` runs the repair on every LIVE edit,
+  folded into the SAME transaction/history entry as its trigger — this is what makes undo/redo of
+  a resize revert (or reapply) the dragged column AND its auto-filled siblings TOGETHER, in one
+  press. A first version ran the repair from a `useEffect` on every `docTick` instead, and undo
+  silently stopped working: reverting a drag left the OTHER columns explicit (from a separate,
+  history-exempt transaction), which read as "touched, one column null" and re-triggered the same
+  repair, refilling the very column the owner had just undone. (b) `normalizeTableColumnWidths`
+  (a plain ProseMirror command, the same shape `notesListIndent.js`'s `shiftIndent` uses) runs
+  ONCE on editor MOUNT — never on `docTick` — because `appendTransaction` never fires for Tiptap's
+  initial `setContent`, so a table that is opened and never edited needs this separate path. **This
+  IS the NEW-2 recovery**: an already-broken stored table (the owner's "Permitting" table, columns
+  down to one character) repairs itself the moment the note is opened, with no action from him —
+  chosen over a manual "fit to content" button because it needs none.
+  ⛔ **A SECOND, INDEPENDENT BUG, found verifying "undo/redo of a resize as a single step":**
+  `Table`'s own `addNodeView()` returns `null` whenever `resizable: true`, so `<colgroup><col>`
+  elements are patched ONLY by the live-drag preview — an undo/redo/repair correctly reverted the
+  STORED document (proven off `editor.getJSON()`) while the rendered `<col>` styles stayed exactly
+  as they were. A SECOND bug in the library's own `updateColumns` compounded it (sets only the ONE
+  CSS property the current state wants, never clears the other, so a stale `width:` always beat a
+  freshly-added `min-width:`). Fixed with `NoteTableView` — a corrected mirror of the library's own
+  exported `TableView` — wired unconditionally via `NoteTable = Table.extend({ addNodeView() {...} })`
+  in `notesExtensions.js`, replacing `TableKit`'s bundled `table` (the other three — `TableCell`/
+  `TableHeader`/`TableRow` — still ride in directly from the package, unmodified).
+  The sheet-growth half reuses the EXISTING page-growth path rather than a second mechanism:
+  `NoteEditor.jsx`'s growth-measurement effect folds each table's own rendered right edge into the
+  same `anchorExtentX` call an overhanging box already used, and `notesPrint.js`'s
+  `pageTableExtentPx` mirrors it purely (off the stored colwidth attrs, no DOM) for PDF-PARITY —
+  driven through the real toolbar Print button, not just the pure builder.
 - **⛔ SELECTING ACROSS TABLE CELLS "JUMPED AND FLASHED" — A CHROME REFLOW, NOT A SELECTION BUG
   (B649376, reopened 2026-08-28, owner report, Silvestri "Utility" table).** *"When I click and
   highlight stuff, it just jumps and flashes."* Measured with a real drag: `NoteToolbar`'s Table

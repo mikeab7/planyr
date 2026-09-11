@@ -110,7 +110,7 @@ function ExportMenu({ post }) {
  * also carried moved to the embedded app's Settings panel (reachable via the lifted ⚙), so nothing
  * was lost. The embedded app stays the single source of truth for the actual cloud writes. */
 
-/* Center slot — the Grid/Split/Gantt view toggle + the review inbox (with its unread badge).
+/* Center slot — the Grid/Split/Gantt view toggle, and ONLY that.
  * Always returns an element (never null) so AppHeader keeps its stable 3-zone Row-2 layout;
  * renders empty until the iframe reports state, or when not in Projects mode.
  *
@@ -119,33 +119,24 @@ function ExportMenu({ post }) {
  * place the user already looks to see where they are — two controls for one job was the defect.
  * The old switcher could jump straight to another project's schedule in one step; the breadcrumb
  * takes two (pick the project, then the schedule) — an accepted trade-off, not something to solve
- * here. See NEW-1's own item for the full removal record. */
+ * here. See NEW-1's own item for the full removal record.
+ *
+ * ⛔ B1547280 (AMENDMENT to B1511712) — THE REVIEW-INBOX BUTTON MOVED OUT OF THIS ZONE, INTO
+ * `ScheduleActions` BELOW. It used to render here, beside the ViewToggle, as one combined flex
+ * row — which meant AppHeader's Row-2 centering measured and positioned the COMBINED width of
+ * BOTH controls as "the chip," not the Grid/Split/Gantt toggle alone. Owner-measured on his own
+ * machine (215% browser zoom, ~1191 CSS px viewport): his own hand-measured "chip" was 157px wide
+ * (exactly the ViewToggle's own rendered width) and sat 51px off the row's center; the CODE's
+ * measured "chip" was actually 222px (ViewToggle + gap + the review button), which does not fit
+ * the row's bound at that width — so centering correctly refused to engage for the 222px bundle,
+ * while the owner was asking (and measuring) whether the 157px control alone was centered. Two
+ * different things were being called "the chip." Root cause, not a tuning knob: `minGap`
+ * (`CENTER_SLOT_GAP`, 12px) was never the problem — the CONTENT being measured was too wide by
+ * construction. Moving the review button out of this zone makes "the chip" and "what gets
+ * centered" the same element, with no change needed to AppHeader.jsx's centering math at all. */
 export function ScheduleCenter({ toolbar, post }) {
-  if (!toolbar.ready || toolbar.section !== "projects") return <></>;
-  return (
-    <>
-      {!toolbar.reviewOpen && <ViewToggle view={toolbar.view} onSet={(v) => post({ type: "planar:view-set", view: v })} />}
-      <button onClick={() => post({ type: "planar:review-toggle" })} aria-pressed={toolbar.reviewOpen}
-        title="Review suggested updates from forwarded emails"
-        style={btn(toolbar.reviewOpen || toolbar.reviewCount > 0)}>
-        <Glyph size={15}><polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></Glyph>
-        {/* NEW-1 — ALWAYS mounted once this button is (was conditional on reviewCount > 0), just
-            invisible at 0: the iframe re-posts the whole planar:toolbar-state payload whenever
-            ANYTHING it tracks changes, including its own review-suggestions count arriving a beat
-            after the report that first revealed Grid/Split/Gantt here. A badge that MOUNTS later
-            grows this button, and this whole group is `justifyContent:"center"` — widening it
-            re-centers everything in it, sliding the already-pressable Grid tab sideways out from
-            under a tap in flight (event:click-swallowed, "moved": true). Reserving the badge's box
-            from the first render (visibility, never display/mount) keeps the group's width — and
-            Grid's position — fixed regardless of when the real count lands. */}
-        <span aria-hidden={!(toolbar.reviewCount > 0)} style={{
-          fontSize: 11, fontWeight: 700, color: "var(--on-accent)", background: ACCENT, borderRadius: 20,
-          padding: "1px 7px", minWidth: 18, textAlign: "center", lineHeight: 1.5,
-          visibility: toolbar.reviewCount > 0 ? "visible" : "hidden",
-        }}>{toolbar.reviewCount > 0 ? toolbar.reviewCount : 0}</span>
-      </button>
-    </>
-  );
+  if (!toolbar.ready || toolbar.section !== "projects" || toolbar.reviewOpen) return <></>;
+  return <ViewToggle view={toolbar.view} onSet={(v) => post({ type: "planar:view-set", view: v })} />;
 }
 
 /* Right slot — zoom, export, save, then the panel toggles (history, contacts, automation,
@@ -156,6 +147,35 @@ export function ScheduleActions({ toolbar, post }) {
   const projects = toolbar.section === "projects";
   return (
     <>
+      {/* ⛔ B1547280 (AMENDMENT to B1511712) — the review-inbox button, RELOCATED here from
+          ScheduleCenter (see that function's own header for the full reasoning: bundling it with
+          the ViewToggle made AppHeader's Row-2 centering measure and position a wider "chip" than
+          the Grid/Split/Gantt control the owner actually meant). Placed first — spatially closest
+          to the ViewToggle it sat beside before — and Projects-only, using the IDENTICAL
+          reserved-visibility idiom as Format below (never a conditional MOUNT, which is exactly
+          the class of bug B1218496 already fixed once for this same badge: a control that mounts
+          a beat late shifts every already-pressable sibling sideways). The badge span inside it
+          keeps its own pre-existing reservation (visibility, permanently mounted) unchanged. */}
+      {(toolbar.settled ? projects : true) && (
+        <span aria-hidden={!projects} style={{ display: "inline-flex", visibility: projects ? "visible" : "hidden" }}>
+          <button onClick={() => post({ type: "planar:review-toggle" })} aria-pressed={toolbar.reviewOpen}
+            title="Review suggested updates from forwarded emails"
+            style={{ ...btn(toolbar.reviewOpen || toolbar.reviewCount > 0), marginRight: 1 }}>
+            <Glyph size={15}><polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></Glyph>
+            {/* NEW-1 — ALWAYS mounted once this button is (was conditional on reviewCount > 0),
+                just invisible at 0: the iframe re-posts the whole planar:toolbar-state payload
+                whenever ANYTHING it tracks changes, including its own review-suggestions count.
+                A badge that mounts later would grow this button and shift every sibling flush
+                against it — reserving its box (visibility, never display/mount) keeps this
+                zone's width, and every icon in it, fixed regardless of when the count lands. */}
+            <span aria-hidden={!(toolbar.reviewCount > 0)} style={{
+              fontSize: 11, fontWeight: 700, color: "var(--on-accent)", background: ACCENT, borderRadius: 20,
+              padding: "1px 7px", minWidth: 18, textAlign: "center", lineHeight: 1.5,
+              visibility: toolbar.reviewCount > 0 ? "visible" : "hidden",
+            }}>{toolbar.reviewCount > 0 ? toolbar.reviewCount : 0}</span>
+          </button>
+        </span>
+      )}
       {/* NEW-1 — reserved (mounted, visibility-toggled) rather than conditionally MOUNTED only
           while the toolbar hasn't SETTLED yet (toolbar.settled — first flips true on a REAL
           planar:toolbar-state report, never on markToolbarReadyFallback's bare ready-only flip).

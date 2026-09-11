@@ -152,7 +152,7 @@ try {
 
   /* A point the APP ITSELF resolves to `want`. Asking `window.__plannerHitTarget` beats a harness
    * re-implementing the hit test, which would only ever test the harness's copy of the rule. */
-  const pointOnFeature = (want) => page.evaluate((w) => {
+  const pointOnFeature = (want, opts = {}) => page.evaluate(({ w, avoidChrome }) => {
     const n = document.querySelector(`[data-feature="${w}"]`);
     if (!n) return null;
     const r = n.getBoundingClientRect();
@@ -162,6 +162,13 @@ try {
         const x = Math.round(r.x + r.width * a), y = Math.round(r.y + r.height * b);
         if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) continue;
         const hit = document.elementFromPoint(x, y);
+        /* NEW-1 (2026-09-11) — a label's right-click no longer forwards to whatever it sits over
+         * (see the module header), so a point picked for a RIGHT-CLICK probe must not land where a
+         * hover-armed chrome affordance (the parcel acreage badge) currently paints — that pixel now
+         * always addresses the chrome's own object, not the feature "underneath" it. Opt in with
+         * `avoidChrome` for any probe whose result gets right-clicked for a MENU (double-click
+         * identity is untouched by this fix and still looks through chrome). */
+        if (avoidChrome && hit && hit.closest("[data-chrome]")) continue;
         const own = hit && hit.closest("[data-feature]");
         const id = own && own.getAttribute("data-feature");
         if (id !== w) continue;
@@ -173,7 +180,7 @@ try {
       }
     }
     return null;
-  }, want);
+  }, { w: want, avoidChrome: !!opts.avoidChrome });
 
   /* ── V91632 CASE 1 — TWO OVERLAPPING TEXT BOXES ON A REAL PLAN ──────────────────────────────
    * "The text-box case is the one to run first, because it is the one that was structurally
@@ -245,43 +252,59 @@ try {
    * "the case that read as 'broken': right-click something that is the only one of its type on the
    * plan." His Bain plan has exactly one pond, which is the real instance of that case. */
   console.log("\n=== V91632 · case 2 — the lone pond on the real plan ===");
-  const pp = await pointOnFeature(`el:${pond.id}`);
-  ok("a point can be found that addresses the lone pond", !!pp, JSON.stringify(pp));
+  /* NEW-1 (2026-09-11) — a right-click no longer forwards through the acreage badge (see the module
+   * header), so the point used for the REST of this case's menu checks must be chrome-free: it has
+   * to genuinely address the pond, not a pixel the badge merely happens to paint over. */
+  const pp = await pointOnFeature(`el:${pond.id}`, { avoidChrome: true });
+  ok("a chrome-free point can be found that addresses the lone pond", !!pp, JSON.stringify(pp));
 
-  /* ⛔ NEW-3 — THE DEFECT THIS REAL PLAN SURFACED AND NO FIXTURE COULD, asserted explicitly rather
-   * than left implicit in the row below it. The parcel acreage badge becomes a hit target on HOVER
-   * (B1327, so it can be dragged), so merely ARRIVING at the pond puts the badge's rect above it in
-   * the stack. B280402 taught the DOUBLE-CLICK resolver to look through `data-chrome`; the
-   * right-click was a plain DOM handler and never went through it, so right-clicking his pond
-   * opened the PARCEL menu — "Merge parcels · Hide acreage label · Delete parcel" — with a
-   * destructive row standing where the pond's own menu belongs.
+  /* ⛔ NEW-1 — A LABEL'S RIGHT-CLICK BELONGS TO THE OBJECT IT DESCRIBES, ALWAYS. NO FORWARDING.
+   * This SUPERSEDES the "NEW-3" check this block used to run.
    *
-   * Two assertions, and the FIRST one is what stops this row rotting green: it proves the harness is
-   * actually exercising the condition. If the badge ever stops entering the stack on hover, this
-   * check must say so rather than quietly pass because there was nothing to swallow the press. */
-  if (pp) {
+   * THE DEFECT NEW-3 ONCE FIXED, restated because the case is still real: the parcel acreage badge
+   * becomes a hit target on HOVER (B1327, so it can be dragged), so merely ARRIVING at the pond puts
+   * the badge's rect above it in the stack.
+   *
+   * THE DEFECT NEW-3 ITSELF INTRODUCED, found on the owner's real Bain plan via a DIFFERENT report:
+   * right-click his 443'×135' dock building, with the badge sitting over it (where `polylabel`
+   * always parks it on a developed lot), and NEW-3's "ask the resolver and forward" fix opened the
+   * BUILDING's menu — Reshape…, Bump-outs, Dock Zones, … Delete — with "Hide acreage label" nowhere
+   * in it. Forwarding traded a rare complaint for a near-universal one: on any occupied parcel the
+   * badge sits over something, so its own menu became practically unreachable.
+   *
+   * The fix removes the forward entirely: the badge's hover-gated hit box is the EXACT rect the
+   * pill paints, so reaching it at all means the press is genuinely on the label, and a right-click
+   * there is now unconditionally about the parcel it describes — same as every other label already
+   * behaved. Two assertions: the first proves the harness is still exercising the hover-armed
+   * condition (if the badge ever stops entering the stack on hover, this must say so rather than
+   * quietly pass because there was nothing to test), the second is the fixed behaviour itself. */
+  const badgePt = await pointOnFeature(`el:${pond.id}`); // deliberately WITHOUT avoidChrome — this one wants the badge
+  if (badgePt) {
     const readStack = () => page.evaluate(({ x, y }) => document.elementsFromPoint(x, y).map((n) => {
       const f = n.closest && n.closest("[data-feature]");
       return { feature: f ? f.getAttribute("data-feature") : null, chrome: !!(n.closest && n.closest("[data-chrome]")) };
-    }), pp);
+    }), badgePt);
     await page.keyboard.press("Escape");
-    await page.mouse.move(pp.x + 220, pp.y + 180);
+    await page.mouse.move(badgePt.x + 220, badgePt.y + 180);
     await page.waitForTimeout(150);
     const cold = await readStack();
-    await page.mouse.move(pp.x, pp.y);           // …and now let the cursor merely REST on it
+    await page.mouse.move(badgePt.x, badgePt.y);   // …and now let the cursor merely REST on it
     await page.waitForTimeout(400);
     const armed = { cold, after: await readStack() };
     console.log(`  stack COLD  : ${JSON.stringify(cold.slice(0, 2))}`);
     console.log(`  stack HOVER : ${JSON.stringify(armed.after.slice(0, 2))}`);
     const top = armed.after[0] || {};
-    ok("NEW-3 precondition: with the cursor resting on it, hover-armed parcel chrome IS above the pond",
-      top.chrome === true && String(top.feature || "").startsWith("parcel:"),
-      JSON.stringify(armed.after.slice(0, 3)));
-    const rows0 = await menuAt(pp.x, pp.y);
-    const isParcelMenu = (rows0 || []).some((r) => /Delete parcel|Merge parcels|acreage label/i.test(r.text));
-    ok("NEW-3: right-clicking the pond opens the POND's menu, not the parcel's — the chrome forwards the press",
-      !!rows0 && !isParcelMenu && rows0.some((r) => /Pond settings/i.test(r.text)),
-      isParcelMenu ? "the PARCEL menu opened — the press was swallowed" : `${(rows0 || []).length} rows`);
+    const hoverArmed = top.chrome === true && String(top.feature || "").startsWith("parcel:");
+    ok("precondition: with the cursor resting on it, hover-armed parcel chrome IS above the pond",
+      hoverArmed, JSON.stringify(armed.after.slice(0, 3)));
+    if (hoverArmed) {
+      const rows0 = await menuAt(badgePt.x, badgePt.y);
+      const isParcelMenu = (rows0 || []).some((r) => /Hide acreage label/i.test(r.text));
+      const isBuildingOrPondMenu = (rows0 || []).some((r) => /Reshape…|Bump-outs|Dock Zones|Pond settings/i.test(r.text));
+      ok("NEW-1: right-clicking the badge opens the PARCEL's own menu ('Hide acreage label'), never what it sits over",
+        !!rows0 && isParcelMenu && !isBuildingOrPondMenu,
+        isParcelMenu ? `${(rows0 || []).length} rows` : "the badge's own menu did not open");
+    }
   }
   if (pp) {
     const rows = await menuAt(pp.x, pp.y);
