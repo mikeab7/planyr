@@ -3312,6 +3312,7 @@ const showToast = (() => {
     if (_activeToast) { _activeToast.remove(); _activeToast = null; }
 
     const el = document.createElement("div");
+    el.setAttribute("data-testid", "schedule-toast");   // B1539584 — stable hook for the fit regression check
     const isError = type === "error";
     Object.assign(el.style, {
       position:      "fixed",
@@ -3320,7 +3321,7 @@ const showToast = (() => {
       transform:     "translateX(-50%) translateY(12px)",
       opacity:       "0",
       display:       "flex",
-      alignItems:    "center",
+      alignItems:    "flex-start",
       gap:           "8px",
       background:    isError ? "#fef2f2" : "#f0fdf4",
       border:        `1px solid ${isError ? "#fecaca" : "#bbf7d0"}`,
@@ -3333,10 +3334,13 @@ const showToast = (() => {
       boxShadow:     "0 4px 16px rgba(0,0,0,0.10)",
       zIndex:        "99999",
       pointerEvents: "none",
-      whiteSpace:    "nowrap",
       transition:    "opacity 0.18s ease, transform 0.18s ease",
       userSelect:    "none",
-      maxWidth:      "420px",
+      // B1539584 — width fits the content up to this cap (and never past the viewport on a
+      // phone), then WRAPS onto more lines rather than letting text spill past the pill's own
+      // background; see the note below on the removed nowrap white-space setting.
+      width:         "max-content",
+      maxWidth:      "min(420px, calc(100vw - 32px))",
       lineHeight:    "1.4",
     });
 
@@ -3345,11 +3349,22 @@ const showToast = (() => {
     Object.assign(icon.style, {
       fontSize: "13px",
       flexShrink: "0",
-      lineHeight: "1",
+      lineHeight: "1.4",
     });
 
+    // B1539584 — was `white-space: nowrap`, which (combined with the flex item default
+    // `min-width: auto`) let this span render at its full unbroken width even past the
+    // toast's own `max-width`, so long messages painted straight through the pill and onto
+    // the page behind it. `minWidth: 0` lets the flex item actually shrink to the container's
+    // cap; normal white-space then wraps the overflow onto additional lines instead.
     const text = document.createElement("span");
     text.textContent = msg;
+    text.setAttribute("data-testid", "schedule-toast-text");
+    Object.assign(text.style, {
+      minWidth:      "0",
+      whiteSpace:    "normal",
+      overflowWrap:  "break-word",
+    });
 
     el.appendChild(icon);
     el.appendChild(text);
@@ -7239,6 +7254,18 @@ function App() {
   const [data,       setData]       = useState(null);
   const dataRef = useRef(null);
   useEffect(() => { dataRef.current = data; }, [data]);
+  // B1539585 — a ref, not a plain closure `let`, because updateTask's setData(updater) can run its
+  // updater EITHER eagerly (synchronously, inline with the dispatch call) OR deferred to the next
+  // render, depending on whether React finds other work already pending on this fiber at click time
+  // — which in an interactive app is common. A local variable checked immediately after `setData(...)`
+  // races the deferred case and silently loses: the check runs with the pre-update `null` before the
+  // updater has ever written to it, so the toast never fires. A ref written INSIDE the updater and read
+  // by a `[data]`-effect is safe under both timings, because the effect is guaranteed to run only after
+  // the render that incorporated the updater's write has committed.
+  const rollToastRef = useRef(null);
+  useEffect(() => {
+    if (rollToastRef.current) { showToast(rollToastRef.current); rollToastRef.current = null; }
+  }, [data]);
   // B212 — keyboard column navigation walks the active project's VISIBLE columns in
   // DISPLAY ORDER so the cell cursor always lands on an on-screen column and never on a
   // hidden one (a hidden column has no rendered cell, so the blue selection outline would
@@ -8222,7 +8249,6 @@ function App() {
   }, []);
 
   const updateTask = useCallback((taskId, updates, projId=null) => {
-    let _rollToast = null;   // B816 — announce a bound task that rolled to a new meeting (reuses B624's toast voice)
     setData(d => {
       const pid = projId ?? d.aPid;
       const _prevBoundStart = {};   // B816 — capture bound-task meeting dates BEFORE the edit, to detect rolls
@@ -8288,18 +8314,20 @@ function App() {
       }
       if (touchesSchedule(updates)) {   // B835 (recurrence ×2) — fires for durValue/durUnit (typed duration) + pinnedStart/pinnedEnd (unpin/unlock) too, not just {duration}/{start}
         tasks = recomputeSchedule(tasks);
-        // B816 — a bound task whose meeting moved from a prior meeting rolled a cycle; announce it (once).
+        // B816 — a bound task whose meeting moved from a prior meeting rolled a cycle; announce it
+        // (once). Written to rollToastRef (not shown directly) — see its declaration for why: this
+        // updater can run either synchronously or on a deferred render, and only the ref survives
+        // both timings (B1539585).
         for (const t of tasks) {
           const prev = _prevBoundStart[t.id];
-          if (!_rollToast && t.meetingBound && prev && t.start && t.start !== prev) {
+          if (!rollToastRef.current && t.meetingBound && prev && t.start && t.start !== prev) {
             const body = MEETING_BODY_INDEX[t.meetingBodyId];
-            _rollToast = `${t.name || "Task"} moved to ${fmtD(t.start)} — the ${fmtD(prev)} agenda closed ${fmtD(body ? agendaDeadline(body, prev) : "")}.`;
+            rollToastRef.current = `${t.name || "Task"} moved to ${fmtD(t.start)} — the ${fmtD(prev)} agenda closed ${fmtD(body ? agendaDeadline(body, prev) : "")}.`;
           }
         }
       }
       return {...d, projects: {...d.projects, [pid]: {...d.projects[pid], tasks}}};
     });
-    if (_rollToast) showToast(_rollToast);
     // ── Successor prompt: fire when task transitions to complete ──
     if (updates.health === 'green') {
       const snap = dataRef.current;
