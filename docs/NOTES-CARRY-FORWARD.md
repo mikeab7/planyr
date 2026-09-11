@@ -293,6 +293,20 @@ position**.
    of the width). **When a fix's justification is the defect the previous fix caused, you are
    trading, not fixing.** Look for the formulation where the two properties stop competing — here,
    making the quantity that was moving independent of the quantity that was changing.
+   ⛔ **AND IT RECURRED THROUGH A NEW DOOR (NEW-1, the page-width-by-hand feature, 2026-09-11) —
+   same defect, same shared variable, a completely different feature this time.** Feeding a width
+   PIN into `naturalSheetWidth` — the exact baseline `matPadX` (the page's left gutter) is centred
+   against — reproduced the identical "centring splits the new width across both edges" signature
+   from scratch: committing a right-edge drag from 580→780 jumped the LEFT edge 100px left in the
+   same instant, half the width gained. **The lesson generalises past alignment specifically: ANY
+   variable that is both "the baseline a layout anchor is computed from" and "a size a feature
+   wants to change" will move the anchor the moment that feature ships**, whether the change comes
+   from centring logic, a pin, or anything else that lands on the same shared number. The fix was
+   the same shape as round 2b's: give the new feature its OWN baseline (`pinnedPageWidth`, feeding
+   only `sheetGrowWidth`, the already-proven ADDITIVE growth path) rather than editing the one
+   `matPadX` already depends on. Before writing to a "natural width"/"baseline" constant this
+   module already treats as authoritative, grep every reader of it — `matPadX` is the one that
+   bites, and it is not the one function whose name mentions width.
 
 0. **⛔ A RULE SHIPPED ON SOME OF ITS EDGES AND CLAMPED ON THE REST (added 2026-09-08,
    NOTES-FREE-PLACEMENT).** The page-grows-to-fit feature grew RIGHT and DOWN and floored LEFT and
@@ -804,6 +818,20 @@ position**.
       defect that is actually verified (Backspace/Delete on a selected box must never reach the
       page); flag a literal-wording conflict with a protected, tested design rather than silently
       building it or silently ignoring the report.
+
+15. **⛔ A LIVE GESTURE'S OWN FLOOR MUST NEVER BE READ FROM THE STATE THE GESTURE ITSELF WRITES
+    (the page-width-by-hand feature, 2026-09-11).** The width-drag's live preview floored its
+    target against `sheetGrowWidth` — captured once at drag start — on the reasoning that it holds
+    "whatever floor is already in effect." It does, but it ALSO holds whatever the CURRENT pin
+    already is, since a pin rides the same variable content overflow does. The result: dragging
+    to widen a page to 780px, then dragging the SAME grip back toward 630px, silently stayed at
+    780 — the drag's own starting point had become its own minimum. Never diagnosed by reading the
+    code; found by literally trying "drag it back" in the live-verify harness the item's own brief
+    demanded. **The fix is a SECOND, narrower reference** — a ref refreshed by every real
+    measurement pass, holding only the answer with the in-flight change subtracted back out (here,
+    genuine box/table overflow with the pin removed) — never the combined number the gesture is
+    itself about to overwrite. Whenever a live drag/resize floors or ceilings itself against "the
+    current value," ask whether that current value already includes what THIS gesture last wrote.
 
 ---
 
