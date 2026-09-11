@@ -360,6 +360,16 @@ export async function cloudHardDelete(uid, id) {
   } catch (_) { /* best-effort — never blocks the delete itself */ }
   try {
     const { data, error } = await supabase.from("sites").delete().eq("id", id).select("id");
+    // B1517888 — `db/sites_block_delete_live_group.sql`'s BEFORE DELETE trigger refuses this
+    // (errcode 'PLYR1') when the row's project group still has a live sibling, or when the row
+    // was never soft-deleted. That refusal is EXPECTED to fire from a stale/unfixed tab (the
+    // whole point of the server-side guard is that it can't be skipped) — surface it as its own
+    // named, human-readable reason rather than a generic "delete failed", so the caller's
+    // existing failure toast (`"…couldn't be permanently deleted"`) tells the truth about why.
+    if (error && error.code === "PLYR1") {
+      reportClientEvent("purge-blocked-live-group", "hard delete refused server-side — project group still has a live plan", { id, error: error.message || "" });
+      return { ok: false, removed: 0, error: "This plan's project still has another active plan — it can't be permanently deleted while any of them are live." };
+    }
     const out = interpretDelete(data, error);
     if (out.ok === false) reportClientEvent("cloud-write-failed", "delete failed (sites)", { id, error: out.error });
     else if (out.removed === 0) reportClientEvent("delete-zero-rows", "delete matched no rows (sites)", { id });

@@ -5,6 +5,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { execSync } from "node:child_process";
 import recomputeProbe from "./scripts/vite-plugin-recompute-probe.mjs";
+import { UNSAFE_BUILDS } from "./src/app/unsafeBuilds.js";
 
 // PDF.js (v6) renders correctly only when it can fetch its support assets at runtime:
 // substitute fonts (non-embedded text), CMaps (CID/CJK fonts), an ICC profile (CMYK
@@ -150,9 +151,16 @@ const BUILD_ID = (() => {
  * thing that makes "it shipped" checkable from the browser.
  *
  * Emitted in BOTH dev and build: dev serves it from middleware (nothing is written to disk),
- * production writes it into dist/ next to index.html. */
+ * production writes it into dist/ next to index.html.
+ *
+ * B1517889 — ALSO carries `supersedes_unsafe`: the short-SHA ids of past builds known to carry a
+ * defect serious enough to escalate `buildSkew.js`'s ordinary, dismissible notice into one that
+ * re-arms rather than staying dismissed. Sourced from `src/app/unsafeBuilds.js` (append-only,
+ * empty by default) so declaring a build unsafe is a deploy-time data change, never a code change
+ * to this plugin. */
 function buildStamp() {
-  const body = () => `${JSON.stringify({ build: BUILD_ID })}\n`;
+  const unsafeBuilds = UNSAFE_BUILDS.map((u) => u.build).filter((b) => typeof b === "string" && b.trim());
+  const body = () => `${JSON.stringify({ build: BUILD_ID, supersedes_unsafe: unsafeBuilds })}\n`;
   return {
     name: "planyr-build-stamp",
     configureServer(server) {

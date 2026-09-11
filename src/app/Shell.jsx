@@ -20,7 +20,7 @@ import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, isDashboa
 import { pageTitle } from "./pageTitle.js";
 import { writeLastRoute, seedBootRoute } from "./lastRoute.js";
 import { isFreshRoutelessBoot, firstLandingRedirect, resolveHasAnyProjects } from "./firstLanding.js";
-import { installBuildSkewWatch, shouldOfferReload, fetchServedBuild, isBuildSkewed, LOADED_BUILD } from "./buildSkew.js";
+import { installBuildSkewWatch, shouldOfferReload, shouldEscalate, fetchServedBuild, isBuildSkewed, LOADED_BUILD } from "./buildSkew.js";
 import { reloadFresh, isChunkRecoveryStuck, subscribeChunkRecoveryStuck } from "./chunkReload.js";
 import { RADIUS } from "../shared/ui/radius.js";
 import FloatingNotice from "../shared/ui/FloatingNotice.jsx";
@@ -170,6 +170,8 @@ function UpdateBanner({ reason, onReload, onDismiss }) {
             ? "That part of Planyr is newer than the copy this tab has open — reload to get it."
             : reason === "chunk-stuck"
             ? "Planyr couldn't finish loading part of the app just now (likely mid-deploy) — a reload should fix it. Anything you were changing is saved on this device."
+            : reason === "unsafe-build"
+            ? "This tab is running an older build of Planyr with a known problem — please reload now. Your work stays saved either way."
             : "A newer version of Planyr is available. Reload when you're ready — your work is saved."}
         </span>
         {narrow
@@ -595,13 +597,24 @@ export default function Shell() {
    *  parseRoute has already resolved the miss away by then. */
   const [servedBuild, setServedBuild] = useState(null);
   const [dismissedFor, setDismissedFor] = useState(null);
+  // B1517889 — the server's current declaration of which past build ids are UNSAFE (see
+  // unsafeBuilds.js), and whether THIS escalated notice has been dismissed for the CURRENT look.
+  // Unlike `dismissedFor` above, an unsafe dismissal does not persist across the next check — see
+  // `onUnsafeBuilds` below, which clears it every time the watch looks again (poll / focus /
+  // visibility change), so a shrug does not turn into permanent silence on a build with a known,
+  // still-live problem. `buildSkew.js`'s own header is the "why" for the module as a whole.
+  const [unsafeBuilds, setUnsafeBuilds] = useState([]);
+  const [unsafeDismissed, setUnsafeDismissed] = useState(false);
   // NEW-2 — a chunk that is STILL missing after the auto-reload already tried once (a
   // mid-propagating deploy). Independent of the build-skew signals below: this is a CONFIRMED
   // current failure, not a heuristic, so it wins whenever both are true. See chunkReload.js.
   const [chunkStuck, setChunkStuck] = useState(() => isChunkRecoveryStuck());
   useEffect(() => subscribeChunkRecoveryStuck(setChunkStuck), []);
   const [routeMiss, setRouteMiss] = useState(() => (typeof window !== "undefined" ? !!unknownModuleSlug(window.location.hash) : false));
-  useEffect(() => installBuildSkewWatch({ onServed: setServedBuild }), []);
+  useEffect(() => installBuildSkewWatch({
+    onServed: setServedBuild,
+    onUnsafeBuilds: (list) => { setUnsafeBuilds(list); setUnsafeDismissed(false); },
+  }), []);
   useEffect(() => {
     if (typeof window === "undefined") return;
     setRouteMiss(!!unknownModuleSlug(window.location.hash));
@@ -635,8 +648,14 @@ export default function Shell() {
     setRouteMiss(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeMiss, servedBuild]);
+  // B1517889 — escalation wins over the ordinary skew reasons (a known, still-live problem
+  // outranks "a newer version exists"), but never over a CONFIRMED current failure (chunk-stuck),
+  // which is happening right now rather than describing risk from staying on an old build.
+  const unsafe = !unsafeDismissed && shouldEscalate({ loaded: LOADED_BUILD, served: servedBuild, unsafeBuilds });
   const updateReason = chunkStuck && dismissedFor !== "chunk-stuck"
     ? "chunk-stuck"
+    : unsafe
+    ? "unsafe-build"
     : shouldOfferReload({ loaded: LOADED_BUILD, served: servedBuild, dismissedFor, routeMissed: routeMiss })
     ? (routeMiss && dismissedFor !== "route-miss" ? "route-miss" : "newer-build")
     : null;
@@ -669,7 +688,14 @@ export default function Shell() {
       <UpdateBanner
         reason={updateReason}
         onReload={() => reloadFresh()}
-        onDismiss={() => setDismissedFor(updateReason === "route-miss" ? "route-miss" : updateReason === "chunk-stuck" ? "chunk-stuck" : servedBuild)}
+        onDismiss={() => {
+          // B1517889 — an "unsafe-build" dismissal is deliberately NOT persisted into
+          // `dismissedFor`: it only hides the notice until the watch looks again (the next poll,
+          // focus, or visibility change resets `unsafeDismissed`), so it re-arms rather than
+          // staying dismissed. Every other reason keeps the existing persist-until-superseded rule.
+          if (updateReason === "unsafe-build") { setUnsafeDismissed(true); return; }
+          setDismissedFor(updateReason === "route-miss" ? "route-miss" : updateReason === "chunk-stuck" ? "chunk-stuck" : servedBuild);
+        }}
       />
       <main style={{ flex: 1, minHeight: 0, position: "relative", zIndex: 0, background: "var(--surface-page)" }}>
         {/* Keep-alive render: every visited workspace stays mounted in an absolutely-

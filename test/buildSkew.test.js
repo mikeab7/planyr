@@ -5,7 +5,7 @@
  * reflex and then the real one is invisible too. Most of these cases are "no opinion".
  */
 import { describe, it, expect, vi } from "vitest";
-import { isBuildSkewed, shouldOfferReload, fetchServedBuild, installBuildSkewWatch } from "../src/app/buildSkew.js";
+import { isBuildSkewed, shouldOfferReload, fetchServedBuild, fetchServedMeta, installBuildSkewWatch, isLoadedBuildUnsafe, shouldEscalate } from "../src/app/buildSkew.js";
 
 describe("isBuildSkewed", () => {
   it("two different real build ids = skew", () => {
@@ -93,6 +93,67 @@ describe("fetchServedBuild", () => {
   });
 });
 
+describe("fetchServedMeta", () => {
+  it("reads build + supersedes_unsafe together", async () => {
+    const fetchImpl = vi.fn(async () => ({ ok: true, json: async () => ({ build: "abc1234", supersedes_unsafe: ["old111", "old222"] }) }));
+    expect(await fetchServedMeta(fetchImpl)).toEqual({ build: "abc1234", unsafeBuilds: ["old111", "old222"] });
+  });
+
+  it("defaults the unsafe list to [] when absent or malformed", async () => {
+    expect(await fetchServedMeta(async () => ({ ok: true, json: async () => ({ build: "abc1234" }) })))
+      .toEqual({ build: "abc1234", unsafeBuilds: [] });
+    expect(await fetchServedMeta(async () => ({ ok: true, json: async () => ({ build: "abc1234", supersedes_unsafe: "not-an-array" }) })))
+      .toEqual({ build: "abc1234", unsafeBuilds: [] });
+    expect(await fetchServedMeta(async () => ({ ok: true, json: async () => ({ build: "abc1234", supersedes_unsafe: ["ok", 42, "  ", null] }) })))
+      .toEqual({ build: "abc1234", unsafeBuilds: ["ok"] });
+  });
+
+  it("returns null — never throws — for every failure shape, same as fetchServedBuild", async () => {
+    expect(await fetchServedMeta(async () => { throw new Error("offline"); })).toBe(null);
+    expect(await fetchServedMeta(async () => ({ ok: false }))).toBe(null);
+  });
+
+  it("fetchServedBuild stays a thin wrapper — same id, unaffected by the unsafe list", async () => {
+    const fetchImpl = vi.fn(async () => ({ ok: true, json: async () => ({ build: "abc1234", supersedes_unsafe: ["old111"] }) }));
+    expect(await fetchServedBuild(fetchImpl)).toBe("abc1234");
+  });
+});
+
+describe("isLoadedBuildUnsafe", () => {
+  it("true only when the loaded build is named in the served list", () => {
+    expect(isLoadedBuildUnsafe("old111", ["old111", "old222"])).toBe(true);
+    expect(isLoadedBuildUnsafe("new333", ["old111", "old222"])).toBe(false);
+  });
+
+  it("silent when it cannot know — empty/missing loaded, non-array list, dev build", () => {
+    expect(isLoadedBuildUnsafe("", ["old111"])).toBe(false);
+    expect(isLoadedBuildUnsafe(null, ["old111"])).toBe(false);
+    expect(isLoadedBuildUnsafe("old111", null)).toBe(false);
+    expect(isLoadedBuildUnsafe("old111", undefined)).toBe(false);
+    expect(isLoadedBuildUnsafe("old111", "old111")).toBe(false); // a bare string is not a list
+    expect(isLoadedBuildUnsafe("dev", ["dev"])).toBe(false);
+  });
+
+  it("an empty registry never escalates — the default, safe state", () => {
+    expect(isLoadedBuildUnsafe("old111", [])).toBe(false);
+  });
+});
+
+describe("shouldEscalate", () => {
+  it("requires BOTH confirmed skew and this tab's own build being named unsafe", () => {
+    expect(shouldEscalate({ loaded: "old111", served: "new222", unsafeBuilds: ["old111"] })).toBe(true);
+  });
+
+  it("no escalation without confirmed skew, even if the (stale) unsafe list names this build", () => {
+    expect(shouldEscalate({ loaded: "old111", served: "old111", unsafeBuilds: ["old111"] })).toBe(false);
+    expect(shouldEscalate({ loaded: "old111", served: null, unsafeBuilds: ["old111"] })).toBe(false);
+  });
+
+  it("no escalation when skew is confirmed but THIS build isn't the unsafe one", () => {
+    expect(shouldEscalate({ loaded: "old333", served: "new222", unsafeBuilds: ["old111"] })).toBe(false);
+  });
+});
+
 describe("installBuildSkewWatch", () => {
   const fakeWin = () => {
     const listeners = {};
@@ -138,5 +199,29 @@ describe("installBuildSkewWatch", () => {
     off();
     await look();
     expect(seen).toEqual([]);
+  });
+
+  it("B1517889 — also reports the served unsafe-build list alongside onServed, additively", async () => {
+    const win = fakeWin();
+    const servedIds = [];
+    const unsafeLists = [];
+    installBuildSkewWatch({
+      win,
+      onServed: (b) => servedIds.push(b),
+      onUnsafeBuilds: (list) => unsafeLists.push(list),
+      fetchImpl: async () => ({ ok: true, json: async () => ({ build: "new222", supersedes_unsafe: ["old111"] }) }),
+    });
+    await win.listeners.focus();
+    expect(servedIds).toEqual(["new222"]);
+    expect(unsafeLists).toEqual([["old111"]]);
+  });
+
+  it("reports an empty unsafe list on a failed look, never throws for omitting onUnsafeBuilds", async () => {
+    const win = fakeWin();
+    const seen = [];
+    // No onUnsafeBuilds at all — must not throw.
+    installBuildSkewWatch({ win, onServed: (b) => seen.push(b), fetchImpl: async () => { throw new Error("offline"); } });
+    await expect(win.listeners.focus()).resolves.not.toThrow();
+    expect(seen).toEqual([null]);
   });
 });
