@@ -644,6 +644,94 @@ const COUNTIES_RAW = {
     idField: "PARCELID", // unconfirmed — jccgis.jccal.org is blocked from this build environment.
     help: "Jefferson County (Birmingham) parcels (county GIS). Search by parcel ID or a site address.",
   },
+  /* ═══ B1551617 — Tier 1 (Hillwood-market) counties, discovered + verified LIVE from this sandbox
+   * 2026-09-11 by ui-audit/discover-county-parcels.mjs (routes: ArcGIS Hub dataset API / ArcGIS
+   * Online item search — both *.arcgis.com, reachable here). Every one passed the harness's
+   * acceptance test: a point query inside the 8s timing budget, ownership-shaped attributes with a
+   * REAL populated value, and three geometry-verified spread points across the whole county (not
+   * just its seat). Full detail (chosen candidate + every rejected one + why) in
+   * docs/STATEWIDE-PARCELS.md's "Tier 1" table. ═══ */
+  ga_fulton: {
+    // VERIFIED LIVE 2026-09-11 from this sandbox: 373,296 parcel polygons, count query 616ms,
+    // 28 fields. Replaces the previously-declined `Tax_Parcels2018` (2018 vintage, stale).
+    state: "GA", label: "Fulton County, GA",
+    layerUrl: "https://services1.arcgis.com/AQDHTHDrZzfsFsB5/arcgis/rest/services/Tax_Parcels/FeatureServer/0",
+    idField: "ParcelID", addrField: "Address",
+    help: "Fulton County tax parcels (county GIS, Esri-hosted). Search by parcel ID or a site address.",
+  },
+  ga_chatham: {
+    // VERIFIED LIVE 2026-09-11 from this sandbox: 126,490 parcel polygons, count query 708ms,
+    // 47 fields. Previously "not found" (docs/STATEWIDE-PARCELS.md, routes 1-2 only, 2026-09-10).
+    state: "GA", label: "Chatham County, GA",
+    layerUrl: "https://services5.arcgis.com/CEpuXecVrKGiDoOH/arcgis/rest/services/Parcels/FeatureServer/0",
+    idField: "PIN", addrField: "PropAddres",
+    help: "Chatham County (Savannah) parcels (county GIS, Esri-hosted). Search by PIN or a site address.",
+  },
+  az_pinal: {
+    // VERIFIED LIVE 2026-09-11 from this sandbox: 286,959 parcel polygons, count query 523ms,
+    // 74 fields. Published by the City of Maricopa's own GIS account (owner CityOfMaricopa) —
+    // confirmed to cover the WHOLE county, not just the city, by three geometry-verified spread
+    // points 50-80 miles apart (Casa Grande / Apache Junction area / San Tan Valley area) all
+    // returning real parcels with real owner names.
+    state: "AZ", label: "Pinal County, AZ",
+    layerUrl: "https://services7.arcgis.com/MlfUGd2UJYefAS7v/arcgis/rest/services/TaxParcel_8_26/FeatureServer/0",
+    idField: "PARCELID", addrField: "SITEADDRES",
+    help: "Pinal County tax parcels (Esri-hosted). Search by parcel ID or a site address.",
+  },
+  mo_clay: {
+    // VERIFIED LIVE 2026-09-11 from this sandbox: 98,112 parcel polygons, count query 570ms,
+    // 40 fields.
+    state: "MO", label: "Clay County, MO",
+    layerUrl: "https://services7.arcgis.com/3c8lLdmDNevrTlaV/arcgis/rest/services/ClayCountyParcelService/FeatureServer/0",
+    idField: "parcel_id", addrField: "situs_display",
+    help: "Clay County parcels (county GIS, Esri-hosted). Search by parcel ID or a site address.",
+  },
+  sc_greenville: {
+    // VERIFIED LIVE 2026-09-11 from this sandbox: 215,484 parcel polygons, count query 387ms,
+    // 55 fields. Replaces the previously-declined `Parcel_Sizes_2018_WFL1` (2018 vintage AND a
+    // derived-acreage layer, not the parcel layer itself).
+    state: "SC", label: "Greenville County, SC",
+    layerUrl: "https://services.arcgis.com/zTM0LZtJeE1HzO09/arcgis/rest/services/kx_greenville_county_sc_tax_parcel_SHP/FeatureServer/0",
+    idField: "PIN",
+    help: "Greenville County tax parcels (Esri-hosted). Search by PIN or a site address.",
+  },
+  ia_polk: {
+    // VERIFIED LIVE 2026-09-11 from this sandbox: 219,672 parcel polygons, count query 291ms,
+    // 49 fields. Previously "not found" (docs/STATEWIDE-PARCELS.md, routes 1-2 only, 2026-09-10).
+    state: "IA", label: "Polk County, IA",
+    layerUrl: "https://services.arcgis.com/lcU85Lh3UvDs5Naw/arcgis/rest/services/PolkParcelsValues5_28_2026/FeatureServer/0",
+    idField: "PIN",
+    help: "Polk County (Des Moines) parcels (county GIS, Esri-hosted). Search by PIN or a site address.",
+  },
+  pa_lehigh: {
+    // VERIFIED LIVE 2026-09-11 from this sandbox: 127,043 parcel polygons ("Parcel Boundaries",
+    // layer 1), count query 451ms, 21 fields. Replaces the previously-declined `ATestParcel` —
+    // same underlying ArcGIS service CONTAINER (a publisher naming quirk, confirmed by inspecting
+    // the service directly): layer 0 is an unrelated "Owner" POINT layer; layer 1, wired here, is
+    // a real, current, 127,043-feature POLYGON parcel layer whose own AGOL item is titled "Parcels
+    // - PA - Lehigh County", not "ATestParcel".
+    state: "PA", label: "Lehigh County, PA",
+    layerUrl: "https://services1.arcgis.com/XWDNR4PQlDQwrRCL/ArcGIS/rest/services/ATestParcel/FeatureServer/1",
+    idField: "PIN", addrField: "SITUS_ADDR_NUM",
+    help: "Lehigh County parcels (Esri-hosted). Search by PIN or a site address.",
+  },
+  nm_bernalillo: {
+    // VERIFIED LIVE 2026-09-11 from this sandbox: 257,283 parcel polygons, count query 304ms,
+    // 16 fields. Published by the City of Albuquerque's GIS (owner agis_CABQ) for the county's
+    // own use. Previously "not found" (docs/STATEWIDE-PARCELS.md, routes 1-2 only, 2026-09-10).
+    state: "NM", label: "Bernalillo County, NM",
+    layerUrl: "https://services.arcgis.com/CWv1abTnC3urn4bV/arcgis/rest/services/berncoparcels_forIDO/FeatureServer/0",
+    idField: "UPC", addrField: "SITUSADD",
+    help: "Bernalillo County (Albuquerque) parcels (Esri-hosted). Search by UPC (Uniform Parcel Code) or a site address.",
+  },
+  il_kane: {
+    // VERIFIED LIVE 2026-09-11 from this sandbox: 187,336 parcel polygons, count query 336ms,
+    // 48 fields.
+    state: "IL", label: "Kane County, IL",
+    layerUrl: "https://services1.arcgis.com/oRKmdBXD6EbdmVgJ/arcgis/rest/services/KaneCo_IL_Parcels_LegalDescription/FeatureServer/0",
+    idField: "PIN", addrField: "SiteAddress",
+    help: "Kane County parcels (county GIS, Esri-hosted). Search by PIN or a site address.",
+  },
 };
 
 /* The counties whose full parcel fabric is snapshot-cached to Google Drive (B629) so the map keeps
@@ -1420,6 +1508,18 @@ const COUNTIES_MAP_RAW = {
   ok_tulsa: { state: "OK", center: [36.1540, -95.9928], zoom: 10, bbox: [35.95, -96.20, 36.35, -95.70], mapServer: null, layerUrl: COUNTIES.ok_tulsa.layerUrl },
   la_eastbatonrouge: { state: "LA", center: [30.4515, -91.1871], zoom: 10, bbox: [30.30, -91.35, 30.70, -90.85], mapServer: null, layerUrl: COUNTIES.la_eastbatonrouge.layerUrl },
   al_jefferson: { state: "AL", center: [33.5207, -86.8025], zoom: 10, bbox: [33.25, -87.15, 33.80, -86.45], mapServer: null, layerUrl: COUNTIES.al_jefferson.layerUrl },
+  // B1551617 — Tier 1 counties (see the matching COUNTIES block above); bbox/center read directly
+  // from public/geo/county-polygons.json (the same nationwide asset resolveCounty uses), never
+  // hand-typed.
+  ga_fulton: { state: "GA", center: [33.8453, -84.4772], zoom: 10, bbox: [33.50, -84.84, 34.19, -84.12], mapServer: null, layerUrl: COUNTIES.ga_fulton.layerUrl },
+  ga_chatham: { state: "GA", center: [31.9823, -81.1400], zoom: 10, bbox: [31.73, -81.39, 32.24, -80.89], mapServer: null, layerUrl: COUNTIES.ga_chatham.layerUrl },
+  az_pinal: { state: "AZ", center: [32.9940, -111.3275], zoom: 9, bbox: [32.51, -112.21, 33.48, -110.45], mapServer: null, layerUrl: COUNTIES.az_pinal.layerUrl },
+  mo_clay: { state: "MO", center: [39.2843, -94.4153], zoom: 10, bbox: [39.11, -94.61, 39.46, -94.22], mapServer: null, layerUrl: COUNTIES.mo_clay.layerUrl },
+  sc_greenville: { state: "SC", center: [34.8448, -82.4562], zoom: 10, bbox: [34.48, -82.77, 35.21, -82.14], mapServer: null, layerUrl: COUNTIES.sc_greenville.layerUrl },
+  ia_polk: { state: "IA", center: [41.6782, -93.5747], zoom: 10, bbox: [41.49, -93.82, 41.86, -93.33], mapServer: null, layerUrl: COUNTIES.ia_polk.layerUrl },
+  pa_lehigh: { state: "PA", center: [40.6038, -75.6195], zoom: 10, bbox: [40.42, -75.89, 40.79, -75.34], mapServer: null, layerUrl: COUNTIES.pa_lehigh.layerUrl },
+  nm_bernalillo: { state: "NM", center: [35.0490, -106.6593], zoom: 10, bbox: [34.87, -107.18, 35.23, -106.14], mapServer: null, layerUrl: COUNTIES.nm_bernalillo.layerUrl },
+  il_kane: { state: "IL", center: [41.9385, -88.4257], zoom: 10, bbox: [41.72, -88.61, 42.16, -88.24], mapServer: null, layerUrl: COUNTIES.il_kane.layerUrl },
 };
 
 // Which configured CAD county/counties could contain a clicked point — used to

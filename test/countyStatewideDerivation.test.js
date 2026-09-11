@@ -161,8 +161,8 @@ describe("the derivation changes nothing about enumeration or the statewide pseu
     const keys = Object.keys(COUNTIES_MAP);
     expect(keys).not.toContain("dallas");
     // ~18 dialed-in TX+CO rows + 32 statewide pseudo-keys + 13 Idaho counties (B1344721) + 19
-    // other-state counties (B1344722), not 254 or 3,143.
-    expect(keys.length).toBeLessThan(90);
+    // other-state counties (B1344722) + 9 Tier-1 counties (B1551617), not 254 or 3,143.
+    expect(keys.length).toBeLessThan(100);
   });
 
   it("candidateCountiesForPoint still answers via the existing txgio_statewide fallback for a derived county — unchanged, not doubled", () => {
@@ -264,10 +264,17 @@ describe("B1457152 — candidateCountiesForPoint never fans out to every configu
   });
 
   it("a state with NO wired source at all resolves to NO candidates — never every candidate", () => {
-    // Albuquerque, NM — a real, geometry-resolvable county with zero configured parcel sources.
-    // This is the case the old fallback got backwards: "we don't know a source" became "try all of
-    // them" instead of the honest "we have none to try".
-    const cand = candidateCountiesForPoint(35.0844, -106.6504);
+    // Pierre, SD — a real, geometry-resolvable county in a state with ZERO configured parcel
+    // sources (no statewide composite, no individual county). This is the case the old fallback
+    // got backwards: "we don't know a source" became "try all of them" instead of the honest "we
+    // have none to try".
+    // ⛔ B1551617 — this used to use Albuquerque/Bernalillo County, NM as the example; Bernalillo
+    // is now wired (nm_bernalillo) and every OTHER New Mexico point still correctly resolves to it
+    // too, as the state's one-and-only "coverage" candidate (the same fallback Idaho's
+    // non-participating counties already rely on) — so the case moved to one of the only two
+    // states (SD, WA) with no wired source at all, rather than deleting the case the fallback rule
+    // is actually about.
+    const cand = candidateCountiesForPoint(44.3683, -100.3510);
     expect(cand).toEqual([]);
   });
 
