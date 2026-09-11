@@ -25,13 +25,13 @@
  * We hand-roll the entire UI. We never hand-roll the engine.
  */
 import StarterKit from "@tiptap/starter-kit";
-import { Extension, getStyleProperty } from "@tiptap/core";
+import { Extension, getStyleProperty, mergeAttributes } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 
 import { DEFAULT_DENSITY, blockFontSize, densityFor, spacingFromElement, spacingStyle, fontSizePx } from "./notesSpacing.js";
 import { inheritedStyle } from "./notesPasteInherit.js";
 import { FontFamily, FontSize, TextStyleKit } from "@tiptap/extension-text-style";
-import { TableKit } from "@tiptap/extension-table";
+import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import { Highlight } from "@tiptap/extension-highlight";
 import { TextAlign } from "@tiptap/extension-text-align";
@@ -54,6 +54,8 @@ import NotePastePlain from "./notesPastePlain.js";
 import NoteBlockKeys from "./notesBlockKeys.js";
 import NoteSearchHighlight from "./notesSearchHighlight.js";
 import NoteTableToText from "./notesTableToText.js";
+import NoteTableColumns, { NoteTableView } from "./notesTableColumns.js";
+import { TABLE_COL_MIN_WIDTH } from "./notesTableWidth.js";
 
 /** Headings stop at 4. A note is a document, not a spec: levels 5–6 are indistinguishable
  *  from body text at reading size and only add choices to the block-style menu. */
@@ -109,6 +111,40 @@ function deriveBlockSizes(doc, tr) {
   });
   return touched;
 }
+
+/* ⛔ A TABLE NEVER GOES WITHOUT A NODE VIEW, EVEN THOUGH `resizable: true` (NEW-1/NEW-2, owner
+ * report 2026-09-11, found verifying "undo/redo of a resize as a single step"). `Table`'s own
+ * `addNodeView()` returns `null` whenever `resizable` is on — the library's live-drag preview
+ * (`displayColumnWidth` in `@tiptap/pm/tables`) patches the `<colgroup><col>` elements' styles
+ * directly, so its authors evidently judged a persistent node view unnecessary. It IS necessary:
+ * that direct-DOM patch is the ONLY thing that ever touches those `<col>` elements, so any
+ * colwidth change that does NOT come from a live drag — an undo, a redo, or this module's own
+ * `NoteTableColumns` repair — leaves them showing the OLD widths forever. Measured live: undo a
+ * resize and the STORED document correctly reverts (`colwidth` back to `null`, proven by reading
+ * it straight off `editor.getJSON()`), while the rendered `<col>` styles stay exactly as they
+ * were, so the table looks completely unchanged — a silently broken-looking undo, on a table
+ * whose data was actually fine.
+ *
+ * ⛔ AND THE LIBRARY'S OWN NODE VIEW COULD NOT BE REUSED AS-IS, WHICH IS WHY `notesTableColumns.js`
+ * HAS ITS OWN `NoteTableView` RATHER THAN THIS FILE IMPORTING `TableView` DIRECTLY. Wiring the
+ * library's `TableView` in here first (same idea, less code) surfaced a SECOND, independent bug:
+ * its `updateColumns` only ever sets the ONE CSS property (`width` or `min-width`) the CURRENT
+ * state wants and never clears the other, so a column going from explicit back to unset (an undo)
+ * keeps its stale `width:` alongside a freshly-added `min-width:` — and `width` wins, so the
+ * column goes on rendering at the old size forever regardless of how many times `update()` runs.
+ * `NoteTableView`'s own header has the full measurement. Overriding `addNodeView()` to drop the
+ * `isResizable` early return is still the only structural change here; the resize plugin's own
+ * live-drag preview is untouched (it finds and patches this SAME real `<table>` DOM through
+ * `view.domAtPos`, and `ignoreMutation`, also unchanged, is what stops ProseMirror's mutation
+ * observer from fighting that preview mid-drag). */
+const NoteTable = Table.extend({
+  addNodeView() {
+    return ({ node, view, HTMLAttributes }) => {
+      const mergedAttributes = mergeAttributes(this.options.HTMLAttributes, HTMLAttributes);
+      return new NoteTableView(node, this.options.cellMinWidth, view, mergedAttributes);
+    };
+  },
+});
 
 export const NOTE_EXTENSIONS = [
   // Document · paragraph · text · bold · italic · strike · code · codeBlock · heading ·
@@ -172,14 +208,37 @@ export const NOTE_EXTENSIONS = [
     },
   }),
 
-  // Resizable columns — dragging a column edge is the first thing anyone tries.
-  TableKit.configure({ table: { resizable: true, allowTableNodeSelection: true } }),
+  /* Resizable columns — dragging a column edge is the first thing anyone tries.
+   *
+   * ⛔ `cellMinWidth` IS THE DRAG FLOOR (NEW-2, owner report 2026-09-11). Tiptap's own default is
+   * 25px — about two characters — which is exactly how a manual drag could squeeze a column to a
+   * sliver. `TABLE_COL_MIN_WIDTH` (notesTableWidth.js) is the same floor `NoteTableColumns`'s
+   * recovery pass enforces on already-stored tables, so a live drag and a loaded document agree
+   * about how narrow a column may ever get.
+   *
+   * ⛔ `NoteTable`, NOT `TableKit`'s own `table` — see this file's own comment on `NoteTable`
+   * above for why a persistent node view is not optional here. `TableCell`/`TableHeader`/
+   * `TableRow` ride in unmodified (imported directly rather than through `TableKit`, which only
+   * bundles the four for convenience and offers no hook to swap one out). */
+  NoteTable.configure({ resizable: true, allowTableNodeSelection: true, cellMinWidth: TABLE_COL_MIN_WIDTH }),
+  TableCell, TableHeader, TableRow,
 
   // "Convert table to text" (NEW-2) — a right-click command that pulls a table's rows out as
   // plain lines, keeping every cell's marks. See lib/notesTableToText.js for the whole rule,
   // including why the PASTE half of this ask lives elsewhere (notesPastePlain.js's
   // isLayoutTable, already shipped).
   NoteTableToText,
+
+  /* ⛔ WIDENING A COLUMN MUST NOT SQUEEZE ITS NEIGHBOURS (NEW-1, owner report 2026-09-11). See
+   * lib/notesTableColumns.js's own header for the full mechanism: once a table has any explicitly
+   * resized column, this keeps every OTHER column explicit too, so the table's own rendered width
+   * is the deterministic SUM of its columns rather than something the browser reconciles against
+   * the sheet — which is what let widening one column starve the rest. TWO defences bundled into
+   * this one extension: an `appendTransaction` plugin for every live edit (so a resize's own
+   * repair rides the SAME undo step as the resize) and a `normalizeTableColumnWidths` command
+   * called once on editor mount (Tiptap's initial `setContent` never runs `appendTransaction`, so
+   * an already-squeezed table needs a separate on-load recovery path). */
+  NoteTableColumns,
 
   // ⛔ HOW FAR APART THE LINES ARE (NEW-7). A BLOCK property, extending paragraph and heading
   // rather than riding textStyle — half a line cannot be one-and-a-half spaced. The value is

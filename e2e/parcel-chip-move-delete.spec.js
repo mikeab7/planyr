@@ -23,7 +23,7 @@
  * Run: npx playwright test e2e/parcel-chip-move-delete.spec.js
  */
 import { test, expect } from "@playwright/test";
-import { armPlannerHooks } from "./helpers.js";
+import { armPlannerHooks, openModule } from "./helpers.js";
 
 const canvas = (p) => p.getByTestId("planner-canvas");
 const chips = (p) => p.locator('[data-print-chip="acre"]');
@@ -61,6 +61,11 @@ async function loadPlan(page) {
     localStorage.setItem("planarfit:currentSite:v1", id);
   }, [SITE_ID, site]);
   await page.goto("/");
+  // B1213312's Dashboard landing route means a bare "/" no longer opens straight into the Site
+  // Planner (B1239330/B1253249 — a repo-wide e2e regression, flagged and NOT fixed there because
+  // it touches ~40 unrelated specs; this one line is the documented remedy, applied here because
+  // this spec is the one this session's own change needs).
+  await openModule(page, "site-planner");
   await expect(canvas(page)).toBeVisible();
   await expect(chips(page).first()).toBeVisible({ timeout: 20_000 });
   await page.waitForTimeout(900); // let the fit / label passes settle
