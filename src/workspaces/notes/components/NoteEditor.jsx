@@ -465,15 +465,16 @@ ${indentCssRules(".planyr-note .ProseMirror li")}
 /* Search marking is a decoration, never a mark — it is not in the document. */
 .planyr-note .note-search-hit { background: var(--warn-bg); box-shadow: 0 0 0 1px var(--warn-text) inset; border-radius: 2px; }
 .planyr-note .note-search-hit-current { background: var(--accent-notes); color: var(--on-accent-notes); box-shadow: none; }
-/* ⛔ SET A PAGE'S OWN WIDTH BY HAND (NEW-1) — the sheet's own edge grips. #1508's own lesson,
+/* ⛔ SET A PAGE'S OWN WIDTH BY HAND (NEW-1) — the sheet's own edge grips. PR 1508's own lesson,
    named in this item's brief: a 9×14px resize target that was invisible until hover shipped as
    "super buggy" because the obvious gesture found nothing there. This one is a full-height, 14px
    hit STRIP straddling the sheet's own border (so it never eats a press meant for the page's
    content — CHROME-NEVER-EATS-A-PRESS), painted with a visible bar only on hover so it never
    competes with the page for attention at rest, exactly the way the box grip above earns its
-   opacity. */
+   opacity. No border-radius on the bar itself — at 2px wide, rounding would not be visible and
+   is not worth adding a new off-scale radius for (design-drift-audit). */
 .planyr-note .planyr-page-width-grip { position: absolute; top: 0; bottom: 0; width: 14px; cursor: col-resize; z-index: 2; touch-action: none; }
-.planyr-note .planyr-page-width-grip::after { content: ""; position: absolute; top: 12px; bottom: 12px; left: 6px; width: 2px; border-radius: 2px; background: var(--text-tertiary); opacity: 0; transition: opacity 90ms linear; }
+.planyr-note .planyr-page-width-grip::after { content: ""; position: absolute; top: 12px; bottom: 12px; left: 6px; width: 2px; background: var(--text-tertiary); opacity: 0; transition: opacity 90ms linear; }
 .planyr-note .planyr-page-width-grip:hover::after,
 .planyr-note .planyr-page-width-grip[data-dragging="1"]::after { opacity: 1; }
 .planyr-note .planyr-page-width-grip[data-dragging="1"]::after { background: var(--accent-notes); }
