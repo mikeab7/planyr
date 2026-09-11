@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mergePulledSites, groupCountDivergence, saveSite, loadSite, loadSitesList, loadPlansOfGroup, renameSiteGroup, repairSplitProjectNames, snapshotVersion, listVersions, getVersion, summarizeVersion, backupNow, pruneMigratedLegacy, isEmptySite, resolveOrCreateTrackedSiteForComp } from "../src/workspaces/site-planner/lib/storage.js";
+import { mergePulledSites, groupCountDivergence, saveSite, loadSite, loadSitesList, loadPlansOfGroup, renameSiteGroup, setSiteGroupRole, deleteSite, repairSplitProjectNames, snapshotVersion, listVersions, getVersion, summarizeVersion, backupNow, pruneMigratedLegacy, isEmptySite, resolveOrCreateTrackedSiteForComp } from "../src/workspaces/site-planner/lib/storage.js";
 import { mergeSiteContent, contentCount, createSiteModel } from "../src/workspaces/site-planner/lib/siteModel.js";
 import { idbAvailable } from "../src/workspaces/site-planner/lib/localDb.js";
 
@@ -458,6 +458,72 @@ describe("saveSite skipHistory option (B458)", () => {
     expect(v.length).toBe(1);                                             // exactly one snapshot, not two
     expect(v[0].buildings).toBe(3);                                       // the fat (3-building) version is restorable
     expect(getVersion("s", v[0].at).els.map((e) => e.id).sort()).toEqual(["a", "b", "c"]);
+  });
+});
+
+// B1525088 (NEW-1) — a status/rename/role/delete write must announce itself on the shared
+// "planarfit:sites" channel (the SAME literal event `shared/projects/projects.js`'s
+// `notifyProjectsChanged()` and `ProjectBreadcrumb.jsx`'s `notifyStoreChange()` already fire), so
+// every other already-mounted reader of the sites cache — the map/Sites panel, the project
+// switcher, Notes/Model's project list — picks it up without a reload. Owner report: a status
+// change reached the server but a still-open map kept showing the old name/status/pin with "no
+// refresh short of reloading the page."
+describe("B1525088 (NEW-1) — identity-changing writes announce themselves on planarfit:sites", () => {
+  const SITES_LIST_KEY = "planarfit:sites:v1";
+  let dispatched;
+  beforeEach(() => {
+    const store = {};
+    globalThis.localStorage = {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; },
+      clear: () => { for (const k of Object.keys(store)) delete store[k]; },
+      key: (i) => Object.keys(store)[i] ?? null,
+      get length() { return Object.keys(store).length; },
+    };
+    dispatched = [];
+    globalThis.window = { dispatchEvent: (e) => { dispatched.push(e.key); } };
+    // Node has no native StorageEvent — stub the tiny shape notifySitesListChanged/
+    // notifySiteModelChanged actually read (an init dict's `key`).
+    globalThis.StorageEvent = class StorageEvent { constructor(type, init) { this.type = type; this.key = init && init.key; } };
+  });
+
+  const listEventCount = () => dispatched.filter((k) => k === SITES_LIST_KEY).length;
+
+  it("a status change fires the shared sites-list event", () => {
+    saveSite({ id: "s", site: "A", status: "pursuit" });
+    dispatched.length = 0; // ignore the creation notify
+    saveSite({ id: "s", status: "dead" });
+    expect(listEventCount()).toBe(1);
+  });
+
+  it("a rename (renameSiteGroup's local half) fires it", () => {
+    saveSite({ id: "s", site: "OLD NAME" });
+    dispatched.length = 0;
+    renameSiteGroup("s", "NEW NAME");
+    expect(listEventCount()).toBeGreaterThanOrEqual(1);
+    expect(loadSite("s").site).toBe("NEW NAME");
+  });
+
+  it("a role flip (setSiteGroupRole) fires it", () => {
+    saveSite({ id: "s", site: "A", role: "pursuit" });
+    dispatched.length = 0;
+    setSiteGroupRole("s", "tracked");
+    expect(listEventCount()).toBeGreaterThanOrEqual(1);
+  });
+
+  it("a pure content edit (geometry only, no identity field touched) does NOT fire it", () => {
+    saveSite({ id: "s", site: "A", status: "pursuit", els: [bld("a")] });
+    dispatched.length = 0;
+    saveSite({ id: "s", els: [bld("a"), bld("b")] }); // geometry only
+    expect(listEventCount()).toBe(0);
+  });
+
+  it("deleting a site fires it", async () => {
+    saveSite({ id: "s", site: "A" });
+    dispatched.length = 0;
+    await deleteSite("s", { tombstone: false }); // signed-out/no-tombstone path removes locally right away
+    expect(listEventCount()).toBe(1);
   });
 });
 
