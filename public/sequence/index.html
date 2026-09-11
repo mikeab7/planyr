@@ -3035,6 +3035,20 @@ const escapeHtml = s => String(s == null ? "" : s)
 // Restrict to hex colors from the ROW_COLORS palette or null to prevent CSS injection.
 const SAFE_COLOR_RE = /^#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?$/;
 const isValidColor = v => v == null || SAFE_COLOR_RE.test(v);
+// B<PENDING> (NEW-2) — cell/row text-size steps for the format mini-toolbar's grow/shrink
+// buttons and its type-in size box. Bounded so a runaway size can't blow out a fixed-height
+// grid row (ROW_H floors at 20px, ceilings at 34px — see settings.rowHeight) or the Gantt bar
+// labels; the cell itself clips with overflow:hidden regardless, this just keeps the picked
+// values sane. Values chosen to bracket the grid's own default per-level sizes (11–13px).
+const FONT_SIZE_STEPS = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 24];
+const FONT_SIZE_MIN = FONT_SIZE_STEPS[0], FONT_SIZE_MAX = FONT_SIZE_STEPS[FONT_SIZE_STEPS.length - 1];
+const isValidFontSize = n => typeof n === "number" && Number.isFinite(n) && n >= FONT_SIZE_MIN && n <= FONT_SIZE_MAX;
+const stepFontSize = (cur, dir) => {
+  const base = typeof cur === "number" ? cur : 12;
+  if (dir > 0) { const next = FONT_SIZE_STEPS.find(v => v > base); return next != null ? next : FONT_SIZE_MAX; }
+  const prev = FONT_SIZE_STEPS.filter(v => v < base);
+  return prev.length ? prev[prev.length - 1] : FONT_SIZE_MIN;
+};
 const pd = s => new Date(s + "T12:00:00");
 const addD = (s, n) => { const d = pd(s); d.setDate(d.getDate() + n); return fd(d); };
 const dif  = (a, b) => Math.round((pd(b) - pd(a)) / 86400000);
@@ -8265,8 +8279,13 @@ function App() {
         // Sanitize rowColor — only allow known hex colors or null
         if ('rowColor' in updates) u.rowColor = isValidColor(updates.rowColor) ? updates.rowColor : null;
         // Sanitize per-task text-format overrides to strict booleans (so junk data can't render)
-        if ('bold' in updates)   u.bold   = !!updates.bold;
-        if ('italic' in updates) u.italic = !!updates.italic;
+        if ('bold' in updates)      u.bold      = !!updates.bold;
+        if ('italic' in updates)   u.italic    = !!updates.italic;
+        // NEW-2 — underline/textColor/fontSize follow the exact same sanitize-on-write shape as
+        // bold/italic/rowColor above: a strict boolean, a known-hex-or-null color, a clamped-or-null size.
+        if ('underline' in updates) u.underline = !!updates.underline;
+        if ('textColor' in updates) u.textColor = isValidColor(updates.textColor) ? updates.textColor : null;
+        if ('fontSize' in updates)  u.fontSize  = isValidFontSize(updates.fontSize) ? updates.fontSize : null;
         if ('predecessors' in updates) {
           u.predecessors = normPreds(updates.predecessors);
           // Editing a predecessor is an explicit instruction to let the cascade
@@ -8491,9 +8510,12 @@ function App() {
     return {mode: 'cell', cells};
   };
 
-  // Merge a format patch ({bold}/{italic}/{fill}, or clearAll) into the
-  // current targets in ONE data pass (one undo step), then patch the open
-  // menu's task snapshot so its toolbar indicators update live.
+  // Merge a format patch ({bold}/{italic}/{fill}/{underline}/{color}/{size}, or clearAll) into
+  // the current targets in ONE data pass (one undo step), then patch the open menu's task
+  // snapshot so its toolbar indicators update live.
+  // NEW-2 (chat, 2026-09-11) — underline/color(text)/size ride the exact same patch/merge/prune
+  // shape bold/italic/fill already use: a row-level field on the task, a per-cell entry inside
+  // cellFmt[colKey], pruned back out the moment an entry has nothing truthy left in it.
   const applyFormatAndSync = (patch, {clearAll = false} = {}) => {
     const tgt = fmtTargets();
     const pid = taskCtx?.projId ?? dataRef.current?.aPid;
@@ -8502,7 +8524,10 @@ function App() {
       if ('bold' in patch) e.bold = patch.bold;
       if ('italic' in patch) e.italic = patch.italic;
       if ('fill' in patch) e.fill = patch.fill;
-      return (e.bold || e.italic || e.fill) ? e : null; // prune empty entries
+      if ('underline' in patch) e.underline = patch.underline;
+      if ('color' in patch) e.color = patch.color;
+      if ('size' in patch) e.size = patch.size;
+      return (e.bold || e.italic || e.fill || e.underline || e.color || e.size) ? e : null; // prune empty entries
     };
     setData(d => {
       const proj = d.projects[pid]; if (!proj) return d;
@@ -8511,11 +8536,14 @@ function App() {
         const idset = new Set(tgt.ids);
         tasks = proj.tasks.map(t => {
           if (!idset.has(t.id)) return t;
-          if (clearAll) { const {cellFmt, ...rest} = t; return {...rest, rowColor: null, bold: false, italic: false}; }
+          if (clearAll) { const {cellFmt, ...rest} = t; return {...rest, rowColor: null, bold: false, italic: false, underline: false, textColor: null, fontSize: null}; }
           const u = {...t};
           if ('bold' in patch) u.bold = patch.bold;
           if ('italic' in patch) u.italic = patch.italic;
           if ('fill' in patch) u.rowColor = patch.fill;
+          if ('underline' in patch) u.underline = patch.underline;
+          if ('color' in patch) u.textColor = patch.color;
+          if ('size' in patch) u.fontSize = patch.size;
           return u;
         });
       } else {
@@ -8538,11 +8566,14 @@ function App() {
       if (!c) return c;
       const t = {...c.task};
       if (tgt.mode === 'row') {
-        if (clearAll) { t.rowColor = null; t.bold = false; t.italic = false; delete t.cellFmt; }
+        if (clearAll) { t.rowColor = null; t.bold = false; t.italic = false; t.underline = false; t.textColor = null; t.fontSize = null; delete t.cellFmt; }
         else {
           if ('bold' in patch) t.bold = patch.bold;
           if ('italic' in patch) t.italic = patch.italic;
           if ('fill' in patch) t.rowColor = patch.fill;
+          if ('underline' in patch) t.underline = patch.underline;
+          if ('color' in patch) t.textColor = patch.color;
+          if ('size' in patch) t.fontSize = patch.size;
         }
       } else {
         const key = activeEffectiveCols(dataRef.current)[selectedColIdx]?.k || 'name';
@@ -8559,23 +8590,49 @@ function App() {
   // the eraser may clear, and a small scope label ("Cell", "Row", "3 rows"…).
   // In cell mode the eraser only clears cell formats — row-level formatting
   // is cleared by selecting the row (ID column) and erasing there.
+  // NEW-2 — `size` additionally reports the sentinel 'mixed' rather than any one selected cell's/
+  // row's number when the targets disagree, so the toolbar's size box can show blank instead of
+  // a wrong number (item (e)); `count`/`unit` feed the toolbar's plain "N cell(s) SELECTED" readout.
   const ctxFmtState = () => {
     if (!taskCtx) return null;
     const tgt = fmtTargets();
+    const ft = flatTasksRef.current || [];
+    const oneOrMixed = vals => { const uniq = new Set(vals); return uniq.size <= 1 ? (vals[0] ?? null) : 'mixed'; };
+    // NEW-2 — the size the anchor cell/row is ACTUALLY rendering at right now when no explicit
+    // override is set, so Grow/Shrink steps off the size the user is looking at rather than a
+    // flat guess. Without this, "Grow" on a never-formatted level-0 task name (which already
+    // renders at 13) silently no-ops on its first click, because the LEVEL_SIZES table below is
+    // the exact one `Cell()`'s name-column case already uses for its own default.
+    const LEVEL_SIZES = [13, 12, 11.5, 11];
+    const naturalSizeOf = (task, colKey) => colKey === 'name' ? LEVEL_SIZES[Math.min(task?.level || 0, 3)] : 12;
     if (tgt.mode === 'row') {
       const t = taskCtx.task;
-      return {mode: 'row', bold: !!t.bold, italic: !!t.italic, fill: t.rowColor || null,
-        hasAny: !!(t.bold || t.italic || t.rowColor || (t.cellFmt && Object.keys(t.cellFmt).length)),
+      const sizes = tgt.ids.map(id => (id === t.id ? t : ft.find(x => x.id === id))?.fontSize ?? null);
+      return {mode: 'row', bold: !!t.bold, italic: !!t.italic, underline: !!t.underline,
+        fill: t.rowColor || null, color: t.textColor || null, size: oneOrMixed(sizes), naturalSize: naturalSizeOf(t, 'name'),
+        hasAny: !!(t.bold || t.italic || t.underline || t.rowColor || t.textColor || t.fontSize || (t.cellFmt && Object.keys(t.cellFmt).length)),
+        count: tgt.ids.length || 1, unit: tgt.ids.length > 1 ? 'rows' : 'row',
         scopeLabel: tgt.ids.length > 1 ? `${tgt.ids.length} rows` : 'Row'};
     }
     const key = activeEffectiveCols(dataRef.current)[selectedColIdx]?.k || 'name';
     const e = taskCtx.task.cellFmt?.[key] || {};
-    const ft = flatTasksRef.current || [];
+    // NEW-2 — the anchor cell (taskCtx.task / key) reads its OWN just-applied cellFmt straight
+    // off the live taskCtx snapshot, same as `e` above — never off `ft` (flatTasksRef), which is
+    // a ref refreshed in an effect AFTER commit and so is one render stale right after a format
+    // click. `ft` is still right for every OTHER cell in a multi-cell selection, which is the
+    // only reason this can't just read `e` for everything. Missing this for `size` alone (while
+    // bold/italic/fill/underline/color already read `e`) is exactly what produced a size box
+    // that lagged one click behind the cell it was editing — caught live in this session by
+    // growing text twice in one open toolbar and diffing the box against the painted cell.
+    const cellFmtOf = (taskId, colKey) => (taskId === taskCtx.task.id && colKey === key) ? e : (ft.find(x => x.id === taskId)?.cellFmt?.[colKey]);
     const hasAny = tgt.cells.some(({taskId, colKey}) => {
-      const t = ft.find(x => x.id === taskId); const f = t?.cellFmt?.[colKey];
-      return !!(f && (f.bold || f.italic || f.fill));
+      const f = cellFmtOf(taskId, colKey);
+      return !!(f && (f.bold || f.italic || f.underline || f.fill || f.color || f.size));
     });
-    return {mode: 'cell', bold: !!e.bold, italic: !!e.italic, fill: e.fill || null, hasAny,
+    const sizes = tgt.cells.map(({taskId, colKey}) => cellFmtOf(taskId, colKey)?.size ?? null);
+    return {mode: 'cell', bold: !!e.bold, italic: !!e.italic, underline: !!e.underline,
+      fill: e.fill || null, color: e.color || null, size: oneOrMixed(sizes), naturalSize: naturalSizeOf(taskCtx.task, key), hasAny,
+      count: tgt.cells.length || 1, unit: tgt.cells.length > 1 ? 'cells' : 'cell',
       scopeLabel: tgt.cells.length > 1 ? `${tgt.cells.length} cells` : 'Cell'};
   };
 
@@ -10203,6 +10260,9 @@ function App() {
           onSetRowColor={color => applyFormatAndSync({fill: color ?? null})}
           onSetBold={v   => applyFormatAndSync({bold: v})}
           onSetItalic={v => applyFormatAndSync({italic: v})}
+          onSetUnderline={v => applyFormatAndSync({underline: v})}
+          onSetTextColor={color => applyFormatAndSync({color: color ?? null})}
+          onSetFontSize={size => applyFormatAndSync({size: size ?? null})}
           onClearFormat={() => applyFormatAndSync({}, {clearAll: true})}
           onClose={() => setTaskCtx(null)}
         />
@@ -10436,25 +10496,224 @@ function ProjContextMenu({x, y, projId, canDelete, onRename, onDuplicate, onDele
   );
 }
 
+// ── SwatchGrid / CaretPopover — shared by the format mini-toolbar's two color carets ──
+// Same 1-"none"+19-color palette, same layout, that used to sit inside the context menu
+// itself (NEW-1, chat 2026-09-11): "nothing about which colours are available changes;
+// they just stop occupying the top third of the menu."
+const SwatchGrid = ({current, onPick}) => (
+  <div style={{padding:"4px 5px",display:"grid",gridTemplateColumns:"repeat(10, 18px)",gap:2,justifyContent:"start"}}>
+    <button title="None (clear)" onClick={()=>onPick(null)} type="button"
+      style={{width:18,height:18,borderRadius:2,background:"#fff",cursor:"pointer",padding:0,display:"flex",alignItems:"center",justifyContent:"center",
+        border: current==null ? "1.5px solid #4f46e5" : "1px solid #d1d5db"}}>
+      <svg width="9" height="9" viewBox="0 0 10 10">
+        <line x1="1" y1="1" x2="9" y2="9" stroke={current==null?"#4f46e5":"#9ca3af"} strokeWidth="1.5"/>
+        <line x1="9" y1="1" x2="1" y2="9" stroke={current==null?"#4f46e5":"#9ca3af"} strokeWidth="1.5"/>
+      </svg>
+    </button>
+    {ROW_COLORS.slice(0, 19).map(rc => (
+      <button key={rc.color} title={rc.label} onClick={()=>onPick(rc.color)} type="button"
+        style={{width:18,height:18,borderRadius:2,background:rc.color,cursor:"pointer",padding:0,
+          border:current===rc.color?"1.5px solid #111827":"1px solid #d1d5db",
+          boxShadow:current===rc.color?"inset 0 0 0 1px #fff":"none"}} />
+    ))}
+  </div>
+);
+const CaretPopover = ({children, popRef, openLeft}) => (
+  <div ref={popRef} onMouseDown={e=>e.stopPropagation()}
+    style={{position:"absolute", top:"100%", marginTop:4, ...(openLeft?{right:0}:{left:0}),
+      background:"#fff", border:"1px solid var(--bd2)", borderRadius:6,
+      boxShadow:"0 8px 24px rgba(0,0,0,0.18)", zIndex:10002}}>
+    {children}
+  </div>
+);
+
+// ── FormatMiniToolbar ─────────────────────────────────────
+// NEW-1/NEW-2 (chat, 2026-09-11, owner-approved mock-up) — the Word-mini-toolbar-style
+// floating strip that replaced the context menu's old top-of-menu formatting section.
+// Own surface (border/radius/shadow), positioned by the caller just above (or, if there's
+// no room, below) the command menu, and forwards its DOM ref so the menu's own outside-
+// click/Escape/scroll close logic can treat both as one unit (see TaskContextMenu below).
+const FormatMiniToolbar = React.forwardRef(function FormatMiniToolbar(
+  {fmt, onSetBold, onSetItalic, onSetUnderline, onSetTextColor, onSetFill, onSetFontSize, onClearFormat, top, left, maxWidth}, ref) {
+  const fb = fmt;
+  const [openCaret, setOpenCaret] = useState(null); // 'size' | 'color' | 'fill' | null
+  const popRef = useRef(null);
+  useEffect(() => {
+    if (!openCaret) return;
+    const down = e => {
+      if (popRef.current?.contains(e.target)) return;          // inside the open popover — keep it open
+      if (e.target.closest?.("[data-caret-toggle]")) return;   // the caret button owns its own toggle
+      setOpenCaret(null);
+    };
+    document.addEventListener("mousedown", down, true);
+    return () => document.removeEventListener("mousedown", down, true);
+  }, [openCaret]);
+
+  const sizeDisplay = fb.size === "mixed" ? "" : (fb.size != null ? String(fb.size) : "");
+  const [sizeText, setSizeText] = useState(sizeDisplay);
+  useEffect(() => { setSizeText(sizeDisplay); }, [sizeDisplay]);
+  const commitSize = raw => {
+    const trimmed = String(raw).trim();
+    if (trimmed === "") { onSetFontSize(null); return; }
+    const n = parseFloat(trimmed);
+    if (!Number.isFinite(n)) { setSizeText(sizeDisplay); return; }
+    onSetFontSize(Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, Math.round(n * 2) / 2)));
+  };
+
+  const MiniBtn = ({active, disabled, onClick, title, children, w = 20}) => (
+    <button title={title} onClick={disabled ? undefined : onClick} disabled={disabled} type="button"
+      style={{width:w,height:20,borderRadius:3,padding:0,cursor:disabled?"default":"pointer",flexShrink:0,
+        display:"inline-flex",alignItems:"center",justifyContent:"center",
+        color: disabled ? "#c0c8d0" : active ? "#fff" : "var(--txt)",
+        background: active ? "#4f46e5" : "transparent",
+        border: `1px solid ${active ? "#4338ca" : "transparent"}`,
+        opacity: disabled ? 0.5 : 1}}
+      onMouseEnter={e=>{ if(!disabled && !active) e.currentTarget.style.background="#e5e7eb"; }}
+      onMouseLeave={e=>{ if(!disabled && !active) e.currentTarget.style.background="transparent"; }}>
+      {children}
+    </button>
+  );
+  const Row = ({children}) => <div style={{display:"flex",alignItems:"center",gap:2,height:22}}>{children}</div>;
+  const Group = ({children, style}) => <div style={{display:"flex",flexDirection:"column",gap:1,padding:"3px 5px",justifyContent:"center",flexShrink:0,...style}}>{children}</div>;
+  const VRule = () => <div style={{width:1,alignSelf:"stretch",background:"var(--bd2)",margin:"3px 0"}} />;
+  // Text-colour / highlight caret button: an icon over a colored bar (the color it will
+  // apply), with a caret that opens the SAME 20-swatch palette. (c) — same colours, same
+  // "none" option; only WHERE they live changed.
+  const ColorCaret = ({kind, icon, current, title, onPick}) => (
+    <div style={{position:"relative",display:"flex",alignItems:"center",gap:1}}>
+      <MiniBtn title={title} onClick={()=>{}} w={22}>
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1}}>
+          {icon}
+          <div style={{width:13,height:2.5,background:current||"transparent",border:current?"none":"1px dashed #c0c8d0",borderRadius:1}} />
+        </div>
+      </MiniBtn>
+      <button data-caret-toggle title={`${title} options`} type="button" onClick={()=>setOpenCaret(c=>c===kind?null:kind)}
+        style={{width:11,height:20,border:"none",background:"transparent",cursor:"pointer",color:"var(--mut)",flexShrink:0,fontSize:8,padding:0}}>▾</button>
+      {openCaret===kind && <CaretPopover popRef={popRef}><SwatchGrid current={current} onPick={c=>{ onPick(c); setOpenCaret(null); }} /></CaretPopover>}
+    </div>
+  );
+
+  return (
+    <div ref={ref} onMouseDown={e=>e.stopPropagation()}
+      style={{position:"fixed",top,left,maxWidth,background:"#fff",border:"1px solid var(--bd2)",borderRadius:8,
+        boxShadow:"0 6px 20px rgba(0,0,0,0.16)",display:"flex",flexWrap:"wrap",alignItems:"stretch",
+        fontFamily:"'Inter',system-ui,sans-serif",zIndex:10001,padding:1}}>
+      {/* Group 1 — size (type-in + caret + grow/shrink), then B / I / U */}
+      <Group>
+        <Row>
+          <input {...NO_AUTOFILL} value={sizeText} onChange={e=>setSizeText(e.target.value)}
+            onBlur={e=>commitSize(e.target.value)}
+            onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); commitSize(e.target.value); e.currentTarget.blur(); } else if(e.key==="Escape"){ setSizeText(sizeDisplay); e.currentTarget.blur(); } }}
+            placeholder="—" title="Text size" aria-label="Text size"
+            style={{width:28,height:20,fontSize:11,border:"1px solid var(--bd2)",borderRadius:3,textAlign:"center",padding:0,fontFamily:"'Inter',system-ui,sans-serif"}} />
+          <div style={{position:"relative"}}>
+            <button data-caret-toggle title="Text size options" type="button" onClick={()=>setOpenCaret(c=>c==="size"?null:"size")}
+              style={{width:11,height:20,border:"none",background:"transparent",cursor:"pointer",color:"var(--mut)",flexShrink:0,fontSize:8,padding:0}}>▾</button>
+            {openCaret==="size" && (
+              <CaretPopover popRef={popRef}>
+                <div style={{padding:"2px 0",minWidth:56,maxHeight:220,overflow:"auto"}}>
+                  {FONT_SIZE_STEPS.map(v => (
+                    <div key={v} onClick={()=>{ onSetFontSize(v); setOpenCaret(null); }}
+                      style={{padding:"4px 10px",fontSize:11,cursor:"pointer",textAlign:"left",
+                        background: fb.size===v ? "var(--surf)" : "transparent", fontWeight: fb.size===v?700:400}}>{v}</div>
+                  ))}
+                </div>
+              </CaretPopover>
+            )}
+          </div>
+          <MiniBtn title="Shrink text" onClick={()=>onSetFontSize(stepFontSize(fb.size==="mixed"?(fb.naturalSize??12):(fb.size??fb.naturalSize??12), -1))}><span style={{fontSize:10,fontWeight:700}}>A−</span></MiniBtn>
+          <MiniBtn title="Grow text"   onClick={()=>onSetFontSize(stepFontSize(fb.size==="mixed"?(fb.naturalSize??12):(fb.size??fb.naturalSize??12), +1))}><span style={{fontSize:10,fontWeight:700}}>A+</span></MiniBtn>
+        </Row>
+        <Row>
+          <MiniBtn active={!!fb.bold}      onClick={()=>onSetBold(!fb.bold)}           title="Bold"><span style={{fontWeight:800,fontSize:12}}>B</span></MiniBtn>
+          <MiniBtn active={!!fb.italic}    onClick={()=>onSetItalic(!fb.italic)}       title="Italic"><span style={{fontStyle:"italic",fontWeight:600,fontSize:12,fontFamily:"Georgia,'Times New Roman',serif"}}>I</span></MiniBtn>
+          <MiniBtn active={!!fb.underline} onClick={()=>onSetUnderline(!fb.underline)} title="Underline"><span style={{fontWeight:700,fontSize:12,textDecoration:"underline"}}>U</span></MiniBtn>
+        </Row>
+      </Group>
+      <VRule/>
+      {/* Group 2 — text colour, then highlight/fill; both open the same swatch palette */}
+      <Group>
+        <Row>
+          <ColorCaret kind="color" title="Text color" current={fb.color}
+            icon={<span style={{fontSize:11,fontWeight:800,lineHeight:1,fontFamily:"'Inter',system-ui,sans-serif"}}>A</span>}
+            onPick={onSetTextColor} />
+        </Row>
+        <Row>
+          <ColorCaret kind="fill" title="Highlight / fill" current={fb.fill}
+            icon={
+              <svg width="12" height="10" viewBox="0 0 24 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 11l8 8a2 2 0 0 0 2.8 0L22 10.5 12.5 1 4 9.5a2 2 0 0 0 0 2.8z" />
+                <path d="M5 9h13" />
+              </svg>
+            }
+            onPick={onSetFill} />
+        </Row>
+      </Group>
+      <VRule/>
+      <Group style={{justifyContent:"center"}}>
+        <MiniBtn title="Clear formatting" disabled={!fb.hasAny} onClick={onClearFormat} w={20}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M19 20H7l-4-4 8-8 12 12-4 4" />
+            <path d="M9 11l4 4" />
+            <path d="M22 21H7" />
+          </svg>
+        </MiniBtn>
+      </Group>
+      <VRule/>
+      {/* Group 3 — plain, non-clickable selection-count readout ((d) in the item: this is
+          what "CELL FORMAT" turned into — a readout, never a toggle). */}
+      <Group style={{justifyContent:"center",alignItems:"center",minWidth:52}}>
+        <div style={{fontSize:13,fontWeight:700,color:"var(--txt)",textAlign:"center",lineHeight:1.1,userSelect:"none"}}>{fb.count} {fb.unit}</div>
+        <div style={{fontSize:8,fontWeight:700,letterSpacing:".06em",textTransform:"uppercase",color:"var(--mut)",textAlign:"center",userSelect:"none"}}>Selected</div>
+      </Group>
+    </div>
+  );
+});
+
 // ── TaskContextMenu ───────────────────────────────────────
-function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onMoveTo, canOutdent, meetingBodies = [], bindCount = 1, boundTasks = [], deadlineAnchorName = null, onBindMeeting, onUnbindMeeting, onAddDeadlineRow, onLinkAsDeadline, onUnlinkDeadline, onAddMeetingCalendar, onStepMeeting, onDelete, deleteCount = 1, onSetHealth, onSetRowColor, onSetBold, onSetItalic, onClearFormat, fmt, onClose}) {
+// NEW-1 (chat, 2026-09-11) — this is now COMMANDS ONLY; every formatting control moved into
+// the sibling FormatMiniToolbar above, which this component portals alongside itself and
+// shares open/close lifecycle with (Escape, click-away, scroll, or choosing any command
+// closes both as one unit).
+function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onMoveTo, canOutdent, meetingBodies = [], bindCount = 1, boundTasks = [], deadlineAnchorName = null, onBindMeeting, onUnbindMeeting, onAddDeadlineRow, onLinkAsDeadline, onUnlinkDeadline, onAddMeetingCalendar, onStepMeeting, onDelete, deleteCount = 1, onSetHealth, onSetRowColor, onSetBold, onSetItalic, onSetUnderline, onSetTextColor, onSetFontSize, onClearFormat, fmt, onClose}) {
   const menuRef = useRef(null);
+  const toolbarRef = useRef(null);
 
   useEffect(() => {
-    const down = e => { if (!menuRef.current?.contains(e.target)) onClose(); };
+    const down = e => { if (!menuRef.current?.contains(e.target) && !toolbarRef.current?.contains(e.target)) onClose(); };
     const key  = e => { if (e.key === "Escape") onClose(); };
+    // (f) — scroll closes the whole group too, same as click-away/Escape/choosing a command.
+    // Registered on the capture phase so a scroll on any nested scrollable ancestor (the grid
+    // body, a submenu's own overflow:auto list) is caught — 'scroll' doesn't bubble on its own.
     document.addEventListener("mousedown", down);
     document.addEventListener("keydown",   key);
-    return () => { document.removeEventListener("mousedown", down); document.removeEventListener("keydown", key); };
+    window.addEventListener("scroll", onClose, true);
+    return () => {
+      document.removeEventListener("mousedown", down);
+      document.removeEventListener("keydown",   key);
+      window.removeEventListener("scroll", onClose, true);
+    };
   }, [onClose]);
 
   const vw = window.innerWidth, vh = window.innerHeight;
   // mh is an estimate of the menu's full rendered height; if y + mh would clip the
   // bottom of the viewport, top shifts up so the menu stays fully visible. Recomputed
-  // when row padding / swatch sizing changed below — better to slightly overestimate.
-  const mw = 220, mh = 510;   // NEW-1 added two rows (Next/Previous meeting) to the worst-case height
+  // when row padding changed below — better to slightly overestimate.
+  // NEW-1 shrank this considerably once the formatting strip + swatch rows moved out.
+  const mw = 220, mh = 420;
   const left = x + mw > vw ? vw - mw - 8 : x;
   const top  = y + mh > vh ? Math.max(8, vh - mh - 8) : y;
+
+  // (e) — the toolbar sits just above the menu with a small gap; if there isn't room above,
+  // it drops below the menu instead; either way it's clamped fully on screen. Because `top`
+  // (the menu's own placed top) is always at-or-above the row's actual click point `y` (the
+  // overflow branch above only ever shifts the menu UP), anchoring the toolbar above `top` —
+  // or, in the fallback, below the menu's full height — keeps it off the clicked row either way.
+  const TB_W = 258, TB_H = 54, TB_GAP = 6;
+  const tbMaxWidth = Math.min(TB_W, vw - 16);
+  let tbTop = top - TB_H - TB_GAP;
+  if (tbTop < 8) tbTop = Math.min(top + mh + TB_GAP, vh - TB_H - 8);
+  const tbLeft = Math.min(Math.max(8, left), vw - tbMaxWidth - 8);
 
   const Item = ({icon, label, hint, danger, disabled, onClick, children}) => (
     <div onClick={disabled ? undefined : onClick}
@@ -10471,33 +10730,15 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
   const Sep = () => <div style={{height:1,background:"var(--bd)",margin:"2px 0"}} />;
   // Scope-aware toolbar state: fb reflects the cell OR row being formatted
   // (computed by App from the live selection); falls back to row flags.
-  const fb = fmt || {bold: !!task.bold, italic: !!task.italic, fill: task.rowColor || null,
-    hasAny: !!task.rowColor || !!task.bold || !!task.italic, scopeLabel: null};
-  const hasAnyFmt = fb.hasAny;
+  const fb = fmt || {bold: !!task.bold, italic: !!task.italic, underline: !!task.underline,
+    fill: task.rowColor || null, color: task.textColor || null, size: task.fontSize || null, naturalSize: [13,12,11.5,11][Math.min(task.level||0,3)],
+    hasAny: !!task.rowColor || !!task.bold || !!task.italic || !!task.underline || !!task.textColor || !!task.fontSize,
+    count: 1, unit: "row", scopeLabel: null};
   const Header = () => (
     <div style={{padding:"5px 11px 4px",borderBottom:"1px solid var(--bd)",marginBottom:2}}>
       <div style={{fontSize:9,color:"var(--mut)",fontFamily:"'Inter',system-ui,sans-serif",letterSpacing:".06em",textTransform:"uppercase",marginBottom:1}}>Task {task.id}</div>
       <div style={{fontSize:11,fontWeight:task.bold?700:500,fontStyle:task.italic?"italic":"normal",color:"var(--txt)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:200}}>{task.name || <span style={{color:"var(--mut)",fontStyle:"italic"}}>New task</span>}</div>
     </div>
-  );
-
-  // Excel-ribbon-style square button: 24x22 with light border, light hover tint, and a
-  // pressed/active state that mirrors common ribbon conventions. Used for B / I / fill
-  // bucket / clear at the top of the menu.
-  const ExcelBtn = ({active, disabled, onClick, title, children}) => (
-    <button title={title} onClick={disabled ? undefined : onClick} disabled={disabled}
-      style={{width:24,height:22,borderRadius:3,padding:0,cursor:disabled?"default":"pointer",
-        display:"inline-flex",alignItems:"center",justifyContent:"center",
-        color: disabled ? "#c0c8d0" : active ? "#fff" : "var(--txt)",
-        background: active ? "#4f46e5" : "transparent",
-        border: `1px solid ${active ? "#4338ca" : "transparent"}`,
-        boxShadow: active ? "inset 0 1px 2px rgba(0,0,0,0.15)" : "none",
-        opacity: disabled ? 0.5 : 1,
-        transition:"background .12s,color .12s,border-color .12s"}}
-      onMouseEnter={e=>{ if(!disabled && !active){ e.currentTarget.style.background="#e5e7eb"; e.currentTarget.style.borderColor="#d1d5db"; } }}
-      onMouseLeave={e=>{ if(!disabled && !active){ e.currentTarget.style.background="transparent"; e.currentTarget.style.borderColor="transparent"; } }}>
-      {children}
-    </button>
   );
 
   // canOutdent is now passed in as a prop — computed by the caller against the WHOLE resolved
@@ -10511,10 +10752,10 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
   const curBodyName = meetingBody ? (meetingBody.name || "Meeting body") : (task.meetingBound ? "Meeting body" : "");
   const isDeadlineRow = task.deadlineForTaskId != null;
   const subOpenLeft = left + mw + 210 > vw;
-  // NEW-1 (chat, 2026-09-11) — "step this bound row to the next/previous meeting" reads off the
-  // SAME resolver (adjacentMeetingDate → meetingDatesInRange) the snap flyout above uses; shown
-  // only when the row is actually bound to a body that resolves (meetingBody truthy), and disabled
-  // (never hidden) when there's no next/previous date to compute one — see (c) in the item.
+  // "step this bound row to the next/previous meeting" reads off the SAME resolver
+  // (adjacentMeetingDate → meetingDatesInRange) the snap flyout below uses; shown only when
+  // the row is actually bound to a body that resolves (meetingBody truthy), and disabled
+  // (never hidden) when there's no next/previous date to compute one.
   const nextMeetingIso = (meetingBody && task.start) ? adjacentMeetingDate(meetingBody, task.start, "next") : null;
   const prevMeetingIso = (meetingBody && task.start) ? adjacentMeetingDate(meetingBody, task.start, "prev") : null;
   const fmtMeetingStep = iso => { const d = new Date(iso + "T12:00:00"); return isNaN(d) ? "" : d.toLocaleDateString("en-US", {weekday:"short", month:"short", day:"numeric"}); };
@@ -10523,132 +10764,79 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
   );
 
   return ReactDOM.createPortal(
-    <div ref={menuRef} style={{position:"fixed",top,left,background:"#fff",border:"1px solid var(--bd2)",
-      borderRadius:6,padding:"3px 0",zIndex:9999,boxShadow:"0 4px 20px rgba(0,0,0,0.14)",minWidth:mw}}>
-      <Header />
-      {/* ─── Excel-style format mini-toolbar at TOP for quick access ────────────────
-          Mirrors the look of Excel/Word's selection ribbon: a tight horizontal strip
-          of square buttons with a subtle background tint, separated by a vertical
-          divider rule. The fill-bucket button shows the current row color as a colored
-          strip beneath it (when set) — Excel's "last used color" affordance. The
-          swatch grid appears immediately below, keeping all formatting in one block. */}
-      <div style={{padding:"3px 6px",background:"#f7f8fa",borderBottom:"1px solid var(--bd)",display:"flex",alignItems:"center",gap:1}}>
-        <ExcelBtn active={!!fb.bold}   onClick={()=>onSetBold(!fb.bold)}     title="Bold">
-          <span style={{fontWeight:800,fontSize:13,fontFamily:"'Inter',system-ui,sans-serif",lineHeight:1}}>B</span>
-        </ExcelBtn>
-        <ExcelBtn active={!!fb.italic} onClick={()=>onSetItalic(!fb.italic)} title="Italic">
-          <span style={{fontStyle:"italic",fontWeight:600,fontSize:13,fontFamily:"Georgia,'Times New Roman',serif",lineHeight:1}}>I</span>
-        </ExcelBtn>
-        <span style={{width:1,height:16,background:"var(--bd2)",margin:"0 3px"}} />
-        {/* Fill-bucket button: icon over a colored strip showing current fill (Excel pattern) */}
-        <ExcelBtn active={!!fb.fill} onClick={()=>{ /* visual only — swatch grid below is live */ }} title={fb.fill ? `Fill: ${fb.fill}` : "Fill color"}>
-          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1}}>
-            <svg width="13" height="11" viewBox="0 0 24 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 11l8 8a2 2 0 0 0 2.8 0L22 10.5 12.5 1 4 9.5a2 2 0 0 0 0 2.8z" />
-              <path d="M5 9h13" />
-            </svg>
-            <div style={{width:14,height:3,background:fb.fill||"transparent",border:fb.fill?"none":"1px dashed #c0c8d0",borderRadius:1}} />
-          </div>
-        </ExcelBtn>
-        <span style={{width:1,height:16,background:"var(--bd2)",margin:"0 3px"}} />
-        {/* Clear / eraser — Excel-style "Clear Formatting" affordance */}
-        <ExcelBtn onClick={onClearFormat} disabled={!hasAnyFmt} title="Clear formatting">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M19 20H7l-4-4 8-8 12 12-4 4" />
-            <path d="M9 11l4 4" />
-            <path d="M22 21H7" />
-          </svg>
-        </ExcelBtn>
-        <span style={{flex:1}} />
-        {/* Scope hint: tells the user whether formatting targets the cell or row(s) */}
-        {fb.scopeLabel && <span style={{fontSize:9,fontWeight:700,color:"var(--mut)",letterSpacing:".04em",textTransform:"uppercase",padding:"0 5px",userSelect:"none"}}>{fb.scopeLabel}</span>}
-        <span style={{fontSize:9,color:"var(--mut)",fontFamily:"'Inter',system-ui,sans-serif",letterSpacing:".06em",textTransform:"uppercase",paddingRight:2}}>Format</span>
-      </div>
-      {/* Swatch grid — immediately below the toolbar, no separator (visually one block) */}
-      <div style={{padding:"4px 6px 5px",background:"#f7f8fa",borderBottom:"1px solid var(--bd)",display:"grid",gridTemplateColumns:"repeat(10, 18px)",gap:2,justifyContent:"start"}}>
-        {/* "No fill" tile in slot 1 — matches Excel/Word's color picker layout */}
-        <button title="No fill (clear color)" onClick={()=>onSetRowColor(null)}
-          style={{width:18,height:18,borderRadius:2,background:"#fff",cursor:"pointer",padding:0,display:"flex",alignItems:"center",justifyContent:"center",
-            border:task.rowColor==null?"1.5px solid #4f46e5":"1px solid #d1d5db"}}>
-          <svg width="9" height="9" viewBox="0 0 10 10">
-            <line x1="1" y1="1" x2="9" y2="9" stroke={task.rowColor==null?"#4f46e5":"#9ca3af"} strokeWidth="1.5"/>
-            <line x1="9" y1="1" x2="1" y2="9" stroke={task.rowColor==null?"#4f46e5":"#9ca3af"} strokeWidth="1.5"/>
-          </svg>
-        </button>
-        {ROW_COLORS.slice(0, 19).map(rc => (
-          <button key={rc.color} title={rc.label} onClick={()=>onSetRowColor(rc.color)}
-            style={{width:18,height:18,borderRadius:2,background:rc.color,cursor:"pointer",padding:0,
-              border:task.rowColor===rc.color?"1.5px solid #111827":"1px solid #d1d5db",
-              boxShadow:task.rowColor===rc.color?"inset 0 0 0 1px #fff":"none"}} />
-        ))}
-      </div>
-      <Item icon="ti-row-insert-top"    label="Insert Row Above"  hint="Ins"  onClick={onInsertAbove} />
-      <Item icon="ti-row-insert-bottom" label="Insert Row Below"              onClick={onInsertBelow} />
-      <Item icon="ti-sitemap"           label="Add Subtask"                   onClick={onAddSubtask} />
-      <Sep />
-      {/* B844 — meeting-calendar flyout: the parent label reads the row's current state; the flyout
-          is one radio list (— none — + bodies) plus the deadline-row actions. */}
-      <div style={{position:"relative"}} onMouseEnter={()=>setSubMeet(true)} onMouseLeave={()=>setSubMeet(false)}>
-        {meetingBodies.length === 0 && !isDeadlineRow ? (
-          <Item icon="ti-calendar-plus" label="Add a meeting calendar…" onClick={onAddMeetingCalendar} />
-        ) : isDeadlineRow ? (
-          <Item icon="ti-flag" label={`Deadline for: ${deadlineAnchorName || "(missing task)"}`} hint="▸" />
-        ) : task.meetingBound ? (
-          <Item icon="ti-calendar-event" label={`Meeting: ${curBodyName}`} hint="▸" />
-        ) : (
-          <Item icon="ti-calendar-event" label={bindCount > 1 ? `Bind ${bindCount} rows to meeting calendar` : "Bind to meeting calendar"} hint="▸" />
-        )}
-        {subMeet && (meetingBodies.length > 0 || isDeadlineRow) && (
-          <div style={{position:"absolute", top:-4, ...(subOpenLeft ? {right:"100%"} : {left:"100%"}), minWidth:200, maxHeight:320, overflow:"auto",
-            background:"#fff", border:"1px solid var(--bd2)", borderRadius:6, boxShadow:"0 8px 24px rgba(0,0,0,0.18)", padding:"3px 0", zIndex:10000}}>
-            {isDeadlineRow ? (<>
-              <SubCaption>Deadline row for “{deadlineAnchorName || "missing task"}”</SubCaption>
-              <Item icon="ti-flag-off" label="Unlink (keep current date)" onClick={onUnlinkDeadline} />
-            </>) : (<>
-              <SubCaption>{bindCount > 1 ? `Snap ${bindCount} rows to` : "Snap this row to"}</SubCaption>
-              <Item icon={!task.meetingBound ? "ti-check" : "ti-circle"} label="— none —" onClick={onUnbindMeeting} />
-              {meetingBodies.map(b => {
-                const isCur = task.meetingBound && task.meetingBodyId === b.id;
-                return <Item key={b.id} icon={isCur ? "ti-check" : "ti-circle"} label={b.name || "Meeting body"} onClick={()=>onBindMeeting(b.id)} />;
-              })}
-              {bindCount === 1 && task.meetingBound && !task.hasChildren && (<>
-                <Sep />
-                <Item icon="ti-flag" label="+ Add deadline row (call/file-by date)" onClick={onAddDeadlineRow} />
+    <>
+      <FormatMiniToolbar ref={toolbarRef} fmt={fb} top={tbTop} left={tbLeft} maxWidth={tbMaxWidth}
+        onSetBold={onSetBold} onSetItalic={onSetItalic} onSetUnderline={onSetUnderline}
+        onSetTextColor={onSetTextColor} onSetFill={onSetRowColor} onSetFontSize={onSetFontSize}
+        onClearFormat={onClearFormat} />
+      <div ref={menuRef} style={{position:"fixed",top,left,background:"#fff",border:"1px solid var(--bd2)",
+        borderRadius:6,padding:"3px 0",zIndex:9999,boxShadow:"0 4px 20px rgba(0,0,0,0.14)",minWidth:mw}}>
+        <Header />
+        <Item icon="ti-row-insert-top"    label="Insert Row Above"  hint="Ins"  onClick={onInsertAbove} />
+        <Item icon="ti-row-insert-bottom" label="Insert Row Below"              onClick={onInsertBelow} />
+        <Item icon="ti-sitemap"           label="Add Subtask"                   onClick={onAddSubtask} />
+        <Sep />
+        {/* NEW-3 (chat, 2026-09-11) — the meeting group now reads step-first: Next meeting,
+            Previous meeting (disabled-not-hidden — so the menu never changes height as the row
+            selection changes), THEN the bind/snap flyout trigger. Was: flyout, then the two step
+            rows; the owner asked for the reverse. */}
+        {meetingBody && (<>
+          <Item icon="ti-chevron-right" label={nextMeetingIso ? `Next meeting · ${fmtMeetingStep(nextMeetingIso)}` : "Next meeting"} disabled={!nextMeetingIso} onClick={() => onStepMeeting(nextMeetingIso)} />
+          <Item icon="ti-chevron-left"  label={prevMeetingIso ? `Previous meeting · ${fmtMeetingStep(prevMeetingIso)}` : "Previous meeting"} disabled={!prevMeetingIso} onClick={() => onStepMeeting(prevMeetingIso)} />
+        </>)}
+        {/* B844 — meeting-calendar flyout: the parent label reads the row's current state; the
+            flyout is one radio list (— none — + bodies) plus the deadline-row actions. */}
+        <div style={{position:"relative"}} onMouseEnter={()=>setSubMeet(true)} onMouseLeave={()=>setSubMeet(false)}>
+          {meetingBodies.length === 0 && !isDeadlineRow ? (
+            <Item icon="ti-calendar-plus" label="Add a meeting calendar…" onClick={onAddMeetingCalendar} />
+          ) : isDeadlineRow ? (
+            <Item icon="ti-flag" label={`Deadline for: ${deadlineAnchorName || "(missing task)"}`} hint="▸" />
+          ) : task.meetingBound ? (
+            <Item icon="ti-calendar-event" label={`Meeting: ${curBodyName}`} hint="▸" />
+          ) : (
+            <Item icon="ti-calendar-event" label={bindCount > 1 ? `Bind ${bindCount} rows to meeting calendar` : "Bind to meeting calendar"} hint="▸" />
+          )}
+          {subMeet && (meetingBodies.length > 0 || isDeadlineRow) && (
+            <div style={{position:"absolute", top:-4, ...(subOpenLeft ? {right:"100%"} : {left:"100%"}), minWidth:200, maxHeight:320, overflow:"auto",
+              background:"#fff", border:"1px solid var(--bd2)", borderRadius:6, boxShadow:"0 8px 24px rgba(0,0,0,0.18)", padding:"3px 0", zIndex:10000}}>
+              {isDeadlineRow ? (<>
+                <SubCaption>Deadline row for “{deadlineAnchorName || "missing task"}”</SubCaption>
+                <Item icon="ti-flag-off" label="Unlink (keep current date)" onClick={onUnlinkDeadline} />
+              </>) : (<>
+                <SubCaption>{bindCount > 1 ? `Snap ${bindCount} rows to` : "Snap this row to"}</SubCaption>
+                <Item icon={!task.meetingBound ? "ti-check" : "ti-circle"} label="— none —" onClick={onUnbindMeeting} />
+                {meetingBodies.map(b => {
+                  const isCur = task.meetingBound && task.meetingBodyId === b.id;
+                  return <Item key={b.id} icon={isCur ? "ti-check" : "ti-circle"} label={b.name || "Meeting body"} onClick={()=>onBindMeeting(b.id)} />;
+                })}
+                {bindCount === 1 && task.meetingBound && !task.hasChildren && (<>
+                  <Sep />
+                  <Item icon="ti-flag" label="+ Add deadline row (call/file-by date)" onClick={onAddDeadlineRow} />
+                </>)}
+                {bindCount === 1 && !task.meetingBound && !task.hasChildren && boundTasks.length > 0 && (<>
+                  <Sep />
+                  <SubCaption>Use as deadline row for</SubCaption>
+                  {boundTasks.slice(0, 8).map(bt => <Item key={bt.id} icon="ti-flag" label={bt.name} onClick={()=>onLinkAsDeadline(bt.id)} />)}
+                </>)}
               </>)}
-              {bindCount === 1 && !task.meetingBound && !task.hasChildren && boundTasks.length > 0 && (<>
-                <Sep />
-                <SubCaption>Use as deadline row for</SubCaption>
-                {boundTasks.slice(0, 8).map(bt => <Item key={bt.id} icon="ti-flag" label={bt.name} onClick={()=>onLinkAsDeadline(bt.id)} />)}
-              </>)}
-            </>)}
-            <Sep />
-            <Item icon="ti-settings" label="Manage meeting calendars…" onClick={onAddMeetingCalendar} />
-          </div>
-        )}
+              <Sep />
+              <Item icon="ti-settings" label="Manage meeting calendars…" onClick={onAddMeetingCalendar} />
+            </div>
+          )}
+        </div>
+        <Sep />
+        <Item icon="ti-copy"              label="Duplicate Row"                 onClick={onDuplicate} />
+        <Item icon="ti-scissors"          label="Cut"               hint="Ctrl+X" onClick={onCutTask} />
+        <Item icon="ti-files"             label="Copy"              hint="Ctrl+C" onClick={onCopyTaskFull} />
+        <Item icon="ti-clipboard"         label="Paste Below"       hint="Ctrl+V" onClick={onPasteTask} disabled={!hasClipboard} />
+        <Sep />
+        <Item icon="ti-indent-increase"   label="Indent →"          hint="Alt⇧→" onClick={onIndent} />
+        <Item icon="ti-indent-decrease"   label="Outdent ←"         hint="Alt⇧←" onClick={onOutdent} disabled={!canOutdent} />
+        <Item icon="ti-folder-symlink"    label="Move to…"                      onClick={onMoveTo} />
+        <Sep />
+        <Item icon="ti-trash"             label={deleteCount > 1 ? `Delete ${deleteCount} Rows` : "Delete Row"} danger onClick={onDelete} />
       </div>
-      {/* NEW-1 (chat, 2026-09-11) — two plain top-level rows (not a submenu, per the owner's ask),
-          shown only for a row genuinely bound to a resolvable body; disabled (not hidden) when
-          there's no next/previous meeting to compute; labeled with the target date so he can see
-          where he's going before he clicks. Moving goes through updateTask({pinnedMeetingDate}) —
-          the SAME pin field + cascade a snap uses — so dependents/deadline rows/meetingDeadline
-          all update exactly as they already do, in one undoable step. */}
-      {meetingBody && (<>
-        <Item icon="ti-chevron-right" label={nextMeetingIso ? `Next meeting · ${fmtMeetingStep(nextMeetingIso)}` : "Next meeting"} disabled={!nextMeetingIso} onClick={() => onStepMeeting(nextMeetingIso)} />
-        <Item icon="ti-chevron-left"  label={prevMeetingIso ? `Previous meeting · ${fmtMeetingStep(prevMeetingIso)}` : "Previous meeting"} disabled={!prevMeetingIso} onClick={() => onStepMeeting(prevMeetingIso)} />
-      </>)}
-      <Sep />
-      <Item icon="ti-copy"              label="Duplicate Row"                 onClick={onDuplicate} />
-      <Sep />
-      <Item icon="ti-scissors"          label="Cut"               hint="Ctrl+X" onClick={onCutTask} />
-      <Item icon="ti-files"             label="Copy"              hint="Ctrl+C" onClick={onCopyTaskFull} />
-      <Item icon="ti-clipboard"         label="Paste Below"       hint="Ctrl+V" onClick={onPasteTask} disabled={!hasClipboard} />
-      <Sep />
-      <Item icon="ti-indent-increase"   label="Indent →"          hint="Alt⇧→" onClick={onIndent} />
-      <Item icon="ti-indent-decrease"   label="Outdent ←"         hint="Alt⇧←" onClick={onOutdent} disabled={!canOutdent} />
-      <Item icon="ti-folder-symlink"    label="Move to…"                      onClick={onMoveTo} />
-      <Sep />
-      <Item icon="ti-trash"             label={deleteCount > 1 ? `Delete ${deleteCount} Rows` : "Delete Row"} danger onClick={onDelete} />
-    </div>,
+    </>,
     document.body
   );
 }
@@ -12064,7 +12252,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
               {orderedCols.map((c) => { const ci = allCols.indexOf(c);
                 const active = isFocused && selectedColIdx === ci && !hasRange;
                 const selected = inRange(ri, ci);
-                const cfmt = task.cellFmt?.[c.k]; // per-cell format (bold/italic/fill)
+                const cfmt = task.cellFmt?.[c.k]; // per-cell format (bold/italic/fill/underline/color/size)
                 // Predecessor editor shows a live hint below the input — let it escape the clipped 24px cell.
                 const predEditing = c.k==="predecessors" && edit?.taskId===task.id && edit?.col===c.k;
                 return (
@@ -12077,6 +12265,8 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                     background: (selected && hasRange) ? "#dbeafe" : (cfmt?.fill || "transparent"),
                     fontWeight: cfmt?.bold ? 700 : undefined,
                     fontStyle: cfmt?.italic ? "italic" : undefined,
+                    textDecoration: cfmt?.underline ? "underline" : undefined,
+                    color: cfmt?.color || undefined,
                     borderRight: (selected && hasRange) ? "1px solid #93c5fd" : "1px solid var(--bd)",
                     boxShadow: selShadow(ri, ci, selected, active),
                     userSelect: isDraggingCells.current ? "none" : "auto",
@@ -12659,7 +12849,15 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
   // B212 — Tab/Shift+Tab while editing advance only through VISIBLE columns (display order),
   // skipping hidden ones, via the shared stepVisibleColIdx helper.
   const tabStep = back => setSelectedColIdx(i => stepVisibleColIdx(colMasterIdxs, i, back ? -1 : +1));
-  const s = {fontSize:12,padding:"0 8px",height:ROW_H,display:"flex",alignItems:"center",overflow:"hidden",whiteSpace:"nowrap"};
+  // NEW-2 — this cell's own per-column format entry (bold/italic/fill/underline/color/size).
+  // `s` is fresh per (task, col) — folding cf.size/color/underline in here reaches every case
+  // below that spreads {...s} without itself re-asserting a fixed fontSize/color (the same
+  // partial reach bold/italic already have via the wrapper's cascade — cases with their own
+  // semantic color, like a conflict date's red, keep it, same as they already keep their own
+  // fontWeight over a cellFmt.bold cascade).
+  const cf = task.cellFmt?.[col.k];
+  const s = {fontSize:cf?.size || 12,padding:"0 8px",height:ROW_H,display:"flex",alignItems:"center",overflow:"hidden",whiteSpace:"nowrap",
+    color: cf?.color || undefined, textDecoration: cf?.underline ? "underline" : undefined};
   const mono = {fontFamily:"'Inter',system-ui,sans-serif"};
 
   // B583 — Formula column: a derived, read-only display value computed by GridView
@@ -12708,10 +12906,15 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
         const cf = task.cellFmt?.name;
         const fw = (task.bold || cf?.bold) ? 700 : ls.fontWeight;
         const fs = (task.italic || cf?.italic) ? "italic" : "normal";
+        // NEW-2 — size/color/underline follow the SAME cell-overrides-row-overrides-default
+        // precedence as fw/fs above, just for a value instead of a boolean (?? rather than ||).
+        const fSize = cf?.size ?? task.fontSize ?? ls.fontSize;
+        const fColor = cf?.color ?? task.textColor ?? undefined;
+        const fUnderline = (task.underline || cf?.underline) ? "underline" : "none";
         return (
           <input {...NO_AUTOFILL} autoFocus className="ei"
             defaultValue={seedVal}
-            style={{fontSize:ls.fontSize, fontWeight:fw, fontStyle:fs, paddingLeft:20+task.level*14}}
+            style={{fontSize:fSize, fontWeight:fw, fontStyle:fs, color:fColor, textDecoration:fUnderline, paddingLeft:20+task.level*14}}
             onFocus={e => { if (editStartChar == null) e.target.select(); }}
             onBlur={e => commit(task.id, "name", e.target.value)}
             onKeyDown={e => {
@@ -12766,9 +12969,9 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
       // toggles are on. Lets users scan the ID column to spot formatted rows without
       // opening the right-click menu.
       const hasCellFmt = !!(task.cellFmt && Object.keys(task.cellFmt).length);
-      const hasFmt = !!task.rowColor || !!task.bold || !!task.italic || hasCellFmt;
+      const hasFmt = !!task.rowColor || !!task.bold || !!task.italic || !!task.underline || !!task.textColor || !!task.fontSize || hasCellFmt;
       const fmtSummary = hasFmt
-        ? `Formatted: ${[task.rowColor && "fill color", task.bold && "bold", task.italic && "italic", hasCellFmt && "cell formats"].filter(Boolean).join(", ")}`
+        ? `Formatted: ${[task.rowColor && "fill color", task.bold && "bold", task.italic && "italic", task.underline && "underline", task.textColor && "text color", task.fontSize && "text size", hasCellFmt && "cell formats"].filter(Boolean).join(", ")}`
         : "Click to select row";
       return (
         // B<NEW> — paddingLeft was 4 while the drag grip (a separate absolutely-positioned
@@ -12783,6 +12986,7 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
           <span>{task.id}</span>
           {task.bold && <span style={{fontSize:8.5,fontWeight:800,color:"#4f46e5",lineHeight:1,fontFamily:"'Inter',system-ui,sans-serif"}}>B</span>}
           {task.italic && <span style={{fontSize:8.5,fontWeight:700,fontStyle:"italic",color:"#4f46e5",lineHeight:1,fontFamily:"'Inter',system-ui,sans-serif"}}>I</span>}
+          {task.underline && <span style={{fontSize:8.5,fontWeight:700,textDecoration:"underline",color:"#4f46e5",lineHeight:1,fontFamily:"'Inter',system-ui,sans-serif"}}>U</span>}
         </span>
       );
     }
@@ -12827,8 +13031,10 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
         ) : (
           <span style={{width:16,flexShrink:0,display:"inline-block"}} />
         )}
-        {(() => { const ls=[{fontSize:13,fontWeight:600},{fontSize:12,fontWeight:500},{fontSize:11.5,fontWeight:400},{fontSize:11,fontWeight:400}][Math.min(task.level,3)]; const cf = task.cellFmt?.name; const isEmpty = !task.name; const fw = (task.bold || cf?.bold) ? 700 : ls.fontWeight; const fs = (task.italic || cf?.italic || isEmpty) ? "italic" : "normal"; return (
-          <span style={{overflow:"hidden",textOverflow:"ellipsis",color:isEmpty?"var(--mut)":"#1f2328",fontStyle:fs,fontSize:ls.fontSize,fontWeight:fw,minWidth:0}}>
+        {(() => { const ls=[{fontSize:13,fontWeight:600},{fontSize:12,fontWeight:500},{fontSize:11.5,fontWeight:400},{fontSize:11,fontWeight:400}][Math.min(task.level,3)]; const cf = task.cellFmt?.name; const isEmpty = !task.name; const fw = (task.bold || cf?.bold) ? 700 : ls.fontWeight; const fs = (task.italic || cf?.italic || isEmpty) ? "italic" : "normal";
+          // NEW-2 — same cell-overrides-row-overrides-default precedence as fw/fs, for a value not a boolean.
+          const fSize = cf?.size ?? task.fontSize ?? ls.fontSize; const fColor = cf?.color ?? task.textColor; const fUnderline = (task.underline || cf?.underline) ? "underline" : "none"; return (
+          <span style={{overflow:"hidden",textOverflow:"ellipsis",color:isEmpty?"var(--mut)":(fColor||"#1f2328"),fontStyle:fs,fontSize:fSize,fontWeight:fw,textDecoration:fUnderline,minWidth:0}}>
             {task.name || "New task"}
           </span>
         ); })()}
@@ -13464,7 +13670,7 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
     return <span data-gantt-name={task.id} data-gantt-mode={place.mode} style={{position:"absolute",
       left:place.x, top:place.y, transform:`translate(${ax}, -50%)`,
       fontSize:fs, lineHeight:1.2, fontWeight:ganttNameWeight(task.level, kind, task.bold),
-      fontStyle:task.italic?"italic":"normal", color:GANTT_INK,
+      fontStyle:task.italic?"italic":"normal", textDecoration:task.underline?"underline":"none", color:GANTT_INK,
       fontFamily:"'Inter',system-ui,sans-serif", whiteSpace:"nowrap", pointerEvents:"none", zIndex:7}}>{task.name}</span>;
   };
 
@@ -15746,7 +15952,7 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
       // Collected, not emitted: the in-chart names are de-collided AFTER the row pass so
       // co-dated labels never overprint each other (B402), then drawn on the top layer.
       nameRecords.push({x:place.x, y:place.y, anchor:place.anchor, mode:place.mode, lw, fs,
-        weight:ganttNameWeight(depth, kind, t.bold), italic:!!t.italic, str:escapeHtml(nm)});
+        weight:ganttNameWeight(depth, kind, t.bold), italic:!!t.italic, underline:!!t.underline, str:escapeHtml(nm)});
     }
     const unsched = blank ? `<text x="${LABEL_W+6}" y="${y+ROW_H*0.68}" font-size="7.5" fill="#9aa0a6" font-style="italic" font-family="Arial,sans-serif">Unscheduled</text>` : "";
     rowBands.push(`<rect x="0" y="${y}" width="${svgWidth}" height="${ROW_H}" fill="${bg}"/>`);
@@ -15854,7 +16060,7 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
   const emitName=r=>{
     // No contrast plate: since NEW-1 every name is a caption in the clear air above its glyph, so
     // there is nothing to knock out behind it.
-    return `<text x="${r.x.toFixed(1)}" y="${r.y.toFixed(1)}" font-size="${r.fs}" font-weight="${r.weight}" fill="${GANTT_INK}" text-anchor="${r.anchor}" dominant-baseline="central" font-family="Arial,sans-serif"${r.italic?' font-style="italic"':''}>${r.str}</text>`;
+    return `<text x="${r.x.toFixed(1)}" y="${r.y.toFixed(1)}" font-size="${r.fs}" font-weight="${r.weight}" fill="${GANTT_INK}" text-anchor="${r.anchor}" dominant-baseline="central" font-family="Arial,sans-serif"${r.italic?' font-style="italic"':''}${r.underline?' text-decoration="underline"':''}>${r.str}</text>`;
   };
   try{
     const boxOf=r=>{const x0=r.anchor==="middle"?r.x-r.lw/2:r.anchor==="end"?r.x-r.lw:r.x;return {x0,x1:x0+r.lw,y0:r.y-r.fs*0.72,y1:r.y+r.fs*0.72};};

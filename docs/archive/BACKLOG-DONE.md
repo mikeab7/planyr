@@ -1,3 +1,39 @@
+### B1560992 — Lift formatting out of the Schedule grid's right-click menu into a floating Word-style strip above it `[Scheduler]` (feature) #scheduler #ui  *(owner chat block, 2026-09-11 — Michael asked for a mock-up of the Excel-ribbon-style formatting strip that used to sit inside the context menu, saw it, and said "I like it, proceed." Minted **B1560992** from this branch's reserved block B1560992–B1561007 against freshly-fetched `origin/main` fb3275f. DEDUPE-FIRST — searched Open/⏳Verify/Done for "mini toolbar", "TaskContextMenu format", "Word mini toolbar", "CELL FORMAT toggle": no prior item names this; net-new.)*
+
+`[x]` **FIXED THIS SESSION.**
+- Verify: sandbox — a pure UI-structure change (which surface renders which controls, and where), fully reproducible headless: this app (`public/sequence/index.html`) boots standalone offline, no auth/live-GIS/real-data needed (ATTEMPT-BEFORE-YOU-PARK) — driven end to end in a real headless Chromium against the real build.
+
+**THE CHANGE.** The old `TaskContextMenu` opened with an Excel-ribbon strip (B/I/fill-bucket/eraser + a 20-swatch grid) occupying its top third, pushing every command down. That strip is now a separate component, `FormatMiniToolbar`, portaled as a sibling of the trimmed, commands-only menu inside the SAME `ReactDOM.createPortal` call (one Fragment, two children) so both share one `onClose`/outside-click/Escape/scroll lifecycle via two refs (`menuRef`, `toolbarRef`) checked together in a single `mousedown` listener. The menu shrank from `mh:510` to `mh:420` accordingly.
+
+**LAYOUT, exactly as approved:** Group 1 (a type-in size box + caret + grow/shrink, then B/I/U), a vertical rule, Group 2 (a text-colour caret and a highlight/fill caret, each an icon over a live colour-preview bar), a vertical rule, a compact "Clear formatting" eraser (kept — item (i) forbids removing capability, only relocating it; the approved mock-up didn't enumerate it but doesn't show it disappearing either), a vertical rule, and a non-interactive Group 3 — a bold count over "SELECTED" (the old "CELL FORMAT" text, now correctly understood per the owner's own on-the-spot correction as a **readout** of how many cells/rows the buttons will act on, never a toggle). The two swatch rows collapsed into the two colour carets' popovers, unchanged palette (`ROW_COLORS`, same "none" tile) — a new shared `SwatchGrid`/`CaretPopover` pair backs both.
+
+**POSITIONING (e).** The toolbar anchors `TB_GAP` above the menu's own placed `top`; because the menu's overflow-avoidance logic only ever shifts `top` UP (never down) to keep it on screen, `top` is always at-or-above the actual click point, so anchoring above `top` can never cover the clicked row. When there isn't room above (`top - TB_H - TB_GAP < 8`), it drops below the menu's full height instead, then both axes clamp fully inside the viewport (`Math.min`/`Math.max` against `vw`/`vh`).
+
+**VERIFIED HEADLESS, this session, against the real build (`public/sequence/index.html` served locally, React/ReactDOM vendored so no CDN is needed for them; Babel-standalone/Tabler-CSS/Supabase-js routed to locally-curled copies since this sandbox's Chromium — like its already-documented `hazards.fema.gov` quirk — gets `ERR_CONNECTION_RESET` hitting jsdelivr directly even though `curl` through the same proxy succeeds; Supabase calls aborted so the app falls to its own documented offline-embedded-seed fallback):**
+- Right-clicking a cell renders the toolbar as its own bordered/radiused/shadowed box, positioned above the menu with a visible gap, and the menu contains zero swatch buttons (`0` matches for `button[title="No fill (clear color)"]`) — commands only, confirmed against the real `[data-task-row]`/`[data-col-key]` DOM.
+- All ten toolbar controls present by title: Shrink text, Grow text, Bold, Italic, Underline, Text color, Text color options, Highlight / fill, Highlight / fill options, Clear formatting.
+- Selecting a single cell reads "1 cell / SELECTED"; shift-click-extending a 3-row range and reopening reads "3 cells / SELECTED" — a readout, not a button (no `onClick`).
+- Escape closes both the toolbar (`input[title="Text size"]` gone) and the menu ("Delete Row" gone) in one press.
+- At a 390px phone-width viewport, the toolbar's bounding box stays fully inside `[0, innerWidth]` — no overflow either edge.
+- A meeting-bound row (synthetically bound via a boot-time seed patch, since the embedded offline demo project carries no bound rows) renders the group in NEW-3's new order — see B1560994 below, verified in the same pass.
+
+**No contradiction with `## Owner product constraints`** — checked all entries; none apply.
+
+Files: `public/sequence/index.html` (`SwatchGrid`, `CaretPopover`, `FormatMiniToolbar`, `TaskContextMenu`, the `<TaskContextMenu>` call site's new `onSetUnderline`/`onSetTextColor`/`onSetFontSize` wiring).
+
+### B1560994 — Reorder the Schedule context menu's meeting group so the step rows come before the snap submenu `[Scheduler]` (task) #scheduler #ui  *(same owner chat block as B1560992/B1560993, 2026-09-11 — the approved mock-up reads "Next meeting, Previous meeting, Meeting: <body> ▸", reversing today's order. Minted **B1560994** from the same reserved block B1560992–B1561007. DEDUPE-FIRST — searched Open/⏳Verify/Done for "meeting group order", "Next meeting Previous meeting reorder", "Bind to meeting calendar order": no prior item; net-new.)*
+
+`[x]` **FIXED THIS SESSION.**
+- Verify: sandbox — a pure JSX-ordering change behind an unchanged conditional (`meetingBody &&`); verified headless against the real build with a genuinely meeting-bound row (see below), no auth/live-GIS/real-data needed.
+
+**THE CHANGE.** In `TaskContextMenu`, the two `Next meeting`/`Previous meeting` `Item`s (disabled-not-hidden when there's no resolvable adjacent date, per (b) — same `adjacentMeetingDate` resolver, unchanged) now render BEFORE the meeting-calendar flyout trigger div, both still inside the same `Insert…` → `Sep` → *(this group)* → `Sep` → `Duplicate…` structure. Nothing about `onBindMeeting`/`onUnbindMeeting`/the snap submenu/the deadline-row branch changed — only their position relative to the two step rows moved.
+
+**VERIFIED HEADLESS**, same session/build as B1560992, using a boot-time seed patch (the embedded offline demo project has no meeting-bound row to right-click, so `page.addInitScript` bound task 1 to a synthetic weekly `meetingBodies` entry before the app's own script ran): right-clicking that row's Start cell renders the menu items in the order `Insert Row Above → Insert Row Below → Add Subtask → Next meeting · Tue, Dec 29 → Previous meeting · Tue, Dec 22 → Meeting: Baytown City Council ▸ → Duplicate Row → …` — confirming (a) the new order and (c) an unbound row still falls through to the pre-existing "Add a meeting calendar…"/"Bind to meeting calendar ▸" single-line form, disabled step rows included, with no menu-height change from selection alone (the disabled-not-hidden behavior was untouched by this item).
+
+**No contradiction with `## Owner product constraints`** — checked all entries; none apply.
+
+Files: `public/sequence/index.html` (`TaskContextMenu`).
+
 ### B1519296 — Split the comp sheet's PROPERTY band into LOCATION and BUILDING `[comps]` (task) #comps #ui  *(owner chat block, 2026-09-11 — Michael reviewed three mockups of the comp entry surface and picked the one that keeps the sheet, does not grow the panel's footprint, and does not convert it to cards; this and B1519297 are that pick. Minted **B1519296** from this branch's reserved block B1519296–B1519311 against freshly-fetched `origin/main` 1b0e371. DEDUPE-FIRST — searched Open/⏳Verify/Done for "PROPERTY band", "LOCATION BUILDING split", "comp sheet group": no prior item; net-new.)*
 
 `[x]` **FIXED THIS SESSION.**
