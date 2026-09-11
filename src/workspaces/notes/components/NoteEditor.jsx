@@ -97,6 +97,36 @@ const TITLE_BAND_GAP = 16;
  * rather than as a different layout. */
 const MAT_GUTTER = 72;
 
+/* ⛔ THE MAT MUST HAVE SOMEWHERE TO SCROLL TO, WHETHER ANYTHING IS PARKED THERE YET OR NOT
+ * (B1550977/NEW-2, owner report 2026-09-11: *"I'm not able to really scroll up or down... that
+ * kinda defeats the purpose of me being able to expand into gray area... if I can't even click
+ * into the gray area."*).
+ *
+ * ⛔ THIS IS A DIFFERENT QUESTION FROM `anchorExtent`/`anchorExtentX` ABOVE, WHICH ONLY GROW THE
+ * SHEET TO HOLD A BOX THAT ALREADY OVERHANGS IT. Before anything is placed, that math reports
+ * zero need, so the mat's own scrollable content was exactly the sheet's size plus a sliver —
+ * measured live: scrollHeight 452 vs a 330 clientHeight, sheet bottom at y=455 against a mat
+ * bottom of y=465, ten pixels of grey at MAXIMUM scroll. There is nowhere to work.
+ *
+ * The fix is unconditional extra room on the mat itself, past whatever the sheet (grown or not)
+ * already needs — a place to drag a floating box INTO, not just room to hold one already there.
+ *
+ * ⛔ THE BOTTOM HALF IS PADDING; THE RIGHT HALF IS NOT, AND NEITHER IS EVER PADDING-LEFT OR
+ * PADDING-TOP. Padding-left/padding-top sit BEFORE the sheet in the mat's own flex flow
+ * (`alignItems: "flex-start"`, `flexDirection: "column"`), so growing them would shift the sheet
+ * away from where it already sits at rest — exactly the "permanent empty gap, page stranded"
+ * look this item explicitly rules out. Padding-BOTTOM is safe the same way (it comes AFTER the
+ * sheet, invisible until actually scrolled to) because `note-sheet` has no percentage-based
+ * HEIGHT for it to disturb. Padding-RIGHT is NOT safe, because `note-sheet` sizes its WIDTH with
+ * `width: "100%"` when ungrown — resolved against the mat's own content box — so more padding
+ * there silently narrows the sheet itself (measured: a naturally-580px sheet rendered at its
+ * 260px floor the instant this was tried as padding). The right-side reach is a normal-flow
+ * SPACER SIBLING instead — see `matReachWidth`'s own comment, below, for the full mechanism.
+ * (Growing left already has its own mechanism, `sheetGrowLeft` + the scroll-compensation layout
+ * effect below, which only spends real scroll room on a box that has actually earned it.) */
+const MAT_EXTRA_BOTTOM = 480;  // a screenful-ish of grey past the sheet's own bottom edge
+const MAT_EXTRA_RIGHT = 320;   // matching breathing room past the sheet's own right edge
+
 /* ⛔ THE PAGE TITLE IS A RATIO OF THE BODY, NOT A PIXEL NUMBER (NOTES-FREE-PLACEMENT / NEW-6,
  * owner report 2026-09-08: *"42px against 15px body, 2.8x, on a 580px column… it is the one
  * element still shouting"*).
@@ -1738,6 +1768,33 @@ export default function NoteEditor({
      * too. */
   }, [editor]);
 
+  /** ⛔ CLICKING BELOW THE LAST LINE, STILL ON THE WHITE PAGE, GOES TO THE END OF THE DOCUMENT
+   * — THE WAY EVERY DOCUMENT EDITOR BEHAVES (B1550976/NEW-1, owner report 2026-09-11: *"I'm
+   * trying to double click at the bottom of the page. However, it's just automatically taking
+   * it to near the geotechnical engineer where you can see a cursor."*). It was not jumping the
+   * caret — it was refusing to move it, because the sheet's own bottom PADDING (real white page,
+   * there so the document has breathing room) sits OUTSIDE `note-body`'s rendered box, and a
+   * press there fell all the way through to the grey mat's "place a note" gesture, built for the
+   * page OUTSIDE the sheet rather than blank paper still inside it. See `focusFromMat`'s own
+   * comment on `box.bottom` for the hit-test this answers.
+   *
+   * Reuses an already-empty trailing paragraph rather than piling up a second one; otherwise
+   * appends a fresh paragraph so there is always somewhere to keep typing — `addNoteAnchorAt`'s
+   * own manual `at + 2` is the precedent for computing the interior position by hand rather than
+   * trusting `insertContentAt`'s default selection (a bare paragraph's interior is one past its
+   * own insertion point, not an anchor's two). */
+  const focusEndOfSheet = useCallback(() => {
+    if (!editor || editor.isDestroyed) return;
+    const { doc } = editor.state;
+    const last = doc.lastChild;
+    if (last && last.type.name === "paragraph" && last.content.size === 0) {
+      editor.chain().focus(doc.content.size - 1, { scrollIntoView: false }).run();
+      return;
+    }
+    const at = doc.content.size;
+    editor.chain().insertContentAt(at, { type: "paragraph" }).focus(at + 1, { scrollIntoView: false }).run();
+  }, [editor]);
+
   /* ═══ SELECT SEVERAL BOXES AND MOVE THEM TOGETHER (B421494) ══════════════════════════════
    *
    * ⛔ THE WHOLE DIFFICULTY IS THAT THE PRESS IS ALREADY SPOKEN FOR. A press on blank page places
@@ -2280,13 +2337,29 @@ export default function NoteEditor({
       return;
     }
 
+    /* ⛔ AND BELOW THAT, STILL ON THE SHEET, IS NOT BLANK PAGE (B1550976/NEW-1). `hit` above is
+     * computed against coordinates already CLAMPED to `box` (note-body's own rendered rect), so
+     * a press in the sheet's own bottom padding — real white page, a whole padding's worth below
+     * the last line rather than one line-height beyond it — resolves a `hit` that
+     * `pressIsBesideLine` correctly refuses, and used to fall through to the grey mat's
+     * "place a note" gesture below, which is for the page OUTSIDE the sheet. A real hit-test:
+     * still `onSheet`, and below `box.bottom` (note-body's own bottom edge) rather than the
+     * sheet's bottom edge, so the side padding at a line's own height (the case B1368 already
+     * covers, above) is untouched. */
+    if (onSheet && e.clientY >= box.bottom) {
+      if (el.closest(".ProseMirror") || el.closest("[contenteditable]")) return;
+      e.preventDefault();
+      focusEndOfSheet();
+      return;
+    }
+
     /* Blank space. ⛔ WHAT HAPPENS NEXT IS NOT DECIDED YET — a press that travels is a marquee
      * and a press that does not is the unchanged placement. `beginBlankGesture` owns both, and
      * the decision is made at mouse-UP against a measured distance. */
     e.preventDefault();
     e.stopPropagation();
     if (!beginBlankGesture(e)) placeBlockAt(e.clientX, e.clientY);
-  }, [editor, placeBlockAt, beginBlankGesture, beginGroupDrag, clearSelection, cancelPendingPlace]);
+  }, [editor, placeBlockAt, beginBlankGesture, beginGroupDrag, clearSelection, cancelPendingPlace, focusEndOfSheet]);
 
   /* ---- HOW BIG THE WRITING IS (NEW-3) ----------------------------------------------------
    *
@@ -2333,6 +2406,22 @@ export default function NoteEditor({
    * numbers, and it is a function of the PANE only, never of the sheet's grown width, which is
    * what makes the page's left edge unable to move. */
   const [matPadX, setMatPadX] = useState(0);
+  /* ⛔ HOW WIDE THE MAT'S SCROLLABLE CONTENT MUST BE TO GIVE THE SHEET SOME BREATHING ROOM PAST
+   * ITS OWN RIGHT EDGE (B1550977/NEW-2) — the sheet's OWN rendered width plus `MAT_EXTRA_RIGHT`,
+   * carried as a NORMAL-FLOW SPACER sibling rather than as padding on `note-mat` itself.
+   *
+   * ⛔ WHY NOT JUST PADDING, WHICH IS WHAT THE FIRST DRAFT OF THIS FIX DID AND WHICH BROKE THE
+   * SHEET'S OWN WIDTH. `note-sheet` sizes itself with `width: "100%"` when ungrown, which resolves
+   * against `note-mat`'s CONTENT box — and `matPadX` is chosen SPECIFICALLY so that
+   * `paneWidth - 2×matPadX ≈ naturalSheetWidth`, a closed-loop equation between the mat's own
+   * padding and the sheet's percentage width. Adding MORE padding-right to reach further past the
+   * sheet breaks that equation: it shrinks the content box the sheet's `100%` resolves against by
+   * the exact amount added, and the sheet renders that much NARROWER — measured: a naturally-580px
+   * sheet rendered at 260px (its own floor) the moment 320px of extra padding-right was tried,
+   * with zero drag on the box at all. A SIBLING spacer costs nothing here: `alignItems:
+   * "flex-start"` sizes each flex-column child independently, so a wider sibling extends the
+   * scroller's own `scrollWidth` without ever touching what "100%" means to `note-sheet`. */
+  const [matReachWidth, setMatReachWidth] = useState(0);
   /** Where the body sat the last time the page's growth changed — see the compensation effect. */
   const growAnchorRef = useRef(null);
   /** …and the gutter that reading was taken under, so a gutter change re-bases rather than scrolls. */
@@ -2671,6 +2760,11 @@ export default function NoteEditor({
       setSheetGrowWidth(grow ? totalSheetWidth : null);
       setSheetGrowLeft(growLeft);
       setSheetGrowGap(growGap);
+      /* ⛔ `totalSheetWidth` IS ALREADY THE SHEET'S OWN REAL RENDERED WIDTH IN BOTH BRANCHES —
+       * `naturalSheetWidth` ungrown (by the same equation `matPadX` is built on) or the full grown
+       * width otherwise — so this is the one number the reach spacer needs, no separate measurement
+       * of its own. See `matReachWidth`'s own comment for why it is a sibling, not more padding. */
+      setMatReachWidth(totalSheetWidth + MAT_EXTRA_RIGHT);
       /* ⛔ THE PAGE'S LEFT EDGE IS PINNED WHERE CENTRING WOULD HAVE PUT AN *UNGROWN* PAGE, AND
        * GROWTH ONLY EVER EXTENDS RIGHTWARD FROM IT.
        *
@@ -3068,6 +3162,7 @@ export default function NoteEditor({
           alignItems: "flex-start", position: "relative",
           paddingLeft: narrow ? undefined : matPadX,
           paddingRight: narrow ? undefined : matPadX,
+          paddingBottom: MAT_EXTRA_BOTTOM,
         }}
       >
         <PasteOptions
@@ -3340,6 +3435,13 @@ export default function NoteEditor({
             style={{ left: pendingPlace.caret.left, top: pendingPlace.caret.top, height: pendingPlace.caret.height }}
           />
         ) : null}
+        {/* ⛔ THE MAT'S OWN RIGHT-SIDE REACH (B1550977/NEW-2) — a NORMAL-FLOW SPACER, not padding
+            on the mat. See `matReachWidth`'s own comment for why padding here silently narrows
+            `note-sheet` itself. `alignItems: "flex-start"` sizes each flex-column child on its
+            own, so this sibling extends `note-mat`'s `scrollWidth` without note-sheet ever
+            knowing it exists. It carries no content and no width until something has actually
+            been measured, so it costs nothing on first paint. */}
+        <div aria-hidden="true" style={{ flex: "0 0 auto", width: matReachWidth || undefined, height: 1 }} />
       </div>
 
         {/* ⛔ BOTH PANES SIT TO THE **RIGHT** OF THE SHEET, and that is what makes them free
