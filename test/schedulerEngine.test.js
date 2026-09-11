@@ -1775,6 +1775,56 @@ describe("anti-drift: the B615/B616 duration + finish-lock engine exists in the 
   });
 });
 
+// B1539584 — the schedule toast spills its message outside the toast (owner report, his own Goose
+// Creek Master Schedule, 2026-09-11 screenshot: a long meeting-step confirmation painted past the
+// right edge of the white pill and onto the bare grid behind it). Full runtime proof (the message
+// actually renders without overflowing its own box, at desktop AND phone width, for two distinct
+// call sites of showToast) lives in ui-audit/verify-schedule-toast-fit.mjs — a headless Playwright
+// check is the only way to measure real box overflow. This is the cheap, CI-runnable half: pins the
+// two properties that caused the defect so neither can silently come back.
+describe("anti-drift: B1539584 showToast wraps instead of overflowing", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  it("the container no longer clips long content to a fixed nowrap width", () => {
+    // The removed defect, verbatim: `whiteSpace: "nowrap"` on the flex container combined with the
+    // flex-item default `min-width: auto` let text render past the box's own `max-width` — the box
+    // was capped correctly, the TEXT inside it wasn't. Must not reappear on the toast container.
+    const toastFn = src.slice(src.indexOf("const showToast = (() => {"), src.indexOf("const parsePreds = raw"));
+    expect(toastFn).not.toMatch(/whiteSpace:\s*"nowrap"/);
+    expect(toastFn).toMatch(/maxWidth:\s*"min\(420px, calc\(100vw - 32px\)\)"/);   // caps at phone width too
+  });
+  it("the text span can actually shrink to wrap (minWidth: 0) rather than escaping the flex row", () => {
+    expect(src).toMatch(/text\.textContent = msg;[\s\S]{0,120}minWidth:\s*"0"/);
+    expect(src).toMatch(/overflowWrap:\s*"break-word"/);
+  });
+});
+
+// B1539585 — found while building B1539584's regression check: the same confirmation toast only
+// fires when React happens to process the setData(updater) call SYNCHRONOUSLY (no other work
+// pending on the fiber at click time). In a fresh, otherwise-idle headless session this is FALSE
+// 100% of 100+ observed attempts — the "moved to a meeting" toast silently never appeared even
+// though the row's date visibly updated. A closure-local `let _rollToast` read immediately after
+// `setData(...)` races the updater when React defers it; a ref written INSIDE the updater and
+// flushed by a `[data]` effect is correct under either timing. Verify: live (LIVE-VERIFY names
+// timing/race bugs a mandatory live class) — V1105281 tracks confirming this on the owner's own
+// account, where background activity (autosave, realtime) makes the race far more likely to lose
+// than in a quiet sandbox tab.
+describe("anti-drift: B1539585 the meeting-roll toast survives deferred setData timing", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  it("the pending message is held in a ref, not a closure variable raced against setData", () => {
+    expect(src).toMatch(/const rollToastRef = useRef\(null\);/);
+    expect(src).not.toMatch(/let _rollToast = null;/);
+  });
+  it("the ref is only ever written INSIDE the setData updater (so it reflects whenever that updater actually ran)", () => {
+    const updateTaskFn = src.slice(src.indexOf("const updateTask = useCallback((taskId, updates, projId=null) => {"), src.indexOf("// ── Multi-row delete"));
+    expect(updateTaskFn).toMatch(/rollToastRef\.current = `\$\{t\.name \|\| "Task"\} moved to/);
+    // and it is NOT read/shown synchronously right after setData(...) — that ordering is exactly the bug.
+    expect(updateTaskFn).not.toMatch(/if \(_rollToast\) showToast\(_rollToast\);/);
+  });
+  it("a [data]-dependent effect flushes the ref after the render that wrote it has committed", () => {
+    expect(src).toMatch(/useEffect\(\(\) => \{\s*if \(rollToastRef\.current\) \{ showToast\(rollToastRef\.current\); rollToastRef\.current = null; \}\s*\}, \[data\]\);/);
+  });
+});
+
 // B624 runtime: the engine helper the input guard reuses (weekend/holiday → next working day).
 describe("B624 rollForwardToWorkday — the input-guard primitive", () => {
   it("a weekend rolls to Monday; a working day is unchanged; a weekday holiday rolls forward", () => {
