@@ -166,6 +166,18 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1094016 — B711329: right-clicking a comp marker exports its owning site record to Google Earth (KMZ), with real geometry, a full facts balloon, and a working fallback `Blocker: auth` `Blocker: real-data`
+
+**Why this needs a real pass.** Comps load ONLY via Supabase (`compsStore.fetchAllComps()`), which this sandbox's proxy CORS-blocks at the auth handshake — there is no way to get even one comp marker onto the map headlessly here, and no local-storage fixture-seeding path exists for comps the way B684's own site-KMZ export can seed a site via `localStorage`. The pure geometry/KML-format MECHANISM is fully proven without a browser (below) — what a live pass adds is a real comp, a real site record, a real right-click, and a real open in Google Earth.
+- Verified HERE (sandbox): `npx vitest run test/kmlExport.test.js` — 24/24 green, driving the REAL `siteRecordFeatures`/`buildKml`/`buildKmz` against literal fixtures, including a full build→parse round-trip through this repo's OWN `kmlImport.js` reader (placemark count, names and coordinates all survive across a drawn parcel + three comp anchor kinds) and an ampersand/quote-bearing name never corrupting the document. Full suite 16,709/16,709 green · lint 0 errors · build green (the new module is its own lazy chunk, never on the Site route's boot path) · `npm run ci-parity` full 20-gate run.
+- **Steps, each with its named expected result:**
+  1. Sign in on planyr.io with an account that has at least one leasing comp recorded. **Expect:** the comp's marker (a colored diamond/tag) renders on the map.
+  2. Right-click the marker. **Expect:** a small menu appears, titled with the comp's own headline, offering "Export site record (KMZ)".
+  3. Click it. **Expect:** a `.kmz` file downloads named after the site record, with no error banner.
+  4. Open the downloaded file in the real Google Earth (web or desktop). **Expect:** the site lands exactly on the aerial (no lon/lat swap or offset) inside a `Parcel` folder (the drawn boundary + a centre pin) and a `Comps` folder (one marker per comp on that site record, colored by type — green for lease, blue for building sale, tan for land); clicking the centre pin opens a balloon with the site's name/role/status/county/acreage/origin/notes/documents, and clicking a comp marker opens its own full field balloon.
+  5. Right-click a comp with no owning site (e.g. one whose `project_id` is null). **Expect:** the download still succeeds, containing only that one comp, and the map shows a banner naming it as a fallback single-comp export.
+- Stopping rule: closes when steps 1–5 are observed on planyr.io against a real account's comps, or when a step fails and is filed as a recurrence against B711329. Per STANDING RULE #2, a failure here is a FINDING, not a silent close.
+
 ### V1077760 — B1482352: a single tab never accuses itself of being out of date `Blocker: auth` `Blocker: real-data`
 
 **Why this needs a real pass.** The defect is a multi-writer/concurrency class (LIVE-VERIFY) and its repro is a signed-in plan writing real `site_elements` rows through `commit_elements_atomic`. This sandbox's proxy CORS-blocks the Supabase auth handshake, so no signed-in write is reachable here. The MECHANISM is fully proven without a browser (see below) — what a live pass adds is confirmation that the owner's own workflow no longer produces the banner.
