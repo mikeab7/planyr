@@ -18,23 +18,43 @@ const BASE = {
   savePulse: false, fileLinked: false, offlineFallback: false, authRequired: false, activePanel: null,
 };
 
-describe("ScheduleCenter — the review-count badge is always mounted, never conditional", () => {
+// B1547280 (AMENDMENT to B1511712) — the review-inbox button (and its badge) moved OUT of
+// ScheduleCenter and INTO ScheduleActions, so it stops being bundled into what AppHeader's Row-2
+// centering measures as "the chip" (see ScheduleToolbar.jsx's own header comments on both
+// components for the full root-cause writeup). These assertions moved with it — same behavior,
+// same reservation idiom, just tested on its new home.
+describe("ScheduleCenter — renders ONLY the Grid/Split/Gantt view toggle", () => {
+  it("does not render a review-count badge at all (moved to ScheduleActions)", () => {
+    const html = renderToStaticMarkup(createElement(ScheduleCenter, { toolbar: { ...BASE, reviewCount: 5 }, post: () => {} }));
+    expect(html).not.toMatch(/visibility:/);
+    expect(html).not.toMatch(/>5</);
+  });
+
+  it("renders the view toggle when ready and in projects section", () => {
+    const html = renderToStaticMarkup(createElement(ScheduleCenter, { toolbar: BASE, post: () => {} }));
+    expect(html).toMatch(/role="group"/);
+    expect(html).toMatch(/Grid/);
+    expect(html).toMatch(/Split/);
+    expect(html).toMatch(/Gantt/);
+  });
+});
+
+describe("ScheduleActions — the review-count badge is always mounted, never conditional", () => {
   it("reviewCount: 0 still renders the badge span, just visibility:hidden", () => {
-    const html = renderToStaticMarkup(createElement(ScheduleCenter, { toolbar: { ...BASE, reviewCount: 0 }, post: () => {} }));
+    const html = renderToStaticMarkup(createElement(ScheduleActions, { toolbar: { ...BASE, reviewCount: 0 }, post: () => {} }));
     expect(html).toMatch(/visibility:hidden/);
-    expect(html).not.toMatch(/visibility:visible/); // nothing else in this component uses visibility
   });
 
   it("reviewCount > 0 renders the SAME badge span, now visible, with the real count", () => {
-    const html = renderToStaticMarkup(createElement(ScheduleCenter, { toolbar: { ...BASE, reviewCount: 5 }, post: () => {} }));
+    const html = renderToStaticMarkup(createElement(ScheduleActions, { toolbar: { ...BASE, reviewCount: 5 }, post: () => {} }));
     expect(html).toMatch(/visibility:visible/);
     expect(html).toMatch(/>5</);
   });
 
-  it("both states mount the identical number of elements (no conditional mount/unmount)", () => {
-    const htmlZero = renderToStaticMarkup(createElement(ScheduleCenter, { toolbar: { ...BASE, reviewCount: 0 }, post: () => {} }));
-    const htmlFive = renderToStaticMarkup(createElement(ScheduleCenter, { toolbar: { ...BASE, reviewCount: 5 }, post: () => {} }));
-    const tagCount = (html) => (html.match(/<(button|span)/g) || []).length;
+  it("both reviewCount states mount the identical number of elements (no conditional mount/unmount)", () => {
+    const htmlZero = renderToStaticMarkup(createElement(ScheduleActions, { toolbar: { ...BASE, reviewCount: 0 }, post: () => {} }));
+    const htmlFive = renderToStaticMarkup(createElement(ScheduleActions, { toolbar: { ...BASE, reviewCount: 5 }, post: () => {} }));
+    const tagCount = (html) => (html.match(/<(button|span|div)/g) || []).length;
     expect(tagCount(htmlZero)).toBe(tagCount(htmlFive));
   });
 });

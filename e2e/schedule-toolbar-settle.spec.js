@@ -24,6 +24,15 @@
  * load), the zoom block only until `toolbar.settled` (the first REAL report, as opposed to the
  * bare fallback) — so neither can insert itself into an already-rendered row.
  *
+ * B1547280 (AMENDMENT to B1511712, 2026-09) — the review button (with its badge) later moved OUT
+ * of the centered Grid/Split/Gantt group and into the right-hand action zone (ScheduleActions),
+ * so AppHeader's Row-2 centering measures the view toggle alone rather than a wider combined
+ * bundle. The RESERVATION discipline this spec guards — mount once, toggle visibility, never
+ * insert — moved with it unchanged, so the first test below (badge 0→5) still proves the same
+ * property in the button's new home: "Grid" has no sibling in its own group any more, and the
+ * badge's own zone (ScheduleActions) never changes width when the count changes because the
+ * badge span itself is always mounted at a fixed size.
+ *
  * This spec drives the REAL Scheduler workspace's outer shell (AppHeader + Scheduler.jsx) but
  * replaces the embedded Gantt app (`/sequence/`) with an inert blank document, then plays the
  * postMessage bridge itself (`window.postMessage({source:"planar-seq", ...}, origin)` — the
