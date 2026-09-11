@@ -275,3 +275,72 @@ describe("B1457152 — candidateCountiesForPoint never fans out to every configu
     expect(candidateCountiesForPoint(35.0, -50.0)).toEqual([]); // mid-Atlantic
   });
 });
+
+/* ⛔ B1551616 (2026-09-11) — THE FAN-OUT ASSERTION, EXTENDED TO COUNT *ALL* GIS LOOKUPS FOR A POINT,
+ * NOT ONLY PARCEL QUERIES. Item 5 of the dispatch brief, verbatim: "extend the fan-out assertion to
+ * count ALL GIS lookups for a point, not only parcel queries - the existing assertion passed while
+ * this was happening."
+ *
+ * "This" is a real, live, measured defect the B1457152 suite above could not see: PR #1622 fixed
+ * `candidateCountiesForPoint` (the PARCEL routing) so a Las Vegas click issues exactly one parcel
+ * query, to Nevada. But a Las Vegas click ALSO triggers the JURISDICTION identify (the header badge,
+ * `identifyJurisdiction(..., { roles: ["county","city","etj"] })` — see SitePlanner.jsx), and its
+ * `countySourcesForPoint` unconditionally returned the Texas TxDOT county-boundary source for ANY
+ * point outside Colorado — Las Vegas included — while `citySourcesForPoint`'s un-bboxed statewide
+ * TxGIO row did the identical thing for the city role. Measured live on planyr.io 2026-09-11: a
+ * Las Vegas parcel lookup fired one correct NV parcel query and ALSO one query to
+ * services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/Texas_County_Boundaries/FeatureServer/0.
+ * Every B1457152 test above is still green on that exact defect, because none of them look past
+ * `candidateCountiesForPoint` — this suite closes that gap by counting the hosts every ROLE's own
+ * per-point source resolver would fire, union'd with the parcel candidates, for the same points. */
+import {
+  countySourcesForPoint, citySourcesForPoint, etjSourcesForPoint, JURISDICTION_SOURCES,
+} from "../src/workspaces/site-planner/lib/jurisdiction.js";
+import { GIS_SOURCES } from "../src/shared/gis/sources.js";
+
+function allGisHostsQueriedFor(lat, lng) {
+  const parcelHosts = candidateCountiesForPoint(lat, lng).map((k) => hostOf(COUNTIES_MAP[k].layerUrl || COUNTIES_MAP[k].serviceUrl));
+  const jurisdictionSources = [
+    ...countySourcesForPoint(lat, lng), ...citySourcesForPoint(lat, lng), ...etjSourcesForPoint(lat, lng),
+  ];
+  const jurisdictionHosts = jurisdictionSources.filter(Boolean).map((s) => hostOf(s.url));
+  return new Set([...parcelHosts, ...jurisdictionHosts].filter(Boolean));
+}
+function hostOf(url) {
+  try { return new URL(url).host; } catch { return null; }
+}
+const TX_HOSTS = new Set([hostOf(GIS_SOURCES.county.serviceUrl), hostOf(GIS_SOURCES.city.serviceUrl)]);
+const CO_HOST = hostOf(GIS_SOURCES.countyCo.serviceUrl);
+
+describe("B1551616 — the COMPLETE GIS lookup fan-out (parcel + county + city + etj), not just parcel", () => {
+  it.each([
+    ["Las Vegas, NV", 36.1167, -115.157],
+    ["Providence, RI", 41.824, -71.412],
+    ["Washington, DC", 38.9072, -77.0369],
+    ["Portland, ME", 43.6591, -70.2568],
+  ])("%s issues NO query to a Texas- or Colorado-specific GIS host, across every role", (label, lat, lng) => {
+    const hosts = allGisHostsQueriedFor(lat, lng);
+    for (const h of TX_HOSTS) expect(hosts.has(h), `${label}: unexpectedly queried Texas host ${h}`).toBe(false);
+    expect(hosts.has(CO_HOST), `${label}: unexpectedly queried Colorado host ${CO_HOST}`).toBe(false);
+  });
+
+  it("REGRESSION FIXTURE — replays the exact reported defect: Las Vegas queries NV parcels and nothing Texan", () => {
+    const hosts = allGisHostsQueriedFor(36.1167, -115.157);
+    expect(hosts.has(hostOf(GIS_SOURCES.county.serviceUrl)), "Texas_County_Boundaries").toBe(false);
+    expect(hosts.has(hostOf(GIS_SOURCES.city.serviceUrl)), "TxGIO statewide city limits").toBe(false);
+    // The parcel query itself is untouched (B1457152's own claim) — this only adds the jurisdiction
+    // roles it didn't look at.
+    expect(candidateCountiesForPoint(36.1167, -115.157)).toEqual(["nv_statewide"]);
+  });
+
+  it("a real Texas point still queries the Texas jurisdiction sources (unchanged behaviour)", () => {
+    const hosts = allGisHostsQueriedFor(29.76, -95.37); // Harris County
+    expect(hosts.has(hostOf(GIS_SOURCES.county.serviceUrl))).toBe(true);
+    expect(hosts.has(hostOf(GIS_SOURCES.city.serviceUrl))).toBe(true);
+  });
+
+  it("a real Colorado point still queries Colorado's own county source (unchanged behaviour)", () => {
+    const srcs = countySourcesForPoint(39.7392, -104.9903); // Denver
+    expect(srcs[0]).toBe(JURISDICTION_SOURCES.countyCo);
+  });
+});

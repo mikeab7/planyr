@@ -130,13 +130,27 @@ describe("NEW-5 · the fallback chain has a Colorado bottom tier", () => {
 });
 
 describe("NEW-5 · county identify is region-routed, and Texas gets the SAME object", () => {
-  it("returns the identical TxDOT source object for Texas and for anywhere outside Colorado", () => {
+  it("returns the identical TxDOT source object for a real Texas point", () => {
     // Identity, not equality: proving Texas resolves to the exact same registry row it always did
     // is the whole "additive, not refactored" claim for this file.
-    for (const [lat, lng] of [[29.7604, -95.3698], [30.0, -95.86], [31.76, -106.485], [45.5, -122.6], [NaN, NaN]]) {
+    for (const [lat, lng] of [[29.7604, -95.3698], [30.0, -95.86], [31.76, -106.485]]) {
       const srcs = countySourcesForPoint(lat, lng);
       expect(srcs).toHaveLength(1);
       expect(srcs[0], `${lat},${lng}`).toBe(JURISDICTION_SOURCES.county);
+    }
+  });
+
+  // ⛔ B1551616 (2026-09-11) — REPLACES the prior version of this test, which asserted that a point
+  // outside Texas AND Colorado (Portland OR; an invalid NaN,NaN point) still resolved to the TxDOT
+  // Texas layer, titled "...for anywhere outside Colorado". That was the reported bug, not a
+  // feature: a Las Vegas NV parcel lookup was firing a live query against
+  // services.arcgis.com/KTcxiTD9dsQw4r7Z/.../Texas_County_Boundaries for a point nowhere near Texas.
+  // A point outside both envelopes now gets NO live county-boundary source — the same honest "no
+  // source configured here" identifyJurisdiction already gives an uncovered ETJ/city point — and
+  // countyAtPoint answers from the nationwide offline floor instead of guessing Texas.
+  it("returns no live source for a point outside both Texas and Colorado (never guesses Texas)", () => {
+    for (const [lat, lng] of [[36.1147, -115.1728], [40.7128, -74.0060], [45.5, -122.6], [NaN, NaN]]) {
+      expect(countySourcesForPoint(lat, lng), `${lat},${lng}`).toEqual([]);
     }
   });
 
