@@ -100,6 +100,9 @@ const ALL_NOTES_FILES = [
   "lib/notesFormatPalette.js",
   // NEW-2 — "Convert table to text": pulls a table's rows out as plain lines / sibling list items.
   "lib/notesTableToText.js",
+  // NEW-1/NEW-2 (B1554272/B1554273) — widening a table column must not squeeze its neighbours,
+  // and a column may never be squeezed below a readable floor. Pure decision + the editor command.
+  "lib/notesTableWidth.js", "lib/notesTableColumns.js",
   // B849105 — orders a conflict's two copies by recency, never by which browser window they came from.
   "lib/notesVersionOrder.js",
   // NOTES-TOOLBAR-STATE (B1382549) — the ONE mechanism every toolbar readout goes through:
