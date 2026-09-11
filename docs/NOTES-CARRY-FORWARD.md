@@ -727,6 +727,52 @@ position**.
     the tell, and the fix a caller reaches for first (grow the SAME padding harder) is provably the
     one that cannot work.
 
+14. **⛔ AN APP-LEVEL SELECTION MODEL THAT `preventDefault`s THE NATIVE CLICK LEAVES A STALE NATIVE
+    CARET BEHIND, AND A GENERIC "DOES THE CARET OWN THIS KEY" CHECK CANNOT TELL STALE FROM LIVE
+    (B1555152, 2026-09-11, owner report — "I clicked after 'Civil Engineer: ', then clicked one of
+    his margin boxes, then pressed Backspace, and it backspaced the Civil Engineer line").**
+    `focusFromMat`'s stage-1 box-select (`B434416`'s two-stage model) correctly calls
+    `e.preventDefault()` so the browser's own click cannot move the caret — but that only stops a
+    NEW caret placement; it does nothing about a caret that was ALREADY sitting in ordinary flow
+    text from an earlier click. `document.activeElement` stays the ProseMirror div and
+    `document.getSelection()` stays anchored at that stale, pre-click position, and
+    `notesKeyScope.js`'s `readCaretScope` — built for a DIFFERENT case (NEW-ARROWS: a box selected,
+    then a genuine NEW click moves the caret into flow text for real) — reads both signals as "yes,
+    a live caret owns this key," so the box's own Delete/Backspace handling (`selectionKeyDown`)
+    silently declines and the keystroke reaches the browser's native handling at the stale
+    position instead. **Measured live, reproduced exactly:** click into real text, single-click an
+    unselected box (correctly selects it, by design — the caret must NOT enter on press 1), press
+    Backspace — a letter vanished from the FLOW TEXT, the box untouched. The fix: blur the editor
+    at the moment a box becomes selected (`editor.commands.blur()`, the same call the box's own
+    Escape handler already makes for the symmetric stage-2→stage-1 transition), so
+    `document.activeElement` genuinely leaves the editor and `readCaretScope` reports no live
+    caret until a real, later click re-establishes one. **The general shape: any time an app-level
+    selection model exists ALONGSIDE the browser's native focus/selection, and a gesture
+    `preventDefault`s the native update without also clearing/moving it, a generic "is there a live
+    caret" check can go stale rather than absent — which reads as present.** Guard:
+    `ui-audit/verify-notes-box-selection.mjs` Attack 11, red-proven against the unfixed code (a
+    literal `git stash` round-trip) before being trusted green.
+    - **⛔ A "MEASURED CAUSE" HANDED IN WITH A BUG REPORT CAN NAME A REAL FACT AND STILL BE THE WRONG
+      EXPLANATION.** The report that produced this item also asserted `user-select: none` on the
+      box's content was "the whole of the flakiness," with real computed-style evidence attached.
+      The computed value was genuinely `none` (inherited from `#root`'s app-wide selection-suppress
+      rule, nothing re-enables it for `.planyr-anchor`) — but live-measured against this Chromium
+      build, a plain click on an ALREADY-selected box (stage 2) places a caret and lets typing edit
+      the box's words with no fix needed: `user-select: none` on a `contenteditable` region blocks
+      drag/double-click word-selection here, not simple click-to-place-caret. Trust a live-measured
+      CSS fact; re-derive the CAUSAL claim built on it before shipping a fix for it — the actual
+      defect was the stale-caret keyscope race above, not the stylesheet.
+    - **⛔ AND THE REQUESTED FIX, TAKEN LITERALLY, WOULD HAVE REOPENED B434416.** The report's own
+      "expected after the fix" asked for a SINGLE click, always, to place the caret directly in the
+      box. `verify-notes-box-selection.mjs`'s Attack 8 exists specifically to prove press 1 selects
+      and does NOT enter — the owner's own B434416/B434418 ask, quoted verbatim in that file, was
+      "click it and I should be able to press Delete," which requires exactly the opposite of "the
+      first click always enters text." Collapsing the two stages would have fixed this report's
+      literal wording while reopening the bug the two-stage model was built to close. Ship the
+      defect that is actually verified (Backspace/Delete on a selected box must never reach the
+      page); flag a literal-wording conflict with a protected, tested design rather than silently
+      building it or silently ignoring the report.
+
 ---
 
 ## 6 · Where the rest lives
