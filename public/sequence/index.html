@@ -3076,7 +3076,7 @@ const barLabelText = (t, field, withYear) => {
   if(!field || field==="none") return "";
   if(field==="start") return fmtBarDate(t.start, withYear);
   if(field==="end")   return fmtBarDate(t.end, withYear);
-  if(field==="owner") return t.responsibleParty || "";
+  if(field==="owner") return ownerDisplayParts(ownerListOf(t)).label;
   if(field==="pct")   return `${t.percentComplete||0}%`;
   return "";
 };
@@ -3963,6 +3963,58 @@ const recascadeWithDrift = (tasks, projName, sink) => {
   return out;
 };
 
+// ── Owner (NEW-1) — an ORDERED LIST of contact names; the FIRST is the accountable one, implicitly
+// (no separate "primary" control to maintain). Older data stored a single string; every reader goes
+// through ownerListOf so a legacy string (or any other stray shape a bad import hands back) coerces
+// the same way everywhere a bare string always has — this file's own tests still pass one, and a
+// real array has to agree with them. Filtering matches ANY owner in the list; grouping, sorting and
+// rollups read the FIRST only (see ownerListOf's callers in evalFieldCondition / the grid+master
+// sort comparators / the dashboard-facing consumers below).
+const OWNER_CAP = 6; // a task can carry a driver plus a couple of co-owners/reviewers who share
+                      // responsibility; past that it stops being an ownership list and starts being
+                      // a mailing list, which is what this field is not for. Enforced in ContactPicker.
+const ownerListOf = t => {
+  const rp = t && t.responsibleParty;
+  const raw = Array.isArray(rp) ? rp : (rp ? [rp] : []);
+  const seen = new Set(); const out = [];
+  raw.forEach(name => {
+    const s = String(name == null ? "" : name).trim();
+    if (!s) return;
+    const k = s.toLowerCase();
+    if (seen.has(k)) return;         // defensive de-dupe — a duplicate name must never double-count
+    seen.add(k); out.push(s);
+  });
+  return out;
+};
+const OWNER_JOIN = "; ";   // NEVER a comma — a comma is a name character (NEW-2) and export/re-import
+                           // must not recreate one owner's junk-contact bug through a joined cell.
+const ownerJoin = list => (Array.isArray(list) ? list : []).join(OWNER_JOIN);
+// First owner + a count of the rest, for the narrow grid/master cell (the column must not widen).
+// `title` carries every name for a hover tooltip, so nothing is lost — it's just not all on screen.
+const ownerDisplayParts = list => {
+  const l = Array.isArray(list) ? list : [];
+  if (!l.length) return { label: "", title: "" };
+  const extra = l.length - 1;
+  return { label: extra > 0 ? `${l[0]} +${extra}` : l[0], title: l.join(", ") };
+};
+// One-time shape fix: a legacy `responsibleParty` string becomes a one-element list; no existing
+// task changes meaning. Naturally idempotent (array in → same array out via ownerListOf's own
+// de-dupe), so — UNLIKE normalizeToV6/V7/V8 below, which each gate on their own _v6/_v7/_v8 flag —
+// this needs no version flag of its own. That matters: every real schedule already carries
+// `_v6:_v7:_v8: true`, so folding this into any of those would silently skip every already-migrated
+// production document, which is exactly the data this feature has to reach.
+const normalizeOwnerLists = d => {
+  if (!d || typeof d !== "object") return d;
+  const projects = {};
+  const srcProjects = (d.projects && typeof d.projects === "object") ? d.projects : {};
+  Object.entries(srcProjects).forEach(([id, proj]) => {
+    if (!proj || typeof proj !== "object") { projects[id] = proj; return; }
+    const srcTasks = Array.isArray(proj.tasks) ? proj.tasks : [];
+    projects[id] = {...proj, tasks: srcTasks.map(t => (t && typeof t === "object") ? {...t, responsibleParty: ownerListOf(t)} : t)};
+  });
+  return {...d, projects};
+};
+
 let NOW = fdLocal(new Date()); // local "today"; refreshed live by App (focus / midnight rollover)
 
 // ── Configurable health automation, v2 (B785744 — replaces the fixed 7-condition rule list from
@@ -4064,7 +4116,21 @@ const evalFieldCondition = (cond, task, NOW, taskById) => {
     }
   }
   if (ftype === "text") {
-    const s = String(task.responsibleParty || "").trim();
+    // "owner" is the one text field today, and it is a LIST (NEW-1) — isBlank/isNotBlank read the
+    // whole list; is/contains match ANY owner in it, not just the first (matches the grid/master
+    // filter contract: a rule for "Owner contains X" must fire for a task where X is a co-owner).
+    if (field === "owner") {
+      const list = ownerListOf(task);
+      const v = String(value || "").trim().toLowerCase();
+      switch (op) {
+        case "isBlank":    return list.length === 0;
+        case "isNotBlank": return list.length > 0;
+        case "is":         return list.some(n => n.toLowerCase() === v);
+        case "contains":   return v ? list.some(n => n.toLowerCase().includes(v)) : false;
+        default: return false;
+      }
+    }
+    const s = String(task[field] || "").trim();
     const v = String(value || "").trim().toLowerCase();
     switch (op) {
       case "isBlank":    return !s;
@@ -4188,7 +4254,7 @@ const evalHealthCondition = (type, days, task, NOW, taskById) => {
       });
     }
     case "noOwner":
-      return !String(task.responsibleParty || "").trim();
+      return ownerListOf(task).length === 0;
     case "complete":
       return pct >= 100;
     default:
@@ -4424,7 +4490,7 @@ const mkt = (id, name, start, dur, parentId=null, health="gray", predecessors=[]
   return {
     id, name, start: safeStart, end: calcEnd(safeStart, safeDur), duration: safeDur, durUnit: "d", durValue: safeDur, predecessors, health,
     percentComplete: health==="green" ? 100 : health==="yellow" ? 40 : 0,
-    parentId, responsibleParty: "", cost: "", notes: [], isExpanded: true,
+    parentId, responsibleParty: [], cost: "", notes: [], isExpanded: true,
     meetingBound: false,   // B816 — new tasks are unbound by default; a task binds to a body via its Meeting cell
   };
 };
@@ -4972,7 +5038,7 @@ const FORMULA_BUILTIN_REFS = [
   { name: "Cost",       aliases: [],                                  get: t => _pfCostRef(t, "cost", "rolledCost") },
   { name: "Budget",     aliases: [],                                  get: t => _pfCostRef(t, "budget", "rolledBudget") },
   { name: "Actual",     aliases: ["Actual / Spend", "Actual Cost"],   get: t => _pfCostRef(t, "actualCost", "rolledActual") },
-  { name: "Owner",      aliases: ["Responsible", "Responsible Party"],get: t => (t.responsibleParty || "") },
+  { name: "Owner",      aliases: ["Responsible", "Responsible Party"],get: t => ownerJoin(ownerListOf(t)) },
   { name: "Health",     aliases: ["Status"],                          get: t => (t.health || "") },
 ];
 const formulaCalendar = () => {
@@ -5562,55 +5628,84 @@ const _cpCanvas = (typeof document !== 'undefined') ? document.createElement('ca
 const _cpCtx = _cpCanvas ? _cpCanvas.getContext('2d') : null;
 function _cpMeasure(text, font) { if (!_cpCtx) return 0; _cpCtx.font = font; return _cpCtx.measureText(text).width; }
 
-/* B443536 — `seeded` says WHERE the opening `value` came from, and it decides the caret.
- * Type-to-edit hands the picker the single character that opened it; select-all would then
- * highlight that character so the NEXT keystroke REPLACES it — typing "Scott" gave "cott",
- * with the search correctly filtered on "S" the whole time (the character was captured and
- * written, then destroyed on keystroke 2, which is why the report says the search sees it).
- * Opening on an EXISTING owner is the opposite case: select-all is right there, so typing a
- * new name replaces the old one instead of appending to it. One flag, two correct behaviours. */
-function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master", seeded = false }) {
+/* ContactPicker — the Owner cell editor. NEW-1: owner is an ORDERED LIST of contacts, shown as
+ * removable, reorderable chips; the FIRST chip is the accountable one (no separate "primary"
+ * control — reordering IS how you correct it). `owners` is always an array (the caller normalizes
+ * legacy data via ownerListOf before it ever reaches here); `onCommit(namesArray, newContacts)`
+ * fires ONCE, when editing ends, with the final ordered list and any brand-new contacts created
+ * along the way (the caller registers each via `addContact`).
+ *
+ * NEW-2 (folded in): a proposed new-contact NAME is guarded at the one place it is actually
+ * created — a comma in it is refused outright (a comma is a chip DELIMITER, never a name
+ * character — see the comma key handling below, which never lets one reach `query` by typing; the
+ * guard here catches a comma that arrives some other way, e.g. a paste) — and a name that is a
+ * PREFIX of an existing contact warns instead of silently minting a near-duplicate, requiring the
+ * same confirming key again once the person has seen the warning.
+ *
+ * NEW-5 (folded in): creating a genuinely new contact is now ONE deliberate action — typing a full
+ * name and pressing Enter (or comma, or clicking the dropdown's "+ Add" row) commits it immediately.
+ * The earlier design asked TWICE (a dropdown affordance, then a separate "Add contact?" modal) —
+ * that second step was pure friction, not caution: the friction lived only on the KEYBOARD path
+ * (a mouse click on the dropdown row was already one action), which is the inconsistency that made
+ * it feel like the confirmation kept reappearing. One path now, for both input methods.
+ *
+ * NEW-4 (folded in): position tracking is a rAF loop while the picker is open, not a scroll/resize
+ * event listener — a `position:fixed` popup portaled to the iframe's own body cannot be kept
+ * attached to its cell by any listener that can be starved or miss an event source; re-measuring
+ * every frame is what "no perceptible lag" actually requires, on the SAME axis whether the scroll
+ * came from a wheel, a scrollbar drag, a key, or a resize. The loop also flips the popup ABOVE the
+ * cell when there is no room below, and closes the editor outright if the cell scrolls out of its
+ * own scroll container — never leaving a popup floating over a frozen header or hanging off-grid.
+ */
+function ContactPicker({ owners, seedText, contacts, onCommit, onCancel, variant = "master", addContact }) {
   const isGrid = variant === "grid";
-  const [query, setQuery] = React.useState(value || '');
+  const initialOwners = React.useMemo(() => (Array.isArray(owners) ? owners : (owners ? [owners] : [])), []); // seed once
+  const [chips, setChips] = React.useState(initialOwners);
+  const [query, setQuery] = React.useState(seedText || '');
   const [highlight, setHighlight] = React.useState(-1);
-  const [pos, setPos] = React.useState(null);      // portal dropdown rect {left,top,width}
-  const [ghost, setGhost] = React.useState(null);  // {left, fontSize, fontFamily, fontWeight}
-  const [pendingNew, setPendingNew] = React.useState(null); // NEW-1 — name awaiting "create?" confirmation
+  const [pos, setPos] = React.useState(null);       // popup rect {left,top,width,above}
+  const [ghost, setGhost] = React.useState(null);   // {left, fontSize, fontFamily, fontWeight}
+  const [warn, setWarn] = React.useState(null);     // {kind:'comma'|'prefix'|'cap', text}
+  const [dragIdx, setDragIdx] = React.useState(null);
+  const lastPrefixWarnedFor = React.useRef(null);
+  const newContactsRef = React.useRef([]);          // collected across the whole editing session
   const inputRef = React.useRef(null);
   const wrapRef = React.useRef(null);
+  const closedRef = React.useRef(false);            // guards against a double-commit (rAF close + blur)
 
   React.useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
     el.focus();
-    if (seeded) { const n = el.value.length; el.setSelectionRange(n, n); }  // caret AFTER the typed char
-    else el.select();                                                       // replace the existing owner
+    const n = el.value.length; el.setSelectionRange(n, n);   // caret after any seeded character
   }, []);
 
+  const chipSet = React.useMemo(() => new Set(chips.map(c => c.toLowerCase())), [chips]);
   const q = query.trim().toLowerCase();
   const suggestions = (q
-    ? contacts.filter(c => c.name.toLowerCase().includes(q) || (c.email||'').toLowerCase().includes(q))
-    : contacts
+    ? contacts.filter(c => !chipSet.has(c.name.toLowerCase()) && (c.name.toLowerCase().includes(q) || (c.email||'').toLowerCase().includes(q)))
+    : contacts.filter(c => !chipSet.has(c.name.toLowerCase()))
   ).slice(0, 6);
 
   const trimmed = query.trim();
   const isNewName = trimmed.length > 0 && !contacts.some(c => c.name.toLowerCase() === trimmed.toLowerCase());
+  const atCap = chips.length >= OWNER_CAP;
   const totalItems = suggestions.length + (isNewName ? 1 : 0);
 
   // Inline prediction = first contact whose name starts with what's typed (prefix match)
   const prediction = query
-    ? contacts.find(c => c.name.toLowerCase().startsWith(query.toLowerCase()) && c.name.length > query.length)
+    ? contacts.find(c => c.name.toLowerCase().startsWith(query.toLowerCase()) && c.name.length > query.length && !chipSet.has(c.name.toLowerCase()))
     : null;
   const ghostText = prediction ? prediction.name.slice(query.length) : '';
 
   React.useEffect(() => { setHighlight(h => h >= totalItems ? -1 : h); }, [totalItems]);
+  React.useEffect(() => { lastPrefixWarnedFor.current = null; setWarn(w => (w && w.kind === "prefix") ? null : w); }, [query]);
 
-  // Position portal dropdown under the input + compute the ghost text offset
-  const reposition = React.useCallback(() => {
+  // Compute the ghost-text offset (font-metrics dependent; only needs the input's OWN metrics, so
+  // it is fine to recompute on every query change rather than every frame).
+  React.useLayoutEffect(() => {
     const el = inputRef.current;
     if (!el) return;
-    const r = el.getBoundingClientRect();
-    setPos({ left: r.left, top: r.bottom + 2, width: Math.max(220, r.width) });
     const cs = window.getComputedStyle(el);
     const fontFamily = cs.fontFamily, fontSize = cs.fontSize, fontWeight = cs.fontWeight || '400';
     const padL = parseFloat(cs.paddingLeft) || 0;
@@ -5619,80 +5714,125 @@ function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master"
     setGhost({ left: padL + bordL + w, fontSize, fontFamily, fontWeight });
   }, [query]);
 
-  React.useLayoutEffect(() => { reposition(); }, [reposition]);
+  /* NEW-4 — track the cell every frame while the picker is open, and close (committing whatever is
+   * final) the instant the cell scrolls out of its own scroll container. A capture-phase scroll
+   * listener depends on the event actually bubbling THROUGH something this component's ancestors
+   * can see, and measured live it does not always fire for a nested grid scroller inside the
+   * iframe — a rAF loop has no event to miss: it just re-reads the real DOM position every frame,
+   * so it cannot desync from whatever the browser is actually painting. */
   React.useEffect(() => {
-    const fn = () => reposition();
-    window.addEventListener('scroll', fn, true);
-    window.addEventListener('resize', fn);
-    return () => { window.removeEventListener('scroll', fn, true); window.removeEventListener('resize', fn); };
-  }, [reposition]);
-
-  /* NEW-1 — creating a person is a DECISION, so it is asked rather than assumed.
-   * This field used to auto-add any unrecognised text as a contact, silently: a typo became a
-   * person that then looked exactly as real as one meant on purpose (the registry really has held
-   * `Can give up trailer parlking` and a bare email address this way).
-   *
-   * ⛔ WHY "DECLINE" MEANS "DON'T COMMIT THE NAME EITHER", which is not arbitrary: `ensureContacts`
-   * (the load pipeline) re-derives a contact for EVERY task owner name missing from the registry,
-   * on every load. So committing an owner without its contact does not avoid creating the contact —
-   * it just defers it to the next reload, where nobody is asked. The owner field and the registry
-   * are already one decision; this makes that visible instead of changing it. Confirm = assign AND
-   * create; decline = neither, and you are returned to the text to fix it.
-   *
-   * Only genuinely-new text asks. An exact match, a pick from the list, and the ghost-prefix
-   * completion all commit straight through — a guard that nags on a normal selection gets switched
-   * off, and then it has made things worse. */
-  function createTyped() { onCommit(trimmed, { name: trimmed, email: '' }); }
-  function commitTyped() {
-    if (!trimmed) { onCommit(''); return; }
-    const existing = contacts.find(c => c.name.toLowerCase() === trimmed.toLowerCase());
-    if (existing) { onCommit(existing.name); return; }
-    setPendingNew(trimmed);   // ask first — nothing is written yet
-  }
-  // Decline: keep the editor open with the TYPED TEXT INTACT so a typo can be corrected rather than
-  // retyped. `query` is controlled state and is never touched here — the text cannot be truncated on
-  // the way back, which is the failure this field just shipped a fix for.
-  function declineNew() {
-    setPendingNew(null);
-    requestAnimationFrame(() => {
+    let raf = null;
+    const tick = () => {
       const el = inputRef.current;
-      if (el) { el.focus(); const n = el.value.length; el.setSelectionRange(n, n); }
-    });
+      if (!el) { raf = requestAnimationFrame(tick); return; }
+      const r = el.getBoundingClientRect();
+      const bounds = wrapRef.current && wrapRef.current.closest('[data-scroll-bounds]');
+      if (bounds) {
+        const b = bounds.getBoundingClientRect();
+        if (r.bottom < b.top || r.top > b.bottom || r.right < b.left || r.left > b.right) {
+          finishEditing();   // scrolled fully out of the grid's own viewport — never float over the header
+          return;
+        }
+      }
+      const popupH = Math.min(260, 40 + totalItems * 40);   // rough estimate; only decides which side to open on
+      const roomBelow = window.innerHeight - r.bottom;
+      const above = roomBelow < popupH + 8 && r.top > popupH + 8;
+      const width = Math.max(240, r.width);
+      setPos(p => {
+        const top = above ? Math.round(r.top - popupH - 2) : Math.round(r.bottom + 2);
+        const left = Math.round(r.left);
+        if (p && p.left === left && p.top === top && p.width === width && p.above === above) return p; // skip no-op renders
+        return { left, top, width, above };
+      });
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => { if (raf) cancelAnimationFrame(raf); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalItems]);
+
+  function finishEditing() {
+    if (closedRef.current) return;
+    closedRef.current = true;
+    // A recognized leftover (typed but never explicitly committed) is kept rather than dropped —
+    // an unrecognized one is discarded silently (NEVER auto-created on blur/close: that is the
+    // original NEW-1 protection this redesign keeps in full).
+    let finalChips = chips;
+    if (trimmed) {
+      const existing = contacts.find(c => c.name.toLowerCase() === trimmed.toLowerCase());
+      if (existing && !chipSet.has(existing.name.toLowerCase())) finalChips = [...chips, existing.name];
+    }
+    onCommit(finalChips, newContactsRef.current);
   }
-  function selectItem(i) { if (i < suggestions.length) onCommit(suggestions[i].name); else commitTyped(); }
+
+  function cancelEditing() {
+    if (closedRef.current) return;
+    closedRef.current = true;
+    onCancel();
+  }
+
+  function addChip(name, newContact) {
+    const n = String(name || "").trim();
+    if (!n) return;
+    if (chipSet.has(n.toLowerCase())) { setQuery(""); setWarn(null); return; }   // already an owner — quiet no-op
+    if (atCap) { setWarn({ kind: "cap", text: `Owner is capped at ${OWNER_CAP} people — remove one to add another.` }); return; }
+    setChips(cs => [...cs, n]);
+    if (newContact) newContactsRef.current = [...newContactsRef.current, newContact];
+    setQuery(""); setWarn(null); setHighlight(-1);
+    requestAnimationFrame(() => inputRef.current && inputRef.current.focus());
+  }
+
+  function removeChip(i) { setChips(cs => cs.filter((_, idx) => idx !== i)); }
+
+  function reorderChips(from, to) {
+    if (from === to || from == null || to == null) return;
+    setChips(cs => { const next = [...cs]; const [m] = next.splice(from, 1); next.splice(to, 0, m); return next; });
+  }
+
+  // The ONE deliberate action that mints a new contact (NEW-5) — reached from Enter/comma on the
+  // keyboard AND from clicking the dropdown's "+ Add" row, so both input methods behave alike.
+  function attemptCreate(name) {
+    if (name.includes(",")) {
+      setWarn({ kind: "comma", text: `A contact name can't contain a comma — that's how two people become one. Use comma or Enter to add each person separately.` });
+      return;
+    }
+    const prefixHit = contacts.find(c => c.name.toLowerCase().startsWith(name.toLowerCase()) && c.name.length > name.length);
+    if (prefixHit && lastPrefixWarnedFor.current !== name.toLowerCase()) {
+      lastPrefixWarnedFor.current = name.toLowerCase();
+      setWarn({ kind: "prefix", text: `"${prefixHit.name}" already exists — press Enter again to add "${name}" anyway, or → to use that instead.` });
+      return;
+    }
+    addChip(name, { name, email: "" });
+  }
+
+  function selectItem(i) { if (i < suggestions.length) addChip(suggestions[i].name); else attemptCreate(trimmed); }
   function acceptGhost() {
     if (!prediction) return;
-    const full = prediction.name;
-    setQuery(full);
-    requestAnimationFrame(() => { const el = inputRef.current; if (el) el.setSelectionRange(full.length, full.length); });
+    addChip(prediction.name);
   }
 
-  /* Outside click commits typed text (don't lose work). Clicks in the portal dropdown are ignored.
-   * NEW-1 — clicking away with UNRECOGNISED text routes through commitTyped, so it now raises the
-   * same question instead of creating a person behind your back. The editor stays open rather than
-   * discarding: silently committing would defeat the whole item, and silently discarding would
-   * throw away typing. Recognised text and an empty field commit on blur exactly as before. */
+  /* Outside click finishes editing (commits the final chip list). Clicks inside the popup are
+   * ignored — they are handled by the popup's own handlers. */
   React.useEffect(() => {
     function onDocMouseDown(e) {
       if (wrapRef.current && wrapRef.current.contains(e.target)) return;
       if (e.target.closest && e.target.closest('[data-contact-dd]')) return;
-      if (pendingNew) return;   // already asking — don't re-ask on every stray click
-      commitTyped();
+      finishEditing();
     }
     document.addEventListener('mousedown', onDocMouseDown);
     return () => document.removeEventListener('mousedown', onDocMouseDown);
-  }, [query, pendingNew]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, chips]);
 
   function onKeyDown(e) {
-    /* NEW-1 — while the "add as a new contact?" question is up it owns Enter and Escape, so the
-     * choice is deliberate either way. Escape answers NO and returns to the text (it does not
-     * cancel the edit); a second Escape then cancels as it always has. */
-    if (pendingNew) {
-      if (e.key === 'Enter')  { e.preventDefault(); e.stopPropagation(); createTyped(); return; }
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); declineNew(); return; }
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      if (warn) { setWarn(null); lastPrefixWarnedFor.current = null; return; }   // dismiss the warning, keep editing
+      if (query) { setQuery(""); return; }   // clear a typed-but-unconfirmed fragment first — the
+                                              // chips already added THIS session are not "pending"
+      cancelEditing();   // nothing left to clear — revert the WHOLE session back to the original owners
       return;
     }
-    if (e.key === 'Escape') { e.stopPropagation(); onCancel(); return; }
     if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight(h => Math.min(h + 1, totalItems - 1)); return; }
     if (e.key === 'ArrowUp')   { e.preventDefault(); setHighlight(h => Math.max(h - 1, -1)); return; }
     if (e.key === 'ArrowRight') {
@@ -5701,15 +5841,28 @@ function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master"
       if (ghostText && atEnd) { e.preventDefault(); acceptGhost(); }
       return;
     }
-    if (e.key === 'Enter' || e.key === 'Tab') {
-      e.stopPropagation();
-      if (e.key === 'Enter') e.preventDefault();
-      if (highlight >= 0 && highlight < totalItems) selectItem(highlight);
+    if (e.key === 'Backspace' && !query && chips.length) { e.preventDefault(); removeChip(chips.length - 1); return; }
+    if (e.key === ',') {
+      e.preventDefault(); e.stopPropagation();
+      if (trimmed) { if (highlight >= 0 && highlight < totalItems) selectItem(highlight); else attemptCreate(trimmed); }
+      return;
+    }
+    // Tab always FINISHES editing outright (same as clicking away) — Tab conventionally means
+    // "leave this field," so it never leaves the popup hanging open the way Enter deliberately
+    // does. Any not-yet-confirmed NEW name is discarded exactly like a blur (finishEditing only
+    // folds in an EXACT match — creating a brand-new contact still needs its own Enter first, so
+    // Tab can never be the single keystroke that mints one).
+    if (e.key === 'Tab') { e.stopPropagation(); finishEditing(); return; }
+    if (e.key === 'Enter') {
+      e.stopPropagation(); e.preventDefault();
+      if (!trimmed) { finishEditing(); return; }   // Enter on an empty input = done editing
+      if (highlight >= 0 && highlight < totalItems) { selectItem(highlight); return; }
       // Only accept the prefix prediction when the typed text isn't ALREADY an exact contact —
-      // typing "Sam" exactly (with "Samuel Jones" also on file) must commit Sam, not the longer
-      // ghost. isNewName is false for an exact match → fall through to commitTyped (exact resolve).
-      else if (ghostText && prediction && isNewName) onCommit(prediction.name);
-      else commitTyped();
+      // typing "Sam" exactly (with "Samuel Jones" also on file) must add Sam, not the longer ghost.
+      if (ghostText && prediction && isNewName) { addChip(prediction.name); return; }
+      const existing = contacts.find(c => c.name.toLowerCase() === trimmed.toLowerCase());
+      if (existing) { addChip(existing.name); return; }
+      attemptCreate(trimmed);
       return;
     }
   }
@@ -5717,53 +5870,61 @@ function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master"
   const masterInputStyle = { display:'block', width:'100%', height:'18px', border:'none', borderBottom:'1.5px solid var(--blue)',
     outline:'none', background:'transparent', color:'var(--txt)', fontSize:12, fontFamily:'inherit', padding:'0 2px' };
 
-  /* NEW-1 — the question. One plain sentence, in the space the dropdown already occupies, so it
-   * reads as the field answering back rather than a dialog box (PANEL-BREVITY: no heading, no
-   * explanatory paragraph). "No" is a real button AND the Escape key AND is what a stray click
-   * leaves you on — saying no must never be the hard path. */
-  const confirmNew = (pendingNew && pos) ? ReactDOM.createPortal(
-    <div data-contact-dd data-contact-confirm {...MENU_STOPS_GRID} style={{position:'fixed', left:pos.left, top:pos.top, width:pos.width, zIndex:100000,
-      background:'#fff', border:'1px solid var(--bd2)', borderRadius:7, boxShadow:'0 6px 20px rgba(0,0,0,.13)', padding:'9px 11px'}}>
-      <div style={{fontSize:12, color:'var(--txt)', lineHeight:1.4, marginBottom:8}}>
-        No match — add "<span style={{fontWeight:600}}>{pendingNew}</span>" as a new contact?
-      </div>
-      <div style={{display:'flex', gap:7}}>
-        <button data-contact-confirm-yes onMouseDown={e=>{ e.preventDefault(); createTyped(); }}
-          style={{flex:1, fontSize:11.5, fontWeight:600, padding:'5px 0', borderRadius:5, cursor:'pointer',
-            border:'1px solid var(--blue)', background:'var(--blue)', color:'#fff'}}>Add contact</button>
-        <button data-contact-confirm-no onMouseDown={e=>{ e.preventDefault(); declineNew(); }}
-          style={{flex:1, fontSize:11.5, padding:'5px 0', borderRadius:5, cursor:'pointer',
-            border:'1px solid var(--bd2)', background:'var(--surf)', color:'var(--txt)'}}>Keep editing</button>
-      </div>
-    </div>, document.body) : null;
-
-  const dropdown = (!pendingNew && totalItems > 0 && pos) ? ReactDOM.createPortal(
-    <div data-contact-dd {...MENU_STOPS_GRID} style={{position:'fixed', left:pos.left, top:pos.top, width:pos.width, zIndex:100000,
+  const popup = pos ? ReactDOM.createPortal(
+    <div data-contact-dd data-owner-popup {...MENU_STOPS_GRID} style={{position:'fixed', left:pos.left, top:pos.top, width:pos.width, zIndex:100000,
       background:'#fff', border:'1px solid var(--bd2)', borderRadius:7, boxShadow:'0 6px 20px rgba(0,0,0,.13)',
-      overflow:'hidden', maxHeight:220, overflowY:'auto'}}>
-      {suggestions.map((c, i) => (
-        <div key={c.id}
-          onMouseEnter={()=>setHighlight(i)}
-          onMouseDown={e=>{ e.preventDefault(); onCommit(c.name); }}
-          style={{display:'flex', alignItems:'center', gap:8, padding:'7px 10px', cursor:'pointer',
-            background: highlight===i ? '#f0f2ff' : 'transparent'}}>
-          <div style={{width:24,height:24,borderRadius:'50%',background:avatarColor(c.name),
-            display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,fontWeight:700,color:'#fff',flexShrink:0}}>{getInitials(c.name)}</div>
-          <div style={{minWidth:0}}>
-            <div style={{fontSize:12,color:'var(--txt)',fontWeight:500,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{c.name}</div>
-            {c.email && <div style={{fontSize:10,color:'var(--mut)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{c.email}</div>}
-          </div>
+      display:'flex', flexDirection: pos.above ? 'column-reverse' : 'column', overflow:'hidden', maxHeight:280}}>
+      {chips.length > 0 && (
+        <div data-owner-chips style={{display:'flex', flexWrap:'wrap', gap:5, padding:'8px 9px', borderBottom:'1px solid var(--bd)'}}>
+          {chips.map((name, i) => (
+            <span key={name + i} data-owner-chip draggable
+              onDragStart={e=>{ e.dataTransfer.effectAllowed='move'; setDragIdx(i); }}
+              onDragOver={e=>{ e.preventDefault(); e.dataTransfer.dropEffect='move'; }}
+              onDrop={e=>{ e.preventDefault(); reorderChips(dragIdx, i); setDragIdx(null); }}
+              onDragEnd={()=>setDragIdx(null)}
+              title={i === 0 ? "Accountable owner — drag another chip here to change" : "Drag to reorder"}
+              style={{display:'inline-flex', alignItems:'center', gap:5, padding:'2px 4px 2px 8px', borderRadius:12,
+                background: i === 0 ? '#eef2ff' : '#f3f4f6', border: i === 0 ? '1px solid #c7d2fe' : '1px solid var(--bd2)',
+                fontSize:11.5, color:'var(--txt)', cursor:'grab', opacity: dragIdx===i ? 0.4 : 1}}>
+              {name}
+              <span data-owner-chip-remove onMouseDown={e=>{ e.preventDefault(); e.stopPropagation(); removeChip(i); }}
+                style={{display:'inline-flex', alignItems:'center', justifyContent:'center', width:14, height:14, borderRadius:'50%',
+                  color:'var(--mut)', cursor:'pointer', fontSize:11, lineHeight:1}}>×</span>
+            </span>
+          ))}
         </div>
-      ))}
-      {isNewName && (
-        <div onMouseEnter={()=>setHighlight(suggestions.length)}
-          onMouseDown={e=>{ e.preventDefault(); createTyped(); }}
-          style={{display:'flex', alignItems:'center', gap:7, padding:'7px 10px', cursor:'pointer',
-            borderTop: suggestions.length ? '1px solid var(--bd)' : 'none',
-            color:'var(--blue)', fontSize:11, fontWeight:500,
-            background: highlight===suggestions.length ? '#f0f5ff' : 'transparent'}}>
-          <span style={{fontSize:14,lineHeight:1}}>+</span>
-          <span style={{whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>Add "<span style={{fontWeight:600}}>{trimmed}</span>" as new contact</span>
+      )}
+      {warn && (
+        <div data-owner-warn style={{fontSize:11, color: warn.kind === "cap" ? "var(--mut)" : "#b45309", background: warn.kind === "cap" ? "var(--surf)" : "#fffbeb",
+          padding:'7px 10px', lineHeight:1.4, borderBottom:'1px solid var(--bd)'}}>{warn.text}</div>
+      )}
+      {(suggestions.length > 0 || isNewName) && (
+        <div style={{overflowY:'auto', maxHeight:220}}>
+          {suggestions.map((c, i) => (
+            <div key={c.id}
+              onMouseEnter={()=>setHighlight(i)}
+              onMouseDown={e=>{ e.preventDefault(); addChip(c.name); }}
+              style={{display:'flex', alignItems:'center', gap:8, padding:'7px 10px', cursor:'pointer',
+                background: highlight===i ? '#f0f2ff' : 'transparent'}}>
+              <div style={{width:24,height:24,borderRadius:'50%',background:avatarColor(c.name),
+                display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,fontWeight:700,color:'#fff',flexShrink:0}}>{getInitials(c.name)}</div>
+              <div style={{minWidth:0}}>
+                <div style={{fontSize:12,color:'var(--txt)',fontWeight:500,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{c.name}</div>
+                {c.email && <div style={{fontSize:10,color:'var(--mut)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{c.email}</div>}
+              </div>
+            </div>
+          ))}
+          {isNewName && (
+            <div data-owner-add-new onMouseEnter={()=>setHighlight(suggestions.length)}
+              onMouseDown={e=>{ e.preventDefault(); attemptCreate(trimmed); }}
+              style={{display:'flex', alignItems:'center', gap:7, padding:'7px 10px', cursor:'pointer',
+                borderTop: suggestions.length ? '1px solid var(--bd)' : 'none',
+                color:'var(--blue)', fontSize:11, fontWeight:500,
+                background: highlight===suggestions.length ? '#f0f5ff' : 'transparent'}}>
+              <span style={{fontSize:14,lineHeight:1}}>+</span>
+              <span style={{whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>Add "<span style={{fontWeight:600}}>{trimmed}</span>" as new contact</span>
+            </div>
+          )}
         </div>
       )}
     </div>, document.body) : null;
@@ -5773,11 +5934,9 @@ function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master"
       <input {...NO_AUTOFILL} ref={inputRef} value={query}
         className={isGrid ? "ei" : undefined}
         style={isGrid ? undefined : masterInputStyle}
-        /* NEW-1 — editing the text IS "keep editing": any change dismisses the question rather than
-           leaving it up quoting a name that is no longer what the field says. */
-        onChange={e=>{ if (pendingNew) setPendingNew(null); setQuery(e.target.value); }}
+        onChange={e=>{ setQuery(e.target.value); }}
         onKeyDown={onKeyDown}
-        placeholder="Type a name…" />
+        placeholder={chips.length ? "Add another…" : "Type a name…"} />
       {ghostText && ghost && (
         <span aria-hidden style={{position:'absolute', left:ghost.left, top:0, height:'100%',
           display:'flex', alignItems:'center', pointerEvents:'none', whiteSpace:'pre',
@@ -5785,8 +5944,7 @@ function ContactPicker({ value, contacts, onCommit, onCancel, variant = "master"
           color:'var(--mut)', opacity:0.5, overflow:'hidden',
           maxWidth:`calc(100% - ${ghost.left}px - 4px)`}}>{ghostText}</span>
       )}
-      {dropdown}
-      {confirmNew}
+      {popup}
     </div>
   );
 }
@@ -5817,7 +5975,11 @@ function ContactsPanel({ data, setData, onClose }) {
       if (oldName && oldName !== nm) {
         projects = {};
         Object.entries(d.projects).forEach(([pid, proj]) => {
-          projects[pid] = {...proj, tasks: (proj.tasks||[]).map(t => t.responsibleParty === oldName ? {...t, responsibleParty: nm} : t)};
+          projects[pid] = {...proj, tasks: (proj.tasks||[]).map(t => {
+            const list = ownerListOf(t);
+            if (!list.includes(oldName)) return t;
+            return {...t, responsibleParty: list.map(n => n === oldName ? nm : n)};
+          })};
         });
       }
       return {...d, settings, projects};
@@ -5834,7 +5996,11 @@ function ContactsPanel({ data, setData, onClose }) {
       if (goneName) {
         projects = {};
         Object.entries(d.projects).forEach(([pid, proj]) => {
-          projects[pid] = {...proj, tasks: (proj.tasks||[]).map(t => t.responsibleParty === goneName ? {...t, responsibleParty: ""} : t)};
+          projects[pid] = {...proj, tasks: (proj.tasks||[]).map(t => {
+            const list = ownerListOf(t);
+            if (!list.includes(goneName)) return t;
+            return {...t, responsibleParty: list.filter(n => n !== goneName)};
+          })};
         });
       }
       return {...d, settings, projects};
@@ -6589,7 +6755,10 @@ function SuggestionsView({data, updateTask, setData, rows, setRows, loading, onC
 
   const propStatus = propTarget ? propTarget.health : (target ? target.health : 'gray');
   const propEnd = propTarget ? propTarget.end : (target ? target.end : '');
-  const propOwner = propTarget ? (propTarget.responsibleParty || '') : (target ? (target.responsibleParty || '') : '');
+  // NEW-1 — Owner is a list now; the automation review panel still edits it as ONE proposed value
+  // (approving a suggestion REPLACES the whole owner list with whatever is typed here) — shown
+  // joined so an existing multi-owner task isn't misleadingly displayed as having just one.
+  const propOwner = ownerJoin(propTarget ? ownerListOf(propTarget) : (target ? ownerListOf(target) : []));
   const endChanged = target && propEnd && propEnd !== target.end;
   const endDelta = endChanged ? difBD(target.end, propEnd) : 0;
   const startChanged = target && propTarget && propTarget.start !== target.start;
@@ -6631,7 +6800,7 @@ function SuggestionsView({data, updateTask, setData, rows, setRows, loading, onC
       const p = d.projects[pid];
       const tasks = p.tasks.slice();
       const newId = tasks.reduce((m, t) => Math.max(m, +t.id || 0), 0) + 1;
-      const t = { id: newId, name: newTask.name, start: newTask.start, end: newTask.end, duration: newTask.duration, predecessors: newTask.predecessors, health: newTask.health, percentComplete: 0, parentId: newTask.parentId, responsibleParty: newTask.responsibleParty || '', notes: noteArr, isExpanded: true };
+      const t = { id: newId, name: newTask.name, start: newTask.start, end: newTask.end, duration: newTask.duration, predecessors: newTask.predecessors, health: newTask.health, percentComplete: 0, parentId: newTask.parentId, responsibleParty: newTask.responsibleParty ? [newTask.responsibleParty] : [], notes: noteArr, isExpanded: true };
       let insertIdx = tasks.length;
       if (newTask.parentId != null) {
         // Prefer right after the predecessor it depends on, when that predecessor is a sibling under
@@ -6672,6 +6841,10 @@ function SuggestionsView({data, updateTask, setData, rows, setRows, loading, onC
     const merged = noteTxt
       ? { ...p, notes: [...existingNotes, { id: Date.now(), date: ymd, text: noteTxt }] }
       : { ...p };
+    // NEW-1 — a suggested Owner is edited here as ONE proposed value (see propOwner above), but the
+    // real task's field is a LIST — wrap it, or approving a suggestion would overwrite the array
+    // with a bare string. Approving REPLACES the whole owner list, same as any other approved field.
+    if ('responsibleParty' in merged) merged.responsibleParty = merged.responsibleParty ? [merged.responsibleParty] : [];
     undoRef.current = { kind: 'approve', pid, tasks: JSON.parse(JSON.stringify(proj.tasks)), row, idx: activeIdx };
     try { updateTask(targetId, merged, pid); }
     catch (e) { console.error("updateTask failed:", e); return; }
@@ -6787,7 +6960,7 @@ function SuggestionsView({data, updateTask, setData, rows, setRows, loading, onC
                 <div className="rev-cell rev-date">{rfmt(ss.start)}{mv ? <span className="rev-delta">{mv.dStart >= 0 ? "+" : ""}{mv.dStart}d</span> : null}</div>
                 <div className="rev-cell rev-date">{rfmt(ss.end)}{mv ? <span className="rev-delta">{mv.dEnd >= 0 ? "+" : ""}{mv.dEnd}d</span> : null}</div>
                 <div className="rev-cell">{renderStatus(t.health)}</div>
-                <div className="rev-cell rev-owner"><span className="nm">{t.responsibleParty || ""}</span></div>
+                <div className="rev-cell rev-owner"><span className="nm">{ownerJoin(ownerListOf(t))}</span></div>
                 <div className="rev-cell"/>
               </div>
               {isTgt ? (
@@ -7643,12 +7816,14 @@ function App() {
         const seen = new Set();
         Object.values(d.projects).forEach(proj => {
           ((proj && Array.isArray(proj.tasks)) ? proj.tasks : []).forEach(t => {
-            const rp = String((t && t.responsibleParty) || '').trim();
-            if (rp && !existingNames.has(rp.toLowerCase()) && !seen.has(rp.toLowerCase())) {
-              existing.push({ id: Date.now() + existing.length + seen.size, name: rp, email: '' });
-              existingNames.add(rp.toLowerCase());
-              seen.add(rp.toLowerCase());
-            }
+            // NEW-1 — owner is a LIST now; derive a contact for every name in it, not just one.
+            ownerListOf(t).forEach(rp => {
+              if (rp && !existingNames.has(rp.toLowerCase()) && !seen.has(rp.toLowerCase())) {
+                existing.push({ id: Date.now() + existing.length + seen.size, name: rp, email: '' });
+                existingNames.add(rp.toLowerCase());
+                seen.add(rp.toLowerCase());
+              }
+            });
           });
         });
         return {...d, settings: {...d.settings, contacts: existing}};
@@ -7657,7 +7832,7 @@ function App() {
       // can't call normalizeIds/ensureContacts directly — those are scoped to this effect). Set
       // synchronously on mount, before the first await, so it's ready before any user import/restore.
       applyLoadedDataRef.current = (parsed) => {
-        let d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(parsed)))))));
+        let d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(parsed))))))));
         d._pinnedClean = true;
         HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
         const driftFound = [];   // B836 — same drift surfacing on import / version-restore
@@ -7674,7 +7849,7 @@ function App() {
         // __PLANAR_DATA__ is the seed used only when Supabase has no record yet.
         const r = await window.storage.get("hs-v1");
         if (r) {
-          const d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(JSON.parse(r.value))))))));
+          const d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(JSON.parse(r.value)))))))));
           // NOTE: a narrow viewport forces the GRID layout at RENDER time (see the body switch),
           // never by mutating the persisted `view` — baking "grid" into saved data let one phone
           // session overwrite the desktop's saved split/gantt preference across every device.
@@ -7697,7 +7872,7 @@ function App() {
         }
         // First load (Supabase empty) — seed from inline data or SEED constant
         const seed = window.__PLANAR_DATA__ || SEED;
-        const d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(seed)))))));
+        const d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(seed))))))));
           // Enforce predecessor relationships on load (seed data — no stale pins)
           HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
           d._pinnedClean = true;
@@ -7710,7 +7885,7 @@ function App() {
         else if (window.__planarAuthRequired) setAuthRequired(true);
         setData(resolveViewState(d));
       } catch {
-        const d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(window.__PLANAR_DATA__ || SEED)))))));
+        const d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(window.__PLANAR_DATA__ || SEED))))))));
         setOfflineFallback(true);
         setData(resolveViewState(d));
       }
@@ -9642,7 +9817,7 @@ function App() {
   const exportHTML = () => {
     const rows = Object.values(data.projects).map(p =>
       `<h2>${escapeHtml(p.name)}</h2><table><tr><th>ID</th><th>Task</th><th>Start</th><th>End</th><th>Dur</th><th>Status</th><th>%</th><th>Owner</th></tr>` +
-      p.tasks.map(t => { const h = HEALTH[t.health] || HEALTH.gray; const pct = t.health==="green" ? 100 : (t.percentComplete||0); return `<tr><td>${escapeHtml(t.id)}</td><td>${escapeHtml(t.name)}</td><td>${escapeHtml(fmtD(t.start))}</td><td>${escapeHtml(fmtD(t.end))}</td><td>${Number(t.duration)||0}d</td><td style="color:${escapeHtml(h.dot)}">${escapeHtml(h.label)}</td><td>${pct}%</td><td>${escapeHtml(t.responsibleParty||"—")}</td></tr>`; }).join("") +
+      p.tasks.map(t => { const h = HEALTH[t.health] || HEALTH.gray; const pct = t.health==="green" ? 100 : (t.percentComplete||0); return `<tr><td>${escapeHtml(t.id)}</td><td>${escapeHtml(t.name)}</td><td>${escapeHtml(fmtD(t.start))}</td><td>${escapeHtml(fmtD(t.end))}</td><td>${Number(t.duration)||0}d</td><td style="color:${escapeHtml(h.dot)}">${escapeHtml(h.label)}</td><td>${pct}%</td><td>${escapeHtml(ownerJoin(ownerListOf(t))||"—")}</td></tr>`; }).join("") +
       `</table>`).join("");
     // Title from the real data, not a hardcoded legacy project name / old brand:
     // a single project uses its name, multiple use the Planyr brand.
@@ -11924,7 +12099,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
         case 'duration': val = `${t.duration}d`; break;
         case 'health': val = HEALTH[t.health]?.label||''; break;
         case 'percentComplete': val = `${t.percentComplete||0}%`; break;
-        case 'responsibleParty': val = t.responsibleParty||''; break;
+        case 'responsibleParty': val = ownerDisplayParts(ownerListOf(t)).label; break;
         case 'predecessors': val = fmtPreds(normPreds(t.predecessors)); break;
         case 'successors': val = String((succMap[t.id]||[]).length>0?(succMap[t.id]||[]).join(', '):''); break;
         case 'id': val = String(t.id); break;
@@ -11938,7 +12113,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
 
   return (
     <div style={{position:"relative",flex:1,minWidth:0,minHeight:0,display:"flex"}}>
-    <div ref={ref} data-grid-scroll="1" style={{flex:1,overflow:"auto",position:"relative",zoom:gridZoom}} onScroll={handleScroll} onMouseEnter={()=>setHoverZone?.("grid")}>
+    <div ref={ref} data-grid-scroll="1" data-scroll-bounds style={{flex:1,overflow:"auto",position:"relative",zoom:gridZoom}} onScroll={handleScroll} onMouseEnter={()=>setHoverZone?.("grid")}>
       <div style={{position:"sticky",top:0,zIndex:10,display:"flex",background:"var(--surf)",borderBottom:"2px solid var(--amber)",borderLeft:"2px solid transparent",minWidth:totalW,height:30}}>
         {orderedCols.map(c => (
           <div key={c.k}
@@ -12721,15 +12896,22 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
             }} />
         );
       }
-      // Owner / responsible party: rich autocomplete with dropdown + inline prediction
+      // Owner / responsible party: an ORDERED LIST of contacts (NEW-1) — chips + autocomplete.
+      // Typing a first character NEVER replaces the existing owners any more (that was the single-
+      // value picker's "select-all, then type replaces" behavior) — it seeds the NEXT chip instead,
+      // so a quick keystroke can only ADD an owner, never silently wipe the others.
       if (col.k === "responsibleParty") {
         return (
           <ContactPicker
             variant="grid"
-            value={editStartChar != null ? editStartChar : (task.responsibleParty || "")}
-            seeded={editStartChar != null}
+            owners={ownerListOf(task)}
+            seedText={editStartChar != null ? editStartChar : ''}
             contacts={contacts || []}
-            onCommit={(name, newContact) => { if (newContact && addContact) addContact(newContact); commit(task.id, "responsibleParty", name); }}
+            addContact={addContact}
+            onCommit={(names, newContacts) => {
+              (newContacts || []).forEach(nc => addContact && addContact(nc));
+              commit(task.id, "responsibleParty", names);
+            }}
             onCancel={() => setEdit(null)}
           />
         );
@@ -13071,9 +13253,12 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
           <span style={{...mono,fontSize:11,color:"var(--mut)"}}>{task.percentComplete}%</span>
         </span>
       );
-    case "responsibleParty":
-      // Match the neighboring data cells (dates, duration, notes): muted, 11px
-      return <span style={{...s,color:"var(--mut)",fontSize:11}}>{task.responsibleParty||""}</span>;
+    case "responsibleParty": {
+      // Match the neighboring data cells (dates, duration, notes): muted, 11px. NEW-1 — the column
+      // must not widen, so a multi-owner task shows "First +N"; the full list is on hover.
+      const { label, title } = ownerDisplayParts(ownerListOf(task));
+      return <span title={title || undefined} style={{...s,color:"var(--mut)",fontSize:11}}>{label}</span>;
+    }
     case "cost":
     case "budget":
     case "actualCost": {
@@ -14893,6 +15078,14 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
   const [selCell, setSelCell] = useState(null); // {ri, ci}
   const tableWrapRef = useRef(null);
   const cellFocusTimer = useRef(null); // pending wrapper-focus queued by a single click — skipped/replaced on multi-clicks
+  // A double-click is two clicks THEN a dblclick: each of the first two schedules onCellClick's
+  // setTimeout(0) wrapper-refocus, and — unlike a second CLICK, which cancels the first click's
+  // timer — nothing ever cancelled the SECOND one for the dblclick that follows. It fired AFTER
+  // the editor had already mounted and focused its own input, silently stealing focus back to the
+  // table wrapper — so a real double-click-to-edit opened the picker but every keystroke landed on
+  // the table instead (measured live: MasterView's Owner AND Name columns both did this, unrelated
+  // to which column — the timer, not the editor, was always the bug). Cancel it before opening.
+  const openEdit = payload => { clearTimeout(cellFocusTimer.current); setLocalEdit(payload); };
   const [colPickerOpen, setColPickerOpen] = useState(false);
   const [lvlOpen, setLvlOpen] = useState(false);
 
@@ -15006,7 +15199,9 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
     } else if (col==="name") {
       if (val.trim() && val.trim() !== t.name) updateTask(t.id, {name: val.trim()}, t.projId);
     } else if (col==="responsibleParty") {
-      if (val !== (t.responsibleParty||"")) updateTask(t.id, {responsibleParty: val}, t.projId);
+      const next = Array.isArray(val) ? val : ownerListOf({responsibleParty: val});
+      const cur = ownerListOf(t);
+      if (next.length !== cur.length || next.some((n,i) => n !== cur[i])) updateTask(t.id, {responsibleParty: next}, t.projId);
     }
     setLocalEdit(null);
     // Return focus to table wrapper so arrow-key navigation resumes immediately
@@ -15041,7 +15236,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
         case "end":         av = a.end;                          bv = b.end;                        break;
         case "project":     av = (a.projName||"").toLowerCase(); bv = (b.projName||"").toLowerCase(); break;
         case "name":        av = (a.name||"").toLowerCase();     bv = (b.name||"").toLowerCase();   break;
-        case "responsibleParty": av=(a.responsibleParty||"").toLowerCase(); bv=(b.responsibleParty||"").toLowerCase(); break;
+        case "responsibleParty": av=(ownerListOf(a)[0]||"").toLowerCase(); bv=(ownerListOf(b)[0]||"").toLowerCase(); break;   // NEW-1 — sort/group read the FIRST (accountable) owner only
         case "notes":       av = (a.notes||[]).length;           bv = (b.notes||[]).length;         break;
         default:            av = 0; bv = 0;
       }
@@ -15086,7 +15281,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
         case 'duration': val = fmtTaskDuration(t, !t.isLeaf)||`${t.duration}d`; break;   // match the unit-aware cell display (B463072: a summary prints its ROLLED span)
         case 'health': val = HEALTH[t.health]?.label||''; break;
         case 'percentComplete': val = `${t.percentComplete||0}%`; break;
-        case 'responsibleParty': val = t.responsibleParty||''; break;
+        case 'responsibleParty': val = ownerDisplayParts(ownerListOf(t)).label; break;
         case 'notes': val = t.notes?.length>0?`${t.notes.length} entr`:'+ Add'; break;
         case 'parent': {
           const p=data.projects[t.projId]?.tasks.find(x=>x.id===t.parentId);
@@ -15206,7 +15401,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
       case "parent":
         return <td key={col.k} onClick={onCellClick} style={{...tdBase,color:"var(--mut)",fontSize:11}}>{getParentName(t)}</td>;
       case "name":
-        return <td key={col.k} style={{...tdBase,cursor:"text"}} onClick={onCellClick} onDoubleClick={()=>setLocalEdit({id:t.id,projId:t.projId,col:"name"})}>
+        return <td key={col.k} style={{...tdBase,cursor:"text"}} onClick={onCellClick} onDoubleClick={()=>openEdit({id:t.id,projId:t.projId,col:"name"})}>
           {isE(t,"name")
             ? <input {...NO_AUTOFILL} autoFocus style={{display:"block",width:"100%",height:"18px",border:"none",borderBottom:"1.5px solid var(--blue)",outline:"none",background:"transparent",fontSize:12,fontFamily:"inherit",color:"var(--txt)",padding:"0 2px"}} defaultValue={localEdit?.initChar ?? t.name}
                 onBlur={e=>commit(t,"name",e.target.value)}
@@ -15219,14 +15414,14 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
         return <td key={col.k} onClick={onCellClick} style={{...tdBase,fontSize:11,color:"var(--mut)"}}>{fmtDate(t.end)}</td>;
       case "duration":
         // Parent durations roll up from children — locked, same as the project grid.
-        return <td key={col.k} style={{...tdBase,cursor:t.isLeaf?"text":"default"}} onClick={onCellClick} onDoubleClick={()=>{ if (!t.isLeaf) return; setLocalEdit({id:t.id,projId:t.projId,col:"duration"}); }}>
+        return <td key={col.k} style={{...tdBase,cursor:t.isLeaf?"text":"default"}} onClick={onCellClick} onDoubleClick={()=>{ if (!t.isLeaf) return; openEdit({id:t.id,projId:t.projId,col:"duration"}); }}>
           {isE(t,"duration")
             ? <input {...NO_AUTOFILL} autoFocus style={{display:"block",width:"100%",height:"18px",border:"none",borderBottom:"1.5px solid var(--blue)",outline:"none",background:"transparent",fontSize:12,fontFamily:"inherit",color:"var(--txt)",padding:"0 2px"}} defaultValue={localEdit?.initChar ?? fmtTaskDuration(t)} onBlur={e=>commit(t,"duration",e.target.value)} onKeyDown={e=>{if(e.key==="Enter")commit(t,"duration",e.target.value);if(e.key==="Escape")setLocalEdit(null);}} />
             : <span style={{color:"var(--mut)"}} title={t.isLeaf ? (durTooltip(t)||undefined) : "Computed from subtasks"}>{fmtTaskDuration(t, !t.isLeaf)||"0d"}</span>}
         </td>;
       case "health":
         return <td key={col.k} data-hmenu="1" onClick={onCellClick}
-          onDoubleClick={()=>setLocalEdit({id:t.id,projId:t.projId,col:"health"})}
+          onDoubleClick={()=>openEdit({id:t.id,projId:t.projId,col:"health"})}
           style={{...tdBase,cursor:"default",position:"relative",
             overflow:isE(t,"health")?"visible":"hidden",
             zIndex:isE(t,"health")?50:"auto"}}>
@@ -15241,28 +15436,30 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
           </span>
         </td>;
       case "percentComplete":
-        return <td key={col.k} style={{...tdBase,cursor:"text"}} onClick={onCellClick} onDoubleClick={()=>setLocalEdit({id:t.id,projId:t.projId,col:"percentComplete"})}>
+        return <td key={col.k} style={{...tdBase,cursor:"text"}} onClick={onCellClick} onDoubleClick={()=>openEdit({id:t.id,projId:t.projId,col:"percentComplete"})}>
           {isE(t,"percentComplete")
             ? <input {...NO_AUTOFILL} autoFocus style={{display:"block",width:"100%",height:"18px",border:"none",borderBottom:"1.5px solid var(--blue)",outline:"none",background:"transparent",fontSize:12,fontFamily:"inherit",color:"var(--txt)",padding:"0 2px"}} defaultValue={localEdit?.initChar ?? (t.percentComplete||0)} onBlur={e=>commit(t,"percentComplete",e.target.value)} onKeyDown={e=>{if(e.key==="Enter")commit(t,"percentComplete",e.target.value);if(e.key==="Escape")setLocalEdit(null);}} />
             : <span style={{color:"var(--mut)"}}>{t.percentComplete||0}%</span>}
         </td>;
-      case "responsibleParty":
-        return <td key={col.k} style={{...tdBase,cursor:"text"}} onClick={onCellClick} onDoubleClick={()=>setLocalEdit({id:t.id,projId:t.projId,col:"responsibleParty"})}>
+      case "responsibleParty": {
+        const { label, title } = ownerDisplayParts(ownerListOf(t));
+        return <td key={col.k} style={{...tdBase,cursor:"text"}} onClick={onCellClick} onDoubleClick={()=>openEdit({id:t.id,projId:t.projId,col:"responsibleParty"})}>
           {isE(t,"responsibleParty")
             ? <ContactPicker
-                value={localEdit?.initChar != null ? localEdit.initChar : (t.responsibleParty||"")}
-                seeded={localEdit?.initChar != null}
+                owners={ownerListOf(t)}
+                seedText={localEdit?.initChar != null ? localEdit.initChar : ''}
                 contacts={data.settings?.contacts||[]}
-                onCommit={(name, newContact) => {
-                  if (newContact) {
-                    setData(d => ({...d, settings:{...d.settings, contacts:[...(d.settings?.contacts||[]), {id:Date.now(), ...newContact}]}}));
+                onCommit={(names, newContacts) => {
+                  if (newContacts && newContacts.length) {
+                    setData(d => ({...d, settings:{...d.settings, contacts:[...(d.settings?.contacts||[]), ...newContacts.map(nc => ({id:Date.now()+Math.random(), ...nc}))]}}));
                   }
-                  commit(t,"responsibleParty",name);
+                  commit(t,"responsibleParty",names);
                 }}
                 onCancel={()=>setLocalEdit(null)}
               />
-            : <span style={{color:"var(--mut)"}}>{t.responsibleParty||<span style={{color:"var(--bd2)"}}>—</span>}</span>}
+            : <span title={title || undefined} style={{color:"var(--mut)"}}>{label || <span style={{color:"var(--bd2)"}}>—</span>}</span>}
         </td>;
+      }
       case "predecessors": {
         const _proj = data.projects[t.projId];
         const _preds = normPreds(t.predecessors);
@@ -15442,7 +15639,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
 
       {/* Table — framed card; the card itself is the scroll container so the
           column headers stay pinned while rows scroll underneath */}
-      <div ref={tableWrapRef} tabIndex={0} onKeyDown={handleTableKey}
+      <div ref={tableWrapRef} data-scroll-bounds tabIndex={0} onKeyDown={handleTableKey}
         style={{flex:1,minHeight:0,overflow:"auto",outline:"none",overscrollBehavior:"contain",
           background:"var(--bg)",border:"1px solid var(--bd2)",borderRadius:10,
           boxShadow:"0 1px 2px rgba(27,31,36,.05), 0 3px 12px rgba(27,31,36,.04)"}}
@@ -16002,6 +16199,7 @@ function buildPDFHtml(cfg, data, forPreview) {
       case "health":{if(isExpandedParentOf(t,tasks,projId)) return "";const dh=displayHealthOf(t,tasks);const h=HC[dh]||{l:dh,c:"#94a3b8"};return `<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:${h.c};flex-shrink:0;display:inline-block"></span>${escapeHtml(h.l)}</span>`;}
       case "name":{const dep=getDepth(tasks,t.id);const ind=dep*14;const fw=dep===0?700:dep===1?600:400;const fs=dep===0?10.5:dep===1?10:9.5;const isP=tasks.some(x=>x.parentId===t.id);const key=projId+":"+t.id;const col=collapsedSet.has(key);const tri=(forPreview&&isP)?`<span class="pl-tri${col?"":" open"}" data-collapse="${key}" title="${col?"Expand":"Collapse"}">${col?"\u25B8":"\u25BE"}</span>`:"";return `<span class="pl-name" style="padding-left:${ind}px;font-weight:${fw};font-size:${fs}px">${tri}${escapeHtml(t.name)}</span>`;}
       case "cost":{const v=costOfIn(tasks,t.id);return v?("$"+Number(v).toLocaleString("en-US",{maximumFractionDigits:2})):"";}
+      case "responsibleParty": return escapeHtml(ownerJoin(ownerListOf(t)));
       default: return escapeHtml(t[k]);
     }
   };
@@ -16043,6 +16241,7 @@ function buildPDFHtml(cfg, data, forPreview) {
       case "health": { if(isExpandedParentOf(t,tasks,projId)) return ""; const dh=displayHealthOf(t,tasks); const h=HC[dh]; return h?h.l:(dh||""); }
       case "name": return t.name==null?"":String(t.name);
       case "cost": { const v=costOfIn(tasks,t.id); return v?("$"+Number(v).toLocaleString("en-US",{maximumFractionDigits:2})):""; }
+      case "responsibleParty": return ownerJoin(ownerListOf(t));
       default: return t[k]==null?"":String(t[k]);
     }};
     // Per-column fit profile: font px, clamp range, whether it may shrink (flex), and any
