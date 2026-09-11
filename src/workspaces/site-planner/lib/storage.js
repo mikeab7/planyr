@@ -11,7 +11,7 @@
 import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs, countJunkEntries,
   shareMirrorOf, withShareMirror, normRole } from "./siteModel.js";
 import { cloudUpsert, cloudDelete, cloudDeleteGroup, cloudHardDelete, cloudRestore, cloudDeletedRows, cloudCheckDeleted, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile } from "./cloudSync.js";
-import { reconcileGroupNames, resolveNameFor, groupKeyOf, maxStampOf } from "./projectName.js";
+import { reconcileGroupNames, resolveNameFor, groupKeyOf, maxStampOf, nameAuthority, renameStamp } from "./projectName.js";
 import { idbGet, idbPut, idbAvailable, idbDelete, idbDeleteByPrefix } from "./localDb.js";
 import { idbKeysReleasableOnPlanDelete, idbKeysHeldByOtherPlans } from "./sharedAssetRefs.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
@@ -1796,9 +1796,68 @@ export function saveSite(partial, { skipHistory = false } = {}) {
    * that split the owner's project.
    *
    * The record being written VOTES: a genuine rename stamps `siteRenamedAt: Date.now()`, the newest
-   * stamp in the group, so it wins and applies. Anything without a newer stamp is corrected. */
-  const authority = resolveNameFor(model, Object.values(sites).filter((s) => s && s.id !== model.id && groupKeyOf(s) === groupKeyOf(model)));
-  if (authority) model = { ...model, ...authority };
+   * stamp in the group, so it wins and applies. Anything without a newer stamp is corrected.
+   *
+   * ⛔ NEW-1 — THE RECORD'S OWN PRIOR STATE IS A VOICE TOO, not just its siblings in the same
+   * group. `resolveNameFor` was only ever handed OTHER plans in the group — for a SOLO-PLAN project
+   * (no siblings to out-vote a stale write) that meant this choke point provided ZERO protection:
+   * whatever `site`/`siteRenamedAt` an incoming write claimed was accepted outright, however stale.
+   * Measured live against `planyr_production` (a throwaway row, rolled back): a real `rename_site_group`
+   * RPC call followed by a second, unstamped "ordinary document save" (exactly what a planner
+   * autosave sends when its in-memory canvas still holds a pre-rename copy — the rename went to
+   * localStorage via `saveSite`, which the open canvas's own React state never sees) reverted a
+   * TWICE-renamed project's name and stamp straight back to the first rename's values — the
+   * `sites_preserve_rename_stamp` guard (db/sites_rename_stamp_guard.sql) reverted it, correctly,
+   * because that is exactly the write it exists to refuse. The guard was never wrong; this store had
+   * no defense against ever SENDING that write in the first place.
+   *
+   * ⛔ A FIRST ATTEMPT AT THIS — folding `existing` into `resolveNameFor`'s sibling list unconditionally
+   * — looked right and was WRONG, caught by this file's own test suite, not by reasoning: when the
+   * caller's `partial` doesn't touch `siteRenamedAt` at all (the exact "ordinary document save" shape),
+   * the merge above INHERITS `existing`'s own stamp untouched, so `model` and `existing` end up carrying
+   * the IDENTICAL stamp with DIFFERENT names — a tie `nameAuthority`'s own tie-break resolves by
+   * `updatedAt`, which is ALWAYS this write (it was just stamped a few lines up), handing the win right
+   * back to the stale name. `nameAuthority`'s tie-break is correct for what it was built for (two
+   * siblings of ONE coordinated rename, which never disagree on the name at a shared stamp) and wrong
+   * for this one — a write that never asserted a NEWER stamp must not win a name disagreement merely by
+   * inheriting an old one.
+   *
+   * So this write is decided directly, without leaning on `nameAuthority`'s tie-break, whenever the
+   * group already has a real stamp on record (`priorAt > 0`): a write claiming a stamp that is not
+   * STRICTLY NEWER may only keep the name the existing stamped record(s) already agree on — resolved
+   * by `nameAuthority` over the PRIOR candidates ALONE (never including `model`, so its freshness can't
+   * leak back in). A write with a genuinely newer stamp still wins outright, unconditionally — this
+   * fixes nothing for a real rename. Only once NO candidate has a real stamp yet (a pure legacy group)
+   * does the ordinary vote-based `resolveNameFor` govern, with `existing` folded in as one more voice —
+   * proven algebraically, not just tested, that this can never skew a legacy majority repair
+   * (`repairSplitProjectNames`): `existing` merely re-asserts the vote this very plan already
+   * contributed to the ORIGINAL tally that produced the correction being applied, so the margin that
+   * made it a majority in the first place can never flip. */
+  const authorityVoices = [
+    ...(existing ? [existing] : []),
+    ...Object.values(sites).filter((s) => s && s.id !== model.id && groupKeyOf(s) === groupKeyOf(model)),
+  ];
+  const priorAt = maxStampOf(authorityVoices);
+  const incomingAt = renameStamp(model.siteRenamedAt) || 0;
+  let authority;
+  if (priorAt > 0 && incomingAt <= priorAt) {
+    const prior = nameAuthority(authorityVoices); // model itself never votes here
+    authority = prior.name != null && (prior.name !== model.site || prior.at !== incomingAt)
+      ? { site: prior.name, ...(prior.at != null ? { siteRenamedAt: prior.at } : {}) }
+      : null;
+  } else {
+    authority = resolveNameFor(model, authorityVoices);
+  }
+  if (authority) {
+    // LOUD-FAILURE — a write that tried to move a project's name/stamp backward was corrected here
+    // rather than silently accepted (the silence is exactly why this bug survived three prior fix
+    // attempts aimed at the trigger/RPC layer instead of this choke point).
+    if (authority.site !== undefined && authority.site !== model.site)
+      reportClientEvent("project-name-write-corrected", "a save tried to move a project's name away from its own recorded rename — corrected before it could reach the cloud", {
+        id: model.id, attempted: model.site, corrected: authority.site,
+      });
+    model = { ...model, ...authority };
+  }
   /* NEW-2 — A CONTENT SAVE MAY NEVER MOVE THE SHARING POINTER, and this is the local half of the
    * rule `siteRowFor` already enforces on the wire (B714). Same reasoning, same failure: the planner
    * holds a model loaded BEFORE a share happened, so its `partial` carries `teamId: null` EXPLICITLY

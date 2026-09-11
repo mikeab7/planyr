@@ -225,6 +225,100 @@ describe("the marker has exactly one parse in the client", () => {
 });
 
 /* ------------------------------------------------------------------ *
+ * 5b. NEW-1 (2026-09-11) — a project renamed ONCE could never be renamed
+ *     again: `saveSite`'s write choke point only ever compared an incoming
+ *     write against this record's SIBLINGS in the same group, so a SOLO-PLAN
+ *     project (no siblings to out-vote a stale write) had NO protection at
+ *     all. Measured live against `planyr_production` (a throwaway row,
+ *     rolled back, never a real project): a real `rename_site_group` RPC
+ *     call followed by an "ordinary document save" carrying no stamp — the
+ *     exact shape a planner autosave sends when its in-memory canvas never
+ *     saw a rename made elsewhere — reverted the row's name and stamp via
+ *     `sites_preserve_rename_stamp`, correctly, because that write really
+ *     was indistinguishable from a stale save. The gap was never having sent
+ *     it in the first place. Fixed by including the record's own EXISTING
+ *     stored value as a candidate in `saveSite`'s authority check, not just
+ *     its siblings — see storage.js's own header on this choke point for the
+ *     algebraic argument that this can never skew a legacy majority repair.
+ * ------------------------------------------------------------------ */
+describe("saveSite's write choke point defends a SOLO-PLAN project too (NEW-1)", () => {
+  beforeEach(() => { globalThis.localStorage = memoryStorage(); });
+
+  it("an ordinary write with no stamp cannot regress an already-renamed single-plan project", async () => {
+    const { saveSite, loadSite } = await import("../src/workspaces/site-planner/lib/storage.js");
+    saveSite({ id: "solo1", groupId: "solo1", site: "First Name" });
+    saveSite({ id: "solo1", site: "Second Name", siteRenamedAt: 1700000000000 }); // a genuine rename
+    expect(loadSite("solo1").site).toBe("Second Name");
+
+    // The reported mechanism: a stale in-memory model (an open planner canvas that never saw the
+    // rename — it went straight to localStorage) performs an ordinary content save.
+    saveSite({ id: "solo1", site: "First Name", els: [] });
+    const after = loadSite("solo1");
+    expect(after.site).toBe("Second Name");           // never regresses
+    expect(after.siteRenamedAt).toBe(1700000000000);  // stamp preserved, not cleared
+  });
+
+  it("a stale write carrying an OLDER real stamp is corrected too — presence alone never wins", async () => {
+    const { saveSite, loadSite } = await import("../src/workspaces/site-planner/lib/storage.js");
+    saveSite({ id: "solo2", groupId: "solo2", site: "Old" });
+    saveSite({ id: "solo2", site: "New", siteRenamedAt: 2000 });
+    saveSite({ id: "solo2", site: "Stale Echo", siteRenamedAt: 1000 }); // real, but older
+    const after = loadSite("solo2");
+    expect(after.site).toBe("New");
+    expect(after.siteRenamedAt).toBe(2000);
+  });
+
+  it("a genuinely NEWER rename still wins outright — the fix must never freeze a project's name", async () => {
+    const { saveSite, loadSite } = await import("../src/workspaces/site-planner/lib/storage.js");
+    saveSite({ id: "solo3", groupId: "solo3", site: "Old" });
+    saveSite({ id: "solo3", site: "New", siteRenamedAt: 1000 });
+    saveSite({ id: "solo3", site: "Newer Still", siteRenamedAt: 2000 });
+    const after = loadSite("solo3");
+    expect(after.site).toBe("Newer Still");
+    expect(after.siteRenamedAt).toBe(2000);
+  });
+
+  it("renaming the SAME solo-plan project three times in a row sticks every time (the reported repro)", async () => {
+    const { renameSiteGroup, loadSite, saveSite } = await import("../src/workspaces/site-planner/lib/storage.js");
+    const id = "solo4";
+    saveSite({ id, groupId: id, site: "Concept" });
+    for (const name of ["First Rename", "Second Rename", "Third Rename"]) {
+      const res = await renameSiteGroup(id, name);
+      expect(res.ok).toBe(true);
+      expect(loadSite(id).site).toBe(name);
+      // A stale ordinary save fires right after, exactly as measured live, and must never win.
+      saveSite({ id, site: "stale copy", els: [] });
+      expect(loadSite(id).site).toBe(name);
+    }
+  });
+
+  it("does not disturb a legacy, never-stamped multi-plan MAJORITY repair (repairSplitProjectNames)", async () => {
+    const { saveSite, loadSite, repairSplitProjectNames } = await import("../src/workspaces/site-planner/lib/storage.js");
+    saveSite({ id: "g1", groupId: "grpX", site: "New" });
+    saveSite({ id: "g2", groupId: "grpX", site: "New" });
+    saveSite({ id: "g3", groupId: "grpX", site: "Old" }); // the straggler
+    const res = repairSplitProjectNames();
+    expect(res.ok).toBe(true);
+    expect(loadSite("g1").site).toBe("New");
+    expect(loadSite("g2").site).toBe("New");
+    expect(loadSite("g3").site).toBe("New");
+  });
+
+  it("reports a corrected write LOUDLY rather than silently accepting or rejecting it", async () => {
+    vi.resetModules();
+    const events = [];
+    vi.doMock("../src/shared/telemetry/clientErrors.js", () => ({ reportClientEvent: (...args) => events.push(args) }));
+    const { saveSite } = await import("../src/workspaces/site-planner/lib/storage.js");
+    saveSite({ id: "solo5", groupId: "solo5", site: "Old" });
+    saveSite({ id: "solo5", site: "New", siteRenamedAt: 5000 });
+    saveSite({ id: "solo5", site: "Stale", els: [] });
+    expect(events.some((e) => e[0] === "project-name-write-corrected")).toBe(true);
+    vi.doUnmock("../src/shared/telemetry/clientErrors.js");
+    vi.resetModules();
+  });
+});
+
+/* ------------------------------------------------------------------ *
  * 5. The checker has teeth — it must REJECT the real pre-fix payload.
  * ------------------------------------------------------------------ */
 describe("teeth — the predicate rejects the shape that actually shipped", () => {

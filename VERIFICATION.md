@@ -219,7 +219,29 @@ was never clicked" quietly ships broken.
   5. Reload browser 2. **Expect:** it shows `ZZ-STAMP-B` — the rename held across the stale writer.
   6. Rename once more from INSIDE a plan (the header breadcrumb rather than the map list). **Expect:** same result as step 2 — both entry points stamp identically.
   7. Delete the throwaway project and say in the report exactly what was touched.
-- **Stopping rule:** closes when steps 1–7 are observed on planyr.io, or when any step fails and is filed against B1496320. Nothing here depends on knowing which project Michael happened to try — any throwaway multi-plan project meets the precondition.
+- **Stopping rule:** closes when steps 1–7 are observed on planyr.io, or when any step fails and is filed against B1496320.
+
+### V1090464 — B1515824: a project renamed once can be renamed again — and again — and it sticks `Blocker: auth` `Blocker: real-data`
+
+**Why this needs a real pass.** This is a concurrency/multi-writer class (LIVE-VERIFY): the defect is a race between an explicit rename (writes straight to `localStorage`) and an unrelated ordinary autosave from a planner canvas that never observed it. This sandbox's proxy CORS-blocks the Supabase auth handshake, so no signed-in write — and no real open-canvas autosave — can be driven from here. **What is NOT pending:** the mechanism is proven in both halves against the real production database and the real client code (see below); a live pass adds only that the deployed bundle carries the fix on the owner's own account.
+
+**Verified HERE (production DB, read-only + one throwaway row, rolled back — nothing of the owner's touched).**
+- `sites_preserve_rename_stamp` / `rename_site_group` / `rename_stamp` read directly off `planyr_production` (`lyeqzkuiwngunutlkkmi`) — byte-identical to this repo's `db/` files. Current split: 57 rows `null`, 34 `number`, 29 key-absent (120 total) — matches the dispatch's own figures.
+- A throwaway row (`zzrenametest1`), inside a `begin; … rollback;` block that discarded everything including the row itself: `rename_site_group` called twice in a row with increasing stamps — **both succeed, no revert.** A third write mirroring an ordinary autosave (no `siteRenamedAt` key at all) — **reverted correctly**, back to the second call's name/stamp. This is the exact mechanism the dispatch described, reproduced from first principles rather than assumed.
+
+**Verified HERE (sandbox, no browser).**
+- `npx vitest run test/renameStampIntegrity.test.js` — 20 pass, 5 new. **Mutation-proven:** `git stash` on `storage.js` alone reddens 4 of the 5 new tests (the fifth, and the pre-existing legacy-majority-repair test, correctly stay green either way).
+- Full unit suite: 829 files / 16,673 tests, one pre-existing unrelated failure (`verificationQueueAudit.test.js` — a stale-`V#` ceiling check against seven other items; reproduces identically on unmodified `main`). `npm run lint` clean. `npm run build` clean.
+
+**Steps, each with its named expected result.** Run on a THROWAWAY duplicate project (owner constraint 7), never one of Michael's real plans. Read the served chunk hash in the same observation as each assertion (`document.querySelectorAll('script[src]')`) so a stale cached tab cannot vouch for the fix.
+  1. Signed in on planyr.io, duplicate any SINGLE-plan project (or make one — a fresh "New project" with one plan). Rename it from the project-switcher to `ZZ-ONE-A`. **Expect:** the name shows immediately, no cloud-write banner.
+  2. Rename the SAME project again, to `ZZ-ONE-B`. **Expect:** same — name updates immediately, no banner. Reload the tab. **Expect:** it still reads `ZZ-ONE-B`. This is the reported repro's simplest form, and it should already pass even on the pre-fix build most of the time — step 4 is the one that actually exercises the fix.
+  3. Rename it a THIRD time, to `ZZ-ONE-C`, and reload again. **Expect:** `ZZ-ONE-C` — confirms it doesn't freeze after the second attempt either.
+  4. Open a plan inside that same project (so the planner canvas is live and autosaving), then — **from the project-switcher, without leaving the open plan** — rename the project to `ZZ-ONE-D`. Immediately draw one small change on the canvas (so the planner's own autosave fires with whatever it had in memory) and wait for the save badge to settle. Reload. **Expect:** the project still reads `ZZ-ONE-D`. **Before this fix, the open canvas's stale in-memory name could win the race and the project would read back an earlier name.** This is the step that most directly reproduces the mechanism found in production.
+  5. Read the row back directly: `select data->>'site', jsonb_typeof(data->'siteRenamedAt'), data->>'siteRenamedAt' from public.sites where id = '<id>'`. **Expect:** `site` matches step 4's name, and the marker reads `number` — never `null`.
+  6. If Michael has a real project already stuck in the "frozen" state (a numeric marker that hasn't taken a rename since), rename ONE of his real ones once, live, as the cheapest confirmation of this item's own no-backfill-needed proposal. **Expect:** it takes, and a second attempt right after also takes.
+  7. Delete the throwaway project (steps 1–5) and say in the report exactly what was touched — including whether step 6 was attempted and on which project.
+- **Stopping rule:** closes when steps 1–5 are observed on planyr.io (step 6 only if a real frozen project is readily at hand — its absence is not a blocker), or when any step fails and is filed against B1515824. Nothing here depends on knowing which project Michael happened to try — any throwaway multi-plan project meets the precondition.
 
 ### V1077408 — B1482000: the "Recently deleted" plan list — and the deep-link dialog — name the PLAN, not the PROJECT `Blocker: auth`
 
