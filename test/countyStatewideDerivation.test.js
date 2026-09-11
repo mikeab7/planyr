@@ -283,7 +283,7 @@ describe("B1457152 — candidateCountiesForPoint never fans out to every configu
   });
 });
 
-/* ⛔ B1551616 (2026-09-11) — THE FAN-OUT ASSERTION, EXTENDED TO COUNT *ALL* GIS LOOKUPS FOR A POINT,
+/* ⛔ B1551618 (2026-09-11) — THE FAN-OUT ASSERTION, EXTENDED TO COUNT *ALL* GIS LOOKUPS FOR A POINT,
  * NOT ONLY PARCEL QUERIES. Item 5 of the dispatch brief, verbatim: "extend the fan-out assertion to
  * count ALL GIS lookups for a point, not only parcel queries - the existing assertion passed while
  * this was happening."
@@ -319,7 +319,7 @@ function hostOf(url) {
 const TX_HOSTS = new Set([hostOf(GIS_SOURCES.county.serviceUrl), hostOf(GIS_SOURCES.city.serviceUrl)]);
 const CO_HOST = hostOf(GIS_SOURCES.countyCo.serviceUrl);
 
-describe("B1551616 — the COMPLETE GIS lookup fan-out (parcel + county + city + etj), not just parcel", () => {
+describe("B1551618 — the COMPLETE GIS lookup fan-out (parcel + county + city + etj), not just parcel", () => {
   it.each([
     ["Las Vegas, NV", 36.1167, -115.157],
     ["Providence, RI", 41.824, -71.412],

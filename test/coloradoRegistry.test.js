@@ -140,7 +140,7 @@ describe("NEW-5 · county identify is region-routed, and Texas gets the SAME obj
     }
   });
 
-  // ⛔ B1551616 (2026-09-11) — REPLACES the prior version of this test, which asserted that a point
+  // ⛔ B1551618 (2026-09-11) — REPLACES the prior version of this test, which asserted that a point
   // outside Texas AND Colorado (Portland OR; an invalid NaN,NaN point) still resolved to the TxDOT
   // Texas layer, titled "...for anywhere outside Colorado". That was the reported bug, not a
   // feature: a Las Vegas NV parcel lookup was firing a live query against

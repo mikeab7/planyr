@@ -216,7 +216,7 @@ export function etjCoverageFor(cityName, lat, lng) {
  * site fall through to a Texas default further down the chain. So a Colorado point resolves
  * against Colorado's own statewide county layer instead.
  *
- * ⛔ B1551616 (2026-09-11) — SUPERSEDES the old "Texas is untouched by construction" comment below,
+ * ⛔ B1551618 (2026-09-11) — SUPERSEDES the old "Texas is untouched by construction" comment below,
  * which is why it is left here rather than deleted: it documented a real defect, verbatim. This
  * function used to return `JURISDICTION_SOURCES.county` (the TxDOT Texas layer) for EVERY point
  * outside the Colorado envelope — including Nevada, New York, or anywhere else on Earth. Measured
@@ -257,7 +257,7 @@ export function countySourcesForPoint(lat, lng) {
  * does not publish); it does not overrule it. Where both answer full-purpose limits for one city,
  * the shares are merged by taking the larger measured area, with both sources named.
  *
- * ⛔ B1551616 (2026-09-11) — the statewide row (TxGIO) carries no `bbox` of its own, same root
+ * ⛔ B1551618 (2026-09-11) — the statewide row (TxGIO) carries no `bbox` of its own, same root
  * cause as the county role above: it was queried for EVERY point on Earth, not just Texas. Gated
  * on the same `TX_ENVELOPE` the county fix uses, in `citySourcesForPoint` below, rather than adding
  * a `bbox` field here — a `bbox` field on this row would also gate the Baytown row's `!s.bbox ||`
@@ -875,7 +875,7 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
     note: "Screening only — verify with the jurisdiction. Boundaries (especially ETJ) change.",
   };
   // Each role resolves to ONE source (county/city/isd) or a region-routed LIST (etj).
-  // ⛔ B1551616 (2026-09-11) — `isd` (TEA, Texas-only) and `road` (TxDOT, Texas-only) are the last
+  // ⛔ B1551618 (2026-09-11) — `isd` (TEA, Texas-only) and `road` (TxDOT, Texas-only) are the last
   // two roles with no region routing at all: opt-in (only queried from the "⚖︎ Jurisdiction & road
   // authority" detail panel a user explicitly opens, never on an ordinary click, unlike county/city
   // above), but the identical defect class — a Nevada point asking Texas's school-district layer.
@@ -1455,7 +1455,7 @@ export async function countyAtPoint(lng, lat, opts = {}) {
   // Colorado's boundary layer. Outside Colorado this is the exact TxDOT source it always was.
   const src = countySourcesForPoint(lat, lng)[0];
   const isCo = src === JURISDICTION_SOURCES.countyCo;
-  /* ⛔ B1551616 (2026-09-11) — a point outside both TX and CO now has NO live source at all
+  /* ⛔ B1551618 (2026-09-11) — a point outside both TX and CO now has NO live source at all
    * (`countySourcesForPoint` returns `[]`), which used to mean this fired the live TxDOT query
    * anyway (it always returned features: [] for an out-of-state point, wasting a request to an
    * unrelated state's service before falling to the offline floor below). Skipping the live call
@@ -1490,7 +1490,7 @@ export async function countyAtPoint(lng, lat, opts = {}) {
         ageMs: r.ageMs, error: r.error ? humanize(r.error) : null,
       };
     }
-    // B1551616 — `state` used to be a binary isCo?"CO":"TX", which mislabeled every point outside
+    // B1551618 — `state` used to be a binary isCo?"CO":"TX", which mislabeled every point outside
     // both TX and CO (and whose offline geometry ALSO couldn't answer, e.g. mid-load) as Texas.
     return { name: null, key: null, fips: null, state: isCo ? "CO" : src ? "TX" : null, ageMs: r.ageMs, error: r.error ? humanize(r.error) : null };
   }
