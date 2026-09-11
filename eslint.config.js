@@ -12,8 +12,11 @@ export default [
   // Never lint build output, deps, or vendored third-party libraries. The landing
   // page's GSAP/Three.js are pre-minified UMD bundles — they reference globals
   // (exports/define/__THREE_DEVTOOLS__) that trip no-undef and are not ours to fix.
-  // ui-audit/.cache-vendor holds React/Babel/Supabase the scheduler boot-check downloads
+  // ui-audit/.vendor holds React/Babel/Supabase the scheduler boot-check downloads
   // (gitignored; not all are *.min.js-named, so an explicit dir ignore is needed too).
+  // Renamed from ui-audit/.cache-vendor at some point without updating this ignore —
+  // kept both here since either name can still exist on a checkout that ran the older
+  // harness before it was renamed; a stale local copy must never poison a lint run.
   // `dist-probe/**` is the instrumented build the VIEW-INDEPENDENT-ONCE detector drives
   // (PLANYR_PROBE=1 — scripts/vite-plugin-recompute-probe.mjs). Build output, like `dist/`.
   // NEW-1 (B866xxx) — the other four `dist-*` build-output dirs `.gitignore` already excludes
@@ -22,7 +25,7 @@ export default [
   // build left on disk after running one of those tools got linted as source: hundreds of
   // false `no-undef`/`no-unreachable` errors ('Deno', 'process', 'global', 'L', a minifier's
   // renamed function reassigned) on a real gitignored artifact nobody meant to lint.
-  { ignores: ["dist/**", "dist-probe/**", "dist-pipe/**", "dist-ratchet/**", "dist-baseline-verify/**", "dist-before/**", "node_modules/**", "**/*.min.js", "ui-audit/.cache-vendor/**"] },
+  { ignores: ["dist/**", "dist-probe/**", "dist-pipe/**", "dist-ratchet/**", "dist-baseline-verify/**", "dist-before/**", "node_modules/**", "**/*.min.js", "ui-audit/.cache-vendor/**", "ui-audit/.vendor/**"] },
   {
     files: ["**/*.{js,jsx}"],
     plugins: { "react-hooks": reactHooks },

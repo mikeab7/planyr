@@ -354,6 +354,97 @@ async function run(label, { width, height, zoomSteps = 0 }) {
       `${before10.length} → ${after10.length}`);
   }
 
+  /* ═══ ATTACK 11 — A STALE CARET LEFT IN FLOW TEXT MUST NOT EAT THE KEY (B1555152, owner report
+   * 2026-09-11: *"I clicked after 'Civil Engineer: ', then clicked one of his margin boxes, then
+   * pressed Backspace, and it backspaced the Civil Engineer line."*).
+   *
+   * ⛔ EVERY ATTACK ABOVE THAT PRESSES DELETE/BACKSPACE ON A SELECTED BOX SEEDS THE PAGE FRESH —
+   * the box is the FIRST thing the mouse ever touches, so there is no earlier caret sitting in
+   * flow text to leave stale. That is exactly the gap that let this ship: `focusFromMat`'s stage-1
+   * select calls `e.preventDefault()`, which stops the BROWSER's click from moving the caret, but
+   * did nothing about a caret already parked in ordinary text from an EARLIER click — and
+   * `notesKeyScope.js` cannot tell a stale caret from a live one, so Backspace fell through to the
+   * browser's native handling at the stale position instead of reaching the box's own Delete
+   * handler. This attack clicks flow text FIRST, exactly like his report, before ever touching the
+   * box. */
+  await seed(page, ONE);
+  const flowPara = await page.evaluate(() => {
+    const p = [...document.querySelectorAll(".ProseMirror p")].find((el) => el.textContent.includes("Flow text"));
+    const r = p.getBoundingClientRect();
+    return { x: Math.round(r.left + 10), y: Math.round(r.top + r.height / 2) };
+  });
+  await page.mouse.click(flowPara.x, flowPara.y);
+  await pacedWait(page, 300);
+  const flowBefore = await page.evaluate(() => [...document.querySelectorAll(".ProseMirror p")].find((el) => el.textContent.includes("Flow text")).textContent);
+  const c11 = await centreOf(page, 0);
+  await page.mouse.click(c11.x, c11.y);           // stage 1: select the box, caret must NOT move
+  await pacedWait(page, 350);
+  ok(`${label} · ⛔ STAGE 1 AFTER A PRIOR FLOW-TEXT CLICK STILL SELECTS THE BOX`,
+    (await renderedBoxes(page))[0].selected);
+  const boxesBefore11 = await storedBoxes(page);
+  await page.keyboard.press("Backspace");
+  await pacedWait(page, 1300);
+  const flowAfter = await page.evaluate(() => [...document.querySelectorAll(".ProseMirror p")].find((el) => el.textContent.includes("Flow text"))?.textContent);
+  const boxesAfter11 = await storedBoxes(page);
+  ok(`${label} · ⛔ …AND BACKSPACE THERE NEVER TOUCHES THE STALE FLOW TEXT`,
+    flowAfter === flowBefore, JSON.stringify({ flowBefore, flowAfter }));
+  ok(`${label} · ⛔ …IT DELETES THE SELECTED BOX INSTEAD — exactly what B434416 asked for`,
+    boxesAfter11.length === boxesBefore11.length - 1, `${boxesBefore11.length} → ${boxesAfter11.length}`);
+  await page.keyboard.press("Control+z");
+  await pacedWait(page, 1300);
+  ok(`${label} · ⛔ …AND Ctrl+Z BRINGS THE BOX BACK`, (await storedBoxes(page)).length === boxesBefore11.length);
+
+  /* ═══ ATTACK 12 — CLICKING AWAY RELEASES THE BOX, SO THE SAME GESTURE NEVER FLIP-FLOPS
+   * (B1555152 part 2, owner's own words: *"even the ASDS click isn't really working that well…
+   * sometimes it takes a double click, sometimes it takes a click, it's actually kinda odd"*).
+   *
+   * ⛔ MEASURED BEFORE THIS FIX: entering a box (stage 2), typing, then clicking an UNRELATED
+   * paragraph elsewhere left `data-selected`/`data-editing` BOTH still "1" — the ring and the
+   * text-cursor state never let go — so a LATER single click on that same box landed straight in
+   * stage 2 (the app still believed it was already selected), while an untouched box still needed
+   * two clicks. Same gesture, two different outcomes, from invisible leftover state — exactly his
+   * complaint. */
+  await seed(page, ONE);
+  const c12 = await centreOf(page, 0);
+  await page.mouse.click(c12.x, c12.y);            // stage 1
+  await pacedWait(page, 300);
+  await page.mouse.click(c12.x, c12.y);            // stage 2: enter and edit
+  await pacedWait(page, 300);
+  await page.keyboard.type(" hi", { delay: 20 });
+  await pacedWait(page, 400);
+  const flowPara12 = await page.evaluate(() => {
+    const p = [...document.querySelectorAll(".ProseMirror p")].find((el) => el.textContent.includes("Flow text"));
+    const r = p.getBoundingClientRect();
+    return { x: Math.round(r.left + 10), y: Math.round(r.top + r.height / 2) };
+  });
+  await page.mouse.click(flowPara12.x, flowPara12.y);   // click AWAY into ordinary text
+  await pacedWait(page, 350);
+  ok(`${label} · ⛔ CLICKING AWAY RELEASES THE BOX — the ring and editing state both clear`,
+    !(await renderedBoxes(page))[0].selected);
+  await page.mouse.click(c12.x, c12.y);             // one click back on the (released) box
+  await pacedWait(page, 350);
+  const caretIn12 = () => page.evaluate(() => {
+    const el = document.querySelector('[data-testid="note-anchor"]');
+    const sel = document.getSelection();
+    return !!(sel.anchorNode && el.contains(sel.anchorNode));
+  });
+  ok(`${label} · ⛔ …SO ONE CLICK BACK ON IT IS STAGE 1 AGAIN, NOT AN INSTANT SURPRISE ENTRY`,
+    (await renderedBoxes(page))[0].selected && !(await caretIn12()));
+
+  /* ═══ ATTACK 13 — SELECTED AND EDITING MUST LOOK DIFFERENT AT A GLANCE (B1555152 part 1) ══ */
+  await seed(page, ONE);
+  const c13 = await centreOf(page, 0);
+  await page.mouse.click(c13.x, c13.y);
+  await pacedWait(page, 300);
+  const selectedWash = await page.evaluate(() =>
+    parseFloat(getComputedStyle(document.querySelector('[data-testid="note-anchor"]')).backgroundColor.match(/[\d.]+\)$/)?.[0] || "0"));
+  await page.mouse.click(c13.x, c13.y);
+  await pacedWait(page, 300);
+  const editingWash = await page.evaluate(() =>
+    parseFloat(getComputedStyle(document.querySelector('[data-testid="note-anchor"]')).backgroundColor.match(/[\d.]+\)$/)?.[0] || "0"));
+  ok(`${label} · ⛔ SELECTED (stage 1) AND EDITING (stage 2) PAINT DIFFERENTLY`,
+    editingWash > selectedWash, `selected wash ${selectedWash} → editing wash ${editingWash}`);
+
   await ctx.close();
 }
 

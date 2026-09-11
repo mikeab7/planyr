@@ -99,21 +99,23 @@ async function escapeOut() {
   await pacedWait(page, 90);
 }
 
+/* NEW-1 — Enter ADDS the typed chip and keeps the popup open (so several names can be typed in a
+   row); it takes a SECOND Enter, on the now-empty input, to finish editing and commit. This is the
+   harness's "I'm done with this cell" gesture everywhere below. */
+async function finishByEnter() {
+  await page.keyboard.press("Enter");
+  await pacedWait(page, 180);
+  await page.keyboard.press("Enter");
+  await pacedWait(page, 200);
+}
+
 /* Type `text` one REAL key at a time into a cell opened by the type-to-edit route
    (select the cell with a single click, then just type — the first key opens the editor).
    Records the input's value after EVERY keystroke, so a lost character is located exactly. */
-/* NEW-1 — creating a contact is now ASKED rather than assumed, so committing a name the registry
-   has never seen raises "No match — add … as a new contact?" and writes nothing until answered.
-   This harness is about the CARET, not that question, so it answers YES and carries on — which
-   also keeps it honest: the committed-value assertions below still have to hold afterwards. */
-async function confirmIfAsked() {
-  const yes = page.locator("[data-contact-confirm-yes]");
-  for (let i = 0; i < 6; i++) {
-    if (await yes.count()) { await yes.click(); await pacedWait(page, 250); return true; }
-    await pacedWait(page, 90);
-  }
-  return false;
-}
+/* NEW-5 (2026-09-11) — creating a contact is now ONE deliberate action: pressing Enter on a
+   genuinely new name creates and commits it immediately, no separate "Add contact?" confirm step.
+   This harness is about the CARET (B443536), not that decision, so there is nothing left to
+   confirm here — Enter alone is enough. */
 
 async function typeToEdit(rowId, colIdx, text) {
   await cellOf(rowId, colIdx).click();
@@ -128,8 +130,10 @@ async function typeToEdit(rowId, colIdx, text) {
   return trace;
 }
 
-/* Same text via the double-click route: the editor is already open and seeded with the
-   EXISTING value, which is select-all'd on purpose so typing replaces it. */
+/* Same text via the double-click route. NEW-1 (2026-09-11) changed what this means for Owner: the
+   editor opens with the existing owner(s) shown as CHIPS (never replaced) and an EMPTY input, so
+   typing here ADDS a person rather than overwriting the one already there — the multi-owner
+   redesign's whole point is that a quick keystroke can no longer silently wipe an existing owner. */
 async function dblClickThenType(rowId, colIdx, text) {
   await cellOf(rowId, colIdx).dblclick();
   await pacedWait(page, 200);
@@ -179,9 +183,7 @@ if (booted && leaves.length >= 5) {
     ownerTrace[1] === NAME.slice(0, 2),
     `after two keys the field reads ${JSON.stringify(ownerTrace[1])}, expected ${JSON.stringify(NAME.slice(0, 2))}`);
 
-  await page.keyboard.press("Enter");
-  await pacedWait(page, 200);
-  await confirmIfAsked();
+  await finishByEnter();
   await pacedWait(page, 250);
   const savedOwner = await committed(r0, COL.owner, NAME);
   ok("Owner · what is COMMITTED equals what was typed (no silent truncation)",
@@ -196,29 +198,39 @@ if (booted && leaves.length >= 5) {
   ok("Owner · type-to-edit of an EXISTING contact keeps every character",
     ownerTrace2[ownerTrace2.length - 1] === NAME,
     `field reads ${JSON.stringify(ownerTrace2[ownerTrace2.length - 1])}`);
-  await page.keyboard.press("Enter");
-  await pacedWait(page, 200);
-  await confirmIfAsked();
+  await finishByEnter();
   await pacedWait(page, 250);
   const saved1 = await committed(r1, COL.owner, NAME);
   ok("Owner · existing contact commits the full name", saved1 === NAME, `stored ${JSON.stringify(saved1)}`);
   await escapeOut();
 
-  // ── 3. OWNER, double-click route — replacing an existing value must still select-all ─
-  // r1 now holds "Scott". Double-click and type "Dana": the OLD value must be replaced
-  // (select-all is correct here), so the field must read exactly "Dana", not "ScottDana".
-  const rep = "Dana";
-  const dblTrace = await dblClickThenType(r1, COL.owner, rep);
-  console.log("   owner double-click replace trace:", JSON.stringify(dblTrace));
-  ok("Owner · double-click then type REPLACES the existing value (select-all preserved)",
-    dblTrace[dblTrace.length - 1] === rep,
-    `field reads ${JSON.stringify(dblTrace[dblTrace.length - 1])}, expected ${JSON.stringify(rep)}`);
-  await page.keyboard.press("Enter");
-  await pacedWait(page, 200);
-  await confirmIfAsked();
+  // ── 3. OWNER, double-click route — NEW-1: it ADDS a second owner, never replaces the first ─
+  // r1 now holds "Scott". Double-click opens chips (["Scott"]) + an EMPTY input; typing "Dana"
+  // must land in that empty input (not overwrite "Scott"), and committing must keep BOTH names —
+  // the multi-owner redesign's whole point is that a quick keystroke can no longer wipe an owner.
+  const second = "Dana";
+  const dblTrace = await dblClickThenType(r1, COL.owner, second);
+  console.log("   owner double-click add-second trace:", JSON.stringify(dblTrace));
+  ok("Owner · double-click then type lands in an EMPTY input (existing owner shown as a chip, not overwritten)",
+    dblTrace[dblTrace.length - 1] === second,
+    `field reads ${JSON.stringify(dblTrace[dblTrace.length - 1])}, expected ${JSON.stringify(second)}`);
+  // The existing owner must be visible as a chip WHILE editing, not silently dropped.
+  const chipTextWhileEditing = await page.evaluate(() =>
+    [...document.querySelectorAll("[data-owner-chip]")].map(d => d.textContent).join(" | "));
+  ok("Owner · the existing owner is shown as a removable chip during the edit, not replaced",
+    chipTextWhileEditing.includes("Scott"), JSON.stringify(chipTextWhileEditing));
+  await finishByEnter();
   await pacedWait(page, 250);
-  const saved2 = await committed(r1, COL.owner, rep);
-  ok("Owner · double-click replacement commits the replacement, whole", saved2 === rep, `stored ${JSON.stringify(saved2)}`);
+  const saved2 = await committed(r1, COL.owner, "Scott +1");
+  ok("Owner · BOTH names are kept — first owner (\"Scott\") stays accountable, shown as \"Scott +1\"",
+    saved2 === "Scott +1", `stored ${JSON.stringify(saved2)}`);
+  const hoverTitle = await page.evaluate((rid) => {
+    const row = document.querySelector(`[data-task-row="${rid}"]`);
+    const span = row && [...row.querySelectorAll("span")].find(s => s.title && s.title.includes("Scott"));
+    return span ? span.title : null;
+  }, r1);
+  ok("Owner · the full list is on hover (nothing lost, just not all on screen)",
+    hoverTitle === "Scott, Dana", `title=${JSON.stringify(hoverTitle)}`);
   await escapeOut();
 
   // ── 4. OWNER, PASTE — a paste into a freshly type-to-edit-opened picker ───────────
@@ -242,9 +254,7 @@ if (booted && leaves.length >= 5) {
   ok("Owner · an unmatched name shows an explicit 'add as new contact' outcome",
     /add\s+"?priya"?\s+as new contact/i.test(addRow), JSON.stringify(addRow.slice(0, 120)));
 
-  await page.keyboard.press("Enter");
-  await pacedWait(page, 200);
-  await confirmIfAsked();
+  await finishByEnter();
   await pacedWait(page, 250);
   const savedPaste = await committed(r2, COL.owner, "Priya");
   ok("Owner · the pasted free-text name commits whole", savedPaste === "Priya", `stored ${JSON.stringify(savedPaste)}`);

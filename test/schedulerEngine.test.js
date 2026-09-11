@@ -415,9 +415,11 @@ describe("anti-drift: the guards still exist in the real source (public/sequence
     expect(src).toMatch(/if \(!d \|\| typeof d !== "object"\) d = \{\};/);
     expect(src).toMatch(/const srcTasks = Array\.isArray\(proj\.tasks\) \? proj\.tasks : \[\];/);
   });
-  it("ensureContacts coerces non-string contact names and responsibleParty", () => {
+  it("ensureContacts coerces non-string contact names and derives one contact per owner in the list", () => {
     expect(src).toMatch(/String\(c\?\.name \|\| ''\)\.toLowerCase\(\)/);
-    expect(src).toMatch(/String\(\(t && t\.responsibleParty\) \|\| ''\)\.trim\(\)/);
+    // NEW-1 — Owner is a LIST now; ensureContacts derives a contact for every name in it (ownerListOf
+    // itself does the string→array coercion this test used to look for directly).
+    expect(src).toMatch(/ownerListOf\(t\)\.forEach\(rp => \{/);
   });
   it("the shell message handler validates origin and the Gantt month loop is bounded", () => {
     expect(src).toMatch(/if \(e\.origin !== window\.location\.origin\) return;/);
@@ -784,7 +786,7 @@ describe("anti-drift: the scheduler bug-batch fixes still exist in the real sour
     expect(src).toMatch(/const noteTxt = String\(noteText \|\| ""\)\.trim\(\);/);
   });
   it("#17 the owner ContactPicker only ghost-accepts on Enter when the typed text is a NEW name", () => {
-    expect(src).toMatch(/else if \(ghostText && prediction && isNewName\) onCommit\(prediction\.name\);/);
+    expect(src).toMatch(/if \(ghostText && prediction && isNewName\) \{ addChip\(prediction\.name\); return; \}/);
   });
   it("#18 the grid uses rolled child health for every parent (collapsed or expanded)", () => {
     expect(src).toMatch(/A parent ALWAYS reflects rolled-up child health/);
@@ -1455,9 +1457,9 @@ describe("anti-drift: the round-3 scheduler fixes still exist in the real source
     expect(src).toMatch(/if \(applyLoadedDataRef\.current\) applyLoadedDataRef\.current\(parsed\);/);   // importJSON (was a ReferenceError)
     expect(src).toMatch(/if \(applyLoadedData\) applyLoadedData\(parsed\); else setData\(parsed\);/);    // doRestore
   });
-  it("D1: a contact rename/delete propagates to tasks' responsibleParty", () => {
-    expect(src).toMatch(/t\.responsibleParty === oldName \? \{\.\.\.t, responsibleParty: nm\}/);
-    expect(src).toMatch(/t\.responsibleParty === goneName \? \{\.\.\.t, responsibleParty: ""\}/);
+  it("D1: a contact rename/delete propagates to every task's owner LIST (NEW-1)", () => {
+    expect(src).toMatch(/return \{\.\.\.t, responsibleParty: list\.map\(n => n === oldName \? nm : n\)\};/);
+    expect(src).toMatch(/return \{\.\.\.t, responsibleParty: list\.filter\(n => n !== goneName\)\};/);
   });
   it("D2 (B613): the rebuilt notes panel edits notes by id and guards the dismiss", () => {
     // The B613 rebuild replaced the free-text bulk editor (which matched notes by text to avoid
@@ -2462,7 +2464,7 @@ describe("anti-drift: B463072 exists VERBATIM in src + mirror, and every render 
     // (the dblclick handler returns unless t.isLeaf), and a leaf must edit in the unit it was typed in.
     const bare = (src.match(/fmtTaskDuration\(([a-z]+)\)/g) || []);
     expect(bare).toEqual(["fmtTaskDuration(t)"]);
-    expect(src).toMatch(/if \(!t\.isLeaf\) return; setLocalEdit/);
+    expect(src).toMatch(/if \(!t\.isLeaf\) return; openEdit/);
   });
 });
 
