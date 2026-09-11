@@ -3036,3 +3036,23 @@ itself is ever in doubt, the steps above are still here to re-run.
 7. No unexpected console/page errors (Supabase-CDN / proxy-network-policy noise excluded from the check — expected in this sandbox, unrelated to the fix; confirmed by re-running with that noise unfiltered and seeing only the known CDN failures).
 
 **Result:** ✅ PASSED, this session, headless self-verify against a real local production build (`origin/main` base `e705440`). `Cadence: once` — closed.
+
+
+### V1105584 — B1539888: right-click on the parcel acreage label opens the PARCEL's own menu, never the object it happens to sit over
+
+**Why a headless self-verify is sufficient here.** Pure canvas hit-testing on a seeded local plan — no sign-in, no external GIS, and no real-project data needed to reproduce or confirm the fix. Per ATTEMPT-BEFORE-YOU-PARK, this is Claude-doable and must be driven here, not filed as needing a live pass.
+
+**What was verified, this session, against a real local production build** (`npm run build` → `vite preview`, headless Chromium at `/opt/pw-browsers/chromium-1194`), on a seeded plan matching the owner's report exactly: one parcel, one 443'×135' building with dock zones top and bottom, centred so the acreage badge lands on it (`polylabel`'s ordinary placement on a developed lot).
+
+1. **Right-click the badge, sitting over the building (the reported case).** Menu opened: `Merge parcels (0)` · `Clear selection` · `Hide acreage label` · `Delete parcel`. **No** building rows (`Reshape…`, `Bump-outs`, `Dock Zones`, `Bring to Front`, …) present. This is the exact fix.
+2. **Right-click the badge, sitting over a pond (B316865's original case, re-run under the new rule).** Same seeded plan with a pond added under the badge's position: menu opened with `Hide acreage label` present — i.e. the parcel's own menu, consistently, regardless of what is underneath. This is the DELIBERATE reversal of B316865's fix, recorded on that item.
+3. **Left-click the badge (no drag) — case (b) from the report.** Cleared selection first (clicked empty canvas, confirmed no `setback-grab`/`vtx-handle` chrome present), then left-clicked the badge: still **zero** `setback-grab` and **zero** `vtx-handle` nodes afterward — the click selects neither the parcel nor the building. Pre-existing, unchanged by this fix (`startAcChip` claims the press via `e.stopPropagation()` but never calls `setSel`), and not something the report asked to change.
+4. **Right-click the building's own name/SF label — case (c).** Confirmed via source: it is a separate, `pointerEvents:"none"` overlay (`data-label-for="<id>"`, distinct from the `[data-el-id]` group) — only the pond label is pointer-enabled (`isPondLabel`), so every other element label is pass-through and a press there resolves directly to the element beneath it. Unaffected by, and consistent with, this fix.
+5. **Hide → Ctrl+Z → reload, case confirmed working end to end.** Right-click → "Hide acreage label" → chip count 0. Ctrl+Z → chip count back to 1. Hide again → reload the page (module tab re-clicked post-reload since the app lands on the Dashboard first) → chip stays at count 0 — the hide persists.
+6. `e2e/parcel-chip-move-delete.spec.js`'s DELETE and UNDO cases (committed, durable, re-runnable — the same 443'×135'-building-under-the-badge geometry) independently confirm cases 1 and 5: **red on pre-fix code** (`"Hide acreage label"` never appears — `TimeoutError`), **green after the fix**. Its MOVE and "chip never swallows a press" cases (case (b)'s CHROME-NEVER-EATS-A-PRESS guarantee) pass unchanged.
+7. `test/featureTarget.test.js`'s "NEW-1 — a label's right-click never forwards to whatever it sits over" suite: source-level proof that `onChipContext` no longer calls `resolveDoubleClickTarget`/`hitStackAt`/`featureContextAction` and always calls `setParcelMenu` — **fails against the pre-fix source, passes after.**
+8. No unexpected console/page errors (checked via `page.on("console")`, only expected proxy/GIS noise).
+
+**Cases (d), (e) and (f) from the report — confirmed by source reading, not independently re-driven this session** (none of them touch `onChipContext` or any code this fix changed): dimension leaders/callouts dispatch directly (`onContextMenu={(e) => onCalloutContext(e, c.id, -1)}` or the per-leader-index form); the parcel boundary line dispatches directly (`onContextMenu={(e) => onParcelContext(e, pc.id)}`); a label over paving/parking/easement uses the same unconditional `onChipContext` path already covered by case 1/2 above.
+
+**Result:** ✅ PASSED, this session, headless self-verify (Chromium) against a real local production build, plus a committed, durable, red-proofed e2e spec and unit-test suite. `Cadence: once` — closed.
