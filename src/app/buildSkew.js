@@ -92,21 +92,55 @@ export function shouldOfferReload({ loaded, served, dismissedFor, routeMissed = 
   return dismissedFor !== served;
 }
 
-/** Read the deployed build id. Resolves to null for EVERY failure — that is the contract the
- *  purity of `isBuildSkewed` depends on, and the reason there is no throw path here. */
-export async function fetchServedBuild(fetchImpl, url = VERSION_URL) {
+/** Read the whole deployed-build stamp — the build id AND the list of past build ids the server
+ *  currently declares unsafe (B1517889). Resolves to null for EVERY failure, same contract as
+ *  `fetchServedBuild` below (which is now a thin wrapper over this). */
+export async function fetchServedMeta(fetchImpl, url = VERSION_URL) {
   const f = fetchImpl || (typeof fetch === "function" ? fetch : null);
   if (!f) return null;
   try {
     const res = await f(url, { cache: "no-store", credentials: "omit" });
     if (!res || !res.ok) return null;
     const body = await res.json();
-    const id = body && typeof body.build === "string" ? body.build.trim() : "";
-    return id || null;
+    const build = body && typeof body.build === "string" ? body.build.trim() : "";
+    const unsafeBuilds = body && Array.isArray(body.supersedes_unsafe)
+      ? body.supersedes_unsafe.filter((b) => typeof b === "string" && b.trim()).map((b) => b.trim())
+      : [];
+    return { build: build || null, unsafeBuilds };
   } catch (_) {
     // Offline, blocked, or not JSON. "I don't know" — never "you are stale".
     return null;
   }
+}
+
+/** Read the deployed build id. Resolves to null for EVERY failure — that is the contract the
+ *  purity of `isBuildSkewed` depends on, and the reason there is no throw path here. */
+export async function fetchServedBuild(fetchImpl, url = VERSION_URL) {
+  const meta = await fetchServedMeta(fetchImpl, url);
+  return meta ? meta.build : null;
+}
+
+/** PURE (B1517889). Is THIS tab's own loaded build one the server currently names as unsafe?
+ *  Same "silent when it cannot know" discipline as everything else here: a malformed/missing
+ *  list, a dev build, or an empty `loaded` all answer false rather than guessing. */
+export function isLoadedBuildUnsafe(loaded, unsafeBuilds) {
+  const a = typeof loaded === "string" ? loaded.trim() : "";
+  if (!a || a === "dev") return false;
+  if (!Array.isArray(unsafeBuilds)) return false;
+  return unsafeBuilds.some((b) => typeof b === "string" && b.trim() === a);
+}
+
+/** PURE (B1517889). Should the ESCALATED notice show — the one that says a known problem is at
+ *  stake, not the generic "a newer version is available"?
+ *
+ *  Requires BOTH: confirmed skew (a newer build really is being served — the same evidence every
+ *  other reason in this module already requires) AND the served build's own declaration that
+ *  THIS tab's loaded build is unsafe. Neither alone is enough — a served id this tab already
+ *  matches can't itself be "unsafe" in any way reloading would fix, and an unsafe list with no
+ *  confirmed skew would be reasoning from a response we can't yet trust. */
+export function shouldEscalate({ loaded, served, unsafeBuilds }) {
+  if (!isBuildSkewed(loaded, served)) return false;
+  return isLoadedBuildUnsafe(loaded, unsafeBuilds);
 }
 
 /* ---- wiring ----------------------------------------------------------------------------
@@ -116,6 +150,11 @@ export async function fetchServedBuild(fetchImpl, url = VERSION_URL) {
  * an unsubscribe. */
 export function installBuildSkewWatch({
   onServed,
+  // B1517889 — optional, purely additive: called alongside `onServed` on every successful look
+  // with whatever build ids the server currently declares unsafe (`[]` when none, or when the
+  // check failed). `onServed`'s own contract — called with the bare build id string or null — is
+  // UNCHANGED, so every existing caller keeps working with no changes.
+  onUnsafeBuilds,
   win = typeof window !== "undefined" ? window : null,
   fetchImpl = null,
   firstCheckMs = SKEW_FIRST_CHECK_MS,
@@ -131,9 +170,11 @@ export function installBuildSkewWatch({
     if (!live || inFlight) return;
     if (win.document && win.document.visibilityState === "hidden") return;
     inFlight = true;
-    const served = await fetchServedBuild(fetchImpl);
+    const meta = await fetchServedMeta(fetchImpl);
     inFlight = false;
-    if (live) onServed?.(served);
+    if (!live) return;
+    onServed?.(meta ? meta.build : null);
+    onUnsafeBuilds?.(meta ? meta.unsafeBuilds : []);
   };
 
   const first = win.setTimeout(look, firstCheckMs);
