@@ -117,9 +117,10 @@ import { lastEditedLabel } from "./lib/siteRecency.js";
 // "Save for all projects" uses (see lib/userPrefs.js's `sitesPanel` header) — never a new mechanism.
 import { loadUserPrefs, saveUserPrefs, readMirror, setSitesPanelPref } from "./lib/userPrefs.js";
 import { adminBoundariesVisible, attachAdminBoundaries } from "./lib/adminBoundaryGate.js";
-import { compHeadline } from "../../shared/comps/lib/comps.js";
+import { compHeadline, compFieldRows, compDateLabel } from "../../shared/comps/lib/comps.js";
 import { loadCompsRatePeriod } from "../../shared/comps/lib/compsRatePeriodPrefs.js";
-import { compMarkerSvg, compMarkerSize } from "../../shared/comps/lib/compMarkerIcon.js";
+import { compMarkerSvg, compMarkerSize, compMarkerColor } from "../../shared/comps/lib/compMarkerIcon.js";
+import { parcelLocationText, siteplanLocationText, pinFallbackText } from "../../shared/comps/lib/compLocationText.js";
 // B1372144 (map notes) — a note is a comp's ANCHOR with a note's payload. It reuses this file's
 // existing ground-first plumbing wholesale (the dropped pin, the parcel selection, the decide bar)
 // and adds only its own marker, editor and layer. It is NOT the Notes WORKSPACE
@@ -152,6 +153,10 @@ const NO_SITES_MATCH_STYLE = { fontSize: 11.5, color: PAL.muted, padding: "10px 
  * marker's own "building sale" blue (compMarkerIcon.js) rather than inventing a fourth color. */
 const COMP_ACCENT = "#2f6fb0";
 const ON_COMP_ACCENT = PALETTES.light.onAccent; // white — see the palette.js import above
+
+// The right-click map menu (B684) and the right-click comp-marker menu (B711329) share this one
+// panel style — a single module-scope literal rather than each JSX block carrying its own copy.
+const COMP_MAP_MENU_PANEL_STYLE = { background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, boxShadow: "0 10px 30px rgba(28,25,20,0.22)", padding: 4, fontFamily: "inherit" };
 
 /* NEW-1 (2026-09-08) — the ON-MAP chips: a selection's acreage, and a dropped decide pin. These
  * paint directly ON THE AERIAL PHOTOGRAPH, not on any app surface, which is why they are fixed
@@ -570,7 +575,7 @@ function RailTab({ label, count, active, onClick }) {
   );
 }
 
-export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], parcelSummary = null, lastEditedByGroup = null, activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onSetDates, onRenameSite, onSharedChange, onUseParcels, onSkip, comps = [], onPlaceComp, onCompClick, pendingCompAnchor = null, onCompAnchorConsumed, focusCompId = null, onCompFocusHandled, onCompsChange, onOpenReviewInDocReview, focusMissingLocations = null }) {
+export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], allSites = null, parcelSummary = null, lastEditedByGroup = null, activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onSetDates, onRenameSite, onSharedChange, onUseParcels, onSkip, comps = [], onPlaceComp, onCompClick, pendingCompAnchor = null, onCompAnchorConsumed, focusCompId = null, onCompFocusHandled, onCompsChange, onOpenReviewInDocReview, focusMissingLocations = null }) {
   const elRef = useRef(null);
   // B1310209 (NEW-2) — the map's own relatively-positioned host box (below), the same one every
   // other floating map panel (the Comps rail, the Layers panel) is already a position:absolute
@@ -1317,6 +1322,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const [statusMenu, setStatusMenu] = useState(null); // {site, x, y} — right-click status picker
   const [dateEditor, setDateEditor] = useState(null); // {site, x, y} — B1161793 (NEW-2) "Deal dates…" popover
   const [mapMenu, setMapMenu] = useState(null);       // {x, y} — right-click-on-empty-map menu (KMZ export) (B684)
+  const [compMenu, setCompMenu] = useState(null);     // {comp, x, y} — right-click-on-a-comp-marker menu (KMZ site-record export) (B711329)
   const [hoverLL, setHoverLL] = useState(null);       // {lat, lng} — live "you are here" GPS readout (B683)
   // B706 / NEW-2: always a STATE, never silence. `zoom` picks the lattice band the cursor
   // tile is warmed at, so with contours on it's the tile they already fetched.
@@ -1403,6 +1409,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [mapMenu]);
+  // Escape also closes the right-click comp-marker menu (site-record KMZ export, B711329).
+  useEffect(() => {
+    if (!compMenu) return;
+    const onKey = (e) => { if (e.key === "Escape") setCompMenu(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [compMenu]);
   // B849840/NEW-1 — Escape leaves a site plan's manipulation mode entirely (deselects/disarms),
   // distinct from overlayPlacementHandles.js's own Escape (cancel one in-flight drag and restore
   // the pre-gesture placement, then stay armed). The two never race: that in-flight handler is
@@ -1456,6 +1469,161 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       setErr(`Couldn't build the Google Earth file: ${(e && e.message) || "unexpected error"}.`);
     }
   };
+
+  // A comp's county key -> "County, ST" (mirrors CompsPanel.jsx's own countyEntry/countyDisplayName
+  // — kept as a small local copy rather than a cross-component import, same as that file's own
+  // note on why this stays self-contained).
+  const countyDisplayName = (key) => {
+    const rec = key ? COUNTIES[key] : null;
+    return rec?.label ? rec.label.split(" ·")[0].trim() : key || null;
+  };
+  const countyEntryFor = (key) => {
+    const rec = key ? COUNTIES[key] : null;
+    if (!rec) return null;
+    return { name: rec.label ? rec.label.split(" ·")[0].trim() : null, state: rec.state || null };
+  };
+
+  // Outer ring(s) of a comp's parcel-anchor GeoJSON (Polygon | MultiPolygon), already WGS84
+  // lon/lat — holes are dropped (a real property boundary carrying a donut hole is rare, and this
+  // export's own polygon+pin pairing only ever needs the outer shape). Never throws on a malformed
+  // shape — just contributes nothing, which degrades to the comp's plain pin.
+  const compParcelRings = (geom) => {
+    if (!geom) return [];
+    if (geom.type === "Polygon") return geom.coordinates?.[0] ? [geom.coordinates[0]] : [];
+    if (geom.type === "MultiPolygon") return (geom.coordinates || []).map((poly) => poly?.[0]).filter(Boolean);
+    return [];
+  };
+
+  // One comp -> its balloon (a card of every populated field, grouped exactly as `compFieldRows`
+  // already orders them for the panel/detail view — never a second, drifting field list) + its
+  // geometry input for `siteRecordFeatures`.
+  const compKmlBalloon = (c) => {
+    const loc = c.anchor?.kind === "parcel" ? parcelLocationText(c.anchor, countyDisplayName)
+      : c.anchor?.kind === "site_plan" ? siteplanLocationText(c.anchor, overlaysById)
+      : pinFallbackText(c.anchor, countyEntryFor);
+    const headRows = [];
+    if (loc) headRows.push({ label: "Location", value: loc });
+    headRows.push({ label: "Executed", value: compDateLabel(c.compDate) });
+    return [{ heading: c.title || compHeadline(c, compsRatePeriod), rows: headRows }, { rows: compFieldRows(c, compsRatePeriod) }];
+  };
+  const compToKmlFeatureInput = (c, balloonHtmlFn) => {
+    const name = c.title || compHeadline(c, compsRatePeriod);
+    const iconColor = compMarkerColor(c.compType);
+    const balloon = balloonHtmlFn(compKmlBalloon(c));
+    if (c.anchor?.kind === "parcel" && c.anchor.parcelGeom) {
+      const rings = compParcelRings(c.anchor.parcelGeom);
+      if (rings.length) return { name, polygonRings: rings, iconColor, lineColor: iconColor, balloon };
+    }
+    return { name, point: [c.anchor.lon, c.anchor.lat], iconColor, balloon };
+  };
+
+  // Right-click a comp marker (the green diamond, or any other comp type) -> export its OWNING
+  // SITE RECORD — the project + every comp attached to it, per the owner's own scope ("this is
+  // supposed to be geared more toward exporting the site records, not necessarily the plans" /
+  // "it's a right click on the green diamond only, I won't be trying to export the entire
+  // database by this method"). B711329 — the KML/KMZ export B711328's own follow-up carved out.
+  const exportCompSiteRecordKmz = async (comp) => {
+    setCompMenu(null);
+    try {
+      const { siteRecordFeatures, balloonHtml, buildKmz, kmzFilename, KMZ_MIME } = await import("../../shared/comps/lib/kmlExport.js");
+      const download = (bytes, filename) => {
+        const blob = new Blob([bytes], { type: KMZ_MIME });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      };
+
+      // `sites` (the `siteGroups` prop) is filtered to role === "pursuit" — most comps' owning
+      // sites are "tracked" market-intel records that never appear there, so the lookup needs the
+      // FULL, every-role list (`allSites`, the same `loadSitesList()` result
+      // `resolveOrCreateTrackedSiteForComp`/`compSiteMatch.js` already require "every role" from),
+      // falling back to `sites` only if a caller hasn't threaded it through.
+      const siteSource = allSites || sites;
+      const site = comp.projectId ? siteSource.find((s) => (s.groupId || s.id) === comp.projectId || s.id === comp.projectId) : null;
+
+      // The premise this whole feature reads the right-click as ("export the comp's OWNING SITE
+      // RECORD, with every sibling comp on it") only holds when that site is resolvable from what
+      // this map already has loaded. When it isn't — the comp predates B1165441's auto-attach, or
+      // its site simply isn't in the currently-loaded list — fall back to exporting the one comp
+      // alone, and SAY so (never a silent narrower export).
+      if (!site) {
+        const name = comp.title || compHeadline(comp, compsRatePeriod);
+        const feats = siteRecordFeatures({ parcel: { rings: [] }, comps: [compToKmlFeatureInput(comp, balloonHtml)] });
+        download(buildKmz(name, feats), kmzFilename(name));
+        setErr(`This comp isn't linked to a site record yet — exported just "${name}" on its own.`);
+        return;
+      }
+
+      const siblingComps = comps.filter((c) => c.projectId && c.projectId === comp.projectId);
+      const siteName = site.site || site.name || "Site record";
+      const boundary = siteBoundaryInfo(site, parcelSummary);
+      const parcelRows = siteDrawParcels(site, parcelSummary).filter((p) => p && p.active !== false && Array.isArray(p.points) && p.points.length >= 3);
+
+      const projPt = site.origin ? (pt) => {
+        const [la, ln] = feetToLatLng(pt, site.origin.lat, site.origin.lon);
+        if (!Number.isFinite(la) || !Number.isFinite(ln)) {
+          throw new Error("a site parcel vertex could not be reprojected to a valid lat/long — export aborted so the file can't be silently misregistered");
+        }
+        return [ln, la];
+      } : null;
+
+      const parcelRings = projPt ? parcelRows.map((p, i) => ({
+        ring: p.points.map(projPt),
+        name: p.addr || (parcelRows.length > 1 ? `${siteName} (parcel ${i + 1})` : siteName),
+      })) : [];
+
+      // Best-effort: the project's filed documents, listed by NAME only (never the file itself —
+      // owner: "except for the full PDF file of course"). Signed-out / a failed read / no
+      // Supabase config all degrade to "not attempted" (the Documents section is simply omitted)
+      // rather than a false "no documents on file" — this is an enrichment, never the reason the
+      // core export (the site + its comps) would fail or block.
+      let documents = null;
+      try {
+        const { listReviews } = await import("../doc-review/lib/reviewStore.js");
+        const rows = await listReviews();
+        documents = (rows || []).filter((r) => r.project_id === comp.projectId).map((r) => ({ name: r.sfile || r.title || "Untitled file" }));
+      } catch { documents = null; }
+
+      const siteRows = [
+        { label: "Role", value: roleOf(site) === "tracked" ? "Tracked" : "Pursuit" },
+        { label: "Status", value: STATUS_META[statusOf(site)]?.label || statusOf(site) },
+      ];
+      if (site.county) siteRows.push({ label: "County", value: countyDisplayName(site.county) });
+      siteRows.push({ label: "Acreage", value: boundary.known ? (boundary.hasBoundary ? `${boundary.acres.toFixed(2)} AC` : "No boundary drawn yet") : "Unknown" });
+      if (site.origin) siteRows.push({ label: "Coordinates", value: `${site.origin.lat.toFixed(5)}, ${site.origin.lon.toFixed(5)}` });
+      const siteSections = [{ heading: siteName, rows: siteRows }];
+      const siteNotes = (mapNotes || []).filter((n) => n.projectId && n.projectId === comp.projectId);
+      if (siteNotes.length) {
+        siteSections.push({ heading: "Notes", lines: siteNotes.map((n) => `${n.title ? `${n.title} — ` : ""}${n.body || ""}`.trim()).filter(Boolean) });
+      }
+      if (documents) {
+        siteSections.push(documents.length
+          ? { heading: "Documents", links: documents.map((d) => ({ label: d.name, url: null })) }
+          : { heading: "Documents", lines: ["No documents on file."] });
+      }
+      siteSections.push({
+        heading: `Comps on this site record (${siblingComps.length})`,
+        lines: siblingComps.map((c) => `${c.title || compHeadline(c, compsRatePeriod)} — ${compDateLabel(c.compDate)}`),
+      });
+
+      const features = siteRecordFeatures({
+        parcel: {
+          rings: parcelRings,
+          fallbackPoint: !parcelRings.length && site.origin ? [site.origin.lon, site.origin.lat] : null,
+          name: siteName,
+          balloon: balloonHtml(siteSections),
+        },
+        comps: siblingComps.map((c) => compToKmlFeatureInput(c, balloonHtml)),
+      });
+      if (!features.length) { setErr("Nothing to export yet — this site record has no boundary and no located comps."); return; }
+      download(buildKmz(siteName, features), kmzFilename(siteName));
+    } catch (e) {
+      setErr(`Couldn't build the Google Earth file: ${(e && e.message) || "unexpected error"}.`);
+    }
+  };
+
   // Share a project (site group) with a team, or make it private again (teamId=null).
   const doShare = async (site, teamId) => {
     const gid = site.groupId || site.id;
@@ -2393,7 +2561,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         const marker = L.marker([c.anchor.lat, c.anchor.lon], { icon, interactive: !selectMode && !placingCompPin, keyboard: false, riseOnHover: true });
         const tip = `${c.title || compHeadline(c, compsRatePeriod)} · ${c.compDate || ""}`;
         if (!selectMode && !placingCompPin) {
-          marker.on("click", () => onCompClickRef.current && onCompClickRef.current(c.id)).bindTooltip(tip, { direction: "top" });
+          // B711329 — right-click a comp marker (any type, not just lease) to export its owning
+          // site record to Google Earth. Same "select mode wins every click" discipline the site
+          // pins' own onCtx uses, via the same open-state-menu shape (compMenu / ContextMenu).
+          const onCompCtx = (e) => {
+            const oe = e.originalEvent;
+            if (oe) { oe.preventDefault(); oe.stopPropagation(); }
+            setCompMenu({ comp: c, x: (oe && oe.clientX) || 0, y: (oe && oe.clientY) || 0 });
+          };
+          marker.on("click", () => onCompClickRef.current && onCompClickRef.current(c.id)).on("contextmenu", onCompCtx).bindTooltip(tip, { direction: "top" });
         }
         marker.addTo(group);
       });
@@ -3910,17 +4086,30 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           }}>Notes couldn't load — {mapNotesErr}</div>
         )}
 
-        {/* Right-click-on-empty-map menu → export the map's sites to Google Earth (B684).
-            Shared viewport-aware ContextMenu (B915) — flips/clamps at any edge. */}
+        {/* Right-click-on-empty-map menu → export the map's sites to Google Earth (B684), and the
+            right-click-on-a-comp-marker menu → export that comp's owning SITE RECORD (B711329).
+            Shared viewport-aware ContextMenu (B915) — flips/clamps at any edge; the two menus
+            share one panel style (COMP_MAP_MENU_PANEL_STYLE) rather than each carrying its own
+            copy of the same shadow literal. */}
         {mapMenu && (
           <ContextMenu x={mapMenu.x} y={mapMenu.y} onClose={() => setMapMenu(null)} minWidth={236} zIndex={3999}
-            className="" ariaLabel="Map actions"
-            panelStyle={{ background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, boxShadow: "0 10px 30px rgba(28,25,20,0.22)", padding: 4, fontFamily: "inherit" }}>
+            className="" ariaLabel="Map actions" panelStyle={COMP_MAP_MENU_PANEL_STYLE}>
             <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "6px 10px 4px" }}>Map</div>
             <button onClick={() => exportSitesKmz(false)} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: PAL.ink, padding: "7px 10px", borderRadius: RADIUS.sm }}
               onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-overlay)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>Export to Google Earth (KMZ)</button>
             <button onClick={() => exportSitesKmz(true)} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: PAL.ink, padding: "7px 10px", borderRadius: RADIUS.sm }}
               onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-overlay)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>Export with 3D buildings</button>
+          </ContextMenu>
+        )}
+
+        {compMenu && (
+          <ContextMenu x={compMenu.x} y={compMenu.y} onClose={() => setCompMenu(null)} minWidth={236} zIndex={3999}
+            className="" ariaLabel="Comp actions" panelStyle={COMP_MAP_MENU_PANEL_STYLE}>
+            <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "6px 10px 4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {compMenu.comp.title || compHeadline(compMenu.comp, compsRatePeriod)}
+            </div>
+            <button onClick={() => exportCompSiteRecordKmz(compMenu.comp)} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: PAL.ink, padding: "7px 10px", borderRadius: RADIUS.sm }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-overlay)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>Export site record (KMZ)</button>
           </ContextMenu>
         )}
 

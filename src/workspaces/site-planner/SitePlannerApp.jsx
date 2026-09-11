@@ -531,6 +531,31 @@ export default function App({
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, []);
+  // B1525088 (NEW-1) — the listener above only ever catches a write THIS BROWSER can see (this
+  // tab's own components, or a native cross-tab storage event from another tab of the SAME
+  // browser). A name/status change made from a DIFFERENT device, or while this tab was closed and
+  // is now a long-lived stale one, never fires either — the owner's own diagnosis was "there is no
+  // refresh short of reloading the page." So a tab that's been backgrounded and regains
+  // focus/visibility re-pulls the cloud (throttled, so switching tabs quickly can't hammer it),
+  // converging the map/Sites panel toward the server's truth without a manual reload.
+  const lastVisiblePullRef = useRef(Date.now());
+  useEffect(() => {
+    const MIN_PULL_INTERVAL_MS = 60000;
+    const maybePull = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      if (!signedInUid) return;
+      const now = Date.now();
+      if (now - lastVisiblePullRef.current < MIN_PULL_INTERVAL_MS) return;
+      lastVisiblePullRef.current = now;
+      pullCloud(signedInUid).then((res) => { if (res && res.ok !== false) refreshSites(); }).catch(() => {});
+    };
+    document.addEventListener("visibilitychange", maybePull);
+    window.addEventListener("focus", maybePull);
+    return () => {
+      document.removeEventListener("visibilitychange", maybePull);
+      window.removeEventListener("focus", maybePull);
+    };
+  }, [signedInUid]);
   const goPlan = (id) => { setCurrentSiteId(id); setActiveSiteId(id); setMode("plan"); };
   /* NEW-5 — the ONE way to leave a project, and the ONE place the intent is recorded.
    *
@@ -1145,6 +1170,11 @@ export default function App({
             layerStatus={layerStatus}
             setLayerStatus={setLayerStatus}
             sites={siteGroups}
+            // B711329 — the comp-marker "Export site record (KMZ)" action must resolve a comp's
+            // owning site by id/groupId regardless of role: `siteGroups` above is filtered to
+            // role === "pursuit", so a comp attached to a "tracked" (market-intel-only) site —
+            // the common case for a bare leasing comp — would never be found through it.
+            allSites={sites}
             parcelSummary={parcelSummaryLoaded ? parcelSummary : null}
             lastEditedByGroup={elementRecencyLoaded ? groupRecency : null}
             activeSiteId={activeSiteId}
