@@ -9,6 +9,30 @@ export const pd = s => new Date(s + "T12:00:00");
 export const addD = (s, n) => { const d = pd(s); d.setDate(d.getDate() + n); return fd(d); };
 export const dif  = (a, b) => Math.round((pd(b) - pd(a)) / 86400000);
 
+// NEW-1 — Owner is an ORDERED LIST of contact names now; ownerListOf coerces a legacy string (or
+// any other stray shape) into a clean, de-duped array. Mirrored verbatim from index.html.
+export const ownerListOf = t => {
+  const rp = t && t.responsibleParty;
+  const raw = Array.isArray(rp) ? rp : (rp ? [rp] : []);
+  const seen = new Set(); const out = [];
+  raw.forEach(name => {
+    const s = String(name == null ? "" : name).trim();
+    if (!s) return;
+    const k = s.toLowerCase();
+    if (seen.has(k)) return;
+    seen.add(k); out.push(s);
+  });
+  return out;
+};
+export const OWNER_JOIN = "; ";
+export const ownerJoin = list => (Array.isArray(list) ? list : []).join(OWNER_JOIN);
+export const ownerDisplayParts = list => {
+  const l = Array.isArray(list) ? list : [];
+  if (!l.length) return { label: "", title: "" };
+  const extra = l.length - 1;
+  return { label: extra > 0 ? `${l[0]} +${extra}` : l[0], title: l.join(", ") };
+};
+
 export let HOLIDAY_SET = new Set();
 const nthWeekday = (y, mo, n, dow) => {
   if (n > 0) { const d = new Date(y, mo-1, 1); while(d.getDay()!==dow) d.setDate(d.getDate()+1); d.setDate(d.getDate()+(n-1)*7); return d; }
@@ -423,7 +447,18 @@ export const evalFieldCondition = (cond, task, NOWv, taskById) => {
     }
   }
   if (ftype === "text") {
-    const s = String(task.responsibleParty || "").trim();
+    if (field === "owner") {
+      const list = ownerListOf(task);
+      const v = String(value || "").trim().toLowerCase();
+      switch (op) {
+        case "isBlank":    return list.length === 0;
+        case "isNotBlank": return list.length > 0;
+        case "is":         return list.some(n => n.toLowerCase() === v);
+        case "contains":   return v ? list.some(n => n.toLowerCase().includes(v)) : false;
+        default: return false;
+      }
+    }
+    const s = String(task[field] || "").trim();
     const v = String(value || "").trim().toLowerCase();
     switch (op) {
       case "isBlank":    return !s;
@@ -519,7 +554,7 @@ export const evalHealthCondition = (type, days, task, NOWv, taskById) => {
       });
     }
     case "noOwner":
-      return !String(task.responsibleParty || "").trim();
+      return ownerListOf(task).length === 0;
     case "complete":
       return pct >= 100;
     default:
@@ -1035,6 +1070,19 @@ export const normalizeIds = d => {
   Object.entries(projects).forEach(([pid, proj]) => { nTid[pid] = (proj.tasks?.length || 0) + 1; });
   return {...d, projects, nTid};
 };
+// One-time shape fix: a legacy `responsibleParty` string becomes a one-element list. Naturally
+// idempotent, so — unlike normalizeToV6/V7, which gate on their own version flag — this needs none.
+export const normalizeOwnerLists = d => {
+  if (!d || typeof d !== "object") return d;
+  const projects = {};
+  const srcProjects = (d.projects && typeof d.projects === "object") ? d.projects : {};
+  Object.entries(srcProjects).forEach(([id, proj]) => {
+    if (!proj || typeof proj !== "object") { projects[id] = proj; return; }
+    const srcTasks = Array.isArray(proj.tasks) ? proj.tasks : [];
+    projects[id] = {...proj, tasks: srcTasks.map(t => (t && typeof t === "object") ? {...t, responsibleParty: ownerListOf(t)} : t)};
+  });
+  return {...d, projects};
+};
 export const ensureContacts = d => {
   if (!d?.projects) return d;
   const existing = (d.settings?.contacts || []);
@@ -1042,18 +1090,19 @@ export const ensureContacts = d => {
   const seen = new Set();
   Object.values(d.projects).forEach(proj => {
     ((proj && Array.isArray(proj.tasks)) ? proj.tasks : []).forEach(t => {
-      const rp = String((t && t.responsibleParty) || '').trim();
-      if (rp && !existingNames.has(rp.toLowerCase()) && !seen.has(rp.toLowerCase())) {
-        existing.push({ id: Date.now() + existing.length + seen.size, name: rp, email: '' });
-        existingNames.add(rp.toLowerCase());
-        seen.add(rp.toLowerCase());
-      }
+      ownerListOf(t).forEach(rp => {
+        if (rp && !existingNames.has(rp.toLowerCase()) && !seen.has(rp.toLowerCase())) {
+          existing.push({ id: Date.now() + existing.length + seen.size, name: rp, email: '' });
+          existingNames.add(rp.toLowerCase());
+          seen.add(rp.toLowerCase());
+        }
+      });
     });
   });
   return {...d, settings: {...d.settings, contacts: existing}};
 };
 // The full load pipeline as index.html composes it.
-export const loadPipeline = d => ensureContacts(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(d)))));
+export const loadPipeline = d => ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(d))))));
 
 // Faithful logic copy of rebuildHEALTH (index.html mutates module globals; this returns
 // the maps so it's testable). Builds the status color maps from settings.customHealth +

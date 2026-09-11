@@ -259,6 +259,17 @@ ${indentCssRules(".planyr-note .ProseMirror li")}
    or a box-shadow: both of those paint outside the element's box, which would put chrome over the
    neighbouring box's controls and re-create the press-swallowing defect this module keeps hitting. */
 .planyr-note .ProseMirror .planyr-anchor[data-selected="1"] { border-color: var(--accent-notes); border-style: solid; background: color-mix(in srgb, var(--accent-notes) 8%, transparent); }
+/* ⛔ SELECTED AND EDITING MUST NOT LOOK IDENTICAL (B1555152 part 1, owner report 2026-09-11:
+   "sometimes it takes a double click, sometimes it takes a click, it's actually kinda odd").
+   Measured: before this rule, selected-alone and selected-plus-editing painted the exact same
+   border colour/style and the exact same background wash — the ONLY difference anywhere was the
+   mouse cursor glyph (grab vs text), which needs the pointer hovering the box to see and says
+   nothing once the mouse has moved on. A box picked up (stage 1, Delete removes it) and a box you
+   are actively typing in (stage 2) are two different things to be IN, and a glance has to be able
+   to tell them apart without touching anything. Editing gets a visibly heavier wash and border —
+   never outline/box-shadow (see the note above: both paint outside the box and would swallow a
+   neighbour's controls). */
+.planyr-note .ProseMirror .planyr-anchor[data-editing="1"] { border-width: 2px; background: color-mix(in srgb, var(--accent-notes) 16%, transparent); }
 .planyr-note .ProseMirror .planyr-anchor[data-empty="1"] { border-color: var(--border-default); border-style: dashed; }
 .planyr-note .ProseMirror .planyr-anchor[data-empty="1"]:focus-within { border-color: var(--accent-notes); }
 .planyr-note .ProseMirror .planyr-anchor[data-empty="1"]:focus-within .planyr-anchor-content::after { content: "Type here"; position: absolute; left: 16px; top: 3px; pointer-events: none; color: var(--text-tertiary); font-style: italic; }
@@ -1104,9 +1115,16 @@ export default function NoteEditor({
    * (see Notes.jsx's note on why that band is gone). `undefined` on desktop and wherever the
    * caller has nowhere to send it (e.g. it isn't asked for outside `narrow`). */
   onBack,
+  /* ⛔ NEW-1 (templates) — the ONE hook that lets a caller other than a page use this exact
+   * editor without a second implementation. Both optional; every existing caller (a real
+   * page) omits them and gets the untouched `readPage`/`writePage(pageId, …)` behaviour.
+   * "Manage templates" is the one caller that supplies them, pointing the same load/save
+   * shape at a template record instead of a page's storage key — the editor itself neither
+   * knows nor cares which. */
+  loadDoc, saveDoc,
 }) {
   /* Initial content read ONCE, here. Not in an effect — see fix (2) in the header. */
-  const [initialDoc] = useState(() => readPage(pageId) || EMPTY_DOC);
+  const [initialDoc] = useState(() => (typeof loadDoc === "function" ? loadDoc() : readPage(pageId)) || EMPTY_DOC);
   const [find, setFind] = useState({ term: "", count: 0, index: 0 });
 
   /* The pending snapshot is PLAIN JSON captured at edit time, so the flush never has to
@@ -1123,7 +1141,8 @@ export default function NoteEditor({
    * which is exactly the kind of churn that made the original ordering bug intermittent. */
   const onStatusRef = useRef(onStatus);
   const onSavedRef = useRef(onSaved);
-  useEffect(() => { onStatusRef.current = onStatus; onSavedRef.current = onSaved; }, [onStatus, onSaved]);
+  const saveDocRef = useRef(saveDoc);
+  useEffect(() => { onStatusRef.current = onStatus; onSavedRef.current = onSaved; saveDocRef.current = saveDoc; }, [onStatus, onSaved, saveDoc]);
 
   /* WHICH page a pasted picture belongs to, and which notebook it is charged against, read
    * at PASTE time through a ref — a value captured when the editor was created would be
@@ -1137,7 +1156,7 @@ export default function NoteEditor({
     const pending = pendingRef.current;
     if (!pending) return;
     pendingRef.current = null;
-    const ok = writePage(pending.id, pending.doc);
+    const ok = typeof saveDocRef.current === "function" ? saveDocRef.current(pending.doc) : writePage(pending.id, pending.doc);
     // LOUD-FAILURE: a write that did not land never reads as "Saved".
     onStatusRef.current?.(ok ? "saved" : "error");
     // The edited stamp is hung on the write that ACTUALLY LANDED, never on a keystroke —
@@ -1821,6 +1840,26 @@ export default function NoteEditor({
    * into a second render tree. A selection you cannot see is a selection you will move by
    * accident — and re-rendering every box through React to show a ring would remount node views
    * the editor owns, which is a different and worse bug. */
+  /* ⛔ A REAL CARET MOVE AWAY FROM A SELECTED/EDITED BOX RELEASES IT (B1555152 part 2, owner
+   * report 2026-09-11: "even the ASDS click isn't really working that well… sometimes it takes a
+   * double click, sometimes it takes a click, it's actually kinda odd").
+   *
+   * Measured live: enter a box (stage 2), type a word, then click an ORDINARY paragraph elsewhere
+   * on the page — the caret correctly moves there, but `selection`/`editingId` never cleared, so
+   * the box stayed painted with its selected ring AND its `data-editing` attribute. Click that
+   * same box again — since `alreadySelected` in `focusFromMat` reads straight off that stale
+   * state, ONE click now lands directly in stage 2 and enters text, where an untouched box still
+   * needs two. Same gesture, two different outcomes, purely from invisible history — which is
+   * exactly his "sometimes a click, sometimes a double click."
+   *
+   * The fix lives HERE, in the transaction-driven paint pass, not in `focusFromMat`'s click
+   * routing: whenever the LIVE caret position genuinely changes (a real transaction, not merely
+   * this same effect re-running because `selection`/`editingId` changed) and lands somewhere that
+   * is not inside a currently-selected box, the selection is released. `lastCaretPosRef` is the
+   * ONLY state this needs — comparing consecutive readings of `editor.state.selection.from` tells
+   * a genuine move (the user clicked/typed elsewhere) apart from this same paint firing again for
+   * an unrelated reason (a resize, a group drag, a re-render) with the caret exactly where it was. */
+  const lastCaretPosRef = useRef(null);
   useEffect(() => {
     if (!editor || editor.isDestroyed) return undefined;
     const paint = () => {
@@ -1836,6 +1875,18 @@ export default function NoteEditor({
          * paint also runs from the editor's own transaction handler, outside React's render. */
         if (String(editingRef.current || "") === id) el.setAttribute("data-editing", "1");
         else el.removeAttribute("data-editing");
+      }
+      const curPos = editor.state.selection.from;
+      const moved = lastCaretPosRef.current !== null && curPos !== lastCaretPosRef.current;
+      lastCaretPosRef.current = curPos;
+      if (moved && (editingRef.current || selRef.current.size)) {
+        const anchorPos = anchorPosAtSelection(editor.state);
+        const node = anchorPos != null ? editor.state.doc.nodeAt(anchorPos) : null;
+        const stillSelected = node && selRef.current.has(String(node.attrs.aid || ""));
+        if (!stillSelected) {
+          setEditingId(null);
+          setSelection(new Set());
+        }
       }
     };
     paint();
@@ -2136,6 +2187,9 @@ export default function NoteEditor({
         e.preventDefault();
         setEditingId(null);
         setSelection((prev) => toggleSelection(prev, id, { additive: true }));
+        /* ⛔ SEE THE STAGE-1 COMMENT BELOW — the same stale-caret hazard applies to an additive
+         * shift-click, so it gets the same blur. */
+        if (editor && !editor.isDestroyed) editor.commands.blur();
         return;
       }
       if (id && selRef.current.has(String(id)) && selRef.current.size > 1) {
@@ -2144,10 +2198,38 @@ export default function NoteEditor({
       if (id) {
         const alreadySelected = selRef.current.has(String(id)) && selRef.current.size === 1;
         if (!alreadySelected) {
-          /* Stage 1. Nothing is typed and no caret moves — this press is about the BOX. */
+          /* Stage 1. Nothing is typed and no caret moves — this press is about the BOX.
+           *
+           * ⛔ AND THE EDITOR MUST BE BLURRED HERE, NOT LEFT AS IT WAS (B1555152, owner report
+           * 2026-09-11: *"I clicked after 'Civil Engineer: ', then clicked one of his margin
+           * boxes, then pressed Backspace, and it backspaced the Civil Engineer line."*).
+           *
+           * `e.preventDefault()` stops the browser's OWN click from moving the caret — which is
+           * correct, stage 1 is about the box, not the words — but it does nothing about a caret
+           * that was ALREADY sitting in ordinary flow text before this press. Left alone,
+           * `document.activeElement` stays the ProseMirror div and `document.getSelection()`
+           * stays anchored at that stale, pre-click position. `notesKeyScope.js`'s
+           * `readCaretScope` cannot tell that apart from a live, current caret — both report
+           * `activeEditable`/`caretInEditable` true — so `selectionKeyDown`'s own Delete/Backspace
+           * handling below DECLINES (believing the caret owns the key), and the keystroke falls
+           * through to the browser's native contenteditable handling, which edits wherever that
+           * stale selection still is. Measured live: click into "Civil Engineer: …", click an
+           * unselected box once, press Backspace — a letter vanished from "Civil Engineer",
+           * never touching the box.
+           *
+           * Blurring here is the same move `selectionKeyDown`'s own Escape handler already makes
+           * when backing OUT of a box to "selected" (`editor.commands.blur()`) — box-selected is
+           * already treated as "not really in the document" everywhere else in this file; this
+           * closes the one entry into that state that forgot to say so. Afterward
+           * `document.activeElement` is no longer the editor, `readCaretScope` correctly reports
+           * no live caret, and Delete/Backspace reach `selectionKeyDown`, which removes the
+           * SELECTED BOX — exactly what B434416 asked for. A later, genuine click into flow text
+           * still refocuses the editor and moves the selection for real, so NEW-ARROWS's own fix
+           * (arrows belong to a freshly-placed caret) is unaffected. */
           e.preventDefault();
           setEditingId(null);
           setSelection(new Set([String(id)]));
+          if (editor && !editor.isDestroyed) editor.commands.blur();
           return;
         }
         /* ⛔ A BOX HOLDING A PICTURE HAS NO STAGE 2, because it has no words to enter (NEW-
