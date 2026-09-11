@@ -202,7 +202,17 @@ ${indentCssRules(".planyr-note .ProseMirror li")}
 .planyr-note .ProseMirror ul[data-type="taskList"] li > label { margin-top: 0.15em; user-select: none; }
 .planyr-note .ProseMirror ul[data-type="taskList"] li > div { flex: 1 1 auto; min-width: 0; }
 .planyr-note .ProseMirror input[type="checkbox"] { accent-color: var(--accent-notes); width: 15px; height: 15px; cursor: pointer; }
-.planyr-note .ProseMirror table { border-collapse: collapse; table-layout: fixed; width: 100%; overflow: hidden; margin: 1em 0 0 0; }
+/* ⛔ NO width: 100% HERE (NEW-1, owner report 2026-09-11) — that is what pinned a table's total
+   width to the text column, so widening one column had nowhere to come from but its neighbours.
+   table-layout: fixed is kept (it is what makes an explicit column width honoured exactly); the
+   table's own width now comes only from the node view's own inline style, which it sets to the
+   sum of its columns once notesTableColumns.js's NoteTableColumns has given every column an
+   explicit one. An untouched table (nothing here yet) still divides the available width evenly —
+   removing this rule changes nothing for it, since a table with no explicit width still fills its
+   container by ordinary block-box rules.
+   (No backticks in this block — that trap has broken this build six times now; see the guard in
+   the notesModule suite.) */
+.planyr-note .ProseMirror table { border-collapse: collapse; table-layout: fixed; margin: 1em 0 0 0; }
 .planyr-note .ProseMirror table td, .planyr-note .ProseMirror table th { border: 1px solid var(--border-strong); padding: 6px 9px; vertical-align: top; position: relative; min-width: 2em; }
 .planyr-note .ProseMirror table th { background: var(--surface-page); font-weight: 650; text-align: left; }
 .planyr-note .ProseMirror table .selectedCell:after { content: ""; position: absolute; inset: 0; background: var(--accent-notes); opacity: 0.16; pointer-events: none; }
@@ -248,6 +258,17 @@ ${indentCssRules(".planyr-note .ProseMirror li")}
    or a box-shadow: both of those paint outside the element's box, which would put chrome over the
    neighbouring box's controls and re-create the press-swallowing defect this module keeps hitting. */
 .planyr-note .ProseMirror .planyr-anchor[data-selected="1"] { border-color: var(--accent-notes); border-style: solid; background: color-mix(in srgb, var(--accent-notes) 8%, transparent); }
+/* ⛔ SELECTED AND EDITING MUST NOT LOOK IDENTICAL (B1555152 part 1, owner report 2026-09-11:
+   "sometimes it takes a double click, sometimes it takes a click, it's actually kinda odd").
+   Measured: before this rule, selected-alone and selected-plus-editing painted the exact same
+   border colour/style and the exact same background wash — the ONLY difference anywhere was the
+   mouse cursor glyph (grab vs text), which needs the pointer hovering the box to see and says
+   nothing once the mouse has moved on. A box picked up (stage 1, Delete removes it) and a box you
+   are actively typing in (stage 2) are two different things to be IN, and a glance has to be able
+   to tell them apart without touching anything. Editing gets a visibly heavier wash and border —
+   never outline/box-shadow (see the note above: both paint outside the box and would swallow a
+   neighbour's controls). */
+.planyr-note .ProseMirror .planyr-anchor[data-editing="1"] { border-width: 2px; background: color-mix(in srgb, var(--accent-notes) 16%, transparent); }
 .planyr-note .ProseMirror .planyr-anchor[data-empty="1"] { border-color: var(--border-default); border-style: dashed; }
 .planyr-note .ProseMirror .planyr-anchor[data-empty="1"]:focus-within { border-color: var(--accent-notes); }
 .planyr-note .ProseMirror .planyr-anchor[data-empty="1"]:focus-within .planyr-anchor-content::after { content: "Type here"; position: absolute; left: 16px; top: 3px; pointer-events: none; color: var(--text-tertiary); font-style: italic; }
@@ -1773,10 +1794,49 @@ export default function NoteEditor({
     editor.commands.ensureNoteAnchorIds();
   }, [editor, readOnly, docTick]);
 
+  /* ⛔ THE RECOVERY PASS FOR AN ALREADY-SQUEEZED TABLE (NEW-2, owner report 2026-09-11).
+   *
+   * ⛔ ONCE ON MOUNT, DELIBERATELY NOT KEYED ON `docTick` — unlike `ensureNoteAnchorIds` just
+   * above, which is idempotent bookkeeping that cannot conflict with anything the owner does.
+   * This one edits width data a later undo can legitimately want to revert, so re-running it on
+   * every doc change fought Ctrl+Z: reverting a drag left the OTHER columns explicit (from this
+   * effect's own earlier, non-history pass), which reads as "touched, one column null" and
+   * re-triggered the SAME repair, silently refilling the column the owner had just undone. Every
+   * LIVE edit (including a resize) is instead covered by `NoteTableColumns`'s own
+   * `appendTransaction` plugin, which rides the SAME undo step as its trigger — see
+   * lib/notesTableColumns.js's header for the full reasoning. This effect's only remaining job is
+   * the note nobody edits after opening: without it, a table that is merely looked at and never
+   * touched would stay squeezed. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || readOnly) return;
+    editor.commands.normalizeTableColumnWidths();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, readOnly]);
+
   /* ⛔ THE SELECTION IS VISIBLE, and it is painted onto the real elements rather than mirrored
    * into a second render tree. A selection you cannot see is a selection you will move by
    * accident — and re-rendering every box through React to show a ring would remount node views
    * the editor owns, which is a different and worse bug. */
+  /* ⛔ A REAL CARET MOVE AWAY FROM A SELECTED/EDITED BOX RELEASES IT (B1555152 part 2, owner
+   * report 2026-09-11: "even the ASDS click isn't really working that well… sometimes it takes a
+   * double click, sometimes it takes a click, it's actually kinda odd").
+   *
+   * Measured live: enter a box (stage 2), type a word, then click an ORDINARY paragraph elsewhere
+   * on the page — the caret correctly moves there, but `selection`/`editingId` never cleared, so
+   * the box stayed painted with its selected ring AND its `data-editing` attribute. Click that
+   * same box again — since `alreadySelected` in `focusFromMat` reads straight off that stale
+   * state, ONE click now lands directly in stage 2 and enters text, where an untouched box still
+   * needs two. Same gesture, two different outcomes, purely from invisible history — which is
+   * exactly his "sometimes a click, sometimes a double click."
+   *
+   * The fix lives HERE, in the transaction-driven paint pass, not in `focusFromMat`'s click
+   * routing: whenever the LIVE caret position genuinely changes (a real transaction, not merely
+   * this same effect re-running because `selection`/`editingId` changed) and lands somewhere that
+   * is not inside a currently-selected box, the selection is released. `lastCaretPosRef` is the
+   * ONLY state this needs — comparing consecutive readings of `editor.state.selection.from` tells
+   * a genuine move (the user clicked/typed elsewhere) apart from this same paint firing again for
+   * an unrelated reason (a resize, a group drag, a re-render) with the caret exactly where it was. */
+  const lastCaretPosRef = useRef(null);
   useEffect(() => {
     if (!editor || editor.isDestroyed) return undefined;
     const paint = () => {
@@ -1792,6 +1852,18 @@ export default function NoteEditor({
          * paint also runs from the editor's own transaction handler, outside React's render. */
         if (String(editingRef.current || "") === id) el.setAttribute("data-editing", "1");
         else el.removeAttribute("data-editing");
+      }
+      const curPos = editor.state.selection.from;
+      const moved = lastCaretPosRef.current !== null && curPos !== lastCaretPosRef.current;
+      lastCaretPosRef.current = curPos;
+      if (moved && (editingRef.current || selRef.current.size)) {
+        const anchorPos = anchorPosAtSelection(editor.state);
+        const node = anchorPos != null ? editor.state.doc.nodeAt(anchorPos) : null;
+        const stillSelected = node && selRef.current.has(String(node.attrs.aid || ""));
+        if (!stillSelected) {
+          setEditingId(null);
+          setSelection(new Set());
+        }
       }
     };
     paint();
@@ -2092,6 +2164,9 @@ export default function NoteEditor({
         e.preventDefault();
         setEditingId(null);
         setSelection((prev) => toggleSelection(prev, id, { additive: true }));
+        /* ⛔ SEE THE STAGE-1 COMMENT BELOW — the same stale-caret hazard applies to an additive
+         * shift-click, so it gets the same blur. */
+        if (editor && !editor.isDestroyed) editor.commands.blur();
         return;
       }
       if (id && selRef.current.has(String(id)) && selRef.current.size > 1) {
@@ -2100,10 +2175,38 @@ export default function NoteEditor({
       if (id) {
         const alreadySelected = selRef.current.has(String(id)) && selRef.current.size === 1;
         if (!alreadySelected) {
-          /* Stage 1. Nothing is typed and no caret moves — this press is about the BOX. */
+          /* Stage 1. Nothing is typed and no caret moves — this press is about the BOX.
+           *
+           * ⛔ AND THE EDITOR MUST BE BLURRED HERE, NOT LEFT AS IT WAS (B1555152, owner report
+           * 2026-09-11: *"I clicked after 'Civil Engineer: ', then clicked one of his margin
+           * boxes, then pressed Backspace, and it backspaced the Civil Engineer line."*).
+           *
+           * `e.preventDefault()` stops the browser's OWN click from moving the caret — which is
+           * correct, stage 1 is about the box, not the words — but it does nothing about a caret
+           * that was ALREADY sitting in ordinary flow text before this press. Left alone,
+           * `document.activeElement` stays the ProseMirror div and `document.getSelection()`
+           * stays anchored at that stale, pre-click position. `notesKeyScope.js`'s
+           * `readCaretScope` cannot tell that apart from a live, current caret — both report
+           * `activeEditable`/`caretInEditable` true — so `selectionKeyDown`'s own Delete/Backspace
+           * handling below DECLINES (believing the caret owns the key), and the keystroke falls
+           * through to the browser's native contenteditable handling, which edits wherever that
+           * stale selection still is. Measured live: click into "Civil Engineer: …", click an
+           * unselected box once, press Backspace — a letter vanished from "Civil Engineer",
+           * never touching the box.
+           *
+           * Blurring here is the same move `selectionKeyDown`'s own Escape handler already makes
+           * when backing OUT of a box to "selected" (`editor.commands.blur()`) — box-selected is
+           * already treated as "not really in the document" everywhere else in this file; this
+           * closes the one entry into that state that forgot to say so. Afterward
+           * `document.activeElement` is no longer the editor, `readCaretScope` correctly reports
+           * no live caret, and Delete/Backspace reach `selectionKeyDown`, which removes the
+           * SELECTED BOX — exactly what B434416 asked for. A later, genuine click into flow text
+           * still refocuses the editor and moves the selection for real, so NEW-ARROWS's own fix
+           * (arrows belong to a freshly-placed caret) is unaffected. */
           e.preventDefault();
           setEditingId(null);
           setSelection(new Set([String(id)]));
+          if (editor && !editor.isDestroyed) editor.commands.blur();
           return;
         }
         /* ⛔ A BOX HOLDING A PICTURE HAS NO STAGE 2, because it has no words to enter (NEW-
@@ -2489,7 +2592,23 @@ export default function NoteEditor({
       const marginX = (narrow ? SHEET_MARGIN_X.narrow : SHEET_MARGIN_X.wide) * 2;
       const naturalSheetWidth = Math.max(1, Math.min(SHEET_MAX_WIDTH, paneWidth - marginX));
       const naturalPageWidth = Math.max(1, naturalSheetWidth - padX);
-      const needX = anchorExtentX(blocks);
+      /* ⛔ A WIDE TABLE GROWS THE SHEET THE SAME WAY A WIDE BOX DOES (NEW-1, owner report
+       * 2026-09-11) — REUSING this path rather than building a second growth mechanism, per the
+       * owner's own instruction. A table is in-flow content, not a positioned anchor, so it has
+       * no stored `x`/`w` to read — its reach is measured live off the rendered element, the same
+       * way an anchor's `height` already is a few lines up (`el.offsetHeight`). `rectScale`
+       * corrects `getBoundingClientRect()` back into the SAME local/document pixel space
+       * `dom.clientWidth`-style reads already use — the identical correction `beginSize`/
+       * `beginDrag` apply to a box's own drag geometry a little further down this file, needed
+       * because `getBoundingClientRect` reflects the real screen (which the native browser zoom
+       * can inflate) while `offsetWidth` does not. */
+      const domRect = dom.getBoundingClientRect();
+      const rectScale = domRect.width / (dom.offsetWidth || 1) || 1;
+      const tableBlocks = [...dom.querySelectorAll("table")].map((t) => {
+        const r = t.getBoundingClientRect();
+        return { x: (r.left - domRect.left) / rectScale, w: t.offsetWidth };
+      });
+      const needX = anchorExtentX([...blocks, ...tableBlocks]);
       /* ⛔ AND THE SAME QUESTION ASKED OF THE LEFT EDGE (NOTES-FREE-PLACEMENT / NEW-1).
        * `anchorExtentLeft` answers "how far past the page's LEFT origin does anything reach", in
        * the same positive-distance units as the two above. The sheet already has room for some of
@@ -2566,6 +2685,11 @@ export default function NoteEditor({
      * block gets taller as you type and the page has to keep up in the same frame. */
     const ro = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
     if (ro) for (const el of dom.querySelectorAll(".planyr-anchor")) ro.observe(el);
+    /* ⛔ AND EVERY TABLE IS OBSERVED TOO (NEW-1) — a live column drag mutates the table's DOM
+     * width directly, outside any transaction (`@tiptap/pm/tables`' own drag preview), so nothing
+     * else would notice until mouseup. Observing the element itself catches the sheet growing in
+     * real time as the drag happens, the same way a typed-into anchor already does. */
+    if (ro) for (const el of dom.querySelectorAll("table")) ro.observe(el);
     /* ⛔ AND THE EDITOR ITSELF IS OBSERVED, not only the blocks inside it (B421490). The width fit
      * above is a function of the EDITOR's width, and nothing was watching that: a block only
      * re-measured when its own text reflowed, so narrowing the window left every box at the width
