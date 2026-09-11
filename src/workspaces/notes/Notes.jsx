@@ -33,7 +33,10 @@ import {
   NO_PROJECT_LABEL, ORG_GROUP_LABEL, SCOPE_ALL, SCOPE_ORG, SCOPE_PROJECT,
 } from "./lib/notesModel.js";
 import { duplicateNotice } from "./lib/notesDuplicates.js";
-import { NOTE_TEMPLATES, templateById } from "./lib/notesTemplates.js";
+import {
+  commitTemplateLabel, createTemplateRecord, deleteTemplateRecord, duplicateTemplateRecord, renameTemplateRecord,
+  templateById, templateFromDoc, writeTemplateBody,
+} from "./lib/notesTemplates.js";
 import { absoluteStamp } from "./lib/notesTime.js";
 import { isQuickOpenChord, quickOpenResults, rankQuickOpen } from "./lib/notesQuickOpen.js";
 import { groupTasksByProject } from "./lib/notesTasks.js";
@@ -42,9 +45,9 @@ import {
   clearNotesStorageError, collectOpenTasks, createPage, knownBinnedPages, markPagesBinned, markPagesRestored, notesConflictFor, notesConflictLine,
   notesScopeLabel, notesStorageLine, onNotesConflict, onNotesStorageError, onNotesSyncState,
   collectBinFacts, ignoreDuplicate, onNotesPagesChanged, purgePages, readIgnoredDuplicates, readNoteFiles,
-  readNoteImages, readPage, readTreeRaw,
+  readNoteImages, readNoteTemplates, readPage, readTreeRaw,
   resolveNotesConflict, searchNotes, setNotesScope, snapshotPage, startNotesSync, stopNotesSync,
-  sweepEmptyAnchors, sweepImagesOfMissingPages, sweepOrphans, toggleNoteTask, writePage, writeTree,
+  sweepEmptyAnchors, sweepImagesOfMissingPages, sweepOrphans, toggleNoteTask, writeNoteTemplates, writePage, writeTree,
 } from "./lib/notesStore.js";
 import {
   attachmentIdsInDocs, imageIdsInDocs, pageToMarkdown, safeFileName, MD_INLINE_ATTACHMENT_MAX,
@@ -63,6 +66,10 @@ const IntegrityBanner = lazy(() => import("./components/IntegrityBanner.jsx"));
  * diff engine + two full-text panes) has no business on every load's critical path. See its
  * own header (B842624). */
 const ConflictNotice = lazy(() => import("./components/ConflictNotice.jsx"));
+/* NEW-1 (templates) — "Manage templates" is opened rarely, and it pulls in the real editor
+ * to let a body be edited, so it has exactly the same "not on the rail's first paint"
+ * argument as the editor itself. */
+const TemplateManager = lazy(() => import("./components/TemplateManager.jsx"));
 
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 /* ⛔ THE FOOTER'S TONE MAP IS GONE WITH THE FOOTER (B539649). It coloured a sync line that no
@@ -183,7 +190,7 @@ function UndoBar({ deleted, onUndo, onDismiss }) {
  * bar (the follow-up brief's NEW-3) that opens a full-screen `ConflictReview` on demand rather
  * than rendering both full versions inline. */
 
-function EmptyState({ onCreate }) {
+function EmptyState({ onCreate, templates = [] }) {
   return (
     <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 28, background: "var(--surface-page)" }}>
       <div style={{ maxWidth: 380, textAlign: "center" }}>
@@ -202,17 +209,18 @@ function EmptyState({ onCreate }) {
             color: "var(--on-accent-notes)", font: "inherit", fontSize: 13.5, fontWeight: 650, cursor: "pointer",
           }}
         >＋ New page</button>
-        {/* B1020931 — one text link per registered template; blank is the button above, a
-            template is the deliberately lighter-weight secondary path. */}
-        {NOTE_TEMPLATES.length > 0 && (
+        {/* B1020931, reworked NEW-1 — one text link per stored template; blank is the button
+            above, a template is the deliberately lighter-weight secondary path. Reads whatever
+            list the workspace root loaded rather than a hardcoded registry. */}
+        {templates.length > 0 && (
           <p style={{ margin: "10px 0 0", fontSize: 12, color: "var(--text-secondary)" }}>
             or start from a template:{" "}
-            {NOTE_TEMPLATES.map((t) => (
+            {templates.map((t) => (
               <button
                 key={t.id}
                 type="button"
                 data-testid={`notes-empty-create-${t.id}`}
-                title={t.description}
+                title={t.description || t.label}
                 onClick={() => onCreate(t.id)}
                 style={{
                   border: "none", background: "none", padding: 0, marginLeft: 2,
@@ -264,6 +272,12 @@ export default function Notes({
 }) {
   const [tree, setTree] = useState(emptyTree);
   const [activePageId, setActivePageId] = useState(null);
+  /* NEW-1 — the account's template library (lib/notesStore.js's readNoteTemplates/
+   * writeNoteTemplates), loaded on the same scope-change effect the tree uses below. Never a
+   * static import: two accounts on one machine must never see each other's templates, same
+   * as the tree. `templateManagerOpen` gates the lazy "Manage templates" panel. */
+  const [templates, setTemplates] = useState([]);
+  const [templateManagerOpen, setTemplateManagerOpen] = useState(false);
   const [status, setStatus] = useState("saved");
   const [storageError, setStorageError] = useState(null);
   const [exportNote, setExportNote] = useState(null);
@@ -290,6 +304,7 @@ export default function Notes({
    * already on screen (PANEL-BREVITY). The empty-rail state still offers the same click
    * explicitly, in the one place someone could conclude their notes were gone. */
   const treeRef = useRef(null);   // the LIVE tree — see `persistTree` / `treeNow` for why nothing reads a render's copy
+  const templatesRef = useRef([]);   // the LIVE template list — same reasoning as treeRef, see persistTemplates/templatesNow
   const undoTimer = useRef(0);
 
   /* B113/B485's existing phone breakpoint (760px, matchMedia), reused rather than a third one —
@@ -325,6 +340,9 @@ export default function Notes({
    * accounts on one machine never read each other's notes. A scope change re-reads. */
   useEffect(() => {
     setNotesScope(userId || null);
+    const templateList = readNoteTemplates();
+    templatesRef.current = templateList;
+    setTemplates(templateList);
     const raw = readTreeRaw();
     let loaded = migrate(raw);
 
@@ -361,7 +379,13 @@ export default function Notes({
      * sweeping against the live tree alone would destroy what a restore needs. */
     const keep = [...allPageIds(loaded), ...trashPageIds(loaded)];
     sweepOrphans(keep);
-    sweepImagesOfMissingPages(keep);
+    /* NEW-1 — a picture pasted into a TEMPLATE body lives in the same image store a page's
+     * pictures do (imageContext's `pageId` is `tpl:<templateId>` for that editor instance —
+     * see TemplateManager.jsx), but a template is never a tree node, so `keep` alone would
+     * read every one of them as an orphan and delete it on the very next load. Templates are
+     * few, so naming them here costs nothing and is cheaper than teaching the sweep a second
+     * kind of "reachable". */
+    sweepImagesOfMissingPages([...keep, ...templateList.map((t) => `tpl:${t.id}`)]);
 
     /* ⛔ AND THE ONE-TIME CLEAN-UP FOR NOTES ALREADY CARRYING EMPTY BLOCKS. Everything else in
      * this round stops NEW ones being made; this is the only thing that helps a note that
@@ -489,6 +513,16 @@ export default function Notes({
    * callbacks referentially STABLE, so the rail stops rebuilding every handler on every
    * keystroke of a rename. */
   const treeNow = useCallback(() => treeRef.current || emptyTree(), []);
+
+  /* NEW-1 — the same write-through discipline `persistTree` uses, one level down: every
+   * template mutator reads `templatesNow()`, never a render's `templates`, so two template
+   * edits in one tick (or an edit racing the scope-load above) cannot clobber each other. */
+  const templatesNow = useCallback(() => templatesRef.current || [], []);
+  const persistTemplates = useCallback((next) => {
+    templatesRef.current = next;
+    setTemplates(next);
+    if (!writeNoteTemplates(next)) setStatus("error");   // LOUD-FAILURE — same badge every save failure already uses
+  }, []);
 
   /* THE PROJECT LIST — and, just as important, WHETHER IT LOADED (B482 ×2, NEW-1).
    *
@@ -825,12 +859,15 @@ export default function Notes({
   /* ⛔ A PAGE MADE INSIDE A PROJECT IS FILED THERE, WITH NO EXTRA STEP (B1374, kept through
    * B1420's collapse). Made from the Dashboard it belongs to no project, which is a real
    * place with the same shape — never a holding pen. */
-  /* B1020931 — an optional templateId seeds the new page's body via `writePage`, the same
-   * seam every autosave uses, so the seed lands before the editor is ever mounted (or
-   * downloaded) for this page. An unknown/blank id is silently a blank page — never an error,
-   * since "no template" is the default, common case. */
+  /* B1020931, reworked NEW-1 — an optional templateId seeds the new page's body via
+   * `writePage`, the same seam every autosave uses, so the seed lands before the editor is
+   * ever mounted (or downloaded) for this page. An unknown/blank id is silently a blank page
+   * — never an error, since "no template" is the default, common case.
+   * ⛔ THE PAGE IS TITLED AFTER THE TEMPLATE, not left as "Untitled page" (NEW-1's own report:
+   * "he has to rename it every time"). `createPage`/`addPage` already accept an explicit
+   * `title`; a blank page keeps passing `undefined` and gets the same default it always did. */
   const handleAddPage = useCallback((templateId) => {
-    const tpl = templateId ? templateById(templateId) : null;
+    const tpl = templateId ? templateById(templatesNow(), templateId) : null;
     /* ⛔ B1405008 — THE BODY IS WRITTEN BEFORE THE ENTRY IS EVER VISIBLE. `createPage`
      * (notesStore.js) writes the page's body synchronously as part of creating it, so there
      * is no window in which the tree can be persisted (and the entry become clickable in the
@@ -838,7 +875,11 @@ export default function Notes({
      * closes. A body write that fails is a real failure (LOUD-FAILURE, already surfaced by
      * the storage-error banner) and must not leave a phantom entry either, so nothing here
      * persists the tree or navigates when `r.ok` is false. */
-    const r = createPage(treeNow(), { projectId: projectId || null, orgScope }, tpl ? tpl.buildDoc() : undefined);
+    const r = createPage(
+      treeNow(),
+      { projectId: projectId || null, orgScope, title: tpl ? tpl.label : undefined },
+      tpl ? JSON.parse(JSON.stringify(tpl.doc)) : undefined,
+    );
     if (!r.ok) return;
     persistTree(r.tree);
     setActivePageId(r.pageId);
@@ -852,7 +893,66 @@ export default function Notes({
     // by its route — and Notes' whole architecture promises an instant, local-first write that
     // must never wait on a network round trip.
     if (projectId) ensureProjectExists(projectId).catch(() => {});
-  }, [projectId, orgScope, persistTree, treeNow]);
+  }, [projectId, orgScope, persistTree, treeNow, templatesNow]);
+
+  /* ---- templates (NEW-1) ----
+   *
+   * Every op below is the pure record op (lib/notesTemplates.js) followed by
+   * `persistTemplates`, which is this file's `persistTree` mirrored one layer down: write
+   * through, flag the shared save-error badge on a real failure, never roll the in-memory
+   * list back. */
+
+  const handleCreateTemplate = useCallback(() => {
+    const { list, id } = createTemplateRecord(templatesNow(), {});
+    persistTemplates(list);
+    return id;
+  }, [templatesNow, persistTemplates]);
+
+  const handleRenameTemplate = useCallback((id, label) => {
+    persistTemplates(renameTemplateRecord(templatesNow(), id, label));
+  }, [templatesNow, persistTemplates]);
+
+  /** The title field's onBlur/Enter half — applies the default ONLY when left blank, never
+   *  while typing. Mirrors `handleTitleCommit` above exactly, one layer down. */
+  const handleCommitTemplateLabel = useCallback((id) => {
+    persistTemplates(commitTemplateLabel(templatesNow(), id));
+  }, [templatesNow, persistTemplates]);
+
+  /** The embedded editor's own `saveDoc` (see components/TemplateManager.jsx) lands here —
+   *  same "return the boolean the write actually returned" contract `writePage` itself
+   *  honours, so the editor's Saved/Saving badge stays honest for a template exactly as it
+   *  is for a page. */
+  const handleTemplateBody = useCallback((id, doc) => {
+    const next = writeTemplateBody(templatesNow(), id, doc);
+    const ok = writeNoteTemplates(next);
+    if (ok) { templatesRef.current = next; setTemplates(next); }
+    return ok;
+  }, [templatesNow]);
+
+  const handleDuplicateTemplate = useCallback((id) => {
+    const { list, id: newId } = duplicateTemplateRecord(templatesNow(), id);
+    persistTemplates(list);
+    return newId;
+  }, [templatesNow, persistTemplates]);
+
+  const handleDeleteTemplate = useCallback((id) => {
+    persistTemplates(deleteTemplateRecord(templatesNow(), id));
+  }, [templatesNow, persistTemplates]);
+
+  /** "Save this page as a template" — the row menu's own entry (NEW-1: "the cheapest way for
+   *  him to build his own library and it costs almost nothing once templates are records").
+   *  Reads the page's REAL stored body — the tree carries no bodies — so a page that has
+   *  never been written to (no body yet) is named rather than silently saved as blank. */
+  const handleSaveAsTemplate = useCallback((pageId) => {
+    const hit = findPage(treeNow(), pageId);
+    if (!hit) return;
+    const doc = readPage(pageId);
+    if (!doc) { setExportNote("That page has no words yet, so there is nothing to save as a template."); return; }
+    const label = displayTitle(hit.page.title);
+    const { list } = templateFromDoc(templatesNow(), { label, doc });
+    persistTemplates(list);
+    setExportNote(`Saved "${label}" as a template — find it under the ▾ beside ＋ Page.`);
+  }, [treeNow, templatesNow, persistTemplates]);
 
   /** A page UNDER another page — the whole point of the collapse, and reachable by direct
    *  action (the row's menu) rather than by a mode. */
@@ -1410,6 +1510,9 @@ export default function Notes({
           onToggleTask={handleToggleTask}
           onOpenTask={(t) => { setActivePageId(t.pageId); setHighlight(t.text); setQuery(""); setMobileShowList(false); }}
           onViewChange={(v) => { setTasksOpen(v === "tasks"); setBinOpen(v === "bin"); }}
+          templates={templates}
+          onManageTemplates={() => setTemplateManagerOpen(true)}
+          onSaveAsTemplate={handleSaveAsTemplate}
         />
         </div>
 
@@ -1547,7 +1650,7 @@ export default function Notes({
               />
             </Suspense>
           ) : (
-            <EmptyState onCreate={handleAddPage} />
+            <EmptyState onCreate={handleAddPage} templates={templates} />
           )}
 
           {/* ⛔ THE FOOTER SYNC LINE IS GONE (NEW-SAVE-BADGE). It said "Saved on this device"
@@ -1585,6 +1688,25 @@ export default function Notes({
               setHighlight(hit.where === "body" ? quickQuery : "");
               setMobileShowList(false);
             }}
+          />
+        </Suspense>
+      ) : null}
+
+      {/* MANAGE TEMPLATES (NEW-1). Its own full-screen overlay, same reasoning as QuickOpen:
+          rendered last so it paints over everything, and it costs a note nothing until the
+          ▾ menu's "Manage templates…" row is actually picked. */}
+      {templateManagerOpen ? (
+        <Suspense fallback={null}>
+          <TemplateManager
+            templates={templates}
+            narrow={narrow}
+            onClose={() => setTemplateManagerOpen(false)}
+            onCreate={handleCreateTemplate}
+            onRename={handleRenameTemplate}
+            onCommitLabel={handleCommitTemplateLabel}
+            onSaveBody={handleTemplateBody}
+            onDuplicate={handleDuplicateTemplate}
+            onDelete={handleDeleteTemplate}
           />
         </Suspense>
       ) : null}

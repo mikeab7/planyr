@@ -53,7 +53,6 @@ import {
 } from "../lib/notesModel.js";
 import { absoluteStamp, daysLeft } from "../lib/notesTime.js";
 import { QUICK_OPEN_KEY } from "../lib/notesQuickOpen.js";
-import { NOTE_TEMPLATES } from "../lib/notesTemplates.js";
 
 // ORG SCOPE (NEW-1) — the "file under" panel's destination for Organization. A UI-local
 // sentinel, never written into the model: `onBind` below translates it into a call to
@@ -352,6 +351,12 @@ function ProjectListBanner({ state, error, unresolved, onRetry }) {
  *  walk it and Enter chooses, so the menu is fully usable without a mouse. It is NOT a
  *  dialog: nothing is modal, nothing blocks, and picking Rename opens the inline field on the
  *  row rather than a box (house rule). */
+/** A non-clickable divider row — the same `{ sep: true }` idiom NoteEditor.jsx's own
+ *  document/box menu already uses, mirrored here rather than imported (this file may not
+ *  reach into components that pull the editor engine). Used to set "Manage templates…" off
+ *  from the template rows above it. */
+const SEP = { sep: true };
+
 function RowMenu({ x, y, items, onClose }) {
   const ref = useRef(null);
   useEffect(() => {
@@ -374,7 +379,17 @@ function RowMenu({ x, y, items, onClose }) {
 
   const vw = typeof window !== "undefined" ? window.innerWidth : 1200;
   const vh = typeof window !== "undefined" ? window.innerHeight : 800;
+  /* ⛔ NEW-1 — A MENU MUST NEVER RUN OFF A SHORT WINDOW. This used to size itself for a
+   * handful of fixed rows (New subpage/Rename/…/Delete); the template dropdown can now hold
+   * as many templates as an account has built, and Michael's own browser window is short
+   * (~465px of viewport height) — a menu that just keeps growing runs off the bottom of the
+   * screen with no way to reach the rows past the fold. `maxHeight` + `overflowY` caps it and
+   * lets it SCROLL instead; when it's short enough to fit, both are no-ops (a menu that fits
+   * never shows a scrollbar). The position calc below already lands a too-tall menu at the
+   * top of the screen (`Math.max(8, vh - height - 8)` floors at 8 once `height` exceeds the
+   * viewport) — capping the rendered box is the other half of that same fix. */
   const height = items.length * 27 + 12;
+  const maxHeight = Math.max(120, vh - 16);
 
   return (
     <div
@@ -386,13 +401,16 @@ function RowMenu({ x, y, items, onClose }) {
         position: "fixed", zIndex: 60,
         left: Math.min(x, Math.max(8, vw - 208)),
         top: Math.min(y, Math.max(8, vh - height - 8)),
-        minWidth: 196, padding: "5px 0",
+        minWidth: 196, maxHeight, overflowY: "auto", padding: "5px 0",
         background: "var(--surface-raised)", border: "1px solid var(--border-default)",
         borderRadius: RADIUS.control, boxShadow: "0 14px 36px rgba(0,0,0,0.22)",
         display: "flex", flexDirection: "column",
       }}
     >
-      {items.map((it) => (
+      {items.map((it, i) => (
+        it.sep ? (
+          <div key={`sep${i}`} style={{ height: 1, flex: "0 0 auto", background: "var(--border-default)", margin: "4px 0" }} />
+        ) : (
         <button
           key={it.id}
           type="button"
@@ -401,10 +419,11 @@ function RowMenu({ x, y, items, onClose }) {
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => { onClose(); it.onPick(); }}
           style={{
-            ...rowBase, borderRadius: 0, padding: "5px 12px", fontSize: 12.5, fontWeight: 600,
+            ...rowBase, flex: "0 0 auto", borderRadius: 0, padding: "5px 12px", fontSize: 12.5, fontWeight: 600,
             color: it.danger ? "var(--danger-text)" : "var(--text-primary)",
           }}
         >{it.label}</button>
+        )
       ))}
     </div>
   );
@@ -873,6 +892,10 @@ export default function NotesTree({
   onRename, onDelete, onExportPage, onPrintPage, onSetPageProject, onSetPageOrgScope,
   onMovePage, onRestore, onPurge, onPurgeAll, onPeekBin, onPurgeEmpties, binFacts, onAllNotes,
   taskGroups = [], onToggleTask, onOpenTask, onViewChange,
+  /* NEW-1 — templates are stored records now (Notes.jsx owns the storage), never a static
+   * import here: this component only renders whatever list it is handed. `onManageTemplates`
+   * opens the full management panel; `onSaveAsTemplate` is the row menu's own entry. */
+  templates = [], onManageTemplates, onSaveAsTemplate,
   /* PHONE DRILL-IN (NEW-1, B849632) — this is the ROOT view below the breakpoint, at full
    * width, so this one flag governs the root's width/row-height/tap-target sizing throughout
    * this file. `false` (the default) reproduces this file's pre-existing output exactly. */
@@ -995,6 +1018,11 @@ export default function NotesTree({
         ...(root ? [{ id: `bind-${id}`, label: "Belongs to…", onPick: () => beginBind(id) }] : []),
         { id: `md-${id}`, label: "Export to Markdown", onPick: () => onExportPage(id) },
         { id: `print-${id}`, label: "Print / save as PDF", onPick: () => onPrintPage(id) },
+        /* NEW-1 — "the cheapest way for him to build his own library". Offered whenever the
+         * workspace root wired the handler in (it always does), not gated behind anything
+         * about the page itself: a template built from a subpage is exactly as useful as one
+         * built from a root page. */
+        ...(onSaveAsTemplate ? [{ id: `savetpl-${id}`, label: "Save as template…", onPick: () => onSaveAsTemplate(id) }] : []),
         { id: `rm-${id}`, label: "Delete", danger: true, onPick: () => beginDelete(id) },
       ],
     }),
@@ -1166,40 +1194,46 @@ export default function NotesTree({
               cursor: "pointer", whiteSpace: "nowrap",
             }}
           >＋ Page</button>
-          {/* B1020931 — a template picker, additive beside the blank-page button above rather
-              than replacing its one-click behavior: the common case (a blank page) stays exactly
-              as fast as it was. Reuses RowMenu, this file's own existing small-menu idiom
-              (below), rather than the shared controls.jsx menu primitives — this file may not
-              import controls.jsx at all (see the source-guard test in notesModule.test.js: that
-              import hoists a third shared chunk onto the Site route, the same measured
-              constraint NoteToolbar.jsx documents for the same reason). Same locked height/radius
-              as the button it sits beside — no new control signature on this surface. */}
-          {NOTE_TEMPLATES.length > 0 && (
-            <button
-              ref={templateTriggerRef}
-              type="button"
-              data-testid="notes-new-from-template"
-              title="New page from template"
-              aria-haspopup="menu"
-              aria-expanded={!!menu}
-              onClick={() => {
-                const r = templateTriggerRef.current?.getBoundingClientRect();
-                setMenu({
-                  x: r ? r.left : 0, y: r ? r.bottom + 4 : 0,
-                  items: NOTE_TEMPLATES.map((t) => ({
+          {/* B1020931, reworked NEW-1 — a template picker, additive beside the blank-page
+              button above rather than replacing its one-click behavior: the common case (a
+              blank page) stays exactly as fast as it was. Reuses RowMenu, this file's own
+              existing small-menu idiom (below), rather than the shared controls.jsx menu
+              primitives — this file may not import controls.jsx at all (see the source-guard
+              test in notesModule.test.js: that import hoists a third shared chunk onto the
+              Site route, the same measured constraint NoteToolbar.jsx documents for the same
+              reason). Same locked height/radius as the button it sits beside — no new control
+              signature on this surface.
+              ⛔ ALWAYS RENDERED NOW, even with zero templates — "Manage templates…" (which
+              creates the first one) must stay reachable, not vanish along with the list it
+              would otherwise have nothing to show. */}
+          <button
+            ref={templateTriggerRef}
+            type="button"
+            data-testid="notes-new-from-template"
+            title="New page from template"
+            aria-haspopup="menu"
+            aria-expanded={!!menu}
+            onClick={() => {
+              const r = templateTriggerRef.current?.getBoundingClientRect();
+              setMenu({
+                x: r ? r.left : 0, y: r ? r.bottom + 4 : 0,
+                items: [
+                  ...templates.map((t) => ({
                     id: `tpl-${t.id}`, label: t.label,
                     onPick: () => { setView("tree"); onViewChange?.("tree"); onAddPage(t.id); },
                   })),
-                });
-              }}
-              style={{
-                flex: "0 0 auto", height: narrow ? 44 : 28, width: narrow ? 44 : 22, padding: 0, borderRadius: RADIUS.control,
-                border: "1px solid var(--border-default)", background: "var(--surface-page)",
-                color: "var(--text-secondary)", font: "inherit", fontSize: 10.5, fontWeight: 650,
-                cursor: "pointer",
-              }}
-            >▾</button>
-          )}
+                  SEP,
+                  { id: "manage-templates", label: "Manage templates…", onPick: () => onManageTemplates?.() },
+                ],
+              });
+            }}
+            style={{
+              flex: "0 0 auto", height: narrow ? 44 : 28, width: narrow ? 44 : 22, padding: 0, borderRadius: RADIUS.control,
+              border: "1px solid var(--border-default)", background: "var(--surface-page)",
+              color: "var(--text-secondary)", font: "inherit", fontSize: 10.5, fontWeight: 650,
+              cursor: "pointer",
+            }}
+          >▾</button>
         </div>
         {/* The workspace root is told which view is showing, so the task rollup — which has
             to read every page BODY in scope — is computed only while it is on screen. */}

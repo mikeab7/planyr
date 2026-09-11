@@ -168,7 +168,8 @@ import {
   trashEntries, walkPages, withTombstones, SCOPE_ALL, SCOPE_PROJECT, SCOPE_ORG,
 } from "./notesModel.js";
 import { normalizeZoom, zoomKey, ZOOM_DEFAULT } from "./notesZoom.js";
-import { IGNORED_DUPES_KEY_BASE } from "./notesKeys.js";
+import { IGNORED_DUPES_KEY_BASE, TEMPLATES_KEY_BASE } from "./notesKeys.js";
+import { seedTemplateRecords } from "./notesTemplates.js";
 import { countEmptyAnchors, pruneEmptyAnchors } from "./notesAnchorPrune.js";
 import { relativeTime } from "./notesTime.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
@@ -333,6 +334,43 @@ export function ignoreDuplicate(key, s = scope) {
     st.setItem(ignoredKey(s), JSON.stringify([...new Set([...readIgnoredDuplicates(s), key])]));
     return true;
   } catch (_) { return false; /* a preference is not data — the bar simply asks again */ }
+}
+
+/* ---- templates (NEW-1) -----------------------------------------------------------------
+ *
+ * ONE blob per account, like the tree — templates are few and edited rarely, unlike page
+ * bodies, so there is no case here for a per-record key. Unlike the tree/page split, this
+ * is REAL DATA (a person's own edited templates), not a preference, so a read/write failure
+ * goes through the same LOUD-FAILURE broadcast the tree and page bodies use — never the
+ * zoom/ignored-dupes pattern of silently degrading to a default. */
+const templatesKey = (s = scope) => `${TEMPLATES_KEY_BASE}:${s}`;
+
+/** Read this account's template library, seeding it with the built-in starters the FIRST
+ *  time this scope has ever been read (never again — an account that deletes every template
+ *  stays empty, it is not re-seeded on the next load). A corrupt blob is reported exactly
+ *  like a corrupt tree would be, never silently read as "no templates". */
+export function readNoteTemplates(s = scope) {
+  const st = store();
+  if (!st) { fail("read", templatesKey(s), new Error("localStorage is unavailable in this browser")); return []; }
+  let text;
+  try { text = st.getItem(templatesKey(s)); } catch (e) { fail("read", templatesKey(s), e); return []; }
+  if (text == null) {
+    const seeded = seedTemplateRecords();
+    writeNoteTemplates(seeded, s);
+    return seeded;
+  }
+  try {
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) { fail("read", templatesKey(s), e); return []; }
+}
+
+/** Persist the whole template list. Returns true only when the bytes actually landed. */
+export function writeNoteTemplates(list, s = scope) {
+  const st = store();
+  if (!st) { fail("write", templatesKey(s), new Error("localStorage is unavailable in this browser")); return false; }
+  try { st.setItem(templatesKey(s), JSON.stringify(list || [])); return true; }
+  catch (e) { fail("write", templatesKey(s), e); return false; }
 }
 
 /* ---- page bodies ---------------------------------------------------------------------- */
