@@ -64,6 +64,11 @@ mkdirSync(OUT, { recursive: true });
 const NARROW_WIDTHS = [900, 960, 1024, 1108];
 const WRAP_RANGE_WIDTHS = [1024, 975, 960, 900, 800, 761];
 const WIDE_WIDTHS = [1440, 1600, 1920, 2560];
+// B1547280 — the owner's own real CSS viewport width, at ~215% browser zoom on a 1600px physical
+// window. The width that surfaced the bug: at 1191px the pre-fix chip (ViewToggle + review button
+// bundled as one 222px unit) did not fit the row's measured bound and fell back to flow, landing
+// 51px right of the row's true center — exactly what he measured and reported.
+const MICHAEL_VIEWPORT_WIDTH = 1191;
 // A gap difference below this reads as "centered" to the eye; the pre-fix defect was ~135px.
 const GAP_TOLERANCE_PX = 3;
 const SCOPES = ["grid", "split"]; // Schedule's two real toolbar-width states
@@ -105,14 +110,16 @@ try {
       return { sampled: xs.length * ys.length, bad, box: { left: r.left, right: r.right, width: r.width } };
     };
     const tabs = [...root.querySelectorAll('[data-testid^="module-tab-"]')];
-    // The center group is TWO controls (Grid/Split/Gantt toggle; the review-inbox button) — its
-    // tight content box is the union of both, never just one, or a real control's width gets
-    // mistaken for empty space on one side. (NEW-1, 2026-09-10 — the "Schedules" switcher button
-    // that used to be a third member here was removed; the Row-1 breadcrumb's schedule crumb now
-    // does that job, outside this zone entirely.)
+    // B1547280 (AMENDMENT to B1511712) — the center group is now the Grid/Split/Gantt toggle
+    // ALONE. The review-inbox button used to be measured here too (a NEW-2-era comment on this
+    // line said "the center group is TWO controls"), which is exactly the bug the owner caught:
+    // AppHeader's Row-2 centering was measuring and positioning a combined bundle wider than the
+    // control he was actually asking about. The button now lives in the right-hand action zone
+    // (ScheduleActions) and is picked up by `toolbarParts` below instead. (NEW-1, 2026-09-10 —
+    // the "Schedules" switcher button that used to be a third member here was removed earlier;
+    // the Row-1 breadcrumb's schedule crumb now does that job, outside this zone entirely.)
     const centerParts = [
       root.querySelector('[role="group"][aria-label="View"]'),
-      root.querySelector('[title="Review suggested updates from forwarded emails"]'),
     ].filter(Boolean);
     // The toolbar's tight content box is the union of EVERY one of its children (not just the
     // first), because the overlap question is "does the center group's content touch ANY part of
@@ -291,6 +298,26 @@ try {
       && Math.abs(short.centerBox.right - long.centerBox.right) < 0.5;
     ok(`@${w}: a long project name in the OTHER row does not move the chip`, same,
       `short center=[${short.centerBox?.left.toFixed(1)},${short.centerBox?.right.toFixed(1)}] long center=[${long.centerBox?.left.toFixed(1)},${long.centerBox?.right.toFixed(1)}]`);
+  }
+
+  console.log("\n── 1191px — the owner's own real viewport (215% browser zoom on a 1600px window), named ──");
+  {
+    const w = MICHAEL_VIEWPORT_WIDTH;
+    await page.setViewportSize({ width: w, height: 700 });
+    await page.waitForTimeout(150);
+    for (const scope of ["grid", "split", "gantt"]) {
+      const m = await probe(scope);
+      const { offset } = recordCase(`owner's viewport (1191) — ${scope}`, m, w);
+      ok(`${scope}@${w}: reports centered mode (the view toggle alone now fits the bound)`, m.centerMode === "centered", `mode=${m.centerMode}`);
+      ok(`${scope}@${w}: the view toggle's own center matches the ROW'S true center (±${GAP_TOLERANCE_PX}px)`,
+        offset != null && Math.abs(offset) <= GAP_TOLERANCE_PX, `offset ${offset == null ? "n/a" : offset.toFixed(1)}px`);
+      if (m.centerBox && m.toolbarBox && m.lastTabBox) {
+        const leftGap = m.centerBox.left - m.lastTabBox.right;
+        const rightGap = m.toolbarBox.left - m.centerBox.right;
+        ok(`${scope}@${w}: never overlaps either neighbor (both real gaps are non-negative)`,
+          leftGap >= 0 && rightGap >= 0, `left ${leftGap.toFixed(1)}px, right ${rightGap.toFixed(1)}px`);
+      }
+    }
   }
 
   console.log("\n── tablet width — an explicit mid-range check, not just narrow/wide extremes ──");
