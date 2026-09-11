@@ -19,6 +19,11 @@ export const PAGE_KEY_BASE = "planyr:notes:page:v1";
 export const SYNC_KEY_BASE = "planyr:notes:sync:v1";
 /** Findings the person has said "keep both, stop telling me" about (NEW-4). */
 export const IGNORED_DUPES_KEY_BASE = "planyr:notes:dupes-ignored:v1";
+/** The per-account template library (B1340704) — one blob, like the tree: templates are few
+ *  and edited rarely, so there is no per-record key the way page bodies get one. Device-local
+ *  only for now (like notesVersions.js's history), never mirrored to the cloud tree/pages
+ *  tables — a stated limit, not an oversight; see notesTemplates.js's header. */
+export const TEMPLATES_KEY_BASE = "planyr:notes:templates:v1";
 
 /** Signed in, a user's notes live under their id; signed out, under `local`. Two accounts on
  *  one machine therefore never read each other's notes. */
