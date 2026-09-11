@@ -1100,9 +1100,16 @@ export default function NoteEditor({
    * (see Notes.jsx's note on why that band is gone). `undefined` on desktop and wherever the
    * caller has nowhere to send it (e.g. it isn't asked for outside `narrow`). */
   onBack,
+  /* ⛔ NEW-1 (templates) — the ONE hook that lets a caller other than a page use this exact
+   * editor without a second implementation. Both optional; every existing caller (a real
+   * page) omits them and gets the untouched `readPage`/`writePage(pageId, …)` behaviour.
+   * "Manage templates" is the one caller that supplies them, pointing the same load/save
+   * shape at a template record instead of a page's storage key — the editor itself neither
+   * knows nor cares which. */
+  loadDoc, saveDoc,
 }) {
   /* Initial content read ONCE, here. Not in an effect — see fix (2) in the header. */
-  const [initialDoc] = useState(() => readPage(pageId) || EMPTY_DOC);
+  const [initialDoc] = useState(() => (typeof loadDoc === "function" ? loadDoc() : readPage(pageId)) || EMPTY_DOC);
   const [find, setFind] = useState({ term: "", count: 0, index: 0 });
 
   /* The pending snapshot is PLAIN JSON captured at edit time, so the flush never has to
@@ -1119,7 +1126,8 @@ export default function NoteEditor({
    * which is exactly the kind of churn that made the original ordering bug intermittent. */
   const onStatusRef = useRef(onStatus);
   const onSavedRef = useRef(onSaved);
-  useEffect(() => { onStatusRef.current = onStatus; onSavedRef.current = onSaved; }, [onStatus, onSaved]);
+  const saveDocRef = useRef(saveDoc);
+  useEffect(() => { onStatusRef.current = onStatus; onSavedRef.current = onSaved; saveDocRef.current = saveDoc; }, [onStatus, onSaved, saveDoc]);
 
   /* WHICH page a pasted picture belongs to, and which notebook it is charged against, read
    * at PASTE time through a ref — a value captured when the editor was created would be
@@ -1133,7 +1141,7 @@ export default function NoteEditor({
     const pending = pendingRef.current;
     if (!pending) return;
     pendingRef.current = null;
-    const ok = writePage(pending.id, pending.doc);
+    const ok = typeof saveDocRef.current === "function" ? saveDocRef.current(pending.doc) : writePage(pending.id, pending.doc);
     // LOUD-FAILURE: a write that did not land never reads as "Saved".
     onStatusRef.current?.(ok ? "saved" : "error");
     // The edited stamp is hung on the write that ACTUALLY LANDED, never on a keystroke —
