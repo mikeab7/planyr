@@ -29,6 +29,7 @@ import { Extension, getStyleProperty, mergeAttributes } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 
 import { DEFAULT_DENSITY, blockFontSize, densityFor, spacingFromElement, spacingStyle, fontSizePx } from "./notesSpacing.js";
+import { PAGE_WIDTH_MAX, PAGE_WIDTH_MIN } from "./notesPageWidth.js";
 import { inheritedStyle } from "./notesPasteInherit.js";
 import { FontFamily, FontSize, TextStyleKit } from "@tiptap/extension-text-style";
 import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
@@ -295,6 +296,15 @@ export const NOTE_EXTENSIONS = [
             parseHTML: () => DEFAULT_DENSITY,
             renderHTML: () => ({}),
           },
+          /* ⛔ SET A PAGE'S OWN WIDTH BY HAND (NEW-1). `null` | `"full"` | a number — see
+           * lib/notesPageWidth.js's own header for the full shape and why a doc attribute is
+           * the right home (rides storage/sync/print/export for free, exactly like `density`).
+           * Never restored from pasted HTML, same reasoning as `density`. */
+          pageWidth: {
+            default: null,
+            parseHTML: () => null,
+            renderHTML: () => ({}),
+          },
         },
       }, {
         types: ["paragraph", "heading"],
@@ -354,6 +364,21 @@ export const NOTE_EXTENSIONS = [
           const next = densityFor(id).id;
           if (state.doc.attrs.density === next) return false;
           if (dispatch) dispatch(tr.setDocAttribute("density", next));
+          return true;
+        },
+
+        /* ⛔ SET A PAGE'S OWN WIDTH (NEW-1). `null` clears the pin (Fit to content); `"full"` or
+         * a finite number pins it. A real `setDocAttribute` step, so this is one undoable step
+         * whether it came from the page menu or from a completed edge drag — NoteEditor.jsx
+         * dispatches it once, on commit, never per drag frame. */
+        setNotePageWidth: (value) => ({ state, tr, dispatch }) => {
+          let next = null;
+          if (value === "full") next = "full";
+          else if (typeof value === "number" && Number.isFinite(value)) {
+            next = Math.round(Math.max(PAGE_WIDTH_MIN, Math.min(PAGE_WIDTH_MAX, value)));
+          }
+          if (state.doc.attrs.pageWidth === next) return false;
+          if (dispatch) dispatch(tr.setDocAttribute("pageWidth", next));
           return true;
         },
 
