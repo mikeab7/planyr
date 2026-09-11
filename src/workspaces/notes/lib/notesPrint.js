@@ -23,6 +23,7 @@ import { absoluteStamp } from "./notesTime.js";
 import { DEFAULT_DENSITY, SINGLE, densityFor } from "./notesSpacing.js";
 import { indentCssRules } from "./notesIndentLevel.js";
 import { anchorExtentLeft, anchorExtentTop, anchorExtentX } from "./notesBoxResize.js";
+import { tableTotalWidth } from "./notesTableWidth.js";
 
 const esc = (s) => String(s == null ? "" : s)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -74,6 +75,49 @@ export function pageAnchorExtentLeftPx(doc) {
 
 export function pageAnchorExtentTopPx(doc) {
   try { return anchorExtentTop(anchorBoxesInDoc(doc)); } catch (_) { return 0; }
+}
+
+/* ⛔ PDF-PARITY FOR NEW-1 (widening a table column grows the sheet, on paper too). Tables do not
+ * nest in this schema, and a table is in-flow content rather than a positioned box — it has no
+ * stored `x`, it always starts at the body's own left content edge — so the question here is
+ * simpler than the anchor one above: how wide does the WIDEST table's own columns need the
+ * content column to be. `tableTotalWidth` (notesTableWidth.js) is the exact same arithmetic the
+ * live editor's node view uses to set `table.style.width`, so paper and the screen cannot
+ * disagree about a table's own width — only about whether the SHEET is wide enough to hold it. */
+function tablesInDoc(doc, out = []) {
+  if (!doc || typeof doc !== "object") return out;
+  if (doc.type === "table") { out.push(doc); return out; }   // tables do not nest in this schema
+  for (const child of doc.content || []) tablesInDoc(child, out);
+  return out;
+}
+
+function tableColumnWidthsFromJSON(tableDoc) {
+  const row = (tableDoc.content || [])[0];
+  const widths = [];
+  if (!row) return widths;
+  let col = 0;
+  for (const cell of row.content || []) {
+    const colspan = cell.attrs?.colspan || 1;
+    const colwidth = cell.attrs?.colwidth || null;
+    for (let j = 0; j < colspan; j += 1, col += 1) {
+      widths[col] = colwidth && colwidth[j] ? colwidth[j] : null;
+    }
+  }
+  return widths;
+}
+
+/** One page's raw document → how many print-pixels wide its widest table's own columns add up
+ *  to. `0` for a page with no table, or an unreadable one — the same "one bad page must not take
+ *  the whole print run down" guard every sibling function on this page uses. */
+export function pageTableExtentPx(doc) {
+  try {
+    let max = 0;
+    for (const t of tablesInDoc(doc)) {
+      const w = tableTotalWidth(tableColumnWidthsFromJSON(t));
+      if (w > max) max = w;
+    }
+    return max;
+  } catch (_) { return 0; }
 }
 
 /* Mirrors src/workspaces/notes/components/NoteEditor.jsx → EDITOR_CSS, construct for
@@ -145,7 +189,10 @@ ${indentCssRules(".note-body li")}
 .note-body ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 0.5em; }
 .note-body ul[data-type="taskList"] li > div { flex: 1 1 auto; min-width: 0; }
 .note-body input[type="checkbox"] { width: 11px; height: 11px; margin-top: 0.3em; }
-.note-body table { border-collapse: collapse; table-layout: fixed; width: 100%; break-inside: auto; }
+/* ⛔ NO width: 100% (NEW-1, mirrors EDITOR_CSS's identical fix) — the table's own width comes
+   from the stored colwidth attrs via the schema's own renderHTML, and the sheet grows to hold it
+   (see growPx above) rather than the table being pinned to the sheet's content width. */
+.note-body table { border-collapse: collapse; table-layout: fixed; break-inside: auto; }
 .note-body table td, .note-body table th { border: 1px solid #9AA0AC; padding: 4px 7px; vertical-align: top; }
 .note-body table th { background: #F2F3F6; font-weight: 650; text-align: left; }
 .note-body tr { break-inside: avoid; }
@@ -277,16 +324,20 @@ export function buildPrintDocument({ title, meta = "", pages = [], density = DEF
     body.push(pageBlock({ ...p, showTitle: !single, breakBefore: !single && i > 0 && !trail }));
   });
 
-  /* ⛔ NOTES-PAGE-GROWTH, PDF-PARITY — the widest anchored block across every printed page
-   * decides whether the sheet needs more than its ordinary 190mm. `max(190mm, ...)` picks
-   * whichever is larger, so the ordinary case (nothing to grow for) is untouched CSS with no
-   * branch here to keep in step with it — the same shape components/NoteEditor.jsx's own
-   * `dom.style.minHeight = max(46vh, Npx)` already uses for the identical reason. The extra
-   * 60px covers the sheet's own 8mm side padding, doubled (`8mm ≈ 30.24px` at 96dpi) — the
-   * anchor's stored x/w are unconverted screen pixels (PDF-PARITY by construction: `renderHTML`
-   * writes them as literal "Npx", the same string on paper as on screen), so no other unit
-   * conversion belongs here. */
-  const growPx = pages.reduce((m, p) => Math.max(m, pageAnchorExtentPx(p.doc)), 0);
+  /* ⛔ NOTES-PAGE-GROWTH, PDF-PARITY — the widest anchored block OR the widest table across every
+   * printed page decides whether the sheet needs more than its ordinary 190mm (NEW-1 folds the
+   * table case into the same `growPx` an anchor already drove, rather than a second branch).
+   * `max(190mm, ...)` picks whichever is larger, so the ordinary case (nothing to grow for) is
+   * untouched CSS with no branch here to keep in step with it — the same shape
+   * components/NoteEditor.jsx's own `dom.style.minHeight = max(46vh, Npx)` already uses for the
+   * identical reason. The extra 60px covers the sheet's own 8mm side padding, doubled (`8mm ≈
+   * 30.24px` at 96dpi) — both an anchor's stored x/w and a table's stored colwidth are
+   * unconverted screen pixels (PDF-PARITY by construction: `renderHTML` writes them as literal
+   * "Npx", the same string on paper as on screen), so no other unit conversion belongs here. */
+  const growPx = pages.reduce(
+    (m, p) => Math.max(m, pageAnchorExtentPx(p.doc), pageTableExtentPx(p.doc)),
+    0,
+  );
   /* ⛔ AND THE SAME ARITHMETIC FOR THE OTHER TWO EDGES (NOTES-FREE-PLACEMENT / NEW-7). The screen
    * grows the page left and up by taking on extra padding rather than by moving anybody's box;
    * paper does exactly the same thing to the same element, so the two sheets cannot disagree
