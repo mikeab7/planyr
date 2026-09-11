@@ -203,3 +203,7 @@ ui-audit/_shots/
 # instead of relying on every session to know it unprompted).
 .scratch-repro/
 /.tmp-verify/
+
+# discover-county-parcels.mjs's own machine-readable dump — regenerated on every run; the durable
+# record of what it found lives in counties.js / countiesProvenance.js / docs/STATEWIDE-PARCELS.md.
+ui-audit/discover-county-parcels-results.json
