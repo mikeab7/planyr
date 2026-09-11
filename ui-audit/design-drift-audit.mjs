@@ -92,6 +92,13 @@ export const DRAWING_SURFACE_FILES = [
   "src/workspaces/notes/lib/notesPrint.js",
   "src/workspaces/food/lib/ratingColor.js",
   "src/shared/theme/familyInk.js",
+  // B711329 — a KML/KMZ export renders in GOOGLE EARTH, a third-party app with no access to our
+  // CSS custom properties, so its feature colors and placemark-balloon inline styles can never be
+  // theme tokens — the same reasoning that exempts printSheet.js above (an export/print surface,
+  // not app chrome). Its sibling site-planner/lib/kmzExport.js carries the identical untokenized
+  // boundary color but predates this exemption list and isn't retroactively added here — pre-
+  // existing debt this item didn't touch, left for its own session.
+  "src/shared/comps/lib/kmlExport.js",
 ];
 
 const EXEMPT_FILES = new Set([...TOKEN_LAYER_FILES, ...DRAWING_SURFACE_FILES]);

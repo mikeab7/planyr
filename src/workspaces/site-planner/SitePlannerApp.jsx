@@ -1145,6 +1145,11 @@ export default function App({
             layerStatus={layerStatus}
             setLayerStatus={setLayerStatus}
             sites={siteGroups}
+            // B711329 — the comp-marker "Export site record (KMZ)" action must resolve a comp's
+            // owning site by id/groupId regardless of role: `siteGroups` above is filtered to
+            // role === "pursuit", so a comp attached to a "tracked" (market-intel-only) site —
+            // the common case for a bare leasing comp — would never be found through it.
+            allSites={sites}
             parcelSummary={parcelSummaryLoaded ? parcelSummary : null}
             lastEditedByGroup={elementRecencyLoaded ? groupRecency : null}
             activeSiteId={activeSiteId}
