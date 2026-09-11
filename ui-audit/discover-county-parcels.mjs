@@ -207,9 +207,16 @@ export function rejectCandidate(candidate, { now = new Date() } = {}) {
   const label = `${candidate.title || ""} ${candidate.serviceName || ""}`;
   if (REJECT_TITLE_RE.test(label)) return `test/demo/sandbox/draft/archive/historical title: "${candidate.title}"`;
   if (isCommercialPublisher({ owner: candidate.owner, orgName: candidate.orgName })) return "commercial data vendor";
-  const year = extractYear(label);
+  // A title-embedded year is checked FIRST (an explicit claim the publisher made); when the title
+  // carries none, fall back to the service's own editingInfo date — a candidate with no year in its
+  // NAME can still be a genuinely stale wire (Wayne County MI's own winning candidate, caught only
+  // this way: no year in "Parcels - MI - Wayne County", but dataLastEditDate 2018 — 8 years stale).
+  const titleYear = extractYear(label);
+  const editYear = candidate.editDate ? new Date(candidate.editDate).getFullYear() : null;
+  const year = titleYear ?? editYear;
+  const basis = titleYear != null ? "name" : "its own last-edit date";
   if (year != null && now.getFullYear() - year > STALE_YEAR_THRESHOLD)
-    return `stale vintage — ${year} is more than ${STALE_YEAR_THRESHOLD} years old`;
+    return `stale vintage — ${year} (${basis}) is more than ${STALE_YEAR_THRESHOLD} years old`;
   return null;
 }
 

@@ -44,6 +44,14 @@ describe("rejectCandidate — item 2's hard rejects", () => {
     expect(rejectCandidate({ title: "Parcels 2021" }, { now })).toBeNull(); // exactly at the threshold, not over it
   });
 
+  it("REGRESSION FIXTURE — a title with NO year is still caught by its own editingInfo date (Wayne County MI)", () => {
+    // "Parcels - MI - Wayne County", dataLastEditDate 2018 — 8 years stale, no year anywhere in the
+    // title, so this candidate was WIRED before this check existed. A title year still wins when
+    // both are present (an explicit publisher claim outranks a service's own bookkeeping date).
+    expect(rejectCandidate({ title: "Parcels - MI - Wayne County", editDate: "2018-05-08T00:00:00.000Z" }, { now })).toMatch(/stale vintage.*2018/);
+    expect(rejectCandidate({ title: "Parcels 2025", editDate: "2018-01-01T00:00:00.000Z" }, { now })).toBeNull();
+  });
+
   it("REGRESSION FIXTURE — the three named ruled-out cases from the dispatch brief", () => {
     expect(rejectCandidate({ title: "Tax_Parcels2018", serviceName: "Tax_Parcels2018" }, { now })).toBeTruthy(); // Fulton GA
     expect(rejectCandidate({ title: "Parcel_Sizes_2018_WFL1" }, { now })).toBeTruthy(); // Greenville SC
