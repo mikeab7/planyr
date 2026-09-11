@@ -911,6 +911,56 @@ describe("B815 nextEligibleMeeting — the core snap rule (deadline, not meeting
   });
 });
 
+// NEW-1 (chat, 2026-09-11) — the grid right-click "Next meeting" / "Previous meeting" primitive.
+describe("NEW-1 adjacentMeetingDate — step a bound row to the next/previous meeting", () => {
+  const council = { recurrence: [{ freq: "monthly", weekday: 2, setpos: [2, 4] }] };
+  // council's 2026 Tue meetings: ... 07-14, 07-28, 08-11, 08-25, 09-08, 09-22 ...
+  it("next: the first meeting strictly after a date that sits between two meetings", () => {
+    expect(E.adjacentMeetingDate(council, "2026-08-05", "next")).toBe("2026-08-11");
+  });
+  it("prev: the last meeting strictly before a date that sits between two meetings", () => {
+    expect(E.adjacentMeetingDate(council, "2026-08-25", "prev")).toBe("2026-08-11");
+  });
+  it("strictly after/before — refDate itself being a meeting date is excluded both ways", () => {
+    expect(E.adjacentMeetingDate(council, "2026-08-11", "next")).toBe("2026-08-25");
+    expect(E.adjacentMeetingDate(council, "2026-08-25", "prev")).toBe("2026-08-11");
+  });
+  it("a date the body never meets on (a hand-typed pin) still steps correctly both ways (item point f)", () => {
+    expect(E.adjacentMeetingDate(council, "2026-08-15", "next")).toBe("2026-08-25");
+    expect(E.adjacentMeetingDate(council, "2026-08-15", "prev")).toBe("2026-08-11");
+  });
+  it("honors blackoutDates (a cancelled meeting is skipped, not returned)", () => {
+    const b = { ...council, blackoutDates: ["2026-08-25"] };
+    expect(E.adjacentMeetingDate(b, "2026-08-11", "next")).toBe("2026-09-08");
+  });
+  it("honors extraDates (a special-called meeting is a valid step target)", () => {
+    const b = { ...council, extraDates: ["2026-08-18"] };
+    expect(E.adjacentMeetingDate(b, "2026-08-11", "next")).toBe("2026-08-18");
+  });
+  it("returns null (disabled, not a wrong date) when nothing resolves in the horizon", () => {
+    // effectiveFrom bounds the rule's active window — nothing exists before it to step back to.
+    const bounded = { recurrence: [{ freq: "monthly", weekday: 2, setpos: [2, 4], effectiveFrom: "2026-09-01" }] };
+    expect(E.adjacentMeetingDate(bounded, "2026-09-08", "prev")).toBeNull();
+    expect(E.adjacentMeetingDate({ recurrence: [] }, "2026-08-05", "next")).toBeNull();
+  });
+  it("never throws on a missing body or refDate", () => {
+    expect(E.adjacentMeetingDate(null, "2026-08-05", "next")).toBeNull();
+    expect(E.adjacentMeetingDate(council, "", "next")).toBeNull();
+    expect(E.adjacentMeetingDate(council, null, "prev")).toBeNull();
+  });
+});
+
+describe("anti-drift: NEW-1 adjacentMeetingDate exists VERBATIM in src + mirror", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  it("both directions read off meetingDatesInRange — no second recurrence engine", () => {
+    expect(src).toMatch(/return meetingDatesInRange\(body, addD\(refDate, 1\), addD\(refDate, 366 \* 3\)\)\[0\] \|\| null;/);
+    expect(mjs).toMatch(/return meetingDatesInRange\(body, addD\(refDate, 1\), addD\(refDate, 366 \* 3\)\)\[0\] \|\| null;/);
+    expect(src).toMatch(/const dates = meetingDatesInRange\(body, addD\(refDate, -366 \* 3\), addD\(refDate, -1\)\);/);
+    expect(mjs).toMatch(/const dates = meetingDatesInRange\(body, addD\(refDate, -366 \* 3\), addD\(refDate, -1\)\);/);
+  });
+});
+
 // ── B845 — government date patterns: the "Tuesday after the first Monday" primitive ─────────────
 describe("B845 nthWeekdayOnOrAfter — Election-Day primitive (Tue after the 1st Monday in Nov)", () => {
   it("resolves the 1st Tuesday on/after Nov 2 across the acceptance years", () => {
