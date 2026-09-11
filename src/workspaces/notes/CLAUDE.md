@@ -502,6 +502,23 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   HERE so no intake path can bypass them, and `purgePages` — the ONE place a note's bytes are
   actually destroyed (body **and** images). **Read its header for `ROWS-CANONICAL-ON-SEED`, the
   Notes edition** — which copy of a note wins is written down there, not left to accident.
+  Also (NEW-1) `readNoteTemplates`/`writeNoteTemplates` — see the templates bullet below.
+- **TEMPLATES (NEW-1, 2026-09-11) — real per-account records now, not a hardcoded registry.**
+  `lib/notesTemplates.js` is the PURE shape (seed content — Project Contacts + Asset
+  Information — and every structural op: create/rename/re-body/duplicate/delete), one blob
+  at `planyr:notes:templates:v1:<scope>` via `notesStore.js`'s `readNoteTemplates`/
+  `writeNoteTemplates`, seeded once per scope on first read and NEVER re-seeded (an account
+  that deletes every template stays empty). `components/TemplateManager.jsx` is the "Manage
+  templates" full-screen panel (its own lazy chunk, opened from the ▾ beside ＋ Page) —
+  reuses the real `NoteEditor` for the body via two new optional props on that component,
+  `loadDoc`/`saveDoc` (default to the ordinary `readPage`/`writePage(pageId, …)` for every
+  existing caller), so there is no second editor. A template is NOT a page-tree node — it
+  never appears in search/Quick Open/tasks/duplicates/reachability, and it carries no
+  version history — but a pasted picture DOES survive: `Notes.jsx` threads
+  `tpl:<templateId>` ids into the same image-orphan sweep pages use. Creating a page from a
+  template titles the page after the template (`createPage`'s existing `title` option).
+  Device-local only for now (a stated limit, not an oversight — see notesKeys.js's
+  `TEMPLATES_KEY_BASE`); cross-device sync is real, separate follow-up work.
 - **⛔ NOTHING MAY EXIST WITHOUT A HOME — the reachability guarantee, and the two merge holes
   that broke it (B342992).** A real note went unreachable in the owner's account: 215 revisions
   of Bain meeting notes, healthy in storage AND in the cloud, with **no node in either tree and

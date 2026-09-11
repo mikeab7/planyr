@@ -114,6 +114,10 @@ const ALL_NOTES_FILES = [
   // NEW-7/NEW-8/NEW-9 — a control reports the RESOLVED VALUE, not whether a mark is stored:
   // `inherit` is not a colour, and an absent font mark is still a font.
   "lib/notesResolvedValue.js",
+  // NEW-1 (templates, 2026-09-11) — the pure template shape/ops, and the "Manage templates"
+  // panel that edits a body through the real NoteEditor (loadDoc/saveDoc) rather than a
+  // second one.
+  "lib/notesTemplates.js", "components/TemplateManager.jsx",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
