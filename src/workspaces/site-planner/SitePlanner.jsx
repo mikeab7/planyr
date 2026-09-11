@@ -11735,31 +11735,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   /* NEW-4 — the acreage chip's OWN right-click menu. The owner asked for the hide to be reachable
      from both here and the parcel menu, "so it is findable either way"; the chip had no
      `onContextMenu` at all, which is why there was no obvious place to put it. Selects the lot as
-     well, so the menu that opens is unambiguously about a named parcel. */
+     well, so the menu that opens is unambiguously about a named parcel.
+     ⛔ NEW-1 (2026-09-11) — A LABEL'S HIT REGION BELONGS TO THE OBJECT IT DESCRIBES, ALWAYS. NO
+     FORWARDING. This SUPERSEDES the NEW-3 "ask the resolver and forward" fix directly below in
+     history (removed here): right-click his 443'×135' dock building — with the parcel's acreage
+     badge sitting over it, exactly where `polylabel` always parks it on a developed lot — and the
+     BUILDING's menu opened (Reshape…, Bump-outs, Dock Zones, Arrange, … Delete), with "Hide acreage
+     label" nowhere in it. A misdirected menu on a Delete is how someone destroys a building while
+     trying to tidy a label.
+     NEW-3 fixed a real complaint (right-clicking his pond, with the badge incidentally hovering
+     there, opened the parcel's menu instead of the pond's) by asking `resolveDoubleClickTarget` —
+     which treats `data-chrome` as see-through — and forwarding to whatever it found underneath.
+     That resolver exists to answer "what is this GESTURE about" for an in-flight double-click; it
+     is the wrong question for a right-click aimed squarely at a drawn, opaque chip. And because
+     `polylabel` deliberately anchors the badge on the developed middle of the lot (B1186), "there is
+     a real feature under the badge" is the ORDINARY case, not the rare one — so forwarding made the
+     badge's own menu practically unreachable on any occupied parcel, which is this exact report.
+     The badge's hover-gated hit box is not a coarse guess at "near the label" — `parcelChips`
+     builds it as the EXACT rect the pill paints (`box: boxOf(c.x, c.y, boxW, boxH)`, the same
+     `boxW`/`boxH` the `<rect>` below draws), so reaching this handler at all means the cursor is
+     genuinely on the painted pill, opaque, with nothing of the object beneath it visible at that
+     pixel. There is no ambiguity left for a resolver to settle: what is drawn there is the label,
+     so a right-click there is about the label's own object, full stop — matching every other label
+     on this canvas (the building name/SF label, the pond label, dimension leaders, measurement and
+     markup chips), none of which forward to whatever they happen to sit over. */
   const onChipContext = (e, id) => {
     if (tool !== "select") return;
     e.preventDefault(); e.stopPropagation();
     if (!parcels.some((p) => p.id === id)) return;
-    /* ⛔ NEW-3 — A RIGHT-CLICK RESOLVES THE SAME WAY A DOUBLE-CLICK DOES, and until this it did not.
-     *
-     * Found on the owner's real Bain plan, not on any fixture: right-click his detention pond and
-     * you get the PARCEL's menu — "Merge parcels · Hide acreage label · Delete parcel" — with the
-     * pond's own Arrange rows, Properties and Delete nowhere in it. Measured stack at that point:
-     * COLD it is `[el:e79404lvnvpt]`; after the cursor merely ARRIVES there it is
-     * `[parcel:…_0 (this badge's rect), el:e79404lvnvpt]` — the badge ENTERS above the pond, exactly
-     * B280402's mechanism, because B1327 gated it on HOVER so it could be dragged at all.
-     *
-     * B280402 answered that for the double-click by making `data-chrome` IDENTITY-TRANSPARENT in
-     * `resolveDoubleClickTarget` — and the app's own resolver still answers `el:e79404lvnvpt` here.
-     * But a right-click never went through that resolver: it is a plain DOM handler on the badge,
-     * so the fix reached one of the two paths. That is why a menu offering **Delete parcel** opened
-     * where the pond's menu belongs — a destructive row standing where a benign one was aimed at.
-     *
-     * So ask the ONE resolver, and forward when the answer is not this lot. The badge keeps its own
-     * menu whenever it is genuinely what was aimed at (over its own lot with nothing else beneath),
-     * which is the affordance B1327/NEW-4 added and this must not take away. */
-    const under = resolveDoubleClickTarget(hitStackAt(e.clientX, e.clientY));
-    if (under && !(under.kind === "parcel" && under.id === id) && featureContextAction(under, e)) return;
     setSel({ kind: "parcel", id });
     setParcelMenu({ x: e.clientX, y: e.clientY, id, fromChip: true });
   };
