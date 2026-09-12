@@ -36,6 +36,8 @@ Every rule below was paid for by a real incident on Planyr — a false bug filed
 
 **Before diagnosing why an action failed, prove the instrument was in a state where it could have worked; after two failures change the mechanism, not the parameters.** Hours went into click-coordinate theories while window.innerWidth was 0. Tuning the same approach a third time is almost always wasted.
 
+**`git stash` without `-u` does not touch untracked files, so "clean main" isn't clean.** A session added a new file, hit a failing ceiling check, stashed to isolate the cause, and re-ran against "fresh main" — the new file stayed in the working tree the whole time (untracked, so plain `stash` skipped it), so the check failed identically and was reported as pre-existing on main. It reached the owner as fact, a second session was dispatched to fix a main-branch breach that did not exist, and the real cause — two raw `rgba()` literals in the new file itself — sat unfixed. Use `git stash -u` (or a real `git worktree` checkout of the base ref) to isolate a new file's own contribution, always.
+
 ## CI, gates and merges
 
 **A PR that needs a gate to pass must not modify that gate.** #1375 failed visual regression on surfaces it genuinely changed and responded by demoting desktop baseline failures to advisory, then reported "all 16 clean" — true of a weakened gate. Gate sensitivity is a separate PR. Ask the diff, not the summary, and force a yes/no: did anything become more permissive than main?
