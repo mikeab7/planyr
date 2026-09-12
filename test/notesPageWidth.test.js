@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  FULL_WIDTH_GUTTER, PAGE_WIDTH_MAX, PAGE_WIDTH_MIN, PAGE_WIDTH_PRESETS,
+  FULL_WIDTH_FLOOR, FULL_WIDTH_GUTTER, PAGE_WIDTH_MAX, PAGE_WIDTH_MIN, PAGE_WIDTH_PRESETS,
   dragWidthFromDelta, pageWidthLabel, pageWidthPresetId, resolvePinnedBaseWidth, resolvePresetPx,
 } from "../src/workspaces/notes/lib/notesPageWidth.js";
 
@@ -74,12 +74,45 @@ describe("resolvePresetPx — a preset's own px against the pane it is rendering
     expect(resolvePresetPx(900, { paneWidth: 500 })).toBe(900);
   });
 
-  it("\"full\" fills the pane down to the standing gutter on each side", () => {
+  it("\"full\" fills the pane down to the standing gutter on each side, once the pane is roomy", () => {
     expect(resolvePresetPx("full", { paneWidth: 1400 })).toBe(1400 - FULL_WIDTH_GUTTER * 2);
   });
 
-  it("\"full\" never resolves narrower than the drag floor, even on a tiny pane", () => {
-    expect(resolvePresetPx("full", { paneWidth: 10 })).toBe(PAGE_WIDTH_MIN);
+  /* ⛔ B1561105 — "Full width" rendered NARROWER than "Wide" on a real window (~1190 CSS px):
+   * Wide ignores the pane and always renders 900, while "full" used to compute paneWidth - 48
+   * with nothing stopping it from landing below 900 whenever the pane was only a little wider
+   * than Wide's own fixed size. Reproduced exactly: at the pane width that produces this, "full"
+   * used to resolve to LESS than the "wide" preset. */
+  it("never resolves narrower than the widest fixed preset (Wide) — the reported inversion", () => {
+    const wide = PAGE_WIDTH_PRESETS.find((p) => p.id === "wide").px;
+    expect(FULL_WIDTH_FLOOR).toBe(wide);
+    // The exact pane width the owner's report reconstructs to (paneWidth - 48 = 875 < 900).
+    const paneWidth = 923;
+    expect(paneWidth - FULL_WIDTH_GUTTER * 2).toBeLessThan(wide); // the old, broken answer
+    expect(resolvePresetPx("full", { paneWidth })).toBe(wide);
+    expect(resolvePresetPx("full", { paneWidth })).toBeGreaterThanOrEqual(
+      resolvePresetPx(wide, { paneWidth }),
+    );
+  });
+
+  it("on a tiny pane, floors at the widest fixed preset rather than shrinking further — it overflows, the mat scrolls", () => {
+    expect(resolvePresetPx("full", { paneWidth: 10 })).toBe(FULL_WIDTH_FLOOR);
+  });
+
+  it("on a roomy pane, still fills the pane exactly as before — the floor never widens an already-wide answer", () => {
+    expect(resolvePresetPx("full", { paneWidth: 2000 })).toBe(2000 - FULL_WIDTH_GUTTER * 2);
+  });
+
+  it("the five options read as a monotonic ladder at every window size, narrow through very wide", () => {
+    for (const paneWidth of [10, 200, 320, 440, 500, 580, 700, 900, 923, 950, 1190, 1400, 2400, 3440]) {
+      const narrow = resolvePresetPx(PAGE_WIDTH_PRESETS[0].px, { paneWidth });
+      const normal = resolvePresetPx(PAGE_WIDTH_PRESETS[1].px, { paneWidth });
+      const wide = resolvePresetPx(PAGE_WIDTH_PRESETS[2].px, { paneWidth });
+      const full = resolvePresetPx("full", { paneWidth });
+      expect(narrow).toBeLessThanOrEqual(normal);
+      expect(normal).toBeLessThanOrEqual(wide);
+      expect(wide).toBeLessThanOrEqual(full);
+    }
   });
 });
 

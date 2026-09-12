@@ -890,6 +890,19 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   a `FormatMenu`, beside Zoom/History/Print/Markdown. `notesPrint.js`'s `pageWidthPinExtentPx`
   folds a numeric pin into the same `growPx` an overhanging box/table already computes (PDF-PARITY);
   `"full"` deliberately does not widen paper.
+  - **⛔ AND "FULL WIDTH" COULD READ NARROWER THAN "WIDE" (B1566928, owner report 2026-09-11).** The
+    three fixed presets (Narrow/Normal/Wide) **ignore the pane entirely, by design** — that is the
+    correct, tested behaviour of `resolvePresetPx`, not the bug. "Full width" was the one preset
+    computed the OPPOSITE way, as `paneWidth - gutter`, with no floor — so on a window only a little
+    wider than Wide's own fixed 900, that pane-relative number landed BELOW 900 and the last row of
+    the menu read as a step down from the one above it. Measured live at the owner's own ~1190px
+    window: Wide 900, Full width 874. `FULL_WIDTH_FLOOR` (derived from `PAGE_WIDTH_PRESETS` itself,
+    never a second literal 900) now floors "full" at the widest fixed preset — below that floor it
+    deliberately overflows the pane, reaching `note-mat`'s already-scrolling `overflow: auto` rather
+    than a new mechanism. Narrow/Normal/Wide, the stored attribute, and `pageWidthLabel` are all
+    untouched. ⛔ **A stale doc-comment from PR #1662 also claimed a NUMERIC pin "never returns wider
+    than the pane" — never true (the pre-existing test asserted the opposite on purpose) — corrected
+    in the same pass rather than left to mislead the next reader.**
 - **SKETCH MODE — four files, and ONE rule that makes them make sense.** *The **CANVAS** owns
   everything: each **box owns its own text AND its own position**, and the arrows are an explicit
   list of `{from,to}` box references.* There is no second representation, so there is nothing to
