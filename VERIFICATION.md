@@ -228,6 +228,19 @@ was never clicked" quietly ships broken.
 
 **⛔ AMENDED 2026-09-12 (B1594320) — THE FIX THIS ENTRY VERIFIES WAS REVERTED.** The `framingCommitted` mechanism this checklist confirms sandbox-side went live and, within hours, made the Site Planner canvas permanently invisible and unclickable on production for every signed-in user — a P0 outage, filed and fixed same-session as **B1594320** (a full revert). Steps 1–3 and 6 below are now MOOT as written — they exercise code that no longer exists (there is nothing to "resume Goose Creek and watch for one framing" against; the mechanism they'd be checking is gone) — and are kept only as the historical record of what a future re-attempt should re-verify. Step 4's console probe and step 5's chunk-hash discipline remain generally useful technique, independent of this specific fix. **The underlying ask (no flashed intermediate framing on a signed-in cold load) is UNCHANGED and still wanted** — the flash itself is back, now that the mechanism that suppressed it is reverted — see B1574432 (reopened) for the trade and why. A future fix for it must close THIS exact gap before shipping: get a genuine signed-in live pass (not the sandbox's route-change proxy for the remount) BEFORE merging, not after. See also **V1132144** (B1594320's own live-verify, that the revert itself is live and the canvas renders again).
 
+**⛔ LIVE MEASUREMENT ADDED, same day, from a session with real signed-in browser access to
+`planyr.io` (this sandbox has none — see `docs/incidents/B1594320-CANVAS-VISIBILITY-OUTAGE.md`).**
+While the ORIGINAL (pre-revert) bundle was still live, project `smtvztgdsp5p`: `document.
+visibilityState: "hidden"`, `hasFocus(): false`, zero `requestAnimationFrame` callbacks in 6.3s, a
+plain `setTimeout(…, 1500)` DID fire (~800ms throttled late). Read against the reverted source: both
+the layout effect and the 1.5s watchdog carried an identical `if (document.visibilityState !==
+"visible") return;` — so on a tab that boots hidden and stays hidden, the watchdog's `setTimeout` was
+never even scheduled. This is now a MEASURED mechanism, not the hypothesis this entry's "why it stuck"
+reasoning left it as. **Explicitly NOT measured: a genuinely foregrounded cold load** — the live
+session could not force Michael's OS-level window to the foreground, so whether the ordinary
+(foregrounded) case also goes permanently blank remains open. Any future re-attempt's watchdog must
+fire on a wall-clock timer not gated on `document.visibilityState`.
+
 **Why this needs its own live pass (as originally written).** Two of this bug's three legs are closed headlessly (below); the third cannot be. The flash rides a REMOUNT that only a signed-in boot performs — `applyUser` (`SitePlannerApp.jsx:350`) bumps `loadEpoch` when the cloud pull settles, and the planner is keyed `` `${activeSiteId}:${loadEpoch}` `` — and this sandbox cannot sign in (the egress proxy CORS-blocks the Supabase auth handshake). The sandbox arm proves the same structural event through a route-change remount, which changes the same React key and produces the same fresh mount; what it cannot prove is the `applyUser` path itself, on his data, on his phone. Timing/race and zoom-dependent rendering are both mandatory LIVE-VERIFY classes besides.
 
 **What was verified here (this session, sandbox, on a real plan fixture at phone width 430×830).**

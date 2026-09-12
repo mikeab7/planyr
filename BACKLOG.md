@@ -103,6 +103,23 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 - Verify: live `Blocker: auth` — unchanged: the flash itself (as opposed to the outage it was rebuilt into) still needs a real signed-in phone boot to confirm either fixed or not. See **V1127680**, also reopened.
 - Stopping rule: closes when a FUTURE fix for this item ships with `ui-audit/verify-boot-framing.mjs --base=<url>` (or equivalent) run from a machine with real signed-in browser egress, confirmed against the actual `applyUser` remount path — not the sandbox's route-change proxy for it — before merging, in addition to the owner's own phone confirmation.
 
+**⛔ LIVE MEASUREMENT, same day, from a session with real signed-in browser access this sandbox does
+not have (see `docs/incidents/B1594320-CANVAS-VISIBILITY-OUTAGE.md`'s own "LIVE MEASUREMENT UPDATE"
+section for the full readout).** Measured directly on `planyr.io`, project `smtvztgdsp5p`, while the
+ORIGINAL (pre-revert) bundle was still live: `document.visibilityState: "hidden"`,
+`document.hasFocus(): false`, zero `requestAnimationFrame` callbacks in 6.3s, while a plain
+`setTimeout(…, 1500)` DID fire (throttled ~800ms late). This settles what this item's own analysis
+above left as a hypothesis: BOTH the layout effect and the 1.5s watchdog carried the identical guard
+`if (document.visibilityState !== "visible") return;` — a direct, explicit early-return, not an
+indirect `requestAnimationFrame` dependency — so on a tab that boots hidden and stays that way, the
+watchdog's `setTimeout` is never even scheduled. A LOUD-FAILURE rescue that refuses to arm itself in
+exactly the condition it exists to catch is not a rescue. **A future fix's watchdog must fire on a
+plain wall-clock timer NOT gated on `document.visibilityState`** (the layout effect's own gate is
+fine to keep — you cannot trust a measurement taken while hidden — it is specifically the watchdog
+that must not defer to the same condition). **Left explicitly open, per that same live session's own
+caution: the FOREGROUNDED cold load remains UNMEASURED.** Do not inherit "always broken" as a
+premise for a future fix — only the hidden-tab case has been measured as broken.
+
 **⛔ TWO CLAIMS IN THE DISPATCH BRIEF ARE WRONG, AND BOTH ARE WHY FOUR ATTEMPTS MISSED THIS.**
 
 1. **"The loadEpoch remount path: setLoadEpoch is never called. Eliminated."** It is called — `SitePlannerApp.jsx:350`, inside `applyUser`, on **every signed-in boot resume**, in the same batched commit as `setCloudLoading(false)` (which is the un-dim in the recording) and `setActiveSiteId(resumeId)`. The planner is keyed `` key={`${activeSiteId}:${loadEpoch}`} ``, so a signed-in cold load **remounts the planner partway through boot**. A grep confined to `SitePlanner.jsx` finds nothing; the call lives in `SitePlannerApp.jsx`.

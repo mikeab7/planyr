@@ -137,3 +137,72 @@ against a documented supabase-js behavior), not as "the fix" for the P0.
    BEFORE merging.** `Verify: live, Blocker: auth` on the ORIGINAL item was the correct classification
    — the mistake was treating "3/3 clean sandbox arms" as sufficient to ship past that blocker rather
    than as a reason to hold until the blocker cleared.
+
+## LIVE MEASUREMENT UPDATE (same day, after the revert shipped) — the hidden-tab case is now a
+## MEASURED mechanism, not a hypothesis
+
+A separate Claude session with real signed-in browser access to `planyr.io` (a capability this
+sandbox does not have) ran diagnostics directly inside the page on the owner's own account, project
+`smtvztgdsp5p`, Site view, fresh load — while the bundle carrying the ORIGINAL (pre-revert)
+`framingCommitted` code was still live. Recorded here verbatim because it settles a question this
+document's own "why it stuck" section above left open.
+
+**Measured:**
+```
+document.visibilityState : "hidden"
+document.hasFocus()      : false
+requestAnimationFrame    : ZERO callbacks fired in 6295 ms — not one
+setTimeout(..., 1500)    : fired, at 2291 ms (throttled ~800 ms late, but it fired)
+```
+Page state, same load: `[data-testid="planner-canvas"]`'s inline `visibility: hidden` never cleared;
+computed visibility `hidden`; the canvas box was `969x408` (non-zero — not a degenerate container);
+`data-planner-mount="mts62vi"` was present (confirming the OLD bundle, with the reverted mechanism,
+was the one live at measurement time); `data-view-ppf/-offx/-offy` read `0.35 / 60 / 60` — still the
+literal `useState` boot default, proving the framing genuinely never committed; three `data-el-id`
+groups were present (the model loaded fine — this is a paint-only failure, consistent with every
+finding elsewhere in this document).
+
+**What this settles.** Re-reading the reverted source with this measurement in hand: BOTH gating
+effects — the layout effect and the 1.5 s watchdog — carried an EXPLICIT, identical early return,
+`if (typeof document !== "undefined" && document.visibilityState !== "visible") return;` (or
+`return undefined;` in the watchdog). This is not an indirect rAF dependency — grep the reverted
+diff for the exact line. So the mechanism is direct and now measured end to end: on a document that
+boots `visibilityState: "hidden"` and STAYS that way, this line matches on every render, and the
+watchdog's own `setTimeout` is **never even scheduled** — not throttled, not delayed, never armed at
+all. A LOUD-FAILURE rescue that refuses to arm itself in exactly the condition it exists to catch is
+not a rescue. **Correction to a plausible-sounding but incorrect side-hypothesis:** the live
+session's own diagnostic reasoned "if the watchdog is driven by `requestAnimationFrame`, or chained
+through one, it can never fire here" — reasonable from the outside, but the actual code shows
+something more direct and easier to fix: the watchdog is a plain `setTimeout`, gated by one explicit
+`if`. The measured fact that stands regardless of that distinction: `setTimeout` demonstrably still
+fires in this exact hidden, unfocused document (the diagnostic's own generic probe proved it,
+independent of the app's watchdog never arming), so a wall-clock deadline is a viable rescue
+mechanism here — it just cannot be gated on `document.visibilityState` the way this watchdog was.
+
+**What remains open, stated as plainly as the live session stated it, and not to be smoothed over:**
+the FOREGROUNDED cold load is still UNMEASURED. Every reading above — like every reading Michael's
+own original report described — was taken (or occurred) with `visibilityState: "hidden"`. Whether a
+genuinely foregrounded load (the ordinary case of someone looking at the tab) also goes permanently
+blank is not established by this measurement, and the live session was explicit that it could not
+close this from its own position either (it cannot force Michael's OS-level window to the
+foreground). **A future re-attempt must not inherit "production is permanently down for every load"
+as a premise — that was never measured, only the hidden-tab case was.** It is entirely possible the
+ordinary foregrounded case recovers via the layout effect's own re-run (it carries no dependency
+array and re-fires on every render, so a later transition to `visible` should let it catch up) and
+that the persistently-reported P0 was specifically about tabs that boot or settle into a
+backgrounded state and never leave it — still a real, serious bug (browsers restore tabs in the
+background routinely, e.g. on OS resume, a phone re-opening a suspended app, or a second window/tab
+regaining focus elsewhere), just a narrower one than "always broken."
+
+**Console check (same live session):** filtering for framing/stalled/boot/planner/canvas on two
+fresh loads turned up nothing. Weak evidence on its own (the telemetry may not be console-mirrored),
+but consistent with the watchdog's `boot-framing-stalled` `reportClientEvent` call never having run
+— which is exactly what "never even armed" predicts.
+
+**For a future re-attempt at B1574432, this changes recommendation #2 above from a hypothesis to a
+requirement:** the watchdog half of any future fix must fire on a plain wall-clock timer that is
+**not** gated on `document.visibilityState`, and must not be reachable only through a code path that
+depends on `requestAnimationFrame` anywhere between "boot" and "reveal." The layout effect's own
+`document.visibilityState !== "visible"` guard is fine to keep (you genuinely cannot trust a
+container measurement taken while hidden) — it is specifically the WATCHDOG, whose entire job is to
+rescue the case the layout effect cannot handle, that must not defer to the same condition.
