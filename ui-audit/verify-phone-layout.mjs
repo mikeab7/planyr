@@ -61,7 +61,10 @@ const page = await ctx.newPage();
 await assertMeasurable(page, "verify-phone-layout");
 const errs = []; page.on("pageerror", (e) => errs.push(String(e)));
 
-await page.goto(BASE, { waitUntil: "load" });
+// ⛔ B1231282 — a bare hash lands on the Dashboard, not the Site Planner: the route is
+// authoritative for which project is open regardless of `planarfit:currentSite:v1` (see
+// verify-canvas-furniture.mjs's own header note on the same fix). Name the seeded groupId.
+await page.goto(BASE + "#/project/" + GID + "/site", { waitUntil: "load" });
 await page.waitForTimeout(2200);
 
 // 1) resumed into the planner (the tool rail / canvas chrome exists, finder search hidden)
@@ -158,8 +161,11 @@ if (railOpened) {
 check("picking a tool auto-closes the rail (so you can draw)", railClosed);
 
 // 7) NEW-1 (B917072) — the six-section rail (Land/Analysis/Yield/…) must NOT hold a fixed
-// vertical strip at phone width when idle: it is off-screen by default, summoned by a
-// "☰ Sections" FAB (mirroring "✎ Tools"), same as the right tool rail.
+// vertical strip at phone width when idle: it is off-screen by default, summoned by an edge tab
+// ⛔ SUPERSEDED (NEW-1, phone-chrome-parity pass) — the summoning control was a bottom-left
+// "☰ Sections" FAB (mirroring "✎ Tools"); both moved to edge tabs at the SIDE of the screen
+// (mirroring the desktop rails they stand in for), and "Sections" — which described nothing —
+// was renamed "Panels".
 const sectionsRailOnScreen = async () => page.evaluate(() => {
   const btn = document.querySelector('[data-rail-tab="parcel"]'); // "Land" — always first, never floats
   if (!btn) return false;
@@ -169,18 +175,18 @@ const sectionsRailOnScreen = async () => page.evaluate(() => {
 });
 check("section rail is off-screen by default (no persistent width tax)", !(await sectionsRailOnScreen()));
 
-const sectionsBtn = page.locator('button:has-text("Sections")').first();
-const hasSectionsFab = await sectionsBtn.count().then((c) => c > 0 && sectionsBtn.isVisible());
-check("phone floating '☰ Sections' button is present", !!hasSectionsFab);
+const panelsTab = page.locator('[data-testid="mobile-panels-tab"]').first();
+const hasPanelsTab = await panelsTab.count().then((c) => c > 0 && panelsTab.isVisible());
+check("phone 'Panels' edge tab is present", !!hasPanelsTab);
 
 let sectionsRailOpened = false;
-if (hasSectionsFab) {
-  await sectionsBtn.click({ timeout: 5000 });
+if (hasPanelsTab) {
+  await panelsTab.click({ timeout: 5000 });
   await page.waitForTimeout(450);
   sectionsRailOpened = await sectionsRailOnScreen();
   await page.screenshot({ path: OUT + "phone-sections.png" });
 }
-check("tapping Sections slides the section rail on-screen", sectionsRailOpened);
+check("tapping Panels slides the section rail on-screen", sectionsRailOpened);
 
 // 8) left-rail panel (Yield) opens as an overlay over the canvas, reached through the summoned rail
 let panelOverlay = false;

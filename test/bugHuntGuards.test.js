@@ -601,8 +601,12 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // a plain single click still SELECTS ONLY on desktop (B750 preserved — the takeover keys off the
     // explicit openInspector, and the panel's visibility off the dock, never off the selection)
     expect(src).toMatch(/const companionOpen = narrow \? narrowProps : leftPanel === "properties";/);
-    // a deliberate rail choice drops the takeover memo so a later deselect can't yank the panel back
-    expect(src).toMatch(/setDockMemo\(null\);\s*\n\s*setLeftPanel\(\(p\) => \(p === tb\.id \? null : tb\.id\)\);/);
+    // a deliberate rail choice drops the takeover memo so a later deselect can't yank the panel back.
+    // NEW-1 (phone-chrome-parity pass) — on narrow, picking "properties" now short-circuits into
+    // `narrowProps` (the dedicated phone bottom-sheet presentation) rather than falling through to
+    // `setLeftPanel`, so the match tolerates that intervening branch instead of requiring the two
+    // calls to be strictly adjacent; `setDockMemo(null)` still runs unconditionally either way.
+    expect(src).toMatch(/setDockMemo\(null\);[\s\S]{0,900}setLeftPanel\(\(p\) => \(p === tb\.id \? null : tb\.id\)\);/);
   });
 
   it("B680: callout editor hides the committed box + chrome while editing (no doubling), keeps a typeable min", () => {

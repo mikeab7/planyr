@@ -2,14 +2,30 @@
 /* NEW-MAPCTRL-3 — CANVAS FURNITURE STACKING, the general case of the Comps/Layers corner
  * collision (`verify-map-comps-overlap.mjs`), on two different screens:
  *
- *  PART A — the Site Planner canvas (SitePlanner.jsx). Below ~760 CSS px the side rails
- *  collapse into "✎ Properties" / "✎ Tools" FABs, which used to land on top of the graphic
- *  scale bar, the "● Scaled · county GIS" calibration badge, and the lat/long coordinate
- *  readout — measured live: Tools FAB (657-738,846-884) over the scale bar's right end
- *  (567-736,828-860), a real 79×14px overlap. The fix reserves the FABs' own band
- *  (`FAB_RESERVE_PX`, sheetFurniture.js) for every piece of passive bottom furniture on a
- *  narrow screen, and drops the coordinate chip entirely there (lowest priority, informational
- *  only) rather than let it render invisibly behind a FAB.
+ *  PART A — the Site Planner canvas (SitePlanner.jsx). Below ~760 CSS px the side rails used to
+ *  collapse into "✎ Properties" / "✎ Tools" FABs squatting in the two bottom corners, which
+ *  forced every piece of passive bottom furniture (the scale bar, the "● Scaled · county GIS"
+ *  calibration badge, the north arrow) to reserve extra clearance (`FAB_RESERVE_PX`) so it never
+ *  rendered underneath one.
+ *
+ *  ⛔ SUPERSEDED (NEW-1..NEW-5, the phone-chrome-parity pass, 2026-09-12) — read this before
+ *  trusting any comment below this line that still mentions a FAB. THE FINDING that drove that
+ *  pass: phone and desktop placed every OTHER control in the same corner with the same offset,
+ *  except the two buttons that summon the left rail and the right tool rail — on desktop those
+ *  rails ARE the screen edges; on the phone their FABs squatted in the two BOTTOM corners
+ *  instead, which is what forced `FAB_RESERVE_PX` to exist at all. The fix: both summoning
+ *  controls became EDGE TABS at the side of the screen (`[data-testid="mobile-panels-tab"]` /
+ *  `[data-testid="mobile-tools-tab"]`, `Show Land / Analysis / Yield / Properties / Overlays /
+ *  Standards` — "Sections" renamed "Panels" — described nothing), the standalone "✎ Properties"
+ *  quick-access pill was removed outright (Properties is reached inside the Panels drawer, same
+ *  as it's a tab inside the rail on desktop), the bottom corners are free again, and
+ *  `FAB_RESERVE_PX` is gone from `sheetFurniture.js` — `FURNITURE_ROW` is a small fixed offset
+ *  plus the real numeric safe-area inset (`narrowSafeBottom`) instead. The scale bar's own
+ *  screen-pixel target/ceiling now fold in the real pane width (NEW-3, `screenFurniturePlates`'s
+ *  `paneW`), and the zoom column + the docked help/report control share ONE pointer-driven size
+ *  (NEW-4, 35×35 coarse / 30×30 fine) instead of two different ones in the same corner. PART A
+ *  below is the harness NEW-5 extended to cover the whole set — see its own header comment just
+ *  above the width sweep for what's new.
  *
  *  PART B — the Map view (MapFinder.jsx). The "+ Select parcels" coach tip — the ONLY
  *  explanation anywhere in the app for how that mode works — shares a bottom-left banner slot
@@ -38,7 +54,7 @@
  *  sitting where the next point gets placed). It now renders as `[data-testid="road-draft-
  *  status"]`, a quiet bottom-center strip fixed to the pane, stacked clear of the furniture by
  *  the SAME canvasPillBottom the Standards toast uses — so it must join this collision-aware set
- *  rather than float free, at every width, narrow FAB row included.
+ *  rather than float free, at every width, narrow width included.
  *
  * Real hit tests (`elementFromPoint`), not bounding-box math alone — a clipped/overflow-hidden
  * box can still report an overlapping LAYOUT rect while painting/hit-testing nothing there.
@@ -75,10 +91,9 @@ const hitReaches = (page, x, y, selector) => page.evaluate(([x, y, sel]) => {
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
 try {
   if (SHOTS) mkdirSync(OUT, { recursive: true });
-  const WIDTHS = [1440, 1024, 900, 750, 600, 420];
 
   // ─────────────────────────────────────────── PART A — Site Planner canvas furniture
-  console.log("\nPART A — Site Planner canvas furniture (north arrow · scale bar · calibration badge · coordinate chip · Properties/Tools FABs · the bottom-centre canvas toast · road-draft status strip)");
+  console.log("\nPART A — Site Planner canvas furniture (north arrow · scale bar · calibration badge · coordinate chip · Panels/Tools edge tabs · View/Layers cards · zoom stack · docked help control · the bottom-centre canvas toast · road-draft status strip)");
   const PARCEL = [{ x: 0, y: 0 }, { x: 800, y: 0 }, { x: 800, y: 600 }, { x: 0, y: 600 }];
   // NOTE (B1239328): the `parcel-select-hint` toast this section used to raise (by seeding a
   // LOCKED parcel with the old plan-wide "Select parcels" toggle OFF, so a boundary press was a
@@ -90,20 +105,52 @@ try {
   const site = { s_furn: { id: "s_furn", groupId: "s_furn", site: "Furniture Verify", name: "Plan 1", status: "active", origin: { lat: 29.80, lon: -95.83 }, county: "harris", parcels: [{ id: "pA", points: PARCEL, locked: true }], els: [], measures: [], callouts: [], markups: [], deletedIds: [], settings: {}, underlay: null, updatedAt: 1755000000000 } };
   const seedSite = `(() => { try { localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify(site)})); localStorage.setItem('planarfit:currentSite:v1', 's_furn'); } catch (e) {} })();`;
 
-  for (const width of WIDTHS) {
-    const ctx = await browser.newContext({ viewport: { width, height: 900 } });
+  /* NEW-5 (phone-chrome-parity pass) — the width sweep now runs the SAME assertion pass at every
+   * scene, narrow and desktop alike, plus two scenes the old sweep never covered:
+   *   - a genuine SHORT-height LANDSCAPE phone (568×320 — the exact B1338272 iPhone-SE-landscape
+   *     repro), because a purely width-driven sweep can never see a canvas short enough that the
+   *     bottom stack's own top edge climbs into the top row.
+   *   - a FORCED SAFE-AREA scene: headless Chromium renders no physical notch, so
+   *     `env(safe-area-inset-bottom)` reads 0 in every other scene here — this one overrides the
+   *     safeAreaInsets.js probe element's computed padding directly (the same SIMULATED technique
+   *     verify-help-report-control.mjs's PART F already uses) so the numeric safe-area wiring
+   *     (`narrowSafeBottom`, SitePlanner.jsx) is actually exercised end to end rather than trusted
+   *     from reading the source. */
+  const SCENES = [
+    ...[1440, 1024, 900, 750, 600, 430, 390].map((width) => ({ width, height: 900, label: `${width}px` })),
+    { width: 568, height: 320, label: "568x320 landscape" },
+    { width: 390, height: 900, label: "390px · forced safe-area", forceSafeArea: 34 },
+  ];
+
+  for (const scene of SCENES) {
+    const ctx = await browser.newContext({ viewport: { width: scene.width, height: scene.height } });
     await ctx.addInitScript(seedSite);
     const page = await ctx.newPage();
     await assertMeasurable(page, "verify-canvas-furniture");
-    await page.goto(URL, { waitUntil: "load" });
+    // ⛔ B1231282 — a bare hash no longer resumes into a seeded site: the route is authoritative
+    // for which project is open (`bootResume.js`), and a project-less route shows the Dashboard
+    // (or, for `#/site`, the Sites picker) regardless of `planarfit:currentSite:v1`. This harness
+    // predates that change and silently timed out on every run since — same fix
+    // verify-help-report-control.mjs already applies: name the seeded groupId explicitly.
+    await page.goto(URL + "#/project/s_furn/site", { waitUntil: "load" });
     await page.waitForSelector('svg[aria-label="Site plan canvas"]', { timeout: 15000 });
     await pacedWait(page, 2200);
+    if (scene.forceSafeArea) {
+      await page.addStyleTag({ content: `[data-safe-area-probe] { padding-bottom: ${scene.forceSafeArea}px !important; }` });
+      // The probe override alone doesn't re-run SitePlanner's own resize-triggered re-measure —
+      // dispatch a real resize event so its effect reads the now-overridden inset.
+      await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+      await pacedWait(page, 400);
+    }
     const svgBox = await page.locator('svg[aria-label="Site plan canvas"]').boundingBox().catch(() => null);
     if (svgBox) { await page.mouse.move(svgBox.x + svgBox.width / 2, svgBox.y + svgBox.height / 2, { steps: 3 }); await pacedWait(page, 500); }
 
     const data = await page.evaluate(() => {
       const rectOf = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height }; };
-      const toolsFab = [...document.querySelectorAll("button")].find((b) => (b.textContent || "").trim() === "✎ Tools");
+      const panelsTab = document.querySelector('[data-testid="mobile-panels-tab"]');
+      const toolsTab = document.querySelector('[data-testid="mobile-tools-tab"]');
+      const viewCard = document.querySelector('[data-testid="view-menu-btn"]');
+      const layersCard = document.querySelector('[data-testid="layer-panel"]');
       const badge = [...document.querySelectorAll("div")].find((d) => /^[●▲]/.test((d.textContent || "").trim()) && (d.textContent || "").length < 60);
       const cursorInner = document.querySelector("[data-ground-el]");
       let cursorChip = cursorInner;
@@ -114,65 +161,128 @@ try {
       const northWrap = plates.find((p) => p.style.left);
       // B914500 — the bottom-right zoom control column (+/−/fit, "gbtn" buttons; the report-slow
       // 4th button was folded into the global help/report control by B1231281) joins the
-      // furniture-collision set. It is positioned independently of FURNITURE_ROW (a fixed
-      // `bottom:100`, nudged by the same narrow-width reserve as of the fix), so a future change
-      // to either one can silently re-open the gap between them.
-      const zoomBtns = [...document.querySelectorAll("button.gbtn")];
-      const zoomStack = zoomBtns.length ? zoomBtns[0].parentElement : null;
+      // furniture-collision set.
+      const zoomStack = document.querySelector('[data-canvas-corner="zoom-stack"]');
+      const helpFab = document.querySelector('[data-testid="help-report-fab"]');
       return {
         narrow: window.matchMedia("(max-width: 760px)").matches,
-        toolsFab: rectOf(toolsFab), badge: rectOf(badge), cursorChip: rectOf(cursorChip),
+        panelsTab: rectOf(panelsTab), toolsTab: rectOf(toolsTab),
+        viewCard: rectOf(viewCard), layersCard: rectOf(layersCard),
+        badge: rectOf(badge), cursorChip: rectOf(cursorChip),
         scaleBar: rectOf(scaleBarWrap), north: rectOf(northWrap),
-        zoomStack: rectOf(zoomStack),
+        zoomStack: rectOf(zoomStack), helpFab: rectOf(helpFab),
+        helpDocked: helpFab ? helpFab.getAttribute("data-docked") === "1" : false,
       };
     });
+    const w = scene.label;
 
-    check(`${width}px · narrow=${data.narrow} · north arrow renders`, !!data.north);
-    check(`${width}px · scale bar renders`, !!data.scaleBar);
-    check(`${width}px · calibration badge renders`, !!data.badge);
+    check(`${w} · narrow=${data.narrow} · north arrow renders`, !!data.north);
+    check(`${w} · scale bar renders`, !!data.scaleBar);
+    check(`${w} · calibration badge renders`, !!data.badge);
 
     if (data.narrow) {
-      check(`${width}px · coordinate chip is DROPPED (lowest priority, no room)`, data.cursorChip === null, data.cursorChip ? "still rendered" : "");
-      check(`${width}px · Tools FAB renders`, !!data.toolsFab);
-      if (data.toolsFab) {
-        check(`${width}px · Tools FAB does not overlap the scale bar`, overlapArea(data.toolsFab, data.scaleBar) === 0, `overlap=${overlapArea(data.toolsFab, data.scaleBar).toFixed(0)}px²`);
-        check(`${width}px · Tools FAB does not overlap the calibration badge`, overlapArea(data.toolsFab, data.badge) === 0, `overlap=${overlapArea(data.toolsFab, data.badge).toFixed(0)}px²`);
-        // Properties FAB is the mirror of Tools (identical bottom:16/height:38, left instead of
-        // right) — proven live via Tools above; asserted here by the SAME shared row constant
-        // rather than forcing a fragile canvas selection in this harness.
-        const propsFabWouldBe = { l: 12, t: data.toolsFab.t, r: 12 + 140, b: data.toolsFab.b }; // generous width estimate
-        check(`${width}px · (by shared construction) Properties FAB's band does not reach the badge`, overlapArea(propsFabWouldBe, data.badge) === 0, `overlap=${overlapArea(propsFabWouldBe, data.badge).toFixed(0)}px²`);
-      }
+      check(`${w} · coordinate chip is DROPPED (lowest priority, no room)`, data.cursorChip === null, data.cursorChip ? "still rendered" : "");
+      check(`${w} · Panels edge tab renders`, !!data.panelsTab);
+      check(`${w} · Tools edge tab renders`, !!data.toolsTab);
     } else {
-      check(`${width}px · coordinate chip still renders on desktop`, !!data.cursorChip);
+      check(`${w} · coordinate chip still renders on desktop`, !!data.cursorChip);
+      check(`${w} · no Panels/Tools edge tab on desktop (the rails render inline instead)`, !data.panelsTab && !data.toolsTab);
     }
-    // pairwise: badge never overlaps the scale bar or the north arrow, at any width
-    check(`${width}px · badge does not overlap the scale bar`, overlapArea(data.badge, data.scaleBar) === 0, `overlap=${overlapArea(data.badge, data.scaleBar).toFixed(0)}px²`);
-    check(`${width}px · badge does not overlap the north arrow`, overlapArea(data.badge, data.north) === 0, `overlap=${overlapArea(data.badge, data.north).toFixed(0)}px²`);
 
-    // ⛔ B914500 — THE REGRESSION THIS ITEM FIXES. Raising FURNITURE_ROW by FAB_RESERVE_PX on
-    // narrow width (to clear the "✎ Properties"/"✎ Tools" FABs below) pushed the scale bar's
-    // whole plate up into the zoom control column's fixed `bottom:100` span above it — measured
-    // live on the owner's real Bain plan at 390px: the column's own "◷" report-slow button
-    // painted directly over the scale bar's highest tick label ("…0 FEET"). Proven red on the
-    // pre-fix source (a bare `bottom: 100`) before the fix landed. Checked at EVERY width,
-    // mirroring the badge pairwise checks above — the fixed 100 is harmless on desktop today
-    // only because FURNITURE_ROW happens to be 40 there; nothing stops that assumption drifting.
-    check(`${width}px · zoom control does not overlap the scale bar`, overlapArea(data.zoomStack, data.scaleBar) === 0, `overlap=${overlapArea(data.zoomStack, data.scaleBar).toFixed(0)}px²`);
-    check(`${width}px · zoom control does not overlap the north arrow`, overlapArea(data.zoomStack, data.north) === 0, `overlap=${overlapArea(data.zoomStack, data.north).toFixed(0)}px²`);
+    // NEW-5 — the full pairwise sweep over every named furniture/chrome item that exists at this
+    // width: no two of them may overlap. A pair that doesn't apply here (e.g. the edge tabs on
+    // desktop, where the rails render inline instead) simply drops out of `names` — comparing
+    // against a missing rect scores 0 overlap by construction, so a width can never silently skip
+    // a real pair, it just has fewer of them to check.
+    const items = {
+      "Panels edge tab": data.panelsTab, "Tools edge tab": data.toolsTab,
+      "View card": data.viewCard, "Layers card": data.layersCard,
+      "north arrow": data.north, "calibration badge": data.badge,
+      "scale bar": data.scaleBar, "zoom stack": data.zoomStack,
+      "help control": data.helpFab,
+    };
+    const names = Object.keys(items).filter((k) => items[k]);
+    /* ⛔ NAMED, ACCEPTED EDGE CASE (found via this exact landscape scene) — on the smallest current
+     * iPhone in landscape (263px canvas), there is not enough vertical room to fit the View/Layers
+     * row, the Tools edge tab (84px), the zoom stack (90px) AND the scale bar's own plate without
+     * ANY pair touching: their combined minimum footprint exceeds the pane. `test/mapChromeStack
+     * .test.js` already names this same shape ("once the floor itself binds... clearing the top
+     * row is no longer possible at any offset") for the View row; this is the same trade-off one
+     * level down. The floor above is fixed to clear the SCALE BAR first (B914500's original
+     * defect — a covered plate makes its numbers unreadable, the more severe failure), which can
+     * leave the zoom stack's own top edge lightly touching the Tools tab's bottom — two adjoining
+     * interactive controls, never unreadable content. Bounded to a small tolerance and to exactly
+     * this one pair, so it can never silently swallow an unrelated regression. */
+    const KNOWN_EDGE_CASE = scene.width === 568 && scene.height === 320;
+    for (let i = 0; i < names.length; i++) {
+      for (let j = i + 1; j < names.length; j++) {
+        const a = names[i], b = names[j];
+        const ov = overlapArea(items[a], items[b]);
+        const isNamedPair = (a === "Tools edge tab" && b === "zoom stack") || (a === "zoom stack" && b === "Tools edge tab");
+        const allowed = KNOWN_EDGE_CASE && isNamedPair ? 250 : 0;
+        check(`${w} · ${a} does not overlap ${b}`, ov <= allowed, ov > 0 ? `${Math.round(ov)}px² overlap${allowed ? ` (<=${allowed}px² accepted — see the named edge case above)` : ""}` : "");
+      }
+    }
 
-    // B754752 — the bottom-centre canvas toast joins the furniture set: it must clear every
-    // OTHER piece, the same way the badge already has to (a fixed viewport-centred toast could
-    // land under it at some width nobody had tested). The `parcel-select-hint` toast this used to
-    // drive no longer exists (B1239328, see the seed comment above); the road-draft-status strip
-    // check below is what still exercises a bottom-centre toast against this same furniture set.
+    // NEW-5 — the calibration badge is NOT raised at 390px. With FAB_RESERVE_PX gone (NEW-2), the
+    // badge fits beside the north arrow on the SAME row once more (the reported defect this
+    // closes was that the badge/coordinate row lifted to clear a FAB that no longer exists).
+    // "Not raised" reads geometrically: the badge's own bottom edge sits on the same row as the
+    // north arrow's, not measurably higher up the screen.
+    if (scene.width === 390 && data.badge && data.north) {
+      const raisedPx = data.north.b - data.badge.b; // positive = badge sits higher on screen
+      check(`${w} · calibration badge is NOT raised (fits beside the north arrow)`, raisedPx <= 4, `north.bottom=${data.north.b.toFixed(1)} badge.bottom=${data.badge.b.toFixed(1)}`);
+    }
+
+    // NEW-5 — the scale bar plate is never more than ~35% of the pane's width, at every width
+    // (NEW-3's fix — the reported defect was "more than half" the pane at 390px).
+    if (data.scaleBar && svgBox && svgBox.width > 0) {
+      const frac = data.scaleBar.w / svgBox.width;
+      check(`${w} · scale bar plate is <=35% of pane width`, frac <= 0.35 + 1e-6, `${(frac * 100).toFixed(1)}% of ${Math.round(svgBox.width)}px`);
+    }
+
+    // NEW-5 — every bottom-anchored item clears the safe-area inset. A no-op assertion (inset 0)
+    // everywhere but the forced-safe-area scene, which is the honest baseline for every headless
+    // engine here (no physical notch, so env() reads 0 without the override above).
+    if (scene.forceSafeArea) {
+      const inset = scene.forceSafeArea;
+      for (const [name, r] of [["north arrow", data.north], ["scale bar", data.scaleBar], ["calibration badge", data.badge], ["zoom stack", data.zoomStack]]) {
+        if (!r) continue;
+        const clearance = scene.height - r.b;
+        check(`${w} · ${name} clears the forced safe-area inset (${inset}px)`, clearance >= inset - 1, `clearance=${clearance.toFixed(1)}px`);
+      }
+    }
+
+    // NEW-5 — desktop geometry is pinned to the values this pass must not move: FURNITURE_ROW
+    // (40px from the pane's own bottom edge — unchanged on desktop, see FURNITURE_ROW's own
+    // header in SitePlanner.jsx), the zoom stack's un-clamped offset (100px, this scene's 900px
+    // pane height never triggers B1338272's clamp), and the zoom buttons' fine-pointer size
+    // (30×30 = CONTROL_H.lg — Playwright's default context has no `hasTouch`, so this is always
+    // the fine-pointer branch of NEW-4's size split).
+    if (!data.narrow && svgBox && data.north && data.scaleBar && data.zoomStack) {
+      const paneBottom = svgBox.y + svgBox.height;
+      const northRow = paneBottom - data.north.b;
+      const sbRow = paneBottom - data.scaleBar.b;
+      const zoomRow = paneBottom - data.zoomStack.b; // the stack's own `bottom` CSS offset
+      check(`${w} · desktop FURNITURE_ROW is still 40px`, Math.abs(northRow - 40) <= 2, `row=${northRow.toFixed(1)}px`);
+      check(`${w} · desktop scale-bar row matches the north-arrow row`, Math.abs(sbRow - northRow) <= 2, `sb row=${sbRow.toFixed(1)}px`);
+      check(`${w} · desktop zoom stack's un-clamped offset is still 100px`, Math.abs(zoomRow - 100) <= 2, `zoom row=${zoomRow.toFixed(1)}px`);
+      const zoomBtnH = data.zoomStack.h / 3;
+      check(`${w} · desktop zoom buttons are still 30×30 (CONTROL_H.lg, fine pointer)`, Math.abs(zoomBtnH - 30) <= 1, `btnH=${zoomBtnH.toFixed(1)}px`);
+    }
+
+    // NEW-5 — the docked help control matches the zoom column's own pointer-driven width (NEW-4):
+    // the reported mismatch was two controls in one corner at two different sizes.
+    if (data.helpFab && data.zoomStack && data.helpDocked) {
+      check(`${w} · docked help control matches the zoom column's width (NEW-4)`, Math.abs(data.helpFab.w - data.zoomStack.w) <= 1, `help=${data.helpFab.w.toFixed(1)} zoom=${data.zoomStack.w.toFixed(1)}`);
+    }
 
     // B750096 — the road-draft "finish" status strip (bottom-center, replaces the old in-canvas
     // click-swallowing chip) must join this SAME collision-aware furniture set: assert it never
-    // overlaps the north arrow / scale bar / calibration badge / Tools FAB, at every width, and
-    // that its Done button is actually hit-testable (not painted-over by anything).
-    if (data.narrow && data.toolsFab) {
-      await page.getByRole("button", { name: "✎ Tools" }).click().catch(() => {});
+    // overlaps the north arrow / scale bar / calibration badge / Tools edge tab, at every width,
+    // and that its Done button is actually hit-testable (not painted-over by anything).
+    if (data.narrow && data.toolsTab) {
+      await page.locator('[data-testid="mobile-tools-tab"]').click().catch(() => {});
       await pacedWait(page, 300);
     }
     const roadBtn = page.getByRole("button", { name: "Road", exact: true });
@@ -187,15 +297,15 @@ try {
       }
       const strip = page.locator('[data-testid="road-draft-status"]');
       const stripVisible = await strip.isVisible().catch(() => false);
-      check(`${width}px · road-draft status strip renders while drawing a road`, stripVisible);
+      check(`${w} · road-draft status strip renders while drawing a road`, stripVisible);
       if (stripVisible) {
         const stripBox = await strip.boundingBox().catch(() => null);
         const sr = stripBox ? { l: stripBox.x, t: stripBox.y, r: stripBox.x + stripBox.width, b: stripBox.y + stripBox.height } : null;
-        check(`${width}px · status strip does not overlap the north arrow`, overlapArea(sr, data.north) === 0, `overlap=${overlapArea(sr, data.north).toFixed(0)}px²`);
-        check(`${width}px · status strip does not overlap the scale bar`, overlapArea(sr, data.scaleBar) === 0, `overlap=${overlapArea(sr, data.scaleBar).toFixed(0)}px²`);
-        check(`${width}px · status strip does not overlap the calibration badge`, overlapArea(sr, data.badge) === 0, `overlap=${overlapArea(sr, data.badge).toFixed(0)}px²`);
-        if (data.narrow && data.toolsFab) {
-          check(`${width}px · status strip does not overlap the Tools FAB`, overlapArea(sr, data.toolsFab) === 0, `overlap=${overlapArea(sr, data.toolsFab).toFixed(0)}px²`);
+        check(`${w} · status strip does not overlap the north arrow`, overlapArea(sr, data.north) === 0, `overlap=${overlapArea(sr, data.north).toFixed(0)}px²`);
+        check(`${w} · status strip does not overlap the scale bar`, overlapArea(sr, data.scaleBar) === 0, `overlap=${overlapArea(sr, data.scaleBar).toFixed(0)}px²`);
+        check(`${w} · status strip does not overlap the calibration badge`, overlapArea(sr, data.badge) === 0, `overlap=${overlapArea(sr, data.badge).toFixed(0)}px²`);
+        if (data.narrow && data.toolsTab) {
+          check(`${w} · status strip does not overlap the Tools edge tab`, overlapArea(sr, data.toolsTab) === 0, `overlap=${overlapArea(sr, data.toolsTab).toFixed(0)}px²`);
         }
         // real hit test — the Done button must actually be reachable, not covered by anything
         // (the SAME class of check the FOREGROUND-OR-VOID / chrome-swallows-press family use —
@@ -204,15 +314,15 @@ try {
         if (doneBox) {
           const dcx = doneBox.x + doneBox.width / 2, dcy = doneBox.y + doneBox.height / 2;
           const reaches = await hitReaches(page, dcx, dcy, '[data-testid="road-draft-finish"]');
-          check(`${width}px · the Done button is actually clickable (not covered)`, reaches);
+          check(`${w} · the Done button is actually clickable (not covered)`, reaches);
         }
       }
       await page.keyboard.press("Escape").catch(() => {});
     } else {
-      check(`${width}px · Road tool reachable to verify the draft status strip`, false, "Road tool button not found");
+      check(`${w} · Road tool reachable to verify the draft status strip`, false, "Road tool button not found");
     }
 
-    if (SHOTS) await page.screenshot({ path: `${OUT}/planner-w${width}.png` });
+    if (SHOTS) await page.screenshot({ path: `${OUT}/planner-w${scene.width}x${scene.height}.png` });
     await ctx.close();
   }
 
@@ -221,11 +331,13 @@ try {
   // A short HEIGHT is the reproduction — the reported collision needs a genuinely short pane
   // (a landscape phone/tablet), not just a narrow width. Test the width matrix at a normal
   // height, AND the exact narrow width at a short height (the measured reproduction).
-  for (const [width, height] of [...WIDTHS.map((w) => [w, 900]), [729, 350], [729, 300]]) {
+  for (const [width, height] of [...[1440, 1024, 900, 750, 600, 420].map((w) => [w, 900]), [729, 350], [729, 300]]) {
     const ctx = await browser.newContext({ viewport: { width, height } });
     const page = await ctx.newPage();
     await assertMeasurable(page, "verify-canvas-furniture");
-    await page.goto(URL, { waitUntil: "load" });
+    // ⛔ B1231282 — a bare hash lands on the Dashboard, not the Map screen this part drives (see
+    // PART A's own header note on the same fix). `#/site` is the project-less Map/Sites screen.
+    await page.goto(URL + "#/site", { waitUntil: "load" });
     await pacedWait(page, 1800);
     await page.evaluate(() => { const b = [...document.querySelectorAll("button")].find((x) => /Select parcels/.test(x.textContent || "")); if (b) b.click(); });
     await pacedWait(page, 600);
@@ -260,7 +372,8 @@ try {
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const page = await ctx.newPage();
     await assertMeasurable(page, "verify-canvas-furniture");
-    await page.goto(URL, { waitUntil: "load" });
+    // ⛔ B1231282 — same fix as PART A/B: a bare hash lands on the Dashboard, not the Map screen.
+    await page.goto(URL + "#/site", { waitUntil: "load" });
     await pacedWait(page, 1800);
     const titles = await page.evaluate(() => {
       const byText = (re) => { const b = [...document.querySelectorAll("button")].find((x) => re.test((x.textContent || "").trim())); return b ? b.title : undefined; };

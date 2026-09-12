@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pickScaleBar } from "../src/workspaces/site-planner/lib/sheetFurniture.js";
+import { pickScaleBar, screenFurniturePlates } from "../src/workspaces/site-planner/lib/sheetFurniture.js";
 // The corner-placement + SVG-string tier now lives in its own module so it rides the LAZY
 // export chunk instead of the Site route's boot chunk (see sheetFurnitureLayout.js's header).
 // Same functions, moved — every assertion below is unchanged.
@@ -43,6 +43,38 @@ describe("pickScaleBar — round distance that fills a band without clipping (NE
     const out = pickScaleBar({ frameW: frame.w, ftPerUnit: 40 }).feet; // 1 unit = 40 ft
     const inn = pickScaleBar({ frameW: frame.w, ftPerUnit: 0.1 }).feet; // 1 unit = 0.1 ft
     expect(out).toBeGreaterThan(inn);
+  });
+});
+
+describe("screenFurniturePlates — the on-screen scale bar shrinks with a narrow pane (NEW-3)", () => {
+  const ftPerUnit = 1; // 1 canvas user unit == 1 ft, a mid zoom
+  const fmtFeet = (n) => String(Math.round(n));
+
+  it("omitting paneW keeps the old fixed 130/240 ceilings exactly (every pre-existing caller)", () => {
+    const withPaneW = screenFurniturePlates({ ftPerUnit, fmtFeet, paneW: 5000 }); // absurdly wide — never binds
+    const withoutPaneW = screenFurniturePlates({ ftPerUnit, fmtFeet });
+    expect(withPaneW.scaleBar.plateW).toBeCloseTo(withoutPaneW.scaleBar.plateW, 6);
+  });
+
+  it("a wide (desktop) pane is byte-identical to the fixed ceiling — Math.min never binds there", () => {
+    const desktop = screenFurniturePlates({ ftPerUnit, fmtFeet, paneW: 1440 });
+    const noPane = screenFurniturePlates({ ftPerUnit, fmtFeet });
+    expect(desktop.scaleBar.plateW).toBeCloseTo(noPane.scaleBar.plateW, 6);
+  });
+
+  it("a narrow pane shrinks the bar continuously — no second breakpoint", () => {
+    let prevW = Infinity;
+    for (let paneW = 900; paneW >= 240; paneW -= 20) {
+      const { scaleBar } = screenFurniturePlates({ ftPerUnit, fmtFeet, paneW });
+      expect(scaleBar.plateW).toBeLessThanOrEqual(prevW + 1e-6);
+      prevW = scaleBar.plateW;
+    }
+  });
+
+  it("at 390px the plate is a small fraction of the pane — the reported \"more than half\" defect", () => {
+    const paneW = 390;
+    const { scaleBar } = screenFurniturePlates({ ftPerUnit, fmtFeet, paneW });
+    expect(scaleBar.plateW).toBeLessThan(paneW * 0.35);
   });
 });
 
@@ -268,44 +300,6 @@ describe("calibBadgePlacement — badge/scale-bar/zoom never collide at any pane
         }
       }
     }
-  });
-});
-
-// NEW-MAPCTRL-3 — on a narrow screen the "✎ Properties"/"✎ Tools" FABs (bottom:16, a 38px pill)
-// replace the side rails and must never be covered by passive furniture reflowing under them.
-import { FAB_RESERVE_PX } from "../src/workspaces/site-planner/lib/sheetFurniture.js";
-
-describe("FAB_RESERVE_PX — the row every bottom furniture item adds when a FAB claims the corner", () => {
-  const FAB_TOP = 16, FAB_H = 38; // measured against the real rendered FABs
-
-  it("clears the real FAB's own top edge with room to spare", () => {
-    const row = 40 + FAB_RESERVE_PX;
-    expect(row).toBeGreaterThan(FAB_TOP + FAB_H);
-  });
-
-  it("the calibration badge still never collides with the scale bar or the zoom stack when row is shifted for a FAB", () => {
-    const box = { badge: (p, badgeW) => ({ x: p.left, w: (p.maxWidth != null ? Math.min(badgeW, p.maxWidth) : badgeW), y: p.bottom, h: 24 }) };
-    const scaleBarBox = (paneW, sbW, sbH, row) => ({ x: paneW - 14 - sbW, w: sbW, y: row, h: sbH });
-    const overlap = (a, b) => {
-      const ox = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
-      const oy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
-      return ox * oy;
-    };
-    const row = 40 + FAB_RESERVE_PX;
-    for (let paneW = 240; paneW <= 900; paneW += 10) {
-      for (const badgeW of [120, 200, 260]) {
-        for (const sbW of [120, 200]) {
-          const sbH = 32;
-          const p = calibBadgePlacement({ paneW, badgeW, scaleBarW: sbW, scaleBarH: sbH, row });
-          expect(overlap(box.badge(p, badgeW), scaleBarBox(paneW, sbW, sbH, row))).toBeLessThanOrEqual(1);
-        }
-      }
-    }
-  });
-
-  it("a shifted row never renders BELOW the FAB band (the badge/scale-bar's own bottom must clear FAB_TOP+FAB_H)", () => {
-    const p = calibBadgePlacement({ paneW: 750, badgeW: 159, scaleBarW: 169, scaleBarH: 32, row: 40 + FAB_RESERVE_PX });
-    expect(p.bottom).toBeGreaterThanOrEqual(FAB_TOP + FAB_H);
   });
 });
 

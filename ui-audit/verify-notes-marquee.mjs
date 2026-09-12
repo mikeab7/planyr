@@ -13,6 +13,14 @@
  * ⛔ AND EVERY GESTURE IS A REAL ONE. A synthetic mousedown reaches nothing on this page (B364017)
  * and a synthetic key mutates nothing (SYNTHETIC-KEYS-DONT-EDIT) — a harness built on either would
  * report a page of green ticks having exercised none of it.
+ *
+ * ⛔ THE MARQUEE NOW NEEDS SHIFT HELD (NEW-2, 2026-09-12), and every band drawn below says so
+ * explicitly. A plain drag on the mat became the PAN (NEW-1, the owner: *"Click and drag should
+ * move like you're on a map"*), so the unshifted version of each of these gestures no longer
+ * selects anything — it moves the canvas. The boundary section below is deliberately NOT shifted:
+ * a press that does not travel is a PLACE with or without the modifier, which is the one thing
+ * about this gesture that did not change. The pan's own guard is `verify-notes-pan.mjs`, which
+ * also re-proves the group move/delete this file covers, at the owner's real window size.
  */
 import { chromium } from "playwright";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
@@ -147,7 +155,7 @@ async function run(label, { width, height, zoomSteps = 0 }) {
   for (const d of [12, 40, 120]) {
     await seed(page);
     const base = await stored(page);
-    await dragFrom(page, 420, 60, -260, 220);            // a band over boxes one/two/three
+    await dragFrom(page, 420, 60, -260, 220, { shift: true });   // a band over boxes one/two/three
     const sel = await selectedIds(page);
     const after = await stored(page);
     ok(`${label} · a ${d >= 12 ? "real" : ""} drag SELECTS and places NOTHING`,
@@ -160,7 +168,7 @@ async function run(label, { width, height, zoomSteps = 0 }) {
   /* ---- 2. DRAGGING ONE SELECTED BOX MOVES THE WHOLE SET, BY ONE DELTA ------------------- */
   await seed(page);
   const base2 = await stored(page);
-  await dragFrom(page, 420, 60, -260, 220);
+  await dragFrom(page, 420, 60, -260, 220, { shift: true });
   const sel2 = await selectedIds(page);
   ok(`${label} · three boxes are selected before the group drag`, sel2.length === 3, JSON.stringify(sel2));
   if (sel2.length === 3) {
@@ -192,7 +200,7 @@ async function run(label, { width, height, zoomSteps = 0 }) {
   /* ---- 4. ARROW KEYS NUDGE THE SELECTION ------------------------------------------------ */
   await seed(page);
   const base3 = await stored(page);
-  await dragFrom(page, 420, 60, -260, 220);
+  await dragFrom(page, 420, 60, -260, 220, { shift: true });
   await page.keyboard.press("ArrowRight");
   await pacedWait(page, 1200);
   const nudged = await stored(page);
@@ -211,13 +219,13 @@ async function run(label, { width, height, zoomSteps = 0 }) {
 
   /* ---- 6. ESCAPE AND CLICK-AWAY CLEAR IT ------------------------------------------------ */
   await seed(page);
-  await dragFrom(page, 420, 60, -260, 220);
+  await dragFrom(page, 420, 60, -260, 220, { shift: true });
   ok(`${label} · a selection exists to clear`, (await selectedIds(page)).length >= 2);
   await page.keyboard.press("Escape");
   await pacedWait(page, 400);
   ok(`${label} · ⛔ ESCAPE CLEARS THE SELECTION`, (await selectedIds(page)).length === 0);
 
-  await dragFrom(page, 420, 60, -260, 220);
+  await dragFrom(page, 420, 60, -260, 220, { shift: true });
   const beforeAway = await stored(page);
   const away = await clientOf(page, 420, 320);
   await page.mouse.click(away.x, away.y);
