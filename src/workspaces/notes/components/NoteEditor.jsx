@@ -37,7 +37,8 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
 import { anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, anchorPosAtSelection, fitAnchorBox, placeAnchor } from "../lib/notesAnchorNode.js";
 import {
-  applyMarquee, boxesInMarquee, gestureOutcome, marqueeRect, moveSelection, nudgeDelta, toggleSelection,
+  applyMarquee, boxesInMarquee, latchGesture, marqueeRect, moveSelection, nudgeDelta,
+  panTarget, toggleSelection,
 } from "../lib/notesMarquee.js";
 import {
   normalizeZoom, scrollTopAfterZoom, zoomForKey, zoomForWheel, zoomLabel, ZOOM_DEFAULT,
@@ -522,6 +523,23 @@ ${indentCssRules(".planyr-note .ProseMirror li")}
 .planyr-note .planyr-page-height-grip[data-dragging="1"]::after { background: var(--accent-notes); }
 .planyr-note .planyr-page-height-grip-top { top: -7px; }
 .planyr-note .planyr-page-height-grip-bottom { bottom: -7px; }
+/* ⛔ THE GREY IS SOMETHING YOU CAN PICK UP (NEW-1). The owner asked for a map, and a map says so
+   before you touch it: grab at rest, grabbing while it moves. The affordance is on the MAT only —
+   the white sheet resets to auto, so paper still shows a text cursor and is still paper.
+
+   ⛔ THESE TWO RULES LIVE LAST IN THIS STYLESHEET ON PURPOSE, AND MOVING THEM BREAKS THEM. The
+   panning rule's descendant form scores the same specificity as the anchor's own cursor rule
+   above, so source order is the whole of what makes the grabbing glyph survive a pan that travels
+   across a box. Nothing here needs an important flag as long as it stays at the bottom.
+
+   ⛔ AND THE DESCENDANT FORM IS NOT BELT AND BRACES — a pan that starts on grey routinely crosses
+   the sheet, the boxes and the edge grips, every one of which sets its own cursor. Without it the
+   glyph flickers through col-resize and grab mid-gesture, which reads as the gesture having
+   changed into something else. */
+.planyr-note [data-testid="note-mat"] { cursor: grab; }
+.planyr-note [data-testid="note-sheet"] { cursor: auto; }
+.planyr-note [data-testid="note-mat"][data-panning="1"],
+.planyr-note [data-testid="note-mat"][data-panning="1"] * { cursor: grabbing; }
 `;
 
 function EditorStyles() {
@@ -1979,40 +1997,98 @@ export default function NoteEditor({
   /**
    * The blank-page gesture, from press to release.
    *
-   * ⛔ IT IS ONE HANDLER FOR BOTH OUTCOMES, deliberately. Two handlers racing to decide what a
+   * ⛔ IT IS ONE HANDLER FOR ALL THREE OUTCOMES, deliberately. Two handlers racing to decide what a
    * press meant is precisely the shape that made this gesture behave differently depending on
-   * invisible state, four rounds running.
+   * invisible state, four rounds running — and a pan is the third claimant on the same press, not
+   * a separate feature that happens to live nearby.
+   *
+   * ⛔ THE THIRD MEANING (NEW-1, owner: *"Click and drag should move like you're on a map"*). A
+   * press that travels with NO modifier now PANS; with Shift it still draws the rubber band
+   * (NEW-2, *"shift click and drag should select multiple items"*). The press that does not travel
+   * is untouched in every respect — same threshold, same `placeBlockAt`, same byte-identical
+   * document when it is abandoned — which is the property `verify-notes-anchor-soak` has always
+   * asserted and the one thing this change was most able to break.
+   *
+   * ⛔ THE PAN IS THE SCROLLER'S OWN OFFSETS, NOT A TRANSFORM. Three reasons, all of them things
+   * that would otherwise have to be re-solved: it cannot fight the wheel (it IS the wheel's
+   * mechanism), it cannot invent room past the ends (a scroll offset clamps), and it leaves the
+   * sheet's own growth/centring measurements — every one of which reads `scrollLeft` — looking at
+   * the same number they always did. A transform would have needed its own extents, its own
+   * reconciliation with `beginWidthDrag`'s scroll compensation, and its own answer for what
+   * `scrollLeft` means afterwards.
+   *
+   * ⛔ AND IT FOLLOWS THE POINTER FROM THE PRESS, not from where the slop was crossed. The 4px
+   * deadzone delays the start; it does not offset the canvas from the hand for the rest of the
+   * gesture. (Leaflet does the same, for the same reason.)
    */
   const beginBlankGesture = useCallback((e) => {
     const f = frame();
     const from = toDoc(e.clientX, e.clientY);
     if (!f || !from) return false;
     const startClient = { x: e.clientX, y: e.clientY };
-    const additive = e.shiftKey;
-    let moved = false;
+    /* ⛔ READ ONCE, AT THE PRESS. See `gestureOutcome`'s own note on why this is never re-read. */
+    const shift = e.shiftKey;
+    const scroller = scrollerRef.current;
+    const startScroll = scroller
+      ? { scrollLeft: scroller.scrollLeft, scrollTop: scroller.scrollTop }
+      : null;
+    /* ⛔ THE SELECTION AS IT STOOD AT THE PRESS, frozen. Reading `selRef.current` on every move
+     * instead — which is what the additive path used to do — makes the band STICKY: a box swept
+     * up and then swept back out of a shrinking band stays selected, because the previous frame's
+     * answer is the next frame's input. Against a frozen baseline the band is honest in both
+     * directions, and a plain Shift-drag (nothing selected yet) is simply a replace. */
+    const baseSelection = new Set([...selRef.current].map(String));
+    /* What this gesture has committed to. `null` until it travels; never goes back. */
+    let latched = null;
+
+    const setPanning = (on) => {
+      const mat = scrollerRef.current;
+      if (mat) {
+        if (on) mat.setAttribute("data-panning", "1");
+        else mat.removeAttribute("data-panning");
+      }
+      /* The pointer can leave the mat mid-pan (over the toolbar, the rail, the window chrome).
+       * `cursor` is an inherited property, so body carries the glyph everywhere the mat's own
+       * rule does not reach. Same shape as `beginWidthDrag`'s col-resize. */
+      document.body.style.cursor = on ? "grabbing" : "";
+      document.body.style.userSelect = on ? "none" : "";
+    };
 
     const onMove = (ev) => {
-      const outcome = gestureOutcome(startClient, { x: ev.clientX, y: ev.clientY });
-      if (outcome !== "select") return;              // still inside the slop — nothing has happened
-      moved = true;
-      const to = toDoc(ev.clientX, ev.clientY);
+      const at = { x: ev.clientX, y: ev.clientY };
+      const was = latched;
+      latched = latchGesture(latched, startClient, at, { shift });
+      if (!latched) return;                          // still inside the slop — nothing has happened
+      if (latched === "pan") {
+        if (!was) setPanning(true);
+        if (!scroller || !startScroll) return;
+        const next = panTarget(startScroll, { dx: at.x - startClient.x, dy: at.y - startClient.y }, {
+          maxLeft: scroller.scrollWidth - scroller.clientWidth,
+          maxTop: scroller.scrollHeight - scroller.clientHeight,
+        });
+        scroller.scrollLeft = next.scrollLeft;
+        scroller.scrollTop = next.scrollTop;
+        return;
+      }
+      const to = toDoc(at.x, at.y);
       if (!to) return;
       const rect = marqueeRect(from, to);
       setBand(rect);
-      setSelection(applyMarquee(additive ? selRef.current : new Set(), boxesInMarquee(rect, boxesNow()), { additive }));
+      setSelection(applyMarquee(baseSelection, boxesInMarquee(rect, boxesNow()), { additive: true }));
     };
 
     const onUp = (ev) => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
       setBand(null);
-      const outcome = gestureOutcome(startClient, { x: ev.clientX, y: ev.clientY });
-      if (outcome === "select") return;              // the selection is already set; place nothing
+      setPanning(false);
+      /* ⛔ THE LATCH, NOT A FRESH READING AT MOUSE-UP. A pan returned to its own origin measures
+       * zero travel, and asking the distance again here would call that a press and leave a note
+       * behind at the end of every round trip. See `latchGesture`. */
+      if (latched) return;                           // panned or selected; place nothing
       /* ⛔ BELOW THE THRESHOLD THIS IS A PLACE, AND IT IS THE UNCHANGED PLACE. */
-      if (!moved) {
-        clearSelection();
-        placeBlockAt(ev.clientX, ev.clientY);
-      }
+      clearSelection();
+      placeBlockAt(ev.clientX, ev.clientY);
     };
 
     window.addEventListener("mousemove", onMove);

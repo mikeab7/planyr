@@ -16,13 +16,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  applyMarquee, boxesInMarquee, dragDistance, DRAG_SLOP, gestureOutcome, marqueeRect,
-  moveSelection, nudgeDelta, NUDGE_STEP, NUDGE_STEP_FAST, rectsOverlap, toggleSelection,
+  applyMarquee, boxesInMarquee, dragDistance, DRAG_SLOP, gestureOutcome, latchGesture, marqueeRect,
+  moveSelection, nudgeDelta, NUDGE_STEP, NUDGE_STEP_FAST, panTarget, rectsOverlap, toggleSelection,
 } from "../src/workspaces/notes/lib/notesMarquee.js";
 
 const at = (x, y) => ({ x, y });
 
-describe("⛔ the boundary between placing and selecting", () => {
+describe("⛔ the boundary between placing and travelling", () => {
   it("a press that never moved PLACES — zero pixels", () => {
     expect(gestureOutcome(at(100, 100), at(100, 100))).toBe("place");
   });
@@ -40,19 +40,35 @@ describe("⛔ the boundary between placing and selecting", () => {
       expect(gestureOutcome(at(0, 0), at(-d, 0)), `${d}px left`).toBe("place");
     }
     for (let d = DRAG_SLOP + 1; d <= DRAG_SLOP + 20; d += 1) {
-      expect(gestureOutcome(at(0, 0), at(d, 0)), `${d}px right`).toBe("select");
-      expect(gestureOutcome(at(0, 0), at(0, -d)), `${d}px up`).toBe("select");
+      // Past the threshold the MODIFIER decides which travelling meaning it is. Nothing held is a
+      // pan (NEW-1, the owner's map); Shift held is the rubber band (NEW-2).
+      expect(gestureOutcome(at(0, 0), at(d, 0)), `${d}px right`).toBe("pan");
+      expect(gestureOutcome(at(0, 0), at(0, -d)), `${d}px up`).toBe("pan");
+      expect(gestureOutcome(at(0, 0), at(d, 0), { shift: true }), `${d}px right + Shift`).toBe("select");
+      expect(gestureOutcome(at(0, 0), at(0, -d), { shift: true }), `${d}px up + Shift`).toBe("select");
     }
     // Diagonal: it is the STRAIGHT-LINE distance, not the larger axis, so a gesture that moved
     // 3 across and 3 down (4.24px) is a drag even though neither axis reached the threshold.
-    expect(gestureOutcome(at(0, 0), at(3, 3))).toBe("select");
+    expect(gestureOutcome(at(0, 0), at(3, 3))).toBe("pan");
+    expect(gestureOutcome(at(0, 0), at(3, 3), { shift: true })).toBe("select");
     expect(gestureOutcome(at(0, 0), at(2, 2))).toBe("place");   // 2.83px
+  });
+
+  it("⛔ THE MODIFIER NEVER OVERRIDES THE DISTANCE — Shift on a press that did not travel still PLACES", () => {
+    // This is the whole reason the two rules are applied in this order. The placement path has
+    // been broken four separate times; a Shift-click must reach exactly the code a plain click
+    // reaches, or this becomes the fifth.
+    for (let d = 0; d <= DRAG_SLOP; d += 1) {
+      expect(gestureOutcome(at(0, 0), at(d, 0), { shift: true }), `${d}px + Shift`).toBe("place");
+    }
   });
 
   it("⛔ RETURNS EXACTLY ONE ANSWER, ALWAYS — never both, never neither", () => {
     for (let d = 0; d < 40; d += 1) {
-      const out = gestureOutcome(at(0, 0), at(d, d));
-      expect(["place", "select"]).toContain(out);
+      for (const shift of [false, true]) {
+        const out = gestureOutcome(at(0, 0), at(d, d), { shift });
+        expect(["place", "pan", "select"]).toContain(out);
+      }
     }
   });
 
@@ -60,6 +76,72 @@ describe("⛔ the boundary between placing and selecting", () => {
     expect(gestureOutcome(null, at(9, 9))).toBe("place");
     expect(gestureOutcome(at(0, 0), null)).toBe("place");
     expect(dragDistance(undefined, undefined)).toBe(0);
+  });
+});
+
+describe("⛔ the latch — a gesture that has travelled never becomes a place again", () => {
+  it("stays null while the press is still inside the slop", () => {
+    expect(latchGesture(null, at(0, 0), at(0, 0))).toBe(null);
+    expect(latchGesture(null, at(0, 0), at(DRAG_SLOP, 0))).toBe(null);
+    expect(latchGesture(null, at(0, 0), at(DRAG_SLOP, 0), { shift: true })).toBe(null);
+  });
+
+  it("latches on the first move past the threshold, to the meaning the modifier chose", () => {
+    expect(latchGesture(null, at(0, 0), at(40, 0))).toBe("pan");
+    expect(latchGesture(null, at(0, 0), at(40, 0), { shift: true })).toBe("select");
+  });
+
+  it("⛔ A PAN RETURNED TO ITS OWN ORIGIN IS STILL A PAN — this is the litter bug", () => {
+    // Drag the canvas 200px out and all the way back. Asking the DISTANCE again at that point
+    // says "zero travel", i.e. place a note — at the end of every round trip somebody makes with
+    // a map. The latch is the only thing standing between that and a stray box.
+    let latched = null;
+    for (const x of [0, 3, 60, 200, 60, 3, 0]) latched = latchGesture(latched, at(0, 0), at(x, 0));
+    expect(latched).toBe("pan");
+    expect(gestureOutcome(at(0, 0), at(0, 0))).toBe("place");   // …which is what it would have said
+  });
+
+  it("the same round trip with Shift stays a SELECT, not a place and not a pan", () => {
+    let latched = null;
+    for (const x of [0, 90, 0]) latched = latchGesture(latched, at(0, 0), at(x, 0), { shift: true });
+    expect(latched).toBe("select");
+  });
+
+  it("⛔ AND IT IS ONE-WAY ONLY — releasing the modifier mid-gesture cannot re-cast it", () => {
+    // `shift` is read once, at the press; this proves the latch does not quietly re-ask.
+    let latched = latchGesture(null, at(0, 0), at(40, 0), { shift: true });
+    latched = latchGesture(latched, at(0, 0), at(80, 0), { shift: false });
+    expect(latched).toBe("select");
+  });
+});
+
+describe("⛔ the pan — the sign, and the ends of the scroller", () => {
+  it("dragging the canvas RIGHT shows what was to its LEFT — the offset goes DOWN", () => {
+    expect(panTarget({ scrollLeft: 300, scrollTop: 300 }, { dx: 120, dy: 0 }))
+      .toEqual({ scrollLeft: 180, scrollTop: 300 });
+  });
+
+  it("dragging LEFT and UP moves the offset the other way, one-to-one", () => {
+    expect(panTarget({ scrollLeft: 0, scrollTop: 0 }, { dx: -130, dy: -100 }, { maxLeft: 900, maxTop: 900 }))
+      .toEqual({ scrollLeft: 130, scrollTop: 100 });
+  });
+
+  it("⛔ STOPS AT THE ENDS rather than running away past them", () => {
+    expect(panTarget({ scrollLeft: 10, scrollTop: 10 }, { dx: 500, dy: 500 }))
+      .toEqual({ scrollLeft: 0, scrollTop: 0 });
+    expect(panTarget({ scrollLeft: 100, scrollTop: 100 }, { dx: -500, dy: -500 }, { maxLeft: 200, maxTop: 250 }))
+      .toEqual({ scrollLeft: 200, scrollTop: 250 });
+  });
+
+  it("a surface with no room to move does not move", () => {
+    expect(panTarget({ scrollLeft: 0, scrollTop: 0 }, { dx: -80, dy: -80 }, { maxLeft: 0, maxTop: 0 }))
+      .toEqual({ scrollLeft: 0, scrollTop: 0 });
+  });
+
+  it("survives nonsense rather than throwing", () => {
+    expect(panTarget(null, {})).toEqual({ scrollLeft: 0, scrollTop: 0 });
+    expect(panTarget({ scrollLeft: 50, scrollTop: 50 }, { dx: "nope", dy: undefined }))
+      .toEqual({ scrollLeft: 50, scrollTop: 50 });
   });
 });
 

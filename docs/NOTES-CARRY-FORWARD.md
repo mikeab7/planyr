@@ -239,6 +239,33 @@ Two more found since, each worth its own line because each returned a confident 
    ring/handles gone once the pointer is moved away) rather than reasserting a stronger claim the
    product no longer makes.
 
+23. **⛔ A FEATURE'S FOOTPRINT CAN BE ARITHMETICALLY IDENTICAL TO THE ONE YOU ARE RULING OUT — ASK
+   THE GESTURE, NOT THE SCROLLER (NEW-1/NEW-2, the canvas pan, 2026-09-12).** A harness proving
+   "a drag that starts on a page edge grip resizes the page and does NOT also pan it" judged that
+   by the scroller's own delta, and reported a **false failure on two of the four grips against a
+   build where nothing was wrong**. `beginWidthDrag`/`beginHeightDrag` move the scroller ON PURPOSE
+   for the LEFT and TOP edges, so the page's edge stays under the pointer while it grows
+   (VIEWPORT-STABLE). Measured: a 70px leftward drag on the left grip widens the sheet 579→649 and
+   sets `scrollLeft` to exactly **70** — which is, to the pixel, what a pan of that same gesture
+   would also have produced. The two are indistinguishable by their footprint and always will be,
+   at every delta, because the compensation is defined as the size change and the size change is
+   defined as the pointer's travel. **The discriminator has to be something only ONE of the two
+   mechanisms writes**: the pan sets `data-panning="1"` on the mat for exactly as long as it runs,
+   so the harness reads that attribute MID-DRAG instead of reasoning backwards from where the
+   scroller ended up. **And that read needs its own known-good arm** — a check that passes by
+   seeing `null` passes identically if it can never see the attribute at all, for every grip,
+   forever; `verify-notes-pan.mjs` §5 therefore points the identical read at a gesture that MUST
+   arm it before believing any of the four that must not.
+24. **⛔ A GESTURE THAT RETURNS TO ITS OWN ORIGIN MEASURES ZERO TRAVEL, AND "WHAT DID THIS PRESS
+   MEAN" READ AT MOUSE-UP WILL CALL THAT A CLICK (NEW-1, 2026-09-12).** `gestureOutcome` decides
+   place-vs-drag from the straight-line distance between the press and the release — correct for a
+   rubber band, which nobody returns to its own starting corner, and **wrong the moment the same
+   press became a PAN**, because dragging a map out and back is an ordinary thing to do and would
+   have left a stray note at the end of every round trip. The hole was always there for the
+   marquee; it was simply never reachable. **A gesture that has committed to a meaning must LATCH
+   it** (`latchGesture`) rather than be re-derived from its endpoints. Worth checking wherever a
+   gesture's meaning is computed from a start/end pair instead of from the path.
+
 See also `ui-audit/TRAPS.md`, and the named rules **FOREGROUND-OR-VOID** (a background tab cannot
 be measured — not its clock, not its pixels) and **COUNT-EVERY-KIND**.
 
@@ -908,3 +935,36 @@ position**.
 - `CLAUDE.md` → **Engineering rules** — the named rules invoked by name in briefs.
 - `ui-audit/` — the harnesses. The systematic one is `sweep-notes.mjs`; **a sweep that reports
   nothing is a failed sweep** and says so in its own output.
+
+## 7 · The mat's gesture model, in one table (NEW-1/NEW-2, 2026-09-12)
+
+Four meanings now compete for one press on the note canvas. The rule reads in this order, and the
+ORDER is the point — distance first, so the placement path (broken four separate times, and guarded
+by `verify-notes-anchor-soak`'s byte-identical property) is reached by exactly the presses it always
+was, Shift or no Shift:
+
+| the press | what it means |
+|---|---|
+| does not travel past `DRAG_SLOP` (4px) | **place** — arms the caret; the first character makes the note. Unchanged, and unchanged with Shift held too. |
+| travels, no modifier | **pan** — the mat's own `scrollLeft`/`scrollTop`, one-to-one with the pointer |
+| travels, Shift held | **select** — the rubber band; every box it touches, replacing the selection |
+| starts on one of the four sheet edge grips | **resize the page** — the grip's `pointerdown` calls `preventDefault()`, which suppresses the compat `mousedown`, so `focusFromMat` never runs at all |
+
+Pure decisions in `lib/notesMarquee.js` (`gestureOutcome`, `latchGesture`, `panTarget`), wiring in
+`NoteEditor.jsx`'s `beginBlankGesture`, guard in `ui-audit/verify-notes-pan.mjs` at **1191×465,
+which is his real window**. Two things that window changes and a taller one hides: the mat's own box
+runs past the bottom of the viewport (measured 606 against 465), so ~140px of it is clipped and the
+sheet's BOTTOM edge grip is unreachable until the mat is scrolled; and `elementsFromPoint` past the
+viewport returns an **empty array** rather than erroring (trap 18).
+
+**⛔ AND A STANDING PRE-EXISTING RED, recorded so it is not mistaken for a regression.**
+`verify-notes-anchor-soak.mjs` fails **13 checks on untouched `origin/main`** (proven 2026-09-12 on a
+separate `git worktree` checkout of `origin/main` — not `git stash`, per trap 17 — built and served
+independently; head and base failure IDENTITIES diff to nothing). It is harness staleness of trap 22's
+exact shape: the soak presses a GRID of points, many of which land on the white sheet, where two
+later, deliberate features now route the press elsewhere (`onSheet` + beside a line → the caret,
+B1368; `onSheet` + below the content → `focusEndOfSheet`, B1550976) instead of creating a block — so
+"14 presses, 6 blocks" is the app being correct. A 14th check, *"A SECOND PRESS AT THE SAME SPOT TYPES
+INTO IT"*, is separately **flaky on base and head alike** (the harness's own typed markers lose
+characters — `FIRSTSECOND` came back as `FRSTSECOND`/`FSTSECOND`); it appears and disappears across
+consecutive runs of the SAME build, so diff identities, never counts. Carried by **B1597762**.
