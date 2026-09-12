@@ -686,6 +686,23 @@ export default function AppHeader({
     if (narrow) { row2CenteredRef.current = false; setRow2Center((prev) => (prev.mode === "flow" ? prev : { mode: "flow", max: null })); return undefined; }
     const row = row2Ref.current, left = row2LeftZoneRef.current, right = row2RightZoneRef.current, content = row2CenterContentRef.current;
     if (!row || !content) return undefined; // no centre content rendered (the 2-zone layout, or not yet mounted) — nothing to centre
+    // B1547280-followup — the owner reported this staying `flow` at a width where the bound
+    // clears the chip by 100+px, on production; three independently-faithful reproductions
+    // (a staged async mount, the real Scheduler.jsx with real postMessage timing incl. both
+    // fallback timers, and a client-side navigation into Schedule) all centred correctly and
+    // could not reproduce it. Rather than guess further, every `measure()` call now records its
+    // own inputs — unconditionally, read-only, changes no behaviour — so the NEXT occurrence is
+    // captured instead of reasoned about. Read `row2Ref.current.dataset.scheduleCenterDebug` (the
+    // latest call) or `window.__scheduleCenterDebugLog` (the last 50, with timestamps) in DevTools.
+    const logCenterDebug = (entry) => {
+      try {
+        const rec = { t: Math.round(performance.now()), ...entry };
+        const log = (window.__scheduleCenterDebugLog = window.__scheduleCenterDebugLog || []);
+        log.push(rec);
+        if (log.length > 50) log.shift();
+        row.dataset.scheduleCenterDebug = JSON.stringify(rec);
+      } catch (_) { /* diagnostic only — never let this throw into the real measurement */ }
+    };
     const measure = () => {
       const rowW = row.clientWidth;
       const leftW = left ? left.getBoundingClientRect().width : 0;
@@ -693,6 +710,7 @@ export default function AppHeader({
       const min = content.getBoundingClientRect().width;
       if (![rowW, leftW, rightW, min].every(Number.isFinite) || rowW <= 0 || min <= 0) {
         row2CenteredRef.current = false;
+        logCenterDebug({ rowW, leftW, rightW, min, max: null, reason: "unmeasurable", mode: "flow" });
         setRow2Center((prev) => (prev.mode === "flow" ? prev : { mode: "flow", max: null }));
         return;
       }
@@ -700,6 +718,7 @@ export default function AppHeader({
       const wasCentered = row2CenteredRef.current;
       const nowCentered = max != null && (wasCentered ? max >= min : max >= min + ROW2_CENTER_HYSTERESIS_PX);
       row2CenteredRef.current = nowCentered;
+      logCenterDebug({ rowW, leftW, rightW, min, max, wasCentered, nowCentered, mode: nowCentered ? "centered" : "flow" });
       setRow2Center((prev) => {
         const nextMode = nowCentered ? "centered" : "flow";
         const nextMax = nowCentered ? max : null;
