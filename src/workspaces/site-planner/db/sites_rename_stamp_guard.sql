@@ -1,3 +1,55 @@
+-- ⛔ HARDENED 2026-09-12 (B1584512) — THE GUARD BELOW WAS BEATABLE TWO WAYS, BOTH REPRODUCED LIVE
+-- IN A ROLLED-BACK PRODUCTION TRANSACTION. Read this block before the original NEW-1 header that
+-- follows it — that header still explains why the guard exists at all, but its "WHAT THIS
+-- DELIBERATELY DOES NOT DO" section is corrected in place below rather than left to mislead.
+--
+-- (a) OLDER STAMP WINS. The guard used to return early on "does NEW carry ANY real stamp" —
+--     presence, not recency: `if rename_stamp(new...) is not null then return new`. A write
+--     carrying a stamp of `1` (or any real-but-OLDER stamp) plus a stale name passed that check
+--     outright and overwrote a row whose stored stamp was current. Fixed by comparing the incoming
+--     stamp against the stored one and requiring it be STRICTLY newer — an equal or older stamp now
+--     loses exactly like no stamp at all. This is a deliberate reversal of the original design note
+--     ("it never enforces monotonicity between two real stamps") — see below for why that reasoning
+--     no longer holds, and see `rename_site_group.sql`'s own 2026-09-12 correction for the
+--     complementary fix that keeps this from turning into a false positive against a legitimate
+--     group rename made from a device with a partial local cache.
+-- (b) COLUMN-ONLY WRITES WERE UNGUARDED. The revert branch only fired when
+--     `(new.data->>'site') is distinct from (old.data->>'site')` — a write that changed the `site`
+--     COLUMN while leaving `data.site` untouched skipped it entirely, leaving the column and the
+--     jsonb copy disagreeing about the project's name. Fixed by reasoning about the EFFECTIVE name
+--     (whichever copy the row actually shows) rather than about which copy the incoming write
+--     happened to touch, so the two can no longer be left disagreeing.
+-- (c) `rename_stamp` ALSO ACCEPTED NUMERIC STRINGS AND ANY POSITIVE VALUE, so a marker of `"1"` (or
+--     the number `1`) read as a "real" rename time — epoch-ms `1` is 1970-01-01T00:00:00.001Z, never
+--     a genuine Planyr rename. Tightened to ONE representation (a JSON NUMBER — the only shape any
+--     real writer here has ever produced; see `rename_site_group.sql` / the backfill file, both of
+--     which write via `to_jsonb(bigint)`) and to a plausible EPOCH-MS RANGE (2024-01-01 through
+--     2100-01-01) — comfortably below every real stamp on record (all ~2026) and comfortably above
+--     zero, so a trivially small or malformed value now reads as UNKNOWN rather than as a stamp.
+--     `(a)`'s strict-recency compare already closes the *specific* `"1"` exploit on its own (`1` is
+--     never `> prior_at` for any row that has ever been renamed for real), but a value this
+--     implausible should never parse as a stamp in the first place — defense in depth, not
+--     decoration.
+--
+-- LOUD-FAILURE, closing the reason this took four rounds and a retraction to find: a refused or
+-- reverted write used to return success with nothing to show for it. The guard now `RAISE WARNING`s
+-- (visible in Postgres/Supabase logs) and records one row in `public.client_errors`
+-- (`source = 'event:rename-guard-refused'`, the same telemetry sink `storage.js`'s
+-- `project-name-write-corrected` client-side event already reports into — this is that event's
+-- server-side twin, for writes that never went through `storage.js` at all) every time a write is
+-- corrected, so the next instance of this class is visible the first time.
+--
+-- Every branch here is mutation-proven — see `db/test/sites_rename_stamp_guard.test.sql`, rewritten
+-- alongside this fix with dedicated cases for both exploits, run live against `planyr_production`
+-- in a rolled-back transaction, confirmed RED against the pre-fix function bodies and GREEN against
+-- these.
+--
+-- ============================================================================================
+-- ORIGINAL HEADER (NEW-1, 2026-09-10) FOLLOWS — still accurate on WHY this guard exists; its
+-- "WHAT THIS DELIBERATELY DOES NOT DO" section below is corrected in place for the two claims the
+-- exploits above disproved.
+-- ============================================================================================
+--
 -- NEW-1 — THE PROJECT-RENAME MARKER MAY NEVER BE WRITTEN EMPTY.
 -- Run ONCE in the Supabase SQL editor. Idempotent; safe to re-run. ADDITIVE: adds two functions
 -- and one BEFORE UPDATE trigger. Changes no table, no column, no policy, and rewrites NO EXISTING
@@ -67,10 +119,18 @@
 -- WHAT THIS DELIBERATELY DOES NOT DO
 --   • It never STAMPS a row that has no stamp. Inventing `now()` for an unstamped write would let
 --     a stale name win outright — the exact opposite of the fix.
---   • It never enforces monotonicity between two real stamps. `renameSiteGroup` computes
---     `max(now, newest-local-stamp + 1)` from the plans THIS device has cached, so a genuinely
---     later rename from a device with a partial cache can legitimately carry a smaller number;
---     refusing it would freeze the project's name. number → number always passes untouched.
+--   • ⛔ CORRECTED 2026-09-12 (B1584512) — the bullet that stood here said "it never enforces
+--     monotonicity between two real stamps … refusing it would freeze the project's name." That was
+--     the exploited hole (exploit (a) above), not a safe design choice: `number → number` used to
+--     pass untouched with NO recency check, so an older real stamp beat a newer one outright. It now
+--     REQUIRES the incoming stamp be STRICTLY greater than the row's own stored stamp; an equal or
+--     older one is refused exactly like no stamp at all. The "device with a partial cache" concern
+--     that justified the old behaviour is real but is answered on the WRITE side instead, where it
+--     belongs: `rename_site_group.sql`'s own 2026-09-12 correction computes the stamp it actually
+--     writes as `greatest(caller's value, current max real stamp across the group + 1)`, read from
+--     the group's own rows at call time rather than trusted from the caller — so the SANCTIONED
+--     rename path can never lose a race against itself, while an unrelated write that merely CARRIES
+--     an older real stamp (the actual exploit) is correctly refused here.
 --   • It never touches `deleted_at`, `team_id`, `user_id` or `version`, and it does not care how a
 --     group is keyed — it is strictly per-row, so it neither uses nor worsens the known
 --     `group_id` column vs `data->>'groupId'` drift (filed separately, out of scope here).
@@ -79,14 +139,20 @@
 --     (`smrkumgymt65`: the column reads `I-10/HWY 90, TX` while the jsonb still holds the raw
 --     `  I-10/HWY 90 , , TX`), and there the COLUMN is the better value — a blanket mirror rule
 --     would push the uglier string into the name the owner actually sees. So the column is only
---     ever put back in the one branch that refused a jsonb name change, never on its own.
---   • It cannot catch a write that carries a STALE-BUT-REAL stamp alongside a stale name (a device
---     cached before a rename, holding an older stamp). number → number passes untouched, by the
---     rule above. That case is the B1440976 family — a rename losing to a stale cached copy — and
---     it is answered at the PULL, where `siteModel.mergeSiteContent` resolves both fields through
---     `nameAuthority`. This guard neither closes nor widens it; refusing an older stamp here would
---     mean silently freezing the name of any device whose clock runs behind, which is a worse
---     failure than the one it would prevent.
+--     ever put back inside the one branch that refuses a non-newer rename, never on its own — as of
+--     2026-09-12 that branch reasons about the EFFECTIVE name (`coalesce(old.site, old.data->>
+--     'site')`) rather than about which of the two copies the incoming write happened to touch
+--     (exploit (b) above), so a column-only write can no longer leave the two disagreeing.
+--   • ⛔ CORRECTED 2026-09-12 (B1584512) — the bullet that stood here said this guard "cannot catch a
+--     write that carries a STALE-BUT-REAL stamp alongside a stale name … refusing an older stamp
+--     here would mean silently freezing the name of any device whose clock runs behind." As of this
+--     date it DOES catch that write — that is exploit (a), and freezing a clock-skewed device's own
+--     stale rename ATTEMPT is the correct outcome, not a worse one: the device's attempt carries no
+--     evidence it is actually newer than what the row already holds, so refusing it and asking the
+--     user to retry is safer than trusting an unverifiable claim. The B1440976 family (an ordinary,
+--     non-rename SAVE from a device that merely has not pulled a rename made elsewhere) is a
+--     DIFFERENT case from a rename ATTEMPT with a stale stamp, and remains correctly handled at the
+--     PULL seam by `siteModel.mergeSiteContent` — unchanged by this correction.
 
 begin;
 
@@ -105,19 +171,28 @@ immutable
 parallel safe
 set search_path = public, pg_temp
 as $$
+  -- ⛔ HARDENED 2026-09-12 (B1584512) — ONE representation only (a JSON NUMBER; the numeric-STRING
+  -- tolerance is gone — no real writer here has ever produced one, see the header) and a plausible
+  -- EPOCH-MS RANGE (2024-01-01 through 2100-01-01 inclusive), so an implausible value like the
+  -- number `1` reads as UNKNOWN rather than as a real rename time. The floor sits comfortably below
+  -- every real stamp on record (all ~2026); the ceiling is a defensive backstop so a write can never
+  -- plant a stamp no future genuine rename could ever beat.
   select case
     when v is null then null
-    when jsonb_typeof(v) = 'number' and (v #>> '{}') ~ '^[0-9]+(\.[0-9]+)?$' and (v #>> '{}')::numeric > 0
-      then floor((v #>> '{}')::numeric)::bigint
-    when jsonb_typeof(v) = 'string' and btrim(v #>> '{}') ~ '^[0-9]+(\.[0-9]+)?$' and btrim(v #>> '{}')::numeric > 0
-      then floor(btrim(v #>> '{}')::numeric)::bigint
-    else null
+    when jsonb_typeof(v) <> 'number' then null
+    when (v #>> '{}')::numeric <> floor((v #>> '{}')::numeric) then null
+    when (v #>> '{}')::numeric < 1704067200000 then null   -- 2024-01-01T00:00:00Z
+    when (v #>> '{}')::numeric > 4102444800000 then null   -- 2100-01-01T00:00:00Z
+    else (v #>> '{}')::numeric::bigint
   end;
 $$;
 
 comment on function public.rename_stamp(jsonb) is
-  'Parse a project-rename marker (epoch ms) out of jsonb. Mirrors projectName.js renameStamp: '
-  'absent / JSON null / non-numeric / <= 0 all read as NULL = UNKNOWN, never as "never renamed".';
+  'Parse a project-rename marker (epoch ms) out of jsonb. Mirrors projectName.js renameStamp for '
+  'the empty/absent cases; HARDENED 2026-09-12 (B1584512) to accept exactly ONE representation (a '
+  'JSON number, integral, within a plausible epoch-ms range) — absent / JSON null / non-numeric / '
+  'a numeric STRING / out-of-range all read as NULL = UNKNOWN, never as "never renamed" and never '
+  'as a trivially-small fake stamp.';
 
 -- ---------------------------------------------------------------------------
 -- 2) The guard.
@@ -128,30 +203,82 @@ language plpgsql
 set search_path = public, pg_temp
 as $$
 declare
-  prior_at bigint;
+  prior_at        bigint;
+  new_at          bigint;
+  eff_name        text;
+  name_disagrees  boolean;
+  stamp_disagrees boolean;
 begin
-  prior_at := public.rename_stamp(old.data -> 'siteRenamedAt');
-  if prior_at is null then return new; end if;                                   -- nothing to protect
-  if public.rename_stamp(new.data -> 'siteRenamedAt') is not null then return new; end if; -- a real rename
   if new.data is null or jsonb_typeof(new.data) <> 'object' then return new; end if;
 
-  -- This write is not a rename, so it may not move the name the stamp belongs to. The `site`
-  -- COLUMN is put back with it — but only here, inside the branch that actually refused the jsonb
-  -- name, so the two never end up announcing different names because of this guard.
-  if (new.data ? 'site') and (old.data ? 'site')
-     and (new.data ->> 'site') is distinct from (old.data ->> 'site') then
-    new.data := jsonb_set(new.data, '{site}', old.data -> 'site', true);
-    if new.site is distinct from old.site then new.site := old.site; end if;
+  prior_at := public.rename_stamp(old.data -> 'siteRenamedAt');
+  if prior_at is null then return new; end if;                        -- nothing to protect
+
+  -- ⛔ HARDENED 2026-09-12 (B1584512, exploit (a)) — PRESENCE IS NOT RECENCY. The old guard passed
+  -- any write that carried ANY real stamp, so an older (or equal) one beat a newer stored one. It
+  -- must be STRICTLY greater than what the row already holds to count as a genuine rename; an equal
+  -- stamp loses too, same as no stamp at all — see the file header for why enforcing this is now
+  -- safe (rename_site_group.sql computes an authoritative, group-wide stamp on the write side).
+  new_at := public.rename_stamp(new.data -> 'siteRenamedAt');
+  if new_at is not null and new_at > prior_at then return new; end if; -- a genuine, strictly-newer rename
+
+  -- Not a strictly-newer rename, so this write may neither move the name the stamp belongs to nor
+  -- touch the stamp itself — whatever it carried (no stamp, an equal one, or an older one) and
+  -- regardless of WHICH copy it tried to change. ⛔ HARDENED 2026-09-12 (B1584512, exploit (b)) —
+  -- the old guard only reconciled the `site` COLUMN back inside a branch gated on the JSONB copy
+  -- having changed, so a write that changed ONLY the column sailed through untouched. Reasoning
+  -- about the EFFECTIVE name instead — whichever copy the row actually shows — means the two can
+  -- never be left disagreeing no matter which one the caller touched.
+  eff_name := coalesce(old.site, old.data ->> 'site');
+
+  -- ⛔ THE OVERWHELMINGLY COMMON CASE THROUGH THIS BRANCH IS AN ORDINARY CONTENT SAVE MADE AFTER A
+  -- ROW WAS ALREADY RENAMED, faithfully carrying the SAME name and SAME stamp forward — that write's
+  -- own `new_at` is never `> prior_at` (it's equal), so it reaches this branch on every single save,
+  -- not just an attack. Decide what to CORRECT (and whether to say anything) by comparing against
+  -- what the write actually PROPOSED, not by re-deriving it from what we are about to force — an
+  -- ordinary matching save must stay silent, or every post-rename autosave would warn and log.
+  name_disagrees  := (new.site is distinct from eff_name) or ((new.data ->> 'site') is distinct from eff_name);
+  stamp_disagrees := (new.data -> 'siteRenamedAt') is distinct from to_jsonb(prior_at);
+  if not name_disagrees and not stamp_disagrees then
+    return new;   -- nothing to correct: this write already agrees with the stamped state
   end if;
 
+  if new.site is distinct from eff_name then new.site := eff_name; end if;
+  if (new.data ->> 'site') is distinct from eff_name then
+    new.data := jsonb_set(new.data, '{site}', to_jsonb(eff_name), true);
+  end if;
   new.data := jsonb_set(new.data, '{siteRenamedAt}', to_jsonb(prior_at), true);
+
+  -- LOUD-FAILURE (B1584512) — a refused/reverted write must be visible the first time, not the
+  -- fifth. RAISE WARNING for immediate operational visibility (Supabase/Postgres logs), plus a
+  -- durable row in the existing telemetry sink so it survives past log retention.
+  raise warning 'sites_preserve_rename_stamp: refused a non-newer rename on site % (prior_at=%, attempted_at=%, kept_name=%)',
+    old.id, prior_at, coalesce(new_at::text, '<none>'), eff_name;
+
+  begin
+    insert into public.client_errors (user_id, module, source, message)
+    values (
+      auth.uid(),
+      'site-planner',
+      'event:rename-guard-refused',
+      format('site=%s prior_at=%s attempted_at=%s kept_name=%s',
+             old.id, prior_at, coalesce(new_at::text, 'none'), eff_name)
+    );
+  exception when others then
+    -- Telemetry must never be able to fail the write it is reporting on.
+    raise warning 'sites_preserve_rename_stamp: telemetry insert failed: %', sqlerrm;
+  end;
+
   return new;
 end;
 $$;
 
 comment on function public.sites_preserve_rename_stamp() is
-  'An UPDATE carrying no real siteRenamedAt may neither clear a stamped row''s marker nor change '
-  'its project name. See db/sites_rename_stamp_guard.sql for the production measurement behind it.';
+  'An UPDATE that is not a STRICTLY newer rename (HARDENED 2026-09-12, B1584512 — presence alone '
+  'used to be enough) may neither clear a stamped row''s marker nor change its project name, on '
+  'EITHER the site column or the jsonb copy (B1584512 closed a column-only bypass). Every refusal '
+  'raises a warning and logs to public.client_errors (event:rename-guard-refused). See '
+  'db/sites_rename_stamp_guard.sql for the production measurement behind it.';
 
 drop trigger if exists sites_preserve_rename_stamp on public.sites;
 create trigger sites_preserve_rename_stamp
