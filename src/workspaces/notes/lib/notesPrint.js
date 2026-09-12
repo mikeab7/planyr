@@ -141,6 +141,21 @@ export function pageWidthPinExtentPx(doc) {
   } catch (_) { return 0; }
 }
 
+/** ⛔ PDF-PARITY FOR "SET A PAGE'S OWN HEIGHT BY HAND" (NEW-1, 2026-09-12) — the vertical twin of
+ *  `pageWidthPinExtentPx` just above, reusing the SAME `growPx`-style computation
+ *  `buildPrintDocument` already runs rather than a second path (the owner's own instruction,
+ *  reused here for the identical reason the width pin's print support already gives). A page
+ *  pinned tall reserves that much of the printed sheet exactly the way an already-overflowing
+ *  page does — real content already flows onto the next physical page past one sheet's height,
+ *  so a shorter-than-its-pin page simply prints the extra blank space, never clipped, never a
+ *  second mechanism. */
+export function pageHeightPinExtentPx(doc) {
+  try {
+    const ph = doc?.attrs?.pageHeight;
+    return typeof ph === "number" && Number.isFinite(ph) ? Math.max(0, ph) : 0;
+  } catch (_) { return 0; }
+}
+
 /* Mirrors src/workspaces/notes/components/NoteEditor.jsx → EDITOR_CSS, construct for
  * construct, translated to paper: ink is black, surfaces are white (a theme token here
  * would print a dark page), and each block declares how it may break across a sheet. */
@@ -367,10 +382,16 @@ export function buildPrintDocument({ title, meta = "", pages = [], density = DEF
    * width too — otherwise growing left would simply squeeze the text column. */
   const growLeftPx = pages.reduce((m, p) => Math.max(m, pageAnchorExtentLeftPx(p.doc)), 0);
   const growTopPx = pages.reduce((m, p) => Math.max(m, pageAnchorExtentTopPx(p.doc)), 0);
+  /* ⛔ A NUMERIC HEIGHT PIN (NEW-1) — see `pageHeightPinExtentPx`'s own header. Aggregated across
+   * pages the identical way the width pin already is: a combined notebook print is one
+   * continuous `.sheet`, so this is the same accepted simplification `growPx` already makes for
+   * a multi-page width pin, not a new one. */
+  const growHeightPx = pages.reduce((m, p) => Math.max(m, pageHeightPinExtentPx(p.doc)), 0);
   const sheetCss = [
     growPx || growLeftPx ? `max-width: max(190mm, ${growPx + growLeftPx + 60}px)` : "",
     growLeftPx ? `padding-left: calc(8mm + ${growLeftPx}px)` : "",
     growTopPx ? `padding-top: calc(10mm + ${growTopPx}px)` : "",
+    growHeightPx ? `min-height: ${growHeightPx}px` : "",
   ].filter(Boolean).join("; ");
   const sheetStyle = sheetCss ? ` style="${sheetCss}"` : "";
 

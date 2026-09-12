@@ -38,6 +38,11 @@ import { resolveCounty, loadCountyPolygons, countyPolygonsReady, countyRoster } 
  * See shared/gis/countyKeys.js for why (a raw `MAP[county]` missed the two production rows
  * spelled "Harris", silently). */
 import { byCountyKey, countyKeySet, normCountyKey } from "../../../shared/gis/countyKeys.js";
+/* CITY-SCOPED SOURCES (B1583296) — a point-in-city-polygon check that runs BEFORE the nationwide
+ * county geometry. See cityScopes.js's own header for why this is a genuine resolution tier, not a
+ * config line: a county whose only real parcel source covers just one city inside it cannot be
+ * expressed at county granularity without silently misrouting every OTHER place in that county. */
+import { cityScopeAnswer } from "./cityScopes.js";
 
 export { loadCountyPolygons, countyPolygonsReady };
 
@@ -773,6 +778,23 @@ const COUNTIES_RAW = {
     layerUrl: "https://services1.arcgis.com/oRKmdBXD6EbdmVgJ/arcgis/rest/services/KaneCo_IL_Parcels_LegalDescription/FeatureServer/0",
     idField: "PIN", addrField: "SiteAddress",
     help: "Kane County parcels (county GIS, Esri-hosted). Search by PIN or a site address.",
+  },
+
+  /* ═══ B1583296 — CITY OF DETROIT, city-scoped (see cityScopes.js) ═══════════════════════════
+   * `Detroit_MP_Parcel_Authoritative` was correctly REJECTED as a Wayne County candidate
+   * (docs/STATEWIDE-PARCELS.md, B1551617/B1574258): it is the City of Detroit only and would
+   * silently return nothing across most of the county. Wayne County itself has no county-wide
+   * source wired (three discovery routes found none — same doc), so this key is reached ONLY via
+   * `cityScopeAnswer`'s point-in-Detroit-boundary test, never via a bbox/name match on "Wayne."
+   * VERIFIED LIVE 2026-09-11 evening Central (Michael's own browser): a point query at downtown
+   * Detroit (42.3314, -83.0458) returned a real parcel with 46 populated fields. Field list
+   * confirmed live from this sandbox 2026-09-12 (services2.arcgis.com is reachable here):
+   * `parcel_id` and `address` are real fields on the layer. */
+  mi_detroit: {
+    state: "MI", label: "City of Detroit, MI",
+    layerUrl: "https://services2.arcgis.com/PpbvckyUgaYqseNQ/arcgis/rest/services/Detroit_MP_Parcel_Authoritative/FeatureServer/0",
+    idField: "parcel_id", addrField: "address",
+    help: "City of Detroit parcels (city GIS, Esri-hosted) — searches are limited to the city limits, not all of Wayne County. Search by parcel ID or a site address.",
   },
 };
 
@@ -1569,6 +1591,19 @@ const COUNTIES_MAP_RAW = {
   pa_lehigh: { state: "PA", center: [40.6038, -75.6195], zoom: 10, bbox: [40.42, -75.89, 40.79, -75.34], mapServer: null, layerUrl: COUNTIES.pa_lehigh.layerUrl },
   nm_bernalillo: { state: "NM", center: [35.0490, -106.6593], zoom: 10, bbox: [34.87, -107.18, 35.23, -106.14], mapServer: null, layerUrl: COUNTIES.nm_bernalillo.layerUrl },
   il_kane: { state: "IL", center: [41.9385, -88.4257], zoom: 10, bbox: [41.72, -88.61, 42.16, -88.24], mapServer: null, layerUrl: COUNTIES.il_kane.layerUrl },
+
+  /* B1583296 — city-scoped, not a county. `bbox` is Detroit's own extent (matches cityScopes.js's
+   * CITY_SCOPES bbox exactly — coarse pre-filter only, the ring geometry there decides). `cityScoped:
+   * true` is REQUIRED on every entry a city scope resolves to: it is what keeps this key out of
+   * candidateCountiesForPoint's blind per-state fallback (a point elsewhere in Michigan with no
+   * bbox/geometry match must never be handed a source that can only ever answer inside Detroit) —
+   * see that function's own comment. Test-guarded in test/cityScopes.test.js. */
+  mi_detroit: {
+    state: "MI", center: [42.35, -83.07], zoom: 11,
+    bbox: [42.2550, -83.2877, 42.4504, -82.9103],
+    cityScoped: true,
+    mapServer: null, layerUrl: COUNTIES.mi_detroit.layerUrl,
+  },
 };
 
 // Which configured CAD county/counties could contain a clicked point — used to
@@ -1615,6 +1650,11 @@ const stateForPoint = (lat, lng) => siteState({ lat, lng });
  * confident" from "the polygon picked a side, but only barely." `geometryCountyKey` stays the
  * key-only shorthand every existing caller already uses. */
 function geometryCountyAnswer(lat, lng) {
+  // City scope first (B1583296) — see cityScopes.js's header. A point inside Detroit resolves
+  // here, synchronously, regardless of whether the nationwide county-polygon asset has landed;
+  // everywhere else falls through to the county-level answer exactly as before.
+  const cs = cityScopeAnswer(lat, lng);
+  if (cs) return { key: cs.key, nearEdge: cs.nearEdge };
   const ans = resolveCounty(lat, lng);
   if (!ans || ans.status !== "ok") return null;
   const key = countyKeyForName(ans.name, ans.state);
@@ -1708,7 +1748,11 @@ export function candidateCountiesForPoint(lat, lng) {
      * it leads and the rest of its state follows as coverage. */
     if (truth) {
       const st = COUNTIES_MAP[truth].state;
-      const inState = entries.filter(([, c]) => c.state === st).map(([k]) => k);
+      // ⛔ B1583296 — a city-scoped sibling (mi_detroit) rides along here only when it IS the
+      // resolved truth; a genuinely different same-state county (found by geometry, missed by
+      // every bbox) must never additionally drag in a source that can only answer inside its own
+      // city limits — see the per-state-fallback comment below for the shape of the same bug.
+      const inState = entries.filter(([k, c]) => c.state === st && (!c.cityScoped || k === truth)).map(([k]) => k);
       return hoist(inState);
     }
     // Outside every county bbox. Pre-Colorado this returned EVERY configured county (harris-first),
@@ -1733,8 +1777,17 @@ export function candidateCountiesForPoint(lat, lng) {
     // now returns NO candidates rather than all of them — `resolveCandidates`/`candidatesAtPoint`
     // already handle an empty list with an honest "still loading, try again" message, and an honest
     // "nothing to try" is a vastly cheaper failure than silently fanning out to every wired state.
+    // ⛔ B1583296 — a CITY-SCOPED entry (mi_detroit) must NEVER ride this blind "every source in
+    // this state" fallback: unlike a purely-statewide composite (Nevada, DC, Maine, …), a
+    // city-scoped source can only ever answer inside its own city limits, and this branch is
+    // reached precisely because neither a bbox nor a confident geometry answer matched — i.e. the
+    // point is somewhere else in the state. Handing it out here is exactly the "returns nothing
+    // from a Detroit-only layer" failure the item that added mi_detroit was written to prevent
+    // (verified: Livonia and Taylor, MI — both outside Detroit's bbox and outside Oakland's bbox —
+    // must not include mi_detroit here). See cityScopes.js's header for why the flag lives on the
+    // entry rather than being re-derived.
     const st = resolvedState(lat, lng);
-    return st ? entries.filter(([, c]) => c.state === st).map(([k]) => k) : [];
+    return st ? entries.filter(([, c]) => c.state === st && !c.cityScoped).map(([k]) => k) : [];
   }
   /* ⛔ NEW-6 — A CONFIDENT GEOMETRY ANSWER DECIDES *MEMBERSHIP*, NOT JUST ORDER.
    *
@@ -1794,7 +1847,14 @@ export function candidateCountiesForPoint(lat, lng) {
  * Texas county. Statewide pseudo-keys are never returned: they are parcel SOURCES, not
  * jurisdictions. Always returns a real key, so the panel always has an answer. Pure. */
 export function countyForView(lat, lng) {
-  const entries = Object.entries(COUNTIES_MAP).filter(([, c]) => !c.statewide);
+  // ⛔ B1583296 — a city-scoped entry (mi_detroit) is excluded from the bbox/nearest-center
+  // fallback pool below, not just from the statewide filter. By the time that fallback runs, the
+  // `truth` check just below has ALREADY tried the city-scope test and failed it (a real hit
+  // returns immediately) — so a city-scoped key can never legitimately be the answer here, and
+  // leaving it in `entries` let "nearest configured center, searched nationwide when the point's
+  // state can't be resolved" (the very next branch) pick Detroit's center for a real Wayne County
+  // city (Taylor, MI) that is provably NOT inside Detroit's own limits.
+  const entries = Object.entries(COUNTIES_MAP).filter(([, c]) => !c.statewide && !c.cityScoped);
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || !entries.length) return "harris";
   /* B209502 — geometry first. The nearest-CENTER rule below is a real improvement on config order
    * but it is still not the county line: Conroe's nearest configured center was WALLER and Texas
@@ -1849,6 +1909,11 @@ export function countyForView(lat, lng) {
  *
  * Pure. */
 export function countyIdentity(lat, lng) {
+  // City scope first (B1583296) — a point inside Detroit is a real, sourced answer, not a county
+  // fallback. Everywhere else in Wayne County (or any other point) falls through unchanged to the
+  // county-level answer below, which correctly reports "no-source" where nothing is wired.
+  const cs = cityScopeAnswer(lat, lng);
+  if (cs) return { status: "ok", key: cs.key, name: cs.name, state: cs.state, nearEdge: cs.nearEdge };
   const ans = resolveCounty(lat, lng);
   if (!ans || ans.status === "pending") return { status: "pending" };
   if (ans.status !== "ok") return { status: "outside" };

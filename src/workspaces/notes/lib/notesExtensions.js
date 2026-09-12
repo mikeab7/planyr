@@ -30,6 +30,7 @@ import { Plugin, PluginKey } from "@tiptap/pm/state";
 
 import { DEFAULT_DENSITY, blockFontSize, densityFor, spacingFromElement, spacingStyle, fontSizePx } from "./notesSpacing.js";
 import { PAGE_WIDTH_MAX, PAGE_WIDTH_MIN } from "./notesPageWidth.js";
+import { PAGE_HEIGHT_MAX, PAGE_HEIGHT_MIN } from "./notesPageHeight.js";
 import { inheritedStyle } from "./notesPasteInherit.js";
 import { FontFamily, FontSize, TextStyleKit } from "@tiptap/extension-text-style";
 import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
@@ -305,6 +306,16 @@ export const NOTE_EXTENSIONS = [
             parseHTML: () => null,
             renderHTML: () => ({}),
           },
+          /* ⛔ SET A PAGE'S OWN HEIGHT BY HAND (NEW-1, 2026-09-12 — "If the sides are draggable
+           * the top and bottom should too."). `null` | a number — see lib/notesPageHeight.js's
+           * own header for the full shape; it is deliberately SMALLER than `pageWidth` (no
+           * preset ladder, no `"full"`), because the owner did not ask for one. Never restored
+           * from pasted HTML, same reasoning as `pageWidth`/`density`. */
+          pageHeight: {
+            default: null,
+            parseHTML: () => null,
+            renderHTML: () => ({}),
+          },
         },
       }, {
         types: ["paragraph", "heading"],
@@ -379,6 +390,21 @@ export const NOTE_EXTENSIONS = [
           }
           if (state.doc.attrs.pageWidth === next) return false;
           if (dispatch) dispatch(tr.setDocAttribute("pageWidth", next));
+          return true;
+        },
+
+        /* ⛔ SET A PAGE'S OWN HEIGHT (NEW-1). `null` clears the pin (Fit to content); a finite
+         * number pins it — no `"full"` case, this module has no such concept. A real
+         * `setDocAttribute` step, one undoable step whether it came from the page menu's "Fit to
+         * content" or a completed edge drag — NoteEditor.jsx dispatches it once, on commit,
+         * never per drag frame. */
+        setNotePageHeight: (value) => ({ state, tr, dispatch }) => {
+          let next = null;
+          if (typeof value === "number" && Number.isFinite(value)) {
+            next = Math.round(Math.max(PAGE_HEIGHT_MIN, Math.min(PAGE_HEIGHT_MAX, value)));
+          }
+          if (state.doc.attrs.pageHeight === next) return false;
+          if (dispatch) dispatch(tr.setDocAttribute("pageHeight", next));
           return true;
         },
 
