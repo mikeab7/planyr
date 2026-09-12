@@ -45,9 +45,17 @@ const argv = process.argv.slice(2);
 const ASSERT = argv.includes("--assert");
 const FIXTURE = (argv.find((a) => a.startsWith("--fixture=")) || "").split("=")[1] || "goose-creek-plan1copy.json";
 const SETTLE_MS = +((argv.find((a) => a.startsWith("--settle=")) || "").split("=")[1] || 5000);
+/* `--base=<url>` points the rig at an ALREADY-DEPLOYED build (a Cloudflare preview, or planyr.io)
+ * instead of serving `dist/` here. Worth having beyond convenience: it is the only way to judge the
+ * bundle that was actually shipped rather than one built moments ago on this machine — the
+ * "prove the browser is running the build you are judging" rule. The seeded plan is a synthetic
+ * fixture written into a throwaway browser context; it signs in to nothing and touches no real
+ * plan. Everything off that origin is still aborted, so a deployed run is as hermetic as a local
+ * one (no GIS, no Supabase, no tiles). */
+const REMOTE_BASE = (argv.find((a) => a.startsWith("--base=")) || "").split("=")[1] || "";
 
-if (!existsSync(join(DIST, "index.html"))) {
-  console.error("verify-boot-framing: no dist/ build — run `npm run build` first.");
+if (!REMOTE_BASE && !existsSync(join(DIST, "index.html"))) {
+  console.error("verify-boot-framing: no dist/ build — run `npm run build` first, or pass --base=<url>.");
   process.exit(2);
 }
 
@@ -62,8 +70,9 @@ const server = createServer((req, res) => {
     res.end(body);
   } catch (_) { res.writeHead(404); res.end("nope"); }
 });
-await new Promise((r) => server.listen(0, "127.0.0.1", r));
-const BASE = `http://127.0.0.1:${server.address().port}/`;
+let BASE = REMOTE_BASE;
+if (REMOTE_BASE) { server.close(); if (!BASE.endsWith("/")) BASE += "/"; }
+else { await new Promise((r) => server.listen(0, "127.0.0.1", r)); BASE = `http://127.0.0.1:${server.address().port}/`; }
 
 /* One place asserts the tab is measurable, so the literal harness name appears exactly once and a
  * failure still says WHICH arm was void (test/tabTiming.test.js requires the naming). */
@@ -82,12 +91,20 @@ const seed2 = fixtureSeedMulti([
   { fixture, id: "bootframe2", name: "Boot framing B", site: "Boot framing B" },
 ], "bootframe");
 
-const browser = await chromium.launch({ ...(EXEC ? { executablePath: EXEC } : {}), args: ["--no-sandbox", "--ignore-certificate-errors", "--disable-background-networking"] });
+/* A deployed target is off-box, so the browser has to go through this environment's egress proxy —
+ * a local run never touches it. `ignoreHTTPSErrors` on the context covers the proxy's own MITM
+ * certificate (/root/.ccr/ca-bundle.crt) without teaching Chromium a new trust store. */
+const PROXY = REMOTE_BASE ? (process.env.HTTPS_PROXY || process.env.https_proxy || "") : "";
+const browser = await chromium.launch({
+  ...(EXEC ? { executablePath: EXEC } : {}),
+  ...(PROXY ? { proxy: { server: PROXY } } : {}),
+  args: ["--no-sandbox", "--ignore-certificate-errors", "--disable-background-networking"],
+});
 
 /* Tiles and every external host are blocked in this sandbox anyway; aborting them explicitly keeps
  * the boot deterministic rather than paced by a proxy's 30 s timeouts. */
 async function newPage({ multi = false } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 430, height: 830 }, deviceScaleFactor: 1 });
+  const ctx = await browser.newContext({ viewport: { width: 430, height: 830 }, deviceScaleFactor: 1, ignoreHTTPSErrors: true });
   await ctx.route("**", (route) => {
     const u = route.request().url();
     if (u.startsWith(BASE)) return route.continue();
@@ -137,7 +154,7 @@ async function runArm(name) {
  * user sees on returning to that tab is therefore the first thing this arm records — which is
  * exactly the question, and it IS assertable. */
 async function backgroundedArm() {
-  const ctx = await browser.newContext({ viewport: { width: 430, height: 830 }, deviceScaleFactor: 1 });
+  const ctx = await browser.newContext({ viewport: { width: 430, height: 830 }, deviceScaleFactor: 1, ignoreHTTPSErrors: true });
   await ctx.route("**", (route) => (route.request().url().startsWith(BASE) ? route.continue() : route.abort()));
   await ctx.addInitScript(seed);
   /* Both halves of "hidden", because headless Chromium gives neither one on its own:
@@ -205,7 +222,8 @@ const control = await controlArm();
 console.log("═".repeat(96));
 console.log("verify-boot-framing — ONE FRAMING PER LOAD");
 console.log("═".repeat(96));
-console.log(`fixture: ${FIXTURE}   viewport 430×830   settle ${SETTLE_MS} ms\n`);
+console.log(`fixture: ${FIXTURE}   viewport 430×830   settle ${SETTLE_MS} ms`);
+console.log(`target : ${REMOTE_BASE ? `${BASE}  (a DEPLOYED build — judging the bundle that actually shipped)` : "dist/ served locally"}\n`);
 
 console.log("KNOWN-GOOD ARM (the rig must be able to SEE a framing change before its verdict means anything)");
 if (control.ok) console.log(`  ✅ a deliberate pan produced a new painted framing (${control.beforeN} → ${control.afterN})\n`);
