@@ -14,9 +14,14 @@
  *
  * ── THE ARMS ────────────────────────────────────────────────────────────────────────────────────
  *   visible    the real case — a cold load in a foregrounded tab.
- *   hidden     the case that defeated an earlier fix — the document starts hidden.
- *              (Reported, never asserted: a suspended rAF paints nothing, so "no flash" there is
- *              vacuous by construction and the report says so rather than scoring it.)
+ *   hidden     the case that defeated an earlier fix — the document starts hidden. ASSERTED, and
+ *              B1600352 is why: this arm used to be reported-only, on the reasoning that a
+ *              suspended rAF paints nothing so "no flash" there is vacuous by construction. That
+ *              reasoning is sound about FLASHES and says nothing at all about the opposite failure,
+ *              a canvas that is never revealed — which contributes zero painted framings, hence
+ *              zero offenders, hence ✅. A blank plan on planyr.io scored a pass here. So the arm
+ *              now asserts, BEFORE it foregrounds anything, that the canvas is revealed, framed off
+ *              the boot default, and hit-testable.
  *   control    ⛔ THE KNOWN-GOOD ARM (DRIVER-SCROLL-IS-NOT-APP-SCROLL §6). After boot settles, one
  *              deliberate "Fit view" click must show up as exactly ONE new painted framing. If it
  *              does not, the rig cannot see framings at all and its verdict on the unknown arm is
@@ -178,14 +183,121 @@ async function backgroundedArm() {
   await page.goto(`${BASE}#/project/bootframe/site`, { waitUntil: "load" }).catch(() => {});
   await new Promise((r) => setTimeout(r, SETTLE_MS));
   const whileHidden = await page.evaluate(() => ({ vis: document.visibilityState, raw: (window.__bootFraming ? window.__bootFraming() : null) }));
+  /* ⛔ B1600352 — THE ASSERTION THIS ARM WAS MISSING, AND ITS ABSENCE PUT A BLANK CANVAS ON
+   * planyr.io WITH THIS GATE GREEN. Counting framings-per-mount can only catch a canvas that
+   * painted TOO MANY framings. It is structurally blind to one that painted NONE: an unrevealed
+   * canvas contributes zero painted framings, therefore zero offenders, therefore ✅ — the same
+   * shape as the vacuity this rig's own teeth proof already caught once (a build with no mount
+   * stamp scored a pass because zero attributable mounts meant zero offenders). The rig counted
+   * flashes and never once required the drawing to actually appear.
+   *
+   * So: BEFORE any foregrounding, and therefore before anything can rescue the build, the canvas
+   * must already be REVEALED and HIT-TESTABLE, carrying a framing that is not the `useState` boot
+   * default. A tab that is merely not frontmost is fully laid out — `getBoundingClientRect()` is
+   * accurate there — so there is nothing to wait for, and a canvas still sitting unpainted at
+   * ppf 0.35 off (60, 60) at this point is the production defect exactly. */
+  /* el-tier: the ELEMENT tier really is the subject here — this arm picks one drawn element and
+     asks whether a press at its own centre reaches it, which is a question about that element's
+     own node, not a census of what the plan contains. The count is the arm's vacuity precondition
+     (an arm that painted no elements cannot ask the question at all), not a measure of plan
+     contents. COUNT-EVERY-KIND's [data-feature] census is the right tool for the latter. */
+  const reveal = await page.evaluate(() => {
+    const c = document.querySelector('[data-testid="planner-canvas"]');
+    if (!c) return { canvas: false };
+    /* el-tier: one drawn ELEMENT's own node is the subject — the question is whether a press at
+       its own centre reaches it, which is what production could not do. Not a plan census. */
+    const el = document.querySelector("[data-el-id]");
+    let hit = null, elId = null;
+    if (el) {
+      elId = el.getAttribute("data-el-id");
+      const b = el.getBoundingClientRect();
+      const t = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+      const owner = t && t.closest ? t.closest("[data-el-id]") : null;
+      hit = owner ? owner.getAttribute("data-el-id") : (t ? `<${(t.tagName || "?").toLowerCase()}>` : null);
+    }
+    /* el-tier: `els` is this arm's VACUITY PRECONDITION, not a census of plan contents — an arm
+       whose fixture drew no element cannot ask whether a press reaches one, and must say so
+       rather than score. COUNT-EVERY-KIND's [data-feature] census is the tool for "what is in
+       this plan"; the question here is about one element's own node. */
+    return { canvas: true, visibility: getComputedStyle(c).visibility,
+             ppf: +c.getAttribute("data-view-ppf"), offX: +c.getAttribute("data-view-offx"), offY: +c.getAttribute("data-view-offy"),
+             vis: document.visibilityState, els: document.querySelectorAll("[data-el-id]").length, elId, hit };
+  });
   await decoy.close();
   await page.bringToFront();
   await page.evaluate(() => { window.__planyrForceHidden = false; document.dispatchEvent(new Event("visibilitychange")); });
   await measurable(page, "backgrounded → foregrounded");
   await page.waitForTimeout(2500);
   const raw = await page.evaluate(() => window.__bootFramingStop());
-  return { name: "backgrounded → foregrounded", report: bootFramingReport(raw), ctx,
+  return { name: "backgrounded → foregrounded", report: bootFramingReport(raw), ctx, reveal,
            reallyHidden: whileHidden.vis, framesWhileHidden: whileHidden?.raw?.frames ?? null };
+}
+
+/* ⛔ B1600352 — THE WATCHDOG'S OWN CASE, WHICH HAD NO TEST AT ALL.
+ *
+ * "A 1.5 s watchdog reports boot-framing-stalled telemetry and reveals the drawing anyway, so this
+ * can never leave a blank canvas" was the ENTIRE safety argument for gating paint in the first
+ * place. Nothing verified it, and on production it was false: the watchdog's effect early-returned
+ * on `document.visibilityState !== "visible"` and its deps were `[framingCommitted, active]`, so in
+ * a document that booted hidden its timer was NEVER ARMED — not fired late, never armed. A
+ * watchdog that only runs when the thing it guards is already healthy is not a watchdog.
+ *
+ * This arm puts the app in the only state the watchdog exists for and takes away its other exit: a
+ * container that can never be measured (the canvas wrap is forced to zero height, so every
+ * `getBoundingClientRect()` is degenerate and a real framing is correctly impossible), in a
+ * document that reads hidden. The ONLY thing that can reveal the canvas here is the watchdog, on a
+ * wall clock. `setTimeout` is not rAF-driven so it is not rAF-suspended, but it IS clamped in a
+ * background tab — so the bound allows for that clamp and still fails a deadline that never
+ * arrives. Asserted on the INLINE style, which is exactly what the gate writes, so a zero-height
+ * container cannot make the assertion unreadable. */
+async function watchdogArm() {
+  const ctx = await browser.newContext({ viewport: { width: 430, height: 830 }, deviceScaleFactor: 1, ignoreHTTPSErrors: true });
+  await ctx.addInitScript(seed);
+  await ctx.addInitScript(`(() => { try {
+    window.__planyrForceHidden = true;
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (window.__planyrForceHidden ? 'hidden' : 'visible') });
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => !!window.__planyrForceHidden });
+  } catch (e) {} })();`);
+  /* ⛔ THE CSS IS INJECTED INTO THE DOCUMENT ITSELF, not appended by a script, and the first
+     version of this arm got that wrong in a way worth recording: an `addInitScript` that appends a
+     <style> runs before the parser has built <head>, and React's module script mounts the planner
+     (and runs its layout effect) before DOMContentLoaded — so the rule was never in the cascade
+     when the container was measured. The arm read a healthy 430x773 wrap, framed normally, and
+     printed ✅ for a watchdog that had not been involved at all. Injecting at the response makes
+     the rule present from parse time, and the box assertion below is what catches it if it is not. */
+  await ctx.route("**", (route) => {
+    const req = route.request();
+    if (!req.url().startsWith(BASE)) return route.abort();
+    if (req.resourceType() !== "document") return route.continue();
+    const html = readFileSync(join(DIST, "index.html"), "utf8").replace(
+      "</head>",
+      '<style>div:has(> svg[data-testid="planner-canvas"]){height:0!important;min-height:0!important;max-height:0!important;flex:0 0 0!important;}</style></head>',
+    );
+    return route.fulfill({ status: 200, contentType: "text/html", body: html });
+  });
+  const page = await ctx.newPage();
+  const decoy = await ctx.newPage();
+  await decoy.goto("about:blank");
+  await decoy.bringToFront();
+  await page.goto(`${BASE}#/project/bootframe/site`, { waitUntil: "load" }).catch(() => {});
+  const t0 = Date.now();
+  let revealedAt = null, box = null;
+  /* A WALL CLOCK, polled — the deadline under test is a wall clock, so the observation of it has to
+     be one too. Generous enough to absorb a background tab's timer clamp; a watchdog that never
+     arms cannot pass it however generous it is. */
+  for (let i = 0; i < 24 && revealedAt === null; i++) {
+    await new Promise((r) => setTimeout(r, 250));
+    const st = await page.evaluate(() => {
+      const c = document.querySelector('[data-testid="planner-canvas"]');
+      if (!c) return null;
+      const r = c.parentElement ? c.parentElement.getBoundingClientRect() : null;
+      return { inline: c.style.visibility || "", computed: getComputedStyle(c).visibility,
+               wrapW: r ? Math.round(r.width) : null, wrapH: r ? Math.round(r.height) : null };
+    });
+    if (st) { box = st; if (st.inline !== "hidden") revealedAt = Date.now() - t0; }
+  }
+  await ctx.close();
+  return { revealedAt, box, waitedMs: Date.now() - t0 };
 }
 
 /* ---- the known-good arm: one deliberate framing must read as exactly one new painted framing ---- */
@@ -217,6 +329,7 @@ const arms = [];
 arms.push(await runArm("visible"));
 arms.push(await backgroundedArm());
 arms.push(await remountArm());
+const watchdog = await watchdogArm();
 const control = await controlArm();
 
 console.log("═".repeat(96));
@@ -234,8 +347,39 @@ for (const arm of arms) {
   const { name, report, ctx } = arm;
   console.log(`ARM: ${name}`);
   if (arm.reallyHidden !== undefined) {
-    console.log(`  document.visibilityState while booting : ${arm.reallyHidden}${arm.reallyHidden === "hidden" ? "  (overridden read + a really de-prioritised frame loop — see the frame count below)" : "  ⚠ the app did NOT read the document as hidden — this arm did not test what it claims"}`);
-    console.log(`  animation frames while hidden          : ${arm.framesWhileHidden} in ${SETTLE_MS} ms — a de-prioritised frame loop, which is what makes the suppression real rather than claimed`);
+    /* ⛔ B1600352 — THIS BLOCK USED TO STATE SOMETHING ITS OWN NUMBER CONTRADICTED. It printed the
+     * hidden-phase frame count and captioned it "a de-prioritised frame loop, which is what makes
+     * the suppression real rather than claimed". The number it was printing on this machine was
+     * 280 frames in 5,000 ms — 56 fps, a frame loop running at FULL RATE. Nothing was
+     * de-prioritised, and a run whose headline evidence line asserts the opposite of what it
+     * measured is worse than one that measures nothing.
+     *
+     * The honest statement, which is also the stronger one: what this arm reproduces is the app's
+     * own READ of `document.visibilityState`, not a throttled compositor. That makes the arm
+     * STRICTER rather than weaker — a live frame loop gives the app every opportunity to notice
+     * and correct itself, and an unrevealed canvas under those conditions cannot be explained away
+     * as "rAF was suspended, so of course nothing happened". The arm says which of the two it got
+     * and never dresses one up as the other. */
+    console.log(`  document.visibilityState while booting : ${arm.reallyHidden}${arm.reallyHidden === "hidden" ? "  (the READ the app gates on, overridden for the whole boot)" : "  ⚠ the app did NOT read the document as hidden — this arm did not test what it claims"}`);
+    if (arm.reallyHidden !== "hidden") { console.log("  ❌ this arm did not reproduce a hidden boot — VACUOUS"); failed = true; }
+    const fps = arm.framesWhileHidden == null ? null : (arm.framesWhileHidden / (SETTLE_MS / 1000));
+    console.log(`  animation frames while hidden          : ${arm.framesWhileHidden} in ${SETTLE_MS} ms${fps == null ? "" : ` (~${fps.toFixed(0)}/s — ${fps > 20 ? "a FULL-RATE loop, so the app had every chance to self-correct; this arm is stricter than a throttled one, not weaker" : "genuinely de-prioritised"})`}`);
+  }
+  if (arm.reveal) {
+    /* The reveal assertion. Judged BEFORE this arm foregrounds anything, so nothing the harness
+       does can rescue the build it is judging. */
+    const rv = arm.reveal;
+    const isBootDefault = rv.ppf === 0.35 && rv.offX === 60 && rv.offY === 60;
+    console.log(`  canvas while still hidden             : visibility=${rv.visibility}  ppf=${rv.ppf} off=(${rv.offX}, ${rv.offY})${isBootDefault ? "  ⟵ the useState BOOT DEFAULT" : ""}`);
+    console.log(`  elementFromPoint at an element centre : ${rv.hit ?? "null"}${rv.elId ? `  (asked about ${rv.elId})` : ""}`);
+    if (!rv.canvas) { console.log("  ❌ no canvas at all — VACUOUS"); failed = true; }
+    else if (!rv.els) { console.log("  ❌ the seeded plan painted NO elements — this arm cannot see the property it asserts (VACUOUS)"); failed = true; }
+    else {
+      if (rv.visibility !== "visible") { console.log(`  ❌ the canvas is still ${rv.visibility} — a load that began in a non-frontmost tab never revealed the drawing. This is a BLANK PLAN, which is strictly worse than the flash this gate exists to prevent (B1600352).`); failed = true; }
+      if (isBootDefault) { console.log("  ❌ the canvas is still carrying the useState boot default — no framing was ever committed"); failed = true; }
+      if (!rv.hit || String(rv.hit).startsWith("<")) { console.log(`  ❌ elementFromPoint at an element's own centre resolved to ${rv.hit ?? "null"}, not to an element — the plan is unclickable as well as unpainted`); failed = true; }
+      if (rv.visibility === "visible" && !isBootDefault && rv.hit && !String(rv.hit).startsWith("<")) console.log("  ✅ revealed, framed off the boot default, and hit-testable — all before this arm foregrounded anything");
+    }
   }
   console.log(`  animation frames sampled : ${report.frames} (${report.visibleFrames} with the tab visible)`);
   console.log(`  planner mounts observed  : ${report.mounts}${arm.expectMounts ? ` (this arm needs ${arm.expectMounts} — one mount means the remount never happened and the arm proved nothing)` : ""}`);
@@ -254,6 +398,21 @@ for (const arm of arms) {
   }
   console.log("");
   await ctx.close();
+}
+
+console.log("WATCHDOG ARM (container never measurable + document hidden — only the watchdog can reveal the canvas)");
+console.log(`  canvas wrap box          : ${watchdog.box ? `${watchdog.box.wrapW}x${watchdog.box.wrapH}` : "?"} — must be degenerate on purpose, so a real framing is correctly impossible`);
+/* ⛔ THE PRECONDITION, AND IT ALREADY EARNED ITS PLACE: without it this arm scored ✅ over a
+   healthy 430x773 container that framed normally and never involved the watchdog at all. An arm
+   that cannot put the app into the state it is asking about does not get to report a result. */
+if (!watchdog.box || watchdog.box.wrapH > 1) {
+  console.log(`  ❌ the container was NOT degenerate (${watchdog.box ? `${watchdog.box.wrapW}x${watchdog.box.wrapH}` : "unreadable"}) — a real framing was possible, so this arm never exercised the watchdog. VACUOUS.`);
+  failed = true;
+} else if (watchdog.revealedAt === null) {
+  console.log(`  ❌ the canvas was STILL unrevealed after ${watchdog.waitedMs} ms (inline visibility="${watchdog.box?.inline ?? "?"}"). The boot-framing watchdog never fired — the LOUD-FAILURE safety net that justifies gating paint at all does not exist in the one condition it was written for (B1600352).`);
+  failed = true;
+} else {
+  console.log(`  ✅ the watchdog revealed the canvas after ${watchdog.revealedAt} ms on a wall clock, with the document reading hidden throughout\n`);
 }
 
 await browser.close();

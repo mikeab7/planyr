@@ -123,11 +123,42 @@ describe("the app still carries what the rig reads", () => {
   it("commits the first framing in a LAYOUT effect — before paint, not on a timer", () => {
     const i = src.indexOf("const [framingCommitted, setFramingCommitted]");
     expect(i).toBeGreaterThan(-1);
-    const after = src.slice(i, i + 2600);
-    expect(after).toMatch(/useLayoutEffect\(\(\) => \{\s*\n\s*if \(framingCommitted\) return;/);
+    const after = src.slice(i, i + 9000);
+    expect(after).toMatch(/useLayoutEffect\(\(\) => \{ commitBootFraming\(\); \}\);/);
     // framed from a freshly READ box, never from the placeholder `size` state
     expect(after).toMatch(/getBoundingClientRect\(\)/);
     expect(after).toMatch(/fit\(\{ w, h \}\)/);
+  });
+
+  /* ⛔ B1600352 — THE THREE PROPERTIES THAT WERE MISSING WHEN THE CANVAS WENT BLANK ON PRODUCTION.
+   * Each one is stated as "this must NOT be gated on visibility", because a visibility gate is
+   * exactly what turned a flash-prevention measure into a permanently unpainted plan: a load that
+   * began in a tab that was not frontmost could never frame, and the watchdog meant to catch that
+   * was gated on the same read and never armed. These are source assertions deliberately — the
+   * behavioural proof is ui-audit/verify-boot-framing.mjs's two new arms, which are red against the
+   * unfixed build; this is the cheap CI-runnable half that says WHICH property was lost. */
+  it("does not gate the boot framing on the tab being frontmost — a real box is the readiness test", () => {
+    const i = src.indexOf("const commitBootFraming = useCallback(");
+    expect(i).toBeGreaterThan(-1);
+    const body = src.slice(i, src.indexOf("}, [active, fit]);", i));
+    expect(body).not.toMatch(/document\.visibilityState/);
+    // the direct, stronger check it is replaced by
+    expect(body).toMatch(/r\.width > 1 && r\.height > 1/);
+  });
+
+  it("owns its own reveal — every browser wake signal re-asks the framing directly", () => {
+    for (const ev of ["visibilitychange", "pageshow", "focus"]) {
+      expect(src).toMatch(new RegExp(`addEventListener\\("${ev}", wake\\)`));
+    }
+  });
+
+  it("arms the watchdog unconditionally, on an absolute wall-clock deadline", () => {
+    expect(src).toMatch(/framingDeadlineRef\.current = Date\.now\(\) \+ BOOT_FRAMING_WATCHDOG_MS/);
+    // armed from the ABSOLUTE deadline, so re-running the effect cannot push it out
+    expect(src).toMatch(/setTimeout\(stall, Math\.max\(0, framingDeadlineRef\.current - Date\.now\(\)\)\)/);
+    const i = src.indexOf("const stall = () => {");
+    const eff = src.slice(src.lastIndexOf("useEffect(() => {", i), i);
+    expect(eff).not.toMatch(/document\.visibilityState !== "visible"\) return/);
   });
 
   it("paints nothing until a framing is committed — the canvas and both map hosts are gated", () => {

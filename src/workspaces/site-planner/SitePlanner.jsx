@@ -602,6 +602,11 @@ const CANVAS_HOVER_IDENTIFY_MS = 320;
 // so a tolerance in degrees is never tighter than the on-screen slop it came from.
 const FT_PER_DEG_MIN = 300000;
 
+/* B1600352 — how long the canvas may stay unpainted before the boot-framing watchdog reveals it
+   anyway (LOUD-FAILURE). An ABSOLUTE deadline is computed from this once per mount; see the
+   `commitBootFraming` block for why it must not be re-derived from when a timer was armed. */
+const BOOT_FRAMING_WATCHDOG_MS = 1500;
+
 // PAL (the canvas + panel palette) is now theme-derived inside the SitePlanner
 // component from usePalette() — see the adapter at the top of the component body.
 // It must be REAL HEXES, not var() tokens: the canvas is SVG and exports to PNG/PDF,
@@ -6030,48 +6035,159 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * which zoom GIS layers answer their gate against, which is B1234400's subject, not this one. */
   const [framingCommitted, setFramingCommitted] = useState(false);
   const framingWatchdogRef = useRef(0);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately dep-array-free: it re-asks
-  // on every render until it can answer, then the first line returns. It cannot loop — `setSize`
-  // bails functionally on an unchanged box, and the only path that dispatches anything else also
-  // sets `framingCommitted`.
-  useLayoutEffect(() => {
-    if (framingCommitted) return;
-    if (!active) return;                       // a keep-alive planner behind another workspace has no real box
-    if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+  /* Set SYNCHRONOUSLY the moment a framing commits, so the three callers below cannot re-enter
+     before the `framingCommitted` state lands. */
+  const framingCommittedRef = useRef(false);
+  /* ⛔ A WALL-CLOCK DEADLINE, ANCHORED ONCE — never re-derived from when a timer happened to be
+     armed. The watchdog effect below re-runs whenever `fit` changes identity (it depends on the
+     model), and an effect that re-armed a fresh 1.5 s timer each time would push its own deadline
+     out forever on a plan whose model keeps settling — a watchdog that never fires because the
+     app is busy is the failure mode this whole block exists to remove. */
+  const framingDeadlineRef = useRef(0);
+  if (framingDeadlineRef.current === 0) framingDeadlineRef.current = Date.now() + BOOT_FRAMING_WATCHDOG_MS;
+
+  /* ══ B1600352 — THE ONE PLACE THAT DECIDES WHETHER THE BOOT FRAMING MAY COMMIT ═════════════════
+   *
+   * ⛔ THE DEFECT THIS REPLACES, AND IT WAS LIVE ON planyr.io: the canvas was painted
+   * `visibility: hidden` and NEVER REVEALED. Measured on the owner's production tab (three loads,
+   * two plans, a brand-new tab): `[data-testid="planner-canvas"]` computed `hidden` on all 16
+   * samples over ~13 s, carrying ppf 0.35 off (60, 60) — the `useState` boot default this gate
+   * exists to stop anyone from seeing — while every ancestor computed `visible` and the container
+   * measured a perfectly real 969x408. `elementFromPoint` at an element's own centre returned an
+   * ancestor `div`, so the plan was unclickable as well as invisible. A user sees an empty site and
+   * concludes his plan is gone.
+   *
+   * THE CAUSE, in one sentence: BOTH the framing and its watchdog refused to run while
+   * `document.visibilityState !== "visible"`, and NOTHING in this block ever re-asked when the
+   * document became visible — so a load that began in a tab that was not frontmost could never
+   * frame, and the safety net that was supposed to catch that never armed.
+   *
+   *   · the layout effect is deliberately dep-array-free, so it re-asks on every RENDER — but a tab
+   *     being foregrounded is not a render. The nearest thing to a rescue, the B1234400
+   *     `visibilitychange` handler ~400 lines above, calls `setSize` with the box it already has;
+   *     a merely-foregrounded tab's box is UNCHANGED, `setSize` bails functionally, React schedules
+   *     no work, and the layout effect is never re-run.
+   *   · the watchdog's deps are `[framingCommitted, active]`. Neither changes on foregrounding, so
+   *     in a document that boots hidden its `setTimeout` was NEVER ARMED — not fired late, never
+   *     armed. "A 1.5 s watchdog reveals the drawing anyway, so this can never leave a blank
+   *     canvas" was the entire safety argument for gating paint at all, and it was absent in the
+   *     one condition it was written for.
+   *
+   * MEASURED, against the unfixed build, at 430x830 on a real fixture plan (ui-audit/verify-boot-
+   * framing.mjs arm 2 + the ordering probe that produced this item):
+   *
+   *     boots hidden, stays hidden  5 s   canvas visibility: hidden   ppf 0.35   watchdog never fired
+   *     boots hidden, then foregrounded   canvas visibility: hidden for the whole 8 s window,
+   *                                       ppf 0.35 off (60, 60), elementFromPoint -> null
+   *
+   * ⛔ AND THE RESCUE THAT DID APPEAR IN THE CI RIG WAS NOT THIS CODE'S DOING. With a
+   * `visibilitychange` dispatched, the canvas came back in ~400 ms; with a `resize` dispatched
+   * instead, or with no event at all, it never came back. Nothing in this block listens for
+   * `visibilitychange` — so the release was being performed by an UNRELATED subscriber's state
+   * change (the element-sync tab-wake refetch, the B1234400 size handler on a box that did move),
+   * which re-rendered the component and let the dep-array-free layout effect ask again. A canvas
+   * whose reveal depends on another subsystem happening to change state is not gated, it is
+   * gambling — and on a real signed-in plan that refetch can no-op (offline, an error, a superseded
+   * engine) and the gamble loses. So the reveal is OWNED here now.
+   *
+   * THE FIX, three parts, none of which weakens B1574432's no-flash guarantee:
+   *
+   *   1. **VISIBILITY IS NOT THE READINESS QUESTION — A REAL BOX IS.** A framing is a function of
+   *      the MODEL and the CONTAINER. `getBoundingClientRect()` is layout-accurate in a tab that is
+   *      merely not frontmost (production measured 969x408 while hidden), so such a tab can be
+   *      framed correctly and the user sees the RIGHT picture the instant it comes forward. What
+   *      B1234400 actually caught was a container that had NEVER BEEN LAID OUT reporting a
+   *      degenerate box that the `Math.max(320, ...)` floor then dressed up as a plausible 320x360 —
+   *      and the raw-rect check below refuses exactly that, directly, without using "is the tab
+   *      frontmost" as a proxy for it. The proxy is what produced this bug; the direct check is
+   *      strictly stronger and is kept.
+   *   2. **THE REVEAL HAS AN OWNER.** Every wake signal a browser can give (`visibilitychange`,
+   *      `pageshow` — the bfcache restore — and `focus`) re-asks this function directly, instead of
+   *      hoping a `setSize` that bails will produce a render.
+   *   3. **THE WATCHDOG ARMS UNCONDITIONALLY, ON A WALL CLOCK.** It no longer refuses to arm while
+   *      hidden, and its deadline is an absolute `Date.now()` stamp taken once at mount, evaluated
+   *      by BOTH the timer and every wake event above. `setTimeout` is not rAF-driven so it is not
+   *      rAF-suspended, but it IS clamped in a background tab (>=1 s, and ~1/min after five minutes
+   *      hidden) — so a tab that comes forward past a deadline its throttled timer has not yet
+   *      delivered reveals immediately on the wake event rather than waiting out the clamp. A
+   *      watchdog that only runs when the thing it guards is already healthy is not a watchdog.
+   *
+   * Returns a short reason string, so the caller can log it and a harness can assert on it. */
+  const commitBootFraming = useCallback(() => {
+    if (framingCommittedRef.current) return "already";
+    if (!active) return "inactive";            // a keep-alive planner behind another workspace has no real box
     const el = wrapRef.current;
-    if (!el) return;
+    if (!el) return "no-container";
     const r = el.getBoundingClientRect();
     /* ⛔ NEVER FRAME FROM A DEGENERATE BOX. The `Math.max(320, …)` floor below turns a
        never-laid-out container into a plausible-looking 320x360 — the exact trap
-       lib/viewFramingGate.js's `measured` flag exists for. Read the RAW rect for the verdict. */
-    if (!(r.width > 1 && r.height > 1)) return;
+       lib/viewFramingGate.js's `measured` flag exists for. Read the RAW rect for the verdict.
+       This is the whole readiness test: it does not care whether the tab is frontmost, only
+       whether this container has really been laid out. */
+    if (!(r.width > 1 && r.height > 1)) return "container-unmeasured";
     sizeMeasuredRef.current = true;
     const w = Math.max(320, r.width), h = Math.max(360, r.height);
     setSize((sz) => (sz.w === w && sz.h === h ? sz : { w, h, rawW: r.width, rawH: r.height }));
     const ticket = framingGate.current.framingTicket();
+    /* `visible: true` is NOT a claim that the tab is frontmost — it is this call site saying the
+       readiness question the flag stands for has been answered a stronger way, by the raw-rect
+       measurement three lines above. See the note in lib/viewFramingGate.js. `mayFrame` still
+       decides OWNERSHIP (has the user moved the view since this framing was requested?), which is
+       the check that actually matters here and is untouched. */
     const verdict = framingGate.current.mayFrame(ticket, { visible: true, measured: true });
-    if (!verdict.ok) { viewRecRef.current?.noteEvent("frame:suppressed", verdict.why); return; }
+    if (!verdict.ok) { viewRecRef.current?.noteEvent("frame:suppressed", verdict.why); return verdict.why; }
     fit({ w, h });                             // the MEASURED box, not the placeholder `size` state
     viewRecRef.current?.noteEvent("frame:boot-committed", `${Math.round(r.width)}x${Math.round(r.height)}`);
+    framingCommittedRef.current = true;        // synchronous, so a wake event mid-commit cannot re-enter
     setFramingCommitted(true);
-  });                                          // no dep array on purpose — it re-asks each render until it can answer, then the first line returns
-  /* LOUD-FAILURE, and the one thing this must never do is leave a permanently blank canvas. If the
-     planner has been active and visible for this long without ever getting a measurable container,
-     something is wrong that this file cannot fix — so say so in telemetry and reveal the drawing
-     anyway rather than showing the owner an empty sheet. Never reached on a healthy boot (the
-     layout effect above answers inside the first commit). */
+    return "committed";
+  }, [active, fit]);
+
+  /* Deliberately dep-array-free: it re-asks on every RENDER until it can answer, then
+     `commitBootFraming`'s first line returns. It cannot loop — `setSize` bails functionally on an
+     unchanged box, and the only path that dispatches anything else also sets `framingCommitted`.
+     This is no longer the ONLY caller: a render is not the only way the answer can change (a tab
+     coming forward is not a render), which is the whole of B1600352. */
+  useLayoutEffect(() => { commitBootFraming(); });
+
+  /* The reveal's owner (part 2 + part 3 above). One effect holds both the wake listeners and the
+     wall-clock watchdog, because they answer the same question and must not be able to disagree
+     about the deadline. Unmounted the moment a framing commits — there is nothing left to watch. */
   useEffect(() => {
     if (framingCommitted || !active) return undefined;
-    if (typeof document !== "undefined" && document.visibilityState !== "visible") return undefined;
-    framingWatchdogRef.current = setTimeout(() => {
+    if (typeof document === "undefined" || typeof window === "undefined") return undefined;
+    const stall = () => {
+      if (framingCommittedRef.current) return;
+      /* One last real attempt before giving up: if the container has since become measurable, the
+         owner gets the CORRECT framing rather than the boot default this gate exists to hide. */
+      if (commitBootFraming() === "committed") return;
       const r = wrapRef.current?.getBoundingClientRect();
       reportClientEvent("boot-framing-stalled", "the planner canvas could not be framed from a measured container", {
         rawW: Math.round(r?.width || 0), rawH: Math.round(r?.height || 0),
+        visibility: document.visibilityState,
+        waitedMs: Math.max(0, Math.round(Date.now() - (framingDeadlineRef.current - BOOT_FRAMING_WATCHDOG_MS))),
       });
-      setFramingCommitted(true);
-    }, 1500);
-    return () => clearTimeout(framingWatchdogRef.current);
-  }, [framingCommitted, active]);
+      framingCommittedRef.current = true;
+      setFramingCommitted(true);               // LOUD-FAILURE: reveal it anyway. A blank plan is the worst outcome.
+    };
+    /* A wake signal re-asks DIRECTLY. It also settles the deadline itself, so a background tab
+       whose throttled timer has not been delivered yet still reveals the instant it comes forward. */
+    const wake = () => {
+      if (framingCommittedRef.current) return;
+      if (commitBootFraming() === "committed") return;
+      if (Date.now() >= framingDeadlineRef.current) stall();
+    };
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("pageshow", wake);
+    window.addEventListener("focus", wake);
+    framingWatchdogRef.current = setTimeout(stall, Math.max(0, framingDeadlineRef.current - Date.now()));
+    return () => {
+      clearTimeout(framingWatchdogRef.current);
+      document.removeEventListener("visibilitychange", wake);
+      window.removeEventListener("pageshow", wake);
+      window.removeEventListener("focus", wake);
+    };
+  }, [framingCommitted, active, commitBootFraming]);
 
   // Fit *after* a state change has committed: bump the nonce instead of calling
   // fit() from a stale closure (which would frame the view without the content
