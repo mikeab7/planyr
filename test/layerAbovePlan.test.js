@@ -223,7 +223,9 @@ describe("NEW-1 — the canvas hosts the lifted band inside the plan SVG", () =>
     const front = planner.indexOf("{ [FRONT_BAND_ATTR]: \"1\" }");
     const promoted = planner.indexOf("{overlayBands.above.map(renderSheetOverlay)}");
     const labels = planner.indexOf("{parcelLabels}");
-    const handles = planner.indexOf('<g data-export="skip" data-handle-layer="1">');
+    // NEW-1 (2026-09-12) — no trailing `>`: the opening tag now also carries an onContextMenu
+    // (click-ownership audit), so it no longer closes immediately after this attribute.
+    const handles = planner.indexOf('<g data-export="skip" data-handle-layer="1"');
     for (const [name, at] of [["promoted references", promoted], ["labels", labels], ["handle layer", handles]]) {
       expect(at, `${name} render site not found`).toBeGreaterThan(-1);
     }

@@ -159,6 +159,18 @@ jobs:
       # Generated-index touch guard near the top of this job and .github/workflows/regen-derived-docs.yml.
       - name: Signature-budget gate (per-surface distinct control shapes, budget-only — NEW-1, B1038016)
         run: node ui-audit/ui-inventory.mjs --budget-only
+      # Boot-framing gate (B1574432). The owner filmed a cold load flashing ONE building at extreme
+      # zoom for about two video frames before settling. Nothing here could see it: the app's own
+      # view-change recorder reads `setView` DISPATCHES from a per-MOUNT ring, and boot both paints
+      # a framing that was never dispatched (a fresh mount's `useState` default) and REMOUNTS the
+      # planner partway through (`loadEpoch`), so the ring being read is not the ring that saw it —
+      # which is why it honestly reported `changes: 0` on his armed production tab. This samples the
+      # COMMITTED framing (the SVG transform's own inputs) once per ANIMATION FRAME on a real cold
+      # boot of a real plan, and fails if any mount paints more than one. It carries a known-good arm
+      # (a deliberate pan must read as a new framing) and refuses to score a run that observed
+      # nothing, so it cannot rot into a permanent green. Proven RED against the unfixed build.
+      - name: Boot-framing gate (the canvas paints ONE framing per mount — B1574432)
+        run: node ui-audit/verify-boot-framing.mjs --assert
       - name: Visual regression baselines (pixel diff against approved baselines — NEW-1)
         env:
           BASE_URL: "http://localhost:4173/"

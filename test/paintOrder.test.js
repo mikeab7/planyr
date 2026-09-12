@@ -143,7 +143,9 @@ describe("the table matches what the canvas actually paints", () => {
   it("the forced-callout tier renders after parcelLabels and before the handle layer", () => {
     const iParcelLabels = SRC.indexOf("{parcelLabels}");
     const iForced = SRC.search(/\{calloutBands\.forced\.map\(/);
-    const iHandleLayer = SRC.indexOf('<g data-export="skip" data-handle-layer="1">');
+    // NEW-1 (2026-09-12) — no trailing `>`: the opening tag now also carries an onContextMenu
+    // (click-ownership audit), so it no longer closes immediately after this attribute.
+    const iHandleLayer = SRC.indexOf('<g data-export="skip" data-handle-layer="1"');
     expect(iParcelLabels).toBeGreaterThan(-1);
     expect(iForced).toBeGreaterThan(-1);
     expect(iHandleLayer).toBeGreaterThan(-1);
