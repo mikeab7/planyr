@@ -40,7 +40,7 @@ import { listMyTeams, currentIdentity } from "../../../workspaces/site-planner/l
 import CompEntryGrid, { draftFromParsedRow } from "./CompEntryGrid.jsx";
 import CompDraftsPanel from "./CompDraftsPanel.jsx";
 import { fetchMyDrafts, insertDrafts, promoteDraft, deleteDraft } from "../lib/compDraftsStore.js";
-import { kmlToDraftRows } from "../lib/kmlImport.js";
+import { kmlToDraftRows, kmzToKmlText } from "../lib/kmlImport.js";
 import { siteplanLocationText, pinFallbackText } from "../lib/compLocationText.js";
 import { reverseGeocodeLatLon } from "../../../workspaces/site-planner/lib/geocode.js";
 import { COUNTIES } from "../../../workspaces/site-planner/lib/counties.js";
@@ -1104,13 +1104,16 @@ export default function CompsPanel({
     }
   };
 
-  // B849233/NEW-2 — the KML-import path. Hand entry (openGrid above) never reaches this;
-  // `handleKmlFile` is the ONLY producer of a comp_import_drafts row.
+  // B849233/NEW-2 (+ NEW-1/B1577424 — .kmz alongside .kml, so Planyr can read its own KMZ
+  // export back). Hand entry (openGrid above) never reaches this; `handleKmlFile` is the ONLY
+  // producer of a comp_import_drafts row. A .kmz is unzipped to its KML text first; everything
+  // downstream (kmlToDraftRows, the draft insert, the review screen) is identical either way.
   const handleKmlFile = async (file) => {
     setKmlImporting(true);
     setKmlImportError(null);
     try {
-      const text = await file.text();
+      const isKmz = /\.kmz$/i.test(file.name || "");
+      const text = isKmz ? await kmzToKmlText(await file.arrayBuffer()) : await file.text();
       const rows = kmlToDraftRows(text, { sourceFile: file.name });
       if (!rows.length) { setKmlImportError("No placemarks found in that file."); return; }
       const result = await insertDrafts(rows);
@@ -1171,11 +1174,13 @@ export default function CompsPanel({
                   ＋ Paste comps
                 </button>
                 {/* B849233/NEW-2 — the ONLY door into the draft staging table; picking a file
-                    here is what creates a row, never hand entry above. */}
+                    here is what creates a row, never hand entry above. NEW-1/B1577424 —
+                    .kmz alongside .kml (a Google Earth "My Places" export, and Planyr's own
+                    export, are both .kmz far more often than bare .kml). */}
                 <label title="Import a Google My Maps export"
                   style={{ border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-primary)", fontSize: 10.5, fontWeight: 700, borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontFamily: "inherit" }}>
-                  ⤒ Import (KML)
-                  <input type="file" accept=".kml" style={{ display: "none" }} disabled={kmlImporting}
+                  ⤒ Import (KML/KMZ)
+                  <input type="file" accept=".kml,.kmz" style={{ display: "none" }} disabled={kmlImporting}
                     onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) handleKmlFile(f); }} />
                 </label>
                 {/* B1167712 (NEW-1) — order (a): upload a plan before any comp exists for it.

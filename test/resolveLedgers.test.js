@@ -12,7 +12,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveConflicts, seedSide, describedPaths, lostDescriptions, UNION_FILES, GENERATED } from "../scripts/resolve-ledgers.mjs";
+import { resolveConflicts, isPureItemInsertion, seedSide, describedPaths, lostDescriptions, UNION_FILES, GENERATED } from "../scripts/resolve-ledgers.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -48,7 +48,53 @@ describe("the precondition: union is safe iff the two sides name disjoint ids", 
       "### B1349 — the item, with THEIR amendment\ntheir body\n\n",
     ));
     expect(res.ok).toBe(false);
-    expect(res.overlaps).toEqual([{ ids: ["B1349"], at: 3 }]);
+    expect(res.overlaps).toEqual([{ ids: ["B1349"], at: 3, reason: "same-id" }]);
+  });
+
+  it("REFUSES an in-place edit to an EXISTING item's body — B1592848, the gap the id-overlap check alone could not see", () => {
+    // Two branches each rewrote item B500's own `- Verify:` line differently, without touching its
+    // heading. Neither side's hunk text contains a "### B" token at all, so the OLD id-overlap
+    // check saw two empty sets and called it safe — reproduced directly against production code
+    // before this fix: `resolveConflicts` returned `ok: true` and unioned both edits into one
+    // item's body (one line silently became two). That is exactly the "two sessions amending the
+    // same item" failure this script exists to be incapable of; it just wasn't visible as a
+    // duplicate HEADING, only as duplicated content inside one.
+    const raw = "# Backlog\n\n### B500 — an existing item\n<<<<<<< HEAD\n- Verify: live (branch A updated this)\n" +
+      "=======\n- Verify: sandbox (confirmed live by branch B)\n>>>>>>> branchB\n- some detail line\n\n### B1 — older item\nbody\n";
+    const res = resolveConflicts(raw);
+    expect(res.ok).toBe(false);
+    expect(res.overlaps).toEqual([{ ids: [], at: 4, reason: "in-place-edit" }]);
+    expect(res.hunks[0].inPlaceEdit).toBe(true);
+  });
+
+  it("REFUSES an edit racing a DELETE/move — one side empty, the other a lone body line with no heading", () => {
+    // Branch A archived (deleted) item B500's block entirely; branch B, unaware, edited one of its
+    // lines instead of deleting it. `ours` (the delete) is empty; `theirs` (the edit) is a bare
+    // body fragment with no heading of its own — neither id set is populated, so this must be
+    // caught by the same "non-empty side isn't a pure insertion" rule, not by id overlap.
+    const raw = "# Backlog\n\n### B1 — kept\nbody\n\n<<<<<<< HEAD\n=======\n- Verify: sandbox (edited, unaware of the archive)\n>>>>>>> branchB\n";
+    const res = resolveConflicts(raw);
+    expect(res.ok).toBe(false);
+    expect(res.overlaps[0].reason).toBe("in-place-edit");
+  });
+
+  it("isPureItemInsertion: empty and all-blank sides are vacuously pure; a body fragment is not", () => {
+    expect(isPureItemInsertion([])).toBe(true);
+    expect(isPureItemInsertion(["", "  "])).toBe(true);
+    expect(isPureItemInsertion(["### B5 — new item", "body"])).toBe(true);
+    expect(isPureItemInsertion(["", "### B5 — new item after a blank line"])).toBe(true); // leading blank tolerated
+    expect(isPureItemInsertion(["- Verify: sandbox", "some body line"])).toBe(false);
+    expect(isPureItemInsertion(["body line with no heading at all"])).toBe(false);
+  });
+
+  it("still UNIONS a clean append even when one side is a multi-item insert and the other is empty", () => {
+    // Not every real conflict has content on both sides — git only shows one when BOTH sides
+    // touched the region, but "touched" can mean "moved a neighbour", leaving one side's hunk text
+    // empty. An empty side must not be mistaken for a body fragment.
+    const raw = "# Backlog\n\n<<<<<<< HEAD\n=======\n### B900 — new from theirs\nbody\n\n>>>>>>> origin/main\n### B1 — old\n";
+    const res = resolveConflicts(raw);
+    expect(res.ok).toBe(true);
+    expect(res.text).toContain("### B900 — new from theirs");
   });
 
   it("REFUSES a hunk git WIDENED to swallow an untouched neighbour — the trap a naive check misses", () => {
