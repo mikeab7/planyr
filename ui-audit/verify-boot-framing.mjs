@@ -236,6 +236,7 @@ async function backgroundedArm() {
     return { canvas: true, visibility: getComputedStyle(c).visibility,
              canvasBox: `${Math.round(cb.x)}..${Math.round(cb.right)}`, inView, anyInView: inView.some((b) => b.inView),
              ppf: +c.getAttribute("data-view-ppf"), offX: +c.getAttribute("data-view-offx"), offY: +c.getAttribute("data-view-offy"),
+             // el-tier: `els` is this arm's vacuity precondition, not a census of plan contents.
              vis: document.visibilityState, els: document.querySelectorAll("[data-el-id]").length, elId, hit };
   });
   await decoy.close();
