@@ -1,3 +1,44 @@
+-- ⛔ CORRECTED 2026-09-12 (B1568880, "NEW-2" cleanup dispatch) — A PRIOR SESSION'S "referenced ZERO
+-- TIMES IN THE SHIPPED BUNDLE" CLAIM ABOUT THIS FUNCTION WAS A MEASUREMENT ARTIFACT, NOT A FINDING.
+-- THIS RPC IS THE LIVE, PRIMARY RENAME PATH. Read this before "cleaning up" this file again.
+--
+-- A 2026-09-11 dispatch treated this function as dead code — "referenced zero times across 29
+-- loaded JS chunks" — and it cost three prior sessions of fixes (including the RAISE guard a few
+-- lines down) aimed at code the app supposedly never reaches. It does reach it: `cloudRenameGroup()`
+-- (`lib/cloudRename.js`) calls `supabase.rpc("rename_site_group", …)` as its PRIMARY path, from
+-- `storage.renameSiteGroup()` — the one rename entry point every UI surface (map right-click,
+-- header project dropdown) goes through. Audited against the RUNNING system on 2026-09-12, not
+-- reasoned about:
+--   • `pg_get_functiondef` against `planyr_production` (`lyeqzkuiwngunutlkkmi`) returns this exact
+--     function body, deployed, and `grant execute` to `authenticated` in place.
+--   • `edge_logs` for that project show real `POST .../rest/v1/rpc/rename_site_group` calls
+--     returning 200 — three in a row at 2026-09-12T02:41:24 / 02:41:54 / 02:42:47Z, matching the
+--     owner's own hand-verification the same day: three consecutive renames of one project, each
+--     holding, surviving a full page reload.
+--   • A full local `vite build` places the literal string in its own lazy chunk
+--     (`dist/assets/cloudRename-*.js`) — present, just not EAGERLY loaded.
+--   • `test/renameStampIntegrity.test.js` already pins `rpcCalls[0].fn === "rename_site_group"` as
+--     a standing regression guard on this exact wiring.
+--
+-- THE MECHANISM OF THE FALSE LEAD, so it is not repeated: `cloudRename.js` is deliberately reached
+-- only by a dynamic `import()` fired from `storage.renameSiteGroup` — a rename is rare and
+-- user-initiated, so its code should not ride the boot bundle every page load pays for (see that
+-- file's own header). A chunk scan that never actually triggers a rename never loads that chunk, so
+-- counting references in only the chunks a passive page load fetches will always read zero — the
+-- same species of mistake `/CLAUDE.md`'s DRIVER-SCROLL-IS-NOT-APP-SCROLL §6 and WRONG-CASE already
+-- catalog (the probe's own inaction produced the reading, not the code under test). This is a
+-- DIFFERENT question from "did the migration below ever get run" — it did, and the running function
+-- matches this file byte for byte.
+--
+-- SO: do not delete this function as dead code, and it needs no "wiring up" — it is already the
+-- sole primary writer of an atomic group rename. The RAISE guard below stays: it is reachable by
+-- ANY authenticated caller (this function is granted to `authenticated`, callable directly over
+-- PostgREST by anyone signed in, not only by the one client call site that happens to always pass a
+-- valid stamp today), so it remains real defense-in-depth, not dead ceremony. See B1568880 in
+-- BACKLOG.md for the full audit. The group_id-COLUMN-drift note below is unrelated and still
+-- correct — separately filed as B366386, measured latent for every real owner project — do not
+-- "fix" it here.
+--
 -- NEW-1/NEW-2 — rename a PROJECT (a site group) in ONE atomic statement.
 -- Run ONCE in the Supabase SQL editor. Idempotent; safe to re-run. ADDITIVE: adds a function,
 -- changes no table, no column and no policy.

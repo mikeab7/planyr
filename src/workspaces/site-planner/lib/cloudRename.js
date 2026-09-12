@@ -1,5 +1,12 @@
 /* cloudRename.js — the project-rename CLOUD write, LOADED ON DEMAND.
  *
+ * ⛔ B1568880 (2026-09-12) — a prior session read this module's own laziness backwards: a chunk
+ * scan taken without ever triggering a rename never loads this chunk, so it "found" zero
+ * references to the `rename_site_group` RPC below and treated the SQL function as dead code for
+ * three rounds of fixes. It is not dead — this is the PRIMARY rename path, confirmed live against
+ * production (`db/rename_site_group.sql`'s own header carries the full audit). Being lazy-loaded
+ * is not being unreachable.
+ *
  * ⛔ Nothing on the boot path may static-import this module. It is reached ONLY by the dynamic
  * `import()` in `storage.renameSiteGroup`, for the same reason `exportSheet.js` and
  * `rasterIdentifyLazy.js` are split out: a rename is a rare, deliberate, user-initiated action, so
