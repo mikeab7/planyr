@@ -13,6 +13,10 @@
  *   surface   "dark" | "light" — picks the wordmark colour
  *   tile      bool — draw the rounded dark backing tile (default true)
  *   title     a11y label (default "Planyr")
+ *   plateProps(tier) — variant="favicon"/"auto"@small only; called per plate ("base"/
+ *             "mid"/"top") to wrap it in its own <g> with the returned props, so a
+ *             caller can animate the three plates independently (e.g. the Site module's
+ *             "Stack" loader, ModuleLoader.jsx) without a second copy of the geometry.
  *
  * Geometry mirrors brand/planyr-favicon.svg + brand/planyr-mark.svg — the canonical
  * source of record, and what the raster favicons are generated from. If the artwork
@@ -64,12 +68,19 @@ function FullGlyph() {
   );
 }
 
-function SolidGlyph() {
+// plateProps(tier) — optional, called for "base"/"mid"/"top" — lets a caller (e.g. a
+// loader animation) wrap each plate in its own <g> to animate independently, without
+// forking the geometry. Unused by default: no plateProps, no extra <g>, no DOM change.
+function SolidGlyph({ plateProps }) {
+  const plate = (tier, node) => {
+    const extra = plateProps && plateProps(tier);
+    return extra ? <g {...extra}>{node}</g> : node;
+  };
   return (
     <>
-      <SolidTier t={TIERS.base} />
-      <SolidTier t={TIERS.mid} />
-      <SolidTier t={TIERS.top} />
+      {plate("base", <SolidTier t={TIERS.base} />)}
+      {plate("mid", <SolidTier t={TIERS.mid} />)}
+      {plate("top", <SolidTier t={TIERS.top} />)}
     </>
   );
 }
@@ -81,6 +92,7 @@ export default function BrandMark({
   surface = "dark",
   tile = true,
   title = "Planyr",
+  plateProps,
   style,
   ...rest
 }) {
@@ -96,7 +108,7 @@ export default function BrandMark({
     >
       <title>{title}</title>
       {tile && <rect width="100" height="100" rx="22" fill={BRAND.surface.ink} />}
-      {v === "mark" ? <FullGlyph /> : <SolidGlyph />}
+      {v === "mark" ? <FullGlyph /> : <SolidGlyph plateProps={plateProps} />}
     </svg>
   );
 

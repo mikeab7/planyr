@@ -11,7 +11,11 @@ export const SHOW_DELAY_MS = 250;
 
 // Per-module skin: which grammar to draw + the caption.
 export const LOADER_SKINS = {
-  "site-planner": { kind: "site",  label: "Drawing site plan…" },
+  // B1340512/NEW-1 — the "Stack" mark (the three plates of the brand mark settling
+  // into place) replaced the old drawn-parcel skeleton. No caption by design — see
+  // ModuleLoader.jsx's StackMark. `label` stays unset here on purpose: ModuleLoader
+  // falls back to a generic caption for screen readers only, never rendered on screen.
+  "site-planner": { kind: "stack" },
   "scheduler":    { kind: "gantt", label: "Assembling schedule…" },
   "doc-review":   { kind: "gantt", label: "Loading review…" },
   "library":      { kind: "gantt", label: "Opening library…" },  // B524: was hitting the generic "Loading…" fallback
