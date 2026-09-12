@@ -520,11 +520,60 @@ describe("NEW-1 — a label's right-click never forwards to whatever it sits ove
    * a future label doesn't reintroduce a private "ask what's underneath" shortcut. */
   it("every other label's context menu dispatches directly to its own object, never through a resolver", () => {
     for (const marker of [
-      'onContextMenu={isPondLabel ? (e) => onElContext(e, d.el.id) : undefined}',
+      'onContextMenu={labelInteractive ? (e) => onElContext(e, d.el.id) : undefined}',
       "onContextMenu={(e) => onParcelContext(e, pc.id)}",
     ]) {
       expect(SP, `expected direct-dispatch marker not found: ${marker}`).toContain(marker);
     }
+  });
+});
+
+/* ⛔ NEW-1 (2026-09-12) — THE CLICK-OWNERSHIP AUDIT (owner block, verbatim: "right click on any item
+ * shouldn't click on anything else but that item"). Three source-level regressions the audit found
+ * and fixed, pinned here so they can't silently regress:
+ *
+ *  1. The acreage badge's LEFT-CLICK never selected its own parcel (only the right-click did, since
+ *     NEW-1 above). `startAcChip` now selects on pointerdown, the same way every other drag-starter
+ *     on this canvas does (startMoveEl / startMoveParcel / …).
+ *  2. EVERY element's own name/SF label — not just the pond's — is now a real click target
+ *     (`labelInteractive`, generalising the old pond-only `isPondLabel`). A label defaults to
+ *     pointer-transparent, so a press on it used to fall through to whatever paints underneath —
+ *     correct only as long as the label happens to sit inside its own footprint, and wrong the
+ *     moment `labelFitLadder` leaders it out onto a neighbour (the reported case: a building's
+ *     name/SF label).
+ *  3. A right-click landing on the handle layer's OWN chrome (a resize/rotate/vertex grip, the
+ *     setback numeric chip, the parcel edge length label) had no `onContextMenu` anywhere in that
+ *     subtree and fell all the way through to the empty-canvas map menu — the same species of bug
+ *     B806082 already fixed one-grip-at-a-time for callout handles, closed here for every handle at
+ *     once by forwarding at the layer itself to whatever is currently selected.
+ */
+describe("NEW-1 (click-ownership audit) — the acreage badge selects on left-click, every label is a direct dispatch target, and the handle layer forwards a right-click to what's selected", () => {
+  const SP = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
+
+  it("startAcChip selects the parcel on pointerdown, before the drag is armed", () => {
+    const at = SP.indexOf("const startAcChip = (e, id) => {");
+    expect(at, "startAcChip not found").toBeGreaterThan(-1);
+    const block = SP.slice(at, SP.indexOf("\n  };", at));
+    expect(block).toMatch(/setSel\(\{ kind: "parcel", id \}\)/);
+    // Selection must happen before drag.current is armed, not after — a press that never moves is
+    // still a valid single click and must still have selected the parcel.
+    expect(block.indexOf('setSel({ kind: "parcel", id })')).toBeLessThan(block.indexOf("drag.current ="));
+  });
+
+  it("every element label is pointer-enabled and dispatches to its own element, not just the pond's", () => {
+    const at = SP.indexOf("const labelInteractive = tool ===");
+    expect(at, "labelInteractive not found").toBeGreaterThan(-1);
+    const block = SP.slice(at, at + 400);
+    // Generalised: no `.type === "pond"` gate left on this line — every element qualifies.
+    expect(block.split("\n")[0]).not.toMatch(/type === "pond"/);
+    expect(block).toMatch(/!!d\.el && !d\.added/);
+  });
+
+  it("the handle layer forwards an unhandled right-click to featureContextAction(sel, e)", () => {
+    const at = SP.indexOf('<g data-export="skip" data-handle-layer="1"');
+    expect(at, "the handle layer group not found").toBeGreaterThan(-1);
+    const block = SP.slice(at, at + 400);
+    expect(block).toMatch(/onContextMenu=\{\(e\) => \{ if \(sel\) featureContextAction\(sel, e\); \}\}/);
   });
 });
 
@@ -609,11 +658,31 @@ describe("the picker is wired into the canvas's own capture-phase press handler"
       .toMatch(/onPointerDownCapture=\{\(e\) => \{ notePress\(e\); if \(handleAddLeaderCapture\(e\)\) return; if \(handleStackPick\(e\)\) return; if \(touchCountRef\.current < 2\) onCanvasVtxDownCapture\(e\); \}\}/);
   });
 
-  it("the picker only engages on plain Alt+click in the select tool, never stealing another modifier's gesture", () => {
-    const at = SP.indexOf("const handleStackPick = ");
-    expect(at).toBeGreaterThan(-1);
-    const body = SP.slice(at, at + 1400);
-    expect(body).toMatch(/if \(!e\.altKey \|\| e\.shiftKey \|\| e\.ctrlKey \|\| e\.metaKey\) return false;/);
-    expect(body).toMatch(/if \(tool !== "select" \|\| e\.button !== 0\) return false;/);
+  /* NEW-1 (2026-09-12, click-ownership audit) — the gating that used to live directly in
+   * `handleStackPick` was pulled out into `resolveAltPick`, the ONE function both the left-click
+   * picker and its new right-click twin (`handleStackPickContext`) share, so a left-click pick and
+   * a right-click pick at the same point can never disagree about the cycle position. */
+  it("the picker only engages on plain Alt+press in the select tool, never stealing another modifier's gesture", () => {
+    const at = SP.indexOf("const resolveAltPick = ");
+    expect(at, "resolveAltPick not found").toBeGreaterThan(-1);
+    const body = SP.slice(at, at + 700);
+    expect(body).toMatch(/if \(!e\.altKey \|\| e\.shiftKey \|\| e\.ctrlKey \|\| e\.metaKey\) return null;/);
+    expect(body).toMatch(/if \(tool !== "select"\) return null;/);
+  });
+
+  it("both buttons resolve through the SAME resolveAltPick, never a second copy of the gate", () => {
+    for (const fn of ["handleStackPick", "handleStackPickContext"]) {
+      const at = SP.indexOf(`const ${fn} = (e) => {`);
+      expect(at, `${fn} not found`).toBeGreaterThan(-1);
+      const body = SP.slice(at, at + 400);
+      expect(body, `${fn} must delegate to resolveAltPick`).toMatch(/resolveAltPick\(e\)/);
+      // Neither wrapper re-checks e.altKey itself — that would be a second copy of the gate.
+      expect(body, `${fn} must not re-check e.altKey itself`).not.toMatch(/e\.altKey/);
+    }
+  });
+
+  it("Alt+right-click is wired into the same capture slot as the vertex-edit context menu, tried first", () => {
+    expect(SP, "Alt must win over vertex-edit mode's own context-menu capture, matching the left-click picker")
+      .toMatch(/onContextMenuCapture=\{\(e\) => \{ if \(handleStackPickContext\(e\)\) return; onCanvasVtxContextCapture\(e\); \}\}/);
   });
 });
