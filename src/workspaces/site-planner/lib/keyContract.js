@@ -48,8 +48,12 @@ export const KEY_CONTRACT = Object.freeze([
     why: "Same as undo." },
   { id: "escape", label: "Cancel / close the inspector", keys: ["Escape"], mod: M.NONE, scope: "app", mutates: false, guaranteed: true,
     why: "B1125 — Escape is the GUARANTEED escape hatch; a panel you can get stuck in is the bug it closes. NEW-1 — `guaranteed` makes that literal: FIELD scope (and the TOUCH.FIELD latch, which the owner's Parcels-panel report showed OUTLIVES the control's focus) used to refuse Escape exactly like a typed character. Escape types no character, so refusing it to protect typing buys nothing, and it is the one key a stuck user reaches for — see keyScopeVerdict's `entry.guaranteed` check." },
-  { id: "shortcuts", label: "Shortcuts overlay", keys: ["?", "/"], mod: M.NONE, scope: "app", mutates: false,
-    why: "A help surface. Reaches nothing." },
+  /* "shortcuts" (keys ["?", "/"]) used to live here — the planner's own local "Keyboard &
+   * gestures" overlay. Retired (NEW-1, keyboard shortcuts page, 2026-09-12): "?" is now a single
+   * global listener in Shell.jsx opening the app-wide Keyboard Shortcuts page, so it no longer
+   * belongs to this workspace's own dispatch table — leaving it declared here with no branch to
+   * match would be a stale entry, and re-adding a SECOND "?" branch in this handler would be
+   * exactly the two-shortcuts-one-key class this table exists to prevent. */
 
   // ── canvas: clipboard & structure ─────────────────────────────────────────────────────────────
   { id: "copy", label: "Copy selection", keys: ["c", "C"], mod: M.MOD, scope: "canvas", mutates: false },

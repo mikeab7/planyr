@@ -157,6 +157,7 @@ import { useBottomSheetHeight } from "../shared/ui/bottomSheetTracker.js";
 import { requestPerfCapture, perfCaptureDelivery, perfRecorderArmed } from "../shared/telemetry/perfRecorderHandle.js";
 import { SUPPRESSED_AUTOMATED } from "../shared/telemetry/clientErrors.js";
 import { buildReportContext, submitReport, queuedReportCount } from "../shared/reports/reportsStore.js";
+import { openShortcutsPage } from "../shared/keyboard/shortcutsPageBus.js";
 
 const FAB_RIGHT = 14;
 const Z_FAB = 2000;
@@ -422,6 +423,9 @@ export default function HelpReportControl({ user }) {
               {slowLabel || "Something was slow just now"}
             </MenuItem>
             <MenuItem onClick={() => setView("help")} style={rowStyle}>Help</MenuItem>
+            {/* NEW-1 — the app's one "?"-reachable page, entry #2 (the keyboard shortcut is #1).
+                Closes this popover before opening the page so the two overlays never stack. */}
+            <MenuItem data-testid="help-menu-shortcuts" onClick={() => { closeAll(); openShortcutsPage(); }} style={rowStyle}>Keyboard shortcuts</MenuItem>
             {/* NEW-1 (B1231280) — an un-armed recorder must say so plainly, not just grey the row
                 out with no explanation (LOUD-FAILURE). Races the idle-deferred install every route
                 runs on load; resolves itself within a few seconds without a reopen. */}
@@ -497,6 +501,9 @@ export default function HelpReportControl({ user }) {
               The moment you opened this, the app quietly saved the last few seconds of its own
               performance — even signed out. "Something was slow just now" sends that along by
               itself, no typing needed; it's attached to "Report a problem" too, automatically.
+            </p>
+            <p style={{ margin: 0 }}>
+              Press <kbd>?</kbd> anywhere in the app to see every keyboard shortcut it has.
             </p>
             <button type="button" onClick={() => setView("menu")} style={{ alignSelf: "flex-end", border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)", borderRadius: RADIUS.sm, padding: "5px 10px", fontSize: 12, cursor: "pointer", font: "inherit" }}>Back</button>
           </div>

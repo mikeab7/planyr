@@ -27,6 +27,8 @@ import FloatingNotice from "../shared/ui/FloatingNotice.jsx";
 import { mayResumeLastSite } from "../workspaces/site-planner/lib/bootResume.js";
 import HelpReportControl from "./HelpReportControl.jsx";
 import { retryQueuedReports } from "../shared/reports/reportsStore.js";
+import { isTextControl } from "../shared/keyboard/keyScope.js";
+import { openShortcutsPage, closeShortcutsPage, subscribeShortcutsPage } from "../shared/keyboard/shortcutsPageBus.js";
 import { checkProjectDeletionStatus, listDeletedProjects, restoreDeletedProject, projectGateStatus, wasProjectFreshlyMinted } from "../shared/projects/projects.js";
 
 // NEW-2 (B848833) — lazy, same reasoning as AdminGate/DesignGallery below: a soft-deleted-project
@@ -42,6 +44,10 @@ const DesignGallery = lazy(() => import("../workspaces/design-gallery/DesignGall
 // one of them, so it's deliberately not a WORKSPACES entry either — same lazy/not-a-workspace
 // shape as AdminGate/DesignGallery above (isDashboardHash below, no header tab of its own).
 const Dashboard = lazy(() => import("../workspaces/dashboard/Dashboard.jsx"));
+// NEW-1 (keyboard shortcuts page, 2026-09-12) — same lazy/not-a-workspace shape as the three
+// above: reachable from every route via the global "?" listener below and the Help menu's
+// "Keyboard shortcuts" row (HelpReportControl.jsx), never a header tab of its own.
+const ShortcutsPage = lazy(() => import("./ShortcutsPage.jsx"));
 
 // "Open where I left off": on an empty-hash boot, seed the URL from the stored last-route
 // pointer BEFORE the first render (so useHashRoute's initial read sees it). Runs at module
@@ -505,6 +511,28 @@ export default function Shell() {
   // silently vanishes, so this is the retry half of that promise. Fire-and-forget.
   useEffect(() => { retryQueuedReports(); }, []);
 
+  /* KEYBOARD SHORTCUTS PAGE (NEW-1) — "?" opens it from ANY route, matching the app's own
+   * existing convention (Site Planner used to bind "?" to its own local overlay; that binding
+   * is retired in favor of this global one — see SitePlanner.jsx's own note on the removal).
+   * Guarded the same way every other app-wide, non-destructive shortcut in this app is: never
+   * while the caret is in a real text control (`isTextControl`, the one shared predicate — see
+   * its own header for why a second hand-rolled tag list is exactly the bug class to avoid).
+   * `openShortcutsPage()`/`closeShortcutsPage()` are a tiny module-scope bus (shortcutsPageBus.js)
+   * rather than a prop threaded through every workspace, so a workspace that never needs this
+   * feature never carries a prop for it. */
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  useEffect(() => subscribeShortcutsPage(setShortcutsOpen), []);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== "?" && !(e.key === "/" && e.shiftKey)) return;
+      if (isTextControl(document.activeElement)) return;
+      e.preventDefault();
+      openShortcutsPage();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // Keep-alive (owner request, 2026-07-05: "cleaner/faster switch between modules"): every
   // workspace the user has VISITED stays mounted, hidden with display:none, instead of being
   // torn down on each tab switch. Switching back is instant — the open drawing, map view,
@@ -851,6 +879,11 @@ export default function Shell() {
           (reportsStore.js's routeId(), the same source Shell's own isAdminHash/active read),
           so it needs no route prop threaded down. */}
       <HelpReportControl user={user} />
+      {shortcutsOpen && (
+        <Suspense fallback={null}>
+          <ShortcutsPage onClose={closeShortcutsPage} />
+        </Suspense>
+      )}
       {authOpen && (
         <AuthPanel
           user={user}
