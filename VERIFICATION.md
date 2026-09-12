@@ -166,6 +166,24 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V976640 — B1339920: Phoenix/Mesa/Surprise/Buckeye return their real Maricopa County parcel, and Pinal's own points are unaffected `Blocker: live-GIS`
+
+**Why this needs its own live pass.** GIS endpoint behaviour is a mandatory LIVE-VERIFY class. The ROUTING LOGIC (which county key a Phoenix-area click resolves to) is fully proven sandbox-side — see below — but the actual endpoint, `gis.maricopa.gov`, is blocked by this sandbox's egress policy (confirmed live via `curl`: the CONNECT tunnel itself is rejected with a policy 403, the same wall this repo's route 3 hits on every custom county host). Michael's own dispatch measured the raw endpoint directly from his browser (1,760,396 features, capabilities Map/Query/Data, real APNs at 4 spread points, all sub-250ms) — strong evidence, but that measurement did not go through the deployed app's own click→identify→render path with this session's routing fix in place, which is what this item still needs.
+
+**What was verified here (this session, sandbox).**
+1. `test/counties.test.js`, new describe block "Maricopa/Pinal AZ routing (B1339920)" — 6/6 passing: `az_maricopa` is wired to `gis.maricopa.gov` (not Pinal's URL); `candidateCountiesForPoint` includes `az_maricopa` for Phoenix/Mesa/Surprise/Buckeye; Buckeye and Surprise (outside Pinal's bbox) route to `az_maricopa` only; Casa Grande and Apache Junction (Pinal's own verified points) still include `az_pinal`; `countyForView` names `az_maricopa` for Phoenix and still names `az_pinal` for Casa Grande/Apache Junction.
+2. `node ui-audit/gis-source-audit.mjs` — clean; `az_maricopa` carries a declared `verifiedNote` in `countiesProvenance.js` (no `verifiedOn`, since the endpoint itself couldn't be re-probed from here).
+3. `npx vitest run test/counties.test.js test/discoverCountyParcels.test.js test/countyKeys.test.js test/countyStateQualifier.test.js test/countyStatewideDerivation.test.js test/coloradoRegistry.test.js` — all green, no regression in any adjacent county-routing suite.
+
+**Steps, each with a named expected result. Needs a network outside this sandbox's egress allowlist:**
+1. On planyr.io, click a downtown Phoenix point (near 33.4484, -112.0740) and select the parcel there. **Expect:** a real parcel renders with APN `11221001` (address starting "50 N CE...") — not "no parcel right there."
+2. Click a Mesa point (33.4152, -111.8315). **Expect:** APN `13837006A`.
+3. Click a Surprise point (33.6292, -112.3680). **Expect:** APN `50118550`.
+4. Click a Buckeye point (33.3703, -112.5838). **Expect:** APN `40022114`, address "705 E EDISON AVE".
+5. Click Casa Grande (32.8795, -111.7574) and Apache Junction (33.4151, -111.5496). **Expect:** unchanged from before this fix — real Pinal parcels via `az_pinal`, confirming no regression.
+6. Read the served chunk hash in the SAME observation as steps 1–5, and confirm it is the post-fix build.
+- Result: ⏳ pending — the routing logic is sandbox-confirmed (listed here as a routine re-check, not an open question); the live endpoint click-through needs a network outside this sandbox. `Cadence: once` (re-probe on suspicion of drift).
+
 ### V1112304 — B1560993: underline and text size on a Schedule cell survive a real signed-in save and reload `Blocker: auth`
 
 **Why this needs a real pass.** Every other leg of this item is fully proven sandbox-side, including a genuine UI click-through of the actual PDF export flow (not just its underlying functions) — see below. What's left is narrowly the CLOUD PERSISTENCE round trip: this sandbox's egress proxy CORS-blocks the Supabase auth handshake, so no signed-in save/reload is reachable here, and the new fields (`task.underline`/`task.textColor`/`task.fontSize`, `cellFmt[col].underline`/`.color`/`.size`) ride the whole-object JSON blob a signed-in session writes to `planar_data` — the same mechanism `bold`/`italic`/`rowColor`/existing `cellFmt` already round-trip through, with no allowlist to update, but never directly exercised end-to-end here.

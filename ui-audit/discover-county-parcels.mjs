@@ -390,11 +390,20 @@ async function route2Agol(county, stateName, stateAbbr) {
  * routes 1/2's raw hits (any distinct host appearing in a result whose owner/source/title names the
  * county, even on an unrelated layer — a county's air-photo service still reveals its GIS host).
  * -------------------------------------------------------------------------------------------- */
-function candidateHostnames(county, stateAbbr, stateName, harvested) {
+/* B1339921 (item 2) — a BARE-name pattern was missing entirely. Every guess before this one glued
+ * "county" (or "co") into the hostname, but a real county GIS portal is often registered under just
+ * its own name — gis.maricopa.gov is Maricopa COUNTY's own authoritative host (measured live,
+ * B1339920), and it matches none of the ten "county"-infixed patterns below. Route 3 still found it
+ * on 2026-09-11 only because it happened to be HARVESTED from a raw route 1/2 hit (see
+ * `harvestHostnames`) — a lucky break, not a guarantee, since harvest depends entirely on some
+ * unrelated search result mentioning the right host. The four bare patterns make this county-hostname
+ * route reach the same answer on the FIRST try, with no dependency on what routes 1/2 happened to surface. */
+export function candidateHostnames(county, stateAbbr, stateName, harvested) {
   const slug = String(county).toLowerCase().replace(/[^a-z]/g, "");
   const stAbbr = String(stateAbbr).toLowerCase();
   const stSlug = String(stateName).toLowerCase().replace(/[^a-z]/g, "");
   const patterns = [
+    `gis.${slug}.gov`, `gis.${slug}.org`, `maps.${slug}.gov`, `www.${slug}.gov`,
     `gis.${slug}county${stAbbr}.gov`, `gis.${slug}co${stAbbr}.gov`, `gis.${slug}co.org`,
     `gis.${slug}county.gov`, `gis.${slug}county.org`, `gisdata.${slug}county.us`,
     `gis.${slug}county${stSlug}.com`, `gis.${slug}county${stSlug}.gov`,

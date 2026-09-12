@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   rejectCandidate, rankScore, vintageOf, spreadProbePoints, acceptCandidate,
-  REJECT_TITLE_RE, STALE_YEAR_THRESHOLD, TIER1_COUNTIES,
+  REJECT_TITLE_RE, STALE_YEAR_THRESHOLD, TIER1_COUNTIES, candidateHostnames, discoverCounty,
 } from "../ui-audit/discover-county-parcels.mjs";
 import { resetHostHealth, resetHostThrottle } from "../ui-audit/lib/hostThrottle.mjs";
 
@@ -204,6 +204,92 @@ describe("acceptCandidate — the four-bullet acceptance test, network mocked", 
     expect(r.blocked).toBe(true);
     expect(r.reasons[0]).toMatch(/blocked by this sandbox/);
   });
+});
+
+describe("candidateHostnames — item 2's bare-name pattern (B1339921)", () => {
+  it("guesses the county's own bare-name host, not only a county-infixed one", () => {
+    const hosts = candidateHostnames("Maricopa", "AZ", "Arizona", []);
+    expect(hosts).toContain("gis.maricopa.gov");
+    // The old county-infixed guesses still fire too — this is additive, never a replacement.
+    expect(hosts).toContain("gis.maricopacounty.gov");
+  });
+
+  it("dedupes a bare-name guess against an identical harvested hostname", () => {
+    const hosts = candidateHostnames("Maricopa", "AZ", "Arizona", ["gis.maricopa.gov"]);
+    expect(hosts.filter((h) => h === "gis.maricopa.gov")).toHaveLength(1);
+  });
+});
+
+describe("discoverCounty — Maricopa resolves via route 3, never the stale route 1/2 candidate (B1339921, item 2)", () => {
+  afterEach(() => { vi.unstubAllGlobals(); resetHostHealth(); resetHostThrottle(); });
+
+  it("rejects parcels_maricnty_2019 (stale) and route 3 walks gis.maricopa.gov's IndividualService folder to the real Parcel layer", async () => {
+    const REAL_HOST = "https://gis.maricopa.gov/arcgis/rest/services";
+    const REAL_SERVICE = `${REAL_HOST}/IndividualService/Parcel/MapServer`;
+    const REAL_LAYER = `${REAL_SERVICE}/1`;
+
+    const fetchMock = vi.fn(async (url) => {
+      const u = String(url);
+      // Route 1 (ArcGIS Hub) — the only candidate it finds is the stale 2019 snapshot.
+      if (u.startsWith("https://hub.arcgis.com/api/v3/datasets")) {
+        return jsonResponse(200, {
+          data: [{ attributes: {
+            url: "https://services.arcgis.com/XXXX/arcgis/rest/services/parcels_maricnty_2019/FeatureServer/0",
+            name: "parcels_maricnty_2019 parcels", owner: "somebody", source: "Maricopa County", orgId: null,
+          } }],
+        });
+      }
+      // Route 2 (AGOL search) — a second, unrelated hit that happens to live on the real host
+      // under a DIFFERENT (wrong-guess) path, so it is what a real search would harvest, but it
+      // does not itself answer — the actual answer is found by route 3 walking the host's own
+      // REST directory from its root, not by trusting this specific guessed path.
+      if (u.startsWith("https://www.arcgis.com/sharing/rest/search")) {
+        return jsonResponse(200, {
+          results: [{
+            url: "https://gis.maricopa.gov/arcgis/rest/services/CadastralViewer/MapServer/0",
+            title: "Maricopa County Parcel Viewer", owner: "maricopa_gis", orgId: null,
+          }],
+        });
+      }
+      if (u.startsWith("https://www.arcgis.com/sharing/rest/portals")) return jsonResponse(200, { name: null });
+      // The AGOL item's own guessed layer — unreachable, exactly as a wrong specific-path guess
+      // would be; route 3 never depends on this URL being right.
+      if (u === "https://gis.maricopa.gov/arcgis/rest/services/CadastralViewer/MapServer/0?f=json") {
+        return { ok: false, status: 404, text: async () => "" };
+      }
+      // Route 3 — the real host. Its ROOT lists no parcel service at all (the dispatch's own
+      // finding); the parcel service lives one folder down, in IndividualService.
+      if (u === `${REAL_HOST}?f=json`) return jsonResponse(200, { folders: ["IndividualService"], services: [] });
+      if (u === `${REAL_HOST}/IndividualService?f=json`) return jsonResponse(200, { folders: [], services: [{ name: "Parcel", type: "MapServer" }] });
+      if (u === `${REAL_SERVICE}?f=json`) {
+        return jsonResponse(200, { layers: [
+          { id: 0, name: "Subdivision", geometryType: "esriGeometryPolygon" },
+          { id: 1, name: "Parcel", geometryType: "esriGeometryPolygon" },
+        ] });
+      }
+      // The chosen layer's own acceptance test: metadata + 3 spread-point envelope queries.
+      if (u === `${REAL_LAYER}?f=json`) {
+        return jsonResponse(200, { fields: [{ name: "APN" }, { name: "PropertyFullStreetAddress" }], geometryType: "esriGeometryPolygon" });
+      }
+      if (u.startsWith(`${REAL_LAYER}/query?`)) {
+        return jsonResponse(200, { features: [{ attributes: { APN: "11221001", PropertyFullStreetAddress: "50 N CENTRAL AVE" } }] });
+      }
+      // Every other guessed hostname (the ten "county"-infixed patterns that do not exist) — plain
+      // not-found, exactly like a real DNS/host miss.
+      return { ok: false, status: 404, text: async () => "" };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const out = await discoverCounty({ county: "Maricopa", state: "AZ" });
+
+    expect(out.chosen).toBeTruthy();
+    expect(out.chosen.url).toBe(REAL_LAYER);
+    expect(out.chosen.route).toBe("county-hostname");
+    // The stale candidate was seen and REJECTED, never accepted.
+    const staleRejection = out.rejected.find((r) => /parcels_maricnty_2019/i.test(r.url || ""));
+    expect(staleRejection).toBeTruthy();
+    expect(staleRejection.reasons.join(" ")).toMatch(/stale vintage.*2019/);
+  }, 15000);
 });
 
 describe("TIER1_COUNTIES — the roster from the dispatch brief", () => {

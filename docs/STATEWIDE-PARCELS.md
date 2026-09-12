@@ -331,6 +331,7 @@ point query inside the 8s timing budget, ownership-shaped attributes with a REAL
 | GA | Fulton | `ga_fulton` | 1 (ArcGIS Hub) | 2026-09-11 | 373,296 parcels, 28 fields. Replaces the excluded `Tax_Parcels2018` below. |
 | GA | Chatham | `ga_chatham` | 2 (AGOL search) | 2026-09-11 | 126,490 parcels, 47 fields. Previously "not found" (2026-09-10). |
 | AZ | Pinal | `az_pinal` | 2 (AGOL search) | 2026-09-11 | 286,959 parcels, 74 fields. Published by the City of Maricopa's own GIS; confirmed county-wide, not city-only, by 3 spread points 50-80 miles apart. |
+| AZ | Maricopa | `az_maricopa` | 3 (county hostname) | 2026-09-11/12 | 1,760,396 parcels, capabilities Map/Query/Data. `gis.maricopa.gov/.../IndividualService/Parcel/MapServer/1` — layer 1 ("Parcel"), not layer 0 ("Subdivision"). Measured LIVE from Michael's own browser 2026-09-11 evening Central (this sandbox's egress policy still blocks `gis.maricopa.gov` — B1339920): 4-point spread Phoenix/Mesa/Surprise/Buckeye, each a real APN, each under 250ms. **This closes the B1339920 bug** — Phoenix had been silently routed to `az_pinal`'s bbox (Pinal's own measured extent overlaps southern Maricopa County) and queried a service with zero Phoenix parcels. |
 | MO | Clay | `mo_clay` | 2 (AGOL search) | 2026-09-11 | 98,112 parcels, 40 fields. Previously "not found" (2026-09-10). |
 | SC | Greenville | `sc_greenville` | 2 (AGOL search) | 2026-09-11 | 215,484 parcels, 55 fields. Replaces the excluded `Parcel_Sizes_2018_WFL1` below. |
 | IA | Polk | `ia_polk` | 1 (ArcGIS Hub) | 2026-09-11 | 219,672 parcels, 49 fields. Previously "not found" (2026-09-10). |
@@ -339,10 +340,15 @@ point query inside the 8s timing budget, ownership-shaped attributes with a REAL
 | IL | Kane | `il_kane` | 2 (AGOL search) | 2026-09-11 | 187,336 parcels, 48 fields. |
 
 Route 3 (county hostname + REST-directory walk) found candidate hosts for several remaining
-counties — see "Not found by routes 1-4" below — but every one is a custom county/city domain this
+counties — see "Not found by routes 1-4" below — and every one is a custom county/city domain this
 sandbox's egress policy blocks; route 3's own code ran correctly and reports each as
-`blocked-in-sandbox`, distinct from "nothing found." Route 4 (state open-data org search) surfaced
-no additional accepted candidate beyond what routes 1-2 already found for this roster.
+`blocked-in-sandbox`, distinct from "nothing found." **One of them, Maricopa AZ's `gis.maricopa.gov`,
+was live-verified from Michael's own browser 2026-09-11/12 and is now wired (`az_maricopa` in the
+Tier 1 table above) — B1339920/B1339921.** A different three (Macomb MI, Johnson KS, Jackson MO)
+were ALSO re-tried from Michael's own browser and did NOT answer even with open egress — those are
+recorded as genuinely not found by routes 1-3, not sandbox-blocked (see "Not found by routes 1-4"
+below). Route 4 (state open-data org search) surfaced no additional accepted candidate beyond what
+routes 1-2 already found for this roster.
 
 ### Excluded — measured, answered, and deliberately NOT wired
 
@@ -361,16 +367,16 @@ Recorded here so nobody re-adds them without re-deriving the same answer:
   the Tier 1 table above (`ga_fulton`).
 - **Greenville County, SC** — `Parcel_Sizes_2018_WFL1`: 2018 AND a derived-acreage layer, not the
   parcel layer itself. **RESOLVED 2026-09-11** — see the Tier 1 table above (`sc_greenville`).
-- **Maricopa County, AZ** — `parcels_maricnty_2007`: a 2007 snapshot. Maricopa publishes six
-  vintages side by side (2004/2007/2008/2011/2019/2021); a search returned 2007 on one run and 2019
-  on another, arbitrarily — needs a deliberate current-vintage pick, not a re-run of the same
-  search. **RE-ATTEMPTED 2026-09-11 (B1551617)**, still unresolved: routes 1/2/4 from this sandbox
-  returned only the same 2007 snapshot again; the county's OWN assessor host —
-  `maps.mcassessor.maricopa.gov` ("Maricopa County Assessor Parcel Viewer") and `gis.maricopa.gov`
-  ("Parcel") — was found via route 3's hostname harvest but is blocked by this sandbox's egress
-  policy. Both are strong, named leads for a live pass (an unrestricted browser / the Cowork
-  thread), not a guess — this is exactly the class of county the dispatch brief's own measurement
-  said route 3 would resolve.
+- **Maricopa County, AZ** — `parcels_maricnty_2007`/`parcels_maricnty_2019`: Maricopa publishes six
+  vintages side by side (2004/2007/2008/2011/2019/2021); a search returns a different one arbitrarily
+  run to run — needs a deliberate current-vintage pick, not a re-run of the same search; both named
+  vintages are stale (>5yr) and correctly hard-rejected by `rejectCandidate` on sight, at zero
+  network cost. **RESOLVED 2026-09-11/12 (B1339920) — see the Tier 1 table above (`az_maricopa`).**
+  `gis.maricopa.gov` (found via route 3's hostname harvest on 2026-09-11, blocked-in-sandbox that
+  session) was measured LIVE from Michael's own browser on 2026-09-11 evening Central and wired.
+  Route 3's own hostname-pattern generator was also missing the bare `gis.<name>.gov` shape this
+  host uses (every prior guess glued "county" into the hostname) — fixed in the same session
+  (B1339921) so this class resolves on the first try, not only via lucky harvest.
 - **Lehigh County, PA** — `ATestParcel`: named as a test service by its own publisher. **RESOLVED
   2026-09-11** — see the Tier 1 table above (`pa_lehigh`). Correction to the record: this is the
   SAME underlying ArcGIS service container, not a different one — inspecting it directly showed
@@ -402,7 +408,6 @@ plus new counties added to this roster, are recorded below by what was actually 
 strong leads for a live pass, not a guess:**
 - **Bartow County, GA** — `www.bartowgis.org`, AGOL item "Parcels - GA - Bartow County".
 - **Cobb County, GA** — `gis.cobbcounty.org`, AGOL item "Parcels - GA - Cobb County".
-- **Macomb County, MI** — `gis.macombgov.org`, AGOL item "Parcels - MI - Macomb County".
 - **Spartanburg County, SC** — `smpesri.scdot.org`, AGOL item "Parcels - SC - Spartanburg County".
 - **Luzerne County, PA** — `gis.luzernecounty.org`, AGOL items "Luzerne County Parcels" AND
   "Parcels - PA - Luzerne County" (two, same host).
@@ -412,7 +417,15 @@ strong leads for a live pass, not a guess:**
 noise (a same-named county elsewhere: Jackson County OR for Jackson MO, Winnebago County WI for
 Winnebago IL, Johnson County MO for Johnson KS, Niagara County NY for Orleans LA) or a generic,
 unrelated "County Cadastral Layers"-titled host that recurred across many unrelated queries:**
-Henry (GA) · Winnebago (IL) · Johnson (KS) · Jackson (MO) · Orleans (LA).
+Henry (GA) · Winnebago (IL) · Orleans (LA).
+
+**Not found by routes 1-3 on 2026-09-11 — tried from Michael's OWN browser (open egress, not this
+sandbox) and STILL did not answer, so these are genuinely harder than a sandbox block, never "no
+source":**
+- **Macomb County, MI** — `gis.macombgov.org` (the route 3 hostname harvest's own candidate,
+  AGOL item "Parcels - MI - Macomb County") did not answer live either.
+- **Johnson County, KS** — `aims.jocogov.org` did not answer live.
+- **Jackson County, MO** — `gis.jacksongov.org` did not answer live.
 
 **Not on this session's Tier 1 roster, unchanged from the 2026-09-10 pass — several almost
 certainly publish parcels through a route not yet tried against them specifically:**

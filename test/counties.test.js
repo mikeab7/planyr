@@ -234,6 +234,51 @@ describe("countyForView — the Layers-panel jurisdiction for a map position", (
   });
 });
 
+/* B1339920 — Maricopa (Phoenix) was wired to NOTHING, so every Phoenix-area click fell into
+ * `az_pinal`'s bbox (Pinal's own measured data extent overlaps the southern edge of Maricopa
+ * County) and queried a service that genuinely has no Phoenix parcels — measured live: zero
+ * features. `az_maricopa` is now its own entry; these are the exact points the dispatch measured,
+ * so a regression here is caught before it ever reaches a live click again. */
+describe("Maricopa/Pinal AZ routing (B1339920) — Phoenix must never fall into Pinal's bbox", () => {
+  const PHOENIX = [33.4484, -112.0740];
+  const MESA = [33.4152, -111.8315];
+  const SURPRISE = [33.6292, -112.3680];
+  const BUCKEYE = [33.3703, -112.5838];
+  const CASA_GRANDE = [32.8795, -111.7574];
+  const APACHE_JUNCTION = [33.4151, -111.5496];
+
+  it("az_maricopa is wired to the county's own gis.maricopa.gov service, not Pinal's", () => {
+    expect(COUNTIES_MAP.az_maricopa).toBeTruthy();
+    expect(COUNTIES_MAP.az_maricopa.layerUrl).toMatch(/^https:\/\/gis\.maricopa\.gov\//);
+    expect(COUNTIES_MAP.az_maricopa.layerUrl).not.toBe(COUNTIES_MAP.az_pinal.layerUrl);
+  });
+
+  it("every Maricopa-metro point candidateCountiesForPoint measured live now includes az_maricopa", () => {
+    for (const [lat, lng] of [PHOENIX, MESA, SURPRISE, BUCKEYE]) {
+      expect(candidateCountiesForPoint(lat, lng)).toContain("az_maricopa");
+    }
+  });
+
+  it("Buckeye and Surprise (outside Pinal's bbox entirely) route to az_maricopa only, no wasted query", () => {
+    expect(candidateCountiesForPoint(...SURPRISE)).not.toContain("az_pinal");
+    expect(candidateCountiesForPoint(...BUCKEYE)).not.toContain("az_pinal");
+  });
+
+  it("Pinal's own verified points (Casa Grande, Apache Junction) still route to az_pinal — unchanged", () => {
+    expect(candidateCountiesForPoint(...CASA_GRANDE)).toContain("az_pinal");
+    expect(candidateCountiesForPoint(...APACHE_JUNCTION)).toContain("az_pinal");
+  });
+
+  it("countyForView names Maricopa for Phoenix, never Pinal (the jurisdiction the header pill shows)", () => {
+    expect(countyForView(...PHOENIX)).toBe("az_maricopa");
+  });
+
+  it("countyForView still names Pinal for its own verified points — this fix must not regress them", () => {
+    expect(countyForView(...CASA_GRANDE)).toBe("az_pinal");
+    expect(countyForView(...APACHE_JUNCTION)).toBe("az_pinal");
+  });
+});
+
 /* B209502 — NAMING A GAP HONESTLY. `countyIdentity` / `noParcelSourceNote` are the second half of the
  * bbox fix: a click in one of the ~245 Texas counties with no configured CAD must NAME that county
  * and say there is no parcel data, never inherit a neighbour's. These guard the pure half AND the
