@@ -1205,10 +1205,24 @@ export default function NoteToolbar({
    * beside Zoom/History/Print/Markdown for the identical reason those do — "things you do TO
    * the page, not to the words in it." A dragged, off-preset width shows as "Custom" and
    * highlights no row, which is correct: it is a real, persistent pin, just not one of the four
-   * named ones. */
+   * named ones.
+   *
+   * ⛔ AND IT NEEDS THE SAME "Style" TREATMENT ITS OWN NEIGHBOUR BELOW GOT (NEW-2, B1605665,
+   * live-verify on PR #1681, 2026-09-12): once Page height shipped beside it, both controls could
+   * read "Fit to content" at once with nothing but a hover tooltip telling them apart — measured
+   * on the owner's own ~1191px window, where they sit flush against each other. `prefix="W"` is
+   * the SAME mechanism `blockStyleControl` already uses below for the identical reason (see its
+   * own comment), not a new one — a standing caption naming WHAT the box holds, never the value.
+   * ONE LETTER, not the full word: a wider caption ("Width"/"Height") left no room for "Fit to
+   * content" to render in full even after widening, ellipsing it to "Fit to co…" — worse than
+   * the ambiguity it fixed, and PANEL-BREVITY's own "less is better" already argues for the
+   * smallest mark that still reads. Widened from 124 to 140 (measured: "Fit to content" needs 6
+   * more px than the single letter left it once it was squeezed in) — cheap at the owner's own
+   * ~1191px window, which measured 367px of unused slack at the end of this same toolbar row
+   * before this change, so neither control wraps. */
   const pageWidthAttr = editor.state.doc.attrs?.pageWidth ?? null;
   const widthControl = (
-    <FormatMenu title="Page width" testid="nt-page-width" width={124} big={narrow}
+    <FormatMenu title="Page width" testid="nt-page-width" width={140} big={narrow} prefix="W"
       value={pageWidthAttr == null ? "fit" : String(pageWidthAttr)}
       displayLabel={pageWidthLabel(pageWidthAttr)}
       options={[
@@ -1224,10 +1238,11 @@ export default function NoteToolbar({
   /* ⛔ SET A PAGE'S OWN HEIGHT BY HAND (NEW-1, 2026-09-12) — the menu's own "way back": a page
    * dragged tall by the top/bottom grips has no preset ladder (the owner did not ask for one),
    * so the one thing this control needs to offer is the return trip to Fit to content. Sits
-   * beside Page width for the identical reason. */
+   * beside Page width for the identical reason — see that control's own comment for the
+   * `prefix="H"` fix (NEW-2) telling the two apart without a hover. */
   const pageHeightAttr = editor.state.doc.attrs?.pageHeight ?? null;
   const heightControl = (
-    <FormatMenu title="Page height" testid="nt-page-height" width={124} big={narrow}
+    <FormatMenu title="Page height" testid="nt-page-height" width={140} big={narrow} prefix="H"
       value={pageHeightAttr == null ? "fit" : "custom"}
       displayLabel={pageHeightLabel(pageHeightAttr)}
       options={[{ label: "Fit to content", value: "fit" }]}

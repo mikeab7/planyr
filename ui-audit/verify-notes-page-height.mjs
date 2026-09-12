@@ -1,10 +1,15 @@
-/* Live verification for NEW-1 (B<PENDING>) — "drag the top and bottom edges of a notes page the
+/* Live verification for NEW-1 (B1586784) — "drag the top and bottom edges of a notes page the
  * same way the sides already drag": the page menu's Fit to content control, dragging either
  * top/bottom edge with a real mouse, the pin as a FLOOR (an anchored box needing more room than
  * the pin still grows the sheet, ordinary content shorter than the pin does not shrink it),
  * a click in newly-added blank space landing the caret, undo/redo as one step, reload
  * persistence, and PDF-PARITY — run at both a normal window and the owner's own short
- * 1191×465 window. Modelled directly on ui-audit/verify-notes-page-width.mjs. */
+ * 1191×465 window. Modelled directly on ui-audit/verify-notes-page-width.mjs.
+ *
+ * ⛔ EXTENDED (B1605664/B1605665, 2026-09-12) — a live-verify of the merged PR found the top
+ * grip's "opposite edge holds" promise inverted for SHRINKING (§[3b]/[3c]/[13b] below) and the
+ * Page width/Page height toolbar controls indistinguishable at a glance (§[15]) — see those
+ * items in docs/archive/BACKLOG-DONE.md for the full root cause and fix on each. */
 import { chromium } from "playwright";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 
@@ -203,6 +208,72 @@ const errsA = await withPage({ width: 1500, height: 950 }, async ({ page, seed, 
     await page.waitForTimeout(900);
     const persisted = await bodyRect();
     ok("the top-dragged height survives a reload", persisted.height >= before.height + 150, JSON.stringify(persisted));
+  }
+
+  /* ── CASE 3b — drag the TOP edge DOWN: shrinks, bottom holds (B1586784, NEW-1) ─────────────
+   * This is the reported regression: a fresh page opens with `note-mat` scrolled to its own
+   * top (`scrollTop === 0`), and the top-edge drag used to compensate for the opposite edge
+   * ENTIRELY by scrolling the mat. Shrinking needs `scrollTop` to go NEGATIVE, which the
+   * browser silently clamps to 0 — so the compensation never applied, and the top edge stayed
+   * put while the BOTTOM edge crept up instead, exactly like a bottom-edge drag. Case 3 above
+   * never caught this because it only ever drags the top edge UP (growing), which needs
+   * `scrollTop` to increase — never clamped, since that room always exists once the body has
+   * grown that much taller. Measured live on production the night this shipped (PR #1681):
+   * dragging the top grip down 100px left the top pinned and the bottom crept up ~100px. */
+  console.log("\n[3b] Drag the top edge down — shrinks, the bottom edge holds (B1586784):");
+  {
+    await seed(PLAIN_DOC, "Shrink top");
+    const before = await bodyRect();
+    const grip = await gripCenter("note-page-height-grip-top");
+    await page.mouse.move(grip.x, grip.y);
+    await page.mouse.down();
+    for (let i = 1; i <= 5; i += 1) await page.mouse.move(grip.x, grip.y + 20 * i, { steps: 2 });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+    const after = await bodyRect();
+    ok("the body shrank by roughly the drag distance", after.height <= before.height - 70, JSON.stringify({ before, after }));
+    ok("the TOP edge moved down by roughly the drag distance (it did NOT stay pinned)",
+      after.top >= before.top + 70 && after.top <= before.top + 130, JSON.stringify({ before, after }));
+    ok("the BOTTOM edge stayed close to where it started (within rounding noise)",
+      Math.abs(after.bottom - before.bottom) <= 15, JSON.stringify({ before, after }));
+
+    // A completed top-edge shrink settles to the app's own ordinary top-anchored rest position
+    // on reload — identical to the same numeric height dragged from the BOTTOM edge instead,
+    // the same documented "settles on reload" behaviour the width feature's own left edge has
+    // (see beginWidthDrag's own comment in NoteEditor.jsx).
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForSelector('[data-testid="note-body"]', { timeout: 20000 });
+    await page.waitForTimeout(900);
+    const persisted = await bodyRect();
+    ok("the shrunk height survives a reload", persisted.height <= before.height - 70, JSON.stringify(persisted));
+    ok("after reload it settles to the app's own ordinary top-anchored rest position",
+      Math.abs(persisted.top - before.top) <= 4, JSON.stringify({ before, persisted }));
+  }
+
+  /* ── CASE 3c — growing via the top edge still works AFTER an earlier shrink (B1586784) ─────
+   * The shrink half of the fix rides a `translateY` left in place across the commit; a LATER
+   * top-edge drag has to pick that up as its own starting point rather than fighting it — the
+   * grow half (pure `scrollTop`, unchanged) must still hold the bottom edge fixed on top of it. */
+  console.log("\n[3c] Grow via the top edge again after a shrink still holds the bottom:");
+  {
+    await seed(PLAIN_DOC, "Shrink then grow top");
+    const grip = await gripCenter("note-page-height-grip-top");
+    await page.mouse.move(grip.x, grip.y);
+    await page.mouse.down();
+    for (let i = 1; i <= 5; i += 1) await page.mouse.move(grip.x, grip.y + 20 * i, { steps: 2 });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+    const shrunk = await bodyRect();
+    const grip2 = await gripCenter("note-page-height-grip-top");
+    await page.mouse.move(grip2.x, grip2.y);
+    await page.mouse.down();
+    for (let i = 1; i <= 10; i += 1) await page.mouse.move(grip2.x, grip2.y - 20 * i, { steps: 2 });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+    const grown = await bodyRect();
+    ok("grew from the shrunk state", grown.height > shrunk.height + 150, JSON.stringify({ shrunk, grown }));
+    ok("the BOTTOM edge held through the second (grow) drag too",
+      Math.abs(grown.bottom - shrunk.bottom) <= 15, JSON.stringify({ shrunk, grown }));
   }
 
   /* ── CASE 4 — the pin is a FLOOR, not a cap ─────────────────────────────────────────────── */
@@ -437,6 +508,22 @@ const errsB = await withPage({ width: 1191, height: 465 }, async ({ page, seed, 
     ok("survives a reload at the short window", persisted.height > before.height + 80, JSON.stringify(persisted));
   }
 
+  console.log("\n[13b] Drag the top edge DOWN at 1191×465 — shrinks, bottom holds (B1586784):");
+  {
+    await seed(PLAIN_DOC, "Short window top shrink");
+    const grip = await gripCenter("note-page-height-grip-top");
+    const before = await bodyRect();
+    await page.mouse.move(grip.x, grip.y);
+    await page.mouse.down();
+    for (let i = 1; i <= 5; i += 1) await page.mouse.move(grip.x, grip.y + 15 * i, { steps: 2 });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+    const after = await bodyRect();
+    ok("shrinks at the short window too", after.height < before.height - 40, JSON.stringify({ before, after }));
+    ok("the top edge moved down (it did NOT stay pinned)", after.top > before.top + 30, JSON.stringify({ before, after }));
+    ok("bottom holds", Math.abs(after.bottom - before.bottom) <= 15, JSON.stringify({ before, after }));
+  }
+
   console.log("\n[14] Clicking in the grown blank area at 1191×465 places the caret:");
   {
     await seed(PLAIN_DOC, "Short window click");
@@ -451,6 +538,35 @@ const errsB = await withPage({ width: 1191, height: 465 }, async ({ page, seed, 
     await page.waitForTimeout(150);
     const focused = await page.evaluate(() => !!document.activeElement?.closest?.(".ProseMirror"));
     ok("caret lands even at the short window", focused);
+  }
+
+  /* ── CASE 15 — the Page width / Page height toolbar controls are distinguishable on sight
+   * (NEW-2, B1605665) ───────────────────────────────────────────────────────────────────────
+   * Both controls default to the SAME visible label, "Fit to content", and sit flush against
+   * each other at the owner's own ~1191px window — before this fix there was nothing but a
+   * hover tooltip (the `title`/`aria-label`) telling them apart. `prefix="W"`/`prefix="H"`
+   * (FormatMenu's own standing-caption mechanism, already used by Block style's "Style" prefix)
+   * fixes it; this asserts the rendered TEXT alone — no hover, no tooltip read — is enough to
+   * tell the two apart, and that neither control's own label got clipped short to make room. */
+  console.log("\n[15] Page width / Page height read as distinct controls with no hover:");
+  {
+    await seed(PLAIN_DOC, "Toolbar label check");
+    const info = await page.evaluate(() => {
+      const w = document.querySelector('[data-testid="nt-page-width"]');
+      const h = document.querySelector('[data-testid="nt-page-height"]');
+      const spanText = (btn) => [...btn.querySelectorAll("span")].map((s) => s.textContent).join("");
+      const truncated = (btn) => [...btn.querySelectorAll("span")].some((s) => s.scrollWidth > s.clientWidth + 1);
+      const wr = w.getBoundingClientRect();
+      const hr = h.getBoundingClientRect();
+      return {
+        widthText: spanText(w), heightText: spanText(h),
+        widthTruncated: truncated(w), heightTruncated: truncated(h),
+        sameRow: Math.abs(wr.top - hr.top) < 3,
+      };
+    });
+    ok("the two controls' rendered text differs (no hover needed)", info.widthText !== info.heightText, JSON.stringify(info));
+    ok("both still show the full 'Fit to content' value, unclipped", !info.widthTruncated && !info.heightTruncated, JSON.stringify(info));
+    ok("both still sit on the toolbar's same row at the owner's window (no wrap)", info.sameRow, JSON.stringify(info));
   }
 
   await page.close();
