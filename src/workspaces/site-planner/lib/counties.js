@@ -1640,25 +1640,25 @@ const COUNTIES_MAP_RAW = {
  * again (B1457152) — see that function's header for why. */
 const stateForPoint = (lat, lng) => siteState({ lat, lng });
 
-/* B209502 — the GEOMETRY answer for a point, or null when the asset is not resident / the point is
- * outside both states. This is the ONE place `counties.js` asks; both public resolvers below read
- * it, so click routing and the jurisdiction heading cannot disagree about which county a point
- * is in (two envelopes that could drift apart is precisely the failure NEW-5 already fought).
+/* B209502 — the GEOMETRY answer for a point: `{ key, nearEdge }` for a county Planyr has a source
+ * for, else null. `nearEdge` is B209502's own uncertainty flag (true within ~150 m of the resolved
+ * county's line) so a caller can tell "the polygon is confident" from "the polygon picked a side,
+ * but only barely"; `geometryCountyKey` is the key-only shorthand `countyForView` uses.
  *
- * `geometryCountyAnswer` is the fuller form — it also carries `nearEdge` (B209502's own uncertainty
- * flag: true within ~150 m of the resolved county's line) so a caller can tell "the polygon is
- * confident" from "the polygon picked a side, but only barely." `geometryCountyKey` stays the
- * key-only shorthand every existing caller already uses. */
+ * ⛔ B1597232 — DERIVED FROM `countyIdentity`, NOT A SECOND COPY OF IT. This used to re-run the
+ * city-scope test, `resolveCounty` and `countyKeyForName` itself — the same three steps
+ * `countyIdentity` (below) already performs, reaching the same answer by the same route. Two
+ * implementations of one question is the shape `docs/DATA.md` bans, and the duplication is what let
+ * the two DIVERGE in the way that mattered: `countyIdentity` distinguishes "no county resolved"
+ * from "a real county resolved and Planyr has NO source for it", and this function flattened both
+ * to the same `null`. `candidateCountiesForPoint` therefore could not tell a genuine unknown from a
+ * known gap, and treated the gap as licence to fall back to a neighbouring county's service — the
+ * Wayne→Oakland defect its own comment now records. There is ONE resolver; this is its projection,
+ * so click routing and the jurisdiction heading cannot disagree about which county a point is in
+ * (two envelopes that could drift apart is precisely the failure NEW-5 already fought). */
 function geometryCountyAnswer(lat, lng) {
-  // City scope first (B1583296) — see cityScopes.js's header. A point inside Detroit resolves
-  // here, synchronously, regardless of whether the nationwide county-polygon asset has landed;
-  // everywhere else falls through to the county-level answer exactly as before.
-  const cs = cityScopeAnswer(lat, lng);
-  if (cs) return { key: cs.key, nearEdge: cs.nearEdge };
-  const ans = resolveCounty(lat, lng);
-  if (!ans || ans.status !== "ok") return null;
-  const key = countyKeyForName(ans.name, ans.state);
-  return key ? { key, nearEdge: !!ans.nearEdge } : null;
+  const id = countyIdentity(lat, lng);
+  return id.status === "ok" ? { key: id.key, nearEdge: !!id.nearEdge } : null;
 }
 function geometryCountyKey(lat, lng) {
   const a = geometryCountyAnswer(lat, lng);
@@ -1738,9 +1738,57 @@ export function candidateCountiesForPoint(lat, lng) {
    * county is hoisted to the front and everything else stays behind it as a fallback. When the
    * geometry is not resident yet, the order is byte-identical to before — no guess is introduced,
    * the old behaviour simply persists until the asset lands. */
-  const truthAns = geometryCountyAnswer(lat, lng);
+  /* B1597232 — ONE resolution, asked once. `countyIdentity` is the single answer function for "which
+   * county is this point in, and does Planyr have a source for it"; `truthAns` is its key-only
+   * projection (exactly what `geometryCountyAnswer` returns), read from the SAME call so the two
+   * questions this function asks of the geometry can never be answered by two different resolves. */
+  const identity = countyIdentity(lat, lng);
+  const truthAns = identity.status === "ok" ? { key: identity.key, nearEdge: !!identity.nearEdge } : null;
   const truth = truthAns ? truthAns.key : null;
   const hoist = (keys) => (truth && keys.includes(truth) ? [truth, ...keys.filter((k) => k !== truth)] : keys);
+  /* The statewide composite(s) that legitimately cover one state. A composite is coverage-of-last-
+   * resort for EVERY county in its state (TxGIO paints all 254 Texas counties; `nv_statewide` is
+   * Nevada's only parcel source at all), so it is never narrowed away by a county-level answer —
+   * unlike a rival county's CAD, which can only ever answer inside its own lines. */
+  const statewideFor = (st) => entries.filter(([, c]) => c.statewide && (!c.state || c.state === st)).map(([k]) => k);
+
+  /* ⛔ B1597232 — A COUNTY PLANYR KNOWS, AND KNOWS IT HAS NO SOURCE FOR, IS AN ANSWER — NOT A GAP TO
+   * PAPER OVER WITH THE NEAREST NEIGHBOUR THAT HAPPENS TO BE WIRED.
+   *
+   * MEASURED LIVE 2026-09-12 on the owner's own browser, twice: "23555 Goddard Rd, Taylor, MI"
+   * (-83.263421, 42.224770) and "33000 Civic Center Dr, Livonia, MI" (-83.368074, 42.396293) are
+   * both squarely in WAYNE County, and the only parcel query either fired went to OAKLAND County's
+   * service. Oakland's southern line is 8 Mile Road, ~42.44°N; Taylor sits about fifteen miles
+   * south of it. This was never a boundary-precision problem — it is the resolver treating "I know
+   * the county and it has no source" as indistinguishable from "I don't know the county."
+   *
+   * THE TWO PATHS IT ARRIVED BY, because they look unrelated and are one cause:
+   *   · TAYLOR matched NO bbox, so it fell to the blind per-state fallback below — "return every
+   *     source in Michigan" — and Michigan's only county source is Oakland's.
+   *   · LIVONIA DID match a bbox: Oakland's padded box reaches down to 42.35°N and Livonia is at
+   *     42.396°N, so `within` was `[mi_oakland]`. The geometry knew it was Wayne, but Wayne has no
+   *     configured key, so `truth` came back null — and with no truth there is nothing to hoist and
+   *     nothing for NEW-6's confident-narrow to narrow to. The wrong county was the only candidate.
+   * Neither path is reachable from the other, which is why a fix at either one alone would have
+   * closed exactly half of a two-line bug report. The cause they share is upstream of both: the old
+   * `geometryCountyAnswer` flattened "no county resolved" and "a real county resolved, with no
+   * source" to the same `null`. `countyIdentity` has always distinguished them — it is what powers
+   * the honest "Wayne County — no parcel data wired here yet" message the callers already show —
+   * and reading it here is the whole fix.
+   *
+   * WHY THIS IS NOT NEW-6 AGAIN, in one line: NEW-6 narrows to the resolved county's own source
+   * when it HAS one (Casa Grande → az_pinal alone). This is the case where it has none, which NEW-6
+   * could not express, because it selects among candidates and the right answer here is no
+   * candidate. Same class as the Pinal/Maricopa defect, opposite branch.
+   *
+   * `nearEdge` gates it exactly as it gates NEW-6: within ~150 m of the line the simplified polygon
+   * is only picking a side, so a wired neighbour may genuinely own the point and the old
+   * multi-candidate behaviour is kept. Statewide composites are never dropped — a point in an
+   * unwired county of a state that HAS one (Clark County NV, Franklin County OH) is fully covered
+   * by it, and those two keep returning exactly `["nv_statewide"]` / `["oh_statewide"]`. Michigan
+   * has no composite, so Taylor and Livonia correctly return NOTHING — and `noParcelSourceNote`
+   * turns that into the county-naming sentence at every call site. */
+  if (identity.status === "no-source" && !identity.nearEdge) return statewideFor(identity.state);
 
   if (!within.length) {
     /* The geometry may know the county even when no bbox matched — Conroe and Texas City are
@@ -1748,6 +1796,27 @@ export function candidateCountiesForPoint(lat, lng) {
      * it leads and the rest of its state follows as coverage. */
     if (truth) {
       const st = COUNTIES_MAP[truth].state;
+      /* ⛔ B1597232 — NEW-6's CONFIDENT NARROW APPLIES HERE TOO. Below, a confident geometry answer
+       * makes the resolved county the ONLY real-CAD candidate; this branch never got the same
+       * treatment, so it still answered a confidently-resolved point with every county in the
+       * state. Measured on the same build as the Wayne report: one Huntsville, TX point (Walker
+       * County, resolved confidently) returned TEN candidates — harris, fortbend, chambers, waller,
+       * montgomery, brazoria, galveston, liberty, austintx and TxGIO — i.e. nine neighbouring
+       * counties' CADs queried for a lot none of them can hold. Same rule, same `nearEdge` gate,
+       * same reason: a neighbour's CAD cannot answer for this county, so asking it is cost without
+       * coverage. The statewide composite still rides along, because it genuinely can answer.
+       *
+       * The one wrinkle is a county PARKED ON its state's composite — every statewide-derived Texas
+       * county, and Waller. Its key and the composite key resolve to the SAME endpoint, so
+       * returning both queries one URL twice under two names; the composite key is the one that is
+       * never dropped by the circuit breaker (`filterHealthyCandidates`' `alwaysKeep`) and the one
+       * `isStatewideBackup` reasons about, so it is the one kept. `scopeWhere` is not lost by this:
+       * it applies only to TEXT search, never to a point identify (see MapFinder's own note). */
+      const composites = statewideFor(st).filter((k) => k !== truth);
+      if (truthAns && !truthAns.nearEdge && !COUNTIES_MAP[truth].statewide) {
+        const parkedOnComposite = composites.length > 0 && isStatewideLayerUrl(COUNTIES_MAP[truth].layerUrl);
+        return parkedOnComposite ? composites : [truth, ...composites];
+      }
       // ⛔ B1583296 — a city-scoped sibling (mi_detroit) rides along here only when it IS the
       // resolved truth; a genuinely different same-state county (found by geometry, missed by
       // every bbox) must never additionally drag in a source that can only answer inside its own
