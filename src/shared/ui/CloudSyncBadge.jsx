@@ -104,6 +104,10 @@ function Badge({ state, onRetry, detail }) {
     <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
       <button
         type="button"
+        // NEW-1 (B1343200) — floors the tap area at 44x44 CSS px (index.css's `.tap-target`)
+        // without growing the visible 30x30 badge; harmless when `canPop` is false too (no
+        // handler is attached either way).
+        className="tap-target"
         // Stable hook for the B278 Playwright harness to assert the cloud badge is present and
         // in the right state across every workspace (Site / Schedule / Review) — same testid
         // everywhere so "Cloud-on / save-persistence" is checked the same way on each path. The

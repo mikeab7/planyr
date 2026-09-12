@@ -175,3 +175,99 @@ test.describe("B1218496 — Scheduler's lifted toolbar doesn't reflow under an i
     expect(clickSwallowedReports).toEqual([]);
   });
 });
+
+/* B1581952 — the owner's OWN LIVE RECORDER (AppHeader.jsx's row2 centering `useLayoutEffect`,
+ * shipped in the prior round for exactly this disagreement) caught the real defect: on his real
+ * page, the FIRST synchronous `measure()` call ran while `ScheduleCenter`/`ScheduleActions` were
+ * still empty (`toolbar.ready` not yet true) and correctly recorded `reason:"unmeasurable"` — but
+ * it never ran again once the real report populated both zones a beat later, and the row was
+ * still off-centre. A plain 3s-delayed report does NOT reproduce this in this sandbox — checked
+ * directly, ResizeObserver alone already recovers it here, same as every earlier attempt — so
+ * whatever silences the FIRST watch on his page is something this sandbox's simplified page never
+ * triggers (candidates include the browser's "ResizeObserver loop" notification-drop behaviour
+ * under real page load's much heavier concurrent observer activity, which a small standalone
+ * reproduction cannot manufacture). Rather than claim a mechanism this session cannot prove, the
+ * fix adds a SECOND, structurally-INDEPENDENT watch — a MutationObserver on the row's own
+ * subtree, which fires on the DOM-node-level event of `<></>` being replaced by `<ViewToggle/>`'s
+ * real markup, a fundamentally different trigger than a ResizeObserver box-size notification and
+ * not subject to whatever silenced that one. The two tests below are honest about what each
+ * proves: the first is the owner's own delayed-report scenario (a real regression check, but not
+ * teeth-proven against this specific fix, since it already passed before this fix in this
+ * sandbox); the second is a genuine mutation-proof — it disables ResizeObserver's callback
+ * entirely (a fair stand-in for "whatever is happening on his page, the RO watch isn't firing")
+ * and shows centering can ONLY resolve via the new MutationObserver path. */
+test.describe("B1581952 — the centering recorder must not go silent on a slow report", () => {
+  test("a report delayed 3s past the unmeasurable boot state still resolves to centered, with a full log", async ({ page }) => {
+    test.setTimeout(60_000);
+    await mockShell(page, { clickSwallowedReports: [] });
+    await page.setViewportSize({ width: 1191, height: 900 });
+    await page.goto("/#/schedule", { waitUntil: "load" });
+
+    // Give the boot ("unmeasurable") state time to sit — long enough that a one-shot-only watch
+    // would have already given up, matching the slow-network shape of the owner's real report.
+    await page.waitForTimeout(3000);
+    const preLog = await page.evaluate(() => window.__scheduleCenterDebugLog || []);
+    expect(preLog.length).toBeGreaterThan(0);
+    expect(preLog[preLog.length - 1].reason).toBe("unmeasurable");
+
+    const grid = page.getByRole("group", { name: "View" }).getByRole("button", { name: "Grid" });
+    await postUntilVisible(page, { ...BASE_TOOLBAR }, grid);
+    await page.waitForTimeout(300);
+
+    const result = await page.evaluate(() => {
+      const modeEl = document.querySelector("[data-schedule-center-mode]");
+      const row2 = modeEl ? modeEl.parentElement : null;
+      const box = (el) => (el ? el.getBoundingClientRect() : null);
+      return { mode: modeEl?.getAttribute("data-schedule-center-mode"), rowBox: box(row2), log: window.__scheduleCenterDebugLog || [] };
+    });
+
+    // The exact assertion the owner asked for: more than one entry, a measurable final rightW,
+    // and a final mode matching what the fit test says for the settled layout.
+    expect(result.log.length).toBeGreaterThan(1);
+    const last = result.log[result.log.length - 1];
+    expect(last.rightW).toBeGreaterThan(100);
+    expect(last.min).toBeGreaterThan(0);
+    expect(result.mode).toBe("centered");
+
+    const grid2 = page.getByRole("group", { name: "View" });
+    const chipBox = await grid2.boundingBox();
+    const rowCenter = result.rowBox.x + result.rowBox.width / 2;
+    const chipCenter = chipBox.x + chipBox.width / 2;
+    expect(Math.abs(chipCenter - rowCenter)).toBeLessThan(2);
+  });
+
+  test("MUTATION-PROOF: with ResizeObserver's callback disabled entirely, centering still recovers via the MutationObserver watch", async ({ page }) => {
+    test.setTimeout(60_000);
+    // Installed before any app code runs: ResizeObserver still exists (so the code's own
+    // `typeof ResizeObserver !== "function"` fallback is NOT what's under test) but its callback
+    // is never invoked — a fair stand-in for "the RO watch isn't firing," whatever the real cause
+    // on the owner's page turns out to be.
+    await page.addInitScript(() => {
+      window.ResizeObserver = class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      };
+    });
+    await mockShell(page, { clickSwallowedReports: [] });
+    await page.setViewportSize({ width: 1191, height: 900 });
+    await page.goto("/#/schedule", { waitUntil: "load" });
+    await page.waitForTimeout(500);
+
+    const preLog = await page.evaluate(() => window.__scheduleCenterDebugLog || []);
+    expect(preLog[preLog.length - 1].reason).toBe("unmeasurable");
+
+    const grid = page.getByRole("group", { name: "View" }).getByRole("button", { name: "Grid" });
+    await postUntilVisible(page, { ...BASE_TOOLBAR }, grid);
+    await page.waitForTimeout(300);
+
+    const result = await page.evaluate(() => {
+      const modeEl = document.querySelector("[data-schedule-center-mode]");
+      return { mode: modeEl?.getAttribute("data-schedule-center-mode"), log: window.__scheduleCenterDebugLog || [] };
+    });
+    expect(result.log.length).toBeGreaterThan(1);
+    expect(result.log.some((e) => e.trigger === "mutation")).toBe(true);
+    expect(result.log.every((e) => e.trigger !== "resize")).toBe(true); // proves RO genuinely never fired
+    expect(result.mode).toBe("centered");
+  });
+});

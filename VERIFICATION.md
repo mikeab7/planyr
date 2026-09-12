@@ -193,6 +193,22 @@ was never clicked" quietly ships broken.
 13. Reload. **Expect:** every box is where step 9 left it, with its words intact, and the page's width/height from step 12 held.
 
 **Then clean up:** delete the duplicated page (bin AND purge it), restore his counts, and say exactly what was touched.
+### V1132144 — B1594320 (P0): the site planner canvas renders and is clickable again on planyr.io, for a signed-in user opening a real project `Blocker: auth`
+
+**Why this needs its own live pass.** The fix is a full revert of `SitePlanner.jsx`'s `framingCommitted` gate — provably correct by static inspection (the only code path capable of setting `visibility: hidden` on the canvas is removed entirely) and confirmed by a real-browser e2e regression test in the sandbox (`e2e/canvas-boot-visibility.spec.js`, passes). What the sandbox cannot do is sign in to a real Supabase account or reach `planyr.io` from its browser (`net::ERR_CONNECTION_RESET`, re-confirmed this session) — the exact production trigger (a signed-in `loadEpoch` remount) was never reproduced here even directly, so the one thing worth confirming live is the plainest one: does the canvas actually render and respond to clicks on a real, signed-in load.
+
+**What was verified here (sandbox, real browser, no auth).**
+1. `e2e/canvas-boot-visibility.spec.js` — two cases (a plan with a parcel-less building, reloaded; a fully blank plan) both pass: the canvas's computed `visibility` is never `"hidden"` across a 2.5s poll, its box never collapses to zero, and `elementFromPoint` at a drawn element's centre resolves to that element.
+2. Adjacent-case sweep, each confirmed directly in a real browser this session (see B1594320 for the full list): no parcel · parcel with no elements · Map view · Scheduler/Notes/Review workspaces · cold direct load vs. navigated-to-from-Map. All render.
+3. `npx vitest run` — 838 files / 16,946 tests, 0 failures. `npm run lint` — 0 errors. `npm run build` — clean.
+4. `ui-audit/verify-boot-framing.mjs` re-run against the reverted build: confirms the flash mechanism is gone (back to the pre-453623a shape, 2 painted framings per mount) and — the thing that matters for THIS item — no arm reports the canvas as unpainted/hidden.
+
+**Steps, each with a named expected result. Needs any signed-in account on `planyr.io` (does not need to be the owner's):**
+1. Sign in, open any existing real project, click into its Site tab (or let the app resume it on load). **Expect:** the drawing appears — imagery/parcel/buildings/labels as applicable — within a couple of seconds, same as every other surrounding control (rails, Layers, scale bar).
+2. Click on a drawn element (a building, a parcel edge). **Expect:** it selects, and a right-click opens its context menu — i.e. the canvas is genuinely hit-testable, not just visually present.
+3. Repeat steps 1–2 on a second, different project. **Expect:** identical — this was reported on two separate projects, so one clean project is not sufficient confirmation.
+4. Read the served chunk hash in the same observation (`document.querySelectorAll('script[src]')` or the Network tab) and confirm it postdates this fix's deploy — the standing rule for any live check on `planyr.io` (a stale tab can keep serving a pre-deploy bundle).
+- Result: ⏳ pending — sandbox-confirmed (static removal + e2e regression guard + full test suite); needs one signed-in click-through on the deployed build to close. `Cadence: once`.
 
 ### V1130256 — B1584528: the name/group-key integrity detector, and the one live drift it already closed `Blocker: auth`
 
@@ -237,7 +253,22 @@ was never clicked" quietly ships broken.
 
 ### V1127680 — B1574432: a cold load of planyr.io on the owner's own signed-in iPhone shows ONE framing, with no flash of a single zoomed building `Blocker: auth`
 
-**Why this needs its own live pass.** Two of this bug's three legs are closed headlessly (below); the third cannot be. The flash rides a REMOUNT that only a signed-in boot performs — `applyUser` (`SitePlannerApp.jsx:350`) bumps `loadEpoch` when the cloud pull settles, and the planner is keyed `` `${activeSiteId}:${loadEpoch}` `` — and this sandbox cannot sign in (the egress proxy CORS-blocks the Supabase auth handshake). The sandbox arm proves the same structural event through a route-change remount, which changes the same React key and produces the same fresh mount; what it cannot prove is the `applyUser` path itself, on his data, on his phone. Timing/race and zoom-dependent rendering are both mandatory LIVE-VERIFY classes besides.
+**⛔ AMENDED 2026-09-12 (B1594320) — THE FIX THIS ENTRY VERIFIES WAS REVERTED.** The `framingCommitted` mechanism this checklist confirms sandbox-side went live and, within hours, made the Site Planner canvas permanently invisible and unclickable on production for every signed-in user — a P0 outage, filed and fixed same-session as **B1594320** (a full revert). Steps 1–3 and 6 below are now MOOT as written — they exercise code that no longer exists (there is nothing to "resume Goose Creek and watch for one framing" against; the mechanism they'd be checking is gone) — and are kept only as the historical record of what a future re-attempt should re-verify. Step 4's console probe and step 5's chunk-hash discipline remain generally useful technique, independent of this specific fix. **The underlying ask (no flashed intermediate framing on a signed-in cold load) is UNCHANGED and still wanted** — the flash itself is back, now that the mechanism that suppressed it is reverted — see B1574432 (reopened) for the trade and why. A future fix for it must close THIS exact gap before shipping: get a genuine signed-in live pass (not the sandbox's route-change proxy for the remount) BEFORE merging, not after. See also **V1132144** (B1594320's own live-verify, that the revert itself is live and the canvas renders again).
+
+**⛔ LIVE MEASUREMENT ADDED, same day, from a session with real signed-in browser access to
+`planyr.io` (this sandbox has none — see `docs/incidents/B1594320-CANVAS-VISIBILITY-OUTAGE.md`).**
+While the ORIGINAL (pre-revert) bundle was still live, project `smtvztgdsp5p`: `document.
+visibilityState: "hidden"`, `hasFocus(): false`, zero `requestAnimationFrame` callbacks in 6.3s, a
+plain `setTimeout(…, 1500)` DID fire (~800ms throttled late). Read against the reverted source: both
+the layout effect and the 1.5s watchdog carried an identical `if (document.visibilityState !==
+"visible") return;` — so on a tab that boots hidden and stays hidden, the watchdog's `setTimeout` was
+never even scheduled. This is now a MEASURED mechanism, not the hypothesis this entry's "why it stuck"
+reasoning left it as. **Explicitly NOT measured: a genuinely foregrounded cold load** — the live
+session could not force Michael's OS-level window to the foreground, so whether the ordinary
+(foregrounded) case also goes permanently blank remains open. Any future re-attempt's watchdog must
+fire on a wall-clock timer not gated on `document.visibilityState`.
+
+**Why this needs its own live pass (as originally written).** Two of this bug's three legs are closed headlessly (below); the third cannot be. The flash rides a REMOUNT that only a signed-in boot performs — `applyUser` (`SitePlannerApp.jsx:350`) bumps `loadEpoch` when the cloud pull settles, and the planner is keyed `` `${activeSiteId}:${loadEpoch}` `` — and this sandbox cannot sign in (the egress proxy CORS-blocks the Supabase auth handshake). The sandbox arm proves the same structural event through a route-change remount, which changes the same React key and produces the same fresh mount; what it cannot prove is the `applyUser` path itself, on his data, on his phone. Timing/race and zoom-dependent rendering are both mandatory LIVE-VERIFY classes besides.
 
 **What was verified here (this session, sandbox, on a real plan fixture at phone width 430×830).**
 1. `ui-audit/verify-boot-framing.mjs --assert` — 3 arms + a known-good arm, all green, 3/3 consecutive clean runs. Samples the COMMITTED framing (`data-view-ppf`/`-offx`/`-offy`) once per animation frame and counts only framings the canvas actually painted.

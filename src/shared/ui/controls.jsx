@@ -131,9 +131,11 @@ export function ToggleChip({ active = false, accent = "var(--accent)", onAccent 
 
 /* IconButton — the square icon slot (the Site Planner iconBtn, token-only). Ref-forwarding so
  * it can anchor an AnchoredMenu directly, like any other trigger element. */
-export const IconButton = forwardRef(function IconButton({ size = 30, active = false, accent = "var(--accent)", onAccent = "var(--on-accent)", style, children, ...rest }, ref) {
+export const IconButton = forwardRef(function IconButton({ size = 30, active = false, accent = "var(--accent)", onAccent = "var(--on-accent)", style, className, children, ...rest }, ref) {
   return (
-    <button ref={ref} style={{
+    // NEW-1 (B1343200) — `tap-target` (index.css) floors this control's tap area at 44x44 CSS px
+    // regardless of `size`, without growing its visible box. See that class's own header.
+    <button ref={ref} className={className ? `tap-target ${className}` : "tap-target"} style={{
       width: size, height: size, padding: 0, flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center",
       borderRadius: CONTROL_RADIUS.control, cursor: "pointer", boxShadow: REST_SHADOW,
       border: `1px solid ${active ? accent : "var(--border-default)"}`,
@@ -216,7 +218,7 @@ export function Section({ title, children, collapsed, accent }) {
  * (margin, order) belongs on a wrapping element. */
 export function Tab({
   active = false, hover = false, fill = "var(--accent)", textColor = "var(--accent)",
-  idleColor = "var(--text-secondary)", icon, children,
+  idleColor = "var(--text-secondary)", icon, children, className,
   style: _style, borderRadius: _borderRadius, height: _height, padding: _padding, fontSize: _fontSize,
   ...rest
 }) {
@@ -224,6 +226,10 @@ export function Tab({
   return (
     <button
       aria-current={active ? "page" : undefined}
+      // NEW-1 (B1343200) — `tap-target` floors this control's tap area at 44x44 CSS px without
+      // growing the row's own height (which is exactly the "chunky" the brief rules out). See
+      // index.css's own header for the mechanism.
+      className={className ? `tap-target ${className}` : "tap-target"}
       style={{
         display: "flex", alignItems: "center", gap: 5,
         height: "100%", padding: "0 9px",
@@ -257,7 +263,7 @@ export function Tab({
  * needs a different geometry, that is a signal to add a size step here, never to override one
  * call site. Layout spacing (margin, flex) belongs on a wrapping element. */
 export const MenuTrigger = forwardRef(function MenuTrigger({
-  size = "md", open, caret = true, leading, textColor = "var(--chrome-text)", children,
+  size = "md", open, caret = true, leading, textColor = "var(--chrome-text)", children, className,
   style: _style, borderRadius: _borderRadius, height: _height, padding: _padding, fontSize: _fontSize,
   ...rest
 }, ref) {
@@ -266,6 +272,8 @@ export const MenuTrigger = forwardRef(function MenuTrigger({
   return (
     <button
       ref={ref}
+      // NEW-1 (B1343200) — see IconButton's own note above; same 44x44 tap-area floor.
+      className={className ? `tap-target ${className}` : "tap-target"}
       {...(open !== undefined ? { "aria-haspopup": "menu", "aria-expanded": open } : {})}
       style={{
         display: "flex", alignItems: "center", gap: 7,
