@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { apprRows, apprVal, findAttr, apprAll, situsAddress, situsKey, isPlaceholderValue } from "../src/workspaces/site-planner/lib/appraisal.js";
+import { apprRows, apprVal, findAttr, apprAll, situsAddress, situsKey, isPlaceholderValue, ownerKey, ownerName } from "../src/workspaces/site-planner/lib/appraisal.js";
 
 // A parcel answered by the statewide TxGIO backup must surface the SAME curated
 // appraisal rows as one from its home county — otherwise the backup looks broken even
@@ -219,5 +219,77 @@ describe("apprRows / situsAddress — the Richfield Ranch TxGIO record (NEW-2)",
 describe("situsAddress — single-field CAD schemas are unaffected by the composed-field rung", () => {
   it("Fort Bend / Montgomery style: one plain SITUS column", () => {
     expect(situsAddress({ SITUS: "4050 CR 50, JOHNSTOWN" })).toBe("4050 CR 50, JOHNSTOWN");
+  });
+});
+
+/* ⛔ B1574258 — THE OWNER ROW WAS SILENTLY BLANK ON THE STANDARD PARCEL SCHEMA.
+ *
+ * `OWNERNME1` / `OWNERNME2` (the "NME" contraction the standard land-parcel schema uses) matched
+ * nothing in the old anchored Owner pattern: `owner_?name` wants "ownername", and the trailing
+ * digit fell outside the `$` anchor besides. The row did not render — no error, no placeholder.
+ *
+ * THIS IS NOT ORLEANS-ONLY, which is the reason it is its own item rather than a line in the
+ * wiring one. Two sources ALREADY WIRED in counties.js publish the owner this way: Wisconsin's
+ * statewide layer (`wi_statewide`, 3,574,646 parcels, owner=`OWNERNME1` per
+ * docs/STATEWIDE-PARCELS.md) and Nebraska's. Both have been showing lots with no Owner line.
+ *
+ * KNOWN-GOOD ARM (DRIVER-SCROLL-IS-NOT-APP-SCROLL §6): the TxGIO record at the top of this file
+ * uses `owner_name`, worked before this change, and must still work after it — if it breaks, the
+ * fault is the widened pattern, not the schema under test. */
+describe("B1574258 — owner resolution on the OWNERNME1/OWNERNME2 parcel schema", () => {
+  // Measured live from Michael's browser against gis.nola.gov, New Orleans CBD, 2026-09-11.
+  const NOLA = {
+    OBJECTID: 1,
+    PARCELID: "41036654",
+    SITEADDRESS: "826 UNION ST, LA",
+    OWNERNME1: "CONDO MASTER",
+    OWNERNME2: "",
+    TAXBILLID: "41036654",
+  };
+
+  it("the Orleans record surfaces its owner", () => {
+    expect(ownerName(NOLA)).toBe("CONDO MASTER");
+    expect(apprRows(NOLA).find((r) => r.label === "Owner")).toEqual({ label: "Owner", value: "CONDO MASTER" });
+  });
+
+  it("the address and account rows were already fine and stay fine", () => {
+    const rows = apprRows(NOLA);
+    expect(rows.find((r) => r.label === "Situs address").value).toBe("826 UNION ST, LA");
+    expect(rows.find((r) => r.label === "Account / ID").value).toBe("41036654");
+  });
+
+  it("the Wisconsin statewide schema (already wired, same spelling) resolves too", () => {
+    expect(ownerName({ STATEID: "1234", OWNERNME1: "BADGER LOGISTICS LLC", ASSDACRES: 12.4 }))
+      .toBe("BADGER LOGISTICS LLC");
+  });
+
+  it("OWNERNME1 beats OWNERNME2 even when the service lists NME2 first — never 'first key wins'", () => {
+    // A flat alternation would have returned whichever key `Object.keys` yielded first. Both
+    // orderings must give the PRIMARY owner.
+    expect(ownerName({ OWNERNME2: "SECOND OWNER", OWNERNME1: "FIRST OWNER" })).toBe("FIRST OWNER");
+    expect(ownerName({ OWNERNME1: "FIRST OWNER", OWNERNME2: "SECOND OWNER" })).toBe("FIRST OWNER");
+    // An un-numbered column outranks any numbered one.
+    expect(ownerName({ OWNERNME1: "NUMBERED", OWNER_NAME: "PLAIN" })).toBe("PLAIN");
+  });
+
+  it("an empty or placeholder primary falls through to the real second owner rather than showing nothing", () => {
+    expect(ownerName({ OWNERNME1: "", OWNERNME2: "REAL CO-OWNER" })).toBe("REAL CO-OWNER");
+    expect(ownerName({ OWNERNME1: "Null", OWNERNME2: "REAL CO-OWNER" })).toBe("REAL CO-OWNER");
+  });
+
+  it("an owner MAILING column is still never mistaken for the owner NAME", () => {
+    // The anchor is what keeps this true; widening the pattern must not have opened it up.
+    expect(ownerKey({ OWNER_ADDRESS: "PO BOX 9", OWNERNME1: "REAL OWNER" })).toBe("OWNERNME1");
+    expect(ownerName({ OWNER_ADDR: "PO BOX 9" })).toBe(null);
+    expect(ownerName({ OWNERNME1_ADDRESS: "PO BOX 9" })).toBe(null);
+  });
+
+  it("a record with no owner column at all still answers null, not an empty string", () => {
+    expect(ownerName({ PARCELID: "1", SITEADDRESS: "1 MAIN ST" })).toBe(null);
+    expect(ownerKey(null)).toBe(null);
+  });
+
+  it("KNOWN-GOOD ARM — the TxGIO `owner_name` record at the top of this file is unchanged", () => {
+    expect(ownerName(TXGIO)).toBe("ACME INDUSTRIAL LP");
   });
 });

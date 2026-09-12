@@ -187,6 +187,9 @@ export const COUNTY_VERIFICATION = {
     verifiedOn: "2026-09-10",
     verifiedNote: "VERIFIED LIVE from this sandbox: 205,820 parcel polygons, count query 563ms, 13 populated fields, esriGeometryPolygon. A 3-point spread (Baton Rouge/Zachary/Baker) all answered with real parcels.",
   },
+  la_orleans: {
+    verifiedNote: "gis.nola.gov is blocked by this build environment's egress policy (re-confirmed live while wiring this row, B1574256 — CONNECT tunnel rejected, HTTP 403 — the same standing as az_maricopa and al_jefferson). Endpoint, layer choice and the 3-point spread are from the dispatch's own live-browser measurement, 2026-09-11 evening Central — not independently re-probed here. Layer 0 'parcels' is the ONLY layer on the ParcelSearch service, capabilities Map/Query/Data; the spread was New Orleans CBD (114ms, 357 features, PARCELID 41036654, SITEADDRESS '826 UNION ST, LA', OWNERNME1 'CONDO MASTER'), Algiers across the Mississippi (94ms, 246 features, PARCELID 41001272, '1306 PACIFIC AVE, LA, 70114') and Lakeview (65ms, 224 features, PARCELID 41011510, '6198 MILNE BLVD, LA, 70124') — three real, distinct parcels at the far corners of the parish, not just its downtown. Found by route 3 (the jurisdiction's OWN GIS hostname, gis.nola.gov/arcgis/rest/services) after routes 1 and 2 both came up empty — the third consecutive time route 3 has succeeded where 1 and 2 failed (Maricopa, Allegheny, Orleans). → V1127504.",
+  },
   al_jefferson: {
     verifiedNote: "jccgis.jccal.org is blocked by this build environment's egress policy. Endpoint, feature count (652ms/68 populated fields) and county provenance are from the dispatch's own live-browser measurement, 2026-09-10 — not independently re-probed here.",
   },

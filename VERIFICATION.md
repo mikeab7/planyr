@@ -188,6 +188,28 @@ was never clicked" quietly ships broken.
 4. On desktop Chrome, open `https://planyr.io/?planyrDiag=1#/project/smqfy48tlk9j/site` cold, then run `window.__plannerViewChanges()` in the console. **Expect:** `counts.changes` is 0 or 1 — and if it is 1, its `from` is NOT `{ppf: 0.35, offX: 60, offY: 60}`. A `from` of exactly that default means a mount still painted its un-framed view and the fix did not reach that path.
 5. Read the served chunk hash in the SAME observation as steps 1–4 (`document.querySelectorAll('script[src]')`, or the Network tab) and confirm it is the post-fix build — a phone tab can keep serving a pre-deploy bundle through its own reload.
 - Result: ⏳ pending — the mechanism, the fix and the guard are all sandbox-confirmed; what is owed is the signed-in remount path on his own phone. `Cadence: once`.
+### V1127504 — B1574256: a New Orleans click returns a real Orleans Parish lot, with its owner, from exactly ONE query `Blocker: live-GIS`
+
+**Why this needs its own live pass.** GIS endpoint behaviour is a mandatory LIVE-VERIFY class, and `gis.nola.gov` is blocked by this sandbox's egress policy — re-confirmed live while wiring the row (`curl` → the CONNECT tunnel itself is rejected, HTTP 403, the same wall every route-3 county host hits here). Michael measured the raw endpoint from his own browser (3 spread points, real parcels, 65–114ms), which is strong evidence for the ENDPOINT; it did not go through the deployed app's own click → identify → parcel-panel path with this session's wiring and field-mapping in place, which is what is left.
+
+**What was verified here (this session, sandbox).**
+1. `test/countyStatewideDerivation.test.js`, new describe block "B1574256/B1574257 — Louisiana parishes route by geometry, not just by bbox" — 8 cases against the REAL committed `public/geo/county-polygons.json` (not a fixture): all three measured points resolve `countyIdentity → ok / la_orleans / "Orleans Parish" / LA`, each issues exactly one parcel-query candidate (`["la_orleans"]`), geometry answers confidently at each (`nearEdge: false`), the label and help say Parish and never County, an unwired parish (Lafayette) still reports its own correct name, and Orleans/East Baton Rouge never query each other.
+2. **Mutation-proven:** reverting B1574257's `COUNTY_DESIGNATION_RE` to the old `/\bcounty\b/g` turns 5 of those cases red, including the known-good East Baton Rouge arm.
+3. `test/counties.test.js`, new describe block "B1574257 — the county-designation strip introduces no new key collisions" — 4 cases, measured across all 3,144 asset rows.
+4. `test/appraisal.test.js`, new describe block "B1574258 — owner resolution on the OWNERNME1/OWNERNME2 parcel schema" — 8 cases including the mailing-column negative and the pre-existing TxGIO known-good arm; mutation-proven (5 red on revert).
+5. `node ui-audit/gis-source-audit.mjs` — clean; `la_orleans` carries a declared `verifiedNote` in `countiesProvenance.js` (no `verifiedOn`, since the endpoint could not be re-probed from here).
+6. Full `npx vitest run` green, and `npm run ci-parity`.
+
+**Steps, each with a named expected result. Needs a network outside this sandbox's egress allowlist:**
+1. On planyr.io, click the New Orleans CBD point (29.9511, -90.0715) and select the parcel there. **Expect:** a real lot renders with **PARCELID 41036654** and situs address **"826 UNION ST, LA"** — not "no parcel right there."
+2. On that same parcel panel, read the headline. **Expect:** the owner reads **"CONDO MASTER"** (this is what B1574258 fixes — before it, the Owner line was absent entirely for this schema).
+3. Click the Algiers point (29.9440, -90.0480). **Expect:** PARCELID **41001272**, address "1306 PACIFIC AVE, LA, 70114".
+4. Click the Lakeview point (30.0030, -90.1120). **Expect:** PARCELID **41011510**, address "6198 MILNE BLVD, LA, 70124".
+5. With the Network panel open, repeat step 1 and count the `/query` requests. **Expect:** exactly ONE, to `gis.nola.gov` — never a second to `services.arcgis.com/KYvXadMcgf0K1EzK` (East Baton Rouge). Same assertion as V975616's Casa Grande fan-out check.
+6. Read the jurisdiction label wherever the app names the county for this view. **Expect:** it says **"Orleans Parish"** — never "Orleans County", never "Orleans Parish County", and never a neighbouring parish.
+7. Click a Baton Rouge point (30.4515, -91.1871). **Expect:** a real East Baton Rouge lot, and the jurisdiction reads "East Baton Rouge Parish" — the pre-existing casualty of B1574257, which reported "no parcel data wired here yet" before this session.
+8. Read the served chunk hash in the SAME observation as steps 1–7 and confirm it is the post-fix build (CLAUDE.md's stale-bundle rule — a reload does not guarantee a fresh chunk).
+- Result: ⏳ pending — the routing, naming and field-mapping logic are all sandbox-confirmed and mutation-proven (listed above as a routine re-check, not an open question); the live endpoint click-through needs a network outside this sandbox. `Cadence: once` (re-probe on suspicion of drift).
 
 ### V976640 — B1339920: Phoenix/Mesa/Surprise/Buckeye return their real Maricopa County parcel, and Pinal's own points are unaffected `Blocker: live-GIS`
 
