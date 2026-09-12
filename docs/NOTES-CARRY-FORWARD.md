@@ -200,6 +200,45 @@ Two more found since, each worth its own line because each returned a confident 
    minutes after merge, 52 minutes before the report that failed to reproduce it, definitively
    ruling out a slow/delayed build as the explanation.
 
+20. **A BLIND "CLICK AWAY TO DESELECT" COORDINATE CAN HIT APP CHROME, NOT THE CANVAS (B1555152 ×3,
+   2026-09-12).** `page.mouse.click(50, 50)` — meant to deselect a box before a reload — actually
+   navigated the whole app to a DIFFERENT workspace (`#/site`) in a narrow 1191×465 test viewport,
+   because at that size the row-1/row-2 navigation chrome occupies exactly that corner. Every
+   subsequent `waitForSelector` then timed out looking for Notes elements that were no longer
+   mounted at all, which reads like "the page broke" rather than "the test clicked the wrong
+   thing." **Use `Escape` (or a coordinate proven, in the same run, to resolve to the canvas via
+   `elementFromPoint`) to deselect/deactivate, never a fixed low-coordinate blind click** — the
+   safe corner at one window size is a nav tab at another.
+21. **A GENERIC `.container p` SELECTOR CAN MATCH THE WRONG PARAGRAPH THE MOMENT A GESTURE REORDERS
+   THE DOM (B1555152 ×3, 2026-09-12).** A repro seeded ONE flow paragraph, then placed a box via the
+   real double-click-and-type gesture — and `addNoteAnchorAt` deliberately inserts the new anchor
+   BEFORE the document's last block (see `lib/notesAnchorNode.js`'s own header on why appending
+   leaves an unremovable blank line). With only one flow paragraph, that paragraph WAS the last
+   block, so the real placement moved it after the new box in DOM order — and
+   `document.querySelector(".ProseMirror p")` then matched the BOX's own paragraph instead of the
+   flow text, silently comparing the wrong node across the whole rest of the script. **A lookup
+   for "the flow text" must match by its actual TEXT CONTENT, never by DOM position** — position is
+   exactly what a real placement gesture is entitled to change.
+22. **A HARNESS ASSERTION CAN GO STALE THE MOMENT A LATER, DELIBERATE FEATURE SHIPS AGAINST THE SAME
+   ELEMENT (B1555152 ×3, 2026-09-12).** `verify-notes-box-selection.mjs`'s Attack 1 ("hovering a box
+   reveals nothing at all") and part of Attack 8 ("the controls went away with the selection") both
+   dated to before B1370544 made the drag grip a permanent HOVER affordance
+   (`.planyr-anchor:hover .planyr-anchor-grip`, unconditional on `[data-selected]`, specifically so a
+   box you just typed into stays movable without pressing Escape first). Both assertions failed
+   **deterministically**, not intermittently, once anything hovered the box — Attack 1 because a
+   fresh box was hovered directly, Attack 8 because the mouse pointer was still resting on the box
+   from the two clicks that selected/entered it, left there when the test checked "no controls" after
+   deselecting via Escape. Neither failure had anything to do with whatever change a session touching
+   this file happened to be making. **The tell that separates "a real regression" from "the harness
+   is stale": diff the actual product code the harness is exercising** (here, the box-selection
+   binding for one and only `NoteEditor.jsx`'s CSS for the other) **against what the failing
+   assertion is really about** — if the code path the fix touched has nothing to do with the failing
+   assertion's own subject, look for a later shipped feature the assertion never got updated for
+   before assuming a regression. Fixed by narrowing both assertions to the real, current, documented
+   invariant (hover reveals the grip alone on an unselected box; a genuine deselect only needs the
+   ring/handles gone once the pointer is moved away) rather than reasserting a stronger claim the
+   product no longer makes.
+
 See also `ui-audit/TRAPS.md`, and the named rules **FOREGROUND-OR-VOID** (a background tab cannot
 be measured — not its clock, not its pixels) and **COUNT-EVERY-KIND**.
 
@@ -818,6 +857,33 @@ position**.
       defect that is actually verified (Backspace/Delete on a selected box must never reach the
       page); flag a literal-wording conflict with a protected, tested design rather than silently
       building it or silently ignoring the report.
+    - **⛔ ROUND 3 (2026-09-12) — `editor.commands.blur()` IS NOT A RELIABLE SIGNAL, AND THE FIX WAS
+      TO STOP DEPENDING ON IT RATHER THAN TO MAKE IT MORE RELIABLE.** The owner reproduced the
+      defect AGAIN after the above fix shipped and deployed, then sent a precise correction: his
+      first report that the box "never gets selected at all" was HIS OWN instrument error (reading
+      `className` instead of `data-selected`) — the selection step fires correctly. The REAL defect,
+      measured on his real signed-in Chrome at his own window size (1191×465, a box whose content
+      rect straddles the right edge of that viewport): `data-selected` correctly flips to `"1"`, but
+      `document.activeElement` STAYS on the editor and the native selection/caret from BEFORE the
+      click survives — i.e. the `blur()` call this bug's first round added does not reliably take
+      effect in his real environment. This sandbox could not reproduce the exact mechanism (his real
+      DPI scaling, a live cloud-sync tick, or a genuine Chromium-vs-Chrome difference are all
+      candidates that cannot be checked here), so the fix does not chase the mechanism: it removes
+      `readCaretScope`'s dependency on `blur()` having worked at all. `readCaretScope`'s
+      `activeEditable` flag is `true` whenever ANY contenteditable HAS FOCUS, regardless of where the
+      selection inside it actually is — so it was always one `blur()` failure away from reporting a
+      stale caret as live. `formFieldOwnsTheKey()` (`notesKeyScope.js`) is a narrower predicate for
+      the box-selection binding specifically: it checks ONLY for a genuinely focused form field
+      (`input`/`textarea`/`select`), because the box-selection module already has its OWN, more
+      precise mechanism for knowing whether the caret has genuinely moved — the `paint` effect's
+      transaction-driven `lastCaretPosRef` tracking (added in this bug's first round) — and does not
+      need the broader "is any contenteditable focused" signal `readCaretScope` provides for the
+      unrelated arrow-key binding (B519681) that predicate was actually built for. **Proven
+      red→green**: a harness forcing focus back onto the editor immediately after a real click
+      selects a box (`page.evaluate(() => noteBody.focus())`, reproducing his exact reported
+      `data-selected="1"` + `activeElement="note-body"` state) mutated the flow text on the
+      pre-fix code and left it untouched on the fixed code. Guard:
+      `ui-audit/verify-notes-box-selection.mjs` Attack 16, at his exact reported viewport.
 
 15. **⛔ A LIVE GESTURE'S OWN FLOOR MUST NEVER BE READ FROM THE STATE THE GESTURE ITSELF WRITES
     (the page-width-by-hand feature, 2026-09-11).** The width-drag's live preview floored its

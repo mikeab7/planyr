@@ -114,3 +114,36 @@ export function bindingShouldDecline(event, doc) {
   if (event && UNGATED_KEYS.has(event.key)) return false;
   return keysBelongToTheCaret(doc);
 }
+
+/** ⛔ THE FORM-FIELD-ONLY HALF (B1555152 ×3, 2026-09-12) — for a binding that has its OWN,
+ *  more precise way of knowing whether a live caret has moved since it last checked, and does
+ *  not need (or want) the broader "is any contenteditable currently focused" signal above.
+ *
+ *  ⛔ THE FAILURE THIS EXISTS FOR, MEASURED LIVE ON planyr.io, NOT REASONED FROM A DESK. The
+ *  notes box-selection model calls `editor.commands.blur()` the instant a box is selected, so
+ *  `document.activeElement` should leave the editor and `bindingShouldDecline` above should
+ *  correctly stop declining. On the owner's real, signed-in Chrome (1191×465, the box's own
+ *  content straddling the viewport's right edge) that blur did not take: `data-selected="1"`
+ *  fired correctly, but `document.activeElement` stayed the ProseMirror div and the STALE
+ *  native selection (wherever the caret was BEFORE the box was clicked) survived — and because
+ *  `activeEditable` alone (a contenteditable merely HAVING focus, regardless of where the
+ *  selection inside it actually sits) is enough to satisfy `caretOwnsTheKey`'s `||`, Backspace
+ *  read as "the caret owns this" and edited the stale position instead of the selected box.
+ *  This sandbox could not reproduce WHY the blur failed to stick (a genuinely fresh browser,
+ *  fractional real-machine DPI scaling, or something else this environment cannot fully match)
+ *  — but the fix does not need to know why, because the box-selection model no longer NEEDS
+ *  `activeEditable` to be reliable at all: `NoteEditor.jsx`'s own transaction-driven `paint`
+ *  effect (B1555152 part 2) already tracks the LIVE caret position directly and releases a
+ *  box's selection the instant it genuinely moves — which is the exact question `activeEditable`
+ *  was being asked to answer, answered a more precise way, one that survives a blur() that
+ *  does not stick.
+ *
+ *  ⛔ WHAT THIS DOES NOT COVER, AND MUST NOT BE MADE TO: a real focused form field (the page
+ *  title, a rename field, the search box) sits OUTSIDE the ProseMirror document entirely, so
+ *  the transaction-driven release above never sees it move there and never fires. That is the
+ *  one case still gated here, by name, exactly as `FIELD_SELECTOR` already names it above. */
+export function formFieldOwnsTheKey(doc = typeof document === "undefined" ? null : document) {
+  if (!doc) return false;
+  const active = doc.activeElement;
+  return !!(active && active.closest && active.closest(FIELD_SELECTOR));
+}
