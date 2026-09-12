@@ -678,6 +678,38 @@ test.describe("B1404352 — a schedule can be deleted from its own row", () => {
     expect(posted).toEqual([]); // opening the confirmation deletes nothing by itself
   });
 
+  // B1547280-followup — Michael asked twice (original NEW-1 dispatch, then again as a still-owed
+  // item) whether deleting a schedule holding hundreds of tasks asks for confirmation and what
+  // becomes of the tasks, and asked for it established on a throwaway, not read from source. The
+  // fixture above already carries "Goose Creek" at 301 tasks (this project's real production
+  // count at the time B1489696 shipped) — this test deletes THAT specific row, not a small one,
+  // and checks the real DOM confirmation text against the real count rather than asserting a
+  // rounder, easier number.
+  test("deleting a schedule with hundreds of tasks (301) asks first and names the exact count", async ({ page }) => {
+    await openSchedule(page, ORPHAN, SCHEDULES);
+    // "Goose Creek" alone, not its "(2)"/"(3)"/"(4)" siblings which also match a plain substring.
+    const row = page.getByTestId("schedule-owner-row").filter({ hasText: /Goose Creek(?!\s*\()/ });
+    await expect(row).toHaveCount(1);
+    await row.getByTestId("schedule-owner-kebab").click();
+    await page.getByTestId("schedule-owner-delete").click();
+    const confirm = page.getByTestId("schedule-owner-row-confirm");
+    await expect(confirm).toBeVisible();
+    await expect(confirm).toContainText("Goose Creek");
+    await expect(confirm).toContainText("301 tasks");
+    // Nothing is removed until Delete is pressed — confirming, then actually clicking through.
+    let posted = await page.evaluate(() => (window.__posted || []).filter((m) => m && m.type === "planar:nav-delete"));
+    expect(posted).toEqual([]);
+    await page.getByTestId("schedule-owner-delete-confirm").click();
+    posted = await page.evaluate(() => (window.__posted || []).filter((m) => m && m.type === "planar:nav-delete"));
+    // The shell's own job ends at posting the delete for the schedule's real id — the embedded
+    // app (public/sequence/index.html, not mocked in this shell-only spec) is what actually
+    // removes the project and its tasks on receiving this message; see deleteProject's own
+    // `delete newProjects[id]` in that file, which drops the whole record — tasks included,
+    // regardless of how many there are — and first writes a labelled pre-delete snapshot to
+    // Version History so the removal is recoverable.
+    expect(posted).toEqual([{ source: "planar-shell", type: "planar:nav-delete", id: 1 }]);
+  });
+
   test("an EMPTY schedule's confirmation says so, distinctly from a task count of zero", async ({ page }) => {
     await openSchedule(page, ORPHAN, SCHEDULES);
     await openRowMenu(page, "Goose Creek (2)");
