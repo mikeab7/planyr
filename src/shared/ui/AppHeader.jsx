@@ -703,14 +703,18 @@ export default function AppHeader({
         row.dataset.scheduleCenterDebug = JSON.stringify(rec);
       } catch (_) { /* diagnostic only — never let this throw into the real measurement */ }
     };
-    const measure = () => {
+    // `trigger` names WHICH watch fired this call — kept in every log entry (not just the
+    // rejected ones) precisely because the disagreement this recorder already resolved once
+    // turned on which mechanism was and wasn't firing; a future one-entry log now says whether
+    // ResizeObserver ever ran at all on that page, rather than leaving that unanswered again.
+    const measure = (trigger) => {
       const rowW = row.clientWidth;
       const leftW = left ? left.getBoundingClientRect().width : 0;
       const rightW = right ? right.getBoundingClientRect().width : 0;
       const min = content.getBoundingClientRect().width;
       if (![rowW, leftW, rightW, min].every(Number.isFinite) || rowW <= 0 || min <= 0) {
         row2CenteredRef.current = false;
-        logCenterDebug({ rowW, leftW, rightW, min, max: null, reason: "unmeasurable", mode: "flow" });
+        logCenterDebug({ rowW, leftW, rightW, min, max: null, reason: "unmeasurable", mode: "flow", trigger });
         setRow2Center((prev) => (prev.mode === "flow" ? prev : { mode: "flow", max: null }));
         return;
       }
@@ -718,7 +722,7 @@ export default function AppHeader({
       const wasCentered = row2CenteredRef.current;
       const nowCentered = max != null && (wasCentered ? max >= min : max >= min + ROW2_CENTER_HYSTERESIS_PX);
       row2CenteredRef.current = nowCentered;
-      logCenterDebug({ rowW, leftW, rightW, min, max, wasCentered, nowCentered, mode: nowCentered ? "centered" : "flow" });
+      logCenterDebug({ rowW, leftW, rightW, min, max, wasCentered, nowCentered, mode: nowCentered ? "centered" : "flow", trigger });
       setRow2Center((prev) => {
         const nextMode = nowCentered ? "centered" : "flow";
         const nextMax = nowCentered ? max : null;
@@ -726,17 +730,34 @@ export default function AppHeader({
         return { mode: nextMode, max: nextMax };
       });
     };
-    measure();
+    measure("initial");
+    // B1581952 (root-caused via the recorder above) — the owner's own live browser produced
+    // exactly ONE log entry ever, at `min:0, rightW:5.99, reason:"unmeasurable"` — the very first
+    // synchronous `measure()` call, taken while `ScheduleCenter`/`ScheduleActions` were still
+    // rendering empty (`toolbar.ready` not yet true). It never ran again: the postMessage report
+    // that later populates both zones (0px content → the real ViewToggle, ~6px right zone → the
+    // full toolbar) never retriggered a ResizeObserver callback on his page, though every faithful
+    // reproduction attempted here (including against the real production bundle, at his own
+    // devicePixelRatio) DID observe that exact transition correctly — so this adds a SECOND,
+    // independent watch rather than trusting ResizeObserver alone to catch a mount-from-empty:
+    // a MutationObserver on the row's own subtree, which fires on the DOM-node-level event that
+    // actually happens here (ScheduleCenter's `<></>` being replaced by `<ViewToggle/>`'s real
+    // markup) rather than relying on a box-size-change notification for it.
+    const onMutate = () => measure("mutation");
+    const onResize = () => measure("resize");
+    const onWindowResize = () => measure("window-resize");
+    const mo = typeof MutationObserver === "function" ? new MutationObserver(onMutate) : null;
+    mo?.observe(row, { childList: true, subtree: true });
     if (typeof ResizeObserver !== "function") {
-      window.addEventListener("resize", measure);
-      return () => window.removeEventListener("resize", measure);
+      window.addEventListener("resize", onWindowResize);
+      return () => { window.removeEventListener("resize", onWindowResize); mo?.disconnect(); };
     }
-    const ro = new ResizeObserver(measure);
+    const ro = new ResizeObserver(onResize);
     ro.observe(row);
     if (left) ro.observe(left);
     if (right) ro.observe(right);
     ro.observe(content);
-    return () => ro.disconnect();
+    return () => { ro.disconnect(); mo?.disconnect(); };
   }, [narrow]);
   const row2Centered = !narrow && row2Center.mode === "centered";
   // NEW-2 (B917073) — one edge-fade reading per scrolling row; see `useScrollEdges` above.
