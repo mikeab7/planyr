@@ -121,10 +121,20 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   freeze a project's name — worse than what it would prevent. Guards: the repo-root `test/` suite
   **renameStampIntegrity** (mutation-proven — every assertion was required to go red against the
   untouched source first) and `db/test/sites_rename_stamp_guard.test.sql` (8 checks, run green
-  against production 2026-09-10, and red — cases 1-3 — before the trigger existed). The repair for
-  rows already damaged is `db/rename_stamp_backfill_20260910.sql`: **deliberately NOT run**, and it
-  is ONE row, not 64 — the other 63 belong to groups with no stamp anywhere, where writing a
-  timestamp would be inventing a fact rather than restoring one.
+  against production 2026-09-10, and red — cases 1-3 — before the trigger existed).
+  **⛔ B1584832 ("NEW-2", 2026-09-12) — THE GUARD STOOD DOWN ON MOST OF THE TABLE, because "no valid
+  stamp" is the guard's own no-op case.** Re-measured 2026-09-12: 88 of 125 rows (52 present-but-empty
+  + 36 no key at all) carried nothing the trigger could reason about — growth since the 2026-09-10
+  count, not a discrepancy. Owner-approved (verbatim: "Yes proceed with the backfill"), RUN against
+  production the same day: `db/rename_stamp_backfill_20260912.sql` supersedes the 2026-09-10 one-row
+  proposal (folds it in as Tier 1 — transcribe a sibling's real stamp where one exists, still exactly
+  the Silvestri row) and additionally seeds the other 87 from their OWN `updated_at` (Tier 2 — no group
+  anywhere held a stamp for them, so there is nothing to transcribe). All 125 rows now carry a valid
+  stamp; re-run the census in that file's header to confirm before touching either script again.
+  **⛔ NOT closed by this: `rename_site_group` still stamps `p_renamed_at` from the CLIENT's clock**,
+  so a device whose clock runs behind the server can still lose a genuine rename to this backfill's
+  Tier-2 seed under a recency-based guard (NEW-1's concurrent change). Filed, not fixed, as B1584833 —
+  read that file's own header before treating the backfill as the whole story.
 - **⛔ `layerZoomGate.js` (B323424/B323425) — THE ONE ANSWER TO "IS THIS ROW ACTUALLY DRAWING RIGHT
   NOW?", and the reason it is shared rather than a note on the contour row.** A checked layer that a
   zoom gate suppresses looked exactly like a broken one: the owner ticked *"Contour lines (1 ft)"*
