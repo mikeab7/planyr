@@ -9313,6 +9313,21 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
 
 **Result:** ⏳ pending — needs a real signed-in browser session with live GIS reachability and real comp data; not reachable from this sandbox. `Cadence: once`.
 
+### V1120176 — B1555152 (×3): a floating note box's Backspace/Delete stays scoped to the box even when `document.activeElement` sticks on the editor after a real click selects it `Blocker: real-data`
+
+**Why this needs its own real pass.** This is the third round on this item. Round 1's `editor.commands.blur()` fix and round 2's re-test both held up under every check this sandbox could run, and the defect still reproduced live — because the real trigger (why `blur()` does not always take effect on the owner's machine) lives in an environment this sandbox cannot reproduce (his real DPI scaling, a live cloud-sync tick, or a genuine Chromium-vs-real-Chrome difference are all candidates, none testable here). This round's fix (`formFieldOwnsTheKey`, `notesKeyScope.js`) removes the DEPENDENCY on `blur()` succeeding rather than trying to make it more reliable, and is proven red→green against a harness that forces `document.activeElement` back onto the editor immediately after a real click selects a box — a faithful proxy for his exact measured state (`data-selected="1"`, `activeElement` still the editor, a stale native selection surviving), reproduced at his own reported window size (1191×465, a box whose content rect straddles the viewport's right edge). Guard: `ui-audit/verify-notes-box-selection.mjs` Attack 16, 4/4 passing, and the full harness (131 checks across four window/zoom configurations) green. What cannot be proven here: whether his real machine's specific mechanism for `blur()` not sticking is actually eliminated, since this sandbox cannot reproduce that mechanism directly — only the state it produces.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, a short-and-wide window if possible (his was 1191×465):**
+1. Open a throwaway note (never one of Michael's real pages — owner constraint 7). Type a line of flow text, then double-click the grey mat beside the sheet (to the right of the page) and type a few words into the box that appears there, so the box sits near the sheet's right edge.
+2. Click once into the flow text (placing an ordinary caret there), then click once on the box's own words. **Expect:** the box shows its selection ring (a highlighted outline), not a text caret inside it.
+3. Press Backspace. **Expect:** the box disappears entirely (Delete/Backspace on a selected box removes it); the flow text is untouched, letter-for-letter — no character missing from it.
+4. Press Ctrl+Z. **Expect:** the box reappears exactly as it was.
+5. Repeat steps 1–4 a few times in a row, including right after opening the note fresh (no prior clicks) and after switching away to another note and back, to catch any timing-dependent variant of the original report ("sometimes it takes a double click, sometimes a click").
+6. Read the served `NoteEditor-*.js` chunk hash in the SAME observation as the result (this repo's own live-measurement rule), confirming it postdates this fix's merge.
+7. Delete the throwaway note and say exactly what was created/removed.
+
+**Result:** ⏳ pending — needs the owner's own real browser/machine, since this item's root cause is specifically an environment this sandbox cannot reproduce. `Cadence: once`.
+
 ## ✅ Verified / ❌ Failed — history
 
 > Passed/failed items are archived to **`VERIFICATION-DONE.md`** to keep this file fast.

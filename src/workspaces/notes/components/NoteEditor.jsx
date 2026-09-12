@@ -44,7 +44,7 @@ import {
 } from "../lib/notesZoom.js";
 import { HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.js";
 import { PASTE_MODES } from "../lib/notesPastePlain.js";
-import { bindingShouldDecline } from "../lib/notesKeyScope.js";
+import { formFieldOwnsTheKey, UNGATED_KEYS } from "../lib/notesKeyScope.js";
 import { DEFAULT_DENSITY, densityFor } from "../lib/notesSpacing.js";
 import { PAGE_WIDTH_MIN, dragWidthFromDelta, resolvePinnedBaseWidth } from "../lib/notesPageWidth.js";
 import { indentCssRules } from "../lib/notesIndentLevel.js";
@@ -2103,24 +2103,26 @@ export default function NoteEditor({
    * exist is exactly the shape of defect this module keeps shipping.
    *
    * ⛔ IT IS BOUND ONLY WHILE A SELECTION EXISTS, and it declines while a FORM FIELD has focus, so
-   * the page title can still be typed in and arrowed through. The editor itself is deliberately
-   * NOT excluded: a live selection is the mode you are in, and clicking into the document clears
-   * it on the way (see the mat's press rule), so the two can never both be live by accident. */
+   * the page title can still be typed in and arrowed through — nothing more (B1555152 ×3, see
+   * `formFieldOwnsTheKey`'s own header in lib/notesKeyScope.js for the full reasoning and the
+   * production failure that produced it). This used to also decline whenever ANY contenteditable
+   * held focus (`bindingShouldDecline`, built for NEW-ARROWS below) — correct in the two states
+   * that were measured for that fix, but it made this binding's correctness depend on
+   * `editor.commands.blur()` reliably moving focus away the instant a box is selected. On the
+   * owner's real signed-in Chrome that blur did not stick — `data-selected="1"` fired, but
+   * `document.activeElement` stayed the editor and a STALE selection survived — and because
+   * merely HAVING a contenteditable focused was enough on its own to decline, Backspace edited
+   * the stale position instead of deleting the selected box. This binding no longer needs that
+   * signal to be reliable: `NoteEditor.jsx`'s own transaction-driven `paint` effect (B1555152
+   * part 2, above) already tracks the LIVE caret position directly and releases a box's
+   * selection the instant it genuinely moves — which is exactly what a click into flow text
+   * (NEW-ARROWS's own case) does, so the caret still correctly wins there; it just no longer
+   * depends on blur() having worked to get that answer. */
   useEffect(() => {
     if (!selection.size) return undefined;
     const onKey = (e) => {
-      /* ⛔ THE CARET OWNS THE KEY WHENEVER THERE IS ONE (NEW-ARROWS). This used to decline only
-       * for `input, textarea, select` — and the document is a CONTENTEDITABLE DIV, which is none
-       * of those. It was excluded deliberately, on the argument that clicking into the document
-       * clears the box selection on the way; measured, it does not, so with a box selected and
-       * the caret in ordinary flow text every arrow moved the BOX and left the caret alone. That
-       * is the owner's reported "direction keys aren't working", reachable in three clicks and
-       * invisible once you have looked away from the selected box.
-       *
-       * The marquee case this binding exists for is UNAFFECTED: the press that starts a band is
-       * `preventDefault`ed, so there is no caret and focus is on `<body>` — measured, not assumed.
-       * See lib/notesKeyScope.js for both states and the property the guard asserts. */
-      if (bindingShouldDecline(e)) return;
+      if (UNGATED_KEYS.has(e.key)) { selectionKeyDown(e); return; }
+      if (formFieldOwnsTheKey()) return;
       selectionKeyDown(e);
     };
     window.addEventListener("keydown", onKey);

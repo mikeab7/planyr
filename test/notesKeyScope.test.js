@@ -21,7 +21,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { caretOwnsTheKey, readCaretScope, bindingShouldDecline, UNGATED_KEYS, FIELD_SELECTOR } from "../src/workspaces/notes/lib/notesKeyScope.js";
+import { caretOwnsTheKey, readCaretScope, bindingShouldDecline, formFieldOwnsTheKey, UNGATED_KEYS, FIELD_SELECTOR } from "../src/workspaces/notes/lib/notesKeyScope.js";
 
 const NOTES = join(process.cwd(), "src/workspaces/notes");
 
@@ -82,6 +82,40 @@ describe("the decision: who owns a keypress", () => {
   });
 });
 
+/* ⛔ THE FORM-FIELD-ONLY SIBLING (B1555152 ×3) — for a binding with its OWN, more precise way of
+ * knowing whether the caret has moved since it last checked, and so does not need (and must NOT
+ * use) the broader "any contenteditable focused" signal above. See `formFieldOwnsTheKey`'s own
+ * header in lib/notesKeyScope.js for the production failure this closes: a box's own selection
+ * ring fired correctly, `editor.commands.blur()` did not move focus away on the owner's real
+ * machine, and `activeEditable` alone (a contenteditable merely HAVING focus, regardless of where
+ * its selection sits) was enough to make Backspace edit a stale position instead of the box. */
+describe("the form-field-only half: declines to a REAL field, never merely a focused editor", () => {
+  const fieldDoc = (tag) => ({ activeElement: { closest: (sel) => (sel === FIELD_SELECTOR ? { tagName: tag } : null) } });
+
+  it("declines while a real field (input/textarea/select) has focus", () => {
+    expect(formFieldOwnsTheKey(fieldDoc("INPUT"))).toBe(true);
+    expect(formFieldOwnsTheKey(fieldDoc("TEXTAREA"))).toBe(true);
+    expect(formFieldOwnsTheKey(fieldDoc("SELECT"))).toBe(true);
+  });
+
+  it("⛔ THE FIX ITSELF — a contenteditable holding focus, with no field, does NOT decline", () => {
+    // This is the exact state measured on the owner's account after a stage-1 box select whose
+    // blur() failed to stick: activeElement is still the ProseMirror div, isContentEditable true,
+    // and there is no real <input>/<textarea>/<select> anywhere. `bindingShouldDecline` reads
+    // this as "the caret owns it" (activeEditable=true) and gets it wrong; this predicate must not.
+    const staleFocusStillOnEditor = { activeElement: { isContentEditable: true, closest: () => null } };
+    expect(formFieldOwnsTheKey(staleFocusStillOnEditor)).toBe(false);
+  });
+
+  it("is safe with no document at all, which is what a listener gets before mount", () => {
+    expect(formFieldOwnsTheKey(null)).toBe(false);
+  });
+
+  it("reads a bare body with nothing focused as nobody's field either", () => {
+    expect(formFieldOwnsTheKey({ activeElement: { closest: () => null } })).toBe(false);
+  });
+});
+
 /* ════════════════════════════════════════════════════════════════════════════════════════
  * THE PROPERTY — every global keydown binding routes through the predicate.
  * ═══════════════════════════════════════════════════════════════════════════════════════ */
@@ -122,9 +156,12 @@ describe("⛔ THE PROPERTY: every global keydown binding in Notes declines to th
       if (!binds.length) continue;
       const r = rel(f);
       if (EXEMPT.has(r)) continue;
-      /* Either entry point counts: `bindingShouldDecline` is `keysBelongToTheCaret` plus the
-       * named Escape exemption (B539653), so a binding using it has asked the question. */
-      if (!/keysBelongToTheCaret\s*\(|bindingShouldDecline\s*\(/.test(src)) {
+      /* Any of the three entry points counts: `bindingShouldDecline` is `keysBelongToTheCaret`
+       * plus the named Escape exemption (B539653); `formFieldOwnsTheKey` (B1555152 ×3) is the
+       * deliberately narrower sibling for a binding with its own, more precise way of knowing
+       * whether the caret has moved — either way, a binding using one of these has asked the
+       * shared module's question rather than hand-rolling its own answer. */
+      if (!/keysBelongToTheCaret\s*\(|bindingShouldDecline\s*\(|formFieldOwnsTheKey\s*\(/.test(src)) {
         offenders.push(`${r} binds keydown on window/document but never asks the key-scope predicate`);
       }
     }
@@ -152,10 +189,17 @@ describe("⛔ THE PROPERTY: every global keydown binding in Notes declines to th
     }
   });
 
-  it("the leaking binding is fixed at its own site — NoteEditor asks before nudging", () => {
-    const src = readFileSync(join(NOTES, "components/NoteEditor.jsx"), "utf8");
-    expect(src).toMatch(/if \(bindingShouldDecline\(e\)\) return;/);
-  });
+  it("⛔ THE BOX-SELECTION BINDING NOW ASKS THE NARROWER, MORE PRECISE QUESTION (B1555152 ×3) —",
+    () => {
+      // Superseded from `if (bindingShouldDecline(e)) return;`: that phrasing made this
+      // binding's correctness depend on `editor.commands.blur()` reliably moving focus off the
+      // editor the instant a box is selected, which did not hold on the owner's real machine.
+      // `formFieldOwnsTheKey` answers the one part of the old question this binding still needs
+      // (a real field elsewhere outranks a selected box) without needing blur() to have worked —
+      // see its own header in lib/notesKeyScope.js.
+      const src = readFileSync(join(NOTES, "components/NoteEditor.jsx"), "utf8");
+      expect(src).toMatch(/if \(formFieldOwnsTheKey\(\)\) return;/);
+    });
 
   /* ⛔ ESCAPE IS EXEMPT, AND THAT IS A RULE RATHER THAN A HOLE (B539653). The gate exists so a
    * binding cannot steal a key the person typing NEEDS. A caret has no use for Escape, and
