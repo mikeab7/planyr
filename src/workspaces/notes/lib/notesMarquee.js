@@ -1,4 +1,11 @@
-/* notesMarquee — ONE GESTURE ON EMPTY PAGE, TWO MEANINGS, DECIDED BY DISTANCE (B421494).
+/* notesMarquee — ONE GESTURE ON EMPTY PAGE, THREE MEANINGS: DISTANCE, THEN THE MODIFIER (B421494,
+ * extended by NEW-1/NEW-2).
+ *
+ * ⛔ READ THE DISTANCE RULE BELOW FIRST — IT IS UNCHANGED, AND THAT IS THE POINT. A third meaning
+ * (pan the canvas) arrived without touching the boundary that four rounds of work went into: a
+ * press that does not travel is still a PLACE, and only a press that DOES travel now has to ask
+ * which of the two travelling meanings it is. Shift says marquee; nothing says pan. See
+ * `gestureOutcome` and `latchGesture`.
  *
  * ⛔ THE PROBLEM THIS FILE EXISTS TO SETTLE, and it is the reason marquee select was deferred a
  * round rather than bolted on. A press on blank page ALREADY means something: it places a box
@@ -49,9 +56,63 @@ export function dragDistance(from, to) {
  * nothing and select nothing — a dead press, which is the "it works intermittently" failure this
  * module has already produced twice by other means. Returning both would leave a stray box behind
  * every marquee, which is worse than having no marquee at all.
+ *
+ * ⛔ AND SINCE NEW-1 THERE ARE THREE ANSWERS, NOT TWO, WITH THE MODIFIER DECIDING BETWEEN THE TWO
+ * TRAVELLING ONES — the owner's words: *"Click and drag should move like you're on a map"* and
+ * *"shift click and drag should select multiple items."* The DISTANCE still decides whether the
+ * press travelled at all; SHIFT decides what travelling means. Deliberately in that order, because
+ * distance is the boundary that four rounds of work went into and it is unchanged: a press below
+ * `DRAG_SLOP` is a PLACE whether or not Shift was held, so the placement path this module keeps
+ * breaking is reached by exactly the same presses it was before.
+ *
+ * `shift` is read at the PRESS, by the caller, and never re-read mid-gesture. A gesture that
+ * changed meaning halfway through because a finger landed on a modifier is the same class of
+ * "it behaves differently depending on invisible state" defect the distance boundary exists to
+ * prevent.
  */
-export function gestureOutcome(from, to, { slop = DRAG_SLOP } = {}) {
-  return dragDistance(from, to) > slop ? "select" : "place";
+export function gestureOutcome(from, to, { slop = DRAG_SLOP, shift = false } = {}) {
+  if (dragDistance(from, to) <= slop) return "place";
+  return shift ? "select" : "pan";
+}
+
+/**
+ * The outcome a gesture has COMMITTED to, once it has travelled — `null` while it is still a place.
+ *
+ * ⛔ A GESTURE THAT HAS BECOME A PAN NEVER TURNS BACK INTO A PLACE, and this is not a refinement,
+ * it is what stops the pan dropping litter. Panning out and back to where you started is an
+ * ordinary thing to do with a map — and `gestureOutcome` read at mouse-up would call that round
+ * trip a zero-distance press and PLACE A NOTE at the end of it. The same latent hole was always
+ * there for the marquee (band out, band back, a stray box); nobody hit it because a rubber band is
+ * rarely returned to its own origin, and a pan is.
+ *
+ * The latch is one-way and it never looks at `shift` again: `latched` is what the press decided.
+ */
+export function latchGesture(latched, from, to, { slop = DRAG_SLOP, shift = false } = {}) {
+  if (latched === "pan" || latched === "select") return latched;
+  const now = gestureOutcome(from, to, { slop, shift });
+  return now === "place" ? null : now;
+}
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
+
+/**
+ * Where a scroller lands when the canvas is dragged by one delta.
+ *
+ * ⛔ THE SIGN IS THE WHOLE OF IT, AND IT IS THE ONE THING WORTH A UNIT TEST: dragging the canvas
+ * to the RIGHT shows you what was to its LEFT, so the scroll offset goes DOWN. Getting it
+ * backwards produces a surface that runs away from the pointer, which reads as broken rather
+ * than inverted.
+ *
+ * ⛔ AND IT CLAMPS TO THE REAL EXTENTS rather than trusting the browser to. The browser does clamp
+ * a `scrollLeft` write, so this is belt and braces there — but it also makes "a pan past the edge
+ * stops AT the edge, and comes straight back the moment you drag the other way" a property that
+ * can be checked at zero pixels instead of only in a browser.
+ */
+export function panTarget(start, { dx = 0, dy = 0 } = {}, { maxLeft = Infinity, maxTop = Infinity } = {}) {
+  return {
+    scrollLeft: clamp(num(start?.scrollLeft) - num(dx), 0, Math.max(0, num(maxLeft, Infinity))),
+    scrollTop: clamp(num(start?.scrollTop) - num(dy), 0, Math.max(0, num(maxTop, Infinity))),
+  };
 }
 
 /** The rubber band, normalised so it is the same rectangle whichever corner you started from. */

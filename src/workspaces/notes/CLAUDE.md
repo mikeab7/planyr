@@ -86,6 +86,12 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   a table crashing on `setContent` against a torn-down instance) — read it before changing the save
   path. There must never be a "sync content on pageId change" effect; the search effect there is
   decorations-only and guards `isDestroyed`, which is the bar any new effect has to clear.
+  **⛔ FOUR MEANINGS NOW COMPETE FOR ONE PRESS ON THE MAT** (B1597760/B1597761): a press that does
+  not travel PLACES · a press that travels PANS the canvas · a press that travels with Shift held
+  draws the marquee · a press that starts on one of the sheet's four edge grips resizes the page.
+  The order matters — distance first, modifier second — and it is written out as a table in
+  `docs/NOTES-CARRY-FORWARD.md` §7. **Read that before adding a fifth claimant.** The decisions are
+  pure and live in `lib/notesMarquee.js`; only the wiring is here.
 - `components/NoteToolbar.jsx` — the formatting bar. **Standing rule (NOTES-TOOLBAR-STATE):
   every control reports the SELECTION, or reports nothing** — uniform shows the real value,
   a caret shows what the next character gets, a genuinely mixed range shows blank (value
