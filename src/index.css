@@ -319,6 +319,14 @@
   --focus-ring-soft: rgba(194, 65, 12, .10);
   --invalid-ring-soft: rgba(226, 75, 74, .18);  /* the halo on a genuinely REJECTED value */
 
+  /* Modal scrim + shadow — deliberately theme-INVARIANT (same value in both blocks, like
+     --canvas-line-casing): a dark translucent backdrop and a dark drop-shadow read correctly
+     behind a raised dialog whether the app itself is in light or dark theme, so there is no
+     "dark-theme version" to define separately. Matches the values already established by
+     AuthPanel.jsx / SitePlanner.jsx's own dialogs. */
+  --modal-scrim:  rgba(20, 18, 15, 0.55);
+  --modal-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+
   /* Interaction surfaces (hovers, scrollbars, kbd chips) — theme-aware. */
   --hover-ghost:         #eef1f5;
   --hover-ghost-danger:  #fcebe3;
@@ -455,6 +463,10 @@
   --focus-ring:      rgba(242, 107, 58, .50);
   --focus-ring-soft: rgba(242, 107, 58, .16);
   --invalid-ring-soft: rgba(242, 112, 111, .24);
+
+  /* Modal scrim + shadow — theme-invariant, see the light :root block for why. */
+  --modal-scrim:  rgba(20, 18, 15, 0.55);
+  --modal-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
 
   /* Interaction surfaces */
   --hover-ghost:         rgba(255, 255, 255, .06);

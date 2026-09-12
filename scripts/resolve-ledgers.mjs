@@ -39,7 +39,9 @@
  *
  * THE PRECONDITION, and it is exactly the property that makes union safe:
  *
- *     within a conflict hunk, NO B#/V# heading may appear on BOTH sides.
+ *     within a conflict hunk, NO B#/V# heading may appear on BOTH sides, AND every non-empty
+ *     side must consist ENTIRELY of one or more freshly-inserted item blocks (each starting
+ *     with its own `### B#`/`### V#` heading) — never a bare fragment of an existing item's body.
  *
  * Two sides that name disjoint ids are two independent appends and concatenating them loses
  * nothing. Two sides that name the same id are two edits of one item, or an edit racing a move —
@@ -47,6 +49,20 @@
  * place for a human. It never guesses. That covers the adjacent-hunk trap too: when git widens a
  * hunk to include an untouched neighbour, the neighbour's id shows up on both sides and the whole
  * hunk is refused rather than silently double-written.
+ *
+ * ⛔ AMENDED (B1592848, 2026-09-12) — THE ORIGINAL PRECONDITION MISSED A REAL CASE: an in-place
+ * edit to a NON-heading line inside an existing item never puts a `### B#` in the hunk text at
+ * all, so the id-overlap check saw two EMPTY sets and called it safe. Reproduced directly: two
+ * branches each rewrote item B500's own `- Verify:` line differently (not touching its heading);
+ * `resolveConflicts` reported `ok: true` and unioned BOTH edits into the same item's body — one
+ * line silently became two, inside a single item, with no duplicate heading for anything else in
+ * this file to catch. That is precisely the "two sessions amending the SAME item" failure this
+ * script exists to be incapable of; the id-overlap check alone cannot see it because the item
+ * whose body is being edited is never named inside the hunk. The fix: a hunk is safe to union
+ * only if EVERY non-empty side is nothing but complete new item insertions (see
+ * `isPureItemInsertion` below) — a bare body fragment on either side now refuses the whole hunk,
+ * same as a shared id does. This also closes the sibling case (an edit racing a DELETE/move):
+ * one side empty, the other a lone edited body line with no heading, refused the same way.
  *
  * AND A POST-CONDITION, because a precondition that is subtly wrong should not be able to write a
  * broken ledger: after unioning, the result is re-checked with the SAME duplicate detectors CI runs
@@ -92,8 +108,23 @@ const ID_RE = /^###\s+([BV]\d+)\b/gm;
 const idsIn = (text) => new Set([...(text || "").matchAll(ID_RE)].map((m) => m[1]));
 
 /**
+ * True if `sideLines` (one side of a conflict hunk) is either empty, or — skipping any purely
+ * blank leading lines — begins with a `### B#`/`### V#` heading. That is the only shape a "clean
+ * append" hunk can take: one or more freshly-inserted item blocks, each announcing its own id. A
+ * non-empty side that does NOT start this way is a bare fragment of an existing item's BODY (an
+ * in-place edit), which is exactly what the id-overlap check alone cannot see (B1592848) — the
+ * heading living outside the hunk entirely. PURE, exported for the unit tests to pin directly.
+ */
+export function isPureItemInsertion(sideLines) {
+  let i = 0;
+  while (i < sideLines.length && sideLines[i].trim() === "") i += 1;
+  if (i >= sideLines.length) return true; // empty, or all-blank: nothing was inserted here
+  return /^###\s+[BV]\d+\b/.test(sideLines[i]);
+}
+
+/**
  * Split a conflicted file into hunks. PURE. Returns
- * `{ ok, hunks:[{ ours, theirs, oursIds, theirsIds, overlap }], text, overlaps:[{ids, at}] }`.
+ * `{ ok, hunks:[{ ours, theirs, oursIds, theirsIds, overlap }], text, overlaps:[{ids, at, reason}] }`.
  * `text` is the unioned result and is only meaningful when `ok`.
  */
 export function resolveConflicts(raw) {
@@ -123,8 +154,10 @@ export function resolveConflicts(raw) {
     const oursIds = idsIn(ours.join("\n"));
     const theirsIds = idsIn(theirs.join("\n"));
     const overlap = [...oursIds].filter((id) => theirsIds.has(id));
-    hunks.push({ ours, theirs, oursIds: [...oursIds], theirsIds: [...theirsIds], overlap });
-    if (overlap.length) overlaps.push({ ids: overlap, at: startLine });
+    const inPlaceEdit = !overlap.length && (!isPureItemInsertion(ours) || !isPureItemInsertion(theirs));
+    hunks.push({ ours, theirs, oursIds: [...oursIds], theirsIds: [...theirsIds], overlap, inPlaceEdit });
+    if (overlap.length) overlaps.push({ ids: overlap, at: startLine, reason: "same-id" });
+    else if (inPlaceEdit) overlaps.push({ ids: [], at: startLine, reason: "in-place-edit" });
     // Union: ours then theirs, in that order. Both sides prepend to the top of a section, so this
     // reproduces exactly the hand resolution — "keep both sides", newest-first, nothing renumbered.
     out.push(...ours, ...theirs);
@@ -274,7 +307,12 @@ function main(argv) {
     const res = resolveConflicts(raw);
     if (res.unterminated) { refusals.push({ file, reason: `unterminated conflict marker at line ${res.unterminated}` }); continue; }
     if (!res.ok) {
-      for (const o of res.overlaps) refusals.push({ file, reason: `${o.ids.join(", ")} appears on BOTH sides of the hunk at line ${o.at}` });
+      for (const o of res.overlaps) {
+        const reason = o.reason === "in-place-edit"
+          ? `an in-place edit inside an existing item's body at line ${o.at} (a non-empty side has no item heading of its own — not a clean append)`
+          : `${o.ids.join(", ")} appears on BOTH sides of the hunk at line ${o.at}`;
+        refusals.push({ file, reason });
+      }
       continue;
     }
     plan.push({ file, text: res.text, hunks: res.hunks.length });
@@ -284,8 +322,9 @@ function main(argv) {
     process.stderr.write(
       `\n⛔ REFUSING TO AUTO-RESOLVE — this is a real disagreement, not an arrival-order collision.\n\n` +
       refusals.map((r) => `   ${r.file}: ${r.reason}\n`).join("") +
-      `\n   The same id on both sides means two sessions EDITED THE SAME ITEM (or an edit raced a\n` +
-      `   lifecycle move). A union would keep both copies and silently duplicate the item, which in\n` +
+      `\n   The same id on both sides — or an in-place edit to an existing item's body with no new\n` +
+      `   heading of its own (B1592848) — means two sessions EDITED THE SAME ITEM (or an edit raced\n` +
+      `   a lifecycle move). A union would keep both copies and silently duplicate the item, which in\n` +
       `   the single source of truth for what is open is a correctness failure, not untidiness.\n` +
       `   Merge those hunks by hand; the conflict markers are untouched. Nothing was written.\n\n`);
     logRun({ outcome: "refused", files: mine.length, refusals: refusals.length });
