@@ -413,3 +413,107 @@ describe("B1338896 — candidateCountiesForPoint narrows to ONE real-CAD candida
     expect(candidateCountiesForPoint(29.6197, -95.6349)).toEqual(["fortbend", "txgio_statewide"]);
   });
 });
+
+/* ⛔ B1574256 / B1574257 (2026-09-12) — ORLEANS PARISH, AND THE PARISH-NAME DEFECT WIRING IT
+ * EXPOSED.
+ *
+ * B1574256 wires `la_orleans` (gis.nola.gov ParcelSearch layer 0, measured live from the owner's
+ * own browser — this sandbox's egress blocks that host). B1574257 is the bug found while doing it:
+ * `countyKeyForName` stripped only the word "County" from a display name, so the nationwide
+ * geometry asset's "Orleans Parish" slugged to `orleansparish` and asked for a key that exists
+ * nowhere. Louisiana's parcel routing therefore never used geometry AT ALL — including for
+ * `la_eastbatonrouge`, wired since B1455634, whose Baton Rouge points reported `no-source` for a
+ * parish that was wired and working.
+ *
+ * THE KNOWN-GOOD ARM IS DELIBERATE (DRIVER-SCROLL-IS-NOT-APP-SCROLL §6). `la_eastbatonrouge` is
+ * code this item does not touch and whose correct answer is known independently: it was already
+ * configured, with a real service, before either item existed. If the parish assertions below pass
+ * while the Baton Rouge arm fails, the fault is in this suite, not in the app. Both were measured
+ * RED on the pre-fix code (`countyKeyForName → null`, `countyIdentity → no-source` at every one of
+ * these points) before the fix was written — the teeth proof NO-ONE-OWNS-A-COMPOSITE asks for,
+ * taken against untouched code rather than a planted defect. */
+describe("B1574256/B1574257 — Louisiana parishes route by geometry, not just by bbox", () => {
+  // The three points Michael measured live against gis.nola.gov, spread across the whole parish.
+  const NOLA_POINTS = [
+    ["New Orleans CBD", 29.9511, -90.0715],
+    ["Algiers", 29.9440, -90.0480],
+    ["Lakeview", 30.0030, -90.1120],
+  ];
+
+  it.each(NOLA_POINTS)("%s resolves to Orleans Parish with a real parcel source", (label, lat, lng) => {
+    const id = countyIdentity(lat, lng);
+    expect(id.status, label).toBe("ok");
+    expect(id.key, label).toBe("la_orleans");
+    // The DESIGNATION is part of the answer: Louisiana has parishes, not counties.
+    expect(id.name, label).toBe("Orleans Parish");
+    expect(id.state, label).toBe("LA");
+  });
+
+  /* ⚠ STATED HONESTLY, because the mutation run says so and a reader would otherwise assume the
+   * stronger claim: for these three points the ONE-query result is carried by the bbox pre-filter,
+   * not by NEW-6's confident-geometry narrowing. Orleans and East Baton Rouge are ~80 miles apart
+   * and their padded bboxes do not overlap, so exactly one Louisiana box matches either way —
+   * re-running this block against the pre-fix `countyKeyForName` leaves these three GREEN while
+   * the identity assertions above go red. That is the opposite of the Casa Grande case, where the
+   * bboxes DID overlap and geometry was the only thing that could separate them. The assertion is
+   * still the one the dispatch asked for and is still worth pinning; what B1574257 buys is that
+   * the narrowing mechanism now WORKS in Louisiana at all, so the next parish wired here (Jefferson
+   * Parish wraps Orleans on three sides) cannot reintroduce the Casa Grande shape. */
+  it.each(NOLA_POINTS)("%s issues EXACTLY ONE parcel query — the same assertion as the Casa Grande fixture", (label, lat, lng) => {
+    expect(candidateCountiesForPoint(lat, lng), label).toEqual(["la_orleans"]);
+  });
+
+  it("and the narrowing MECHANISM is now live in Louisiana — geometry answers confidently at each point", () => {
+    // This is the part the bbox cannot do, and the part that was dead before B1574257: a confident
+    // (non-nearEdge) geometry answer that NEW-6 can narrow membership on.
+    for (const [label, lat, lng] of NOLA_POINTS) {
+      const id = countyIdentity(lat, lng);
+      expect(id.key, label).toBe("la_orleans");
+      expect(id.nearEdge, label).toBe(false);
+    }
+  });
+
+  it("KNOWN-GOOD ARM — East Baton Rouge, wired before either item and untouched by both, now resolves too", () => {
+    // This is the pre-existing casualty of the same defect, and the arm that localises a failure
+    // to this suite rather than to the Orleans wiring: it was RED for the same reason before the
+    // B1574257 fix, with no Orleans row involved at all.
+    const id = countyIdentity(30.4515, -91.1871); // downtown Baton Rouge
+    expect(id.status).toBe("ok");
+    expect(id.key).toBe("la_eastbatonrouge");
+    expect(id.name).toBe("East Baton Rouge Parish");
+    expect(candidateCountiesForPoint(30.4515, -91.1871)).toEqual(["la_eastbatonrouge"]);
+  });
+
+  it("a parish display name round-trips to its key, and the key keeps the designation OUT of the slug", () => {
+    expect(countyKeyForName("Orleans Parish", "LA")).toBe("la_orleans");
+    expect(countyKeyForName("East Baton Rouge Parish", "LA")).toBe("la_eastbatonrouge");
+    // …and a parish Planyr has NOT wired still answers honestly rather than borrowing a neighbour.
+    expect(countyKeyForName("Jefferson Parish", "LA")).toBe(null);
+  });
+
+  it("the user-facing label and help say PARISH, never County", () => {
+    const cfg = COUNTIES.la_orleans;
+    expect(cfg.label).toBe("Orleans Parish, LA");
+    expect(cfg.label).not.toMatch(/County/i);
+    expect(cfg.help).toMatch(/Parish/);
+    expect(cfg.help).not.toMatch(/County/i);
+    expect(cfg.layerUrl).toBe("https://gis.nola.gov/arcgis/rest/services/ParcelSearch/MapServer/0");
+    // Measured field names — PARCELID / SITEADDRESS, layer 0 "parcels" (the service's only layer).
+    expect(cfg.idField).toBe("PARCELID");
+    expect(cfg.addrField).toBe("SITEADDRESS");
+  });
+
+  it("an UNWIRED Louisiana parish still reports its own real name with the right designation", () => {
+    // Lafayette Parish has no source wired. The honest answer names it correctly and does NOT
+    // fall back to Orleans or East Baton Rouge — and never reads "Lafayette Parish County".
+    const id = countyIdentity(30.2241, -92.0198);
+    expect(id.status).toBe("no-source");
+    expect(id.name).toBe("Lafayette Parish");
+    expect(noParcelSourceNote(id)).toBe("Lafayette Parish — no parcel data wired here yet.");
+  });
+
+  it("Orleans and East Baton Rouge never query each other — the parishes are ~80 miles apart", () => {
+    expect(candidateCountiesForPoint(29.9511, -90.0715)).not.toContain("la_eastbatonrouge");
+    expect(candidateCountiesForPoint(30.4515, -91.1871)).not.toContain("la_orleans");
+  });
+});

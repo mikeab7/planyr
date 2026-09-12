@@ -638,6 +638,27 @@ const COUNTIES_RAW = {
     idField: "ASSESSMENT_NUM", addrField: "PHYSICAL_ADDRESS",
     help: "East Baton Rouge Parish tax parcels (parish GIS, Esri-hosted). Search by assessment number or a site address.",
   },
+  /* ⛔ LOUISIANA HAS PARISHES, NOT COUNTIES — and that is not only a labelling matter. The
+   * nationwide geometry asset names this row "Orleans Parish", and until B1574257 (below, same
+   * session) `countyKeyForName` stripped only the word "County" from a display name, so NO
+   * Louisiana point could ever be turned back into its configured key: `la_eastbatonrouge` was
+   * already unreachable by name, silently, and this row would have joined it. The key, the label
+   * and every user-facing string here say PARISH; the slug drops the designation exactly the way
+   * a Texas key drops "County" (`la_orleans`, not `la_orleansparish`). */
+  la_orleans: {
+    // B1574256 — MEASURED LIVE from Michael's own browser 2026-09-11 evening Central (this
+    // sandbox's egress policy blocks gis.nola.gov — CONNECT tunnel rejected, 403; see
+    // countiesProvenance.js). Layer 0 "parcels" is the ONLY layer on the ParcelSearch service;
+    // capabilities "Map,Query,Data". Three points spread across the whole parish all answered with
+    // real, distinct parcels: New Orleans CBD (114ms, 357 features, PARCELID 41036654, "826 UNION
+    // ST, LA", OWNERNME1 "CONDO MASTER"), Algiers across the river (94ms, 246 features, PARCELID
+    // 41001272, "1306 PACIFIC AVE, LA, 70114") and Lakeview (65ms, 224 features, PARCELID 41011510,
+    // "6198 MILNE BLVD, LA, 70124"). This is the parish's OWN authoritative GIS host.
+    state: "LA", label: "Orleans Parish, LA",
+    layerUrl: "https://gis.nola.gov/arcgis/rest/services/ParcelSearch/MapServer/0",
+    idField: "PARCELID", addrField: "SITEADDRESS",
+    help: "Orleans Parish (New Orleans) parcels (parish GIS). Search by parcel ID or a site address.",
+  },
   al_jefferson: {
     state: "AL", label: "Jefferson County, AL",
     layerUrl: "https://jccgis.jccal.org/server/rest/services/Basemap/Parcels/MapServer/0",
@@ -1528,6 +1549,10 @@ const COUNTIES_MAP_RAW = {
   ok_oklahoma: { state: "OK", center: [35.4676, -97.5164], zoom: 10, bbox: [35.20, -97.83, 35.65, -97.20], mapServer: null, layerUrl: COUNTIES.ok_oklahoma.layerUrl },
   ok_tulsa: { state: "OK", center: [36.1540, -95.9928], zoom: 10, bbox: [35.95, -96.20, 36.35, -95.70], mapServer: null, layerUrl: COUNTIES.ok_tulsa.layerUrl },
   la_eastbatonrouge: { state: "LA", center: [30.4515, -91.1871], zoom: 10, bbox: [30.30, -91.35, 30.70, -90.85], mapServer: null, layerUrl: COUNTIES.la_eastbatonrouge.layerUrl },
+  // B1574256 — center/bbox read directly from public/geo/county-polygons.json (the same nationwide
+  // asset resolveCounty uses, same convention as the B1551617/B1339920 rows below), never
+  // hand-typed: raw extent [-180269,59766,-179299,60327] at scale 2000, rounded to 2 dp.
+  la_orleans: { state: "LA", center: [30.0233, -89.8920], zoom: 11, bbox: [29.88, -90.13, 30.16, -89.65], mapServer: null, layerUrl: COUNTIES.la_orleans.layerUrl },
   al_jefferson: { state: "AL", center: [33.5207, -86.8025], zoom: 10, bbox: [33.25, -87.15, 33.80, -86.45], mapServer: null, layerUrl: COUNTIES.al_jefferson.layerUrl },
   // B1551617 — Tier 1 counties (see the matching COUNTIES block above); bbox/center read directly
   // from public/geo/county-polygons.json (the same nationwide asset resolveCounty uses), never
@@ -1975,9 +2000,37 @@ export const STATEWIDE_PARCEL_LAYER = TXGIO_STATEWIDE_LAYER;
  * `jefferson` and collide with each other (and with Texas, which has no Jefferson of its own
  * configured, but the shape would still be wrong). TX/CO behavior is BYTE-IDENTICAL to before —
  * this only adds a candidate for every state that reaches neither of those two branches. */
+/* ⛔ B1574257 (2026-09-12) — "COUNTY" IS NOT THE ONLY DESIGNATION, AND STRIPPING ONLY IT MADE EVERY
+ * LOUISIANA PARISH UNREACHABLE BY NAME — SILENTLY, AND ALREADY IN PRODUCTION.
+ *
+ * The line below used to strip `\bcounty\b` and nothing else. The nationwide geometry asset
+ * (B1361425) publishes each row with its own Census-standard designation — "Orleans Parish",
+ * "Denali Borough", "Aleutians West Census Area", "Anchorage Municipality" — which is CORRECT and
+ * is what `noParcelSourceNote` already leans on to avoid printing "Orleans Parish County". But the
+ * routing KEYS in this file drop the designation (`harris`, not `harriscounty`), so a parish name
+ * slugged to `orleansparish` and asked for `la_orleansparish`, a key that exists nowhere.
+ *
+ * WHAT THAT ACTUALLY COST, measured on the shipped code before the fix (not reasoned about):
+ * `la_eastbatonrouge` — wired since B1455634 — was ALREADY unreachable this way. A Baton Rouge
+ * point returned `countyKeyForName → null`, so `countyIdentity` reported `no-source` ("East Baton
+ * Rouge Parish — no parcel data wired here yet") for a parish whose own parcel service was wired
+ * and working, and `geometryCountyAnswer` returned null, so NEW-6's confident-narrowing — the
+ * whole B1338896 Casa Grande fix — could never engage anywhere in Louisiana. Nothing threw; the
+ * app simply substituted the padded-bbox/state fallback and said nothing. The only reason this had
+ * not produced a WRONG parish is that Louisiana had exactly one row to fall back to.
+ *
+ * THE FIX IS THE DESIGNATION LIST, NOT A LOUISIANA SPECIAL CASE. Measured across all 3,144 rows in
+ * the committed asset: widening the strip to county | parish | borough | census area | municipality
+ * adds ZERO new key collisions (both before and after, the only same-state collapses are the six
+ * pre-existing independent-city/county pairs — Baltimore MD, St. Louis MO, and Fairfax/Franklin/
+ * Richmond/Roanoke VA — which the existing `\bcity\b` strip already produced, none of which is a
+ * configured county today). Guarded by `test/counties.test.js`, which re-runs that collision count
+ * against the real asset so a future widening cannot quietly introduce one. */
+const COUNTY_DESIGNATION_RE = /\b(county|parish|borough|census area|municipality)\b/g;
+
 export function countyKeyForName(name, state = null) {
   if (!name) return null;
-  const slug = String(name).toLowerCase().replace(/\bcounty\b/g, "").replace(/\b(city|and|of)\b/g, "").replace(/[^a-z]/g, "");
+  const slug = String(name).toLowerCase().replace(COUNTY_DESIGNATION_RE, "").replace(/\b(city|and|of)\b/g, "").replace(/[^a-z]/g, "");
   const st = state ? String(state).toUpperCase() : null;
   /* B209503 — the one Texas county whose key is not its slug. Austin COUNTY (Bellville / Sealy)
    * keeps the key `austintx` so the far more common string "Austin" — the city, its ETJ, a TxDOT

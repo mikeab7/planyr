@@ -463,3 +463,60 @@ describe("countyBboxIntersectsView (the Texarkana/Chambers fix)", () => {
     expect(countyBboxIntersectsView("chambers", null)).toBe(true);
   });
 });
+
+/* ⛔ B1574257 — THE DESIGNATION STRIP IS ONLY SAFE WHILE IT COLLAPSES NOTHING.
+ *
+ * `countyKeyForName` drops a county-equivalent designation ("County", "Parish", "Borough",
+ * "Census Area", "Municipality") before slugging a display name into a routing key. That is what
+ * makes a Louisiana parish reachable at all — but a designation strip is exactly the kind of change
+ * that can silently make two DIFFERENT places in one state answer to the SAME key, which is the
+ * wrong-county class this repo has already paid for twice (Pearland, Casa Grande).
+ *
+ * So the widening was measured, not reasoned about, and the measurement is pinned here against the
+ * REAL committed asset rather than a fixture: across all 3,144 rows, widening the strip adds ZERO
+ * new same-state collapses. The six that remain are pre-existing, predate this change, are produced
+ * by the older `\bcity\b` strip, and are all independent-city/county pairs — none of which is a
+ * configured county today. Baselined at their exact count so a future widening (adding "Township",
+ * say) goes RED here instead of quietly resolving a click to the wrong place. */
+describe("B1574257 — the county-designation strip introduces no new key collisions", () => {
+  const roster = JSON.parse(readFileSync(new URL("../public/geo/county-polygons.json", import.meta.url), "utf8")).counties;
+
+  // The slug half of `countyKeyForName`, before and after the widening. Kept literal on purpose:
+  // importing the real one would make this test agree with the code by construction.
+  const slug = (name, designations) => String(name).toLowerCase()
+    .replace(designations, "").replace(/\b(city|and|of)\b/g, "").replace(/[^a-z]/g, "");
+  const NARROW = /\bcounty\b/g;                                              // pre-B1574257
+  const WIDE = /\b(county|parish|borough|census area|municipality)\b/g;      // shipped
+
+  const collisionsUnder = (designations) => {
+    const seen = new Map(), out = [];
+    for (const r of roster) {
+      const k = `${r.state}_${slug(r.name, designations)}`;
+      if (seen.has(k)) out.push(`${k}: ${seen.get(k)} + ${r.name}`);
+      else seen.set(k, r.name);
+    }
+    return out.sort();
+  };
+
+  it("the asset is the real one, with the whole country in it (vacuity guard)", () => {
+    expect(roster.length).toBeGreaterThan(3000);
+    expect(roster.filter((r) => r.state === "LA").length).toBe(64); // Louisiana's 64 parishes
+  });
+
+  it("widening the strip adds NOTHING to the collision set", () => {
+    expect(collisionsUnder(WIDE)).toEqual(collisionsUnder(NARROW));
+  });
+
+  it("the pre-existing collisions are exactly the six independent-city/county pairs, and none is configured", () => {
+    const pre = collisionsUnder(NARROW);
+    expect(pre).toHaveLength(6);
+    expect(pre.join(" | ")).toMatch(/MD_baltimore.*MO_stlouis.*VA_fairfax.*VA_franklin.*VA_richmond.*VA_roanoke/);
+    for (const key of ["md_baltimore", "mo_stlouis", "va_fairfax", "va_franklin", "va_richmond", "va_roanoke"]) {
+      expect(COUNTIES_MAP[key], key).toBeUndefined();
+    }
+  });
+
+  it("no designation strips a name to nothing — an empty slug would key every such row alike", () => {
+    expect(roster.filter((r) => !slug(r.name, WIDE))).toEqual([]);
+  });
+});
