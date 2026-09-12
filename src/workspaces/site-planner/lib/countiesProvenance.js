@@ -236,6 +236,12 @@ export const COUNTY_VERIFICATION = {
     verifiedOn: "2026-09-11",
     verifiedNote: "VERIFIED LIVE from this sandbox: 187,336 parcel polygons, count query 336ms, 48 fields, esriGeometryPolygon.",
   },
+
+  /* B1583296 — City of Detroit, wired CITY-scoped (see cityScopes.js), not as Wayne County. */
+  mi_detroit: {
+    verifiedOn: "2026-09-12",
+    verifiedNote: "Layer metadata (field list: parcel_id, address, tax_status, tax_status_description, 51 fields total) confirmed LIVE from this sandbox — services2.arcgis.com is reachable here. The dispatch's own live-browser measurement (2026-09-11 evening Central) queried a real point at downtown Detroit (42.3314, -83.0458) and returned a parcel with 46 populated fields. Detroit_MP_Parcel_Authoritative was PREVIOUSLY declined as a Wayne County candidate (B1455635/B1551617) for exactly the reason it is now wired only as a CITY scope: it is Detroit's own authoritative parcel layer and would silently return nothing across the rest of Wayne County. The boundary geometry cityScopes.js uses to decide whether a point is inside Detroit at all — 'City of Detroit Boundary', City of Detroit's own ArcGIS Online org (OpenDataAdmin_detroitmi, item 86b221bb68ca4364afe81d156e54f95c, public_authoritative) — was independently queried and verified live from this sandbox the same session; see that module's own header for the full provenance and the three control points (downtown Detroit hits; Livonia and Taylor, both real Wayne County cities, do not).",
+  },
 };
 
 /* Convenience accessors so callers never reach into the shape directly. */

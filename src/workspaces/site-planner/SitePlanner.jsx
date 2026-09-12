@@ -675,7 +675,7 @@ const RailIcon = ({ id, size = 17 }) => (
 );
 
 const TOOLS = [
-  { id: "select", label: "Select", hint: "Move/resize/rotate • drag to move (snap only ALIGNS to the grid/edges, never bonds; hold Alt to bypass) • Shift-click or marquee to pick several, then Group (Ctrl+G) so they move/copy/select as one unit; double-click a group member to edit it in place • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan • shortcut: V" },
+  { id: "select", label: "Select", hint: "Move/resize/rotate • drag to move (snap only ALIGNS to the grid/edges, never bonds; hold Alt to bypass) • Shift-click or marquee to pick several, then Group (Ctrl+G) so they move/copy/select as one unit; double-click a group member to edit it in place • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • something buried behind another object? Alt-click (or Alt-right-click for its menu) reaches it — repeat at the same spot to go deeper • drag empty space to pan • shortcut: V" },
   { id: "marquee", label: "Select multiple", hint: "Box-select (M): drag a box over the drawing — everything it touches is selected together, ready to move (drag any one) or delete. In the Select tool you can also Ctrl/⌘-click to toggle an object, Shift-click to add. Esc / click empty to clear" },
   { id: "parcel", label: "Parcel", hint: "Draw mode: click to drop boundary points, then click the first point (or double-click) to close — draw as many as you like • Remove mode: click a parcel to delete it • click Done (or Esc) to exit" },
   { id: "split", label: "Split", hint: "Cut a parcel: click points to draw the line across it — two points cut straight, or add as many as you like for a bent or stepped cut following a creek, a road or an easement; double-click (or Enter) to finish. A cut that leaves the lot and comes back makes more than two pieces — then delete any you don't want" },
@@ -2839,6 +2839,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * break re-opening a plan rather than protect it. */
   const framingGate = useRef(null);
   if (framingGate.current === null) framingGate.current = createViewFramingGate();
+  /* B1574432 — a MOUNT IDENTITY, stamped on the canvas and on nothing else.
+   * Boot contains a REMOUNT (`SitePlannerApp` keys this component `${activeSiteId}:${loadEpoch}`
+   * and `applyUser` bumps `loadEpoch` once the cloud pull settles), and every per-mount instrument
+   * in this file — the view-change recorder included — is blind across it: the ring is a `useRef`,
+   * so the mount that answers `window.__plannerViewChanges` after boot is the SECOND one and it has
+   * no memory of the first. That is why the owner's armed production tab read `changes: 0` through
+   * a flash he had on video. This attribute is the one thing that lets an out-of-page observer tell
+   * "two framings in one mount" (a flash) from "two mounts, one framing each" (correct). Read-only,
+   * one string, no behaviour. */
+  const mountIdRef = useRef(null);
+  if (mountIdRef.current === null) mountIdRef.current = `m${Math.random().toString(36).slice(2, 8)}`;
   const [layerGateReady, setLayerGateReady] = useState(false);
   const geoSrcRef = useRef(null); // which BASEMAPS source the live tile layers were built from
   // "Make sure the aerial is on" (identify mode, analysis-layer framing, geocoded add):
@@ -5928,7 +5939,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
 
   /* ------------ fit to content ------------ */
-  const fit = useCallback(() => {
+  /* `box` — B1574432. An OPTIONAL, freshly-measured `{ w, h }`, used by the first-framing layout
+     effect below. It must not read the `size` STATE for the boot framing: on the first render
+     `size` is still its placeholder `{ w: 800, h: 560 }` (the container has never been measured),
+     and a `setSize` dispatched in the same layout effect has not re-rendered yet. Framing from the
+     placeholder is framing from a box that does not exist — which is the whole defect. Every other
+     caller passes nothing and reads `size`, exactly as before. */
+  const fit = useCallback((box) => {
+    const box2 = (box && Number.isFinite(box.w) && Number.isFinite(box.h)) ? box : size;
     /* ⛔ B494048 — FRAME WHAT IS ON SCREEN, NOT WHAT IS IN THE MODEL. Measured on the owner's plan:
        hiding both ponds — 2,616 ft of the drawing's width — left Zoom to fit at a byte-identical
        zoom, so the buildings he could actually see stayed squeezed into the middle of a frame built
@@ -5949,9 +5967,110 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pts.forEach((p) => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
     const bw = Math.max(maxX - minX, 10), bh = Math.max(maxY - minY, 10);
     const pad = 60;
-    const ppf = Math.min((size.w - pad * 2) / bw, (size.h - pad * 2) / bh);
-    setView({ ppf, offX: pad - minX * ppf + (size.w - pad * 2 - bw * ppf) / 2, offY: pad - minY * ppf + (size.h - pad * 2 - bh * ppf) / 2 });
+    const ppf = Math.min((box2.w - pad * 2) / bw, (box2.h - pad * 2) / bh);
+    setView({ ppf, offX: pad - minX * ppf + (box2.w - pad * 2 - bw * ppf) / 2, offY: pad - minY * ppf + (box2.h - pad * 2 - bh * ppf) / 2 });
   }, [parcels, els, sheetOverlays, size, hiddenGroups, setView]);
+
+  /* ══ B1574432 — ONE FRAMING PER LOAD, AND IT LANDS BEFORE THE FIRST PAINT ══════════════════════
+   *
+   * THE REPORT: a 60 fps screen recording of a cold load on the owner's iPhone. The plan paints
+   * correctly (dimmed, behind "Loading your sites…"), then for about two video frames the canvas
+   * cuts to ONE building at extreme zoom, then returns to the correct view. Four prior attempts
+   * missed it, and the app's own view-change recorder read `changes: 0` on his armed production
+   * tab — which reads as "no view change happened" and is not what it means (see below).
+   *
+   * THE MEASUREMENT (ui-audit/verify-boot-framing.mjs, which samples the COMMITTED framing —
+   * `data-view-ppf/offx/offy`, the SVG transform's own inputs — once per ANIMATION FRAME, so what
+   * it reports is what was on screen). On a real cold boot of a real plan, before this fix:
+   *
+   *     PAINTED framings: 2
+   *       1. ppf=0.35  off=(60, 60)          first painted t=671 ms   held 82 ms over 6 frames
+   *       2. ppf=0.0831 off=(283.9, 340.2)   first painted t=801 ms   held the rest of the run
+   *
+   * The first one is `useState({ ppf: 0.35, offX: 60, offY: 60 })` — a framing computed from NO
+   * MODEL AND NO CONTAINER, painted for six frames, 4.2x too close, and then thrown away. At that
+   * zoom a large building fills a phone screen edge to edge. That is the flash, exactly as filmed.
+   *
+   * ⛔ WHY IT LOOKED INTERMITTENT, AND WHY IT IS NOT. On the very first boot those six frames sit
+   * behind the loading screen, so nobody sees them. A signed-in boot then REMOUNTS this component —
+   * `SitePlannerApp` keys it `${activeSiteId}:${loadEpoch}` and `applyUser` bumps `loadEpoch` the
+   * moment the cloud pull settles (same commit as `setCloudLoading(false)`, which is the un-dim in
+   * the recording) — and a remount resets `view` to that same constant. THAT time the six frames
+   * land on top of a fully painted plan. Same defect, twice per boot; only the second is visible.
+   *
+   * ⛔ AND WHY THE EXISTING RECORDER COULD NOT SETTLE IT. `viewChangeRecorder` records `setView`
+   * DISPATCHES and lives in a `useRef`, so (a) it cannot see a framing that was never dispatched —
+   * a fresh mount PAINTS its initial `useState` view with no `setView` at all — and (b) it does not
+   * survive the remount above: `window.__plannerViewChanges` is re-pointed by whichever mount ran
+   * its effect last, so the ring being read is not the ring that witnessed the flash. Reproduced
+   * locally on one mount it reads `{ changes: 1, unrequestedZooms: 1 }` for exactly this
+   * transition, so a zero on production is the instrument's scope, not the defect's absence.
+   *
+   * THE FIX, and it is deliberately not a delay. A framing is a function of the MODEL and the
+   * CONTAINER. The model is complete at mount (`restored` is read synchronously from storage). The
+   * container is not measured until layout. So the framing is computed in a LAYOUT EFFECT — after
+   * the DOM exists, BEFORE the browser paints — from the container's own freshly read box. The
+   * first painted frame therefore already carries the final framing, on every mount, remount
+   * included. Nothing is debounced and nothing is hidden behind a timer; the intermediate framing
+   * does not exist rather than being outrun. (Same discipline as VIEWPORT-STABLE (a), which this
+   * file already applies to panel-toggle reflow: measure the real edge in a layout effect and fold
+   * it in during the same frame.)
+   *
+   * `framingCommitted` is the second half, and it is what covers the case that defeated an earlier
+   * fix: a document that boots HIDDEN. There, rAF is suspended and the readiness gate correctly
+   * refuses to frame — measured before this fix, such a tab held ppf 0.35 for the whole five-second
+   * window — and when it is foregrounded the browser paints the existing DOM BEFORE any effect of
+   * ours runs. So until a framing has actually been committed, the canvas stack paints nothing at
+   * all: a blank sheet, never a wrong picture. In the ordinary visible boot this gate is released
+   * inside the same commit as the first paint and is never observable.
+   *
+   * Deliberately SEPARATE from `viewFramed`, which is a different fact ("the boot reframe has had
+   * its turn, framed or suppressed") that `layerGateReady` depends on. Conflating them would change
+   * which zoom GIS layers answer their gate against, which is B1234400's subject, not this one. */
+  const [framingCommitted, setFramingCommitted] = useState(false);
+  const framingWatchdogRef = useRef(0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately dep-array-free: it re-asks
+  // on every render until it can answer, then the first line returns. It cannot loop — `setSize`
+  // bails functionally on an unchanged box, and the only path that dispatches anything else also
+  // sets `framingCommitted`.
+  useLayoutEffect(() => {
+    if (framingCommitted) return;
+    if (!active) return;                       // a keep-alive planner behind another workspace has no real box
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+    const el = wrapRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    /* ⛔ NEVER FRAME FROM A DEGENERATE BOX. The `Math.max(320, …)` floor below turns a
+       never-laid-out container into a plausible-looking 320x360 — the exact trap
+       lib/viewFramingGate.js's `measured` flag exists for. Read the RAW rect for the verdict. */
+    if (!(r.width > 1 && r.height > 1)) return;
+    sizeMeasuredRef.current = true;
+    const w = Math.max(320, r.width), h = Math.max(360, r.height);
+    setSize((sz) => (sz.w === w && sz.h === h ? sz : { w, h, rawW: r.width, rawH: r.height }));
+    const ticket = framingGate.current.framingTicket();
+    const verdict = framingGate.current.mayFrame(ticket, { visible: true, measured: true });
+    if (!verdict.ok) { viewRecRef.current?.noteEvent("frame:suppressed", verdict.why); return; }
+    fit({ w, h });                             // the MEASURED box, not the placeholder `size` state
+    viewRecRef.current?.noteEvent("frame:boot-committed", `${Math.round(r.width)}x${Math.round(r.height)}`);
+    setFramingCommitted(true);
+  });                                          // no dep array on purpose — it re-asks each render until it can answer, then the first line returns
+  /* LOUD-FAILURE, and the one thing this must never do is leave a permanently blank canvas. If the
+     planner has been active and visible for this long without ever getting a measurable container,
+     something is wrong that this file cannot fix — so say so in telemetry and reveal the drawing
+     anyway rather than showing the owner an empty sheet. Never reached on a healthy boot (the
+     layout effect above answers inside the first commit). */
+  useEffect(() => {
+    if (framingCommitted || !active) return undefined;
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") return undefined;
+    framingWatchdogRef.current = setTimeout(() => {
+      const r = wrapRef.current?.getBoundingClientRect();
+      reportClientEvent("boot-framing-stalled", "the planner canvas could not be framed from a measured container", {
+        rawW: Math.round(r?.width || 0), rawH: Math.round(r?.height || 0),
+      });
+      setFramingCommitted(true);
+    }, 1500);
+    return () => clearTimeout(framingWatchdogRef.current);
+  }, [framingCommitted, active]);
 
   // Fit *after* a state change has committed: bump the nonce instead of calling
   // fit() from a stale closure (which would frame the view without the content
@@ -7193,32 +7312,79 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return true;
   };
 
-  /* ⛔ B548822 — THE STACK PICKER. See lib/featureTarget.js (stackAtPoint / nextPickIndex) for the
-   * full design: Alt+click resolves to the top of the hit stack at this point, exactly like a plain
-   * click; Alt+click AGAIN at the same point steps one deeper, wrapping back to the top. It is the
-   * general answer to a feature buried under another — the owner's Richfield case, a road
-   * geometrically inside a pond, with both already at the bottom of their own type-layer band so
-   * Send-to-Back has nowhere left to send either one (see planStyle.js's EL_BANDS.back, the mirror
-   * escape hatch this same report named missing).
+  /* ⛔ B548822 — THE STACK PICKER, and its ONE resolution function for both buttons
+   * (NEW-1, 2026-09-12, owner amendment to the click-ownership audit — verbatim: "The only time it
+   * should [click on something else] is if we're doing the alt thing to click on something behind,
+   * make sure that feature actually works").
    *
-   * Runs in the CAPTURE phase — the SAME `onPointerDownCapture` the double-click anchor already uses
+   * See lib/featureTarget.js (stackAtPoint / nextPickIndex) for the pure half: Alt+press resolves to
+   * the TOP of the hit stack at this point, exactly like an unmodified press; Alt+press AGAIN at the
+   * SAME point steps one deeper, wrapping back to the top. Stable and predictable because the order
+   * is the stack's own paint order (top-most first) — the SAME order an unmodified press already
+   * resolves the first entry of. It is the general answer to a feature buried under another — the
+   * owner's Richfield case, a road geometrically inside a pond, with both already at the bottom of
+   * their own type-layer band so Send-to-Back has nowhere left to send either one (see
+   * planStyle.js's EL_BANDS.back, the mirror escape hatch this same report named missing) — and now
+   * also the reported acreage-badge-over-a-building case: unmodified reaches the parcel (the
+   * topmost painted thing there), Alt reaches the building behind it.
+   *
+   * `resolveAltPick` is the ONE decision, shared by both buttons, so a left-click pick and a
+   * right-click pick at the same point can never disagree about the cycle position or "what's
+   * here" — exactly the discipline `featureDoubleAction`/`featureContextAction` already apply to
+   * the double-click and forwarded-right-click resolvers. `handleStackPick` (pointerdown capture,
+   * left button only) turns the resolved target into a SELECTION, the same as it always has;
+   * `handleStackPickContext` (contextmenu capture, added by this amendment) turns it into that
+   * target's own MENU via `featureContextAction` — the same per-family dispatch every other forward
+   * in this file already uses. A right-click that could not reach what a left-click reaches would
+   * be the same defect in a different coat, so the two share one cycle rather than two.
+   *
+   * Gate: Alt alone — Shift/Ctrl/Meta combos are already claimed (Shift+click vertex-insert on an
+   * editable path, the Ctrl/⌘ multi-select toggle) and left untouched. `tool === "select"` matches
+   * every other selection affordance on this canvas; `editingCorners` is a Select sub-mode and is
+   * deliberately NOT excluded, so Alt still reaches behind a vertex-edit target exactly as it
+   * already did for the left-click picker. `altSnapOffRef` (Alt held mid-DRAG, to bypass snap) is a
+   * different reading of the SAME key on an ALREADY-ARMED gesture and cannot collide: this resolves
+   * at the START of a fresh press, before any drag exists to bypass snap on. */
+  const resolveAltPick = (e) => {
+    if (!e.altKey || e.shiftKey || e.ctrlKey || e.metaKey) return null;
+    if (tool !== "select") return null;
+    const stack = stackAtPoint(document.elementsFromPoint(e.clientX, e.clientY));
+    if (!stack.length) { stackPickRef.current = null; return null; } // nothing here — fall through to the ordinary press
+    const idx = nextPickIndex(stackPickRef.current, { x: e.clientX, y: e.clientY }, stack.length);
+    stackPickRef.current = { x: e.clientX, y: e.clientY, index: idx };
+    return { target: stack[idx].target, idx, len: stack.length };
+  };
+  /* Runs in the CAPTURE phase — the SAME `onPointerDownCapture` the double-click anchor already uses
    * — because it has to win over whichever feature's own BUBBLE-phase pointerdown paint order would
    * otherwise hand the press to (the topmost one, which is exactly what the picker exists to get
    * past). Returns true when it consumed the press, so the caller skips the vertex-edit capture
    * logic that would otherwise also run. */
   const handleStackPick = (e) => {
-    if (!e.altKey || e.shiftKey || e.ctrlKey || e.metaKey) return false; // Alt alone — Shift/Ctrl/Alt combos are already claimed (vertex-insert, snap-bypass)
-    if (tool !== "select" || e.button !== 0) return false;
-    const stack = stackAtPoint(document.elementsFromPoint(e.clientX, e.clientY));
-    if (!stack.length) { stackPickRef.current = null; return false; } // nothing here — fall through to the ordinary background press
+    if (e.button !== 0) return false;
+    const picked = resolveAltPick(e);
+    if (!picked) return false;
     e.preventDefault();
     e.stopPropagation();
-    const idx = nextPickIndex(stackPickRef.current, { x: e.clientX, y: e.clientY }, stack.length);
-    stackPickRef.current = { x: e.clientX, y: e.clientY, index: idx };
     setMulti([]);
     setDrillId(null);
-    setSel(stack[idx].target);
-    flashWarn(stack.length > 1 ? `${idx + 1} of ${stack.length} here — Alt+click again to go deeper` : "Only one thing here.", 1800);
+    setSel(picked.target);
+    flashWarn(picked.len > 1 ? `${picked.idx + 1} of ${picked.len} here — Alt+click again to go deeper` : "Only one thing here.", 1800);
+    return true;
+  };
+  /* NEW-1 (2026-09-12) — Alt+RIGHT-CLICK's twin: same cycle, same target, opened as a MENU instead
+   * of a selection. Runs in `onContextMenuCapture` (the same capture slot `onCanvasVtxContextCapture`
+   * already occupies, tried FIRST so Alt wins over vertex-edit mode exactly as it already does for
+   * the left-click picker) and dispatches through `featureContextAction` — the one function that
+   * already knows how to open each family's own menu, so this adds no second notion of "which menu
+   * belongs to which kind". Returns true when it consumed the press. */
+  const handleStackPickContext = (e) => {
+    const picked = resolveAltPick(e);
+    if (!picked) return false;
+    // `featureContextAction` calls `e.preventDefault()/stopPropagation()` itself, but only once it
+    // has actually opened a menu — a refused pick (e.g. a locked parcel) touches neither, so the
+    // press falls through untouched exactly as it would have with no picker at all.
+    if (!featureContextAction(picked.target, e)) return false;
+    flashWarn(picked.len > 1 ? `${picked.idx + 1} of ${picked.len} here — Alt+right-click again to go deeper` : "Only one thing here.", 1800);
     return true;
   };
 
@@ -11721,6 +11887,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // NEW-3: start dragging a parcel's acreage chip; offset is kept in parcel-local feet
   // relative to the parcel centroid, so it survives geometry edits and persists with the plan.
+  /* ⛔ NEW-1 (2026-09-12) — LEFT-CLICK ON THE BADGE SELECTS ITS OWN PARCEL, the same way every other
+     drag-starter on this canvas selects on pointerdown (startMoveEl / startMoveParcel / …). Before
+     this the press only armed a drag and never touched `sel` — the badge is chrome that renders
+     OUTSIDE the parcel's own `<g>` (a top-level sibling in `parcelLabels`, not nested inside the
+     boundary), so unlike a press on the parcel's own fill/stroke there is no DOM bubbling that could
+     have reached `startMoveParcel`'s selection either. A plain click on the badge therefore selected
+     NEITHER the badge NOR whatever happened to sit under the (pointer-events:none-when-not-hovered)
+     pill — a silent no-op, same species as the right-click gap NEW-1 (2026-09-11, above) closed for
+     the context menu. The invariant is the same for both buttons: this label's hit region belongs to
+     its own parcel, always. */
   const startAcChip = (e, id) => {
     if (e.button !== 0) return;
     if (identifyMode) { e.stopPropagation(); beginIdentifyPress(e); return; } // B383: clicking a lot's acreage label in identify mode toggles/adds it too (don't drag the chip)
@@ -11728,6 +11904,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     e.stopPropagation();
     const pc = parcels.find((p) => p.id === id);
     if (!pc) return;
+    setSel({ kind: "parcel", id });
+    setCombineSel([]); // matches startMoveParcel: a plain click is a fresh single-select
     /* NEW-4 — history is pushed on the first real MOVE, not on the press. B1327's complaint about
        this chip included "burnt an undo frame for nothing"; a press that turns out to be a click
        must cost no undo step. `moved` is the latch. */
@@ -16809,35 +16987,48 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const halo = carto || leader;
     const ink = carto ? "#0E2E36" : (leader ? PAL.ink : labelInk(elStyle(d.el, settings).fill));
     // B875 — a pond's map label is a click target (a leadered pond label often sits away from the
-    // basin, so it's a real second handle). NEW-1 — it now honours the SAME contract as the basin
-    // itself: a single click SELECTS, a double-click opens the inspector. Other labels stay
-    // pointer-transparent (clicks fall through to the shape).
-    const isPondLabel = tool === "select" && d.el && d.el.type === "pond" && !d.added;
+    // basin, so it's a real second handle): a single click SELECTS, a double-click opens the
+    // inspector.
+    // ⛔ NEW-1 (2026-09-12, NEW-1 in the click-ownership audit) — GENERALISED TO EVERY ELEMENT'S
+    // LABEL, not just the pond's. A label defaults to pointer-transparent, so a press on it falls
+    // through to whatever paints underneath — which is the element's own body ONLY as long as the
+    // label happens to sit inside its own footprint. `labelFitLadder`'s "outside-with-leader" rung
+    // can push ANY element's label off its own shape and onto a neighbour's (a narrow building with
+    // a long custom name is the reported case — "the building name/SF label reaches the building
+    // only because it sits inside its own footprint"), and once that happens the fall-through
+    // resolves to the WRONG feature: the invariant this label belongs to its own element, not to
+    // whatever it happens to be drawn over, held for the pond alone and not for its siblings. Rather
+    // than add a second special case for buildings, the pond's own click target is now the rule for
+    // every element's label — one fix that closes every type at once (CHROME-NEVER-EATS-A-PRESS
+    // clause 5's preference over a per-type patch), and `featureDoubleAction` already branches
+    // pond-vs-other on double-click, so nothing about the pond's own behaviour changes.
+    const labelInteractive = tool === "select" && !!d.el && !d.added;
     // NEW-1 — `data-label-for` / `data-label-rung` / `data-label-leader` stamp WHICH element this
     // label belongs to and WHICH rung of the shared fit ladder (lib/labelFitLadder) placed it, so a
     // headless check can assert on our own markup instead of guessing ownership from proximity.
     return (
       <g key={`lbl${d.lid}`} data-label-for={d.lid} data-label-rung={place.rung || "inline"} data-label-leader={leader ? "1" : "0"}
-        /* NEW-2 — only the pond label is pointer-enabled, so it is the only label that can take a
-           dblclick itself; every other label is pointer-transparent and the press resolves to the
-           shape underneath it, which is the same answer. */
-        data-feature={isPondLabel ? `el:${d.el.id}` : undefined}
-        pointerEvents={isPondLabel ? "auto" : "none"}
+        /* NEW-2 — every element's label is pointer-enabled (not just the pond's), so every one of
+           them can take a dblclick itself and resolves EXPLICITLY to its own element rather than by
+           falling through to whatever happens to paint underneath. The "added" satellite label
+           (pondAdd's "Additional Detention") is not itself a feature and stays transparent. */
+        data-feature={labelInteractive ? `el:${d.el.id}` : undefined}
+        pointerEvents={labelInteractive ? "auto" : "none"}
         // NEW-1 (B1264944) — click/double-click stay live even in "Edit boundary corners" (still
         // the plain Select tool underneath), so only the CURSOR changes there, matching every
         // other selectable object's own hover cursor in that mode.
-        style={isPondLabel ? { cursor: editingCorners ? "crosshair" : "pointer" } : undefined}
-        onPointerDown={isPondLabel ? (e) => {
+        style={labelInteractive ? { cursor: editingCorners ? "crosshair" : "pointer" } : undefined}
+        onPointerDown={labelInteractive ? (e) => {
           if (e.button !== 0) return;
           e.stopPropagation();
           const wasSel = sel?.kind === "el" && sel.id === d.el.id;
-          // NEW-1 — keyed on the pond's own id (was `${id}:label`), same lastTapRef-poison fix as
-          // the dimension number: a label that overhangs its basin took press 2 of a real
+          // NEW-1 — keyed on the element's own id (was `${id}:label`), same lastTapRef-poison fix as
+          // the dimension number: a label that overhangs its shape took press 2 of a real
           // double-click under a private key, so the pair dissolved and the record was clobbered.
           if (isDoubleTap(e, d.el.id, wasSel)) { featureDoubleAction({ kind: "el", id: d.el.id }, e); return; }
           setSel({ kind: "el", id: d.el.id });   // single click: select only (NEW-1)
         } : undefined}
-        onContextMenu={isPondLabel ? (e) => onElContext(e, d.el.id) : undefined}>
+        onContextMenu={labelInteractive ? (e) => onElContext(e, d.el.id) : undefined}>
         {/* B875 (edit-path recurrence) — a pond label sits OVER the basin and, since #656, is
             pointer-enabled; without its own onContextMenu a right-click on it fell THROUGH to the
             canvas's empty-map menu (Zoom to fit / Paste / Export…) instead of the pond's element
@@ -22532,7 +22723,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               reveal shows real imagery, and anything beyond it shows the static
               dark backdrop — never the cream page behind the canvas. */}
           {origin && (
-            <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none", background: (basemapOn && showAerial) ? "#3f3f3f" : PAL.paper }}>
+            <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none", visibility: framingCommitted ? undefined : "hidden", background: (basemapOn && showAerial) ? "#3f3f3f" : PAL.paper }}>
               <div ref={geoWrapRef} style={{ position: "absolute", inset: -geoOverscan, background: (basemapOn && showAerial) ? "#3f3f3f" : PAL.paper }} />
             </div>
           )}
@@ -22544,7 +22735,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               the backdrop exactly (same clip, same overscan, same gesture transform); it never
               takes a pointer event, so it can neither block a click nor steal a handle. */}
           {origin && (
-            <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: CANVAS_Z.gisLine, overflow: "hidden", pointerEvents: "none" }}>
+            <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: CANVAS_Z.gisLine, overflow: "hidden", pointerEvents: "none", visibility: framingCommitted ? undefined : "hidden" }}>
               <div ref={geoTopWrapRef} style={{ position: "absolute", inset: -geoOverscan }}>
                 <div ref={geoTopPaneRef} style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0 }} />
               </div>
@@ -22633,9 +22824,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               export, so every pre-B1449 assertion reads exactly what it read. */}
           <svg ref={svgRef} data-testid="planner-canvas" width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
             data-view-offx={view.offX} data-view-offy={view.offY} data-view-ppf={view.ppf}
+            data-planner-mount={mountIdRef.current}
             data-reg-dx={regShift.dx} data-reg-dy={regShift.dy}
             data-pan-dx={panDx} data-pan-dy={panDy} data-pan-k={panK} data-render-ppf={rppf}
-            style={{ position: "relative", zIndex: 1, transform: (regShift.dx || regShift.dy) ? `translate(${regShift.dx}px, ${regShift.dy}px)` : undefined, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : editingCorners ? "crosshair" : (tool === "select" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            /* B1574432 — the canvas stack paints NOTHING until a framing has been computed from the
+               complete model and a real measurement of this container. On an ordinary visible boot
+               that happens inside the same commit as the first paint (the layout effect above), so
+               this gate is never observable; it exists for the document-that-boots-HIDDEN case,
+               where the browser paints the DOM as it stands the instant the tab is foregrounded,
+               before any effect of ours can correct it. A blank sheet for a frame is honest; a
+               framing the app is about to throw away is the bug. */
+            style={{ position: "relative", zIndex: 1, visibility: framingCommitted ? undefined : "hidden", transform: (regShift.dx || regShift.dy) ? `translate(${regShift.dx}px, ${regShift.dy}px)` : undefined, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : editingCorners ? "crosshair" : (tool === "select" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => {
               // Don't cancel the default action when the mousedown lands on an inline text
               // editor (a foreignObject <textarea>/<input> — the callout/text box, the inline
@@ -22659,7 +22858,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                read-only and unconditional: it never touches the event, and it must NOT sit behind
                the touch-count guard below, because a press swallowed mid-pinch is still a press. */
             onPointerDownCapture={(e) => { notePress(e); if (handleAddLeaderCapture(e)) return; if (handleStackPick(e)) return; if (touchCountRef.current < 2) onCanvasVtxDownCapture(e); }}
-            onContextMenuCapture={onCanvasVtxContextCapture}
+            /* NEW-1 (2026-09-12) — Alt+right-click's stack pick is tried FIRST, matching the pointerdown
+               capture chain one line up: Alt wins over vertex-edit mode's own context-menu capture
+               exactly the way it already wins over its pointerdown capture for the left-click picker. */
+            onContextMenuCapture={(e) => { if (handleStackPickContext(e)) return; onCanvasVtxContextCapture(e); }}
             onPointerMoveCapture={(e) => { if (touchCountRef.current < 2) onCanvasVtxMoveCapture(e); }}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId, "pointercancel")} onDoubleClick={onBgDouble}
             onContextMenu={(e) => {
@@ -23608,7 +23810,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   hit-tests ahead of everything before it, so a handle here is always visible AND always
                   grabbable regardless of what is drawn underneath. Every manipulation handle in the
                   planner belongs in this group — see the block that builds them for the rule. */}
-              <g data-export="skip" data-handle-layer="1">
+              {/* ⛔ NEW-2 (2026-09-12, click-ownership audit) — A RIGHT-CLICK THAT LANDS ON THIS
+                  LAYER'S OWN CHROME BELONGS TO THE FEATURE THE CHROME IS FOR, NOT TO THE EMPTY
+                  CANVAS. None of a resize/rotate/vertex grip, the setback numeric chip or the
+                  parcel edge length label carries its own `onContextMenu` (they only wire
+                  `onPointerDown`, for dragging) — and because this whole layer renders as a
+                  top-level sibling rather than nested inside any one feature's own `<g>`, an
+                  unhandled right-click doesn't bubble to that feature's menu the way it would from
+                  inside the feature's own body (renderElPx's outer group, the parcel boundary's
+                  stroke, …). It bubbles all the way to the canvas root's plain `onContextMenu`,
+                  which opens the EMPTY-CANVAS menu (Zoom to fit / Paste / Export…) — the same
+                  species of violation CHROME-NEVER-EATS-A-PRESS already closed for DOUBLE-CLICK
+                  (a handle is chrome belonging to the selected feature, so it must never answer AS
+                  something else, and here "something else" is nothing at all). Every one of this
+                  layer's children exists only while something is selected, so `sel` is always the
+                  right answer when nothing more specific has already stopped the event —
+                  `featureContextAction` is the SAME per-family dispatch `onElContext` already uses
+                  for its one legitimate forward (a send-behind annotation), reused rather than
+                  re-invented. */}
+              <g data-export="skip" data-handle-layer="1"
+                onContextMenu={(e) => { if (sel) featureContextAction(sel, e); }}>
                 {/* NEW-4 — the selected lot's setback chrome joins the same layer, for the same
                     reason one line up: a chip and a grab band ARE manipulation affordances, and on a
                     plan whose buildings sit hard against the setback line they were painted over and
@@ -24482,7 +24703,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           transform: narrow && !mobileTools ? "translateX(100%)" : "none", transition: "transform 0.2s ease",
           boxShadow: narrow ? "-10px 0 28px rgba(0,0,0,0.45)" : "inset 1px 0 0 rgba(0,0,0,0.3)" }}>
           {railHdr("Tools")}
-          <button className={`rbtn${tool === "select" ? " on" : ""}`} style={rbtn(tool === "select")} onClick={() => selectTool("select")} aria-pressed={tool === "select"}><ToolIcon id="select" /> Select <span className="rbtn-hint" style={railHint(tool === "select")}>V</span></button>
+          {/* NEW-1 (2026-09-12) — this button had NO `title`, so the tool's own `hint` string (which
+              already documented "hold Alt to bypass" for snap) was never actually surfaced anywhere —
+              its sibling Marquee button one line down has always wired its hint as a tooltip. Matching
+              that existing, ordinary way this app teaches a modifier is how the Alt-click/Alt-right-click
+              "reach behind" escape hatch (just added to the hint string above) becomes discoverable,
+              without inventing a second teaching mechanism or a nag. */}
+          <button className={`rbtn${tool === "select" ? " on" : ""}`} style={rbtn(tool === "select")} onClick={() => selectTool("select")} aria-pressed={tool === "select"} title={TOOLS.find((t) => t.id === "select").hint}><ToolIcon id="select" /> Select <span className="rbtn-hint" style={railHint(tool === "select")}>V</span></button>
           <button className={`rbtn${tool === "marquee" ? " on" : ""}`} style={rbtn(tool === "marquee")} onClick={() => selectTool("marquee")} aria-pressed={tool === "marquee"} data-testid="tool-marquee" title={TOOLS.find((t) => t.id === "marquee").hint}><ToolIcon id="marquee" /> Select multiple <span className="rbtn-hint" style={railHint(tool === "marquee")}>M</span></button>
 
           {/* NEW-1 — "Parcel tools": the COMPLETE answer to "what can I do to a parcel", grouped in

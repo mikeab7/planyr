@@ -20,8 +20,14 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const SP = readFileSync(join(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
 
-/* The handle layer's markup: the group, and the consts rendered into it. */
-const LAYER_OPEN = '<g data-export="skip" data-handle-layer="1">';
+/* The handle layer's markup: the group, and the consts rendered into it.
+ * ⛔ NEW-1 (2026-09-12, click-ownership audit) — the opening tag now also carries an
+ * `onContextMenu` (forwarding an unhandled right-click on this layer's own chrome to whatever is
+ * currently selected, closing the same species of gap B806082 fixed one grip at a time for
+ * callouts), so the tag no longer closes immediately after `data-handle-layer="1"`. Match the
+ * attribute prefix only — every assertion below is about what is INSIDE the group, not about its
+ * exact opening tag text. */
+const LAYER_OPEN = '<g data-export="skip" data-handle-layer="1"';
 const layerStart = SP.indexOf(LAYER_OPEN);
 const layerBlock = SP.slice(layerStart, SP.indexOf("</g>", SP.indexOf("{insHint &&", layerStart)));
 
@@ -33,6 +39,18 @@ const contentBefore = SP.slice(SP.indexOf("<svg ref={svgRef}"), layerStart);
 describe("NEW-1: the handle layer exists and is the LAST child of the feet-space transform", () => {
   it("the group is tagged so a render check can find it, and is export-skipped", () => {
     expect(layerStart, "the data-handle-layer group is gone").toBeGreaterThan(-1);
+  });
+
+  /* NEW-1 (2026-09-12) — an unhandled right-click on this layer's OWN chrome (a grip, the setback
+   * chip, the parcel edge length label — none of which carry their own onContextMenu) used to fall
+   * all the way through to the empty-canvas menu. Pinned here rather than only in
+   * featureTarget.test.js because this file is the one place that already knows the layer's exact
+   * opening tag. */
+  it("the group forwards an unhandled right-click to whatever is currently selected", () => {
+    // A fixed-size slice, not "up to the next `>`" — the handler is itself an arrow function
+    // (`(e) =>`), so the first `>` after `layerStart` is INSIDE the attribute, not the tag's close.
+    const openTag = SP.slice(layerStart, layerStart + 200);
+    expect(openTag).toMatch(/onContextMenu=\{\(e\) => \{ if \(sel\) featureContextAction\(sel, e\); \}\}/);
   });
 
   it("nothing but the print-frame / screen-space chrome follows it inside the canvas", () => {

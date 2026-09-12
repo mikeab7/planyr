@@ -1,19 +1,23 @@
 /* ModuleLoader — one reusable "assembling" loader, themed per workspace.
  *
- * Instead of a bare spinner, each module gets a skeleton screen that builds
+ * Instead of a bare spinner, most modules get a skeleton screen that builds
  * ITSELF in that module's visual grammar, so the wait previews the structure
  * coming and reads as faster:
  *   • Schedule  → a Gantt chart assembling: zebra row bands fade in top→bottom,
  *                 ghost task bars wipe in left→right (staggered per row), milestone
  *                 diamonds pop at the bar ends, and a vertical "playhead" sweeps
  *                 left→right — all in the Schedule accent #7F77DD.
- *   • Site      → a site plan drawing itself: a parcel outline stroke-draws and
- *                 building footprints fade in, in the Site accent #1D9E75.
+ *   • Site      → the "Stack" mark (B1340512/NEW-1): the three isometric plates of
+ *                 the brand mark (BrandMark.jsx, variant="favicon") settle into place
+ *                 bottom-first, hold, then loop. Deliberately bare — no caption, no
+ *                 progress text, no drawn geometry — the owner's pick among five
+ *                 replacements for the old drawn-parcel skeleton.
  * One animation engine, a per-module skin + accent (reuses MODULE_ACCENT), so the
  * loading UX stays consistent as the suite grows. (B224)
  *
- * Accessibility: honors prefers-reduced-motion — the cascade + sweep are dropped
- * for a static skeleton with a gentle opacity pulse.
+ * Accessibility: honors prefers-reduced-motion — the cascade + sweep (or, for Site,
+ * the plate settle) are dropped for a static rest state (a gentle opacity pulse for
+ * the Gantt skin; the three Stack plates simply held at full opacity).
  *
  * Threshold: the loader stays invisible for ~250 ms (SHOW_DELAY_MS), so a fast
  * load never flashes it for a split second. Used as a Suspense fallback (chunk
@@ -22,6 +26,7 @@
  */
 import { useEffect, useState } from "react";
 import { resolveLoaderTheme, SHOW_DELAY_MS } from "./moduleLoaderTheme.js";
+import BrandMark from "../brand/BrandMark.jsx";
 
 export { SHOW_DELAY_MS };
 
@@ -41,13 +46,10 @@ const GANTT_ROWS = [
   { s: 0.56, w: 0.15, kind: "bar", name: 0.36 },
 ];
 
-// Building footprints for the Site skin (fractions of the parcel box).
-const SITE_BUILDINGS = [
-  { x: 0.10, y: 0.16, w: 0.34, h: 0.26 },
-  { x: 0.52, y: 0.14, w: 0.36, h: 0.20 },
-  { x: 0.12, y: 0.52, w: 0.30, h: 0.30 },
-  { x: 0.50, y: 0.46, w: 0.40, h: 0.36 },
-];
+const STACK_SIZE = 46;      // px square at desktop (CSS scales it down on phone widths)
+const STACK_CYCLE = 2.9;    // seconds — settle → hold → fade → pause, then loop
+const STACK_STAGGER = 0.13; // seconds — 130ms per plate, bottom plate first
+const STACK_TIERS = ["base", "mid", "top"];
 
 // Keyframes (injected as one <style> with the component). transform-origin:left
 // makes bars wipe from their start edge; opacity fades the loop boundary so the
@@ -77,6 +79,28 @@ const KEYFRAMES = `
 @keyframes pl-draw  { to { stroke-dashoffset: 0; } }
 @keyframes pl-fade  { 0% { opacity: 0; transform: scale(0.96); } 60% { opacity: 1; } 100% { opacity: 1; transform: scale(1); } }
 @keyframes pl-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+/* Stack (B1340512/NEW-1) — a plate settles in, holds, then fades back to its start
+   state before the next loop begins (86%→100% is the deliberate pause: 0%'s state
+   already matches 100%'s, so the infinite loop never jumps/flickers at the seam). */
+@keyframes pl-stack-settle {
+  0%   { opacity: 0; transform: translateY(-9px); }
+  14%  { opacity: 1; transform: translateY(0); }
+  72%  { opacity: 1; transform: translateY(0); }
+  86%  { opacity: 0; transform: translateY(-9px); }
+  100% { opacity: 0; transform: translateY(-9px); }
+}
+.pl-stack-wrap { display: flex; align-items: center; justify-content: center; }
+.pl-stack-plate {
+  opacity: 0;
+  transform: translateY(-9px);
+  animation-name: pl-stack-settle;
+  animation-duration: ${STACK_CYCLE}s;
+  animation-timing-function: cubic-bezier(.22,.61,.36,1);
+  animation-iteration-count: infinite;
+}
+@media (max-width: 560px) {
+  .pl-stack-wrap { transform: scale(0.72); }
+}
 `;
 
 const CYCLE = 2.6;        // seconds — one assemble→sweep loop
@@ -139,43 +163,22 @@ function GanttSkin({ accent, reduce }) {
   );
 }
 
-function SiteSkin({ accent, reduce }) {
-  const VB_W = 760, VB_H = 520;
-  // Irregular parcel outline (a closed path) that stroke-draws itself.
-  const parcel = "M70,70 L560,48 L700,250 L640,470 L150,452 L60,260 Z";
-  const PERIM = 2100; // generous dash length to cover the path
-  const PX = 60, PY = 44, PW = 640, PH = 432;   // parcel bounding box for footprints
-  const drawStyle = reduce
-    ? { strokeDashoffset: 0 }
-    : { strokeDasharray: PERIM, strokeDashoffset: PERIM, animation: `pl-draw 1.6s ease-in-out infinite alternate` };
+// The Stack mark — the three plates of the brand mark (BrandMark.jsx) settling into
+// place, bottom plate first. Reuses BrandMark's geometry via its plateProps hook
+// (never a second copy of the polygons). Deliberately the ONLY thing on screen for
+// this skin — no caption, no progress text, no drawn parcel (the owner's pick among
+// five replacements for the old skeleton, B1340512/NEW-1).
+function StackMark({ reduce }) {
+  const plateProps = (tier) => reduce
+    ? { style: { opacity: 1, transform: "none" } }
+    : {
+        className: "pl-stack-plate",
+        style: { animationDelay: `${STACK_TIERS.indexOf(tier) * STACK_STAGGER}s` },
+      };
   return (
-    <svg width="100%" height="100%" viewBox={`0 0 ${VB_W} ${VB_H}`} preserveAspectRatio="xMidYMid meet"
-      style={{ display: "block", maxHeight: "78vh" }} aria-hidden="true">
-      {/* faint survey grid */}
-      {Array.from({ length: 9 }, (_, i) => (
-        <line key={`v${i}`} x1={40 + i * 84} y1="20" x2={40 + i * 84} y2={VB_H - 20} stroke="#eaeef0" strokeWidth="1" />
-      ))}
-      {Array.from({ length: 7 }, (_, i) => (
-        <line key={`h${i}`} x1="20" y1={36 + i * 70} x2={VB_W - 20} y2={36 + i * 70} stroke="#eaeef0" strokeWidth="1" />
-      ))}
-      {/* parcel outline stroke-drawing itself */}
-      <path d={parcel} fill={`${accent}14`} stroke={accent} strokeWidth="3" strokeLinejoin="round" style={drawStyle} />
-      {/* building footprints fading in, staggered */}
-      {SITE_BUILDINGS.map((b, i) => {
-        const style = reduce
-          ? { opacity: 0.9 }
-          : { transformBox: "fill-box", transformOrigin: "center", animation: `pl-fade 0.6s ease-out both`, animationDelay: `${0.8 + i * 0.22}s` };
-        return (
-          <rect key={i} x={PX + b.x * PW} y={PY + b.y * PH} width={b.w * PW} height={b.h * PH}
-            rx="3" fill={accent} opacity="0.82" stroke="#ffffff" strokeWidth="2" style={style} />
-        );
-      })}
-      {/* north arrow pops in last */}
-      <g style={reduce ? { opacity: 0.8 } : { animation: `pl-fade 0.5s ease-out both`, animationDelay: "1.7s" }}>
-        <circle cx={VB_W - 56} cy="60" r="20" fill="#ffffff" stroke={accent} strokeWidth="2" />
-        <path d={`M${VB_W - 56},44 L${VB_W - 50},64 L${VB_W - 56},59 L${VB_W - 62},64 Z`} fill={accent} />
-      </g>
-    </svg>
+    <div className="pl-stack-wrap" aria-hidden="true">
+      <BrandMark size={STACK_SIZE} variant="favicon" tile={false} plateProps={plateProps} />
+    </div>
   );
 }
 
@@ -191,8 +194,10 @@ export default function ModuleLoader({ module = "scheduler", label, style }) {
     return () => clearTimeout(t);
   }, []);
 
-  const Skin = theme.kind === "site" ? SiteSkin : GanttSkin;
-  const caption = label || theme.label;
+  const isStack = theme.kind === "stack";
+  // Screen readers still get an announcement even though the Stack skin shows no
+  // visible caption by design (theme.label is intentionally unset for it).
+  const caption = label || theme.label || "Loading…";
 
   return (
     <div
@@ -208,15 +213,21 @@ export default function ModuleLoader({ module = "scheduler", label, style }) {
       }}
     >
       <style>{KEYFRAMES}</style>
-      <div style={{ width: "100%", flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center",
-        ...(reduce ? { animation: "pl-pulse 1.8s ease-in-out infinite" } : null) }}>
-        <Skin accent={theme.accent} reduce={reduce} />
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 9, color: "var(--text-secondary)", fontFamily: "'Inter', system-ui, sans-serif", fontSize: 13, fontWeight: 500 }}>
-        <span style={{ width: 9, height: 9, borderRadius: 2, background: theme.accent, transform: "rotate(45deg)",
-          ...(reduce ? null : { animation: "pl-pulse 1.4s ease-in-out infinite" }) }} />
-        {caption}
-      </div>
+      {isStack ? (
+        <StackMark reduce={reduce} />
+      ) : (
+        <>
+          <div style={{ width: "100%", flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center",
+            ...(reduce ? { animation: "pl-pulse 1.8s ease-in-out infinite" } : null) }}>
+            <GanttSkin accent={theme.accent} reduce={reduce} />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, color: "var(--text-secondary)", fontFamily: "'Inter', system-ui, sans-serif", fontSize: 13, fontWeight: 500 }}>
+            <span style={{ width: 9, height: 9, borderRadius: 2, background: theme.accent, transform: "rotate(45deg)",
+              ...(reduce ? null : { animation: "pl-pulse 1.4s ease-in-out infinite" }) }} />
+            {caption}
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -4109,7 +4109,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               {compMenu.comp.title || compHeadline(compMenu.comp, compsRatePeriod)}
             </div>
             <button onClick={() => exportCompSiteRecordKmz(compMenu.comp)} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: PAL.ink, padding: "7px 10px", borderRadius: RADIUS.sm }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-overlay)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>Export site record (KMZ)</button>
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-overlay)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>Export KMZ</button>
           </ContextMenu>
         )}
 

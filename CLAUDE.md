@@ -465,7 +465,13 @@ were split out of this file.
    them into one dismissal. (See B1037952, B1048400.)
 7. **(2026-08-22) A live check runs on a throwaway duplicate of a real plan, never on one of
    Michael's real plans** — and the session says exactly what was touched.
-8. **(2026-09-07) Split stays a phone-width Schedule option — do not remove it, do not re-ask.**
+8. **(2026-09-11) The canvas commits ONE framing per load.** Whatever framing is first painted is
+   the framing that stays; no intermediate framing is ever shown. A framing may not be computed
+   before the model it frames and the container it frames into are both real — and where it cannot
+   yet be computed, the canvas paints nothing rather than a placeholder view. A debounce, a delay,
+   or anything that merely outruns the wrong framing does not satisfy this. Enforced by
+   `ui-audit/verify-boot-framing.mjs` (a required gate). (See B1574432, V1127680.)
+9. **(2026-09-07) Split stays a phone-width Schedule option — do not remove it, do not re-ask.**
    Michael, verbatim: "Yes make split an option on the phone." Separately, a one-pane-at-a-time
    Split (any variant, however its highlight is drawn) is a rejected shape, not an open design
    question — three real-device rejections of exactly that mechanism, the last verbatim: "Nothing

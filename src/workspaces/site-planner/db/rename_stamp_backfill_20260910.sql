@@ -1,6 +1,14 @@
--- NEW-1 — PROPOSED repair for rows whose rename marker was already erased. ⛔ NOT RUN.
+-- NEW-1 — PROPOSED repair for rows whose rename marker was already erased.
 --
--- ⛔ READ THIS FIRST. This file has NOT been executed against planyr_production, deliberately. The
+-- ⛔ SUPERSEDED 2026-09-12 (B1584832, "NEW-2") — its one repair below RAN, folded into a broader pass.
+-- The 2026-09-12 review found this file's "64 rows, 1 repairable" scope was already stale: by then 88
+-- of 125 rows carried no valid stamp, not 64 of 116. `rename_stamp_backfill_20260912.sql` re-derives
+-- this exact one-row transcription (`sms9c5oc7jnt` → 1785525795307, still the only row any live sibling
+-- can vouch for) as its Tier 1, and additionally seeds the other 87 unprotected rows from their own
+-- `updated_at` (Tier 2, since no group anywhere holds a stamp for them). Read that file instead of this
+-- one for current state; this file is kept only as the historical record of the original one-row finding.
+--
+-- ⛔ READ THIS FIRST (historical). This file was NOT executed against planyr_production on its own. The
 -- dispatch that produced it said, verbatim: "propose a backfill for the 64 rows already carrying an
 -- empty marker but do NOT silently rewrite the owner's data — file it and say what you would run."
 -- The guard that stops the damage recurring (db/sites_rename_stamp_guard.sql) IS applied and rewrote

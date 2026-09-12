@@ -43,6 +43,7 @@ import {
 import { familyKey, firstFamily, fontDisplayLabel, matchFontOption } from "../lib/notesFontFamily.js";
 import { defaultFontLabel, resolvedColor, resolvedColorsAgree } from "../lib/notesResolvedValue.js";
 import { PAGE_WIDTH_PRESETS, pageWidthLabel } from "../lib/notesPageWidth.js";
+import { pageHeightLabel } from "../lib/notesPageHeight.js";
 
 /* Mirrored from src/shared/ui/controls.jsx rather than imported — deliberately, and there
  * is a test that fails if the copies drift (test/notesModule.test.js). Importing
@@ -1220,6 +1221,18 @@ export default function NoteToolbar({
         editor.commands.setNotePageWidth(Number(v));
       }} />
   );
+  /* ⛔ SET A PAGE'S OWN HEIGHT BY HAND (NEW-1, 2026-09-12) — the menu's own "way back": a page
+   * dragged tall by the top/bottom grips has no preset ladder (the owner did not ask for one),
+   * so the one thing this control needs to offer is the return trip to Fit to content. Sits
+   * beside Page width for the identical reason. */
+  const pageHeightAttr = editor.state.doc.attrs?.pageHeight ?? null;
+  const heightControl = (
+    <FormatMenu title="Page height" testid="nt-page-height" width={124} big={narrow}
+      value={pageHeightAttr == null ? "fit" : "custom"}
+      displayLabel={pageHeightLabel(pageHeightAttr)}
+      options={[{ label: "Fit to content", value: "fit" }]}
+      onPick={(v) => { if (v === "fit") editor.commands.setNotePageHeight(null); }} />
+  );
   const exportBtn = (
     <TBButton title="Export this page to Markdown" testid="nt-export" wide big={narrow} label="Markdown" onClick={onExport}>
       <Icon><path d="M8 2.5v8" /><path d="M5 7.5L8 10.5l3-3" /><path d="M2.5 12.5h11" /></Icon>
@@ -1392,6 +1405,7 @@ export default function NoteToolbar({
           <MenuGroup label="Page">
             {zoomBtn}
             {widthControl}
+            {heightControl}
             {historyBtn}
             {printBtn}
             {exportBtn}
@@ -1403,6 +1417,7 @@ export default function NoteToolbar({
 
       {!narrow && zoomBtn}
       {!narrow && widthControl}
+      {!narrow && heightControl}
       {!narrow && historyBtn}
       {!narrow && printBtn}
       {!narrow && exportBtn}
