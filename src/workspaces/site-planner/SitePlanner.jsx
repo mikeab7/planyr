@@ -2601,7 +2601,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [insHint, setInsHint] = useState(null); // {x,y} screen px (snapped to the nearest edge point)
   const [shiftHeld, setShiftHeld] = useState(false);
   const selVtxRef = useRef(selVtx); selVtxRef.current = selVtx;
-  const [showShortcuts, setShowShortcuts] = useState(false); // ? keyboard overlay
 
   // Title reader + metes-and-bounds plotter (Schedule B → checklist; legal
   // description → drawn encumbrance). All in one modal.
@@ -6738,7 +6737,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         e.preventDefault(); // arm hold-to-pan; also blocks the page from scrolling
         return;
       }
-      if (e.key === "?" || (e.key === "/" && e.shiftKey)) { e.preventDefault(); setShowShortcuts((s) => !s); return; }
+      // "?" (and Shift+/) used to toggle a local "Keyboard & gestures" overlay here. It is now
+      // the global Keyboard Shortcuts page (src/app/ShortcutsPage.jsx), reachable from every
+      // workspace via a single listener in Shell.jsx — leaving a second binding on this key here
+      // as well would be exactly the "two shortcuts on one key" class this app's own
+      // keyContract.js exists to prevent. See that file's own history for why the entry moved.
       // B932 — Alt+Z autosizes the selected text box / callout to fit its text (Bluebeam parity: its
       // "Autosize Text Box" shortcut). Clears any dragged fixed width so the box hugs its content again
       // — the keyboard peer of the "↔ Fit to text" button. `e.code` (physical Z) because Alt+Z emits a
@@ -27964,33 +27967,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         );
       })()}
 
-      {showShortcuts && (
-        <div onClick={() => setShowShortcuts(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 560, maxWidth: "92vw", maxHeight: "86vh", overflowY: "auto" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
-              <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Keyboard & gestures</h2>
-              <button className="gbtn" onClick={() => setShowShortcuts(false)} style={{ ...chip }}>Close ✕</button>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 26px" }}>
-              {[
-                ["Tools", ""], ["V", "Select"], ["M", "Select multiple"], ["Space-drag", "Pan temporarily"], ["S", "Toggle snap"], ["L", "Line"], ["R", "Rectangle"], ["E", "Ellipse"],
-                ["⇧P", "Polygon"], ["⇧N", "Polyline"], ["Q", "Callout"], ["T", "Text box"],
-                ["Edit", ""], ["Ctrl/⌘ Z", "Undo"], ["Ctrl/⌘ ⇧Z", "Redo"], ["Ctrl/⌘ C / X / V", "Copy / Cut / Paste"],
-                ["Ctrl/⌘ D", "Duplicate"], ["Ctrl/⌘ G", "Group selection"], ["Ctrl/⌘ ⇧G", "Ungroup"], ["Alt Z", "Fit text box / callout to its text"], ["Delete / ⌫", "Delete selection"], ["Esc", "Cancel / deselect"],
-                ["While drawing", ""], ["⇧ drag", "Constrain (square / circle / 45°)"], ["Double-click / Enter", "Finish polygon / polyline"], ["Click 1st dot", "Close a shape"],
-                ["Gestures", ""], ["Drag a dot", "Move a vertex"], ["＋ on an edge", "Add a vertex"], ["⇧-click a dot", "Delete a vertex"],
-                ["Right-click element", "Actions menu"], ["Double-click in a group", "Edit that member in place"], ["Drag a group", "Move as one unit"], ["Alt drag", "Bypass snap (place freely)"], ["?", "This panel"],
-              ].map(([k, v], i) => v === "" ? (
-                <div key={i} style={{ gridColumn: "1 / -1", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: PAL.muted, marginTop: i ? 12 : 0, marginBottom: 2 }}>{k}</div>
-              ) : (
-                <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "3px 0", fontSize: 12.5 }}>
-                  <kbd style={{ flex: "none" }}>{k}</kbd><span style={{ color: PAL.ink }}>{v}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* The local "Keyboard & gestures" overlay that used to live here is retired — its content
+          moved into the app-wide Keyboard Shortcuts page (shared/keyboard/shortcutsData.js's
+          "site" section), reachable via "?" from anywhere, not just this workspace. */}
       {/* Version history (automatic local backups, B126) — restore an earlier saved version */}
       {storageOpen && (
         <div onClick={() => setStorageOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>

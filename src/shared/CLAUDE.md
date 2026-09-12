@@ -129,6 +129,19 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   to stop a Backspace destroying a building, and the ui-audit harness **verify-delete-key-scope** re-proves that defect dead
   on every run. The `FIELD` LATCH is likewise narrowed: `data-field-group` marks every value row, so a row
   whose only control is a slider or a dropdown is NOT a typing row.
+  `isTextControl` (same file) is also the ONE predicate the app shell's global "?" Keyboard Shortcuts
+  listener asks before opening — see the next bullet.
+- **`keyboard/shortcutsData.js` + `platform.js` + `shortcutsPageBus.js` — the Keyboard Shortcuts page
+  (NEW-1, 2026-09-12), rendered by the app shell's own lazy-loaded ShortcutsPage component.**
+  `shortcutsData.js` is the ONE list that page reads: its Site section is DERIVED from the site-planner
+  workspace's own key-contract module's `KEY_CONTRACT` (so it cannot drift from what that workspace's
+  handler does); every other section's items carry an `evidence: [{file, pattern}]` pointer that the
+  repo-root `test/` suite's shortcuts-page test re-checks against the real source on every run. Adding,
+  changing or removing a shortcut anywhere in the app should update the matching entry here in the SAME
+  commit — the guard catches drift/removal, not a silent addition. `platform.js` is the one
+  Mac-vs-everyone-else chord formatter (`formatCombo`); `shortcutsPageBus.js` is the tiny open/close
+  signal the "?" listener and the Help menu's "Keyboard shortcuts" row both call, so neither the page
+  nor its callers need a prop threaded through every workspace.
 - `theme/palette.js` — JS mirror of the CSS theme tokens (keep in sync; SVG/canvas can't use
   `var()`). `ui/statusTokens.js` — the single project-status palette source. `ui/controls.jsx` —
   shared control primitives (Button/ToggleChip/IconButton/Field/Section/MenuItem) + the one
