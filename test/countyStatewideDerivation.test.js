@@ -376,6 +376,13 @@ describe("B1338896 — candidateCountiesForPoint narrows to ONE real-CAD candida
     expect(candidateCountiesForPoint(32.8802, -111.7476)).toEqual(["az_pinal"]);
   });
 
+  it("REGRESSION FIXTURE — the exact Phoenix point from the live repro queries az_maricopa ALONE", () => {
+    // -112.0731, 33.4808 as measured live (lng, lat) → (lat, lng) for this function. The dispatch's
+    // own control point: this one already issued exactly one query before this fix (no bbox overlap
+    // at THIS exact point) — pinned here so it can never regress alongside the Casa Grande fix.
+    expect(candidateCountiesForPoint(33.4808, -112.0731)).toEqual(["az_maricopa"]);
+  });
+
   it("Casa Grande and Apache Junction (both squarely inside Pinal) never also query Maricopa", () => {
     expect(candidateCountiesForPoint(32.8795, -111.7574)).toEqual(["az_pinal"]); // Casa Grande
     expect(candidateCountiesForPoint(33.4151, -111.5496)).toEqual(["az_pinal"]); // Apache Junction
