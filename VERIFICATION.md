@@ -166,6 +166,20 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1130256 — B1584528: the name/group-key integrity detector, and the one live drift it already closed `Blocker: auth`
+
+**Why this needs its own live pass.** The rename mechanism this item's constraint says must keep working is a concurrency/multi-writer, real-project-data class (mandatory LIVE-VERIFY), and this sandbox's proxy CORS-blocks the Supabase auth handshake, so a real signed-in click-through can't run here.
+
+**What was verified here (this session, both sandbox AND live).**
+1. `test/nameGroupIntegrity.test.js` (16 tests) — proven red on the real production disagreement (`e2e-fixture-testfit`), green on the healthy shape. Full suite: 839 files / 16,953 tests green. `npm run lint` (0 errors) · `npm run build` green.
+2. **Live, via read-only Supabase MCP queries against `planyr_production` (`lyeqzkuiwngunutlkkmi`), confirming the review's own numbers rather than re-deriving them:** 125 rows, 0 name-column disagreements, 1 group-key disagreement (`e2e-fixture-testfit`), 118 rows carry `scheduleProjectName`, 7 non-empty — all four numbers matched exactly.
+3. **Live, the fix itself:** `db/backfill_group_id_column.sql` applied to `planyr_production`; its self-rolling-back proof (`db/test/backfill_group_id_column.test.sql`) run against the real database — planted disagreement confirmed RED, healed, confirmed GREEN, then rolled back (0 rows survive). The one real disagreement, `e2e-fixture-testfit` (a seeded e2e fixture, not owner data), was then backfilled for real via the new RPC and reconfirmed clean (0 group-key / 0 name mismatches account-wide, re-queried after the fix).
+4. **Live-adjacent, the rename mechanism itself:** `e2e/project-rename.spec.js` run headless (logged out, local-storage rename path) against a build carrying this item's changes — 14/14 passed, 1 skipped for missing `E2E_EMAIL`/`E2E_PASSWORD`. Includes "renaming writes EVERY plan in the project, stamps them together, and survives a reload."
+
+**Steps, each with a named expected result. Needs a real signed-in browser (this sandbox is auth-blocked):**
+1. On planyr.io, signed in as the owner, rename any real project three times in a row, reloading between each rename. **Expect:** each rename holds after reload — the same behaviour already hand-verified 2026-09-12 (three consecutive renames, `rename_site_group` RPC, three `POST rest/v1/rpc/rename_site_group` → 200 in Supabase's edge logs), unchanged by this item's `cloudSync.js siteRowFor` edit (which only touches the `group_id` column, never the rename path).
+2. `SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… node scripts/audit-name-group-integrity.mjs` from a machine with real credentials. **Expect:** "No row disagrees with itself on its name, and no row's two group keys disagree." (already true per step 3 above, measured via direct SQL — running the script itself is the one remaining formality).
+
 ### V1127504 — B1574256: a New Orleans click returns a real Orleans Parish lot, with its owner, from exactly ONE query `Blocker: live-GIS`
 
 **Why this needs its own live pass.** GIS endpoint behaviour is a mandatory LIVE-VERIFY class, and `gis.nola.gov` is blocked by this sandbox's egress policy — re-confirmed live while wiring the row (`curl` → the CONNECT tunnel itself is rejected, HTTP 403, the same wall every route-3 county host hits here). Michael measured the raw endpoint from his own browser (3 spread points, real parcels, 65–114ms), which is strong evidence for the ENDPOINT; it did not go through the deployed app's own click → identify → parcel-panel path with this session's wiring and field-mapping in place, which is what is left.
