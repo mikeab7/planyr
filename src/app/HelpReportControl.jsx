@@ -225,6 +225,15 @@ export default function HelpReportControl({ user }) {
     return () => { mq.removeEventListener ? mq.removeEventListener("change", onChange) : mq.removeListener(onChange); };
   }, []);
   const fabSize = coarsePointer ? CONTROL_H.touch : CONTROL_H.lg;
+  // NEW-4 (site-planner phone-chrome-parity pass, 2026-09-12) — when DOCKED, this control reads
+  // the dock's own `data-dock-size` (the zoom stack's pointer-driven size, set by
+  // SitePlanner.jsx) instead of its own standalone `fabSize`. Two controls sharing one small
+  // corner at two different sizes read as a mismatch; this control's own B1176976 44px
+  // tap-target floor still governs every OTHER (floating, undocked) placement — a dock that
+  // publishes no size (every dock besides the Site Planner's zoom-stack one, today) falls back
+  // to `fabSize` unchanged, so this is additive, not a lowered floor everywhere.
+  const dockSizeAttr = dockEl?.dataset?.dockSize;
+  const dockFabSize = dockSizeAttr != null && Number.isFinite(+dockSizeAttr) ? +dockSizeAttr : fabSize;
 
   useEffect(() => { setQueued(queuedReportCount()); }, [open]);
 
@@ -364,16 +373,17 @@ export default function HelpReportControl({ user }) {
       style={
         dockEl
           // Docked (map / site planner) — real furniture inside the pane's own DOM, positioned
-          // by its dock anchor's parent, not by this control. Same size/shape/tap-target as the
-          // floating case — `fabSize` (B1162016, pointer-driven) is shared between both branches,
-          // never a value of its own for the docked case.
+          // by its dock anchor's parent, not by this control. `dockFabSize` (NEW-4) is the dock's
+          // own published size when it has one (the Site Planner zoom stack's pointer-driven 35/
+          // 30), falling back to this control's own standalone `fabSize` for any dock that
+          // publishes none.
           ? {
               // No boxShadow here (deliberately unlike the zoom-stack's own container) — this
               // control is docked as its own furniture item, not merged into that bordered box,
               // and the floating case below never had one either; adding a new raw color literal
               // for a shadow here would be exactly the DESIGN.md drift this repo's own
               // design-drift-audit gate exists to catch (measured: it does).
-              position: "static", width: fabSize, height: fabSize, borderRadius: RADIUS.md,
+              position: "static", width: dockFabSize, height: dockFabSize, borderRadius: RADIUS.md,
               border: "1px solid var(--border-strong)", background: "var(--surface-raised)",
               color: "var(--text-primary)", display: "flex", alignItems: "center", justifyContent: "center",
               cursor: "pointer", padding: 0, font: "inherit", fontSize: FONT_SIZE.control,

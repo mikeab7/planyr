@@ -192,6 +192,24 @@ export const SCALE_BAR_CLEARANCE_PX = 44;
  * screen and reproduce the same collision at the next size down. */
 export const TOP_RIGHT_ROW_RESERVE_PX = 52;
 
+/* ⛔ NEW-1 (phone-chrome-parity pass, 2026-09-12) — ON NARROW, THE ZOOM STACK SHARES ITS EDGE
+ * WITH THE TOOLS EDGE TAB TOO, NOT JUST THE VIEW/LAYERS ROW EVERY SCREEN HAS.
+ *
+ * Moving the phone "✎ Tools" FAB to an edge tab at `top: 53, height: 84` (mirroring the desktop
+ * right rail it stands in for) put a SECOND occupant on the same right edge the zoom stack
+ * already shares with the View/Layers row above it — and on a genuinely short canvas (a
+ * landscape phone; measured on the exact B1338272 263px-canvas repro) the zoom stack's own
+ * un-clamped position sits squarely inside the tab's own band: measured 32×26px real overlap.
+ * `TOP_RIGHT_ROW_RESERVE_PX` alone only ever asked the stack to clear the row's ~41px; it has no
+ * way to know a second, taller occupant now sits below that row on narrow screens.
+ *
+ * `TOOLS_TAB_RESERVE_PX` is that tab's own footprint from the pane top — its `top` + height +
+ * the SAME 8px breathing gap `TOP_RIGHT_ROW_RESERVE_PX` already budgets — so `zoomStackBottomPx`
+ * can be asked (via its `topReserve` parameter) to clear the tab instead of the bare row when the
+ * tab is actually on screen. Desktop is untouched: the tab never renders there, so the call site
+ * passes the default `TOP_RIGHT_ROW_RESERVE_PX` unchanged. */
+export const TOOLS_TAB_RESERVE_PX = 53 + 84 + 8; // tab's own top + height + gap = 145
+
 /* The bottom-right zoom stack's actual `bottom` CSS offset, clamped against the canvas's own
  * REAL height so the stack's top edge can never climb into `TOP_RIGHT_ROW_RESERVE_PX`'s band.
  *
@@ -202,11 +220,13 @@ export const TOP_RIGHT_ROW_RESERVE_PX = 52;
  *   floor    — never return less than this, so the stack cannot be pushed low enough to march
  *              into the bottom furniture's own reserve instead of the row above it
  *
- * On any canvas tall enough that `paneH - stackH - TOP_RIGHT_ROW_RESERVE_PX >= desired` (every
- * desktop size, and most phones), this returns `desired` UNCHANGED — the clamp only ever
- * activates on a canvas short enough to need it. Pure. */
-export function zoomStackBottomPx({ desired, paneH, stackH, floor }) {
-  return Math.max(floor, Math.min(desired, paneH - stackH - TOP_RIGHT_ROW_RESERVE_PX));
+ * On any canvas tall enough that `paneH - stackH - topReserve >= desired` (every desktop size,
+ * and most phones), this returns `desired` UNCHANGED — the clamp only ever activates on a canvas
+ * short enough to need it. `topReserve` defaults to `TOP_RIGHT_ROW_RESERVE_PX` (the View/Layers
+ * row every screen shares); a narrow caller passes `TOOLS_TAB_RESERVE_PX` instead once the Tools
+ * edge tab is also on screen (NEW-1) — the SAME clamp shape, a different thing to clear. Pure. */
+export function zoomStackBottomPx({ desired, paneH, stackH, floor, topReserve = TOP_RIGHT_ROW_RESERVE_PX }) {
+  return Math.max(floor, Math.min(desired, paneH - stackH - topReserve));
 }
 
 /* ⛔ NEW-1 (regression from B1310209, this item) — A CLEARANCE CONSTANT ASSUMES THE OTHER PANEL IS

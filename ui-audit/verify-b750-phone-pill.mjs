@@ -1,14 +1,24 @@
-/* Headless drive for the Site Planner phone/narrow-viewport ✎ Properties pill (B750 / V263 step 2)
+/* Headless drive for the Site Planner phone/narrow-viewport Properties access (B750 / V263 step 2)
  * — LOGGED OUT, on the BUILT app, at a NARROW width (<760px so `narrow` mode engages).
  *
- * On a narrow window a tap only SELECTS — the Properties companion does NOT auto-open. Instead a
- * "✎ Properties" pill appears; tapping it opens the companion overlay. Checks:
- *  1. Selecting an element shows the ✎ Properties pill and leaves the companion CLOSED (tap = select only).
- *  2. Tapping the pill OPENS the Properties companion (its property-panel renders).
- *  3. Deselect + a plain single-tap on the element still SELECTS only (pill back, companion closed).
+ * ⛔ SUPERSEDED (NEW-1, phone-chrome-parity pass, 2026-09-12) — this used to drive the standalone
+ * "✎ Properties" quick-access pill (B656): select an element, the pill appears, tap it to open the
+ * companion. That pill is GONE — Properties is reached the same way on every width now: the
+ * Panels edge tab opens the rail, and its "Properties" row is one of the tabs in it, exactly as
+ * it's a tab inside the rail on desktop. The B556 guard this test exists to prove — a plain tap
+ * only ever SELECTS, it never auto-opens the panel — is unchanged, so this still checks it; only
+ * the "how do I open it on purpose" step changed. On narrow, the Properties tab keeps its
+ * dedicated phone bottom-sheet presentation (`phoneSheetSolo`) rather than becoming an ordinary
+ * left-side drawer panel, so the assertions below read the companion overlay the same way the
+ * original pill flow did.
+ *
+ *  1. Selecting an element leaves the companion CLOSED (tap = select only) — and confirms the old
+ *     "✎ Properties" pill no longer exists at all.
+ *  2. Panels tab → "Properties" row OPENS the Properties companion (its property-panel renders).
+ *  3. ✕ closes the companion — the element stays SELECTED.
  *
  * The element is DRAWN live (not seeded) — the narrow layout's fit doesn't frame a seeded parcel in
- * the headless sandbox, but a live draw exercises the exact select→pill path the ticket describes.
+ * the headless sandbox, but a live draw exercises the exact select→open path the ticket describes.
  */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 const { chromium } = pw;
@@ -26,7 +36,7 @@ const seed = `(()=>{try{localStorage.setItem('planarfit:sites:v1',JSON.stringify
 
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
-// Narrow viewport — below FLOAT_MIN_WIDTH (760) so the narrow layout + ✎ pill logic engages.
+// Narrow viewport — below FLOAT_MIN_WIDTH (760) so the narrow layout engages.
 const ctx = await browser.newContext({ viewport: { width: 720, height: 860 }, deviceScaleFactor: 1, ignoreHTTPSErrors: true });
 await ctx.addInitScript(seed);
 const page = await ctx.newPage();
@@ -40,17 +50,21 @@ await assertMeasurable(page, "verify-b750-phone-pill");
 const fails = [];
 const check = (name, ok, extra = "") => { console.log(`${ok ? "✓" : "✗"} ${name}${extra ? " — " + extra : ""}`); if (!ok) fails.push(name); };
 const panelCount = () => page.locator('[data-testid="property-panel"]').count();
-const pill = () => page.locator('button:has-text("✎ Properties")');
-const pillVisible = async () => (await pill().count()) > 0 && (await pill().first().isVisible());
+const oldPillVisible = async () => {
+  const p = page.locator('button:has-text("✎ Properties")');
+  return (await p.count()) > 0 && (await p.first().isVisible());
+};
 
-await page.goto(BASE, { waitUntil: "load" });
+// ⛔ B1231282 — a bare hash lands on the Dashboard, not the Site Planner (see
+// verify-canvas-furniture.mjs's own header note on the same fix). Name the seeded groupId.
+await page.goto(BASE + "#/project/S/site", { waitUntil: "load" });
 await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 15000 });
 await page.waitForTimeout(1500);
 
-// Confirm we're in narrow mode (the ✎ Tools trigger is narrow-only), then arm Building via that overlay.
-const toolsBtn = page.locator('button:has-text("Tools")').first();
-check("B750 (phone) — narrow layout engaged (the ✎ Tools trigger is present)", (await toolsBtn.count()) > 0);
-await toolsBtn.click();
+// Confirm we're in narrow mode (the Tools edge tab is narrow-only), then arm Building via that overlay.
+const toolsTab = page.locator('[data-testid="mobile-tools-tab"]').first();
+check("B750 (phone) — narrow layout engaged (the Tools edge tab is present)", (await toolsTab.count()) > 0);
+await toolsTab.click();
 await page.waitForTimeout(400);
 await page.locator('button:has-text("Building")').first().click();
 await page.waitForTimeout(300);
@@ -60,33 +74,38 @@ const r = await page.locator('[data-testid="planner-canvas"]').boundingBox();
 const A = { x: r.x + r.width * 0.35, y: r.y + r.height * 0.40 };
 const B = { x: r.x + r.width * 0.62, y: r.y + r.height * 0.62 };
 const C = { x: (A.x + B.x) / 2, y: (A.y + B.y) / 2 }; // building centre
-const EMPTY = { x: r.x + r.width * 0.85, y: r.y + r.height * 0.85 };
 await page.mouse.move(A.x, A.y); await page.mouse.down();
 await page.mouse.move(C.x, C.y, { steps: 5 }); await page.mouse.move(B.x, B.y, { steps: 5 });
 await page.mouse.up();
 await page.waitForTimeout(600);
 await page.screenshot({ path: OUT + "phone-selected.png" });
 
-// 1) Drawn element is selected → the ✎ pill shows, but the companion stays CLOSED (no auto-open).
-const pill1 = await pillVisible();
+// 1) Drawn element is selected → the companion stays CLOSED (no auto-open), and the old
+//    standalone "✎ Properties" pill (removed by NEW-1) does not exist at all.
 const panel1 = await panelCount();
-check("B750 (phone) — selecting an element shows the ✎ Properties pill (tap = select only)", pill1, `pill=${pill1}`);
+const oldPill1 = await oldPillVisible();
 check("B750 (phone) — a plain draw/tap does NOT auto-open the companion (no property-panel yet)", panel1 === 0, `panels=${panel1}`);
+check("B750 (phone) — the removed standalone '✎ Properties' pill does not exist (NEW-1)", !oldPill1, `oldPill=${oldPill1}`);
 
-// 2) Tap the pill → the companion overlay opens.
-if (pill1) { await pill().first().click(); await page.waitForTimeout(500); }
+// 2) Panels edge tab → "Properties" row → the companion overlay opens.
+const panelsTab = page.locator('[data-testid="mobile-panels-tab"]').first();
+check("B750 (phone) — Panels edge tab is present", (await panelsTab.count()) > 0);
+await panelsTab.click();
+await page.waitForTimeout(300);
+const propertiesRow = page.locator('[data-rail-tab="properties"]').first();
+check("B750 (phone) — Properties row is present in the Panels drawer", (await propertiesRow.count()) > 0);
+await propertiesRow.click();
+await page.waitForTimeout(500);
 await page.screenshot({ path: OUT + "phone-companion.png" });
 const panel2 = await panelCount();
-check("B750 (phone) — tapping the ✎ pill OPENS the Properties companion", panel2 > 0, `panels=${panel2}`);
+check("B750 (phone) — Panels → Properties OPENS the companion overlay", panel2 > 0, `panels=${panel2}`);
 
-// 3) ✕ closes the companion — the element stays SELECTED, so the ✎ pill returns (companion closed
-//    again). This is the round-trip the ticket describes: pill ⇄ companion, tap only ever selects.
+// 3) ✕ closes the companion.
 await page.locator('[aria-label="Close properties"]').first().click();
 await page.waitForTimeout(400);
-const pill3 = await pillVisible();
 const panel3 = await panelCount();
-await page.screenshot({ path: OUT + "phone-reselect.png" });
-check("B750 (phone) — ✕ closes the companion; the element stays selected so the ✎ pill returns", pill3 && panel3 === 0, `pill=${pill3} panels=${panel3}`);
+await page.screenshot({ path: OUT + "phone-closed.png" });
+check("B750 (phone) — ✕ closes the companion", panel3 === 0, `panels=${panel3}`);
 
 await browser.close();
 console.log(fails.length ? `\nFAILED: ${fails.length}\n` : "\nALL PASSED\n");

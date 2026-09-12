@@ -192,15 +192,16 @@ export function northArrowPlate({ m, pal = {}, bearingDeg = 0 }) {
 // truncates with an ellipsis instead of overflowing the pane / colliding with the zoom column.
 // Pure → unit-testable. `badgeW` is the badge's natural (untruncated) width in CSS px; pass 0
 // before it's measured (→ never raised). Returns { raise, left, bottom, maxWidth }.
-/* NEW-MAPCTRL-3 — THE ONE reserve every piece of bottom-left/bottom-right canvas furniture
- * (north arrow, scale bar, this calibration badge) adds to its `row` on a narrow (phone/tablet)
- * screen, so none of them can render under the "✎ Properties" / "✎ Tools" FABs that replace the
- * side rails there. Measured against the real rendered FABs: `bottom:16` + a 38px pill, rounded
- * up with an 8px gap. Confirmed collisions this closes (measured live, headless, at width 750):
- * the calibration badge (and the coordinate readout it shares a row with) under "✎ Properties",
- * and the scale bar's own right portion under "✎ Tools" (`ui-audit/verify-canvas-furniture.mjs`).
- * A control the user can PRESS always wins the band; passive furniture reflows above it. */
-export const FAB_RESERVE_PX = 62;
+/* ⛔ SUPERSEDED (NEW-1/NEW-2, the phone-chrome-parity pass) — `FAB_RESERVE_PX` is GONE. It used
+ * to be the one reserve every piece of bottom-left/bottom-right canvas furniture (north arrow,
+ * scale bar, this calibration badge) added to its `row` on a narrow screen, so none of them
+ * rendered under the "✎ Properties" / "✎ Tools" FABs that used to squat in the two bottom
+ * corners. Those two summoning controls moved to edge tabs at the SIDE of the screen (mirroring
+ * the desktop rails they stand in for), so the bottom corners are free again and the reserve is
+ * unnecessary — `SitePlanner.jsx` now passes a `row` built from a small fixed offset plus the
+ * real safe-area inset (the notch/home-indicator strip), never this constant. `calibBadgePlacement`
+ * itself is untouched — it only ever consumed `row` as a plain number and does not care why it is
+ * whatever it is. */
 
 export function calibBadgePlacement({
   paneW, badgeW, scaleBarW, scaleBarH,
@@ -235,11 +236,27 @@ export function canvasPillBottom({ northH = 0, scaleBarH = 0, calibBottom = null
 // arrow ALWAYS fully on screen — immune to canvas-taller-than-viewport / status-bar
 // overlap — and lets CSS place each precisely. Returns each plate's inner SVG markup
 // plus its width/height so the caller can size its wrapping <svg>. `targetU`/`maxU`
-// are absolute screen-pixel widths for the bar (the canvas user unit == screen px).
+// are absolute screen-pixel CEILINGS for the bar (the canvas user unit == screen px).
+//
+// NEW-3 (phone-chrome-parity pass) — on a genuinely narrow pane the bar used to keep its full
+// desktop-sized ceiling (targetU 130 / maxU 240) with no awareness of how much pane it was
+// actually sitting in, so on a 390px-wide phone canvas the plate ran to more than half the pane
+// instead of the ~quarter a comfortable reading gives it. `paneW` lets the caller (SitePlanner's
+// measured `size.rawW`) fold in the SAME continuous fraction the export path already uses via
+// `pickScaleBar`'s own `targetFrac`/`maxFrac` (≈0.22 / 0.30) — via a plain `Math.min` against the
+// existing absolute ceilings, not a second breakpoint, so the two curves meet smoothly: on a wide
+// (desktop) pane `paneW·frac` always exceeds the absolute ceiling and `Math.min` returns that
+// ceiling UNCHANGED (byte-identical to before this fix), and only once the pane narrows enough
+// for the fraction to undercut the ceiling does the bar actually shrink. Omitting `paneW`
+// (every caller that predates this — the export path sizes off the sheet frame instead, and the
+// dev-only bottom-furniture-harness) keeps the old fixed-ceiling behaviour untouched.
 export function screenFurniturePlates({
-  ftPerUnit, fmtFeet, pal = {}, bearingDeg = 0, refS = 540, targetU = 130, maxU = 240,
+  ftPerUnit, fmtFeet, pal = {}, bearingDeg = 0, refS = 540,
+  paneW = null, targetFrac = 0.22, maxFrac = 0.3, targetU: targetUCeil = 130, maxU: maxUCeil = 240,
 }) {
   const m = furnitureMetrics(refS);
+  const targetU = paneW != null ? Math.min(targetUCeil, paneW * targetFrac) : targetUCeil;
+  const maxU = paneW != null ? Math.min(maxUCeil, paneW * maxFrac) : maxUCeil;
   const { feet, lengthU } = pickScaleBar({ ftPerUnit, targetU, maxU });
   const sb = scaleBarPlate({ lengthU, feet, m, pal, fmtFeet });
   const na = northArrowPlate({ m, pal, bearingDeg });

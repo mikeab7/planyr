@@ -110,7 +110,7 @@ import { wseSensitivity } from "./lib/wseSensitivity.js";
  * comment for why both hosts have to move together. */
 const LayerPanel = lazy(() => import("./components/LayerPanel.jsx"));
 // NEW-3 — the ONE map-overlay stacking model (an open panel outranks map chrome).
-import { MAP_CHROME_Z, zoomStackBottomPx } from "./lib/mapChromeStack.js";
+import { MAP_CHROME_Z, zoomStackBottomPx, TOOLS_TAB_RESERVE_PX } from "./lib/mapChromeStack.js";
 import { districtDrainageNote } from "./lib/floodGroup.js";
 import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
@@ -472,7 +472,7 @@ import {
 import { siteState as resolveSiteState } from "./lib/siteRegion.js";
 import { splitPolygonByCut, remapEdgeVector } from "./lib/polygonSplit.js";
 import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea } from "./lib/polyClip.js";
-import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom, FAB_RESERVE_PX } from "./lib/sheetFurniture.js";
+import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom } from "./lib/sheetFurniture.js";
 // B765985 — pure, dependency-free (safe on the boot path): the explicit engineering-scale math
 // the compose screen's frame-locking and fit-check use.
 import { scaleLabel, frameFootprintForScale, checkScaleFits } from "./lib/printScale.js";
@@ -1756,6 +1756,23 @@ const XIcon = () => (
 // Compact number formatting for the scale picker (B574–B578). trimNum: a field value without
 // trailing-zero noise (0.125 → "0.125", 1 → "1"). fmtScaleNum: the "1″=X′" readout (integer when
 // near-integer, else one decimal — so an architectural 3/4″=1′ shows 1.3, not a misleading 1).
+// NEW-1 (phone-chrome-parity pass) — an alpha-blended variant of a theme HEX token (never a raw
+// literal — the mobile edge tabs read PAL.chrome through this so the slight see-through reads
+// correctly in both themes instead of a fixed rgba() that would go wrong in one of them).
+// ⛔ Kept BEFORE `fmtScaleNum`, not after — `hiddenContentReads.js`'s audit sweep attributes a
+// module-scope binding's "body" from its own line to the NEXT module-scope binding, and
+// `export default function SitePlanner` doesn't match that sweep's pattern (`export default`,
+// not `export const/function`) — so whichever module-scope const sits LAST before it silently
+// swallows the sweep's attribution for the entire component as its own "body" (see
+// `fmtScaleNum`'s own DECLARATIONS entry for why that name, specifically, carries that
+// documented quirk). Adding a new module-scope const AFTER it would inherit that role instead —
+// see test/hiddenContentReads.test.js's "stale declaration" guard, which caught exactly this.
+const hexA = (hex, a) => {
+  const h = String(hex).replace("#", "");
+  const n = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  const r = parseInt(n.slice(0, 2), 16), g = parseInt(n.slice(2, 4), 16), b = parseInt(n.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${a})`;
+};
 const trimNum = (n) => String(Math.round(n * 1000) / 1000);
 const fmtScaleNum = (n) => { const r = Math.round(n * 10) / 10; return Number.isInteger(r) ? String(r) : r.toFixed(1); };
 
@@ -1915,7 +1932,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [narrowWidth, setNarrowWidth] = useState(() => { try { return window.matchMedia(`(max-width: ${FLOAT_MIN_WIDTH}px)`).matches; } catch (_) { return false; } });
   const [mobileTools, setMobileTools] = useState(false); // right tool rail open as an overlay (narrow only)
   const [mobileSections, setMobileSections] = useState(false); // NEW-1 (B917072) — left section rail (Land/Analysis/Yield/…) summoned as an overlay (narrow only)
-  const [narrowProps, setNarrowProps] = useState(false); // B656: phone-only — the ✎ Properties pill opened the companion overlay
+  const [narrowProps, setNarrowProps] = useState(false); // B656: phone-only — whether the Properties companion overlay is open (opened via openInspector — a double-click, or the Panels drawer's Properties tab; the old standalone "✎ Properties" quick-access pill was removed by NEW-1)
   const [propsCollapsed, setPropsCollapsed] = useState(false); // B656: companion header fold
 
   /* NEW-B# (owner, 2026-09-07) — "the help/report button ... should be on the map when it is on
@@ -1999,6 +2016,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // never true for a mouse-driven session, so this can only ever ADD phone-shaped devices to what
   // `narrowWidth` already caught — a real desktop, at any height, is untouched.
   const narrow = isPhoneShape({ narrowWidth, shortHeight, coarsePointer });
+  // NEW-2 (phone-chrome-parity pass) — the real safe-area inset (the notch/dynamic-island/home-
+  // indicator no-go strip), as a NUMBER, for the bottom canvas furniture's own math. Reuses
+  // B1176480's approach (`shared/ui/safeAreaInsets.js`) rather than a second env() probe — the
+  // furniture's `bottom` used to get its clearance from `FAB_RESERVE_PX` (the "✎ Properties"/
+  // "✎ Tools" FABs squatting in the bottom corners); those moved to edge tabs (NEW-1), so the
+  // corners are free again, but the furniture still needs SOME clearance from a real device's
+  // home indicator, which a bare small constant would not give it. Gated on `narrow` — desktop
+  // never has a notch and never pays for the resize/orientation listeners.
+  const [narrowSafeBottom, setNarrowSafeBottom] = useState(0);
+  useEffect(() => {
+    if (!narrow) { setNarrowSafeBottom(0); return undefined; }
+    const measure = () => setNarrowSafeBottom(safeAreaInsets().bottom);
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("orientationchange", measure);
+    const vv = window.visualViewport;
+    vv?.addEventListener("resize", measure);
+    vv?.addEventListener("scroll", measure);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("orientationchange", measure);
+      vv?.removeEventListener("resize", measure);
+      vv?.removeEventListener("scroll", measure);
+    };
+  }, [narrow]);
   const lsGet = (k, d) => { try { return localStorage.getItem("planarfit:" + k) || d; } catch (_) { return d; } };
   // (Its `lsSet` twin went with NEW-1: smooth zoom was its last caller, and that setting is now
   // written by `shared/prefs/smoothZoom.js`, which owns the same `planarfit:` prefix.)
@@ -20931,7 +20973,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* NEW-1 (B1239328) — the return half of the cross-link, now one quiet text line
                   instead of a bordered card: this panel owns what a parcel HAS; everything you DO
                   to one lives in the right rail's Parcel tools menu. Opens that menu directly (and
-                  slides the rail in first on a phone, where it's hidden behind the ✎ Tools pill). */}
+                  slides the rail in first on a phone, where it's hidden behind the Tools edge tab). */}
               <button type="button" data-testid="land-to-parcel-tools" onClick={openParcelToolsMenu}
                 title="Draw, plot from a deed, split, combine, reshape or remove a parcel"
                 style={{ display: "block", width: "100%", marginTop: 10, padding: 0, border: "none", background: "transparent", color: PAL.muted, fontWeight: 500, fontSize: 11, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
@@ -22571,19 +22613,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      step and never during a pan, instead of 187 times per pan gesture (29 ms measured, with
      `scaleBarPlate` and `furnitureMetrics` underneath it). This is the shape of a legitimate
      view-derived memo: name the scalar, not the whole `view`. */
+  // NEW-3 (phone-chrome-parity pass) — the scale bar's on-screen target/ceiling now fold in the
+  // real pane width (`paneW`, computed just above) so it shrinks smoothly on a narrow canvas
+  // instead of keeping its full desktop-sized cap; see screenFurniturePlates's own header.
   const furnPlates = useMemo(
-    () => screenFurniturePlates({ ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL }),
-    [view.ppf, PAL],
+    () => screenFurniturePlates({ ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL, paneW }),
+    [view.ppf, PAL, paneW],
   );
-  // NEW-MAPCTRL-3 — on a narrow (phone/tablet) screen, the "✎ Properties" / "✎ Tools" FABs
-  // replace the side rails and claim their own band at the very bottom of the pane
-  // (`bottom:16` + a 38px pill) — a PRESSABLE control that must win the space over passive
-  // furniture. `FURNITURE_ROW` is the one row every bottom-anchored item below (north arrow,
-  // scale bar, the calibration badge) is drawn from; it shifts up by `FAB_RESERVE_PX` whenever
-  // narrow, so none of them can render underneath a FAB. Confirmed collisions this closes:
-  // the badge under "✎ Properties" and the scale bar's right end under "✎ Tools", both
-  // measured live at width 750 before this fix (`ui-audit/verify-canvas-furniture.mjs`).
-  const FURNITURE_ROW = narrow ? 40 + FAB_RESERVE_PX : 40;
+  // ⛔ SUPERSEDED (NEW-1/NEW-2, phone-chrome-parity pass) — the "✎ Properties" / "✎ Tools" FABs
+  // that used to squat in the two bottom corners (forcing every bottom-anchored item below —
+  // north arrow, scale bar, the calibration badge — to reserve `FAB_RESERVE_PX` of extra
+  // clearance) are GONE; the two controls that summon the Panels/Tools rails on a narrow screen
+  // now live as edge tabs at the SIDE of the screen, mirroring the desktop rails they stand in
+  // for (see the "Tools"/"Panels" edge-tab render sites below). So `FURNITURE_ROW` goes back to a
+  // small fixed offset — the same shape the desktop row already used — plus the real safe-area
+  // inset (`narrowSafeBottom`, a NUMBER, not a CSS calc() string — B1176480/safeAreaInsets.js) so
+  // the furniture still clears a real device's home indicator with the FAB reserve gone. Desktop
+  // is untouched (`narrowSafeBottom` is always 0 there — the effect never arms).
+  const FURNITURE_ROW = narrow ? 8 + narrowSafeBottom : 40;
   // Would the calibration badge (anchored at left:56, bottom:FURNITURE_ROW) run into the
   // right-anchored scale bar on the same row? Pure decision in sheetFurniture.js: when they'd
   // meet the badge is lifted to its own row above the bar (and its width capped). `calibBadgeW`
@@ -24358,41 +24405,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
           })()}
 
-          {/* B656: on a phone, selection alone never opens the overlay (B556) — this pill is
-              the explicit affordance: tap it to open the Properties companion as an overlay. */}
-          {narrow && companionSel && !leftPanel && !narrowProps && (
-            <button data-export="skip" onClick={() => { setNarrowProps(true); }}
-              style={{ position: "absolute", left: 12, bottom: "calc(16px + env(safe-area-inset-bottom))", zIndex: 1190, display: "flex", alignItems: "center", gap: 6, background: PAL.ember, color: PAL.onAccent, border: "none", borderRadius: RADIUS.pill, padding: "9px 14px", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", boxShadow: "0 4px 14px rgba(0,0,0,0.28)", cursor: "pointer" }}>
-              ✎ Properties
-            </button>
-          )}
+          {/* ⛔ SUPERSEDED (NEW-1, phone-chrome-parity pass) — the standalone "✎ Properties" quick-
+              access pill (B656) is GONE. Properties is reached the same way on every width: the
+              Panels tab (below) opens the rail, and its "Properties" row is one of the tabs in it
+              — exactly how it's a tab inside the rail on desktop. Double-clicking a selected
+              feature still opens it directly too (`openInspector`, unaffected by this removal).
+              The B556 guard (a plain tap only ever selects, never auto-opens the panel) is
+              unchanged — nothing here touches `openInspector`/`narrowProps`. */}
           {/* zoom controls (bottom-right, above the scale bar) */}
           {(() => {
-            // NEW-2 (B915536) — was fontSize:16 (off-scale); "Zoom to fit" already rendered its own
-            // ⤢ glyph at FONT_SIZE.display (14) right beside +/−, so bringing all three to the same
-            // size unifies a group that was already inconsistent with itself, not just off-scale.
-            const zb = { width: 30, height: 30, display: "grid", placeItems: "center", border: `1px solid ${PAL.panelLine}`, background: "var(--surface-overlay)", color: PAL.ink, cursor: "pointer", fontSize: FONT_SIZE.display, fontWeight: 600 };
+            // NEW-4 (phone-chrome-parity pass) — the zoom column and the docked help/report
+            // control (below) used to be two different sizes in the same corner on a phone (this
+            // stack a flat 30, the help control 44 on a coarse pointer per B1162016) — owner
+            // decision: BOTH read the same pointer-driven size, 35×35 on a coarse pointer / 30×30
+            // on a fine one. 35 is deliberately BELOW the 44px tap-target floor B1176976 set for a
+            // STANDALONE control; these three buttons sit in a tight, already-precise stack where
+            // matching each other reads as more deliberate than hitting that floor a fourth time —
+            // an owner call, not a "fix". `zb.width`/`zb.height` feed the help dock's own offset
+            // and size below, so the two can never drift back apart by construction.
+            const zbSize = coarsePointer ? 35 : CONTROL_H.lg;
+            const zb = { width: zbSize, height: zbSize, display: "grid", placeItems: "center", border: `1px solid ${PAL.panelLine}`, background: "var(--surface-overlay)", color: PAL.ink, cursor: "pointer", fontSize: FONT_SIZE.display, fontWeight: 600 };
             const zoomBy = (f) => setView((v) => { const nv = zoomAround({ scale: v.ppf, tx: v.offX, ty: v.offY }, f, size.w / 2, size.h / 2, 0.02, 8); return { ppf: nv.scale, offX: nv.tx, offY: nv.ty }; });
-            // ⛔ NEW-MAPCTRL-4 — this `bottom` MUST track FURNITURE_ROW's own narrow-width reserve.
-            // The comment above `calibBadgePlacement` (sheetFurniture.js) says the scale bar/north
-            // arrow/badge row "clears... the zoom controls above (they start at bottom:100)" — true
-            // on desktop, where FURNITURE_ROW is 40 and this stack's bottom:100 leaves a 60px gap.
-            // But NEW-MAPCTRL-3 raises FURNITURE_ROW by FAB_RESERVE_PX (62) on narrow (phone/tablet)
-            // to clear the "✎ Properties" / "✎ Tools" FABs — and that raise was never mirrored here.
-            // The result, measured on a real 390px phone width against the owner's real Bain plan:
-            // the scale bar's row lands at bottom:102 while this stack still starts at bottom:100 —
-            // the 60px clearance the comment above assumes is gone, and the scale bar's own plate
-            // (32px tall) sits ENTIRELY inside this stack's vertical span. Its right ~30px (exactly
-            // this column's width) paints directly over the scale bar's highest tick label, e.g.
-            // reading "…0 FEET" for a covered "500"/"1000"/etc. Applying the SAME reserve here
-            // restores the original 28px clearance (60 − the 32px plate height) at every width,
-            // rather than inventing a second breakpoint. ⛔ B1231281 removed the stack's fourth
-            // button (the "◷" report-slow control, folded into the global help/report control —
-            // HelpReportControl.jsx) — this container's OWN bottom edge is unchanged by that (it is
-            // anchored via `bottom: zoomBottom`, not by its content height), so "Zoom to fit" now
-            // occupies the slot nearest the scale bar and this reserve is exactly as necessary as
-            // it was with four buttons.
-            const desiredZoomBottom = narrow ? 100 + FAB_RESERVE_PX : 100;
+            // ⛔ SUPERSEDED (NEW-2, phone-chrome-parity pass) — this `bottom` no longer tracks a FAB
+            // reserve; the "✎ Properties"/"✎ Tools" FABs that squatted in the bottom corners are
+            // gone (NEW-1 moved their job to edge tabs at the side of the screen), so there is
+            // nothing left to clear down there. `desiredZoomBottom` goes back to a small fixed
+            // clearance from the scale bar's own row — `FURNITURE_ROW`'s narrow value (8 +
+            // safe-area) plus the SAME 60px gap the desktop row already keeps (100 − 40 = 60, so
+            // 8 + 60 = 68) — rather than a second, unrelated number.
+            const desiredZoomBottom = narrow ? 68 + narrowSafeBottom : 100;
             // ⛔ B1338272 — THE COLLISION THAT ONLY SHOWS UP ON A SHORT CANVAS. `desiredZoomBottom`
             // above is a fixed clearance from the map's BOTTOM edge, tuned to clear the scale bar —
             // it assumes the canvas is tall enough that the stack's own TOP edge is nowhere near the
@@ -24410,11 +24451,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // twin of the `rawW` this file already carries for the same reason (B881's bottom-
             // furniture reflow). The floor keeps the stack from being pushed low enough to march
             // into the scale bar's own reserve instead of the row above it.
+            // ⛔ BUG FOUND while extending this harness (NEW-5, phone-chrome-parity pass) — the
+            // floor here was bare `FURNITURE_ROW`, which only guarantees the stack's bottom clears
+            // the scale bar's ROW, never the scale bar's own PLATE sitting on top of that row. On
+            // the exact B1338272 263px-canvas repro this was already true on `main`, independent
+            // of anything else in this pass: measured a real 13×30px overlap between the zoom
+            // stack and the scale bar's plate — B914500's own defect, recurring at a height nobody
+            // had tested it at. Adding the plate's own height (`furnPlates.scaleBar.plateH`) plus
+            // a small breathing gap closes it the same way `TOP_RIGHT_ROW_RESERVE_PX` already
+            // measures the View/Layers row's real height rather than assuming a bare offset is tall
+            // enough — never a hand-picked number, since a wider aerial-scale range can size the
+            // plate taller.
+            // NEW-1 (phone-chrome-parity pass) — on narrow, the Tools edge tab (top:53, height
+            // 84) shares this same right edge above the zoom stack; on a genuinely short canvas
+            // (a landscape phone) the stack's own un-clamped position can climb into the tab's
+            // own band. `topReserve` asks the clamp to clear the TAB, not the bare View/Layers
+            // row, whenever the tab is actually on screen — desktop (where it never renders)
+            // keeps the default reserve, so this cannot move desktop's own pixel-identical value.
             const zoomBottom = zoomStackBottomPx({
               desired: desiredZoomBottom,
               paneH: size.rawH ?? size.h,
               stackH: zb.height * 3, // three stacked buttons, no internal gap
-              floor: FURNITURE_ROW,
+              floor: FURNITURE_ROW + furnPlates.scaleBar.plateH + 2,
+              topReserve: narrow ? TOOLS_TAB_RESERVE_PX : undefined,
             });
             return (
               <>
@@ -24436,16 +24495,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </div>
               {/* NEW-B# (owner, 2026-09-07) — dock anchor for the global Help/Report control
                   (shared/ui/chromeDock.js). Sits on the SAME `bottom: zoomBottom` row as the zoom
-                  stack, offset left by its known column width (`zb.width`, 30) plus an 8px gap —
-                  the zoom stack's own `data-canvas-corner="zoom-stack"` div is left untouched by
-                  this addition on purpose (see the header note above). HelpReportControl portals
-                  its own 44×44 button in here on its own terms (never shrunk to this stack's 30px
-                  zb rows, which would breach the deliberate B1176976 tap-target minimum) — it
-                  becomes a genuine furniture item INSIDE this pane instead of separate
-                  `position:fixed` app chrome. `data-export="skip"` so it never rides a PDF/PNG
-                  export clone (PDF-PARITY: it isn't part of the plan). */}
+                  stack, offset left by its known column width (`zb.width`) plus an 8px gap — the
+                  zoom stack's own `data-canvas-corner="zoom-stack"` div is left untouched by this
+                  addition on purpose (see the header note above). It becomes a genuine furniture
+                  item INSIDE this pane instead of separate `position:fixed` app chrome.
+                  `data-export="skip"` so it never rides a PDF/PNG export clone (PDF-PARITY: it
+                  isn't part of the plan).
+                  ⛔ SUPERSEDED (NEW-4, phone-chrome-parity pass) — this used to say the docked
+                  button renders at its own fixed 44×44/30×30 (B1162016) "never shrunk to this
+                  stack's 30px zb rows, which would breach the deliberate B1176976 tap-target
+                  minimum." Two controls sharing one corner at two different sizes read as a
+                  mismatch (owner decision), so `data-dock-size` publishes THIS stack's own
+                  pointer-driven size (`zb.width` — 35 on a coarse pointer, 30 on a fine one) and
+                  HelpReportControl.jsx reads it when docked here, sizing itself to match instead
+                  of its own standalone floor. The B1176976 44px tap-target minimum still governs
+                  every OTHER (floating, undocked) rendering of that control — this is a
+                  deliberately narrower exception, made explicit rather than silently generalised. */}
               <div data-export="skip" data-canvas-dock-slot="planner" style={{ position: "absolute", right: 14 + zb.width + 8, bottom: zoomBottom, zIndex: MAP_CHROME_Z.control }}>
-                <div ref={helpDockRef} data-canvas-dock="planner" />
+                <div ref={helpDockRef} data-canvas-dock="planner" data-dock-size={zb.width} />
               </div>
               </>
             );
@@ -24685,12 +24752,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           )}
         </div>
 
-        {/* phone-only floating button to summon the tool rail (B113) */}
+        {/* ⛔ SUPERSEDED (NEW-1, phone-chrome-parity pass) — phone-only EDGE TAB to summon the
+            tool rail (was a bottom-right pill, B113). On desktop this rail IS the right screen
+            edge; on a phone the control that summons it now lives at that same edge instead of
+            squatting in the bottom-right corner (which is what forced every piece of bottom
+            canvas furniture — the scale bar, north arrow, calibration badge — to reserve extra
+            clearance; see FURNITURE_ROW's own header above). `top: 53` clears the View/Layers
+            row (MAP_OVERLAY_TOP_PX 10 + its collapsed chip height + a gap); the visible corners
+            are the ones facing the canvas (`RADIUS.md`), square where the tab is flush against
+            the true screen edge. `data-canvas-corner="tools-fab"` is unchanged — the shared
+            help/report control's corner-avoidance sweep (shared/ui/cornerClearance.js) and
+            verify-help-report-control.mjs's PART A both key off this attribute, not the label. */}
         {narrow && !mobileTools && (
-          <button onClick={() => setMobileTools(true)} title="Show the drawing tools"
-            data-canvas-corner="tools-fab"
-            style={{ position: "absolute", right: 12, bottom: "calc(16px + env(safe-area-inset-bottom))", zIndex: 1190, display: "flex", alignItems: "center", gap: 6, padding: "11px 16px", borderRadius: RADIUS.pill, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 800, color: "#fff", background: PAL.ember, boxShadow: "0 6px 18px rgba(0,0,0,0.45)" }}>
-            ✎ Tools
+          <button onClick={() => setMobileTools(true)} title="Show the drawing tools" aria-label="Tools"
+            data-canvas-corner="tools-fab" data-testid="mobile-tools-tab"
+            style={{
+              position: "absolute", right: 0, top: 53, width: 40, height: 84, zIndex: 1190,
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
+              border: "none", borderTop: `1px solid ${PAL.chromeLine}`, borderLeft: `1px solid ${PAL.chromeLine}`, borderBottom: `1px solid ${PAL.chromeLine}`,
+              borderRadius: `${RADIUS.md}px 0 0 ${RADIUS.md}px`,
+              background: hexA(PAL.chrome, 0.94), cursor: "pointer", padding: 0, fontFamily: "inherit",
+              boxShadow: "-3px 0 12px rgba(0,0,0,0.32)",
+            }}>
+            <span style={{ color: PAL.ember, fontSize: 17, lineHeight: 1 }}>✎</span>
+            <span style={{ color: PAL.chromeInk, fontSize: 9, fontWeight: 700, letterSpacing: "0.02em" }}>Tools</span>
+            <span style={{ color: PAL.chromeMuted, fontSize: 12, lineHeight: 1 }}>‹</span>
           </button>
         )}
         {/* right-side tool rail — dark chrome. On phones it overlays the canvas
@@ -24992,17 +25078,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
         {/* left side — Bluebeam-style icon rail + one open menu */}
         <div style={{ display: "flex", flex: "none", order: 1, minHeight: 0 }}>
-          {/* NEW-1 (B917072) — phone-only floating button to summon the section rail, mirroring
-              the right-side "✎ Tools" FAB (B113). Before this, the six-section rail below rendered
-              INLINE at a fixed 54px on every width, so an idle phone view paid for it on every
-              load with nothing open — the owner's "I don't even have my tool options" (the rail
-              itself IS reachable by touch; the complaint is the permanent width tax with no
-              payoff). Stacks above "✎ Properties" (B656) when both would otherwise land on the
-              same corner. */}
+          {/* ⛔ SUPERSEDED (NEW-1, phone-chrome-parity pass) — phone-only EDGE TAB to summon the
+              section rail (was "☰ Sections", a bottom-left pill, B917072). Renamed "Panels" — the
+              old label named nothing (behind it are Land, Analysis, Drainage, Yield, Properties,
+              Overlays, Standards). On desktop this rail IS the left screen edge; the control that
+              summons it now lives at that same edge (`top: 10`, clearing the View/Layers row's
+              own top-right corner — this side has no row to clear). The old "stack above the ✎
+              Properties pill" special case is gone with that pill (NEW-1 removed it entirely —
+              Properties is one of the rows this tab's drawer already opens, same as on desktop).
+              `state` names (`mobileSections`) are unchanged — only the visible control moved. */}
           {narrow && !leftPanel && !companionOpen && !mobileSections && (
-            <button onClick={() => setMobileSections(true)} title="Show Land / Analysis / Yield / Properties / Overlays / Standards"
-              style={{ position: "absolute", left: 12, bottom: `calc(${(companionSel && !narrowProps) ? 68 : 16}px + env(safe-area-inset-bottom))`, zIndex: 1190, display: "flex", alignItems: "center", gap: 6, padding: "11px 16px", borderRadius: RADIUS.pill, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 800, color: "#fff", background: PAL.ember, boxShadow: "0 6px 18px rgba(0,0,0,0.45)" }}>
-              ☰ Sections
+            <button onClick={() => setMobileSections(true)} title="Show Land / Analysis / Yield / Properties / Overlays / Standards" aria-label="Panels"
+              data-testid="mobile-panels-tab"
+              style={{
+                position: "absolute", left: 0, top: 10, width: 40, height: 84, zIndex: 1190,
+                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
+                border: "none", borderTop: `1px solid ${PAL.chromeLine}`, borderRight: `1px solid ${PAL.chromeLine}`, borderBottom: `1px solid ${PAL.chromeLine}`,
+                borderRadius: `0 ${RADIUS.md}px ${RADIUS.md}px 0`,
+                background: hexA(PAL.chrome, 0.94), cursor: "pointer", padding: 0, fontFamily: "inherit",
+                boxShadow: "3px 0 12px rgba(0,0,0,0.32)",
+              }}>
+              <span style={{ color: PAL.ember, fontSize: 17, lineHeight: 1 }}>☰</span>
+              <span style={{ color: PAL.chromeInk, fontSize: 9, fontWeight: 700, letterSpacing: "0.02em" }}>Panels</span>
+              <span style={{ color: PAL.chromeMuted, fontSize: 12, lineHeight: 1 }}>›</span>
             </button>
           )}
           {/* backdrop while the rail is summoned but nothing has been picked yet — tap outside
@@ -25049,6 +25147,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   // NEW-1: a deliberate rail choice ends any active inspector takeover — the chosen
                   // panel wins over the restore memo, so a later deselect won't yank it back.
                   setDockMemo(null);
+                  // NEW-1 (phone-chrome-parity pass) — on narrow, Properties keeps its dedicated
+                  // phone bottom-sheet presentation (B1215682's `phoneSheetSolo`), which is keyed
+                  // off `narrowProps` rather than `leftPanel` — the same state the now-removed
+                  // standalone "✎ Properties" pill used to arm (`openInspector`'s own narrow
+                  // branch). Picking Properties from this drawer is the entry point on every
+                  // width, same as desktop's plain rail tab; only the RESULT differs by width,
+                  // exactly as it already did.
+                  if (narrow && tb.id === "properties") { setNarrowProps((p) => !p); return; }
                   setLeftPanel((p) => (p === tb.id ? null : tb.id));
                 }}>
                 <span style={{ display: "grid", placeItems: "center", height: 18, lineHeight: 1 }}><RailIcon id={tb.id} /></span>
