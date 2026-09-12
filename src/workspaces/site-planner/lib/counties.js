@@ -1583,11 +1583,21 @@ const stateForPoint = (lat, lng) => siteState({ lat, lng });
 /* B209502 — the GEOMETRY answer for a point, or null when the asset is not resident / the point is
  * outside both states. This is the ONE place `counties.js` asks; both public resolvers below read
  * it, so click routing and the jurisdiction heading cannot disagree about which county a point
- * is in (two envelopes that could drift apart is precisely the failure NEW-5 already fought). */
-function geometryCountyKey(lat, lng) {
+ * is in (two envelopes that could drift apart is precisely the failure NEW-5 already fought).
+ *
+ * `geometryCountyAnswer` is the fuller form — it also carries `nearEdge` (B209502's own uncertainty
+ * flag: true within ~150 m of the resolved county's line) so a caller can tell "the polygon is
+ * confident" from "the polygon picked a side, but only barely." `geometryCountyKey` stays the
+ * key-only shorthand every existing caller already uses. */
+function geometryCountyAnswer(lat, lng) {
   const ans = resolveCounty(lat, lng);
   if (!ans || ans.status !== "ok") return null;
-  return countyKeyForName(ans.name, ans.state);
+  const key = countyKeyForName(ans.name, ans.state);
+  return key ? { key, nearEdge: !!ans.nearEdge } : null;
+}
+function geometryCountyKey(lat, lng) {
+  const a = geometryCountyAnswer(lat, lng);
+  return a ? a.key : null;
 }
 
 /* ⛔ B1457152 — WHICH STATE A POINT IS IN, ANSWERED BY THE SAME NATIONWIDE GEOMETRY, NOT THE
@@ -1663,7 +1673,8 @@ export function candidateCountiesForPoint(lat, lng) {
    * county is hoisted to the front and everything else stays behind it as a fallback. When the
    * geometry is not resident yet, the order is byte-identical to before — no guess is introduced,
    * the old behaviour simply persists until the asset lands. */
-  const truth = geometryCountyKey(lat, lng);
+  const truthAns = geometryCountyAnswer(lat, lng);
+  const truth = truthAns ? truthAns.key : null;
   const hoist = (keys) => (truth && keys.includes(truth) ? [truth, ...keys.filter((k) => k !== truth)] : keys);
 
   if (!within.length) {
@@ -1700,20 +1711,43 @@ export function candidateCountiesForPoint(lat, lng) {
     const st = resolvedState(lat, lng);
     return st ? entries.filter(([, c]) => c.state === st).map(([k]) => k) : [];
   }
-  // Append the STATEWIDE source(s) of the states already in play — never every state's. A Texas
-  // click must not carry Colorado's composite along, and vice versa.
-  const states = new Set(within.map((k) => COUNTIES_MAP[k].state).filter(Boolean));
-  const statewide = entries
-    .filter(([k, c]) => c.statewide && !within.includes(k) && (!c.state || states.size === 0 || states.has(c.state)))
-    .map(([k]) => k);
+  /* ⛔ NEW-6 — A CONFIDENT GEOMETRY ANSWER DECIDES *MEMBERSHIP*, NOT JUST ORDER.
+   *
+   * Two counties' padded bboxes can overlap far more than the counties themselves do — Pinal's
+   * bbox is its own measured data extent and reaches well into Maricopa's southern edge, exactly
+   * like Sugar Land's harris/fortbend overlap. For a real straddle (a click near the shared line,
+   * `nearEdge: true`) that over-inclusion is the whole point: query both neighbours and let
+   * whichever service answers own the lot. But a point solidly INSIDE one county — Casa Grande,
+   * AZ, 32.8802/-111.7476, ~9 miles from the Pinal/Maricopa line — is not a straddle, and asking
+   * BOTH counties' services for it is not "harmless redundancy": nothing guarantees which answers
+   * first, so a wrong-county hit is one race condition away (measured live, 2026-09-11 evening —
+   * Maricopa's service answered with a real Maricopa parcel for a Pinal address, and only lucked
+   * into losing the race). `nearEdge` is exactly the flag B209502 built for this: false means the
+   * simplified polygon is not merely picking a side, it is confident. So a confident, non-statewide
+   * geometry answer narrows the REAL-CAD candidates to itself alone — every other bbox match is
+   * dropped, not just demoted — while a genuine near-edge point (or no geometry yet) keeps the old
+   * multi-candidate behaviour untouched. The statewide fallback tier is a different kind of source
+   * (coverage-of-last-resort, not a rival county) and is never narrowed by this. */
+  const confident = truthAns && !truthAns.nearEdge && COUNTIES_MAP[truthAns.key] && !COUNTIES_MAP[truthAns.key].statewide
+    ? truthAns.key
+    : null;
   /* The geometry's county leads even when several boxes matched — this is the Sugar Land case,
    * where harris and fortbend both contain the point and config order used to hand it to harris.
    * A geometry answer that is NOT among the bbox matches is still hoisted in front (it is the
    * correct county; the boxes simply do not reach it), with every bbox candidate kept behind it
-   * so click coverage is never narrowed by this reorder. */
-  const ordered = truth && !within.includes(truth) && COUNTIES_MAP[truth]
-    ? [truth, ...within]
-    : hoist(within);
+   * so click coverage is never narrowed by this reorder — UNLESS the answer is confident, in which
+   * case it is the only real-CAD candidate returned. */
+  const ordered = confident
+    ? [confident]
+    : (truth && !within.includes(truth) && COUNTIES_MAP[truth] ? [truth, ...within] : hoist(within));
+  // Append the STATEWIDE source(s) of the states already in play — never every state's. A Texas
+  // click must not carry Colorado's composite along, and vice versa. Derived from `ordered` (not
+  // the raw `within` bbox matches) so a confident narrow doesn't drag along a neighbour's state's
+  // composite it no longer has a real-CAD candidate in.
+  const states = new Set(ordered.map((k) => COUNTIES_MAP[k].state).filter(Boolean));
+  const statewide = entries
+    .filter(([k, c]) => c.statewide && !ordered.includes(k) && (!c.state || states.size === 0 || states.has(c.state)))
+    .map(([k]) => k);
   return [...ordered, ...statewide.filter((k) => !ordered.includes(k))];
 }
 
