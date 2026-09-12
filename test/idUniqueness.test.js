@@ -11,8 +11,9 @@
  * --against-main` prevents minting OVER an archived id in the first place. The full-pair audit is
  * still available via findDuplicateIds(REPO, B_FILES, "B") for a future archive cleanup. */
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   findDuplicateIds, findDuplicateIdsIn, newCrossFileCollisions,
   LIVE_B_FILES, LIVE_V_FILES, B_FILES, V_FILES, KNOWN_LEGACY_ID_COLLISIONS,
@@ -88,5 +89,29 @@ describe("cross-file collisions — live↔archive guard with a frozen legacy ba
     expect(atBaseline).toEqual([]);
     const oneMore = [{ id: "B445", count: 4 }].filter(({ id, count }) => count > (KNOWN_LEGACY_ID_COLLISIONS.B[id] || 1));
     expect(oneMore).toEqual([{ id: "B445", count: 4 }]);
+  });
+});
+
+describe("no leftover git conflict markers in the ledgers (B1592848 — the CI backstop for a botched hand resolution)", () => {
+  // A duplicate-id guard cannot catch every bad manual conflict resolution — a `<<<<<<<`/`=======`/
+  // `>>>>>>>` marker left behind by hand (or by a tool that isn't scripts/resolve-ledgers.mjs, which
+  // already refuses to leave one) commits fine as plain text and is otherwise invisible until
+  // someone reads the file. Zero-tolerance, zero grandfathering: none of the four ledgers has ever
+  // legitimately contained one of these exact line shapes (verified below), so any future
+  // occurrence is unambiguously a leftover conflict marker, not a false positive.
+  const MARKER_FILES = [...new Set([...B_FILES, ...V_FILES])];
+  const MARKER_RE = /^(<{7} |={7}$|>{7} )/m;
+
+  for (const file of MARKER_FILES) {
+    it(`${file} has no leftover conflict-marker lines`, () => {
+      const text = readFileSync(join(REPO, file), "utf8");
+      const bad = [...text.matchAll(new RegExp(MARKER_RE, "gm"))].map((m) => m[0]);
+      expect(bad, `${file} contains a leftover git conflict marker — a merge was hand-resolved incompletely`).toEqual([]);
+    });
+  }
+
+  it("actually catches a leftover marker (proves the guard is not a no-op)", () => {
+    const withMarker = "### B1 — ok\n<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> origin/main\n";
+    expect([...withMarker.matchAll(new RegExp(MARKER_RE, "gm"))].map((m) => m[0])).toEqual(["<<<<<<< ", "=======", ">>>>>>> "]);
   });
 });
