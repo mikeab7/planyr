@@ -1,7 +1,8 @@
-/* CompDraftsPanel — the KML-import review/promote surface (B849233/NEW-2). Reachable only from
- * the KML import action (CompsPanel's "Import (KML)" button) — hand entry (the paste grid) never
- * creates a row here. Every row is shown for confirmation before it becomes a real comp; nothing
- * is committed silently (the leasing spec's own words for the description-extraction step).
+/* CompDraftsPanel — the KML/KMZ-import review/promote surface (B849233/NEW-2, .kmz added by
+ * NEW-1/B1577424). Reachable only from the import action (CompsPanel's "Import (KML/KMZ)"
+ * button) — hand entry (the paste grid) never creates a row here. Every row is shown for
+ * confirmation before it becomes a real comp; nothing is committed silently (the leasing spec's
+ * own words for the description-extraction step).
  *
  * A plain in-rail list (unlike CompEntryGrid's portaled overlay) — each card is a single-column
  * stacked form, the same width CompForm already works at, so no width problem to solve here.
@@ -165,7 +166,7 @@ function DraftCard({ draft, anchorOverride, armed, onArm, onFocusAnchor, onPromo
  *  - armedRowId, onArm(id|null) — which draft is waiting for the next map pick
  *  - onFocusAnchor(anchor), onPromote(draftId, comp), onDismiss(draftId)
  *  - busyId — the draft currently mid-promotion/dismiss
- *  - onImportFile(file) — hand a picked .kml File up to the host
+ *  - onImportFile(file) — hand a picked .kml/.kmz File up to the host
  *  - importing, importError
  *  - onBack() — return to the comps list
  */
@@ -184,8 +185,8 @@ export default function CompDraftsPanel({
         display: "block", textAlign: "center", border: "1px dashed var(--border-default)", borderRadius: 8, padding: "10px 8px",
         fontSize: 12, color: "var(--text-secondary)", cursor: "pointer", marginBottom: 12,
       }}>
-        {importing ? "Reading file…" : "Import another Google My Maps export (.kml)"}
-        <input type="file" accept=".kml" style={{ display: "none" }} disabled={importing}
+        {importing ? "Reading file…" : "Import another Google My Maps export (.kml or .kmz)"}
+        <input type="file" accept=".kml,.kmz" style={{ display: "none" }} disabled={importing}
           onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) onImportFile(f); }} />
       </label>
       {importError && <div style={{ fontSize: 12, color: "var(--danger-text)", marginBottom: 10 }}>{importError}</div>}
