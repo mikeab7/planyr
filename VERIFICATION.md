@@ -201,6 +201,18 @@ The pre-fix row is the owner's own reported URL, reproduced from this sandbox �
 6. Read the served chunk hash in the **SAME observation** as steps 1–5 (Network tab, or `document.querySelectorAll('script[src]')`) and confirm it is the post-fix build — a stale tab can silently serve the pre-deploy bundle and make any of the above read either way.
 - Result: ⏳ pending — the routing is sandbox-confirmed against the real geometry asset at the exact reported coordinates (listed above as a routine re-check, not an open question); the live network-panel pass needs a network outside this sandbox and a deployed build. `Cadence: once`.
 - Stopping rule: closes when steps 1–4 are observed on planyr.io, or when any step fails and is filed as a recurrence against B1597232.
+### V1138176 — B1600352: on the owner's signed-in browser, a hidden-boot load shows the PLAN, not an aerial with the plan off-screen `Blocker: auth`
+
+**Status: this check is EXPECTED TO FAIL against production today, and that is the point.** B1600352 ships no product-code change — it is the measurement, the incident-doc record, and the repaired instrument. The forward fix is **B1600353**. This entry exists so the owner-facing symptom has a live check attached to it that someone other than the owner can run.
+
+**What was measured in the sandbox (B1600352).** Foregrounded cold loads are fine on all three builds tested; a hidden boot is broken on all three; pre-`453623a` and reverted `main` are byte-identical. See the item and `docs/incidents/B1594320-CANVAS-VISIBILITY-OUTAGE.md`.
+
+**The steps, each with a named expected result. Step 3 needs no auth and closes the production half.**
+1. On the owner's own machine, signed in, open a project's **Site** tab and **background the window before the page finishes loading** (the condition of the original report). Leave it backgrounded and read, on `[data-testid="planner-canvas"]`, in the SAME observation as the served chunk hash: computed `visibility`, `data-view-ppf`/`-offx`/`-offy`, and the client rects of the `[data-el-id]` elements against the canvas box.
+   **Expected once B1600353 lands:** `visibility: visible`, a real fit (NOT `0.35 / 60 / 60`), and every element inside the canvas box. **Today (B1600352 only): `0.35 / 60 / 60` with the elements outside the canvas box — a known, recorded failure, not a new finding.**
+2. Bring the window forward. **Expected:** the plan is on screen and clickable; `elementFromPoint` at an element's own centre resolves to that element, not to an ancestor `div`.
+3. From any machine with real browser egress: `node ui-audit/verify-boot-framing.mjs --base=https://planyr.io/ --assert`.
+   **Expected once B1600353 lands:** exit 0. **Today: the hidden arm fails with "every drawn element is OUTSIDE the canvas box" — which is the red-proof that the surviving defect is real.**
 
 ### V1135584 — B1597760/B1597761: drag the grey to move the Notes page, Shift-drag to sweep up several boxes — on his own machine `Blocker: real-data`
 

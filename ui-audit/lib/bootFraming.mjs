@@ -168,7 +168,19 @@ export function bootFramingReport(raw, { minFrames = 30 } = {}) {
    * offenders, so it printed ✅ — over a run whose own listing showed the default framing painted
    * twice. An unattributable framing is not a passing framing: if the stamp is missing the rig
    * cannot answer its own question and must say so. */
-  if (painted.some((r) => !r.mount)) vacuity.push(`${painted.filter((r) => !r.mount).length} of ${painted.length} painted framings carry no \`data-planner-mount\` — this build does not stamp the canvas, so framings cannot be attributed to a mount and no verdict is possible`);
+  /* ⛔ B1600352 — THE STAMP VACUITY IS REAL, BUT IT MUST NOT FIRE ON A BUILD THAT SIMPLY HAS NO
+   * GATE. B1594320 reverted B1574432, so `main` carries no `framingCommitted` gate and no
+   * `data-planner-mount` stamp at all. Treating that as "no verdict is possible" would make this rig
+   * exit 1 on every build forever, which is how a guard gets deleted. The distinction that matters:
+   * a build where SOME framings are attributed and others are not is genuinely unjudgeable (that is
+   * the false-green this rig's own teeth proof caught); a build where NOTHING is stamped and the
+   * canvas was never held unpainted simply does not have the mechanism this half asks about, so the
+   * FLASH verdict is reported as not-applicable while every other assertion still runs and still
+   * gates. `gateAbsent` says which of the two it was, so a caller can never silently read one as the
+   * other. */
+  const unstamped = painted.filter((r) => !r.mount).length;
+  const gateAbsent = unstamped === painted.length && unpainted.length === 0;
+  if (unstamped && !gateAbsent) vacuity.push(`${unstamped} of ${painted.length} painted framings carry no \`data-planner-mount\` — this build stamps SOME framings and not others, so they cannot be attributed to a mount and no verdict is possible`);
   const mounts = [...new Set(painted.map((p) => p.mount).filter(Boolean))];
   /* ⛔ THE INVARIANT IS PER MOUNT, NOT PER RUN. "One framing per load" is really "whatever framing
    * a mounted planner first paints is the one it keeps" — and a signed-in boot mounts the planner
@@ -178,6 +190,7 @@ export function bootFramingReport(raw, { minFrames = 30 } = {}) {
   const framingsPerMount = mounts.map((m) => ({ mount: m, framings: painted.filter((p) => p.mount === m).length }));
   const offenders = framingsPerMount.filter((m) => m.framings !== 1);
   return {
+    gateAbsent,
     ok: vacuity.length === 0 && painted.length > 0 && offenders.length === 0,
     framingsPerMount,
     offenders,
