@@ -203,14 +203,60 @@ export function siteNameFromParcel(attrs, { addr = null, searched = null, acct =
   return "Untitled site";
 }
 
+/* ⛔ B1574258 — THE OWNER ROW WAS SILENTLY BLANK ON THE STANDARD PARCEL SCHEMA, AND HAD BEEN
+ * SHIPPING THAT WAY.
+ *
+ * The pattern here used to be `^(owner|own_?name|owner_?name|name|owner1)$` — anchored, which is
+ * right (it must never swallow OWNER_ADDRESS, a mailing column) but too narrow by one spelling.
+ * A large family of public parcel services publishes the owner as **OWNERNME1 / OWNERNME2** (the
+ * "NME" contraction of the standard land-parcel schema), and none of those matched: `owner_?name`
+ * wants "ownername", and the `$` anchor rejects the trailing digit anyway. The row simply did not
+ * render — no error, no placeholder, LOUD-FAILURE's quiet cousin: an absent fact reading as a fact
+ * that does not exist.
+ *
+ * THIS IS NOT A NEW-ORLEANS-ONLY FIX, which is why it is its own item. Measured against the rows
+ * already wired in `counties.js` before Orleans was added: Wisconsin's statewide source
+ * (`wi_statewide`, 3,574,646 parcels) publishes owner=`OWNERNME1`, and so does Nebraska's — so the
+ * parcel panel has been showing those two states' lots with no Owner line at all.
+ *
+ * AND THE ORDERING HALF, which is the failure mode this module's own header documents twice (the
+ * mailing address, then SITUS_NUM beating SITUS_ADDR): a flat "first key that matches" cannot
+ * express "OWNERNME1 outranks OWNERNME2". A record with two co-owners would have shown whichever
+ * the service happened to list first. So the owner row resolves through `ownerKey`, which prefers
+ * the UN-numbered column, then the lowest-numbered one — the same discipline as `situsKey`. */
+export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?nme\d*|name|owner\d)$/i;
+
+/** The trailing sequence number on an owner column (OWNERNME2 → 2), or 0 when it has none. */
+const ownerSeq = (key) => { const m = /(\d+)$/.exec(key); return m ? Number(m[1]) : 0; };
+
+/**
+ * The KEY holding the parcel's owner name, or null when the record does not carry one.
+ * `skip` lets a caller exclude keys another row has already claimed (see `apprRows`). Pure.
+ */
+export function ownerKey(attrs, { skip = null } = {}) {
+  if (!attrs) return null;
+  let best = null, bestSeq = Infinity;
+  for (const key of Object.keys(attrs)) {
+    if (skip && skip.has(key)) continue;
+    if (!OWNER_KEY_RE.test(key)) continue;
+    if (isPlaceholderValue(attrs[key])) continue;
+    const seq = ownerSeq(key);
+    if (seq < bestSeq) { best = key; bestSeq = seq; }
+  }
+  return best;
+}
+
 // Curated field order: regex that matches a county's column name → the label we show.
 // Patterns cover the per-county CAD columns (HCAD / FBCAD / CCAD) AND the statewide TxGIO
 // columns (prop_id, owner_name, situs_addr, legal_area/gis_area, land_value, imp_value,
 // mkt_value, stat_land_use, year_built) so a parcel answered by any source — a county's
 // own CAD or the statewide backup — surfaces the same curated rows (B244/B787).
 export const APPR_FIELDS = [
-  // ...|owner_?name matches TxGIO owner_name AND CCAD's Owner_Name.
-  [/^(owner|own_?name|owner_?name|name|owner1)$/i, "Owner"],
+  // ...|owner_?name matches TxGIO owner_name AND CCAD's Owner_Name; |owner_?nme\d* matches the
+  // OWNERNME1/OWNERNME2 spelling of the standard parcel schema (B1574258 — see OWNER_KEY_RE).
+  // The VALUE always comes from the ordered `ownerKey` resolver below, never from "first key that
+  // matches": OWNERNME1 must beat OWNERNME2 whatever order the service lists them in.
+  [OWNER_KEY_RE, "Owner"],
   // The situs row is NOT a plain regex — it is the ordered ladder below (`situsAddress`), because a
   // single alternation plus "first key wins" resolved the OWNER'S MAILING address on real county
   // schemas. `SITUS_FIELD` is the union of the ladder's rungs, kept only so the row still claims its
@@ -253,7 +299,11 @@ export const apprRows = (attrs) => {
     // row over a real PROP_ID sitting later in the same record.
     const k = label === "Situs address"
       ? situsKey(attrs, { skip: used })
-      : Object.keys(attrs).find((key) => !used.has(key) && re.test(key) && !isPlaceholderValue(attrs[key]));
+      // NEW — the Owner row resolves through its own ordered resolver for the same reason the
+      // situs row does: OWNERNME1 must beat OWNERNME2 regardless of the service's key order.
+      : label === "Owner"
+        ? ownerKey(attrs, { skip: used })
+        : Object.keys(attrs).find((key) => !used.has(key) && re.test(key) && !isPlaceholderValue(attrs[key]));
     if (k) { used.add(k); rows.push({ label, value: label === "Situs address" ? String(attrs[k]).replace(/\s+/g, " ").trim() : attrs[k] }); }
   }
   return rows;
