@@ -66,7 +66,7 @@
 | Indiana (IN) | county assessor by default since a 2008 reform; a handful of larger townships above a population threshold retain their own elected township assessor | blocked-in-sandbox | [Parcel Boundaries of Indiana (Indiana Geographic Information Office, Data Harvest)](https://gisdata.in.gov/server/rest/services/Hosted/Parcel_Boundaries_of_Indiana_Current/FeatureServer/0) | gov | blocked (sandbox policy) | — | — | — | — | — | ✅ (Verify: live — gisdata.in.gov) |
 | Kansas (KS) | county | no-free-source | none found | — | — | — | — | — | — | — | — |
 | Kentucky (KY) | county | no-free-source | none found | — | — | — | — | — | — | — | — |
-| Louisiana (LA) | parish (64 parishes, each with an elected parish assessor — no county, no appraisal-district concept) | no-free-source | none found | — | — | — | — | — | — | — | — |
+| Louisiana (LA) | parish (64 parishes, each with an elected parish assessor — no county, no appraisal-district concept) | no-free-source **at STATE level; 2 parishes wired individually** | none found statewide — see the county-level tables for `la_eastbatonrouge` and `la_orleans` (B1574256) | — | — | — | — | — | — | — | — |
 | Massachusetts (MA) | city/town (351 cities/towns; counties have no assessing function) | measured-reachable | [Massachusetts Property Tax Parcels (MassGIS, EOTSS)](https://services1.arcgis.com/hGdibHYSPO59RG1h/arcgis/rest/services/Massachusetts_Property_Tax_Parcels/FeatureServer/0) | gov | yes (200, 119ms) | 2,559,319 | esriGeometryPolygon | parcelId=`PROP_ID`, owner=`OWNER1`, situsAddress=`SITE_ADDR`, landArea=`LOT_SIZE`, appraisedValue=`LAND_VAL` | lat 98% · lon 100% of state | 5684ms, 2000 feat. | ✅ |
 | Maryland (MD) | state-run — SDAT (Dept. of Assessments & Taxation) runs 24 local offices directly; not independent county assessors | blocked-in-sandbox | [MD iMAP — Parcel Boundaries (SDAT-sourced, monthly)](https://mdgeodata.md.gov/imap/rest/services/PlanningCadastre/MD_ParcelBoundaries/MapServer/0) | gov | blocked (sandbox policy) | — | — | — | — | — | ✅ (Verify: live — mdgeodata.md.gov) |
 | Maine (ME) | town/municipality (482 towns); Unorganized Territory assessed directly by Maine Revenue Services | measured-reachable | ["Maine Parcels Organized Towns", layer 10 (the ONLY layer on this service)](https://services1.arcgis.com/RbMX0mRVOFNTdLzd/ArcGIS/rest/services/Maine_Parcels_Organized_Towns/FeatureServer/10) | agol | yes (200, 158–174ms) | 708,382 | esriGeometryPolygon | parcelId=`STATE_ID`, owner=absent, situsAddress=`PROP_LOC`, landArea=absent, appraisedValue=absent | lat 98% · lon 102% of state | 378ms, 2000 feat. | ✅ |
@@ -210,6 +210,7 @@ because the link test is not sound in one direction: Rhode Island's own statewid
 - **Kansas (KS):** RETRACTED, corrected 2026-09-08 from the owner's own browser (not this sandbox): services.kansasgis.org root has ZERO services; its folders are FIRSTNET, ORKA, Utilities, water, wimas, wizard, and ORKA — the one folder that could plausibly hold parcels — holds only KS_ORKA_Extras and sketch. No parcel mosaic exists there. This replaces the prior 'not confirmed either way' finding, which is now a confirmed no.
 - **Kentucky (KY):** Kentucky's own open-data portal (opengisdata.ky.gov) files every parcel dataset per-county with no combined statewide layer; DOR Mapping Services page describes supporting individual county PVAs, not running one central layer.
 - **Louisiana (LA):** LAGIC / LSU Atlas / LA Division of Administration GIS / LA Tax Commission checked — no state-run parcel aggregation found. qpublic.net/la is a private directory of parish links, not a state service.
+  **Individual parishes DO publish, and are wired one at a time** — East Baton Rouge (B1455634) and Orleans (B1574256, `gis.nola.gov`, found by route 3 after 1 and 2 came up empty). The statewide finding is unchanged; the parish-level one is not the same question. **⛔ Louisiana has PARISHES, not counties, and that is load-bearing rather than cosmetic:** the nationwide geometry asset names these rows "Orleans Parish"/"East Baton Rouge Parish", and until B1574257 `countyKeyForName` stripped only the word "County" from a display name — so NO Louisiana point could be turned back into its configured key, silently. Any future parish wired here must keep the designation out of the key (`la_orleans`) and IN every user-facing label ("Orleans Parish, LA").
 - **Massachusetts (MA):** Best-in-class of the whole probe: full schema (id/owner/situs/area/value), 2.56M parcels, semi-annual refresh.
 - **Maryland (MD):** MEASURED LIVE FROM THE OWNER'S OWN BROWSER (2026-09-08), not this sandbox — mdgeodata.md.gov is blocked here. 'Parcel Boundaries', polygon, 117 fields: ACCTID, ADDRESS, ACRES, LANDAREA, NFMTTLVL (total value). Owner NAME is absent — only owner MAILING ADDRESS (OWNADD1 etc); the app leaves owner absent rather than fabricating it from the mailing fields.
 - **Maine (ME):** ⛔ CORRECTED 2026-09-10 (B1455632). The `shape-mismatch` finding above read layer 0 of this service (which does need the ADB join for owner/value) and never checked layer 10, the service's ONLY OTHER layer — confirmed live from this sandbox: `esriGeometryPolygon`, 708,382 features, fields TOWN/COUNTY/STATE_ID/MAP_BK_LOT/PROP_LOC — everything the app's id/situs lookup needs, no join required. Owner and appraised value are still absent (they genuinely do live only in the un-joined ADB table) — left absent, never fabricated. **⛔ COVERAGE CAVEAT, stated plainly per the dispatch's own instruction: "Organized Towns" excludes Maine's UNORGANIZED TERRITORY — roughly HALF the state's LAND AREA (the North Woods) but almost none of its parcels (a handful of residents, no municipal government to assess them). This is NOT full statewide coverage; do not let it read as such anywhere in the app or in future docs.** The publisher's currency disclaimer ("data for many towns is more than fifteen years old") still applies to the organized-town data this layer DOES carry.
@@ -338,6 +339,7 @@ point query inside the 8s timing budget, ownership-shaped attributes with a REAL
 | PA | Lehigh | `pa_lehigh` | 2 (AGOL search) | 2026-09-11 | 127,043 parcels, 21 fields. Same service CONTAINER as the excluded `ATestParcel` below, different layer — see that entry. |
 | NM | Bernalillo | `nm_bernalillo` | 2 (AGOL search) | 2026-09-11 | 257,283 parcels, 16 fields. Previously "not found" (2026-09-10). |
 | IL | Kane | `il_kane` | 2 (AGOL search) | 2026-09-11 | 187,336 parcels, 48 fields. |
+| LA | Orleans **Parish** | `la_orleans` | 3 (jurisdiction hostname) | 2026-09-11/12 | `gis.nola.gov/arcgis/rest/services/ParcelSearch/MapServer/0` — layer 0 "parcels", the service's ONLY layer; capabilities Map/Query/Data. Measured LIVE from Michael's own browser 2026-09-11 evening Central (this sandbox's egress blocks `gis.nola.gov`, re-confirmed HTTP 403 while wiring — B1574256). 3-point spread across the whole parish: CBD 114ms/357 feat. (PARCELID 41036654, "826 UNION ST, LA", OWNERNME1 "CONDO MASTER") · Algiers 94ms/246 feat. (41001272, "1306 PACIFIC AVE, LA, 70114") · Lakeview 65ms/224 feat. (41011510, "6198 MILNE BLVD, LA, 70124"). Fields: PARCELID, SITEADDRESS, OWNERNME1, OWNERNME2, TAXBILLID. **Previously "not found" on the 2026-09-10 (routes 1-2) and 2026-09-11 (routes 1-4) passes — this CORRECTS both.** |
 
 Route 3 (county hostname + REST-directory walk) found candidate hosts for several remaining
 counties — see "Not found by routes 1-4" below — and every one is a custom county/city domain this
@@ -417,7 +419,15 @@ strong leads for a live pass, not a guess:**
 noise (a same-named county elsewhere: Jackson County OR for Jackson MO, Winnebago County WI for
 Winnebago IL, Johnson County MO for Johnson KS, Niagara County NY for Orleans LA) or a generic,
 unrelated "County Cadastral Layers"-titled host that recurred across many unrelated queries:**
-Henry (GA) · Winnebago (IL) · Orleans (LA).
+Henry (GA) · Winnebago (IL) · ~~Orleans (LA)~~.
+
+> **✅ ORLEANS PARISH IS NO LONGER IN THAT LIST — CORRECTED 2026-09-12 (B1574256).** It was
+> measured live from Michael's own browser at `gis.nola.gov/arcgis/rest/services`, whose root
+> service list carries `ParcelSearch` directly, and is now wired as `la_orleans` (Tier 1 table
+> above). The "Niagara County NY" hit recorded above is exactly the wrong-state noise routes 1-2
+> produce for a parish name; **route 3 found it immediately.** Left struck-through rather than
+> deleted so the failed-route record stays readable — the point of this section is what was tried,
+> not only what worked.
 
 **Not found by routes 1-3 on 2026-09-11 — tried from Michael's OWN browser (open egress, not this
 sandbox) and STILL did not answer, so these are genuinely harder than a sandbox block, never "no
@@ -430,3 +440,57 @@ source":**
 **Not on this session's Tier 1 roster, unchanged from the 2026-09-10 pass — several almost
 certainly publish parcels through a route not yet tried against them specifically:**
 Ingham (MI) · Washington (OR) · Boone (KY).
+
+### Not found by routes 1-3 on 2026-09-11, tried from Michael's OWN browser (B1574256)
+
+⛔ **Recorded as "not found by routes 1-3 on 2026-09-11" — NEVER as "no source."** These hostnames
+did not answer at all from a browser with fully open egress, so they are genuinely harder rather
+than an artifact of this sandbox's egress policy. Several of these counties almost certainly do
+publish parcels somewhere; what is established is that the county-GIS-hostname route did not reach
+them, which is a much narrower claim.
+
+| State | County | Hostnames tried, none answered |
+|---|---|---|
+| MI | Wayne | `gis.waynecounty.com` · `maps.waynecounty.com` · `gisapps.waynecounty.com` |
+| MI | Macomb | `gis.macombgov.org` · `maps.macombgov.org` |
+| GA | Cobb | `gis.cobbcounty.org` · `gis.cobbcounty.gov` |
+| GA | Fulton | `gis.fultoncountyga.gov` · `gisdata.fultoncountyga.gov` (already wired via route 1 — `ga_fulton` — so this is the hostname route failing, not the county) |
+| GA | Henry | `gis.co.henry.ga.us` |
+| PA | Luzerne | `gis.luzernecounty.org` |
+| PA | Lackawanna | `maps.lackawannacounty.org` |
+| IL | Winnebago | `gis.wincoil.gov` |
+| MO | Clay | `gis.claycountymo.gov` (already wired via route 2 — `mo_clay` — same note as Fulton) |
+| MO | Jackson | `gis.jacksongov.org` · `maps.jacksongov.org` |
+
+**⚠ Johnson County, KS is a DIFFERENT case and deserves its own line, because its host DID answer.**
+`aims.jocogov.org` / `gis.jocogov.org` responded and served a real REST directory — it simply
+carries **no parcel service**. The folders listed are: `Edgerton`, `JCW_UtilityMapping`, `Mission`,
+`PrairieVillage`, `SpringHill`, `Test`, `Utilities`, `WebEOC` — city utility layers, nothing
+cadastral. So Johnson County's parcel data is published **somewhere else**, and "the county GIS host
+has no parcels" is a finding that points at the next step rather than closing the question. Kansas
+City is a Hillwood market, so this is worth a targeted look: the county's AIMS (Automated
+Information Mapping System) program and its open-data portal are the obvious next candidates, and
+neither has been probed by name. This supersedes the earlier, vaguer "`aims.jocogov.org` did not
+answer live" note above, which was wrong about the host — it answered.
+
+### Route 3 is now three-for-three where routes 1 and 2 failed
+
+Worth stating plainly because it is the pattern that keeps working, and it changes where a future
+session should spend its first attempt. Routes 1 (ArcGIS Hub dataset API) and 2 (ArcGIS Online item
+search) are cheap and should still run first — they found 8 of the 11 Tier 1 counties wired so far.
+But when they come up empty or return only wrong-state noise, **the jurisdiction's OWN GIS hostname
+has succeeded every single time it has been reachable:**
+
+| County | Host | Wired as | Item |
+|---|---|---|---|
+| Maricopa AZ | `gis.maricopa.gov/arcgis/rest/services` | `az_maricopa` | B1339920 |
+| Allegheny PA | county GIS host | `pa_allegheny` | B1455634 |
+| Orleans Parish LA | `gis.nola.gov/arcgis/rest/services` | `la_orleans` | B1574256 |
+
+In all three the ROOT service list carried the parcel service directly — no deep search needed once
+the right host was in hand. The standing limitation is unchanged and is the whole reason this is a
+pattern rather than a rule: **route 3's hosts are custom jurisdiction domains that this sandbox's
+egress policy blocks**, so a Claude Code session can find the candidate but usually cannot verify
+it. Verification comes from Michael's own browser or a Cowork session. (`gis.nola.gov` was
+re-probed from this sandbox while wiring `la_orleans` and returned HTTP 403 at the CONNECT tunnel —
+the block is live, not historical.)
