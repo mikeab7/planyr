@@ -60,6 +60,21 @@ export const PAGE_WIDTH_PRESETS = [
   { id: "full", label: "Full width", px: "full" },
 ];
 
+/** ⛔ FULL WIDTH MUST NEVER READ NARROWER THAN THE WIDEST FIXED PRESET (B1561105, owner report
+ *  2026-09-11). Every fixed preset (Narrow/Normal/Wide) ignores the pane entirely — `resolvePresetPx`
+ *  said so on purpose — while "Full width" independently computed `paneWidth - gutter`. On a
+ *  window only a little wider than Wide's own fixed 900, that pane-relative number came out
+ *  SMALLER than 900: measured live at a ~1190px browser window, Wide rendered its column at
+ *  818 while Full width rendered 793 — narrower, so the last option in the menu read as a step
+ *  DOWN from the one above it. Derived from `PAGE_WIDTH_PRESETS` itself (never a second literal
+ *  900) so a future preset wider than today's Wide stays the floor automatically. Below this
+ *  floor, "Full width" overflows the pane exactly the way an oversized box or table already
+ *  does — `note-mat`'s own `overflow: auto` already scrolls for that case, so this is not a new
+ *  mechanism, only a new place that reaches it. */
+export const FULL_WIDTH_FLOOR = Math.max(
+  ...PAGE_WIDTH_PRESETS.filter((p) => typeof p.px === "number").map((p) => p.px),
+);
+
 const clampWidth = (n) => Math.round(Math.max(PAGE_WIDTH_MIN, Math.min(PAGE_WIDTH_MAX, n)));
 
 /** The preset row a stored value matches exactly, or `null` for "Fit to content" (`pageWidth ==
@@ -83,19 +98,29 @@ export function pageWidthLabel(pageWidth) {
 /** Resolve a preset's own `px` (a number, or the string `"full"`) against the space this
  *  particular pane actually has right now. `null`/`"full"` need `paneWidth`; every other preset's
  *  `px` is already the answer. Used by BOTH the toolbar (to compute what a click should commit)
- *  and the measurement effect (to compute what is already committed). */
+ *  and the measurement effect (to compute what is already committed).
+ *
+ *  ⛔ "full" IS FLOORED AT `FULL_WIDTH_FLOOR` (B1561105) — see that constant's own header. Without
+ *  it, a pane only a little wider than Wide's own fixed width made `paneWidth - gutter` smaller
+ *  than Wide, inverting the last two rows of the menu. */
 export function resolvePresetPx(px, { paneWidth = 0 } = {}) {
-  if (px === "full") return clampWidth(paneWidth - FULL_WIDTH_GUTTER * 2);
+  if (px === "full") return clampWidth(Math.max(paneWidth - FULL_WIDTH_GUTTER * 2, FULL_WIDTH_FLOOR));
   return clampWidth(px);
 }
 
 /** ⛔ THE ONE ANSWER NoteEditor.jsx's MEASUREMENT EFFECT NEEDS: given the stored attribute and the
  *  pane's current width, what SHEET width should stand in for the unpinned `SHEET_MAX_WIDTH`
  *  constant this run? `null` — unpinned, "Fit to content" — is passed straight back so the
- *  caller's own existing `SHEET_MAX_WIDTH` fallback is untouched. Never returns wider than the
- *  pane allows (matching the unpinned baseline's own existing `Math.min(..., paneWidth -
- *  marginX)` clamp one level up), so a pinned-wide page on a narrow window still shrinks to fit
- *  rather than clipping — it is a min, not a hard cut. */
+ *  caller's own existing `SHEET_MAX_WIDTH` fallback is untouched.
+ *
+ *  ⛔ CORRECTED (B1561105) — an earlier version of this comment claimed every pin "never returns
+ *  wider than the pane allows." That was never true of a NUMERIC pin (Narrow/Normal/Wide, or a
+ *  completed drag): those ignore the pane entirely, by design — `resolvePresetPx`'s own test
+ *  pins it as "a plain-number preset ignores the pane entirely." A pin is a FLOOR the same way
+ *  real content already is (see this file's own header): the numeric presets are meant to hold
+ *  their literal width and let the pane's own scrolling (already wired for an oversized box or
+ *  table) take up any slack, never quietly shrink themselves. Only `"full"` is genuinely
+ *  pane-relative, and even it now has its own floor — see `FULL_WIDTH_FLOOR`. */
 export function resolvePinnedBaseWidth(pageWidth, { paneWidth = 0 } = {}) {
   if (pageWidth == null) return null;
   if (pageWidth === "full") return resolvePresetPx("full", { paneWidth });

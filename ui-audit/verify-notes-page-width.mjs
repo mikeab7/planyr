@@ -308,6 +308,48 @@ console.log("\n[10] PDF-PARITY — the real toolbar Print button:");
   }
 }
 
+/* ═══════ CASE 12 — B1561105: Full width must never render narrower than Wide ════════════ */
+console.log("\n[12] The reported inversion — Full width vs Wide at the owner's exact window:");
+{
+  // The owner's own report: a ~1190 CSS px browser window, Wide picked then Full width picked,
+  // and Full width rendered SMALLER. Reproduce at that exact width, then sweep narrow/normal/wide
+  // windows and assert the five options never invert anywhere.
+  await seed(PLAIN_DOC, "Inversion repro");
+  await page.setViewportSize({ width: 1190, height: 900 });
+  await page.waitForTimeout(300);
+  await pickWidthMenu("900");
+  const wideAt1190 = await sheetRect();
+  await pickWidthMenu("full");
+  const fullAt1190 = await sheetRect();
+  ok("Full width is never narrower than Wide at the owner's own window width",
+    fullAt1190.width >= wideAt1190.width, JSON.stringify({ wideAt1190, fullAt1190 }));
+  await page.setViewportSize({ width: 1500, height: 950 });
+}
+
+console.log("\n[13] The full ladder — every option, narrow/normal/wide windows, as a table:");
+{
+  const widths = { narrow: 900, normal: 1400, wide: 3000 };
+  const table = {};
+  for (const [sizeLabel, vw] of Object.entries(widths)) {
+    await seed(PLAIN_DOC, `Ladder ${sizeLabel}`);
+    await page.setViewportSize({ width: vw, height: 900 });
+    await page.waitForTimeout(300);
+    const row = {};
+    for (const opt of ["440", "580", "900", "full"]) {
+      await pickWidthMenu(opt);
+      row[opt] = (await sheetRect()).width;
+    }
+    table[sizeLabel] = row;
+  }
+  console.log("  " + JSON.stringify(table));
+  for (const [sizeLabel, row] of Object.entries(table)) {
+    ok(`${sizeLabel} window: Narrow ≤ Normal ≤ Wide ≤ Full`,
+      row["440"] <= row["580"] && row["580"] <= row["900"] && row["900"] <= row["full"],
+      JSON.stringify(row));
+  }
+  await page.setViewportSize({ width: 1500, height: 950 });
+}
+
 console.log("\n[11] \"Full width\" does not widen paper (a screen-only concept):");
 {
   await seed(PLAIN_DOC, "Print full width");
