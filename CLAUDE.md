@@ -465,12 +465,19 @@ were split out of this file.
    them into one dismissal. (See B1037952, B1048400.)
 7. **(2026-08-22) A live check runs on a throwaway duplicate of a real plan, never on one of
    Michael's real plans** — and the session says exactly what was touched.
-8. **(2026-09-11) The canvas commits ONE framing per load.** Whatever framing is first painted is
-   the framing that stays; no intermediate framing is ever shown. A framing may not be computed
-   before the model it frames and the container it frames into are both real — and where it cannot
-   yet be computed, the canvas paints nothing rather than a placeholder view. A debounce, a delay,
-   or anything that merely outruns the wrong framing does not satisfy this. Enforced by
-   `ui-audit/verify-boot-framing.mjs` (a required gate). (See B1574432, V1127680.)
+8. **(2026-09-11, SUSPENDED 2026-09-12) The canvas commits ONE framing per load — the GOAL still
+   stands, but the mechanism that enforced it is REVERTED and the requirement is not enforced right
+   now.** B1574432's `framingCommitted` gate (hide the canvas until a real framing is computed, a
+   1.5s watchdog as the fallback) shipped with its own real-signed-in-boot path explicitly
+   unverified (parked `Blocker: auth` — the untested path was exactly the one this sandbox cannot
+   sign in to exercise) and went on to make the Site Planner canvas **permanently invisible and
+   unclickable on planyr.io** for every project, for every signed-in user — a P0 outage, not the
+   two-frame flash it was fixing. See **B1594320** for the incident and the revert. The underlying
+   ask (no flashed intermediate framing on cold load) is UNCHANGED and still wanted; a future
+   attempt must get a genuine signed-in live pass (not just the sandbox's route-change proxy for
+   the remount) before this gate is re-enabled as a requirement. `ui-audit/verify-boot-framing.mjs`
+   still exists and still works as a diagnostic — it is simply no longer a required CI gate, because
+   there is currently no shipped mechanism for it to check.
 9. **(2026-09-07) Split stays a phone-width Schedule option — do not remove it, do not re-ask.**
    Michael, verbatim: "Yes make split an option on the phone." Separately, a one-pane-at-a-time
    Split (any variant, however its highlight is drawn) is a rejected shape, not an open design
