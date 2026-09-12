@@ -602,11 +602,6 @@ const CANVAS_HOVER_IDENTIFY_MS = 320;
 // so a tolerance in degrees is never tighter than the on-screen slop it came from.
 const FT_PER_DEG_MIN = 300000;
 
-/* B1600353 — how long the boot framing keeps retrying a container it cannot yet measure, on a WALL
-   CLOCK. Bounded on purpose: an unbounded retry against a container that will never exist is a leak,
-   not a rescue, and the wake listeners cover anything slower. */
-const BOOT_FRAMING_RETRY_MS = 10000;
-
 // PAL (the canvas + panel palette) is now theme-derived inside the SitePlanner
 // component from usePalette() — see the adapter at the top of the component body.
 // It must be REAL HEXES, not var() tokens: the canvas is SVG and exports to PNG/PDF,
@@ -5975,14 +5970,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
 
   /* ------------ fit to content ------------ */
-  /* `box` — B1600353. An OPTIONAL, freshly-measured `{ w, h }` from the container's own
-     `getBoundingClientRect()`, used by the boot framing below. It must not read the `size` STATE for
-     that: on the first render `size` is still its placeholder (the container has never been
-     measured), and a `setSize` dispatched in the same tick has not re-rendered yet — framing from a
-     box that does not exist is exactly what B1234400's readiness gate exists to prevent. Every other
-     caller passes nothing and reads `size`, exactly as before. */
-  const fit = useCallback((box) => {
-    const box2 = (box && Number.isFinite(box.w) && Number.isFinite(box.h)) ? box : size;
+  const fit = useCallback(() => {
     /* ⛔ B494048 — FRAME WHAT IS ON SCREEN, NOT WHAT IS IN THE MODEL. Measured on the owner's plan:
        hiding both ponds — 2,616 ft of the drawing's width — left Zoom to fit at a byte-identical
        zoom, so the buildings he could actually see stayed squeezed into the middle of a frame built
@@ -6003,8 +5991,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pts.forEach((p) => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
     const bw = Math.max(maxX - minX, 10), bh = Math.max(maxY - minY, 10);
     const pad = 60;
-    const ppf = Math.min((box2.w - pad * 2) / bw, (box2.h - pad * 2) / bh);
-    setView({ ppf, offX: pad - minX * ppf + (box2.w - pad * 2 - bw * ppf) / 2, offY: pad - minY * ppf + (box2.h - pad * 2 - bh * ppf) / 2 });
+    const ppf = Math.min((size.w - pad * 2) / bw, (size.h - pad * 2) / bh);
+    setView({ ppf, offX: pad - minX * ppf + (size.w - pad * 2 - bw * ppf) / 2, offY: pad - minY * ppf + (size.h - pad * 2 - bh * ppf) / 2 });
   }, [parcels, els, sheetOverlays, size, hiddenGroups, setView]);
 
   // Fit *after* a state change has committed: bump the nonce instead of calling
@@ -6054,107 +6042,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setFitReq((prev) => ({ n: (prev ? prev.n : 0) + 1, ticket: t }));
     return true;
   }, []);
-  /* ══ B1600353 — A HIDDEN BOOT MUST STILL COMMIT ITS FRAMING ══════════════════════════════════════
-   *
-   * ⛔ THE DEFECT, MEASURED ON PRODUCTION (owner's signed-in Chrome, window backgrounded at the OS
-   * level, two readings hours apart on two different served chunks): the canvas computes
-   * `visibility: visible`, the aerial paints across it, and `data-view-ppf/-offx/-offy` read
-   * `0.35 / 60 / 60` — the `useState` boot default — while every `[data-el-id]` element sits OUTSIDE
-   * the canvas box (elements at x 1195..1405 against a canvas box of x 54..1023). `elementFromPoint`
-   * at an element's own centre returns `null`. The owner sees an aerial photo of the wrong place
-   * with no parcel and no building: "my plan is gone."
-   *
-   * ⛔ THIS IS OLDER THAN B1574432 AND ITS REVERT, which is the thing that kept it hidden. Measured
-   * across three builds at 1280x900 on a 66-element fixture: pre-`453623a` and post-revert `main`
-   * are BYTE-IDENTICAL on both arms (foregrounded ppf 0.1064540557003681, plan on screen; hidden
-   * boot ppf 0.35 off (60,60), every element `inView: false`). B1574432 only added the HIDING, which
-   * turned this silent defect into a loud blank canvas; reverting it restored the silence, not the
-   * correctness. A genuinely FOREGROUNDED cold load was never broken on any of the three — this is a
-   * hidden-boot bug, not everyone's bug.
-   *
-   * ⛔ THE MECHANISM, AND IT IS THE RETRY RATHER THAN THE VERDICT. The verdict is right: a framing
-   * suppressed for `document-hidden` or `container-unmeasured` is a "not yet", not a "no", so it is
-   * deferred against the SAME ticket. The retry was:
-   *
-   *     const poll = () => { if (isVisible() && sizeMeasuredRef.current) { requestFit(...); return; }
-   *                          raf = requestAnimationFrame(poll); };
-   *     raf = requestAnimationFrame(poll);
-   *
-   * reasoning that "a background tab's own rAF is suspended, so polling with it costs nothing while
-   * hidden and resumes on its own the instant the tab is foregrounded." The first half is true; the
-   * second does not follow. The owner's own diagnostic measured `requestAnimationFrame`: ZERO
-   * callbacks in 6,295 ms on that tab. A retry that only runs once the tab is already foregrounded
-   * cannot recover a tab that is not — so the framing was never re-requested and the view stayed on
-   * the boot default for the life of the load. (This is the rAF-chained deadline the 2026-09-11
-   * dispatch brief hypothesised. It was on the RETRY path, not the watchdog, which is why it
-   * survived a whole incident spent looking at the gate.)
-   *
-   * THE FIX, two parts, and deliberately NOT a re-land of B1574432's hide-until-ready gate (see
-   * docs/incidents/B1594320-CANVAS-VISIBILITY-OUTAGE.md, which requires a remount-surviving ceiling
-   * and a signed-in live pass before that returns):
-   *
-   *   1. **"IS THE TAB FRONTMOST" IS NOT THE READINESS QUESTION — "IS THERE A REAL BOX" IS.** The
-   *      container is read directly, and a raw non-degenerate rect is the verdict.
-   *      `getBoundingClientRect()` is layout-accurate in a tab that is merely not frontmost:
-   *      production measured a real 969x408 while hidden, and later x 54..1023 / y 56..464. What
-   *      B1234400 actually caught was a container that had NEVER BEEN LAID OUT, reporting a
-   *      degenerate box that the `Math.max(320, …)` floor then dressed up as a plausible 320x360 —
-   *      and the raw-rect test below refuses exactly that, directly, without the proxy. So a hidden
-   *      boot frames correctly at boot and the user sees the right picture the instant the tab comes
-   *      forward, rather than depending on being rescued later.
-   *   2. **THE RETRY IS DRIVEN BY WAKE EVENTS AND A WALL CLOCK, NEVER BY rAF.** `visibilitychange`,
-   *      `pageshow` (the bfcache restore) and `focus` re-ask directly, and a bounded wall-clock
-   *      interval covers a container that is simply late. Nothing here can be suspended by a
-   *      throttled frame loop.
-   *
-   * The ticket still travels all the way to the execution, so a user gesture during any of this
-   * still cancels the framing exactly as before — that is `mayFrame`'s job and it is untouched. */
   useEffect(() => {
-    if (!fitReq) return undefined;
-    if (typeof document === "undefined" || typeof window === "undefined") return undefined;
-    let done = false, timer = 0;
-    const deadline = Date.now() + BOOT_FRAMING_RETRY_MS;
-    /* The readiness test, asked of the DOM rather than of the tab. Returns the raw rect or null. */
-    const realBox = () => {
-      const el = wrapRef.current;
-      if (!el) return null;
-      const r = el.getBoundingClientRect();
-      return (r.width > 1 && r.height > 1) ? r : null;
+    if (!fitReq) return;
+    const isVisible = () => typeof document === "undefined" || document.visibilityState === "visible";
+    const verdict = framingGate.current.mayFrame(fitReq.ticket, { visible: isVisible(), measured: sizeMeasuredRef.current });
+    if (verdict.ok) { fit(); return undefined; }
+    viewRecRef.current?.noteEvent("frame:suppressed", verdict.why);
+    if (verdict.why !== "document-hidden" && verdict.why !== "container-unmeasured") return undefined;
+    // A background tab's own requestAnimationFrame is suspended (FOREGROUND-OR-VOID), so polling
+    // with it costs nothing while hidden and resumes on its own the instant the tab is foregrounded
+    // — no separate visibilitychange listener needed here.
+    let raf = 0, cancelled = false;
+    const poll = () => {
+      if (cancelled) return;
+      if (isVisible() && sizeMeasuredRef.current) { requestFit(fitReq.ticket); return; }
+      raf = requestAnimationFrame(poll);
     };
-    const attempt = () => {
-      if (done) return true;
-      const r = realBox();
-      if (!r) return false;                    // genuinely unmeasurable — a "not yet", keep waiting
-      sizeMeasuredRef.current = true;
-      /* `visible: true` is NOT a claim that the tab is frontmost — it is this call site saying the
-         readiness question that flag stands for has been answered a STRONGER way, by the raw-rect
-         measurement above. `mayFrame` still decides OWNERSHIP (has the user moved the view since
-         this framing was requested?), which is the check that actually matters and is untouched. */
-      const verdict = framingGate.current.mayFrame(fitReq.ticket, { visible: true, measured: true });
-      if (!verdict.ok) { viewRecRef.current?.noteEvent("frame:suppressed", verdict.why); return true; }
-      fit({ w: Math.max(320, r.width), h: Math.max(360, r.height) });   // the MEASURED box, never the placeholder
-      return true;
-    };
-    const stop = () => {
-      done = true;
-      if (timer) clearInterval(timer);
-      document.removeEventListener("visibilitychange", wake);
-      window.removeEventListener("pageshow", wake);
-      window.removeEventListener("focus", wake);
-      window.removeEventListener("resize", wake);
-    };
-    function wake() { if (attempt()) stop(); }
-    if (attempt()) return undefined;
-    viewRecRef.current?.noteEvent("frame:deferred", "container not measurable yet");
-    document.addEventListener("visibilitychange", wake);
-    window.addEventListener("pageshow", wake);
-    window.addEventListener("focus", wake);
-    window.addEventListener("resize", wake);
-    /* A bounded wall clock, so a container that is merely late still gets framed with nobody
-       touching the tab. Bounded because an unbounded retry on a container that will never exist is a
-       leak, not a rescue; the wake listeners above cover anything slower than this. */
-    timer = setInterval(() => { if (attempt() || Date.now() > deadline) stop(); }, 120);
-    return () => { stop(); };
+    raf = requestAnimationFrame(poll);
+    return () => { cancelled = true; if (raf) cancelAnimationFrame(raf); };
   }, [fitReq]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* Frame the planner view to the ACTIVE parcels (+ margin) so a just-enabled
