@@ -190,6 +190,46 @@ export const COUNTY_VERIFICATION = {
   al_jefferson: {
     verifiedNote: "jccgis.jccal.org is blocked by this build environment's egress policy. Endpoint, feature count (652ms/68 populated fields) and county provenance are from the dispatch's own live-browser measurement, 2026-09-10 — not independently re-probed here.",
   },
+  /* ═══ B1551617 — Tier 1 counties, all discovered + verified LIVE from this sandbox 2026-09-11 by
+   * ui-audit/discover-county-parcels.mjs (routes 1/2 — hub.arcgis.com / www.arcgis.com, both
+   * reachable here). Every one passed 3 geometry-verified spread points across the WHOLE county
+   * (never just the seat), not merely a metadata check. ═══ */
+  ga_fulton: {
+    verifiedOn: "2026-09-11",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 373,296 parcel polygons, count query 616ms, 28 fields, esriGeometryPolygon. Replaces the previously-declined `Tax_Parcels2018` (2018 vintage, stale — docs/STATEWIDE-PARCELS.md). Discovered via the ArcGIS Hub dataset API route.",
+  },
+  ga_chatham: {
+    verifiedOn: "2026-09-11",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 126,490 parcel polygons, count query 708ms, 47 fields, esriGeometryPolygon. Previously recorded as 'not found by routes 1-2' (docs/STATEWIDE-PARCELS.md, 2026-09-10); found this session via the ArcGIS Online item search route.",
+  },
+  az_pinal: {
+    verifiedOn: "2026-09-11",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 286,959 parcel polygons, count query 523ms, 74 fields, esriGeometryPolygon. Published by the City of Maricopa's own GIS account (owner CityOfMaricopa, not the neighboring Maricopa COUNTY) — a 3-point spread 50-80 miles apart (Casa Grande / Apache Junction area / San Tan Valley area) all answered with real, distinct parcels, confirming this covers the whole county rather than just the city.",
+  },
+  mo_clay: {
+    verifiedOn: "2026-09-11",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 98,112 parcel polygons, count query 570ms, 40 fields, esriGeometryPolygon.",
+  },
+  sc_greenville: {
+    verifiedOn: "2026-09-11",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 215,484 parcel polygons, count query 387ms, 55 fields, esriGeometryPolygon. Replaces the previously-declined `Parcel_Sizes_2018_WFL1` (2018 vintage AND a derived-acreage layer, not the parcel layer itself — docs/STATEWIDE-PARCELS.md).",
+  },
+  ia_polk: {
+    verifiedOn: "2026-09-11",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 219,672 parcel polygons, count query 291ms, 49 fields, esriGeometryPolygon. Previously recorded as 'not found by routes 1-2' (docs/STATEWIDE-PARCELS.md, 2026-09-10); found this session via the ArcGIS Hub dataset API route.",
+  },
+  pa_lehigh: {
+    verifiedOn: "2026-09-11",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 127,043 parcel polygons, count query 451ms, 21 fields, esriGeometryPolygon. Replaces the previously-declined `ATestParcel` — this is the SAME underlying ArcGIS service container (a publisher naming quirk, not the same data): fetched the service's own layer list directly and confirmed layer 0 is an unrelated 'Owner' POINT layer while layer 1 (wired here) is a real, current, 127,043-feature POLYGON parcel layer whose own AGOL item is titled 'Parcels - PA - Lehigh County'.",
+  },
+  nm_bernalillo: {
+    verifiedOn: "2026-09-11",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 257,283 parcel polygons, count query 304ms, 16 fields, esriGeometryPolygon. Published by the City of Albuquerque's GIS (owner agis_CABQ). Previously recorded as 'not found by routes 1-2' (docs/STATEWIDE-PARCELS.md, 2026-09-10).",
+  },
+  il_kane: {
+    verifiedOn: "2026-09-11",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 187,336 parcel polygons, count query 336ms, 48 fields, esriGeometryPolygon.",
+  },
 };
 
 /* Convenience accessors so callers never reach into the shape directly. */

@@ -328,8 +328,12 @@ const FIELD_PATTERNS = {
    * cannot match inside `PARCEL_APN` because an underscore is a word character, so there is no
    * word boundary before "APN". A doc that reports a real id column as absent understates a
    * source and is exactly the kind of quiet wrong number this repo keeps closing; the app's own
-   * live field auto-detect was never affected (these are reporting hints, not authority). */
-  parcelId: /parcel.?id|parcel.?apn|\bapn\b|_apn(?:_|$)|platlot|(?:^|_)pin(?:_|$)|prop.?id|acctid|account|parcelnb|parcelnum|gispid|statepar|stateid|(?:^|_)pid(?:_|$)/i,
+   * live field auto-detect was never affected (these are reporting hints, not authority).
+   * B1551616 correction, 2026-09-11: `_apn(?:_|$)` only caught APN AFTER an underscore
+   * ("PARCEL_APN"), not BEFORE one — `APN_CHR` (a real field on a Macomb County MI candidate)
+   * read the same false "absent". `(?:^|_)apn(?:_|$)` is a strict superset of the old clause
+   * (identical on `_apn$`/`_apn_`, plus now `^apn_`/`^apn$`) — it can only ADD matches. */
+  parcelId: /parcel.?id|parcel.?apn|\bapn\b|(?:^|_)apn(?:_|$)|platlot|(?:^|_)pin(?:_|$)|prop.?id|acctid|account|parcelnb|parcelnum|gispid|statepar|stateid|(?:^|_)pid(?:_|$)/i,
   owner: /owner/i,
   situsAddress: /situs|site.?add|prop.?add|premisead|full.?address|prop_loc/i,
   landArea: /acre|sqfoot|lot_size|land.?area/i,
