@@ -11,12 +11,17 @@ with u as (select id from auth.users where email = 'e2e@planyr.test')
 delete from public.sites
 where id = 'e2e-fixture-testfit' and user_id in (select id from u);
 
+-- ⛔ NEW-3 (2026-09-12) — `group_id` below was a typo ('e2e-fixture', missing the '-testfit' suffix)
+-- that disagreed with the jsonb blob's own `groupId: "e2e-fixture-testfit"` — the ONE row in the
+-- whole account nameGroupIntegrity.groupKeyMismatch found, and the exact real-world shape its own
+-- test suite is seeded from (test/nameGroupIntegrity.test.js). Fixed to match; a future re-run of
+-- this seed must not reintroduce it.
 with u as (select id from auth.users where email = 'e2e@planyr.test')
 insert into public.sites (id, user_id, group_id, site, name, county, data)
 select
   'e2e-fixture-testfit',
   u.id,
-  'e2e-fixture',
+  'e2e-fixture-testfit',
   'E2E Dense Test-Fit',
   'E2E Dense Test-Fit',
   'Harris',
