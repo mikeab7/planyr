@@ -3,12 +3,18 @@ import { zoomStackBottomPx, TOP_RIGHT_ROW_RESERVE_PX } from "../src/workspaces/s
 
 // B1338272 — the smallest current iPhone in landscape gives a 568×320 device a canvas about
 // 263px tall once the header/toolbar are subtracted (measured live against the owner's real
-// Bain plan). The desktop desired offset (100) and the narrow one (100+62=162) are both fixed
-// constants tuned for a canvas comfortably taller than that.
+// Bain plan). The desktop desired offset (100) and the narrow one are both fixed constants
+// tuned for a canvas comfortably taller than that.
+// ⛔ SUPERSEDED (NEW-2, phone-chrome-parity pass) — `NARROW_DESIRED`/`FURNITURE_ROW_NARROW` no
+// longer add the now-removed `FAB_RESERVE_PX` (62); the caller's real narrow values are
+// `68 + narrowSafeBottom` / `8 + narrowSafeBottom` (SitePlanner.jsx). `zoomStackBottomPx` itself
+// is untouched — it only ever consumed `desired`/`floor` as plain numbers — so this test still
+// exercises the real pure function; these two constants are just realistic-shaped inputs to it,
+// not a claim about what the caller currently passes.
 const DESKTOP_DESIRED = 100;
-const NARROW_DESIRED = 162; // 100 + FAB_RESERVE_PX(62)
+const NARROW_DESIRED = 162;
 const STACK_H = 90; // three 30px buttons
-const FURNITURE_ROW_NARROW = 102; // 40 + FAB_RESERVE_PX(62)
+const FURNITURE_ROW_NARROW = 102;
 const FURNITURE_ROW_DESKTOP = 40;
 
 describe("zoomStackBottomPx (B1338272 — the zoom stack must never climb into the top-right row)", () => {
