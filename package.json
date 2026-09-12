@@ -58,6 +58,7 @@
     "verify:jurbadge": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-jurisdiction-badge-shapes.mjs",
     "build:floodtiles": "node scripts/build-flood-tiles.mjs",
     "resolve-ledgers": "node scripts/resolve-ledgers.mjs",
+    "safe-merge": "node scripts/merge-ledgers-safe.mjs",
     "mark-shared-ids": "node scripts/mark-shared-ids.mjs"
   },
   "dependencies": {
