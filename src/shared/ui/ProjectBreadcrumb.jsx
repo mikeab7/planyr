@@ -69,6 +69,7 @@ import {
   DELETED_RETENTION_DAYS, activeUid,
 } from "../projects/projects.js";
 import { resolveCurrentName, withCurrentProject, unionProjectLists, resolveControlledId as resolveControlledIdPure, hasSavedProjectRecord, applyFrozenOrder } from "../projects/projectModel.js";
+import { crumbNeedsCompact } from "./breadcrumbFit.js";
 
 // Crumbs sit on the chrome bar, which now themes WITH the app (B318) — so these are
 // chrome tokens, not the retired warm-dark hexes (white-on-light was the B341 bug).
@@ -165,6 +166,19 @@ const KebabIcon = ({ size = 14 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
     style={{ flex: "none", display: "block" }}>
     <circle cx="12" cy="5" r="1.9" /><circle cx="12" cy="12" r="1.9" /><circle cx="12" cy="19" r="1.9" />
+  </svg>
+);
+
+// NEW-4/B1343203 — the compact-crumb "more levels this way" marker, same drawn-icon idiom as
+// every other glyph in this file (stroke/fill currentColor, never a text character): a text "…"
+// or "⋯" is at the mercy of the platform font, which is exactly why this file already replaced
+// its own per-row manage affordance (KebabIcon, above) and the pencil/wastebasket glyphs the same
+// way. Horizontal, not vertical (KebabIcon's own shape), to read as "more of the TRAIL" rather
+// than "more actions".
+const CollapsedCrumbIcon = ({ size = 14 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
+    style={{ flex: "none", display: "block" }}>
+    <circle cx="5" cy="12" r="1.9" /><circle cx="12" cy="12" r="1.9" /><circle cx="19" cy="12" r="1.9" />
   </svg>
 );
 
@@ -311,6 +325,14 @@ export default function ProjectBreadcrumb({
   // separator as the crumbs above it. The Site Planner passes its plan switcher here so the
   // project name stays in exactly one place and the plan sits beside it: Map / Project / Plan.
   planSlot = null,
+  // NEW-4 (B1343203) — phone width (`narrow`) and a ref to Row 1's own scrolling strip (`rowRef`,
+  // AppHeader's), so this component can measure ITS OWN budget — how much of the row is visible
+  // before it has to scroll — and collapse the MIDDLE crumb (this one, the project) to a compact
+  // "…" affordance when the full trail would not fit. The FIRST (Dashboard) and LAST (`planSlot`,
+  // when present) crumbs never collapse — only ever the one in between. Off-narrow, or with no
+  // `planSlot` (this crumb IS the last one then), it never compacts.
+  narrow = false,
+  rowRef = null,
 }) {
   const controlled = Array.isArray(controlledProjects);
   const [open, setOpen] = useState(false);
@@ -760,6 +782,70 @@ export default function ProjectBreadcrumb({
   // the parent's `currentProject` prop is still the pre-rename value (Review/Library derive it
   // from the route id, not the store). Falls back to the prop when the list can't resolve it.
   const currentName = resolveCurrentName(currentProject, projects);
+  // NEW-4 (B1343203) — the SAME name the visible span below computes inline (kept literal there
+  // for an existing source-guard test's sake — see that span's own comment), hoisted here once so
+  // the compact-mode aria-label and the hidden measurement twin can't drift from it independently.
+  const projectLabel = cross ? "All projects" : org ? "Organization" : (currentName || "Select a project");
+
+  /* NEW-4 (B1343203) — measured (not assumed) compaction of the MIDDLE crumb, per this file's own
+   * VIEWPORT-STABLE-style rule: guess wrong either way and you either compact a trail that
+   * already fits (needless) or leave the last crumb — the plan actually open — unreachable
+   * without scrolling (the reported bug). `projectMeasureRef` is an always-mounted, always-FULL,
+   * invisible twin of this crumb (same chrome, same current name, never abbreviated) — reading
+   * ITS width rather than a hand-typed constant means the budget can never drift out of sync with
+   * a later change to the visible crumb's own icon/caret/warn-triangle chrome. There is no
+   * feedback loop to guard against (unlike Row 2's centred-toolbar hysteresis case): the dashboard
+   * crumb, the plan crumb and this hidden twin are all measured at their natural, uncompacted
+   * size regardless of `crumbCompact`'s own current value.
+   */
+  const wrapRef = useRef(null);
+  const dashboardRef = useRef(null);
+  const planSlotRef = useRef(null);
+  const projectMeasureRef = useRef(null);
+  const [crumbCompact, setCrumbCompact] = useState(false);
+  useLayoutEffect(() => {
+    // Only ever collapse the MIDDLE crumb: with no trailing `planSlot`, this crumb IS the last
+    // one and must survive intact, same as Dashboard.
+    if (!narrow || !planSlot || !rowRef) { setCrumbCompact((c) => (c ? false : c)); return undefined; }
+    const wrap = wrapRef.current, dash = dashboardRef.current, plan = planSlotRef.current, full = projectMeasureRef.current;
+    if (!wrap || !dash || !plan || !full) return undefined;
+    const hasRO = typeof ResizeObserver === "function";
+    let ro; // read inside `measure`, assigned right after (a closed-over TDZ-safe forward reference)
+    let rowObserved = false;
+    const measure = () => {
+      /* ⛔ `rowRef.current` CAN BE NULL ON THE VERY FIRST CALL, and that is not a bug to fix by
+       * retrying blindly — it is React's own commit order. `rowRef` is attached to an ANCESTOR
+       * element (AppHeader's row div, which CONTAINS this component), and refs attach bottom-up
+       * in the SAME traversal as layout effects: every descendant's ref and layout effect (this
+       * one included) completes before an ancestor's own ref is attached. So on first mount this
+       * child's layout effect fires before the parent's ref exists. The rAF below re-enters this
+       * exact function one frame later, by which point it does — and this same call is what
+       * starts observing the row for resize, since it could not be handed to the ResizeObserver
+       * any earlier than it existed. */
+      const row = rowRef.current;
+      if (!row) return;
+      if (hasRO && ro && !rowObserved) { ro.observe(row); rowObserved = true; }
+      // This component's own left edge is where the breadcrumb starts — a real measured
+      // position (never a guessed wordmark-width-plus-gap constant) for how much of Row 1 is
+      // visible before it has to scroll.
+      const availableWidth = Math.max(0, row.getBoundingClientRect().right - wrap.getBoundingClientRect().left);
+      const needsCompact = crumbNeedsCompact({
+        availableWidth,
+        dashboardWidth: dash.getBoundingClientRect().width,
+        projectWidth: Math.max(CRUMB_MIN_W, full.getBoundingClientRect().width),
+        planWidth: plan.getBoundingClientRect().width,
+        hasPlan: !!planSlot,
+      });
+      setCrumbCompact((prev) => (prev === needsCompact ? prev : needsCompact));
+    };
+    measure();
+    if (!hasRO) { window.addEventListener("resize", measure); return () => window.removeEventListener("resize", measure); }
+    const raf = requestAnimationFrame(measure);
+    ro = new ResizeObserver(measure);
+    ro.observe(wrap); ro.observe(dash); ro.observe(plan); ro.observe(full);
+    if (rowRef.current) { ro.observe(rowRef.current); rowObserved = true; }
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
+  }, [narrow, planSlot, currentName, cross, org, rowRef]);
 
   return (
     /* NEW-2 — the crumb row may SHRINK (it used to be `flex: "none"`), so that when the header is
@@ -767,9 +853,14 @@ export default function ProjectBreadcrumb({
        by the zone's `overflow: hidden` — which cuts the last crumb's ▾ caret off, the exact thing
        the owner could not click. Each crumb carries its own min-width below, so shrinking can never
        squeeze one to nothing. */
-    <div style={{ display: "flex", alignItems: "center", gap: 2, minWidth: 0, flex: "0 1 auto" }}>
-      {/* Dashboard crumb (B192) — literal text, always visible, primary route home */}
+    <div ref={wrapRef} style={{ display: "flex", alignItems: "center", gap: 2, minWidth: 0, flex: "0 1 auto" }}>
+      {/* Dashboard crumb (B192) — literal text, always visible, primary route home. NEW-4/B1343203:
+          the FIRST crumb, so it never compacts; `dashboardRef` feeds the compaction measurement
+          below. NEW-1/B1343200: `tap-target` floors its hit area at 44x44 without growing the chip. */}
       <button
+        ref={dashboardRef}
+        className="tap-target"
+        data-testid="dashboard-crumb"
         onClick={goDashboard}
         title={crumbDashboardTitle({ homeLabel, dashboardTitle })}
         aria-current={onDash ? "page" : undefined}
@@ -795,42 +886,75 @@ export default function ProjectBreadcrumb({
           sharedWithTeam.js, sourced from the same team_id a project actually shares on. */}
       <button
         ref={anchorRef}
+        className="tap-target"
         data-testid="project-crumb"
+        data-crumb-compact={crumbCompact ? "1" : undefined}
         onClick={() => setOpen((o) => !o)}
         /* NEW-2 — the tooltip named only "project" outcomes; once the switcher can also open
-           the Organization, both branches of that sentence needed a third case. */
+           the Organization, both branches of that sentence needed a third case.
+           NEW-4/B1343203 — compact mode keeps the same title/tooltip, so the full name is still
+           one hover (or a screen reader) away even while the visible chip reads "…". */
         title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={crumbCompact ? `Switch project — currently ${projectLabel}` : undefined}
         /* NEW-2 — shrinkable BETWEEN two bounds. The name ellipsises down to the floor and no
            further, so the ⚠ and the ▾ always have room and the crumb never becomes a
-           sliver you cannot aim at. */
-        style={crumbBtn({ color: (currentProject || cross || org) ? INK : MUTED, flex: "0 1 auto", maxWidth: 240, minWidth: CRUMB_MIN_W })}
+           sliver you cannot aim at.
+           NEW-4/B1343203 — a THIRD, tighter bound when `crumbCompact` measured that the full
+           trail does not fit: the name collapses to "…" and the floor drops from CRUMB_MIN_W
+           (a floor sized for a readable abbreviated NAME) down to the tap-target floor itself, so
+           collapsing this crumb actually buys back the room the last (plan) crumb needs. */
+        style={crumbBtn({
+          color: (currentProject || cross || org) ? INK : MUTED, flex: "0 1 auto",
+          maxWidth: crumbCompact ? 44 : 240, minWidth: crumbCompact ? 44 : CRUMB_MIN_W,
+        })}
       >
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {/* NEW-2 — the same fix, on the crumb's own visible text: it used to fall straight
-              to "Select a project" whenever nothing was picked, which is wrong the moment the
-              same menu also offers the Organization. */}
-          {cross ? "All projects" : org ? "Organization" : (currentName || "Select a project")}
-        </span>
+        {crumbCompact ? (
+          <CollapsedCrumbIcon />
+        ) : (
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {/* NEW-2 — the same fix, on the crumb's own visible text: it used to fall straight
+                to "Select a project" whenever nothing was picked, which is wrong the moment the
+                same menu also offers the Organization. */}
+            {cross ? "All projects" : org ? "Organization" : (currentName || "Select a project")}
+          </span>
+        )}
         {/* NEW-3 — the at-risk marker on the crumb itself. Two fixes in one: the `⚠` text glyph
             becomes a drawn triangle (most platforms resolve U+26A0 to a colour emoji), and the
             HARDCODED `#f59e0b` becomes `--warn-text`. The raw hex was the B341 trap exactly — a
             chrome-region component pinning a colour instead of a token, which reads fine until the
             chrome flips theme, and which the contrast audit cannot check. */}
-        {atRisk(saveState) && (
+        {!crumbCompact && atRisk(saveState) && (
           <span title="Saved on this device: the cloud is unreachable" aria-hidden
             style={{ flex: "none", color: "var(--warn-text)", display: "grid", placeItems: "center" }}><WarnIcon size={12} /></span>
         )}
-        <span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
+        {!crumbCompact && <span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>}
       </button>
 
+      {/* NEW-4 (B1343203) — an always-mounted, always-FULL, invisible twin of the crumb above,
+          read by the compaction measurement effect. It is not this crumb's OWN rendered box
+          (which shrinks the instant `crumbCompact` flips true) so the decision can never watch
+          the effect of its own last answer. */}
+      <span
+        ref={projectMeasureRef}
+        aria-hidden="true"
+        style={{ position: "absolute", visibility: "hidden", pointerEvents: "none", ...crumbBtn({ maxWidth: 240, minWidth: CRUMB_MIN_W }) }}
+      >
+        <span>{projectLabel}</span>
+        {atRisk(saveState) && <WarnIcon size={12} />}
+        <span style={{ fontSize: 11 }}>▾</span>
+      </span>
+
       {/* Trailing crumb (e.g. the Site Planner's plan switcher). Same "/" separator + crumb
-          geometry as the Map/project crumbs, so the three segments read as one breadcrumb. */}
+          geometry as the Map/project crumbs, so the three segments read as one breadcrumb.
+          NEW-4/B1343203 — the LAST crumb, so it never compacts; `planSlotRef` wraps the REAL
+          rendered node (not a duplicate — a plan switcher owns its own open/close state and
+          anchor ref, so rendering it twice would fight over both) purely to read its width. */}
       {planSlot && (
         <>
           <span style={{ color: MUTED, opacity: 0.55, flex: "none", fontSize: 13, padding: "0 1px" }}>/</span>
-          {planSlot}
+          <span ref={planSlotRef} style={{ display: "flex", alignItems: "center", minWidth: 0 }}>{planSlot}</span>
         </>
       )}
 

@@ -19964,7 +19964,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           three header segments (project / plan / the signed-out cloud trigger) share ONE signature
           rather than needing a third catch-up pass the next time `crumbBtn` moves. */}
       <button
-        className="dbtn"
+        // NEW-1 (B1343200) — `tap-target` floors this control's tap area at 44x44 CSS px
+        // (index.css) without growing the 30-tall chip itself.
+        className="dbtn tap-target"
         style={{
           display: "flex", alignItems: "center", gap: 5, flex: "none",
           height: 30, padding: "0 12px", borderRadius: RADIUS.md, border: "none",

@@ -704,6 +704,27 @@ input[type="range"] { height: 18px; }
 .no-hscrollbar { scrollbar-width: none; -ms-overflow-style: none; -webkit-overflow-scrolling: touch; }
 .no-hscrollbar::-webkit-scrollbar { height: 0; width: 0; display: none; }
 
+/* B1343200 (NEW-1) — a control's VISIBLE size can stay compact; its TAP target does not. The
+   owner's report: on an iPhone the header's breadcrumb row and tab strip render at desktop
+   proportions and the controls are hard to hit. Apple/Google's own guidance floors a touch
+   target at 44x44 CSS px; inflating every chip to that size would make the header "chunky" (the
+   thing the brief explicitly rules out), so instead this centers an INVISIBLE hit box at least
+   44x44 on top of the control via generated ::after content — a pointer press on generated
+   content still fires its click on the host element, so this needs no extra DOM node and no JS
+   measurement. `max(44px, 100%)` never shrinks the hit box below the control's own visible size,
+   it only grows a too-small one out to the floor. Applied at the shared Tab/IconButton/MenuTrigger
+   primitives (controls.jsx) so a new control built from them inherits the floor automatically. */
+.tap-target { position: relative; }
+.tap-target::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: max(44px, 100%);
+  height: max(44px, 100%);
+}
+
 /* NEW-4 — the Settings panel's section nav. A column beside the content on a desktop-width
    modal; a wrapping row above it once the modal is squeezed to a phone's width, where a fixed
    side column would leave the content a sliver. Done in CSS rather than with a matchMedia hook

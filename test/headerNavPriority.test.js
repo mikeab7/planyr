@@ -141,7 +141,10 @@ describe("the layout rule, read off the real source", () => {
 
   it("both crumbs may shrink, and neither may be squeezed below the shared floor", () => {
     expect(crumb).toContain("export const CRUMB_MIN_W =");
-    expect(crumb).toContain(`flex: "0 1 auto", maxWidth: 240, minWidth: CRUMB_MIN_W`);
+    expect(crumb).toContain(`color: (currentProject || cross || org) ? INK : MUTED, flex: "0 1 auto",`);
+    // NEW-4/B1343203 added a THIRD, tighter bound (the phone-narrow compact "…" affordance) —
+    // the floor for the ordinary (non-compact) case is still exactly CRUMB_MIN_W.
+    expect(crumb).toContain(`maxWidth: crumbCompact ? 44 : 240, minWidth: crumbCompact ? 44 : CRUMB_MIN_W`);
     // The plan chip reads the SAME constant — two floors that can drift is how one of the pair
     // ends up squeezable again.
     expect(planner).toContain(`import { CRUMB_MIN_W } from "../../shared/ui/ProjectBreadcrumb.jsx";`);
