@@ -987,6 +987,14 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   `sharedLayerUrlConflicts()` is the dev-time + CI assertion that no two entries share a NON-statewide
   URL; `MapFinder.addDisplay` dedupes displays by RESOLVED URL, so the same endpoint is never added
   twice and non-owner keys are aliases that must never remove the shared layer.
+- **`cityScopes.js` (B1583296) — the CITY-scoped resolution tier, checked BEFORE the nationwide
+  county geometry.** Every other resolver in `counties.js` answers at COUNTY granularity; this is
+  for the rare case where a county has no source of its own but ONE city inside it publishes a real,
+  authoritative layer that would silently misroute the rest of the county if wired at the county key
+  (`mi_detroit` — Wayne County, MI — is the first and, deliberately, the only entry). Every
+  `COUNTIES_MAP` entry a scope here resolves to MUST carry `cityScoped: true`, or it can leak into
+  `candidateCountiesForPoint`/`countyForView`'s blind same-state fallbacks for a point the scope
+  itself rejected — read that file's own comments at both fallback sites before adding a second one.
 - **⛔ `doubleTap.js` + `featureTarget.js` (B50008–B50010) — THE DOUBLE-CLICK, and both halves of its
   contract had shipped broken. Read them before touching selection or the click contract.** B750/B935
   declare the rule (single click selects, double click opens Properties) and it was never wrong; its two
