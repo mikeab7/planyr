@@ -206,3 +206,124 @@ depends on `requestAnimationFrame` anywhere between "boot" and "reveal." The lay
 `document.visibilityState !== "visible"` guard is fine to keep (you genuinely cannot trust a
 container measurement taken while hidden) — it is specifically the WATCHDOG, whose entire job is to
 rescue the case the layout effect cannot handle, that must not defer to the same condition.
+
+---
+
+## SANDBOX MEASUREMENT UPDATE (B1600352, 2026-09-12 ~01:15) — the foregrounded case is now MEASURED, and the framing failure PREDATES 453623a
+
+This section closes the two questions the sections above left explicitly open, and corrects one
+statement in them. Everything here is a harness measurement at 1280×900 on a real fixture plan
+(`ui-audit/fixtures/goose-creek-plan1copy.json`, 66 elements), run against builds produced from this
+repo's own commits — not a reading of the source.
+
+### 1. THE FOREGROUNDED COLD LOAD IS FINE. This is a hidden-boot bug, not everyone's bug.
+
+The doc above states, correctly and emphatically, that this was never measured and that a future
+attempt *"must not inherit 'production is permanently down for every load' as a premise."* Measured
+now, on **three different builds**:
+
+| build | foregrounded cold load | hidden boot |
+|---|---|---|
+| `258abb3` — the PRE-`453623a` world (the 3:40 PM walk) | **plan on screen**, ppf 0.1064540557003681 | **plan OFF-SCREEN**, ppf 0.35 off (60, 60) |
+| `453623a` — B1574432, the gate as shipped | **plan on screen**, ppf 0.0831, hit-testable | **canvas BLANK**, ppf 0.35 off (60, 60) |
+| reverted `main` (`d30f712e`+) | **plan on screen**, ppf 0.1064540557003681 | **plan OFF-SCREEN**, ppf 0.35 off (60, 60) |
+
+The doc's own guess about the mechanism — that the layout effect's missing dependency array lets a
+foregrounded load catch up — is **confirmed**. The defect is specifically *"the load began while the
+tab was not frontmost"*, which is narrower than the original premise and still serious.
+
+### 2. ⛔ THE NEVER-COMMITTED FRAMING PREDATES `453623a`. THE REVERT IS FAITHFUL, AND THE WORLD IT RESTORED WAS ALREADY BROKEN.
+
+The obvious reading of "revert the commit that broke it" is that the prior behaviour returns. It did
+— **exactly**, which is the problem. Pre-`453623a` and reverted `main` are **byte-identical on both
+arms, to the last decimal**: same `ppf 0.1064540557003681`, same offsets, same element rects
+(`x -350..-205`, `x -491..-303`, `x -333..-210` on the hidden arm, all `inView: false`).
+
+So `453623a` **never caused the framing failure.** It added the *hiding*, which changed a
+pre-existing silent defect into a loud one:
+
+- **before it** — hidden boot paints the aerial with the plan off-screen (silent, plausible, reads as data loss)
+- **with it** — hidden boot paints nothing (loud, obviously broken)
+- **after the revert** — back to silent
+
+**This matters for what gets fixed next.** The blank canvas and the unframed view are TWO defects,
+not one. The revert closed the first. The second is still live on production, is older than this
+incident, and is the one the owner is actually looking at.
+
+### 3. THE MECHANISM OF THE SURVIVING DEFECT: the retry is `requestAnimationFrame`-driven.
+
+`SitePlanner.jsx`'s `fitReq` effect asks `mayFrame(..., { visible: isVisible(), … })`. In a hidden
+boot that returns `document-hidden`, which is correctly treated as a "not yet" rather than a "no" —
+and the retry is:
+
+```js
+const poll = () => {
+  if (isVisible() && sizeMeasuredRef.current) { requestFit(fitReq.ticket); return; }
+  raf = requestAnimationFrame(poll);
+};
+raf = requestAnimationFrame(poll);
+```
+
+Its own comment reasons that *"a background tab's own requestAnimationFrame is suspended
+(FOREGROUND-OR-VOID), so polling with it costs nothing while hidden and resumes on its own the
+instant the tab is foregrounded — no separate `visibilitychange` listener needed here."* The first
+half is true; the second does not follow. The live diagnostic recorded in the section above measured
+**`requestAnimationFrame`: ZERO callbacks in 6295 ms** on the owner's tab. A retry that only runs
+when the tab is already foregrounded cannot recover a tab that is not.
+
+**This IS the rAF-chained deadline the original 2026-09-11 dispatch brief hypothesised.** That brief
+pointed at the *watchdog*, and the watchdog turned out to be a plain `setTimeout` that was simply
+never armed (the section above establishes this, and both investigating sessions reached it
+independently). The rAF dependency is real — it is on the **retry path**, which nobody looked at,
+because the gate was the thing that had just changed.
+
+### 4. CORRECTION to recommendation #2 above: the layout effect's `visibilityState` guard is NOT fine to keep.
+
+The doc says the guard is *"fine to keep (you genuinely cannot trust a container measurement taken
+while hidden)."* **That premise is false as stated, and this document's own evidence refutes it.**
+The live measurement in the section above records the canvas box as **969×408 while
+`visibilityState === "hidden"`** — a real, laid-out container — and the owner's second reading hours
+later on a different chunk recorded **x 54..1023, y 56..464**, likewise real. `getBoundingClientRect()`
+is layout-accurate in a tab that is merely not frontmost.
+
+What B1234400 actually caught was a container that had **never been laid out**, reporting a
+degenerate box that the `Math.max(320, …)` floor then dressed up as a plausible 320×360. The direct
+guard for that is the raw rect (`r.width > 1 && r.height > 1`), which refuses it without using "is
+the tab frontmost" as a proxy. **Keeping the visibility guard is what forces reliance on a watchdog
+at all** — remove the proxy and the framing simply commits at mount, in a hidden tab, correctly, and
+the user sees the right picture the instant the tab comes forward.
+
+### 5. "REVEALED" IS NOT "SHOWING THE PLAN" — and any future gate needs that as a guard.
+
+The owner's 01:03 reading is the case to design against: canvas computed `visible`, aerial painted
+across it, and all three elements at `x 1195..1405` against a canvas box of `x 54..1023` —
+**revealed, and off-screen.** A reveal that fires without a committed framing is not a rescue; it
+converts a loud failure into a silent one. Any future hide-until-ready mechanism must either frame
+as part of revealing, or never reveal without a framing — and must distinguish *"nothing to frame"*
+(a genuinely empty plan, where the boot default is the right answer) from *"could not frame"*.
+
+`ui-audit/verify-boot-framing.mjs` now asserts this directly: every drawn element must land inside
+the canvas box after boot, on every arm. It fails against reverted `main`'s hidden arm today, which
+is the red-proof for the surviving defect.
+
+### 6. THE RIG THAT CERTIFIED THE BLANK BUILD GREEN — both vacuities fixed in this same change.
+
+`ui-audit/verify-boot-framing.mjs` was a required gate and was **green over a build with a
+permanently blank canvas**. Two independent reasons, both now closed:
+
+- **Its verdict could only catch too MANY framings.** "No mount painted more than one framing" is
+  structurally blind to *none*: zero painted framings → zero offenders → ✅. The same shape as the
+  vacuity its own teeth proof caught once before (no mount stamp → zero attributable mounts → zero
+  offenders). It now asserts the canvas is revealed, framed off the boot default, hit-testable, and
+  showing the plan — before the arm foregrounds anything.
+- **Its headline evidence line asserted the opposite of what it measured.** It printed the
+  hidden-phase frame count captioned *"a de-prioritised frame loop, which is what makes the
+  suppression real rather than claimed"*. The number on this machine was **280 frames in 5,000 ms —
+  56 fps, a full-rate loop.** It now reports what it actually got, and why a full-rate loop makes the
+  arm *stricter* (the app had every chance to self-correct and did not).
+
+A third, smaller one was caught by the new watchdog arm's own precondition on its first run: it
+scored ✅ over a healthy 430×773 container that framed normally, because its zero-height CSS was
+appended by an init script that runs before `<head>` exists and React mounts before
+`DOMContentLoaded`. The precondition now fails the arm as VACUOUS if the container is not actually
+degenerate.
