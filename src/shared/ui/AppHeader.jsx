@@ -176,6 +176,43 @@ function FullscreenButton({ active, onToggle }) {
   );
 }
 
+/* NEW-2 (B1343201) — a phone header row that scrolls sideways gives no sign that it does. The
+ * fade above (`edgeFadeMask`) already softens the edge on a side with more content, but a fade is
+ * not TAPPABLE — on a mouse (a laptop trackpad forced into the narrow layout, or a tablet in a
+ * mouse-driven window) a horizontal `overflow-x:auto` row with no visible scrollbar
+ * (`.no-hscrollbar`) has no obvious way to move it at all. `ScrollChevron` renders ONLY on a
+ * side that genuinely has content past it (fed by the SAME `useScrollEdges` state the fade
+ * reads, so the two can never disagree) and PAGES the row — a real interaction, not decoration.
+ * Module scope, never inside another component's render body (MODULE-SCOPE-COMPONENTS). */
+function ScrollChevron({ side, onClick }) {
+  return (
+    <IconButton
+      size={28}
+      onClick={onClick}
+      aria-label={side === "left" ? "Scroll left" : "Scroll right"}
+      title={side === "left" ? "Scroll left" : "Scroll right"}
+      style={{
+        // No custom boxShadow — IconButton's own REST_SHADOW (controls.jsx, a token-layer file
+        // exempt from the raw-color drift audit) already gives this enough lift off the chrome.
+        position: "absolute", top: "50%", transform: "translateY(-50%)", [side]: 2, zIndex: 5,
+        border: `1px solid ${LINE}`, background: "var(--chrome-bg-elev)", color: "var(--chrome-text)",
+        fontSize: CHROME_FONT_CONTROL,
+      }}
+    >
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"
+        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: "block" }}>
+        {side === "left" ? <path d="M15 5l-7 7 7 7" /> : <path d="M9 5l7 7-7 7" />}
+      </svg>
+    </IconButton>
+  );
+}
+// A "page" is most of a screenful (0.72) rather than the whole row, so the trailing edge of what
+// was already visible stays on screen as a continuity anchor for the next page.
+function pageScrollRow(ref, dir) {
+  const el = ref.current;
+  if (el) el.scrollBy({ left: dir * el.clientWidth * 0.72, behavior: "smooth" });
+}
+
 function SettingsMenu() {
   const [open, setOpen] = useState(false);
   const anchor = useRef(null);
@@ -302,7 +339,16 @@ const MODULES = MODULE_ICONS.map((m) => ({ ...m, label: MODULE_TAB_LABEL[m.id] }
 // (not a sibling overlay), so it never needs its own wrapper and can never drift out of sync with
 // a resize. Absent at both edges (nothing to hint) it returns `undefined` — no mask property at
 // all, so an unaffected row is byte-identical to before this fix.
-function useScrollEdges(ref, active) {
+// NEW-4 (B1343203) — `watchRefs` are additional elements whose OWN resize should also trigger a
+// re-check, beyond the scrolling row itself. `ResizeObserver` on the row alone misses a case this
+// item's own breadcrumb fix introduced: `overflow-x:auto` means the row's clientWidth is the
+// VIEWPORT-clipped box, which does not change when a CHILD shrinks (the middle crumb compacting)
+// — only the row's scrollWidth (its content) does, and content width is not what ResizeObserver
+// reports for the row. `leftZoneRef` (content-sized on narrow: `flex:"0 0 auto"`) DOES shrink when
+// its child crumb compacts, so observing it too catches exactly the case a row-only observer
+// missed — measured live: without this, a chevron that should have cleared once its row started
+// fitting stayed rendered as permanent furniture.
+function useScrollEdges(ref, active, watchRefs) {
   const [edges, setEdges] = useState({ left: false, right: false });
   useLayoutEffect(() => {
     const el = ref.current;
@@ -314,10 +360,14 @@ function useScrollEdges(ref, active) {
     update();
     el.addEventListener("scroll", update, { passive: true });
     let ro;
-    if (typeof ResizeObserver === "function") { ro = new ResizeObserver(update); ro.observe(el); }
+    if (typeof ResizeObserver === "function") {
+      ro = new ResizeObserver(update);
+      ro.observe(el);
+      (watchRefs || []).forEach((r) => { if (r && r.current) ro.observe(r.current); });
+    }
     return () => { el.removeEventListener("scroll", update); ro?.disconnect(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ref, active]);
+  }, [ref, active, ...(watchRefs || [])]);
   return edges;
 }
 const EDGE_FADE_PX = 20;
@@ -600,6 +650,8 @@ export default function AppHeader({
   const leftZoneRef = useRef(null);
   const rightZoneRef = useRef(null);
   const centerZoneRef = useRef(null);
+  // NEW-1 (B1343200) — a ref purely so a headless check can read the wordmark's own tap-target box.
+  const wordmarkRef = useRef(null);
   // NEW-2 (B917073) — Row 2 (the module tab strip) scrolls sideways on a phone with no visible
   // scrollbar (V11's swipe-is-the-affordance choice, `no-hscrollbar`). Nothing kept the scroll
   // position honest across a MODULE CHANGE that didn't come from tapping a now-visible tab (a
@@ -761,7 +813,7 @@ export default function AppHeader({
   }, [narrow]);
   const row2Centered = !narrow && row2Center.mode === "centered";
   // NEW-2 (B917073) — one edge-fade reading per scrolling row; see `useScrollEdges` above.
-  const row1Edges = useScrollEdges(rowRef, narrow);
+  const row1Edges = useScrollEdges(rowRef, narrow, [leftZoneRef]);
   const row2Edges = useScrollEdges(row2Ref, narrow);
   const row1Mask = narrow ? edgeFadeMask(row1Edges) : undefined;
   const row2Mask = narrow ? edgeFadeMask(row2Edges) : undefined;
@@ -981,6 +1033,13 @@ export default function AppHeader({
   const moduleTabButtons = visibleModules.map((m) => (
     <ModuleTab key={m.id} m={m} isActive={m.id === module} onClick={() => onSwitch && onSwitch(m.id)} />
   ));
+  // NEW-2 (B1343201) — shared by both Row-2 layout branches below (only one renders at a time).
+  const row2Chevrons = (
+    <>
+      {narrow && row2Edges.left && <ScrollChevron side="left" onClick={() => pageScrollRow(row2Ref, -1)} />}
+      {narrow && row2Edges.right && <ScrollChevron side="right" onClick={() => pageScrollRow(row2Ref, 1)} />}
+    </>
+  );
 
   return (
     <>
@@ -1041,6 +1100,8 @@ export default function AppHeader({
               this control a DIFFERENT action + tooltip than the breadcrumb crumb below;
               every other caller passes neither and gets the prior behavior unchanged. */}
           <button
+            ref={wordmarkRef}
+            className="tap-target"
             onClick={logoAction.onClick}
             title={logoAction.title}
             style={{
@@ -1081,6 +1142,8 @@ export default function AppHeader({
                 org={org}
                 onSelectOrg={onSelectOrg}
                 planSlot={planSlot}
+                narrow={narrow}
+                rowRef={rowRef}
               />
             </>
           )}
@@ -1164,6 +1227,9 @@ export default function AppHeader({
               used to bound. Do not reintroduce it without a real family split to justify it. */}
           {authControl}
         </div>
+        {/* NEW-2 (B1343201) — tappable scroll affordance, phone only, one side at a time. */}
+        {narrow && row1Edges.left && <ScrollChevron side="left" onClick={() => pageScrollRow(rowRef, -1)} />}
+        {narrow && row1Edges.right && <ScrollChevron side="right" onClick={() => pageScrollRow(rowRef, 1)} />}
       </div>
 
       {/* ── Row 2 — 44px (taller than Row 1: the tools row earns the weight, B357) ──
@@ -1301,6 +1367,7 @@ export default function AppHeader({
           <div ref={row2RightZoneRef} style={{ flex: narrow ? "1 0 auto" : "none", display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 6, minWidth: narrow ? "auto" : 0, gap: 4, overflow: narrow ? "visible" : "hidden" }}>
             {toolbarContent}
           </div>
+          {row2Chevrons}
         </div>
       ) : (
         // B885137 (NEW-2) — 44px→26px. Every tab STRETCHES to this row's height (ModuleTab's
@@ -1308,7 +1375,7 @@ export default function AppHeader({
         // --control-h-md (CONTROL_H.md) with no separate padding math needed — verified against
         // the mockup's own derived number (6px padding + an 11.5px line ≈ 26) rather than typed
         // in blind.
-        <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ height: 26, display: "flex", alignItems: "center", borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
+        <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ height: 26, display: "flex", alignItems: "center", position: "relative", borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
 
           {/* Module tabs — the planner's own workspace navigation. Omitted entirely on a
               standalone route (B651873, e.g. /food): the toolbar zone below is already
@@ -1346,6 +1413,7 @@ export default function AppHeader({
           >
             {toolbarContent}
           </div>
+          {row2Chevrons}
         </div>
       )}
     </header>

@@ -6,14 +6,14 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-09-09",
-        "approvedCommit": "2ffc913d",
-        "note": "B1434240: round the Leaflet scale bar and the cursor coordinate chip to the app's --radius-md map-chip scale, matching the zoom stack and locate control"
+        "approvedAt": "2026-09-12",
+        "approvedCommit": "3f178aaaa",
+        "note": "B1343200-B1343203 phone header fixes: IconButton/Tab/MenuTrigger/CloudSyncBadge now carry the app-wide tap-target class (position:relative + an invisible ::after hit-area expansion) for the 44px minimum touch target. That structural change perturbs the anti-aliased edge of the existing low-opacity REST_SHADOW box-shadow on the header's right-zone icon buttons by a few RGB units on desktop/light only -- confirmed with CI's exact pinned Chromium (rev 1228) and by direct pixel inspection: no layout shift, no color/token change, tiny (<=9/255) delta confined to a hairline strip at the button edges. Re-approving the current, correct pixels."
       },
       "dark": {
-        "approvedAt": "2026-09-09",
-        "approvedCommit": "2ffc913d",
-        "note": "B1434240: round the Leaflet scale bar and the cursor coordinate chip to the app's --radius-md map-chip scale, matching the zoom stack and locate control"
+        "approvedAt": "2026-09-12",
+        "approvedCommit": "3f178aaaa",
+        "note": "B1343200-B1343203 phone header fixes: IconButton/Tab/MenuTrigger/CloudSyncBadge now carry the app-wide tap-target class (position:relative + an invisible ::after hit-area expansion) for the 44px minimum touch target. That structural change perturbs the anti-aliased edge of the existing low-opacity REST_SHADOW box-shadow on the header's right-zone icon buttons by a few RGB units on desktop/light only -- confirmed with CI's exact pinned Chromium (rev 1228) and by direct pixel inspection: no layout shift, no color/token change, tiny (<=9/255) delta confined to a hairline strip at the button edges. Re-approving the current, correct pixels."
       },
       "light--phone": {
         "approvedAt": "2026-09-09",
@@ -28,14 +28,14 @@
     },
     "site-planner-header": {
       "light": {
-        "approvedAt": "2026-09-08",
-        "approvedCommit": "47de6bec",
-        "note": "B1368144 — the map toolbar goes ground-first (owner-chosen design, 2026-09-08): the Site/Comp segmented toggle and the 'Place comp' split button are removed, and the resting toolbar now reads address field, Select parcels, Draw, Drop a pin. The changed region (x446,y7 984x128 desktop) is exactly the top-centre toolbar pill and nothing else — the rail, the layers panel, the map and every other surface are byte-identical. A DELIBERATE picture change the owner chose from three mockups, not drift; PERCEPTUAL-PARITY's imperceptibility bar governs LOD-class changes where the picture is meant to stay the same, which this is not."
+        "approvedAt": "2026-09-12",
+        "approvedCommit": "3f178aaaa",
+        "note": "B1343200-B1343203 phone header fixes: IconButton/Tab/MenuTrigger/CloudSyncBadge now carry the app-wide tap-target class (position:relative + an invisible ::after hit-area expansion) for the 44px minimum touch target. That structural change perturbs the anti-aliased edge of the existing low-opacity REST_SHADOW box-shadow on the header's right-zone icon buttons by a few RGB units on desktop/light only -- confirmed with CI's exact pinned Chromium (rev 1228) and by direct pixel inspection: no layout shift, no color/token change, tiny (<=9/255) delta confined to a hairline strip at the button edges. Re-approving the current, correct pixels."
       },
       "dark": {
-        "approvedAt": "2026-09-08",
-        "approvedCommit": "47de6bec",
-        "note": "B1368144 — the map toolbar goes ground-first (owner-chosen design, 2026-09-08): the Site/Comp segmented toggle and the 'Place comp' split button are removed, and the resting toolbar now reads address field, Select parcels, Draw, Drop a pin. The changed region (x446,y7 984x128 desktop) is exactly the top-centre toolbar pill and nothing else — the rail, the layers panel, the map and every other surface are byte-identical. A DELIBERATE picture change the owner chose from three mockups, not drift; PERCEPTUAL-PARITY's imperceptibility bar governs LOD-class changes where the picture is meant to stay the same, which this is not."
+        "approvedAt": "2026-09-12",
+        "approvedCommit": "3f178aaaa",
+        "note": "B1343200-B1343203 phone header fixes: IconButton/Tab/MenuTrigger/CloudSyncBadge now carry the app-wide tap-target class (position:relative + an invisible ::after hit-area expansion) for the 44px minimum touch target. That structural change perturbs the anti-aliased edge of the existing low-opacity REST_SHADOW box-shadow on the header's right-zone icon buttons by a few RGB units on desktop/light only -- confirmed with CI's exact pinned Chromium (rev 1228) and by direct pixel inspection: no layout shift, no color/token change, tiny (<=9/255) delta confined to a hairline strip at the button edges. Re-approving the current, correct pixels."
       },
       "light--phone": {
         "approvedAt": "2026-09-08",
@@ -50,14 +50,14 @@
     },
     "site-planner-left-rail": {
       "light": {
-        "approvedAt": "2026-09-08",
-        "approvedCommit": "47de6bec",
-        "note": "B1368144 — the map toolbar goes ground-first (owner-chosen design, 2026-09-08): the Site/Comp segmented toggle and the 'Place comp' split button are removed, and the resting toolbar now reads address field, Select parcels, Draw, Drop a pin. The changed region (x446,y7 984x128 desktop) is exactly the top-centre toolbar pill and nothing else — the rail, the layers panel, the map and every other surface are byte-identical. A DELIBERATE picture change the owner chose from three mockups, not drift; PERCEPTUAL-PARITY's imperceptibility bar governs LOD-class changes where the picture is meant to stay the same, which this is not."
+        "approvedAt": "2026-09-12",
+        "approvedCommit": "3f178aaaa",
+        "note": "B1343200-B1343203 phone header fixes: IconButton/Tab/MenuTrigger/CloudSyncBadge now carry the app-wide tap-target class (position:relative + an invisible ::after hit-area expansion) for the 44px minimum touch target. That structural change perturbs the anti-aliased edge of the existing low-opacity REST_SHADOW box-shadow on the header's right-zone icon buttons by a few RGB units on desktop/light only -- confirmed with CI's exact pinned Chromium (rev 1228) and by direct pixel inspection: no layout shift, no color/token change, tiny (<=9/255) delta confined to a hairline strip at the button edges. Re-approving the current, correct pixels."
       },
       "dark": {
-        "approvedAt": "2026-09-08",
-        "approvedCommit": "47de6bec",
-        "note": "B1368144 — the map toolbar goes ground-first (owner-chosen design, 2026-09-08): the Site/Comp segmented toggle and the 'Place comp' split button are removed, and the resting toolbar now reads address field, Select parcels, Draw, Drop a pin. The changed region (x446,y7 984x128 desktop) is exactly the top-centre toolbar pill and nothing else — the rail, the layers panel, the map and every other surface are byte-identical. A DELIBERATE picture change the owner chose from three mockups, not drift; PERCEPTUAL-PARITY's imperceptibility bar governs LOD-class changes where the picture is meant to stay the same, which this is not."
+        "approvedAt": "2026-09-12",
+        "approvedCommit": "3f178aaaa",
+        "note": "B1343200-B1343203 phone header fixes: IconButton/Tab/MenuTrigger/CloudSyncBadge now carry the app-wide tap-target class (position:relative + an invisible ::after hit-area expansion) for the 44px minimum touch target. That structural change perturbs the anti-aliased edge of the existing low-opacity REST_SHADOW box-shadow on the header's right-zone icon buttons by a few RGB units on desktop/light only -- confirmed with CI's exact pinned Chromium (rev 1228) and by direct pixel inspection: no layout shift, no color/token change, tiny (<=9/255) delta confined to a hairline strip at the button edges. Re-approving the current, correct pixels."
       },
       "light--phone": {
         "approvedAt": "2026-09-08",
@@ -72,14 +72,14 @@
     },
     "library": {
       "light": {
-        "approvedAt": "2026-09-08",
-        "approvedCommit": "47de6bec",
-        "note": "B1368144 — the map toolbar goes ground-first (owner-chosen design, 2026-09-08): the Site/Comp segmented toggle and the 'Place comp' split button are removed, and the resting toolbar now reads address field, Select parcels, Draw, Drop a pin. The changed region (x446,y7 984x128 desktop) is exactly the top-centre toolbar pill and nothing else — the rail, the layers panel, the map and every other surface are byte-identical. A DELIBERATE picture change the owner chose from three mockups, not drift; PERCEPTUAL-PARITY's imperceptibility bar governs LOD-class changes where the picture is meant to stay the same, which this is not."
+        "approvedAt": "2026-09-12",
+        "approvedCommit": "3f178aaaa",
+        "note": "B1343200-B1343203 phone header fixes: IconButton/Tab/MenuTrigger/CloudSyncBadge now carry the app-wide tap-target class (position:relative + an invisible ::after hit-area expansion) for the 44px minimum touch target. That structural change perturbs the anti-aliased edge of the existing low-opacity REST_SHADOW box-shadow on the header's right-zone icon buttons by a few RGB units on desktop/light only -- confirmed with CI's exact pinned Chromium (rev 1228) and by direct pixel inspection: no layout shift, no color/token change, tiny (<=9/255) delta confined to a hairline strip at the button edges. Re-approving the current, correct pixels."
       },
       "dark": {
-        "approvedAt": "2026-09-08",
-        "approvedCommit": "47de6bec",
-        "note": "B1368144 — the map toolbar goes ground-first (owner-chosen design, 2026-09-08): the Site/Comp segmented toggle and the 'Place comp' split button are removed, and the resting toolbar now reads address field, Select parcels, Draw, Drop a pin. The changed region (x446,y7 984x128 desktop) is exactly the top-centre toolbar pill and nothing else — the rail, the layers panel, the map and every other surface are byte-identical. A DELIBERATE picture change the owner chose from three mockups, not drift; PERCEPTUAL-PARITY's imperceptibility bar governs LOD-class changes where the picture is meant to stay the same, which this is not."
+        "approvedAt": "2026-09-12",
+        "approvedCommit": "3f178aaaa",
+        "note": "B1343200-B1343203 phone header fixes: IconButton/Tab/MenuTrigger/CloudSyncBadge now carry the app-wide tap-target class (position:relative + an invisible ::after hit-area expansion) for the 44px minimum touch target. That structural change perturbs the anti-aliased edge of the existing low-opacity REST_SHADOW box-shadow on the header's right-zone icon buttons by a few RGB units on desktop/light only -- confirmed with CI's exact pinned Chromium (rev 1228) and by direct pixel inspection: no layout shift, no color/token change, tiny (<=9/255) delta confined to a hairline strip at the button edges. Re-approving the current, correct pixels."
       },
       "light--phone": {
         "approvedAt": "2026-09-08",

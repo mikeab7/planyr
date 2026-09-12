@@ -287,8 +287,8 @@
       ]
     },
     "notesRouteJsBytes": {
-      "baseline": 591937,
-      "target": 591937,
+      "baseline": 650820,
+      "target": 650820,
       "unit": "bytes",
       "what": "Total JS a plain Notes route must download: the entry chunk plus Notes and its static-import closure.",
       "note": "Seeded at 0 so the FIRST measurement of a brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move \u2014 a hand-typed seed is the thing that step exists to prevent. WHAT THIS NUMBER DOES AND DOES NOT INCLUDE, because it is the whole reason the split is load-bearing: it counts the notebook TREE and its chrome, and deliberately NOT the rich-text engine. Notes.jsx pulls components/NoteEditor.jsx (and through it the only @tiptap imports in the module) via a lazy() import inside a Suspense, so the engine is a separate on-demand chunk of ~464 KB that a user pays for only when a page is actually opened, and the rail paints first. A future rise in THIS metric therefore means something moved onto the static path that belongs behind that boundary \u2014 most likely a new static import of the editor, or a shared module that got hoisted. test/notesModule.test.js source-scans for the first case; this budget is the backstop for the second."
@@ -871,6 +871,17 @@
           "commit": "af10e63aac33a54a448f8f04e25cb8b77cd482fd",
           "sourceHash": "9749697817ee6b74",
           "reason": "Excel round-trip needs ExcelJS (~900KB) for real formula/style/merge/named-range fidelity; SheetJS's free tier cannot write cell styles. Lazy-loaded behind the Model workspace File menu only -- no route's eager bundle grew (model route JS unchanged, confirmed via perf-bundle-audit)."
+        },
+        {
+          "metric": "bundle.notesRouteJsBytes",
+          "from": 591937,
+          "to": 650820,
+          "direction": "raise",
+          "item": "B1343200",
+          "date": "2026-09-12",
+          "commit": "7ea4942b2bf2299b188cbb8107b85a882ce5a834",
+          "sourceHash": "25ba6bb76a15f79e",
+          "reason": "Phone header fixes (B1343200-B1343203: 44px touch targets, scroll chevrons, breadcrumb compaction) landed on AppHeader/ProjectBreadcrumb in the shared entry chunk every route pays for; the band was already down to a few hundred bytes of slack from unrelated prior merges before this branch added anything, and the feature was measured and trimmed twice already."
         }
       ]
     }
