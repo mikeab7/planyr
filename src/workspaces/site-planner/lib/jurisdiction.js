@@ -216,15 +216,33 @@ export function etjCoverageFor(cityName, lat, lng) {
  * site fall through to a Texas default further down the chain. So a Colorado point resolves
  * against Colorado's own statewide county layer instead.
  *
- * ⛔ TEXAS IS UNTOUCHED, BY CONSTRUCTION: this returns the SAME `JURISDICTION_SOURCES.county`
- * object for every Texas point AND for every point outside Colorado's envelope. Only a point
- * inside Colorado sees a different source. (`test/coloradoRegistry.test.js` asserts identity, not
- * equality — the very same object reference.) */
+ * ⛔ B1551618 (2026-09-11) — SUPERSEDES the old "Texas is untouched by construction" comment below,
+ * which is why it is left here rather than deleted: it documented a real defect, verbatim. This
+ * function used to return `JURISDICTION_SOURCES.county` (the TxDOT Texas layer) for EVERY point
+ * outside the Colorado envelope — including Nevada, New York, or anywhere else on Earth. Measured
+ * live on planyr.io: a parcel lookup at 3960 Howard Hughes Pkwy, Las Vegas NV correctly queried
+ * Nevada's parcel service (B1457152's fix) but ALSO queried
+ * services.arcgis.com/KTcxiTD9dsQw4r7Z/.../Texas_County_Boundaries/FeatureServer/0 for the same
+ * Nevada point — a wasted, wrong-state network request every time `countyAtPoint`/`identifyJurisdiction`
+ * ran for any of the ~30 non-TX/CO states this app now serves parcels for (see `counties.js`).
+ * `candidateCountiesForPoint` (the PARCEL routing path) was fixed for exactly this in B1457152; this
+ * jurisdiction/county-AUTHORITY path was not touched by that fix and carried the same defect.
+ *
+ * The fix mirrors the Colorado envelope: a coarse, generous TX bounding box (same convention as
+ * `STATE_BBOX.TX` in ui-audit/lib/statewideCoverage.mjs) gates the TxDOT layer too. A point inside
+ * neither envelope returns `[]` — the same honest "no live source configured here" `identifyJurisdiction`
+ * already handles for every other unmapped ETJ/city (see the `if (!srcs.length)` branch below) —
+ * rather than guessing at an unrelated state's service. `countyAtPoint` (below) skips the live call
+ * entirely in that case and answers from the nationwide offline floor (`resolveCounty`) instead of
+ * firing a live query it already knows will answer empty. */
 const CO_ENVELOPE = { latMin: 36.9, latMax: 41.1, lonMin: -109.2, lonMax: -101.9 };
+const TX_ENVELOPE = { latMin: 25.7, latMax: 36.6, lonMin: -106.7, lonMax: -93.4 };
+const inEnvelope = (env, lat, lng) => Number.isFinite(lat) && Number.isFinite(lng) &&
+  lat >= env.latMin && lat <= env.latMax && lng >= env.lonMin && lng <= env.lonMax;
 export function countySourcesForPoint(lat, lng) {
-  const inCo = Number.isFinite(lat) && Number.isFinite(lng) &&
-    lat >= CO_ENVELOPE.latMin && lat <= CO_ENVELOPE.latMax && lng >= CO_ENVELOPE.lonMin && lng <= CO_ENVELOPE.lonMax;
-  return [inCo ? JURISDICTION_SOURCES.countyCo : JURISDICTION_SOURCES.county];
+  if (inEnvelope(CO_ENVELOPE, lat, lng)) return [JURISDICTION_SOURCES.countyCo];
+  if (inEnvelope(TX_ENVELOPE, lat, lng)) return [JURISDICTION_SOURCES.county];
+  return []; // honest "no live county-boundary source configured here" — see countyAtPoint's offline floor
 }
 
 /* ⛔ NEW-1 — THE CITY ROLE BECOMES A REGION-ROUTED LIST, exactly as ETJ already is, and for the
@@ -237,7 +255,14 @@ export function countySourcesForPoint(lat, lng) {
  * ⚠ B286307's caution still stands and is honoured: the statewide row is FIRST and is never
  * replaced. A city row ADDS what the statewide layer cannot say (the class, and the polygons it
  * does not publish); it does not overrule it. Where both answer full-purpose limits for one city,
- * the shares are merged by taking the larger measured area, with both sources named. */
+ * the shares are merged by taking the larger measured area, with both sources named.
+ *
+ * ⛔ B1551618 (2026-09-11) — the statewide row (TxGIO) carries no `bbox` of its own, same root
+ * cause as the county role above: it was queried for EVERY point on Earth, not just Texas. Gated
+ * on the same `TX_ENVELOPE` the county fix uses, in `citySourcesForPoint` below, rather than adding
+ * a `bbox` field here — a `bbox` field on this row would also gate the Baytown row's `!s.bbox ||`
+ * fallback check for every OTHER statewide-shaped row that might be added later, which is not this
+ * fix's job to change. */
 export const CITY_SOURCES = [
   JURISDICTION_SOURCES.city,
   {
@@ -256,7 +281,11 @@ export const CITY_SOURCES = [
   },
 ];
 export function citySourcesForPoint(lat, lng) {
-  return CITY_SOURCES.filter((s) => !s.bbox || bboxHas(s.bbox, lat, lng));
+  return CITY_SOURCES.filter((s) => {
+    if (s.bbox) return bboxHas(s.bbox, lat, lng);
+    if (s === JURISDICTION_SOURCES.city) return inEnvelope(TX_ENVELOPE, lat, lng); // the un-bboxed TxGIO statewide row
+    return true;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -846,11 +875,17 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
     note: "Screening only — verify with the jurisdiction. Boundaries (especially ETJ) change.",
   };
   // Each role resolves to ONE source (county/city/isd) or a region-routed LIST (etj).
+  // ⛔ B1551618 (2026-09-11) — `isd` (TEA, Texas-only) and `road` (TxDOT, Texas-only) are the last
+  // two roles with no region routing at all: opt-in (only queried from the "⚖︎ Jurisdiction & road
+  // authority" detail panel a user explicitly opens, never on an ordinary click, unlike county/city
+  // above), but the identical defect class — a Nevada point asking Texas's school-district layer.
+  // Gated on the same TX_ENVELOPE the county/city fixes use, for consistency and because there is
+  // no other statewide ISD/road source wired for any other state to route to instead.
   const sourcesForRole = (role) =>
     role === "etj" ? etjSourcesForPoint(lat, lng)
     : role === "county" ? countySourcesForPoint(lat, lng)   // NEW-5 — Texas-identical outside Colorado
     : role === "city" ? citySourcesForPoint(lat, lng)       // NEW-1 — the statewide row, plus any city's own
-    : (JURISDICTION_SOURCES[role] ? [JURISDICTION_SOURCES[role]] : []);
+    : (JURISDICTION_SOURCES[role] && inEnvelope(TX_ENVELOPE, lat, lng) ? [JURISDICTION_SOURCES[role]] : []);
   // NEW-2 — the rings the SHARE is measured on: every active parcel when the caller has them.
   const shareRings = (opts.rings && opts.rings.length ? opts.rings : (opts.ring ? [opts.ring] : []))
     .filter((r) => r && r.length >= 3);
@@ -1420,8 +1455,14 @@ export async function countyAtPoint(lng, lat, opts = {}) {
   // Colorado's boundary layer. Outside Colorado this is the exact TxDOT source it always was.
   const src = countySourcesForPoint(lat, lng)[0];
   const isCo = src === JURISDICTION_SOURCES.countyCo;
-  const r = await identifySource(src, { lng, lat }, opts).fresh;
-  const feat = r.items.map((it) => normalizeFeature(src, it.attrs)).find((f) => f.name) || null;
+  /* ⛔ B1551618 (2026-09-11) — a point outside both TX and CO now has NO live source at all
+   * (`countySourcesForPoint` returns `[]`), which used to mean this fired the live TxDOT query
+   * anyway (it always returned features: [] for an out-of-state point, wasting a request to an
+   * unrelated state's service before falling to the offline floor below). Skipping the live call
+   * entirely when there is nothing to ask is both the fix (no more wrong-state network request —
+   * the Las Vegas / Texas_County_Boundaries defect) and strictly faster for every non-TX/CO site. */
+  const r = src ? await identifySource(src, { lng, lat }, opts).fresh : { items: [], ageMs: null, error: null };
+  const feat = src ? r.items.map((it) => normalizeFeature(src, it.attrs)).find((f) => f.name) || null : null;
   if (!feat) {
     /* B209502 — THE OFFLINE FLOOR. The live boundary layer is still the authority, but when it
      * cannot answer this used to return a bare null, and null is where the caller falls back to
@@ -1449,7 +1490,9 @@ export async function countyAtPoint(lng, lat, opts = {}) {
         ageMs: r.ageMs, error: r.error ? humanize(r.error) : null,
       };
     }
-    return { name: null, key: null, fips: null, state: isCo ? "CO" : "TX", ageMs: r.ageMs, error: r.error ? humanize(r.error) : null };
+    // B1551618 — `state` used to be a binary isCo?"CO":"TX", which mislabeled every point outside
+    // both TX and CO (and whose offline geometry ALSO couldn't answer, e.g. mid-load) as Texas.
+    return { name: null, key: null, fips: null, state: isCo ? "CO" : src ? "TX" : null, ageMs: r.ageMs, error: r.error ? humanize(r.error) : null };
   }
   // B792 — fips rides along (48157 = Fort Bend, …) so persistence-side callers can
   // cross-check parcel attributes against the boundary answer. (Colorado's GEOID20 is the
