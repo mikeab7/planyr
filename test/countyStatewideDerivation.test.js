@@ -351,3 +351,65 @@ describe("B1551618 — the COMPLETE GIS lookup fan-out (parcel + county + city +
     expect(srcs[0]).toBe(JURISDICTION_SOURCES.countyCo);
   });
 });
+
+/* ⛔ B1338896 (2026-09-12) — A CONFIDENT GEOMETRY ANSWER MUST NARROW *MEMBERSHIP*, NOT JUST ORDER.
+ *
+ * Measured live from Michael's own browser, on the build after the Maricopa fix (B1339920) merged:
+ * a Casa Grande, AZ click — a point squarely inside Pinal County, ~9 miles from the Maricopa line —
+ * fired TWO parcel queries: Pinal's own `TaxParcel_8_26` (200, correct — an 11.13 ac lot) AND
+ * Maricopa's own `gis.maricopa.gov` (200, wrong county for this point). `az_pinal`'s bbox is
+ * Pinal's own measured DATA EXTENT and reaches well into `az_maricopa`'s bbox even though the two
+ * counties' real boundaries do not overlap at all — the same shape as the Sugar Land
+ * harris/fortbend overlap this file's B1551618 suite already exercises. Pinal's service happened to
+ * answer first this time; nothing in `candidateCountiesForPoint`/`identifyParcelEager` guaranteed
+ * that ordering — a real-CAD hit wins immediately, whichever one answers.
+ *
+ * The B1339920 fan-out test in `test/counties.test.js` ("Pinal's own verified points … still route
+ * to az_pinal — unchanged") passed throughout this defect, because it only asserted `az_pinal` was
+ * PRESENT and never asserted `az_maricopa` was ABSENT — and that file never warms the county-polygon
+ * geometry asset at all, so it could not see this fix even if it had asserted exclusivity. This
+ * suite tightens it: it runs in THIS file (which warms the real, committed geometry in `beforeAll`)
+ * and asserts EXACTLY one parcel-query candidate for a point inside exactly one registered county. */
+describe("B1338896 — candidateCountiesForPoint narrows to ONE real-CAD candidate for a point solidly inside a single county", () => {
+  it("REGRESSION FIXTURE — the exact Casa Grande point from the live repro queries az_pinal ALONE", () => {
+    // -111.7476, 32.8802 as measured live (lng, lat) → (lat, lng) for this function.
+    expect(candidateCountiesForPoint(32.8802, -111.7476)).toEqual(["az_pinal"]);
+  });
+
+  it("REGRESSION FIXTURE — the exact Phoenix point from the live repro queries az_maricopa ALONE", () => {
+    // -112.0731, 33.4808 as measured live (lng, lat) → (lat, lng) for this function. The dispatch's
+    // own control point: this one already issued exactly one query before this fix (no bbox overlap
+    // at THIS exact point) — pinned here so it can never regress alongside the Casa Grande fix.
+    expect(candidateCountiesForPoint(33.4808, -112.0731)).toEqual(["az_maricopa"]);
+  });
+
+  it("Casa Grande and Apache Junction (both squarely inside Pinal) never also query Maricopa", () => {
+    expect(candidateCountiesForPoint(32.8795, -111.7574)).toEqual(["az_pinal"]); // Casa Grande
+    expect(candidateCountiesForPoint(33.4151, -111.5496)).toEqual(["az_pinal"]); // Apache Junction
+  });
+
+  it("Phoenix, Mesa, Surprise and Buckeye (squarely inside Maricopa) never also query Pinal", () => {
+    for (const [label, lat, lng] of [
+      ["Phoenix", 33.4484, -112.0740], ["Mesa", 33.4152, -111.8315],
+      ["Surprise", 33.6292, -112.3680], ["Buckeye", 33.3703, -112.5838],
+    ]) {
+      expect(candidateCountiesForPoint(lat, lng), label).toEqual(["az_maricopa"]);
+    }
+  });
+
+  it("a point genuinely near the Pinal/Maricopa line still queries BOTH — the straddle case is untouched", () => {
+    // 33.211, -111.9 sits within ~150 m of the real boundary (resolveCounty reports nearEdge:true
+    // there) — a genuine straddle, unlike Casa Grande's ~9 miles of clearance. Both neighbours must
+    // still be queried so whichever service actually holds the lot can answer.
+    const straddle = candidateCountiesForPoint(33.211, -111.9);
+    expect(straddle).toContain("az_pinal");
+    expect(straddle).toContain("az_maricopa");
+  });
+
+  it("the Sugar Land harris/fortbend straddle now also resolves to fortbend alone (fortbend + the statewide backup) once geometry is confident", () => {
+    // Same fix, same mechanism, the county pair this repo has documented the overlap on since B130.
+    // Sugar Land is well clear of the Harris/Fort Bend line (not near-edge), so the confident
+    // geometry answer narrows to fortbend — harris is no longer queried for a point that isn't his.
+    expect(candidateCountiesForPoint(29.6197, -95.6349)).toEqual(["fortbend", "txgio_statewide"]);
+  });
+});
