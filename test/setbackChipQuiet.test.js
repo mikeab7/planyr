@@ -184,7 +184,9 @@ describe("NEW-4 — setback chrome is raised into the selection-chrome layer", (
   });
 
   it("…inside the export-stripped HANDLE LAYER, ahead of the vertex handles", () => {
-    const chrome = at('<g data-export="skip" data-handle-layer="1">');
+    // NEW-1 (2026-09-12) — no trailing `>` in the needle: the opening tag now also carries an
+    // onContextMenu (click-ownership audit), so it no longer closes right after this attribute.
+    const chrome = at('<g data-export="skip" data-handle-layer="1"');
     const grab = at("{setbackGrabNode}");
     const chips = at("{setbackChipNodes}");
     expect(grab).toBeGreaterThan(chrome);
@@ -199,7 +201,7 @@ describe("NEW-4 — setback chrome is raised into the selection-chrome layer", (
   });
 
   it("only the INTERACTIVE chrome moved — the ring, its casing and the fill stay in the parcel band", () => {
-    const chrome = at('<g data-export="skip" data-handle-layer="1">');
+    const chrome = at('<g data-export="skip" data-handle-layer="1"');
     expect(at('data-testid="setback-ring"')).toBeLessThan(chrome);
     expect(at('data-testid="setback-casing"')).toBeLessThan(chrome);
     expect(at('data-testid="parcel-outline"')).toBeLessThan(chrome);
