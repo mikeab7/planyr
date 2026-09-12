@@ -154,11 +154,24 @@ describe("⛔ the STRUCTURAL guard — every framing path must go through the on
      * arbitrarily. Checking the gate inside `requestFit` grants permission while the user has not
      * moved and spends it after he has — measured live at 40x throttle: a wheel took the view to
      * 0.4594 px/ft and a fit then yanked it to 0.1064. The check must sit immediately before `fit()`.
-     * Mutation: moving `mayFrame` back into `requestFit` fails this. */
-    const eff = SRC.slice(SRC.indexOf("    if (!fitReq) return;"), SRC.indexOf("    if (!fitReq) return;") + 1600);
+     * Mutation: moving `mayFrame` back into `requestFit` fails this.
+     *
+     * ⛔ B1600353 — THE ANCHORS ARE MATCHED ON SHAPE, NOT ON TWO EXACT LITERALS, because both of
+     * those literals changed for reasons that have nothing to do with this property and the guard
+     * went red on a change that fully satisfies it. The effect's early return became
+     * `return undefined;` (it now returns a cleanup function on its other path), and `fit()` became
+     * `fit({ w, h })` (it is handed the freshly measured container box instead of reading the `size`
+     * state). Neither touches "the verdict is taken at execution". A guard that fails on a rename is
+     * a guard that gets weakened or deleted by whoever hits it next, so it asks the structural
+     * question instead: the effect exists, it takes the verdict against the REQUEST's ticket, and it
+     * does so BEFORE it frames — whatever `fit` is called with. */
+    const anchor = SRC.indexOf("    if (!fitReq) return");
+    expect(anchor).toBeGreaterThan(-1);
+    const eff = SRC.slice(anchor, anchor + 3000);
     expect(eff).toMatch(/framingGate\.current\.mayFrame\(fitReq\.ticket,/);
     expect(eff).toMatch(/frame:suppressed/);
-    expect(eff.indexOf("mayFrame")).toBeLessThan(eff.indexOf("fit()"));
+    expect(eff.indexOf("mayFrame")).toBeLessThan(eff.indexOf("fit("));
+    expect(eff.indexOf("fit(")).toBeGreaterThan(-1);
     const rfStart = SRC.indexOf("const requestFit = useCallback(");
     const rf = SRC.slice(rfStart, SRC.indexOf("}, []);", rfStart));
     expect(rf).not.toMatch(/mayFrame/);
