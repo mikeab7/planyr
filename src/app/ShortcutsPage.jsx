@@ -22,7 +22,7 @@ import { formatCombo, comboAriaLabel } from "../shared/keyboard/platform.js";
 import { RADIUS } from "../shared/ui/radius.js";
 import { FONT_SIZE, SPACE } from "../shared/ui/designTokens.js";
 
-const BACKDROP = "rgba(20,18,15,0.55)"; // the app's own established modal scrim (AuthPanel.jsx, SitePlanner.jsx's own dialogs)
+const BACKDROP = "var(--modal-scrim)"; // the app's one modal scrim token (AuthPanel.jsx / SitePlanner.jsx's own dialogs use the same look)
 
 function Kbd({ combo, keysText }) {
   const text = combo ? formatCombo(combo) : keysText;
@@ -109,7 +109,7 @@ export default function ShortcutsPage({ onClose }) {
         onClick={(e) => e.stopPropagation()}
         style={{
           display: "flex", flexDirection: "column",
-          background: "var(--surface-raised)", borderRadius: RADIUS.lg, boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
+          background: "var(--surface-raised)", borderRadius: RADIUS.lg, boxShadow: "var(--modal-shadow)",
           width: "min(760px, 94vw)", maxHeight: "90vh", minHeight: 0,
         }}
       >
