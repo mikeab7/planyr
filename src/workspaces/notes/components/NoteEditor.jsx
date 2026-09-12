@@ -47,6 +47,7 @@ import { PASTE_MODES } from "../lib/notesPastePlain.js";
 import { formFieldOwnsTheKey, UNGATED_KEYS } from "../lib/notesKeyScope.js";
 import { DEFAULT_DENSITY, densityFor } from "../lib/notesSpacing.js";
 import { PAGE_WIDTH_MIN, dragWidthFromDelta, resolvePinnedBaseWidth } from "../lib/notesPageWidth.js";
+import { dragHeightFromDelta, resolvePinnedBaseHeight } from "../lib/notesPageHeight.js";
 import { indentCssRules } from "../lib/notesIndentLevel.js";
 import {
   readNoteFiles, readNoteImages, readPage, readPageVersions, registerOpenNoteDoc,
@@ -510,6 +511,17 @@ ${indentCssRules(".planyr-note .ProseMirror li")}
 .planyr-note .planyr-page-width-grip[data-dragging="1"]::after { background: var(--accent-notes); }
 .planyr-note .planyr-page-width-grip-left { left: -7px; }
 .planyr-note .planyr-page-width-grip-right { right: -7px; }
+/* ⛔ SET A PAGE'S OWN HEIGHT BY HAND (NEW-1) — the horizontal twin of the width grips just
+   above: same hit-strip shape, same hover-only bar, same reasoning, transposed onto the
+   top/bottom edges. row-resize cursor, matching the direction of travel. NO BACKTICKS IN THIS
+   COMMENT (it lives inside the EDITOR_CSS template literal — one backtick ends the string). */
+.planyr-note .planyr-page-height-grip { position: absolute; left: 0; right: 0; height: 14px; cursor: row-resize; z-index: 2; touch-action: none; }
+.planyr-note .planyr-page-height-grip::after { content: ""; position: absolute; left: 12px; right: 12px; top: 6px; height: 2px; background: var(--text-tertiary); opacity: 0; transition: opacity 90ms linear; }
+.planyr-note .planyr-page-height-grip:hover::after,
+.planyr-note .planyr-page-height-grip[data-dragging="1"]::after { opacity: 1; }
+.planyr-note .planyr-page-height-grip[data-dragging="1"]::after { background: var(--accent-notes); }
+.planyr-note .planyr-page-height-grip-top { top: -7px; }
+.planyr-note .planyr-page-height-grip-bottom { bottom: -7px; }
 `;
 
 function EditorStyles() {
@@ -2361,11 +2373,37 @@ export default function NoteEditor({
      * the last line rather than one line-height beyond it — resolves a `hit` that
      * `pressIsBesideLine` correctly refuses, and used to fall through to the grey mat's
      * "place a note" gesture below, which is for the page OUTSIDE the sheet. A real hit-test:
-     * still `onSheet`, and below `box.bottom` (note-body's own bottom edge) rather than the
-     * sheet's bottom edge, so the side padding at a line's own height (the case B1368 already
-     * covers, above) is untouched. */
-    if (onSheet && e.clientY >= box.bottom) {
-      if (el.closest(".ProseMirror") || el.closest("[contenteditable]")) return;
+     * still `onSheet`, and below the document's own real end (not `box.bottom` — see below)
+     * rather than the sheet's bottom edge, so the side padding at a line's own height (the case
+     * B1368 already covers, above) is untouched.
+     *
+     * ⛔ AND A HEIGHT PIN NEEDS A SECOND, NARROWER VERSION OF THIS SAME CHECK (NEW-1, "drag the
+     * top and bottom edges the same way the sides already drag") — NOT a wholesale replacement
+     * of `box.bottom`, which was the FIRST DRAFT of this fix and broke a real, pre-existing,
+     * tested behaviour: the unpinned "max(46vh, need)" floor already leaves ordinary blank canvas
+     * *inside* `dom`'s own box below a short paragraph, and double-clicking THERE is the
+     * established "open page, place a new block" gesture (`verify-notes-anchor-zoom.mjs`'s whole
+     * first section) — replacing `box.bottom` with the document's real end for every case routed
+     * every one of those clicks to "caret at the end of the document" instead, and the anchor
+     * never appeared. A height PIN is different in kind: it is the OWNER asking for a taller
+     * PAGE, not for more room to place things, so the space it adds is genuinely "past the
+     * document," and a native click there does not reliably place a caret either (measured:
+     * `document.activeElement` stays untouched). So this second boundary — `contentBottom`, where
+     * the document's LAST position actually renders, always a real textblock because
+     * NOTES-PAGE-GROWTH's own anchor-placement rule inserts every anchor BEFORE the document's
+     * last block, never after — governs `e.clientY >= contentBottom` ONLY while a height pin is
+     * active, leaving every unpinned page's existing behaviour (including the
+     * `.closest(".ProseMirror")` early return below it, still relevant there) untouched. */
+    const heightPinned = editor.state.doc.attrs?.pageHeight != null;
+    let belowContent = box.bottom;
+    if (heightPinned) {
+      try {
+        const endCoords = editor.view.coordsAtPos(editor.state.doc.content.size);
+        if (endCoords && Number.isFinite(endCoords.bottom)) belowContent = endCoords.bottom;
+      } catch (_) { /* an unresolvable end position falls back to the DOM's own box */ }
+    }
+    if (onSheet && e.clientY >= belowContent) {
+      if (!heightPinned && (el.closest(".ProseMirror") || el.closest("[contenteditable]"))) return;
       e.preventDefault();
       focusEndOfSheet();
       return;
@@ -2453,6 +2491,16 @@ export default function NoteEditor({
    *  fresh by every real measurement run; see that effect's own comment for why a drag must
    *  floor against THIS, never against `sheetGrowWidth`. */
   const widthContentFloorRef = useRef(0);
+  /* ⛔ SET A PAGE'S OWN HEIGHT BY HAND (NEW-1) — the vertical twin of the two refs above.
+   * `heightDragRef` is non-null only for the duration of an edge-drag gesture (see
+   * `beginHeightDrag` below); `heightContentFloorRef` is `need` alone (genuine anchored-box
+   * overflow, never the current pin — see `widthContentFloorRef`'s own comment for the bug that
+   * reading a drag's floor from the value it is about to overwrite causes: narrowing an existing
+   * pin silently doing nothing). Unlike width, there is no `matPadX`-style baseline this can
+   * disturb — the height pin only ever feeds `dom.style.minHeight`, an element this module
+   * already writes to imperatively for the unpinned case. */
+  const heightDragRef = useRef(null);
+  const heightContentFloorRef = useRef(0);
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
 
@@ -2677,8 +2725,10 @@ export default function NoteEditor({
        * function, fighting the drag with the STALE (pre-commit) `pageWidth` attribute and
        * producing a visible fight/flicker rather than a smooth drag. The drag handlers below set
        * this ref for exactly the frames this function must stand down; `setNotePageWidth`'s own
-       * commit is what makes the next, real run of this function authoritative again. */
-      if (widthDragRef.current) return;
+       * commit is what makes the next, real run of this function authoritative again. A live
+       * HEIGHT drag (NEW-1) owns `dom.style.minHeight` the identical way, for the identical
+       * reason — see `beginHeightDrag` below. */
+      if (widthDragRef.current || heightDragRef.current) return;
       const nodes = [...dom.querySelectorAll(".planyr-anchor")];
       /* ⛔ TWO DIFFERENT QUESTIONS, TWO DIFFERENT DENOMINATORS — conflating them into one
        * `hostWidth` was the bug in this fix's own first draft, caught by re-measuring rather
@@ -2709,7 +2759,19 @@ export default function NoteEditor({
         return { x: fit.x, w: fit.w, y: parseFloat(el.style.top) || 0, height: el.offsetHeight };
       });
       const need = anchorExtent(blocks);
-      dom.style.minHeight = need ? `max(46vh, ${need}px)` : "";
+      /* ⛔ SET A PAGE'S OWN HEIGHT BY HAND (NEW-1) — a pin is a FLOOR under the unpinned
+       * `max(46vh, need)` default, exactly parallel to how a width pin overrides
+       * `SHEET_MAX_WIDTH`: real content (an anchored box needing room) still wins via
+       * `Math.max`, so a pin can never clip anything. `heightContentFloorRef` is `need` ALONE —
+       * never the current pin — for the same reason `widthContentFloorRef` is: flooring a live
+       * drag against the value it is about to overwrite makes narrowing an existing pin silently
+       * do nothing (docs/NOTES-CARRY-FORWARD.md §5-1's addendum on the width feature's own first
+       * draft of this exact mistake). */
+      heightContentFloorRef.current = need;
+      const pinnedHeight = resolvePinnedBaseHeight(editor.state.doc.attrs?.pageHeight);
+      dom.style.minHeight = pinnedHeight != null
+        ? `${Math.max(pinnedHeight, need)}px`
+        : (need ? `max(46vh, ${need}px)` : "");
       /* ⛔ AND THE PAGE GROWS SIDEWAYS TOO (NEW-RIGHT-EDGE) — restored against the right
        * denominator. `naturalPageWidth` is the page's OWN width before anything grows it —
        * computed from the pane's width and the sheet's fixed layout constants
@@ -3017,6 +3079,95 @@ export default function NoteEditor({
       if (!moved) return;                              // a click that did not drag writes nothing
       const w = liveWidthFor(ev.clientX);
       editor.commands.setNotePageWidth(Math.round(w));
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  }, [editor]);
+
+  /* ---- SET A PAGE'S OWN HEIGHT BY HAND, THE DRAG HALF (NEW-1, 2026-09-12) ----------------
+   *
+   * The vertical twin of `beginWidthDrag` just above, riding the identical trick for the
+   * identical reason — growth only ever happens in ONE direction at rest (DOWN, extending
+   * `dom.style.minHeight`, the same element the unpinned default already writes to), and the
+   * "other" edge's own illusion of moving is a scroll compensation, never a second growth
+   * mechanism:
+   *   BOTTOM edge — grow `dom.style.minHeight` toward the pointer. The top of the body never
+   *                 moves for this (it never has), so "the opposite edge holds" is free — the
+   *                 exact shape of the width feature's RIGHT edge.
+   *   TOP edge    — ALSO grow `dom.style.minHeight` (downward, same as above), but additionally
+   *                 scroll the mat by the exact same amount the height grew. A body that is `H`
+   *                 taller and a viewport scrolled `H` further down show the BOTTOM edge at the
+   *                 identical screen position it started at, and the TOP edge — now `H` further
+   *                 from the viewport's own top in content-space, with the viewport shifted `H`
+   *                 to compensate — lands exactly `H` above where it started on screen. Same
+   *                 arithmetic as `beginWidthDrag`'s own comment on its LEFT edge, transposed.
+   *                 A reload, which does not restore scroll position, settles at the app's
+   *                 ordinary top-anchored rest position with the new height — identical to a
+   *                 page grown from the bottom, stated here rather than left as a surprise, for
+   *                 the same reason `beginWidthDrag`'s own comment states it.
+   *
+   * ⛔ WHY THIS DOES NOT FIGHT THE MEASUREMENT EFFECT ABOVE: `measure()` bails out immediately
+   * while `heightDragRef.current` is set, so the ResizeObserver it owns cannot see this
+   * function's live `dom.style.minHeight` writes and overwrite them mid-drag against the
+   * STILL-uncommitted `pageHeight` attribute. The one real commit — `setNotePageHeight` on
+   * release — is what hands authority back, one undoable `setDocAttribute` step regardless of
+   * how many pixels the drag covered. A press with no real movement commits nothing, matching
+   * this module's own standing rule (B391073) and `beginWidthDrag`'s identical guard.
+   *
+   * ⛔ NO REACT STATE NEEDED HERE, UNLIKE WIDTH. `sheetGrowWidth` exists because `note-sheet` is
+   * a React-owned element whose declarative `width` style needed a value to bind to; the height
+   * pin only ever feeds `dom.style.minHeight`, and `dom` is the editor's own DOM node — this
+   * module already writes that property imperatively for the unpinned default (see the
+   * measurement effect above), so the live drag does too, and the commit's own re-render is what
+   * makes the NEXT real `measure()` run authoritative again. */
+  const [heightDragEdge, setHeightDragEdge] = useState(null);
+  const beginHeightDrag = useCallback((edge) => (e) => {
+    if (!editor || editor.isDestroyed || e.button !== 0) return;
+    const dom = editor.view.dom;
+    const scroller = scrollerRef.current;
+    if (!dom || !scroller) return;
+    e.preventDefault();
+    const startHeight = dom.getBoundingClientRect().height;
+    const drag = {
+      edge,
+      startHeight,
+      startClientY: e.clientY,
+      startScrollTop: scroller.scrollTop,
+      // Genuine content overflow only — NEVER the live minHeight, which already carries whatever
+      // pin is active and would floor a shrinking drag against its own starting point (see the
+      // measurement effect's own comment on `heightContentFloorRef`).
+      baseGrowHeight: heightContentFloorRef.current || 0,
+    };
+    heightDragRef.current = drag;
+    setHeightDragEdge(edge);
+    const prevCursor = document.body.style.cursor;
+    const prevSelect = document.body.style.userSelect;
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+
+    const liveHeightFor = (clientY) => {
+      const rawDelta = edge === "bottom" ? clientY - drag.startClientY : drag.startClientY - clientY;
+      return Math.max(dragHeightFromDelta(drag.startHeight, rawDelta), drag.baseGrowHeight);
+    };
+    const onMove = (ev) => {
+      const h = liveHeightFor(ev.clientY);
+      dom.style.minHeight = `${h}px`;
+      if (edge === "top") scroller.scrollTop = drag.startScrollTop + (h - drag.startHeight);
+    };
+    const onUp = (ev) => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      document.body.style.cursor = prevCursor;
+      document.body.style.userSelect = prevSelect;
+      heightDragRef.current = null;
+      setHeightDragEdge(null);
+      if (!editor || editor.isDestroyed) return;
+      const moved = Math.abs(ev.clientY - drag.startClientY) >= 1;
+      if (!moved) return;                              // a click that did not drag writes nothing
+      const h = liveHeightFor(ev.clientY);
+      editor.commands.setNotePageHeight(Math.round(h));
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -3455,6 +3606,27 @@ export default function NoteEditor({
                 aria-orientation="vertical"
                 aria-label="Drag to change the page's width"
                 onPointerDown={beginWidthDrag("right")}
+              />
+              {/* ⛔ SET A PAGE'S OWN HEIGHT BY HAND (NEW-1) — same reasoning as the two grips
+                  just above, transposed onto the top/bottom edges. Hidden on a phone for the
+                  identical reason: `!narrow` already gates this whole fragment. */}
+              <div
+                className="planyr-page-height-grip planyr-page-height-grip-top"
+                data-testid="note-page-height-grip-top"
+                data-dragging={heightDragEdge === "top" ? "1" : "0"}
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="Drag to change the page's height"
+                onPointerDown={beginHeightDrag("top")}
+              />
+              <div
+                className="planyr-page-height-grip planyr-page-height-grip-bottom"
+                data-testid="note-page-height-grip-bottom"
+                data-dragging={heightDragEdge === "bottom" ? "1" : "0"}
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="Drag to change the page's height"
+                onPointerDown={beginHeightDrag("bottom")}
               />
             </>
           )}
