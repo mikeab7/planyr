@@ -166,24 +166,36 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
-### V1138176 — B1600352: a cold load of planyr.io in a tab that was NOT frontmost when it started shows the plan, not an empty sheet `Blocker: auth`
+### V1138176 — B1600352: on the owner's signed-in browser, a hidden-boot load shows the PLAN, not an aerial with the plan off-screen `Blocker: auth`
 
-**Why this needs its own live pass.** The defect, the fix and both guards are fully proven headlessly on a real plan (below) — this is a `Verify: sandbox` item and it is not waiting on anything to be believed. One narrow thing still cannot be reproduced here and is worth one confirmation on the owner's own machine, because this bug reached production once already: **this sandbox cannot produce a genuinely browser-dispatched `visibilitychange`.** Measured, not assumed — Chromium here reports a background tab as `visibilityState: "visible"` and dispatches no event at all, **both headless and headed under `xvfb`** (a second page brought to the front with `bringToFront()`, the backgrounded page's own listener log empty after 6 s). So every arm reproduces the hidden state by overriding the READ the app gates on, which is the app's own gating path and is the right path to test — but it is not the browser's real transition, and the owner's report is the only evidence about that transition on real hardware. Timing/race is a mandatory LIVE-VERIFY class besides.
+**Status: this check is EXPECTED TO FAIL against production today, and that is the point.** B1600352 ships no product-code change — it is the measurement, the incident-doc record, and the repaired instrument. The forward fix is **B1600353**. This entry exists so the owner-facing symptom has a live check attached to it that someone other than the owner can run.
 
-**What was verified here (this session, sandbox, on a real plan fixture at 430×830 and 1440×900).**
-1. `npm run verify:bootframing` — 3 arms + the new watchdog arm + the known-good arm, exit 0. The backgrounded arm now asserts, **before it foregrounds anything**, that the canvas is revealed (`visibility: visible`), carries a framing that is not the `useState` boot default, and answers `elementFromPoint` at a drawn element's own centre. One painted framing per mount on every arm, remount included — B1574432's invariant is intact.
-2. **Teeth proof, both new arms, against unfixed `main`** (`SitePlanner.jsx` reverted to `origin/main`, rebuilt, same harness): the backgrounded arm reports `visibility=hidden  ppf=0.35 off=(60, 60)` and `elementFromPoint → null`; the watchdog arm reports the canvas still unrevealed after 6,279 ms with a 0×0 container. Exit 1. Restored and rebuilt: exit 0.
-3. **The watchdog arm's own precondition caught a false green in itself on its first run** — it scored ✅ over a healthy 430×773 container that framed normally and never involved the watchdog, because the zero-height CSS was appended too late to be in the cascade. It now fails as VACUOUS if the container is not actually degenerate.
-4. `npx vitest run` — 839 test files / 16,963 tests, all green, including three new CI-runnable source assertions in `test/bootFraming.test.js`.
-5. **13 adjacent cases** swept and reported on the item (foregrounded cold load · hidden boot · hidden→foregrounded · parcel with no elements · empty plan · phone 390 · desktop 1440 · Map · Schedule · Notes · Review · navigated-to-Site-from-Map): all render, none regressed.
+**What was measured in the sandbox (B1600352).** Foregrounded cold loads are fine on all three builds tested; a hidden boot is broken on all three; pre-`453623a` and reverted `main` are byte-identical. See the item and `docs/incidents/B1594320-CANVAS-VISIBILITY-OUTAGE.md`.
 
-**The steps still pending, each with its expected result. Steps 1–2 need a signed-in account (his); step 3 needs only a machine with real browser egress and closes the production half without auth.**
-1. On the owner's own machine, sign in to planyr.io and open a project's **Site** tab. **Before the page finishes loading, switch to another application or another browser tab** so the window is genuinely backgrounded at the OS level — this is the exact condition of the original report. Wait ~10 s, then bring the window back.
-   **Expected:** the plan is there — parcel, buildings, labels — framed to fit, immediately on return. **Fail:** an empty drawing area, or the plan appearing at an extreme zoom and then jumping.
-2. Same account, ordinary foregrounded cold load of the Site tab, watching for B1574432's original symptom.
-   **Expected:** the plan paints once, already framed; no flash of a single building at extreme zoom. (This is V1127680's subject and must not have regressed.)
+**The steps, each with a named expected result. Step 3 needs no auth and closes the production half.**
+1. On the owner's own machine, signed in, open a project's **Site** tab and **background the window before the page finishes loading** (the condition of the original report). Leave it backgrounded and read, on `[data-testid="planner-canvas"]`, in the SAME observation as the served chunk hash: computed `visibility`, `data-view-ppf`/`-offx`/`-offy`, and the client rects of the `[data-el-id]` elements against the canvas box.
+   **Expected once B1600353 lands:** `visibility: visible`, a real fit (NOT `0.35 / 60 / 60`), and every element inside the canvas box. **Today (B1600352 only): `0.35 / 60 / 60` with the elements outside the canvas box — a known, recorded failure, not a new finding.**
+2. Bring the window forward. **Expected:** the plan is on screen and clickable; `elementFromPoint` at an element's own centre resolves to that element, not to an ancestor `div`.
 3. From any machine with real browser egress: `node ui-audit/verify-boot-framing.mjs --base=https://planyr.io/ --assert`.
-   **Expected:** exit 0, with the backgrounded arm printing `✅ revealed, framed off the boot default, and hit-testable` and the watchdog arm printing a reveal time on a wall clock. This judges the bundle that actually shipped rather than one built locally.
+   **Expected once B1600353 lands:** exit 0. **Today: the hidden arm fails with "every drawn element is OUTSIDE the canvas box" — which is the red-proof that the surviving defect is real.**
+
+### V1132144 — B1594320 (P0): the site planner canvas renders and is clickable again on planyr.io, for a signed-in user opening a real project `Blocker: auth`
+
+**Why this needs its own live pass.** The fix is a full revert of `SitePlanner.jsx`'s `framingCommitted` gate — provably correct by static inspection (the only code path capable of setting `visibility: hidden` on the canvas is removed entirely) and confirmed by a real-browser e2e regression test in the sandbox (`e2e/canvas-boot-visibility.spec.js`, passes). What the sandbox cannot do is sign in to a real Supabase account or reach `planyr.io` from its browser (`net::ERR_CONNECTION_RESET`, re-confirmed this session) — the exact production trigger (a signed-in `loadEpoch` remount) was never reproduced here even directly, so the one thing worth confirming live is the plainest one: does the canvas actually render and respond to clicks on a real, signed-in load.
+
+**What was verified here (sandbox, real browser, no auth).**
+1. `e2e/canvas-boot-visibility.spec.js` — two cases (a plan with a parcel-less building, reloaded; a fully blank plan) both pass: the canvas's computed `visibility` is never `"hidden"` across a 2.5s poll, its box never collapses to zero, and `elementFromPoint` at a drawn element's centre resolves to that element.
+2. Adjacent-case sweep, each confirmed directly in a real browser this session (see B1594320 for the full list): no parcel · parcel with no elements · Map view · Scheduler/Notes/Review workspaces · cold direct load vs. navigated-to-from-Map. All render.
+3. `npx vitest run` — 838 files / 16,946 tests, 0 failures. `npm run lint` — 0 errors. `npm run build` — clean.
+4. `ui-audit/verify-boot-framing.mjs` re-run against the reverted build: confirms the flash mechanism is gone (back to the pre-453623a shape, 2 painted framings per mount) and — the thing that matters for THIS item — no arm reports the canvas as unpainted/hidden.
+
+**Steps, each with a named expected result. Needs any signed-in account on `planyr.io` (does not need to be the owner's):**
+1. Sign in, open any existing real project, click into its Site tab (or let the app resume it on load). **Expect:** the drawing appears — imagery/parcel/buildings/labels as applicable — within a couple of seconds, same as every other surrounding control (rails, Layers, scale bar).
+2. Click on a drawn element (a building, a parcel edge). **Expect:** it selects, and a right-click opens its context menu — i.e. the canvas is genuinely hit-testable, not just visually present.
+3. Repeat steps 1–2 on a second, different project. **Expect:** identical — this was reported on two separate projects, so one clean project is not sufficient confirmation.
+4. Read the served chunk hash in the same observation (`document.querySelectorAll('script[src]')` or the Network tab) and confirm it postdates this fix's deploy — the standing rule for any live check on `planyr.io` (a stale tab can keep serving a pre-deploy bundle).
+- Result: ⏳ pending — sandbox-confirmed (static removal + e2e regression guard + full test suite); needs one signed-in click-through on the deployed build to close. `Cadence: once`.
+
 ### V1130256 — B1584528: the name/group-key integrity detector, and the one live drift it already closed `Blocker: auth`
 
 **Why this needs its own live pass.** The rename mechanism this item's constraint says must keep working is a concurrency/multi-writer, real-project-data class (mandatory LIVE-VERIFY), and this sandbox's proxy CORS-blocks the Supabase auth handshake, so a real signed-in click-through can't run here.
@@ -227,7 +239,22 @@ was never clicked" quietly ships broken.
 
 ### V1127680 — B1574432: a cold load of planyr.io on the owner's own signed-in iPhone shows ONE framing, with no flash of a single zoomed building `Blocker: auth`
 
-**Why this needs its own live pass.** Two of this bug's three legs are closed headlessly (below); the third cannot be. The flash rides a REMOUNT that only a signed-in boot performs — `applyUser` (`SitePlannerApp.jsx:350`) bumps `loadEpoch` when the cloud pull settles, and the planner is keyed `` `${activeSiteId}:${loadEpoch}` `` — and this sandbox cannot sign in (the egress proxy CORS-blocks the Supabase auth handshake). The sandbox arm proves the same structural event through a route-change remount, which changes the same React key and produces the same fresh mount; what it cannot prove is the `applyUser` path itself, on his data, on his phone. Timing/race and zoom-dependent rendering are both mandatory LIVE-VERIFY classes besides.
+**⛔ AMENDED 2026-09-12 (B1594320) — THE FIX THIS ENTRY VERIFIES WAS REVERTED.** The `framingCommitted` mechanism this checklist confirms sandbox-side went live and, within hours, made the Site Planner canvas permanently invisible and unclickable on production for every signed-in user — a P0 outage, filed and fixed same-session as **B1594320** (a full revert). Steps 1–3 and 6 below are now MOOT as written — they exercise code that no longer exists (there is nothing to "resume Goose Creek and watch for one framing" against; the mechanism they'd be checking is gone) — and are kept only as the historical record of what a future re-attempt should re-verify. Step 4's console probe and step 5's chunk-hash discipline remain generally useful technique, independent of this specific fix. **The underlying ask (no flashed intermediate framing on a signed-in cold load) is UNCHANGED and still wanted** — the flash itself is back, now that the mechanism that suppressed it is reverted — see B1574432 (reopened) for the trade and why. A future fix for it must close THIS exact gap before shipping: get a genuine signed-in live pass (not the sandbox's route-change proxy for the remount) BEFORE merging, not after. See also **V1132144** (B1594320's own live-verify, that the revert itself is live and the canvas renders again).
+
+**⛔ LIVE MEASUREMENT ADDED, same day, from a session with real signed-in browser access to
+`planyr.io` (this sandbox has none — see `docs/incidents/B1594320-CANVAS-VISIBILITY-OUTAGE.md`).**
+While the ORIGINAL (pre-revert) bundle was still live, project `smtvztgdsp5p`: `document.
+visibilityState: "hidden"`, `hasFocus(): false`, zero `requestAnimationFrame` callbacks in 6.3s, a
+plain `setTimeout(…, 1500)` DID fire (~800ms throttled late). Read against the reverted source: both
+the layout effect and the 1.5s watchdog carried an identical `if (document.visibilityState !==
+"visible") return;` — so on a tab that boots hidden and stays hidden, the watchdog's `setTimeout` was
+never even scheduled. This is now a MEASURED mechanism, not the hypothesis this entry's "why it stuck"
+reasoning left it as. **Explicitly NOT measured: a genuinely foregrounded cold load** — the live
+session could not force Michael's OS-level window to the foreground, so whether the ordinary
+(foregrounded) case also goes permanently blank remains open. Any future re-attempt's watchdog must
+fire on a wall-clock timer not gated on `document.visibilityState`.
+
+**Why this needs its own live pass (as originally written).** Two of this bug's three legs are closed headlessly (below); the third cannot be. The flash rides a REMOUNT that only a signed-in boot performs — `applyUser` (`SitePlannerApp.jsx:350`) bumps `loadEpoch` when the cloud pull settles, and the planner is keyed `` `${activeSiteId}:${loadEpoch}` `` — and this sandbox cannot sign in (the egress proxy CORS-blocks the Supabase auth handshake). The sandbox arm proves the same structural event through a route-change remount, which changes the same React key and produces the same fresh mount; what it cannot prove is the `applyUser` path itself, on his data, on his phone. Timing/race and zoom-dependent rendering are both mandatory LIVE-VERIFY classes besides.
 
 **What was verified here (this session, sandbox, on a real plan fixture at phone width 430×830).**
 1. `ui-audit/verify-boot-framing.mjs --assert` — 3 arms + a known-good arm, all green, 3/3 consecutive clean runs. Samples the COMMITTED framing (`data-view-ppf`/`-offx`/`-offy`) once per animation frame and counts only framings the canvas actually painted.

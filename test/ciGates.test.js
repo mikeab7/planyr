@@ -103,7 +103,7 @@ describe("jobSteps() against .github/ci-gates.yml — the actual gate list", () 
   it("parses without refusing, and every step is a plain run: gate (no uses:)", () => {
     const res = jobSteps(readGates(), "build");
     expect(res.ok, res.unparsed.join("; ")).toBe(true);
-    expect(res.steps.length).toBe(21);
+    expect(res.steps.length).toBe(20);
     expect(res.steps.every((s) => s.run != null && s.uses == null)).toBe(true);
   });
 
@@ -153,10 +153,10 @@ describe("splitSteps / classifyInfra — gates vs CI-only plumbing", () => {
     ]);
   });
 
-  it("ci-gates.yml's real steps split into 21 gates + 0 infra", () => {
+  it("ci-gates.yml's real steps split into 20 gates + 0 infra", () => {
     const { steps } = jobSteps(readGates(), "build");
     const { gates, infra } = splitSteps(steps);
-    expect(gates.length).toBe(21);
+    expect(gates.length).toBe(20);
     expect(infra.length).toBe(0);
   });
 
@@ -261,9 +261,9 @@ describe("resolveStepEnv — one gate's env:, given the global secret resolution
 });
 
 describe("scripts/ci-parity.mjs --list — the two files actually wire together (integration, no gates run)", () => {
-  it("reports 21 gates from ci-gates.yml and 5 infra steps from build.yml", () => {
+  it("reports 20 gates from ci-gates.yml and 5 infra steps from build.yml", () => {
     const out = execFileSync("node", ["scripts/ci-parity.mjs", "--list"], { cwd: REPO, encoding: "utf8" });
-    expect(out).toContain("Gates (21), in order, read from .github/ci-gates.yml:");
+    expect(out).toContain("Gates (20), in order, read from .github/ci-gates.yml:");
     expect(out).toContain("Infra steps NOT covered (5)");
     expect(out).toContain("Checkout (actions/checkout)");
     expect(out).toContain("Upload visual regression diffs (actions/upload-artifact)");
@@ -276,7 +276,7 @@ describe("scripts/ci-parity.mjs --list — the two files actually wire together 
 
   it("--docs-only --list reports only the DOCS_ONLY_GATE_NAMES subset, and names the total it's drawn from", () => {
     const out = execFileSync("node", ["scripts/ci-parity.mjs", "--list", "--docs-only"], { cwd: REPO, encoding: "utf8" });
-    expect(out).toContain(`Gates (${DOCS_ONLY_GATE_NAMES.length} of 21, docs-only mode)`);
+    expect(out).toContain(`Gates (${DOCS_ONLY_GATE_NAMES.length} of 20, docs-only mode)`);
     for (const name of DOCS_ONLY_GATE_NAMES) expect(out).toContain(name);
     // a full-build-only gate must NOT show up in the docs-only listing
     expect(out).not.toContain("Lint (fails the build");
@@ -287,7 +287,7 @@ describe("scripts/ci-parity.mjs --list — the two files actually wire together 
     const out = execFileSync("node", ["scripts/ci-parity.mjs", "--list"], {
       cwd: REPO, encoding: "utf8", env: { ...process.env, CI_DOCS_ONLY: "true" },
     });
-    expect(out).toContain(`Gates (${DOCS_ONLY_GATE_NAMES.length} of 21, docs-only mode)`);
+    expect(out).toContain(`Gates (${DOCS_ONLY_GATE_NAMES.length} of 20, docs-only mode)`);
   });
 });
 

@@ -206,7 +206,8 @@ async function backgroundedArm() {
     if (!c) return { canvas: false };
     /* el-tier: one drawn ELEMENT's own node is the subject — the question is whether a press at
        its own centre reaches it, which is what production could not do. Not a plan census. */
-    const el = document.querySelector("[data-el-id]");
+    const els = [...document.querySelectorAll("[data-el-id]")];
+    const el = els[0];
     let hit = null, elId = null;
     if (el) {
       elId = el.getAttribute("data-el-id");
@@ -219,7 +220,21 @@ async function backgroundedArm() {
        whose fixture drew no element cannot ask whether a press reaches one, and must say so
        rather than score. COUNT-EVERY-KIND's [data-feature] census is the tool for "what is in
        this plan"; the question here is about one element's own node. */
+    /* ⛔ B1600352 — "REVEALED" IS NOT "SHOWING THE PLAN", and the owner's 2026-09-12 01:03 live
+       reading is why this is asserted separately. On the reverted build the canvas computes
+       `visible` and the aerial paints across it, while every drawn element sits OUTSIDE the canvas
+       box entirely (measured on production: elements at x 1195-1405, canvas box x 54-1023). A
+       visible canvas with the plan off-screen reads to the owner as "my plan is gone", exactly as a
+       blank one did — and it is worse, because it looks plausible. So the rig asks whether the plan
+       is ON SCREEN, not merely whether the canvas was un-hidden. */
+    const cb = c.getBoundingClientRect();
+    const inView = els.slice(0, 3).map((e) => {
+      const b = e.getBoundingClientRect();
+      return { id: e.getAttribute("data-el-id"), x: Math.round(b.x), right: Math.round(b.right),
+               inView: b.right > cb.x && b.x < cb.right && b.bottom > cb.y && b.y < cb.bottom };
+    });
     return { canvas: true, visibility: getComputedStyle(c).visibility,
+             canvasBox: `${Math.round(cb.x)}..${Math.round(cb.right)}`, inView, anyInView: inView.some((b) => b.inView),
              ppf: +c.getAttribute("data-view-ppf"), offX: +c.getAttribute("data-view-offx"), offY: +c.getAttribute("data-view-offy"),
              vis: document.visibilityState, els: document.querySelectorAll("[data-el-id]").length, elId, hit };
   });
@@ -378,18 +393,25 @@ for (const arm of arms) {
       if (rv.visibility !== "visible") { console.log(`  ❌ the canvas is still ${rv.visibility} — a load that began in a non-frontmost tab never revealed the drawing. This is a BLANK PLAN, which is strictly worse than the flash this gate exists to prevent (B1600352).`); failed = true; }
       if (isBootDefault) { console.log("  ❌ the canvas is still carrying the useState boot default — no framing was ever committed"); failed = true; }
       if (!rv.hit || String(rv.hit).startsWith("<")) { console.log(`  ❌ elementFromPoint at an element's own centre resolved to ${rv.hit ?? "null"}, not to an element — the plan is unclickable as well as unpainted`); failed = true; }
+      if (!rv.anyInView) {
+        console.log(`  ❌ every drawn element is OUTSIDE the canvas box (canvas x ${rv.canvasBox}) — the canvas is painted but the PLAN IS OFF-SCREEN. To the owner this reads as "my plan is gone", and it is worse than a blank canvas because it looks plausible (B1600352).`);
+        rv.inView.forEach((b) => console.log(`       ${b.id}  x ${b.x}..${b.right}  inView=${b.inView}`));
+        failed = true;
+      }
       if (rv.visibility === "visible" && !isBootDefault && rv.hit && !String(rv.hit).startsWith("<")) console.log("  ✅ revealed, framed off the boot default, and hit-testable — all before this arm foregrounded anything");
     }
   }
   console.log(`  animation frames sampled : ${report.frames} (${report.visibleFrames} with the tab visible)`);
   console.log(`  planner mounts observed  : ${report.mounts}${arm.expectMounts ? ` (this arm needs ${arm.expectMounts} — one mount means the remount never happened and the arm proved nothing)` : ""}`);
   if (arm.expectMounts && report.mounts < arm.expectMounts) { console.log("  ❌ the remount did not happen — this arm is VACUOUS"); failed = true; }
+  if (report.gateAbsent) console.log("  framing gate             : ABSENT in this build (no `data-planner-mount`, canvas never held unpainted) — the FLASH half is not applicable here; every other assertion below still gates");
   console.log(`  PAINTED framings         : ${report.paintedFramings}`);
   console.log(`  committed framings       : ${report.committedFramings}`);
   if (report.unpainted.length) console.log(`  held-but-never-painted   : ${report.unpainted.length} (the canvas carried a framing while deliberately unpainted — correct, and not counted)`);
   if (report.vacuous) report.vacuity.forEach((v) => console.log(`  ⚠ VACUOUS: ${v}`));
   framingLines(report.painted).forEach((l) => console.log(l));
   if (report.vacuous) { console.log("  ❌ this arm observed nothing — a run that cannot see the property does not get to score it"); failed = true; }
+  else if (report.gateAbsent) console.log("  ⊘ flash verdict not applicable — this build has no framing gate to flash");
   else if (report.ok) console.log(`  ✅ every mount painted exactly one framing (${report.mounts} mount${report.mounts === 1 ? "" : "s"}, ${report.paintedFramings} framing${report.paintedFramings === 1 ? "" : "s"}) — the invariant holds`);
   else {
     report.offenders.forEach((o) => console.log(`  ❌ mount ${o.mount} painted ${o.framings} distinct framings — the user saw ${o.framings - 1} framing(s) that mount then threw away`));

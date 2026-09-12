@@ -86,18 +86,6 @@
  * callback fires even for a page that was never laid out, and the app's own `Math.max(320, …)` floor
  * turns that degenerate box into a plausible-looking 320×360 that must NOT be trusted).
  *
- * ⛔ B1600352 — `visible` IS A PROXY, AND A CALLER THAT CAN ANSWER THE REAL QUESTION DIRECTLY MUST
- * NOT BE MADE TO ASK IT. The question both flags serve is "does this framing describe reality?",
- * and for a framing computed from a container's own box the answer is entirely "has that container
- * really been laid out" — `getBoundingClientRect()` is layout-accurate in a tab that is merely not
- * frontmost. Treating "the tab is frontmost" as a REQUIREMENT rather than as one cheap way to infer
- * layout is what took planyr.io's site-planner canvas down: it was painted `visibility: hidden` and
- * never revealed, because a load that began in a non-frontmost tab could never frame and the
- * watchdog that was supposed to catch that was gated on the same proxy and never armed. So
- * SitePlanner's boot framing passes `visible: true` having proven the STRONGER property — a raw,
- * non-degenerate rect read from the live DOM — and that is a legitimate use of the flag, not a lie
- * to it. A caller that CANNOT measure still passes the honest `visible` and gets the old behaviour.
- *
  * Checked BEFORE the move count on purpose: an unmeasurable view has nothing sensible to say about
  * ownership either, and naming the more fundamental reason first is what a caller building a retry
  * loop actually wants back (see SitePlanner.jsx's fitReq effect, which retries a `document-hidden` /

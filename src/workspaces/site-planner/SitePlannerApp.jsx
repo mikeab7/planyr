@@ -299,6 +299,18 @@ export default function App({
     // B124 "work disappears on its own" churn). A real switch (different user) or a
     // sign-out still runs in full.
     if (uid && uid === prevUid.current && event !== "SIGNED_OUT") return;
+    /* B1594320 — stamp the dedup marker HERE, synchronously, before any `await` — not only at
+     * the end of this function (which still runs several awaits below: claimInvites, pullCloud,
+     * refreshSites…). supabase-js can legitimately deliver more than one auth event for the SAME
+     * resumed session close together (its own `_emitInitialSession`, fired the instant a NEW
+     * listener subscribes, races `_recoverAndRefresh`'s separate `SIGNED_IN` broadcast on a cold
+     * load — see @supabase/auth-js's GoTrueClient). With the marker set only at the end, a second
+     * event for the same uid arriving before the first call's assignment landed read the guard
+     * above as "not a duplicate" and ran this whole pull+resume+`setLoadEpoch` sequence again,
+     * force-remounting the keyed planner (`${activeSiteId}:${loadEpoch}`) a second time mid-boot.
+     * Setting it now closes that window; the `seq` guard below still supersedes a genuinely
+     * newer event before this one reaches the resume step. */
+    prevUid.current = uid;
     const seq = ++applySeq.current; // capture before the await; a newer auth event bumps it
     setActiveUser(uid);
     setSignedInUid(uid);     // null when logged out → the on-device-sites prompt only shows when signed in
@@ -372,9 +384,9 @@ export default function App({
     }
     // NEW-3 — B471's auth-transition telemetry (event:auth-signed-in / event:auth-signed-out) was
     // removed: a successful sign-in is not an error, and it was 1,246 rows across 477 builds on
-    // production, 11% of the whole client_errors table on its own. `prevUid` still tracks the last
-    // seen uid for the same-user re-emit guard above.
-    prevUid.current = uid;
+    // production, 11% of the whole client_errors table on its own. `prevUid` is stamped early now
+    // (B1594320, above) rather than here, so this comment stays as the historical marker of why
+    // that field exists — see the guard at the top of this function.
     // V13 — the first auth event + pull has now settled the store + the resume view; release
     // the boot gate so the URL sync + the dangling-pointer cleanup may run. Batched with the
     // resume's setActiveSiteId above, so the URL-sync effect only ever sees the resolved view
