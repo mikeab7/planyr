@@ -11,11 +11,16 @@ describe("moduleLoaderTheme — reusable per-module loader theming (B224)", () =
     expect(t.label).toMatch(/schedule/i);
   });
 
-  it("themes Site Planner as the footprint skin in the Site accent #1D9E75", () => {
+  it("themes Site Planner as the Stack mark skin (B1340512/NEW-1) in the Site accent #1D9E75", () => {
     const t = resolveLoaderTheme("site-planner");
-    expect(t.kind).toBe("site");
+    expect(t.kind).toBe("stack");
     expect(t.accent).toBe("#1D9E75");
     expect(t.accent).toBe(MODULE_ACCENT["site-planner"]);
+  });
+
+  it("the Stack skin carries no caption label (no on-screen text by design)", () => {
+    const t = resolveLoaderTheme("site-planner");
+    expect(t.label).toBeUndefined();
   });
 
   it("pulls the accent from the shared MODULE_ACCENT for every known skin (no drift)", () => {
