@@ -296,7 +296,7 @@ async function watchdogArm() {
   await decoy.bringToFront();
   await page.goto(`${BASE}#/project/bootframe/site`, { waitUntil: "load" }).catch(() => {});
   const t0 = Date.now();
-  let revealedAt = null, box = null;
+  let revealedAt = null, box = null, firstInline = null;
   /* A WALL CLOCK, polled — the deadline under test is a wall clock, so the observation of it has to
      be one too. Generous enough to absorb a background tab's timer clamp; a watchdog that never
      arms cannot pass it however generous it is. */
@@ -309,10 +309,19 @@ async function watchdogArm() {
       return { inline: c.style.visibility || "", computed: getComputedStyle(c).visibility,
                wrapW: r ? Math.round(r.width) : null, wrapH: r ? Math.round(r.height) : null };
     });
-    if (st) { box = st; if (st.inline !== "hidden") revealedAt = Date.now() - t0; }
+    if (st) {
+      box = st;
+      /* ⛔ B1600353 — IF THE CANVAS WAS NEVER HIDDEN, THERE IS NO WATCHDOG TO TEST, and this arm
+         must say so instead of scoring a pass. On a gateless build (B1594320 reverted the gate) the
+         inline `visibility` is empty from the very first sample, so "revealed at 250 ms" would be
+         trivially true and would certify a watchdog that does not exist — the same false-green shape
+         this whole rig is being repaired for. The FIRST sample decides which build we are on. */
+      if (firstInline === null) firstInline = st.inline;
+      if (st.inline !== "hidden") revealedAt = Date.now() - t0;
+    }
   }
   await ctx.close();
-  return { revealedAt, box, waitedMs: Date.now() - t0 };
+  return { revealedAt, box, waitedMs: Date.now() - t0, gateAbsent: firstInline !== "hidden" };
 }
 
 /* ---- the known-good arm: one deliberate framing must read as exactly one new painted framing ---- */
@@ -403,7 +412,14 @@ for (const arm of arms) {
   }
   console.log(`  animation frames sampled : ${report.frames} (${report.visibleFrames} with the tab visible)`);
   console.log(`  planner mounts observed  : ${report.mounts}${arm.expectMounts ? ` (this arm needs ${arm.expectMounts} — one mount means the remount never happened and the arm proved nothing)` : ""}`);
-  if (arm.expectMounts && report.mounts < arm.expectMounts) { console.log("  ❌ the remount did not happen — this arm is VACUOUS"); failed = true; }
+  /* ⛔ B1600353 — the remount arm counts mounts through `data-planner-mount`, which only exists
+     while B1574432's gate is in the build. On a gateless build it cannot count mounts at all, so it
+     reports that rather than failing as vacuous — the arm's OTHER assertions (revealed, framed off
+     the boot default, hit-testable, plan on screen) do not need the stamp and still gate. */
+  if (arm.expectMounts && report.mounts < arm.expectMounts) {
+    if (report.gateAbsent) console.log(`  ⊘ mounts are not countable in this build (no \`data-planner-mount\`) — the remount COUNT is not applicable; this arm's framing assertions still gate`);
+    else { console.log("  ❌ the remount did not happen — this arm is VACUOUS"); failed = true; }
+  }
   if (report.gateAbsent) console.log("  framing gate             : ABSENT in this build (no `data-planner-mount`, canvas never held unpainted) — the FLASH half is not applicable here; every other assertion below still gates");
   console.log(`  PAINTED framings         : ${report.paintedFramings}`);
   console.log(`  committed framings       : ${report.committedFramings}`);
@@ -427,7 +443,9 @@ console.log(`  canvas wrap box          : ${watchdog.box ? `${watchdog.box.wrapW
 /* ⛔ THE PRECONDITION, AND IT ALREADY EARNED ITS PLACE: without it this arm scored ✅ over a
    healthy 430x773 container that framed normally and never involved the watchdog at all. An arm
    that cannot put the app into the state it is asking about does not get to report a result. */
-if (!watchdog.box || watchdog.box.wrapH > 1) {
+if (watchdog.gateAbsent) {
+  console.log("  ⊘ the canvas was never hidden — this build has no hide-until-ready gate, so there is NO WATCHDOG to test. Not applicable; not a pass.\n");
+} else if (!watchdog.box || watchdog.box.wrapH > 1) {
   console.log(`  ❌ the container was NOT degenerate (${watchdog.box ? `${watchdog.box.wrapW}x${watchdog.box.wrapH}` : "unreadable"}) — a real framing was possible, so this arm never exercised the watchdog. VACUOUS.`);
   failed = true;
 } else if (watchdog.revealedAt === null) {
