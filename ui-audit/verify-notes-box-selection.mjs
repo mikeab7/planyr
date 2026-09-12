@@ -193,7 +193,16 @@ async function run(label, { width, height, zoomSteps = 0 }) {
   const c0 = await centreOf(page, 0);
   await page.mouse.move(c0.x, c0.y);          // HOVER only — no press
   await pacedWait(page, 500);
-  ok(`${label} · ⛔ HOVERING A BOX REVEALS NOTHING`, (await visibleControls(page)).length === 0, JSON.stringify(await visibleControls(page)));
+  /* ⛔ AMENDED — the grip is a deliberate HOVER affordance since B1370544 ("the grip is a 12×20
+   * affordance visible on hover… a box you have just typed into must still be movable without
+   * pressing Escape first"), unconditional on selection (`.planyr-anchor:hover .planyr-anchor-grip`
+   * carries no `[data-selected]` qualifier). So "hovering reveals nothing at all" was true only
+   * before that feature shipped; the real, current, documented invariant is narrower: hovering an
+   * UNSELECTED box reveals the grip alone, never the resize/delete handles (`.planyr-anchor-h` IS
+   * gated on `[data-selected="1"]`). */
+  const hoverShown = await visibleControls(page);
+  ok(`${label} · ⛔ HOVERING AN UNSELECTED BOX REVEALS ONLY THE DRAG GRIP, NOTHING ELSE`,
+    hoverShown.length === 1 && hoverShown[0] === "note-anchor-grip", JSON.stringify(hoverShown));
   ok(`${label} · …and hovering does not select it either`, !(await renderedBoxes(page))[0].selected);
 
   /* ═══ ATTACK 2 — A CLICK SELECTS, AND SELECTION IS VISIBLE (NEW-1) ════════════════════════ */
@@ -307,6 +316,15 @@ async function run(label, { width, height, zoomSteps = 0 }) {
   await page.keyboard.press("Escape");
   await pacedWait(page, 400);
   ok(`${label} · ⛔ ESCAPE AGAIN DESELECTS`, !(await renderedBoxes(page))[0].selected);
+  /* ⛔ THE MOUSE MUST MOVE AWAY FIRST — the grip is a HOVER affordance since B1370544 ("the grip is
+   * a 12×20 affordance visible on hover"), independent of selection by design (`.planyr-anchor:hover
+   * .planyr-anchor-grip` in EditorStyles). The pointer is still resting on the box from the two
+   * clicks above, so checking `visibleControls` without moving away first was asserting a stale
+   * invariant (no controls at all once deselected) against a real, later, intentional feature (a
+   * deselected-but-hovered box still shows its grip) — a false failure unrelated to this box's
+   * selection state at all. */
+  await page.mouse.move(5, 5);
+  await pacedWait(page, 200);
   ok(`${label} · …and the controls went away with the selection`, (await visibleControls(page)).length === 0);
 
   /* ═══ ATTACK 9 — TYPING INSIDE A SELECTED BOX MUST NOT DELETE IT ═════════════════════════ */
@@ -541,6 +559,95 @@ async function run(label, { width, height, zoomSteps = 0 }) {
 await run("A · a full window", { width: 1500, height: 950 });
 await run("B · a SHORT window, which is his", { width: 1280, height: 620 });
 await run("C · zoomed in — NOT 100%", { width: 1500, height: 950, zoomSteps: 2 });
+
+/* ═══ ATTACK 16 — THE ACTIVEELEMENT NEVER LEAVES THE EDITOR (B1555152 ×3, owner correction
+ * 2026-09-12). The owner retracted his earlier "the box never gets selected" claim — instrument
+ * error on his side, reading `className` instead of `data-selected` — and sent PRECISE replacement
+ * evidence from a real signed-in reproduction on planyr.io at his own window size (1191×465, a box
+ * whose content rect straddles the right edge of that viewport):
+ *
+ *     anchor data-selected           "1"          ← selection DID happen
+ *     document.activeElement         "note-body"  ← the blur did NOT happen
+ *     getSelection().rangeCount      1, anchorNode still the flow paragraph  ← the live caret survived
+ *
+ * So `editor.commands.blur()` (the call the first fix added) is not reliable in his real
+ * environment — `activeElement` can stay on the editor even after `data-selected` correctly flips
+ * to "1". Attack 14 above proves the HAPPY path (a click on a box blurs the editor); this attack
+ * proves the ROBUSTNESS path — Backspace must stay safe even when the blur does not stick, for
+ * whatever reason (this sandbox cannot reproduce his real DPI/Chrome/sync-tick environment, so it
+ * is driven directly: click the box for real, THEN force focus back onto the editor, matching the
+ * exact state he measured, and check what a subsequent Backspace does).
+ *
+ * ⛔ THE FIX: `formFieldOwnsTheKey()` (`notesKeyScope.js`) replaces the box-selection binding's use
+ * of `bindingShouldDecline`/`readCaretScope`'s `activeEditable` flag — which reads TRUE merely
+ * because the contenteditable HAS focus, regardless of where the selection inside it actually is —
+ * with a narrower check for a genuine form field only. Whether a selected box's Backspace binding
+ * should decline no longer depends on `blur()` having taken effect at all: it depends on the
+ * `paint` effect's own caret-position tracking (added in this bug's first round), which already
+ * knows whether the caret has genuinely moved since the box was selected.
+ *
+ * ⛔ RED-PROVEN: this exact sequence was run against the code before this round's fix and the flow
+ * text was mutated ("MAINLINE ALPHA BRAVO" → "MAINLIE ALPHA BRAVO", the letter coming out of the
+ * stale selection) — confirming the scenario is real and this attack has teeth. */
+{
+  const label = "D · his reported viewport, box straddling the right edge";
+  console.log(`\n${label}`);
+  const ctx = await browser.newContext({ viewport: { width: 1191, height: 465 }, ignoreHTTPSErrors: true });
+  const page = await ctx.newPage();
+  page.on("pageerror", (e) => pageErrors.push(`${label}: ${e.message}`));
+  await assertMeasurable(page, "verify-notes-box-selection");
+  await page.goto(`${BASE}#/notes`, { waitUntil: "domcontentloaded" });
+  // A box near the right edge of a 1191-wide viewport straddles it, exactly as his did
+  // (content rect x 1068–1204 on his machine; this sandbox's own placement lands similarly).
+  await seed(page, [{ x: 1000, y: 120, w: 180, t: "SIDEBOX CHARLIE" }]);
+
+  const flowPara16 = await page.evaluate(() => {
+    const p = [...document.querySelectorAll(".ProseMirror p")].find((el) => el.textContent.includes("Flow text"));
+    const r = p.getBoundingClientRect();
+    return { x: Math.round(r.left + 10), y: Math.round(r.top + r.height / 2) };
+  });
+  await page.mouse.click(flowPara16.x, flowPara16.y);
+  await pacedWait(page, 300);
+
+  const c16 = await centreOf(page, 0);
+  await page.mouse.click(c16.x, c16.y);
+  await pacedWait(page, 350);
+  const afterClick16 = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="note-anchor"]');
+    return {
+      dataSelected: el.getAttribute("data-selected"),
+      activeElement: document.activeElement?.getAttribute?.("data-testid") || document.activeElement?.tagName,
+    };
+  });
+  ok(`${label} · ⛔ A REAL CLICK SELECTS THE BOX`, afterClick16.dataSelected === "1", JSON.stringify(afterClick16));
+
+  // Force activeElement back onto the editor — the exact state the owner measured, whatever the
+  // real-world cause (this sandbox cannot reproduce his DPI/Chrome/sync-tick environment directly).
+  await page.evaluate(() => document.querySelector('[data-testid="note-body"]').focus());
+  await pacedWait(page, 300);
+  const forcedState16 = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="note-anchor"]');
+    return {
+      dataSelected: el.getAttribute("data-selected"),
+      activeElement: document.activeElement?.getAttribute?.("data-testid") || document.activeElement?.tagName,
+    };
+  });
+  ok(`${label} · the box is still selected with activeElement forced back to the editor — his exact reported state`,
+    forcedState16.dataSelected === "1" && forcedState16.activeElement === "note-body", JSON.stringify(forcedState16));
+
+  const flowBefore16 = await page.evaluate(() => [...document.querySelectorAll(".ProseMirror p")].find((el) => el.textContent.includes("Flow text")).textContent);
+  const boxesBefore16 = await storedBoxes(page);
+  await page.keyboard.press("Backspace");
+  await pacedWait(page, 1300);
+  const flowAfter16 = await page.evaluate(() => [...document.querySelectorAll(".ProseMirror p")].find((el) => el.textContent.includes("Flow text"))?.textContent);
+  const boxesAfter16 = await storedBoxes(page);
+  ok(`${label} · ⛔ BACKSPACE STILL LEAVES THE FLOW TEXT UNTOUCHED EVEN WITH activeElement STUCK ON THE EDITOR`,
+    flowAfter16 === flowBefore16, JSON.stringify({ flowBefore16, flowAfter16 }));
+  ok(`${label} · ⛔ …AND IT DELETES THE SELECTED BOX INSTEAD`,
+    boxesAfter16.length === boxesBefore16.length - 1, `${boxesBefore16.length} → ${boxesAfter16.length}`);
+
+  await ctx.close();
+}
 
 ok("no uncaught page errors", pageErrors.length === 0, pageErrors.slice(0, 3).join(" | ") || "clean");
 
