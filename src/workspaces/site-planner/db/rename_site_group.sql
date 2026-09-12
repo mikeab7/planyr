@@ -92,6 +92,8 @@ volatile
 security invoker
 set search_path = public, pg_temp
 as $$
+declare
+  v_at bigint;
 begin
   -- ⛔ NEW-1 — REFUSE AN EMPTY STAMP BY NAME. `jsonb_set` is STRICT, so a NULL `p_renamed_at` makes
   -- the whole expression NULL and the statement tries to set `data` to NULL. MEASURED, not assumed:
@@ -107,12 +109,31 @@ begin
     raise exception 'rename_site_group: p_renamed_at must be a positive epoch-ms timestamp (got %)', p_renamed_at
       using errcode = '22004';
   end if;
+
+  -- ⛔ HARDENED 2026-09-12 (B1584512) — THE WRITTEN STAMP IS AUTHORITATIVE, NEVER JUST THE CALLER'S
+  -- GUESS. `sites_rename_stamp_guard.sql`'s trigger now refuses any write that is not STRICTLY
+  -- newer than a row's own STORED stamp (closing "an older stamp wins" — see that file). The
+  -- caller's `p_renamed_at` is computed client-side from `Math.max(Date.now(), newest-LOCAL-stamp +
+  -- 1)` — a genuinely later rename made from a device whose local cache does not include every plan
+  -- in this group could still name a value lower than a stamp already sitting on a row it hasn't
+  -- seen, and with the trigger now strict that row would REFUSE while its siblings accept, reopening
+  -- exactly the split-name defect this function exists to close. So take the group's own current
+  -- maximum here, from the SAME rows the update below is about to touch, and write
+  -- `greatest(caller's value, that maximum + 1)` — strictly newer than every row in the group by
+  -- construction, so the trigger can never partially refuse a genuine group rename. A caller whose
+  -- value already clears that bar (the ordinary case) is unaffected byte-for-byte.
+  select greatest(p_renamed_at, coalesce(max(public.rename_stamp(s.data -> 'siteRenamedAt')), 0) + 1)
+    into v_at
+    from public.sites s
+   where coalesce(s.data->>'groupId', s.id) = p_group_id
+     and s.deleted_at is null;
+
   return query
   update public.sites s
      set site       = p_site,
          data       = jsonb_set(
                         jsonb_set(coalesce(s.data, '{}'::jsonb), '{site}', to_jsonb(p_site), true),
-                        '{siteRenamedAt}', to_jsonb(p_renamed_at), true),
+                        '{siteRenamedAt}', to_jsonb(v_at), true),
          version    = coalesce(s.version, 1) + 1,
          updated_at = now()
    where coalesce(s.data->>'groupId', s.id) = p_group_id
@@ -123,6 +144,8 @@ $$;
 
 comment on function public.rename_site_group(text, text, bigint) is
   'Rename a project (site group) in one atomic statement across every plan row in the group. '
-  'SECURITY INVOKER — existing RLS on public.sites decides what the caller may rename.';
+  'SECURITY INVOKER — existing RLS on public.sites decides what the caller may rename. HARDENED '
+  '2026-09-12 (B1584512) — the stamp actually written is greatest(caller''s value, the group''s own '
+  'current max real stamp + 1), so it is always strictly newer than every row it touches.';
 
 grant execute on function public.rename_site_group(text, text, bigint) to authenticated;

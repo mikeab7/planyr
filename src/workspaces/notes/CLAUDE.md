@@ -903,6 +903,31 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
     untouched. ⛔ **A stale doc-comment from PR #1662 also claimed a NUMERIC pin "never returns wider
     than the pane" — never true (the pre-existing test asserted the opposite on purpose) — corrected
     in the same pass rather than left to mislead the next reader.**
+- **SET A PAGE'S OWN HEIGHT BY HAND (B1586784, `lib/notesPageHeight.js`) — the vertical twin of
+  the width pin above, owner decision 2026-09-12: "If the sides are draggable the top and bottom
+  should too."** Same shape, deliberately smaller: a `pageHeight` DOC attribute, `null` (Fit to
+  content) or a number (a pinned floor) — **no preset ladder, no `"full"`**, since the owner did
+  not ask for one. Two new grips (`note-page-height-grip-top`/`-bottom`, desktop-only) feed the
+  SAME stored number the width grips' shape already established: growth is always downward
+  (`dom.style.minHeight`, the same property the unpinned "max(46vh, need)" default already wrote
+  to), the bottom edge grows it directly, and the top edge grows it too while scrolling `note-mat`
+  by the identical amount — the width feature's own left-edge algebra, transposed. A drag's own
+  live floor (`heightContentFloorRef`) is `need` alone, never the current pin, for the exact
+  reason `widthContentFloorRef` is (§5-1 of the carry-forward file).
+  - **⛔ AND `box.bottom` STOPPED MEANING "WHERE THE FLOW ENDS" THE MOMENT A PIN COULD SET IT PAST
+    REAL CONTENT.** `focusFromMat`'s "click below → caret at end" branch (B1550976) used to compare
+    against `box.bottom` because that was always identical to the last real line's own bottom edge
+    — a height pin (or the pre-existing unpinned 46vh floor) can now leave genuine blank canvas
+    *inside* `dom`'s own box, and a native click there does not reliably place a caret. The fix is
+    **narrower than it looks**: the boundary only moves to the document's real end
+    (`editor.view.coordsAtPos(doc.content.size)`) while `pageHeight != null` — routing EVERY case
+    through it, the first draft's mistake, broke **verify-notes-anchor-zoom**'s own "double-click
+    in the unpinned 46vh blank area places a new block" behaviour, which must stay exactly as it
+    was.
+  - `notesPrint.js`'s `pageHeightPinExtentPx` folds a numeric pin into the SAME `sheetCss`
+    computation the width pin's `pageWidthPinExtentPx` already contributes to (`min-height` on
+    `.sheet`), never a second mechanism. `NoteToolbar.jsx`'s "Page height" `FormatMenu` sits
+    beside "Page width"; its one option is "Fit to content" — the pin's own way back.
 - **SKETCH MODE — four files, and ONE rule that makes them make sense.** *The **CANVAS** owns
   everything: each **box owns its own text AND its own position**, and the arrows are an explicit
   list of `{from,to}` box references.* There is no second representation, so there is nothing to

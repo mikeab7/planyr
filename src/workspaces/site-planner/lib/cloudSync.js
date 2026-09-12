@@ -126,7 +126,11 @@ export function siteRowFor(m, { isNew = false, teamId = null } = {}) {
     // `createSiteModel` already normalises what the app holds, but a row can also be written from
     // a header-only path that never round-tripped the model; this is the last gate before the
     // column, so no new mixed-case row can be created from this client whatever route it took.
-    group_id: m.groupId || null, site: m.site || null, name: m.name || null, county: normCountyKey(m.county),
+    // ⛔ NEW-3 (2026-09-12) — `group_id` mirrors the SAME derivation the RPCs use for this group,
+    // `coalesce(data->>'groupId', id)` — never a bare `|| null`, which used to write an explicit
+    // NULL for every anchor row instead of the id every jsonb-keyed reader already falls back to.
+    // See nameGroupIntegrity.js for the detector this keeps green going forward.
+    group_id: m.groupId || m.id || null, site: m.site || null, name: m.name || null, county: normCountyKey(m.county),
     updated_at: new Date(m.updatedAt || Date.now()).toISOString(),
     data: m,
   };

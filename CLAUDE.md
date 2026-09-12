@@ -660,7 +660,20 @@ Runtime deps are kept few and deliberate. New client dependency added 2026-07-10
   Nudge on the absence of a RUN, never on `total_count: 0`.
   **⚠ AND WHEN A NUDGE IS GENUINELY OWED, PREFER MERGING `origin/main` OVER AN EMPTY COMMIT** — it
   fires the same real push event AND refreshes a branch that has drifted, so it fixes the stale-merge
-  case at the same time. Resolve the inevitable `BACKLOG.md` conflict by keeping both sides.
+  case at the same time.
+  **⛔ USE `npm run safe-merge -- origin/main`, NOT a bare `git merge origin/main`, whenever the merge
+  might touch `BACKLOG.md`/`VERIFICATION.md` (B1592848, 2026-09-12) — which is nearly always, since
+  main moves fast on exactly these two files.** The manual remedy below (`node
+  scripts/resolve-ledgers.mjs`) already existed and was already safe, and sessions kept not running
+  it anyway: within one hour, PR #1673 and PR #1675 both went `mergeable_state: dirty` on this exact
+  file pair and were hand-rebased instead of resolved, and PR #1656 hit the identical shape earlier
+  the same evening. `scripts/merge-ledgers-safe.mjs` is the fix — ONE command that runs `git merge`,
+  and if (and only if) the ONLY conflicts left are ones `resolve-ledgers.mjs` itself judges safe to
+  union, finishes the merge commit automatically; a real disagreement (two sessions editing the same
+  item) is left exactly as a raw `git merge` would leave it — real conflict markers, nothing
+  committed, resolve by hand. It is composition, not a new mechanism: it does not weaken
+  `resolve-ledgers.mjs`'s guarantees in any way, it just removes the separate step nobody was
+  remembering to run.
   **`MAP.md` / `BACKLOG_OPEN.md` conflicts now self-resolve automatically on `git merge` (B904992)** —
   a committed `.gitattributes` hands both paths to a custom merge driver
   (`scripts/merge-driver-ledgers.mjs`), backed by a `post-merge` hook
@@ -672,10 +685,18 @@ Runtime deps are kept few and deliberate. New client dependency added 2026-07-10
   scripts/install-hooks.mjs --check` to confirm) rather than resolving by hand. **The manual path is
   not gone** — it is still the only route for `BACKLOG.md` / `docs/archive/BACKLOG-DONE.md` / `VERIFICATION.md` /
   `docs/archive/VERIFICATION-DONE.md` (a merge driver is per-file and cannot run `resolve-ledgers.mjs`'s cross-file
-  duplicate-id rollback), and it is still the correct fallback if the driver itself ever refuses
+  duplicate-id rollback — considered and deliberately ruled out for these four files, see
+  `scripts/merge-driver-ledgers.mjs`'s own header; `npm run safe-merge` above is the answer that
+  doesn't need one), and it is still the correct fallback if the driver itself ever refuses
   (LOUD-FAILURE — it leaves ordinary conflict markers rather than guess): `node
   scripts/resolve-ledgers.mjs` regenerates all four hand-merged files AND both generated ones in one
-  pass.
+  pass. **⛔ B1592848 (2026-09-12) closed a real gap in that resolver's own safety check:** an
+  in-place edit to a NON-heading line inside an existing item (e.g. two branches each rewriting the
+  same item's `- Verify:` line differently) never puts a `### B#`/`### V#` heading inside the
+  conflict hunk, so the old id-overlap check saw two empty sets and called it safe — reproduced
+  directly, it silently unioned both edits into one item's body. The precondition now also refuses
+  whenever either non-empty side of a hunk is not a clean, complete new-item insertion; see that
+  script's header and `test/resolveLedgers.test.js` for the reproduction.
   **⚠ CHECK `mergeable_state` FIRST — a "dirty" (merge-conflicted) PR silently swallows EVERY nudge
   (learned 2026-07-06 on PR #518).** GitHub only creates `pull_request` build runs against the PR's
   test-MERGE ref; while the PR conflicts with `main` that ref can't exist, so nudges, close/reopen —
