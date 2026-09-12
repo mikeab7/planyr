@@ -152,6 +152,56 @@ describe("ParcelInfoCard — everything the card already did, unchanged (NEW-1)"
   });
 });
 
+/* ⛔ B1597232 (2026-09-12) — A COVERAGE GAP IS NOT AN OUTAGE, AND THIS CARD IS WHERE THE OWNER MET IT.
+ *
+ * The Wayne County, MI report came in through exactly this surface: search the address, let the
+ * automatic lot lookup run. Once `candidateCountiesForPoint` correctly returns NOTHING for a county
+ * Planyr has never wired, the card had only `unavailable` to land on — "the county parcel service
+ * couldn't be reached for this area right now… Give it a moment" — which is false in both halves:
+ * nothing was unreachable, and waiting changes nothing. A permanent fact wearing a transient
+ * failure's words invites the owner to keep retrying something that will never come back. */
+describe("ParcelInfoCard — the no-source state (B1597232)", () => {
+  const NOTE = "Wayne County — no parcel data wired here yet.";
+  const noSource = (extra = {}) => render({ info: { status: "no-source", label: "23555 Goddard Rd, Taylor, MI", note: NOTE, ...extra } });
+
+  it("names the county and the gap, using the resolver's own sentence", () => {
+    const html = noSource();
+    expect(html).toContain("No parcel data here yet");
+    expect(html).toContain(NOTE);
+    expect(html).toContain("parcel-card-no-source");
+  });
+
+  it("never reads as an outage — no 'couldn't be reached', no 'give it a moment', no retry", () => {
+    const html = noSource();
+    expect(html).not.toContain("Parcel info unavailable");
+    expect(html).not.toContain("couldn");   // "couldn't be reached" / "couldn’t be reached"
+    expect(html).not.toMatch(/give it a moment/i);
+  });
+
+  it("⛔ does NOT offer 'start the plan here anyway', even when the caller passes the handler", () => {
+    // NEW-4's rule, which this state must not quietly widen: that fallback exists for an OUTAGE,
+    // where the source that WOULD have answered is down. Here nothing is down — the way forward is
+    // the aerial trace the copy names, and MapFinder gates the prop on `unavailable` for the same
+    // reason. Passing the handler anyway proves the card itself holds the line.
+    const html = noSource();
+    expect(html).not.toContain("parcel-card-start-blank");
+    expect(noSource()).not.toContain("Start the plan here");
+    const forced = render({ info: { status: "no-source", note: NOTE }, onStartBlank: () => {} });
+    expect(forced).not.toContain("parcel-card-start-blank");
+  });
+
+  it("points at the way forward that actually exists", () => {
+    expect(noSource()).toMatch(/trace the lot/i);
+    expect(noSource()).toContain("Aerial");
+  });
+
+  it("carries no primary action, like every other state of this card", () => {
+    const html = noSource();
+    expect(html).not.toContain("Plan this site");
+    expect(html).not.toContain("Add as comp");
+  });
+});
+
 // NEW-6 → NEW-1 (2026-09-08, the map toolbar goes ground-first). NEW-6 made this card's primary
 // action follow the map's Site/Comp toggle, because with the toggle on Comp an address search
 // still popped this card offering "Plan this site" — a Site-module action. That toggle no longer

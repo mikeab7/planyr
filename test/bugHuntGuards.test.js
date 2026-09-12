@@ -869,3 +869,50 @@ describe("B869/V352 (2026-07-19 verification handoff): the SITE-BASED suggested 
     expect(src).toMatch(/basisKind: "site"/);
   });
 });
+
+/* ⛔ B1597232 (2026-09-12) — AN EMPTY CANDIDATE LIST IS NEVER REPORTED WITHOUT ASKING WHY IT IS EMPTY.
+ *
+ * The Wayne County, MI fix makes `candidateCountiesForPoint` return NOTHING for a point whose
+ * county is confidently resolved and has no parcel source wired — which is the honest answer, and
+ * which changed what an empty list MEANS. It used to mean only "nothing has resolved yet"; it now
+ * also means "there is permanently nothing to ask here." MapFinder's two empty-list branches were
+ * both written for the first meaning and said so out loud — "Parcel services are still loading —
+ * give it a second and click again" on a click, and the `unavailable` card ("the county parcel
+ * service couldn't be reached… give it a moment") on an address search, which is the surface the
+ * owner actually reported through. Left alone, the fix would have replaced a wrong query with a
+ * wrong sentence: a permanent fact wearing a transient failure's words, inviting him to retry
+ * something that will never come back.
+ *
+ * `countyIdentity` is the one thing that can tell the two apart, so this guard is the property
+ * rather than the wording: EVERY `if (!candidates.length)` branch must consult it. A future edit
+ * may reword any of these messages freely; it may not go back to guessing which one applies.
+ * The pure half — that Taylor and Livonia really do produce an empty list, and that Las Vegas and
+ * Columbus do not — is in test/cityScopes.test.js and test/countyStatewideDerivation.test.js. */
+describe("B1597232 — MapFinder never explains an empty candidate list without consulting countyIdentity", () => {
+  const src = read("../src/workspaces/site-planner/MapFinder.jsx");
+
+  it("finds both empty-candidate branches — the click and the address search", () => {
+    // A rename that loses a branch would make the assertions below vacuously pass.
+    expect((src.match(/if \(!candidates\.length\)/g) || []).length).toBe(2);
+  });
+
+  it.each([0, 1])("branch %i asks countyIdentity/noParcelSourceNote before it chooses its wording", (i) => {
+    const starts = [...src.matchAll(/if \(!candidates\.length\)/g)].map((m) => m.index);
+    const block = src.slice(starts[i], starts[i] + 600);
+    expect(block).toMatch(/noParcelSourceNote\(countyIdentity\(/);
+  });
+
+  it("the address-search branch has its own card state — it never reports a coverage gap as an outage", () => {
+    const starts = [...src.matchAll(/if \(!candidates\.length\)/g)].map((m) => m.index);
+    const search = src.slice(starts[1], starts[1] + 600);
+    expect(search).toMatch(/status: "no-source"/);
+    // …and `unavailable` survives for the cases that really are one (nothing resolved yet).
+    expect(search).toMatch(/status: "unavailable"/);
+  });
+
+  it("the OUTAGE fallback stays gated on `unavailable` — a coverage gap is not offered a retry route", () => {
+    // NEW-4's rule: "start the plan here anyway" exists because the source that WOULD have
+    // answered is down. Nothing is down in a county that was never wired.
+    expect(src).toMatch(/onStartBlank=\{parcelInfo\.status === "unavailable"/);
+  });
+});

@@ -4,10 +4,21 @@ import { PinIcon, EmptyCircleIcon, WarnTriangleIcon } from "./icons.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
 
 /* ParcelInfoCard (B233, reshaped by NEW-1) — the card that drops in under the map
- * finder's search pill after a "Go". Three distinct states: found (the parcel's key
+ * finder's search pill after a "Go". FOUR distinct states: found (the parcel's key
  * facts + Plan this site), none (the map centred, but no parcel covers that point),
- * and unavailable (the county parcel service couldn't be reached) — the last two read
- * differently on purpose.
+ * unavailable (the county parcel service couldn't be reached) and no-source (this county
+ * has no parcel source wired at all) — each reads differently on purpose.
+ *
+ * B1597232 — `no-source` is the newest and exists because the other three could not express it.
+ * A point in a county Planyr has never wired has nothing to query, so the search used to land
+ * on `unavailable`: "the county parcel service couldn't be reached for this area right
+ * now… give it a moment." Both halves were false — nothing was unreachable, and waiting
+ * changes nothing — and it is the wording the owner met when searching two Wayne County, MI
+ * addresses. This state names the county and says the gap is a gap, from `noParcelSourceNote`'s
+ * own sentence (passed in as `info.note`) so the words cannot drift from the verdict that
+ * produced them. It deliberately does NOT offer "start the plan here anyway": per NEW-4's rule,
+ * that fallback belongs to an OUTAGE (where the source that would have answered is down), and
+ * the way forward here is the aerial trace the copy names.
  *
  * NEW-1: the found state shows exactly THREE rows by default — Owner, Account / ID,
  * Acreage (the split lives in lib/appraisal.js `parcelCardRows`, so it's unit-guarded).
@@ -84,6 +95,7 @@ export default function ParcelInfoCard({
   if (!info) return null;
 
   const found = info.status === "found";
+  const noSource = info.status === "no-source"; // B1597232 — this county has no parcel source wired at all
   const { primary, more } = found ? parcelCardRows(info.attrs, { acct: info.acct, acres: info.acres }) : { primary: [], more: [] };
 
   return (
@@ -100,11 +112,14 @@ export default function ParcelInfoCard({
             glyphs, so the three states of the same badge didn't match each other. */}
         <span style={{ flex: "none", display: "grid", placeItems: "center",
           color: info.status === "unavailable" ? "var(--warn-text)" : found ? PAL.accent : PAL.muted }}>
-          {found ? <PinIcon size={13} /> : info.status === "none" ? <EmptyCircleIcon size={13} /> : <WarnTriangleIcon size={13} />}
+          {/* B1597232 — a coverage gap is a neutral FACT, not a warning: it shares the `none` state's
+              quiet empty circle rather than the outage triangle, because nothing has gone wrong. */}
+          {found ? <PinIcon size={13} /> : info.status === "none" || noSource ? <EmptyCircleIcon size={13} /> : <WarnTriangleIcon size={13} />}
         </span>
         <span style={{ flex: 1, fontSize: 12.5, fontWeight: 700, color: info.status === "unavailable" ? PAL.accent : PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {found ? (info.addr || info.label || "Parcel")
             : info.status === "none" ? "No parcel at this point"
+            : noSource ? "No parcel data here yet"
             : "Parcel info unavailable"}
         </span>
         <button onClick={onDismiss} title="Dismiss" aria-label="Dismiss parcel info"
@@ -159,6 +174,13 @@ export default function ParcelInfoCard({
       ) : info.status === "none" ? (
         <div style={{ padding: "9px 11px", fontSize: 11.5, color: PAL.muted, lineHeight: 1.5 }}>
           The map centered on the address, but no parcel covers that exact point — it may sit on a road or right-of-way. Click the lot directly, or zoom in and use <b>Select parcels</b>.
+        </div>
+      ) : noSource ? (
+        /* B1597232 — the county is named by `info.note` (`noParcelSourceNote`'s own sentence, so this
+           card can never name a different county from the one the resolver decided on), and the
+           way forward is the aerial trace — never the outage fallback, and never "try again". */
+        <div data-testid="parcel-card-no-source" style={{ padding: "9px 11px", fontSize: 11.5, color: PAL.muted, lineHeight: 1.5 }}>
+          {info.note} You can still trace the lot from the <b>Aerial</b> underlay.
         </div>
       ) : (
         /* NEW-4 — an outage used to end here, with the owner left on a map that would not give

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { cityScopeAnswer } from "../src/workspaces/site-planner/lib/cityScopes.js";
 import {
-  COUNTIES, COUNTIES_MAP, countyIdentity, countyForView, candidateCountiesForPoint,
+  COUNTIES, COUNTIES_MAP, countyIdentity, countyForView, candidateCountiesForPoint, noParcelSourceNote,
 } from "../src/workspaces/site-planner/lib/counties.js";
 import { setCountyPolygons } from "../src/workspaces/site-planner/lib/countyPolygons.js";
 
@@ -91,5 +91,62 @@ describe("Detroit wired as a CITY, not as Wayne County (B1583296)", () => {
   it("countyForView never names mi_detroit for a point outside Detroit's own limits", () => {
     expect(countyForView(...LIVONIA)).not.toBe("mi_detroit");
     expect(countyForView(...TAYLOR)).not.toBe("mi_detroit");
+  });
+});
+
+/* ⛔ B1597232 — THE WAYNE→OAKLAND REGRESSION FIXTURE, at the EXACT points measured live from the
+ * owner's own browser on the build after the Detroit wiring merged (2026-09-12, just after
+ * midnight Central). Same wrong-county class as Casa Grande→Maricopa; opposite branch of it.
+ *
+ * WHY THE SUITE ABOVE DID NOT CATCH IT, which is the part worth keeping: it asserted
+ * `not.toContain("mi_detroit")` — the failure it was written to prevent — and mi_detroit really
+ * was absent. `mi_oakland` was there instead, and "does not contain the ONE key I was thinking
+ * about" is not the same assertion as "contains nothing that could answer for this point." These
+ * fixtures pin the WHOLE list, for both points, so no third Michigan source can slip into it
+ * either. (The general rule behind them, and the cases in other states that must keep their
+ * answers, are in countyStatewideDerivation.test.js.)
+ *
+ * Oakland's southern line is 8 Mile Road, ~42.44°N. Taylor is ~15 miles south of it and Livonia
+ * ~3; neither is a boundary-precision case, and the resolver reports both as confidently inside
+ * Wayne. The two arrived by DIFFERENT paths — Taylor matched no county bbox at all, Livonia fell
+ * inside Oakland's padded one — so both are pinned, not just the tidier one. */
+describe("a Wayne County point never reaches Oakland County's service (B1597232)", () => {
+  // Exactly as measured, transposed from the reported (lng, lat) to this function's (lat, lng).
+  const GODDARD_RD_TAYLOR = [42.224770, -83.263421];   // 23555 Goddard Rd, Taylor, MI
+  const CIVIC_CENTER_LIVONIA = [42.396293, -83.368074]; // 33000 Civic Center Dr, Livonia, MI
+  const WOODWARD_DETROIT = [42.328905, -83.045471];     // 1 Woodward Ave — the working control
+
+  it.each([
+    ["23555 Goddard Rd, Taylor (matched no county bbox)", GODDARD_RD_TAYLOR],
+    ["33000 Civic Center Dr, Livonia (fell inside Oakland's padded bbox)", CIVIC_CENTER_LIVONIA],
+  ])("%s queries NOTHING — not Oakland, not Detroit, not anything", (_label, pt) => {
+    expect(candidateCountiesForPoint(...pt)).toEqual([]);
+  });
+
+  it.each([
+    ["Taylor", GODDARD_RD_TAYLOR],
+    ["Livonia", CIVIC_CENTER_LIVONIA],
+  ])("%s is reported as a NAMED gap, so the empty list reads as a fact and not as a stall", (_label, pt) => {
+    const id = countyIdentity(...pt);
+    expect(id.status).toBe("no-source");
+    expect(id.name).toBe("Wayne County");
+    expect(id.state).toBe("MI");
+    // Confidently inside Wayne — not a near-edge point where a wired neighbour may legitimately
+    // own the lot, which is the one case that still keeps the old multi-candidate behaviour.
+    expect(id.nearEdge).toBe(false);
+    expect(noParcelSourceNote(id)).toBe("Wayne County — no parcel data wired here yet.");
+  });
+
+  it("THE CONTROL — 1 Woodward Ave still resolves to the Detroit city source ALONE", () => {
+    // Verified live the same night: exactly one query, to Detroit_MP_Parcel_Authoritative, which
+    // returned a 0.60 AC lot. The Wayne fix must leave this path byte-identical.
+    expect(candidateCountiesForPoint(...WOODWARD_DETROIT)).toEqual(["mi_detroit"]);
+    expect(countyIdentity(...WOODWARD_DETROIT).key).toBe("mi_detroit");
+  });
+
+  it("THE OTHER CONTROL — a real Oakland County point still reaches Oakland's service", () => {
+    // The defect was never in Oakland's own wiring (its service is fine and correctly wired for
+    // Oakland); it was which points reached it. Pontiac, MI — squarely inside Oakland.
+    expect(candidateCountiesForPoint(42.6389, -83.2910)).toEqual(["mi_oakland"]);
   });
 });

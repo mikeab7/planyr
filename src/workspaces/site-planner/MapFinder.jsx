@@ -3118,7 +3118,21 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // the first hit. Candidates with an unresolved URL (service still loading or
     // down), or a primary whose breaker is open, are skipped this click.
     const { candidates, realPrimaries } = resolveCandidates(latlng);
-    if (!candidates.length) { setErr("Parcel services are still loading — give it a second and click again."); return; }
+    /* ⛔ B1597232 — "STILL LOADING" IS ONE OF *TWO* REASONS THERE IS NOTHING TO QUERY, AND SAYING IT
+     * FOR THE OTHER ONE IS A LIE THAT NEVER RESOLVES. Since the Wayne→Oakland fix,
+     * `candidateCountiesForPoint` returns an EMPTY list for a point whose county is confidently
+     * resolved and has no parcel source wired — which is a permanent, knowable fact, not a warm-up.
+     * Telling the owner to "give it a second and click again" there invites him to click forever.
+     * `countyIdentity` already knows the difference and already supplies the sentence; the outage
+     * and pending cases keep their existing wording untouched. Same shape as the no-hits branch
+     * below, which has named the county since B209502. */
+    if (!candidates.length) {
+      const gap = noParcelSourceNote(countyIdentity(latlng.lat, latlng.lng));
+      setErr(gap
+        ? `${gap} You can still trace the lot from the Aerial underlay.`
+        : "Parcel services are still loading — give it a second and click again.");
+      return;
+    }
     setErr(""); setFallbackOffer(null); setBackupNotice(null); setCachedNotice(null); setLocateFar(false);
 
     // Instant local toggle-off: a click inside an already-highlighted parcel deselects
@@ -3245,7 +3259,21 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // this one stale, so we neither apply its parcelInfo NOR add its (now-wrong) parcel.
     const live = () => tok == null || tok === addrTokRef.current;
     const { candidates, realPrimaries } = resolveCandidates(latlng);
-    if (!candidates.length) { if (live()) setParcelInfo({ status: "unavailable", label }); return; }
+    /* ⛔ B1597232 — A COVERAGE GAP IS NOT AN OUTAGE, AND THIS IS THE SURFACE THE WAYNE COUNTY REPORT
+     * CAME IN THROUGH ("search the address, let the automatic lot lookup run"). With no candidates
+     * this card used to read `unavailable` — "the county parcel service couldn't be reached for
+     * this area right now… give it a moment" — which, for a county Planyr has simply never wired,
+     * is false in both halves: nothing was unreachable, and waiting changes nothing. `no-source` is
+     * its own card state carrying `countyIdentity`'s own sentence, so the wording cannot drift from
+     * the verdict. The genuine cases below (nothing resolved yet, a thrown lookup) still say
+     * `unavailable`, and only they keep the "start the plan here anyway" way out — per the NEW-4
+     * rule the click path already follows: an OUTAGE carries the fallback, a coverage fact does not
+     * (the aerial trace, offered in the copy, is the way forward for this one). */
+    if (!candidates.length) {
+      const gap = noParcelSourceNote(countyIdentity(latlng.lat, latlng.lng));
+      if (live()) setParcelInfo(gap ? { status: "no-source", label, note: gap } : { status: "unavailable", label });
+      return;
+    }
     let res;
     try {
       res = await identifyParcelEager(candidates, latlng.lng, latlng.lat, {

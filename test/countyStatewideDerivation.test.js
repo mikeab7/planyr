@@ -517,3 +517,103 @@ describe("B1574256/B1574257 — Louisiana parishes route by geometry, not just b
     expect(candidateCountiesForPoint(30.4515, -91.1871)).not.toContain("la_orleans");
   });
 });
+
+/* ⛔ B1597232 (2026-09-12) — A COUNTY THE GEOMETRY RESOLVES CONFIDENTLY, AND THAT HAS NO PARCEL SOURCE
+ * OF ITS OWN, YIELDS *NO* REAL-CAD CANDIDATE — NEVER A NEIGHBOUR'S.
+ *
+ * The live report: two Wayne County, MI addresses (Taylor and Livonia) each fired exactly one
+ * parcel query, and it went to OAKLAND County's service — a county whose southern line, 8 Mile
+ * Road, is up to fifteen miles north of them. The exact-point regression fixtures live in
+ * test/cityScopes.test.js beside the Detroit wiring they sit next to; THIS suite holds the general
+ * rule and, more importantly, the cases that must NOT change with it.
+ *
+ * THE CAUSE, in one line, because it is not the one the symptom suggests: the resolver could not
+ * tell "I don't know this county" from "I know this county and it has no source." Both arrived as
+ * a null `truth`, and a null `truth` was a licence to fall back — to the state's other sources
+ * (Taylor, which matched no bbox) or to whatever padded bbox happened to reach (Livonia, which sat
+ * inside Oakland's). `countyIdentity` has always distinguished the two; `candidateCountiesForPoint`
+ * now reads it.
+ *
+ * ⛔ THE HALF THAT IS EASY TO GET WRONG, and why these tests matter more than the fixtures:
+ * "no source of its own" is NOT the same as "no coverage." A state with a STATEWIDE composite
+ * covers every county in it — TxGIO paints all 254 Texas counties; `nv_statewide` is the only
+ * parcel source Nevada has at all — so a composite is never narrowed away by a county-level
+ * answer. Only a RIVAL COUNTY's CAD is dropped, because that is the one thing that provably cannot
+ * answer for a lot outside its own lines. A fix that dropped the composites too would have taken
+ * Nevada, Ohio and every other statewide-only state offline to fix Michigan. */
+describe("B1597232 — an unsourced county is an ANSWER (no candidates), not a licence to ask its neighbour", () => {
+  it("a state whose only county source is elsewhere returns NOTHING, not that source", () => {
+    // Michigan wires exactly two sources — Oakland County and the City of Detroit — and Wayne
+    // County is neither. Both Wayne paths (no bbox match; inside Oakland's padded bbox) are pinned
+    // at their exact measured points in test/cityScopes.test.js.
+    expect(candidateCountiesForPoint(42.224770, -83.263421)).toEqual([]); // Taylor
+    expect(candidateCountiesForPoint(42.396293, -83.368074)).toEqual([]); // Livonia
+  });
+
+  it("the same rule, a different state: an unwired Louisiana parish never reaches the two wired ones", () => {
+    // Lafayette Parish, whose honest `no-source` identity this file already asserts above. Before
+    // this fix it was handed BOTH la_orleans and la_eastbatonrouge — services ~80 and ~40 miles
+    // away that cannot hold a Lafayette lot. Louisiana has no statewide composite, so: nothing.
+    expect(candidateCountiesForPoint(30.2241, -92.0198)).toEqual([]);
+  });
+
+  it("⛔ A STATEWIDE COMPOSITE IS COVERAGE AND IS NEVER NARROWED AWAY — the states that would break", () => {
+    // Clark County NV and Franklin County OH are both `no-source` at COUNTY level and both fully
+    // covered by their state's composite. If the fix had dropped composites alongside rival
+    // counties, every statewide-only state would have gone dark. Each still returns exactly its own.
+    expect(candidateCountiesForPoint(36.1699, -115.1398)).toEqual(["nv_statewide"]); // Las Vegas
+    expect(candidateCountiesForPoint(39.9612, -82.9988)).toEqual(["oh_statewide"]);  // Columbus
+    expect(countyIdentity(36.1699, -115.1398).status).toBe("no-source");
+    expect(countyIdentity(39.9612, -82.9988).status).toBe("no-source");
+  });
+
+  it("a WIRED county in the same state is untouched — the defect was which points reached Oakland, never Oakland", () => {
+    expect(candidateCountiesForPoint(42.6389, -83.2910)).toEqual(["mi_oakland"]); // Pontiac, MI
+  });
+
+  it("every county Michael verified live the same night still issues exactly one query", () => {
+    // New Orleans, Savannah, Des Moines, Phoenix, Casa Grande — reported as working, one query
+    // each. The Wayne fix touches the branch they all pass through, so they are re-pinned here.
+    for (const [label, lat, lng, key] of [
+      ["New Orleans", 29.9511, -90.0715, "la_orleans"],
+      ["Savannah", 32.0809, -81.0912, "ga_chatham"],
+      ["Des Moines", 41.5868, -93.6250, "ia_polk"],
+      ["Phoenix", 33.4484, -112.0740, "az_maricopa"],
+      ["Casa Grande", 32.8802, -111.7476, "az_pinal"],
+    ]) {
+      expect(candidateCountiesForPoint(lat, lng), label).toEqual([key]);
+    }
+  });
+});
+
+/* B1597232 (second half) — THE SAME NARROW, ON THE BRANCH THAT NEVER GOT IT.
+ *
+ * B1338896 (above) made a confident geometry answer decide MEMBERSHIP rather than order — but only
+ * on the path where at least one bbox matched. The no-bbox-match path still answered a confidently
+ * resolved point with EVERY county in its state. Measured on the same build as the Wayne report:
+ * one Huntsville, TX point — Walker County, resolved confidently — returned TEN candidates, nine of
+ * them neighbouring counties' CADs that cannot hold a Walker lot (harris, fortbend, chambers,
+ * waller, montgomery, brazoria, galveston, liberty, austintx) plus TxGIO. Same rule, same
+ * `nearEdge` gate, same reason a neighbour is dropped: it cannot answer, so asking it is cost
+ * without coverage. This is the branch Conroe and Texas City are documented to arrive on, so both
+ * are pinned too. */
+describe("B1597232 — the confident narrow reaches the no-bbox-match branch as well", () => {
+  it("Huntsville, TX (Walker) stops querying nine neighbouring CADs", () => {
+    // Walker is a statewide-DERIVED county: its key and `txgio_statewide` resolve to the SAME
+    // endpoint, so returning both would query one URL twice under two names. The composite key is
+    // the one kept — it is the key the circuit breaker never drops and the one `isStatewideBackup`
+    // reasons about.
+    expect(candidateCountiesForPoint(30.7235, -95.5508)).toEqual(["txgio_statewide"]);
+  });
+
+  it("Conroe and Texas City — the two points this branch was documented for — resolve to their own county plus the composite", () => {
+    expect(candidateCountiesForPoint(30.3119, -95.4561)).toEqual(["montgomery", "txgio_statewide"]); // Conroe
+    expect(candidateCountiesForPoint(29.3838, -94.9027)).toEqual(["galveston", "txgio_statewide"]);  // Texas City
+  });
+
+  it("a dialed-in county keeps its OWN CAD first, with the statewide layer behind it as backup", () => {
+    // The narrow must never promote the composite over a county that has a real CAD of its own.
+    expect(candidateCountiesForPoint(29.7604, -95.3698)).toEqual(["harris", "txgio_statewide"]);
+    expect(candidateCountiesForPoint(29.5636, -95.2860)).toEqual(["brazoria", "txgio_statewide"]); // Pearland
+  });
+});
