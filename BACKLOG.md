@@ -55,6 +55,34 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 
 ## 🔲 Open
 
+### B1340512 — Replace the Site module loader with the "Stack" mark `[Site Planner]` (task) #site-planner #ui  *(owner chat block, 2026-09-12: reviewed five replacements for the Site module's first-paint loader — a pale lopsided blob tracing a third of its perimeter, captioned "Drawing site plan…" with a mint diamond — and picked "Stack": the three plates of the existing planyr brand mark settling into place, bottom plate first, then holding, nothing else on screen. Minted **B1340512** from this branch's reserved block B1340512–B1340527 · V977232–V977247 against freshly-fetched `origin/main` 5ec3d09. DEDUPE-FIRST — searched Open/⏳Verify/Done for "Drawing site plan", "site loader", "ModuleLoader", "Stack mark": B224 (Done) built the ORIGINAL per-module loader engine (incl. the blob this item replaces) — confirmed, not superseded elsewhere; net-new otherwise.)*
+`[x]` **IMPLEMENTED THIS SESSION.**
+- Verify: sandbox — reproduced and verified in a headless, signed-out Chromium session (ATTEMPT-BEFORE-YOU-PARK: no auth, no external GIS, fully Claude-doable) against the real production build (`vite preview`), with the Site Planner chunk's network response artificially delayed (Playwright route interception) so the loader stays on screen long enough to sample across more than one full 2.9s animation cycle. 15/15 checks: the mark renders with no caption text anywhere in the status region (only an `aria-label` for screen readers, defaulting to "Loading…" since this skin sets no visible label); all three plates run `pl-stack-settle`, staggered exactly `0s/0.13s/0.26s`, cycle duration `2.9s`; sampling across >1 cycle shows a genuine settled phase, a fade, and a hidden pause before it loops again (opacities `[1,1,1,1,0.09,0,0.93,1]` — no jump/flicker at the loop seam, by construction: the keyframe's 0% and 100% states are identical); `prefers-reduced-motion` renders all three plates static at full opacity/`transform:none` with no animation; phone width applies a `transform: scale(0.72)` to the whole mark via one `@media (max-width: 560px)` rule, still centred; light and dark themes both resolved the correct `--surface-page` background behind an unaffected mark. Screenshots taken at each case.
+
+**THE MARK IS REUSED, NOT FORKED.** `BrandMark.jsx` (the existing inline-SVG isometric stack used in the header/favicon) gained one new optional prop, `plateProps(tier)` — called per plate (`"base"|"mid"|"top"`) to wrap it in its own `<g>` with the returned props, so a caller can animate the three plates independently. Unused by any existing caller (no prop passed = no extra `<g>`, byte-identical DOM), so the header/favicon/wordmark uses are untouched. `ModuleLoader.jsx`'s new `StackMark` component calls `<BrandMark size={46} variant="favicon" tile={false} plateProps={...} />` — the solid three-plate glyph, no dark backing tile, no wordmark — never a second copy of the polygons.
+
+**THE ANIMATION.** One CSS `@keyframes pl-stack-settle` shared by all three plates via `animation-delay` (0/130/260ms, bottom first): 0%→14% settle in (`opacity 0→1`, `translateY(-9px)→0`, `cubic-bezier(.22,.61,.36,1)`), 14%→72% hold at rest, 72%→86% fade back out, 86%→100% pause hidden — 0% and 100% are the identical hidden state, so the `infinite` loop never jumps at the seam; that pause is what makes the loop read as deliberate rather than an abrupt restart. Pure CSS + the existing inline SVG, no canvas/library/JS animation loop, so it paints on the very first frame with nothing to wait on.
+
+**THE OLD SKIN IS FULLY REMOVED, not flagged off.** `moduleLoaderTheme.js`'s `"site-planner"` entry is now `{ kind: "stack" }` (was `{ kind: "site", label: "Drawing site plan…" }`); `ModuleLoader.jsx`'s `SiteSkin` function, its `SITE_BUILDINGS` fixture, and the caption/diamond-bullet row are deleted for this skin (the Gantt skin other modules use is untouched — Schedule was explicitly out of scope this session, per the brief, and still shows its own caption). No flag, no leftover geometry helper.
+
+**ADJACENT CASES, all checked live:**
+| Case | Result |
+|---|---|
+| Cold load of the Site route, throttled network | Mark settles in, holds, loops with a visible pause; no caption |
+| Switching to Site from another module, same session | Same bare mark if the loader appears at all (often too fast to show, which is correct) |
+| A project with no parcel drawn yet | Identical code path — the loader is a pure Suspense/chunk boundary, zero dependency on project/parcel data |
+| Phone width | Mark scales down via one CSS rule, stays centred, same timing |
+| `prefers-reduced-motion: reduce` | All three plates static, full opacity, no movement |
+| Light theme | Correct light `--surface-page` behind the mark |
+| Dark theme | Correct dark `--surface-page` behind the mark |
+| Slow connection (loops several times) | Sampled opacity across >1 cycle confirms settle→hold→fade→pause→resettle with no stutter at the seam |
+
+**Owner product constraints check:** nothing here contradicts any listed constraint.
+
+- Files: `src/shared/brand/BrandMark.jsx` (`plateProps` prop), `src/shared/ui/ModuleLoader.jsx` (`StackMark`, keyframes, removed `SiteSkin`/`SITE_BUILDINGS`), `src/shared/ui/moduleLoaderTheme.js` (`site-planner` skin), `test/moduleLoaderTheme.test.js` (updated for the new kind + the no-caption-label case).
+
+---
+
 ### B1551617 — Wire every remaining county in the country, using the new discovery harness `[Site Planner]` (task) #gis #parcel  *(owner dispatch, 2026-09-11, item 3: "Ship tier 1 in this session. If tier 2 and 3 cannot fit, say so loudly and leave the harness runnable so the next session continues — do not silently stop." Minted **B1551617** from this branch's reserved block B1551616–B1551631 against freshly-fetched `origin/main` fb3275f2. DEDUPE-FIRST — searched Open/⏳Verify/Done for "Tier 1 counties", "Hillwood markets", "discover-county-parcels": no prior item; net-new. See **B1551616** (Done — the harness this item runs) and **B1551619** (Done — the doc-recording discipline this item's results follow).)*
 `[ ]` **9 of the 22 Tier-1 counties are wired and shipped this session** (`ga_fulton`, `ga_chatham`, `az_pinal`, `mo_clay`, `sc_greenville`, `ia_polk`, `pa_lehigh`, `nm_bernalillo`, `il_kane` — see `docs/STATEWIDE-PARCELS.md`'s "Tier 1" table for the full detail on each). **13 remain**, and the reason in every case is named, not silent:
   - **✅ Maricopa AZ — RESOLVED 2026-09-12, see B1339920/B1339921.** `gis.maricopa.gov` was measured live from the owner's own browser and wired as `az_maricopa`; that same dispatch also found route 3's own hostname-pattern generator was missing the bare `gis.<name>.gov` shape this host (and likely others) uses — fixed in B1339921 so this class no longer depends on lucky harvest.
