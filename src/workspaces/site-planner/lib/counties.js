@@ -667,6 +667,14 @@ const COUNTIES_RAW = {
     idField: "PIN", addrField: "PropAddres",
     help: "Chatham County (Savannah) parcels (county GIS, Esri-hosted). Search by PIN or a site address.",
   },
+  /* ⛔ B1339920 (2026-09-12) — THIS ENTRY WAS PREVIOUSLY THE ONLY AZ ROW, AND ITS BBOX REACHES
+   * PHOENIX. `az_pinal`'s bbox is Pinal's own measured data extent (32.5–33.47 lat), which overlaps
+   * the southern edge of Maricopa County — Phoenix (33.4484, -112.0740) falls inside it, so with no
+   * `az_maricopa` entry ever configured, every Phoenix click routed here and queried a service that
+   * genuinely has no Phoenix parcels (measured live: zero features). The bbox itself is correct for
+   * Pinal (Casa Grande / Apache Junction still resolve here, both verified below) — the missing
+   * piece was Maricopa's OWN entry, added immediately after this one, so Phoenix/Mesa/Surprise/
+   * Buckeye route to the county that actually holds their parcels instead. See `az_maricopa` below. */
   az_pinal: {
     // VERIFIED LIVE 2026-09-11 from this sandbox: 286,959 parcel polygons, count query 523ms,
     // 74 fields. Published by the City of Maricopa's own GIS account (owner CityOfMaricopa) —
@@ -677,6 +685,19 @@ const COUNTIES_RAW = {
     layerUrl: "https://services7.arcgis.com/MlfUGd2UJYefAS7v/arcgis/rest/services/TaxParcel_8_26/FeatureServer/0",
     idField: "PARCELID", addrField: "SITEADDRES",
     help: "Pinal County tax parcels (Esri-hosted). Search by parcel ID or a site address.",
+  },
+  az_maricopa: {
+    // B1339920 — MEASURED LIVE from Michael's own browser 2026-09-11 evening Central (this
+    // sandbox's egress policy blocks gis.maricopa.gov — see countiesProvenance.js). 1,760,396
+    // parcel polygons, capabilities "Map,Query,Data". Layer 1 ("Parcel") — layer 0 ("Subdivision")
+    // is a different layer, not the parcel fabric, do not wire it. Four spread points across the
+    // whole county all answered with real parcels: Phoenix (221ms, APN 11221001), Mesa (108ms, APN
+    // 13837006A), Surprise (110ms, APN 50118550), Buckeye (102ms, APN 40022114, "705 E EDISON AVE").
+    // This is the county's OWN authoritative GIS host, not a third-party republication.
+    state: "AZ", label: "Maricopa County, AZ",
+    layerUrl: "https://gis.maricopa.gov/arcgis/rest/services/IndividualService/Parcel/MapServer/1",
+    idField: "APN", addrField: "PropertyFullStreetAddress",
+    help: "Maricopa County (Phoenix) tax parcels (county GIS). Search by APN or a site address.",
   },
   mo_clay: {
     // VERIFIED LIVE 2026-09-11 from this sandbox: 98,112 parcel polygons, count query 570ms,
@@ -1514,6 +1535,9 @@ const COUNTIES_MAP_RAW = {
   ga_fulton: { state: "GA", center: [33.8453, -84.4772], zoom: 10, bbox: [33.50, -84.84, 34.19, -84.12], mapServer: null, layerUrl: COUNTIES.ga_fulton.layerUrl },
   ga_chatham: { state: "GA", center: [31.9823, -81.1400], zoom: 10, bbox: [31.73, -81.39, 32.24, -80.89], mapServer: null, layerUrl: COUNTIES.ga_chatham.layerUrl },
   az_pinal: { state: "AZ", center: [32.9940, -111.3275], zoom: 9, bbox: [32.51, -112.21, 33.48, -110.45], mapServer: null, layerUrl: COUNTIES.az_pinal.layerUrl },
+  // B1339920 — bbox/center read directly from public/geo/county-polygons.json (same convention as
+  // the B1551617 Tier 1 rows above), never hand-typed: [-226663,65023,-222085,68098] / scale 2000.
+  az_maricopa: { state: "AZ", center: [33.2803, -112.1870], zoom: 8, bbox: [32.51, -113.33, 34.05, -111.04], mapServer: null, layerUrl: COUNTIES.az_maricopa.layerUrl },
   mo_clay: { state: "MO", center: [39.2843, -94.4153], zoom: 10, bbox: [39.11, -94.61, 39.46, -94.22], mapServer: null, layerUrl: COUNTIES.mo_clay.layerUrl },
   sc_greenville: { state: "SC", center: [34.8448, -82.4562], zoom: 10, bbox: [34.48, -82.77, 35.21, -82.14], mapServer: null, layerUrl: COUNTIES.sc_greenville.layerUrl },
   ia_polk: { state: "IA", center: [41.6782, -93.5747], zoom: 10, bbox: [41.49, -93.82, 41.86, -93.33], mapServer: null, layerUrl: COUNTIES.ia_polk.layerUrl },

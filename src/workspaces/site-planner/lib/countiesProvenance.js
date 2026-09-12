@@ -206,6 +206,9 @@ export const COUNTY_VERIFICATION = {
     verifiedOn: "2026-09-11",
     verifiedNote: "VERIFIED LIVE from this sandbox: 286,959 parcel polygons, count query 523ms, 74 fields, esriGeometryPolygon. Published by the City of Maricopa's own GIS account (owner CityOfMaricopa, not the neighboring Maricopa COUNTY) — a 3-point spread 50-80 miles apart (Casa Grande / Apache Junction area / San Tan Valley area) all answered with real, distinct parcels, confirming this covers the whole county rather than just the city.",
   },
+  az_maricopa: {
+    verifiedNote: "gis.maricopa.gov is blocked by this build environment's egress policy (confirmed live, B1339920 — CONNECT tunnel rejected by organization policy). Endpoint, feature count (1,760,396 polygons, capabilities Map/Query/Data) and the 4-point spread (Phoenix/Mesa/Surprise/Buckeye, each with a real APN and sub-250ms response) are from the dispatch's own live-browser measurement, 2026-09-11 evening Central — not independently re-probed here. Layer 1 ('Parcel') was explicitly distinguished from layer 0 ('Subdivision') in that measurement; layer 0 is NOT wired.",
+  },
   mo_clay: {
     verifiedOn: "2026-09-11",
     verifiedNote: "VERIFIED LIVE from this sandbox: 98,112 parcel polygons, count query 570ms, 40 fields, esriGeometryPolygon.",
