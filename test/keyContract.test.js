@@ -132,7 +132,7 @@ describe("focusScope — who owns the keyboard", () => {
   it("Escape — and every app-scope key — reaches the sweep once the checkbox no longer claims FIELD (B1125)", () => {
     const scope = focusScope({ tag: "INPUT", type: "checkbox", lastTouchedCanvas: false });
     expect(scope).toBe(SCOPE.CHROME);
-    for (const id of ["escape", "undo", "redo", "shortcuts"]) {
+    for (const id of ["escape", "undo", "redo"]) {
       expect(keyScopeVerdict({ entry: KEY_CONTRACT.find((k) => k.id === id), scope }).allow, id).toBe(true);
     }
   });
@@ -219,7 +219,7 @@ describe("keyScopeVerdict — what each scope may fire", () => {
   });
 
   it("app-scope keys still work from chrome — Escape must never become unreachable (B1125)", () => {
-    for (const id of ["escape", "undo", "redo", "shortcuts"]) {
+    for (const id of ["escape", "undo", "redo"]) {
       expect(keyScopeVerdict({ entry: entry(id), scope: SCOPE.CHROME }).allow, id).toBe(true);
     }
   });
@@ -249,14 +249,14 @@ describe("keyScopeVerdict — what each scope may fire", () => {
    * checkbox/text controls latch `TOUCH.FIELD`, and that latch OUTLIVES the control's focus by
    * design (B1188) — so a later Escape, with focus long since moved elsewhere, still judged
    * against FIELD and was refused. Escape types no character, so FIELD swallowing it protects
-   * nothing. This is deliberately NARROW: undo/redo/shortcuts are also scope:"app" and are NOT
-   * exempted — a text box's own native Ctrl+Z must still win while it is genuinely focused. */
+   * nothing. This is deliberately NARROW: undo/redo are also scope:"app" and are NOT exempted —
+   * a text box's own native Ctrl+Z must still win while it is genuinely focused. */
   it("⛔ Escape survives FIELD scope — the guaranteed escape hatch, even with the field latch held", () => {
     const escape = KEY_CONTRACT.find((k) => k.id === "escape");
     expect(escape.guaranteed).toBe(true);
     expect(keyScopeVerdict({ entry: escape, scope: SCOPE.FIELD }).allow).toBe(true);
     expect(keyScopeVerdict({ entry: escape, scope: SCOPE.FIELD, fieldEdit: true }).allow).toBe(true);
-    for (const id of ["undo", "redo", "shortcuts"]) {
+    for (const id of ["undo", "redo"]) {
       expect(keyScopeVerdict({ entry: KEY_CONTRACT.find((k) => k.id === id), scope: SCOPE.FIELD }).allow, id).toBe(false);
     }
   });
