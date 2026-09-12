@@ -389,15 +389,27 @@ Recorded here so nobody re-adds them without re-deriving the same answer:
 - **Wayne County, MI** — `Detroit_MP_Parcel_Authoritative`: this is the CITY OF DETROIT, not Wayne
   County — the same wrong-scope failure mode as the Nebraska defect (answers correctly downtown,
   silently returns nothing across most of the county). **RE-ATTEMPTED 2026-09-11 (B1551617)**,
-  still unresolved: routes 1/2/4 found several real "Wayne County" candidates, but every one either
-  fails a spread point outright (covers only part of the county) or is itself stale — the
-  best-scoring one, "Parcels - MI - Wayne County" (owner GDITAdmin), carries no year in its title
-  but its own `editingInfo.dataLastEditDate` is 2018, 8 years stale, caught only because this
-  session's harness was extended to check that field too (see BACKLOG.md). Route 3 found
+  still unresolved AT THE COUNTY LEVEL: routes 1/2/4 found several real "Wayne County" candidates,
+  but every one either fails a spread point outright (covers only part of the county) or is itself
+  stale — the best-scoring one, "Parcels - MI - Wayne County" (owner GDITAdmin), carries no year in
+  its title but its own `editingInfo.dataLastEditDate` is 2018, 8 years stale, caught only because
+  this session's harness was extended to check that field too (see BACKLOG.md). Route 3 found
   `gis.macombgov.org` for the neighboring county (Macomb, below) but no equivalently-named Wayne
-  County host; a live pass should re-run route 3 against `gis.waynecounty.com` /
-  `www.waynecounty.com` — this sandbox's pattern guesses for Wayne's own domain were all blocked
-  before returning a result either way.
+  County host, and a re-attempt from Michael's own browser (open egress) still did not answer
+  (`gis.waynecounty.com` / `maps.waynecounty.com` / `gisapps.waynecounty.com` — B1574256, and again
+  B1583297) — genuinely harder, not a sandbox artifact.
+  **✅ WIRED SEPARATELY, CITY-SCOPED, 2026-09-12 (B1583296): `mi_detroit`.** The rejection above is
+  UNCHANGED and permanent AT THE COUNTY GRANULARITY — `Detroit_MP_Parcel_Authoritative` is still
+  never registered as `wayne`/`mi_wayne`. What changed is a genuinely new resolution TIER
+  (`src/workspaces/site-planner/lib/cityScopes.js`): a bundled City of Detroit boundary polygon
+  (sourced from the City of Detroit's own ArcGIS Online org, `OpenDataAdmin_detroitmi`, item
+  `86b221bb68ca4364afe81d156e54f95c`, `public_authoritative`) is checked BEFORE the county-level
+  answer, so a point genuinely inside Detroit's own limits now resolves to `mi_detroit` while every
+  other Wayne County city (Livonia, Taylor, Dearborn, …) still correctly reports no parcel source —
+  proven against exactly those two control points. This was a genuine architectural addition, not a
+  config line — see B1583296 (BACKLOG.md) and `cityScopes.js`'s own header for the full reasoning.
+  Wayne County's own gap — everywhere in the county OUTSIDE Detroit — is UNCHANGED and is what
+  B1583297's fourth-route candidates (Michigan's own open-data portal, SEMCOG) target next.
 
 ### Not found by routes 1-4 on 2026-09-11 (B1551617) — expands the 2026-09-10 pass; recorded as such, NEVER as "no source"
 
@@ -451,27 +463,59 @@ them, which is a much narrower claim.
 
 | State | County | Hostnames tried, none answered |
 |---|---|---|
-| MI | Wayne | `gis.waynecounty.com` · `maps.waynecounty.com` · `gisapps.waynecounty.com` |
-| MI | Macomb | `gis.macombgov.org` · `maps.macombgov.org` |
-| GA | Cobb | `gis.cobbcounty.org` · `gis.cobbcounty.gov` |
-| GA | Fulton | `gis.fultoncountyga.gov` · `gisdata.fultoncountyga.gov` (already wired via route 1 — `ga_fulton` — so this is the hostname route failing, not the county) |
-| GA | Henry | `gis.co.henry.ga.us` |
-| PA | Luzerne | `gis.luzernecounty.org` |
-| PA | Lackawanna | `maps.lackawannacounty.org` |
-| IL | Winnebago | `gis.wincoil.gov` |
-| MO | Clay | `gis.claycountymo.gov` (already wired via route 2 — `mo_clay` — same note as Fulton) |
-| MO | Jackson | `gis.jacksongov.org` · `maps.jacksongov.org` |
+| MI | Wayne (outside Detroit) | `gis.waynecounty.com` · `maps.waynecounty.com` · `gisapps.waynecounty.com` — reconfirmed 2026-09-11 evening (B1583297). **The City of Detroit ITSELF, inside Wayne County, is now wired separately as a city-scoped source (`mi_detroit`, B1583296) — this row is about the COUNTY-wide gap only, i.e. every Wayne County city that is not Detroit.** |
+| MI | Macomb | `gis.macombgov.org` · `maps.macombgov.org` — reconfirmed 2026-09-11 evening (B1583297). |
+| GA | Cobb | `gis.cobbcounty.org` · `gis.cobbcounty.gov` — reconfirmed 2026-09-11 evening (B1583297). |
+| GA | Fulton | `gis.fultoncountyga.gov` · `gisdata.fultoncountyga.gov` (already wired via route 1 — `ga_fulton` — so this is the hostname route failing, not the county; the county's OWN host might carry a fresher vintage than the AGOL copy, which is why this is still worth closing) — reconfirmed 2026-09-11 evening (B1583297). |
+| GA | Henry | `gis.co.henry.ga.us` — reconfirmed 2026-09-11 evening (B1583297). |
+| PA | Luzerne | `gis.luzernecounty.org` — reconfirmed 2026-09-11 evening (B1583297). |
+| PA | Lackawanna | `maps.lackawannacounty.org` — reconfirmed 2026-09-11 evening (B1583297). |
+| IL | Winnebago | `gis.wincoil.gov` — reconfirmed 2026-09-11 evening (B1583297). |
+| MO | Clay | `gis.claycountymo.gov` (already wired via route 2 — `mo_clay` — same note as Fulton) — reconfirmed 2026-09-11 evening (B1583297). |
+| MO | Jackson | `gis.jacksongov.org` · `maps.jacksongov.org` — reconfirmed 2026-09-11 evening (B1583297). |
 
 **⚠ Johnson County, KS is a DIFFERENT case and deserves its own line, because its host DID answer.**
-`aims.jocogov.org` / `gis.jocogov.org` responded and served a real REST directory — it simply
-carries **no parcel service**. The folders listed are: `Edgerton`, `JCW_UtilityMapping`, `Mission`,
-`PrairieVillage`, `SpringHill`, `Test`, `Utilities`, `WebEOC` — city utility layers, nothing
-cadastral. So Johnson County's parcel data is published **somewhere else**, and "the county GIS host
-has no parcels" is a finding that points at the next step rather than closing the question. Kansas
-City is a Hillwood market, so this is worth a targeted look: the county's AIMS (Automated
+`aims.jocogov.org` / `gis.jocogov.org` / **`maps.jocogov.org`** (the third hostname added 2026-09-11
+evening, B1583297 — same answer, same session) responded and served a real REST directory — it
+simply carries **no parcel service**. The folders listed are: `Edgerton`, `JCW_UtilityMapping`,
+`Mission`, `PrairieVillage`, `SpringHill`, `Test`, `Utilities`, `WebEOC` — city utility layers,
+nothing cadastral. So Johnson County's parcel data is published **somewhere else**, and "the county
+GIS host has no parcels" is a finding that points at the next step rather than closing the question.
+Kansas City is a Hillwood market, so this is worth a targeted look: the county's AIMS (Automated
 Information Mapping System) program and its open-data portal are the obvious next candidates, and
 neither has been probed by name. This supersedes the earlier, vaguer "`aims.jocogov.org` did not
 answer live" note above, which was wrong about the host — it answered.
+
+**PASDA is not a route to Pennsylvania county parcels generally** (reconfirmed 2026-09-11 evening,
+B1583297; originally established 2026-09-08 — see the Pennsylvania state-level note above): its
+service directory carries 170 services, of which EXACTLY ONE is parcels (`ErieCountyParcels`,
+county-only). So Luzerne and Lackawanna — both Pennsylvania — cannot be found via a PA-statewide
+aggregator; each needs its own per-county route, which is exactly what routes 1-3 already tried and
+failed to find above.
+
+### A fourth route to try next for the still-missing counties (B1583297, filed 2026-09-11 evening)
+
+None of these have been attempted yet against the ten counties still open above (Wayne outside
+Detroit, Macomb MI, Winnebago IL, Luzerne PA, Lackawanna PA, Cobb GA, Fulton GA's own current-vintage
+host, Henry GA, Clay MO, Jackson MO) or against Johnson County KS's still-unlocated parcel service.
+Filed as the next step rather than left as a dead end, per the owner's own instruction:
+
+- **State open-data portals under their own naming**, distinct from a state GIS AGENCY's own
+  `.gov` host (the route this session already tried and the sandbox blocks) — e.g. Michigan's
+  `gis-michigan.opendata.arcgis.com` and the Illinois and Georgia equivalents. This is the SAME
+  method NEW-2 (above, in the statewide-mosaic hunt) used to rescue California and Rhode Island from
+  a false "no free source" — searching a state's own ArcGIS Online ORGANIZATION rather than only its
+  `.gov` GIS host — applied here at county rather than state granularity.
+- **Regional planning agencies**, which sometimes host or mirror a member county's parcel data even
+  when the county's own GIS host is unreachable or has none: SEMCOG (Southeast Michigan Council of
+  Governments) for Wayne-outside-Detroit and Macomb, ARC (Atlanta Regional Commission) for Cobb,
+  Fulton and Henry, and MARC (Mid-America Regional Council) for Johnson KS and Jackson MO.
+- **County assessor web apps whose underlying service is not titled "parcels"** — several counties
+  in this repo's own history published their real parcel fabric under a name that would never match
+  a "parcels" keyword search (Nebraska's own case, and Tulsa County OK's `TCA_Mapping_Application`,
+  found only by walking the service directly rather than searching its title). Worth a targeted
+  service-directory walk (route 3's own method, one level deeper) once a candidate host is found for
+  any of the counties above.
 
 ### Route 3 is now three-for-three where routes 1 and 2 failed
 

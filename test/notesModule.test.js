@@ -124,6 +124,9 @@ const ALL_NOTES_FILES = [
   // B1561104 (page width by hand, 2026-09-11) — the pure preset/resolution rules behind the
   // page menu's Narrow/Normal/Wide/Full/Fit-to-content control and the sheet's own edge drag.
   "lib/notesPageWidth.js",
+  // B1586784 (page height by hand, 2026-09-12) — the vertical twin: the pure Fit-to-content/pin
+  // resolution rules behind the sheet's own top/bottom edge drag.
+  "lib/notesPageHeight.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
