@@ -82,17 +82,32 @@ describe("resolvePresetPx — a preset's own px against the pane it is rendering
    * Wide ignores the pane and always renders 900, while "full" used to compute paneWidth - 48
    * with nothing stopping it from landing below 900 whenever the pane was only a little wider
    * than Wide's own fixed size. Reproduced exactly: at the pane width that produces this, "full"
-   * used to resolve to LESS than the "wide" preset. */
-  it("never resolves narrower than the widest fixed preset (Wide) — the reported inversion", () => {
+   * used to resolve to LESS than the "wide" preset. The FLOOR fixed that; kept covered below at
+   * a genuinely tiny pane where the floor still has to do real work. */
+  it("never resolves narrower than the widest fixed preset (Wide), even on a pane too tiny to floor around", () => {
     const wide = PAGE_WIDTH_PRESETS.find((p) => p.id === "wide").px;
     expect(FULL_WIDTH_FLOOR).toBe(wide);
-    // The exact pane width the owner's report reconstructs to (paneWidth - 48 = 875 < 900).
-    const paneWidth = 923;
-    expect(paneWidth - FULL_WIDTH_GUTTER * 2).toBeLessThan(wide); // the old, broken answer
+    const paneWidth = 50; // small enough that even the narrowed B1344624 gutter can't clear the floor
+    expect(paneWidth - FULL_WIDTH_GUTTER * 2).toBeLessThan(wide); // the floor is still needed here
     expect(resolvePresetPx("full", { paneWidth })).toBe(wide);
     expect(resolvePresetPx("full", { paneWidth })).toBeGreaterThanOrEqual(
       resolvePresetPx(wide, { paneWidth }),
     );
+  });
+
+  /* ⛔ B1344624 — THE FLOOR WAS DOING ALL THE WORK, EVEN WHEN IT SHOULDN'T HAVE BEEN: at the
+   * owner's own ~1190px working window (pane ≈ 923px, Pages rail open, Outline closed), the OLD
+   * 24px-per-side gutter put "full"'s own pane-relative number (923 − 48 = 875) BELOW the floor
+   * on nearly every ordinary window, so `resolvePresetPx` always fell back to the exact same
+   * constant Wide already is — "Full width" and "Wide" read as the identical number on every
+   * page he tried, never a genuine, pane-tracking answer. The narrowed gutter (24 → 8) lets a
+   * pane with real room to give report a number that legitimately EXCEEDS Wide instead. */
+  it("at the owner's own working window, genuinely exceeds Wide instead of silently equalling it", () => {
+    const wide = PAGE_WIDTH_PRESETS.find((p) => p.id === "wide").px;
+    const paneWidth = 923;
+    const full = resolvePresetPx("full", { paneWidth });
+    expect(full).toBeGreaterThan(wide); // a real, pane-tracking answer, not the floor's constant
+    expect(full).toBe(paneWidth - FULL_WIDTH_GUTTER * 2); // computed from the pane, not floored
   });
 
   it("on a tiny pane, floors at the widest fixed preset rather than shrinking further — it overflows, the mat scrolls", () => {

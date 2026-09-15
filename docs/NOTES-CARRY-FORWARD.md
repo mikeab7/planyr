@@ -296,6 +296,40 @@ Two more found since, each worth its own line because each returned a confident 
    is not FOREGROUND-OR-VOID §6's trap in reverse: that one is about a reading between the two
    presses of a double-click changing the gesture's own timing budget. A drag has no such budget,
    so a mid-drag rect costs nothing.)
+27. **⛔ AN AUTO-SCROLL TRIGGER MEASURED AGAINST THE SCROLLER'S OWN EDGE FIRES DURING ORDINARY,
+   DELIBERATE DRAGS (B1344630, 2026-09-15).** A width/height grip drag needed to keep growing the
+   page once the pointer reached the browser window's edge (a real mouse cannot move further, and
+   nothing was scrolling the mat to let the drag continue). The first draft measured the pointer's
+   distance to `scroller.getBoundingClientRect()` — but `note-mat` sits BELOW the toolbar and
+   BESIDE the Pages rail, real window space the pointer can still move into, not a screen
+   boundary. `verify-notes-page-height.mjs` §16 caught it immediately: a plain, controlled 60px
+   test drag (nowhere near any real edge) reported "moved −82, asked −60," because the pointer had
+   merely crossed into the toolbar's own row. **Measure against `window.innerWidth`/`innerHeight`
+   for "can the real mouse move further," never a descendant element's own box** — the same
+   distinction FOREGROUND-OR-VOID draws between a tab's OWN visibility and a container's.
+28. **⛔ A SCROLL-FOLLOWS-THE-DRAG FIX FOR ONE EDGE CAN BREAK "THE OPPOSITE EDGE HOLDS" FOR THE
+   OTHER (B1344630, 2026-09-15).** The TOP height grip's own growing case scrolls the mat by
+   exactly the same amount `minHeight` grows, so the two cancel and the BOTTOM edge visibly holds
+   — a real, working, load-bearing trick (see trap 26 and `heightTopPadRef`'s own header). Copying
+   that trick onto the BOTTOM edge's auto-scroll (so its own grip stays under the pointer past the
+   window's bottom) has nothing to cancel against: scrolling always shifts the WHOLE viewport, so
+   the TOP edge — which this drag is supposed to hold fixed — visibly slid too (measured: −171px
+   on a drag that asked for +60). **A scroll-compensation trick that cancels for one edge does not
+   generalise to the opposite edge for free; each edge's own invariant has to be re-derived, not
+   assumed.** Caught by the same §16 sweep, which is why it runs the full four-case matrix (both
+   edges, both directions) rather than just the one case a change happens to touch.
+29. **⛔ A HARNESS CONTEXT LEFT OPEN BETWEEN SECTIONS CAN STALE A LATER SECTION'S OWN MEASUREMENT
+   (B1344626, 2026-09-15) — FOREGROUND-OR-VOID, ONE DOOR FURTHER.** A `ResizeObserver`-driven
+   value (the mat's own proportional bottom padding) read correctly in isolation but read a
+   STALE, pre-layout number (offsetHeight ~472 instead of the settled 774) inside the real
+   harness — reproducibly, not flakily. Root cause: an earlier section's `page`/`browserContext`
+   was never closed before the next section opened its own, so two Chromium tabs were open at
+   once and the newer one was not reliably the foregrounded one. FOREGROUND-OR-VOID already covers
+   a background tab's OWN clock and pixels; this is the same failure arriving through a THIRD
+   channel, `ResizeObserver` delivery, which can stall for a tab that never became the active one
+   in the first place. **Close every `page.context()` a section opens before the next section
+   opens its own** — the existing per-section `await page.context().close()` calls in this repo's
+   own harnesses exist for exactly this, and a section that skips it is not merely untidy.
 
 See also `ui-audit/TRAPS.md`, and the named rules **FOREGROUND-OR-VOID** (a background tab cannot
 be measured — not its clock, not its pixels) and **COUNT-EVERY-KIND**.
