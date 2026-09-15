@@ -341,6 +341,7 @@ import {
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, stallStripesExplicit, segmentsPath, featureNameLabelVisible, featureNameFontPx, featureExtentFt } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
+import { calloutStyle } from "./lib/calloutStyle.js";
 import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference } from "./lib/overlayOrder.js";
 import { hasCrop, cropClipRectScreen, cropTrimFeet, cropFromTrimFeet } from "./lib/overlayCrop.js";
 import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerialVisibility.js";
@@ -8282,10 +8283,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   /* ------------ callouts (annotations) ------------ */
   // Re-aim / move / retext callouts. Box & tip are stored in feet.
   const setCallout = (id, patch) => setCallouts((a) => a.map((c) => (c.id === id ? { ...c, ...patch } : c)));
-  // Resolved style for a callout (defaults + per-callout overrides).
-  // padX default is more generous than padY (B566): equal 8/8 padding read as cramped on the
-  // sides because text butts closer to a vertical edge than to the line-height-cushioned top/bottom.
-  const calloutStyle = (c) => ({ size: c.size || 13, color: c.color || "#1f2937", fill: c.fill || "#fffbe8", stroke: c.stroke || "#1f2937", align: c.align || "center", bold: !!c.bold, italic: !!c.italic, underline: !!c.underline, padX: c.padX ?? 14, padY: c.padY ?? 8, lineHeight: c.lineHeight ?? 1.3 });
+  // Resolved style for a callout (defaults + per-callout overrides) — lib/calloutStyle.js, so the
+  // canvas and the Properties panel read the exact same weight/dash/opacity resolution (B1652704).
   // Multi-leader (Bluebeam-style) — a callout persists as { tip } (legacy single leader),
   // { tips: [...] } (N leaders), or neither + noLeader:true (plain text label). `calloutTips` is
   // the ONE read accessor so render/drag/menu code never branches on which shape a given callout
@@ -22283,6 +22282,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // committed box, its handles, and the inline editor can't drift.
                 const { fontPx, lineH, padX, padY, w, h, lines } = calloutLayout(c, st, rppf);
                 const border = st.stroke; // B619: no recolor on select — the leader/box keep the callout's own color; blue chrome cues selection
+                const leaderDash = dashArray(st.dash, st.weight); // NEW-1 (B1652704) — shared with the box border below
                 const anchor = st.align === "left" ? "start" : st.align === "right" ? "end" : "middle";
                 const tx = st.align === "left" ? bp.x - w / 2 + padX : st.align === "right" ? bp.x + w / 2 - padX : bp.x;
                 const tips = calloutTips(c).map((p) => f2p(p));
@@ -22327,9 +22327,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               openInspector();   // a leader has no text interior — always Properties (B948)
                             }
                           }}>
-                          <line data-testid={`callout-leader-stub-${c.id}-${i}`} x1={origin.x} y1={origin.y} x2={elbow.x} y2={elbow.y} stroke={border} strokeWidth={1.6} />
-                          <line data-testid={`callout-leader-run-${c.id}-${i}`} x1={elbow.x} y1={elbow.y} x2={tp.x} y2={tp.y} stroke={border} strokeWidth={1.6} />
-                          <polygon data-testid={`callout-leader-arrow-${c.id}-${i}`} points={`${tp.x},${tp.y} ${tp.x - ah * Math.cos(ang - 0.4)},${tp.y - ah * Math.sin(ang - 0.4)} ${tp.x - ah * Math.cos(ang + 0.4)},${tp.y - ah * Math.sin(ang + 0.4)}`} fill={border} />
+                          {/* NEW-1 (B1652704) — THE LEADER LINE IS PART OF THE OUTLINE: stub, run
+                              and arrowhead all take the box border's own weight/dash/opacity
+                              (st.weight/st.dash/st.opacity), never a separate leader style. */}
+                          <line data-testid={`callout-leader-stub-${c.id}-${i}`} x1={origin.x} y1={origin.y} x2={elbow.x} y2={elbow.y} stroke={border} strokeWidth={st.weight} strokeDasharray={leaderDash} strokeOpacity={st.opacity} />
+                          <line data-testid={`callout-leader-run-${c.id}-${i}`} x1={elbow.x} y1={elbow.y} x2={tp.x} y2={tp.y} stroke={border} strokeWidth={st.weight} strokeDasharray={leaderDash} strokeOpacity={st.opacity} />
+                          <polygon data-testid={`callout-leader-arrow-${c.id}-${i}`} points={`${tp.x},${tp.y} ${tp.x - ah * Math.cos(ang - 0.4)},${tp.y - ah * Math.sin(ang - 0.4)} ${tp.x - ah * Math.cos(ang + 0.4)},${tp.y - ah * Math.sin(ang + 0.4)}`} fill={border} fillOpacity={st.opacity} />
                           {/* a transparent, wider hit-stroke on EACH segment so a thin leader (or its stub) is still easy to right-click */}
                           <line x1={origin.x} y1={origin.y} x2={elbow.x} y2={elbow.y} stroke="transparent" strokeWidth={10} data-export="skip" />
                           <line x1={elbow.x} y1={elbow.y} x2={tp.x} y2={tp.y} stroke="transparent" strokeWidth={10} data-export="skip" />
@@ -22339,7 +22342,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {/* B680 — hide the committed box + text while its editor is open so the textarea is the
                         ONLY box on screen (was drawing a second, offset box behind the editor overlay). */}
                     {editCallout?.id !== c.id && <rect data-testid={`callout-box-${c.id}`} x={boxRect.x} y={boxRect.y} width={w} height={h} rx={cr} ry={cr}
-                      fill={st.fill} stroke={border} strokeWidth={1.4}
+                      fill={st.fill} fillOpacity={st.fillOpacity} stroke={border} strokeWidth={st.weight} strokeDasharray={leaderDash} strokeOpacity={st.opacity}
                       pointerEvents="all" /* B142: select across the whole box even when the fill is none/transparent (was only the painted area / thin border) */
                       /* NEW-1 (B1253248) — was "default" outside Select: a plain arrow over a
                          callout while placing something new, instead of the placement crosshair.
@@ -26063,42 +26066,79 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // top, so a hardcoded surface colour blanked every colour chip in these panels: the
             // control you click to change a colour showed no colour. Leave it to ColorField.
             const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
-            // B615 — persistent captions under each swatch so you don't have to hover to tell them apart.
-            const cap = { fontSize: 9.5, color: PAL.muted, lineHeight: 1, textAlign: "center", letterSpacing: "0.02em" };
-            const swatchCap = { display: "flex", flexDirection: "column", alignItems: "center", gap: 3 };
             const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : SURF_RAISED, color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "var(--border-default)" });
+            // NEW-3 (B1652706) — the div-flexbox rows below (colour + Size in one row, B/I/U +
+            // align in another, a hand-joined "Padding X / Y" field) were the one panel B-A3 never
+            // converted to the shared row primitive (Field/PairedField/PairedFieldHead — see the
+            // parcel Outline group and the closed-markup Outline/Fill group for the pattern this
+            // follows). Rebuilt on it here so it inherits the 64px label gutter every other panel
+            // shares, and gains the FILL | LINE pair the outline's new weight/dash/opacity (NEW-1/
+            // NEW-2, B1652704/B1652705) needs a home for. A divider (a bare bordered-top div)
+            // separates the three groups; nothing below is removed, only relaid out.
+            const dividerStyle = { borderTop: BORDER_1, margin: "10px 0" };
             return (
               // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
               <div>
               <Section title={selCallout.noLeader ? "Text box" : "Callout"}>
-                <button style={{ ...chip, width: "100%", marginBottom: 9 }} onClick={() => beginEditCallout(selCallout.id)}>✎ Edit text</button>
-                {/* B913 — an explicit width was set by dragging a side handle (text wraps to it). "Fit to
-                    text" clears it so the box auto-sizes to its content again (matches the per-element inspector). */}
-                {selCallout.boxW != null && (
-                  <button style={{ ...chip, width: "100%", marginBottom: 9 }} title="Clear the fixed width — auto-size the box to its text again (Alt+Z)" onClick={() => setSelCallout({ boxW: null })}>↔ Fit to text <kbd style={{ marginLeft: 6 }}>Alt Z</kbd></button>
-                )}
-                {/* row 1: size · text color · fill */}
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7 }}>
-                  <span style={{ ...cap, marginRight: 1 }}>Size</span>
-                  <NumInput style={{ ...numInput, width: 48 }} value={cs.size} min={6} max={96} step={1} coarse={4} onCommit={(n) => setSelCallout({ size: n })} />
-                  <span style={swatchCap} title="Text color"><ColorField value={toHex6(cs.color)} {...colorCtl((v) => liveCallout({ color: v }))} seed={COLOR_SEED} title="Text color" style={swatch} /><span style={cap}>Text</span></span>
-                  <span style={swatchCap} title="Fill color"><ColorField value={toHex6(cs.fill)} {...colorCtl((v) => liveCallout({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /><span style={cap}>Fill</span></span>
-                  <span style={swatchCap} title="Outline color"><ColorField value={toHex6(cs.stroke)} {...colorCtl((v) => liveCallout({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} /><span style={cap}>Outline</span></span>
+                <StdSubLabel>Text</StdSubLabel>
+                <Field label="Colour"><ColorField value={toHex6(cs.color)} {...colorCtl((v) => liveCallout({ color: v }))} seed={COLOR_SEED} title="Text color" style={swatch} /></Field>
+                <Field label="Size"><NumInput style={numInput} value={cs.size} min={6} max={96} step={1} coarse={4} onCommit={(n) => setSelCallout({ size: n })} /></Field>
+                <Field label="Style">
+                  <div style={{ display: "flex", gap: 5 }}>
+                    <button style={{ ...seg(cs.bold), fontWeight: 800 }} title="Bold" onClick={() => setSelCallout({ bold: !cs.bold })}>B</button>
+                    <button style={{ ...seg(cs.italic), fontStyle: "italic" }} title="Italic" onClick={() => setSelCallout({ italic: !cs.italic })}>I</button>
+                    <button style={{ ...seg(cs.underline), textDecoration: "underline" }} title="Underline" onClick={() => setSelCallout({ underline: !cs.underline })}>U</button>
+                  </div>
+                </Field>
+                {/* B681 — familiar Word-style alignment icons (stacked rows) instead of the cryptic ⇤ ≣ ⇥ unicode. */}
+                <Field label="Align">
+                  <div style={{ display: "flex", gap: 5 }}>
+                    {[["left", "Align left"], ["center", "Align center"], ["right", "Align right"]].map(([a, lbl]) => (
+                      <button key={a} style={{ ...seg(cs.align === a), display: "flex", alignItems: "center", justifyContent: "center" }} title={lbl} aria-label={lbl} onClick={() => setSelCallout({ align: a })}><AlignIcon dir={a} /></button>
+                    ))}
+                  </div>
+                </Field>
+                <Field label="Spacing"><NumInput style={numInput} value={cs.lineHeight} min={0.8} step={0.1} coarse={0.5} onCommit={(n) => setSelCallout({ lineHeight: n })} /></Field>
+
+                <div style={dividerStyle} />
+
+                {/* NEW-1/NEW-2 (B1652704/B1652705) — the outline gains a weight, a dash pattern
+                    and its own opacity (reusing lib/calloutStyle.js + the shared DASH_OPTIONS
+                    list — never a second dash list), and the fill gains its own independent
+                    opacity. Fill has no weight and no pattern, so those two cells carry the
+                    shared em-dash placeholder (PairedField's default when `left` is omitted). */}
+                <PairedFieldHead left="Fill" right="Line" />
+                <PairedField label="Colour"
+                  left={<ColorField value={toHex6(cs.fill)} {...colorCtl((v) => liveCallout({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} />}
+                  right={<ColorField value={toHex6(cs.stroke)} {...colorCtl((v) => liveCallout({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} />}
+                />
+                <PairedField label="Weight"
+                  right={<NumInput style={{ ...numInput, width: "100%" }} value={cs.weight} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelCallout({ weight: n })} />}
+                />
+                <PairedField label="Pattern"
+                  right={<select style={{ ...numInput, width: "100%", fontFamily: "inherit" }} value={cs.dash} onChange={(e) => setSelCallout({ dash: e.target.value })}>{DASH_OPTIONS}</select>}
+                />
+                <PairedField label="Opacity"
+                  left={<PercentField value={cs.fillOpacity} onCommit={(v) => setSelCallout({ fillOpacity: v })} inputStyle={numInput} ariaLabel="Fill opacity" />}
+                  right={<PercentField value={cs.opacity} onCommit={(v) => setSelCallout({ opacity: v })} inputStyle={numInput} ariaLabel="Outline opacity" />}
+                />
+
+                <div style={dividerStyle} />
+
+                <PairedFieldHead left="X" right="Y" />
+                <PairedField label="Padding"
+                  left={<NumInput style={{ ...numInput, width: "100%" }} value={cs.padX} min={0} step={1} coarse={4} onCommit={(n) => setSelCallout({ padX: n })} />}
+                  right={<NumInput style={{ ...numInput, width: "100%" }} value={cs.padY} min={0} step={1} coarse={4} onCommit={(n) => setSelCallout({ padY: n })} />}
+                />
+
+                <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                  <button style={{ ...chip, flex: 1 }} onClick={() => beginEditCallout(selCallout.id)}>✎ Edit text</button>
+                  {/* B913 — an explicit width was set by dragging a side handle (text wraps to it). "Fit to
+                      text" clears it so the box auto-sizes to its content again (matches the per-element inspector). */}
+                  {selCallout.boxW != null && (
+                    <button style={{ ...chip, flex: 1 }} title="Clear the fixed width — auto-size the box to its text again (Alt+Z)" onClick={() => setSelCallout({ boxW: null })}>↔ Fit to text <kbd style={{ marginLeft: 6 }}>Alt Z</kbd></button>
+                  )}
                 </div>
-                {/* row 2: B / I / U · align L C R */}
-                <div style={{ display: "flex", gap: 5, marginBottom: 7 }}>
-                  <button style={{ ...seg(cs.bold), fontWeight: 800 }} title="Bold" onClick={() => setSelCallout({ bold: !cs.bold })}>B</button>
-                  <button style={{ ...seg(cs.italic), fontStyle: "italic" }} title="Italic" onClick={() => setSelCallout({ italic: !cs.italic })}>I</button>
-                  <button style={{ ...seg(cs.underline), textDecoration: "underline" }} title="Underline" onClick={() => setSelCallout({ underline: !cs.underline })}>U</button>
-                  <span style={{ width: 6 }} />
-                  {/* B681 — familiar Word-style alignment icons (stacked rows) instead of the cryptic ⇤ ≣ ⇥ unicode. */}
-                  {[["left", "Align left"], ["center", "Align center"], ["right", "Align right"]].map(([a, lbl]) => (
-                    <button key={a} style={{ ...seg(cs.align === a), display: "flex", alignItems: "center", justifyContent: "center" }} title={lbl} aria-label={lbl} onClick={() => setSelCallout({ align: a })}><AlignIcon dir={a} /></button>
-                  ))}
-                </div>
-                {/* row 3: padding · line spacing */}
-                <Field label="Padding X / Y"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={cs.padX} min={0} step={1} coarse={4} onCommit={(n) => setSelCallout({ padX: n })} /> <NumInput style={{ ...numInput, width: 42 }} value={cs.padY} min={0} step={1} coarse={4} onCommit={(n) => setSelCallout({ padY: n })} /></span></Field>
-                <Field label="Line spacing"><NumInput style={numInput} value={cs.lineHeight} min={0.8} step={0.1} coarse={0.5} onCommit={(n) => setSelCallout({ lineHeight: n })} /></Field>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                   {/* NEW-1 — the markup and measurement inspectors both carry a Lock chip here; this
                       one carried only Delete, so an annotation was the one drawn object with no lock

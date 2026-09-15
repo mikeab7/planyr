@@ -20,9 +20,10 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { srgbToLab, deltaE2000 } from "../ui-audit/lib/perceptualDiff.mjs";
 import {
-  FAMILY_DEFAULT_INK, ELEMENT_DEFAULT_PAINT, INK_DISTINCT_MIN_DE, MEASURE_INK, parseHex,
+  FAMILY_DEFAULT_INK, ELEMENT_DEFAULT_PAINT, INK_DISTINCT_MIN_DE, MEASURE_INK, CALLOUT_DEFAULT_FILL, parseHex,
 } from "../src/shared/theme/familyInk.js";
 import { MEASURE_DEFAULT_COLOR, measureStyle } from "../src/workspaces/site-planner/lib/measureStyle.js";
+import { calloutStyle } from "../src/workspaces/site-planner/lib/calloutStyle.js";
 import { ANNOT_STROKE } from "../src/shared/markup/markupStyle.js";
 
 const de = (a, b) => deltaE2000(srgbToLab(...parseHex(a)), srgbToLab(...parseHex(b)));
@@ -108,5 +109,15 @@ describe("the table is wired to the code, not a parallel copy", () => {
    * back in. */
   it("measureStyle ignores any accent a caller tries to hand it", () => {
     expect(measureStyle({}, { accent: "#c2410c" }).stroke).toBe(MEASURE_INK);
+  });
+  /* B1652707 — the callout resolver used to re-type this table's own "#1f2937" as a literal
+   * (twice) instead of importing it; moving it here is what this test guards against recurring. */
+  it("calloutStyle resolves an unstyled callout's colour/stroke to the table's callout ink", () => {
+    expect(calloutStyle({}).color).toBe(FAMILY_DEFAULT_INK.callout);
+    expect(calloutStyle({}).stroke).toBe(FAMILY_DEFAULT_INK.callout);
+  });
+  it("CALLOUT_DEFAULT_FILL is a parseable hex, and calloutStyle resolves to it", () => {
+    expect(parseHex(CALLOUT_DEFAULT_FILL)).not.toBeNull();
+    expect(calloutStyle({}).fill).toBe(CALLOUT_DEFAULT_FILL);
   });
 });

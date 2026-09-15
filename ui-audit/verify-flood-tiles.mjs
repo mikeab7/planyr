@@ -27,7 +27,11 @@ import { assertMeasurable } from "./lib/tabTiming.mjs";
 // EXACTLY, so that one stays a single-specifier line.
 import { pacedWait } from "./lib/tabTiming.mjs";
 
-const BASE = process.env.BASE_URL || "http://localhost:5233";
+// B1614656 — bare BASE_URL now lands on the Dashboard (B1213312's "#/" = Dashboard, not an alias
+// for "site-planner, no project" anymore), so the `[title^="Open site"]` wait below would time out
+// after 60s with no seeded row ever mounting. "#/site" is the Site Planner's own route with no
+// project selected — the site rail this harness clicks through.
+const BASE = (process.env.BASE_URL || "http://localhost:5233") + "#/site";
 /* The sandbox's Playwright package and its installed browser revisions do not always match, so the
  * binary is named explicitly (the house convention — see verify-view-independent.mjs). And
  * `--ignore-certificate-errors` is mandatory here: outbound HTTPS goes through a TLS-inspecting
