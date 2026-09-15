@@ -558,9 +558,9 @@ const PinGlyph = ({ size = 12 }) => (
  * gap to the panel's RADIUS.lg=12 edge): a literal that already equals a token's pixel value still
  * drifts independently of it (docs/DESIGN.md's radius section, exception 3) — this ties it to the
  * panel it actually nests inside instead. */
-function RailTab({ label, count, active, onClick }) {
+function RailTab({ label, count, active, onClick, title }) {
   return (
-    <button type="button" role="tab" aria-selected={active} onClick={onClick} style={{
+    <button type="button" role="tab" aria-selected={active} onClick={onClick} title={title} style={{
       flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
       // NEW-2 (B950321, map-overlay alignment) — was 26; CONTROL_H.sm (22) so the rail header
       // row's COLLAPSED total height can land on MAP_OVERLAY_CHIP_H_PX, matching the Layers
@@ -1329,6 +1329,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const hoverEl = useGroundElevation(hoverLL, { zoom });
   const [renaming, setRenaming] = useState(null);     // {id, name} — the site row being inline-renamed (B158)
   const skipRenameBlurRef = useRef(false);            // Esc cancels without the trailing blur committing
+  const renameRowRefs = useRef(new Map());            // site id -> its row's DOM node, for the scroll-into-view below (NEW-1)
   const [parcelInfo, setParcelInfo] = useState(null); // {status:'found'|'none'|'unavailable', label, addr, acct, acres, attrs, county, key, backup} — address-search result (B233)
   const [backupNotice, setBackupNotice] = useState(null); // {county} — set when a click was answered by the statewide backup because the county's own server was down (B244)
   const [cachedNotice, setCachedNotice] = useState(null); // {county, asOf} — set when a click was answered by the Drive PARCEL SNAPSHOT because the live county server was unreachable (B629)
@@ -1348,6 +1349,32 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     if (name && name !== original) onRenameSiteRef.current && onRenameSiteRef.current(id, name);
   };
   const cancelRename = () => { skipRenameBlurRef.current = true; setRenaming(null); };
+  /* NEW-1 — every entry point that starts a rename goes through here, not through a bare
+   * `setRenaming(...)`. The inline editor `setRenaming` arms lives on the site's OWN ROW inside
+   * the Sites tab (see `siteRow` below) — a right-click on a SITE'S MAP MARKER opens the SAME
+   * status/pin/rename/delete menu regardless of which rail tab is showing (the marker layer is
+   * gated only on the "Sites" checkbox, never on `panelTab` — B831778), so choosing "Rename…"
+   * while the Comps tab is active used to arm `renaming` with nothing anywhere to put the caret
+   * into: the row it belongs to was never mounted. This puts every other piece of panel state
+   * that could hide the row back where it needs to be FIRST, in the same batched update, so the
+   * editor and the row it lives on always appear together. */
+  const startSiteRename = (s) => {
+    setPanelTab("site");
+    if (!sitesPanelOpen) toggleSitesPanel();
+    if (!passListed(s)) { setNameFilter(""); setLocationFilterOnly(false); }
+    if (!pinnedSet.has(s.id) && groupCollapsedFor(statusOf(s))) toggleGroup(statusOf(s));
+    setRenaming({ id: s.id, name: s.site || s.name || "" });
+  };
+  // The row+editor above land in the SAME commit that opened/expanded/switched to reach them, so
+  // by the time this runs the ref is already registered — scroll it fully into view (any/every
+  // ancestor scroller: the outer panel scroll, the group's own, or the Pinned section's) so a row
+  // buried in a long list or a long-collapsed group is never merely "focused off-screen". The
+  // input's own `autoFocus` (see `siteRow`) puts the caret in on the same mount — nothing further
+  // is needed for that half.
+  useLayoutEffect(() => {
+    if (!renaming) return;
+    renameRowRefs.current.get(renaming.id)?.scrollIntoView({ block: "nearest" });
+  }, [renaming]);
 
   // ── Team sharing (share a project with a team) ──────────────────────────────
   const [myUid, setMyUid] = useState(null);
@@ -3586,7 +3613,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       } else if (tries >= 40) { // ~2s — far longer than a tab switch + lazy chunk needs
         clearInterval(iv);
         setSitePlanUploadReq(0);
-        setErr("Couldn't open the site plan upload — open the Comps tab on the left and use “＋ Site plan”.");
+        setErr("Couldn't open the site plan upload — open the Records tab on the left and use “＋ Site plan”.");
       }
     }, 50);
     return () => clearInterval(iv);
@@ -3873,7 +3900,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // (same `narrow` state the panel shell above keys off), so it gets the larger row there.
     const rowH = narrow ? 44 : 28;
     return (
-      <div key={s.id} title={s.origin ? "Open site (double-click to fly here · right-click for status / pin / rename / delete)" : "Open site (right-click for status / pin / rename / delete)"}
+      <div key={s.id} ref={(el) => { if (el) renameRowRefs.current.set(s.id, el); else renameRowRefs.current.delete(s.id); }}
+        title={s.origin ? "Open site (double-click to fly here · right-click for status / pin / rename / delete)" : "Open site (right-click for status / pin / rename / delete)"}
         onClick={() => onOpenSite && onOpenSite(s.id)}
         onDoubleClick={() => flyToSite(s)}
         onMouseEnter={() => setHoverRow(s.id)} onMouseLeave={() => setHoverRow((r) => (r === s.id ? null : r))}
@@ -4494,7 +4522,16 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               </button>
               <RailTab label="Sites" count={nf ? `${shownCount}/${pursuitSites.length}` : pursuitSites.length}
                 active={panelTab === "site"} onClick={() => { setPanelTab("site"); if (!sitesPanelOpen) toggleSitesPanel(); }} />
-              <RailTab label="Comps" count={comps.length} active={panelTab === "comp"}
+              {/* NEW-2 — relabeled from "Comps" to the settled term for this tab's content
+                  (comps, site plans and boundary for a property — "site record", the same wording
+                  already shipped in the map marker menu's "Export site record (KMZ)", B711329).
+                  ⛔ The visible word here is the shorter "Records", not the full two-word phrase:
+                  "Sites" and "Site record" sitting one tab apart read as the same thing (both lead
+                  with "Site"), and the full phrase does not fit this pill next to its count at this
+                  panel's width. "Records" is the same settled term, just not repeating "Site" —
+                  the full name is still one hover away via the title tooltip. */}
+              <RailTab label="Records" title="Site record — comps, plans, and boundary for this property"
+                count={comps.length} active={panelTab === "comp"}
                 onClick={() => { setPanelTab("comp"); if (!sitesPanelOpen) toggleSitesPanel(); }} />
             </div>
             {/* B948496 — everything below the pinned header is ONE scrollable region, so the
@@ -5126,7 +5163,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               </span>
               <span style={{ flex: 1 }}>{pinnedSet.has(statusMenu.site.id) ? "Unpin" : "Pin to top"}</span>
             </button>
-            <button onClick={() => { const s = statusMenu.site; setStatusMenu(null); setRenaming({ id: s.id, name: s.site || s.name || "" }); }}
+            <button onClick={() => { const s = statusMenu.site; setStatusMenu(null); startSiteRename(s); }}
               title="Rename this project"
               style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
                 background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 600 }}>
@@ -5172,7 +5209,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             <div style={{ fontSize: 12.5, color: PAL.muted, lineHeight: 1.5, marginBottom: 16 }}>“{confirmDel.site || confirmDel.name || "this site"}” and all of its plans move to Recently deleted. You can restore it from the project switcher for 30 days.</div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button className="gbtn" style={{ padding: "8px 14px", fontSize: 12.5, borderRadius: RADIUS.md, border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", fontWeight: 600 }} onClick={() => setConfirmDel(null)}>Cancel</button>
-              <button style={{ padding: "8px 14px", fontSize: 12.5, borderRadius: RADIUS.md, border: "1px solid #b91c1c", background: "#b91c1c", color: "#fff", cursor: "pointer", fontWeight: 600 }} onClick={() => { onDeleteSite && onDeleteSite(confirmDel.id); setConfirmDel(null); }}>Delete</button>
+              <button style={{ padding: "8px 14px", fontSize: 12.5, borderRadius: RADIUS.md, border: "1px solid #b91c1c", background: "#b91c1c", color: "#fff", cursor: "pointer", fontWeight: 600 }} onClick={() => {
+                // NEW-4 — a pinned project that gets deleted must not leave a ghost pin (see the
+                // matching fix in ProjectBreadcrumb.jsx's doDelete, the same shared store).
+                if (pinnedSet.has(confirmDel.id)) togglePin(confirmDel.id);
+                onDeleteSite && onDeleteSite(confirmDel.id);
+                setConfirmDel(null);
+              }}>Delete</button>
             </div>
           </div>
         </div>

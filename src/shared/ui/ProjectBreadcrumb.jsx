@@ -68,7 +68,7 @@ import {
   listDeletedProjects, restoreDeletedProject, purgeDeletedProject, purgeExpiredDeletedProjects,
   DELETED_RETENTION_DAYS, activeUid,
 } from "../projects/projects.js";
-import { resolveCurrentName, withCurrentProject, unionProjectLists, resolveControlledId as resolveControlledIdPure, hasSavedProjectRecord, applyFrozenOrder } from "../projects/projectModel.js";
+import { resolveCurrentName, withCurrentProject, unionProjectLists, resolveControlledId as resolveControlledIdPure, hasSavedProjectRecord, applyFrozenOrder, reorderWithCurrentAndPinned } from "../projects/projectModel.js";
 import { crumbNeedsCompact } from "./breadcrumbFit.js";
 
 // Crumbs sit on the chrome bar, which now themes WITH the app (B318) — so these are
@@ -145,6 +145,28 @@ const DuplicateIcon = ({ size = 13 }) => (
     style={{ flex: "none", display: "block" }}>
     <rect x="9" y="9" width="12" height="12" rx="2" />
     <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
+  </svg>
+);
+
+// NEW-4/B1626032 — Pin, same drawn-icon idiom as Pencil/Duplicate/Trash above (stroke,
+// currentColor) — a pushpin, distinct from KebabIcon's dots and from the drag-grip glyph below.
+const PinIcon = ({ size = 13 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    style={{ flex: "none", display: "block" }}>
+    <path d="M12 17v5" />
+    <path d="M9 10.5V4h6v6.5l2 3.5H7z" />
+  </svg>
+);
+
+// NEW-4 — the pinned-row drag handle, same six-dot grip MapFinder's own status-group reorder
+// handle uses (MapFinder.jsx's group drag button) — one visual vocabulary for "drag this to
+// reorder" across the app, not a second glyph invented here.
+const DragGripIcon = ({ size = 9 }) => (
+  <svg width={size} height={size * 1.44} viewBox="0 0 9 13" fill="currentColor" aria-hidden="true">
+    <circle cx="2" cy="1.8" r="1.2" /><circle cx="7" cy="1.8" r="1.2" />
+    <circle cx="2" cy="6.5" r="1.2" /><circle cx="7" cy="6.5" r="1.2" />
+    <circle cx="2" cy="11.2" r="1.2" /><circle cx="7" cy="11.2" r="1.2" />
   </svg>
 );
 
@@ -356,10 +378,77 @@ export default function ProjectBreadcrumb({
   const orderSnapshotRef = useRef(null);
   const rowButtonRefs = useRef(new Map());
   const pendingRefocusIdRef = useRef(null);
+  /* NEW-4 — pinned project ids, most-recently-pinned first, and the account-scope store behind
+   * them. This REUSES the store the map view's own Sites panel already ships (B855952/B855953,
+   * `site-planner/lib/userPrefs.js`'s `sitesPanel.pinned`) rather than inventing a second one —
+   * a project pinned from either surface is pinned on both, on every device, because it is
+   * literally the same array. That module is workspace-specific and pulls in Supabase + the
+   * Standards style resolvers, so — same reasoning as `reportBreadcrumbDefect` and the notes
+   * census below — it is reached ONLY by a dynamic `import()`: a static import would put all of
+   * that on every route's boot chunk, since this breadcrumb is chrome on every route. */
+  const userPrefsModRef = useRef(null);
+  const loadUserPrefsMod = () => (userPrefsModRef.current ||= import("../../workspaces/site-planner/lib/userPrefs.js"));
+  const [pinnedIds, setPinnedIds] = useState([]);
+  const acctPrefsRef = useRef(null); // the full account-prefs object, once a load resolves
+  const refreshPins = () => {
+    loadUserPrefsMod().then((mod) => mod.loadUserPrefs(activeUid())).then(({ prefs }) => {
+      acctPrefsRef.current = prefs;
+      setPinnedIds(prefs.sitesPanel.pinned);
+    }).catch(() => {});
+  };
+  // Optimistic write, same shape as MapFinder's own `commitAcctPrefs`: paint the new order/pin
+  // state immediately, then persist — "not signed in" is the ordinary signed-out case and stays
+  // silent (the header's own "Cloud off" chip already says so); any other failure is LOUD, on the
+  // same transient toast the rename/delete failures already use below (`flashToast`).
+  const commitPinned = (nextIds) => {
+    setPinnedIds(nextIds);
+    loadUserPrefsMod().then((mod) => {
+      const next = mod.setSitesPanelPref(acctPrefsRef.current, { pinned: nextIds });
+      acctPrefsRef.current = next;
+      return mod.saveUserPrefs(activeUid(), next);
+    }).then((res) => {
+      if (res.ok || res.error === "not signed in") return;
+      // No literal "⚠" here — this file's own NEW-3 rule: a text warning glyph resolves to a
+      // colour emoji on most platforms, which is why every other warning in this file is a
+      // drawn SVG (WarnIcon) instead. The toast itself already reads as a warning.
+      flashToast(`Pinned projects saved on this computer only — couldn't reach your account (${res.error}).`);
+    }).catch(() => {});
+  };
+  const togglePinned = (id) => commitPinned(pinnedIds.includes(id) ? pinnedIds.filter((x) => x !== id) : [id, ...pinnedIds]);
+  // Keyboard reorder — ArrowUp/ArrowDown while a pinned row's drag handle has focus.
+  const movePinned = (id, dir) => {
+    const idx = pinnedIds.indexOf(id);
+    if (idx < 0) return;
+    const j = idx + dir;
+    if (j < 0 || j >= pinnedIds.length) return;
+    const next = pinnedIds.slice();
+    [next[idx], next[j]] = [next[j], next[idx]];
+    commitPinned(next);
+  };
+  // Mouse/touch reorder — plain HTML5 drag and drop, same mechanics as MapFinder's own
+  // status-group reorder (dragGroup/dropGroup).
+  const [dragPinId, setDragPinId] = useState(null);
+  const dropPinned = (targetId) => {
+    const from = pinnedIds.indexOf(dragPinId);
+    const to = pinnedIds.indexOf(targetId);
+    setDragPinId(null);
+    if (from < 0 || to < 0 || from === to) return;
+    const next = pinnedIds.slice();
+    next.splice(from, 1);
+    next.splice(to, 0, dragPinId);
+    commitPinned(next);
+  };
   // NEW-2 — `applyFrozenOrder` holds the row order steady across an in-progress rename; it is a
-  // pass-through the rest of the time.
+  // pass-through the rest of the time. NEW-3/NEW-4 — `reorderWithCurrentAndPinned` runs FIRST: the
+  // current project always leads, pinned projects (in the user's own order) come next, then
+  // everything else in its existing (recency) order — see that function's own header for why
+  // current always outranks pinned rather than the two competing for the top slot.
   const projects = applyFrozenOrder(
-    (controlled ? unionProjectLists(controlledProjects, internalProjects) : internalProjects).filter(Boolean),
+    reorderWithCurrentAndPinned(
+      (controlled ? unionProjectLists(controlledProjects, internalProjects) : internalProjects).filter(Boolean),
+      currentProject?.id ?? null,
+      pinnedIds,
+    ),
     orderSnapshotRef.current,
   );
   const [hoverRow, setHoverRow] = useState(null);
@@ -477,7 +566,7 @@ export default function ProjectBreadcrumb({
       .catch(() => {});
   };
   useEffect(() => {
-    if (open) { refresh(); warmThenRefresh(); reconcileThenRefresh(); refreshBin(); setQ(""); }
+    if (open) { refresh(); warmThenRefresh(); reconcileThenRefresh(); refreshBin(); refreshPins(); setQ(""); }
     else { setMenuFor(null); setEditingId(null); setBinOpen(false); setPurgeFor(null); orderSnapshotRef.current = null; }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -694,6 +783,12 @@ export default function ProjectBreadcrumb({
     }
     const wasCurrent = id === currentProject?.id;
     setMenuFor(null);
+    // NEW-4 — a pinned project that gets deleted must not leave a ghost pin (an id in the pinned
+    // list with no live project behind it, which would show up as a silently-vanishing "current"
+    // row's worth of nothing the next time the switcher opens). Cheap and safe to do even if the
+    // delete itself only partially succeeds — a stale pin pointing at a soft-deleted project is
+    // worse than an unpinned one.
+    if (pinnedIds.includes(id)) commitPinned(pinnedIds.filter((x) => x !== id));
     /* Move FIRST, delete second. The other order leaves a window in which the project is
      * gone and its notes still point at it — which is precisely the orphan being avoided. */
     if (moveNotes) {
@@ -777,6 +872,141 @@ export default function ProjectBreadcrumb({
 
   const onDash = !currentProject; // we're at the all-projects view
   const filtered = filterProjects(projects, q);
+  /* NEW-3/NEW-4 — split the already-ordered, already-filtered list into the three sections the
+   * dropdown renders: the current project (leads, unconditionally), the pinned section (in the
+   * user's own order), then everything else. `filtered` already carries this exact ordering (see
+   * `reorderWithCurrentAndPinned` above `projects`), so this is a pure partition — it never
+   * re-sorts anything, and a project that doesn't match the search query is simply absent from
+   * whichever of the three lists it would have been in (current included — it is never
+   * force-shown against a query it doesn't match). */
+  const currentId = currentProject?.id ?? null;
+  const currentRow = currentId != null ? filtered.find((p) => p.id === currentId) || null : null;
+  const pinnedRows = filtered.filter((p) => p.id !== currentId && pinnedIds.includes(p.id));
+  const restRows = filtered.filter((p) => p.id !== currentId && !pinnedIds.includes(p.id));
+  /* The one project-row renderer, used for the current row, every pinned row, and every plain
+   * row — a project must look and behave identically wherever it lands, differing only in the
+   * reorder control a PINNED row carries. `pinned` rows also accept a drop (drag-and-drop
+   * reorder); `narrow` (phone — no hover, no HTML5 drag) gets explicit ▲/▼ buttons instead of the
+   * hover/focus-revealed drag handle, per NEW-4's phone case. */
+  const renderProjectRow = (p, { pinned = false } = {}) => {
+    const cur = p.id === currentId;
+    const editing = editingId === p.id;
+    const active = hoverRow === p.id || menuFor?.id === p.id; // row highlighted while its menu is open
+    const pinnedIdx = pinned ? pinnedIds.indexOf(p.id) : -1;
+    return (
+      <div
+        key={p.id}
+        data-testid={`project-row-${p.id}`}
+        onContextMenu={canManage ? (e) => openManageMenu(e, p) : undefined}
+        onMouseEnter={() => setHoverRow(p.id)}
+        onMouseLeave={() => setHoverRow(null)}
+        onDragOver={pinned && !q.trim() ? (e) => { if (dragPinId && dragPinId !== p.id) e.preventDefault(); } : undefined}
+        onDrop={pinned && !q.trim() ? (e) => { e.preventDefault(); if (dragPinId) dropPinned(p.id); } : undefined}
+        style={row({ padding: 0, background: active ? "var(--hover-ghost)" : (cur ? "var(--hover-menu)" : "transparent") })}
+      >
+        {editing ? (
+          <RenameInput
+            value={editVal}
+            onChange={setEditVal}
+            onCommit={() => commitRename(p.id)}
+            onCancel={() => { pendingRefocusIdRef.current = p.id; setEditingId(null); }}
+            label={`Rename ${p.name}`}
+            style={{ flex: 1, margin: "2px 4px", border: "1px solid var(--accent-site-text, #2563eb)" }}
+          />
+        ) : (
+          <>
+            <button
+              ref={(el) => { if (el) rowButtonRefs.current.set(p.id, el); else rowButtonRefs.current.delete(p.id); }}
+              onClick={() => pickProject(p.id, p.name)}
+              title={p.name}
+              style={row({ flex: 1, minWidth: 0, background: "transparent" })}
+            >
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
+                {p.name}
+              </span>
+              {/* Cross-module connectedness (schema v9): a project that has a linked
+                  schedule shows a small calendar chip, so the connection is visible at a
+                  glance in the switcher. Site is implicit (every project IS a site). */}
+              {p.scheduleProjectId != null && (
+                <span
+                  title="Has a linked schedule"
+                  aria-label="Has a linked schedule"
+                  style={{ flex: "none", display: "grid", placeItems: "center", color: "var(--text-tertiary)" }}
+                ><CalendarIcon /></span>
+              )}
+            </button>
+            {/* ⛔ NEW-2 — THE KEBAB IS ALWAYS RENDERED, AND THAT IS THE PRECONDITION FOR
+                REMOVING THE CRUMB-LEVEL RENAME, NOT A COSMETIC CHANGE.
+                It used to render only while `active` (`hoverRow === p.id`), set purely by
+                onMouseEnter — and the only other route to this menu is `onContextMenu`, a
+                right-click. So on a touch device there was no rename or delete AT ALL, and
+                for a keyboard user the control was not merely invisible but ABSENT FROM THE
+                DOM, so it could not be tabbed to either. The crumb-level rename was
+                covering for that (its own comment said so: "invisible, and dead on touch"),
+                which is why it could not simply be deleted — removing one of two entry
+                points must not leave zero. Present always; hover only BRIGHTENS it, since
+                opacity/colour is presentation and must never be the hit-test gate.
+                The row's timestamp / "current" marker now sits BESIDE it instead of being
+                swapped out by it, so hovering a row no longer hides when it was edited. */}
+            <span style={{ flex: "none", display: "flex", alignItems: "center", gap: 6, paddingRight: 7 }}>
+              {/* NEW-4 — the pinned reorder control. Desktop: a drag handle, quiet at rest,
+                  shown on hover/focus (same mechanism as MapFinder's own status-group grip) and
+                  itself keyboard-operable (ArrowUp/ArrowDown while it holds focus). Phone
+                  (`narrow` — no hover, no HTML5 drag): explicit, always-visible ▲/▼ buttons.
+                  ⛔ Hidden while a search query is active: `pinnedIdx` (and a drag/drop target)
+                  are positions in the FULL pinned order, but a search can show only some of them
+                  — reordering against a partly-hidden list is ambiguous, so this asks the user to
+                  clear the search first rather than silently swapping with an off-screen
+                  neighbour. The pin itself, and its "current"/kebab controls, stay fully live. */}
+              {pinned && !q.trim() && (narrow ? (
+                <span style={{ display: "flex", flex: "none" }}>
+                  <button aria-label={`Move ${p.name} up in your pinned projects`} disabled={pinnedIdx <= 0}
+                    onClick={() => movePinned(p.id, -1)}
+                    style={{ flex: "none", width: 16, height: 16, display: "grid", placeItems: "center", background: "transparent", border: "none", borderRadius: RADIUS.sm, cursor: pinnedIdx <= 0 ? "default" : "pointer", color: pinnedIdx <= 0 ? "var(--border-default)" : "var(--text-tertiary)", fontFamily: "inherit", fontSize: 10, lineHeight: 1, padding: 0 }}
+                  >▲</button>
+                  <button aria-label={`Move ${p.name} down in your pinned projects`} disabled={pinnedIdx < 0 || pinnedIdx >= pinnedIds.length - 1}
+                    onClick={() => movePinned(p.id, 1)}
+                    style={{ flex: "none", width: 16, height: 16, display: "grid", placeItems: "center", background: "transparent", border: "none", borderRadius: RADIUS.sm, cursor: (pinnedIdx < 0 || pinnedIdx >= pinnedIds.length - 1) ? "default" : "pointer", color: (pinnedIdx < 0 || pinnedIdx >= pinnedIds.length - 1) ? "var(--border-default)" : "var(--text-tertiary)", fontFamily: "inherit", fontSize: 10, lineHeight: 1, padding: 0 }}
+                  >▼</button>
+                </span>
+              ) : (
+                <button draggable tabIndex={0} aria-label={`Reorder ${p.name} in your pinned projects`}
+                  title="Drag to reorder, or focus + arrow keys"
+                  onDragStart={(e) => { setDragPinId(p.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", p.id); } catch (_) { /* Firefox needs setData to arm the drag; a throw here is harmless */ } }}
+                  onDragEnd={() => setDragPinId(null)}
+                  onFocus={() => setHoverRow(p.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "ArrowUp") { e.preventDefault(); movePinned(p.id, -1); }
+                    else if (e.key === "ArrowDown") { e.preventDefault(); movePinned(p.id, 1); }
+                  }}
+                  style={{ flex: "none", width: 15, height: 15, display: "grid", placeItems: "center", background: "transparent", border: "none", borderRadius: RADIUS.sm, cursor: "grab", color: "var(--text-tertiary)", opacity: active ? 1 : 0, transition: "opacity .12s", fontFamily: "inherit" }}
+                ><DragGripIcon /></button>
+              ))}
+              {cur ? (
+                <span style={{ color: accent, fontSize: 10.5, fontWeight: 700 }}>current</span>
+              ) : (
+                <span style={{ color: "var(--text-tertiary)", fontSize: 11 }}>{relTime(p.updatedAt)}</span>
+              )}
+              {canManage && (
+                <button
+                  onClick={(e) => openManageMenu(e, p)}
+                  title="Rename or delete"
+                  aria-label={`Manage ${p.name}`}
+                  data-testid={`project-kebab-${p.id}`}
+                  style={{
+                    flex: "none", cursor: "pointer", border: "none", background: "transparent",
+                    color: active ? "var(--text-secondary)" : "var(--text-tertiary)",
+                    borderRadius: RADIUS.sm, padding: "2px 3px", lineHeight: 0, fontFamily: "inherit",
+                    display: "grid", placeItems: "center",
+                  }}
+                ><KebabIcon /></button>
+              )}
+            </span>
+          </>
+        )}
+      </div>
+    );
+  };
   // Show the current project's LIVE name (auto-update-name): after an inline rename here — or a
   // rename in another tab — the freshly-refreshed `projects` list carries the new name even when
   // the parent's `currentProject` prop is still the pre-rename value (Review/Library derive it
@@ -1027,96 +1257,35 @@ export default function ProjectBreadcrumb({
         )}
         <div style={divider} />
 
-        {/* Recent projects — newest-edited first, relative timestamps */}
+        {/* Recent projects — newest-edited first, relative timestamps. NEW-3/NEW-4 — the CURRENT
+            project renders first (outside any section), then a "Pinned" section (reorderable),
+            then everything else — see `renderProjectRow` and `reorderWithCurrentAndPinned`. */}
         <div style={{ maxHeight: 280, overflowY: "auto", margin: "0 -2px", padding: "0 2px" }}>
           {filtered.length === 0 ? (
             <div style={{ padding: "10px 9px", fontSize: 12, color: "var(--text-tertiary)" }}>
               {q ? "No matching projects." : (warming ? "Loading projects…" : "No projects yet — start one below.")}
             </div>
           ) : (
-            filtered.map((p) => {
-              const cur = p.id === currentProject?.id;
-              const editing = editingId === p.id;
-              const active = hoverRow === p.id || menuFor?.id === p.id; // row highlighted while its menu is open
-              return (
-                <div
-                  key={p.id}
-                  data-testid={`project-row-${p.id}`}
-                  onContextMenu={canManage ? (e) => openManageMenu(e, p) : undefined}
-                  onMouseEnter={() => setHoverRow(p.id)}
-                  onMouseLeave={() => setHoverRow(null)}
-                  style={row({ padding: 0, background: active ? "var(--hover-ghost)" : (cur ? "var(--hover-menu)" : "transparent") })}
-                >
-                  {editing ? (
-                    <RenameInput
-                      value={editVal}
-                      onChange={setEditVal}
-                      onCommit={() => commitRename(p.id)}
-                      onCancel={() => { pendingRefocusIdRef.current = p.id; setEditingId(null); }}
-                      label={`Rename ${p.name}`}
-                      style={{ flex: 1, margin: "2px 4px", border: "1px solid var(--accent-site-text, #2563eb)" }}
-                    />
-                  ) : (
-                    <>
-                      <button
-                        ref={(el) => { if (el) rowButtonRefs.current.set(p.id, el); else rowButtonRefs.current.delete(p.id); }}
-                        onClick={() => pickProject(p.id, p.name)}
-                        title={p.name}
-                        style={row({ flex: 1, minWidth: 0, background: "transparent" })}
-                      >
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
-                          {p.name}
-                        </span>
-                        {/* Cross-module connectedness (schema v9): a project that has a linked
-                            schedule shows a small calendar chip, so the connection is visible at a
-                            glance in the switcher. Site is implicit (every project IS a site). */}
-                        {p.scheduleProjectId != null && (
-                          <span
-                            title="Has a linked schedule"
-                            aria-label="Has a linked schedule"
-                            style={{ flex: "none", display: "grid", placeItems: "center", color: "var(--text-tertiary)" }}
-                          ><CalendarIcon /></span>
-                        )}
-                      </button>
-                      {/* ⛔ NEW-2 — THE KEBAB IS ALWAYS RENDERED, AND THAT IS THE PRECONDITION FOR
-                          REMOVING THE CRUMB-LEVEL RENAME, NOT A COSMETIC CHANGE.
-                          It used to render only while `active` (`hoverRow === p.id`), set purely by
-                          onMouseEnter — and the only other route to this menu is `onContextMenu`, a
-                          right-click. So on a touch device there was no rename or delete AT ALL, and
-                          for a keyboard user the control was not merely invisible but ABSENT FROM THE
-                          DOM, so it could not be tabbed to either. The crumb-level rename was
-                          covering for that (its own comment said so: "invisible, and dead on touch"),
-                          which is why it could not simply be deleted — removing one of two entry
-                          points must not leave zero. Present always; hover only BRIGHTENS it, since
-                          opacity/colour is presentation and must never be the hit-test gate.
-                          The row's timestamp / "current" marker now sits BESIDE it instead of being
-                          swapped out by it, so hovering a row no longer hides when it was edited. */}
-                      <span style={{ flex: "none", display: "flex", alignItems: "center", gap: 6, paddingRight: 7 }}>
-                        {cur ? (
-                          <span style={{ color: accent, fontSize: 10.5, fontWeight: 700 }}>current</span>
-                        ) : (
-                          <span style={{ color: "var(--text-tertiary)", fontSize: 11 }}>{relTime(p.updatedAt)}</span>
-                        )}
-                        {canManage && (
-                          <button
-                            onClick={(e) => openManageMenu(e, p)}
-                            title="Rename or delete"
-                            aria-label={`Manage ${p.name}`}
-                            data-testid={`project-kebab-${p.id}`}
-                            style={{
-                              flex: "none", cursor: "pointer", border: "none", background: "transparent",
-                              color: active ? "var(--text-secondary)" : "var(--text-tertiary)",
-                              borderRadius: RADIUS.sm, padding: "2px 3px", lineHeight: 0, fontFamily: "inherit",
-                              display: "grid", placeItems: "center",
-                            }}
-                          ><KebabIcon /></button>
-                        )}
-                      </span>
-                    </>
-                  )}
+            <>
+              {currentRow && renderProjectRow(currentRow)}
+              {pinnedRows.length > 0 && (
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 9px 3px" }}>
+                    <span style={{ flex: "none", color: "var(--text-tertiary)", display: "grid", placeItems: "center", lineHeight: 0 }}><PinIcon size={10.5} /></span>
+                    <span style={{ flex: 1, textAlign: "left", fontSize: 10.5, fontWeight: 700, color: "var(--text-primary)" }}>Pinned</span>
+                    <span style={{ color: "var(--text-tertiary)", fontWeight: 700, fontSize: 10.5 }}>{pinnedRows.length}</span>
+                  </div>
+                  {/* No hard cap on pin count — the section scrolls internally past 6 rather than
+                      pushing the rest of the list off screen (same threshold MapFinder's own
+                      Sites-panel Pinned section uses). */}
+                  <div data-testid="project-pinned-list" style={{ maxHeight: pinnedRows.length > 6 ? 192 : "none", overflowY: pinnedRows.length > 6 ? "auto" : "visible" }}>
+                    {pinnedRows.map((p) => renderProjectRow(p, { pinned: true }))}
+                  </div>
+                  <div style={divider} />
                 </div>
-              );
-            })
+              )}
+              {restRows.map((p) => renderProjectRow(p))}
+            </>
           )}
         </div>
 
@@ -1228,6 +1397,21 @@ export default function ProjectBreadcrumb({
           <>
             {!menuFor.confirm ? (
               <>
+                {/* NEW-4 — pin/unpin lives in this SAME overflow menu, never a second control on
+                    the row (the owner's own instruction). Independent of canRename/canDelete/
+                    canDuplicate — it never touches the controlled bridge, only the shared
+                    account-scope pin store, so it is offered wherever this menu is reachable. */}
+                <button
+                  data-testid="project-pin"
+                  role="menuitem"
+                  onClick={() => { const id = menuFor.id; setMenuFor(null); togglePinned(id); }}
+                  title={pinnedIds.includes(menuFor.id) ? "Remove this project from the top of the list" : "Pin this project to the top of the list"}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--hover-ghost)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  style={menuItem()}
+                >
+                  <PinIcon /> {pinnedIds.includes(menuFor.id) ? "Unpin" : "Pin to top"}
+                </button>
                 {canRename && (
                   <button
                     data-testid="project-rename"
