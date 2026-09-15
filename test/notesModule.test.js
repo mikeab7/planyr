@@ -483,9 +483,19 @@ describe("no dialog boxes anywhere in the module (owner rule)", () => {
      * layout effect after EVERY render, and the setter returns the previous object unless the
      * value genuinely changed — so it cannot drift as the caret moves, which is the failure
      * this cap exists to catch. If a future change makes it read `editor.` at init, the sharp
-     * assertion fails first and this comment is not what saves it. */
+     * assertion fails first and this comment is not what saves it.
+     *
+     * ⛔ RAISED 10 → 11 (B1344627, owner report 2026-09-15). The eleventh is `usePopoverClampLeft`'s
+     * `shift` — one shared source-level `useState` call, instantiated per popover trigger
+     * (FormatMenu, ColorPopover, TableGridPicker, LinkControl, CalloutControl all call the same
+     * hook), that nudges an already-open popover's `left` inward when it would otherwise hang off
+     * the viewport's right edge (the Insert Table picker's own report: 18 of its 36 size cells sat
+     * past `innerWidth` at the owner's own ~1191px window). It is not a mirror either: it is
+     * measured off `getBoundingClientRect()`/`offsetWidth` in a `useLayoutEffect`, reset to 0 on
+     * close, and never seeded from `editor.` — the sharp assertion above still covers it, same as
+     * `resolvedDefaults`. */
     const states = [...bar.matchAll(/useState\(/g)].length;
-    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(10);
+    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(11);
   });
 });
 
