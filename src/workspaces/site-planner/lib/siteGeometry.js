@@ -15,7 +15,8 @@ import { edgeAbutsPaving } from "./parking.js";
 import { classDefaultRadius, classReturnRadius, roadClassOf } from "./roadClasses.js";
 import { roadCenterline } from "./roadGeometry.js";
 import { trimPolylineEnds, roundaboutNodes, roundaboutGeometry, roundaboutDiameterFor, legTrimFor, roundaboutArea } from "./roundabout.js";
-import { bufferPolyline, offsetPolyline } from "./metesAndBounds.js";
+import { bufferPolyline, offsetPolylineMiterLimit } from "./metesAndBounds.js";
+import { roadSurfaceRing } from "./roadNetwork.js";
 import { imperviousCorrectionWidths } from "./roadCrossSection.js";
 
 export const SQFT_PER_ACRE = 43560;
@@ -212,15 +213,23 @@ export const roadDenseCenterline = (el, settings, sharpAt, trim) => {
   return trim && (trim.start > 0 || trim.end > 0) ? trimPolylineEnds(dense, trim.start || 0, trim.end || 0) : dense;
 };
 // The pavement+curb OUTER ring (closed polygon) — total width = travelW + a curb each side.
+// B1612608 (item 1) — built with the robust ClipperOffset join (roadSurfaceRing), which holds the
+// road's stated width through a sharp turn instead of the old bufferPolyline's miter blow-up /
+// self-crossing at the join; bufferPolyline is kept only as a defensive fallback for the rare
+// degenerate case Clipper itself declines (never a silently dropped road surface).
 export const roadStripRing = (el, settings, sharpAt, trim) => {
   const dense = roadDenseCenterline(el, settings, sharpAt, trim);
-  return bufferPolyline(dense, Math.max(0, (+el.travelW || 0) + 2 * roadCurbWidth(el))) || [];
+  const width = Math.max(0, (+el.travelW || 0) + 2 * roadCurbWidth(el));
+  return roadSurfaceRing(dense, width) || bufferPolyline(dense, width) || [];
 };
 // The two inner curb lines = the centerline offset by ±travelW/2 (face-of-curb edges).
+// B1612608 — offsetPolylineMiterLimit (a true mitered join with a limit that bevels past it),
+// not the old offsetPolyline, so the curb stroke tracks the (now-correct) pavement edge through a
+// sharp turn instead of spiking past it.
 export const roadCurbLines = (el, settings, sharpAt, trim) => {
   const dense = roadDenseCenterline(el, settings, sharpAt, trim);
   const hw = Math.max(0, (+el.travelW || 0) / 2);
-  return [offsetPolyline(dense, hw), offsetPolyline(dense, -hw)].filter(Boolean);
+  return [offsetPolylineMiterLimit(dense, hw), offsetPolylineMiterLimit(dense, -hw)].filter(Boolean);
 };
 // Plan-view paved area (sf) of a centerline road = its generated strip polygon area
 // (replaces the old w×h — the curbs are included, matching the B70 three-way contract).
