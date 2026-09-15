@@ -1,7 +1,7 @@
-/* B853712 — THE STATEWIDE-DERIVED TIER, PROVEN AGAINST THE LIVE TxGIO ENDPOINT, THROUGH THE
+/* B853712 · NEW-1 (2026-09-12) — THE STATEWIDE-DERIVED TIER, PROVEN AGAINST THE LIVE TX STATEWIDE ENDPOINT, THROUGH THE
  * SHIPPED CODE — not a curl reimplementation.
  *
- * `counties.js` now derives a real parcel source (the universal TxGIO statewide layer) for any of
+ * `counties.js` now derives a real parcel source (the universal TX statewide (StratMap) layer) for any of
  * the 254 Texas counties that has no dialed-in appraisal-district row of its own, from the SAME
  * `public/geo/county-polygons.json` asset the geometry resolver already fetches. Unit tests
  * (`test/countyStatewideDerivation.test.js`) prove the pure logic; this proves the live half: that
@@ -11,7 +11,7 @@
  * ships.
  *
  * THIS IS A SAMPLE, STATED HONESTLY, NOT A CLAIM OF 254 VERIFIED ROWS (owner instruction,
- * 2026-08-29): TxGIO is ONE service, and its COVERAGE is what's under test, not 254 independent
+ * 2026-08-29, source updated 2026-09-12): the TX statewide layer is ONE service, and its COVERAGE is what's under test, not 254 independent
  * endpoints. Probed here: the nineteen counties within 50 miles of downtown Dallas (edge distance,
  * per-county polygon) PLUS a spread sample well outside that radius — a Panhandle, a border, a
  * Piney Woods and a Gulf-coast county — so a pass here is evidence about the MECHANISM, not proof
@@ -48,7 +48,7 @@ const SPREAD_SAMPLE = [
 const fails = [];
 const ok = (cond, msg) => { console.log(`  ${cond ? "✓" : "✗"} ${msg}`); if (!cond) fails.push(msg); };
 
-console.log("--- B853712 · statewide-derived tier, live against TxGIO ---\n");
+console.log("--- B853712 · statewide-derived tier, live against the TX statewide layer ---\n");
 
 const payload = JSON.parse(readFileSync(ASSET_PATH, "utf8"));
 await setCountyPolygons(payload);
@@ -76,13 +76,16 @@ async function probeCounty(name, lat, lng) {
   }
   const ms = Date.now() - t0;
   if (err) { ok(false, `${name}: identifyAtPoint threw — ${err.message}`); return; }
-  ok(!!feat, `${name}: TxGIO /identify returned a parcel (${ms} ms)`);
+  ok(!!feat, `${name}: TX statewide /identify returned a parcel (${ms} ms)`);
   if (!feat) return;
 
+  // NEW-1 (2026-09-12) — TX_STATEWIDE_STRATMAP_LAYER carries no COUNTY attribute (unlike the old
+  // TxGIO host this probed before), so there is nothing to cross-check the returned parcel's county
+  // against. The point itself is already inside the named county (that's how it was chosen), so the
+  // check here is just that a real, identified parcel came back with a real id.
   const a = feat.attributes || {};
-  const county = a.COUNTY || a.county;
-  const matches = typeof county === "string" && county.toUpperCase() === name.toUpperCase();
-  ok(matches, `${name}: returned parcel's COUNTY="${county}" matches (prop_id=${a.PROP_ID || a.prop_id}, owner="${a.OWNER_NAME || a.owner_name}")`);
+  const propId = a.Prop_ID ?? a.prop_id ?? a.PROP_ID;
+  ok(propId != null && propId !== "", `${name}: returned parcel has a real Prop_ID (${propId}, owner="${a.OWNER_NAME || a.owner_name}")`);
 }
 
 console.log("1) the nineteen counties within 50 miles of downtown Dallas");
@@ -91,15 +94,15 @@ for (const [name, lat, lng] of DFW_19) await probeCounty(name, lat, lng);
 console.log("\n2) a spread sample well outside that radius (mechanism, not just proximity)");
 for (const [name, lat, lng] of SPREAD_SAMPLE) await probeCounty(name, lat, lng);
 
-console.log("\n3) the dialed-in tier is unaffected — its own live CAD still answers, not TxGIO");
+console.log("\n3) the dialed-in tier is unaffected — its own live CAD still answers, not the TX statewide layer");
 {
   const id = countyIdentity(29.76, -95.37); // inside Harris
   ok(id.key === "harris", `Harris still resolves to its own dialed-in key (got "${id.key}")`);
-  ok(COUNTIES_MAP.harris.layerUrl.includes("gis.hctx.net"), "Harris's layerUrl is still HCAD's own service, not TxGIO");
+  ok(COUNTIES_MAP.harris.layerUrl.includes("gis.hctx.net"), "Harris's layerUrl is still HCAD's own service, not the TX statewide layer");
 }
 
 console.log(`\n${fails.length ? `✗ ${fails.length} FAILED` : "✓ all checks passed"}`);
 console.log(`\nSAMPLE SIZE: ${DFW_19.length + SPREAD_SAMPLE.length} of 254 Texas counties probed live. This is evidence`);
-console.log("about the derivation MECHANISM (one TxGIO service, scoped correctly per county), not a claim");
+console.log("about the derivation MECHANISM (one TX statewide service covering the whole state, unscoped), not a claim");
 console.log("that every one of the remaining unprobed counties has been individually confirmed.");
 process.exit(fails.length ? 1 : 0);
