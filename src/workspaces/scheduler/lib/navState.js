@@ -228,13 +228,54 @@ export function isPickShowing(pick, activeId, section, projectId) {
 // this the carry-out would instantly re-adopt the site we just cleared and bring the panel back.
 // The intent is cleared by the very next nav-state, so a non-honouring iframe degrades to the
 // prior behaviour rather than a route that can never adopt again.
+//
+// ⛔ NEW-1 (owner report, 2026-09-15 — "sometimes when I'm clicking between modules... it takes me
+// to the wrong place") — `bootCarryOutAllowed` is a REQUIRED gate now, not an oversight to add
+// later. `activeId`/`section` come from the embedded app's own persisted, ACCOUNT-WIDE `aPid`
+// field (see the B1080544/B851 notes above this function) — "what schedule was last open," not
+// "what the user just chose." Without this gate, EVERY later arrival at a project-less Schedule
+// route (a module-tab click from Site's own "Select a project", a hand-typed `#/schedule`, a
+// revisit after deliberately leaving a project elsewhere) silently re-adopted whatever project
+// that ambient field happened to hold — which is exactly what made a routed project feel random:
+// the same click landed differently depending on invisible state left over from an earlier visit,
+// possibly from a different tab or session entirely. `bootCarryOutAllowed` is the SAME boot-resume
+// privilege `SitePlannerApp.jsx`'s `mayResumeLastSite` already grants (Shell's `resumeAllowed`) —
+// true only while THIS mount is processing the app's own actual boot route — and the caller must
+// FREEZE it at first render (never re-read Shell's live `resumeAllowed` on every render), because
+// `mayResumeLastSite` only compares the CURRENT projectId against the boot-time one: if the boot
+// itself resolved project-less (e.g. the Dashboard), `resumeAllowed` reads true again any later
+// time the live projectId cycles back to null, which is precisely the case this gate exists to
+// close. See `shouldNeutralizeToReports` below for the honest counterpart: when this returns
+// false, the iframe must be told to stop showing that stale project, not merely left alone.
 export function shouldAdoptLinkedSiteIntoRoute({
-  isActive = true, section = "projects", projectId = null, dashboardIntent = false,
+  isActive = true, section = "projects", projectId = null, dashboardIntent = false, bootCarryOutAllowed = false,
 } = {}) {
   if (!isActive) return false;          // only the VISIBLE module may write the route (keep-alive gate)
   if (section !== "projects") return false;
   if (projectId != null) return false;  // route already carries a project → inert (loop-free)
+  if (!bootCarryOutAllowed) return false; // NEW-1 — not the app's own boot-resume: never silently adopt
   return !dashboardIntent;
+}
+
+// NEW-1 — the honest counterpart to shouldAdoptLinkedSiteIntoRoute. The route names no project,
+// this ISN'T the app's boot-resume privilege (see that gate's own header just above), and the
+// iframe is STILL showing some specific project's grid — its own persisted `aPid`, left over from
+// this tab's earlier visit, another tab, or another session. Rather than leave that stale project
+// visibly on screen while the breadcrumb correctly says "no project" (a crumb/grid mismatch that
+// is arguably worse than the silent-adopt bug), tell the iframe to show its own neutral,
+// cross-project Dashboard (reports) view instead — the same "nothing chosen ⇒ a real, honestly-
+// labeled neutral state" shape the Site Planner's own "Select a project" map already uses.
+// `dashboardIntent` is skipped deliberately: a Dashboard press already told the iframe to switch
+// (dashboardNavActions), so re-posting here would be redundant, not wrong — but there is nothing
+// useful for this function to add in that window.
+export function shouldNeutralizeToReports({
+  isActive = true, section = "projects", projectId = null, bootCarryOutAllowed = false, dashboardIntent = false,
+} = {}) {
+  if (!isActive) return false;
+  if (projectId != null) return false;
+  if (bootCarryOutAllowed) return false;  // the boot privilege still stands — let it try adopting first
+  if (dashboardIntent) return false;      // already told the iframe to switch, nothing more to do
+  return section === "projects";
 }
 
 /* ---- NEW-5 (B1080544) — make a route↔grid mismatch IMPOSSIBLE TO SEE, not merely self-healing ---
