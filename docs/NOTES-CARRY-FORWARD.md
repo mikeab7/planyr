@@ -1015,6 +1015,39 @@ position**.
     routing every reader through the one function that already combines them correctly
     (`readIndent` + `shiftIndent`) rather than letting each caller reinvent the combination.
 
+17. **⛔ A LOAD-TIME SCHEMA SETTLE IS NOT AN EDIT, AND `onUpdate` COULD NOT TELL THE DIFFERENCE
+   (B1662464, 2026-09-15) — "opening a note writes to it."** Tiptap's own mount-time normalisation
+   — missing node attrs filled to their schema defaults, and the `TrailingNode` extension
+   inserting a blank paragraph so the cursor has somewhere to land after a table/list — is a REAL,
+   doc-changed ProseMirror transaction with **zero keystrokes**. `NoteEditor.jsx`'s `onUpdate`
+   used to treat every doc-changed transaction alike, so simply OPENING a note queued a write,
+   stamped `updatedAt` to "now" (`touchPage`, so "Edited just now" showed on a page nobody
+   touched), and — via `docTick`, which bumps on a pure `selectionUpdate` too, not only real doc
+   changes — could mint a version row 1500ms later carrying the default **"While you were
+   typing"** label, or a forced "When you left the page" row on close, both from a session with
+   no keystrokes at all. Measured with zero browser interaction across six run/mark shapes
+   (identical marks, differing `textStyle`, bold-vs-plain, an autolink-shaped mark, a real
+   Tab-sunk nested list item, an item wearing Tab's flat `indent` attribute): all six changed
+   shape and got saved on the very first open, before the fix; none does, after.
+   **THE FIX, general on purpose:** `hasUserInputRef` starts `false` and is set `true` only by a
+   genuine, `event.isTrusted` DOM event (`pointerdown`/`keydown`/`paste`/`drop`/`cut`, listened on
+   `window` so a toolbar click counts too, never by a command or an effect). `onUpdate` still
+   updates `lastDocRef` on every transaction so a real edit right after the settle loses no
+   context, but queues nothing — no save timer, no dirty status, no version row — until this
+   flips. It is not a special case for THIS settle's shape; it refuses to call ANY load-time
+   transaction an edit until a person has done something, which closes the whole class the owner's
+   own report worried about, not just this one instance.
+   **⛔ AND WHAT THIS DID NOT EXPLAIN, recorded so a future session does not assume it did:** the
+   report that found this ALSO found real text apparently missing from a real note
+   ("…Jerry Hayley Kandice Cabets…" → "…Jerry Hayley…", one list item, adjacent run gone). None of
+   the six shapes above — nor any other tried — ever reproduced actual TEXT loss, only the
+   cosmetic shape change (attrs, trailing paragraph). So the mechanism above is CONFIRMED and
+   FIXED, but it is not proven to be what deleted that specific line, and per STANDING RULE #2 that
+   gap is parked live (`V1190496`, `Blocker: real-data`), not closed on this null. If a future
+   session ever finds a load-time (or any silent, no-user-intent) transaction that removes TEXT
+   rather than just changing structure, that is the missing piece — and per this entry's own fix
+   shape, gating it behind `hasUserInputRef` closes it the same way, no new mechanism needed.
+
 ---
 
 ## 6 · Where the rest lives
