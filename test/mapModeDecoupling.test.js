@@ -101,11 +101,13 @@ describe("MapFinder map-layer effects never read `mode` (B831778/NEW-3)", () => 
     expect(code).not.toMatch(/const \[mode, /);
     expect(code).not.toMatch(/setItem\("planarfit:mapMode:v1"/);
     expect(src).toMatch(/<RailTab label="Sites"[\s\S]{0,120}active=\{panelTab === "site"\}/);
-    expect(src).toMatch(/<RailTab label="Comps"[\s\S]{0,80}active=\{panelTab === "comp"\}/);
+    // NEW-2 — the "Comps" tab was relabeled "Records" (site record — see MapFinder.jsx's own
+    // comment on the RailTab); the window is wider now to span the added `title=` tooltip.
+    expect(src).toMatch(/<RailTab label="Records"[\s\S]{0,220}active=\{panelTab === "comp"\}/);
     // Teeth proof: the OLD coupled pattern must genuinely be gone, not just "a new pattern also
     // exists alongside it" — a partial revert would still satisfy the two matches above.
     expect(src).not.toMatch(/<RailTab label="Sites"[\s\S]{0,120}active=\{mode === "site"\}/);
-    expect(src).not.toMatch(/<RailTab label="Comps"[\s\S]{0,80}active=\{mode === "comp"\}/);
+    expect(src).not.toMatch(/<RailTab label="Records"[\s\S]{0,220}active=\{mode === "comp"\}/);
   });
 
   /* NEW-1 — `panelTab` still READS the retired `planarfit:mapMode:v1` key to seed itself, and that

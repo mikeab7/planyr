@@ -6,14 +6,14 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-09-12",
-        "approvedCommit": "3f178aaaa",
-        "note": "B1343200-B1343203 phone header fixes: IconButton/Tab/MenuTrigger/CloudSyncBadge now carry the app-wide tap-target class (position:relative + an invisible ::after hit-area expansion) for the 44px minimum touch target. That structural change perturbs the anti-aliased edge of the existing low-opacity REST_SHADOW box-shadow on the header's right-zone icon buttons by a few RGB units on desktop/light only -- confirmed with CI's exact pinned Chromium (rev 1228) and by direct pixel inspection: no layout shift, no color/token change, tiny (<=9/255) delta confined to a hairline strip at the button edges. Re-approving the current, correct pixels."
+        "approvedAt": "2026-09-15",
+        "approvedCommit": "5fc697b45",
+        "note": "B1631937: relabel the Comps rail tab to Records (site record)"
       },
       "dark": {
-        "approvedAt": "2026-09-12",
-        "approvedCommit": "3f178aaaa",
-        "note": "B1343200-B1343203 phone header fixes: IconButton/Tab/MenuTrigger/CloudSyncBadge now carry the app-wide tap-target class (position:relative + an invisible ::after hit-area expansion) for the 44px minimum touch target. That structural change perturbs the anti-aliased edge of the existing low-opacity REST_SHADOW box-shadow on the header's right-zone icon buttons by a few RGB units on desktop/light only -- confirmed with CI's exact pinned Chromium (rev 1228) and by direct pixel inspection: no layout shift, no color/token change, tiny (<=9/255) delta confined to a hairline strip at the button edges. Re-approving the current, correct pixels."
+        "approvedAt": "2026-09-15",
+        "approvedCommit": "5fc697b45",
+        "note": "B1631937: relabel the Comps rail tab to Records (site record)"
       },
       "light--phone": {
         "approvedAt": "2026-09-09",
