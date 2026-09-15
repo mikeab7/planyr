@@ -1,6 +1,7 @@
-/* nameGroupIntegrity.js — THE detector for the two data-integrity holes NEW-3 (2026-09-12 owner
- * review, "our code was too susceptible to issues with this and maybe had too many sources of
- * truth") exists to close permanently, both measured against `planyr_production` the same day:
+/* nameGroupIntegrity.js — THE detector for the data-integrity holes this module exists to close
+ * permanently. Started with the two NEW-3 (2026-09-12 owner review, "our code was too susceptible
+ * to issues with this and maybe had too many sources of truth") found, both measured against
+ * `planyr_production` the same day:
  *
  *   1. A project's name is copied across up to FOUR places (the `site` column, the `data->>'site'`
  *      jsonb mirror, the client's localStorage cache, and — for a group with a linked Schedule —
@@ -20,12 +21,22 @@
  *      introduce drift (a migration, a duplicate-project path, a manual SQL fix) fails loudly
  *      instead of sitting unnoticed the way this one did.
  *
- * This module is PURE (no storage, no network, no DOM) so both classes are unit-testable on their
- * own, and it is the ONE place either question is asked — `scripts/audit-name-group-integrity.mjs`
+ * ⛔ NEW-1 (2026-09-15) added a THIRD, BLOCKING check: `unstampedRow`. A row with no valid rename
+ * stamp is `sites_preserve_rename_stamp`'s (db/sites_rename_stamp_guard.sql) own no-op case —
+ * "if prior_at is null then return new" — so it has NO protection at all, exactly the gap that let
+ * a brand-new project (`smu1z3h60nbu`, created three days after the 2026-09-12 backfill closed
+ * every row that existed THEN) get its name overwritten cleanly. `db/sites_rename_stamp_guard.sql`
+ * now stamps every row at INSERT so this should never recur — this check is the permanent CI-side
+ * proof that it doesn't, so a future write path that bypasses that trigger (there should be none —
+ * it fires on every INSERT, unconditionally) fails the build instead of waiting for someone to
+ * probe production again the way NEW-1 itself had to.
+ *
+ * This module is PURE (no storage, no network, no DOM) so every class is unit-testable on its own,
+ * and it is the ONE place any of these questions is asked — `scripts/audit-name-group-integrity.mjs`
  * (live, whole-account) and `test/nameGroupIntegrity.test.js` (seeded, CI-enforced) both call it
- * rather than re-deriving either check.
+ * rather than re-deriving any check.
  */
-import { nameAuthority, groupKeyOf as modelGroupKeyOf } from "./projectName.js";
+import { nameAuthority, renameStamp, groupKeyOf as modelGroupKeyOf } from "./projectName.js";
 
 // A value counts as "a name" the same way projectName.js's `claimOf` does — a non-empty, non-
 // whitespace string. Anything else (absent, JSON null, "") is "no opinion", not a competing claim.
@@ -75,6 +86,20 @@ export function nameMismatch(row) {
   return { id: row.id, siteColumn: col, siteJsonb: jsonb };
 }
 
+/* NEW-1 (2026-09-15) — a row carrying no valid rename stamp at all, live or deleted (the backfill
+ * this check exists to keep true ran over every row, trashed included — see
+ * db/rename_stamp_backfill_20260912.sql's own "WHAT THIS DELIBERATELY DOES NOT TOUCH" for why a
+ * trashed row is exactly as unprotected as a live one otherwise). Reuses `projectName.renameStamp`
+ * — the SAME one parse `public.rename_stamp` mirrors server-side — rather than re-deriving the
+ * "is this a real stamp" question a third time. BLOCKING: this row has no protection at all
+ * against sites_preserve_rename_stamp's own no-op case. */
+export function unstampedRow(row) {
+  if (!row || !row.id) return null;
+  const raw = row.data && typeof row.data === "object" ? row.data.siteRenamedAt : undefined;
+  if (renameStamp(raw) != null) return null;
+  return { id: row.id };
+}
+
 /* A row's `scheduleProjectName` hint disagreeing with its project's own current authoritative name.
  *
  * ⛔ DELIBERATELY INFORMATIONAL, NEVER BLOCKING — read this before wiring it into anything that
@@ -97,13 +122,14 @@ export function scheduleNameDrift(row, authoritativeName) {
  * deleted_at` returns (live + deleted — every check here reasons per-row or per-live-group, never
  * needs a live-only filter the way projectName's split gate does).
  *
- * Returns { nameMismatches, groupKeyMismatches, scheduleNameDrifts }: the first two are BLOCKING —
- * a caller (the audit script, a future CI gate) should fail loudly on either being non-empty; the
- * third is informational only, per scheduleNameDrift's own header. */
+ * Returns { nameMismatches, groupKeyMismatches, unstampedRows, scheduleNameDrifts }: the first
+ * three are BLOCKING — a caller (the audit script, a future CI gate) should fail loudly on any
+ * being non-empty; the last is informational only, per scheduleNameDrift's own header. */
 export function auditRows(rows) {
   const list = (rows || []).filter(Boolean);
   const nameMismatches = list.map(nameMismatch).filter(Boolean);
   const groupKeyMismatches = list.map(groupKeyMismatch).filter(Boolean);
+  const unstampedRows = list.map(unstampedRow).filter(Boolean);
 
   // Resolve each LIVE group's current authoritative name once, so scheduleNameDrift has something
   // honest to compare against — reusing projectName.nameAuthority rather than re-deriving it.
@@ -129,5 +155,5 @@ export function auditRows(rows) {
     .map((row) => scheduleNameDrift(row, authorityByGroup.get(jsonbGroupKeyOf(row))))
     .filter(Boolean);
 
-  return { nameMismatches, groupKeyMismatches, scheduleNameDrifts };
+  return { nameMismatches, groupKeyMismatches, unstampedRows, scheduleNameDrifts };
 }

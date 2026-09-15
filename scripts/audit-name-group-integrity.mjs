@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* NEW-3 (2026-09-12 owner review, "too many sources of truth") — account-wide check for the two
+/* NEW-3 (2026-09-12 owner review, "too many sources of truth") — account-wide check for the
  * data-integrity holes nameGroupIntegrity.js exists to catch, run directly against production:
  *
  *   1. A row whose own `site` column disagrees with its own `data.site` jsonb field — never
@@ -10,6 +10,12 @@
  *      (`row.group_id || row.id`, the denormalized COLUMN mirror three SQL files in this repo
  *      already document as "known to drift" — rename_site_group.sql, set_site_group_role.sql,
  *      team_share_state.sql).
+ *   3. NEW-1 (2026-09-15) — a row with no valid rename stamp at all: `sites_preserve_rename_stamp`
+ *      (db/sites_rename_stamp_guard.sql) can only ever protect a stamp that is already there, so
+ *      such a row has NO defense against a stale write overwriting its name. `sites_rename_stamp_
+ *      guard.sql`'s BEFORE INSERT trigger now seeds one on every row the moment it is created, so
+ *      this should never fire again — it exists to prove that, not to find the next one to fix by
+ *      hand.
  *
  * Plus one INFORMATIONAL count (never blocking, see nameGroupIntegrity.scheduleNameDrift's own
  * header for why): a linked-Schedule name hint (`data.scheduleProjectName`) that has gone stale
@@ -20,17 +26,24 @@
  * `e2e-fixture-testfit` — a typo in e2e/seed/seed-fixtures.sql, fixed alongside this script — every
  * one of the owner's own 34 real project groups already agrees, per B366386's own sweep), 7
  * non-empty scheduleProjectName hints, all in agreement with their project's name that day.
+ * MEASURED 2026-09-15: 127 rows, 1 unstamped (`smu1z3h60nbu`, created three days after the
+ * 2026-09-12 rename-stamp backfill) — repaired the same session, and the INSERT trigger that stops
+ * a recurrence is applied.
  *
  * USAGE:
  *   SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… node scripts/audit-name-group-integrity.mjs [--fix]
- * Exits 1 if any row has a name-column disagreement or a group-key disagreement; exits 0 otherwise
- * (the schedule-name-drift count never affects the exit code). `--fix` corrects ONLY group-key
- * disagreements, via `backfill_group_id_column()` (db/backfill_group_id_column.sql) — never a bare
- * hand-rolled UPDATE. It deliberately does NOT auto-fix a name-column disagreement: unlike the
- * group-id mirror, `sites_rename_stamp_guard.sql`'s own header records one historical case
- * (`smrkumgymt65`) where the COLUMN, not the jsonb, was the better value — so a blanket "jsonb
- * wins" rule would sometimes push the worse name onto a row a human should look at instead. Read-
- * only without `--fix`.
+ * Exits 1 if any row has a name-column disagreement, a group-key disagreement, or no valid rename
+ * stamp; exits 0 otherwise (the schedule-name-drift count never affects the exit code). `--fix`
+ * corrects ONLY group-key disagreements, via `backfill_group_id_column()`
+ * (db/backfill_group_id_column.sql) — never a bare hand-rolled UPDATE. It deliberately does NOT
+ * auto-fix a name-column disagreement: unlike the group-id mirror, `sites_rename_stamp_guard.sql`'s
+ * own header records one historical case (`smrkumgymt65`) where the COLUMN, not the jsonb, was the
+ * better value — so a blanket "jsonb wins" rule would sometimes push the worse name onto a row a
+ * human should look at instead. It also does NOT auto-fix an unstamped row — that repair (seed from
+ * the row's own `updated_at`, the same Tier-2 convention rename_stamp_backfill_20260912.sql used)
+ * is a one-line, self-scoping SQL statement, already applied; a NEW unstamped row appearing here
+ * would mean the INSERT trigger itself stopped firing, which needs investigation, not a re-run of
+ * this flag. Read-only without `--fix`.
  */
 import { createClient } from "@supabase/supabase-js";
 import { auditRows } from "../src/workspaces/site-planner/lib/nameGroupIntegrity.js";
@@ -59,12 +72,12 @@ async function fetchAllSites() {
 
 async function main() {
   const rows = await fetchAllSites();
-  const { nameMismatches, groupKeyMismatches, scheduleNameDrifts } = auditRows(rows);
+  const { nameMismatches, groupKeyMismatches, unstampedRows, scheduleNameDrifts } = auditRows(rows);
   console.log(`Scanned ${rows.length} site row(s) (live + deleted).`);
 
-  const dirty = nameMismatches.length || groupKeyMismatches.length;
+  const dirty = nameMismatches.length || groupKeyMismatches.length || unstampedRows.length;
   if (!dirty) {
-    console.log("No row disagrees with itself on its name, and no row's two group keys disagree.");
+    console.log("No row disagrees with itself on its name, no row's two group keys disagree, and every row carries a valid rename stamp.");
   } else {
     if (nameMismatches.length) {
       console.log(`\n${nameMismatches.length} row(s) disagree with THEMSELVES on their project name (site column vs data.site):`);
@@ -73,6 +86,10 @@ async function main() {
     if (groupKeyMismatches.length) {
       console.log(`\n${groupKeyMismatches.length} row(s) have disagreeing group keys (jsonb vs group_id column):`);
       for (const m of groupKeyMismatches) console.log(`  - ${m.id}: jsonb="${m.jsonbKey}" column="${m.columnKey}"`);
+    }
+    if (unstampedRows.length) {
+      console.log(`\n${unstampedRows.length} row(s) carry NO valid rename stamp (sites_preserve_rename_stamp has nothing to protect them with):`);
+      for (const u of unstampedRows) console.log(`  - ${u.id}`);
     }
   }
   if (scheduleNameDrifts.length) {
