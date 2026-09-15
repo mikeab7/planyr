@@ -13,7 +13,7 @@ import ModuleLoader from "../../shared/ui/ModuleLoader.jsx";
 import { menuPanelStyle } from "../../shared/ui/controls.jsx";
 import {
   parseNavState, deriveCurrentProject, findBySiteId, needsScheduleCarryIn,
-  dashboardNavActions, shouldShowLinkPanel, shouldAdoptLinkedSiteIntoRoute, isPickShowing,
+  dashboardNavActions, shouldShowLinkPanel, shouldAdoptLinkedSiteIntoRoute, shouldNeutralizeToReports, isPickShowing,
   isGridMismatched, newProjectAction,
 } from "./lib/navState.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
@@ -39,6 +39,11 @@ export default function Scheduler({
   // (the whole point — no ~2 s Gantt re-boot per switch); hidden, we still FOLLOW the route
   // into the iframe, but never write the route from iframe state.
   isActive = true,
+  // NEW-1 (owner report, 2026-09-15) — the Shell's own boot-resume privilege (SitePlannerApp.jsx's
+  // `mayResumeLastSite`, computed once by Shell.jsx and passed uniformly to every workspace).
+  // Frozen at first mount below (`bootCarryOutRef`) — see that ref's own comment for why reading
+  // this live on every render would reopen the exact bug it closes.
+  resumeAllowed = true,
   // The Shell passes this to every workspace as the "leave this workspace, go to the
   // Site Planner map home" action. B1128272 — Schedule wires it to the header
   // wordmark ONLY (`onLogoDashboard`), never to the breadcrumb crumb — see
@@ -99,6 +104,17 @@ export default function Scheduler({
   // re-adopt the site we just cleared and put the trapping panel straight back up. Cleared by the
   // very next nav-state (see the message handler), so it can never wedge the route permanently.
   const dashboardIntentRef = useRef(false);
+  // NEW-1 — the boot-resume privilege (Shell's `resumeAllowed`), FROZEN at this component's own
+  // first render via `useRef`'s initial-value argument (React ignores it on every later render).
+  // Reading Shell's live `resumeAllowed` prop instead would reopen the exact bug this closes:
+  // `mayResumeLastSite` only compares the CURRENT routed projectId against the app's boot-time
+  // one, so when the boot itself resolved project-less (e.g. the Dashboard), it reads true again
+  // any later time the live projectId cycles back to null — which is precisely "arrive at a
+  // project-less Schedule route later in the session," the case being closed. Freezing it here
+  // captures "was THIS mount's first render genuinely the app's boot resolution" once, and the
+  // carry-out effect below spends it (sets it false) the moment it actually uses it, so even a
+  // legitimate boot-time adoption never re-fires on a later revisit.
+  const bootCarryOutRef = useRef(resumeAllowed);
   // The switcher pick the user last EXPLICITLY made (or null): `{ id, projectId }`, never a bare
   // id. Read by isPickShowing() below to let a deliberate pick of a cross-cutting unlinked
   // schedule (Operations/Pursuits) show its grid even on a routed project with no schedule of its
@@ -389,11 +405,34 @@ export default function Scheduler({
     // while they sit on the Site dashboard with no project selected). The dashboardIntent arm
     // (B1050) holds the adoption off for the one frame between "Dashboard cleared the route" and
     // "the iframe confirmed it's on reports" — without it the two would ping-pong the project back.
-    if (!shouldAdoptLinkedSiteIntoRoute({ isActive, section, projectId, dashboardIntent: dashboardIntentRef.current })) return;
+    if (!shouldAdoptLinkedSiteIntoRoute({
+      isActive, section, projectId, dashboardIntent: dashboardIntentRef.current, bootCarryOutAllowed: bootCarryOutRef.current,
+    })) return;
     const cur = deriveCurrentProject(projects, activeId, section);
     const linked = cur && cur.linkedSiteId != null ? cur.linkedSiteId : null;
-    if (linked != null) { try { onProjectChange?.(linked); } catch (_) {} }
+    if (linked != null) {
+      try { onProjectChange?.(linked); } catch (_) {}
+      // NEW-1 — the boot privilege is spent the instant it's actually used, exactly like
+      // `userLeftProjectRef` elsewhere in this app: it authorises ONE resume, not a standing
+      // license to keep silently re-adopting whatever the iframe shows on every later revisit.
+      bootCarryOutRef.current = false;
+    }
   }, [projects, activeId, section, projectId, onProjectChange, isActive]);
+
+  // NEW-1 — the honest counterpart to the carry-out effect above. The route is project-less, this
+  // ISN'T the app's boot-resume window (bootCarryOutRef spent or never granted), and the iframe is
+  // still showing SOME specific project's grid — its own persisted, account-wide `aPid`, left over
+  // from an earlier visit that may not even be THIS tab or session. Leaving it on screen would show
+  // a project the breadcrumb (correctly, now) says was never chosen — a crumb/grid mismatch, and
+  // exactly the "takes me to the wrong place" report this whole fix answers. Tell the iframe to
+  // show its own neutral, cross-project Dashboard (reports) view instead, matching the Site
+  // Planner's own "Select a project" state for "nothing chosen."
+  useEffect(() => {
+    if (!shouldNeutralizeToReports({
+      isActive, section, projectId, dashboardIntent: dashboardIntentRef.current, bootCarryOutAllowed: bootCarryOutRef.current,
+    })) return;
+    post({ type: "planar:nav-dashboard" });
+  }, [isActive, section, projectId]);
 
   // Picking a schedule from the breadcrumb is a USER action: switch to it, and if it's linked to a
   // site, carry that site into the route so the Site/Review tabs follow. One-shot (not a reactive
@@ -582,7 +621,16 @@ export default function Scheduler({
         onSwitch={onShellSwitch}
         authControl={authControl}
         accountActive={accountActive}
-        homeLabel="Dashboard"
+        // NEW-2/NEW-3 (owner report, 2026-09-15) — this crumb is NOT the app's real Dashboard
+        // (`onDashboard` below is wired to the in-module reports view, `goDashboard`, never
+        // `onGoDashboard`) — labeling it "Dashboard" anyway is exactly what made it read as landing
+        // "in the wrong place" (it visibly reads the same as Review/Library/Notes/Spreadsheet's
+        // leading crumb, which DOES leave to the real Dashboard). Same rule this app already
+        // applies to Site's own leading crumb ("Map", not "Dashboard", because it also leads
+        // somewhere other than the real Dashboard): the label must match the real destination.
+        // The wordmark is unaffected — it already reads no label text and already goes to the real
+        // Dashboard (`onLogoDashboard={onGoDashboard}` below).
+        homeLabel="Reports"
         // B850 (2026-07-15, owner-reported, then owner pushed back further: "shouldn't it just
         // auto-reload... if I have it up in two tabs") — AUDIT-FIRST confirmed the Scheduler is
         // genuinely safe for two tabs, same guarantee multiEditOk exists to convey: the embedded
