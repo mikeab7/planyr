@@ -9952,6 +9952,17 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
 
 **Result:** ⏳ pending — needs a real signed-in browser session; not reachable from this sandbox. `Cadence: once`.
 
+### V1185632 — B1657600: a Fort Worth (non-Houston-metro) parcel click fires exactly one request — `/identify`, never a wasted `/query` — and a Houston click is unaffected
+
+**Why this needs its own real pass.** The fix (`isIdentifyOnlyLayerUrl` gating `queryAtPoint`) is fully proven as a pure/mocked unit test (`test/arcgis.test.js` — a declared identify-only layer fires exactly one request in a controlled fetch mock) and by direct measurement against the real TxGIO host from this session's own environment (see the B1639698 amendment above, which hit `feature.geographic.texas.gov` directly and got the real "not supported" `/query` body followed by real `/identify` data — confirming the service's capability shape this fix relies on). What cannot be proven from either of those: the LIVE APP's actual network behavior end to end — the map finder's real candidate-routing/eager-identify machinery, running in a real browser against the deployed build, produces the exact request COUNT and HOST the dispatch's own repro asked for. This needs the fix live on `planyr.io`, not merely reasoned from source + a mocked test.
+
+**Steps, each with a named expected result — on `planyr.io` post-deploy, logged out (no sign-in needed for an address search on the map finder), network panel open:**
+1. Search "12350 Timberland Blvd, Fort Worth, TX". **Expect:** the lot resolves correctly (as it did before this fix — never user-visible), and the network panel shows **exactly ONE** request to `feature.geographic.texas.gov` — a `/identify` call — and **zero** requests to that host's `/query` endpoint.
+2. Search a Houston address (e.g. an address inside Harris County). **Expect:** exactly **ONE** request to `gis.hctx.net` (HCAD, Harris's own CAD) and **zero** requests to `feature.geographic.texas.gov` — matching the pre-existing B1639697 fix (a healthy real CAD suppresses the redundant statewide co-query), unaffected by this item.
+3. Read the served chunk hash (`document.querySelectorAll('script[src]')` or the Network tab) in the SAME observation as steps 1–2, per this repo's own live-measurement rule, confirming the build postdates this fix's merge.
+
+**Result:** ⏳ pending — needs the fix deployed (Cloudflare Pages auto-deploys on merge to `main`) and a real or headless browser driven against the live app with network tracing; not yet run this session because the code had not merged when this entry was written. `Cadence: once`.
+
 ## ✅ Verified / ❌ Failed — history
 
 > Passed/failed items are archived to **`VERIFICATION-DONE.md`** to keep this file fast.
