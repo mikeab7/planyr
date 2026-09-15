@@ -243,6 +243,21 @@ was never clicked" quietly ships broken.
 })()
 ```
 - **Stopping rule:** closes when steps 1–10 are observed and his read on the tolerance feel (step 8) is recorded, or a specific residual is filed as a recurrence against B1631649.
+### V1160592 — B1631632: "Save for all projects" carries the building-program tier table to the account, and a brand-new SIGNED-IN project reads it `Blocker: auth`
+
+**Why this needs a real pass.** Everything about the new tier table's editing, per-building override, undo behavior, and print-time summary is verified live in this sandbox, logged out, in a real headless Chromium (`ui-audit/verify-building-program-standards.mjs`, 27/27 checks). The ONE thing that sandbox structurally cannot do is sign in — the Supabase auth handshake is CORS-blocked here — so the "Save for all projects" button is correctly DISABLED in every sandbox run (`disabled={!cloudReady}`, pre-existing, unrelated to this item). What's pending is only the SIGNED-IN click-through of a pre-existing, already-relied-on mechanism (the same `commitUserPrefs`/`saveUserPrefs` cloud round trip that parcelStyle/typeStyles/measureStyle's own "Save for all projects" already uses) now also carrying one more field.
+
+**Verified HERE (this session, no sign-in reached).**
+- The pure round trip — `setStandardPref`/`getStandardPref` writing and reading `planStandards.buildingStyle.rules`, and surviving a `normalize()` pass without being stripped — is unit-tested (`test/standardsApply.test.js`, new cases).
+- Signed-out: editing a tier, clicking "Save for all projects" is correctly blocked with a "Sign in to make these defaults across your account" title; seeding the account MIRROR directly (as a real save would leave it) and opening a brand-new, never-before-seen project correctly reads the seeded default — proving the READ side end to end without needing auth.
+- The WRITE side (an actual signed-in click reaching the real `profiles.prefs` row) was not reached.
+
+**Steps, each with a named expected result.**
+  1. Signed in on `planyr.io`, open any plan's Standards panel → "Buildings — program," change the first clear-height tier's value to something distinctive, and click "Save for all projects." **Expect:** the button is enabled (not the disabled/signed-out state), and a "Saved as your defaults for all projects" confirmation appears.
+  2. `select prefs->'planStandards'->'buildingStyle' from public.profiles where id = '<uid>';` **Expect:** the `rules` object holds the distinctive value.
+  3. Open (or create) a different, never-before-touched project on the same account and check Standards → Buildings — program. **Expect:** the first clear-height tier reads the distinctive value from step 1, with no `settings.buildingRules` of its own on that new plan.
+  4. Reload that new plan once more. **Expect:** unchanged from step 3.
+- **Stopping rule:** closes when steps 1–4 are observed on `planyr.io`, or when any step fails and is filed as a recurrence against B1631632, per STANDING RULE #2 (a failure here is a FINDING, not a silent close).
 
 ### V1148592 — B1613696: a brand-new signed-in "New project" still creates a normal plan, now carrying a real rename stamp from the moment it's born `Blocker: auth`
 

@@ -24,7 +24,12 @@ const MIRROR_KEY = "planyr:userPrefs:v1";
 
 /** The shape we care about today. Additive: a new preference is a new key, never a migration. */
 export const EMPTY_PREFS = {
-  planStandards: { parcelStyle: {}, typeStyles: {}, measureStyle: {} },
+  // buildingStyle NEW-1 — a single "rules" key holding the building-program tier
+  // table ({ clearHeight, slab }, see lib/buildingProps.js). Unlike parcelStyle/
+  // measureStyle it is not a flat per-field bag — the whole tiered rule commits as
+  // one value — but it rides the SAME setStandardPref/getStandardPref machinery
+  // (that code path is already value-shape-agnostic), so no new accessor is needed.
+  planStandards: { parcelStyle: {}, typeStyles: {}, measureStyle: {}, buildingStyle: {} },
   // B326418 — whether a NEW project is born shared with your team, and which team. Absent means
   // default-ON (see newProjectSharing.js), so an account that has never opened the switch behaves
   // as the owner asked. It only ever affects projects created from here on.
@@ -75,6 +80,9 @@ const normalize = (p) => ({
     // NEW-1 — measurement defaults joined the account scope. Additive: an older prefs row simply
     // has no bag here and normalizes to an empty one, so nothing needs migrating.
     measureStyle: { ...((p && p.planStandards && p.planStandards.measureStyle) || {}) },
+    // NEW-1 (building program) — additive the same way: an older prefs row has no
+    // bag here and normalizes to an empty one.
+    buildingStyle: { ...((p && p.planStandards && p.planStandards.buildingStyle) || {}) },
   },
 });
 

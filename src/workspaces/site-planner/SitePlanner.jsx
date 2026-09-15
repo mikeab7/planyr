@@ -477,7 +477,7 @@ import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom } from "./
 // B765985 — pure, dependency-free (safe on the boot path): the explicit engineering-scale math
 // the compose screen's frame-locking and fit-check use.
 import { scaleLabel, frameFootprintForScale, checkScaleFits } from "./lib/printScale.js";
-import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
+import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab, addTier as addTierPure, removeTier as removeTierPure, moveTier as moveTierPure, maxFiniteUpTo } from "./lib/buildingProps.js";
 import { createHistoryStack } from "./lib/history.js";
 import { describeHistoryStep, historyRunLabel } from "./lib/historyLabel.js";
 /* NEW-1 — putting an unlocated plan on the earth, and adjusting where it sits (the "GIS is down"
@@ -15716,10 +15716,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Building properties (B198): clear height + slab thickness, auto-assigned from each
   // building's footprint sf via an editable per-plan rule (`settings.buildingRules`),
   // with optional manual overrides stored on the element (clearHeightOverride /
-  // slabThicknessOverride). Surfaced in the selected-building panel, the print options
-  // flyout (B199) and the printed buildings table (B197) — one source, never recomputed
-  // ad hoc in the print routine.
-  const buildingRules = normalizeRules(settings.buildingRules);
+  // slabThicknessOverride). Surfaced in the selected-building panel, the Standards panel's
+  // "Buildings — program" section (NEW-1) and the printed buildings table (B197) — one
+  // source, never recomputed ad hoc in the print routine.
+  // NEW-1 — this plan's own copy first, then the account default ("Save for all projects"),
+  // exactly the ladder `committedParcelStd`/`committedMeasureStd` already use — so promoting
+  // the tier table to the account actually reaches a brand-new project, which starts with no
+  // `settings.buildingRules` of its own. `userPrefs` (the account-prefs state) isn't declared
+  // until further down this component, so this starts WITHOUT the account fallback and is
+  // reassigned right after `userPrefs` exists (search "buildingRules = normalize" below) —
+  // every actual reader of this binding (buildingRows(), the building inspector) only runs
+  // later, inside this render's JSX, so it always sees the reassigned, account-aware value.
+  let buildingRules = normalizeRules(settings.buildingRules);
   const buildingSqft = (el) => {
     const base = el.points ? polyArea(el.points) : el.w * el.h;
     const ba = els.reduce((s, x) => s + (x.attachedTo === el.id && x.dogEar ? x.w * x.h : 0), 0);
@@ -15740,6 +15748,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const setRuleTier = (key, idx, field, val) => setSettings((s) => {
     const r = normalizeRules(s.buildingRules);
     return { ...s, buildingRules: { ...r, [key]: r[key].map((t, i) => (i === idx ? { ...t, [field]: val } : t)) } };
+  });
+  // NEW-1 — add/remove/reorder a tier row (the Standards panel's "Buildings — program"
+  // section). Commits straight to `settings.buildingRules`, exactly like `setRuleTier` above
+  // and exactly like the sibling structural-grid fields (Speed bay, Bay band, …) commit
+  // straight to `settings` — an edit here IS saved to this plan the instant it's made.
+  const addRuleTier = (key) => setSettings((s) => {
+    const r = normalizeRules(s.buildingRules);
+    return { ...s, buildingRules: { ...r, [key]: addTierPure(r[key]) } };
+  });
+  const removeRuleTier = (key, idx) => setSettings((s) => {
+    const r = normalizeRules(s.buildingRules);
+    return { ...s, buildingRules: { ...r, [key]: removeTierPure(r[key], idx) } };
+  });
+  const moveRuleTier = (key, idx, dir) => setSettings((s) => {
+    const r = normalizeRules(s.buildingRules);
+    return { ...s, buildingRules: { ...r, [key]: moveTierPure(r[key], idx, dir) } };
   });
   const resetBuildingRules = () => setSettings((s) => { const { buildingRules, ...rest } = s; return rest; }); // drop → defaults
   // Set/clear a per-building override (B199). `val == null` reverts that property to auto.
@@ -19931,6 +19955,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * lib/userPrefs.js). Signed out, the "All" scope falls back to a machine-local mirror and SAYS
    * so rather than passing a per-computer value off as a cross-machine default. */
   const [userPrefs, setUserPrefs] = useState(() => applyPrefs(readMirror()));
+  // NEW-1 — now that `userPrefs` exists, fold the account default into `buildingRules`
+  // (declared far above, before this state existed). See that declaration's own comment.
+  buildingRules = normalizeRules(settings.buildingRules ?? getStandardPref(userPrefs, "buildingStyle", "rules"));
   const [prefsSource, setPrefsSource] = useState("local"); // "cloud" once the account row loads
   useEffect(() => {
     let live = true;
@@ -20045,8 +20072,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     PARCEL_STD_KEYS.forEach((k) => { up = setStandardPref(up, "parcelStyle", k, parcelStdValue(k) ?? null); });
     MEASURE_STD_KEYS.forEach((k) => { up = setStandardPref(up, "measureStyle", k, measureStdValueUI(k) ?? null); });
     Object.keys(TYPE).forEach((t) => TYPE_STD_KEYS.forEach((k) => { up = setStandardPref(up, "typeStyles", k, typeStdValue(t, k) ?? null, t); }));
+    // NEW-1 — the building-program tier table rides the SAME "Save for all projects" button
+    // (it isn't part of `stdDraft`; it commits straight to `settings.buildingRules`, like the
+    // sibling structural-grid fields), so whatever this plan currently shows is what a
+    // brand-new project starts with.
+    up = setStandardPref(up, "buildingStyle", "rules", buildingRules);
     commitUserPrefs(up);
-    setSettings((s) => ({ ...s, parcelStyle: {}, typeStyles: {}, measureStyle: {} }));
+    setSettings((s) => { const { buildingRules: _drop, ...rest } = s; return { ...rest, parcelStyle: {}, typeStyles: {}, measureStyle: {} }; });
     clearStdDraft();
     flashStdToast("Saved as your defaults for all projects", null, 3500);
   };
@@ -21890,6 +21922,60 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <Field label="Dock door — W / o.c."><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.doorWidth} min={1} onCommit={(n) => setSettings((s) => ({ ...s, doorWidth: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.doorOC} min={2} onCommit={(n) => setSettings((s) => ({ ...s, doorOC: n }))} /></span></Field>
             <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>Interior bays are sized evenly within the band toward the typical size, so the columns are uniformly spaced; the speed bay is pinned. The band is the allowed bay range.</div>
           </Section>
+          </div>
+
+          {/* NEW-1 — BUILDINGS: PROGRAM. Clear height & slab thickness by building size — the
+              printed buildings table's CLEAR/SLAB columns (buildingRows(), read by printSheet.js)
+              come from this tier table, exactly the way the column-grid math above reads the
+              structural-grid fields. Same direct-commit model as that sibling section (an edit
+              here IS saved to this plan immediately — there is nothing to "Apply", since a
+              building resolves its clear height/slab live, same as the grid); "Save for all
+              projects" below additionally promotes it to the account, same button that already
+              carries Parcels/Measurements/Colors. Per-building overrides live on the building
+              itself (Properties → Structure) and always win — this table is the auto/default
+              only, exactly like the grid's own per-building overrides. Shares the "building"
+              focus key with the structural-grid section above so `jumpToStandards("building")`
+              (the Properties-panel pointer, NEW-2) opens and scrolls to both together. */}
+          <div data-std-sec="building">
+          {(() => {
+            const tinyNum = { ...numInput, width: 68, padding: "4px 7px", fontSize: 11.5 };
+            const valNum = { ...numInput, width: 46, padding: "4px 7px", fontSize: 11.5 };
+            const moveBtn = (on) => ({ width: 16, height: 13, padding: 0, display: "grid", placeItems: "center", fontSize: 8, lineHeight: 1, border: BORDER_1, borderRadius: 3, background: SURF_RAISED, fontFamily: "inherit", cursor: on ? "pointer" : "default", color: on ? PAL.ink : "#cfc7b5", opacity: on ? 1 : 0.5 });
+            // Order is COSMETIC ONLY (evalTier resolves the smallest qualifying threshold
+            // regardless of array position — see buildingProps.js) — ▲▼ let the owner arrange
+            // rows for readability without any risk of changing which tier a size resolves to.
+            const tierRow = (key, t, i, unit, count) => (
+              <div key={`${key}${i}`} style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 2px", fontSize: 11.5, color: PAL.ink }}>
+                <span style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                  <button title="Move up" disabled={i === 0} onClick={() => moveRuleTier(key, i, -1)} style={moveBtn(i > 0)}>▲</button>
+                  <button title="Move down" disabled={i === count - 1} onClick={() => moveRuleTier(key, i, 1)} style={moveBtn(i < count - 1)}>▼</button>
+                </span>
+                {t.upTo != null ? (
+                  <><span style={{ color: PAL.muted }}>under</span><NumInput style={tinyNum} value={t.upTo} min={1} onCommit={(n) => setRuleTier(key, i, "upTo", n)} /><span style={{ color: PAL.muted }}>SF</span></>
+                ) : (
+                  <span style={{ color: PAL.muted, flex: "0 0 auto" }}>{maxFiniteUpTo(buildingRules[key]) != null ? `${maxFiniteUpTo(buildingRules[key]).toLocaleString()} SF & above` : "and above"}</span>
+                )}
+                <span style={{ flex: 1 }} />
+                <span style={{ color: PAL.muted }}>→</span>
+                <NumInput style={valNum} value={t.value} min={1} onCommit={(n) => setRuleTier(key, i, "value", n)} /><span style={{ color: PAL.muted, width: 16 }}>{unit}</span>
+                <button title="Remove this tier" disabled={count <= 1} onClick={() => removeRuleTier(key, i)} style={{ ...chip, padding: "2px 6px", fontSize: 10, opacity: count <= 1 ? 0.4 : 1 }}>✕</button>
+              </div>
+            );
+            return (
+              <Section key={`std-buildingprogram:${standardsFocus === "building"}`} title="Buildings — program" collapsed={standardsFocus !== "building"}>
+                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, margin: "0 2px 8px" }}>
+                  A building steps up automatically when it crosses a threshold below, unless it's been overridden on that building itself.
+                </div>
+                <StdSubLabel>Clear height (ft)</StdSubLabel>
+                {buildingRules.clearHeight.map((t, i) => tierRow("clearHeight", t, i, "ft", buildingRules.clearHeight.length))}
+                <button style={{ ...chip, fontSize: 11, padding: "4px 8px", marginTop: 3 }} onClick={() => addRuleTier("clearHeight")}>+ Add tier</button>
+                <StdSubLabel>Slab thickness (in)</StdSubLabel>
+                {buildingRules.slab.map((t, i) => tierRow("slab", t, i, "in", buildingRules.slab.length))}
+                <button style={{ ...chip, fontSize: 11, padding: "4px 8px", marginTop: 3 }} onClick={() => addRuleTier("slab")}>+ Add tier</button>
+                <button style={{ ...chip, width: "100%", marginTop: 10, fontSize: 11.5, padding: "5px 8px" }} onClick={resetBuildingRules}>Reset to defaults</button>
+              </Section>
+            );
+          })()}
           </div>
 
           <div data-std-sec="parking">
@@ -24819,37 +24905,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* The compose screen (B765985) — a full-screen surface, not an overlay: nothing of the
               canvas is visible or reachable while this is up. See PrintCompose.jsx.
-              `buildingRulesPanelNode` is the SAME "Options ▾" body B199 shipped (clear-height/slab
-              default tiers + per-building overrides that drive the printed buildings table) —
-              carried forward verbatim, just relocated from the old floating flyout into this
-              screen's own panel. */}
+              `buildingRulesPanelNode` carries the per-building CLEAR/SLAB overrides that drive
+              the printed buildings table — a genuinely print-specific convenience (review/adjust
+              just the two printed columns right before printing). NEW-1 moved the SIZE-TIER
+              TABLE ITSELF (the "Defaults by building size" editor this panel used to own,
+              B199) into the Standards panel's "Buildings — program" section — one editable
+              home, not two copies of the same tier table (both would read/write the identical
+              `settings.buildingRules`, so it was never a correctness risk, just a needless
+              second way to do the same edit); this panel now only SUMMARIZES it. */}
           {composeMode && (() => {
-            const rules = normalizeRules(settings.buildingRules);
+            const rules = buildingRules;
             const rows = buildingRows();
-            const lbl = { fontSize: 10.5, color: PAL.muted, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", margin: "8px 4px 4px" };
-            const tinyNum = { ...numInput, width: 70, padding: "4px 7px", fontSize: 11.5 };
             const valNum = { ...numInput, width: 46, padding: "4px 7px", fontSize: 11.5 };
-            const tierRow = (key, t, i, unit) => (
-              <div key={`${key}${i}`} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 4px", fontSize: 11.5, color: PAL.ink }}>
-                {t.upTo != null ? (
-                  <><span style={{ color: PAL.muted }}>under</span><NumInput style={tinyNum} value={t.upTo} min={1} onCommit={(n) => setRuleTier(key, i, "upTo", n)} /><span style={{ color: PAL.muted }}>SF</span></>
-                ) : (
-                  <span style={{ color: PAL.muted, flex: "0 0 auto" }}>{rules[key][i - 1] ? `${(rules[key][i - 1].upTo || 0).toLocaleString()} SF & above` : "and above"}</span>
-                )}
-                <span style={{ flex: 1 }} />
-                <span style={{ color: PAL.muted }}>→</span>
-                <NumInput style={valNum} value={t.value} min={1} onCommit={(n) => setRuleTier(key, i, "value", n)} /><span style={{ color: PAL.muted, width: 16 }}>{unit}</span>
-              </div>
-            );
             const buildingRulesPanelNode = (
               <div style={{ padding: "2px 2px 4px" }}>
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: PAL.ink, padding: "2px 4px" }}>Defaults by building size</div>
-                <div style={lbl}>Clear height</div>
-                {rules.clearHeight.map((t, i) => tierRow("clearHeight", t, i, "ft"))}
-                <div style={lbl}>Slab thickness</div>
-                {rules.slab.map((t, i) => tierRow("slab", t, i, "in"))}
-                <button style={{ ...chip, width: "100%", marginTop: 7, fontSize: 11.5, padding: "5px 8px" }} onClick={resetBuildingRules}>Reset to defaults</button>
-                <div style={{ height: 1, background: PAL.panelLine, margin: "10px 2px 4px" }} />
+                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, padding: "0 4px 6px" }}>
+                  Clear height {rules.clearHeight.length} tier{rules.clearHeight.length === 1 ? "" : "s"} · slab {rules.slab.length} tier{rules.slab.length === 1 ? "" : "s"} — edit in Standards → Buildings.
+                </div>
+                <div style={{ height: 1, background: PAL.panelLine, margin: "2px 2px 4px" }} />
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: PAL.ink, padding: "2px 4px" }}>Per-building overrides</div>
                 {rows.length === 0 ? (
                   <div style={{ fontSize: 11.5, color: PAL.muted, padding: "6px 4px" }}>No buildings yet — draw a building to set its clear height & slab.</div>
@@ -24878,7 +24952,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </div>
                   </div>
                 ))}
-                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 8, padding: "0 4px" }}>Auto values come from the size rules above; an override pins a value until you revert it. These print in the buildings table.</div>
+                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 8, padding: "0 4px" }}>Auto values come from Standards → Buildings; an override pins a value until you revert it. These print in the buildings table.</div>
               </div>
             );
             return (
@@ -26475,6 +26549,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             onCommit={(deg) => rotateSelTo(deg)}
                             onStep={(d) => rotateSelTo(normalizeDeg((b.rot || 0) + d))} />
                         </Field>
+                        {/* NEW-2 — the owner nearly built a second way to edit the column grid
+                            because this pointer didn't exist; same style as the Colors line
+                            every selected element ends with, below. */}
+                        <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 10 }}>
+                          This building's column grid, clear height & slab start from <button style={linkBtn} onClick={() => jumpToStandards("building")}>Standards → Buildings ↗</button>
+                        </div>
                       </>
                     );
                   })() : (
