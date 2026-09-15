@@ -2957,6 +2957,23 @@ export default function NoteEditor({
        * before it was fixed: a block rendered at x=1007, and after a reload the same block sat at
        * 959 — 48px adrift, from nothing but the loop settling differently on the two paths. */
       const paneWidth = scrollerRef.current?.offsetWidth || dom.clientWidth;
+      /* ⛔ B1344624 ×2 (owner report 2026-09-15) — THE GUTTER MUST FIT INSIDE WHAT IS ACTUALLY
+       * VISIBLE, NOT THE BORDER BOX `paneWidth` ABOVE. `note-mat` scrolls VERTICALLY
+       * (`overflow: auto`) and its own bottom reach (`matExtraBottom`) keeps a scrollbar present
+       * on nearly every note, which eats real horizontal space `offsetWidth` does not know
+       * about — measured on the owner's own window: `offsetWidth` 923, `clientWidth` 913, a
+       * 10px gap the gutter math below was blind to, so even an unpinned Fit-to-content page
+       * carried a few pixels of dead horizontal scroll it never needed. `paneContentWidth` is
+       * used ONLY for the gutter (`matPadX`) below — `paneWidth` above is untouched (anchored-box
+       * fitting, table extents, the natural sheet cap, the reach spacer all still read it), both
+       * because none of them reported this defect and because that measurement has its own
+       * already-fixed feedback-loop history (this comment's neighbour, two lines up) that a
+       * change here has no business disturbing. Safe to read fresh every pass: `note-mat` is
+       * `box-sizing: border-box` (the app-wide reset), so its own `clientWidth` cannot be moved
+       * by the padding this same effect writes onto it — only by the box's outer size (the flex
+       * layout) or by the vertical scrollbar's own presence, neither of which this effect's
+       * output feeds back into. */
+      const paneContentWidth = scrollerRef.current?.clientWidth || paneWidth;
       const blocks = nodes.map((el) => {
         const x = parseFloat(el.getAttribute("data-anchor-x")) || parseFloat(el.style.left) || 0;
         const w = parseFloat(el.getAttribute("data-anchor-w")) || parseFloat(el.style.width);
@@ -3016,8 +3033,20 @@ export default function NoteEditor({
        * door. `naturalSheetWidth`/`naturalPageWidth` stay the TRUE, pin-independent baseline —
        * `matPadX` must never move because of a pin — and the pin instead gets its OWN baseline,
        * used only for how wide the SHEET renders, exactly parallel to how `sheetGrowWidth`
-       * already overrides the sheet's width without ever touching `matPadX`. */
-      const pinnedBase = resolvePinnedBaseWidth(editor.state.doc.attrs?.pageWidth, { paneWidth });
+       * already overrides the sheet's width without ever touching `matPadX`.
+       *
+       * ⛔ AND IT RESOLVES AGAINST `paneContentWidth`, NOT `paneWidth` (B1344624 ×2) — the ONE
+       * other place this effect deliberately departs from the border-box `paneWidth` documented
+       * above, for the same reason the gutter does: "full" is the one pin whose entire point IS
+       * the pane, and its resolved width is a PROMISE that the frame fits with only a small
+       * margin — a promise `resolvePresetPx` cannot keep if it is handed a width that includes
+       * room a vertical scrollbar has already claimed. Every numeric pin (Narrow/Normal/Wide, a
+       * completed drag) is UNAFFECTED: `resolvePresetPx` ignores `paneWidth` entirely for those,
+       * by design (its own header). Measured live: without this, "full" still resolved a few
+       * pixels too wide on a note with a scrollbar and a closed Outline rail, and the gutter
+       * fix above — correctly sized around an already-too-wide frame — could only ever shrink
+       * to zero, never close the last few pixels. */
+      const pinnedBase = resolvePinnedBaseWidth(editor.state.doc.attrs?.pageWidth, { paneWidth: paneContentWidth });
       const pinnedPageWidth = pinnedBase != null ? Math.max(1, pinnedBase - padX) : null;
       /* ⛔ A WIDE TABLE GROWS THE SHEET THE SAME WAY A WIDE BOX DOES (NEW-1, owner report
        * 2026-09-11) — REUSING this path rather than building a second growth mechanism, per the
@@ -3134,8 +3163,43 @@ export default function NoteEditor({
        * The pin does both: the gutter is exactly the one a centred ungrown page has, so nothing
        * looks different until something grows, and the left edge cannot move because it is not a
        * function of the sheet's width at all. Growth is spent on the right, where there is nothing
-       * to disturb, and the scroller carries whatever does not fit. */
-      setMatPadX(Math.max(MAT_GUTTER, Math.round((paneWidth - naturalSheetWidth) / 2)));
+       * to disturb, and the scroller carries whatever does not fit.
+       *
+       * ⛔ "FULL WIDTH" COLLAPSES ITS OWN GUTTER TOO — THE ONE DELIBERATE EXCEPTION (B1344624 ×2,
+       * owner report 2026-09-15). Every NUMERIC pin (Narrow/Normal/Wide, or a completed drag)
+       * keeps this SAME natural-width gutter on purpose, which is the whole point of the rule just
+       * above — it is what stops the left edge jumping on an ordinary growth or preset pick, and a
+       * numeric pin overflowing a narrow pane is already correct, scrollable behaviour
+       * (`resolvePresetPx`'s own header: those "ignore the pane entirely, by design"). "Full
+       * width" is not like them: its entire point IS the pane, and `resolvePresetPx("full", …)`
+       * already promises the frame fits with only a small margin on each side — `pinnedBase`
+       * above is that promise. Leaving the gutter at the big natural size while the frame renders
+       * at that pane-filling width breaks the promise from the other end: the frame is sized
+       * correctly and the surrounding padding was never told to shrink to match, so the frame
+       * overhangs the pane by the difference — measured live, a 907px frame inside a 172px gutter
+       * overhanging the visible area by 156px, a sideways scroll on a page the menu calls "Full
+       * width." The fix derives the gutter from the SAME resolved width the frame itself just
+       * committed to, rather than a second, independent number that could drift out of sync with
+       * it: whatever room is left after the frame, split evenly, floored so it can never go
+       * negative and never rounds up into overflow — `Math.floor`, not `Math.round`; the natural
+       * gutter above can round up because a stray extra pixel of grey is invisible, but a stray
+       * extra pixel of FRAME is the whole bug this item is about. When `resolvePresetPx`'s own
+       * floor engages (a pane too narrow for even Wide), this correctly shrinks toward zero rather
+       * than manufacturing room that is not there — the same accepted "the floor wins, the pane
+       * scrolls" behaviour Wide already has at that width.
+       *
+       * ⛔ AND BOTH BRANCHES FLOOR, NEITHER ROUNDS — a leftover of ODD width (`paneContentWidth −
+       * frame`) cannot split into two EQUAL integer sides at all: `Math.round` on the half rounds
+       * one side up, and doubling that rounded-up half back out (both sides get the SAME value)
+       * overshoots the true leftover by exactly one pixel — measured live, the reported 924
+       * `scrollWidth` against a 923 `clientWidth` on an ordinary Fit-to-content page. `Math.floor`
+       * instead spends one pixel less than the leftover allows, so it can only ever UNDER-fill
+       * (one pixel of unused grey on one side, invisible) and never over- (one pixel of forced
+       * scroll on a page with nothing that needs it). */
+      const isFullWidthPin = editor.state.doc.attrs?.pageWidth === "full";
+      const naturalGutter = Math.max(MAT_GUTTER, Math.floor((paneContentWidth - naturalSheetWidth) / 2));
+      const fullGutter = Math.max(0, Math.floor((paneContentWidth - (pinnedBase ?? naturalSheetWidth)) / 2));
+      setMatPadX(isFullWidthPin ? fullGutter : naturalGutter);
     };
     measure();
     /* Re-measured as the text inside a block reflows, which is the half that matters: the
