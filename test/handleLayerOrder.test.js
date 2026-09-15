@@ -49,8 +49,22 @@ describe("NEW-1: the handle layer exists and is the LAST child of the feet-space
   it("the group forwards an unhandled right-click to whatever is currently selected", () => {
     // A fixed-size slice, not "up to the next `>`" — the handler is itself an arrow function
     // (`(e) =>`), so the first `>` after `layerStart` is INSIDE the attribute, not the tag's close.
-    const openTag = SP.slice(layerStart, layerStart + 200);
-    expect(openTag).toMatch(/onContextMenu=\{\(e\) => \{ if \(sel\) featureContextAction\(sel, e\); \}\}/);
+    // NEW-1 (B1609136) widened this slice — the handler now hit-tests for an occluded acreage
+    // badge before falling back to `sel` (see the next test), so the opening tag is longer.
+    const openTag = SP.slice(layerStart, layerStart + 700);
+    expect(openTag).toMatch(/if \(sel\) featureContextAction\(sel, e\);/);
+  });
+
+  /* NEW-1 (B1609136, 2026-09-15) — a resize/rotate/vertex grip forwards correctly (above), but the
+   * acreage badge — the ONLY `data-chrome` node in this file — keeps its own `onContextMenu` and
+   * must win when its render coincides with the selected element's own handle (the handle paints
+   * over it, being the later sibling). The layer must hit-test for it BEFORE using `sel`. */
+  it("…but hit-tests for an occluded acreage badge first, so the badge's own parcel wins", () => {
+    const openTag = SP.slice(layerStart, layerStart + 700);
+    expect(openTag).toMatch(/document\.elementsFromPoint\(e\.clientX, e\.clientY\)/);
+    expect(openTag).toMatch(/data-chrome="acreage-badge"/);
+    expect(openTag).toMatch(/onChipContext\(e, pid\)/);
+    expect(openTag.indexOf("onChipContext(e, pid)")).toBeLessThan(openTag.indexOf("if (sel) featureContextAction(sel, e);"));
   });
 
   it("nothing but the print-frame / screen-space chrome follows it inside the canvas", () => {
