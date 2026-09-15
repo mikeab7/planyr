@@ -289,7 +289,10 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
 
   it("B566: callout/text-box default horizontal padding is more generous than vertical", () => {
     const sp = read("../src/workspaces/site-planner/SitePlanner.jsx");
-    expect(sp).toMatch(/padX: c\.padX \?\? 14, padY: c\.padY \?\? 8/);             // Site Planner default
+    // B1652706 — the resolver moved out of SitePlanner.jsx into its own pure module
+    // (lib/calloutStyle.js), alongside the box's new weight/dash/opacity fields.
+    const cs = read("../src/workspaces/site-planner/lib/calloutStyle.js");
+    expect(cs).toMatch(/padX: o\.padX \?\? 14, padY: o\.padY \?\? 8/);             // Site Planner default
     const mr = read("../src/shared/markup/MarkupRenderer.jsx");
     expect(mr).toMatch(/const padX = 8, padY = 4;/);                              // Doc Review parity — constant unchanged
     // Callout overflow fix (Doc Review): the char-count guess (`text.length * fs * 0.58 + padX*2`)
