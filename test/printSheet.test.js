@@ -194,6 +194,72 @@ describe("B765985 — the compose screen's title-block row: scale + prepared-by"
   });
 });
 
+describe("NEW-2 — the print menu's 'Stats band' toggle: printSheetLayout({ includeMetrics: false })", () => {
+  it("defaults to including the band — byte-identical to every pre-existing caller", () => {
+    const withDefault = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: 0, metricsCount: 9 });
+    const withExplicitTrue = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: 0, metricsCount: 9, includeMetrics: true });
+    expect(withDefault).toEqual(withExplicitTrue);
+    expect(withDefault.metrics).toBeTruthy();
+  });
+  it("off: reserves ZERO height for the band (metrics is null) and the plan reclaims the space, not a gap", () => {
+    const on = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: 0, metricsCount: 9 });
+    const off = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: 0, metricsCount: 9, includeMetrics: false });
+    expect(off.metrics).toBe(null);
+    expect(off.plan.h).toBeGreaterThan(on.plan.h);
+    // the plan gains exactly what the band + its gap used to take, and its bottom edge
+    // now sits flush with the inner border — no leftover gap where the band used to be.
+    expect(off.plan.y + off.plan.h).toBe(off.inner.y + off.inner.h);
+    expect(off.plan.h - on.plan.h).toBe(on.metrics.h + 14); // 14 = the gap constant between content and the band
+  });
+  it("off with a stormwater strip present still reserves nothing — the whole band goes together", () => {
+    const off = printSheetLayout({ metricsCount: 9, stormwaterBars: 2, includeMetrics: false });
+    expect(off.metrics).toBe(null);
+  });
+  it("off holds across every paper size and orientation — the sheet stays the same page (no overflow)", () => {
+    for (const p of PAPER_SIZES) {
+      for (const orient of ["landscape", "portrait"]) {
+        const L = printSheetLayout({ paper: p.key, orient, buildingCount: 1, metricsCount: 9, includeMetrics: false });
+        expect(L.metrics).toBe(null);
+        expect(L.plan.h).toBeGreaterThan(0);
+        expect(L.plan.y + L.plan.h).toBeLessThanOrEqual(L.page.h + 1e-6);
+      }
+    }
+  });
+});
+
+describe("NEW-2 — buildPrintSheetSvg omits the band (bars, metrics line AND the disclaimer) together", () => {
+  const bars = [{ label: "Detention", verdict: "+5.02 AC-FT", status: "covered", layout: bulletBarLayout({ provided: 15, required: 10 }), unit: "ac-ft" }];
+  it("band on: metrics text, stormwater bars and the note all render", () => {
+    const L = printSheetLayout({ buildingCount: 0, stormwaterBars: bars.length });
+    const svg = buildPrintSheetSvg({
+      layout: L, planSvg: "", title: "T", buildings: [], pal: PAL,
+      metrics: [["Site area", "10 AC"]], stormwater: bars,
+      note: "Concept site plan — planning-level estimates, not a survey.",
+    });
+    expect(svg).toContain("Site area:");
+    expect(svg).toMatch(/STORMWATER/);
+    expect(svg).toContain("not a survey");
+  });
+  it("band off: none of it renders — not the metrics, not the bars, not the disclaimer — even though the same data was passed in", () => {
+    const L = printSheetLayout({ buildingCount: 0, stormwaterBars: bars.length, includeMetrics: false });
+    const svg = buildPrintSheetSvg({
+      layout: L, planSvg: "", title: "T", buildings: [], pal: PAL,
+      metrics: [["Site area", "10 AC"]], stormwater: bars,
+      note: "Concept site plan — planning-level estimates, not a survey.",
+    });
+    expect(svg).not.toContain("Site area:");
+    expect(svg).not.toMatch(/STORMWATER/);
+    expect(svg).not.toContain("not a survey");
+  });
+  it("band off never disturbs the title block or the plan/table content", () => {
+    const L = printSheetLayout({ buildingCount: 2, includeMetrics: false });
+    const svg = buildPrintSheetSvg({ layout: L, planSvg: '<svg id="PLAN"></svg>', title: "Cypress Logistics", buildings: ROWS, pal: PAL });
+    expect(svg).toContain(">Cypress Logistics<");
+    expect(svg).toContain(">BUILDINGS<");
+    expect(svg).toContain('id="PLAN"');
+  });
+});
+
 describe("export filename (B201) — date · project · plan name", () => {
   it("formats as YYYY.MM.DD {Project} - {Plan Name}", () => {
     const d = new Date(2026, 5, 19); // June (month index 5) 19, 2026

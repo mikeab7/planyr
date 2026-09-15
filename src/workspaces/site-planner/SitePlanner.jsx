@@ -16520,6 +16520,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     printAspectRef.current = sheetPlanAspect({
       paper: printPaper, orient: printOrient, buildingCount: nBuildings,
       metricsPairs: printMetricPairs(), stormwaterBars: printStormwaterBars().length,
+      includeMetrics: settings.printMetricsBand !== false,
     });
     return printAspectRef.current;
   };
@@ -16566,6 +16567,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       paper: printPaper, orient: printOrient, buildingCount: nBuildings,
       metricsPairs: printMetricPairs(), stormwaterBars: printStormwaterBars().length,
       titleBlockExtra: !!printScale,
+      includeMetrics: settings.printMetricsBand !== false,
     });
     setComposeBoxIn(box);
     const pf = pickedFrameRef.current;
@@ -16583,14 +16585,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!composeMode) return;
     recomputeCompose();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [composeMode, printPaper, printOrient, printScale]);
+  }, [composeMode, printPaper, printOrient, printScale, settings.printMetricsBand]);
   // The live sheet preview — debounced, and built through the SAME `buildComposedSheet` the
   // final PDF rasterizes (PDF-PARITY by construction, not by inspection). Re-runs on every
   // knob the sheet's CONTENTS depend on; paper/orient/scale changes reach here indirectly
   // through the printFrame update the effect above already made.
   const composeKey = composeMode && printFrame
     ? [printPaper, printOrient, printFrame.cx, printFrame.cy, printFrame.wFt, printFrame.hFt,
-      settings.showDims !== false, settings.showAreas !== false, showAerial, printOverlay, printMapLayers, settings.printPreparedBy || ""].join("|")
+      settings.showDims !== false, settings.showAreas !== false, showAerial, printOverlay, printMapLayers, settings.printPreparedBy || "", settings.printMetricsBand !== false].join("|")
     : null;
   useEffect(() => {
     if (!composeKey) return;
@@ -16600,7 +16602,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       try {
         const scaleText = printScale ? scaleLabel(printScale) : "";
         const preparedBy = (settings.printPreparedBy || "").trim();
-        const composed = await withExportSheet((x) => x.buildComposedSheet(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy));
+        const composed = await withExportSheet((x) => x.buildComposedSheet(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false));
         if (cancelled) return;
         if (!composed) { setComposePreviewUrl(null); return; }
         const url = URL.createObjectURL(new Blob([composed.sheetSvg], { type: "image/svg+xml" }));
@@ -16644,7 +16646,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     try {
       const scaleText = printScale ? scaleLabel(printScale) : "";
       const preparedBy = (settings.printPreparedBy || "").trim();
-      await exportPDF(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy);
+      await exportPDF(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false);
       cancelPrint();
     } finally { setComposeDownloading(false); }
   };
@@ -24813,6 +24815,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 aerialAvailable={aerialAvailable} showAerial={showAerial} onToggleAerial={setShowAerial}
                 overlayPrintable={overlayPrintable} printOverlay={printOverlay} onTogglePrintOverlay={setPrintOverlay}
                 mapLayersPrintable={mapLayersPrintable} printMapLayers={printMapLayers} onToggleMapLayers={setPrintMapLayers}
+                showMetricsBand={settings.printMetricsBand !== false} onToggleMetricsBand={(v) => setSettings((s) => ({ ...s, printMetricsBand: v }))}
                 buildingRulesPanel={buildingRulesPanelNode}
                 onReposition={exitToReposition} onCancel={cancelPrint} onDownload={doPrint}
                 downloading={composeDownloading}
