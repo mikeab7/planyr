@@ -166,6 +166,49 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1173824 — B1645792: a road tee-ing into a truck court / paving pad at an oblique angle shows a real rounded curb return, not a raw notch
+
+**Why this needs a live pass.** A rendering-shape fix (PERCEPTUAL-PARITY: the bar is whether the
+owner can SEE it right at his own working zoom, matching his original repro shape, not just
+whether the numbers check out). Everything the sandbox can prove is already proven: the angle
+sweep (0–89° × five widths/radii/pad sizes, a rotated pad, connecting a few feet from a pad
+corner) is unit-tested against the fix and separately confirmed RED on unmodified `origin/main`
+(`test/roadDriveJunctionFillet.test.js`); the same RED→GREEN is reproduced live in a headless
+Chromium driving the real canvas (`e2e/road-drive-junction-fillet.spec.js`), including a
+byte-identical PDF/print export parity check. A visual screenshot of the fix was also inspected
+this session and reads as a clean, properly rounded curb return with no notch, no disconnected
+island, and no exposed raw flat-cap edge — confirmed twice: once against this session's local
+build, and again against PR #1722's own Cloudflare Pages branch preview deploy
+(`claude-vibrant-curie-7olpix.planyr.pages.dev`, commit `c5cb133`), i.e. the actual deployed
+artifact, not just a local dev server. Same clean result both times. What is NOT provable here:
+whether it looks right on a real monitor at the owner's own DPI/zoom, and specifically whether it
+fixes the EXACT geometry in his original screenshot (not available to this session — only his
+verbal description was).
+
+**No standing throwaway project exists** — this check needs a fresh throwaway plan (or an explicit
+duplicate of a real one) created first; state exactly what was created/touched, per the owner
+constraint on live checks. Never touch one of Michael's real plans.
+
+**Steps, each with a named expected result:**
+1. Open a throwaway plan (new project — never edit one of Michael's real plans directly). Draw a
+   truck court / paving pad (a wide rectangle). Draw a road (36–40 ft preset) ending on the pad's
+   edge at an oblique angle (not perpendicular — aim for roughly 30–60° off square). **Expect:**
+   both sides of the junction show a smooth, rounded curb-return arc blending the road's pavement
+   into the pad's edge — no straight diagonal edge exposed, no gap/notch of bare ground between
+   the road and the pad, no floating triangular scrap of pavement near (but not touching) the road.
+2. Zoom in on the junction at a normal working zoom. **Expect:** the fillet reads as ONE continuous
+   piece of pavement — the road widening smoothly into the return on both the acute and the obtuse
+   side of the approach — not two shapes that merely happen to sit near each other.
+3. Repeat with a generic Parking-type pad instead of a truck court, and with the road approached at
+   a different oblique angle (try both a shallow ~15–20° and a steep ~70–80° approach). **Expect:**
+   the same clean result at every angle tried.
+4. Print/export the sheet (or use the app's PDF export) and compare the junction to the on-screen
+   canvas. **Expect:** identical — the exported pavement shape matches the screen exactly (already
+   proven byte-identical in the headless e2e spec; this step is the human confirmation).
+5. State what was created/touched (the throwaway plan's id/name) so it can be cleaned up or left as
+   a known throwaway.
+- **Stopping rule:** closes when steps 1–5 are observed on a real screen, or a specific residual
+  (which angle/pad shape, a screenshot) is filed as a recurrence against B1645792.
 ### V1179280 — B1651248: Pennington County, SD parcels — a real point in Rapid City returns a real parcel `Blocker: live-GIS`
 
 **Why this needs its own live pass.** GIS endpoint behaviour is a mandatory LIVE-VERIFY class. Reachability and field metadata were confirmed directly from this sandbox (`services1.arcgis.com` is on the egress allowlist) — `52,547` polygon features, extent matching Pennington County. What only a live click can show is that a real point inside Rapid City resolves a real parcel through exactly one query.

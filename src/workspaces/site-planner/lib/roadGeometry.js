@@ -1223,16 +1223,50 @@ export function teeGeometry(params) {
   const deepT = phT > EPS ? Math.min(phT * 0.5, 12) : 0;
   const deepS = Math.max(1, Math.min(phS * 0.5, 12));
   const inT = mul(nTee, -1);                            // through near edge → through centerline
-  const wedge = (f, corner, inS) => {
+  // NEW-1 (road→pad junction fillet) — `f.tan2` sits on the SIDE road's own edge LINE, offset from
+  // the centerline by phS and extended infinitely in direction `d`. That line is the driveway's REAL
+  // physical edge only where the driveway's tessellated strip actually reaches — and the strip's own
+  // end, at T, is a FLAT CAP perpendicular to `d` (etOpenButt), not to this line. At an oblique
+  // approach the two corners are NOT mirror-symmetric about that cap: MEASURED (a 45° approach,
+  // 36 ft drive), one corner's `tan2` lands ~9 ft further INTO the strip than the cap (harmless —
+  // extra overlap), the other lands ~9 ft BEHIND it, on the far side of the cap the strip never
+  // occupies. A fixed perpendicular push from `tan2` (the old `back2`) cannot bridge that: it stays
+  // parallel to the cap it needs to reach past, so past ~40° the wedge on that side floats as its own
+  // disconnected island — the pavement never gets there — reading as a raw knife-edge notch where the
+  // strip's real (exposed) flat cap crosses the target edge, exactly the owner's report. (Road-to-road
+  // tees never show this: `teeJunctionsOf`/`nodeJunction` gives the "through" side real width, so the
+  // side road's cap lands somewhere inside that wide strip by sheer overlap — a coincidence of a wide
+  // target, not a fix, and one a zero-width pad target doesn't have.)
+  // The fix: anchor the wedge to the driveway's REAL cap corner (`T - inS*phS`, the same point
+  // `roadStripRing`'s own flat cap uses) rather than to `tan2` alone, reaching a small tuck past
+  // it into the strip, then take the CONVEX HULL of every candidate point (the arc, the old
+  // backing points, and the new cap-anchored ones). The fillet arc is convex outward by
+  // construction, so on every case actually measured (0–89° across five widths/radii/pad sizes, a
+  // rotated pad, connecting a few feet from a pad corner, and the owner's own reported shape) the
+  // hull keeps the true curve intact and only fills in whatever straight-line backing is needed to
+  // bridge it to wherever the real cap corner turns out to be — ahead of `tan2` or behind it, no
+  // case split needed. (Two other constructions were tried and rejected: a hand-built polygon that
+  // reaches the cap directly self-intersects at some angle/radius combinations because the RAW
+  // `corner` intersection point it anchored a return to can land far from where the fillet's own
+  // geometry actually is; a separate small "bridge" rectangle unioned in only shares a zero-area
+  // edge with the wedge at some angles, so it never actually merges. The hull has no such case:
+  // it is a hull, so it is a simple polygon by construction, always.)
+  const sideTuck = Math.max(0.5, Math.min(phS * 0.15, 3));
+  const wedge = (f, inS) => {
     if (!f || !(f.R > EPS) || !Array.isArray(f.arc) || f.arc.length < 2) return null;
     const back1 = add(f.tan1, mul(inT, deepT));         // tan1 pushed into the through pavement
     const back2 = add(f.tan2, mul(inS, deepS));         // tan2 pushed into the side pavement
-    const heel = add(add(corner, mul(inT, deepT)), mul(inS, deepS));
-    const poly = [...f.arc.map((p) => ({ x: p.x, y: p.y })), back2, heel, back1];
-    return poly.length >= 3 ? poly : null;
+    // The real flat-cap corner on the SAME edge line `f.tan2` sits on: that line is offset from T
+    // by `inS*(-phS)` (e.g. wedge A's corner sits on the +perpS edge while its pavement thickens
+    // toward -perpS — see the call site below).
+    const capCorner = add(T, mul(inS, -phS));
+    const sTan2 = dot(sub(f.tan2, capCorner), d);        // tan2's position along the cap line (0 = at the cap)
+    const farPt = add(capCorner, mul(d, Math.max(sTan2, 0) + sideTuck)); // past the cap, into the strip
+    const farPtIn = add(farPt, mul(inS, deepS));
+    return convexHull([back1, ...f.arc.map((p) => ({ x: p.x, y: p.y })), back2, capCorner, farPt, farPtIn]);
   };
   // Corner A sits on the +perpS edge, so its pavement lies toward -perpS; corner B is the mirror.
-  const wedges = [wedge(fA, cornerA, mul(perpS, -1)), wedge(fB, cornerB, perpS)].filter(Boolean);
+  const wedges = [wedge(fA, mul(perpS, -1)), wedge(fB, perpS)].filter(Boolean);
   // Legacy mouth polygon — no longer painted, kept so older consumers/tests still resolve.
   const mouth = [...fA.arc, ...fB.arc.slice().reverse()].map((p) => ({ x: p.x, y: p.y }));
   const coverPolys = mouth.length >= 3 ? [mouth] : [];
