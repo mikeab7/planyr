@@ -1155,9 +1155,13 @@ export default function CompsPanel({
         {!loading && !loadError && view === "list" && (
           <>
             {/* A real section label, same treatment as "Site plans" above it — the two lists
-                stacked in one rail must each say plainly which is which (NEW-3). */}
+                stacked in one rail must each say plainly which is which (NEW-3).
+                NEW-2 — relabeled from "Comps" to "Records" to match the rail tab above it
+                (MapFinder.jsx's RailTab — see its own comment for why "Records" rather than the
+                full "Site record"); this is the tab's own content header, so it must read the
+                same word as the tab that opens it. */}
             <div style={{ padding: "10px 14px 0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-              <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)" }}>Comps</span>
+              <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-secondary)" }}>Records</span>
               {/* B849232/NEW-1 — the paste-grid, not the map pin tool, is the everyday way in now:
                   Michael enters comps in batches from broker emails, most of which don't start
                   with a map click at all. The map is still a way in — NEW-1 (2026-09-08) turned

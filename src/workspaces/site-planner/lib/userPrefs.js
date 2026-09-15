@@ -12,94 +12,33 @@
  *
  * LOUD-FAILURE: a failed cloud write returns { ok:false, error } and the caller surfaces it; it
  * is never swallowed into a silent "saved".
+ *
+ * ⛔ THIS FILE IS THE CANVAS-FACING WRAPPER — its `applyPrefs` publishes the plan-standards half
+ * into the style resolvers (`planStyle.js` / `measureStyle.js`), which is why it (and, through
+ * `planStyle.js`, `metesAndBounds.js`) may only ever be reached from the Site Planner's own static
+ * import graph (SitePlanner.jsx / MapFinder.jsx). A caller that doesn't touch the canvas — the
+ * header project switcher's pin store, for instance — wants `userPrefsStore.js` instead, which
+ * holds the exact same read/normalize/persist logic with none of the style-resolver weight. See
+ * that file's header for the CI regression (PR #1714) this split fixes.
  */
-import { supabase } from "./supabase.js";
-import { getProfileRow, invalidateProfileRow } from "../../../shared/profile/profileRowCache.js";
 import { setAccountStyleDefaults } from "./planStyle.js";
 import { setAccountMeasureDefaults } from "./measureStyle.js";
-import { DEFAULT_SHARE_PREF, normalizeSharePref } from "./newProjectSharing.js";
-import { normalizeBands as normalizeXSectionBands } from "./roadCrossSection.js";
+import {
+  EMPTY_PREFS,
+  readMirror,
+  loadPrefsRaw,
+  savePrefsRaw,
+  setStandardPref,
+  getStandardPref,
+  setSitesPanelPref,
+  _normalizePrefs,
+} from "./userPrefsStore.js";
 
-const MIRROR_KEY = "planyr:userPrefs:v1";
-
-/** The shape we care about today. Additive: a new preference is a new key, never a migration. */
-export const EMPTY_PREFS = {
-  // buildingStyle NEW-1 — a single "rules" key holding the building-program tier
-  // table ({ clearHeight, slab }, see lib/buildingProps.js). Unlike parcelStyle/
-  // measureStyle it is not a flat per-field bag — the whole tiered rule commits as
-  // one value — but it rides the SAME setStandardPref/getStandardPref machinery
-  // (that code path is already value-shape-agnostic), so no new accessor is needed.
-  planStandards: { parcelStyle: {}, typeStyles: {}, measureStyle: {}, buildingStyle: {} },
-  // B326418 — whether a NEW project is born shared with your team, and which team. Absent means
-  // default-ON (see newProjectSharing.js), so an account that has never opened the switch behaves
-  // as the owner asked. It only ever affects projects created from here on.
-  newProjectSharing: DEFAULT_SHARE_PREF,
-  // NEW-1 — named road cross-section templates ("4-lane divided boulevard", "private drive"), saved
-  // here so a section designed once is reusable on ANY road in ANY project (see
-  // lib/roadCrossSection.js). Each entry is { id, name, bands }. Additive: absent = no saved presets,
-  // the dialog still ships its own built-ins from roadCrossSection.js regardless.
-  roadCrossSectionPresets: [],
-  // B855952/B855953/B855954 (NEW-1/NEW-2/NEW-3) — the Map view's left "Sites" panel arrangement:
-  // which status group is on top, which are collapsed, and which sites are pinned to the top. ONE
-  // bag for all three because they are one concept ("how this person has arranged their panel") —
-  // splitting it across three stores is how one of them ends up not persisting. Cross-device on
-  // purpose (this account row, not localStorage): "pin a site on my laptop, see it pinned on my
-  // phone" is the whole point, unlike `layerPrefs.js`'s per-SITE, device-agnostic-by-construction
-  // overrides. `order`/`pinned` are sparse — empty means "today's default" — and `collapsed` starts
-  // with Complete/Dead closed (SitesPanel's pre-existing device-local default) so shipping this
-  // doesn't reopen every settled project for someone who never touches the panel.
-  sitesPanel: { order: [], collapsed: { complete: true, dead: true }, pinned: [], sort: "recent" },
-};
-
-const SITES_PANEL_SORTS = new Set(["largest", "az", "recent"]);
-function normalizeSitesPanel(raw) {
-  const r = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
-  const order = Array.isArray(r.order) ? r.order.filter((s) => typeof s === "string") : [];
-  const collapsedRaw = r.collapsed && typeof r.collapsed === "object" && !Array.isArray(r.collapsed) ? r.collapsed : null;
-  const collapsed = collapsedRaw
-    ? Object.fromEntries(Object.entries(collapsedRaw).filter(([, v]) => typeof v === "boolean"))
-    : { ...EMPTY_PREFS.sitesPanel.collapsed };
-  const pinned = Array.isArray(r.pinned) ? r.pinned.filter((id) => typeof id === "string") : [];
-  const sort = SITES_PANEL_SORTS.has(r.sort) ? r.sort : EMPTY_PREFS.sitesPanel.sort;
-  return { order, collapsed, pinned, sort };
-}
-
-const normalizeXSectionPresets = (list) => (Array.isArray(list) ? list : [])
-  .filter((p) => p && typeof p.name === "string" && p.name.trim() && Array.isArray(p.bands) && p.bands.length)
-  .map((p) => ({ id: p.id || `xsec-${Math.random().toString(36).slice(2, 10)}`, name: p.name, bands: normalizeXSectionBands(p.bands) }));
-
-const normalize = (p) => ({
-  ...EMPTY_PREFS,
-  ...(p && typeof p === "object" ? p : {}),
-  newProjectSharing: normalizeSharePref(p && p.newProjectSharing),
-  roadCrossSectionPresets: normalizeXSectionPresets(p && p.roadCrossSectionPresets),
-  sitesPanel: normalizeSitesPanel(p && p.sitesPanel),
-  planStandards: {
-    parcelStyle: { ...((p && p.planStandards && p.planStandards.parcelStyle) || {}) },
-    typeStyles: { ...((p && p.planStandards && p.planStandards.typeStyles) || {}) },
-    // NEW-1 — measurement defaults joined the account scope. Additive: an older prefs row simply
-    // has no bag here and normalizes to an empty one, so nothing needs migrating.
-    measureStyle: { ...((p && p.planStandards && p.planStandards.measureStyle) || {}) },
-    // NEW-1 (building program) — additive the same way: an older prefs row has no
-    // bag here and normalizes to an empty one.
-    buildingStyle: { ...((p && p.planStandards && p.planStandards.buildingStyle) || {}) },
-  },
-});
-
-const hasLS = () => { try { return typeof localStorage !== "undefined" && !!localStorage; } catch { return false; } };
-
-export function readMirror() {
-  if (!hasLS()) return normalize(null);
-  try { return normalize(JSON.parse(localStorage.getItem(MIRROR_KEY) || "null")); } catch { return normalize(null); }
-}
-function writeMirror(prefs) {
-  if (!hasLS()) return;
-  try { localStorage.setItem(MIRROR_KEY, JSON.stringify(prefs)); } catch { /* quota / private mode */ }
-}
+export { EMPTY_PREFS, readMirror, setStandardPref, getStandardPref, setSitesPanelPref, _normalizePrefs };
 
 /** Publish the plan-style half into the style resolver so every surface picks it up at once. */
 export function applyPrefs(prefs) {
-  const p = normalize(prefs);
+  const p = _normalizePrefs(prefs);
   setAccountStyleDefaults(p.planStandards);
   setAccountMeasureDefaults(p.planStandards.measureStyle);
   return p;
@@ -112,20 +51,10 @@ export function applyPrefs(prefs) {
  * Never throws: a preferences read can't be allowed to block opening a plan.
  */
 export async function loadUserPrefs(uid) {
-  const mirror = readMirror();
-  if (!supabase || !uid) return { prefs: applyPrefs(mirror), source: "local" };
-  try {
-    // NEW-1 — routed through the shared, session-cached `profileRowCache` (SitePlanner.jsx,
-    // MapFinder.jsx and SitePlansSection.jsx each call this on mount; all three are mounted at
-    // once on a project open, so this used to fire the SAME `profiles?select=prefs` read once
-    // per component). A failed read still falls back to the mirror exactly as before.
-    const row = await getProfileRow(uid);
-    const prefs = applyPrefs(row?.prefs);
-    writeMirror(prefs);
-    return { prefs, source: "cloud" };
-  } catch (e) {
-    return { prefs: applyPrefs(mirror), source: "local", error: e?.message || "prefs load failed" };
-  }
+  const { prefs, source, error } = await loadPrefsRaw(uid);
+  return error === undefined
+    ? { prefs: applyPrefs(prefs), source }
+    : { prefs: applyPrefs(prefs), source, error };
 }
 
 /**
@@ -135,49 +64,6 @@ export async function loadUserPrefs(uid) {
  * only" rather than a false "saved everywhere".
  */
 export async function saveUserPrefs(uid, prefs) {
-  const next = applyPrefs(prefs);
-  writeMirror(next);
-  if (!supabase || !uid) return { ok: false, prefs: next, error: "not signed in" };
-  const { error } = await supabase.from("profiles").upsert({ id: uid, prefs: next, updated_at: new Date().toISOString() }, { onConflict: "id" });
-  if (error) return { ok: false, prefs: next, error: error.message };
-  invalidateProfileRow(uid); // NEW-1 — the next load must see this write, not a cached pre-write row
-  return { ok: true, prefs: next };
+  const result = await savePrefsRaw(uid, prefs);
+  return { ...result, prefs: applyPrefs(result.prefs) };
 }
-
-/* ---------------------------------------------------------------- pure edits */
-
-/**
- * Set one plan-standard key at account scope. `value === null` REMOVES it (back to built-in).
- * `group` is "typeStyles" (a nested per-type bag) or any FLAT bag — "parcelStyle",
- * "measureStyle". The flat branch is keyed by the group name rather than hardcoding parcelStyle,
- * so adding a family (NEW-1's measurements) is a one-word change, not a new code path.
- */
-export function setStandardPref(prefs, group, key, value, type) {
-  const p = normalize(prefs);
-  if (group === "typeStyles") {
-    const bag = { ...(p.planStandards.typeStyles[type] || {}) };
-    if (value === null || value === undefined) delete bag[key]; else bag[key] = value;
-    const all = { ...p.planStandards.typeStyles };
-    if (Object.keys(bag).length) all[type] = bag; else delete all[type];
-    return { ...p, planStandards: { ...p.planStandards, typeStyles: all } };
-  }
-  const bag = { ...(p.planStandards[group] || {}) };
-  if (value === null || value === undefined) delete bag[key]; else bag[key] = value;
-  return { ...p, planStandards: { ...p.planStandards, [group]: bag } };
-}
-
-/** Read one plan-standard key at account scope (undefined = not set here). */
-export function getStandardPref(prefs, group, key, type) {
-  const p = normalize(prefs);
-  return group === "typeStyles" ? (p.planStandards.typeStyles[type] || {})[key] : (p.planStandards[group] || {})[key];
-}
-
-/** Merge a patch into the Sites-panel arrangement bag (order/collapsed/pinned/sort). Any key not
- * present in `patch` is left as-is. Used for a group drag reorder, a collapse toggle, a pin/unpin,
- * or a sort-order change — all one store (see EMPTY_PREFS.sitesPanel's header). */
-export function setSitesPanelPref(prefs, patch) {
-  const p = normalize(prefs);
-  return { ...p, sitesPanel: normalizeSitesPanel({ ...p.sitesPanel, ...patch }) };
-}
-
-export const _normalizePrefs = normalize;

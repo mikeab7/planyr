@@ -29,13 +29,14 @@
 import { test, expect } from "@playwright/test";
 import { openModule } from "./helpers.js";
 
-// The left rail's "Comps" tab opens the rail if it was collapsed — one click reaches the Comps
-// list/create-form surface (RailTab, MapFinder.jsx). NEW-1 (2026-09-08): it is its own state and
-// no longer moves anything on the centre toolbar (there is no centre mode left to move).
+// The left rail's "Records" tab (relabeled from "Comps" — NEW-2, the settled "site record" term;
+// see MapFinder.jsx's RailTab comment) opens the rail if it was collapsed — one click reaches the
+// comps list/create-form surface (RailTab, MapFinder.jsx). NEW-1 (2026-09-08): it is its own
+// state and no longer moves anything on the centre toolbar (there is no centre mode left to move).
 async function openCompsTab(page) {
   await page.goto("/");
   await openModule(page, "site-planner");
-  await page.getByRole("tab", { name: "Comps" }).click();
+  await page.getByRole("tab", { name: "Records" }).click();
 }
 
 async function openCompCreateForm(page) {
