@@ -1,4 +1,4 @@
-/* B<PENDING> NEW-2 (dispatch: "Parking tool's rect presets did not commit on the deployed build
+/* B1664513 (dispatch: "Parking tool's rect presets did not commit on the deployed build
  * when a live check tried to place one") — root-caused by static reading of SitePlanner.jsx's
  * pointer-up draw-commit handler: the fixed-width PRESET branch (`if (d.depth) { if
  * (draftRect.parkLen >= 4) {...} }`) had no `else`, unlike the free-draw branch right below it

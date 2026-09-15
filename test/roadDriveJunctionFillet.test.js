@@ -1,4 +1,4 @@
-/* B<PENDING> — road→pavement-pad junctions (a driveway teeing into a truck court / paving pad /
+/* B1645792 — road→pavement-pad junctions (a driveway teeing into a truck court / paving pad /
  * parking field) rendered raw geometric angles instead of a curb return: on the acute side of an
  * oblique approach, the road edge and the pad edge crossed into a knife-edge V notch; on the
  * obtuse side, a hard, unfilleted corner. Owner repro: a 36 ft road into a truck-court stub at an
@@ -194,7 +194,7 @@ describe("road → paving-pad / truck-court junction — curb-return fillet, not
   });
 });
 
-// B<PENDING> NEW-1 (amendment to B1645792 / V1173824) — the shipped fix (PR #1722, merged 0f17770)
+// B1645792 (×2) — amendment to B1645792 / V1173824 — the shipped fix (PR #1722, merged 0f17770)
 // stopped the wedge disconnecting into an island, but a live pass on the deployed build found two
 // residuals: (1) a small unpaved NOTCH still opens right at the throat — the single convex hull
 // mixing the arc with the cap-bridge points could dip inside the true covered area at the shared
@@ -329,7 +329,7 @@ describe("does not regress B1631648 (a road's OWN interior bend, unrelated to a 
   });
 });
 
-// B<PENDING> NEW-2 — a free-drawn POLYGON pad/parking field must get the SAME junction-fillet
+// B1664512 NEW-2 — a free-drawn POLYGON pad/parking field must get the SAME junction-fillet
 // treatment as a rect pad (driveJunctionsOf's own predicate used to exclude any target carrying
 // `.points` outright — SitePlanner.jsx's `if (!T || T.points || ...) continue`). This replicates
 // driveJunctionsOf's math using `polygonEdges`/`polygonContainsPoint`/`polygonDepthBehind` in place

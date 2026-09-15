@@ -967,7 +967,7 @@ describe("dedupeRoadVertices — one-shot load cleanup (NEW-3)", () => {
   });
 });
 
-// B<PENDING> NEW-2 — the polygon analogues of rectEdges/rectContainsPoint, so a free-drawn
+// B1664512 NEW-2 — the polygon analogues of rectEdges/rectContainsPoint, so a free-drawn
 // polygon pad/parking field can be a drive-tee target the same way an axis-aligned rect is.
 describe("polygonEdges / polygonContainsPoint / polygonDepthBehind — polygon drive-target primitives", () => {
   // A simple square, same footprint as a 100x100 rect centred at the origin.

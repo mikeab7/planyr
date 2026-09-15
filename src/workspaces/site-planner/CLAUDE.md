@@ -1449,7 +1449,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   **verify-road-split-curved** all drive the owner's real geometry (Goose Creek "Plan 1 (copy)" +
   Tsakiris / Concept A), and the harness shoots every junction twice — the second pass at reduced
   fill opacity, where a residual stacked edge shows and full opacity hides it.
-  **⛔ B<PENDING> — `teeGeometry` HAS EXACTLY ONE LIVE CALLER (`driveJunctionsOf`, a road tee-ing into
+  **⛔ B1645792 — `teeGeometry` HAS EXACTLY ONE LIVE CALLER (`driveJunctionsOf`, a road tee-ing into
   a parking field / truck court / paving pad), and its wedge builder used to anchor the SIDE
   (driveway) reach to `f.tan2` — a point on the driveway's THEORETICAL long-edge line, extended
   infinitely — pushed perpendicular by a small fixed `deepS`.** Road-to-road tees moved to
@@ -1474,6 +1474,31 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   the existing **road-drive-connect** spec only ever drove a PERPENDICULAR connect, exactly the
   symmetric case this defect never shows on; WRONG-CASE applies). PDF-PARITY holds by construction, unchanged:
   `exportSheet.buildExportSvg` clones the live `<svg>` rather than re-deriving road geometry.
+  **⛔ B1645792 (×2) — THE HULL ABOVE ALSO FLATTENED THE ARC IT WAS SUPPOSED TO PRESERVE, AND
+  COULD LEAVE A THIN THROAT NOTCH — because mixing the fillet arc into the SAME hull as the
+  cap-reach points lets the hull draw a straight shortcut edge across the arc whenever the reach
+  points sit farther out than the curve does (measured: a road-to-pad return collapsing to 2
+  surviving arc points out of 24). `restoreArcOnHull` (`roadGeometry.js`) walks the hull's own
+  vertices afterward and splices the true arc back in wherever the hull skipped over it — this can
+  only move the boundary INWARD onto the real curve, never outward, so it cannot open a new gap —
+  but it is **verified simple (`isSimplePolygon`) and DISCARDED, falling back to the plain hull, the
+  instant it fails** (measured self-intersecting on a handful of angle/pad-size combinations during
+  development). Scoped to `deepT === 0` — the ONLY live case — because `back1` (≈`tan1`) stops
+  matching `arc[0]` once `deepT > 0`, and splicing against a non-matching anchor reopened a
+  hair-thin sliver on the road-to-road (`nodeJunction`-adjacent but unrelated) generic library test.
+  The near-perpendicular throat notch gets the same treatment: `T` (the tee point) joins the SAME
+  hull (never a separate merged piece — two pieces sharing one vertex pinch into a visible cusp
+  instead of real overlap) and is verified/discarded the same way. Guard: the same
+  **roadDriveJunctionFillet** suite's new "NEW-1 (B1645792 amendment)" block (a point-in-polygon
+  throat-notch scan + an arc-vertex-survival check, both confirmed RED against the merged `0f17770`
+  fix before this amendment existed).
+  **B1664512 — `teeGeometry`'s ONE live caller now accepts a POLYGON target, not just a rect.**
+  `polygonEdges`/`polygonContainsPoint`/`polygonDepthBehind` (`roadGeometry.js`) are the polygon
+  analogues of `rectEdges`/`rectContainsPoint`/a rect's own `w`/`h`, in the exact shape
+  `nearestRectEdge` already consumes — `driveJunctionsOf` (the render), `driveTargetKind`/
+  `driveTargetsOf` (which targets exist) and `findDriveConnect` (the weld-time magnet) all branch on
+  `Array.isArray(el.points)` to reach for these instead. `polygonContainsPoint` is a real ray-cast
+  (correct on a concave ring); `rectContainsPoint`'s half-plane shortcut would silently misjudge one.
 - Terrain pipeline (B703–B706) — **LOADED ON DEMAND (B1095): `terrainLazy.js` is the ONE entry
   point** (`loadTerrain()` cached import + the synchronous `terrainNow()` the per-move cursor
   sample reads + the `contourHover` router); nothing on the boot path may static-import

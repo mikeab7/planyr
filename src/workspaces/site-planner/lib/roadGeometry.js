@@ -1300,7 +1300,7 @@ export function teeGeometry(params) {
     // tee gained a 2.8–10.7 sqft "hole" it never had before). Left untouched, phT > 0 keeps the
     // pre-existing (unflattened-arc-risk, but proven simple) hull behaviour.
     if (deepT > EPS) return hull;
-    // Near-perpendicular residual (B<PENDING> NEW-1, live-check finding on B1645792): at a shallow
+    // Near-perpendicular residual (B1645792 (×2), live-check finding): at a shallow
     // approach angle the strip's own tilted flat cap can dip a hair below the pad edge between T
     // (the tee point) and `capCorner` — the reach above doesn't cover it, since it is anchored at
     // `back1`/`tan2`, not at T. Try adding T to the SAME hull (never a separate merged piece — a
@@ -1392,7 +1392,7 @@ export function rectContainsPoint(P, edges) {
   return edges.every((e) => dot(e.outN, sub(P, e.mid)) <= 1e-6);
 }
 
-/* B<PENDING> NEW-2 — the world-space edges of a free-drawn POLYGON pad/parking field (`points`),
+/* B1664512 NEW-2 — the world-space edges of a free-drawn POLYGON pad/parking field (`points`),
  * in the exact `{a, b, dir, outN, mid, len}` shape `rectEdges` already produces — so
  * `nearestRectEdge` (already agnostic to where its `edges` came from) works unchanged on either.
  * `outN` is oriented away from the polygon's own centroid, same convention as `rectEdges`'s "away
@@ -1479,7 +1479,7 @@ function convexHull(points) {
   return hull.length >= 3 ? hull : null;
 }
 
-/* B<PENDING> NEW-1 (amendment to B1645792) — `teeGeometry`'s wedge builder hulls the fillet ARC
+/* B1645792 (×2) — `teeGeometry`'s wedge builder hulls the fillet ARC
  * together with the straight points needed to bridge to the driveway's real flat-cap corner
  * (`teeGeometry`'s own header explains why both are needed). A convex hull of that combined set is
  * simple by construction — which is exactly why it was chosen — but it is free to draw its own

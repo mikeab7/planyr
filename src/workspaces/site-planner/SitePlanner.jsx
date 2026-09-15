@@ -1372,7 +1372,7 @@ function teeJunctionsOf(els, settings) {
 }
 // B955/NEW-1 — road → parking-drive / truck-court junctions for the clean-intersection render. Reads
 // el.driveTee (set at connect), locates the connected endpoint on the target's facing edge (a rect's
-// via rectEdges, a free-drawn polygon pad/field's via polygonEdges — B<PENDING> NEW-2), and reuses
+// via rectEdges, a free-drawn polygon pad/field's via polygonEdges — B1664512), and reuses
 // teeGeometry with the target edge as the "through" edge (no through curb; return radius scaled by
 // target type). Returns [{ sideId, targetId, kind, geom }]. Pure over (els, settings); memoized.
 // B959/NEW-1 — truck-court entrance sized by STANDARD CIVIL DRIVEWAY PRACTICE, design vehicle WB-62:
@@ -1417,7 +1417,7 @@ function driveJunctionsOf(els, settings) {
   for (const S of els || []) {
     if (!isCenterlineRoad(S) || S.attachedTo || !S.driveTee) continue;
     const T = byId.get(S.driveTee.targetId);
-    // B<PENDING> NEW-2 — a free-drawn POLYGON pad/parking field is a valid drive target too, not
+    // B1664512 NEW-2 — a free-drawn POLYGON pad/parking field is a valid drive target too, not
     // just an axis-aligned rect: `polygonEdges`/`polygonContainsPoint` are the polygon analogues of
     // `rectEdges`/`rectContainsPoint`, in the exact shape `nearestRectEdge` already consumes.
     if (!T || typeof T.cx !== "number") continue;
@@ -5924,7 +5924,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      the return radius is editable per-junction either way, so a car-scale drive is one edit, not a
      blocker. A road never connects to a BUILDING here — a building is not paving, and painting a
      driveway INTO a wall is not a connection this tool should ever make silently.
-     B<PENDING> NEW-2 — a free-drawn POLYGON pad/parking field (`el.points`) is now a target too:
+     B1664512 NEW-2 — a free-drawn POLYGON pad/parking field (`el.points`) is now a target too:
      `rectEdges` needed a rectangle, but `polygonEdges`/`polygonContainsPoint` are the same shape
      over an arbitrary ring, and `nearestRectEdge` already consumes either without change. */
   const driveTargetKind = (el) => (el && typeof el.cx === "number"
