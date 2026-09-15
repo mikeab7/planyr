@@ -109,3 +109,60 @@ export function edgeAbutsPaving(A, axis, sign, neighbors, eps = 1.5) {
   }
   return paved.some((b) => pts.some((p) => pointInRectEl(p.x, p.y, b)));
 }
+
+/* ----------------------- freestanding split-stack membership (NEW-1) -------------------- */
+// B1625728 fixed "Split rows/aisles" → "+" for a WALL-BONDED field by grouping siblings via the
+// host + side (`sideParkPadsOn`, dogEar.js `sideParkStack`) and flagged the freestanding case as
+// unfixed: "a freestanding stack has no shared host/side to group siblings by". There is nothing
+// to group by because there is no host — but `explodeParkingBands` still lays every piece out
+// CONTIGUOUSLY along one local depth axis with an exact (zero-gap) fit, so that geometry IS a
+// reliable identity: same width, same rotation, touching. This mirrors the standing rule right
+// above `sideParkPadsOn` in SitePlanner.jsx — "what is on this wall is answered by GEOMETRY, with
+// the tag as a fast path" — applied where there is no wall to test against. `sideParkPiece`
+// (already stamped by the explode) orders the result when present; it is never REQUIRED for
+// membership, so a plan where the tag went missing degrades to a correctly-ordered geometric read
+// rather than an invisible stack.
+const PAVED_STACK_TYPES = new Set(["parking", "paving"]);
+const angleClose = (a, b, tolDeg = 0.5) => Math.abs((((a - b + 180) % 360 + 360) % 360) - 180) < tolDeg;
+
+/**
+ * The freestanding (non-wall-bonded) split stack `el` belongs to: the contiguous run of
+ * parking/paving pieces sharing `el`'s width and rotation, touching end to end along that shared
+ * axis, walked outward from `el` in both directions (so `el` may be any piece in the stack, not
+ * just an end). Ordered from the field's original near end to its far end. A lone, un-split field
+ * (or a bonded one — this never groups an `attachedTo` element) returns `[el]`.
+ */
+export function freeParkStack(el, all, eps = 0.5) {
+  if (!el || el.attachedTo || el.points || !PAVED_STACK_TYPES.has(el.type)) return el ? [el] : [];
+  const rot = ((el.rot || 0) % 360 + 360) % 360;
+  const rad = (-rot * Math.PI) / 180, cs = Math.cos(rad), sn = Math.sin(rad);
+  const toLocal = (dx, dy) => ({ x: dx * cs - dy * sn, y: dx * sn + dy * cs });
+  const rows = (all || [])
+    .filter((x) => x && !x.attachedTo && !x.points && PAVED_STACK_TYPES.has(x.type)
+      && Math.abs((x.w || 0) - (el.w || 0)) < eps && angleClose(x.rot || 0, rot))
+    .map((x) => {
+      const l = toLocal(x.cx - el.cx, x.cy - el.cy);
+      return { el: x, lx: l.x, lo: l.y - x.h / 2, hi: l.y + x.h / 2 };
+    })
+    .filter((r) => Math.abs(r.lx) < eps); // on the SAME stacking line, not merely alongside it
+
+  const seed = rows.find((r) => r.el.id === el.id);
+  if (!seed) return [el];
+  let lo = seed.lo, hi = seed.hi;
+  const chain = [seed];
+  const remaining = rows.filter((r) => r !== seed);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (let i = remaining.length - 1; i >= 0; i--) {
+      const r = remaining[i];
+      if (r.lo <= hi + eps && r.hi >= lo - eps) {         // touches (or overlaps) the covered range
+        lo = Math.min(lo, r.lo); hi = Math.max(hi, r.hi);
+        chain.push(r); remaining.splice(i, 1); grew = true;
+      }
+    }
+  }
+  chain.sort((a, b) => (Number.isFinite(a.el.sideParkPiece) && Number.isFinite(b.el.sideParkPiece))
+    ? a.el.sideParkPiece - b.el.sideParkPiece : a.lo - b.lo);
+  return chain.map((r) => r.el);
+}
