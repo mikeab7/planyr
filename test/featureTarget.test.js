@@ -572,8 +572,28 @@ describe("NEW-1 (click-ownership audit) — the acreage badge selects on left-cl
   it("the handle layer forwards an unhandled right-click to featureContextAction(sel, e)", () => {
     const at = SP.indexOf('<g data-export="skip" data-handle-layer="1"');
     expect(at, "the handle layer group not found").toBeGreaterThan(-1);
-    const block = SP.slice(at, at + 400);
-    expect(block).toMatch(/onContextMenu=\{\(e\) => \{ if \(sel\) featureContextAction\(sel, e\); \}\}/);
+    const block = SP.slice(at, at + 700);
+    expect(block).toMatch(/if \(sel\) featureContextAction\(sel, e\);/);
+  });
+
+  /* NEW-1 (B1609136) — the LAST hole in the click-ownership invariant: a plain resize/rotate/
+   * vertex grip has no identity of its own and correctly forwards to `sel` (the test above), but
+   * the acreage badge is `data-chrome` only for the DOUBLE-CLICK resolver and keeps its own
+   * `onContextMenu` for a plain right-click. `polylabel` routinely anchors the badge on or near
+   * the selected element's own corner/edge/rotate handle, which paints OVER it (this layer is the
+   * last sibling) and wins the native hit test — so the badge's own handler never fired and this
+   * fallback wrongly opened the SELECTED ELEMENT's menu instead of the badge's own parcel's.
+   * Hit-test the real point first; only fall back to `sel` when nothing more specific is there. */
+  it("the handle layer hit-tests for an occluded acreage badge BEFORE falling back to sel", () => {
+    const at = SP.indexOf('<g data-export="skip" data-handle-layer="1"');
+    expect(at, "the handle layer group not found").toBeGreaterThan(-1);
+    const block = SP.slice(at, at + 700);
+    expect(block).toMatch(/document\.elementsFromPoint\(e\.clientX, e\.clientY\)/);
+    expect(block).toMatch(/data-chrome="acreage-badge"/);
+    expect(block).toMatch(/data-chip-parcel/);
+    expect(block).toMatch(/onChipContext\(e, pid\)/);
+    // the badge check must run BEFORE the sel fallback, not after
+    expect(block.indexOf("onChipContext(e, pid)")).toBeLessThan(block.indexOf("if (sel) featureContextAction(sel, e);"));
   });
 });
 
