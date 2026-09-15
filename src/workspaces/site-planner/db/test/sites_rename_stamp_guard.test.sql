@@ -5,6 +5,14 @@
 -- authoritative-stamp fix in rename_site_group that keeps the tightened guard from splitting a
 -- genuine group rename.
 --
+-- ⛔ EXTENDED 2026-09-15 (NEW-1, "the hole the backfill could not close") — cases 16-18b pin
+-- `sites_stamp_rename_on_insert`, the BEFORE INSERT trigger that seeds a birth stamp on a row
+-- carrying none, so `sites_preserve_rename_stamp` (above) is never again handed a row it has
+-- nothing to compare against. See db/sites_rename_stamp_guard.sql's own "EXTENDED 2026-09-15"
+-- header for the production measurement (row `smu1z3h60nbu`, created three days after the
+-- 2026-09-12 backfill, the only unstamped row of 127) and why this is a separate INSERT trigger
+-- rather than a change to the UPDATE guard.
+--
 -- THE TWO EXPLOITS THIS FILE PINS, both reproduced live in a rolled-back transaction before either
 -- fix was written:
 --   (a) OLDER STAMP WINS — the guard used to return early on "does NEW carry ANY real stamp",
@@ -16,7 +24,7 @@
 -- Plus: `rename_stamp` itself accepted numeric STRINGS and ANY positive number, so `"1"` (or the
 -- number `1`) read as a "real" rename time.
 --
--- Sixteen cases. Cases 0 and 4 are KNOWN-GOOD ARMS — they assert answers that are true independently
+-- Nineteen cases (0-18). Cases 0 and 4 are KNOWN-GOOD ARMS — they assert answers that are true independently
 -- of the guard, so a run in which everything "passes" because the probe is blind fails here first
 -- (DRIVER-SCROLL-IS-NOT-APP-SCROLL §6: prove the instrument can see a known answer before trusting
 -- it on the unknown one).
@@ -55,6 +63,17 @@
 --       case the strict guard would otherwise split), the RPC still renames the WHOLE group to one
 --       consistent, strictly-newer stamp. Without the fix in rename_site_group.sql, this case
 --       reproduces a NEW split-name defect the strict guard would otherwise introduce.
+--   16. NEW-1 (2026-09-15) — a brand-new INSERT carrying NO `siteRenamedAt` key at all comes back
+--       with a valid stamp, and that stamp is exactly its own `updated_at` in epoch ms — the same
+--       Tier-2 convention the 2026-09-12 backfill used, not a second one.
+--   17. NEW-1 — an INSERT that already carries a real stamp (the shape `duplicatePlan` produces
+--       when it inherits a group's existing rename) is left completely alone; the birth-stamp
+--       trigger never overwrites a stamp a caller already supplied.
+--   18. NEW-1 — THE ATTACK, DEMONSTRATED END TO END on the row case 16 just created: the exact
+--       column+jsonb write that landed cleanly pre-fix (reproduced live against `smu1z3h60nbu`
+--       2026-09-15 before this trigger existed) is now refused on a row that is mere moments old,
+--       because it was born with a stamp for `sites_preserve_rename_stamp` to protect. (18b) and
+--       LOUD-FAILURE fires for it too.
 --
 -- HOW TO RUN: paste the whole file into the Supabase SQL editor and execute (or via the Supabase
 -- MCP execute_sql tool). It is SELF-ROLLING-BACK — it ends by raising an exception carrying the
@@ -68,8 +87,12 @@
 --     accepted) — case 0 (the string/`1`/range assertions) and case 12 must FAIL.
 --   • Revert `rename_site_group` to its pre-2026-09-12 body (writes the caller's value verbatim,
 --     no group-max) — case 15 must FAIL (the group ends up split).
+--   • DROP the `sites_stamp_rename_on_insert` trigger (or its function) entirely — cases 16, 18
+--     and 18b must FAIL: a fresh INSERT comes back with no stamp at all, and the case-18 attack
+--     lands cleanly on it exactly as it did on `smu1z3h60nbu` pre-fix.
 --   Restoring each function must turn its cases green again. Confirmed red against the exact
---   pre-fix bodies on 2026-09-12, before any fix in this pair of files was written.
+--   pre-fix bodies on 2026-09-12 (cases 0/8/9/10/11/12/15) and 2026-09-15 (cases 16/18/18b, with
+--   the trigger dropped), before any fix in this pair of files was written.
 -- ============================================================================
 do $$
 declare
@@ -89,6 +112,8 @@ declare
   p_tiny     text := 'zzrsg-tiny-stamp';
   p_g2a      text := 'zzrsg-group2-hi';
   p_g2b      text := 'zzrsg-group2-lo';
+  p_newborn  text := 'zzrsg-newborn';           -- NEW-1 (2026-09-15): INSERT-time stamping
+  p_inherit  text := 'zzrsg-newborn-inherited';
   at1        bigint := 1785525795307;   -- the real Silvestri stamp, 2026-07-31T19:23:15.307Z
   at2        bigint := 1786655992552;
   at_older   bigint := at1 - 1000;
@@ -103,6 +128,8 @@ declare
   raised     boolean := false;
   err        text := '';
   tel_count  int;
+  newborn_at   bigint;
+  newborn_want bigint;
 begin
   select id into owner_uid from auth.users order by created_at limit 1;
   if owner_uid is null then raise exception 'rename stamp guard test: no auth user to hang the fixture off'; end if;
@@ -132,6 +159,16 @@ begin
   end if;
 
   -- ---- fixtures: five stamped plans in one group, plus one never-stamped, plus new attack fixtures
+  --
+  -- ⛔ NEW-1 (2026-09-15) — `sites_stamp_rename_on_insert` now birth-stamps EVERY insert with no
+  -- valid stamp, so `p_unstamp` (cases 5/14's LEGACY never-stamped fixture — the majority-tier
+  -- invariant those cases exist to protect) can no longer be produced by an ordinary INSERT. That
+  -- is the fix working as intended, not a test bug — but the legacy shape (a row that predates
+  -- this trigger) still needs to exist to prove the majority tier stays correct for it, so this one
+  -- bulk insert disables the new trigger for its own duration. Every OTHER row in this statement
+  -- already carries an explicit `siteRenamedAt`, so disabling it here changes nothing for them —
+  -- the trigger would have been a no-op on each regardless.
+  alter table public.sites disable trigger sites_stamp_rename_on_insert;
   insert into public.sites (id, user_id, site, name, data) values
     (p_null,     owner_uid, 'Silvestri', 'Concept A', jsonb_build_object('id', p_null,     'groupId', grp, 'site', 'Silvestri', 'siteRenamedAt', at1)),
     (p_absent,   owner_uid, 'Silvestri', 'Concept B', jsonb_build_object('id', p_absent,   'groupId', grp, 'site', 'Silvestri', 'siteRenamedAt', at1)),
@@ -147,6 +184,7 @@ begin
     (p_tiny,     owner_uid, 'Original',  'Concept A', jsonb_build_object('id', p_tiny,     'groupId', p_tiny,    'site', 'Original',  'siteRenamedAt', at1)),
     (p_g2a,      owner_uid, 'Two',       'Concept A', jsonb_build_object('id', p_g2a,      'groupId', grp2,      'site', 'Two',       'siteRenamedAt', at_hi)),
     (p_g2b,      owner_uid, 'Two',       'Concept B', jsonb_build_object('id', p_g2b,      'groupId', grp2,      'site', 'Two',       'siteRenamedAt', at_lo));
+  alter table public.sites enable trigger sites_stamp_rename_on_insert;
 
   -- ---- Case 1 — the exact shape that shipped: a document push asserting an empty marker --------
   update public.sites
@@ -329,8 +367,55 @@ begin
                          got_site, got_col);
   end if;
 
-  if failed > 0 then
-    raise exception E'sites_preserve_rename_stamp: % of 24 checks FAILED%\n(fixtures rolled back)', failed, rep;
+  -- ---- Case 16 — NEW-1 (2026-09-15): a brand-new INSERT with NO siteRenamedAt key at all --------
+  -- MUTATION PROOF: drop sites_stamp_rename_on_insert (or its function) and this goes RED — the
+  -- row comes back with no stamp, exactly like smu1z3h60nbu measured 2026-09-15 pre-fix.
+  insert into public.sites (id, user_id, site, name, data) values
+    (p_newborn, owner_uid, 'Untitled site', 'Concept A',
+     jsonb_build_object('id', p_newborn, 'groupId', p_newborn, 'site', 'Untitled site'));
+  select public.rename_stamp(data -> 'siteRenamedAt'), floor(extract(epoch from updated_at) * 1000)::bigint
+    into newborn_at, newborn_want
+    from public.sites where id = p_newborn;
+  if newborn_at is null or newborn_at is distinct from newborn_want then
+    failed := failed + 1;
+    rep := rep || format(E'\n  FAIL case 16 (NEW-1 — INSERT-time stamping): a brand-new row with no siteRenamedAt key came back stamp=%s (want a valid stamp = %s, its own updated_at in epoch ms)',
+                         coalesce(newborn_at::text, '<none>'), newborn_want);
   end if;
-  raise exception E'sites_preserve_rename_stamp: ALL 24 CHECKS PASSED\n(fixtures rolled back)';
+
+  -- ---- Case 17 — NEW-1: an INSERT that already carries a real stamp is left alone ---------------
+  -- (the shape duplicatePlan produces when a plan inherits its group's existing rename stamp)
+  insert into public.sites (id, user_id, site, name, data) values
+    (p_inherit, owner_uid, 'Silvestri', 'Concept F',
+     jsonb_build_object('id', p_inherit, 'groupId', grp, 'site', 'Silvestri', 'siteRenamedAt', at2));
+  select public.rename_stamp(data -> 'siteRenamedAt') into newborn_at from public.sites where id = p_inherit;
+  if newborn_at is distinct from at2 then
+    failed := failed + 1;
+    rep := rep || format(E'\n  FAIL case 17: an INSERT that already carried a real stamp (%s) was overwritten by birth-stamping (%s)',
+                         at2, coalesce(newborn_at::text, '<none>'));
+  end if;
+
+  -- ---- Case 18 — NEW-1: THE ATTACK, demonstrated end to end on the row case 16 just created ------
+  -- The exact write that landed cleanly on smu1z3h60nbu pre-fix (measured live 2026-09-15) must now
+  -- be refused on a row that is mere moments old.
+  update public.sites
+     set site = 'Attacker Name',
+         data = jsonb_set(data, '{site}', to_jsonb('Attacker Name'::text))
+   where id = p_newborn;
+  select data->>'site', site into got_site, got_col from public.sites where id = p_newborn;
+  if got_site is distinct from 'Untitled site' or got_col is distinct from 'Untitled site' then
+    failed := failed + 1;
+    rep := rep || format(E'\n  FAIL case 18 (NEW-1 — the attack, on a row seconds old): data.site=%s column=%s (want Untitled site/Untitled site)', got_site, got_col);
+  end if;
+  -- LOUD-FAILURE — this refusal must have logged a telemetry row too.
+  select count(*) into tel_count from public.client_errors
+   where source = 'event:rename-guard-refused' and message like '%' || p_newborn || '%';
+  if tel_count < 1 then
+    failed := failed + 1;
+    rep := rep || format(E'\n  FAIL case 18b (LOUD-FAILURE): no client_errors row logged for the refused write on the newborn row %s', p_newborn);
+  end if;
+
+  if failed > 0 then
+    raise exception E'sites_preserve_rename_stamp: % of 28 checks FAILED%\n(fixtures rolled back)', failed, rep;
+  end if;
+  raise exception E'sites_preserve_rename_stamp: ALL 28 CHECKS PASSED\n(fixtures rolled back)';
 end $$;

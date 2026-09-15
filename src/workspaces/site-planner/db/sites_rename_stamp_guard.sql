@@ -293,3 +293,110 @@ commit;
 --     from public.sites group by 1 order by 2 desc;
 --   -- the 'null' bucket must never GROW again from here (existing rows are untouched by this file;
 --   -- db/rename_stamp_backfill_20260910.sql is the separate, un-run repair for them).
+
+-- ============================================================================================
+-- ⛔ EXTENDED 2026-09-15 (NEW-1, "the hole the backfill could not close") — A NEWLY CREATED
+-- PROJECT WAS BORN WITH NO STAMP, SO THE GUARD ABOVE STOOD DOWN ON IT FROM THE MOMENT IT EXISTED.
+-- ============================================================================================
+--
+-- `sites_preserve_rename_stamp` opens with "if prior_at is null then return new" — the guard can
+-- only protect a stamp that is already there. The 2026-09-12 backfill
+-- (rename_stamp_backfill_20260912.sql) gave every EXISTING row one; nothing gave a row one at the
+-- moment it was CREATED, so the population drifted right back: every project made after that
+-- backfill ran was unprotected again until this.
+--
+-- MEASURED ON planyr_production 2026-09-15, not reasoned about: row `smu1z3h60nbu` ("Untitled
+-- site"), created_at 2026-09-15 01:08 UTC — three days after the backfill merged — carries no
+-- `siteRenamedAt` key at all, the only unstamped row of 127. Reproduced live in a rolled-back
+-- transaction: an UPDATE changing both `site` and `data.site` with no stamp, which
+-- `sites_preserve_rename_stamp` correctly refuses on any row that already carries a real stamp,
+-- landed CLEANLY here — the guard had nothing to compare the write against.
+--
+-- THE FIX. A BEFORE INSERT trigger, the same shape `sites_normalize_county`'s BEFORE INSERT OR
+-- UPDATE trigger already uses: a row arriving with no valid `rename_stamp` (absent key, JSON
+-- null, or anything else `rename_stamp` doesn't recognise) is seeded from its own `updated_at`,
+-- converted to epoch ms — the SAME convention `rename_stamp_backfill_20260912.sql`'s Tier 2 used
+-- for the 87 rows it could not transcribe from a sibling, deliberately, not a second one: that
+-- file's own header explains why `updated_at` is a safe seed (a row's `updated_at` is always AT
+-- LEAST as old as any genuine rename that produced its current `data.site`, since nothing writes
+-- `site` without also touching `updated_at`), and the same argument holds at INSERT — the client
+-- always sends `updated_at` explicitly on every write (`cloudSync.siteRowFor`), so `new.updated_at`
+-- already carries the value the row is being created with by the time this trigger runs. `now()`
+-- is a defensive fallback only, for a write that somehow omits it (no client in this codebase
+-- does).
+--
+-- WHY THIS IS A SEPARATE INSERT TRIGGER AND NOT A CHANGE TO THE UPDATE GUARD ABOVE.
+-- `sites_preserve_rename_stamp` deliberately never stamps an unstamped row on UPDATE — inventing
+-- one there would let an ordinary content save win a recency comparison it has no business
+-- winning (see its own "WHAT THIS DELIBERATELY DOES NOT DO"). INSERT is a different question: a
+-- brand-new row has no EXISTING name to disagree with, so whatever the client submits at creation
+-- is unambiguously the row's first authoritative name — stamping it only records that fact, it
+-- never asserts a rename that did not happen.
+--
+-- ⛔ CHECKED BEFORE SHIPPING THIS — NOTHING READS THE STAMP AS PROOF A REAL RENAME HAPPENED. The
+-- one place in this codebase that renders `siteRenamedAt` to the owner as evidence of a rename
+-- EVENT is the dashboard's "Since you were last here" feed
+-- (`dashboard/lib/sinceLastHereFeed.js`'s `buildPlanEvents`), and it already resolves "created"
+-- before "renamed" for the same plan in one visit window (`if (!fired && …renamedMs…)`) off the
+-- row's own real `created_at` COLUMN — a genuine, independent server timestamp this trigger never
+-- touches. A birth-stamped row therefore still reports as "New plan X," never "Renamed to X," the
+-- first time it is seen. `projectName.nameAuthority` is the other consumer, and it already treats
+-- "carries a valid stamp" as "this copy is current" regardless of how the stamp was set (a real
+-- rename or a seeded one) — exactly what the 2026-09-12 backfill's own Tier-2 rows already do, so
+-- this introduces no new category of stamp; it only closes the window before a row gets one.
+--
+-- Idempotent, additive: creates one function and one BEFORE INSERT trigger. Cannot touch an
+-- existing row — an INSERT trigger never fires against a row that already exists (the one
+-- pre-existing unstamped row, `smu1z3h60nbu`, is repaired separately, by the same Tier-2 rule, in
+-- a one-row statement scoped by the identical safe property the 2026-09-12 backfill used).
+
+begin;
+
+create or replace function public.sites_stamp_rename_on_insert()
+returns trigger
+language plpgsql
+set search_path = public, pg_temp
+as $$
+begin
+  if new.data is null or jsonb_typeof(new.data) <> 'object' then return new; end if;
+  if public.rename_stamp(new.data -> 'siteRenamedAt') is not null then return new; end if; -- already real
+
+  new.data := jsonb_set(
+    new.data,
+    '{siteRenamedAt}',
+    to_jsonb(floor(extract(epoch from coalesce(new.updated_at, now())) * 1000)::bigint),
+    true
+  );
+  return new;
+end;
+$$;
+
+comment on function public.sites_stamp_rename_on_insert() is
+  'A row may never be BORN with no rename stamp for sites_preserve_rename_stamp to protect '
+  '(2026-09-15). An INSERT carrying no valid public.rename_stamp is seeded from its own '
+  'updated_at (epoch ms; falls back to now() if that is somehow absent) — the same convention '
+  'rename_stamp_backfill_20260912.sql''s Tier 2 uses. See db/sites_rename_stamp_guard.sql for the '
+  'production measurement behind it.';
+
+drop trigger if exists sites_stamp_rename_on_insert on public.sites;
+create trigger sites_stamp_rename_on_insert
+  before insert on public.sites
+  for each row execute function public.sites_stamp_rename_on_insert();
+
+-- The one pre-existing row this trigger cannot reach (it did not exist when the trigger was
+-- created). Scoped by the identical safe property the 2026-09-12 backfill used — "no valid
+-- stamp" — not a hardcoded id, so this is a no-op if it is ever re-run after the row is fixed,
+-- and it can never touch a row that already carries a real stamp.
+update public.sites
+   set data = jsonb_set(data, '{siteRenamedAt}', to_jsonb(floor(extract(epoch from updated_at) * 1000)::bigint), true)
+ where public.rename_stamp(data -> 'siteRenamedAt') is null;
+
+commit;
+
+-- Verification (run after):
+--   select case when not (data ? 'siteRenamedAt') then 'key-absent'
+--               when public.rename_stamp(data->'siteRenamedAt') is not null then 'valid-stamp'
+--               else 'present-invalid' end as bucket, count(*)
+--     from public.sites group by 1 order by 2 desc;
+--   -- expect ONLY 'valid-stamp', for every row, forever — including rows created after this file
+--   -- was applied (proven by db/test/sites_rename_stamp_guard.test.sql's INSERT-time cases).

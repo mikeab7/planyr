@@ -166,6 +166,24 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1148592 — B1613696: a brand-new signed-in "New project" still creates a normal plan, now carrying a real rename stamp from the moment it's born `Blocker: auth`
+
+**Why this needs a real pass.** A real-project-data / concurrency-adjacent class fix by nature (a database trigger that fires on the write path every project creation goes through), which is a mandatory LIVE-VERIFY class — even though this fix has NO client-side code at all, so there is nothing in the bundle to regress and the one thing a SQL-only proof cannot show is that the DEPLOYED trigger behaves correctly under an ordinary signed-in "New project" click. **What is NOT pending** — the trigger's own correctness (a fresh row gets a valid stamp, an inherited stamp is left alone, the reported attack is refused on a row seconds old, the one pre-existing unstamped row is repaired) is already proven, mutation-style, directly against `planyr_production` (see B1613696).
+
+**Verified HERE (this session, no browser reached).**
+- `db/test/sites_rename_stamp_guard.test.sql` (28 cases, up from 24) run against **`planyr_production` itself**, self-rolling-back: all 28 PASS with the trigger applied. A separate rolled-back mutation run with the new trigger DROPPED reproduced the pre-fix symptom on demand (a fresh INSERT comes back with no stamp; the reported attack — an UPDATE changing both the `site` column and `data.site` with no stamp — lands cleanly).
+- `npx vitest run test/nameGroupIntegrity.test.js test/renameStampIntegrity.test.js` — 44/44 pass. Full suite `npx vitest run` — 851 files / 17,264 tests, all green.
+- Live census re-run after applying: `select … group by 1` over `public.sites` reads `{"valid-stamp": 127}` — every row, zero exceptions. 0 leftover fixture rows from any of the above (re-queried after each stage).
+- A live end-to-end check (INSERT a fresh row with no stamp → confirm it comes back stamped → attempt the exact reported attack on it → confirm refused) was run directly via SQL against production and passed; what remains is the SAME sequence but initiated through the real "New project" button in a signed-in browser, which this sandbox cannot reach.
+
+**Steps, each with a named expected result. A brand-new project, not a duplicate of one of Michael's real plans — this is testing CREATION, not renaming an existing plan.**
+  1. Signed in on `planyr.io`, click "New project" (or the equivalent entry point) and give it any name. **Expect:** it opens normally, exactly as before — nothing about this fix is visible in the product.
+  2. `select data->'siteRenamedAt', data->>'site', updated_at from public.sites where id = '<new plan id>';` **Expect:** `siteRenamedAt` is a real JSON NUMBER (not `null`, not absent), equal to `updated_at` converted to epoch milliseconds.
+  3. Rename the new project once from the project-switcher kebab menu. **Expect:** it takes immediately and survives a reload — the existing B1515824/B1584512 invariant, unaffected by this item, now exercised on a plan that is only seconds old.
+  4. Reload the plan once more and confirm the name and the stamp are both still correct. **Expect:** unchanged from step 3.
+  5. Delete the throwaway project (or leave it — a `New project` click carries no owner-data risk the way duplicating a real plan would) and state exactly what was created/touched.
+- **Stopping rule:** closes when steps 1–5 are observed on `planyr.io`, or when any step fails and is filed as a recurrence against B1613696, per STANDING RULE #2 (a failure here is a FINDING, not a silent close).
+
 ### V1145488 — B1574432 (re-land): the boot flash is gone on a real signed-in cold load, and the canvas is never blank `Blocker: auth`
 
 **Why this needs its own live pass, stated as the thing that went wrong last time.** This is the SIXTH attempt at this family and the FIFTH shipped one caused a P0 (`docs/incidents/B1594320-CANVAS-VISIBILITY-OUTAGE.md`). Its third and last condition for a re-attempt is verbatim: *"Do not re-ship a hide-until-ready gate on this element without a genuine signed-in live pass BEFORE merging. `Verify: live, Blocker: auth` on the ORIGINAL item was the correct classification — the mistake was treating '3/3 clean sandbox arms' as sufficient to ship past that blocker rather than as a reason to hold until the blocker cleared."* This entry exists so that is not repeated. The sandbox now drives the signed-in `loadEpoch` remount itself (`ui-audit/verify-boot-framing-auth.mjs`, incident condition #1, built this session) — but with a FAKE session against a FAKE Supabase, so it proves the mechanism, never the real account, the real cloud latency, or the owner's own device.
