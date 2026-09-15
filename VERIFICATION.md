@@ -9745,6 +9745,34 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
 
 **Result:** ⏳ pending — needs the owner's own real browser/machine, since this item's root cause is specifically an environment this sandbox cannot reproduce. `Cadence: once`.
 
+### V1167792 — B1638832: a project-less module route no longer silently adopts a stale ambient project on a real, signed-in account `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** The decision logic (`shouldAdoptLinkedSiteIntoRoute`'s new `bootCarryOutAllowed` gate, and its counterpart `shouldNeutralizeToReports`) is fully proven as pure functions (`test/schedulerLinkPanel.test.js`, 23 cases) and confirmed end-to-end in a headless, signed-out sandbox run: from Site's own project-less state, clicking the Schedule tab lands on a bare `#/schedule` with no project adopted, and a direct fresh load of `#/schedule` renders cleanly with the crumb reading "Reports." What cannot be proven here: the actual reported symptom, which depends on the embedded scheduler's own **account-wide, cloud-persisted** `aPid` field genuinely disagreeing with the routed project — a state this sandbox has no way to manufacture (a fresh session has no ambient history at all), and the exact case the owner hit on Goose Creek.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, on the Goose Creek account (or any account with 2+ real projects each carrying a Schedule):**
+1. Open Goose Creek's Schedule tab (so the embedded app's `aPid` is genuinely Goose Creek's). Navigate to Site and reach its project-less "Select a project" state (e.g. via the "Map" crumb). Click the Schedule tab. **Expect:** the URL reads a bare `#/schedule`, the crumb reads "Reports," and the grid shows the cross-project reports view — Goose Creek's grid must NOT reappear uninvited.
+2. From the same project-less state, hand-type a bare `#/schedule` URL into the address bar and load it. **Expect:** the identical neutral result.
+3. From Site with a DIFFERENT real project routed (e.g. Grand Port), click Schedule. **Expect:** Schedule correctly follows Grand Port immediately (the carry-IN path, unaffected by this fix) — confirms the fix didn't disturb the legitimate case.
+4. Close the tab; open a genuinely fresh tab/window on the bare domain. **Expect:** "open where I left off" still resumes correctly when the last real route named a project; a boot landing on the Dashboard or any project-less route must not silently jump into Goose Creek's (or any) schedule.
+5. Repeat steps 1–2 a few times across a short session to catch the "it doesn't always happen" timing the owner described, and record the exact hash sequence observed each time (DevTools console `window.location.hash`, or the Network/history panel).
+
+**Result:** ⏳ pending — needs a real signed-in browser session with real, multi-project account history; not reachable from this sandbox. `Cadence: once`.
+
+### V1167793 — B1638835: the full module × leading-crumb navigation matrix, with two real projects in play, never lands on a project nobody chose `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** `test/routeSingleWriter.test.js` proves the STRUCTURAL half — exactly three, reviewed, allowlisted places write `window.location.hash` directly, and no code anywhere listens to `popstate` — which is sandbox-provable by source inspection and stays true regardless of account state. What it cannot prove is the dispatch's own explicit ask: a live matrix with **two real projects in play**, which is precisely the shape a single-project (or project-less) sandbox session cannot exercise, and is named in the original report as "probably why this has survived two previous passes."
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, on an account with at least two real projects (each with a linked Schedule so the Schedule tab has something project-specific to show):**
+1. From EVERY module tab (Site, Schedule, Review, Library, Notes, Spreadsheet), click every OTHER module tab, once with a project actively routed and once from that module's own project-less state. **Expect:** the destination always matches what that module's own project-less/project-routed state should show — never a different, unchosen project's data.
+2. Click the leading crumb from all six modules (Site's "Map," Schedule's "Reports," and the shared "Dashboard" on the other four). **Expect:** each leads to exactly the destination its label names, every time.
+3. Enter each of the seven project-less routes directly (`#/`, `#/site`, `#/schedule`, `#/markup`, `#/library`, `#/notes`, `#/spreadsheet`) via a fresh address-bar load. **Expect:** each renders its own module's genuine "no project" state — never a specific project's data appearing uninvited.
+4. Cold-load each of the above (a real fresh tab, not a reload) and confirm the same expectations hold.
+5. Use Back and Forward after each of the above and confirm the browser history navigates cleanly with no double-landing (a hash that settles on one value, then jumps to a second one a beat later, with no further click).
+6. Repeat the FULL matrix above with a SECOND real project as the "recently active elsewhere" one (e.g. leave Project B's Schedule open, then run the whole sweep starting from Project A) — this is the case a single-project test cannot show a wrong-project landing at all, and the one most likely to catch a remaining instance of the B1638832 class outside Scheduler.
+7. Record the exact hash sequence for any step that doesn't match its expectation, so a recurrence has a concrete trace rather than "sometimes."
+
+**Result:** ⏳ pending — needs a real signed-in browser session with at least two real projects; not reachable from this sandbox. `Cadence: once`.
+
 ## ✅ Verified / ❌ Failed — history
 
 > Passed/failed items are archived to **`VERIFICATION-DONE.md`** to keep this file fast.
