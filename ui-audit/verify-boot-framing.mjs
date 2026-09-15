@@ -135,19 +135,32 @@ async function remountArm() {
   await page.waitForTimeout(3000);
   await page.evaluate(() => { window.location.hash = "#/project/bootframe2/site"; });
   await page.waitForTimeout(3000);
+  const revealState = await readReveal(page);
   const raw = await page.evaluate(() => window.__bootFramingStop());
   const report = bootFramingReport(raw);
   return { name: "remount mid-session (a second plan opens over a painted one)", report, ctx,
-           expectMounts: 2 };
+           expectMounts: 2, plansLoaded: 2, revealState };
 }
+
+/* ⛔ B1574432 — WHY THE REVEAL *REASON* IS READ AND NOT JUST THE VISIBILITY. "The canvas is
+ * visible" reads identically on a healthy boot and on a watchdog rescue that revealed a canvas it
+ * could not frame — and the second is the incident doc's §5 failure ("revealed, and off-screen"),
+ * which looks plausible and is therefore worse than a blank one. `data-planner-reveal` is the app
+ * saying WHICH of the two happened: "framed" (a real framing caused the reveal) or "ceiling" (the
+ * wall clock gave up). An arm that expects a healthy boot requires "framed" specifically. */
+const readReveal = (page) => page.evaluate(() => {
+  const c = document.querySelector('[data-testid="planner-canvas"]');
+  return c ? { present: c.hasAttribute("data-planner-reveal"), reason: c.getAttribute("data-planner-reveal") || "" } : null;
+});
 
 async function runArm(name) {
   const { ctx, page } = await newPage();
   await measurable(page, name);
   await page.goto(`${BASE}#/project/bootframe/site`, { waitUntil: "load" });
   await page.waitForTimeout(SETTLE_MS);
+  const revealState = await readReveal(page);
   const raw = await page.evaluate(() => (window.__bootFramingStop ? window.__bootFramingStop() : null));
-  return { name, report: bootFramingReport(raw), ctx };
+  return { name, report: bootFramingReport(raw), ctx, plansLoaded: 1, revealState };
 }
 
 /* ⛔ THE ARM THAT DEFEATED AN EARLIER FIX: a document that is genuinely BACKGROUNDED while it
@@ -244,8 +257,10 @@ async function backgroundedArm() {
   await page.evaluate(() => { window.__planyrForceHidden = false; document.dispatchEvent(new Event("visibilitychange")); });
   await measurable(page, "backgrounded → foregrounded");
   await page.waitForTimeout(2500);
+  const revealState = await readReveal(page);
   const raw = await page.evaluate(() => window.__bootFramingStop());
   return { name: "backgrounded → foregrounded", report: bootFramingReport(raw), ctx, reveal,
+           plansLoaded: 1, revealState,
            reallyHidden: whileHidden.vis, framesWhileHidden: whileHidden?.raw?.frames ?? null };
 }
 
@@ -308,6 +323,7 @@ async function watchdogArm() {
       if (!c) return null;
       const r = c.parentElement ? c.parentElement.getBoundingClientRect() : null;
       return { inline: c.style.visibility || "", computed: getComputedStyle(c).visibility,
+               reveal: c.getAttribute("data-planner-reveal") || "",
                wrapW: r ? Math.round(r.width) : null, wrapH: r ? Math.round(r.height) : null };
     });
     if (st) {
@@ -428,12 +444,40 @@ for (const arm of arms) {
   if (report.vacuous) report.vacuity.forEach((v) => console.log(`  ⚠ VACUOUS: ${v}`));
   framingLines(report.painted).forEach((l) => console.log(l));
   if (report.vacuous) { console.log("  ❌ this arm observed nothing — a run that cannot see the property does not get to score it"); failed = true; }
-  else if (report.gateAbsent) console.log("  ⊘ flash verdict not applicable — this build has no framing gate to flash");
-  else if (report.ok) console.log(`  ✅ every mount painted exactly one framing (${report.mounts} mount${report.mounts === 1 ? "" : "s"}, ${report.paintedFramings} framing${report.paintedFramings === 1 ? "" : "s"}) — the invariant holds`);
   else {
-    report.offenders.forEach((o) => console.log(`  ❌ mount ${o.mount} painted ${o.framings} distinct framings — the user saw ${o.framings - 1} framing(s) that mount then threw away`));
-    if (!report.offenders.length) console.log("  ❌ no framing could be attributed to a mount");
-    failed = true;
+    /* ══ B1574432 — THE TWO GATE-INDEPENDENT ASSERTIONS, RUN ON EVERY BUILD ══════════════════════
+     * Everything below the `gateAbsent` line used to be skipped on a build with no gate, which meant
+     * the only build the rig could fail was one that HAD the fix. These two need no attribute the
+     * fix adds, so an accidental revert goes red here instead of printing "not applicable". */
+    if (report.bootDefaultFlashes.length) {
+      console.log(`  ❌ THE BOOT DEFAULT WAS PAINTED AND THEN THROWN AWAY — this is the flash, ${report.bootDefaultFlashes.length} time(s):`);
+      report.bootDefaultFlashes.forEach((f) => console.log(`       ppf=0.35 off=(60, 60) painted at t=${f.at}ms, held ${f.heldMs}ms over ${f.samples} frame(s), then replaced${f.mount ? `  (mount ${f.mount})` : ""}`));
+      console.log("       (the triple alone is NOT the signature — an empty plan legitimately frames to it. What fails here is that it was REPLACED, i.e. the user was shown a framing the app then discarded.)");
+      failed = true;
+    } else console.log(`  ✅ the boot default was never painted-then-replaced (${report.paintedFramings} painted framing${report.paintedFramings === 1 ? "" : "s"}, none discarded)`);
+    if (arm.plansLoaded && report.paintedFramings > arm.plansLoaded) {
+      console.log(`  ❌ ${report.paintedFramings} distinct framings were painted for ${arm.plansLoaded} plan load(s), with no user gesture in this arm — at least ${report.paintedFramings - arm.plansLoaded} of them was shown and discarded`);
+      failed = true;
+    }
+    /* The per-MOUNT verdict still runs where the build stamps mounts. It is strictly extra: it can
+       localise a flash to one mount, which the count above cannot, but it can no longer be the only
+       thing asked — that is what made a gateless build unjudgeable. */
+    if (report.gateAbsent) console.log("  ⊘ per-mount attribution not available in this build (no `data-planner-mount`) — the two assertions above carried this arm");
+    else if (report.ok) console.log(`  ✅ every mount painted exactly one framing (${report.mounts} mount${report.mounts === 1 ? "" : "s"}, ${report.paintedFramings} framing${report.paintedFramings === 1 ? "" : "s"}) — the invariant holds`);
+    else {
+      report.offenders.forEach((o) => console.log(`  ❌ mount ${o.mount} painted ${o.framings} distinct framings — the user saw ${o.framings - 1} framing(s) that mount then threw away`));
+      if (!report.offenders.length && !report.bootDefaultFlashes.length) console.log("  ❌ no framing could be attributed to a mount");
+      failed = true;
+    }
+    /* ⛔ AND THE OTHER DIRECTION — a reveal that fired without a framing behind it. On an arm whose
+     * container is perfectly healthy, the ceiling must never be what opened the gate: that would
+     * mean the normal path failed and the rescue covered for it silently. */
+    const rv = arm.revealState;
+    if (!rv) { console.log("  ❌ no canvas to read a reveal reason from — VACUOUS"); failed = true; }
+    else if (!rv.present) console.log("  ⊘ reveal reason not exposed in this build (no `data-planner-reveal`) — no gate to judge");
+    else if (rv.reason === "framed") console.log("  ✅ the reveal was caused by a real framing (data-planner-reveal=\"framed\"), not by the ceiling");
+    else if (rv.reason === "ceiling") { console.log("  ❌ the canvas was revealed by the CEILING on a healthy container — the normal framing path failed and the rescue covered for it (data-planner-reveal=\"ceiling\")"); failed = true; }
+    else { console.log(`  ❌ the canvas was never revealed at all (data-planner-reveal="${rv.reason}") — this is the B1594320 outage shape`); failed = true; }
   }
   console.log("");
   await ctx.close();
@@ -452,8 +496,16 @@ if (watchdog.gateAbsent) {
 } else if (watchdog.revealedAt === null) {
   console.log(`  ❌ the canvas was STILL unrevealed after ${watchdog.waitedMs} ms (inline visibility="${watchdog.box?.inline ?? "?"}"). The boot-framing watchdog never fired — the LOUD-FAILURE safety net that justifies gating paint at all does not exist in the one condition it was written for (B1600352).`);
   failed = true;
+} else if (watchdog.box?.reveal !== "ceiling") {
+  /* ⛔ B1574432 — THE ARM'S OWN PRECONDITION ON *WHICH MECHANISM* REVEALED IT. "The canvas became
+   * visible" is not the property under test — "the CEILING revealed it" is. A build that somehow
+   * framed this deliberately-degenerate container would also turn the canvas visible and would
+   * score a pass here while the watchdog stayed untested, which is exactly the vacuity that let
+   * this arm certify a healthy 430x773 container once before. The app states the mechanism itself. */
+  console.log(`  ❌ the canvas was revealed, but data-planner-reveal reads "${watchdog.box?.reveal || "(empty)"}" rather than "ceiling" — something other than the watchdog opened the gate, so this arm did not test the watchdog. VACUOUS.`);
+  failed = true;
 } else {
-  console.log(`  ✅ the watchdog revealed the canvas after ${watchdog.revealedAt} ms on a wall clock, with the document reading hidden throughout\n`);
+  console.log(`  ✅ the watchdog revealed the canvas after ${watchdog.revealedAt} ms on a wall clock (data-planner-reveal="ceiling"), with the document reading hidden throughout\n`);
 }
 
 await browser.close();
