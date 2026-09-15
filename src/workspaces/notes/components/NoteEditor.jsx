@@ -246,6 +246,15 @@ const EDITOR_CSS = `
 .planyr-note .ProseMirror ul, .planyr-note .ProseMirror ol { padding-left: 1.5em; margin: 1em 0 0 0; }
 .planyr-note .ProseMirror li { margin: var(--note-list-gap, 2px) 0; }
 .planyr-note .ProseMirror li p { margin: 0; }
+/* ⛔ A NESTED LIST IS THE NEXT LINE OF THE SAME LIST, NOT A NEW BLOCK (Tab vertical-drop bug,
+   owner report). The "ul, ol { margin: 1em 0 0 0 }" rule above spaces a list away from a
+   paragraph that precedes it elsewhere in the document; a list nested INSIDE a list item — what
+   Tab's real sinkListItem produces — is not that. It is the very next item, one level deeper, and
+   Tab must change only its horizontal position (lib/notesListIndent.js's header). Left alone, the
+   nested ol/ul's own 1em top margin lands between the parent item and its newly-sunk child, so an
+   indented item sits measurably lower than an ordinary sibling would (measured: 6px normal gap →
+   15px after one real Tab) — "it's literally at a different height." */
+.planyr-note .ProseMirror li > ul, .planyr-note .ProseMirror li > ol { margin-top: var(--note-list-gap, 2px); }
 /* ⛔ THE indent ATTRIBUTE'S ONE STYLESHEET TABLE (B842949) — a fixed step per level, looked up
    by data-indent, never an inline margin computed and stamped onto the element by hand. See
    lib/notesIndentLevel.js → indentAttrs / indentCssRules for why. PDF-PARITY: the print sheet

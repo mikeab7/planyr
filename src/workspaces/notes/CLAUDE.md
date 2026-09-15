@@ -1014,6 +1014,15 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
     dispatch via a new `window.__noteEditor.dispatchBeforeInput()` test hook — nothing but the
     plugin can act on it). Not reachable from a real iPhone in this sandbox — see `VERIFICATION.md`
     → **V916800**.
+  - **⛔ THE TABLE HAD NO ROW FOR TAB'S `indent` ATTRIBUTE (B1656403, found sweeping the list/indent
+    surface after B1656400's vertical-drop fix).** Every row above answers from REAL structural
+    depth; an item indented only by `lib/notesListIndent.js`'s flat attribute is structurally an
+    ordinary item, so Backspace at its start skipped straight to `list-item-to-paragraph` —
+    losing the level AND its list-item status in one press, not the one visible step this table
+    otherwise guarantees. `blockStartAction` now checks `readIndent(container.attrs) > 0` before
+    its structural `nested` branch and returns `outdent-indent-attr`, which runs the same
+    `shiftIndent(-1)` Shift+Tab uses — checked first so it also wins for a compound item that is
+    BOTH really nested and wearing the attribute (the "Tab again" case).
 - `lib/notesPastePlain.js` — **paste JUST the text** (B36051), Word's "Keep Text Only". ⛔ The
   DEFAULT PASTE IS UNCHANGED — the owner asked for an *option*, so this WATCHES the paste
   (`handlePaste` returns false) rather than intercepting it. Two ways in: **Ctrl/Cmd+Shift+V**,
@@ -1076,6 +1085,26 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   two mechanisms. Above rather than below because an item sitting at level 2 by attribute is, to
   ProseMirror, an ordinary first item, so `liftListItem` would lift it clean out of its list while
   it still owed two outdents.
+  - **⛔ TAB'S VERTICAL DROP (B1656400, owner report 2026-09-15): the CSS, not this file, was
+    wrong.** *"if I press tab again, it indents it further, but then drops it down… it's literally
+    at a different height."* `sinkListItem`'s real nesting wraps the item in a brand-new `<ul>`/
+    `<ol>`, and the generic `ul, ol { margin: 1em 0 0 0 }` rule (`components/NoteEditor.jsx`'s
+    `EDITOR_CSS`) — meant to space a list away from a preceding paragraph — landed on that nested
+    list too, so a sunk item sat 15px below its parent instead of the ordinary 6px sibling gap. A
+    second Tab (this file's attribute path) adds no further vertical change of its own; the drop is
+    already there after the first press. Fixed with one override,
+    `.ProseMirror li > ul, .ProseMirror li > ol { margin-top: var(--note-list-gap, 2px) }`,
+    mirrored into `lib/notesPrint.js` (PDF-PARITY, density-aware). Guard:
+    **verify-notes-list-indent-height** under `ui-audit/`.
+  - **⛔ AND THE ATTRIBUTE WAS INVISIBLE TO ENTER AND BACKSPACE (B1656402/B1656403, found sweeping
+    this surface after B1656400).** An item wearing the attribute alone is, structurally, an
+    ordinary item — so Enter on an empty one and Backspace at the start of one both skipped "give
+    the level back" and went straight to leaving the list / losing list-item status, instead of the
+    one-visible-step convention real nesting already gets right. Fixed with a new `Enter` binding
+    here (`emptyIndentableAt` + `shiftIndent(-1)`, same priority-200 rung as Shift+Tab) and a new
+    `readIndent(container.attrs) > 0` check in `lib/notesBlockKeys.js`'s `blockStartAction`, checked
+    BEFORE its structural `nested` branch — both reuse `shiftIndent(-1)`, so there is still exactly
+    one place that decrements `indent`.
 - `lib/notesIndentLevel.js` — the pure half: `readIndent`, the ceiling, and the markup
   (`margin-left` **on the item**, so the bullet moves with its words). Renders nothing at level 0,
   which is the clause the byte-identical round-trip rests on.

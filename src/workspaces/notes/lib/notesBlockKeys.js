@@ -73,8 +73,11 @@
  *   a CODE BLOCK                              becomes a plain paragraph; its code never
  *                                             merges into the prose above
  *   first block of a BLOCKQUOTE               leaves the quote; the rest of the quote stays
- *   NESTED list item                          OUTDENTS one level, and does nothing else
- *   TOP-LEVEL list item                       becomes a plain paragraph, keeping its text;
+ *   a list item wearing Tab's INDENT LEVEL    gives that level back, and does nothing else —
+ *   (real nesting or not)                     checked BEFORE the two rows below, same
+ *                                             precedence Shift+Tab already gives it
+ *   NESTED list item, no level owed           OUTDENTS one level, and does nothing else
+ *   TOP-LEVEL list item, no level owed        becomes a plain paragraph, keeping its text;
  *                                             the join is press 2
  *   a later block INSIDE a list item          the ordinary join, within that item
  *   paragraph after a LIST or a QUOTE         its words join the LAST LINE of it — it does
@@ -103,6 +106,8 @@
  */
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey, Selection } from "@tiptap/pm/state";
+import { INDENTABLE, readIndent } from "./notesIndentLevel.js";
+import { shiftIndent } from "./notesListIndent.js";
 
 /** Above Tiptap's default (100) so this is asked before `joinBackward` AND before
  *  `ListKeymap`, and nowhere near `notesTabKey`'s deliberately LOW priority. */
@@ -112,7 +117,7 @@ export const BLOCK_KEYS_PRIORITY = 160;
  *  `"left"` are the default and are not worth a keystroke of their own. */
 const MEANINGFUL_ALIGN = new Set(["center", "right", "justify"]);
 
-const LIST_ITEM_TYPES = new Set(["listItem", "taskItem"]);
+const LIST_ITEM_TYPES = new Set(INDENTABLE);
 
 /** ProseMirror's own `findCutBefore`, restated here because the decision needs it and
  *  prosemirror-commands does not export it. It walks up from the caret while it is at the
@@ -163,6 +168,13 @@ export function blockStartAction(state) {
   if (containerDepth >= 1 && $from.index(containerDepth) === 0) {
     const container = $from.node(containerDepth);
     if (LIST_ITEM_TYPES.has(container.type.name)) {
+      /* ⛔ AN ATTRIBUTE LEVEL IS OWED BACK BEFORE ANY STRUCTURAL CHANGE (NEW-2 sweep) — the
+       * same precedence Shift+Tab already gives it. An item indented by Tab's `indent`
+       * attribute alone (no sibling above to nest under — see lib/notesListIndent.js) is, to
+       * ProseMirror's own structural depth, an ORDINARY item: without this check the rule
+       * below reads it as ungrounded and either lifts it clean out of the list (a top-level
+       * item) or does nothing useful, dropping the level with no visible step of its own. */
+      if (readIndent(container.attrs) > 0) return { action: "outdent-indent-attr", itemType: container.type.name };
       const listDepth = containerDepth - 1;
       const grandparent = listDepth >= 1 ? $from.node(listDepth - 1) : null;
       const nested = !!grandparent && LIST_ITEM_TYPES.has(grandparent.type.name);
@@ -214,6 +226,11 @@ function runBlockStartAction(editor, verdict) {
        * of the list — the same command, and which of the two it is depends only on where the
        * item already sits, so there is no branch here to get wrong. */
       return editor.commands.liftListItem(verdict.itemType) || true;
+    case "outdent-indent-attr":
+      /* The SAME command Shift+Tab runs — the level the item owes, given back, structure
+       * untouched. Reusing it rather than a second attribute-mutation keeps there being
+       * exactly one place that decrements `indent`. */
+      return editor.commands.command(shiftIndent(-1)) || true;
     case "select-node-before":
       return editor.commands.setNodeSelection(verdict.pos) || true;
     case "into-table-cell":
