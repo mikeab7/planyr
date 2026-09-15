@@ -335,8 +335,8 @@ function reportBlankTileHealed(map, layerId) {
 // The status glyph as an inline WHITE SVG (crisp at every size/zoom + on retina;
 // never raster). Keyed off the token `shape`, drawn CENTERED on (cx,cy) so it sits
 // dead-center in the bulb. Only the SETTLED stages carry a glyph (the colorblind-safe
-// second cue); Pursuit and Active are glyphless solid discs — color + size + the
-// ground-ring progress sweep distinguish them (B433). "" → no glyph.
+// second cue); Pursuit and Active are glyphless solid discs — color + size alone
+// distinguish them (B433). "" → no glyph.
 function statusGlyph(shape, cx, cy) {
   const n = (v) => +v.toFixed(2);
   switch (shape) {
@@ -350,31 +350,30 @@ function statusGlyph(shape, cx, cy) {
   }
 }
 
-// Progress fraction per status (Path B — DERIVED from status until a real
-// progress_pct column lands, B161/B163). The retired building marker drew this as an
-// arc ring; the precision pin folds the SAME source into the ground ring (B434).
-const STATUS_PROGRESS = { pursuit: 0.10, active: 0.60, onhold: 0.30, complete: 1.00, dead: 0 };
-
-/* Status map pin (B434) — the "precision pin": a small color BULB on a short vertical
- * STALK seated over a GROUND RING (a survey-monument read). The ground-ring CENTER is
- * the anchor — it sits exactly on the site coordinate (it replaces the old building/
- * shield bottom-tip anchor). Kept constant across states so it always reads as a site;
- * only the bulb FILL color, the glyph, the size tier, the opacity, and the ground-ring
- * progress sweep vary — and they vary WITH importance (Pursuit loudest/largest → Dead
- * quietest/smallest; statusTokens.js).
+/* Status map pin (B434; superseded by B1628913/NEW-2 — "just a circle") — a small color
+ * BULB, nothing else. The owner, verbatim: "keep the top piece of it exactly the same, but
+ * just make it a circle instead of a pin." The bulb at the top of the old precision pin WAS
+ * that top piece, and it was already a circle — so removing the stalk and ground ring below
+ * it is the whole change. Everything about how a status LOOKS is untouched: bulb FILL color,
+ * glyph, size tier, opacity and z-order all still read from statusToken (statusTokens.js),
+ * and still vary WITH importance (Pursuit loudest/largest → Dead quietest/smallest).
  *  • SOLID bulb + a WHITE keyline (the white disc/halo behind it) — the standing rule:
  *    never a transparent/hollow primary marker on the aerial (B433). A soft white halo
  *    on every stroke keeps it legible over both bright (tan/developed) and dark (water/
  *    forest) tiles; no drop-shadow (it flashes on re-render) EXCEPT a single subtle one
  *    on the open site.
- *  • PROGRESS folds into the ground ring: it sweeps 0–100% clockwise from 12 o'clock
- *    (pursuit 10 · active 60 · onhold 30 · complete 100 · dead 0) — the same source the
- *    retired building arc used. A faint full track keeps the ring readable at 0%.
- *  • A FIXED hit box for every state → the anchor never drifts when status/size change.
- *    The ground-ring center sits at the viewBox bottom edge, so it maps to the hit-box
- *    bottom-center (the iconAnchor) at EVERY size tier; its lower half overflows below.
+ *  • ⛔ THE ANCHOR MOVED WITH THE SHAPE. The old ground ring's center sat at the viewBox's
+ *    bottom edge on purpose, so it mapped to the hit box's BOTTOM-center at every size
+ *    tier. With the ring gone, the CIRCLE's own center is what must sit on the site's
+ *    coordinate — so the anchor is now the hit box's CENTER, and the art is positioned
+ *    inside the (still fixed) hit box so the bulb's rendered center always lands there,
+ *    whatever the size tier.
+ *  • A FIXED hit box for every state (unchanged from the old pin) → the tap target never
+ *    shrinks or drifts when status/size change.
  *  • The glyph (‖/✓/✕) rides inside the bulb as the colorblind-safe second cue; Pursuit
- *    and Active are glyphless solid discs (color + size + sweep carry them).
+ *    and Active are glyphless solid discs — color + size carry them. (The progress sweep
+ *    that used to ride the ground ring is gone with the ring, not reintroduced as a ring
+ *    drawn around the circle — the owner asked for a circle, not a circle with a ring.)
  * `active` = the currently-open site (a small size bump + a subtle drop-shadow + top z). */
 function sitePinIcon(status, active) {
   const t = statusToken(status);
@@ -386,43 +385,34 @@ function sitePinIcon(status, active) {
   const op = t.mapOpacity ?? 1;
   const halo = t.halo || 2;
   const col = t.color, edge = darken(col, 0.26);
-  // viewBox 0 0 26 34. Ground-ring center = (13, 34) (bottom edge) so it maps to the
-  // hit-box bottom-center for every tier; bulb up top, stalk between.
-  const CX = 13, BULB_CY = 10.5, BULB_R = 6.8, RING_CY = 34, RING_R = 5;
-  const STALK_TOP = +(BULB_CY + BULB_R - 0.5).toFixed(2);  // bulb bottom
-  const STALK_BOT = +(RING_CY - RING_R + 0.4).toFixed(2);  // ring top
-  const pct = STATUS_PROGRESS[status] ?? 0;
-  const C = +(2 * Math.PI * RING_R).toFixed(2);
-  const sweep = +(C * pct).toFixed(2);
-  // White keyline/halo underlay for the whole silhouette → legible over any imagery.
-  const whiteHalo =
-    `<circle cx="${CX}" cy="${BULB_CY}" r="${(BULB_R + halo).toFixed(1)}" fill="#fff"/>` +
-    `<line x1="${CX}" y1="${STALK_TOP}" x2="${CX}" y2="${STALK_BOT}" stroke="#fff" stroke-width="${(2.4 + halo).toFixed(1)}" stroke-linecap="round"/>` +
-    `<circle cx="${CX}" cy="${RING_CY}" r="${RING_R}" fill="none" stroke="#fff" stroke-width="${(2 + halo).toFixed(1)}"/>`;
-  const stalk = `<line x1="${CX}" y1="${STALK_TOP}" x2="${CX}" y2="${STALK_BOT}" stroke="${col}" stroke-width="2.4" stroke-linecap="round"/>`;
-  // Ground ring: a faint full track (so the ring still reads at 0%) + the progress arc.
-  const ringTrack = `<circle cx="${CX}" cy="${RING_CY}" r="${RING_R}" fill="none" stroke="${col}" stroke-width="2" opacity="0.32"/>`;
-  const ringSweep = sweep > 0
-    ? `<circle cx="${CX}" cy="${RING_CY}" r="${RING_R}" fill="none" stroke="${col}" stroke-width="2" stroke-linecap="round" stroke-dasharray="${sweep} ${C}" transform="rotate(-90 ${CX} ${RING_CY})"/>`
-    : "";
+  // viewBox 0 0 26 34, unchanged from the old pin, so the bulb + glyph geometry below is
+  // untouched — only the stalk/ring that used to occupy the rest of this box are gone.
+  const CX = 13, BULB_CY = 10.5, BULB_R = 6.8;
+  // White keyline/halo underlay for the bulb → legible over any imagery.
+  const whiteHalo = `<circle cx="${CX}" cy="${BULB_CY}" r="${(BULB_R + halo).toFixed(1)}" fill="#fff"/>`;
   // Bulb: solid fill + a thin same-hue edge for crispness; the white disc behind is the
   // white keyline. The glyph (settled stages only) rides centered inside the bulb.
   const bulb = `<circle cx="${CX}" cy="${BULB_CY}" r="${BULB_R}" fill="${col}" stroke="${edge}" stroke-width="0.6"/>`;
-  const shapeSvg = whiteHalo + stalk + ringTrack + ringSweep + bulb + statusGlyph(t.shape, CX, BULB_CY);
-  // overflow:visible so the halo + the ground ring's lower half aren't clipped.
+  const shapeSvg = whiteHalo + bulb + statusGlyph(t.shape, CX, BULB_CY);
   const shadow = active ? "filter:drop-shadow(0 1px 2px rgba(0,0,0,0.38));" : "";
+  // Position the art so the BULB's own rendered center — not the svg box's corner — lands
+  // on the hit box's center, which is now the anchor (see header). `vs` is the same uniform
+  // scale the width/height attributes apply against the fixed viewBox (w = 26*vs, h = 34*vs),
+  // so CX*vs / BULB_CY*vs is exactly where the bulb renders inside this <svg>.
+  const left = +(HIT_W / 2 - CX * vs).toFixed(1);
+  const top = +(HIT_H / 2 - BULB_CY * vs).toFixed(1);
   const html =
     `<div style="position:relative;width:${HIT_W}px;height:${HIT_H}px;opacity:${op};${shadow}">` +
     `<svg width="${w}" height="${h}" viewBox="0 0 26 34" ` +
-    `style="position:absolute;left:${((HIT_W - w) / 2).toFixed(1)}px;bottom:0;overflow:visible">` +
+    `style="position:absolute;left:${left}px;top:${top}px;overflow:visible">` +
     shapeSvg +
     `</svg></div>`;
   return L.divIcon({
     className: "map-site-feature", // NEW-3 — a stable hook for verifying the decoupling
     html,
     iconSize: [HIT_W, HIT_H],
-    iconAnchor: [HIT_W / 2, HIT_H],
-    tooltipAnchor: [0, -(h - 4)],
+    iconAnchor: [HIT_W / 2, HIT_H / 2],
+    tooltipAnchor: [0, -((BULB_R + halo) * vs + 4)],
   });
 }
 

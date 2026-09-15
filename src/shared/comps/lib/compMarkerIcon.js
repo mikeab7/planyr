@@ -1,8 +1,9 @@
 /* compMarkerIcon — the map marker for a leasing comp. Deliberately a DIFFERENT silhouette from
- * sitePinIcon (site-planner/MapFinder.jsx) so a comp can never be mistaken for a project pin on
- * the same map: a small flat TAG shape (no ground ring/progress sweep — a comp has no status),
- * colored by comp type so the three kinds read apart at a glance. Pure — no Leaflet import here,
- * so this is unit-testable; the caller wraps the returned spec in `L.divIcon`.
+ * sitePinIcon (site-planner/MapFinder.jsx — a plain solid circle, colored by status; B1628913)
+ * so a comp can never be mistaken for a project pin on the same map: a small flat rotated TAG
+ * shape (a comp has no status, so no size-tier/glyph machinery), colored by comp type so the
+ * three kinds read apart at a glance. Pure — no Leaflet import here, so this is unit-testable;
+ * the caller wraps the returned spec in `L.divIcon`.
  */
 
 const TYPE_COLOR = {
@@ -32,14 +33,15 @@ export function compMarkerColor(compType) {
  */
 export function compMarkerSvg(compType, { selected = false } = {}) {
   const col = compMarkerColor(compType);
-  const w = selected ? 22 : 18, h = selected ? 22 : 18;
+  const w = selected ? 17 : 14, h = selected ? 17 : 14;
   const cx = w / 2, cy = w / 2;
   const r = (w / 2) - 2;
-  // The selected state's own distinguishing cue is mostly the overall SIZE bump above (18->22);
-  // a marginally thicker crisp border on top of that (rather than reproducing the old halo's
-  // now-removed 2px-vs-3px blur difference) keeps it visually distinct without reintroducing a
-  // glow. Both values sit inside the 1.5-2px hard-stroke range asked for.
-  const ring = selected ? 2 : 1.6;
+  // B1628912 (NEW-1) — sized down from 18/22 (owner: comps read heavier than they should next to
+  // everything else). The selected state's own distinguishing cue is still mostly the overall
+  // SIZE bump above (14->17); the keyline is now a PROPORTION of the marker's own width rather
+  // than a fixed px pair, so it grows and shrinks with the marker instead of going hairline at
+  // the smaller resting size or looking oversized if the marker is ever resized again.
+  const ring = +(w * 0.1).toFixed(2);
   return (
     `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="overflow:visible">` +
     `<rect x="${cx - r}" y="${cy - r}" width="${r * 2}" height="${r * 2}" rx="3" ` +
@@ -51,8 +53,9 @@ export function compMarkerSvg(compType, { selected = false } = {}) {
 }
 
 /** Marker anchor size — used by the Leaflet L.divIcon wrapper so the tag's CENTER (not a
- * corner) sits on the comp's coordinate. */
+ * corner) sits on the comp's coordinate. Kept in lockstep with `compMarkerSvg`'s own w/h —
+ * B1628912 (NEW-1) sized both down together; drifting them apart puts a comp off its coordinate. */
 export function compMarkerSize(selected = false) {
-  const s = selected ? 22 : 18;
+  const s = selected ? 17 : 14;
   return { size: [s, s], anchor: [s / 2, s / 2] };
 }
