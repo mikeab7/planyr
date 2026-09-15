@@ -23,7 +23,13 @@
  * to CALLOUT_LINE and renders the box border pixel-identical to before.
  *
  * Pure (no React/DOM) so it unit-tests without a browser. Tests: test/calloutStyle.test.js.
+ *
+ * B1652707 — the default text/outline ink and fill are TOKENS (`shared/theme/familyInk.js`),
+ * never raw hex literals here: `FAMILY_DEFAULT_INK.callout` is the SAME slate this module used to
+ * hardcode twice, and `familyInk.js`'s own header already named it "SitePlanner calloutStyle
+ * default border/ink … on its cream plate" — this is that consolidation, not a new value.
  */
+import { FAMILY_DEFAULT_INK, CALLOUT_DEFAULT_FILL } from "../../../shared/theme/familyInk.js";
 
 export const CALLOUT_LINE = { weight: 1.4, dash: "solid", opacity: 1, fillOpacity: 1 };
 
@@ -39,9 +45,9 @@ export function calloutStyle(c) {
   const o = c || {};
   return {
     size: o.size || 13,
-    color: o.color || "#1f2937",
-    fill: o.fill || "#fffbe8",
-    stroke: o.stroke || "#1f2937",
+    color: o.color || FAMILY_DEFAULT_INK.callout,
+    fill: o.fill || CALLOUT_DEFAULT_FILL,
+    stroke: o.stroke || FAMILY_DEFAULT_INK.callout,
     align: o.align || "center",
     bold: !!o.bold,
     italic: !!o.italic,

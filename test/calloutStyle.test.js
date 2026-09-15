@@ -11,6 +11,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { CALLOUT_LINE, CALLOUT_STD_KEYS, calloutStyle } from "../src/workspaces/site-planner/lib/calloutStyle.js";
+import { FAMILY_DEFAULT_INK, CALLOUT_DEFAULT_FILL } from "../src/shared/theme/familyInk.js";
 
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
 
@@ -32,6 +33,16 @@ describe("the built-in outline/fill look is EXACTLY the pre-styling render (an u
     expect(calloutStyle({ weight: 0 }).weight).toBe(CALLOUT_LINE.weight);
     expect(calloutStyle({ weight: -1 }).weight).toBe(CALLOUT_LINE.weight);
     expect(calloutStyle({ weight: NaN }).weight).toBe(CALLOUT_LINE.weight);
+  });
+});
+
+describe("the default ink/fill are wired to the shared token table, not a parallel copy (B1652707)", () => {
+  it("calloutStyle resolves an unstyled callout's colour/stroke to FAMILY_DEFAULT_INK.callout", () => {
+    expect(calloutStyle({}).color).toBe(FAMILY_DEFAULT_INK.callout);
+    expect(calloutStyle({}).stroke).toBe(FAMILY_DEFAULT_INK.callout);
+  });
+  it("calloutStyle resolves an unstyled callout's fill to CALLOUT_DEFAULT_FILL", () => {
+    expect(calloutStyle({}).fill).toBe(CALLOUT_DEFAULT_FILL);
   });
 });
 
