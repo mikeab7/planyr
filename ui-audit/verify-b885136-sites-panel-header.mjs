@@ -12,7 +12,11 @@ import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 
-const BASE = process.env.BASE_URL || "http://localhost:5173/";
+// B1614656 — bare BASE_URL now lands on the Dashboard (B1213312's "#/" = Dashboard, not an alias
+// for "site-planner, no project" anymore), so this harness silently found zero site rows and hung
+// forever on a locator wait. "#/site" is the Site Planner's own route with no project selected —
+// exactly the Map/Sites-panel screen this harness exists to check.
+const BASE = (process.env.BASE_URL || "http://localhost:5173/") + "#/site";
 const OUT = new URL("./screens/b885136-b885137/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
