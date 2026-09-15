@@ -9961,7 +9961,37 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
 2. Search a Houston address (e.g. an address inside Harris County). **Expect:** exactly **ONE** request to `gis.hctx.net` (HCAD, Harris's own CAD) and **zero** requests to `feature.geographic.texas.gov` — matching the pre-existing B1639697 fix (a healthy real CAD suppresses the redundant statewide co-query), unaffected by this item.
 3. Read the served chunk hash (`document.querySelectorAll('script[src]')` or the Network tab) in the SAME observation as steps 1–2, per this repo's own live-measurement rule, confirming the build postdates this fix's merge.
 
-**Result:** ⏳ pending — needs the fix deployed (Cloudflare Pages auto-deploys on merge to `main`) and a real or headless browser driven against the live app with network tracing; not yet run this session because the code had not merged when this entry was written. `Cadence: once`.
+**Result:** ⏳ pending, ATTEMPTED post-merge this session, INCONCLUSIVE — not a defect finding, an
+instrument limitation, recorded rather than smoothed over. The fix merged and deployed (PR #1724,
+`main` @ `0f17770`), and `planyr.io` itself is reachable from this sandbox (plain `curl` reaches it
+in <0.5s, repeatably). But driving it with headless Chromium through this session's egress proxy is
+NOT reliable enough to trust a pass here: the same real, same-origin asset (e.g.
+`assets/map-vendor-*.css`) intermittently fails with `net::ERR_TOO_MANY_RETRIES` under the burst of
+concurrent connections a real page mount opens, which the app's own CSS-preload error handling then
+turns into a full render-crash (`[workspace error boundary] caught a render crash`) — so the address
+search input this check needs never mounts. Confirmed this is a CONNECTION-LEVEL flake, not a policy
+block: `curl -sS $HTTPS_PROXY/__agentproxy/status` shows no rejection recorded for `planyr.io` itself
+(only expected, unrelated policy denials for `www.google.com`/`static.cloudflareinsights.com`
+telemetry beacons), and a single sequential `curl` never fails — only the ~dozen-way concurrent
+fetch a real page load performs does. Tried and ruled out as insufficient: the default Playwright
+launch (env-var proxy only), an explicit `--proxy-server` flag (fixed it for a bare `/` load but not
+reliably for `#/site`'s heavier asset set), and up to 8 reload retries per page (some reloads
+themselves errored with `Protocol error: Not attached to an active page`, suggesting the crashed
+render can take the page down, not just the network layer). This matches a class of failure this
+proxy's own README documents (`/root/.ccr/README.md`, "connection reset / unexpected disconnect …
+mid-transfer" — "once a tunnel is up the proxy cannot send an error response, so a connection it
+aborts reaches the tool as a bare reset") and is the same shape a prior session on this exact repo
+already recorded for this exact site (`ui-audit/verify-parcel-cache-fallback.mjs`'s own header:
+"this sandbox's egress proxy resets Chromium's connection to real GIS hosts and to planyr.io — the
+reason V199 itself could never be driven from here"). **What is NOT in question:** the fix's own
+logic — `test/arcgis.test.js` proves the exact-one-request behavior deterministically against a
+mocked fetch, and this session's own direct (non-browser) `fetch()` calls against the real
+`feature.geographic.texas.gov` host confirmed the service capability shape (`/query` → the known
+disabled-operation body, `/identify` → real data) the fix's branch depends on. What is still
+genuinely unconfirmed is the full, real-browser, real-network-panel count this item was opened to
+show. `Cadence: once` — stays open; needs either a real signed-in/signed-out browser session
+outside this proxy (Michael's own, or a Cowork session per this repo's own "a Cowork session
+records its own live verify" mechanism) or a future sandbox with different egress behavior.
 
 ## ✅ Verified / ❌ Failed — history
 
