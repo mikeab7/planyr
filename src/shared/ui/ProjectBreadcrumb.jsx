@@ -894,6 +894,11 @@ export default function ProjectBreadcrumb({
     const editing = editingId === p.id;
     const active = hoverRow === p.id || menuFor?.id === p.id; // row highlighted while its menu is open
     const pinnedIdx = pinned ? pinnedIds.indexOf(p.id) : -1;
+    // NEW-1/B<PENDING> — the marker that replaced the "Pinned" section header + count: every
+    // pinned row carries its own small pin icon rather than a shared heading, so it also marks
+    // the CURRENT row when that project happens to be pinned (the current row never lands in the
+    // pinned section itself — `pinnedRows` excludes it — so without this it would look unpinned).
+    const isPinned = pinnedIds.includes(p.id);
     return (
       <div
         key={p.id}
@@ -922,6 +927,13 @@ export default function ProjectBreadcrumb({
               title={p.name}
               style={row({ flex: 1, minWidth: 0, background: "transparent" })}
             >
+              {isPinned && (
+                <span
+                  title="Pinned"
+                  aria-label="Pinned"
+                  style={{ flex: "none", display: "grid", placeItems: "center", color: "var(--text-tertiary)" }}
+                ><PinIcon size={11} /></span>
+              )}
               <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
                 {p.name}
               </span>
@@ -1259,8 +1271,11 @@ export default function ProjectBreadcrumb({
         <div style={divider} />
 
         {/* Recent projects — newest-edited first, relative timestamps. NEW-3/NEW-4 — the CURRENT
-            project renders first (outside any section), then a "Pinned" section (reorderable),
-            then everything else — see `renderProjectRow` and `reorderWithCurrentAndPinned`. */}
+            project renders first (outside any section), then the pinned rows (reorderable, each
+            marked with its own pin icon rather than a section header — NEW-1/B<PENDING>, owner
+            report: the "Pinned" heading + its count read as clutter once every pinned row already
+            carries the icon), then everything else — see `renderProjectRow` and
+            `reorderWithCurrentAndPinned`. */}
         <div style={{ maxHeight: 280, overflowY: "auto", margin: "0 -2px", padding: "0 2px" }}>
           {filtered.length === 0 ? (
             <div style={{ padding: "10px 9px", fontSize: 12, color: "var(--text-tertiary)" }}>
@@ -1271,14 +1286,10 @@ export default function ProjectBreadcrumb({
               {currentRow && renderProjectRow(currentRow)}
               {pinnedRows.length > 0 && (
                 <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 9px 3px" }}>
-                    <span style={{ flex: "none", color: "var(--text-tertiary)", display: "grid", placeItems: "center", lineHeight: 0 }}><PinIcon size={10.5} /></span>
-                    <span style={{ flex: 1, textAlign: "left", fontSize: 10.5, fontWeight: 700, color: "var(--text-primary)" }}>Pinned</span>
-                    <span style={{ color: "var(--text-tertiary)", fontWeight: 700, fontSize: 10.5 }}>{pinnedRows.length}</span>
-                  </div>
                   {/* No hard cap on pin count — the section scrolls internally past 6 rather than
                       pushing the rest of the list off screen (same threshold MapFinder's own
-                      Sites-panel Pinned section uses). */}
+                      Sites-panel Pinned section uses). The separator below is what still marks the
+                      boundary between pinned and unpinned rows now that the text header is gone. */}
                   <div data-testid="project-pinned-list" style={{ maxHeight: pinnedRows.length > 6 ? 192 : "none", overflowY: pinnedRows.length > 6 ? "auto" : "visible" }}>
                     {pinnedRows.map((p) => renderProjectRow(p, { pinned: true }))}
                   </div>
