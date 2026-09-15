@@ -112,7 +112,10 @@ describe("NEW-1 — the protection this redesign keeps in full: nothing is auto-
     expect(b, "finishEditing must exist").toBeTruthy();
     expect(b, "a leftover that matches nothing is never turned into a new contact here")
       .not.toMatch(/newContactsRef\.current\.push/);
-    expect(b, "an EXACT match is still kept rather than dropped").toMatch(/existing && !chipSet\.has/);
+    // B1341728 — the leftover fold now reads the LIVE chips off a ref (the rAF close path's closure
+    // can be a render behind), so the membership test is `already` rather than the memoised chipSet.
+    expect(b, "an EXACT match is still kept rather than dropped").toMatch(/existing && !already/);
+    expect(b, "and it is tested against the LIVE chip list, not a possibly-stale closure").toMatch(/chipsRef\.current/);
   });
   it("clicking away calls finishEditing, never a direct create", () => {
     const i = pickerSrc.indexOf("function onDocMouseDown");
@@ -121,10 +124,20 @@ describe("NEW-1 — the protection this redesign keeps in full: nothing is auto-
     expect(b, "clicking away must finish (commit chips), not create a contact directly").toMatch(/finishEditing\(\)/);
     expect(b, "clicking away must not call attemptCreate/addChip directly").not.toMatch(/attemptCreate\(|addChip\(/);
   });
-  it("Escape cancels the whole edit (discarding this session's chip changes) once no warning is showing", () => {
+  /* ⛔ B1341728 REVERSED WHAT THIS TEST USED TO PIN. It asserted `cancelEditing();` here — i.e. it
+   * held the defective behaviour in place: Escape threw away every owner chosen in the session,
+   * silently, while those owners were on screen as finished chips. The owner hit it on his own
+   * account (2026-09-15). Escape now abandons only the in-progress TEXT and then leaves; the chips
+   * were written through as they were added, so there is nothing for it to destroy. */
+  it("Escape abandons only the in-progress text, then closes — it can no longer discard chips", () => {
     const b = bodyOf(pickerSrc, "onKeyDown");
     expect(b, "Escape dismisses an active warning first, without closing").toMatch(/if \(warn\) \{ setWarn\(null\)/);
-    expect(b, "Escape with no warning cancels the edit").toMatch(/cancelEditing\(\);/);
+    expect(b, "Escape clears a typed-but-unconfirmed fragment before it closes anything").toMatch(/if \(query\) \{ setQuery\(""\); return; \}/);
+    expect(b, "Escape with nothing left to clear merely CLOSES the editor").toMatch(/closeEditor\(\);/);
+    expect(pickerSrc, "the discard path is gone from the component entirely, not merely unreachable")
+      .not.toMatch(/cancelEditing/);
+    expect(pickerSrc, "no onCancel prop survives for a future call site to re-wire a discard to")
+      .not.toMatch(/\bonCancel\b/);
   });
 });
 

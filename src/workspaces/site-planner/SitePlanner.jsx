@@ -24040,8 +24040,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   `featureContextAction` is the SAME per-family dispatch `onElContext` already uses
                   for its one legitimate forward (a send-behind annotation), reused rather than
                   re-invented. */}
+              {/* ⛔ NEW-1 (B1609136, 2026-09-15) — LAST HOLE IN THAT INVARIANT: a plain resize/
+                  rotate/vertex grip has no identity of its own and correctly forwards to `sel`
+                  above, but the parcel ACREAGE BADGE is not "nothing" — it is `data-chrome` only
+                  for the DOUBLE-CLICK resolver (B280402) and keeps its OWN `onContextMenu`
+                  (`onChipContext`) for a plain right-click, unconditionally, no forwarding
+                  (B1539888/NEW-1 2026-09-11). `polylabel` anchors the badge on the developed
+                  middle of the lot (B1186), so it routinely lands on or near the SELECTED
+                  element's own corner/edge/rotate handle — measured live on production (a 22.20 AC
+                  parcel over a 132,014 SF building): the badge is genuinely painted there, but the
+                  handle paints OVER it (this layer is the last sibling) and wins the native hit
+                  test, so `onChipContext` never fires and the fallback below opened the BUILDING's
+                  menu instead of the parcel's. Hit-test the real point FIRST: if the badge is
+                  there — just occluded by the grip — its own parcel owns the menu; only when
+                  nothing more specific is under the cursor does this layer fall back to `sel`.
+                  The badge is the ONLY `data-chrome` node in this file (grep before adding a
+                  second one without extending this check). */}
               <g data-export="skip" data-handle-layer="1"
-                onContextMenu={(e) => { if (sel) featureContextAction(sel, e); }}>
+                onContextMenu={(e) => {
+                  const chip = document.elementsFromPoint(e.clientX, e.clientY)
+                    .map((n) => n.closest && n.closest('[data-chrome="acreage-badge"]')).find(Boolean);
+                  const pid = chip && chip.getAttribute("data-chip-parcel");
+                  if (pid) { onChipContext(e, pid); return; }
+                  if (sel) featureContextAction(sel, e);
+                }}>
                 {/* NEW-4 — the selected lot's setback chrome joins the same layer, for the same
                     reason one line up: a chip and a grab band ARE manipulation affordances, and on a
                     plan whose buildings sit hard against the setback line they were painted over and
