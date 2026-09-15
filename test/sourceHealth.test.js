@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   recordSourceResult, isSourceOpen, sourceCooldownMs, filterHealthyCandidates,
-  resetSourceHealth, isStatewideBackup, SOURCE_FAIL_THRESHOLD, SOURCE_COOLDOWN_MS, SOURCE_SLOW_MS,
+  resetSourceHealth, isStatewideBackup, suppressRedundantStatewide,
+  SOURCE_FAIL_THRESHOLD, SOURCE_COOLDOWN_MS, SOURCE_SLOW_MS,
 } from "../src/workspaces/site-planner/lib/sourceHealth.js";
 import { STATEWIDE_KEYS } from "../src/workspaces/site-planner/lib/counties.js";
 
@@ -257,5 +258,55 @@ describe("isStatewideBackup — honest 'statewide backup' labeling (B630)", () =
       queried: [{ county: "md_statewide" }],
       statewideKeys: STATEWIDE_KEYS,
     })).toBe(false);
+  });
+});
+
+// NEW-2 (2026-09-15, B1639697) — a single healthy real CAD needs no statewide co-query.
+// Regression test for the reported "1200 McKinney St, Houston, TX fires HCAD AND the statewide
+// layer" fan-out: query COUNT is what's under test here, not just the eventual winning hit
+// (isStatewideBackup above already proves the WINNER is honest either way).
+describe("suppressRedundantStatewide — a healthy single real CAD queries alone (NEW-2)", () => {
+  const SW = ["txgio_statewide"];
+
+  it("drops the statewide candidate when exactly one real primary is present and healthy", () => {
+    const candidates = [{ county: "harris", url: "u1" }, { county: "txgio_statewide", url: "u2" }];
+    const realPrimaries = [{ county: "harris" }];
+    const out = suppressRedundantStatewide(candidates, realPrimaries, SW);
+    expect(out.map((c) => c.county)).toEqual(["harris"]); // exactly one query — the county's own CAD
+  });
+
+  it("keeps the statewide candidate when the sole real primary's breaker is open (genuine outage)", () => {
+    // filterHealthyCandidates would already have dropped "harris" from `candidates` here — the
+    // statewide entry is the only one left, and must stay so the outage backstop still answers.
+    const candidates = [{ county: "txgio_statewide", url: "u2" }]; // harris already filtered out
+    const realPrimaries = [{ county: "harris" }]; // still a real primary for this point
+    const out = suppressRedundantStatewide(candidates, realPrimaries, SW);
+    expect(out.map((c) => c.county)).toEqual(["txgio_statewide"]);
+  });
+
+  it("keeps every candidate at a straddle (2+ real primaries) — unchanged", () => {
+    const candidates = [{ county: "harris", url: "u1" }, { county: "fortbend", url: "u2" }, { county: "txgio_statewide", url: "u3" }];
+    const realPrimaries = [{ county: "harris" }, { county: "fortbend" }];
+    const out = suppressRedundantStatewide(candidates, realPrimaries, SW);
+    expect(out.map((c) => c.county)).toEqual(["harris", "fortbend", "txgio_statewide"]);
+  });
+
+  it("keeps the sole statewide candidate when there is no real primary at all (a derived TX county)", () => {
+    const candidates = [{ county: "txgio_statewide", url: "u1" }];
+    const out = suppressRedundantStatewide(candidates, [], SW);
+    expect(out.map((c) => c.county)).toEqual(["txgio_statewide"]);
+  });
+
+  it("KNOWN-GOOD ARM — the exact reported repro: Harris (healthy) + statewide collapses to one query", () => {
+    const t = 1000;
+    resetSourceHealth();
+    const healthy = filterHealthyCandidates(
+      [{ county: "harris", url: "u1" }, { county: "txgio_statewide", url: "u2" }],
+      STATEWIDE_KEYS,
+      t,
+    );
+    const out = suppressRedundantStatewide(healthy, [{ county: "harris" }], STATEWIDE_KEYS);
+    expect(out).toHaveLength(1);
+    expect(out[0].county).toBe("harris");
   });
 });

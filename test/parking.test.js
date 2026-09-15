@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parkDepthForRows, parkRowsForDepth, splitParkingPieces, explodeParkingBands, edgeAbutsPaving } from "../src/workspaces/site-planner/lib/parking.js";
+import { parkDepthForRows, parkRowsForDepth, splitParkingPieces, explodeParkingBands, edgeAbutsPaving, freeParkStack } from "../src/workspaces/site-planner/lib/parking.js";
 
 const SD = 18, AI = 24, MOD = 2 * SD + AI; // 60' double-loaded module (18 + 24 + 18)
 
@@ -145,5 +145,67 @@ describe("edgeAbutsPaving — curb suppression where pavement meets pavement (B1
   it("treats a clear gap as non-abutting (curb stays)", () => {
     const gap = { id: "g", type: "paving", cx: 0, cy: 95, w: 100, h: 60, rot: 0 }; // ~35' below A's edge
     expect(edgeAbutsPaving(A, "y", 1, [gap])).toBe(false);
+  });
+});
+
+// NEW-1 (deliberate remainder of B1625728) — a FREESTANDING split stack has no host/side to group
+// siblings by, so `freeParkStack` finds them from geometry: same width + rotation, touching along
+// one local depth axis, walked outward from whichever piece was passed in.
+describe("freeParkStack — freestanding split-stack membership by geometry (NEW-1)", () => {
+  // The exact stack `explodeParkingBands` + splitParkingRows lay down for a 2-row (60' = 18+24+18)
+  // freestanding field, un-attached, rot 0, walking +y from -30: row @ -21 (h18), aisle @ 0 (h24),
+  // row @ +21 (h18).
+  const row0 = { id: "r0", type: "parking", cx: 0, cy: -21, w: 100, h: 18, rot: 0, sideParkPiece: 0 };
+  const aisle = { id: "a0", type: "paving", cx: 0, cy: 0, w: 100, h: 24, rot: 0, sideParkPiece: 1 };
+  const row1 = { id: "r1", type: "parking", cx: 0, cy: 21, w: 100, h: 18, rot: 0, sideParkPiece: 2 };
+  const stack = [row0, aisle, row1];
+
+  it("finds the whole contiguous stack regardless of which piece is passed in", () => {
+    for (const seed of stack) {
+      const found = freeParkStack(seed, stack);
+      expect(found.map((e) => e.id)).toEqual(["r0", "a0", "r1"]);
+    }
+  });
+
+  it("a lone, un-split field returns just itself", () => {
+    const lone = { id: "f", type: "parking", cx: 0, cy: 0, w: 100, h: 60, rot: 0 };
+    expect(freeParkStack(lone, [lone]).map((e) => e.id)).toEqual(["f"]);
+  });
+
+  it("never groups a wall-bonded element (attachedTo short-circuits to itself)", () => {
+    const bonded = { id: "b", type: "parking", cx: 0, cy: -21, w: 100, h: 18, rot: 0, attachedTo: "host1", sideParkSide: "top", sideParkPiece: 0 };
+    expect(freeParkStack(bonded, [bonded, aisle, row1]).map((e) => e.id)).toEqual(["b"]);
+  });
+
+  it("does not bridge a real gap between two otherwise-matching fields", () => {
+    const far = { id: "far", type: "parking", cx: 0, cy: 21 + 50, w: 100, h: 18, rot: 0 }; // 50' clear of row1
+    expect(freeParkStack(row0, [...stack, far]).map((e) => e.id)).toEqual(["r0", "a0", "r1"]);
+  });
+
+  it("does not group a DIFFERENT freestanding field of a different width, even if adjacent", () => {
+    const other = { id: "o", type: "parking", cx: 0, cy: 21 + 9, w: 60, h: 18, rot: 0 }; // touches r1, narrower
+    expect(freeParkStack(row0, [...stack, other]).map((e) => e.id)).toEqual(["r0", "a0", "r1"]);
+  });
+
+  it("does not group a field offset to the side (same width/rotation, not on the same line)", () => {
+    const beside = { id: "beside", type: "parking", cx: 150, cy: -21, w: 100, h: 18, rot: 0 };
+    expect(freeParkStack(row0, [...stack, beside]).map((e) => e.id)).toEqual(["r0", "a0", "r1"]);
+  });
+
+  it("holds under rotation (a stack turned 37°)", () => {
+    const rot = 37;
+    const rad = (rot * Math.PI) / 180, c = Math.cos(rad), s = Math.sin(rad);
+    const world = (lx, ly) => ({ x: lx * c - ly * s, y: lx * s + ly * c });
+    const mk = (id, ly, h, sideParkPiece) => { const p = world(0, ly); return { id, type: "parking", cx: p.x, cy: p.y, w: 100, h, rot, sideParkPiece }; };
+    const r0 = mk("r0", -21, 18, 0);
+    const a0 = { ...mk("a0", 0, 24, 1), type: "paving" };
+    const r1 = mk("r1", 21, 18, 2);
+    const rotated = [r0, a0, r1];
+    for (const seed of rotated) expect(freeParkStack(seed, rotated).map((e) => e.id)).toEqual(["r0", "a0", "r1"]);
+  });
+
+  it("orders by geometry even when sideParkPiece is entirely absent (legacy/untagged data)", () => {
+    const untagged = stack.map((e) => { const { sideParkPiece, ...rest } = e; return rest; });
+    expect(freeParkStack(untagged[1], untagged).map((e) => e.id)).toEqual(["r0", "a0", "r1"]);
   });
 });

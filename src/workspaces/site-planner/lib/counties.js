@@ -49,54 +49,43 @@ export { loadCountyPolygons, countyPolygonsReady };
 export const FEET_WKID = 2278;
 
 // The TxGIO (Texas statewide) parcel MapServer layer — one public, CORS-open layer
-// covering all 254 counties. Its own /query is disabled upstream (B627), so it renders as
-// a server /export image and clicks route through /identify. ⛔ NEW-1 (2026-09-12) — this is
-// NO LONGER the click-routing fallback for a county with no CAD of its own; that role moved to
-// `TX_STATEWIDE_STRATMAP_LAYER` below (see that const's header for why). This constant now backs
-// only: (a) Waller's own primary source (Waller has no CAD of its own and rides this specific
-// government host, unchanged), (b) `STATEWIDE_PARCEL_LAYER` / `statewideFallbackFor` — the
-// TEXT-SEARCH outage backup for the 8 dialed-in counties (scoped by `county=` on THIS layer's own
-// `county` column, which the StratMap layer below does not have), and (c) `parcelDisplayIsImageOnly`,
-// which still needs to recognise this exact URL so Waller's outlines keep rendering as a raster
-// /export image rather than a (nothing-returning) vector query. One const so all THOSE references
-// stay identical.
+// covering all 254 counties. It is the UNIVERSAL outage fallback for every county: its
+// own /query is disabled upstream (B627), so it renders as a server /export image and
+// clicks route through /identify. Referenced by the `txgio_statewide` COUNTIES_MAP entry
+// (the statewide display/click source, decoupled from Chambers in B787 when Chambers got
+// its own CCAD source), by any county that has no CAD of its own (Waller), and by
+// STATEWIDE_PARCEL_LAYER / statewideFallbackFor. One const so all references stay identical.
+//
+// ⛔ 2026-09-12→2026-09-15 INCIDENT, recorded so this URL is never swapped out again on the
+// same mistaken reading. A same-day session (B1639584) repointed every one of the roles above
+// (except Waller/text-search/image-only, see their own call sites) to a THIRD-PARTY AGOL mirror
+// of this exact dataset, `services1.arcgis.com/.../2019_Texas_Parcels_StratMap/FeatureServer/0`,
+// reasoning that a live signed-in check found this government host "wasn't returning usable
+// parcels for the Dallas–Fort Worth counties at all." That check queried `/query`, which this
+// service has ALWAYS had disabled (B627, the very fact this comment already documented) — so the
+// failure it measured was the well-known query-capability gap, not a coverage gap, and the fix
+// pointed the universal Texas fallback at a copy hosted on a THIRD PARTY'S ArcGIS Online account
+// (owner `TPWD_LawEnforcement`) instead of fixing the /identify wiring. That third-party copy was
+// deleted by its owner within three days — HTTP 200 with `{"error":{"code":400,"message":"Invalid
+// URL"}}` at the SERVICE ROOT — taking down parcel lookups for every Texas county outside the 8
+// dialed-in Houston-metro CADs (all of DFW included) for the rest of that window. This is the
+// LIVE PRODUCTION DEFECT B1639584 (×2) fixed by reverting to this const and its /identify plumbing
+// (`identifyAtPoint` in arcgis.js already exists for exactly this MapServer). Verified working
+// LIVE 2026-09-15 with real addresses across DFW, El Paso, Lubbock, Austin, San Antonio, Amarillo
+// and Canyon, all reporting TAX_YEAR 2025 — do not re-litigate "TxGIO doesn't work" without first
+// checking whether the check used /query (disabled) instead of /identify (the only op this
+// MapServer's layer actually serves).
+//
+// /identify RETURNS FIELD NAMES UPPERCASE (PROP_ID, SITUS_ADDR, LEGAL_AREA, GIS_AREA, COUNTY, …)
+// even though the layer's own metadata (and this file's idField/addrField hints) are lowercase —
+// every consumer here is regex-based and case-insensitive (`/i`), so this self-heals; do not add
+// a case-sensitive field lookup against this layer's attributes. GIS_AREA also comes back through
+// /identify as a TRUNCATED string in scientific notation (sampled: "5.0968505128e-") — an
+// /identify formatting artifact, not a data problem — and is unusable as a number; LEGAL_AREA
+// comes back clean (sampled: "53.803"). `appraisal.js`'s `acreageKey` now verifies a GIS-column
+// value actually parses as a number before preferring it over LEGAL_AREA, specifically for this.
 const TXGIO_STATEWIDE_LAYER =
   "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0";
-
-/* NEW-1 (2026-09-12) — Texas statewide parcels, StratMap 2025 vintage, Esri-hosted. This is now
- * the universal CLICK-ROUTING fallback for every Texas county with no CAD of its own (Dallas,
- * Tarrant, Denton, Collin, and the other ~240 counties `derivedTxCounties()` covers) — wired in
- * behind the `txgio_statewide` COUNTIES_MAP entry, which every Texas click already appends as its
- * trailing fallback candidate (see that entry's own comment). TXGIO_STATEWIDE_LAYER above stays
- * wired for the roles named in its own header; this is a DIFFERENT service, not a rename of that
- * one — the government TxGIO harvest is known-laggy for at least one county already documented in
- * this file (Chambers, B787), and a live, signed-in check against production (2026-09-12, outside
- * this sandbox's egress policy — see BEFORE-YOU-START note on the filing item) found it wasn't
- * returning usable parcels for the Dallas–Fort Worth counties at all, while this layer does.
- *
- * Endpoint URL is correct AS WRITTEN — the SERVICE name says "2019" (upstream naming lag) but the
- * LAYER it points at, "Stratmap25_landparcels_48", is the 2025 vintage; do not "fix" the 2019 in
- * the URL or go hunting for a 2025-named service. Measured live 2026-09-12 (signed-in browser
- * against production): 14,333,926 polygon features, a standard queryable FeatureServer with no
- * known /query restriction (unlike TXGIO_STATEWIDE_LAYER's B627 identify-only limitation), so it
- * renders as an ordinary styleable vector layer via `makeParcelDisplayLayer`
- * (`parcelDisplayIsImageOnly` only ever matches TXGIO_STATEWIDE_LAYER's own URL). Point-verified
- * with real addresses at Fort Worth/Sundance Square, AllianceTexas, downtown Dallas, Frisco,
- * Denton, Grapevine, El Paso and Lubbock; a handful of other test points answered zero features
- * and all three sat in street right-of-way between parcels (downtown Fort Worth, Arlington,
- * Amarillo) — a single zero-hit point there is not a coverage gap.
- *
- * Fields: OBJECTID, Prop_ID, GEO_ID, OWNER_NAME, LEGAL_AREA, GIS_AREA, LEGAL_DESC, SITUS_ADDR,
- * MAIL_ADDR — no county-name column, unlike TXGIO_STATEWIDE_LAYER's `county` field, so nothing
- * built on this layer can carry a per-county `scopeWhere` the way `TXGIO_COUNTY_NAME` does (a
- * derived county here searches the whole state, unscoped — click-to-select is a point query and
- * never needed scoping anyway). ⛔ LEGAL_AREA IS A STRING WITH AN INCONSISTENT FORMAT ("16.02 a"
- * vs a bare "0.6658") and must never be parsed as a number — `appraisal.js`'s `acreageKey` prefers
- * GIS_AREA (or, first, the ring-measured acreage, which already wins over any CAD-reported number)
- * over it for exactly this reason. Scale note: 14.3M features — every consumer of this layer must
- * stay a point-intersects query returning a single feature, never anything that scans or counts. */
-export const TX_STATEWIDE_STRATMAP_LAYER =
-  "https://services1.arcgis.com/1mtXwieMId59thmg/arcgis/rest/services/2019_Texas_Parcels_StratMap/FeatureServer/0";
 
 /* NEW-5 — COLORADO'S TxGIO ANALOGUE. The Colorado Public Parcels composite, aggregated from the
  * counties by the Governor's Office of Information Technology GIS team and published as one
@@ -183,25 +172,17 @@ const COUNTIES_RAW = {
   waller: {
     state: "TX",
     label: "Waller County · WCAD",
-    // Waller CAD publishes no public parcel GIS of its own, so it rides the universal Texas
-    // statewide fallback — the SAME layer `txgio_statewide`/`derivedTxCounties()` use, so the
-    // "one URL, one policy" invariant (`isStatewideLayerUrl`, NEW-2 below) holds for Waller too.
-    // ⛔ NEW-1 (2026-09-12) — moved from TXGIO_STATEWIDE_LAYER to TX_STATEWIDE_STRATMAP_LAYER
-    // alongside that migration (see that const's own header); it is a normal queryable
-    // FeatureServer, so Waller's outlines now render as a styleable vector layer, not the old
-    // /export image workaround, and Waller is one of the B629 snapshot-cached counties
-    // (SNAPSHOT_COUNTIES) purely as a genuine OUTAGE fallback now (no longer a standing
-    // preference — `preferSnapshotForDisplay` only engages if this live source actually fails).
-    // Its primary is STILL the statewide composite, but it is no longer the SAME URL
-    // `statewideFallbackFor` uses for the 8 dialed-in counties' text-search backup
-    // (TXGIO_STATEWIDE_LAYER, which alone still carries a `county` column to scope by) — so
-    // Waller now gets a genuine, distinct SECOND-tier backup there instead of the old
-    // self-referential "no separate backup" case.
-    layerUrl: TX_STATEWIDE_STRATMAP_LAYER,
-    idField: "Prop_ID",
-    addrField: "SITUS_ADDR",
-    // No scopeWhere — TX_STATEWIDE_STRATMAP_LAYER has no county-name column to scope by.
-    help: "Texas statewide parcels — Waller County has no county-specific service of its own.",
+    // Waller CAD publishes no public parcel GIS of its own, so it rides the statewide TxGIO
+    // layer scoped to WALLER (TxGIO /query+/find disabled 2026-07-03 → outlines via /export,
+    // clicks via /identify). Waller is one of the B629 snapshot-cached counties
+    // (SNAPSHOT_COUNTIES), so a Drive snapshot backs it when TxGIO is down. Because its
+    // primary IS the statewide layer, statewideFallbackFor(waller) returns null (no separate
+    // backup) — same self-referential case Chambers used to be before its B787 CCAD repoint.
+    layerUrl: TXGIO_STATEWIDE_LAYER,
+    idField: "prop_id",
+    addrField: "situs_addr",
+    scopeWhere: "county='WALLER'",
+    help: "Texas statewide parcels (TxGIO) — searches are limited to Waller County.",
   },
 
   /* ═══ B209503 — THE HOUSTON METRO IS NINE COUNTIES; THIS REGISTRY HELD FOUR ══════════════════
@@ -844,14 +825,123 @@ const COUNTIES_RAW = {
     idField: "parcel_id", addrField: "address",
     help: "City of Detroit parcels (city GIS, Esri-hosted) — searches are limited to the city limits, not all of Wayne County. Search by parcel ID or a site address.",
   },
+
+  /* ═══ NEW-1/NEW-3/NEW-4/NEW-5 (2026-09-15) — South Dakota (Pennington), Pennsylvania (Luzerne +
+   * Lackawanna) and Macomb, MI. All MEASURED LIVE from Michael's own browser 2026-09-15; this
+   * sandbox's egress policy blocks the county-hosted ones (Luzerne, Lackawanna) but Pennington's
+   * and Macomb's *.arcgis.com endpoints were independently confirmed reachable, with matching
+   * field lists, directly from this sandbox the same day. ═══ */
+  sd_pennington: {
+    // MEASURED LIVE 2026-09-15: 52,547 parcel polygons, extent matching Pennington County (Rapid
+    // City). Confirmed reachable from this sandbox too (services1.arcgis.com).
+    state: "SD", label: "Pennington County, SD",
+    layerUrl: "https://services1.arcgis.com/AhXvNWFdL7hH4TjJ/arcgis/rest/services/PenningtonParcels/FeatureServer/0",
+    idField: "PIN",
+    help: "Pennington County (Rapid City) parcels (county GIS, Esri-hosted). Search by parcel ID (PIN) or a site address.",
+  },
+  /* ⛔ MINNEHAHA COUNTY HAS A HOLE EXACTLY WHERE ITS OWN LARGEST CITY SITS — the worked example
+   * behind the parcel-source vetting checklist's "city-hole" trap (see /CLAUDE.md → parcel-source
+   * vetting). This county layer covers the RURAL REMAINDER only: MEASURED LIVE 2026-09-15, 23,044
+   * polygons across the whole-county extent, but a point query at downtown Sioux Falls
+   * (-96.7311, 43.5460) returns ZERO — not a right-of-way artifact (a rural point 15 miles away,
+   * -96.95/43.75, returns a real parcel). The city publishes its OWN layer (`sd_siouxfalls`
+   * immediately below, city-scoped — see cityScopes.js), checked BEFORE any county-level
+   * resolution, so the two together are what Minnehaha County gets. Same two-tier shape as
+   * Wayne/Detroit; the difference is Wayne has NO county-level source at all, while Minnehaha has
+   * a real one with a city-shaped hole in it. */
+  sd_minnehaha: {
+    state: "SD", label: "Minnehaha County, SD",
+    layerUrl: "https://gis.minnehahacounty.gov/minnemap/rest/services/Parcels/MapServer/0",
+    idField: "MAP_ID", addrField: "FULL_ADDRESS",
+    help: "Minnehaha County parcels (county GIS) — covers the county outside Sioux Falls' own city limits, which the city publishes separately. Search by parcel ID or a site address.",
+  },
+  /* City of Sioux Falls — city-scoped (see cityScopes.js). Fills the hole `sd_minnehaha` leaves
+   * over its own downtown. MEASURED LIVE 2026-09-15: 67,022 polygons; ACREAGE is a real double
+   * (unlike Lackawanna's StatedArea below, which is a formatted string). */
+  sd_siouxfalls: {
+    state: "SD", label: "City of Sioux Falls, SD",
+    layerUrl: "https://gis.siouxfalls.gov/arcgis/rest/services/Data/Property/MapServer/1",
+    idField: "TAG", addrField: "ADDRESS",
+    help: "City of Sioux Falls parcels (city GIS, Esri-hosted) — searches are limited to the city limits, not all of Minnehaha County. Search by parcel tag or a site address.",
+  },
+  /* Luzerne County, PA. ⛔ LAYER 1 IS THE PARCEL (TAX PARCELS) LAYER on this service — layer 6 on
+   * the SAME service is IMPROVEMENTS, a different table entirely, and must never be wired here.
+   * MEASURED LIVE 2026-09-15: 176,385 polygons, extent matching Luzerne County. No address field
+   * on this layer — left unset rather than invented; a missing addrField degrades to no address
+   * search (see the ID_RE / detectField auto-detection note near the top of this file), never a
+   * guessed column. */
+  pa_luzerne: {
+    state: "PA", label: "Luzerne County, PA",
+    layerUrl: "https://gis.luzernecounty.org/server/rest/services/PublicMap/MapServer/1",
+    idField: "PIN",
+    help: "Luzerne County tax parcels (county GIS). Search by parcel ID (PIN) — no address search; this layer carries no address field.",
+  },
+  /* Lackawanna County, PA. Esri PARCEL-FABRIC schema, not a normal assessor layer — `Name` (not
+   * `PIN`/`APN`) holds the 13-digit parcel PIN and is the idField. ⛔ `StatedArea` holds acreage as
+   * a STRING WITH A UNIT SUFFIX ("2.005 ac", "49.874 ac") — never parse it as a bare number if a
+   * future acreage readout consumes it. It is harmless today: `appraisal.js`'s `GIS_ACRE_RE`
+   * requires literal "gis_area"/"acre" fragments and does not match "StatedArea", so this layer's
+   * acreage-shaped field is correctly invisible to that auto-detection. `Type_` is null on every
+   * sampled row. MEASURED LIVE 2026-09-15: 103,145 polygons, extent matching Lackawanna County.
+   * Do NOT use the sibling `GISViewer/ParcelsPINs` service — identical count, identical fabric
+   * schema, no added value. */
+  pa_lackawanna: {
+    state: "PA", label: "Lackawanna County, PA",
+    layerUrl: "https://gis.lackawannacounty.org/arcgis/rest/services/GISViewer/Parcels/FeatureServer/0",
+    idField: "Name",
+    help: "Lackawanna County tax parcels (county GIS, Esri parcel-fabric schema). Search by parcel PIN — no address search; this layer carries no address field.",
+  },
+  /* Macomb County, MI — the third county of metro Detroit; previously had no parcel source at all.
+   * ⛔ LAYER ID IS 10, NOT 0 — layer 0 does not exist on this service ("Invalid URL"); the service
+   * exposes exactly one layer, id 10, "Macomb County Tax Parcels". MEASURED LIVE 2026-09-15:
+   * 332,971 polygons, extent matching Macomb County; confirmed reachable with a matching field
+   * list directly from this sandbox too (services6.arcgis.com). No city hole — four spread points
+   * (Warren, Sterling Heights, Mount Clemens, Romeo) all resolved correctly.
+   * ⛔ PROVENANCE RISK: published under a PERSONAL ArcGIS Online account, not a county-org one —
+   * the same shape as the Texas statewide source whose owner deleted it and broke the whole state
+   * (docs/STATEWIDE-PARCELS.md). Flagged so a future staleness/vintage check knows to look here
+   * first, and so a county-published replacement is preferred over this one if it ever appears. */
+  mi_macomb: {
+    state: "MI", label: "Macomb County, MI",
+    layerUrl: "https://services6.arcgis.com/K0qS4r8AEJxrE8em/arcgis/rest/services/Macomb_County_Parcel_Data/FeatureServer/10",
+    idField: "TAX_ID", addrField: "ADDRESS",
+    help: "Macomb County tax parcels (Esri-hosted, personal AGOL account — see this entry's own code comment on vintage/removal risk). Search by tax ID or a site address.",
+  },
+
+  /* ═══ NEW-6/NEW-7 (2026-09-15) — Kansas City, MO, city-scoped and spanning FOUR counties
+   * (Jackson, Clay, Platte, Cass), plus Independence, MO, city-scoped and wholly within Jackson.
+   * See cityScopes.js's own header for why a city-scoped source needs no per-county branching: its
+   * boundary ring test is county-agnostic, so one layer answers regardless of which county the
+   * point falls in. mo_clay and mo_platte (above) remain each county's own wired source OUTSIDE
+   * Kansas City's limits; inside them, the city layer takes precedence — the same precedence
+   * cityScopeAnswer already gives mi_detroit over Wayne County. ═══ */
+  mo_kansascity: {
+    // MEASURED LIVE 2026-09-15: 203,425 polygons. The APN prefix (JA/CL/PL/…) names which county a
+    // parcel is in, confirmed by three spread points — Crown Center (JA…, Jackson), north
+    // KC/Northland (CL…, Clay), the airport (PL…, Platte) — all resolving through this ONE layer
+    // via the boundary ring in cityScopes.js, never a per-county branch.
+    state: "MO", label: "City of Kansas City, MO",
+    layerUrl: "https://mapd.kcmo.org/kcgis/rest/services/AGOL/MapServer/6",
+    idField: "APN", addrField: "ADDRESS",
+    help: "City of Kansas City parcels (city GIS) — searches are limited to the city limits, which span Jackson, Clay, Platte and Cass counties. Search by APN or a site address.",
+  },
+  /* City of Independence, MO — city-scoped, wholly within Jackson County. Jackson County publishes
+   * no open countywide parcel service (docs/STATEWIDE-PARCELS.md); Independence and Kansas City
+   * together are what Jackson County gets — the rest of the county has no source wired, which is
+   * an honest gap, not a defect. MEASURED LIVE 2026-09-15: 73,154 polygons, extent covering the
+   * city (not the county). `Name` is confirmed as the idField — its live field-list alias reads
+   * "Parcel APN", confirmed directly from this sandbox (services.arcgis.com), not a guess. */
+  mo_independence: {
+    state: "MO", label: "City of Independence, MO",
+    layerUrl: "https://services.arcgis.com/sbDzK061dd6DNPHv/arcgis/rest/services/COI_Parcels_2_view/FeatureServer/0",
+    idField: "Name", addrField: "SitusAddress",
+    help: "City of Independence parcels (city GIS, Esri-hosted) — searches are limited to the city limits, not all of Jackson County. Search by parcel APN or a site address.",
+  },
 };
 
 /* The counties whose full parcel fabric is snapshot-cached to Google Drive (B629) so the map keeps
- * working when the live county server is down. Chambers originally rode the flaky State/TxGIO
- * service (the actual pain that motivated this list) before its B787 CCAD repoint; Waller still has
- * no CAD of its own and rides the TX statewide layer (NEW-1, 2026-09-12: a normal queryable service
- * now, so this snapshot is a genuine outage backup rather than a standing necessity). Fort Bend is
- * included as reliable-source insurance (Phase 2, tiled). Harris is
+ * working when the live county server is down. Chambers + Waller ride the flaky State/TxGIO service
+ * (the actual pain); Fort Bend is included as reliable-source insurance (Phase 2, tiled). Harris is
  * deliberately EXCLUDED (1.5M parcels — too big for the browser). Kept in lockstep with the
  * parcel-cache Function's allowlist (functions/api/parcel-cache/_handler.js). */
 export const SNAPSHOT_COUNTIES = countyKeySet(["chambers", "waller", "fortbend"]);
@@ -920,9 +1010,8 @@ export async function resolveTaxRates(county, attrs, { lng, lat } = {}) {
  *
  * A hand-written row above marks a county with its OWN probed appraisal-district service — the
  * DIALED-IN tier (harris/fortbend/chambers/waller/montgomery/brazoria/galveston/liberty/austintx).
- * Every OTHER Texas county rides the universal statewide fallback (`TX_STATEWIDE_STRATMAP_LAYER`,
- * NEW-1 2026-09-12 — see that const's own header) the same shape Waller rides its own primary
- * source — so this DERIVES that same shape for the other ~245 counties from
+ * Every OTHER Texas county rides the universal statewide fallback (`TXGIO_STATEWIDE_LAYER`) exactly
+ * the way Waller already does — so this DERIVES that same shape for the other ~245 counties from
  * `public/geo/county-polygons.json`, the asset `resolveCounty` already fetches for point-in-polygon
  * geometry (B209502). Nothing new is fetched and nothing is hand-typed: the derivation reuses the
  * asset's own name/state/fips/bbox, which is why it costs the Site route's bundle nothing beyond
@@ -981,6 +1070,7 @@ function derivedTxCounties() {
     const key = rawKey && (TX_COUNTY_KEY_ALIAS[rawKey] || rawKey);
     if (!key || COUNTIES_RAW[key]) continue; // a dialed-in row always wins — never shadowed
     const [minLng, minLat, maxLng, maxLat] = c.bbox;
+    const NAME_UPPER = c.name.toUpperCase();
     out.set(key, {
       name: c.name,
       mapEntry: {
@@ -989,20 +1079,17 @@ function derivedTxCounties() {
         zoom: 10,
         bbox: [round2(minLat - PAD), round2(minLng - PAD), round2(maxLat + PAD), round2(maxLng + PAD)],
         mapServer: null,
-        layerUrl: TX_STATEWIDE_STRATMAP_LAYER,
+        layerUrl: TXGIO_STATEWIDE_LAYER,
         statewideDerived: true,
       },
       cfgEntry: {
         state: "TX",
         label: `${c.name} County`,
-        layerUrl: TX_STATEWIDE_STRATMAP_LAYER,
-        idField: "Prop_ID",
-        addrField: "SITUS_ADDR",
-        // NEW-1 (2026-09-12) — no scopeWhere: TX_STATEWIDE_STRATMAP_LAYER carries no county-name
-        // column to scope by (see that const's own header), so a search here reaches the whole
-        // state rather than being confined to this one county. Click-to-select (a point query)
-        // never needed a scope either way.
-        help: `Texas statewide parcels — searches the whole state (${c.name} County has no county-specific service of its own).`,
+        layerUrl: TXGIO_STATEWIDE_LAYER,
+        idField: "prop_id",
+        addrField: "situs_addr",
+        scopeWhere: `county='${NAME_UPPER}'`,
+        help: `Texas statewide parcels (TxGIO) — searches are limited to ${c.name} County.`,
         statewideDerived: true,
       },
     });
@@ -1165,12 +1252,11 @@ const COUNTIES_MAP_RAW = {
     zoom: 11,
     bbox: [29.75, -96.05, 30.20, -95.62],
     mapServer: null,
-    // Waller has no CAD of its own, so the TX statewide layer is its live source — a normal
-    // queryable vector layer since NEW-1 (2026-09-12), see `COUNTIES_RAW.waller`'s own comment.
-    // Its B629 Drive snapshot backs it on a genuine outage. NOT flagged `statewide` —
-    // `txgio_statewide` is the single universal fallback source, and a second statewide key
-    // would just double the query on every click.
-    layerUrl: TX_STATEWIDE_STRATMAP_LAYER,
+    // Waller has no CAD of its own, so the statewide TxGIO layer is its live source (outlines
+    // via /export, clicks via /identify). Its B629 Drive snapshot backs it when TxGIO is down.
+    // NOT flagged `statewide` — `txgio_statewide` is the single universal fallback source, and
+    // a second statewide key would just double the TxGIO query on every click.
+    layerUrl: TXGIO_STATEWIDE_LAYER,
   },
   /* B209503 — the five counties that complete the Houston metro. These bboxes are the REAL county
    * extents, read from the committed county-polygon asset (which is itself built from the state's
@@ -1198,31 +1284,29 @@ const COUNTIES_MAP_RAW = {
     mapServer: null, layerUrl: COUNTIES.austintx.layerUrl,
   },
 
-  // The statewide parcel source, as its OWN key (decoupled from Chambers in B787 once Chambers
-  // got its live CCAD source). `statewide:true` makes it the UNIVERSAL parcel source: it paints
-  // parcel outlines anywhere you zoom in (backing the visible lines wherever a county's own CAD
-  // is down/unconfigured), and `candidateCountiesForPoint` appends it as a click fallback
-  // everywhere so a click can always select an outline it can see (the B130 fix — e.g. a Fort
-  // Bend lot with FBCAD down). It has NO bbox on purpose: it must never match a click BY bbox
-  // (that would tag a real-county click as statewide) — it is only ever appended as the trailing
-  // fallback. Kept LAST so candidate[0] stays a real county (harris when away from all bboxes —
-  // the jurisdiction-resolver default). The answering county of a statewide hit is corrected
-  // post-hit via `countyAtPoint` (B36a).
-  // ⛔ NEW-1 (2026-09-12) — this key's layerUrl moved from TXGIO_STATEWIDE_LAYER to
-  // TX_STATEWIDE_STRATMAP_LAYER (the key name is kept unchanged — it is a routing key, not a
-  // claim about which upstream host answers it, and nothing persists it as one). See that
-  // const's own header for why: the government TxGIO harvest this key used to point at is
-  // known-laggy for at least one county already (Chambers, B787) and was measured live to return
-  // no usable parcels at all for the Dallas–Fort Worth counties this key is the ONLY source for
-  // (via `derivedTxCounties()`, which shares this exact URL). TXGIO_STATEWIDE_LAYER stays wired
-  // for Waller's own primary source and the text-search outage backup (`statewideFallbackFor`).
+  // The statewide TxGIO parcel source, as its OWN key (decoupled from Chambers in B787 once
+  // Chambers got its live CCAD source). `statewide:true` makes it the UNIVERSAL parcel source:
+  // its /export image layer paints parcel outlines anywhere you zoom in (backing the visible
+  // lines wherever a county's own CAD is down/unconfigured), and `candidateCountiesForPoint`
+  // appends it as a click fallback everywhere so a click can always select an outline it can
+  // see (the B130 fix — e.g. a Fort Bend lot with FBCAD down). It has NO bbox on purpose: it
+  // must never match a click BY bbox (that would tag a real-county click as statewide) — it is
+  // only ever appended as the trailing fallback. Kept LAST so candidate[0] stays a real county
+  // (harris when away from all bboxes — the jurisdiction-resolver default). The answering
+  // county of a statewide hit is corrected post-hit via `countyAtPoint` (B36a).
   txgio_statewide: {
     state: "TX",
     center: [31.0, -99.2], // Texas centroid — only used if this key is ever "picked" (it isn't; not in the search dropdown)
     zoom: 6,
     mapServer: null,
     statewide: true,
-    layerUrl: TX_STATEWIDE_STRATMAP_LAYER,
+    layerUrl: TXGIO_STATEWIDE_LAYER,
+    // B1657600 — this layer's /query has been disabled at the SERVICE since B627 (see the const's
+    // own header above); every click used to fire /query anyway, catch the "not supported" body,
+    // and THEN fall back to /identify — a wasted, always-failing round trip on every one of the
+    // ~245 Texas counties this composite backs. Declaring it up front lets queryAtPoint skip
+    // straight to /identify. See isIdentifyOnlyLayerUrl below.
+    identifyOnly: true,
   },
 
   /* ═══ COLORADO (NEW-5) ═══════════════════════════════════════════════════════════════════
@@ -1666,6 +1750,37 @@ const COUNTIES_MAP_RAW = {
     bbox: [42.2550, -83.2877, 42.4504, -82.9103],
     cityScoped: true,
     mapServer: null, layerUrl: COUNTIES.mi_detroit.layerUrl,
+  },
+
+  // NEW-1/NEW-3/NEW-4/NEW-5, 2026-09-15 — see the matching COUNTIES block above for provenance.
+  sd_pennington: { state: "SD", center: [44.0805, -103.2310], zoom: 9, bbox: [43.638, -104.094, 44.514, -101.978], mapServer: null, layerUrl: COUNTIES.sd_pennington.layerUrl },
+  sd_minnehaha: { state: "SD", center: [43.6745, -96.7895], zoom: 10, bbox: [43.487, -97.140, 43.862, -96.439], mapServer: null, layerUrl: COUNTIES.sd_minnehaha.layerUrl },
+  pa_luzerne: { state: "PA", center: [41.2459, -75.8813], zoom: 10, bbox: [40.902, -76.323, 41.426, -75.601], mapServer: null, layerUrl: COUNTIES.pa_luzerne.layerUrl },
+  pa_lackawanna: { state: "PA", center: [41.4090, -75.6624], zoom: 10, bbox: [41.161, -75.833, 41.646, -75.434], mapServer: null, layerUrl: COUNTIES.pa_lackawanna.layerUrl },
+  mi_macomb: { state: "MI", center: [42.5975, -82.8794], zoom: 10, bbox: [42.443, -83.112, 42.902, -82.700], mapServer: null, layerUrl: COUNTIES.mi_macomb.layerUrl },
+
+  /* City-scoped entries (NEW-2/NEW-6/NEW-7, 2026-09-15) — `bbox` is each city's own ring extent,
+   * matching cityScopes.js's CITY_SCOPES bbox exactly (coarse pre-filter only, the ring geometry
+   * there decides). `cityScoped: true` is REQUIRED on every entry a city scope resolves to — see
+   * cityScopes.js's header and mi_detroit's own comment above for why. Test-guarded in
+   * test/cityScopes.test.js. */
+  sd_siouxfalls: {
+    state: "SD", center: [43.5512, -96.7234], zoom: 11,
+    bbox: [43.4643, -96.8488, 43.6381, -96.5981],
+    cityScoped: true,
+    mapServer: null, layerUrl: COUNTIES.sd_siouxfalls.layerUrl,
+  },
+  mo_kansascity: {
+    state: "MO", center: [39.0902, -94.5754], zoom: 10,
+    bbox: [38.8243, -94.7653, 39.3562, -94.3854],
+    cityScoped: true,
+    mapServer: null, layerUrl: COUNTIES.mo_kansascity.layerUrl,
+  },
+  mo_independence: {
+    state: "MO", center: [39.0787, -94.3486], zoom: 11,
+    bbox: [39.0176, -94.4814, 39.1398, -94.2159],
+    cityScoped: true,
+    mapServer: null, layerUrl: COUNTIES.mo_independence.layerUrl,
   },
 };
 
@@ -2111,6 +2226,19 @@ export const STATEWIDE_LAYER_URLS = Object.freeze(
   Object.values(COUNTIES_MAP).filter((c) => c.statewide).map((c) => trimLayerUrl(c.layerUrl)),
 );
 export const isStatewideLayerUrl = (url) => STATEWIDE_LAYER_URLS.includes(trimLayerUrl(url));
+
+/* B1657600 — a URL's QUERY CAPABILITY is likewise a property of the endpoint, not of whichever
+ * county key names it, and it is a DIFFERENT axis from `statewide` above: `co_statewide`
+ * (Colorado's composite) is `statewide:true` and fully query-capable, while `txgio_statewide`
+ * (Texas's) is `statewide:true` and permanently query-disabled (B627) — conflating the two would
+ * wrongly skip /query for a healthy state's composite the day it gets wired. `identifyOnly:true`
+ * on a config entry declares the fact once; every OTHER county key parked on the same URL (Waller,
+ * and any derived statewide-fallback Texas county) inherits it for free because this is keyed on
+ * the URL, exactly like `isStatewideLayerUrl` above. */
+export const IDENTIFY_ONLY_LAYER_URLS = Object.freeze(
+  Object.values(COUNTIES_MAP).filter((c) => c.identifyOnly).map((c) => trimLayerUrl(c.layerUrl)),
+);
+export const isIdentifyOnlyLayerUrl = (url) => IDENTIFY_ONLY_LAYER_URLS.includes(trimLayerUrl(url));
 
 /* NEW-2 — the dev-time assertion that stops the next county parked on a composite from
  * reintroducing the double-add. Two config entries may share a layer URL ONLY when that URL is a

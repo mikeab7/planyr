@@ -5,6 +5,7 @@ import {
   ParcelFetchError, PARCEL_FETCH_TIMEOUT_MS, humanizeError, geoJsonToEsriFeature,
   identifyAtPoint, isQueryCapabilityError,
 } from "../src/workspaces/site-planner/lib/arcgis.js";
+import { STATEWIDE_PARCEL_LAYER } from "../src/workspaces/site-planner/lib/counties.js";
 
 const LAYER = "https://example.test/MapServer/0";
 const ok = (body) => ({ ok: true, status: 200, json: async () => body });
@@ -215,6 +216,39 @@ describe("queryAtPoint → /identify fallback when the layer /query op is disabl
   it("identifyAtPoint resolves null when identify finds nothing", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ok({ results: [] })));
     await expect(identifyAtPoint(LAYER, -95, 29)).resolves.toBeNull();
+  });
+});
+
+// B1657600 — the exact repro: a Fort Worth (or any non-Houston-metro Texas) click fires a /query
+// against the TxGIO statewide layer that can NEVER succeed (its /query has been disabled since
+// B627), wasting a round trip on every one of the ~245 counties this layer backs, before the
+// isQueryCapabilityError catch above falls back to /identify. A layer that has DECLARED itself
+// identify-only skips straight to /identify — one request, not two.
+describe("queryAtPoint — a declared identify-only layer skips /query entirely (B1657600)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const box = { rings: [[[-97.001, 32.001], [-96.999, 32.001], [-96.999, 32.003], [-97.001, 32.003], [-97.001, 32.001]]] };
+
+  it("fires exactly one request — /identify — never /query", async () => {
+    const calls = [];
+    vi.stubGlobal("fetch", vi.fn(async (url) => {
+      calls.push(String(url));
+      return ok({ results: [{ geometry: box, attributes: { PROP_ID: "12345", COUNTY: "TARRANT" } }] });
+    }));
+    const feat = await queryAtPoint(STATEWIDE_PARCEL_LAYER, -97, 32.002);
+    expect(feat.attributes.PROP_ID).toBe("12345");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("/identify");
+    expect(calls.some((u) => u.includes("/query"))).toBe(false);
+  });
+
+  it("a plain county CAD (not identify-only) still tries /query first, as before", async () => {
+    const calls = [];
+    vi.stubGlobal("fetch", vi.fn(async (url) => {
+      calls.push(String(url));
+      return ok({ features: [] });
+    }));
+    await queryAtPoint(LAYER, -95, 29);
+    expect(calls[0]).toContain("/query");
   });
 });
 

@@ -991,6 +991,30 @@ position**.
     itself about to overwrite. Whenever a live drag/resize floors or ceilings itself against "the
     current value," ask whether that current value already includes what THIS gesture last wrote.
 
+16. **⛔ A SECOND WAY TO REPRESENT THE SAME PROPERTY IS INVISIBLE TO CODE THAT ONLY KNOWS THE FIRST
+    ONE (B1656400/B1656402/B1656403, owner report 2026-09-15 — "if I press tab again, it indents it
+    further, but then drops it down… it's literally at a different height").** `lib/notesListIndent.js`
+    added a flat `indent` ATTRIBUTE specifically because real ProseMirror nesting cannot reach every
+    item (the first bullet of a list has no sibling to tuck under) — a second, deliberate
+    representation of "how deep is this item" living alongside the original, structural one. Three
+    separate pieces of code that already answered "how deep is this item" from structure ALONE turned
+    out to be wrong the moment the attribute existed: **(a)** a stylesheet rule sized for "a list that
+    follows a paragraph" also matched a list nested by real `sinkListItem`, landing a 1em block-margin
+    between a parent item and its own newly-sunk child instead of the ordinary sibling gap — measured
+    live, 6px became 15px; **(b)** Enter-on-an-empty-item and **(c)** Backspace-at-position-zero both
+    read ONLY real structural depth to decide "outdent one level" vs. "leave the list / lose list-item
+    status", so an item wearing the flat attribute (structurally an ordinary item) skipped the outdent
+    step entirely on both keys. All three shipped correctly reasoned, all three passed every existing
+    test, because every existing test used a document where the two representations happened to agree
+    (either real nesting alone, or the attribute alone, never a case exercising the SEAM). **The
+    lesson generalises: whenever a module grows a second representation of a property some code
+    already computes structurally (an attribute standing in for depth, a cached value standing in for
+    a live one, a flag standing in for a real state), grep every reader of the FIRST representation
+    and ask whether it needs to combine with the second — a reader that looks obviously correct in
+    isolation can still be wrong the instant both representations are simultaneously true.** Fixed by
+    routing every reader through the one function that already combines them correctly
+    (`readIndent` + `shiftIndent`) rather than letting each caller reinvent the combination.
+
 ---
 
 ## 6 · Where the rest lives

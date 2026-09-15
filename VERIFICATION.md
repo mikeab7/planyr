@@ -166,6 +166,135 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1173824 — B1645792: a road tee-ing into a truck court / paving pad at an oblique angle shows a real rounded curb return, not a raw notch
+
+**Why this needs a live pass.** A rendering-shape fix (PERCEPTUAL-PARITY: the bar is whether the
+owner can SEE it right at his own working zoom, matching his original repro shape, not just
+whether the numbers check out). Everything the sandbox can prove is already proven: the angle
+sweep (0–89° × five widths/radii/pad sizes, a rotated pad, connecting a few feet from a pad
+corner) is unit-tested against the fix and separately confirmed RED on unmodified `origin/main`
+(`test/roadDriveJunctionFillet.test.js`); the same RED→GREEN is reproduced live in a headless
+Chromium driving the real canvas (`e2e/road-drive-junction-fillet.spec.js`), including a
+byte-identical PDF/print export parity check. A visual screenshot of the fix was also inspected
+this session and reads as a clean, properly rounded curb return with no notch, no disconnected
+island, and no exposed raw flat-cap edge — confirmed twice: once against this session's local
+build, and again against PR #1722's own Cloudflare Pages branch preview deploy
+(`claude-vibrant-curie-7olpix.planyr.pages.dev`, commit `c5cb133`), i.e. the actual deployed
+artifact, not just a local dev server. Same clean result both times. What is NOT provable here:
+whether it looks right on a real monitor at the owner's own DPI/zoom, and specifically whether it
+fixes the EXACT geometry in his original screenshot (not available to this session — only his
+verbal description was).
+
+**No standing throwaway project exists** — this check needs a fresh throwaway plan (or an explicit
+duplicate of a real one) created first; state exactly what was created/touched, per the owner
+constraint on live checks. Never touch one of Michael's real plans.
+
+**Steps, each with a named expected result:**
+1. Open a throwaway plan (new project — never edit one of Michael's real plans directly). Draw a
+   truck court / paving pad (a wide rectangle). Draw a road (36–40 ft preset) ending on the pad's
+   edge at an oblique angle (not perpendicular — aim for roughly 30–60° off square). **Expect:**
+   both sides of the junction show a smooth, rounded curb-return arc blending the road's pavement
+   into the pad's edge — no straight diagonal edge exposed, no gap/notch of bare ground between
+   the road and the pad, no floating triangular scrap of pavement near (but not touching) the road.
+2. Zoom in on the junction at a normal working zoom. **Expect:** the fillet reads as ONE continuous
+   piece of pavement — the road widening smoothly into the return on both the acute and the obtuse
+   side of the approach — not two shapes that merely happen to sit near each other.
+3. Repeat with a generic Parking-type pad instead of a truck court, and with the road approached at
+   a different oblique angle (try both a shallow ~15–20° and a steep ~70–80° approach). **Expect:**
+   the same clean result at every angle tried.
+4. Print/export the sheet (or use the app's PDF export) and compare the junction to the on-screen
+   canvas. **Expect:** identical — the exported pavement shape matches the screen exactly (already
+   proven byte-identical in the headless e2e spec; this step is the human confirmation).
+5. State what was created/touched (the throwaway plan's id/name) so it can be cleaned up or left as
+   a known throwaway.
+- **Stopping rule:** closes when steps 1–5 are observed on a real screen, or a specific residual
+  (which angle/pad shape, a screenshot) is filed as a recurrence against B1645792.
+
+### V1180736 — B1652704/B1652705/B1652706: the Text box / Callout properties panel — weight/dash/opacity, and its shared-table rebuild — hold on real production, at desktop and phone widths
+
+**Why this needs a live pass.** The dispatch explicitly named this a LIVE-VERIFY item and asked for it "on production, at desktop width and at iPhone width in both orientations, using the WebKit orientation harness already in the repo" — this is the zoom-/width-dependent-rendering LIVE-VERIFY class from `CLAUDE.md`. Everything that does NOT require `planyr.io` itself is now proven, twice over: once against a local preview build, and again against **this PR's own Cloudflare Pages branch preview deploy** (`https://claude-focused-fermi-3xnp7z.planyr.pages.dev`, commit `cf18cb8` — real deployed bytes, not a local dev server, the same "check the actual deployed artifact" step V1173824 used on PR #1722) — a pure back-compat + round-trip unit suite for the style resolver (`test/calloutStyle.test.js`); a headless Chromium pass driving the real panel end-to-end — selecting a callout, live-editing Weight/Pattern/Opacity/Fill-opacity and confirming the box border AND both leader segments update together, confirming the fill fades while the text stays fully opaque, and confirming the rebuilt panel's structural layout (one shared left gutter edge across single and paired rows, the Fill|Line and X|Y headers, both row shapes present) — 17/17 checks passing both times (`ui-audit/verify-callout-outline-style.mjs`, `BASE_URL=<preview>`); and a **real WebKit** pass (Playwright WebKit build 2215, installed this session — not Chromium's phone emulation) at desktop width and four iPhone size/orientation combinations (SE portrait/landscape, 15 portrait/landscape), confirming no horizontal overflow and the same structural checks hold at every size, including through the real `Panels → Properties` bottom-sheet route on narrow — 25/25 checks passing both times (`ui-audit/verify-callout-outline-webkit.mjs`). What is NOT provable from this sandbox: `planyr.io` itself only serves `main`, so it still won't carry this code until the PR merges — the branch preview is a real deploy of the SAME commit, but it is not the production URL the dispatch named, and a real device/finger on the phone bottom sheet is untested either way.
+
+**What was verified here (sandbox + branch preview), concretely.** Back-compat: an untouched callout (no `weight`/`dash`/`opacity`/`fillOpacity` saved) renders its box border at `stroke-width="1.4"`, no `stroke-dasharray`, `stroke-opacity`/`fill-opacity` absent-or-1 — matching the pre-existing hardcoded render exactly — and BOTH leader segments (stub + run) read the same 1.4/solid, not the old, separately-hardcoded 1.6. Live editing: setting Weight to 5, Pattern to Dashed and (outline) Opacity to 40% on the box updates the box border to `stroke-width="5"`, `stroke-dasharray="15 12"`, `stroke-opacity="0.4"` — and both leader segments pick up the identical three values in the same render. Setting Fill Opacity to 10% independently fades the box fill (`fill-opacity="0.1"`) while the callout's own `<text>` stays at `fill-opacity="1"`. Panel layout: 17 field-group rows found (5 single-column, 5 paired, matching the TEXT / Fill|Line / Padding X|Y grouping), Fill and Line column headers both render, and every row's left edge is the same screen `x` — one shared gutter, exactly as B1618656 established for the other panels. Every one of these was re-confirmed byte-for-byte against the branch preview deploy, not just the local dev server.
+
+**Steps, each with a named expected result — run once PR merges and Cloudflare Pages deploys:**
+1. On `planyr.io`, logged out, open (or draw) a text box (press **T**) and a callout (press **Q**, click a target then a box location) on a throwaway/blank site — never one of Michael's real plans. Select the text box. **Expect:** the Properties panel shows a TEXT section (Colour/Size/Style/Align/Spacing), a Fill | Line paired group (Colour/Weight/Pattern/Opacity — Fill's Weight and Pattern cells show a plain em-dash, not blank), and an X | Y Padding row, all sharing one left label edge.
+2. In the Fill | Line group, set Line Weight to a visibly larger value (e.g. 6) and Pattern to Dashed. **Expect:** the box border thickens and turns dashed on screen immediately.
+3. Select the callout (the one with a leader/arrow). Repeat step 2. **Expect:** the leader line (the arrow pointing at the target) ALSO thickens and turns dashed, matching the box border exactly — not left thin/solid.
+4. Drop the (outline) Opacity slider to a low value (e.g. 20%). **Expect:** both the box border and the leader fade together; the text inside stays fully readable/solid, not faded.
+5. Drop the Fill Opacity to a low value, with outline Opacity back at 100%. **Expect:** only the box's background fill fades — the border stays crisp and the text stays fully solid.
+6. Read the served chunk hash (Network tab, or `document.querySelectorAll('script[src]')`) in the same observation as steps 1–5, and confirm it is the post-merge build.
+7. Open Chrome DevTools' device toolbar (or a real iPhone) at iPhone SE and iPhone 15 widths, both orientations. Re-select the text box (via the Panels drawer → Properties on narrow). **Expect:** the same panel, no horizontal scrolling/clipping, the bottom sheet opens and every row still lines up on one left edge.
+8. Ideally, repeat steps 1–5 once more using real WebKit (`npx playwright install webkit && npx playwright install-deps webkit` if not already present) against the deployed `planyr.io` URL rather than DevTools emulation, per `docs/PHONE-TESTING.md`.
+- **Stopping rule:** closes when steps 1–7 (8 if WebKit is available) are observed against the deployed build, or a specific residual is filed as a recurrence against whichever of B1652704/B1652705/B1652706 it belongs to.
+
+### V1179280 — B1651248: Pennington County, SD parcels — a real point in Rapid City returns a real parcel `Blocker: live-GIS`
+
+**Why this needs its own live pass.** GIS endpoint behaviour is a mandatory LIVE-VERIFY class. Reachability and field metadata were confirmed directly from this sandbox (`services1.arcgis.com` is on the egress allowlist) — `52,547` polygon features, extent matching Pennington County. What only a live click can show is that a real point inside Rapid City resolves a real parcel through exactly one query.
+
+**What was verified here (sandbox).** `countyKeyForName`/`candidateCountiesForPoint` auto-derive `sd_pennington` from the nationwide county-name geometry with no code change needed (the same mechanism every other per-county entry uses) — `test/countyStatewideDerivation.test.js`/`test/counties.test.js` pass unchanged. `test/gisSources.test.js`'s provenance audit passes with the new row's `verifiedOn` date recorded.
+
+**Steps.**
+1. Open the Site Planner on a Rapid City, SD site (or pan the map there and click a parcel).
+2. Click any lot. **Expect:** exactly ONE parcel query fires, to `services1.arcgis.com/AhXvNWFdL7hH4TjJ/.../PenningtonParcels/FeatureServer/0`, and a real parcel with a real PIN is selected.
+3. Click a lot well outside Pennington County (still in South Dakota). **Expect:** no query to this layer.
+- Stopping rule: closes when step 2 is observed on `planyr.io`, or when it fails and is filed as a recurrence against B1651248.
+
+### V1179281 — B1651249: Sioux Falls resolves to the city layer, a rural Minnehaha point resolves to the county layer — never the wrong one `Blocker: live-GIS`
+
+**Why this needs its own live pass.** The county layer's own hole over Sioux Falls, and the city-scope ring that fills it, are both proven sandbox-side against the real geometry (see below); only a live click can prove the actual `gis.minnehahacounty.gov`/`gis.siouxfalls.gov` endpoints answer correctly and that neither fires against the other.
+
+**What was verified here (sandbox).** `cityScopeAnswer`/`candidateCountiesForPoint` proven against the real fetched boundary ring: downtown Sioux Falls (-96.7311, 43.5460) resolves to `sd_siouxfalls` ALONE; a rural Minnehaha point (-96.95, 43.75) resolves to `sd_minnehaha` ALONE — `test/cityScopes.test.js`'s new suite pins both. The ring itself (Esri Living Atlas Census Populated Places, generalised ~150 m) was independently validated against `SQMI` (79.63, matching Sioux Falls' known area) and both control points before being embedded.
+
+**Steps.**
+1. Click a lot in downtown Sioux Falls. **Expect:** exactly ONE query, to `gis.siouxfalls.gov/.../Data/Property/MapServer/1`, real parcel with a real TAG returned.
+2. Click a lot well outside Sioux Falls but inside Minnehaha County (e.g. a rural point). **Expect:** exactly ONE query, to `gis.minnehahacounty.gov/.../Parcels/MapServer/0`.
+3. Click a lot near the Sioux Falls city line. **Expect:** the near-edge behaviour (may query both) rather than a wrong single answer.
+- Stopping rule: closes when steps 1–2 are observed on `planyr.io`, or when either fails and is filed as a recurrence against B1651249.
+
+### V1179282 — B1651250: Luzerne County, PA parcels — a real point returns a real parcel by PIN `Blocker: live-GIS`
+
+`gis.luzernecounty.org` is blocked from this sandbox; layer choice (layer 1, not the layer-6 Improvements table) and field mapping (`PIN`, no address field) are recorded from the dispatch's own live-browser measurement, not independently re-probed here.
+
+**Steps.**
+1. Click a lot in Luzerne County, PA (e.g. Wilkes-Barre). **Expect:** exactly ONE query, to `gis.luzernecounty.org/server/rest/services/PublicMap/MapServer/1`, a real parcel with a real PIN.
+2. Confirm the returned attributes come from LAYER 1, never layer 6 (Improvements).
+- Stopping rule: closes when step 1 is observed on `planyr.io`, or when it fails and is filed as a recurrence against B1651250.
+
+### V1179283 — B1651251: Lackawanna County, PA parcels — a real point returns a real parcel by its 13-digit PIN `Blocker: live-GIS`
+
+`gis.lackawannacounty.org` is blocked from this sandbox; the parcel-fabric schema (`Name` = the PIN) is recorded from the dispatch's own live-browser measurement.
+
+**Steps.**
+1. Click a lot in Lackawanna County, PA (e.g. Scranton). **Expect:** exactly ONE query, to `gis.lackawannacounty.org/arcgis/rest/services/GISViewer/Parcels/FeatureServer/0`, a real parcel whose `Name` field is a 13-digit PIN.
+- Stopping rule: closes when step 1 is observed on `planyr.io`, or when it fails and is filed as a recurrence against B1651251.
+
+### V1179284 — B1651252: Macomb County, MI parcels — four spread points across the county each return a real parcel, no city hole `Blocker: live-GIS`
+
+**What was verified here (sandbox).** Reachability and field metadata confirmed directly from this sandbox (`services6.arcgis.com`) — `332,971` polygon features, fields match exactly.
+
+**Steps.**
+1. Click a lot in Warren, MI. **Expect:** a real parcel at 11064 10 Mile Rd (or nearby), via `services6.arcgis.com/K0qS4r8AEJxrE8em/.../Macomb_County_Parcel_Data/FeatureServer/10`.
+2. Repeat for Sterling Heights, Mount Clemens and Romeo. **Expect:** each returns a real, distinct parcel — confirming no city-shaped hole in this county's coverage.
+- Stopping rule: closes when steps 1–2 are observed on `planyr.io`, or when either fails and is filed as a recurrence against B1651252.
+
+### V1179285 — B1651253: Kansas City, MO parcels resolve through ONE ring across Jackson, Clay and Platte counties `Blocker: live-GIS`
+
+**Why this needs its own live pass.** The county-agnostic ring resolution is proven sandbox-side against the real fetched boundary (`test/cityScopes.test.js`); only a live click can prove `mapd.kcmo.org` itself answers correctly for a point in each county.
+
+**Steps.**
+1. Click a lot at Crown Center (Jackson County). **Expect:** exactly ONE query, to `mapd.kcmo.org/kcgis/rest/services/AGOL/MapServer/6`, a real parcel with an APN starting `JA`.
+2. Click a lot in the Northland (Clay County, inside KC limits). **Expect:** the same layer, an APN starting `CL`.
+3. Click a lot near KCI airport (Platte County). **Expect:** the same layer, an APN starting `PL`.
+4. Click a lot in Liberty, MO (Clay County, OUTSIDE KC limits). **Expect:** routes to `mo_clay` instead, never the KC layer.
+- Stopping rule: closes when steps 1–4 are observed on `planyr.io`, or when any fails and is filed as a recurrence against B1651253.
+
+### V1179286 — B1651254: Independence, MO parcels — a real point returns a real parcel, distinct from the Kansas City ring `Blocker: live-GIS`
+
+**Steps.**
+1. Click a lot in Independence, MO. **Expect:** exactly ONE query, to `services.arcgis.com/sbDzK061dd6DNPHv/.../COI_Parcels_2_view/FeatureServer/0`, a real parcel whose `Name` field is a parcel APN.
+2. Click a lot in downtown Kansas City. **Expect:** routes to `mo_kansascity`, never `mo_independence`.
+- Stopping rule: closes when steps 1–2 are observed on `planyr.io`, or when either fails and is filed as a recurrence against B1651254.
+
 ### V1160896 — B1631939: pinned/reordered projects in the header switcher actually follow the owner's account across devices, and survive a real sign-in `Blocker: auth`
 
 **What was verified here, extensively, without a real signed-in pass.** Driven headless in a real Chromium build against three real seeded projects (not a synthetic fixture), logged out: pinning from the switcher's kebab lifts a project into a "Pinned" section below the always-first current project; a second pin puts it above the first (most-recently-pinned-first, matching the existing Sites-panel convention — see V480816); keyboard ArrowUp/ArrowDown on the drag handle reorders the pinned section; unpinning removes a project from that section; deleting a pinned project cleans it out of the pinned list (no ghost pin left behind); a reload of the page (localStorage left genuinely alone) shows the same pin state and order restored, via `userPrefs.js`'s existing localStorage mirror of the account-scope `sitesPanel` bag; a non-matching search query empties the whole list, current and pinned rows included, rather than force-showing either.
@@ -181,26 +310,45 @@ was never clicked" quietly ships broken.
 6. Also confirm the SAME pin appears (or can be toggled) from the Map view's own Sites-panel row menu (B859505) — pinning from either surface is meant to be the one shared list.
 7. Delete a pinned project from the switcher. **Expect:** it's gone from the Pinned section too, not left behind as a stale entry.
 - **Stopping rule:** closes when steps 1–7 are observed on `planyr.io`, or when any step fails and is filed as a recurrence against B1631939, per STANDING RULE #2 (a failure here is a FINDING, not a silent close).
-### V1168544 — B1639584: Texas statewide parcels (StratMap) as the click-routing fallback behind the 8 wired counties `Blocker: live-GIS`
+### V1168544 — B1639584 (×2): Texas statewide parcels via TxGIO's own `/identify` (the third-party StratMap mirror this item originally shipped is confirmed dead) `Blocker: live-GIS`
 
-**Why this needs its own live pass.** GIS endpoint behaviour is a mandatory LIVE-VERIFY class, and this item is specifically about whether a real ArcGIS host returns real parcels — which only a live query against `services1.arcgis.com` can show, and that host sits outside this sandbox's egress allowlist. The ROUTING LOGIC (which candidate a Texas point resolves to, and that it is exactly one for both a wired and an unwired county) is fully proven sandbox-side against the real, unmodified `candidateCountiesForPoint`/`identifyParcelEager` machinery, listed below — nothing about that logic depends on the endpoint answering.
+**⛔ CORRECTED 2026-09-15 — this V# previously described a check against `services1.arcgis.com/.../2019_Texas_Parcels_StratMap/FeatureServer/0`, which no longer exists (HTTP 200, `{"error":{"code":400,"message":"Invalid URL"}}` at the SERVICE ROOT).** The fix now under test reverts to `feature.geographic.texas.gov` (TxGIO's own government host, `TXGIO_STATEWIDE_LAYER`) via its `/identify` operation (its `/query` has been permanently disabled since B627) — see B1639584 (×2)'s own header for the full incident. The steps below are rewritten for the CURRENT fix; do not run them against the old URL.
+
+**Why this needs its own live pass.** GIS endpoint behaviour is a mandatory LIVE-VERIFY class, and this item is specifically about whether a real ArcGIS host returns real parcels — which only a live query against `feature.geographic.texas.gov` can show, and that host sits outside this sandbox's egress allowlist. The ROUTING LOGIC (which candidate a Texas point resolves to, and that it is exactly one for both a wired and an unwired county) is fully proven sandbox-side against the real, unmodified `candidateCountiesForPoint`/`identifyParcelEager`/`identifyAtPoint` machinery, listed below — nothing about that logic depends on the endpoint answering.
 
 **What was verified HERE (this session, sandbox, against the real production code — not a mock).**
-1. `test/countyStatewideDerivation.test.js` — every existing candidate-list fixture re-asserted unchanged: Harris → `["harris", "txgio_statewide"]`, Chambers → `["chambers", "txgio_statewide"]` (once), Fort Bend (Sugar Land straddle) → `["fortbend", "txgio_statewide"]`, Huntsville/Walker (a derived, unwired county) → `["txgio_statewide"]` alone, Conroe/Texas City → `[county, "txgio_statewide"]`. The KEY LIST candidateCountiesForPoint returns is byte-identical to before this item; only the URL the `txgio_statewide` key resolves to moved.
-2. `test/counties.test.js`, `test/coloradoRegistry.test.js`, `test/parcelSourcePolicy.test.js` — the "one URL, one health policy" invariant (`isStatewideLayerUrl`) still holds after Waller and `txgio_statewide` both moved to the new layer; Waller's own outage-backup behavior (`statewideFallbackFor`) updated and re-proven (see the item for why it now returns a real object instead of `null`).
-3. `test/appraisal.test.js` — the new `acreageKey` ordered-resolver proven against the exact reported StratMap field order (`LEGAL_AREA` before `GIS_AREA`) and values, plus fallback/placeholder/skip cases; the pre-existing TxGIO fixture's expectation corrected to the fixed, now-general rule.
-4. `test/gisSources.test.js` (county provenance audit — every county row must be live-verified, on its composite, or explained) and `test/goldenMasterTexas.test.js` (Texas characterisation snapshot, which fails loudly rather than silently on any Texas output drift) both re-pass with the new URL named as a recognised, deliberately-unscopable composite — the golden master's 4-value diff (both new layerUrls + Waller's new statewide-backup object) is named in the item, not silently regenerated.
-5. Full suite: `npx vitest run` — **852 files / 17,302 tests, all green**, no regression in any adjacent county-routing suite.
+1. `test/countyStatewideDerivation.test.js` — every candidate-list fixture reverted to its pre-2026-09-12 shape: Harris → `["harris", "txgio_statewide"]`, Chambers → `["chambers", "txgio_statewide"]` (once), Fort Bend (Sugar Land straddle) → `["fortbend", "txgio_statewide"]`, Huntsville/Walker (a derived, unwired county) → `["txgio_statewide"]` alone, Conroe/Texas City → `[county, "txgio_statewide"]`.
+2. `test/counties.test.js`, `test/coloradoRegistry.test.js` — the "one URL, one health policy" invariant (`isStatewideLayerUrl`) holds; Waller's `statewideFallbackFor` is `null` again (self-referential — its primary and the text-search backup are once again the same layer).
+3. `test/appraisal.test.js` — `acreageKey`'s GIS-preference mechanism (kept from the original item — correct independent of which layer is live) now also proven against the NEW trap: `/identify` returns `GIS_AREA` as truncated scientific notation ("5.0968505128e-"), and the resolver correctly falls through to the clean `LEGAL_AREA` instead of surfacing unparseable garbage. Case-insensitivity of every field-matching regex against `/identify`'s UPPERCASE attribute keys re-confirmed (no code change was needed there).
+4. `test/gisSources.test.js` / `ui-audit/gis-source-audit.mjs` (county provenance audit) and the Texas golden master fixture both re-pass with the dead-mirror exception removed and the original composite recognised again.
+5. Full suite: `npx vitest run` — **855 files / 17,392 tests, all green**, no regression in any adjacent county-routing suite. `npm run build` clean.
 
-**What this does NOT prove, and why the item still parks:** that `services1.arcgis.com/.../2019_Texas_Parcels_StratMap/FeatureServer/0` itself returns a real parcel at a real point — that host is blocked from this sandbox, so nothing here queried it. **This is the owner's own live measurement, recorded as evidence for this item, not re-derived by this session:** 14,333,926 features; real addresses returned at Fort Worth/Sundance Square (307 stacked-condo features, first "500 THROCKMORTON ST # 2806"), AllianceTexas ("12350 TIMBERLAND BLVD"), downtown Dallas ("1400 YOUNG ST, DALLAS, TX 75201"), Frisco ("7026 MAIN ST"), Denton ("110 W HICKORY ST"), Grapevine ("213 W HUDGINS ST"), El Paso ("401 MILLS AVE") and Lubbock ("2500 BROADWAY"); three zero-hit points (downtown Fort Worth, Arlington, Amarillo) confirmed to sit in street right-of-way, not a coverage hole.
+**What this does NOT prove, and why the item still parks:** that `feature.geographic.texas.gov`'s `/identify` op itself returns a real parcel at a real point — that host is blocked from this sandbox, so nothing here queried it live. **This is evidence recorded for this item, not re-derived by this session, per the dispatch's own live samples (2026-09-15):** real addresses returned via `/identify` at AllianceTexas (-97.2900/32.9500, "12350 TIMBERLAND BLVD", county TARRANT, owner KELLER ISD, `legal_area` 53.803), Dallas (-96.7970/32.7767), Houston (-95.3620/29.7580, "1111 RUSK ST 286", county HARRIS), El Paso, Lubbock, Austin, San Antonio, Amarillo, Canyon — all `TAX_YEAR` 2025; two right-of-way points confirmed to correctly return zero, not a coverage gap.
 
 **Steps, each with its named expected result. Run on the Site tab of planyr.io with the browser Network panel open, filtering on `/query` or `/identify`.**
-1. Click a lot inside Harris County (e.g. downtown Houston). **Expect:** exactly ONE parcel query fires, to `gis.hctx.net` (HCAD) — the StratMap layer must NOT also be queried for a point a real CAD already covers, or must lose the race silently if it races (the existing "a real CAD hit wins immediately" rule); either way the SELECTED parcel and its attributes must be HCAD's.
-2. Click a lot in Tarrant County (Fort Worth), Dallas County, Denton County, or Collin County (Frisco). **Expect:** exactly ONE parcel query, to `services1.arcgis.com/.../2019_Texas_Parcels_StratMap/FeatureServer/0`, and a real, correct parcel is selected with a real `Prop_ID`/owner/address.
-3. Click a lot in Waller County. **Expect:** the outline layer renders as a normal vector layer (not the old server-rendered image) and a click still selects the lot via the same new layer.
+1. Click a lot inside Harris County (e.g. downtown Houston). **Expect:** exactly ONE parcel query fires, to `gis.hctx.net` (HCAD) — the TxGIO layer must NOT also be queried for a point a real CAD already covers (this is now enforced by B1639697's `suppressRedundantStatewide`, not just a race outcome — verify it together with V1168545 below).
+2. Click a lot in Tarrant County (Fort Worth), Dallas County, Denton County, or Collin County (Frisco). **Expect:** exactly ONE query, an `/identify` call to `feature.geographic.texas.gov/.../stratmap_land_parcels_48_most_recent/MapServer/0/identify`, and a real, correct parcel is selected with a real `PROP_ID`/owner/address.
+3. Click a lot in Waller County. **Expect:** the outline layer renders as a server-rendered image overlay (not a queryable vector layer — TxGIO's `/query` is disabled) and a click still selects the lot via `/identify`.
 4. Read the served chunk hash in the SAME observation as steps 1–3 (Network tab, or `document.querySelectorAll('script[src]')`) and confirm it is the post-merge build.
 - Result: ⏳ pending — the routing is sandbox-confirmed against the real committed code (listed above); the live endpoint pass needs a network outside this sandbox's egress allowlist. `Cadence: once`.
-- Stopping rule: closes when steps 1–3 are observed on planyr.io, or when any step fails and is filed as a recurrence against B1639584.
+- Stopping rule: closes when steps 1–3 are observed on planyr.io, or when any step fails and is filed as a further recurrence against B1639584.
+
+### V1168545 — B1639697: a single healthy county parcel source queries alone; the statewide layer no longer fires alongside it `Blocker: live-GIS`
+
+**Why this needs its own live pass.** Confirming an exact NETWORK REQUEST COUNT is only observable in a real browser's Network panel — a sandbox unit test proves the pure `suppressRedundantStatewide` rule and its wiring (below), but not that the real click handlers in `MapFinder.jsx`/`SitePlanner.jsx` actually reach it end to end against live hosts. Best run in the SAME click-through pass as V1168544 above (steps 1–2 here overlap those steps' own Network-panel observation).
+
+**What was verified HERE (this session, sandbox, against the real production code).**
+1. `test/sourceHealth.test.js`'s new `suppressRedundantStatewide` block (5 tests): a single healthy primary collapses the candidate list to one; an unhealthy sole primary (breaker open) keeps the statewide fallback; a straddle (2+ real primaries) is untouched; a statewide-only area (every derived TX county) is untouched; a KNOWN-GOOD ARM reproduces the exact reported repro end to end through the real `filterHealthyCandidates` + `STATEWIDE_KEYS`.
+2. `test/parcelClickRouting.test.js` (the source guard over `SitePlanner.jsx`'s in-planner identify region) re-passes, confirming the in-planner double-click-to-import path was also wired (not just the Map-search flow the original repro used).
+3. Full suite: `npx vitest run` — **855 files / 17,392 tests, all green.**
+
+**Steps, each with a named expected result. Run on the Site tab of planyr.io with the browser Network panel open, filtering on `/query` or `/identify`.**
+1. Click a lot inside Harris County (or Fort Bend, Montgomery, Brazoria, Galveston, Chambers, Liberty, Austin). **Expect:** exactly ONE parcel request fires this click, to that county's own CAD — no request to `feature.geographic.texas.gov` at all.
+2. Click a lot in Tarrant, Dallas, Denton, Collin, Travis, or Bexar County (no dialed-in CAD). **Expect:** exactly ONE parcel request fires, to `feature.geographic.texas.gov`'s `/identify`.
+3. Force a genuine outage on one dialed-in county (e.g. block `gis.hctx.net` via devtools request blocking) and click three times inside Harris. **Expect:** the first click may take longer (querying the now-unhealthy primary alone before failing), but by the third click the statewide layer is queried instead and a real parcel (flagged "backup") is still selected — the outage backstop must still work, just no longer racing in parallel from the first click.
+4. Read the served chunk hash in the SAME observation as steps 1–3 and confirm it is the post-merge build.
+- Result: ⏳ pending — the suppression rule is sandbox-confirmed against the real committed code (listed above); the live query-count pass needs a network outside this sandbox's egress allowlist. `Cadence: once`.
+- Stopping rule: closes when steps 1–3 are observed on planyr.io, or when any step fails and is filed as a recurrence against B1639697.
 
 ### V1157504 — B1631648: a road's own sharp turn holds its stated width and reads as a clean corner, not a lobe/pinch `Blocker: real-data`
 
@@ -9823,6 +9971,47 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
 5. Record the exact hash + breadcrumb + grid-content sequence observed for each step, so a recurrence has a concrete trace.
 
 **Result:** ⏳ pending — needs a real signed-in browser session; not reachable from this sandbox. `Cadence: once`.
+
+### V1185632 — B1657600: a Fort Worth (non-Houston-metro) parcel click fires exactly one request — `/identify`, never a wasted `/query` — and a Houston click is unaffected
+
+**Why this needs its own real pass.** The fix (`isIdentifyOnlyLayerUrl` gating `queryAtPoint`) is fully proven as a pure/mocked unit test (`test/arcgis.test.js` — a declared identify-only layer fires exactly one request in a controlled fetch mock) and by direct measurement against the real TxGIO host from this session's own environment (see the B1639698 amendment above, which hit `feature.geographic.texas.gov` directly and got the real "not supported" `/query` body followed by real `/identify` data — confirming the service's capability shape this fix relies on). What cannot be proven from either of those: the LIVE APP's actual network behavior end to end — the map finder's real candidate-routing/eager-identify machinery, running in a real browser against the deployed build, produces the exact request COUNT and HOST the dispatch's own repro asked for. This needs the fix live on `planyr.io`, not merely reasoned from source + a mocked test.
+
+**Steps, each with a named expected result — on `planyr.io` post-deploy, logged out (no sign-in needed for an address search on the map finder), network panel open:**
+1. Search "12350 Timberland Blvd, Fort Worth, TX". **Expect:** the lot resolves correctly (as it did before this fix — never user-visible), and the network panel shows **exactly ONE** request to `feature.geographic.texas.gov` — a `/identify` call — and **zero** requests to that host's `/query` endpoint.
+2. Search a Houston address (e.g. an address inside Harris County). **Expect:** exactly **ONE** request to `gis.hctx.net` (HCAD, Harris's own CAD) and **zero** requests to `feature.geographic.texas.gov` — matching the pre-existing B1639697 fix (a healthy real CAD suppresses the redundant statewide co-query), unaffected by this item.
+3. Read the served chunk hash (`document.querySelectorAll('script[src]')` or the Network tab) in the SAME observation as steps 1–2, per this repo's own live-measurement rule, confirming the build postdates this fix's merge.
+
+**Result:** ⏳ pending, ATTEMPTED post-merge this session, INCONCLUSIVE — not a defect finding, an
+instrument limitation, recorded rather than smoothed over. The fix merged and deployed (PR #1724,
+`main` @ `0f17770`), and `planyr.io` itself is reachable from this sandbox (plain `curl` reaches it
+in <0.5s, repeatably). But driving it with headless Chromium through this session's egress proxy is
+NOT reliable enough to trust a pass here: the same real, same-origin asset (e.g.
+`assets/map-vendor-*.css`) intermittently fails with `net::ERR_TOO_MANY_RETRIES` under the burst of
+concurrent connections a real page mount opens, which the app's own CSS-preload error handling then
+turns into a full render-crash (`[workspace error boundary] caught a render crash`) — so the address
+search input this check needs never mounts. Confirmed this is a CONNECTION-LEVEL flake, not a policy
+block: `curl -sS $HTTPS_PROXY/__agentproxy/status` shows no rejection recorded for `planyr.io` itself
+(only expected, unrelated policy denials for `www.google.com`/`static.cloudflareinsights.com`
+telemetry beacons), and a single sequential `curl` never fails — only the ~dozen-way concurrent
+fetch a real page load performs does. Tried and ruled out as insufficient: the default Playwright
+launch (env-var proxy only), an explicit `--proxy-server` flag (fixed it for a bare `/` load but not
+reliably for `#/site`'s heavier asset set), and up to 8 reload retries per page (some reloads
+themselves errored with `Protocol error: Not attached to an active page`, suggesting the crashed
+render can take the page down, not just the network layer). This matches a class of failure this
+proxy's own README documents (`/root/.ccr/README.md`, "connection reset / unexpected disconnect …
+mid-transfer" — "once a tunnel is up the proxy cannot send an error response, so a connection it
+aborts reaches the tool as a bare reset") and is the same shape a prior session on this exact repo
+already recorded for this exact site (`ui-audit/verify-parcel-cache-fallback.mjs`'s own header:
+"this sandbox's egress proxy resets Chromium's connection to real GIS hosts and to planyr.io — the
+reason V199 itself could never be driven from here"). **What is NOT in question:** the fix's own
+logic — `test/arcgis.test.js` proves the exact-one-request behavior deterministically against a
+mocked fetch, and this session's own direct (non-browser) `fetch()` calls against the real
+`feature.geographic.texas.gov` host confirmed the service capability shape (`/query` → the known
+disabled-operation body, `/identify` → real data) the fix's branch depends on. What is still
+genuinely unconfirmed is the full, real-browser, real-network-panel count this item was opened to
+show. `Cadence: once` — stays open; needs either a real signed-in/signed-out browser session
+outside this proxy (Michael's own, or a Cowork session per this repo's own "a Cowork session
+records its own live verify" mechanism) or a future sandbox with different egress behavior.
 
 ## ✅ Verified / ❌ Failed — history
 

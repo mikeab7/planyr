@@ -1449,6 +1449,31 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   **verify-road-split-curved** all drive the owner's real geometry (Goose Creek "Plan 1 (copy)" +
   Tsakiris / Concept A), and the harness shoots every junction twice — the second pass at reduced
   fill opacity, where a residual stacked edge shows and full opacity hides it.
+  **⛔ B<PENDING> — `teeGeometry` HAS EXACTLY ONE LIVE CALLER (`driveJunctionsOf`, a road tee-ing into
+  a parking field / truck court / paving pad), and its wedge builder used to anchor the SIDE
+  (driveway) reach to `f.tan2` — a point on the driveway's THEORETICAL long-edge line, extended
+  infinitely — pushed perpendicular by a small fixed `deepS`.** Road-to-road tees moved to
+  `nodeJunction` (above) after B1011 and never hit this: the "through" side there carries REAL
+  pavement width, so a side road's own flat end cap (`etOpenButt`, perpendicular to its centerline,
+  not to `tan2`'s line) lands somewhere inside that wide strip by sheer overlap — a coincidence of a
+  wide target, not a fix. A pad target is deliberately zero-width (`phT: 0` — its own fill is never
+  unioned with the road's), so it has no such headroom: at an oblique approach the two corners are
+  NOT symmetric about the flat cap (measured, 36 ft drive into a pad edge at 45°: one corner's
+  `tan2` lands ~9 ft further INTO the strip than the cap, the other ~9 ft BEHIND it, on the side the
+  strip's own polygon never reaches), so past roughly 40° the wedge on that side dissolved as its
+  own disconnected island — a knife-edge notch where the strip's real, now-exposed flat cap met the
+  pad's edge at a raw angle, with a hard, unfilleted corner on the other side. **Fix:** anchor the
+  wedge to the driveway's REAL cap corner (`T - inS*phS`, the same point `roadStripRing`'s own flat
+  cap uses), reach a small tuck past it into the strip, then take the CONVEX HULL of every candidate
+  point (the arc is convex outward by construction, so the hull leaves the true curve untouched and
+  only fills in whatever straight backing is needed to bridge to the real cap — ahead of `tan2` or
+  behind it, no case split needed). Swept 0–89° across five widths/radii/pad sizes, incl. connecting
+  a few feet from a pad corner and a rotated pad: every case is one simple, connected region.
+  Guards: the repo-root `test/` suite **roadDriveJunctionFillet** (pure geometry, mutation-proven
+  RED on the unpatched wedge) and the e2e spec **road-drive-junction-fillet** (the oblique case —
+  the existing **road-drive-connect** spec only ever drove a PERPENDICULAR connect, exactly the
+  symmetric case this defect never shows on; WRONG-CASE applies). PDF-PARITY holds by construction, unchanged:
+  `exportSheet.buildExportSvg` clones the live `<svg>` rather than re-deriving road geometry.
 - Terrain pipeline (B703–B706) — **LOADED ON DEMAND (B1095): `terrainLazy.js` is the ONE entry
   point** (`loadTerrain()` cached import + the synchronous `terrainNow()` the per-move cursor
   sample reads + the `contourHover` router); nothing on the boot path may static-import

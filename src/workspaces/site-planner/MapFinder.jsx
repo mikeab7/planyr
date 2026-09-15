@@ -9,7 +9,7 @@ import {
   isAccuracyUsable, garbageAccuracyMessage, locateAvailability, locateUnavailableTooltip,
 } from "./lib/locateMe.js";
 import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, featureAtPoint, preferSnapshotForDisplay } from "./lib/parcelSnapshot.js";
-import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideBackup } from "./lib/sourceHealth.js";
+import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideBackup, suppressRedundantStatewide } from "./lib/sourceHealth.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
 import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./lib/mapStack.js";
 import { tileCacheLimit } from "./lib/tileBudget.js";
@@ -3100,7 +3100,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       .map((county) => ({ county, url: layerUrlsRef.current[county], statewide: STATEWIDE_KEYS.includes(county) }))
       .filter((c) => c.url);
     const realPrimaries = all.filter((c) => !STATEWIDE_KEYS.includes(c.county));
-    return { candidates: filterHealthyCandidates(all, STATEWIDE_KEYS), realPrimaries };
+    const healthy = filterHealthyCandidates(all, STATEWIDE_KEYS);
+    // NEW-2 (B1639697) — a single healthy real CAD (Harris, Fort Bend, …) needs no statewide
+    // co-query; see suppressRedundantStatewide's own header for why this is safe against the
+    // outage-resilience behavior the parallel race exists for.
+    const candidates = suppressRedundantStatewide(healthy, realPrimaries, STATEWIDE_KEYS);
+    return { candidates, realPrimaries };
   };
   // A statewide-backup answer reports the parcel's true county in its `county` attr
   // ("FORT BEND"); title-case it for the badge, or fall back to a generic phrase.

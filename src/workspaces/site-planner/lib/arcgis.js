@@ -2,7 +2,7 @@
  * its geometry into a polygon in local feet. All requests run in the browser,
  * so they depend on the target server allowing CORS (Esri's do, by default).
  */
-import { FEET_WKID } from "./counties.js";
+import { FEET_WKID, isIdentifyOnlyLayerUrl } from "./counties.js";
 import { FT_PER_DEG, ftPerDeg, mercDeg, lngLatToFeet, feetToLatLngPair } from "./mapLock.js";
 
 /* A typed failure from a parcel/ArcGIS request. Lets a caller tell a SERVER problem
@@ -231,6 +231,11 @@ export async function identifyAtPoint(layerUrl, lng, lat) {
 // Find the parcel polygon under a clicked map point. Returns the ArcGIS feature
 // with geometry in lon/lat (EPSG:4326), which every service supports, or null.
 export async function queryAtPoint(layerUrl, lng, lat) {
+  // B1657600 — a layer that has DECLARED its /query permanently disabled (TxGIO's statewide
+  // MapServer, isIdentifyOnlyLayerUrl) skips the /query attempt entirely and asks /identify
+  // directly, instead of paying a wasted round trip on every click just to rediscover the same
+  // capability error the isQueryCapabilityError catch below already knows about.
+  if (isIdentifyOnlyLayerUrl(layerUrl)) return identifyAtPoint(layerUrl, lng, lat);
   const geometry = JSON.stringify({ x: lng, y: lat, spatialReference: { wkid: 4326 } });
   try {
     const j = await fetchJson(trim(layerUrl) + "/query", {

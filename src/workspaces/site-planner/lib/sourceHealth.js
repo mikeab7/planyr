@@ -97,5 +97,36 @@ export function filterHealthyCandidates(candidates, alwaysKeep = [], now = Date.
   return out.length ? out : (candidates || []);
 }
 
+/* NEW-2 (2026-09-15, B1639697) — a single, HEALTHY real CAD is authoritative on its own; racing
+ * the statewide fallback alongside it wins nothing but a second, redundant request against the
+ * shared statewide host on every click in every one of the 8 dialed-in Houston-metro counties.
+ * Measured live: searching "1200 McKinney St, Houston, TX" fired both HCAD's own query AND the
+ * statewide layer's, even though HCAD alone always answers correctly — `isStatewideBackup` above
+ * already proves the statewide hit is discarded whenever a real CAD also answers, so the second
+ * request bought nothing but load on a shared government/ArcGIS-Online host.
+ *
+ * Drop the statewide candidate(s) ONLY when there is EXACTLY ONE real (non-statewide) primary for
+ * this point AND it is currently healthy (i.e. it survived `filterHealthyCandidates` above) —
+ * every other shape keeps the existing multi-candidate query, so the B130/B634 outage-resilience
+ * behavior this repo has depended on is unchanged for exactly the cases it exists for:
+ *   - a straddle (2+ real primaries near a shared county line) — still raced together;
+ *   - an UNHEALTHY primary (its breaker is already open — `filterHealthyCandidates` already
+ *     dropped it from `candidates`, so the statewide candidate is the ONLY one left and must
+ *     stay, exactly as before);
+ *   - any point with no real CAD at all (every derived/parked-on-composite Texas county) — those
+ *     already resolve to a single statewide candidate by construction (`counties.js`'s
+ *     `parkedOnComposite` dedup), untouched here.
+ * Pure; takes the same candidate/key shapes `filterHealthyCandidates`/`isStatewideBackup` do. */
+export function suppressRedundantStatewide(candidates, realPrimaries, statewideKeys = []) {
+  const isStatewide = (k) => statewideKeys.includes(k);
+  const primaries = realPrimaries || [];
+  if (primaries.length !== 1) return candidates; // 0 (statewide-only) or 2+ (straddle): unchanged
+  const primaryCounty = primaries[0].county;
+  const primaryIsHealthy = (candidates || []).some((c) => c.county === primaryCounty);
+  if (!primaryIsHealthy) return candidates; // breaker open — statewide is the only source left
+  const out = (candidates || []).filter((c) => !isStatewide(c.county));
+  return out.length ? out : candidates; // never drop to empty
+}
+
 // Test/teardown helper — wipe all tracked health.
 export function resetSourceHealth() { _state.clear(); }

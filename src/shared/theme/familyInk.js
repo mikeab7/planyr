@@ -79,6 +79,13 @@ export const FAMILY_DEFAULT_INK = {
   cloud:   "#2563EB",
 };
 
+/* The callout/text-box family's own default FILL — the "cream plate" `FAMILY_DEFAULT_INK.callout`'s
+ * own comment already names. Lives here rather than in `calloutStyle.js` for the same reason the ink
+ * table does: one canonical value, imported by the resolver, never re-typed at the call site
+ * (B1652707 — this file is on the design-drift audit's exempt list precisely so a drawn-canvas
+ * default can be declared once here instead of as a raw literal in an ordinary module). */
+export const CALLOUT_DEFAULT_FILL = "#fffbe8";
+
 /* Every colour a site element paints by default, fill and stroke, flattened — the surfaces an
  * annotation gets drawn ON TOP OF. Mirrored from planStyle.js TYPES; the guard asserts the mirror
  * is complete, so a new element type cannot be added without this list noticing. */
