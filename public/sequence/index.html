@@ -5645,9 +5645,26 @@ function _cpMeasure(text, font) { if (!_cpCtx) return 0; _cpCtx.font = font; ret
 /* ContactPicker — the Owner cell editor. NEW-1: owner is an ORDERED LIST of contacts, shown as
  * removable, reorderable chips; the FIRST chip is the accountable one (no separate "primary"
  * control — reordering IS how you correct it). `owners` is always an array (the caller normalizes
- * legacy data via ownerListOf before it ever reaches here); `onCommit(namesArray, newContacts)`
- * fires ONCE, when editing ends, with the final ordered list and any brand-new contacts created
- * along the way (the caller registers each via `addContact`).
+ * legacy data via ownerListOf before it ever reaches here).
+ *
+ * ⛔ B1341728 — THIS IS A WRITE-THROUGH (tokens-class) EDITOR: `onOwnersChange(namesArray,
+ * newContacts)` fires the MOMENT a chip is added, removed or reordered, and `onClose()` merely
+ * closes the editor. It used to hold the whole session in component state and hand it over in a
+ * single `onCommit` at the end, with an `onCancel` that threw it away — and that is precisely the
+ * defect the owner reported (2026-09-15): a chip is drawn in the FINISHED style, a pill with its
+ * own remove control, so the person has every reason to read it as saved, while it was still
+ * unsaved state that Escape discarded outright. Every discard path in this component exploited
+ * that one gap, so the gap is closed rather than each path patched: what the editor renders as
+ * finished IS what the task holds, at every instant, and no exit gesture — Escape, Enter, Tab,
+ * click-away, or an unmount nobody asked for — can take it back. See CLAUDE.md's
+ * EDITOR-EXIT-CONTRACT named rule, and ui-audit/verify-cell-editor-exit-contract.mjs, which asks
+ * every editable cell in this grid the same question.
+ *
+ * WHAT ESCAPE MEANS NOW, stated because the two exits must not be left disagreeing: Escape
+ * abandons only what is genuinely IN PROGRESS — a typed-but-unconfirmed fragment in the input —
+ * and then, on a second press with nothing left to clear, closes the editor. It can no longer
+ * revert chips, because chips are no longer pending. Ctrl+Z is the recovery for an add or a
+ * removal made by mistake, the same as for every other cell edit in this grid.
  *
  * NEW-2 (folded in): a proposed new-contact NAME is guarded at the one place it is actually
  * created — a comma in it is refused outright (a comma is a chip DELIMITER, never a name
@@ -5671,7 +5688,7 @@ function _cpMeasure(text, font) { if (!_cpCtx) return 0; _cpCtx.font = font; ret
  * cell when there is no room below, and closes the editor outright if the cell scrolls out of its
  * own scroll container — never leaving a popup floating over a frozen header or hanging off-grid.
  */
-function ContactPicker({ owners, seedText, contacts, onCommit, onCancel, variant = "master", addContact }) {
+function ContactPicker({ owners, seedText, contacts, onOwnersChange, onClose, variant = "master" }) {
   const isGrid = variant === "grid";
   const initialOwners = React.useMemo(() => (Array.isArray(owners) ? owners : (owners ? [owners] : [])), []); // seed once
   const [chips, setChips] = React.useState(initialOwners);
@@ -5685,7 +5702,17 @@ function ContactPicker({ owners, seedText, contacts, onCommit, onCancel, variant
   const newContactsRef = React.useRef([]);          // collected across the whole editing session
   const inputRef = React.useRef(null);
   const wrapRef = React.useRef(null);
-  const closedRef = React.useRef(false);            // guards against a double-commit (rAF close + blur)
+  const closedRef = React.useRef(false);            // guards against a double-close (rAF close + blur)
+  // The chip list as last WRITTEN THROUGH to the task. Every mutation is compared against it so a
+  // no-op (re-adding a name already there, closing with nothing changed) never writes — a
+  // redundant write would still be a real setData, i.e. a wasted undo step and a wasted save.
+  const lastWrittenRef = React.useRef(initialOwners);
+  /* The LIVE chip list and the LIVE typed fragment, mirrored into refs every render. `finishEditing`
+   * can be reached from the rAF position loop, whose closure is only as fresh as the last time that
+   * effect re-ran ([totalItems]) — a chip added since then would otherwise be invisible to it, and
+   * the leftover fold below would write a list one name short. Reading refs makes that path exact. */
+  const chipsRef = React.useRef(initialOwners);
+  const queryRef = React.useRef(seedText || '');
 
   React.useEffect(() => {
     const el = inputRef.current;
@@ -5695,6 +5722,8 @@ function ContactPicker({ owners, seedText, contacts, onCommit, onCancel, variant
   }, []);
 
   const chipSet = React.useMemo(() => new Set(chips.map(c => c.toLowerCase())), [chips]);
+  chipsRef.current = chips;
+  queryRef.current = query;
   const q = query.trim().toLowerCase();
   const suggestions = (q
     ? contacts.filter(c => !chipSet.has(c.name.toLowerCase()) && (c.name.toLowerCase().includes(q) || (c.email||'').toLowerCase().includes(q)))
@@ -5765,24 +5794,42 @@ function ContactPicker({ owners, seedText, contacts, onCommit, onCancel, variant
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [totalItems]);
 
-  function finishEditing() {
-    if (closedRef.current) return;
-    closedRef.current = true;
-    // A recognized leftover (typed but never explicitly committed) is kept rather than dropped —
-    // an unrecognized one is discarded silently (NEVER auto-created on blur/close: that is the
-    // original NEW-1 protection this redesign keeps in full).
-    let finalChips = chips;
-    if (trimmed) {
-      const existing = contacts.find(c => c.name.toLowerCase() === trimmed.toLowerCase());
-      if (existing && !chipSet.has(existing.name.toLowerCase())) finalChips = [...chips, existing.name];
-    }
-    onCommit(finalChips, newContactsRef.current);
+  /* THE ONE WRITE PATH (B1341728). Every chip mutation goes through here, immediately — there is
+   * no deferred "final" list to lose. `newContact` is handed over in the SAME call that assigns
+   * it, so a brand-new person can never be created-but-unassigned (the quieter second leak of the
+   * old deferred design: on Escape the chip AND the contact both vanished). */
+  function writeThrough(next, newContact) {
+    const news = newContact ? [newContact] : [];
+    if (news.length) newContactsRef.current = [...newContactsRef.current, ...news];
+    const prev = lastWrittenRef.current;
+    const same = prev.length === next.length && prev.every((n, i) => n === next[i]);
+    if (same && !news.length) return;
+    lastWrittenRef.current = next;
+    onOwnersChange(next, news);
   }
 
-  function cancelEditing() {
+  function closeEditor() {
     if (closedRef.current) return;
     closedRef.current = true;
-    onCancel();
+    onClose();
+  }
+
+  function finishEditing() {
+    if (closedRef.current) return;
+    // A recognized leftover (typed but never explicitly committed) is kept rather than dropped —
+    // an unrecognized one is discarded silently (NEVER auto-created on blur/close: that is the
+    // original NEW-1 protection this redesign keeps in full). It is the ONLY thing left that this
+    // exit decides; every chip is already written. Read the LIVE chips/query off the refs, never the
+    // closure — see their declaration for the rAF path that makes the difference.
+    const liveChips = chipsRef.current;
+    const liveTrimmed = String(queryRef.current || "").trim();
+    if (liveTrimmed) {
+      const lower = liveTrimmed.toLowerCase();
+      const existing = contacts.find(c => c.name.toLowerCase() === lower);
+      const already = liveChips.some(n => n.toLowerCase() === lower);
+      if (existing && !already) writeThrough([...liveChips, existing.name]);
+    }
+    closeEditor();
   }
 
   function addChip(name, newContact) {
@@ -5790,17 +5837,24 @@ function ContactPicker({ owners, seedText, contacts, onCommit, onCancel, variant
     if (!n) return;
     if (chipSet.has(n.toLowerCase())) { setQuery(""); setWarn(null); return; }   // already an owner — quiet no-op
     if (atCap) { setWarn({ kind: "cap", text: `Owner is capped at ${OWNER_CAP} people — remove one to add another.` }); return; }
-    setChips(cs => [...cs, n]);
-    if (newContact) newContactsRef.current = [...newContactsRef.current, newContact];
+    const next = [...chips, n];
+    setChips(next);
+    writeThrough(next, newContact);
     setQuery(""); setWarn(null); setHighlight(-1);
     requestAnimationFrame(() => inputRef.current && inputRef.current.focus());
   }
 
-  function removeChip(i) { setChips(cs => cs.filter((_, idx) => idx !== i)); }
+  function removeChip(i) {
+    const next = chips.filter((_, idx) => idx !== i);
+    setChips(next);
+    writeThrough(next);
+  }
 
   function reorderChips(from, to) {
     if (from === to || from == null || to == null) return;
-    setChips(cs => { const next = [...cs]; const [m] = next.splice(from, 1); next.splice(to, 0, m); return next; });
+    const next = [...chips]; const [m] = next.splice(from, 1); next.splice(to, 0, m);
+    setChips(next);
+    writeThrough(next);
   }
 
   // The ONE deliberate action that mints a new contact (NEW-5) — reached from Enter/comma on the
@@ -5842,9 +5896,13 @@ function ContactPicker({ owners, seedText, contacts, onCommit, onCancel, variant
     if (e.key === 'Escape') {
       e.stopPropagation();
       if (warn) { setWarn(null); lastPrefixWarnedFor.current = null; return; }   // dismiss the warning, keep editing
-      if (query) { setQuery(""); return; }   // clear a typed-but-unconfirmed fragment first — the
-                                              // chips already added THIS session are not "pending"
-      cancelEditing();   // nothing left to clear — revert the WHOLE session back to the original owners
+      if (query) { setQuery(""); return; }   // clear a typed-but-unconfirmed fragment — the only
+                                              // thing in this editor that is genuinely in progress
+      // B1341728 — nothing left to clear, so just LEAVE. Escape no longer reverts the chips: they
+      // were written to the task the instant they were added, so there is nothing pending to
+      // abandon and nothing for this key to destroy. (It used to run a revert-the-whole-session
+      // path here, which threw away every owner chosen during the edit — the reported bug.)
+      closeEditor();
       return;
     }
     if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight(h => Math.min(h + 1, totalItems - 1)); return; }
@@ -12090,7 +12148,10 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     else updateTask(id,{[col]:val});
   };
 
-  const commit = (taskId, col, val) => {
+  /* B1341728 — the WRITE half of commit, split out so a write-through (tokens-class) editor can
+   * save what it shows WITHOUT closing itself. Range-fill semantics are byte-for-byte the ones
+   * `commit` has always had; `commit` is now exactly this plus closing the editor, nothing else. */
+  const applyCommit = (taskId, col, val) => {
     const isHealthOp = col === "health" || col === "status";
     if (hasRange && selRange) {
       const ci = COLS.findIndex(c => c.k === col);
@@ -12112,12 +12173,13 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
             if (t && !(t.hasChildren && (col==="start"||col==="end"||col==="duration"||col==="cost"||col==="budget"||col==="actualCost"))) applyUpdate(t.id, col, val);
           }
         }
-        setEdit(null); return;
+        return;
       }
     }
     applyUpdate(taskId, col, val);
-    setEdit(null);
   };
+
+  const commit = (taskId, col, val) => { applyCommit(taskId, col, val); setEdit(null); };
 
   const commitAndAdvance = (taskId, col, val) => {
     // Fix #6: capture the next task's id BEFORE commit so the date cascade
@@ -12541,7 +12603,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                         <i className="ti ti-grip-vertical" style={{fontSize:10, color:"var(--mut)"}} />
                       </span>
                     )}
-                    <Cell task={task} col={{...c, w:colWidths[c.k]}} colMasterIdxs={colMasterIdxs} edit={edit} setEdit={setEdit} commit={commit} commitAndAdvance={commitAndAdvance}
+                    <Cell task={task} col={{...c, w:colWidths[c.k]}} colMasterIdxs={colMasterIdxs} edit={edit} setEdit={setEdit} commit={commit} commitAndAdvance={commitAndAdvance} applyCommit={applyCommit}
                       proj={proj} succMap={succMap} getTaskName={getTaskName}
                       setNotesCtx={setNotesCtx} projId={proj?.id} updateTask={updateTask}
                       editStartChar={edit?.taskId===task.id && edit?.col===c.k ? editStartChar : null}
@@ -12661,6 +12723,11 @@ function HealthPicker({value, onChange}) {
   useEffect(() => {
     if (!open) return;
     const handleKey = e => {
+      // B1341729 — Tab is an EXIT gesture like any other, so it CLOSES the menu (it used to fall
+      // through the guard below, leaving an open popover floating over the grid while focus moved
+      // on). It chooses nothing: a menu's highlight is in-progress, never finished, so leaving
+      // without pressing Enter correctly keeps the value that was already there.
+      if (e.key === "Tab") { setOpen(false); return; }
       if (!["ArrowDown","ArrowUp","Enter","Escape"," "].includes(e.key)) return;
       e.stopImmediatePropagation();
       e.preventDefault();
@@ -12780,6 +12847,11 @@ function StatusPicker({value, onChange}) {
   useEffect(() => {
     if (!open) return;
     const handleKey = e => {
+      // B1341729 — Tab is an EXIT gesture like any other, so it CLOSES the menu (it used to fall
+      // through the guard below, leaving an open popover floating over the grid while focus moved
+      // on). It chooses nothing: a menu's highlight is in-progress, never finished, so leaving
+      // without pressing Enter correctly keeps the value that was already there.
+      if (e.key === "Tab") { setOpen(false); return; }
       if (!["ArrowDown","ArrowUp","Enter","Escape"," "].includes(e.key)) return;
       e.stopImmediatePropagation();
       e.preventDefault();
@@ -13020,7 +13092,7 @@ function PredEditor({ seedVal, taskId, colKey, commit, commitAndAdvance, setEdit
 }
 
 // ── Cell ─────────────────────────────────────────────────
-function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance, proj, succMap, getTaskName, setNotesCtx, projId, updateTask, editStartChar, isExpandedParent, dispHealth, setSelectedColIdx, contacts, addContact, formulaCell, expandAnchorRef}) {
+function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance, applyCommit, proj, succMap, getTaskName, setNotesCtx, projId, updateTask, editStartChar, isExpandedParent, dispHealth, setSelectedColIdx, contacts, addContact, formulaCell, expandAnchorRef}) {
   // B212 — Tab/Shift+Tab while editing advance only through VISIBLE columns (display order),
   // skipping hidden ones, via the shared stepVisibleColIdx helper.
   const tabStep = back => setSelectedColIdx(i => stepVisibleColIdx(colMasterIdxs, i, back ? -1 : +1));
@@ -13110,12 +13182,11 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
             owners={ownerListOf(task)}
             seedText={editStartChar != null ? editStartChar : ''}
             contacts={contacts || []}
-            addContact={addContact}
-            onCommit={(names, newContacts) => {
+            onOwnersChange={(names, newContacts) => {
               (newContacts || []).forEach(nc => addContact && addContact(nc));
-              commit(task.id, "responsibleParty", names);
+              applyCommit(task.id, "responsibleParty", names);
             }}
-            onCancel={() => setEdit(null)}
+            onClose={() => setEdit(null)}
           />
         );
       }
@@ -15388,7 +15459,9 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
     ).map(x => `${x.id} – ${x.name}`).join("; ");
   };
 
-  const commit = (t, col, val) => {
+  /* B1341728 — same split as the project grid: `applyCommit` WRITES, `commit` writes and closes.
+   * A write-through (tokens-class) editor saves what it renders without closing itself. */
+  const applyCommit = (t, col, val) => {
     // Only call updateTask if the value actually changed — prevents no-op edits
     // from triggering cascadeDates and shifting successor start dates
     if (col==="duration") {
@@ -15409,9 +15482,17 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
       const cur = ownerListOf(t);
       if (next.length !== cur.length || next.some((n,i) => n !== cur[i])) updateTask(t.id, {responsibleParty: next}, t.projId);
     }
+  };
+
+  // Close the editor and return focus to the table wrapper so arrow-key navigation resumes.
+  const closeEdit = () => {
     setLocalEdit(null);
-    // Return focus to table wrapper so arrow-key navigation resumes immediately
     setTimeout(() => tableWrapRef.current?.focus({preventScroll:true}), 0);
+  };
+
+  const commit = (t, col, val) => {
+    applyCommit(t, col, val);
+    closeEdit();
   };
   const isE = (t, col) => localEdit?.id===t.id && localEdit?.projId===t.projId && localEdit?.col===col;
 
@@ -15655,13 +15736,13 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
                 owners={ownerListOf(t)}
                 seedText={localEdit?.initChar != null ? localEdit.initChar : ''}
                 contacts={data.settings?.contacts||[]}
-                onCommit={(names, newContacts) => {
+                onOwnersChange={(names, newContacts) => {
                   if (newContacts && newContacts.length) {
                     setData(d => ({...d, settings:{...d.settings, contacts:[...(d.settings?.contacts||[]), ...newContacts.map(nc => ({id:Date.now()+Math.random(), ...nc}))]}}));
                   }
-                  commit(t,"responsibleParty",names);
+                  applyCommit(t,"responsibleParty",names);
                 }}
-                onCancel={()=>setLocalEdit(null)}
+                onClose={closeEdit}
               />
             : <span title={title || undefined} style={{color:"var(--mut)"}}>{label || <span style={{color:"var(--bd2)"}}>—</span>}</span>}
         </td>;
