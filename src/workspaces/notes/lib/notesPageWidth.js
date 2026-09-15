@@ -44,8 +44,20 @@ export const PAGE_WIDTH_MAX = 2400;
 
 /** How much clear grey pane must remain on each side of a "Full width" page — it fills the pane,
  *  it does not press its own edges against it, so there is still somewhere to double-click a new
- *  box and somewhere to drop one (MAT_GUTTER's own reasoning in NoteEditor.jsx, reused). */
-export const FULL_WIDTH_GUTTER = 24;
+ *  box and somewhere to drop one (MAT_GUTTER's own reasoning in NoteEditor.jsx, reused).
+ *
+ *  ⛔ SHRUNK 24 → 8 (B1344624, owner report 2026-09-15). At the owner's own ~1191px working
+ *  window (pane ≈ 923px with the Pages rail open, Outline closed), the OLD 24px×2 = 48px gutter
+ *  put "Full width"'s own computed number (paneWidth − 48 ≈ 875) BELOW `FULL_WIDTH_FLOOR` (900,
+ *  Wide's own fixed width) on nearly every ordinary window — so `resolvePresetPx`'s floor always
+ *  won, and Full width rendered at the EXACT SAME 900px as Wide, every time: "the two presets are
+ *  indistinguishable on every page tried." The floor (below) is still correct and still the right
+ *  safety net for a genuinely narrow pane — this only narrows the gutter it has to overcome, so a
+ *  pane with real room to give (923 − 16 = 907) reports a genuinely different, genuinely
+ *  pane-tracking number instead of silently falling back to the same constant Wide already is. An
+ *  8px margin is still enough to land a double-click and to drop a dragged box — it was never
+ *  load-bearing for more than "not flush against the glass." */
+export const FULL_WIDTH_GUTTER = 8;
 
 /** The menu's fast path. `px` is a plain number for every preset except `full`, which has no
  *  fixed number — it is resolved against the pane at render time. `normal` intentionally matches

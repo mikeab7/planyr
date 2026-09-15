@@ -56,6 +56,58 @@ const RADIUS = { control: 8, pill: 999 };
  * so B849633's phone-sheet branch of OverflowMenu's panel doesn't count as a second raw
  * colour literal against the design-drift ceiling for what is visually the same shadow. */
 const POPOVER_SHADOW = "0 12px 32px rgba(0,0,0,0.20)";
+/* Min gap a clamped popover keeps from the window's own right edge (B1344627 / NEW-4). */
+const POPOVER_EDGE_MARGIN = 8;
+
+/* ⛔ NEW-4 (B1344627, owner report 2026-09-15) — EVERY POPOVER ON THIS BAR HANGS OFF THE RIGHT
+ * EDGE OF THE WINDOW INSTEAD OF STAYING INSIDE IT. Five of them (FormatMenu's own listbox,
+ * ColorPopover, TableGridPicker, LinkControl, CalloutControl) share the identical anchoring bug:
+ * `position:"absolute", left:0` inside a `position:"relative"` trigger span opens the popover
+ * flush against its OWN trigger, never against the viewport — fine while the trigger sits near
+ * the toolbar's left end, wrong once it doesn't. Insert Table sits at the row's right end at
+ * almost every window width, so its popover (and any other near it) opened mostly or entirely
+ * off-screen; measured live at a 1191px window, 18 of the table grid's 36 size cells sat past
+ * `innerWidth`, making anything past a three-column table unreachable from the picker.
+ *
+ * `shared/ui/AnchoredMenu.jsx` already solves this the general way (a `position:"fixed"` portal
+ * to `document.body`), but that component pulls in `controls.jsx`'s chunk — exactly what this
+ * file's own `RADIUS` constant already avoids importing, so the Site route's four-chunk bundle
+ * budget stays intact (see this file's own top-of-file note). So this reuses only the PURE
+ * placement math AnchoredMenu itself is built on
+ * (`shared/ui/anchoredMenuPlacement.js` — no React, no chunk cost) is the RIGHT shape to mirror,
+ * but even that needs a trigger rect this file already has for free (`popRef.current.parentElement`
+ * is always the wrapping `<span>` every one of the five popovers is anchored to) — so rather than
+ * importing a second math module for one subtraction, the same clamp is inlined here directly,
+ * mirroring `anchoredMenuPlacement.js`'s own "clamp the right edge into the viewport" step.
+ *
+ * Measured LIVE (`ResizeObserver` on the popover itself), not guessed once at open time — the
+ * table grid's own width GROWS while it is open (the picker's own "keep dragging for a bigger
+ * table" affordance), so a one-shot measurement taken at mount would already be stale by the
+ * time a drag reached a wider column count. A plain `left: -shift` nudge, not a flip to `right:0`
+ * — flipping would still need the SAME measured shift to avoid also overflowing the LEFT edge on
+ * a narrow phone toolbar, so there is nothing a flip buys here that a clamp does not. */
+function usePopoverClampLeft(open) {
+  const popRef = useRef(null);
+  const [shift, setShift] = useState(0);
+  useLayoutEffect(() => {
+    if (!open) { setShift(0); return undefined; }
+    const measure = () => {
+      const pop = popRef.current;
+      const wrap = pop?.parentElement;
+      if (!pop || !wrap) return;
+      const wrapLeft = wrap.getBoundingClientRect().left;
+      const need = Math.max(0, wrapLeft + pop.offsetWidth - (window.innerWidth - POPOVER_EDGE_MARGIN));
+      setShift(need);
+    };
+    measure();
+    const pop = popRef.current;
+    const ro = pop && typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+    if (ro && pop) ro.observe(pop);
+    window.addEventListener("resize", measure);
+    return () => { ro?.disconnect(); window.removeEventListener("resize", measure); };
+  }, [open]);
+  return { popRef, clampStyle: shift ? { left: -shift } : undefined };
+}
 
 /* ⛔ ICON-2: a colour control's swatch bar showing GREY communicates no colour at all, and it
  * made the two colour buttons a matched silhouette differing only by a small glyph on top.
@@ -184,6 +236,7 @@ function TBButton({ onClick, active, pressed, disabled, title, label, children, 
 function FormatMenu({ title, testid, value, mixed, options, onPick, big, width = 116, displayLabel, prefix }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
+  const { popRef, clampStyle } = usePopoverClampLeft(open);
   useEffect(() => {
     if (!open) return undefined;
     const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
@@ -230,6 +283,7 @@ function FormatMenu({ title, testid, value, mixed, options, onPick, big, width =
       </button>
       {open && (
         <div
+          ref={popRef}
           data-testid={`${testid}-menu`}
           role="listbox"
           aria-label={title}
@@ -240,6 +294,7 @@ function FormatMenu({ title, testid, value, mixed, options, onPick, big, width =
             display: "flex", flexDirection: "column", gap: 1,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
             borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
+            ...clampStyle,
           }}
         >
           {options.map((o) => {
@@ -324,6 +379,7 @@ function ColorPopover({ title, swatch, colors, onPick, testid, glyph = "ink", bi
   const name = mixed ? `${title} — mixed` : title;
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
+  const { popRef, clampStyle } = usePopoverClampLeft(open);
   useEffect(() => {
     if (!open) return undefined;
     const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
@@ -346,6 +402,7 @@ function ColorPopover({ title, swatch, colors, onPick, testid, glyph = "ink", bi
       </TBButton>
       {open && (
         <div
+          ref={popRef}
           data-testid={`${testid}-popover`}
           onMouseDown={stop}
           style={{
@@ -353,6 +410,7 @@ function ColorPopover({ title, swatch, colors, onPick, testid, glyph = "ink", bi
             display: "grid", gridTemplateColumns: "repeat(5, 22px)", gap: 6,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
             borderRadius: RADIUS.control, boxShadow: "0 12px 32px rgba(0,0,0,0.20)",
+            ...clampStyle,
           }}
         >
           {colors.map((c) => (
@@ -393,6 +451,7 @@ function TableGridPicker({ onInsert, big }) {
   const [grid, setGrid] = useState({ rows: GRID_START, cols: GRID_START });
   const wrapRef = useRef(null);
   const gridRef = useRef(null);
+  const { popRef, clampStyle } = usePopoverClampLeft(open);
 
   useEffect(() => {
     if (!open) { setDim({ rows: 0, cols: 0 }); setGrid({ rows: GRID_START, cols: GRID_START }); return undefined; }
@@ -462,6 +521,7 @@ function TableGridPicker({ onInsert, big }) {
       <TBButton title="Insert table" testid="nt-table" active={open} big={big} onClick={() => setOpen((o) => !o)}><TableIcon /></TBButton>
       {open && (
         <div
+          ref={popRef}
           data-testid="nt-table-grid"
           onMouseDown={stop}
           style={{
@@ -469,6 +529,7 @@ function TableGridPicker({ onInsert, big }) {
             display: "flex", flexDirection: "column", gap: 6,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
             borderRadius: RADIUS.control, boxShadow: "0 12px 32px rgba(0,0,0,0.20)",
+            ...clampStyle,
           }}
         >
           <div
@@ -498,6 +559,7 @@ function LinkControl({ editor, big }) {
   const [href, setHref] = useState("");
   const inputRef = useRef(null);
   const active = editor.isActive("link");
+  const { popRef, clampStyle } = usePopoverClampLeft(open);
 
   useEffect(() => { if (open && inputRef.current) inputRef.current.focus(); }, [open]);
 
@@ -519,11 +581,13 @@ function LinkControl({ editor, big }) {
       </TBButton>
       {open && (
         <div
+          ref={popRef}
           onMouseDown={stop}
           style={{
             position: "absolute", top: big ? 48 : 32, left: 0, zIndex: 40, padding: 8, display: "flex", gap: 6,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
             borderRadius: RADIUS.control, boxShadow: "0 12px 32px rgba(0,0,0,0.20)",
+            ...clampStyle,
           }}
         >
           <input
@@ -618,6 +682,7 @@ function OverflowMenu({ children, testid = "nt-more", big }) {
 function CalloutControl({ editor, big }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
+  const { popRef, clampStyle } = usePopoverClampLeft(open);
   const inside = editor.isActive("noteCallout");
   const tone = inside ? editor.getAttributes("noteCallout")?.tone : null;
 
@@ -645,6 +710,7 @@ function CalloutControl({ editor, big }) {
       </TBButton>
       {open && (
         <div
+          ref={popRef}
           data-testid="nt-callout-panel"
           onMouseDown={stop}
           style={{
@@ -652,6 +718,7 @@ function CalloutControl({ editor, big }) {
             display: "flex", flexDirection: "column", gap: 2,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
             borderRadius: RADIUS.control, boxShadow: "0 12px 32px rgba(0,0,0,0.20)",
+            ...clampStyle,
           }}
         >
           {CALLOUT_TONES.map((t) => (
@@ -1235,18 +1302,54 @@ export default function NoteToolbar({
         editor.commands.setNotePageWidth(Number(v));
       }} />
   );
-  /* ⛔ SET A PAGE'S OWN HEIGHT BY HAND (NEW-1, 2026-09-12) — the menu's own "way back": a page
-   * dragged tall by the top/bottom grips has no preset ladder (the owner did not ask for one),
-   * so the one thing this control needs to offer is the return trip to Fit to content. Sits
-   * beside Page width for the identical reason — see that control's own comment for the
-   * `prefix="H"` fix (NEW-2) telling the two apart without a hover. */
+  /* ⛔ SET A PAGE'S OWN HEIGHT BY HAND (NEW-1, 2026-09-12) — a page dragged tall by the top/bottom
+   * grips has no preset ladder (the owner did not ask for one), so the one thing this control
+   * needs to offer is the return trip to Fit to content. Sits beside Page width for the identical
+   * reason — see that control's own comment for the `prefix="H"` fix (NEW-2) telling the two
+   * apart without a hover.
+   *
+   * ⛔ CORRECTED (B1344628, owner report 2026-09-15) — THIS IS NO LONGER A `FormatMenu`. A
+   * listbox with exactly one row ("Fit to content") is a real defect, not a smaller version of
+   * the width menu: opening it always shows the SAME single option whether the page is already
+   * Fit to content (where it is a no-op) or pinned Custom (where it is the one thing you came
+   * for) — nothing in the menu itself tells those two situations apart, and a listbox that can
+   * only ever reset never needed the open/close ceremony a listbox implies. This module's own
+   * "no preset ladder" decision (NEW-1 above, restated by the owner at B1586784: "Fit to content
+   * plus Custom is enough") already settled that a real choice list is not wanted here — so the
+   * fix is not a second preset ladder, it is dropping the ceremony this control never earned: a
+   * PLAIN button, visually matching the width control's closed state (`prefix="H"`, the same
+   * box), that commits `setNotePageHeight(null)` on its own press and is disabled (inert, no
+   * click target) the moment the page is already Fit to content — so there is nothing to press
+   * when there is nothing to reset, and one press is the whole interaction when there is. */
   const pageHeightAttr = editor.state.doc.attrs?.pageHeight ?? null;
+  const heightPinned = pageHeightAttr != null;
   const heightControl = (
-    <FormatMenu title="Page height" testid="nt-page-height" width={140} big={narrow} prefix="H"
-      value={pageHeightAttr == null ? "fit" : "custom"}
-      displayLabel={pageHeightLabel(pageHeightAttr)}
-      options={[{ label: "Fit to content", value: "fit" }]}
-      onPick={(v) => { if (v === "fit") editor.commands.setNotePageHeight(null); }} />
+    <button
+      type="button"
+      title={heightPinned ? "Reset the page's height to Fit to content" : "Page height — already Fit to content"}
+      aria-label={heightPinned ? "Reset the page's height to Fit to content" : "Page height — already Fit to content"}
+      data-testid="nt-page-height"
+      disabled={!heightPinned}
+      onMouseDown={stop}
+      onClick={() => editor.commands.setNotePageHeight(null)}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 4,
+        height: narrow ? 44 : 28, width: narrow ? Math.max(140, 132) : 140, padding: "0 6px 0 8px",
+        flex: narrow ? "0 0 auto" : undefined,
+        border: "1px solid var(--border-default)", borderRadius: RADIUS.control,
+        background: "var(--surface-raised)", color: "var(--text-primary)",
+        opacity: heightPinned ? 1 : 0.5, cursor: heightPinned ? "pointer" : "default",
+        font: "inherit", fontSize: narrow ? 15 : 13,
+      }}
+    >
+      <span aria-hidden="true" style={{
+        flex: "0 0 auto", fontSize: narrow ? 11 : 9.5, fontWeight: 700, letterSpacing: "0.06em",
+        textTransform: "uppercase", color: "var(--text-tertiary)", marginRight: 4,
+      }}>H</span>
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "left", flex: "1 1 auto" }}>
+        {pageHeightLabel(pageHeightAttr)}
+      </span>
+    </button>
   );
   const exportBtn = (
     <TBButton title="Export this page to Markdown" testid="nt-export" wide big={narrow} label="Markdown" onClick={onExport}>

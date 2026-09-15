@@ -9,7 +9,13 @@
  * ⛔ EXTENDED (B1605664/B1605665, 2026-09-12) — a live-verify of the merged PR found the top
  * grip's "opposite edge holds" promise inverted for SHRINKING (§[3b]/[3c]/[13b] below) and the
  * Page width/Page height toolbar controls indistinguishable at a glance (§[15]) — see those
- * items in docs/archive/BACKLOG-DONE.md for the full root cause and fix on each. */
+ * items in docs/archive/BACKLOG-DONE.md for the full root cause and fix on each.
+ *
+ * ⛔ EXTENDED AGAIN (B1344629, 2026-09-15) — B1605664 fixed `dom` (`note-body`) but not
+ * `note-sheet` (the visible card), and every assertion above reads `bodyRect()` alone, so it
+ * shipped green while the owner's real repro — the CARD staying put and shrinking from the
+ * bottom, opening a gap under the title — was still live. §[3b]/[13b] now assert `sheetRect()`
+ * too (the owner's own 1191×465 numbers reproduce exactly: card top 150→204, bottom 578→578). */
 import { chromium } from "playwright";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 
@@ -57,6 +63,20 @@ async function withPage(viewport, fn) {
     return page.evaluate(() => {
       const body = document.querySelector('[data-testid="note-body"]');
       const r = body.getBoundingClientRect();
+      return { top: Math.round(r.top), bottom: Math.round(r.bottom), height: Math.round(r.height) };
+    });
+  }
+
+  /* ⛔ B1344629 — `bodyRect` alone is not enough to prove the GRIP's own edge moved. `dom`
+   * (`note-body`) can hold its own top/bottom correctly while `note-sheet` — the visible white
+   * card the grip is actually drawn on, title included — stays put and just shrinks from the
+   * other end instead, which is exactly the bug this measures (see NoteEditor.jsx's own comment
+   * on this correction for the measured before/after). Every top-edge case below now asserts on
+   * BOTH. */
+  async function sheetRect() {
+    return page.evaluate(() => {
+      const sheet = document.querySelector('[data-testid="note-sheet"]');
+      const r = sheet.getBoundingClientRect();
       return { top: Math.round(r.top), bottom: Math.round(r.bottom), height: Math.round(r.height) };
     });
   }
@@ -136,23 +156,25 @@ async function withPage(viewport, fn) {
     }, offset);
   }
 
-  await fn({ page, seed, bodyRect, storedPageHeight, gripCenter, pointNearBodyBottom });
+  await fn({ page, seed, bodyRect, sheetRect, storedPageHeight, gripCenter, pointNearBodyBottom });
   return errs;
 }
 
 /* ═══════════════════════ NORMAL WINDOW ═══════════════════════════════════════════════════ */
 console.log(`\n[NORMAL WINDOW 1500×950]`);
-const errsA = await withPage({ width: 1500, height: 950 }, async ({ page, seed, bodyRect, storedPageHeight, gripCenter, pointNearBodyBottom }) => {
+const errsA = await withPage({ width: 1500, height: 950 }, async ({ page, seed, bodyRect, sheetRect, storedPageHeight, gripCenter, pointNearBodyBottom }) => {
   /* ── CASE 1 — default is Fit to content, and the menu says so ─────────────────────────── */
   console.log("\n[1] Default (unpinned) page:");
   {
     await seed(PLAIN_DOC, "Default height");
     const stored = await storedPageHeight();
     ok("stores no height pin at all", stored === null, `stored=${stored}`);
-    await page.click('[data-testid="nt-page-height"]');
+    // ⛔ B1344628 — this is a plain reset BUTTON now, not a listbox trigger; when the page is
+    // already Fit to content there is nothing to reset, so it is DISABLED, not clickable.
     const label = await page.textContent('[data-testid="nt-page-height"]');
-    ok("Page height menu trigger reads Fit to content", label.includes("Fit to content"), label);
-    await page.keyboard.press("Escape");
+    ok("Page height control reads Fit to content", label.includes("Fit to content"), label);
+    const disabled = await page.$eval('[data-testid="nt-page-height"]', (el) => el.disabled);
+    ok("and is disabled — nothing to reset", disabled === true);
   }
 
   /* ── CASE 2 — drag the BOTTOM edge down: grows, top holds ──────────────────────────────── */
@@ -224,6 +246,7 @@ const errsA = await withPage({ width: 1500, height: 950 }, async ({ page, seed, 
   {
     await seed(PLAIN_DOC, "Shrink top");
     const before = await bodyRect();
+    const sheetBefore = await sheetRect();
     const grip = await gripCenter("note-page-height-grip-top");
     await page.mouse.move(grip.x, grip.y);
     await page.mouse.down();
@@ -231,11 +254,24 @@ const errsA = await withPage({ width: 1500, height: 950 }, async ({ page, seed, 
     await page.mouse.up();
     await page.waitForTimeout(300);
     const after = await bodyRect();
+    const sheetAfter = await sheetRect();
     ok("the body shrank by roughly the drag distance", after.height <= before.height - 70, JSON.stringify({ before, after }));
     ok("the TOP edge moved down by roughly the drag distance (it did NOT stay pinned)",
       after.top >= before.top + 70 && after.top <= before.top + 130, JSON.stringify({ before, after }));
     ok("the BOTTOM edge stayed close to where it started (within rounding noise)",
       Math.abs(after.bottom - before.bottom) <= 15, JSON.stringify({ before, after }));
+    /* ⛔ B1344629 — THE CARD ITSELF, NOT JUST `dom`, MUST MOVE. This is the actual reported bug:
+       `dom`'s own top/bottom can read correct while `note-sheet` (the visible white card the
+       grip is drawn on) stays pinned at the top and just shrinks from the bottom instead, which
+       reads to a real user as "nothing moved, and now there's a gap under the title." */
+    ok("the CARD's own top edge moved down by roughly the drag distance too",
+      sheetAfter.top >= sheetBefore.top + 70 && sheetAfter.top <= sheetBefore.top + 130,
+      JSON.stringify({ sheetBefore, sheetAfter }));
+    ok("the CARD's own bottom edge stayed close to where it started",
+      Math.abs(sheetAfter.bottom - sheetBefore.bottom) <= 15, JSON.stringify({ sheetBefore, sheetAfter }));
+    ok("the gap between the card's top and the body's top did NOT grow (no dead space opened under the title)",
+      Math.abs((after.top - sheetAfter.top) - (before.top - sheetBefore.top)) <= 4,
+      JSON.stringify({ beforeGap: before.top - sheetBefore.top, afterGap: after.top - sheetAfter.top }));
 
     // A completed top-edge shrink settles to the app's own ordinary top-anchored rest position
     // on reload — identical to the same numeric height dragged from the BOTTOM edge instead,
@@ -330,8 +366,8 @@ const errsA = await withPage({ width: 1500, height: 950 }, async ({ page, seed, 
     await page.waitForTimeout(400);
     const grown = await bodyRect();
     ok("grew from the drag", grown.height > natural.height, JSON.stringify({ natural, grown }));
+    // ⛔ B1344628 — one press of the (now-enabled) reset button, not a listbox pick.
     await page.click('[data-testid="nt-page-height"]');
-    await page.click('[data-testid="nt-page-height-opt-fit"]');
     await page.waitForTimeout(900);
     const back = await bodyRect();
     ok("Fit to content returns to the natural (unpinned) height", back.height === natural.height, JSON.stringify({ natural, back }));
@@ -471,7 +507,7 @@ const errsA = await withPage({ width: 1500, height: 950 }, async ({ page, seed, 
 
 /* ═══════════════════════ THE OWNER'S OWN SHORT WINDOW, 1191×465 ═══════════════════════════ */
 console.log(`\n[OWNER'S WINDOW 1191×465]`);
-const errsB = await withPage({ width: 1191, height: 465 }, async ({ page, seed, bodyRect, storedPageHeight, gripCenter, pointNearBodyBottom }) => {
+const errsB = await withPage({ width: 1191, height: 465 }, async ({ page, seed, bodyRect, sheetRect, storedPageHeight, gripCenter, pointNearBodyBottom }) => {
   console.log("\n[12] Drag the bottom edge down at 1191×465:");
   {
     await seed(PLAIN_DOC, "Short window bottom drag");
@@ -513,15 +549,22 @@ const errsB = await withPage({ width: 1191, height: 465 }, async ({ page, seed, 
     await seed(PLAIN_DOC, "Short window top shrink");
     const grip = await gripCenter("note-page-height-grip-top");
     const before = await bodyRect();
+    const sheetBefore = await sheetRect();
     await page.mouse.move(grip.x, grip.y);
     await page.mouse.down();
     for (let i = 1; i <= 5; i += 1) await page.mouse.move(grip.x, grip.y + 15 * i, { steps: 2 });
     await page.mouse.up();
     await page.waitForTimeout(300);
     const after = await bodyRect();
+    const sheetAfter = await sheetRect();
     ok("shrinks at the short window too", after.height < before.height - 40, JSON.stringify({ before, after }));
     ok("the top edge moved down (it did NOT stay pinned)", after.top > before.top + 30, JSON.stringify({ before, after }));
     ok("bottom holds", Math.abs(after.bottom - before.bottom) <= 15, JSON.stringify({ before, after }));
+    // ⛔ B1344629 — the CARD, not just `dom`, at the owner's own window size too.
+    ok("the CARD's own top edge moved down too (not just the text)",
+      sheetAfter.top > sheetBefore.top + 30, JSON.stringify({ sheetBefore, sheetAfter }));
+    ok("the CARD's own bottom edge held", Math.abs(sheetAfter.bottom - sheetBefore.bottom) <= 15,
+      JSON.stringify({ sheetBefore, sheetAfter }));
   }
 
   console.log("\n[14] Clicking in the grown blank area at 1191×465 places the caret:");
