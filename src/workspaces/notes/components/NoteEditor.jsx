@@ -48,7 +48,7 @@ import { PASTE_MODES } from "../lib/notesPastePlain.js";
 import { formFieldOwnsTheKey, UNGATED_KEYS } from "../lib/notesKeyScope.js";
 import { DEFAULT_DENSITY, densityFor } from "../lib/notesSpacing.js";
 import { PAGE_WIDTH_MIN, dragWidthFromDelta, resolvePinnedBaseWidth } from "../lib/notesPageWidth.js";
-import { dragHeightFromDelta, resolvePinnedBaseHeight } from "../lib/notesPageHeight.js";
+import { dragHeightFromDelta, resolvePinnedBaseHeight, scrollToReach, topEdgeCompensation } from "../lib/notesPageHeight.js";
 import { indentCssRules } from "../lib/notesIndentLevel.js";
 import {
   readNoteFiles, readNoteImages, readPage, readPageVersions, registerOpenNoteDoc,
@@ -88,6 +88,12 @@ const SHEET_MARGIN_X = { narrow: 8, wide: 0 };  // left+right margin, per side
 const SHEET_PAD_TOP = { narrow: 18, wide: 30 };
 /* The gap under the title band, before the body starts. */
 const TITLE_BAND_GAP = 16;
+/* ⛔ HOW MUCH CLEAR AIR THE TOP GRIP IS LEFT WITH AFTER A DRAG THAT SCROLLED IT OUT OF VIEW
+ * (B1609184). The grip straddles the page's top edge (`top: -7px; height: 14px`), so putting the
+ * edge itself level with the mat's first visible row would still leave the upper half of the grip
+ * clipped and hard to grab. This is the grip's own overhang plus a little, so what you just
+ * dragged is fully there to grab again. */
+const TOP_EDGE_REACH_GAP = 10;
 
 /* ⛔ THE STRIP OF GREY THAT MUST ALWAYS EXIST BESIDE THE PAGE (NOTES-FREE-PLACEMENT round 2).
  * A page that has outgrown the pane is left-aligned so its own left edge is reachable at scroll 0
@@ -2554,6 +2560,14 @@ export default function NoteEditor({
    * one distance that separates them. `0` is the ordinary state and costs nothing, same as before. */
   const [sheetGrowLeft, setSheetGrowLeft] = useState(0);
   const [sheetGrowGap, setSheetGrowGap] = useState(0);
+  /* ⛔ AND THE PAGE'S OWN TOP EDGE MOVES FOR A TOP-EDGE SHRINK (B1605664 ×2) — the render mirror of
+   * `heightTopPadRef` below, which carries the full reasoning. It is STATE and not an imperative
+   * write for the same reason `sheetGrowWidth` above is: `note-sheet` is React-owned, and writing
+   * its style from outside React is a fight with the reconciler waiting to happen. The ref is the
+   * authoritative live value (a drag reads it synchronously at press, where a `useCallback`
+   * closure over state would be stale); this is what actually renders. `0` in every ordinary
+   * state, costing nothing. */
+  const [sheetTopPad, setSheetTopPad] = useState(0);
   /* How much grey sits to the LEFT of the page — the gutter a centred ungrown page would have,
    * floored so it never disappears. Measured in the same pass as the growth, from the same
    * numbers, and it is a function of the PANE only, never of the sheet's grown width, which is
@@ -2630,52 +2644,70 @@ export default function NoteEditor({
    * pin silently doing nothing). The height pin feeds `dom.style.minHeight`, an element this
    * module already writes to imperatively for the unpinned case.
    *
-   * ⛔ CORRECTED (B1605664, 2026-09-12) — READ THIS BEFORE TOUCHING THE TOP GRIP. The comment
-   * this replaced claimed the top edge could reuse `beginWidthDrag`'s LEFT-edge trick verbatim —
-   * grow `minHeight` (always downward, architecturally) and scroll `note-mat` to make the OTHER
-   * edge look fixed. That trick needs `scroller.scrollTop` to move as far as the drag asks, in
-   * EITHER direction, and it silently CANNOT: shrinking via the top edge needs `scrollTop` to go
-   * NEGATIVE, and a note page opens scrolled to its own top (`scrollTop === 0`) essentially
-   * always — measured live on a fresh page and reproduced in `ui-audit/verify-notes-page-height.mjs`
-   * §3b below: a 100px drag on the top grip left `scrollTop` pinned at 0 (the browser clamps a
-   * negative assignment to 0, unlike the LEFT-edge width case, which only ever needs `scrollLeft`
-   * to INCREASE — plenty of room, since the page just grew that much wider). The number
-   * (`dragHeightFromDelta`) came out right; only the ILLUSION of which edge moved was broken, so
-   * it looked exactly like a bottom-edge drag — this is B1586784's owner-reported regression.
-   * `heightTopPadRef` is the fix: a `translateY` for the SHRINK half (which scroll cannot
-   * represent), left in place across the commit exactly the way `beginWidthDrag`'s own
-   * `scrollLeft` is — so the settled, reload-surviving state renders at its ordinary top-anchored
-   * position (a completed top-edge shrink then LOOKS like the equivalent bottom-edge shrink once
-   * the drag itself is over, matching `pageHeight`'s existing meaning: it is just a number,
-   * symmetric no matter which edge produced it). ⛔ TRANSFORM, NOT `margin-top` — the first draft
-   * used `margin-top` and measured 16px short on every drag: `dom`'s own top margin COLLAPSES
-   * with the title band's `marginBottom` (TITLE_BAND_GAP) rather than adding to it, so the visible
-   * shift was always `shrank - TITLE_BAND_GAP`, not `shrank`. `transform` never participates in
-   * margin collapsing (it is a paint-time offset, not a layout property), so it moves by exactly
-   * what was asked regardless of whatever gap already existed above it. The GROW half still
-   * rides `scrollTop` exactly as before — that direction never needed a negative value and was
-   * never broken. `heightTopPadRef` resets to 0 the moment the page returns to Fit to content (an
-   * unpinned page has no grow-from-top state to keep); a later BOTTOM-edge drag composes with
-   * whatever offset the top edge already added rather than clearing it, the same way growing
-   * sideways from one width edge does not erase a pin already set from the other.
+   * ⛔ CORRECTED TWICE. READ BOTH ROUNDS BEFORE TOUCHING THE TOP GRIP.
    *
-   * ⛔ CORRECTED AGAIN (B1344629, owner report 2026-09-15) — THE TRANSFORM GOES ON `note-sheet`
-   * (THE CARD), NOT ON `dom` ALONE, AND THIS WAS WRONG THE FIRST TIME IT SHIPPED. B1605664 put
-   * the `translateY` on `dom` because it reasoned about the drag as "hold `dom`'s own bottom
-   * still" — true in isolation, and exactly why the existing live-verify harness's own
-   * `bodyRect()` (which reads `[data-testid="note-body"]`, i.e. `dom`) reported it as fixed. But
-   * the grip visually belongs to `note-sheet` (the white card with the border and the title), and
-   * `dom`'s `minHeight` shrinking is REAL layout — it shrinks `note-sheet`'s own rendered height
-   * by the same amount, with nothing to carry ITS top edge or its title down. Measured live: card
-   * top 150→150 (unmoved), bottom 686→586 (shrunk from the bottom — the exact pre-B1605664 bug,
-   * one level up), while `dom` alone correctly went top 267→367 / bottom unchanged — which is a
-   * GAP opening under the title, not a moving page. Translating `note-sheet` instead carries the
-   * title, the grips and the body down together, so the whole visible page — not just its text —
-   * keeps "bottom holds, top follows the grip." See the measurement effect's own comment on this
-   * same fix for the full reasoning. */
+   * ROUND 1 (B1605664, 2026-09-12) — the ORIGINAL comment claimed the top edge could reuse
+   * `beginWidthDrag`'s LEFT-edge trick verbatim: grow `minHeight` (always downward,
+   * architecturally) and scroll `note-mat` to make the OTHER edge look fixed. That trick needs
+   * `scroller.scrollTop` to move as far as the drag asks, in EITHER direction, and it silently
+   * CANNOT: shrinking via the top edge needs `scrollTop` to go NEGATIVE, and a note page opens
+   * scrolled to its own top (`scrollTop === 0`) essentially always. The browser clamps a negative
+   * assignment to 0 without complaint (unlike the LEFT-edge width case, which only ever needs
+   * `scrollLeft` to INCREASE — plenty of room, since the page just grew that much wider), so the
+   * compensation never applied and a top-edge shrink looked exactly like a bottom-edge one. That
+   * diagnosis was RIGHT and is unchanged; the clamp is still the thing to design around.
+   *
+   * ROUND 2 (B1605664 ×2, 2026-09-15) — round 1's FIX was a `translateY` on `dom`, and `dom` is the
+   * WRONG ELEMENT. `dom` is the ProseMirror body, which lives INSIDE `note-sheet`; the page a
+   * person sees, with the white surface, the border and the two grips on it, is the SHEET. A
+   * transform is a paint-time offset that changes nothing about layout, so it slid the TEXT down
+   * inside a page whose own top edge never moved while its bottom edge crept up — the exact
+   * symptom round 1 set out to fix. Measured on the shipped build at the owner's own 1191x465
+   * window, top grip dragged DOWN 40 on a fresh page:
+   *     note-sheet (the page)   top 150 -> 150   bottom 578 -> 538    ✗ the grabbed edge is pinned
+   *     note-body  (the text)   top 267 -> 307   bottom 481 -> 481    ✓ reads perfect
+   * Both numbers are honest. They describe different boxes — and `ui-audit/verify-notes-page-
+   * height.mjs` measured the second one, which is why it reported 46/46 green against a page that
+   * was visibly broken (B1609185 fixes the harness; DRIVER-SCROLL-IS-NOT-APP-SCROLL §6 — the
+   * harness's own QUESTION produced the reading).
+   *
+   * THE FIX IS THEREFORE A LAYOUT OFFSET ON THE SHEET, NOT A PAINT OFFSET ON THE BODY:
+   * `heightTopPadRef` (+ its `sheetTopPad` render mirror) is folded into `note-sheet`'s own
+   * `margin-top`. The sheet's height still comes from `dom.style.minHeight`, so shrinking by `S`
+   * and pushing the sheet down by `S` holds the bottom edge EXACTLY still — bottom = top + height,
+   * (T + S) + (H - S) = T + H — while the top edge moves 1:1 with the pointer. ⛔ MARGIN IS SAFE
+   * HERE AND WAS NOT ON `dom`: round 1 rejected `margin-top` because `dom`'s own top margin
+   * COLLAPSES with the title band's `marginBottom` (measured 16px short every time). `note-sheet`
+   * is a FLEX ITEM of `note-mat` (`display: flex; flexDirection: column`), and flex items never
+   * margin-collapse with anything — so the margin moves the page by exactly what is asked. It is
+   * also the one offset that works at any `zoom`: the sheet's own margin and the body's own
+   * `minHeight` are scaled by the SAME zoom, so the two cancel at every zoom level.
+   *
+   * ⛔ WHY THE PAD IS KEPT AFTER RELEASE, NOT CLEARED. Clearing it on commit would yank the whole
+   * page back up by `S` the instant the mouse comes up — which IS the reported bug, one frame
+   * later. The gap it leaves above the page is the honest consequence of the owner's own stated
+   * expectation ("the grabbed edge follows the pointer and the opposite edge holds"): with the mat
+   * already at `scrollTop === 0` there is nothing above the page to scroll into, so the only way
+   * the top edge can move DOWN is for real space to open above it. That space is ordinary
+   * scrollable grey, and a reload (which restores neither scroll position nor this offset) settles
+   * at the app's usual top-anchored rest position with the same stored height.
+   *
+   * `heightPadOwnerRef` is what stops the offset going stale: it records the committed
+   * `pageHeight` the pad belongs to. Every height drag (either edge) re-stamps it, so a later
+   * BOTTOM-edge drag composes with the offset rather than clearing it; any OTHER route to a
+   * different height — undo/redo, a sync from another device, Fit to content — no longer matches,
+   * and the measurement effect drops the pad so the page re-anchors at the top of the mat. */
   const heightDragRef = useRef(null);
   const heightContentFloorRef = useRef(0);
   const heightTopPadRef = useRef(0);
+  const heightPadOwnerRef = useRef(null);
+  /** The ONE way the page's top offset is ever written — ref (read synchronously by the next
+   *  drag) and render mirror together, so the two can never disagree. */
+  const writeTopPad = useCallback((px) => {
+    const n = Math.max(0, px || 0);
+    heightTopPadRef.current = n;
+    setSheetTopPad(n);
+  }, []);
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
 
@@ -2944,31 +2976,19 @@ export default function NoteEditor({
        * draft of this exact mistake). */
       heightContentFloorRef.current = need;
       const pinnedHeight = resolvePinnedBaseHeight(editor.state.doc.attrs?.pageHeight);
-      /* ⛔ Fit to content has no grow-from-top state to keep — see `heightTopPadRef`'s own
-       * header comment above. Any other run (pinned via either edge) leaves whatever the ref
-       * currently holds alone; only a live TOP drag (`beginHeightDrag` below) ever grows it. */
-      if (pinnedHeight == null) heightTopPadRef.current = 0;
+      /* ⛔ THE PAGE'S TOP OFFSET BELONGS TO ONE COMMITTED HEIGHT, AND IS DROPPED THE MOMENT A
+       * DIFFERENT ONE IS ON SCREEN (B1605664 ×2). Fit to content has no grow-from-top state to keep
+       * at all; neither has a height that arrived by undo/redo or by a sync from another device,
+       * which would otherwise render somebody else's page stranded below a gap this session
+       * opened. A height drag on EITHER edge re-stamps `heightPadOwnerRef` as it commits, so the
+       * ordinary "drag the top, then drag the bottom" sequence composes instead of jumping. */
+      if (pinnedHeight == null || pinnedHeight !== heightPadOwnerRef.current) {
+        heightPadOwnerRef.current = pinnedHeight;
+        if (heightTopPadRef.current) writeTopPad(0);
+      }
       dom.style.minHeight = pinnedHeight != null
         ? `${Math.max(pinnedHeight, need)}px`
         : (need ? `max(46vh, ${need}px)` : "");
-      /* ⛔ CORRECTED (B1344629, owner report 2026-09-15) — THE TOP-EDGE SHRINK TRANSFORM BELONGS
-       * ON THE SHEET CARD, NOT ON `dom` — READ THIS BEFORE MOVING IT BACK. B1605664 (above) put
-       * this `translateY` on `dom` (the ProseMirror content element) alone, reasoning it as
-       * "the same trick as `beginWidthDrag`'s `scrollLeft`, transposed." Measured live at the
-       * owner's own 1191×465 window: after a 100px top-grip drag downward, `note-sheet` (the
-       * visible white card — the thing the grip visually sits on) went top 150→150, bottom
-       * 686→586 — completely unmoved at the top, shrunk from the BOTTOM, exactly the pre-fix
-       * bug — while `dom` alone (the text) went top 267→367, bottom unchanged: correct in
-       * isolation, but it opened a growing gap between the title and the body instead of moving
-       * the page's own top edge, because nothing ever told the CARD to follow. `dom`'s `minHeight`
-       * shrinking is real layout — it shrinks `note-sheet`'s own layout height by the same amount,
-       * so translating the CARD down by `heightTopPadRef.current` (not `dom`) carries the title,
-       * the grips and the body down together and lands the card's bottom back where its
-       * (now-shorter) layout box would have put it before the translate — restoring "bottom
-       * holds, top moves with the grip" for the whole visible page, not just its text. */
-      const sheetEl = noteRootRef.current?.querySelector('[data-testid="note-sheet"]');
-      if (sheetEl) sheetEl.style.transform = heightTopPadRef.current ? `translateY(${heightTopPadRef.current}px)` : "";
-      dom.style.transform = "";
       /* ⛔ AND THE PAGE GROWS SIDEWAYS TOO (NEW-RIGHT-EDGE) — restored against the right
        * denominator. `naturalPageWidth` is the page's OWN width before anything grows it —
        * computed from the pane's width and the sheet's fixed layout constants
@@ -3151,7 +3171,7 @@ export default function NoteEditor({
      * numbers are read off it, so crossing the phone breakpoint has to re-run this closure with
      * the fresh value immediately rather than wait on the ResizeObserver to fire against a
      * still-stale `narrow` from the render this effect was last registered under. */
-  }, [editor, docTick, narrow]);
+  }, [editor, docTick, narrow, writeTopPad]);
 
   /* ⛔ THE PAGE GROWS; THE WORDS DO NOT MOVE (NOTES-FREE-PLACEMENT, VIEWPORT-STABLE (a)).
    *
@@ -3227,25 +3247,38 @@ export default function NoteEditor({
    * window happens to show, the spreadsheet convention for dragging a selection to an edge.
    *
    * `beginEdgeAutoScroll` runs a `requestAnimationFrame` loop for the life of a grip drag. While
-   * the pointer sits within `EDGE_AUTOSCROLL_MARGIN` of the scroller's own edge, on the side the
-   * drag is growing toward, each frame nudges `drag.lastClientX`/`lastClientY` FURTHER in that
-   * direction — pretending the mouse kept moving, even though the browser stopped delivering real
-   * `pointermove` events once the cursor reached the screen's edge — and scrolls the scroller the
-   * same amount, so the growing edge stays visible under the pointer. Reusing the SAME
-   * `liveWidthFor`/`liveHeightFor` closures each caller already has (rather than a parallel
-   * mechanism) is what keeps this from becoming a second source of truth: a real `pointermove`
-   * and an auto-scroll tick both just update `drag.lastClientX` and re-run the identical formula. */
+   * the pointer sits within `EDGE_AUTOSCROLL_MARGIN` of the WINDOW's own edge — never the
+   * scroller's — on the side the drag is growing toward, each frame nudges
+   * `drag.lastClientX`/`lastClientY` FURTHER in that direction — pretending the mouse kept
+   * moving, even though the browser stopped delivering real `pointermove` events once the cursor
+   * reached the screen's edge — and scrolls the scroller the same amount, so the growing edge
+   * stays visible under the pointer. Reusing the SAME `liveWidthFor`/`liveHeightFor` closures
+   * each caller already has (rather than a parallel mechanism) is what keeps this from becoming a
+   * second source of truth: a real `pointermove` and an auto-scroll tick both just update
+   * `drag.lastClientX` and re-run the identical formula.
+   *
+   * ⛔ THE WINDOW'S EDGE, NOT `scroller.getBoundingClientRect()` — this was the first draft's own
+   * bug, caught by `verify-notes-page-height.mjs` §16 going from 46/46 to 39/46 with nothing else
+   * changed. `note-mat` sits BELOW the toolbar (its own top edge measured ~126px down a ~700px
+   * window) and to the RIGHT of the Pages rail — real, draggable window space the pointer can
+   * still move INTO, not the edge of the screen. Keying the margin off the scroller's own (much
+   * smaller) box fired auto-scroll during perfectly ordinary, fully-intentional test drags that
+   * never came near a real screen boundary at all — measured: a 60px controlled drag reported
+   * "moved -82, asked -60", the auto-scroll tacking on 22 unasked extra pixels because the pointer
+   * had merely crossed INTO the toolbar's own row, nowhere near `window.innerHeight`'s true 0. The
+   * window's own edge is the only boundary a real mouse cannot cross, which is the one thing this
+   * mechanism exists to route around. */
   const EDGE_AUTOSCROLL_MARGIN = 32;
   const EDGE_AUTOSCROLL_MAX_PX_PER_FRAME = 22;
-  const beginEdgeAutoScroll = useCallback(({ scroller, axis, sign, getPointerPos, onTick }) => {
+  const beginEdgeAutoScroll = useCallback(({ axis, sign, getPointerPos, onTick }) => {
     let raf = null;
     const step = () => {
       const pos = getPointerPos();
       if (pos == null) { raf = null; return; }
-      const rect = scroller.getBoundingClientRect();
-      const distanceToEdge = axis === "x"
-        ? (sign > 0 ? rect.right - pos : pos - rect.left)
-        : (sign > 0 ? rect.bottom - pos : pos - rect.top);
+      const viewportEdge = axis === "x"
+        ? (sign > 0 ? window.innerWidth : 0)
+        : (sign > 0 ? window.innerHeight : 0);
+      const distanceToEdge = sign > 0 ? viewportEdge - pos : pos - viewportEdge;
       if (distanceToEdge < EDGE_AUTOSCROLL_MARGIN) {
         const depth = Math.max(0, EDGE_AUTOSCROLL_MARGIN - distanceToEdge);
         const speed = Math.max(2, Math.min(EDGE_AUTOSCROLL_MAX_PX_PER_FRAME, depth));
@@ -3335,10 +3368,9 @@ export default function NoteEditor({
       apply();
     };
     // ⛔ NEW-7 — see `beginEdgeAutoScroll`'s own header. The right edge auto-scrolls the view
-    // RIGHTWARD as it grows (so the growing edge stays under the pointer); the left edge grows
-    // by moving further LEFT, so it watches the scroller's own left edge instead.
+    // RIGHTWARD as it grows (so the growing edge stays under the pointer, watching the WINDOW's
+    // own right edge); the left edge grows by moving further LEFT, watching the window's left.
     const stopAutoScroll = beginEdgeAutoScroll({
-      scroller,
       axis: "x",
       sign: edge === "right" ? 1 : -1,
       getPointerPos: () => drag.lastClientX,
@@ -3394,55 +3426,56 @@ export default function NoteEditor({
    *                 DECREASE below its own current value, and a note page opens scrolled to its
    *                 own top (`scrollTop === 0`) essentially always — there is nothing to scroll
    *                 UP into. `scroller.scrollTop = X` where X<0 silently clamps to 0 (browsers do
-   *                 not throw), so the compensation never applied: `dom.style.minHeight` still
-   *                 shrank correctly, but with the viewport pinned exactly where it was, the BODY
-   *                 keeps its top and only its bottom recedes — indistinguishable from a
-   *                 bottom-edge drag (B1586784, owner-reported 2026-09-12: "both grips resize
-   *                 from the bottom"). `heightTopPadRef` (declared above, by the other two
-   *                 height refs) is the real fix: a `translateY` on `dom`, grown by exactly the
-   *                 amount the live drag shrinks below where THIS gesture started — unlike
-   *                 scroll, a CSS transform has no floor at the viewport's own top, so it never
-   *                 clamps, and unlike a margin it never collapses with a neighbour's own margin
-   *                 (measured 16px short the one time this used `margin-top` instead — see
-   *                 `heightTopPadRef`'s own header). `dom`'s own bottom edge is `minHeight` below
-   *                 its top, so shifting the whole box down by exactly the amount `minHeight`
-   *                 shrank holds the bottom exactly where it was while the top — now `shrank`
-   *                 pixels further down on screen — moves 1:1 with the pointer, the opposite of
-   *                 growing. Left in place across the commit exactly the way `beginWidthDrag`'s
-   *                 own `scrollLeft` is (see that function's comment) — see `heightTopPadRef`'s
-   *                 own header for why that settles correctly rather than snapping back.
+   *                 not throw), so the compensation never applies: `dom.style.minHeight` shrinks
+   *                 correctly, but with the viewport pinned exactly where it was, the page keeps
+   *                 its top and only its bottom recedes — indistinguishable from a bottom-edge
+   *                 drag. So the shrink half moves the PAGE instead of the viewport:
+   *                 `heightTopPadRef` (declared above, by the other height refs, with the full
+   *                 reasoning and the measurements) opens exactly `shrank` of real space above
+   *                 `note-sheet` via its own `margin-top`. The sheet's bottom edge is `minHeight`
+   *                 below its top, so pushing the whole page down by exactly what `minHeight`
+   *                 gave up holds the bottom still while the top moves 1:1 with the pointer.
+   *                 ⛔ THE PAGE, NOT THE BODY — round 1 of this fix put a `translateY` on `dom`
+   *                 (the ProseMirror body, INSIDE the sheet), which slid the text down inside a
+   *                 page whose own edges did not move at all. See `heightTopPadRef`'s header for
+   *                 the before/after numbers and for why the harness called that green.
+   *
+   * ⛔ AND THE EDGE YOU DRAGGED STAYS REACHABLE WHEN YOU LET GO (B1609184). Growing from the top
+   * scrolls the mat, and a big enough grow scrolls the page's own top edge — with the grip that
+   * lives on it — clean out of the mat's visible box: measured at the owner's 1191x465 window, a
+   * 60px grow left the top edge at screen y 90 against a mat whose viewport starts at 126, so the
+   * edge just dragged could not be grabbed again without scrolling back by hand. `settleTopEdge`
+   * gives back the minimum scroll that brings the grip fully back inside, and only when it is
+   * genuinely outside — a drag that ends with the grip in view scrolls nothing at all. It runs at
+   * RELEASE, never mid-gesture: the drag itself must stay 1:1 with the pointer (the owner verified
+   * that half as correct), and "reachable when the drag ends" is exactly the promise being kept.
    *
    * ⛔ WHY THIS DOES NOT FIGHT THE MEASUREMENT EFFECT ABOVE: `measure()` bails out immediately
    * while `heightDragRef.current` is set, so the ResizeObserver it owns cannot see this
-   * function's live `dom.style.minHeight`/`transform` writes and overwrite them mid-drag against
-   * the STILL-uncommitted `pageHeight` attribute. The one real commit — `setNotePageHeight` on
+   * function's live `dom.style.minHeight` writes and overwrite them mid-drag against the
+   * STILL-uncommitted `pageHeight` attribute. The one real commit — `setNotePageHeight` on
    * release — is what hands authority back, one undoable `setDocAttribute` step regardless of
    * how many pixels the drag covered. A press with no real movement commits nothing, matching
    * this module's own standing rule (B391073) and `beginWidthDrag`'s identical guard.
    *
-   * ⛔ NO REACT STATE NEEDED HERE, UNLIKE WIDTH. `sheetGrowWidth` exists because `note-sheet` is
-   * a React-owned element whose declarative `width` style needed a value to bind to; the height
-   * pin only ever feeds `dom.style.minHeight`/`transform`, and `dom` is the editor's own DOM
-   * node — this module already writes `minHeight` imperatively for the unpinned default (see the
-   * measurement effect above), so the live drag does too, and the commit's own re-render is what
-   * makes the NEXT real `measure()` run authoritative again (including re-applying
-   * `heightTopPadRef`'s current value, so it survives a render the drag itself did not cause). */
+   * ⛔ THE PAGE'S OFFSET IS REACT STATE, THE BODY'S HEIGHT IS NOT, AND THAT SPLIT IS THE WHOLE
+   * POINT. `dom` is the editor's own DOM node, which this module already writes to imperatively
+   * for the unpinned case, so the live drag does too. `note-sheet` is React-owned — exactly why
+   * `sheetGrowWidth` exists for the width feature — so its offset rides `writeTopPad` (ref +
+   * `sheetTopPad` render mirror) rather than a style write React would fight over. The commit's
+   * own re-render is what makes the NEXT real `measure()` run authoritative again. */
   const [heightDragEdge, setHeightDragEdge] = useState(null);
   const beginHeightDrag = useCallback((edge) => (e) => {
     if (!editor || editor.isDestroyed || e.button !== 0) return;
     const dom = editor.view.dom;
     const scroller = scrollerRef.current;
-    // ⛔ B1344629 — the shrink-side translateY belongs on the CARD, not on `dom` alone (see the
-    // measurement effect's own comment on this same correction for the measured reason).
-    const sheetEl = noteRootRef.current?.querySelector('[data-testid="note-sheet"]');
-    if (!dom || !scroller || !sheetEl) return;
+    if (!dom || !scroller) return;
     e.preventDefault();
     const startHeight = dom.getBoundingClientRect().height;
     const drag = {
       edge,
       startHeight,
       startClientY: e.clientY,
-      lastClientY: e.clientY,
       startScrollTop: scroller.scrollTop,
       // Whatever margin-top the top edge has already grown, from an earlier gesture — this
       // drag ADDS to it (or gives it back) rather than starting over from 0, the same way a
@@ -3465,77 +3498,85 @@ export default function NoteEditor({
       const rawDelta = edge === "bottom" ? clientY - drag.startClientY : drag.startClientY - clientY;
       return Math.max(dragHeightFromDelta(drag.startHeight, rawDelta), drag.baseGrowHeight);
     };
-    const apply = () => {
-      const h = liveHeightFor(drag.lastClientY);
-      dom.style.minHeight = `${h}px`;
-      if (edge === "top") {
-        // Growing (h > startHeight): scroll down into the room the taller body just made —
-        // never clamped, since that room genuinely now exists. Shrinking (h < startHeight):
-        // scroll cannot go negative, so give the SAME distance to a translateY instead — see
-        // this function's own header comment for why a transform, not a margin. Exactly one of
-        // the two is ever non-zero at a time, so they never fight each other.
-        const grew = Math.max(0, h - drag.startHeight);
-        const shrank = Math.max(0, drag.startHeight - h);
-        scroller.scrollTop = drag.startScrollTop + grew;
-        heightTopPadRef.current = drag.startTopPad + shrank;
-        sheetEl.style.transform = heightTopPadRef.current ? `translateY(${heightTopPadRef.current}px)` : "";
-      }
+    /* The top edge's own "the other edge holds" illusion, for one live height — see this
+     * function's header for why shrinking moves the PAGE (there is nothing above it to scroll
+     * into) while growing rides the SCROLLER. The two are one continuous line, not two cases:
+     * growing HANDS BACK any gap an earlier shrink opened before it spends any scroll, so the
+     * ordinary shrink-then-grow-again round trip ends exactly where it started with no gap and no
+     * leftover scroll. Only a grow past whatever gap was available needs the scroller at all. */
+    const applyTopCompensation = (h) => {
+      const next = topEdgeCompensation({
+        startTopPad: drag.startTopPad,
+        startScrollTop: drag.startScrollTop,
+        delta: h - drag.startHeight,                               // + grew · − shrank
+      });
+      writeTopPad(next.topPad);
+      scroller.scrollTop = next.scrollTop;
     };
+    /* B1609184 — give back the least scroll that puts the grip just dragged fully back inside the
+     * mat's visible box, and nothing when it is already there. The visible box is the INTERSECTION
+     * of the mat and the window: at a short window the mat's own element can extend past the
+     * bottom of the screen (measured 480 tall in a 465 window), so the mat's rect alone is not
+     * what a person can see. Scrolling UP moves content DOWN the screen, hence the subtraction. */
+    const settleTopEdge = () => {
+      const grip = noteRootRef.current?.querySelector('[data-testid="note-page-height-grip-top"]');
+      if (!grip) return;
+      const matRect = scroller.getBoundingClientRect();
+      scroller.scrollTop = scrollToReach({
+        scrollTop: scroller.scrollTop,
+        gripTop: grip.getBoundingClientRect().top,
+        visibleTop: Math.max(matRect.top, 0),
+        gap: TOP_EDGE_REACH_GAP,
+      });
+    };
+    /* ⛔ NEW-7 (B1344630) WAS SCOPED TO THIS TOO, AND REVERTED — READ BEFORE RE-ADDING IT. An
+     * earlier draft auto-scrolled the mat as the BOTTOM edge grew, to keep the grip under the
+     * pointer past the window's own bottom edge, the same trick `beginWidthDrag` uses on the
+     * right. It broke the "opposite edge holds" invariant this whole feature is built on: unlike
+     * the TOP edge (where the scroll and the `minHeight` grow by the SAME amount, so they cancel
+     * for the top), a bottom-edge auto-scroll has nothing to cancel against — scrolling shifts
+     * the WHOLE viewport, so the top edge visibly slid too. Measured in
+     * `ui-audit/verify-notes-page-height.mjs` §16: a plain 60px bottom-edge drag at the owner's
+     * own 1191×465 window (where the grip already rests within the auto-scroll margin of the
+     * window's own bottom edge at REST) reported the top edge moving −171px on a drag that is
+     * supposed to hold it. NEW-7's own report was about the WIDTH grips only ("I could NOT
+     * distinguish 'the app clamps the width to the pane' from 'I ran out of screen'" — said of
+     * dragging the page WIDER) — the height grips were never part of that report, so this stays
+     * scoped to `beginWidthDrag` alone rather than partially reintroducing the same defect. */
     const onMove = (ev) => {
-      drag.lastClientY = ev.clientY;
-      apply();
+      const h = liveHeightFor(ev.clientY);
+      dom.style.minHeight = `${h}px`;
+      if (edge === "top") applyTopCompensation(h);
     };
-    // ⛔ NEW-7 — see `beginEdgeAutoScroll`'s own header. The bottom edge auto-scrolls the view
-    // DOWNWARD as it grows; the top edge only ever needs this while GROWING (dragging up off the
-    // top of the screen) — shrinking (dragging the top grip down) moves toward the page's own
-    // interior, never toward a screen edge, so watching the scroller's own top edge for `edge
-    // === "top"` covers exactly the case that needs it and no other.
-    const stopAutoScroll = beginEdgeAutoScroll({
-      scroller,
-      axis: "y",
-      sign: edge === "bottom" ? 1 : -1,
-      getPointerPos: () => drag.lastClientY,
-      onTick: (deltaPx) => {
-        drag.lastClientY += deltaPx;
-        if (edge === "bottom") scroller.scrollTop += deltaPx;
-        apply();
-      },
-    });
     const onUp = (ev) => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
-      stopAutoScroll();
       document.body.style.cursor = prevCursor;
       document.body.style.userSelect = prevSelect;
       heightDragRef.current = null;
       setHeightDragEdge(null);
       if (!editor || editor.isDestroyed) return;
-      // ⛔ NEW-7 — see `beginWidthDrag`'s own identical correction: never flatly overwrite
-      // `lastClientY` with `ev.clientY` here, or a commit right after auto-scroll ran would snap
-      // back to the screen-bound pointer position and discard the auto-scrolled growth. Take
-      // whichever position represents MORE growth in this edge's own direction.
-      drag.lastClientY = edge === "bottom"
-        ? Math.max(drag.lastClientY, ev.clientY)
-        : Math.min(drag.lastClientY, ev.clientY);
-      const moved = Math.abs(drag.lastClientY - drag.startClientY) >= 1;
+      const moved = Math.abs(ev.clientY - drag.startClientY) >= 1;
       if (!moved) return;                              // a click that did not drag writes nothing
-      const h = liveHeightFor(drag.lastClientY);
+      const h = liveHeightFor(ev.clientY);
       // Re-derive from the SAME `h` this commits, rather than trusting the last `onMove` call's
       // own read — `pointerup`'s own coordinates are the authoritative final position and can
       // differ from the last `pointermove` by a pixel, and a mismatch here is exactly the kind
       // of one-frame gap VIEWPORT-STABLE calls out.
-      if (edge === "top") {
-        const shrank = Math.max(0, drag.startHeight - h);
-        heightTopPadRef.current = drag.startTopPad + shrank;
-        sheetEl.style.transform = heightTopPadRef.current ? `translateY(${heightTopPadRef.current}px)` : "";
-      }
-      editor.commands.setNotePageHeight(Math.round(h));
+      if (edge === "top") applyTopCompensation(h);
+      const committed = Math.round(h);
+      // The offset above now belongs to THIS height — see the measurement effect's own comment
+      // on `heightPadOwnerRef`. Stamped for a BOTTOM-edge drag too, so dragging the bottom after
+      // the top composes with the offset instead of dropping it and jumping the page.
+      heightPadOwnerRef.current = committed;
+      editor.commands.setNotePageHeight(committed);
+      if (edge === "top") settleTopEdge();
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
-  }, [editor, beginEdgeAutoScroll]);
+  }, [editor, writeTopPad]);
 
   /* ---- PASTE JUST THE TEXT (B36051) ------------------------------------------------------
    *
@@ -3943,7 +3984,16 @@ export default function NoteEditor({
             padding: narrow
               ? `${SHEET_PAD_TOP.narrow}px ${SHEET_PAD_X.narrow}px max(96px, calc(96px + env(safe-area-inset-bottom))) ${SHEET_PAD_X.narrow + sheetGrowLeft}px`
               : `${SHEET_PAD_TOP.wide}px ${SHEET_PAD_X.wide}px 96px ${SHEET_PAD_X.wide + sheetGrowLeft}px`,
-            margin: narrow ? `10px ${SHEET_MARGIN_X.narrow}px 0` : `24px ${SHEET_MARGIN_X.wide}px 0`,
+            /* ⛔ AND THE TOP MARGIN IS WHERE A TOP-EDGE SHRINK MOVES THE PAGE (B1605664 ×2) —
+               `sheetTopPad` is 0 in every ordinary state, so this renders exactly as it always
+               has. It is a MARGIN and not a transform because the page's own bottom edge must
+               stay put while its top moves: a transform would carry both edges down together.
+               Flex items never margin-collapse, and `note-mat` is a column flex container, so
+               this moves the page by exactly what was asked — see `heightTopPadRef`'s own header
+               for the 16px-short measurement that rules margins out on the BODY but not here. */
+            margin: narrow
+              ? `${10 + sheetTopPad}px ${SHEET_MARGIN_X.narrow}px 0`
+              : `${24 + sheetTopPad}px ${SHEET_MARGIN_X.wide}px 0`,
           }}
         >
           {/* ⛔ SET A PAGE'S OWN WIDTH BY HAND (NEW-1) — hidden on a phone: a phone page is

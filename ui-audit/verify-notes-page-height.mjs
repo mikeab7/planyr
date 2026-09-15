@@ -67,16 +67,22 @@ async function withPage(viewport, fn) {
     });
   }
 
-  /* ⛔ B1344629 — `bodyRect` alone is not enough to prove the GRIP's own edge moved. `dom`
-   * (`note-body`) can hold its own top/bottom correctly while `note-sheet` — the visible white
-   * card the grip is actually drawn on, title included — stays put and just shrinks from the
-   * other end instead, which is exactly the bug this measures (see NoteEditor.jsx's own comment
-   * on this correction for the measured before/after). Every top-edge case below now asserts on
-   * BOTH. */
+  /* ⛔ THE PAGE'S OWN EDGES, WHICH ARE NOT `bodyRect`'s (B1609185, 2026-09-15) — and the whole
+   * reason this harness reported 46/46 against a page that was visibly broken on production.
+   * `note-body` is the ProseMirror body, which lives INSIDE `note-sheet`; the page a person sees
+   * — white surface, border, and the two height grips sitting on its edges — is the SHEET. The
+   * shipped B1605664 fix moved the BODY with a `translateY` and left the page itself where it
+   * was, so every `bodyRect` reading was perfect while the page's top edge never moved at all.
+   * Measured on that build, top grip dragged down 40 at 1191x465:
+   *     note-sheet  top 150 -> 150   bottom 578 -> 538     ✗ the grabbed edge is pinned
+   *     note-body   top 267 -> 307   bottom 481 -> 481     ✓ reads perfect
+   * Both are honest; they describe different boxes. A claim about what a PERSON sees an edge do
+   * is a claim about this rect, never the other one. DRIVER-SCROLL-IS-NOT-APP-SCROLL §6: the
+   * harness's own QUESTION produced the reading, so §16 below carries a known-good arm whose
+   * answer does not depend on the drag code at all. */
   async function sheetRect() {
     return page.evaluate(() => {
-      const sheet = document.querySelector('[data-testid="note-sheet"]');
-      const r = sheet.getBoundingClientRect();
+      const r = document.querySelector('[data-testid="note-sheet"]').getBoundingClientRect();
       return { top: Math.round(r.top), bottom: Math.round(r.bottom), height: Math.round(r.height) };
     });
   }
@@ -220,11 +226,17 @@ const errsA = await withPage({ width: 1500, height: 950 }, async ({ page, seed, 
     await page.mouse.move(grip.x, grip.y);
     await page.mouse.down();
     for (let i = 1; i <= 10; i += 1) await page.mouse.move(grip.x, grip.y - 20 * i, { steps: 2 });
+    /* ⛔ READ IT WITH THE BUTTON STILL DOWN (B1609184). "The opposite edge holds" is a promise
+     * about the DRAG, and a top-edge grow deliberately ends with a scroll that brings the edge
+     * you dragged back into reach (§17) — which moves both edges on screen, after the gesture is
+     * over. Asserting the hold at release would be asserting that the settle does not happen. */
+    const mid = await bodyRect();
     await page.mouse.up();
     await page.waitForTimeout(300);
     const after = await bodyRect();
     ok("the body grew by roughly the drag distance", after.height >= before.height + 150, JSON.stringify({ before, after }));
-    ok("the BOTTOM edge stayed close to where it started (within rounding noise)", Math.abs(after.bottom - before.bottom) <= 15, JSON.stringify({ before, after }));
+    ok("the BOTTOM edge stayed close to where it started, through the drag itself", Math.abs(mid.bottom - before.bottom) <= 15, JSON.stringify({ before, mid }));
+    ok("the height it grew to survives the release settle", Math.abs(after.height - mid.height) <= 3, JSON.stringify({ mid, after }));
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.waitForSelector('[data-testid="note-body"]', { timeout: 20000 });
     await page.waitForTimeout(900);
@@ -246,7 +258,7 @@ const errsA = await withPage({ width: 1500, height: 950 }, async ({ page, seed, 
   {
     await seed(PLAIN_DOC, "Shrink top");
     const before = await bodyRect();
-    const sheetBefore = await sheetRect();
+    const pageBefore = await sheetRect();
     const grip = await gripCenter("note-page-height-grip-top");
     await page.mouse.move(grip.x, grip.y);
     await page.mouse.down();
@@ -254,24 +266,21 @@ const errsA = await withPage({ width: 1500, height: 950 }, async ({ page, seed, 
     await page.mouse.up();
     await page.waitForTimeout(300);
     const after = await bodyRect();
-    const sheetAfter = await sheetRect();
+    const pageAfter = await sheetRect();
     ok("the body shrank by roughly the drag distance", after.height <= before.height - 70, JSON.stringify({ before, after }));
-    ok("the TOP edge moved down by roughly the drag distance (it did NOT stay pinned)",
+    ok("the text inside the page moved down with it (note-body)",
       after.top >= before.top + 70 && after.top <= before.top + 130, JSON.stringify({ before, after }));
-    ok("the BOTTOM edge stayed close to where it started (within rounding noise)",
+    ok("the text's own bottom stayed put (note-body)",
       Math.abs(after.bottom - before.bottom) <= 15, JSON.stringify({ before, after }));
-    /* ⛔ B1344629 — THE CARD ITSELF, NOT JUST `dom`, MUST MOVE. This is the actual reported bug:
-       `dom`'s own top/bottom can read correct while `note-sheet` (the visible white card the
-       grip is drawn on) stays pinned at the top and just shrinks from the bottom instead, which
-       reads to a real user as "nothing moved, and now there's a gap under the title." */
-    ok("the CARD's own top edge moved down by roughly the drag distance too",
-      sheetAfter.top >= sheetBefore.top + 70 && sheetAfter.top <= sheetBefore.top + 130,
-      JSON.stringify({ sheetBefore, sheetAfter }));
-    ok("the CARD's own bottom edge stayed close to where it started",
-      Math.abs(sheetAfter.bottom - sheetBefore.bottom) <= 15, JSON.stringify({ sheetBefore, sheetAfter }));
-    ok("the gap between the card's top and the body's top did NOT grow (no dead space opened under the title)",
-      Math.abs((after.top - sheetAfter.top) - (before.top - sheetBefore.top)) <= 4,
-      JSON.stringify({ beforeGap: before.top - sheetBefore.top, afterGap: after.top - sheetAfter.top }));
+    /* ⛔ AND THE SAME TWO QUESTIONS ABOUT THE PAGE ITSELF (B1609185) — the three readings above
+     * are about `note-body`, and they were all GREEN on the build whose page was visibly broken.
+     * See `sheetRect`'s own header. §16 is the full matrix; these two are here so this case can
+     * never again pass while the page's own top edge stays pinned. */
+    ok("the PAGE's top edge moved down too (it did NOT stay pinned)",
+      pageAfter.top >= pageBefore.top + 70 && pageAfter.top <= pageBefore.top + 130,
+      JSON.stringify({ pageBefore, pageAfter }));
+    ok("the PAGE's bottom edge stayed where it was",
+      Math.abs(pageAfter.bottom - pageBefore.bottom) <= 3, JSON.stringify({ pageBefore, pageAfter }));
 
     // A completed top-edge shrink settles to the app's own ordinary top-anchored rest position
     // on reload — identical to the same numeric height dragged from the BOTTOM edge instead,
@@ -304,12 +313,22 @@ const errsA = await withPage({ width: 1500, height: 950 }, async ({ page, seed, 
     await page.mouse.move(grip2.x, grip2.y);
     await page.mouse.down();
     for (let i = 1; i <= 10; i += 1) await page.mouse.move(grip2.x, grip2.y - 20 * i, { steps: 2 });
+    const midGrow = await bodyRect();          // button still down — see §3's own note on why
     await page.mouse.up();
     await page.waitForTimeout(300);
     const grown = await bodyRect();
     ok("grew from the shrunk state", grown.height > shrunk.height + 150, JSON.stringify({ shrunk, grown }));
     ok("the BOTTOM edge held through the second (grow) drag too",
-      Math.abs(grown.bottom - shrunk.bottom) <= 15, JSON.stringify({ shrunk, grown }));
+      Math.abs(midGrow.bottom - shrunk.bottom) <= 15, JSON.stringify({ shrunk, midGrow }));
+    /* ⛔ AND THE GAP THE SHRINK OPENED IS HANDED BACK BEFORE ANY SCROLL IS SPENT (B1605664 ×2) —
+     * a shrink-then-regrow round trip leaves no leftover offset and no leftover scroll, which is
+     * what keeps the two halves of this gesture from silently accumulating against each other. */
+    const roundTrip = await page.evaluate(() => ({
+      scrollTop: document.querySelector('[data-testid="note-mat"]').scrollTop,
+      marginTop: getComputedStyle(document.querySelector('[data-testid="note-sheet"]')).marginTop,
+    }));
+    ok("regrowing gives back the gap the shrink opened rather than stacking scroll on top of it",
+      parseFloat(roundTrip.marginTop) <= 24.5, JSON.stringify(roundTrip));
   }
 
   /* ── CASE 4 — the pin is a FLOOR, not a cap ─────────────────────────────────────────────── */
@@ -549,22 +568,21 @@ const errsB = await withPage({ width: 1191, height: 465 }, async ({ page, seed, 
     await seed(PLAIN_DOC, "Short window top shrink");
     const grip = await gripCenter("note-page-height-grip-top");
     const before = await bodyRect();
-    const sheetBefore = await sheetRect();
+    const pageBefore = await sheetRect();
     await page.mouse.move(grip.x, grip.y);
     await page.mouse.down();
     for (let i = 1; i <= 5; i += 1) await page.mouse.move(grip.x, grip.y + 15 * i, { steps: 2 });
     await page.mouse.up();
     await page.waitForTimeout(300);
     const after = await bodyRect();
-    const sheetAfter = await sheetRect();
+    const pageAfter = await sheetRect();
     ok("shrinks at the short window too", after.height < before.height - 40, JSON.stringify({ before, after }));
-    ok("the top edge moved down (it did NOT stay pinned)", after.top > before.top + 30, JSON.stringify({ before, after }));
-    ok("bottom holds", Math.abs(after.bottom - before.bottom) <= 15, JSON.stringify({ before, after }));
-    // ⛔ B1344629 — the CARD, not just `dom`, at the owner's own window size too.
-    ok("the CARD's own top edge moved down too (not just the text)",
-      sheetAfter.top > sheetBefore.top + 30, JSON.stringify({ sheetBefore, sheetAfter }));
-    ok("the CARD's own bottom edge held", Math.abs(sheetAfter.bottom - sheetBefore.bottom) <= 15,
-      JSON.stringify({ sheetBefore, sheetAfter }));
+    // ⛔ THE PAGE, NOT THE TEXT (B1609185) — this case read `note-body` alone and was green on the
+    // build whose page never moved. See `sheetRect`'s own header, and §16 for the full matrix.
+    ok("the PAGE's top edge moved down (it did NOT stay pinned)",
+      pageAfter.top > pageBefore.top + 30, JSON.stringify({ pageBefore, pageAfter }));
+    ok("the PAGE's bottom edge holds", Math.abs(pageAfter.bottom - pageBefore.bottom) <= 3,
+      JSON.stringify({ pageBefore, pageAfter }));
   }
 
   console.log("\n[14] Clicking in the grown blank area at 1191×465 places the caret:");
@@ -610,6 +628,181 @@ const errsB = await withPage({ width: 1191, height: 465 }, async ({ page, seed, 
     ok("the two controls' rendered text differs (no hover needed)", info.widthText !== info.heightText, JSON.stringify(info));
     ok("both still show the full 'Fit to content' value, unclipped", !info.widthTruncated && !info.heightTruncated, JSON.stringify(info));
     ok("both still sit on the toolbar's same row at the owner's window (no wrap)", info.sameRow, JSON.stringify(info));
+  }
+
+  /* ── CASE 16 — THE FOUR-WAY EDGE MATRIX, MEASURED ON THE PAGE ITSELF (B1609185) ────────────
+   * The gate this feature should always have had, and the one thing every earlier arm was
+   * missing: for BOTH grips, in BOTH directions, at the owner's own window — does the edge you
+   * GRABBED move with the pointer, and does the OTHER edge stay exactly where it was, measured on
+   * `note-sheet` (the page) rather than on `note-body` (the text inside it)?
+   *
+   * It is written to FAIL on the exact repro that shipped green: dragging the top grip DOWN 40 on
+   * a fresh page moved `note-body` perfectly and left the page's own top edge pinned at screen y
+   * 150 while its bottom crept up 578 -> 538. See `sheetRect`'s own header for the numbers.
+   *
+   * ⛔ IT CARRIES TWO KNOWN-GOOD ARMS, per DRIVER-SCROLL-IS-NOT-APP-SCROLL §6 — a probe is only
+   * believable on the unknown case once it has reported a KNOWN answer correctly:
+   *   (a) IDENTITY — the rect being measured really is the page's own boundary (grey mat just
+   *       above its top edge, page just below), and `note-body`'s top edge really is NOT (it has
+   *       page above it, by construction: the title band sits between them). That second half is
+   *       true independently of anything this feature does, and it is precisely the check whose
+   *       absence let a body-only harness vouch for a broken page.
+   *   (b) LIVENESS — scrolling the mat by a known amount must move BOTH of the page's edges by
+   *       exactly that amount. A probe that cannot see the page move under a scroll it performed
+   *       itself cannot be trusted to see it move under a drag.
+   * A mid-drag reading is what the promise is actually about (the pointer is still down and still
+   * on the edge), so each case reads the page with the button HELD, then again after release. */
+  console.log("\n[16] The page's own edges follow the pointer — both grips, both directions:");
+  {
+    await seed(PLAIN_DOC, "Edge matrix");
+
+    /* ---- known-good arm (a): what is this probe even pointed at? ------------------------- */
+    const probe = await page.evaluate(() => {
+      const sr = document.querySelector('[data-testid="note-sheet"]').getBoundingClientRect();
+      const br = document.querySelector('[data-testid="note-body"]').getBoundingClientRect();
+      const cx = Math.round(sr.left + sr.width / 2);
+      const inSheet = (y) => {
+        const el = document.elementFromPoint(cx, Math.round(y));
+        return !!el && !!el.closest('[data-testid="note-sheet"]');
+      };
+      // 14 clears the top grip's own 7px overhang above the edge (`top: -7px; height: 14px`).
+      return {
+        insideSheetTop: inSheet(sr.top + 4),
+        outsideSheetTop: inSheet(sr.top - 14),
+        aboveBodyTop: inSheet(br.top - 4),
+        sheetToBody: Math.round(br.top - sr.top),
+      };
+    });
+    ok("the rect being measured IS the page's own top edge (page below it, grey above it)",
+      probe.insideSheetTop && !probe.outsideSheetTop, JSON.stringify(probe));
+    ok("KNOWN-GOOD ARM: note-body's top edge is NOT a page edge — it has page above it, so a probe aimed there cannot see the page move",
+      probe.aboveBodyTop && probe.sheetToBody > 20, JSON.stringify(probe));
+
+    /* ---- known-good arm (b): can this probe see the page move at all? -------------------- */
+    const liveness = await page.evaluate(() => {
+      const mat = document.querySelector('[data-testid="note-mat"]');
+      const read = () => {
+        const r = document.querySelector('[data-testid="note-sheet"]').getBoundingClientRect();
+        return { top: Math.round(r.top), bottom: Math.round(r.bottom) };
+      };
+      const before = read();
+      const was = mat.scrollTop;
+      mat.scrollTop = was + 30;
+      const moved = mat.scrollTop - was;          // the mat may have had less than 30 to give
+      const after = read();
+      mat.scrollTop = was;
+      return { before, after, moved, back: read() };
+    });
+    ok("KNOWN-GOOD ARM: a known scroll moves BOTH of the page's edges by exactly that much",
+      liveness.moved > 0
+        && liveness.before.top - liveness.after.top === liveness.moved
+        && liveness.before.bottom - liveness.after.bottom === liveness.moved
+        && liveness.back.top === liveness.before.top, JSON.stringify(liveness));
+
+    /* ---- the matrix ---------------------------------------------------------------------- */
+    const GROW = 60;   // enough, at this window, to scroll the top edge clean out of view (case 17)
+    const SHRINK = 40; // stays clear of PAGE_HEIGHT_MIN on a fresh page — asserted below, never assumed
+    const cases = [
+      { edge: "top", dir: "down", dy: SHRINK, grabbed: "top", opposite: "bottom", expect: +SHRINK },
+      { edge: "top", dir: "up", dy: -GROW, grabbed: "top", opposite: "bottom", expect: -GROW },
+      { edge: "bottom", dir: "down", dy: GROW, grabbed: "bottom", opposite: "top", expect: +GROW },
+      { edge: "bottom", dir: "up", dy: -SHRINK, grabbed: "bottom", opposite: "top", expect: -SHRINK },
+    ];
+    for (const c of cases) {
+      await seed(PLAIN_DOC, `Edge ${c.edge} ${c.dir}`);
+      const grip = await gripCenter(`note-page-height-grip-${c.edge}`);
+      const before = await sheetRect();
+      const bodyBefore = await bodyRect();
+      /* ⛔ VACUITY GUARD — a shrink the page's own minimum height (PAGE_HEIGHT_MIN, applied to
+       * the BODY's own min-height, which is what the drag writes) would have refused proves
+       * nothing: it would read as a clean pass while actually measuring a clamp. */
+      const shrinking = (c.edge === "top") === (c.dy > 0);
+      ok(`[${c.edge}/${c.dir}] the drag has room to be real (not floored by the page minimum)`,
+        !shrinking || bodyBefore.height - Math.abs(c.dy) >= 170,
+        JSON.stringify({ bodyBefore, dy: c.dy }));
+
+      await page.mouse.move(grip.x, grip.y);
+      await page.mouse.down();
+      const steps = 6;
+      for (let i = 1; i <= steps; i += 1) {
+        await page.mouse.move(grip.x, grip.y + Math.round((c.dy * i) / steps), { steps: 2 });
+      }
+      const mid = await sheetRect();              // pointer still down, still on the edge
+      await page.mouse.up();
+      await page.waitForTimeout(300);
+      const after = await sheetRect();
+
+      const grabbedMoved = mid[c.grabbed] - before[c.grabbed];
+      const oppositeMoved = mid[c.opposite] - before[c.opposite];
+      ok(`[${c.edge}/${c.dir}] the GRABBED ${c.grabbed} edge followed the pointer`,
+        Math.abs(grabbedMoved - c.expect) <= 3,
+        `moved ${grabbedMoved}, asked ${c.expect} — ${JSON.stringify({ before, mid })}`);
+      ok(`[${c.edge}/${c.dir}] the OPPOSITE ${c.opposite} edge did not move`,
+        Math.abs(oppositeMoved) <= 2,
+        `moved ${oppositeMoved} — ${JSON.stringify({ before, mid })}`);
+      // Grabbing the top and pulling DOWN shortens the page; every other combination follows
+      // from the same one line.
+      const expectedHeightDelta = c.edge === "top" ? -c.dy : c.dy;
+      ok(`[${c.edge}/${c.dir}] the page's height changed by the drag, not by something else`,
+        Math.abs((mid.height - before.height) - expectedHeightDelta) <= 3,
+        JSON.stringify({ before, mid, expectedHeightDelta }));
+      /* Releasing settles the page. The one deliberate exception is a top-edge GROW, which
+       * scrolls the edge you just dragged back into reach — case 17's own subject. */
+      if (!(c.edge === "top" && c.dy < 0)) {
+        ok(`[${c.edge}/${c.dir}] letting go changes nothing — no snap back at release`,
+          Math.abs(after[c.grabbed] - mid[c.grabbed]) <= 2 && Math.abs(after[c.opposite] - mid[c.opposite]) <= 2,
+          JSON.stringify({ mid, after }));
+      }
+    }
+  }
+
+  /* ── CASE 17 — the edge you just dragged is still there to grab (B1609184) ──────────────────
+   * Growing from the top scrolls the mat, and a big enough grow scrolls the page's top edge —
+   * and the grip that lives on it — clean out of the mat's visible box (measured on the shipped
+   * build: edge at screen y 90 against a mat whose viewport starts at 126, so the grip sat at
+   * 84–98, ungrabbable until you scrolled back by hand). The settle gives back the minimum
+   * scroll that brings it fully into view. The visible box is the INTERSECTION of the mat and
+   * the window — at this window the mat's own element runs past the bottom of the screen. */
+  console.log("\n[17] After growing from the top, the top grip is still reachable:");
+  {
+    await seed(PLAIN_DOC, "Top grip reachable");
+    const grip = await gripCenter("note-page-height-grip-top");
+    const before = await sheetRect();
+    await page.mouse.move(grip.x, grip.y);
+    await page.mouse.down();
+    for (let i = 1; i <= 6; i += 1) await page.mouse.move(grip.x, grip.y - 10 * i, { steps: 2 });
+    const mid = await page.evaluate(() => {
+      const g = document.querySelector('[data-testid="note-page-height-grip-top"]').getBoundingClientRect();
+      const m = document.querySelector('[data-testid="note-mat"]').getBoundingClientRect();
+      return { gripTop: Math.round(g.top), visibleTop: Math.round(Math.max(m.top, 0)) };
+    });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+    const settled = await page.evaluate(() => {
+      const g = document.querySelector('[data-testid="note-page-height-grip-top"]').getBoundingClientRect();
+      const m = document.querySelector('[data-testid="note-mat"]').getBoundingClientRect();
+      const visibleTop = Math.max(m.top, 0);
+      const visibleBottom = Math.min(m.bottom, window.innerHeight);
+      const cx = Math.round(g.left + g.width / 2);
+      const cy = Math.round(g.top + g.height / 2);
+      const hit = document.elementFromPoint(cx, cy);
+      return {
+        gripTop: Math.round(g.top), gripBottom: Math.round(g.bottom),
+        visibleTop: Math.round(visibleTop), visibleBottom: Math.round(visibleBottom),
+        hitIsTheGrip: !!hit && hit.getAttribute?.("data-testid") === "note-page-height-grip-top",
+      };
+    });
+    const after = await sheetRect();
+    /* ⛔ VACUITY GUARD — if the grow never pushed the grip out of view there was nothing for the
+     * settle to fix, and a pass here would mean nothing at all. */
+    ok("the grow really did push the grip out of the mat's visible box (otherwise this proves nothing)",
+      mid.gripTop < mid.visibleTop, JSON.stringify(mid));
+    ok("after release the WHOLE grip is back inside the mat's visible box",
+      settled.gripTop >= settled.visibleTop && settled.gripBottom <= settled.visibleBottom, JSON.stringify(settled));
+    ok("and a press at its centre would actually land on it",
+      settled.hitIsTheGrip, JSON.stringify(settled));
+    ok("the page still grew — the settle scrolls, it does not undo the drag",
+      after.height >= before.height + 50, JSON.stringify({ before, after }));
   }
 
   await page.close();
