@@ -118,16 +118,10 @@ describe("ensureSnapshot — download, hold, and SWR-refresh only when Drive is 
 // shadow a live queryable CAD (the exact B787 complaint), but SHOULD back an image-only
 // statewide source (whose /query is disabled, so its vector layer draws nothing).
 describe("preferSnapshotForDisplay — snapshot shows only when the live source can't draw current selectable outlines (B787)", () => {
-  it("prefers the snapshot for an image-only statewide (TxGIO) live source", () => {
+  it("prefers the snapshot for an image-only statewide (TxGIO) live source — Waller", () => {
     expect(preferSnapshotForDisplay({ hasSnapshot: true, liveUrl: STATEWIDE_PARCEL_LAYER })).toBe(true);
-  });
-
-  // NEW-1 (2026-09-12) — Waller's PRIMARY moved to TX_STATEWIDE_STRATMAP_LAYER, a normal
-  // queryable vector service (unlike TXGIO_STATEWIDE_LAYER/STATEWIDE_PARCEL_LAYER above), so it
-  // no longer matches this image-only heuristic — the Drive snapshot is still there as a genuine
-  // OUTAGE fallback (SNAPSHOT_COUNTIES), it just no longer shadows a healthy live layer.
-  it("does NOT prefer the snapshot for Waller any more — its live source is a normal vector layer now", () => {
-    expect(preferSnapshotForDisplay({ hasSnapshot: true, liveUrl: COUNTIES.waller.layerUrl })).toBe(false);
+    // and matches the actual Waller config, which rides the statewide layer
+    expect(preferSnapshotForDisplay({ hasSnapshot: true, liveUrl: COUNTIES.waller.layerUrl })).toBe(true);
   });
 
   it("does NOT prefer the snapshot for a queryable CAD — Chambers on CCAD draws its own current vectors", () => {

@@ -294,12 +294,12 @@ describe("B1574258 — owner resolution on the OWNERNME1/OWNERNME2 parcel schema
   });
 });
 
-// NEW-1 (2026-09-12) — the Texas statewide StratMap layer (TX_STATEWIDE_STRATMAP_LAYER,
-// site-planner/lib/counties.js) publishes fields in EXACTLY this order — LEGAL_AREA before
-// GIS_AREA — and LEGAL_AREA's own value is the raw appraisal-roll text: a unit suffix on some
-// parcels ("16.02 a"), bare on others ("0.6658"). A flat "first key in attrs order that matches"
-// would show that inconsistent string as the Acreage row whenever it happened to be listed first,
-// which is this layer's own field order.
+// NEW-1 (2026-09-12) — the Texas statewide StratMap dataset (site-planner/lib/counties.js's
+// TXGIO_STATEWIDE_LAYER) publishes fields in EXACTLY this order — LEGAL_AREA before GIS_AREA —
+// and LEGAL_AREA's own value is the raw appraisal-roll text: a unit suffix on some parcels
+// ("16.02 a"), bare on others ("0.6658"). A flat "first key in attrs order that matches" would
+// show that inconsistent string as the Acreage row whenever it happened to be listed first, which
+// is this layer's own field order.
 const STRATMAP = {
   OBJECTID: 1,
   Prop_ID: "R123456",
@@ -339,5 +339,33 @@ describe("acreageKey / apprRows — a GIS area column beats a \"legal\" one rega
 
   it("the `skip` set is honored, same as ownerKey/situsKey", () => {
     expect(acreageKey(STRATMAP, { skip: new Set(["GIS_AREA"]) })).toBe("LEGAL_AREA");
+  });
+});
+
+// ⛔ NEW-2 (2026-09-15, B1639584 ×2) — this exact StratMap schema is served through TxGIO's own
+// MapServer /identify (counties.js's TXGIO_STATEWIDE_LAYER, whose /query is disabled — B627), and
+// /identify serializes GIS_AREA as a TRUNCATED scientific-notation string, sampled live at
+// "5.0968505128e-" — invalid number syntax (an incomplete exponent), not merely an unusual one.
+// LEGAL_AREA comes back clean through the same transport ("53.803"). A GIS-preferring resolver
+// that doesn't validate the value would surface unparseable garbage as the Acreage row.
+describe("acreageKey — a GIS-area value that doesn't parse as a number is never preferred (NEW-2, /identify truncation)", () => {
+  it("falls through to LEGAL_AREA when GIS_AREA is truncated scientific notation", () => {
+    expect(acreageKey({ LEGAL_AREA: "53.803", GIS_AREA: "5.0968505128e-" })).toBe("LEGAL_AREA");
+  });
+
+  it("apprRows surfaces the clean LEGAL_AREA text, never the truncated GIS_AREA string", () => {
+    const rows = apprRows({ OWNER_NAME: "X", LEGAL_AREA: "53.803", GIS_AREA: "5.0968505128e-" });
+    const byLabel = Object.fromEntries(rows.map((r) => [r.label, r.value]));
+    expect(byLabel["Acreage"]).toBe("53.803");
+  });
+
+  it("a well-formed GIS_AREA value (a plain string or number) still wins, unaffected", () => {
+    expect(acreageKey({ LEGAL_AREA: "16.02 a", GIS_AREA: "16.0187" })).toBe("GIS_AREA");
+    expect(acreageKey({ LEGAL_AREA: "16.02 a", GIS_AREA: 16.0187 })).toBe("GIS_AREA");
+  });
+
+  it("an empty or whitespace-only GIS_AREA value is also never preferred", () => {
+    expect(acreageKey({ LEGAL_AREA: "12.5", GIS_AREA: "" })).toBe("LEGAL_AREA");
+    expect(acreageKey({ LEGAL_AREA: "12.5", GIS_AREA: "   " })).toBe("LEGAL_AREA");
   });
 });

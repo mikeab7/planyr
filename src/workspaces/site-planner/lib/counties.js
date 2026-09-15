@@ -49,54 +49,43 @@ export { loadCountyPolygons, countyPolygonsReady };
 export const FEET_WKID = 2278;
 
 // The TxGIO (Texas statewide) parcel MapServer layer — one public, CORS-open layer
-// covering all 254 counties. Its own /query is disabled upstream (B627), so it renders as
-// a server /export image and clicks route through /identify. ⛔ NEW-1 (2026-09-12) — this is
-// NO LONGER the click-routing fallback for a county with no CAD of its own; that role moved to
-// `TX_STATEWIDE_STRATMAP_LAYER` below (see that const's header for why). This constant now backs
-// only: (a) Waller's own primary source (Waller has no CAD of its own and rides this specific
-// government host, unchanged), (b) `STATEWIDE_PARCEL_LAYER` / `statewideFallbackFor` — the
-// TEXT-SEARCH outage backup for the 8 dialed-in counties (scoped by `county=` on THIS layer's own
-// `county` column, which the StratMap layer below does not have), and (c) `parcelDisplayIsImageOnly`,
-// which still needs to recognise this exact URL so Waller's outlines keep rendering as a raster
-// /export image rather than a (nothing-returning) vector query. One const so all THOSE references
-// stay identical.
+// covering all 254 counties. It is the UNIVERSAL outage fallback for every county: its
+// own /query is disabled upstream (B627), so it renders as a server /export image and
+// clicks route through /identify. Referenced by the `txgio_statewide` COUNTIES_MAP entry
+// (the statewide display/click source, decoupled from Chambers in B787 when Chambers got
+// its own CCAD source), by any county that has no CAD of its own (Waller), and by
+// STATEWIDE_PARCEL_LAYER / statewideFallbackFor. One const so all references stay identical.
+//
+// ⛔ 2026-09-12→2026-09-15 INCIDENT, recorded so this URL is never swapped out again on the
+// same mistaken reading. A same-day session (B1639584) repointed every one of the roles above
+// (except Waller/text-search/image-only, see their own call sites) to a THIRD-PARTY AGOL mirror
+// of this exact dataset, `services1.arcgis.com/.../2019_Texas_Parcels_StratMap/FeatureServer/0`,
+// reasoning that a live signed-in check found this government host "wasn't returning usable
+// parcels for the Dallas–Fort Worth counties at all." That check queried `/query`, which this
+// service has ALWAYS had disabled (B627, the very fact this comment already documented) — so the
+// failure it measured was the well-known query-capability gap, not a coverage gap, and the fix
+// pointed the universal Texas fallback at a copy hosted on a THIRD PARTY'S ArcGIS Online account
+// (owner `TPWD_LawEnforcement`) instead of fixing the /identify wiring. That third-party copy was
+// deleted by its owner within three days — HTTP 200 with `{"error":{"code":400,"message":"Invalid
+// URL"}}` at the SERVICE ROOT — taking down parcel lookups for every Texas county outside the 8
+// dialed-in Houston-metro CADs (all of DFW included) for the rest of that window. This is the
+// LIVE PRODUCTION DEFECT B1639584 (×2) fixed by reverting to this const and its /identify plumbing
+// (`identifyAtPoint` in arcgis.js already exists for exactly this MapServer). Verified working
+// LIVE 2026-09-15 with real addresses across DFW, El Paso, Lubbock, Austin, San Antonio, Amarillo
+// and Canyon, all reporting TAX_YEAR 2025 — do not re-litigate "TxGIO doesn't work" without first
+// checking whether the check used /query (disabled) instead of /identify (the only op this
+// MapServer's layer actually serves).
+//
+// /identify RETURNS FIELD NAMES UPPERCASE (PROP_ID, SITUS_ADDR, LEGAL_AREA, GIS_AREA, COUNTY, …)
+// even though the layer's own metadata (and this file's idField/addrField hints) are lowercase —
+// every consumer here is regex-based and case-insensitive (`/i`), so this self-heals; do not add
+// a case-sensitive field lookup against this layer's attributes. GIS_AREA also comes back through
+// /identify as a TRUNCATED string in scientific notation (sampled: "5.0968505128e-") — an
+// /identify formatting artifact, not a data problem — and is unusable as a number; LEGAL_AREA
+// comes back clean (sampled: "53.803"). `appraisal.js`'s `acreageKey` now verifies a GIS-column
+// value actually parses as a number before preferring it over LEGAL_AREA, specifically for this.
 const TXGIO_STATEWIDE_LAYER =
   "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0";
-
-/* NEW-1 (2026-09-12) — Texas statewide parcels, StratMap 2025 vintage, Esri-hosted. This is now
- * the universal CLICK-ROUTING fallback for every Texas county with no CAD of its own (Dallas,
- * Tarrant, Denton, Collin, and the other ~240 counties `derivedTxCounties()` covers) — wired in
- * behind the `txgio_statewide` COUNTIES_MAP entry, which every Texas click already appends as its
- * trailing fallback candidate (see that entry's own comment). TXGIO_STATEWIDE_LAYER above stays
- * wired for the roles named in its own header; this is a DIFFERENT service, not a rename of that
- * one — the government TxGIO harvest is known-laggy for at least one county already documented in
- * this file (Chambers, B787), and a live, signed-in check against production (2026-09-12, outside
- * this sandbox's egress policy — see BEFORE-YOU-START note on the filing item) found it wasn't
- * returning usable parcels for the Dallas–Fort Worth counties at all, while this layer does.
- *
- * Endpoint URL is correct AS WRITTEN — the SERVICE name says "2019" (upstream naming lag) but the
- * LAYER it points at, "Stratmap25_landparcels_48", is the 2025 vintage; do not "fix" the 2019 in
- * the URL or go hunting for a 2025-named service. Measured live 2026-09-12 (signed-in browser
- * against production): 14,333,926 polygon features, a standard queryable FeatureServer with no
- * known /query restriction (unlike TXGIO_STATEWIDE_LAYER's B627 identify-only limitation), so it
- * renders as an ordinary styleable vector layer via `makeParcelDisplayLayer`
- * (`parcelDisplayIsImageOnly` only ever matches TXGIO_STATEWIDE_LAYER's own URL). Point-verified
- * with real addresses at Fort Worth/Sundance Square, AllianceTexas, downtown Dallas, Frisco,
- * Denton, Grapevine, El Paso and Lubbock; a handful of other test points answered zero features
- * and all three sat in street right-of-way between parcels (downtown Fort Worth, Arlington,
- * Amarillo) — a single zero-hit point there is not a coverage gap.
- *
- * Fields: OBJECTID, Prop_ID, GEO_ID, OWNER_NAME, LEGAL_AREA, GIS_AREA, LEGAL_DESC, SITUS_ADDR,
- * MAIL_ADDR — no county-name column, unlike TXGIO_STATEWIDE_LAYER's `county` field, so nothing
- * built on this layer can carry a per-county `scopeWhere` the way `TXGIO_COUNTY_NAME` does (a
- * derived county here searches the whole state, unscoped — click-to-select is a point query and
- * never needed scoping anyway). ⛔ LEGAL_AREA IS A STRING WITH AN INCONSISTENT FORMAT ("16.02 a"
- * vs a bare "0.6658") and must never be parsed as a number — `appraisal.js`'s `acreageKey` prefers
- * GIS_AREA (or, first, the ring-measured acreage, which already wins over any CAD-reported number)
- * over it for exactly this reason. Scale note: 14.3M features — every consumer of this layer must
- * stay a point-intersects query returning a single feature, never anything that scans or counts. */
-export const TX_STATEWIDE_STRATMAP_LAYER =
-  "https://services1.arcgis.com/1mtXwieMId59thmg/arcgis/rest/services/2019_Texas_Parcels_StratMap/FeatureServer/0";
 
 /* NEW-5 — COLORADO'S TxGIO ANALOGUE. The Colorado Public Parcels composite, aggregated from the
  * counties by the Governor's Office of Information Technology GIS team and published as one
@@ -183,25 +172,17 @@ const COUNTIES_RAW = {
   waller: {
     state: "TX",
     label: "Waller County · WCAD",
-    // Waller CAD publishes no public parcel GIS of its own, so it rides the universal Texas
-    // statewide fallback — the SAME layer `txgio_statewide`/`derivedTxCounties()` use, so the
-    // "one URL, one policy" invariant (`isStatewideLayerUrl`, NEW-2 below) holds for Waller too.
-    // ⛔ NEW-1 (2026-09-12) — moved from TXGIO_STATEWIDE_LAYER to TX_STATEWIDE_STRATMAP_LAYER
-    // alongside that migration (see that const's own header); it is a normal queryable
-    // FeatureServer, so Waller's outlines now render as a styleable vector layer, not the old
-    // /export image workaround, and Waller is one of the B629 snapshot-cached counties
-    // (SNAPSHOT_COUNTIES) purely as a genuine OUTAGE fallback now (no longer a standing
-    // preference — `preferSnapshotForDisplay` only engages if this live source actually fails).
-    // Its primary is STILL the statewide composite, but it is no longer the SAME URL
-    // `statewideFallbackFor` uses for the 8 dialed-in counties' text-search backup
-    // (TXGIO_STATEWIDE_LAYER, which alone still carries a `county` column to scope by) — so
-    // Waller now gets a genuine, distinct SECOND-tier backup there instead of the old
-    // self-referential "no separate backup" case.
-    layerUrl: TX_STATEWIDE_STRATMAP_LAYER,
-    idField: "Prop_ID",
-    addrField: "SITUS_ADDR",
-    // No scopeWhere — TX_STATEWIDE_STRATMAP_LAYER has no county-name column to scope by.
-    help: "Texas statewide parcels — Waller County has no county-specific service of its own.",
+    // Waller CAD publishes no public parcel GIS of its own, so it rides the statewide TxGIO
+    // layer scoped to WALLER (TxGIO /query+/find disabled 2026-07-03 → outlines via /export,
+    // clicks via /identify). Waller is one of the B629 snapshot-cached counties
+    // (SNAPSHOT_COUNTIES), so a Drive snapshot backs it when TxGIO is down. Because its
+    // primary IS the statewide layer, statewideFallbackFor(waller) returns null (no separate
+    // backup) — same self-referential case Chambers used to be before its B787 CCAD repoint.
+    layerUrl: TXGIO_STATEWIDE_LAYER,
+    idField: "prop_id",
+    addrField: "situs_addr",
+    scopeWhere: "county='WALLER'",
+    help: "Texas statewide parcels (TxGIO) — searches are limited to Waller County.",
   },
 
   /* ═══ B209503 — THE HOUSTON METRO IS NINE COUNTIES; THIS REGISTRY HELD FOUR ══════════════════
@@ -959,11 +940,8 @@ const COUNTIES_RAW = {
 };
 
 /* The counties whose full parcel fabric is snapshot-cached to Google Drive (B629) so the map keeps
- * working when the live county server is down. Chambers originally rode the flaky State/TxGIO
- * service (the actual pain that motivated this list) before its B787 CCAD repoint; Waller still has
- * no CAD of its own and rides the TX statewide layer (NEW-1, 2026-09-12: a normal queryable service
- * now, so this snapshot is a genuine outage backup rather than a standing necessity). Fort Bend is
- * included as reliable-source insurance (Phase 2, tiled). Harris is
+ * working when the live county server is down. Chambers + Waller ride the flaky State/TxGIO service
+ * (the actual pain); Fort Bend is included as reliable-source insurance (Phase 2, tiled). Harris is
  * deliberately EXCLUDED (1.5M parcels — too big for the browser). Kept in lockstep with the
  * parcel-cache Function's allowlist (functions/api/parcel-cache/_handler.js). */
 export const SNAPSHOT_COUNTIES = countyKeySet(["chambers", "waller", "fortbend"]);
@@ -1032,9 +1010,8 @@ export async function resolveTaxRates(county, attrs, { lng, lat } = {}) {
  *
  * A hand-written row above marks a county with its OWN probed appraisal-district service — the
  * DIALED-IN tier (harris/fortbend/chambers/waller/montgomery/brazoria/galveston/liberty/austintx).
- * Every OTHER Texas county rides the universal statewide fallback (`TX_STATEWIDE_STRATMAP_LAYER`,
- * NEW-1 2026-09-12 — see that const's own header) the same shape Waller rides its own primary
- * source — so this DERIVES that same shape for the other ~245 counties from
+ * Every OTHER Texas county rides the universal statewide fallback (`TXGIO_STATEWIDE_LAYER`) exactly
+ * the way Waller already does — so this DERIVES that same shape for the other ~245 counties from
  * `public/geo/county-polygons.json`, the asset `resolveCounty` already fetches for point-in-polygon
  * geometry (B209502). Nothing new is fetched and nothing is hand-typed: the derivation reuses the
  * asset's own name/state/fips/bbox, which is why it costs the Site route's bundle nothing beyond
@@ -1093,6 +1070,7 @@ function derivedTxCounties() {
     const key = rawKey && (TX_COUNTY_KEY_ALIAS[rawKey] || rawKey);
     if (!key || COUNTIES_RAW[key]) continue; // a dialed-in row always wins — never shadowed
     const [minLng, minLat, maxLng, maxLat] = c.bbox;
+    const NAME_UPPER = c.name.toUpperCase();
     out.set(key, {
       name: c.name,
       mapEntry: {
@@ -1101,20 +1079,17 @@ function derivedTxCounties() {
         zoom: 10,
         bbox: [round2(minLat - PAD), round2(minLng - PAD), round2(maxLat + PAD), round2(maxLng + PAD)],
         mapServer: null,
-        layerUrl: TX_STATEWIDE_STRATMAP_LAYER,
+        layerUrl: TXGIO_STATEWIDE_LAYER,
         statewideDerived: true,
       },
       cfgEntry: {
         state: "TX",
         label: `${c.name} County`,
-        layerUrl: TX_STATEWIDE_STRATMAP_LAYER,
-        idField: "Prop_ID",
-        addrField: "SITUS_ADDR",
-        // NEW-1 (2026-09-12) — no scopeWhere: TX_STATEWIDE_STRATMAP_LAYER carries no county-name
-        // column to scope by (see that const's own header), so a search here reaches the whole
-        // state rather than being confined to this one county. Click-to-select (a point query)
-        // never needed a scope either way.
-        help: `Texas statewide parcels — searches the whole state (${c.name} County has no county-specific service of its own).`,
+        layerUrl: TXGIO_STATEWIDE_LAYER,
+        idField: "prop_id",
+        addrField: "situs_addr",
+        scopeWhere: `county='${NAME_UPPER}'`,
+        help: `Texas statewide parcels (TxGIO) — searches are limited to ${c.name} County.`,
         statewideDerived: true,
       },
     });
@@ -1277,12 +1252,11 @@ const COUNTIES_MAP_RAW = {
     zoom: 11,
     bbox: [29.75, -96.05, 30.20, -95.62],
     mapServer: null,
-    // Waller has no CAD of its own, so the TX statewide layer is its live source — a normal
-    // queryable vector layer since NEW-1 (2026-09-12), see `COUNTIES_RAW.waller`'s own comment.
-    // Its B629 Drive snapshot backs it on a genuine outage. NOT flagged `statewide` —
-    // `txgio_statewide` is the single universal fallback source, and a second statewide key
-    // would just double the query on every click.
-    layerUrl: TX_STATEWIDE_STRATMAP_LAYER,
+    // Waller has no CAD of its own, so the statewide TxGIO layer is its live source (outlines
+    // via /export, clicks via /identify). Its B629 Drive snapshot backs it when TxGIO is down.
+    // NOT flagged `statewide` — `txgio_statewide` is the single universal fallback source, and
+    // a second statewide key would just double the TxGIO query on every click.
+    layerUrl: TXGIO_STATEWIDE_LAYER,
   },
   /* B209503 — the five counties that complete the Houston metro. These bboxes are the REAL county
    * extents, read from the committed county-polygon asset (which is itself built from the state's
@@ -1310,31 +1284,23 @@ const COUNTIES_MAP_RAW = {
     mapServer: null, layerUrl: COUNTIES.austintx.layerUrl,
   },
 
-  // The statewide parcel source, as its OWN key (decoupled from Chambers in B787 once Chambers
-  // got its live CCAD source). `statewide:true` makes it the UNIVERSAL parcel source: it paints
-  // parcel outlines anywhere you zoom in (backing the visible lines wherever a county's own CAD
-  // is down/unconfigured), and `candidateCountiesForPoint` appends it as a click fallback
-  // everywhere so a click can always select an outline it can see (the B130 fix — e.g. a Fort
-  // Bend lot with FBCAD down). It has NO bbox on purpose: it must never match a click BY bbox
-  // (that would tag a real-county click as statewide) — it is only ever appended as the trailing
-  // fallback. Kept LAST so candidate[0] stays a real county (harris when away from all bboxes —
-  // the jurisdiction-resolver default). The answering county of a statewide hit is corrected
-  // post-hit via `countyAtPoint` (B36a).
-  // ⛔ NEW-1 (2026-09-12) — this key's layerUrl moved from TXGIO_STATEWIDE_LAYER to
-  // TX_STATEWIDE_STRATMAP_LAYER (the key name is kept unchanged — it is a routing key, not a
-  // claim about which upstream host answers it, and nothing persists it as one). See that
-  // const's own header for why: the government TxGIO harvest this key used to point at is
-  // known-laggy for at least one county already (Chambers, B787) and was measured live to return
-  // no usable parcels at all for the Dallas–Fort Worth counties this key is the ONLY source for
-  // (via `derivedTxCounties()`, which shares this exact URL). TXGIO_STATEWIDE_LAYER stays wired
-  // for Waller's own primary source and the text-search outage backup (`statewideFallbackFor`).
+  // The statewide TxGIO parcel source, as its OWN key (decoupled from Chambers in B787 once
+  // Chambers got its live CCAD source). `statewide:true` makes it the UNIVERSAL parcel source:
+  // its /export image layer paints parcel outlines anywhere you zoom in (backing the visible
+  // lines wherever a county's own CAD is down/unconfigured), and `candidateCountiesForPoint`
+  // appends it as a click fallback everywhere so a click can always select an outline it can
+  // see (the B130 fix — e.g. a Fort Bend lot with FBCAD down). It has NO bbox on purpose: it
+  // must never match a click BY bbox (that would tag a real-county click as statewide) — it is
+  // only ever appended as the trailing fallback. Kept LAST so candidate[0] stays a real county
+  // (harris when away from all bboxes — the jurisdiction-resolver default). The answering
+  // county of a statewide hit is corrected post-hit via `countyAtPoint` (B36a).
   txgio_statewide: {
     state: "TX",
     center: [31.0, -99.2], // Texas centroid — only used if this key is ever "picked" (it isn't; not in the search dropdown)
     zoom: 6,
     mapServer: null,
     statewide: true,
-    layerUrl: TX_STATEWIDE_STRATMAP_LAYER,
+    layerUrl: TXGIO_STATEWIDE_LAYER,
   },
 
   /* ═══ COLORADO (NEW-5) ═══════════════════════════════════════════════════════════════════

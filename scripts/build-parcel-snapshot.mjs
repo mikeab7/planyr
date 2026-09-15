@@ -37,6 +37,20 @@ import { buildSnapshotFC } from "../src/shared/gis/parcelSnapshotBuild.js";
 const PAGE = 2000; // ArcGIS maxRecordCount for these layers
 const UA = { "user-agent": "Mozilla/5.0 (compatible; PlanyrParcelSnapshot/1.0; +https://planyr.io)" };
 
+// ⛔ CONFIRMED DEAD 2026-09-15 (B1639584/B1639698) — this third-party AGOL mirror (owner
+// `TPWD_LawEnforcement`) was taken down; it now returns HTTP 200 with `{"error":{"code":400,
+// "message":"Invalid URL"}}` at the SERVICE ROOT, not just this layer. Its use here (a
+// `county-poly` provider, tried FIRST for both Chambers and Waller below) is therefore currently
+// non-functional; the nightly job's own keep-last-good/auto-issue mechanism (see
+// .github/workflows/parcel-snapshot.yml's header) will surface this on its own. TXGIO_PARCELS
+// below cannot stand in as a bulk source either — its /query is permanently disabled (B627, not a
+// transient outage), and /identify (this repo's working substitute for a single point — see
+// counties.js's TXGIO_STATEWIDE_LAYER) has no bulk/paged equivalent, so it cannot page a whole
+// county. Rebuilding this pipeline needs a NEW /query-capable statewide TX parcel mirror — filed,
+// not fixed, as a follow-on (dedupe-first against BACKLOG.md before re-filing). Until then this
+// script will fail nightly and the existing Drive snapshots simply go stale in place — the app
+// itself is unaffected either way (capture-when-up, serve-when-down).
+//
 // The AGO-hosted StratMap 2025 parcels FeatureServer (query-enabled, reliable, independent of the
 // dark TxGIO /query). Has NO county field, so county pulls scope by the county polygon.
 const AGO_STRATMAP = "https://services1.arcgis.com/1mtXwieMId59thmg/arcgis/rest/services/2019_Texas_Parcels_StratMap/FeatureServer/0";

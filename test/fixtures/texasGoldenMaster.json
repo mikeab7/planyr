@@ -165,14 +165,14 @@
       "harris": "https://www.gis.hctx.net/arcgis/rest/services/HCAD/Parcels/MapServer/0",
       "fortbend": "https://services2.arcgis.com/D4saGHECICkCeoJm/arcgis/rest/services/FBCAD_Public_Data/FeatureServer/0",
       "chambers": "https://gisdata.pandai.com/pamaps02/rest/services/Chambers/ChambersCADPublic/MapServer/0",
-      "waller": "https://services1.arcgis.com/1mtXwieMId59thmg/arcgis/rest/services/2019_Texas_Parcels_StratMap/FeatureServer/0"
+      "waller": "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0"
     },
     "mapLayerUrls": {
       "harris": "https://www.gis.hctx.net/arcgis/rest/services/HCAD/Parcels/MapServer/0",
       "fortbend": "https://services2.arcgis.com/D4saGHECICkCeoJm/arcgis/rest/services/FBCAD_Public_Data/FeatureServer/0",
       "chambers": "https://gisdata.pandai.com/pamaps02/rest/services/Chambers/ChambersCADPublic/MapServer/0",
-      "waller": "https://services1.arcgis.com/1mtXwieMId59thmg/arcgis/rest/services/2019_Texas_Parcels_StratMap/FeatureServer/0",
-      "txgio_statewide": "https://services1.arcgis.com/1mtXwieMId59thmg/arcgis/rest/services/2019_Texas_Parcels_StratMap/FeatureServer/0"
+      "waller": "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0",
+      "txgio_statewide": "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0"
     },
     "bboxes": {
       "harris": [
@@ -271,14 +271,7 @@
         "countyName": "CHAMBERS",
         "label": "Statewide backup (TxGIO)"
       },
-      "waller": {
-        "layerUrl": "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0",
-        "scopeWhere": "county='WALLER'",
-        "idField": "prop_id",
-        "addrField": "situs_addr",
-        "countyName": "WALLER",
-        "label": "Statewide backup (TxGIO)"
-      }
+      "waller": null
     }
   },
   "drainageAuthority": {
