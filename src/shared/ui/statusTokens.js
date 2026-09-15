@@ -30,9 +30,9 @@
  * #1D9E75, and the warm-coral/cool-blue split stays legible for red-green-colorblind
  * viewers); On&nbsp;Hold = amber; Complete = neutral gray; Dead = the SAME neutral
  * gray (distinguished from Complete by glyph + strike, not hue). Pursuit and Active
- * are glyphless SOLID DISCS — color, size, and the ground-ring progress sweep
- * distinguish them; the colorblind-safe second cue is the glyph on the settled
- * stages: pause ‖ = On Hold, check ✓ = Complete, ✕ = Dead.
+ * are glyphless SOLID DISCS — color and size alone distinguish them (the map pin is a
+ * plain circle, B1628913 — no ground-ring progress sweep); the colorblind-safe second
+ * cue is the glyph on the settled stages: pause ‖ = On Hold, check ✓ = Complete, ✕ = Dead.
  */
 // Per-state fields:
 //   color / darkColor — canonical status hex. Map pins use `color` directly (the

@@ -3,7 +3,7 @@
  * is used by MapFinder's comps layer.
  *
  * ⛔ DELIBERATELY A THIRD SILHOUETTE, so nothing on this map can be confused for anything else:
- *   · a SITE is a precision pin — a bulb on a stalk over a ground ring (sitePinIcon, MapFinder.jsx)
+ *   · a SITE is a plain solid CIRCLE, colored by status (sitePinIcon, MapFinder.jsx; B1628913)
  *   · a COMP is a flat rotated DIAMOND tag, colored by comp type (compMarkerIcon.js)
  *   · a NOTE is a rounded SPEECH BUBBLE with a downward tail, in the Notes accent (magenta).
  * Shape AND hue differ, not hue alone — the map is read over aerial imagery, and B433's own

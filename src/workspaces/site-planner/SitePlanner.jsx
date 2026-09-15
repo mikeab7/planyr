@@ -11018,10 +11018,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      so a new stall row is appended BEYOND the outermost piece rather than growing a band that has
      an aisle outboard of it. It matches its neighbour's along-wall run (the owner trims these
      pieces by hand, and a full-span newcomer beside a trimmed row is not what he asked for), and
-     records that run as intent so the wall-kid refit carries it. */
+     records that run as intent so the wall-kid refit carries it.
+     ⛔ B1620480 — "the aisle already exists" is only true when the OUTERMOST piece already IS one.
+     explodeParkingBands ends its own stack on a bare aisle only for an ODD row count (the aisle
+     reserved for a future partner row); split the far more common EVEN case (e.g. the 2-row default)
+     and the stack ends on a ROW, with nothing beyond it. Appending only a stall row there — the
+     original, unconditional behaviour — glued a second row flush against the first with no drive
+     access to either: reproduced live on the owner's report ("adding parking … is only adding
+     parking but no aisles"). Insert the missing aisle first whenever the outer piece is a row. */
   const addSideParkPieceBeyond = (b, side, outer) => {
     const isVert = side === "left" || side === "right";
-    const depth = settings.stallDepth;                          // one stall row; the aisle already exists
+    const depth = settings.stallDepth;                          // one stall row
+    const outerCfg = cfgOf(outer);
+    const ai = outerCfg.aisle ?? settings.aisle;
+    const needsAisle = outer.type !== "paving";                 // outer is a row → no aisle beyond it yet
     const sw = sidewalkOnSide(b, side);
     const pads = sideParkPadsOn(b, side);
     const inboard = (sw ? swThick(sw) : 0)
@@ -11030,16 +11040,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const span = sidewalkSpanForBumps(b, side, bumpsOfHost(els, b));
     const offDefault = Math.abs(cur.run - span.run) > 0.5 || Math.abs(cur.alongShift - span.alongShift) > 0.5;
     const [nx, ny] = SIDE_N[side];
-    const perp = wallKidPerp(b, side, depth, inboard);
-    const off = rot2(nx !== 0 ? perp : cur.alongShift, ny !== 0 ? perp : cur.alongShift, b.rot);
-    const idx = pads.reduce((m, p, i) => Math.max(m, Number.isFinite(p.sideParkPiece) ? p.sideParkPiece : i), -1) + 1;
-    addBuildingEls([{
-      id: uid(), type: "parking", cx: b.cx + off.x, cy: b.cy + off.y, w: cur.run, h: depth,
-      rot: ((b.rot + SIDE_PARK_ANGLE[side]) % 360 + 360) % 360, attachedTo: b.id,
-      sideParkSide: side, sideParkPiece: idx,
-      ...(offDefault ? { sideParkFit: { run: cur.run, alongShift: cur.alongShift } } : {}),
-      ...(outer.cfg ? { cfg: outer.cfg } : {}),
-    }], b.id);
+    const fitPatch = offDefault ? { sideParkFit: { run: cur.run, alongShift: cur.alongShift } } : {};
+    const idx0 = pads.reduce((m, p, i) => Math.max(m, Number.isFinite(p.sideParkPiece) ? p.sideParkPiece : i), -1) + 1;
+    const place = (pdepth, gap, idx, type, cfgPatch) => {
+      const perp = wallKidPerp(b, side, pdepth, gap);
+      const off = rot2(nx !== 0 ? perp : cur.alongShift, ny !== 0 ? perp : cur.alongShift, b.rot);
+      return {
+        id: uid(), type, cx: b.cx + off.x, cy: b.cy + off.y, w: cur.run, h: pdepth,
+        rot: ((b.rot + SIDE_PARK_ANGLE[side]) % 360 + 360) % 360, attachedTo: b.id,
+        sideParkSide: side, sideParkPiece: idx, ...fitPatch, ...cfgPatch,
+      };
+    };
+    const rowCfg = outer.cfg ? { cfg: outer.cfg } : {};
+    const newEls = needsAisle
+      ? [place(ai, inboard, idx0, "paving", {}), place(depth, inboard + ai, idx0 + 1, "parking", rowCfg)]
+      : [place(depth, inboard, idx0, "parking", rowCfg)];
+    addBuildingEls(newEls, b.id);
   };
   // (Removed B416: the legacy opposite-dock trailer row — `OPP_TRAILER_D` / `oppTrailerGeom`
   // / `fitWallTrailer` / the `oppSide` refit branch. Since B228 the dock-zone stack
@@ -17525,6 +17541,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Grow a parking field one row deeper (keeping its near edge fixed); the stall
   // striping auto-fills the new depth. Loops, so you can stack rows/aisles.
   const growParking = (el, dir = 1) => {
+    // ⛔ B1620480 — a wall-bonded field that's been split ("Split rows/aisles") is a STACK of
+    // independent pieces (lib/dogEar sideParkStack), not one resizable band: resizing THIS one piece
+    // in place doesn't move its siblings, so it overlaps them instead of extending the field — the
+    // same root cause as the addSideParkPieceBeyond fix above. Whichever piece in the stack is
+    // selected, delegate to the SAME outermost-append/outermost-remove the building-edge "+"/"−"
+    // ladder uses (growEmployeeSide), so every entry point onto a split stack behaves one way.
+    if (el.attachedTo && el.sideParkSide) {
+      const host = els.find((x) => x.id === el.attachedTo && !x.points);
+      if (host && sideParkPadsOn(host, el.sideParkSide).length > 1) { growEmployeeSide(host, el.sideParkSide, dir); return; }
+    }
     const cfg = cfgOf(el);
     const sd = cfg.stallDepth || settings.stallDepth, ai = cfg.aisle ?? settings.aisle;
     // Step exactly one row: 1 row + aisle (single-loaded) → 2 rows, same aisle
