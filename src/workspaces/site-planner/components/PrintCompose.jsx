@@ -20,6 +20,21 @@
  * MODULE-SCOPE-COMPONENTS: this file is the module scope. SitePlanner.jsx renders
  * `<PrintCompose .../>` conditionally; nothing here is defined inside another component's
  * render body.
+ *
+ * NEW-1 (owner report) — `data-wheelscroll="1"` on the outer full-screen wrapper. The
+ * canvas's non-passive wheel-zoom handler is bound to the canvas WRAPPER and calls
+ * `e.preventDefault()` on every wheel event that doesn't bubble through a
+ * `[data-wheelscroll]` node (SitePlanner.jsx's wheel-zoom block) — this screen renders as a
+ * DOM descendant of that wrapper even though it's visually `position:fixed` over it, so
+ * without the attribute every wheel notch here silently zoomed the hidden canvas instead of
+ * scrolling anything: the options column couldn't scroll at all, and scrolling over the
+ * preview image invisibly re-zoomed the canvas underneath for when the dialog closes. One
+ * attribute on the root opts the WHOLE screen out — the options column keeps its own
+ * `overflowY:auto` and scrolls natively; the preview pane has nothing to scroll, so a wheel
+ * over it is now simply inert (it does not zoom the preview — see NEW-1 in BACKLOG.md).
+ * Keyboard PageDown/ArrowDown already scrolled the panel correctly (native browser behavior on
+ * a focused control inside an `overflow:auto` region) — measured, not assumed, in
+ * ui-audit/verify-print-menu-scroll-and-band.mjs; only the mouse/trackpad wheel was broken.
  */
 import { Button, ToggleChip, Section, Field } from "../../../shared/ui/controls.jsx";
 import { PAPER_SIZES } from "../lib/printSheet.js";
@@ -53,11 +68,12 @@ export default function PrintCompose({
   overlayPrintable, printOverlay, onTogglePrintOverlay,
   mapLayersPrintable, printMapLayers, onToggleMapLayers,
   buildingRulesPanel,
+  showMetricsBand, onToggleMetricsBand,
   onReposition, onCancel, onDownload,
   downloading,
 }) {
   return (
-    <div data-testid="print-compose" style={{ position: "fixed", inset: 0, zIndex: 3000, display: "flex", background: "var(--surface-page)" }}>
+    <div data-testid="print-compose" data-wheelscroll="1" style={{ position: "fixed", inset: 0, zIndex: 3000, display: "flex", background: "var(--surface-page)" }}>
       {/* Sheet preview — the whole point of a compose SCREEN over an overlay: the sheet is
           shown at its true page proportions, on its own, with nothing else competing for
           the eye. Zero canvas furniture renders here at all (there is no canvas here). */}
@@ -133,6 +149,7 @@ export default function PrintCompose({
             {aerialAvailable && <ContentToggle label="Aerial imagery" title="The satellite/aerial backdrop" checked={showAerial} onChange={onToggleAerial} />}
             {overlayPrintable && <ContentToggle label="Placed reference overlay" title="The placed site-plan overlay — exactly as shown (scale, position, rotation, opacity)" checked={printOverlay} onChange={onTogglePrintOverlay} />}
             {mapLayersPrintable && <ContentToggle label="Map / GIS layers" title="The live map layers (floodplain, pipelines, utilities…), exactly as shown on the map" checked={printMapLayers} onChange={onToggleMapLayers} />}
+            <ContentToggle label="Stats band" title="The stormwater required-vs-provided bars, the site-metrics line and the screening disclaimer printed below the plan. Off reclaims that space for the plan image." checked={showMetricsBand} onChange={onToggleMetricsBand} />
           </Section>
 
           <Section title="Buildings table" collapsed accent="var(--accent)">

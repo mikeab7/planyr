@@ -83,7 +83,7 @@ export function metricsRowsFor(pairsOrCount, bandW) {
   return Math.max(2, rows);
 }
 
-export function printSheetLayout({ paper = "letter", orient = "landscape", buildingCount = 0, metricsCount = 9, metricsPairs = null, stormwaterBars = 0, titleBlockExtra = false } = {}) {
+export function printSheetLayout({ paper = "letter", orient = "landscape", buildingCount = 0, metricsCount = 9, metricsPairs = null, stormwaterBars = 0, titleBlockExtra = false, includeMetrics = true } = {}) {
   const page = pageSize(paper, orient);
   const M = 28; // ≈0.28 in border inset
   const inner = { x: M, y: M, w: page.w - 2 * M, h: page.h - 2 * M };
@@ -97,11 +97,15 @@ export function printSheetLayout({ paper = "letter", orient = "landscape", build
   // falls back to a coarse average. Two rows minimum = the historical 64 c-in.
   // B862 — the Stormwater required-vs-provided bar strip (when present) reserves its own
   // rows on top of the text pairs, so the band deepens instead of clipping.
+  // NEW-2 — `includeMetrics: false` (the print menu's "Stats band" toggle, off) reserves
+  // NO height at all: the plan takes the whole freed strip back rather than leaving a gap,
+  // and `metrics` comes back null so buildPrintSheetSvg knows to omit the band (and, with
+  // it, the disclaimer note — the two are one thing to the owner, so they go together).
   const metricRows = metricsRowsFor(metricsPairs || metricsCount, inner.w);
-  const metricsH = 18 + metricRows * 17 + 12 + stormwaterBandH(stormwaterBars);
+  const metricsH = includeMetrics ? 18 + metricRows * 17 + 12 + stormwaterBandH(stormwaterBars) : 0;
   const gap = 14;
   const contentTop = inner.y + titleH + gap;
-  const contentBot = inner.y + inner.h - metricsH - gap;
+  const contentBot = includeMetrics ? inner.y + inner.h - metricsH - gap : inner.y + inner.h;
   const contentH = Math.max(0, contentBot - contentTop);
   const hasTable = buildingCount > 0;
   // Right-hand data column near the title block; clamped so it never starves the plan.
@@ -114,7 +118,7 @@ export function printSheetLayout({ paper = "letter", orient = "landscape", build
     title: { x: inner.x, y: inner.y, w: inner.w, h: titleH },
     plan: { x: inner.x, y: contentTop, w: planW, h: contentH },
     table: hasTable ? { x: inner.x + planW + gap, y: contentTop, w: tableW, h: contentH } : null,
-    metrics: { x: inner.x, y: contentBot + gap, w: inner.w, h: metricsH },
+    metrics: includeMetrics ? { x: inner.x, y: contentBot + gap, w: inner.w, h: metricsH } : null,
   };
 }
 
@@ -272,8 +276,10 @@ export function buildPrintSheetSvg({
   s += planSvg;
   // buildings table (right column)
   if (L.table && buildings.length) s += buildBuildingTableSvg({ ...L.table, rows: buildings, pal });
-  // metrics band (+ the B862 stormwater required-vs-provided bar strip)
-  s += buildMetricsSvg({ ...L.metrics, pairs: metrics, note, pal, stormwater });
+  // metrics band (+ the B862 stormwater required-vs-provided bar strip) — NEW-2: `L.metrics`
+  // is null when the print menu's "Stats band" toggle is off, and the disclaimer note goes
+  // with it (it is part of the band, not a separate thing the owner is trying to evade).
+  if (L.metrics) s += buildMetricsSvg({ ...L.metrics, pairs: metrics, note, pal, stormwater });
   s += `</svg>`;
   return s;
 }
