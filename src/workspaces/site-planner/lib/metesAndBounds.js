@@ -88,6 +88,57 @@ function bufferPolylineUncached(pts, w, opts = {}) {
   return [...left, ...right.reverse()];
 }
 
+/* A proper MITERED join with a LIMIT that falls back to a flat BEVEL — the join rule
+ * `offsetPolyline` above approximates with a bisector-and-scale heuristic (clamped to a flat
+ * ×3, applied the same way on both the convex and the concave side of a turn). At a tight
+ * angle that heuristic is what let the road corridor's join blow up (B1612608, item 1: the
+ * outside swells into a lobe well past the road's own width, the inside overshoots PAST the
+ * opposite edge into a self-crossing "bowtie" — read that item's fixture before touching this).
+ *
+ * This computes the ACTUAL intersection of the two adjacent segments' offset lines (the true
+ * miter point, not an approximation of one). When the miter distance is within `miterLimit`
+ * ratios of the offset distance, that intersection is the corner — one point, same contract as
+ * `offsetPolyline`. Past the limit, it falls back to a flat two-point BEVEL (the two segments'
+ * own offset lines AT the vertex) instead of continuing to push the point out — so a corner can
+ * add one extra point to the output, which is fine for every consumer here (a rendered/trimmed
+ * polyline, never indexed 1:1 against the input). A near-total reversal (two segments folding
+ * back on themselves) has no meaningful miter and always bevels.
+ *
+ * `miterLimit` defaults to 2 (matches this repo's existing ClipperOffset convention —
+ * pondOffset.js's `MITER`), i.e. a corner is mitered up to where the miter point would sit at
+ * twice the offset distance from the centerline, and bevelled beyond that. Pure — unit-tested
+ * (test/roadSurfaceJoin.test.js). Returns null for <2 points. */
+export function offsetPolylineMiterLimit(pts, dist, miterLimit = 2) {
+  if (!pts || pts.length < 2 || !Number.isFinite(dist)) return null;
+  const n = pts.length;
+  const dir = [];
+  for (let i = 1; i < n; i++) {
+    const dx = pts[i].x - pts[i - 1].x, dy = pts[i].y - pts[i - 1].y;
+    const L = Math.hypot(dx, dy) || 1;
+    dir.push({ x: dx / L, y: dy / L });
+  }
+  const leftNormalOf = (d) => ({ x: -d.y, y: d.x });
+  const offsetPointAt = (p, d) => { const nn = leftNormalOf(d); return { x: p.x + nn.x * dist, y: p.y + nn.y * dist }; };
+  const out = [offsetPointAt(pts[0], dir[0])];
+  const limitDist = Math.abs(dist) * (miterLimit > 0 ? miterLimit : 2);
+  for (let i = 1; i < n - 1; i++) {
+    const dIn = dir[i - 1], dOut = dir[i];
+    const cos = dIn.x * dOut.x + dIn.y * dOut.y;
+    if (cos > 1 - 1e-9) { out.push(offsetPointAt(pts[i], dIn)); continue; } // straight through, no join
+    const A = offsetPointAt(pts[i], dIn), B = offsetPointAt(pts[i], dOut); // each leg's own offset line at the vertex
+    const den = dIn.x * dOut.y - dIn.y * dOut.x;                           // cross(dIn, dOut); ~0 ⇒ parallel/reversed
+    let miter = null;
+    if (Math.abs(den) > 1e-9) {
+      const t = ((B.x - A.x) * dOut.y - (B.y - A.y) * dOut.x) / den;       // A + t·dIn meets B + s·dOut
+      miter = { x: A.x + dIn.x * t, y: A.y + dIn.y * t };
+    }
+    if (miter && Math.hypot(miter.x - pts[i].x, miter.y - pts[i].y) <= limitDist + 1e-6) out.push(miter);
+    else { out.push(A); out.push(B); }                                    // past the limit (or a hairpin): bevel
+  }
+  out.push(offsetPointAt(pts[n - 1], dir[n - 2]));
+  return out;
+}
+
 /* --- overlap test: do two convex-ish polygons (rings of {x,y}) intersect? ---
  * Uses vertex-containment + edge-crossing (handles partial overlaps the bbox
  * test would miss). Good enough for "warn me if this easement crosses a

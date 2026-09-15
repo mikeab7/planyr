@@ -313,7 +313,7 @@ import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES,
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, parcelSplitNames, lineageConflicts } from "./lib/siteModel.js";
-import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, nodeJunction, cardinalTeePoint, roadBearingDeg } from "./lib/roadGeometry.js";
+import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, rectContainsPoint, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, nodeJunction, cardinalTeePoint, roadBearingDeg } from "./lib/roadGeometry.js";
 import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, rectOutlineCutSegments } from "./lib/roadNetwork.js";
 import {
   roundaboutDiameterFor, roundaboutBandFor,
@@ -1418,9 +1418,12 @@ function driveJunctionsOf(els, settings) {
     if (!T || T.points || !(T.w > 0) || !(T.h > 0) || typeof T.cx !== "number") continue;
     const edges = rectEdges(T.cx, T.cy, T.w, T.h, T.rot || 0);
     let ei = -1, hit = null;                                        // which endpoint sits on the target edge?
+    // B1612608/NEW-2 — a welded endpoint well inside a big court reads a large distance to every
+    // edge (findDriveConnect never moved it there — see that function's header), so it must also
+    // pass here on CONTAINMENT alone; the nearest edge is still used to orient the curb return.
     for (const idx of [0, S.pts.length - 1]) {
       const h = nearestRectEdge(S.pts[idx], edges, { facingOnly: false });
-      if (h && h.dist <= 6 && (!hit || h.dist < hit.dist)) { hit = h; ei = idx; }
+      if (h && (h.dist <= 6 || rectContainsPoint(S.pts[idx], edges)) && (!hit || h.dist < hit.dist)) { hit = h; ei = idx; }
     }
     if (!hit) continue;
     const P = S.pts[ei];                                            // the road's welded endpoint
@@ -5890,24 +5893,46 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (plan.deleteTarget) tombstone([targetId]);
   };
 
-  /* ---- Road → parking-drive / truck-court connect (B955/NEW-1) ----
-     A PARKING field or a TRUCK COURT paving strip is also a connect target: a road endpoint welds
-     onto the facing rectangle edge and the junction renders as a TYPE-SCALED clean intersection —
-     car-scale returns (~20 ft) for a parking drive, truck-scale (~50 ft) for a dock-court drive.
-     v1 connects to the nearest FACING edge (the aisle-mouth / access-edge the road approaches);
-     picking the exact aisle opening + a 3-centred compound truck return are flagged fast-follows. */
+  /* ---- Road → parking-drive / truck-court / paving connect (B955/NEW-1; widened B1612608 item 2) ----
+     A PARKING field, a TRUCK COURT, or any other hand-drawn PAVING pad is a connect target: a road
+     endpoint welds onto the facing rectangle edge and the junction renders as a TYPE-SCALED clean
+     intersection — car-scale returns (~20 ft) for a parking drive, truck-scale (~50 ft) for a
+     paving/dock-court drive. v1 connects to the nearest FACING edge (the aisle-mouth / access-edge
+     the road approaches); picking the exact aisle opening + a 3-centred compound truck return are
+     flagged fast-follows.
+     B1612608/NEW-2 — every `type:"paving"` rect is a target now, not only the auto-generated
+     bonded dock zone (`el.truckCourt`): the owner's most common case ("a road meeting a truck
+     court") is at least as often a hand-drawn paving pad — the same tool draws "paving / drive /
+     truck court" as one thing — and the old `el.truckCourt` gate silently excluded every one of
+     those. An untagged paving pad defaults to the truck-scale return (matching the named case);
+     the return radius is editable per-junction either way, so a car-scale drive is one edit, not a
+     blocker. A road never connects to a BUILDING here — a building is not paving, and painting a
+     driveway INTO a wall is not a connection this tool should ever make silently. Irregular
+     (click-drawn / `el.points`) paving is NOT yet a connect target — `rectEdges` needs a rectangle;
+     see the item's PR for why that is reported rather than built here. */
   const driveTargetKind = (el) => (el && !el.points && typeof el.cx === "number" && el.w > 0 && el.h > 0
-    ? (el.type === "parking" ? "parking" : (el.type === "paving" && el.truckCourt ? "truckcourt" : null)) : null);
-  const driveTargetsOf = () => els.filter((x) => driveTargetKind(x)).map((x) => ({ id: x.id, kind: driveTargetKind(x), edges: rectEdges(x.cx, x.cy, x.w, x.h, x.rot || 0) }));
+    ? (el.type === "parking" ? "parking" : el.type === "paving" ? "truckcourt" : null) : null);
+  // B494049's rule for road magnets applies here too — a hidden target is not a magnet: connecting
+  // to a court you cannot see moves nothing but leaves a relationship you cannot explain.
+  const driveTargetsOf = () => visibleEls(hiddenGroups, els).filter((x) => driveTargetKind(x)).map((x) => ({ id: x.id, kind: driveTargetKind(x), edges: rectEdges(x.cx, x.cy, x.w, x.h, x.rot || 0) }));
   const DRIVE_RETURN = { parking: 15, truckcourt: 24 }; // B1005 — curb-return seed (ft): car ≈15, truck ≈24 (single fillet; teeGeometry caps the reach to R at any angle, so it stays a tidy rounded corner — dial up per-junction for a genuine WB-62 turn)
-  // Nearest parking/truck-court edge to a moving road endpoint, within `tolFt`.
+  // Nearest parking/truck-court/paving edge to a moving road endpoint, within `tolFt` — OR anywhere
+  // the endpoint is CONTAINED in the target at all (B1612608/NEW-2: "lands on, overlaps, or falls
+  // within tolerance" — a point well inside a big court reads a large distance to every edge, but
+  // it is unambiguously on the paved surface). A contained point is never relocated (the weld point
+  // returned is the endpoint itself, exactly where it was placed — only a genuinely NEAR-edge match
+  // snaps to the precise edge point, the same small nudge every other connect magnet already makes).
   const findDriveConnect = (P, tolFt) => {
     let best = null;
     for (const t of driveTargetsOf()) {
       // facingOnly:false — a road drawn TO the edge ends ON it (not strictly outside); the nearest edge
       // is still the one the road approaches, so consider all edges and take the nearest within tolerance.
       const hit = nearestRectEdge(P, t.edges, { facingOnly: false });
-      if (hit && hit.dist <= tolFt && (!best || hit.dist < best.dist)) best = { kind: "drive", targetId: t.id, targetKind: t.kind, pt: hit.pt, dist: hit.dist };
+      if (!hit) continue;
+      const inside = hit.dist > tolFt && rectContainsPoint(P, t.edges);
+      if ((hit.dist <= tolFt || inside) && (!best || hit.dist < best.dist)) {
+        best = { kind: "drive", targetId: t.id, targetKind: t.kind, pt: inside ? { x: P.x, y: P.y } : hit.pt, dist: inside ? 0 : hit.dist };
+      }
     }
     return best;
   };
@@ -9857,6 +9882,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (c && c.kind === "road") { targetId = c.road.roadId; plan = planRoadConnect(el, raw.length - 1, els.find((x) => x.id === c.road.roadId), c.road, defR); }
       else if (c && c.kind === "drive") { drive = c.drive; }
     }
+    // B1612608/NEW-2 — the STARTING point is a placement endpoint too. A road begun AT a truck
+    // court (clicked there first, then drawn away) used to connect nothing at all, because only
+    // the final point was ever checked here — "placing a road so it meets an existing surface
+    // leaves the two as separate shapes" regardless of which end was drawn first. Checked only
+    // when the final point found nothing on its own: the road's single `driveTee` field can name
+    // one target, and the final point keeps the priority it already had (a named, reported
+    // limitation — see findDriveConnect's header for "both ends to two different targets").
+    let startDrive = null;
+    if (!altSnapOffRef.current && !plan && !drive) {
+      const c0 = resolveEndpointConnect(raw[0], { id: el.id, index: 0 });
+      if (c0 && c0.kind === "drive") startDrive = c0.drive;
+    }
     if (plan) {
       let mGeom = plan.moving;
       if (plan.action === "merge") { // round the fresh junction corner to the class min (NEW-2)
@@ -9875,6 +9912,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       el = reRoad({ ...el, pts: el.pts.map((p, i) => i === last ? { x: drive.pt.x, y: drive.pt.y } : p),
         driveTee: { targetId: drive.targetId, kind: drive.targetKind, returnR: DRIVE_RETURN[drive.targetKind], flare: 0 } });
       setEls((a) => [...a, el]);
+    } else if (startDrive) { // same, but the STARTING point welded (B1612608/NEW-2)
+      el = reRoad({ ...el, pts: el.pts.map((p, i) => i === 0 ? { x: startDrive.pt.x, y: startDrive.pt.y } : p),
+        driveTee: { targetId: startDrive.targetId, kind: startDrive.targetKind, returnR: DRIVE_RETURN[startDrive.targetKind], flare: 0 } });
+      setEls((a) => [...a, el]);
     } else {
       setEls((a) => [...a, el]);
     }
@@ -9883,8 +9924,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setRoadSnapTarget(null);
     setTool("select");
     if (plan && plan.action === "merge") flashWarn("Connected to the existing road — joined into one and rounded the junction corner.", 5000);
-    else if (drive) flashWarn(drive.targetKind === "truckcourt" ? "Connected to the truck court — truck-scale curb returns." : "Connected to the parking drive — car-scale curb returns.", 5000);
-    else {
+    else if (drive || startDrive) {
+      const dk = (drive || startDrive).targetKind;
+      flashWarn(dk === "truckcourt" ? "Connected to the truck court — truck-scale curb returns." : "Connected to the parking drive — car-scale curb returns.", 5000);
+    } else {
       const st = roadRadiusStatus(el, settings); // B599/NEW-4: warn loudly on commit, never block
       if (st) flashWarn(`⚠ ${f0(st.minR)}′ radius — below ${f0(st.threshold)}′ min for ${st.label}`, 7000);
     }
@@ -20155,7 +20198,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     onPointerDown: () => { opSnapRef.current = false; },
     onChange: (e) => { if (!opSnapRef.current) { pushHistory(); opSnapRef.current = true; } apply(e); },
   });
-  const multiOpacityHandlers = sliderHistory((e) => liveMultiStyle({ fillOpacity: +e.target.value }));
 
   /* ------------ Plans dropdown grouping (this site's plans vs. other sites) ------------ */
   const planGroup = (s) => s.groupId || s.id;
@@ -21320,40 +21362,46 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginBottom: 8, cursor: "pointer" }}>
                 <input type="checkbox" checked={!!selParcel.fill} onChange={(e) => { pushHistory(); setSelParcel(e.target.checked ? { fill: "#5b6650" } : { fill: null }); }} /> Fill the parcel (off by default)
               </label>
-              {selParcel.fill && (
-                <>
-                  <Field label="Translucence">
-                    {/* RC-5/RC-7: an opacity slider must coalesce one drag into ONE undo frame via
-                        sliderHistory — setSelParcel never pushes, so a bare onChange left the parcel
-                        translucence un-undoable (and misdirected the next Ctrl-Z, since fillOpacity IS
-                        in the history snapshot). Matches every other opacity slider in this file. */}
-                    <input type="range" min={0} max={0.6} step={0.02} value={selParcel.fillOpacity ?? 0.12}
-                      {...sliderHistory((e) => setSelParcel({ fillOpacity: +e.target.value }))} />
-                  </Field>
-                  <Field label="Fill color">
-                    <span style={ROW6}>
-                      <ColorField value={toHex6(selParcel.fill)} {...colorCtl((v) => setSelParcel({ fill: v }))} seed={COLOR_SEED} title="Fill color" />
-                    </span>
-                  </Field>
-                </>
-              )}
-              {/* Outline (boundary line) style — always available. `livePick` gives the color its own
-                  one-frame undo; the discrete weight/style/reset commits push their own frame (setSelParcel
-                  does not). Renders live via pc.stroke/pc.weight/pc.dash at the parcel <polygon>. */}
-              <Field label="Outline color">
-                <span style={ROW6}>
-                  <ColorField value={toHex6(selParcel.stroke ?? PAL.parcel)} {...colorCtl((v) => setSelParcel({ stroke: v }))} seed={COLOR_SEED} title="Outline color" />
-                </span>
-              </Field>
-              <Field label="Line weight">
-                <NumInput style={numInput} value={selParcel.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => { pushHistory(); setSelParcel({ weight: n }); }} />
-              </Field>
-              <Field label="Line style">
-                <select value={selParcel.dash || "solid"} onChange={(e) => { pushHistory(); setSelParcel({ dash: e.target.value }); }}
-                  style={{ ...numInput, width: "auto", cursor: "pointer" }}>
-                  {DASH_OPTIONS}
-                </select>
-              </Field>
+              {/* Outline (boundary line) style — always available; fill only once the checkbox above is
+                  on, so there's only ever a real second side to pair against then (B1618656 NEW-1) —
+                  otherwise this stays the plain single-column Outline group it always was. `livePick`
+                  gives the color its own one-frame undo; the discrete weight/style/reset commits push
+                  their own frame (setSelParcel does not). Renders live via pc.stroke/pc.weight/pc.dash/
+                  pc.fill/pc.fillOpacity at the parcel <polygon>. */}
+              {selParcel.fill ? (<>
+                <PairedFieldHead left="Outline" right="Fill" />
+                <PairedField label="Colour"
+                  left={<span style={ROW6}><ColorField value={toHex6(selParcel.stroke ?? PAL.parcel)} {...colorCtl((v) => setSelParcel({ stroke: v }))} seed={COLOR_SEED} title="Outline color" /></span>}
+                  right={<span style={ROW6}><ColorField value={toHex6(selParcel.fill)} {...colorCtl((v) => setSelParcel({ fill: v }))} seed={COLOR_SEED} title="Fill color" /></span>}
+                />
+                <PairedField label="Width"
+                  left={<NumInput style={{ ...numInput, width: "100%" }} value={selParcel.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => { pushHistory(); setSelParcel({ weight: n }); }} />}
+                />
+                <PairedField label="Pattern"
+                  left={<select value={selParcel.dash || "solid"} onChange={(e) => { pushHistory(); setSelParcel({ dash: e.target.value }); }} style={{ ...numInput, width: "100%", cursor: "pointer" }}>{DASH_OPTIONS}</select>}
+                />
+                {/* RC-5/RC-7: an opacity edit must coalesce into ONE undo frame — setSelParcel never
+                    pushes, so PercentField's own onCommit (fires once, on blur/Enter) replaces the old
+                    sliderHistory-wrapped range input without losing that guarantee. */}
+                <PairedField label="Opacity"
+                  right={<PercentField value={selParcel.fillOpacity ?? 0.12} max={60} onCommit={(v) => { pushHistory(); setSelParcel({ fillOpacity: v }); }} inputStyle={numInput} ariaLabel="Fill opacity" />}
+                />
+              </>) : (<>
+                <Field label="Outline color">
+                  <span style={ROW6}>
+                    <ColorField value={toHex6(selParcel.stroke ?? PAL.parcel)} {...colorCtl((v) => setSelParcel({ stroke: v }))} seed={COLOR_SEED} title="Outline color" />
+                  </span>
+                </Field>
+                <Field label="Line weight">
+                  <NumInput style={numInput} value={selParcel.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => { pushHistory(); setSelParcel({ weight: n }); }} />
+                </Field>
+                <Field label="Line style">
+                  <select value={selParcel.dash || "solid"} onChange={(e) => { pushHistory(); setSelParcel({ dash: e.target.value }); }}
+                    style={{ ...numInput, width: "auto", cursor: "pointer" }}>
+                    {DASH_OPTIONS}
+                  </select>
+                </Field>
+              </>)}
               <button style={{ ...chip, marginTop: 2 }} onClick={() => { pushHistory(); setSelParcel({ stroke: null, weight: null, dash: null }); }} title="Reset the outline back to the default color, weight and solid line">Reset outline</button>
               {/* NEW-1 — the SETBACK line gets the same three controls as the boundary above, on
                   this parcel only. Renders live via pc.sbStroke/pc.sbWeight/pc.sbDash at the
@@ -21767,33 +21815,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 NEW-1 — the section styles TWO different lines, so each group is labelled: an
                 unlabelled pair of colour rows left it guessing which line you were editing. */}
             <StdSubLabel>Parcel line</StdSubLabel>
-            <Field label="Outline color">
-              <ColorField value={toHex6(parcelStdValue("stroke") ?? PAL.parcel)} title="Outline color" seed={COLOR_SEED}
-                {...colorCtl((v) => draftParcelStd({ stroke: v }), false)} />
-            </Field>
-            <Field label="Line weight">
-              <NumInput style={numInput} value={parcelStdValue("weight") ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => draftParcelStd({ weight: n })} />
-            </Field>
-            <Field label="Line style">
-              <select value={parcelStdValue("dash") ?? "solid"} onChange={(e) => draftParcelStd({ dash: e.target.value })}
-                style={{ ...numInput, width: "auto", cursor: "pointer" }}>
-                {DASH_OPTIONS}
-              </select>
-            </Field>
+            <PairedFieldHead left="Outline" right="Fill" />
+            <PairedField label="Colour"
+              left={<ColorField value={toHex6(parcelStdValue("stroke") ?? PAL.parcel)} title="Outline color" seed={COLOR_SEED} {...colorCtl((v) => draftParcelStd({ stroke: v }), false)} />}
+              right={parcelStdValue("fill") ? <ColorField value={toHex6(parcelStdValue("fill"))} title="Fill color" seed={COLOR_SEED} {...colorCtl((v) => draftParcelStd({ fill: v }), false)} /> : undefined}
+            />
+            <PairedField label="Width"
+              left={<NumInput style={{ ...numInput, width: "100%" }} value={parcelStdValue("weight") ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => draftParcelStd({ weight: n })} />}
+            />
+            <PairedField label="Pattern"
+              left={<select value={parcelStdValue("dash") ?? "solid"} onChange={(e) => draftParcelStd({ dash: e.target.value })} style={{ ...numInput, width: "100%", cursor: "pointer" }}>{DASH_OPTIONS}</select>}
+            />
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 2px 8px", cursor: "pointer" }}>
               <input type="checkbox" checked={!!parcelStdValue("fill")} onChange={(e) => draftParcelStd(e.target.checked ? { fill: "#5b6650" } : { fill: null, fillOpacity: null })} /> Fill new parcels (off by default)
             </label>
             {parcelStdValue("fill") && (
-              <>
-                <Field label="Translucence">
-                  <input type="range" min={0} max={0.6} step={0.02} value={parcelStdValue("fillOpacity") ?? 0.12}
-                    onChange={(e) => draftParcelStd({ fillOpacity: +e.target.value })} />
-                </Field>
-                <Field label="Fill color">
-                  <ColorField value={toHex6(parcelStdValue("fill"))} title="Fill color" seed={COLOR_SEED}
-                    {...colorCtl((v) => draftParcelStd({ fill: v }), false)} />
-                </Field>
-              </>
+              <PairedField label="Opacity"
+                right={<PercentField value={parcelStdValue("fillOpacity") ?? 0.12} max={60} onCommit={(v) => draftParcelStd({ fillOpacity: v })} inputStyle={numInput} ariaLabel="Fill opacity" />}
+              />
             )}
             {/* NEW-1 — the SETBACK line, with the same three controls as the boundary above. It
                 had none at all: colour, weight and dash were hardcoded at the one place it was
@@ -21826,34 +21865,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               Apply pushes them onto measurements already drawn. */}
           <div data-std-sec="measure">
           <Section key={`std-measure:${standardsFocus === "measure"}`} title="Measurements" collapsed={standardsFocus !== "measure"}>
-            <StdSubLabel>Line</StdSubLabel>
-            <Field label="Line color">
-              <ColorField value={toHex6(measureStdValueUI("stroke") ?? PAL.accent)} title="Measurement line color" seed={COLOR_SEED}
-                {...colorCtl((v) => draftMeasureStd({ stroke: v }), false)} />
-            </Field>
-            <Field label="Line weight">
-              <NumInput style={numInput} value={measureStdValueUI("weight") ?? MEASURE_LINE.weight} min={0.5} step={0.5} coarse={2} onCommit={(n) => draftMeasureStd({ weight: n })} />
-            </Field>
-            <Field label="Line style">
-              <select value={measureStdValueUI("dash") ?? MEASURE_LINE.dash} onChange={(e) => draftMeasureStd({ dash: e.target.value })}
-                style={{ ...numInput, width: "auto", cursor: "pointer" }}>
-                {DASH_OPTIONS}
-              </select>
-            </Field>
-            <StdSubLabel>Area fill</StdSubLabel>
+            <PairedFieldHead left="Line" right="Fill" />
+            <PairedField label="Colour"
+              left={<ColorField value={toHex6(measureStdValueUI("stroke") ?? PAL.accent)} title="Measurement line color" seed={COLOR_SEED} {...colorCtl((v) => draftMeasureStd({ stroke: v }), false)} />}
+              right={measureStdValueUI("fill") ? <ColorField value={toHex6(measureStdValueUI("fill"))} title="Measurement fill color" seed={COLOR_SEED} {...colorCtl((v) => draftMeasureStd({ fill: v }), false)} /> : undefined}
+            />
+            <PairedField label="Width"
+              left={<NumInput style={{ ...numInput, width: "100%" }} value={measureStdValueUI("weight") ?? MEASURE_LINE.weight} min={0.5} step={0.5} coarse={2} onCommit={(n) => draftMeasureStd({ weight: n })} />}
+            />
+            <PairedField label="Pattern"
+              left={<select value={measureStdValueUI("dash") ?? MEASURE_LINE.dash} onChange={(e) => draftMeasureStd({ dash: e.target.value })} style={{ ...numInput, width: "100%", cursor: "pointer" }}>{DASH_OPTIONS}</select>}
+            />
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 2px 8px", cursor: "pointer" }}>
               <input type="checkbox" checked={!!measureStdValueUI("fill")} onChange={(e) => draftMeasureStd(e.target.checked ? { fill: PAL.accent } : { fill: null, fillOpacity: null })} /> Use a separate fill colour
             </label>
-            {measureStdValueUI("fill") && (
-              <Field label="Fill color">
-                <ColorField value={toHex6(measureStdValueUI("fill"))} title="Measurement fill color" seed={COLOR_SEED}
-                  {...colorCtl((v) => draftMeasureStd({ fill: v }), false)} />
-              </Field>
-            )}
-            <Field label="Fill opacity">
-              <input type="range" min={0} max={1} step={0.02} value={measureStdValueUI("fillOpacity") ?? MEASURE_LINE.fillOpacity}
-                onChange={(e) => draftMeasureStd({ fillOpacity: +e.target.value })} />
-            </Field>
+            <PairedField label="Opacity"
+              right={<PercentField value={measureStdValueUI("fillOpacity") ?? MEASURE_LINE.fillOpacity} onCommit={(v) => draftMeasureStd({ fillOpacity: v })} inputStyle={numInput} ariaLabel="Fill opacity" />}
+            />
             {/* NEW-2 — the project-level reveal zoom. Same one-click capture as the per-measurement
                 control, so nobody ever types a zoom number. */}
             <StdSubLabel>Labels</StdSubLabel>
@@ -24051,6 +24079,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       live-draft strip below the <svg> (liveDraftReadout). */}
                 </g>
               ); })()}
+              {/* B1612608/NEW-2 — the connect magnet for the road tool's VERY FIRST point. The preview
+                  below only exists once draftRoadPts holds something, so a road STARTED at a truck
+                  court showed no ring before the first click even though the click itself already
+                  welds there (finishRoad/the point-drop handler both call resolveEndpointConnect
+                  unconditionally) — a connection with no warning before it happens. Same ring, same
+                  tolerance, same bypass (Alt) as every later point. */}
+              {tool === "road" && roadWidth !== "free" && !draftRoadPts && cursor && !altSnapOffRef.current && (() => {
+                const c = resolveEndpointConnect(cursor, null);
+                if (!c) return null;
+                const p = f2p(c.pt);
+                return <g pointerEvents="none"><circle cx={p.x} cy={p.y} r={9} fill="none" stroke={SEL_BLUE} strokeWidth={2.5} /><circle cx={p.x} cy={p.y} r={3.5} fill={SEL_BLUE} /></g>;
+              })()}
               {/* centerline road preview (B596/NEW-1): live tessellated centerline + the
                   provisional pavement+curb offset strip as points are placed */}
               {draftRoadPts && draftRoadPts.length > 0 && (() => {
@@ -25567,17 +25607,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // the selection disagrees (a colour has no indeterminate state). Its picker paints the
             // WHOLE selection: a swatch click in ONE undo frame (applyMultiStyle), the "Custom…"
             // wheel live with one frame per picking session — no dialog box (inline-editors rule).
-            const colorField = (label, prop) => {
-              const st = props[prop]; if (!st) return null;
+            // Returns the swatch content alone (no Field wrapper) — B1618656 NEW-1 places it inside
+            // a PairedField's own OUTLINE/FILL column instead.
+            const colorSwatch = (label, prop) => {
+              const st = props[prop]; if (!st) return undefined;
               return (
-                <Field label={label} key={prop}>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    <ColorField title={label} value={st.mixed ? "#808080" : toHex6(st.value)} mixed={st.mixed} seed={COLOR_SEED}
-                      pick={livePick((v) => liveMultiStyle({ [prop]: v }))}
-                      onSwatch={(v) => { applyMultiStyle({ [prop]: v }); pushRecent(v); }} />
-                    {st.mixed && <span style={mixNote}>Mixed</span>}
-                  </span>
-                </Field>
+                <span key={prop} style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0, flexWrap: "wrap" }}>
+                  <ColorField title={label} value={st.mixed ? "#808080" : toHex6(st.value)} mixed={st.mixed} seed={COLOR_SEED}
+                    pick={livePick((v) => liveMultiStyle({ [prop]: v }))}
+                    onSwatch={(v) => { applyMultiStyle({ [prop]: v }); pushRecent(v); }} />
+                  {st.mixed && <span style={mixNote}>Mixed</span>}
+                </span>
               );
             };
             return (
@@ -25592,31 +25632,40 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   the ONLY place that count appears. Suppressing it here (not on desktop) reclaims
                   a whole card's worth of vertical space with zero information loss. */}
               <Section title={phoneSheetSolo ? false : `${multi.length} selected`}>
-                {caps.includes("fillOpacity") && (
-                  <Field label="Opacity">
-                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      {/* Mixed → the thumb sits at a neutral midpoint (a range can't be truly
-                          indeterminate) so dragging it anywhere — including to 100% to restore the
-                          whole selection — is a real change that writes to every member. */}
-                      <input type="range" min={0} max={1} step={0.05} value={props.fillOpacity.mixed ? 0.5 : props.fillOpacity.value} {...multiOpacityHandlers} />
-                      {props.fillOpacity.mixed && <span style={mixNote}>Mixed</span>}
-                    </span>
-                  </Field>
-                )}
-                {caps.includes("fill") && colorField("Fill", "fill")}
-                {caps.includes("stroke") && colorField("Outline", "stroke")}
+                {(caps.includes("fill") || caps.includes("stroke")) && (<>
+                  <PairedFieldHead left="Outline" right="Fill" />
+                  <PairedField label="Colour"
+                    left={caps.includes("stroke") ? colorSwatch("Outline", "stroke") : undefined}
+                    right={caps.includes("fill") ? colorSwatch("Fill", "fill") : undefined}
+                  />
+                </>)}
                 {caps.includes("weight") && (
-                  <Field label="Line weight">
-                    <NumInput style={numInput} value={props.weight.mixed ? null : props.weight.value} placeholder="—" min={0.5} step={0.5} coarse={2} onCommit={(n) => applyMultiStyle({ weight: n })} />
-                  </Field>
+                  <PairedField label="Weight"
+                    left={<NumInput style={{ ...numInput, width: "100%" }} value={props.weight.mixed ? null : props.weight.value} placeholder="—" min={0.5} step={0.5} coarse={2} onCommit={(n) => applyMultiStyle({ weight: n })} />}
+                  />
                 )}
                 {caps.includes("dash") && (
-                  <Field label="Dash">
-                    <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={props.dash.mixed ? "" : (props.dash.value || "solid")} onChange={(e) => { if (e.target.value) applyMultiStyle({ dash: e.target.value }); }}>
+                  <PairedField label="Pattern"
+                    left={<select style={{ ...numInput, width: "100%", fontFamily: "inherit" }} value={props.dash.mixed ? "" : (props.dash.value || "solid")} onChange={(e) => { if (e.target.value) applyMultiStyle({ dash: e.target.value }); }}>
                       {props.dash.mixed && <option value="" disabled>Mixed</option>}
                       {DASH_OPTIONS}
-                    </select>
-                  </Field>
+                    </select>}
+                  />
+                )}
+                {caps.includes("fillOpacity") && (
+                  <PairedField label="Opacity"
+                    right={
+                      /* Mixed → no committed value to show (matches Weight's own "—" placeholder
+                         above); typing any number, including 100, is a real change written to every
+                         member, same as the slider it replaces. */
+                      <span style={{ display: "flex", alignItems: "center", gap: SPACE.xxs, minWidth: 0, flexWrap: "wrap" }}>
+                        <NumInput style={{ ...numInput, width: "100%", minWidth: 0 }} value={props.fillOpacity.mixed ? null : Math.round(props.fillOpacity.value * 100)} placeholder="—" min={0} max={100} step={5}
+                          ariaLabel="Fill opacity" onCommit={(n) => applyMultiStyle({ fillOpacity: Math.max(0, Math.min(100, Math.round(n))) / 100 })} />
+                        <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", flex: "none" }}>%</span>
+                        {props.fillOpacity.mixed && <span style={mixNote}>Mixed</span>}
+                      </span>
+                    }
+                  />
                 )}
                 {hasEl && (
                   <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
@@ -25677,19 +25726,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     easement's TYPE colour (above) until touched; "Reset" clears back to the type
                     default rather than leaving a stale override behind. */}
                 <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "8px 0", paddingTop: 8 }}>
-                  <Field label="Fill color"><ColorField value={toHex6(est.fill)} {...colorCtl((v) => setSelEasement({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /></Field>
-                  <Field label="Fill opacity">
-                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <input type="range" min={0} max={0.6} step={0.02} value={est.fillOpacity} onChange={(ev) => setSelEasement({ fillOpacity: +ev.target.value })} />
-                      <span style={{ fontSize: 10.5, color: PAL.muted, minWidth: 28 }}>{Math.round(est.fillOpacity * 100)}%</span>
-                    </span>
-                  </Field>
-                  <Field label="Hatch">
-                    <select style={{ ...numInput, width: 150, fontFamily: "inherit" }} value={est.hatch} onChange={(ev) => setSelEasement({ hatch: ev.target.value })}>
-                      {HATCH_OPTIONS.map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}
-                    </select>
-                  </Field>
-                  <Field label="Outline color"><ColorField value={toHex6(est.stroke)} {...colorCtl((v) => setSelEasement({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} /></Field>
+                  <PairedFieldHead left="Outline" right="Fill" />
+                  <PairedField label="Colour"
+                    left={<ColorField value={toHex6(est.stroke)} {...colorCtl((v) => setSelEasement({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} />}
+                    right={<ColorField value={toHex6(est.fill)} {...colorCtl((v) => setSelEasement({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} />}
+                  />
+                  <PairedField label="Pattern"
+                    right={<select style={{ ...numInput, width: "100%", fontFamily: "inherit" }} value={est.hatch} onChange={(ev) => setSelEasement({ hatch: ev.target.value })}>{HATCH_OPTIONS.map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}</select>}
+                  />
+                  <PairedField label="Opacity"
+                    right={<PercentField value={est.fillOpacity} max={60} onCommit={(v) => setSelEasement({ fillOpacity: v })} inputStyle={numInput} ariaLabel="Fill opacity" />}
+                  />
                   {est.hasOverride && <button style={{ ...chip, marginTop: 4 }} onClick={() => setSelEasement({ fill: null, stroke: null, fillOpacity: null, hatch: null })} title={`Revert to the ${t.label} type's default appearance`}>↺ Reset to type default</button>}
                 </div>
                 <Field label="Label"><input value={e.labelOverride || ""} onChange={(ev) => setSelEasement({ labelOverride: ev.target.value })} placeholder={easementLabel({ ...e, labelOverride: "" })} style={txt} /></Field>
@@ -25738,33 +25785,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
               <div>
               <Section title={simpleClosedMarkup ? null : (isCloud ? "Markup · Cloud" : `Markup · ${selMarkup.kind[0].toUpperCase()}${selMarkup.kind.slice(1)}`)}>
-                {/* NEW-2 (2026-09-07) — this used to be a 2-column grid crammed into the ~294px
-                    panel: the "pt" unit label overlapped "Hatch" in the next column, the Hatch
-                    dropdown clipped to "None (flat f…", and "Line width"/"Line style" wrapped onto
-                    two lines while their controls stayed on one. A single column always fits the
-                    panel at its real width, with plenty of vertical room to spend (PANEL-BREVITY:
-                    collapsing width for width's sake was the wrong axis — this panel's height was
-                    never the scarce resource). Outline/Fill stay visually grouped via StdSubLabel,
-                    same pattern the measurement panel's own Line/Fill groups already use. */}
+                {/* NEW-1 (B1618656) — the owner's two-column properties-panel mockup: OUTLINE and FILL
+                    as column heads over a shared label gutter (PairedFieldHead/PairedField), so
+                    "Colour"/"Pattern"/"Opacity" are written once instead of twice and the two sides
+                    can be compared at a glance. The 2026-09-07 revert to one column (below, superseded)
+                    was fixing fixed-width controls that didn't fit a value column, not the pairing
+                    itself — this pass fixes that directly: every select here is flexible width, and
+                    Opacity is a compact percent field rather than the slider that had no room to fit
+                    two abreast. */}
                 {simpleClosedMarkup ? (<>
-                  <StdSubLabel>Outline</StdSubLabel>
-                  <Field label="Color"><ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveStyle({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} /></Field>
-                  <Field label="Line width"><span style={{ display: "flex", alignItems: "center", gap: 4 }}><NumInput style={{ ...numInput, width: 62 }} value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setStyle({ weight: n })} /><span style={{ fontSize: 11, color: PAL.muted }}>pt</span></span></Field>
-                  <Field label="Line style">
-                    <select style={{ ...numInput, width: 104, fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setStyle({ dash: e.target.value })}>
-                      {DASH_OPTIONS}
-                    </select>
-                  </Field>
-                  <Field label="Line opacity"><span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: "1 1 auto" }}><input style={{ minWidth: 0, flex: "1 1 auto" }} type="range" min={0} max={1} step={0.05} value={selMarkup.strokeOpacity ?? 1} {...sliderHistory((e) => liveStyle({ strokeOpacity: +e.target.value }))} /><span style={{ fontSize: 10.5, minWidth: 30, textAlign: "right", flex: "none" }}>{Math.round((selMarkup.strokeOpacity ?? 1) * 100)}%</span></span></Field>
-                  <StdSubLabel>Fill</StdSubLabel>
-                  <Field label="Color"><ColorField value={toHex6(selMarkup.fill)} {...colorCtl((v) => liveStyle({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} /></Field>
-                  <Field label="Hatch">
-                    <select style={{ ...numInput, width: 122, fontFamily: "inherit" }} value={selMarkup.hatch || "none"} onChange={(e) => setStyle({ hatch: e.target.value })}>
-                      {HATCH_OPTIONS.map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}
-                    </select>
-                  </Field>
-                  <Field label="Hatch color"><ColorField value={toHex6(selMarkup.hatchColor || selMarkup.stroke || selMarkup.fill)} {...colorCtl((v) => liveStyle({ hatchColor: v }))} seed={COLOR_SEED} title="Hatch color" style={swatch} /></Field>
-                  <Field label="Fill opacity"><span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: "1 1 auto" }}><input style={{ minWidth: 0, flex: "1 1 auto" }} type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} {...sliderHistory((e) => liveStyle({ fillOpacity: +e.target.value }))} /><span style={{ fontSize: 10.5, minWidth: 30, textAlign: "right", flex: "none" }}>{Math.round((selMarkup.fillOpacity ?? 0) * 100)}%</span></span></Field>
+                  <PairedFieldHead left="Outline" right="Fill" />
+                  <PairedField label="Colour"
+                    left={<ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveStyle({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} />}
+                    right={<ColorField value={toHex6(selMarkup.fill)} {...colorCtl((v) => liveStyle({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} />}
+                  />
+                  <PairedField label="Width"
+                    left={<span style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}><NumInput style={{ ...numInput, width: "100%", minWidth: 0 }} value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setStyle({ weight: n })} /><span style={{ fontSize: 11, color: PAL.muted, flex: "none" }}>pt</span></span>}
+                  />
+                  <PairedField label="Pattern"
+                    left={<select style={{ ...numInput, width: "100%", fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setStyle({ dash: e.target.value })}>{DASH_OPTIONS}</select>}
+                    right={<select style={{ ...numInput, width: "100%", fontFamily: "inherit" }} value={selMarkup.hatch || "none"} onChange={(e) => setStyle({ hatch: e.target.value })}>{HATCH_OPTIONS.map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}</select>}
+                  />
+                  <PairedField label="Hatch colour"
+                    right={<ColorField value={toHex6(selMarkup.hatchColor || selMarkup.stroke || selMarkup.fill)} {...colorCtl((v) => liveStyle({ hatchColor: v }))} seed={COLOR_SEED} title="Hatch color" style={swatch} />}
+                  />
+                  <PairedField label="Opacity"
+                    left={<PercentField value={selMarkup.strokeOpacity ?? 1} onCommit={(v) => setStyle({ strokeOpacity: v })} inputStyle={numInput} ariaLabel="Line opacity" />}
+                    right={<PercentField value={selMarkup.fillOpacity ?? 0} onCommit={(v) => setStyle({ fillOpacity: v })} inputStyle={numInput} ariaLabel="Fill opacity" />}
+                  />
                 </>) : (<>
                   <Field label="Outline"><ColorField value={toHex6(selMarkup.stroke)} {...colorCtl((v) => liveStyle({ stroke: v }))} seed={COLOR_SEED} title="Outline color" style={swatch} /></Field>
                   <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => setStyle({ weight: n })} /></Field>
@@ -26017,29 +26065,41 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   placeholder="e.g. Front setback" style={textInput} /></Field>
                 {/* Line + fill, routed through the shared ColorField (so it inherits the recently
                     used colours) and the shared DASH_OPTIONS list — one editing surface, not a
-                    parallel one. Every mode gets the line controls; only a closed area gets fill. */}
-                <StdSubLabel>{mode === "count" ? "Markers" : "Line"}</StdSubLabel>
-                <Field label={mode === "count" ? "Marker color" : "Line color"}>
-                  <ColorField value={toHex6(measureStyle(m).stroke)} {...colorCtl((v) => liveMeasure({ stroke: v }))} seed={COLOR_SEED} title="Line color" style={swatch} />
-                </Field>
-                <Field label="Line weight">
-                  <NumInput style={numInput} value={m.weight ?? MEASURE_LINE.weight} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMeasure({ weight: n })} />
-                </Field>
-                {stylable && (
-                  <Field label="Line style">
-                    <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={m.dash || MEASURE_LINE.dash} onChange={(e) => setSelMeasure({ dash: e.target.value })}>
-                      {DASH_OPTIONS}
-                    </select>
+                    parallel one. Every mode gets the line controls; only a closed area gets fill —
+                    and only then is there a second side to pair against (B1618656 NEW-1), so a
+                    non-closed measurement keeps its plain single-column Line/Markers group. */}
+                {closed ? (<>
+                  <PairedFieldHead left={mode === "count" ? "Markers" : "Line"} right="Fill" />
+                  <PairedField label="Colour"
+                    left={<ColorField value={toHex6(measureStyle(m).stroke)} {...colorCtl((v) => liveMeasure({ stroke: v }))} seed={COLOR_SEED} title="Line color" style={swatch} />}
+                    right={<ColorField value={toHex6(measureStyle(m).fill)} {...colorCtl((v) => liveMeasure({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} />}
+                  />
+                  <PairedField label="Weight"
+                    left={<NumInput style={{ ...numInput, width: "100%" }} value={m.weight ?? MEASURE_LINE.weight} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMeasure({ weight: n })} />}
+                  />
+                  {stylable && (
+                    <PairedField label="Pattern"
+                      left={<select style={{ ...numInput, width: "100%", fontFamily: "inherit" }} value={m.dash || MEASURE_LINE.dash} onChange={(e) => setSelMeasure({ dash: e.target.value })}>{DASH_OPTIONS}</select>}
+                    />
+                  )}
+                  <PairedField label="Opacity"
+                    right={<PercentField value={m.fillOpacity ?? MEASURE_LINE.fillOpacity} onCommit={(v) => setSelMeasure({ fillOpacity: v })} inputStyle={numInput} ariaLabel="Fill opacity" />}
+                  />
+                </>) : (<>
+                  <StdSubLabel>{mode === "count" ? "Markers" : "Line"}</StdSubLabel>
+                  <Field label={mode === "count" ? "Marker color" : "Line color"}>
+                    <ColorField value={toHex6(measureStyle(m).stroke)} {...colorCtl((v) => liveMeasure({ stroke: v }))} seed={COLOR_SEED} title="Line color" style={swatch} />
                   </Field>
-                )}
-                {closed && (<>
-                  <StdSubLabel>Fill</StdSubLabel>
-                  <Field label="Fill color">
-                    <ColorField value={toHex6(measureStyle(m).fill)} {...colorCtl((v) => liveMeasure({ fill: v }))} seed={COLOR_SEED} title="Fill color" style={swatch} />
+                  <Field label="Line weight">
+                    <NumInput style={numInput} value={m.weight ?? MEASURE_LINE.weight} min={0.5} step={0.5} coarse={2} onCommit={(n) => setSelMeasure({ weight: n })} />
                   </Field>
-                  <Field label="Fill opacity">
-                    <input type="range" min={0} max={1} step={0.05} value={m.fillOpacity ?? MEASURE_LINE.fillOpacity} {...sliderHistory((e) => liveMeasure({ fillOpacity: +e.target.value }))} />
-                  </Field>
+                  {stylable && (
+                    <Field label="Line style">
+                      <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={m.dash || MEASURE_LINE.dash} onChange={(e) => setSelMeasure({ dash: e.target.value })}>
+                        {DASH_OPTIONS}
+                      </select>
+                    </Field>
+                  )}
                 </>)}
                 {uncal && <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, margin: "2px 2px 6px" }}>Your colour is saved, but this measurement stays amber on the drawing until the sheet is calibrated — that amber means “this number isn’t real feet yet”.</div>}
                 {/* NEW-2 — when this measurement's label appears. Captured from the live view with
@@ -26601,6 +26661,45 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               ) : selEl.type === "pond" ? null : (
                 <div style={{ fontSize: 11.5, color: PAL.muted, marginBottom: 4, lineHeight: 1.5 }}>Polygon · {selEl.points.length} points. Drag the body to move. Drag a <b>dot</b> to move a corner, click a <b>＋</b> on an edge to add one, <b>Shift-click</b> a dot to delete. Double-click to change type.</div>
               )}
+              {/* B1614128 — a hand-click-drawn (freehand) building never satisfied the
+                  `!selEl.points || selEl.footEdit` gate above (it has points but no dock frame), so
+                  it fell straight to the generic "Polygon · N points" fallback and lost its Structure
+                  fields AND the Standards → Buildings pointer entirely — even though the printed
+                  exhibit already prices its clear height/slab off the same tiers (buildingSqft reads
+                  polygon area for any shape). Column grid + the dock-frame Loading UI stay OUT here on
+                  purpose: a freehand outline has no wall to hang a grid or a dock zone off, and
+                  footprintLength/footprintDepth need el.w/el.h, which this shape never has —
+                  effectiveBuildingProps only needs sf, so clear height/slab don't share that gap. */}
+              {isBuilding(selEl) && selEl.points && !selEl.footEdit && (() => {
+                const sf = buildingSqft(selEl);
+                const props = effectiveBuildingProps(selEl, sf, buildingRules);
+                const autoTag = { fontSize: 10, color: PAL.muted, marginLeft: 2 };
+                const resetBtn = { ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent, marginLeft: 2 };
+                return (
+                  <>
+                    <div style={subHead}>Structure</div>
+                    <Field label="Clear height (ft)">
+                      <span style={ROW4}>
+                        <NumInput style={{ ...numInput, width: 52 }} value={props.clearHeight.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ clearHeightOverride: n }); }} />
+                        {props.clearHeight.overridden
+                          ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ clearHeightOverride: null }); }} style={resetBtn}>set ↺</button>
+                          : <span style={autoTag}>auto</span>}
+                      </span>
+                    </Field>
+                    <Field label="Slab (in)">
+                      <span style={ROW4}>
+                        <NumInput style={{ ...numInput, width: 52 }} value={props.slab.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ slabThicknessOverride: n }); }} />
+                        {props.slab.overridden
+                          ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ slabThicknessOverride: null }); }} style={resetBtn}>set ↺</button>
+                          : <span style={autoTag}>auto</span>}
+                      </span>
+                    </Field>
+                    <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 10 }}>
+                      This building's clear height & slab start from <button style={linkBtn} onClick={() => jumpToStandards("building")}>Standards → Buildings ↗</button>
+                    </div>
+                  </>
+                );
+              })()}
               {selEl.type !== "pond" && (() => {
                 const poly = !!selEl.points;
                 const area = isCenterlineRoad(selEl) ? roadStripArea(selEl, settings, sharpFor(selEl), roundTrim(selEl), roundabouts.areaById.get(selEl.id)) : poly ? polyArea(selEl.points) : selEl.w * selEl.h;
@@ -28219,20 +28318,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     })()}
                     {curStyle && (
                     <Collapse sectionId="pond-appearance" title="Appearance" defaultOpen={false} summary="fill · outline · opacity">
-                      <Field label="Fill">
-                        <span style={ROW6}>
-                          <ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" />
-                        </span>
-                      </Field>
-                      <Field label="Outline">
-                        <span style={ROW6}>
-                          <ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" />
-                        </span>
-                      </Field>
-                      <Field label="Fill opacity">
-                        <input type="range" min={0.1} max={1} step={0.05} value={curStyle.fillOpacity}
-                          {...sliderHistory((e) => setSelEl({ fillOpacity: +e.target.value }))} />
-                      </Field>
+                      <PairedFieldHead left="Outline" right="Fill" />
+                      <PairedField label="Colour"
+                        left={<span style={ROW6}><ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" /></span>}
+                        right={<span style={ROW6}><ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" /></span>}
+                      />
+                      <PairedField label="Opacity"
+                        right={<PercentField value={curStyle.fillOpacity} min={10} onCommit={(v) => { pushHistory(); setSelEl({ fillOpacity: v }); }} inputStyle={numInput} ariaLabel="Fill opacity" />}
+                      />
                       <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
                         <button style={{ ...chip, flex: 1 }} onClick={setStyleDefault} title={`Use these colors for every new ${TYPE[selEl.type].label}`}>Set as default</button>
                         <button style={chip} onClick={clearElStyle} title="Revert this element to the type default">Reset</button>
@@ -28254,20 +28347,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               so the standalone Properties section is suppressed for them. */}
           {!multiStyleable && selEl && curStyle && selEl.type !== "pond" && (
             <Section title="Properties">
-              <Field label="Fill">
-                <span style={ROW6}>
-                  <ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" />
-                </span>
-              </Field>
-              <Field label="Outline">
-                <span style={ROW6}>
-                  <ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" />
-                </span>
-              </Field>
-              <Field label="Fill opacity">
-                <input type="range" min={0.1} max={1} step={0.05} value={curStyle.fillOpacity}
-                  {...sliderHistory((e) => setSelEl({ fillOpacity: +e.target.value }))} />
-              </Field>
+              <PairedFieldHead left="Outline" right="Fill" />
+              <PairedField label="Colour"
+                left={<span style={ROW6}><ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" /></span>}
+                right={<span style={ROW6}><ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" /></span>}
+              />
+              <PairedField label="Opacity"
+                right={<PercentField value={curStyle.fillOpacity} min={10} onCommit={(v) => { pushHistory(); setSelEl({ fillOpacity: v }); }} inputStyle={numInput} ariaLabel="Fill opacity" />}
+              />
               <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
                 <button style={{ ...chip, flex: 1 }} onClick={setStyleDefault} title={`Use these colors for every new ${TYPE[selEl.type].label}`}>Set as default</button>
                 <button style={chip} onClick={clearElStyle} title="Revert this element to the type default">Reset</button>
@@ -30246,6 +30333,39 @@ function Section({ title, children, collapsed, accent }) {
     </div>
   );
 }
+/* NEW-1 (B1618656) — the shared label GUTTER every properties-panel row aligns to, whether it's a
+ * lone Field or one half of a PairedField. Sized to the short paired-column vocabulary (Colour /
+ * Width / Style / Pattern / Opacity — all ≤8 chars); PropLabel below wraps a longer single-row
+ * label (e.g. a pond engineering-assumption field) onto a second line rather than widening the
+ * gutter and starving the two value columns beside it. A per-panel gutter was considered and
+ * rejected — the owner's mockup calls for one shared left edge across the whole panel, paired rows
+ * included, so the width has to be a single constant every row in every panel reads. */
+const PROP_GUTTER_W = 64;
+const PROP_GRID_GAP = SPACE.sm; // 6 — tight on purpose: two ~84px value columns at the 268px panel width
+
+/* The row label — wraps up to 2 lines (a handful of longer single-row labels do; the paired-row
+ * vocabulary never does) and always carries its own text as a hover title, so nothing is ever lost
+ * to the clamp even in the rare case a label runs past 2 lines. */
+function PropLabel({ children, title }) {
+  const full = title ?? (typeof children === "string" ? children : undefined);
+  return (
+    <span
+      style={{
+        fontSize: FONT_SIZE.control, lineHeight: 1.25, color: "var(--text-secondary)",
+        display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
+        ...(full ? { cursor: "help" } : null),
+      }}
+      title={full}
+    >{children}</span>
+  );
+}
+
+// The placeholder for "a property only one side has" (per the mockup) — an OUTLINE cell with no
+// weight, or a FILL cell with no hatch, reads as a dash rather than an empty gap.
+function PropDash() {
+  return <span aria-hidden="true" style={{ display: "block", textAlign: "center", color: "var(--text-tertiary)", fontSize: FONT_SIZE.control }}>—</span>;
+}
+
 /* NEW-1 — `data-field-group` marks a VALUE-ENTRY ROW as one unit to the keyboard latch
  * (shared/keyboard/keyScope.js). The label, the input and its ▲▼ steppers are one thing to the
  * user, and pressing any of them means "I am editing this number" — so Delete and Backspace
@@ -30253,15 +30373,55 @@ function Section({ title, children, collapsed, accent }) {
  * seven measured ways the owner's building could be destroyed were presses on those steppers. */
 function Field({ label, children, title }) {
   return (
-    <div data-field-group="1" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 8 }}>
-      <span style={{ fontSize: 12, color: "var(--text-secondary)", ...(title ? { cursor: "help" } : null) }} title={title}>{label}</span>{children}
+    <div data-field-group="1" style={{ display: "grid", gridTemplateColumns: `${PROP_GUTTER_W}px 1fr`, alignItems: "center", columnGap: PROP_GRID_GAP, marginBottom: SPACE.md }}>
+      <PropLabel title={title}>{label}</PropLabel>
+      <div style={{ minWidth: 0 }}>{children}</div>
     </div>
   );
 }
-/* NEW-1 — a sub-heading INSIDE a Standards section, for a section that styles more than one
- * thing. The Parcels section now drives two different lines (the boundary and the setback), and
- * two unlabelled colour rows gave no way to tell which was which. Hierarchy comes from weight +
- * uppercase letter-spacing, never from fading the text toward the background (theme rule). */
+// PairedField — one row of an OUTLINE/FILL (or LINE/FILL) column pair, sharing Field's own gutter
+// so the two primitives line up on one left edge. `left`/`right` go under PairedFieldHead's two
+// column names, in that order; either may be omitted for a property only the other side has.
+function PairedField({ label, title, left, right }) {
+  return (
+    <div data-field-group="1" style={{ display: "grid", gridTemplateColumns: `${PROP_GUTTER_W}px 1fr 1fr`, alignItems: "center", columnGap: PROP_GRID_GAP, marginBottom: SPACE.md }}>
+      <PropLabel title={title}>{label}</PropLabel>
+      <div style={{ minWidth: 0 }}>{left ?? <PropDash />}</div>
+      <div style={{ minWidth: 0 }}>{right ?? <PropDash />}</div>
+    </div>
+  );
+}
+// PairedFieldHead — the column-header row atop a PairedField group (empty gutter cell, then the
+// two group names) — the mockup's "OUTLINE" / "FILL" row. Shares Section's uppercase title style.
+function PairedFieldHead({ left, right }) {
+  const head = { fontSize: FONT_SIZE.label, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-secondary)" };
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: `${PROP_GUTTER_W}px 1fr 1fr`, columnGap: PROP_GRID_GAP, margin: "10px 2px 7px" }}>
+      <span />
+      <span style={head}>{left}</span>
+      <span style={head}>{right}</span>
+    </div>
+  );
+}
+// PercentField — compact 0–100% entry for a 0–1 opacity value. A paired value column has no room
+// for a full-width slider (the mockup's deliberate call), so both OUTLINE and FILL opacity read as
+// a short number instead. Commits once (blur/Enter), like every other NumInput in these panels —
+// no drag-history batching needed, unlike the slider it replaces. `inputStyle` is the caller's own
+// local `numInput` const (this function lives at module scope, above the component that defines
+// it, so it cannot close over it) — every call site already has one in scope.
+function PercentField({ value, onCommit, ariaLabel, inputStyle, min = 0, max = 100 }) {
+  return (
+    <span style={{ display: "flex", alignItems: "center", gap: SPACE.xxs, minWidth: 0 }}>
+      <NumInput style={{ ...inputStyle, width: "100%", minWidth: 0 }} value={Math.round((value ?? 0) * 100)} min={min} max={max} step={5}
+        ariaLabel={ariaLabel} onCommit={(n) => onCommit(Math.max(min, Math.min(max, Math.round(n))) / 100)} />
+      <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", flex: "none" }}>%</span>
+    </span>
+  );
+}
+/* NEW-1 — a sub-heading INSIDE a panel/section that styles more than one UNPAIRED thing (e.g. the
+ * parcel boundary vs. its setback line — two different lines, neither one "the fill side" of the
+ * other, so they stay two stacked single-column groups rather than a paired grid). Hierarchy comes
+ * from weight + uppercase letter-spacing, never from fading the text toward the background (theme rule). */
 function StdSubLabel({ children }) {
   return (
     <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-secondary)", margin: "10px 2px 7px" }}>{children}</div>
