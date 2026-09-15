@@ -41,6 +41,40 @@ export const GRID_DEFAULTS = {
   doorOC: 12,            // dock-door spacing, on-centre (ft)
 };
 
+// ── Interior grid-line show/hide — decided ONCE PER VIEW, from the map scale alone ────────────
+//
+// Owner report (B1614544, 2026-09-15, verbatim): "LETS MAKE IT SO THAT GRIDLINES SHOW AT THE
+// SAME ZOOM FOR ALL BUILDINGS, I DONT LIKE SEEING GRID LINES ON SOME BUT NOT OTHERS." Reproduced
+// live (ui-audit/verify-grid-view-scale.mjs): a 200×150 building and a 1200×600 building on one
+// plan, at the identical zoom — the large building drew its full 31-line grid, the small one drew
+// none.
+//
+// ROOT CAUSE, confirmed before this fix was written: `SitePlanner.jsx` gated the grid on
+// `Math.min(w, h) >= FEAT_BTN_MIN_PX`, where w/h are THAT BUILDING's own rendered footprint in
+// screen px. A building's footprint size varies building to building, so this made the reveal
+// zoom a function of which building you asked about, not of where the map was zoomed — the exact
+// mixed state reported. `FEAT_BTN_MIN_PX` (B225) is the right gate for a DIFFERENT question ("does
+// this building have screen room to seat the +/− edit control cluster") and stays correct there;
+// it was never the right gate for "is the drawing zoomed in enough to read a column grid."
+//
+// THE FIX: gate on `ppf` (px per foot of the current view, or the sheet's own px/ft on an export
+// pass — identical for every building in one render pass) and nothing else. No building geometry,
+// position, rotation or on-screen size enters the decision, so every building's grid necessarily
+// shows or hides together, on the same render.
+//
+// THE THRESHOLD is picked off the grid's OWN typical bay size — GRID_DEFAULTS.bayMin, the
+// tightest end of the industry flex band — never off any one building's footprint, so it stays a
+// property of the grid rather than of whatever plan happens to be open. Below the floor the
+// narrowest common bay would render under MIN_BAY_LEGIBLE_PX wide and the mesh reads as a smear
+// rather than individual column lines.
+const MIN_BAY_LEGIBLE_PX = 16;
+/** px per foot at which the column grid reveals. Not derived from any drawn building. */
+export const GRID_MIN_PPF = MIN_BAY_LEGIBLE_PX / GRID_DEFAULTS.bayMin; // 0.32 px/ft
+/** Whether the interior column grid should draw at this view/render scale (ppf, px per foot). */
+export function gridLinesVisible(ppf) {
+  return Number.isFinite(ppf) && ppf >= GRID_MIN_PPF;
+}
+
 // Resolve the grid knobs for one building element: global `settings` defaults, each
 // optionally pinned by a per-building override (the existing `…Override` pattern —
 // flat fields on the element, null/absent = "use the global default"). Returns the

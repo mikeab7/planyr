@@ -345,7 +345,7 @@ import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlay
 import { hasCrop, cropClipRectScreen, cropTrimFeet, cropFromTrimFeet } from "./lib/overlayCrop.js";
 import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerialVisibility.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, dockAxisOf, healDockAxes, withDockAxis, rotateDockAxisPatch } from "./lib/dockZones.js";
-import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
+import { computeBuildingGrid, resolveGridSettings, placeDockDoors, gridLinesVisible } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
 import { dimSlideRange, clampDimOffset, DIM_POS_F_DEFAULT, DIM_POS_F_ROAD, dimNumberBox } from "./lib/dimSlide.js";
@@ -29497,8 +29497,9 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
       const out = [];
       const g = resolveGridSettings(el, settings);
       const grid = computeBuildingGrid({ length: L, depth: D, dock, grid: g });
-      const wpx = Math.abs(bb.w) * ppf, hpx = Math.abs(bb.h) * ppf;
-      if (settings.showGrid && grid.summary && Math.min(wpx, hpx) >= FEAT_BTN_MIN_PX) {
+      // NEW-1 (B1614544) — reveal gate is VIEW SCALE ONLY (buildingGrid.gridLinesVisible), never
+      // this building's own on-screen footprint size; see that module's header for why.
+      if (settings.showGrid && grid.summary && gridLinesVisible(lfPpf || ppf)) {
         const lineStyle = (role) => role === "flex"
           ? { stroke: GRID_FLEX, strokeWidth: 0.6, strokeDasharray: "5 4", opacity: 0.85 }
           : { stroke: GRID_LINE, strokeWidth: 0.5, opacity: 0.8 };
@@ -29877,12 +29878,20 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
     const depthFt = (d) => (faceAtZero ? d : depthMaxFt - d);
 
     // ---- Column grid (B568) — drawn for real buildings only (never a dog-ear bump-out),
-    // zoom-gated on the rendered footprint px (the FEAT_BTN_MIN_PX precedent) so it reveals
-    // when legible and never clutters at site-overview zoom.
-    // NEW-1 (V481(f)): the reveal gate is a MIN-ON-SCREEN-SIZE rule, so on an export pass it
-    // measures the footprint at the SHEET's scale (canvas px ÷ lfK) — otherwise a wide-zoom PDF
-    // silently dropped the column grid a working-zoom PDF of the same plan drew.
-    if (settings.showGrid && !el.dogEar && grid.summary && Math.min(w, h) / lfK >= FEAT_BTN_MIN_PX) {
+    // zoom-gated so it reveals when legible and never clutters at site-overview zoom.
+    // ⛔ NEW-1 (B1614544) — gated on VIEW SCALE ALONE (buildingGrid.gridLinesVisible(ppf)),
+    // NEVER on this building's own on-screen footprint size. The prior gate compared THIS
+    // building's rendered `Math.min(w,h)` against a fixed pixel floor (the FEAT_BTN_MIN_PX
+    // precedent, B225) — a per-building question, so at one zoom a building whose footprint
+    // happened to read large passed while a smaller building right beside it did not ("gridlines
+    // show on some buildings but not others at the same zoom" — owner report, reproduced live in
+    // ui-audit/verify-grid-view-scale.mjs before this fix). `ppf` is the same number for every
+    // building at a given render pass — screen (`ppf`) or sheet (`lfPpf`, so a wide-zoom PDF still
+    // draws the same grid a working-zoom PDF of the same plan draws) — so gating on it alone makes
+    // the show/hide decision one bit for the WHOLE PLAN, by construction. Do not reintroduce a
+    // building-size term here to fix a legibility complaint — pick a different `GRID_MIN_PPF`
+    // instead (see that constant's header in buildingGrid.js).
+    if (settings.showGrid && !el.dogEar && grid.summary && gridLinesVisible(lfPpf || ppf)) {
       const lineStyle = (role) => role === "flex"
         ? { stroke: GRID_FLEX, strokeWidth: 0.6, strokeDasharray: "5 4", opacity: 0.85 } // end/rear/centre flex boundary
         : { stroke: GRID_LINE, strokeWidth: 0.5, opacity: 0.8 };                     // interior column line (speed bay renders the same — no orange emphasis)
