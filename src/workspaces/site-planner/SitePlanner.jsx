@@ -25592,6 +25592,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                  uses, not a square-per-button minimum). */
               [data-bottom-sheet="properties"] [data-num-stepper] { flex-direction: row !important; gap: 3px !important; align-self: stretch; }
               [data-bottom-sheet="properties"] [data-num-stepper] button { min-width: 32px; }
+              /* NEW-2 (found on a phone-width WebKit pass of the callout/text-box panel — the
+                 shared row primitive's own Opacity row pairs TWO stepped controls, Fill opacity
+                 left of Line opacity right, and the markup panel's Opacity row does the same) — a
+                 row where BOTH halves carry the 32px-wide touch stepper above has no room left for
+                 it at iPhone-SE width and measurably overflowed its own row (scrollWidth 12px past
+                 clientWidth). Reverting the stepper to its narrow desktop COLUMN layout there just
+                 trades the overflow for the exact "two stacked squares" look NEW-4 above was fixing
+                 (still 44px-tall buttons, now stacked instead of side by side), so data-paired-cell
+                 (PairedField's own half-width value column, as opposed to a full-width Field row)
+                 hides the spinner there instead — typing and the input's own ArrowUp/ArrowDown
+                 keys still nudge the value, this only drops the tap-target buttons where two of
+                 them can't both fit without pushing the row off the sheet. */
+              [data-bottom-sheet="properties"] [data-paired-cell] [data-num-stepper] { display: none !important; }
               /* B1215682/NEW-5 — label and value sit ADJACENT, not at opposite edges of the full
                  sheet width: the row's own inline justify-content is overridden (it is set inline,
                  so this needs the specificity bump) rather than pushing the control flush right
@@ -30462,7 +30475,7 @@ function PropDash() {
  * seven measured ways the owner's building could be destroyed were presses on those steppers. */
 function Field({ label, children, title }) {
   return (
-    <div data-field-group="1" style={{ display: "grid", gridTemplateColumns: `${PROP_GUTTER_W}px 1fr`, alignItems: "center", columnGap: PROP_GRID_GAP, marginBottom: SPACE.md }}>
+    <div data-field-group="1" data-row-align="1" style={{ display: "grid", gridTemplateColumns: `${PROP_GUTTER_W}px 1fr`, alignItems: "center", columnGap: PROP_GRID_GAP, marginBottom: SPACE.md }}>
       <PropLabel title={title}>{label}</PropLabel>
       <div style={{ minWidth: 0 }}>{children}</div>
     </div>
@@ -30473,19 +30486,30 @@ function Field({ label, children, title }) {
 // column names, in that order; either may be omitted for a property only the other side has.
 function PairedField({ label, title, left, right }) {
   return (
-    <div data-field-group="1" style={{ display: "grid", gridTemplateColumns: `${PROP_GUTTER_W}px 1fr 1fr`, alignItems: "center", columnGap: PROP_GRID_GAP, marginBottom: SPACE.md }}>
+    <div data-field-group="1" data-row-align="1" style={{ display: "grid", gridTemplateColumns: `${PROP_GUTTER_W}px 1fr 1fr`, alignItems: "center", columnGap: PROP_GRID_GAP, marginBottom: SPACE.md }}>
       <PropLabel title={title}>{label}</PropLabel>
-      <div style={{ minWidth: 0 }}>{left ?? <PropDash />}</div>
-      <div style={{ minWidth: 0 }}>{right ?? <PropDash />}</div>
+      {/* NEW-2 — `data-paired-cell="1"` marks a HALF-width value column, as opposed to a Field
+          row's full-width one. It exists only so the phone bottom-sheet's stepper touch-target CSS
+          (below, near `data-num-stepper`) can tell the two apart: a row with BOTH sides populated
+          by a stepped control (e.g. this panel's Opacity row — Fill AND Line opacity, each a
+          PercentField with its own ▲▼ nudge) doesn't have room for two 44px-touch-target-wide
+          spinners side by side at iPhone-SE width, and measurably overflowed the row before this
+          marker existed (the Opacity row's own scrollWidth ran 12px past its clientWidth). */}
+      <div data-paired-cell="1" style={{ minWidth: 0 }}>{left ?? <PropDash />}</div>
+      <div data-paired-cell="1" style={{ minWidth: 0 }}>{right ?? <PropDash />}</div>
     </div>
   );
 }
 // PairedFieldHead — the column-header row atop a PairedField group (empty gutter cell, then the
 // two group names) — the mockup's "OUTLINE" / "FILL" row. Shares Section's uppercase title style.
+// `data-row-align="1"` is NOT `data-field-group` (that marks a value-entry row for the keyboard
+// latch, and this row holds no input) — it exists only so a left-edge alignment check can find
+// every row KIND, header included. NEW-1 shipped this row 2px right of the rows it labels
+// because the alignment check of the day filtered on `data-field-group` and never saw it.
 function PairedFieldHead({ left, right }) {
   const head = { fontSize: FONT_SIZE.label, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-secondary)" };
   return (
-    <div style={{ display: "grid", gridTemplateColumns: `${PROP_GUTTER_W}px 1fr 1fr`, columnGap: PROP_GRID_GAP, margin: "10px 2px 7px" }}>
+    <div data-row-align="1" style={{ display: "grid", gridTemplateColumns: `${PROP_GUTTER_W}px 1fr 1fr`, columnGap: PROP_GRID_GAP, margin: "10px 0 7px" }}>
       <span />
       <span style={head}>{left}</span>
       <span style={head}>{right}</span>
@@ -30513,7 +30537,7 @@ function PercentField({ value, onCommit, ariaLabel, inputStyle, min = 0, max = 1
  * from weight + uppercase letter-spacing, never from fading the text toward the background (theme rule). */
 function StdSubLabel({ children }) {
   return (
-    <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-secondary)", margin: "10px 2px 7px" }}>{children}</div>
+    <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-secondary)", margin: "10px 0 7px" }}>{children}</div>
   );
 }
 // B681 — familiar Word-style paragraph-alignment glyph: four stacked rows, long rows spanning the
