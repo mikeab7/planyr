@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { apprRows, apprVal, findAttr, apprAll, situsAddress, situsKey, isPlaceholderValue, ownerKey, ownerName } from "../src/workspaces/site-planner/lib/appraisal.js";
+import { apprRows, apprVal, findAttr, apprAll, situsAddress, situsKey, isPlaceholderValue, ownerKey, ownerName, acreageKey } from "../src/workspaces/site-planner/lib/appraisal.js";
 
 // A parcel answered by the statewide TxGIO backup must surface the SAME curated
 // appraisal rows as one from its home county — otherwise the backup looks broken even
@@ -33,8 +33,8 @@ describe("apprRows — TxGIO statewide-backup field mapping (B244)", () => {
     expect(byLabel["Account / ID"]).toBe("40594");
   });
 
-  it("maps legal_area → Acreage (TxGIO has no *_acre column)", () => {
-    expect(byLabel["Acreage"]).toBe("12.34");
+  it("maps gis_area → Acreage (TxGIO has no *_acre column; NEW-1 2026-09-12: a GIS-measured area column beats a \"legal\" one)", () => {
+    expect(byLabel["Acreage"]).toBe("12.31");
   });
 
   it("maps land_value / imp_value / mkt_value to the money rows", () => {
@@ -291,5 +291,53 @@ describe("B1574258 — owner resolution on the OWNERNME1/OWNERNME2 parcel schema
 
   it("KNOWN-GOOD ARM — the TxGIO `owner_name` record at the top of this file is unchanged", () => {
     expect(ownerName(TXGIO)).toBe("ACME INDUSTRIAL LP");
+  });
+});
+
+// NEW-1 (2026-09-12) — the Texas statewide StratMap layer (TX_STATEWIDE_STRATMAP_LAYER,
+// site-planner/lib/counties.js) publishes fields in EXACTLY this order — LEGAL_AREA before
+// GIS_AREA — and LEGAL_AREA's own value is the raw appraisal-roll text: a unit suffix on some
+// parcels ("16.02 a"), bare on others ("0.6658"). A flat "first key in attrs order that matches"
+// would show that inconsistent string as the Acreage row whenever it happened to be listed first,
+// which is this layer's own field order.
+const STRATMAP = {
+  OBJECTID: 1,
+  Prop_ID: "R123456",
+  GEO_ID: "48439-01-234-5678",
+  OWNER_NAME: "GATEWAY LOGISTICS LLC",
+  LEGAL_AREA: "16.02 a",
+  GIS_AREA: 16.0187,
+  LEGAL_DESC: "ABST 42 TR 7",
+  SITUS_ADDR: "500 COMMERCE DR",
+  MAIL_ADDR: "PO BOX 100, DALLAS, TX 75201",
+};
+
+describe("acreageKey / apprRows — a GIS area column beats a \"legal\" one regardless of field order (NEW-1)", () => {
+  it("acreageKey prefers GIS_AREA over LEGAL_AREA even though LEGAL_AREA is listed first", () => {
+    expect(acreageKey(STRATMAP)).toBe("GIS_AREA");
+  });
+
+  it("apprRows surfaces GIS_AREA's clean number as Acreage, never LEGAL_AREA's unit-suffixed text", () => {
+    const rows = apprRows(STRATMAP);
+    const byLabel = Object.fromEntries(rows.map((r) => [r.label, r.value]));
+    expect(byLabel["Acreage"]).toBe(16.0187);
+    expect(String(byLabel["Acreage"])).not.toMatch(/a$/i);
+  });
+
+  it("falls back to a \"legal\"-style column when no GIS-style one exists", () => {
+    expect(acreageKey({ LEGAL_AREA: "12.5" })).toBe("LEGAL_AREA");
+    expect(acreageKey({ legal_acre: "9.1" })).toBe("legal_acre");
+  });
+
+  it("a placeholder GIS value is skipped in favor of a real legal one, and vice versa", () => {
+    expect(acreageKey({ GIS_AREA: "Null", LEGAL_AREA: "12.5" })).toBe("LEGAL_AREA");
+  });
+
+  it("a record with neither kind of area column resolves to null", () => {
+    expect(acreageKey({ OWNER_NAME: "X" })).toBeNull();
+  });
+
+  it("the `skip` set is honored, same as ownerKey/situsKey", () => {
+    expect(acreageKey(STRATMAP, { skip: new Set(["GIS_AREA"]) })).toBe("LEGAL_AREA");
   });
 });

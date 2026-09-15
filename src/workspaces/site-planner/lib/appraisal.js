@@ -246,6 +246,30 @@ export function ownerKey(attrs, { skip = null } = {}) {
   return best;
 }
 
+/* NEW-1 (2026-09-12) — a source can publish BOTH a GIS-measured area column and a "legal" one
+ * whose values are the raw appraisal-roll text in an inconsistent format (a unit suffix on some
+ * rows, bare on others — Texas's own statewide StratMap layer does exactly this: LEGAL_AREA reads
+ * "16.02 a" on one parcel and "0.6658" bare on the next, while GIS_AREA is a plain number). A flat
+ * "first key in attrs order that matches" (the shape every other row here uses) let the legal-text
+ * column win the Acreage row whenever it happened to be listed first — which is this layer's own
+ * field order (LEGAL_AREA precedes GIS_AREA). `acreageKey` prefers a GIS/measured area column over
+ * a "legal" one, the same ordered-preference shape `ownerKey`/`situsKey` already use for their own
+ * ambiguities, so the row always shows the reliable number regardless of attribute order. Existing
+ * sources that carry only one of the two kinds are unaffected — there is nothing to prefer between. */
+const GIS_ACRE_RE = /(gis_?acre|calc_?acre|^acre|acreage|deed_?acre|gis_?area|land_?size_?ac)/i;
+const LEGAL_ACRE_RE = /(legal_?acre|legal_?area)/i;
+export function acreageKey(attrs, { skip = null } = {}) {
+  if (!attrs) return null;
+  let legal = null;
+  for (const key of Object.keys(attrs)) {
+    if (skip && skip.has(key)) continue;
+    if (isPlaceholderValue(attrs[key])) continue;
+    if (GIS_ACRE_RE.test(key)) return key;
+    if (legal == null && LEGAL_ACRE_RE.test(key)) legal = key;
+  }
+  return legal;
+}
+
 // Curated field order: regex that matches a county's column name → the label we show.
 // Patterns cover the per-county CAD columns (HCAD / FBCAD / CCAD) AND the statewide TxGIO
 // columns (prop_id, owner_name, situs_addr, legal_area/gis_area, land_value, imp_value,
@@ -303,7 +327,12 @@ export const apprRows = (attrs) => {
       // situs row does: OWNERNME1 must beat OWNERNME2 regardless of the service's key order.
       : label === "Owner"
         ? ownerKey(attrs, { skip: used })
-        : Object.keys(attrs).find((key) => !used.has(key) && re.test(key) && !isPlaceholderValue(attrs[key]));
+        // NEW-1 — the Acreage row is ALSO an ordered resolver, not "first key that matches": a
+        // GIS-measured area column must beat a "legal" one whose text format is inconsistent
+        // (see `acreageKey`'s own header), regardless of the service's key order.
+        : label === "Acreage"
+          ? acreageKey(attrs, { skip: used })
+          : Object.keys(attrs).find((key) => !used.has(key) && re.test(key) && !isPlaceholderValue(attrs[key]));
     if (k) { used.add(k); rows.push({ label, value: label === "Situs address" ? String(attrs[k]).replace(/\s+/g, " ").trim() : attrs[k] }); }
   }
   return rows;
