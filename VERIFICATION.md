@@ -166,6 +166,19 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1196336 — B1674160: the shared column-header row (Fill|Line / X|Y) shares its panel's left edge on real production, at desktop and phone widths
+
+**Why this needs a live pass, and why it is deliberately grouped with the pending V1180736 rather than treated as a fresh wait.** B1674160 is a pure CSS/layout fix (a stray `margin` shorthand term), fully provable headlessly and logged out — Chromium (17/17) and real WebKit at desktop + 4 iPhone size/orientation combinations for both a callout and a plain text box (101/101) all confirm the header row now shares its rendered `left` with every Field/PairedField row beneath it, and the fix is mutation-proven (reverting it reproduces the exact pre-fix two-edge reading). What is NOT provable from this sandbox is the same wall V1180736 already names: `planyr.io` only serves `main`, so this fix — landing in the same panel, on the same commit range, as B1652704–B1652706 — needs the identical real-production click-through those items are already waiting on. Rather than mint a second independent wait on the same panel, this closes alongside V1180736 the first time either gets a real pass.
+
+**What was verified here (sandbox), concretely.** Repro reproduced first: `getBoundingClientRect().left` on the FILL/LINE column-header row read 2px right of every Field/PairedField row's own left edge (measured 79.66/79.66/81.66 on the deployed pre-fix build, chunk `SitePlannerApp-BdTHtd59.js`). Root cause: `PairedFieldHead`'s inline `margin: "10px 2px 7px"` carried a stray horizontal 2px term every sibling row primitive lacked; `StdSubLabel` (the parcel-line/setback-line sub-heading used in Standards → Parcels, among others) carried the identical stray term and is fixed alongside it. Fix: `margin: "10px 0 7px"` on both — vertical rhythm (10px above, 7px below) is unchanged, only the horizontal term moved to 0. Guard: both components now carry a `data-row-align="1"` marker (alongside `Field`/`PairedField`'s existing `data-field-group`) so an alignment check can find the header row at all — the PRIOR check filtered on `data-field-group` alone, which the header never carried, so it silently measured zero header rows and reported "one edge" while the header sat 2px off; this was proven, not assumed, by reverting the fix and re-running the corrected check (`edges seen: 80,82` on the reverted build, `edges seen: 80` on the fixed one). Cross-panel propagation confirmed live: the Standards → Parcels panel (which combines `StdSubLabel` + `PairedFieldHead` + `Field` + `PairedField` in one screen) reads a single left edge (80px) across all eight of its rows in a headless Chromium run, with no panel-specific fix needed since none of markup/measurement/easement/the shared Properties section/the pond Appearance group/Standards → Measurements/the multi-selection style panel carries its own copy of this styling.
+
+**Steps, each with a named expected result — run once a live session reaches this panel (shared with V1180736's own steps):**
+1. On `planyr.io`, logged out, open (or draw) a text box or callout on a throwaway/blank site — never one of Michael's real plans — and dock its Properties panel. **Expect:** the Fill | Line column-header row's label text starts at the exact same horizontal position as every field row's own label beneath it — no visible 2px jog.
+2. Read the served chunk hash in the same observation as step 1, confirming it is the post-merge build carrying this fix.
+3. At iPhone SE and iPhone 15 widths (DevTools device toolbar or real WebKit), both orientations, repeat step 1 through the phone bottom sheet. **Expect:** the same single left edge holds at every width.
+4. Open Standards → Parcels (the parcel Boundary panel) and confirm the "Parcel line"/"Setback line" sub-headings and the Outline | Fill header all start flush with the field rows below them.
+- **Stopping rule:** closes when steps 1–4 are observed against the deployed build (either standalone or as part of a V1180736 pass), or a specific residual is filed as a recurrence against B1674160.
+
 ### V1190496 — B1662464: is real content still missing from the note "Silvestri - Utility" (or any note), and if so, restore it Michael's way `Blocker: real-data`
 
 **Why this needs a live pass, and what it is NOT.** This is not asking anyone to re-diagnose the write-on-open mechanism — that half is fixed and sandbox-proved (B1662464's own body, `ui-audit/verify-notes-write-on-open.mjs`, 6/6 shapes, red-proved against the pre-fix build). This is the narrower, still-open question the sandbox genuinely cannot answer: a real note on Michael's own signed-in account was observed to have lost a contact's name ("…Jerry Hayley Kandice Cabets…" → "…Jerry Hayley…") sometime in the few minutes before it was reported, and no repro in this sandbox (six varied multi-run/mark shapes, all with the confirmed write-on-open mechanism reproduced and then fixed) ever reproduced actual TEXT loss — only the cosmetic shape change (default attrs filled in, a trailing paragraph appended). So the specific loss is unexplained, not merely unfixed, and per `CLAUDE.md`'s STANDING RULE #2 an owner-reported symptom may not be closed on that null. This needs real, signed-in access to the actual row (or Michael's own answer) to settle.
@@ -179,24 +192,33 @@ was never clicked" quietly ships broken.
 4. Whichever of (a)/(b) applies, do not restage or edit the real note beyond what step 3 authorizes, and do not use this real note for any further reproduction — a throwaway duplicate is the right tool for that (owner constraint #7).
 - Stopping rule: closes when step 1 resolves to (a) with nothing further to do, or when (b) is confirmed and Michael's answer from step 3 has been acted on (restored or deliberately left as-is). If a live pass ever reveals a mechanism that DOES destroy text (not just cosmetic shape) on open/reopen, file it as its own bug against the mechanism found, referencing this item.
 
-### V1173824 — B1645792: a road tee-ing into a truck court / paving pad at an oblique angle shows a real rounded curb return, not a raw notch
+### V1173824 (×2) — B1645792: a road tee-ing into a truck court / paving pad at an oblique angle shows a real rounded curb return, not a raw notch
 
-**Why this needs a live pass.** A rendering-shape fix (PERCEPTUAL-PARITY: the bar is whether the
-owner can SEE it right at his own working zoom, matching his original repro shape, not just
-whether the numbers check out). Everything the sandbox can prove is already proven: the angle
-sweep (0–89° × five widths/radii/pad sizes, a rotated pad, connecting a few feet from a pad
-corner) is unit-tested against the fix and separately confirmed RED on unmodified `origin/main`
-(`test/roadDriveJunctionFillet.test.js`); the same RED→GREEN is reproduced live in a headless
-Chromium driving the real canvas (`e2e/road-drive-junction-fillet.spec.js`), including a
-byte-identical PDF/print export parity check. A visual screenshot of the fix was also inspected
-this session and reads as a clean, properly rounded curb return with no notch, no disconnected
-island, and no exposed raw flat-cap edge — confirmed twice: once against this session's local
-build, and again against PR #1722's own Cloudflare Pages branch preview deploy
-(`claude-vibrant-curie-7olpix.planyr.pages.dev`, commit `c5cb133`), i.e. the actual deployed
-artifact, not just a local dev server. Same clean result both times. What is NOT provable here:
-whether it looks right on a real monitor at the owner's own DPI/zoom, and specifically whether it
-fixes the EXACT geometry in his original screenshot (not available to this session — only his
-verbal description was).
+**⛔ THIS V# ALREADY FAILED ONCE — record that, don't smooth over it.** The PASS-reading confidence
+this section stated previously (a screenshot inspected against a Cloudflare Pages branch preview,
+"clean result both times") was against the FIRST fix (PR #1722 / merge `0f17770`) and was WRONG: a
+live check of the deployed production build (`6d0d578`) found two real residuals the screenshot
+inspection missed — a small unpaved notch at the throat (invisible at the zoom/crop the screenshot
+happened to use) and a straight-sided (not arced) return on the road→pad case specifically. Per
+STANDING RULE #2, that is a FINDING, not a disposition, and the fix below is the reproduce-and-fix
+response to it — recorded here as the amendment (B1645792 ×2) it actually is.
+
+**Why this still needs a live pass.** A rendering-shape fix (PERCEPTUAL-PARITY: the bar is whether
+the owner can SEE it right at his own working zoom, matching his original repro shape, not just
+whether the numbers check out). Everything the sandbox can prove is now proven AGAINST THE BUG'S
+OWN DEFINITION this time (a point-in-polygon "is this spot paved by the pad or the road" scan, not
+just "does it look clean in a screenshot"): a wider 0–89° angle sweep (both truck-court and
+generic-pad sizes) is unit-tested and confirmed RED against the merged `0f17770` fix before this
+amendment's own fix was written (`test/roadDriveJunctionFillet.test.js`, the new "NEW-1 (B1645792
+amendment)" describe block, 8 tests); the same RED→GREEN is reproduced live in a headless Chromium
+driving the real canvas (`e2e/road-drive-junction-fillet.spec.js`, unmodified, re-run 3/3 green
+including the PDF/print export-parity check). Rendered SVGs across 8 angle/pad combinations were
+visually inspected this session (not just point-scanned) and show continuous pavement coverage and
+a genuinely curved return on the obtuse side at every angle. **What is still NOT provable here, the
+same gap the first PASS-reading missed:** whether it looks right on the owner's own monitor at his
+own DPI/zoom, on his own original repro geometry — which is exactly the gap a screenshot-only
+sandbox check cannot close, and why this V# stays open rather than being marked passed again on
+another sandbox-side inspection.
 
 **No standing throwaway project exists** — this check needs a fresh throwaway plan (or an explicit
 duplicate of a real one) created first; state exactly what was created/touched, per the owner
@@ -221,7 +243,9 @@ constraint on live checks. Never touch one of Michael's real plans.
 5. State what was created/touched (the throwaway plan's id/name) so it can be cleaned up or left as
    a known throwaway.
 - **Stopping rule:** closes when steps 1–5 are observed on a real screen, or a specific residual
-  (which angle/pad shape, a screenshot) is filed as a recurrence against B1645792.
+  (which angle/pad shape, a screenshot) is filed as a recurrence against B1645792. This V# has
+  already recorded one such residual (this amendment) — a second one re-opens it again, by name,
+  rather than a silent third attempt at the same screenshot-only confidence.
 
 ### V1180736 — B1652704/B1652705/B1652706: the Text box / Callout properties panel — weight/dash/opacity, and its shared-table rebuild — hold on real production, at desktop and phone widths
 
@@ -239,6 +263,39 @@ constraint on live checks. Never touch one of Michael's real plans.
 7. Open Chrome DevTools' device toolbar (or a real iPhone) at iPhone SE and iPhone 15 widths, both orientations. Re-select the text box (via the Panels drawer → Properties on narrow). **Expect:** the same panel, no horizontal scrolling/clipping, the bottom sheet opens and every row still lines up on one left edge.
 8. Ideally, repeat steps 1–5 once more using real WebKit (`npx playwright install webkit && npx playwright install-deps webkit` if not already present) against the deployed `planyr.io` URL rather than DevTools emulation, per `docs/PHONE-TESTING.md`.
 - **Stopping rule:** closes when steps 1–7 (8 if WebKit is available) are observed against the deployed build, or a specific residual is filed as a recurrence against whichever of B1652704/B1652705/B1652706 it belongs to.
+
+### V1192544 — B1664512: a road connects and fillets cleanly into a FREE-DRAWN polygon pad / parking field, same as a rect one
+
+**Why this needs a live pass.** A rendering-shape + connect-topology fix, same PERCEPTUAL-PARITY
+bar as V1173824: the sandbox proves the geometry (`polygonEdges`/`polygonContainsPoint`/
+`polygonDepthBehind` unit-tested against `rectEdges`/`rectContainsPoint` on the same footprint,
+plus a 0–89° angle sweep dissolving to one connected simple region on a polygon-drawn rectangular
+field AND a genuinely concave L-shaped one, `test/roadGeometry.test.js` + `test/roadDriveJunctionFillet.test.js`)
+but cannot prove the actual DRAWING TOOL magnet-connects a road to a freehand-drawn field on the
+owner's own screen, at his own zoom, using the real Parking/paving freehand tool rather than a
+replicated math scenario.
+
+**No standing throwaway project exists** — this check needs a fresh throwaway plan created first;
+state exactly what was created/touched. Never touch one of Michael's real plans.
+
+**Steps, each with a named expected result:**
+1. Open a throwaway plan. Draw a parking field or paving pad using the FREEHAND (polygon) draw
+   tool — NOT a rectangle preset — so it has an irregular, non-rectangular outline (even a mild
+   L-shape or a rounded-corner-ish polygon is enough). **Expect:** the field draws normally, same
+   as before this fix (this fix touches only what a ROAD does when it approaches this field, not
+   how the field itself is drawn).
+2. Draw a road (a 36 ft preset works well) ending on one of the polygon field's edges at an
+   oblique angle. **Expect:** the road's endpoint magnet-snaps onto the field's edge (same as it
+   already does for a rectangle field) and, once connected, the junction renders a smooth, rounded
+   curb-return fillet — no raw straight-edge butt joint, no notch, no floating pavement scrap.
+3. Try connecting near the MIDDLE of a concave (inward) corner of the field if one exists.
+   **Expect:** still connects and fillets cleanly — no crash, no wildly oversized return punching
+   into the field's own concavity.
+4. Zoom in on the junction. **Expect:** reads as one continuous piece of pavement, matching the
+   look of a rect-target junction (V1173824's own steps 1–2).
+5. State what was created/touched (the throwaway plan's id/name).
+- **Stopping rule:** closes when steps 1–5 are observed on a real screen, or a specific residual is
+  filed as a recurrence against B1664512.
 
 ### V1179280 — B1651248: Pennington County, SD parcels — a real point in Rapid City returns a real parcel `Blocker: live-GIS`
 
