@@ -1252,6 +1252,42 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
   cites real project data. Each class maps to ≥1 e2e harness spec (`e2e/`, B278/B280/B281) so the manual
   live gate shrinks over time.
 
+- **EDITOR-EXIT-CONTRACT** — **EVERY WAY OUT OF AN EDITOR KEEPS WHAT THE EDITOR SHOWS AS FINISHED.
+  An editor that draws part of its value in FINISHED form while still holding it as unsaved state is
+  a defect by construction — not a keystroke to patch.** (Owner report 2026-09-15, B1341728/B1341729,
+  measured on his own account on a throwaway duplicate schedule.)
+  1. **THE CASE.** The Schedule grid's Owner cell let you click a contact out of a list; it appeared
+     as a **chip with its own remove control** — pixel-for-pixel how a SAVED owner looks. It was
+     unsaved component state. Escape threw it away. Enter threw it away and moved the cursor on, so
+     the loss was silent. Tab and click-away saved. Owners saved BEFORE the edit survived all four,
+     so it destroyed new work only — the least likely kind of loss to be noticed, and the most
+     annoying to redo.
+  2. **THREE EDITOR CLASSES. Pick one; a hybrid is the bug.**
+     · **text** — the value in flight is text the person is still typing. **Enter / Tab /
+       click-away COMMIT; Escape abandons the typed text.** Nothing is drawn as finished, so Escape
+       destroys nothing anyone could mistake for saved. (Excel's contract, and the right one here.)
+     · **select** — a menu. **CHOOSING is the commit.** The arrow-key highlight is in progress, not
+       finished, so an exit taken without choosing correctly leaves the value alone — and **every**
+       exit, Tab included, CLOSES the menu rather than leaving it floating over the grid.
+     · **tokens** — a chip / token field. **Every token is written through the instant it is added,
+       removed or reordered**; every exit merely closes, and none can discard. Undo is the recovery
+       for a mistaken add or removal, exactly as for any other committed edit.
+  3. **THE INVARIANT THAT BINDS ALL THREE: no exit may remove anything the editor renders in
+     FINISHED form.** If you want a token to be abandonable, it has to LOOK pending. Shipping it in
+     the finished style and calling it pending is the defect, whichever exit happens to expose it.
+  4. **⛔ AND THE REASON THIS IS A RULE RATHER THAN A FIX: THE REPORTED KEY IS NEVER THE SCOPE.**
+     Escape reproduced instantly in the sandbox; **Enter did not** — it committed correctly on every
+     route tried (double-click, Enter-to-open, type-to-edit; no prior owner, one, several; one add,
+     three). Patching the key that reproduced would have left the one that did not, on his machine,
+     unexplained and unfixed. Closing the STATE GAP retires both, plus the unmount nobody planned
+     for. When a user reports one exit, audit all four, on every editor of that surface.
+  5. **MACHINE-ENFORCED, both halves.** `ui-audit/verify-cell-editor-exit-contract.mjs` drives every
+     editable cell in the Schedule grid through Escape · Enter · Tab · click-away in a real browser
+     and prints the audit table (it carries a known-good arm and declares the run VOID rather than
+     scoring it if that arm does not report its known value). `test/cellEditorExitContract.test.js`
+     is the CI-runnable half: it fails if a cell editor omits an exit, if the token editor grows a
+     deferred-commit path again, or if this rule is deleted from CLAUDE.md.
+
 - **PANEL-BREVITY** — **LESS IS BETTER. The default view is the scarcest space in the product; every
   line must earn its place.** (Owner rule, 2026-07-28, verbatim: *"you keep adding words to the yield
   panel. So make a rule somewhere in the repo that that's not what we want to do. Less is better. I just

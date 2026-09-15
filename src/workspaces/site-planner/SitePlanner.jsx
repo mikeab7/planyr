@@ -33,6 +33,7 @@ import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
 import { assemblyIntegrity, tearPayload, orphanPayload, unhealablePayload } from "./lib/assemblyIntegrity.js";
 import { groupCasEnabled } from "./lib/groupCas.js";
+import { bootFramingRemainingMs } from "./lib/bootFramingDeadline.js";
 import { extendMergeSelection } from "./lib/parcelSelect.js";
 import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
 import { nearestBoundaryEdge, constrainToEdgeAngle, edgeLockTolFt } from "./lib/edgeConstrain.js";
@@ -2175,6 +2176,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const hiddenGroups = settings.hidden;
 
   const [view, setViewRaw] = useState({ ppf: 0.35, offX: 60, offY: 60 });
+  /* B1574432 — A MOUNT IDENTITY, stamped on the canvas and on nothing else. Boot contains a
+   * REMOUNT (`SitePlannerApp` keys this component `${activeSiteId}:${loadEpoch}` and `applyUser`
+   * bumps `loadEpoch` once the cloud pull settles), and every per-mount instrument in this file —
+   * the view-change recorder included — is blind across it: the ring is a `useRef`, so the mount
+   * that answers `window.__plannerViewChanges` after boot is the SECOND one and has no memory of
+   * the first. That is why the owner's armed production tab read `changes: 0` through a flash he
+   * had on video. This attribute is the one thing that lets an out-of-page observer tell "two
+   * framings in one mount" (a flash) from "two mounts, one framing each" (correct). Read-only,
+   * one string, no behaviour. */
+  const mountIdRef = useRef(null);
+  if (mountIdRef.current === null) mountIdRef.current = `m${Math.random().toString(36).slice(2, 8)}`;
   /* NEW-1 (owner report, 2026-09-05 — "it zooms in very close, zooms out, zooms back in") — a
    * READ-ONLY diagnostic recording every setView call with its real call stack, so a report of
    * MORE THAN ONE automatic view change on a cold load can be settled with real evidence instead
@@ -5974,6 +5986,73 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return eang != null ? constrainToEdgeAngle(pivot, cursorFt, eang) : snapPt(snap45(pivot, cursorFt));
   };
 
+  /* ══ B1574432 — THE CANVAS PAINTS ONE FRAMING PER LOAD: THE REVEAL IS CAUSED BY THE FRAMING ═════
+   *
+   * THE REPORT (owner, 2026-09-11, a 60 fps iPhone screen recording of a cold load): the plan paints
+   * correctly, then for about two video frames the canvas cuts to one building at extreme zoom, then
+   * returns. Measured here on 2026-09-15 against `main` at phone width on a 66-element fixture:
+   * `ppf 0.35 off (60,60)` — the `useState` boot default, a framing computed from NO MODEL AND NO
+   * CONTAINER — painted for 106 ms over SIX FRAMES, then replaced by the real `ppf 0.0831`. On the
+   * remount arm it is painted TWICE, once per mount; the second lands on top of an already-painted
+   * plan, which is the one he filmed.
+   *
+   * ⛔ THIS IS THE SIXTH ATTEMPT AT THIS FAMILY AND THE FIFTH SHIPPED ONE CAUSED A P0. Read
+   * docs/incidents/B1594320-CANVAS-VISIBILITY-OUTAGE.md before touching any of this. The short
+   * version: B1574432 gated paint on `framingCommitted`, and in a document that boots HIDDEN both
+   * of its effects early-returned on `document.visibilityState !== "visible"` — so the 1.5 s
+   * watchdog that was the ENTIRE safety argument for gating paint was never even ARMED, and the
+   * canvas stayed `visibility: hidden` forever for every signed-in user. The three things that
+   * incident requires of any re-attempt, and where each is discharged:
+   *
+   *   1. a sandbox that can drive the signed-in `loadEpoch` remount without real credentials
+   *      → ui-audit/lib/authRemount.mjs (a fake GoTrue `INITIAL_SESSION` + a separately-timed
+   *        `SIGNED_IN` broadcast, reproducing the two-event race), driven by the `auth-remount` arm.
+   *   2. a watchdog ceiling that SURVIVES A REMOUNT → lib/bootFramingDeadline.js. The deadline is
+   *      absolute, per-plan, and stored above the component, so a remount arms a timer for the time
+   *      REMAINING. A per-mount deadline is explicitly not good enough.
+   *   3. a genuine signed-in live pass before merging → V1613952.
+   *
+   * ⛔ AND THE TWO SHAPES THE MECHANISM BELOW IS BUILT SO IT CANNOT HAVE:
+   *
+   *   · **IT CAN NEVER STAY SHUT.** The ceiling effect has an EMPTY dep array and NO condition of
+   *     any kind — not `active`, not `visibilityState`, not the container. It arms once per mount,
+   *     unconditionally, on a plain wall clock. That is the single line whose absence was the P0.
+   *   · **IT CAN NEVER REVEAL A FRAMING IT IS ABOUT TO THROW AWAY.** The reveal is not a separate
+   *     decision that could drift from the framing — `fit()` itself sets it, in the same commit that
+   *     writes the view. There is no path that reveals a framed canvas and no path that frames a
+   *     hidden one, because they are one statement.
+   *
+   * ⛔ READINESS IS THE RAW RECT, NEVER `document.visibilityState`. That proxy is what forced
+   * reliance on a watchdog in the first place, and it is false: production measured a real 969x408
+   * container while hidden. `getBoundingClientRect()` is layout-accurate in a tab that is merely not
+   * frontmost. What B1234400 actually caught was a container that had NEVER BEEN LAID OUT, and the
+   * direct test for that is `r.width > 1 && r.height > 1`. This also means the gate opens correctly
+   * during a hidden boot, so the ceiling is a genuine rare backstop rather than the load-bearing
+   * path — the inversion that killed the last attempt.
+   *
+   * ⛔ "NOTHING TO FRAME" IS NOT "COULD NOT FRAME", and `ppf 0.35 off (60,60)` is BOTH of them. A
+   * genuinely empty plan has no points, so `fit()` legitimately sets exactly that triple — which is
+   * why the triple alone is never a failure signature, here or in any harness. The discriminator is
+   * whether `fit()` RAN against a real measured box: it marks the framing committed on every path
+   * including the empty one, and a canvas that never reached `fit()` is the un-framed case.
+   *
+   * `revealReason` is "" until revealed, then "framed" (a real framing caused it — the only healthy
+   * answer) or "ceiling" (the wall clock gave up waiting; LOUD-FAILURE, telemetered). It is mirrored
+   * onto the canvas as `data-planner-reveal` so a harness can tell those two apart from outside the
+   * page — without which "the canvas is visible" passes just as happily on a rescue as on a success.
+   *
+   * Deliberately SEPARATE from `viewFramed`, which is a different fact ("the boot reframe has had
+   * its turn, framed or suppressed") that `layerGateReady` depends on. Conflating them would change
+   * which zoom GIS layers answer their gate against — B1234400's subject, not this one. */
+  const [revealReason, setRevealReason] = useState("");
+  const revealReasonRef = useRef("");
+  const markFramed = useCallback(() => {
+    if (revealReasonRef.current) return;
+    revealReasonRef.current = "framed";
+    setRevealReason("framed");
+  }, []);
+  const revealed = revealReason !== "";
+
   /* ------------ fit to content ------------ */
   /* `box` — B1600353. An OPTIONAL, freshly-measured `{ w, h }` from the container's own
      `getBoundingClientRect()`, used by the boot framing below. It must not read the `size` STATE for
@@ -5982,7 +6061,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      box that does not exist is exactly what B1234400's readiness gate exists to prevent. Every other
      caller passes nothing and reads `size`, exactly as before. */
   const fit = useCallback((box) => {
-    const box2 = (box && Number.isFinite(box.w) && Number.isFinite(box.h)) ? box : size;
+    const measured = !!(box && Number.isFinite(box.w) && Number.isFinite(box.h));
+    const box2 = measured ? box : size;
+    /* B1574432 — the reveal is caused by the framing, in the same commit that writes the view, so
+       the two can never disagree. Only a framing taken against a REAL measurement counts: a `fit()`
+       computed off the `size` placeholder is a framing from a box that does not exist, and revealing
+       on it would be the "revealed, and off-screen" failure the incident doc's §5 names. Called with
+       no box (the Zoom-to-fit menu row) it still counts once the container has genuinely been
+       measured, which by then it always has. */
+    const framedFromRealBox = measured || sizeMeasuredRef.current;
     /* ⛔ B494048 — FRAME WHAT IS ON SCREEN, NOT WHAT IS IN THE MODEL. Measured on the owner's plan:
        hiding both ponds — 2,616 ft of the drawing's width — left Zoom to fit at a byte-identical
        zoom, so the buildings he could actually see stayed squeezed into the middle of a frame built
@@ -5998,14 +6085,106 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     sheetOverlays.filter((o) => o.visible !== false).forEach((o) => {
       pts.push(imagePointToWorld(o, 0, 0), imagePointToWorld(o, o.imgW, 0), imagePointToWorld(o, o.imgW, o.imgH), imagePointToWorld(o, 0, o.imgH));
     });
-    if (pts.length === 0) { setView({ ppf: 0.35, offX: 60, offY: 60 }); return; }
+    /* ⛔ "NOTHING TO FRAME" IS A FRAMING. An empty plan has no points, so the right answer IS the
+       default triple — and it must mark the gate committed, or an empty plan would hang behind the
+       gate until the ceiling rescued it. This is the branch that makes `ppf 0.35 off (60,60)`
+       ambiguous, and the reason no check may ever treat that triple alone as a failure. */
+    if (pts.length === 0) { setView({ ppf: 0.35, offX: 60, offY: 60 }); if (framedFromRealBox) markFramed(); return; }
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     pts.forEach((p) => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
     const bw = Math.max(maxX - minX, 10), bh = Math.max(maxY - minY, 10);
     const pad = 60;
     const ppf = Math.min((box2.w - pad * 2) / bw, (box2.h - pad * 2) / bh);
     setView({ ppf, offX: pad - minX * ppf + (box2.w - pad * 2 - bw * ppf) / 2, offY: pad - minY * ppf + (box2.h - pad * 2 - bh * ppf) / 2 });
-  }, [parcels, els, sheetOverlays, size, hiddenGroups, setView]);
+    if (framedFromRealBox) markFramed();   // B1574432 — the reveal, in the same commit as the view
+  }, [parcels, els, sheetOverlays, size, hiddenGroups, setView, markFramed]);
+  /* The ceiling effect below is deliberately `[]`-dep'd, so it would otherwise close over the `fit`
+     of the FIRST render — stale `els`, stale `size`. This keeps the live one reachable from it
+     without giving that effect a dependency that could re-arm (and therefore postpone) its clock. */
+  const fitRef = useRef(fit);
+  fitRef.current = fit;
+
+  /* B1574432 — THE BOOT FRAMING, COMPUTED BEFORE THE FIRST PAINT. A framing is a function of the
+   * MODEL and the CONTAINER. The model is complete at mount (`restored` is read synchronously from
+   * storage); the container is not measured until layout. So it is computed in a LAYOUT effect —
+   * after the DOM exists, before the browser paints — from the container's own freshly read box.
+   * The first painted frame therefore already carries the final framing, on every mount, remount
+   * included: the intermediate framing does not EXIST rather than being outrun by a timer.
+   *
+   * NO DEP ARRAY, on purpose: it re-asks on every render until it can answer, then the first line
+   * returns. It cannot loop — `setSize` bails functionally on an unchanged box, and the only path
+   * that dispatches anything else also sets the reveal. Re-asking every render is also what makes
+   * the Map→Site transition clean: the moment that container stops being `display:none` it has a
+   * real box, and this effect frames it before that first paint too.
+   *
+   * ⛔ NO `active` GUARD AND NO `visibilityState` GUARD — the raw rect subsumes both and neither can
+   * be wrong in the direction that hurts. A `display:none` container (the planner kept alive behind
+   * another workspace) HAS no box, so the rect refuses it directly; a merely-backgrounded tab has a
+   * perfectly real box, so the rect admits it and the framing commits while hidden, which is exactly
+   * what B1600353 established and what the last attempt got backwards. */
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately dep-array-free: it re-asks
+  // on every render until it can answer, then the first line returns. It cannot loop — `setSize`
+  // bails functionally on an unchanged box, and the only path that dispatches anything else also
+  // sets the reveal.
+  useLayoutEffect(() => {
+    if (revealReasonRef.current) return;
+    const el = wrapRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    /* ⛔ NEVER FRAME FROM A DEGENERATE BOX. The `Math.max(320, …)` floor below turns a never-laid-out
+       container into a plausible-looking 320x360 — the exact trap lib/viewFramingGate.js's `measured`
+       flag exists for. The RAW rect is the verdict. */
+    if (!(r.width > 1 && r.height > 1)) return;
+    sizeMeasuredRef.current = true;
+    const w = Math.max(320, r.width), h = Math.max(360, r.height);
+    setSize((sz) => (sz.w === w && sz.h === h ? sz : { w, h, rawW: r.width, rawH: r.height }));
+    const ticket = framingGate.current.framingTicket();
+    const verdict = framingGate.current.mayFrame(ticket, { visible: true, measured: true });
+    if (!verdict.ok) { viewRecRef.current?.noteEvent("frame:suppressed", verdict.why); return; }
+    fit({ w, h });                         // the MEASURED box, never the placeholder `size` state
+    viewRecRef.current?.noteEvent("frame:boot-committed", `${Math.round(r.width)}x${Math.round(r.height)}`);
+  });                                      // no dep array on purpose — see above
+
+  /* ⛔ B1574432 — THE CEILING. THE ONE LINE WHOSE ABSENCE WAS A P0, SO READ THE DEP ARRAY FIRST:
+   * it is EMPTY, and there is NO condition guarding the arming. Not `active`, not
+   * `document.visibilityState`, not the container, not `revealReason`. It arms exactly once per
+   * mount, on a plain wall clock, and nothing about the page's state can stop it. B1574432's
+   * watchdog was `[framingCommitted, active]` with an early return on `visibilityState !== "visible"`
+   * — so in the document that booted hidden its `setTimeout` was never even SCHEDULED, and the
+   * canvas stayed hidden for every signed-in user on planyr.io. A rescue that refuses to arm itself
+   * in the condition it exists for is not a rescue.
+   *
+   * The deadline is ABSOLUTE and PER-PLAN (lib/bootFramingDeadline.js), not a fresh 1.5 s per mount:
+   * a remount arms a timer for the time REMAINING, so a repeating remount — which is exactly what a
+   * signed-in boot does, and what an auth-event race can do twice — cannot postpone the reveal.
+   * That is incident requirement #2, and a per-mount deadline explicitly does not meet it.
+   *
+   * It tries to FRAME before it gives up (incident §5: "either frame as part of revealing, or never
+   * reveal without a framing"). If the container has become real in the meantime, `fit()` marks the
+   * reveal "framed" and this is a late success, not a rescue. Only a container that genuinely cannot
+   * be measured falls through to the bare reveal, and that one is LOUD: telemetry says so, and
+   * `data-planner-reveal="ceiling"` says so to anything watching from outside the page. Revealing an
+   * unframed canvas is a real defect — it is simply a much smaller one than a blank canvas, and the
+   * telemetry is what keeps it from being silent. */
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (revealReasonRef.current) return;
+      const el = wrapRef.current;
+      const r = el ? el.getBoundingClientRect() : null;
+      if (r && r.width > 1 && r.height > 1) {
+        sizeMeasuredRef.current = true;
+        fitRef.current({ w: Math.max(320, r.width), h: Math.max(360, r.height) });
+      }
+      if (revealReasonRef.current) return;   // the late framing above succeeded — not a rescue
+      revealReasonRef.current = "ceiling";
+      setRevealReason("ceiling");
+      reportClientEvent("boot-framing-stalled", "the planner canvas could not be framed from a measured container", {
+        rawW: Math.round(r?.width || 0), rawH: Math.round(r?.height || 0),
+        visibility: typeof document === "undefined" ? null : document.visibilityState,
+      });
+    }, bootFramingRemainingMs(siteId));
+    return () => clearTimeout(t);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- unconditional by design; see above
 
   // Fit *after* a state change has committed: bump the nonce instead of calling
   // fit() from a stale closure (which would frame the view without the content
@@ -22747,8 +22926,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               viewport by geoOverscan with extra tiles loaded (keepBuffer), the
               reveal shows real imagery, and anything beyond it shows the static
               dark backdrop — never the cream page behind the canvas. */}
+          {/* B1574432 — `visibility` below: the aerial backdrop rides the same `view` the drawing
+              does, so it flashes with it; gating the drawing alone would leave the filmed defect
+              half-fixed. */}
           {origin && (
-            <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none", background: (basemapOn && showAerial) ? "#3f3f3f" : PAL.paper }}>
+            <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none", visibility: revealed ? undefined : "hidden", background: (basemapOn && showAerial) ? "#3f3f3f" : PAL.paper }}>
               <div ref={geoWrapRef} style={{ position: "absolute", inset: -geoOverscan, background: (basemapOn && showAerial) ? "#3f3f3f" : PAL.paper }} />
             </div>
           )}
@@ -22760,7 +22942,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               the backdrop exactly (same clip, same overscan, same gesture transform); it never
               takes a pointer event, so it can neither block a click nor steal a handle. */}
           {origin && (
-            <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: CANVAS_Z.gisLine, overflow: "hidden", pointerEvents: "none" }}>
+            <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: CANVAS_Z.gisLine, overflow: "hidden", pointerEvents: "none", visibility: revealed ? undefined : "hidden" }}>
               <div ref={geoTopWrapRef} style={{ position: "absolute", inset: -geoOverscan }}>
                 <div ref={geoTopPaneRef} style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0 }} />
               </div>
@@ -22849,9 +23031,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               export, so every pre-B1449 assertion reads exactly what it read. */}
           <svg ref={svgRef} data-testid="planner-canvas" width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
             data-view-offx={view.offX} data-view-offy={view.offY} data-view-ppf={view.ppf}
+            /* B1574432 — read-only, for an observer OUTSIDE the page. `data-planner-mount` lets a
+               frame sampler tell "two framings in one mount" (a flash) from "two mounts, one framing
+               each" (correct). `data-planner-reveal` is "" until revealed, then "framed" or
+               "ceiling" — without which "the canvas is visible" reads identically on a healthy boot
+               and on a watchdog rescue over an unframed canvas, which is the failure the incident
+               doc's §5 names. Neither attribute changes any behaviour. */
+            data-planner-mount={mountIdRef.current} data-planner-reveal={revealReason}
             data-reg-dx={regShift.dx} data-reg-dy={regShift.dy}
             data-pan-dx={panDx} data-pan-dy={panDy} data-pan-k={panK} data-render-ppf={rppf}
-            style={{ position: "relative", zIndex: 1, transform: (regShift.dx || regShift.dy) ? `translate(${regShift.dx}px, ${regShift.dy}px)` : undefined, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : editingCorners ? "crosshair" : (tool === "select" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            /* B1574432 — the canvas stack paints NOTHING until a framing has been computed from the
+               complete model and a real measurement of this container. On an ordinary boot that
+               happens inside the same commit as the first paint (the layout effect above), so this
+               gate is never observable; what it removes is the six frames of `ppf 0.35 off (60,60)`
+               the owner filmed. A blank sheet for one commit is honest; a framing the app is about
+               to throw away is the bug. It cannot stay shut — see the ceiling effect. */
+            style={{ position: "relative", zIndex: 1, visibility: revealed ? undefined : "hidden", transform: (regShift.dx || regShift.dy) ? `translate(${regShift.dx}px, ${regShift.dy}px)` : undefined, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : editingCorners ? "crosshair" : (tool === "select" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => {
               // Don't cancel the default action when the mousedown lands on an inline text
               // editor (a foreignObject <textarea>/<input> — the callout/text box, the inline

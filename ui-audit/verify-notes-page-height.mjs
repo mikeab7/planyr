@@ -9,7 +9,13 @@
  * ⛔ EXTENDED (B1605664/B1605665, 2026-09-12) — a live-verify of the merged PR found the top
  * grip's "opposite edge holds" promise inverted for SHRINKING (§[3b]/[3c]/[13b] below) and the
  * Page width/Page height toolbar controls indistinguishable at a glance (§[15]) — see those
- * items in docs/archive/BACKLOG-DONE.md for the full root cause and fix on each. */
+ * items in docs/archive/BACKLOG-DONE.md for the full root cause and fix on each.
+ *
+ * ⛔ EXTENDED AGAIN (B1344629, 2026-09-15) — B1605664 fixed `dom` (`note-body`) but not
+ * `note-sheet` (the visible card), and every assertion above reads `bodyRect()` alone, so it
+ * shipped green while the owner's real repro — the CARD staying put and shrinking from the
+ * bottom, opening a gap under the title — was still live. §[3b]/[13b] now assert `sheetRect()`
+ * too (the owner's own 1191×465 numbers reproduce exactly: card top 150→204, bottom 578→578). */
 import { chromium } from "playwright";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 
@@ -169,10 +175,12 @@ const errsA = await withPage({ width: 1500, height: 950 }, async ({ page, seed, 
     await seed(PLAIN_DOC, "Default height");
     const stored = await storedPageHeight();
     ok("stores no height pin at all", stored === null, `stored=${stored}`);
-    await page.click('[data-testid="nt-page-height"]');
+    // ⛔ B1344628 — this is a plain reset BUTTON now, not a listbox trigger; when the page is
+    // already Fit to content there is nothing to reset, so it is DISABLED, not clickable.
     const label = await page.textContent('[data-testid="nt-page-height"]');
-    ok("Page height menu trigger reads Fit to content", label.includes("Fit to content"), label);
-    await page.keyboard.press("Escape");
+    ok("Page height control reads Fit to content", label.includes("Fit to content"), label);
+    const disabled = await page.$eval('[data-testid="nt-page-height"]', (el) => el.disabled);
+    ok("and is disabled — nothing to reset", disabled === true);
   }
 
   /* ── CASE 2 — drag the BOTTOM edge down: grows, top holds ──────────────────────────────── */
@@ -377,8 +385,8 @@ const errsA = await withPage({ width: 1500, height: 950 }, async ({ page, seed, 
     await page.waitForTimeout(400);
     const grown = await bodyRect();
     ok("grew from the drag", grown.height > natural.height, JSON.stringify({ natural, grown }));
+    // ⛔ B1344628 — one press of the (now-enabled) reset button, not a listbox pick.
     await page.click('[data-testid="nt-page-height"]');
-    await page.click('[data-testid="nt-page-height-opt-fit"]');
     await page.waitForTimeout(900);
     const back = await bodyRect();
     ok("Fit to content returns to the natural (unpinned) height", back.height === natural.height, JSON.stringify({ natural, back }));

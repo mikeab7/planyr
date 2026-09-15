@@ -189,9 +189,12 @@ export function bootFramingReport(raw, { minFrames = 30 } = {}) {
    * mount painting two is the bug, whichever mount it is. */
   const framingsPerMount = mounts.map((m) => ({ mount: m, framings: painted.filter((p) => p.mount === m).length }));
   const offenders = framingsPerMount.filter((m) => m.framings !== 1);
+  const flashes = bootDefaultFlashes(painted);
   return {
     gateAbsent,
-    ok: vacuity.length === 0 && painted.length > 0 && offenders.length === 0,
+    /* B1574432 — the gate-independent half, asserted by every arm whatever the build stamps. */
+    bootDefaultFlashes: flashes,
+    ok: vacuity.length === 0 && painted.length > 0 && offenders.length === 0 && flashes.length === 0,
     framingsPerMount,
     offenders,
     vacuous: vacuity.length > 0,
@@ -206,6 +209,37 @@ export function bootFramingReport(raw, { minFrames = 30 } = {}) {
     committed,
     unpainted: unpainted.map((r) => ({ ppf: r.ppf, offX: r.offX, offY: r.offY, at: r.at, samples: r.samples })),
   };
+}
+
+/* ⛔ B1574432 — THE FLASH TEST THAT DOES NOT NEED THE APP'S COOPERATION.
+ *
+ * Every verdict above is computed per MOUNT, and the mount comes from `data-planner-mount` — an
+ * attribute only the hide-until-ready gate stamps. So on a build with no gate there are no mounts,
+ * therefore no offenders, therefore the flash half reports "not applicable" — and that is what it
+ * did on 2026-09-15 against `main`, while printing, in its own listing, `ppf=0.35 off=(60, 60)`
+ * painted for 106 ms over SIX FRAMES and then replaced. The rig displayed the defect and declined
+ * to judge it. An instrument whose failure detector is disarmed by the absence of the fix can only
+ * ever certify the fix, which is the exact false-green shape this file has already been repaired
+ * for twice (the missing mount stamp, and counting only too-MANY framings).
+ *
+ * This asks the question directly, of the pixels, with no dependence on any attribute the fix adds:
+ * WAS THE BOOT DEFAULT PAINTED AND THEN THROWN AWAY?
+ *
+ * ⛔ AND THE PART THAT MAKES IT CORRECT RATHER THAN MERELY STRICTER: `ppf 0.35 off (60,60)` IS NOT
+ * A DEFECT SIGNATURE ON ITS OWN, AND MUST NEVER BE TREATED AS ONE. It is both the `useState` boot
+ * default AND the honest answer `fit()` computes for a genuinely EMPTY plan (SitePlanner.jsx's
+ * `pts.length === 0` branch). A check that failed on the triple alone would report every empty plan
+ * as broken. The discriminator is REPLACEMENT: a framing the canvas painted and then moved off is
+ * one the user was shown and the app threw away — a flash — whereas the same triple held to the end
+ * of the load is a plan that had nothing to frame, and is correct.
+ */
+export const BOOT_DEFAULT = { ppf: 0.35, offX: 60, offY: 60 };
+const sameFraming = (a, b) => a.ppf === b.ppf && a.offX === b.offX && a.offY === b.offY;
+export function bootDefaultFlashes(painted = []) {
+  return painted
+    .map((r, i) => ({ r, replaced: painted.slice(i + 1).some((n) => !sameFraming(n, r)) }))
+    .filter(({ r, replaced }) => sameFraming(r, BOOT_DEFAULT) && replaced)
+    .map(({ r }) => ({ at: Math.round(r.at), heldMs: Math.round(r.heldMs), samples: r.samples, mount: r.mount || null }));
 }
 
 /** One line per distinct painted framing, for a harness's report. */
