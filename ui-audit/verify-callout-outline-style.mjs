@@ -15,6 +15,9 @@
  *          paired header, and every row (single or paired) shares one left label-gutter edge.
  *
  * Run: node ui-audit/verify-callout-outline-style.mjs   (preview server must be up on :4173)
+ *   or: BASE_URL="https://<deploy>/#/project/<id>/site" node ui-audit/verify-callout-outline-style.mjs
+ *       to run against a real deployment (e.g. this PR's own Cloudflare Pages branch preview —
+ *       see V1180736 in VERIFICATION.md).
  */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 const { chromium } = pw;

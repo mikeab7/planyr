@@ -1,20 +1,25 @@
 /* WebKit real-engine pass for B1652704/B1652705/B1652706 (the text box / callout Properties
  * panel rebuild) — real Playwright WebKit (not Chromium emulation), at desktop width and three
- * iPhone sizes in both orientations, driven against a LOCAL preview build.
+ * iPhone sizes in both orientations. Defaults to a LOCAL preview build; pass `BASE_URL` to point
+ * it at a real deployment instead (e.g. this PR's own Cloudflare Pages branch preview — see
+ * V1180736 in VERIFICATION.md for the run against real deployed bytes).
  *
- * ⛔ This is NOT the production pass the dispatch asked for (V1180736) — this PR has not merged
- * yet, so planyr.io does not serve this code. This script exists to catch any WebKit-specific
- * rendering difference (a real engine, not Chromium's phone emulation) BEFORE the post-merge
- * production check, per docs/PHONE-TESTING.md's own "WebKit installs on demand here" note.
+ * ⛔ Even against a branch preview, this is NOT the production pass the dispatch asked for — a
+ * branch preview is a real deploy of this PR's own commit, but `planyr.io` itself only serves
+ * `main`, so it still won't reflect this code until the PR merges. This script exists to catch
+ * any WebKit-specific rendering difference (a real engine, not Chromium's phone emulation)
+ * BEFORE the post-merge production check, per docs/PHONE-TESTING.md's own "WebKit installs on
+ * demand here" note.
  *
  * Run: node ui-audit/verify-callout-outline-webkit.mjs   (preview server must be up on :4173)
+ *   or: BASE_URL="https://<preview>.pages.dev/#/project/<id>/site" node ui-audit/verify-callout-outline-webkit.mjs
  */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 const { webkit, devices } = pw;
 import { mkdirSync } from "node:fs";
 
 const DEMO_ID = "verify-b1652704-webkit";
-const BASE = `http://localhost:4173/#/project/${DEMO_ID}/site`;
+const BASE = process.env.BASE_URL || `http://localhost:4173/#/project/${DEMO_ID}/site`;
 const OUT = new URL("./screens/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 
