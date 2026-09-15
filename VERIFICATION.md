@@ -166,6 +166,108 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1145488 — B1574432 (re-land): the boot flash is gone on a real signed-in cold load, and the canvas is never blank `Blocker: auth`
+
+**Why this needs its own live pass, stated as the thing that went wrong last time.** This is the SIXTH attempt at this family and the FIFTH shipped one caused a P0 (`docs/incidents/B1594320-CANVAS-VISIBILITY-OUTAGE.md`). Its third and last condition for a re-attempt is verbatim: *"Do not re-ship a hide-until-ready gate on this element without a genuine signed-in live pass BEFORE merging. `Verify: live, Blocker: auth` on the ORIGINAL item was the correct classification — the mistake was treating '3/3 clean sandbox arms' as sufficient to ship past that blocker rather than as a reason to hold until the blocker cleared."* This entry exists so that is not repeated. The sandbox now drives the signed-in `loadEpoch` remount itself (`ui-audit/verify-boot-framing-auth.mjs`, incident condition #1, built this session) — but with a FAKE session against a FAKE Supabase, so it proves the mechanism, never the real account, the real cloud latency, or the owner's own device.
+
+**The two things the sandbox structurally cannot produce, and they are the reason this is parked rather than closed:**
+1. **A genuinely foregrounded cold load on the owner's own machine.** His window is backgrounded at the OS level and the desktop-control tools need a permission prompt, so the Cowork thread cannot force it to the front. The harness is the evidence for that arm (see the sandbox results below); his phone is the other.
+2. **A real signed-in boot against the real Supabase**, where `applyUser`'s cloud pull takes real network time and can deliver the `INITIAL_SESSION` / `SIGNED_IN` pair with real-world spacing.
+
+---
+
+## THE CHECKLIST — run this on Michael's signed-in Chrome, on `planyr.io`
+
+**⛔ STEP 0, and it is not optional (owner correction, 2026-09-03, B1112449/B1112450).** A tab can silently keep serving a pre-deploy cached bundle, and a stale tab's own reload can reload the SAME stale chunks. So the chunk name is read **in the same `evaluate` as every result below** — never in a separate call, and never inherited from another tab that was "confirmed fresh" minutes earlier. **Open a brand-new tab**, go to a real project's Site view, let it settle, then run the single expression below.
+
+```js
+(() => {
+  const c = document.querySelector('[data-testid="planner-canvas"]');
+  const chunks = [...document.querySelectorAll('script[src]')].map(s => s.src.split('/').pop())
+    .filter(n => /SitePlanner|index/.test(n));
+  if (!c) return { PASS: false, why: 'no planner canvas on the page', chunks };
+  const cb = c.getBoundingClientRect();
+  const els = [...document.querySelectorAll('[data-el-id]')];
+  const first = els[0];
+  let hit = null;
+  if (first) {
+    const b = first.getBoundingClientRect();
+    const t = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+    const owner = t && t.closest ? t.closest('[data-el-id]') : null;
+    hit = owner ? owner.getAttribute('data-el-id') : (t ? '<' + t.tagName.toLowerCase() + '>' : null);
+  }
+  const onScreen = els.filter(e => {
+    const b = e.getBoundingClientRect();
+    return b.right > cb.x && b.x < cb.right && b.bottom > cb.y && b.y < cb.bottom;
+  }).length;
+  return {
+    chunks,                                   // ⟵ READ IN THE SAME OBSERVATION AS EVERYTHING BELOW
+    gatePresent:  c.hasAttribute('data-planner-reveal'),
+    revealReason: c.getAttribute('data-planner-reveal'),
+    visibility:   getComputedStyle(c).visibility,
+    inlineVisibility: c.style.visibility || '(none)',
+    mount:        c.getAttribute('data-planner-mount'),
+    ppf: +c.getAttribute('data-view-ppf'),
+    off: [+c.getAttribute('data-view-offx'), +c.getAttribute('data-view-offy')],
+    elements: els.length, onScreen, elementFromPoint: hit,
+    visibilityState: document.visibilityState, hasFocus: document.hasFocus(),
+  };
+})()
+```
+
+**PASS conditions — every one of these, on a plan that HAS drawn content:**
+
+| # | Field | Required | Why it is the condition |
+|---|---|---|---|
+| 1 | `chunks` | contains a `SitePlanner*` name that is **NOT** `SitePlannerApp-Bz_McZ8T.js` | That is the pre-fix chunk measured on production 2026-09-15. Still seeing it means the tab is on the old bundle and **nothing below counts** — hard-reload and re-run. |
+| 2 | `gatePresent` | `true` | The attribute only exists in a build carrying this fix. `false` means the gate is not deployed; stop. |
+| 3 | `revealReason` | **`"framed"`** | The reveal was caused by a real framing. `"ceiling"` = the rescue fired and the normal path failed — report it, it is a real (lesser) defect. `""` = never revealed → **STOP, this is the B1594320 outage, tell the session immediately.** |
+| 4 | `visibility` | `"visible"` | The outage direction. |
+| 5 | `elements` / `onScreen` | `onScreen > 0`, and equal to `elements` on an ordinary plan | "Revealed" is not "showing the plan": the reverted build painted an aerial with every element off-canvas, which reads as *"my plan is gone."* |
+| 6 | `elementFromPoint` | an element id, **not** `null` and not a `<tag>` | The plan must be clickable where it is drawn. |
+| 7 | `ppf` / `off` | **not judged** | ⛔ `ppf 0.35 off (60,60)` is BOTH the boot default AND the honest answer for an empty plan. **Never use that triple alone as a failure signature.** Row 3 is what distinguishes the two. |
+
+**And the thing only Michael's eyes can answer — the report itself:** on a **cold load of a real project on his iPhone**, does the canvas still cut to one building at extreme zoom for about two video frames before settling? Expected: **no flash — the drawing appears once, already framed.** A brief blank instant before it appears is the gate working as designed and is not a failure; a wrong picture that then corrects itself is.
+
+**Worth doing twice:** once on a tab brought to the FRONT before loading, and once on a load that begins with the window backgrounded (the case that produced the P0). Row 3 must read `"framed"` both times.
+
+**If anything fails, capture `revealReason` + `chunks` together** — those two fields are what tell a session whether it is looking at a real defect or a stale bundle, and the absence of exactly that pairing is what sent the 2026-09-03 false alarm down the wrong path.
+
+---
+
+**What WAS verified here (sandbox, this session, on real builds — not by reasoning).**
+1. **The flash reproduced on `main` before anything was changed** (`verify-boot-framing.mjs`, phone width, 66-element Goose Creek fixture): `visible` arm **2 painted framings** — `ppf 0.35 off (60,60)` held **106 ms over 6 frames**, then `ppf 0.0831`; `remount` arm **4**, the boot default once per mount.
+2. **With the fix:** `visible` 1 framing · `backgrounded → foregrounded` 1 framing, revealed + framed + hit-testable BEFORE the arm foregrounds anything (so B1600353 is intact) · `remount` 2 mounts / 2 framings · watchdog arm revealed at **2237 ms** on a wall clock in a document reading hidden, with a container forced degenerate.
+3. **The signed-in `loadEpoch` remount, driven in the sandbox for the first time** (`verify-boot-framing-auth.mjs`, incident condition #1): **2 real planner mounts**, no boot default painted on either, revealed by its framing, plan on screen and hit-testable. Ceiling arm: **7 remounts ~700 ms apart** on a degenerate container and the canvas is still revealed by the ceiling at **2325 ms**, within the ceiling of the FIRST mount.
+4. **Red-proofed three ways, each against a real build:** (a) `main`, no gate → the repaired rig exits 1, naming the flash on all three arms (it exited **0** before the repair, printing the flash and declaring it "not applicable"); (b) the P0 reintroduced (a `visibilityState` guard back on the ceiling) → watchdog arm RED, *"still unrevealed after 6349 ms"*; (c) the per-mount deadline (#1686's shape, which the incident doc says is explicitly not good enough) → auth ceiling arm RED, canvas permanently hidden.
+5. **Adjacent cases** (`verify-boot-framing-cases.mjs`), all green: foregrounded phone + desktop · hidden boot · no parcel · no elements · genuinely empty plan · Map / Schedule / Notes / Review via the real visible tab.
+6. `test/bootFramingDeadline.test.js` 8/8; full suite green; `npm run ci-parity` green.
+### V978448 — B1341728: on his own signed-in board, all four ways out of the Owner cell keep the owner he just picked `Blocker: real-data`
+
+**Why this needs its own live pass, stated precisely.** The Escape arm of the report reproduced instantly in this sandbox and is fixed and re-proven here. **The Enter arm did not reproduce here at all** — on this build, in a real browser, driven through every route (double-click to open, Enter-to-open, type-to-edit; no prior owner / one / several; one add / three adds), Enter committed correctly every time, and instrumenting the keystroke showed why: React 18 attaches at `#root`, so the picker's own `stopPropagation` stops the native Enter before the document-level grid handler — the only code in the file that could move a cursor — ever sees it. What this sandbox cannot be is HIS environment: signed in, cloud-syncing, real contacts, a real board. So the Enter arm is a **FINDING (not reproducible here), never a DISPOSITION** (STANDING RULE #2), and the disposition actually taken is the other two: the loss is made impossible by construction (every chip is written to the task the instant it is added, so no exit on any path has an unsaved owner to discard), and **this check asks him whether it is gone and takes his answer as the verdict.**
+
+**What was verified HERE (this session, headless Chromium, the real Schedule grid, real key events and real mouse clicks on the real dropdown — `ui-audit/verify-cell-editor-exit-contract.mjs`).**
+1. **Teeth first, on UNTOUCHED `main`:** the harness was run before the fix was written and went RED on exactly the six Owner/Escape arms — no prior owner · one prior owner · two prior owners · three adds in a row · removing a saved owner · minting a brand-new contact. It is therefore proven able to SEE the reported defect, not merely to agree with the fix.
+2. **After the fix: 54 audit rows, 12/12 checks, all green** — Owner × {Escape, Enter, Tab, click-away} × {no prior owner, one, two, three adds, remove a saved owner, brand-new contact}, plus click-away onto another cell in the SAME row and onto a different row.
+3. **The brand-new-contact leak is closed in the same pass:** a contact minted during the edit is created AND assigned on every exit — it can no longer be created-but-unassigned, nor (as on Escape before) lost together with its chip.
+4. Every OTHER editable cell in the grid was driven through the same four exits and conforms: Task name · Start · Finish · Duration · Predecessor · Cost (text class — Enter/Tab/click-away commit, Escape abandons the typed text) and Health (select class — only a choice commits; every exit closes, Tab included after this PR's fix).
+5. Vacuity guard honoured (DRIVER-SCROLL §6): the run carries a known-good arm — a text cell must commit on Tab — and declares itself VOID rather than printing a score if that arm does not report its known value. `FOREGROUND-OR-VOID` honoured via the house `assertMeasurable` from `ui-audit/lib/tabTiming.mjs`.
+6. CI-runnable half green and mutation-proven: `test/cellEditorExitContract.test.js` (15 tests) goes red on three separate planted regressions and green on restore; `npm run lint` 0 errors; `npx vitest run` full suite green; `npm run build` green.
+
+**What this does NOT prove, and why the item parks:** that the Enter arm behaves on HIS board. This sandbox runs logged-out against a local fixture, so it has no cloud round-trip, no remote refresh landing mid-edit, and none of his real contacts.
+
+**Steps — run on planyr.io, signed in, on a THROWAWAY DUPLICATE schedule (never a real one), each with its named expected result.**
+1. Duplicate a small schedule (as he did with "Operations (Copy)"), open its grid, and pick a task whose Owner cell is EMPTY. Double-click the Owner cell and click one contact from the list so it shows as a tag. Press **Escape**. **Expect:** the cell reads that person's name. Reopen the cell — **expect** the chip to be there, not "Type a name…".
+2. Same setup, fresh empty Owner cell. Add one contact from the list, press **Enter**. **Expect:** the cell reads that person's name, and reopening the cell shows the chip. (This is the arm that could not be reproduced in the sandbox — it is the one that matters most here.) Note also whether the cursor moves down a row; it may, and that is fine as long as the owner is kept.
+3. Repeat steps 1 and 2 with **Tab** and with **clicking away** onto another cell. **Expect:** saved in both, unchanged from before.
+4. On a task that ALREADY has one saved owner, add a second from the list and leave by each of the four exits in turn. **Expect:** both names kept every time (the cell shows "First +1"; hovering shows the full list).
+5. On a task with two saved owners, click the ✕ on the FIRST chip and press **Escape**. **Expect:** the removal STICKS — the cell now shows only the second owner. This is a deliberate change: Tab and click-away already kept the removal, and Escape used to disagree with them. **Ctrl+Z restores it.**
+6. Type a brand-new name (nobody on the list), press Enter to add it as a contact, then leave by each of the four exits in turn. **Expect:** the person is assigned to the task every time, and appears in the contact list — never created-but-unassigned, and never silently dropped.
+7. Read the served chunk hash in the **SAME observation** as the result above (Network tab, or `document.querySelectorAll('script[src]')`) and confirm it is a build carrying this fix — a stale tab can serve the pre-deploy bundle and make any step read either way.
+8. Delete the throwaway duplicate schedule afterwards and say what was touched.
+- Result: ⏳ pending — Escape reproduced and is fixed and re-proven here; Enter is not reproducible in this sandbox and is retired by construction rather than by a repro, which is what this check confirms. `Cadence: once`.
+- Stopping rule: closes when steps 1–6 are observed on planyr.io and Escape and Enter both keep the owner. If Enter still loses it there, the cause is downstream of this editor — a write that did not persist, not an editor that discarded it, because the editor no longer holds an unsaved owner at any instant — and that is filed as a NEW item, not a recurrence of B1341728.
+
 ### V1135056 — B1597232: a Wayne County, MI address fires NO parcel query and names the gap — never a query to Oakland County `Blocker: live-GIS`
 
 **Why this needs its own live pass.** GIS endpoint behaviour is a mandatory LIVE-VERIFY class, and this item is specifically about NETWORK FAN-OUT — how many `/query` requests one address search fires and to which hosts — which only a real search against the deployed, post-fix build can show in a Network panel. The ROUTING LOGIC (which sources a point resolves to) is fully proven sandbox-side against the real committed geometry asset, at the exact reported coordinates, listed below. What is not reachable here is the network itself: `gisservices.oakgov.com` (Oakland), `Detroit_MP_Parcel_Authoritative` and the geocoder that turns the reported addresses into points all sit outside this sandbox's egress allowlist, and the fix is only observable end-to-end once Cloudflare has deployed the merged build.
