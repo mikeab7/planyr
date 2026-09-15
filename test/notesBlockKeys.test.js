@@ -166,6 +166,38 @@ describe("blockStartAction — which single step a Backspace at position zero ta
     expect(actionAt(doc(UL(LI("one"), LI("two"))), [0, 0, 0])).toBe("list-item-to-paragraph");
   });
 
+  /* ── NEW-2 sweep (the Tab vertical-drop report) — an item wearing Tab's `indent` ATTRIBUTE
+   * gives that level back before any structural rule runs, the same precedence Shift+Tab
+   * already gives it. Before this, the attribute was invisible to `blockStartAction`: a solo
+   * first item indented by the attribute alone (no real sibling to nest under) read as an
+   * ordinary top-level item, so Backspace at its start jumped straight past "give the level
+   * back" to `list-item-to-paragraph` — losing its list-item status (and the level) in one
+   * press instead of the one visible step every other row in this table promises. ─────────── */
+  it("⛔ NEW-2 — a SOLO item indented by the attribute alone gives the level back, not the list", () => {
+    const solo = { type: "listItem", attrs: { indent: 1 }, content: [P("Solo")] };
+    const v = verdictAt(doc({ type: "bulletList", content: [solo] }), [0, 0, 0]);
+    expect(v.action).toBe("outdent-indent-attr");
+    expect(v.itemType).toBe("listItem");
+    // The control: the SAME shape at indent 0 is untouched — this is a new row, not a rewrite.
+    expect(actionAt(doc(UL(LI("Solo"))), [0, 0, 0])).toBe("list-item-to-paragraph");
+  });
+
+  it("⛔ NEW-2 — the same for a checklist item wearing the attribute", () => {
+    const solo = { type: "taskItem", attrs: { checked: false, indent: 1 }, content: [P("Solo")] };
+    const v = verdictAt(doc({ type: "taskList", content: [solo] }), [0, 0, 0]);
+    expect(v.action).toBe("outdent-indent-attr");
+    expect(v.itemType).toBe("taskItem");
+  });
+
+  it("⛔ NEW-2 — the attribute wins even when the item is ALSO really nested (the compound, "
+     + "'Tab again' case the owner reported)", () => {
+    const child = { type: "listItem", attrs: { indent: 1 }, content: [P("Child")] };
+    const d = doc({ type: "bulletList", content: [LI("Parent", { type: "bulletList", content: [child] })] });
+    const v = verdictAt(d, [0, 0, 1, 0, 0]);
+    expect(v.action).toBe("outdent-indent-attr");           // not "outdent-list-item"
+  });
+
+
   /* ── formatting comes off before anything structural ──────────────────────────────────── */
   it("an odd ALIGNMENT is undone first — B36051's case, and it is still first in line", () => {
     for (const align of ["center", "right", "justify"]) {

@@ -155,6 +155,25 @@ const shift = (editor, delta) => editor.commands.command(shiftIndent(delta));
  *  first item clean out of its list while it still owes an outdent. */
 const hasIndent = (editor) => itemsInSelection(editor.state).some(({ node }) => readIndent(node.attrs) > 0);
 
+/** ⛔ THE CARET'S OWN ITEM, WHEN IT IS EMPTY — the "leave the list" gesture Enter already
+ *  performs on an empty item (`lib/notesEnterInherit.js` declines here for exactly that
+ *  reason). An item wearing an attribute LEVEL is, to ProseMirror's own structural depth, an
+ *  ordinary item — so the native Enter-on-empty-item handling (outdent if really nested,
+ *  leave the list if not) never sees the attribute at all, and an empty item at level 1 by
+ *  attribute alone would jump straight past "give the level back" to "gone from the list",
+ *  the same one-step-too-far NEW-2 asked the sweep to check for. Null unless the caret sits in
+ *  an indentable item with no text anywhere in it. */
+const emptyIndentableAt = (state) => {
+  const { $from, empty } = state.selection;
+  if (!empty) return null;
+  for (let d = $from.depth; d > 0; d -= 1) {
+    const node = $from.node(d);
+    if (!INDENTABLE.includes(node.type.name)) continue;
+    return node.textContent.trim() === "" ? node : null;
+  }
+  return null;
+};
+
 /* ⛔ ABOVE THE LIST KEYMAP, DELIBERATELY, AND IT IS THE ONLY REASON THIS IS A SEPARATE
  * EXTENSION FROM `notesTabKey`. That one is a FALLBACK at priority 50 — it sees a press only
  * after the list and table keymaps have turned it down, which is exactly right for Tab. It is
@@ -199,6 +218,16 @@ const NoteListIndent = Extension.create({
         if (!activeItemType(this.editor)) return false;
         // A level owed is given back before the list is allowed to lift anything.
         if (!hasIndent(this.editor)) return false;
+        return shift(this.editor, -1);
+      },
+
+      /* ⛔ AN EMPTY ITEM STILL OWING A LEVEL GIVES IT BACK FIRST (NEW-2 sweep). Declines for a
+       * range, a non-empty item, or an item at attribute level 0 — every one of those is
+       * `lib/notesEnterInherit.js`'s case or the list keymap's own "leave the list" case, both
+       * already correct, and this must not touch them. */
+      Enter: () => {
+        const node = emptyIndentableAt(this.editor.state);
+        if (!node || readIndent(node.attrs) <= 0) return false;
         return shift(this.editor, -1);
       },
     };

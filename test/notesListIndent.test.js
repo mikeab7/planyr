@@ -21,6 +21,7 @@
  * expect nothing. Neither half is sufficient alone and both are required to ship.
  */
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { getSchema } from "@tiptap/core";
 import { Node as PMNode } from "@tiptap/pm/model";
 import { EditorState, TextSelection } from "@tiptap/pm/state";
@@ -29,6 +30,7 @@ import { NOTE_EXTENSIONS } from "../src/workspaces/notes/lib/notesExtensions.js"
 import { shiftIndent, MAX_INDENT, INDENTABLE } from "../src/workspaces/notes/lib/notesListIndent.js";
 import { indentAttrs, indentCssRules, readIndent } from "../src/workspaces/notes/lib/notesIndentLevel.js";
 import { docToMarkdown } from "../src/workspaces/notes/lib/notesMarkdown.js";
+import { buildPrintDocument } from "../src/workspaces/notes/lib/notesPrint.js";
 
 const schema = getSchema(NOTE_EXTENSIONS);
 
@@ -478,5 +480,45 @@ describe("⛔ a REAL nested chain moves as ONE block — only the outermost sele
     expect(oldHits.length).toBe(3);
     const { json } = run(before, +1, { range: wholeChainRange(before) });
     expect(itemsOf(json).filter(([, n]) => n > 0).length).toBe(1);
+  });
+});
+
+/* ⛔ THE VERTICAL-DROP REPORT (owner, verbatim: "if I press tab again, it indents it further,
+ * but then drops it down. So it's literally at a different height. So which can't be right").
+ *
+ * MEASURED live in a real browser (Tab on the second of three top-level bullets, which
+ * `sinkListItem` sinks for real under the first): an ordinary sibling gap of 6px between two
+ * items became a 15px gap the instant the second item was wrapped in the new nested `<ul>` —
+ * the generic ".ProseMirror ul, ol { margin: 1em 0 0 0 }" rule, meant to space a list away from
+ * a paragraph that PRECEDES it elsewhere in the document, was also landing between a parent
+ * item and its own newly-sunk child, which is the next line of the SAME list, not a new block.
+ * A second Tab (the attribute path, once real nesting has nowhere further to sink) adds no
+ * further vertical change on its own — the whole drop is already there after the first.
+ *
+ * This suite is node-only and cannot lay out CSS (SYNTHETIC-KEYS-DONT-EDIT's sibling
+ * limitation for layout rather than keystrokes), so it asserts the STYLESHEET TEXT carries the
+ * override rather than the rendered pixels — the live measurement above is what proved the
+ * regex actually fixes the picture, and re-stashing the source change reproduces the drop. */
+describe("⛔ a nested list is the next line of the list, not a new block (Tab vertical-drop)", () => {
+  const nestedListGapRule = /\.planyr-note \.ProseMirror li > ul,\s*\.planyr-note \.ProseMirror li > ol\s*\{\s*margin-top:\s*var\(--note-list-gap,\s*2px\);?\s*\}/;
+  const nestedListGapRulePrint = /\.note-body li > ul,\s*\.note-body li > ol\s*\{\s*margin-top:\s*2px;?\s*\}/;
+
+  it("EDITOR_CSS gives a list nested inside a list item the item gap, not the generic 1em block margin", () => {
+    const screenCss = readFileSync("src/workspaces/notes/components/NoteEditor.jsx", "utf8");
+    expect(screenCss).toMatch(nestedListGapRule);
+  });
+
+  it("⛔ PDF-PARITY — the printed sheet carries the identical override, at every density", () => {
+    const html = buildPrintDocument({ title: "T", pages: [{ title: "T", html: "<p>x</p>" }] });
+    expect(html).toMatch(nestedListGapRulePrint);
+    for (const density of ["comfortable", "compact"]) {
+      const withDensity = buildPrintDocument({ title: "T", pages: [{ title: "T", html: "<p>x</p>" }], density });
+      expect(withDensity).toMatch(/\.note-body li > ul,\s*\.note-body li > ol\s*\{\s*margin-top:\s*\d+px;?\s*\}/);
+    }
+  });
+
+  it("the generic block-margin rule is left alone — it still spans a list that follows a paragraph", () => {
+    const screenCss = readFileSync("src/workspaces/notes/components/NoteEditor.jsx", "utf8");
+    expect(screenCss).toContain(".planyr-note .ProseMirror ul, .planyr-note .ProseMirror ol { padding-left: 1.5em; margin: 1em 0 0 0; }");
   });
 });
