@@ -912,7 +912,7 @@ export default function ProjectBreadcrumb({
             onCommit={() => commitRename(p.id)}
             onCancel={() => { pendingRefocusIdRef.current = p.id; setEditingId(null); }}
             label={`Rename ${p.name}`}
-            style={{ flex: 1, margin: "2px 4px", border: "1px solid var(--accent-site-text, #2563eb)" }}
+            style={{ flex: 1, margin: "2px 4px", border: "1px solid var(--accent-site-text)" }}
           />
         ) : (
           <>
