@@ -63,4 +63,59 @@ export function dragHeightFromDelta(startHeight, deltaPx) {
   return clampHeight(startHeight + deltaPx);
 }
 
+/** ⛔ THE TOP EDGE'S "THE OTHER EDGE HOLDS" RULE, AS ONE ANSWER (B1605664 ×2, 2026-09-15 — round 2 of that item).
+ *
+ *  The page only ever grows DOWNWARD (`dom.style.minHeight`), so a TOP-edge drag has to move
+ *  something else to keep its promise that the edge you grabbed follows the pointer while the
+ *  opposite edge stays put. Which "something else" is not a preference — each direction has
+ *  exactly one thing that CAN move:
+ *
+ *   GROWING   the taller page has just made room BELOW, so scrolling the mat down by the growth
+ *             puts the bottom edge back where it was and carries the top edge up with the
+ *             pointer. Never clamped: the room provably exists, it was just created.
+ *   SHRINKING the same trick backwards needs the mat to scroll UP past its own top, and a note
+ *             page sits at `scrollTop === 0` essentially always. `scrollTop = -20` does not
+ *             throw, it silently becomes 0 — which is the whole of B1605664: the height changed
+ *             and the compensation didn't, so the page looked like it shrank from the bottom.
+ *             So shrinking opens real space ABOVE the page instead (`topPad`, rendered as
+ *             `note-sheet`'s own margin-top), which has no floor to clamp against.
+ *
+ *  ⛔ AND THEY ARE ONE LINE, NOT TWO CASES. Growing HANDS BACK any gap an earlier shrink opened
+ *  before it spends a single pixel of scroll, so shrink-then-regrow lands exactly back where it
+ *  started — no leftover gap above the page, no leftover scroll under it. Two independent
+ *  branches would accumulate both, and the accumulation only shows up after the third or fourth
+ *  gesture, which is exactly the kind of drift nobody reports as a bug.
+ *
+ *  @param startTopPad   the gap already open above the page when this drag began
+ *  @param startScrollTop the mat's scroll position when this drag began
+ *  @param delta         live height − height at drag start (positive grew, negative shrank)
+ *  @returns {{ topPad: number, scrollTop: number }} both absolute, never deltas. */
+export function topEdgeCompensation({ startTopPad = 0, startScrollTop = 0, delta = 0 } = {}) {
+  const pad = Math.max(0, startTopPad || 0);
+  return {
+    topPad: Math.max(0, pad - delta),
+    scrollTop: Math.max(0, (startScrollTop || 0) + Math.max(0, delta - pad)),
+  };
+}
+
+/** ⛔ THE EDGE YOU JUST DRAGGED HAS TO STILL BE THERE TO GRAB (B1609184, 2026-09-15).
+ *
+ *  Growing from the top scrolls the mat, and a big enough grow scrolls the page's top edge — and
+ *  the grip that lives on it — clean out of the visible area, where it cannot be grabbed again
+ *  without scrolling back by hand. This gives back the LEAST scroll that brings the grip fully
+ *  into view, and exactly nothing when it is already there, so a drag that ends in view never
+ *  moves the picture. Scrolling up moves content down the screen, hence the subtraction.
+ *
+ *  It deliberately runs at RELEASE and never mid-gesture: the drag itself has to stay 1:1 with
+ *  the pointer (that half is what the owner verified as correct), and the promise being kept is
+ *  "the edge you are dragging stays reachable when the drag ends".
+ *
+ *  @param visibleTop the first row a person can actually SEE — the intersection of the scroller
+ *                    and the window, never the scroller's own rect, which at a short window can
+ *                    run off the bottom of the screen. */
+export function scrollToReach({ scrollTop = 0, gripTop = 0, visibleTop = 0, gap = 0 } = {}) {
+  const short = (visibleTop + gap) - gripTop;
+  return short > 0 ? Math.max(0, scrollTop - short) : scrollTop;
+}
+
 export { clampHeight };

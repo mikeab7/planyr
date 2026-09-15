@@ -266,6 +266,37 @@ Two more found since, each worth its own line because each returned a confident 
    it** (`latchGesture`) rather than be re-derived from its endpoints. Worth checking wherever a
    gesture's meaning is computed from a start/end pair instead of from the path.
 
+25. **⛔ THE PAGE IS `note-sheet`; `note-body` IS THE TEXT INSIDE IT — AND MEASURING THE INNER ONE
+   CERTIFIED A VISIBLY BROKEN PAGE AS 46/46 GREEN (B1605664 ×2 / B1609185, 2026-09-15).** The
+   fix under test moved the ProseMirror body with a `transform`. A transform is a paint-time
+   offset that changes no layout, so the TEXT slid down inside a page whose own top edge never
+   moved and whose bottom edge crept up — exactly the defect being fixed. Measured on the
+   deployed build at 1191×465, top grip dragged down 40 on a fresh page:
+   `note-sheet` top **150 → 150**, bottom **578 → 538** ✗ · `note-body` top **267 → 307**, bottom
+   **481 → 481** ✓. **Both numbers are honest; they describe different boxes**, and the harness
+   only ever asked the inner one. **Any claim about what a PERSON sees an edge, a margin or a
+   page boundary do is a claim about `note-sheet`** — the white surface with the border and the
+   four edge grips on it. `note-body` answers questions about the text.
+   - **THE CHEAP GUARD, and it is the one this file exists to hand you:** before trusting a rect,
+     ask what is immediately ABOVE its top edge. Grey mat above and page below means you are on
+     the page's real boundary; page above means you are on something inside it. That single probe
+     separates the two elements and would have caught this on the first run. It is now a standing
+     known-good arm in `ui-audit/verify-notes-page-height.mjs` §16, beside a liveness arm (a known
+     scroll must move both of the page's edges by exactly that much).
+   - **AND THE ASYMMETRY THAT LET IT THROUGH is DRIVER-SCROLL-IS-NOT-APP-SCROLL §6's, verbatim:**
+     every discipline here proves a guard can go RED on known-broken code, and nothing forces a
+     probe to go GREEN on known-good code. Both known-good arms above stayed green on the broken
+     build — which is what localised the fault to the product rather than to the probe.
+26. **⛔ "THE OPPOSITE EDGE HOLDS" IS A PROMISE ABOUT THE DRAG, SO READ IT WITH THE BUTTON STILL
+   DOWN (B1609184, 2026-09-15).** A top-edge grow now ends with a deliberate scroll that brings
+   the dragged edge back into reach, which moves both edges on screen AFTER the gesture is over.
+   Two existing arms asserted the hold at RELEASE and went red on a correct build — they were
+   asserting that the settle does not happen. Take the mid-gesture reading for the pointer
+   promise and a separate post-release reading for whatever the settle is supposed to do. (This
+   is not FOREGROUND-OR-VOID §6's trap in reverse: that one is about a reading between the two
+   presses of a double-click changing the gesture's own timing budget. A drag has no such budget,
+   so a mid-drag rect costs nothing.)
+
 See also `ui-audit/TRAPS.md`, and the named rules **FOREGROUND-OR-VOID** (a background tab cannot
 be measured — not its clock, not its pixels) and **COUNT-EVERY-KIND**.
 
