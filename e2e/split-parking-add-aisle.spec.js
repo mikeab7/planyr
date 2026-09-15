@@ -24,7 +24,7 @@
  * classes (no timing/race, no concurrency, no GIS endpoint, not zoom-density-dependent).
  */
 import { test, expect } from "@playwright/test";
-import { openModule } from "./helpers.js";
+import { openModule, armPlannerHooks } from "./helpers.js";
 
 const canvas = (p) => p.getByTestId("planner-canvas");
 const SITE_KEY = "planarfit:sites:v1";
@@ -66,6 +66,7 @@ async function openProperties(page, elId) {
 }
 
 async function startBlank(page) {
+  await armPlannerHooks(page); // __plannerView.centerOn — a deterministic zoom for the on-shape "+"/"−" gate
   await page.goto("/");
   await openModule(page, "site-planner");
   await page.getByTestId("map-toolbar-draw").click();
@@ -206,6 +207,209 @@ test.describe("B1620480 — adding parking after a split still adds the drive ai
 
     els = await readEls(page);
     stack = pads(els).slice().sort((a, b) => a.sideParkPiece - b.sideParkPiece);
+    expect(stack.map((e) => e.type)).toEqual(["parking", "paving", "parking"]);
+    expect(stack.reduce((s, e) => s + e.h, 0)).toBeCloseTo(18 + 24 + 18, 6);
+
+    expect(errors, `page errors: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
+
+/* NEW-1 (deliberate remainder of B1625728, owner go-ahead 2026-09-15, verbatim: "I don't often,
+ * but if I do, it should work. So yes, ship that fix.") — B1625728 fixed the WALL-BONDED case and
+ * explicitly flagged the freestanding one as untouched: "a freestanding stack has no shared
+ * host/side to group siblings by, so there is no cheap way to detect 'this piece has siblings' the
+ * way the wall-bonded fix does." `freeParkStack` (lib/parking.js) closes that gap from geometry
+ * (same width + rotation, touching, walked outward from whichever piece was clicked) rather than a
+ * host relation. Reuses this file's harness rather than a new one, per the dispatch.
+ */
+const freePads = (els) => els.filter((e) => !e.attachedTo && (e.type === "parking" || e.type === "paving"));
+const byPiece = (a) => a.slice().sort((x, y) => x.sideParkPiece - y.sideParkPiece);
+
+const fieldInput = (page, label) => page.getByText(label, { exact: true }).locator("xpath=..").locator("input").first();
+
+async function drawFreestandingField(page, box) {
+  await page.getByRole("button", { name: "Parking", exact: true }).click();
+  await page.mouse.move(box.x + 250, box.y + 250);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 450, box.y + 320, { steps: 5 });
+  await page.mouse.move(box.x + 650, box.y + 400, { steps: 8 });
+  await page.mouse.up();
+  await page.keyboard.press("Escape");
+}
+
+/* Select an element BY ID (a specific piece, wherever it sits after a split) and open Properties —
+ * same down/up ×2 pattern as `openProperties` above, so pointer capture doesn't eat the dblclick. */
+async function selectAndOpenProperties(page, elId) {
+  const box = await page.locator(`[data-el-id="${elId}"]`).first().boundingBox();
+  const x = box.x + Math.min(8, box.width / 2), y = box.y + Math.min(4, box.height / 2);
+  await page.mouse.move(x, y);
+  await page.mouse.down(); await page.mouse.up();
+  await page.mouse.down(); await page.mouse.up();
+  await page.waitForTimeout(200);
+}
+
+async function selectOnly(page, elId) {
+  const box = await page.locator(`[data-el-id="${elId}"]`).first().boundingBox();
+  await page.mouse.click(box.x + Math.min(8, box.width / 2), box.y + Math.min(4, box.height / 2));
+  await page.waitForTimeout(200);
+}
+
+// The Yield panel's "Car stalls" row — BUILDINGS starts closed, so open it on first read.
+async function readCarStalls(page) {
+  await page.getByRole("button", { name: "Yield", exact: true }).click();
+  if ((await page.getByText("Car stalls", { exact: true }).count()) === 0) {
+    await page.getByRole("button", { name: /Buildings/i }).first().click();
+  }
+  const txt = (await page.getByText("Car stalls", { exact: true }).locator("xpath=following-sibling::span[1]").innerText()).trim();
+  return parseInt(txt, 10);
+}
+
+test.describe("NEW-1 — a FREE-STANDING (not attached to a building) split field also adds the drive aisle", () => {
+  test("draw → split → add on a freestanding field: outer piece grows the whole stack, never one piece in place", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+
+    await startBlank(page);
+    const box = await canvas(page).boundingBox();
+
+    // Control case first: a freestanding field BEFORE any split still works exactly as it always
+    // has (plain in-place row growth — nothing here is stack-aware yet).
+    await drawFreestandingField(page, box);
+    let els = await readEls(page);
+    let field = els.find((e) => e.type === "parking" && !e.attachedTo);
+    expect(field, "a freestanding field was drawn").toBeTruthy();
+    const fieldId = field.id;
+    await selectAndOpenProperties(page, fieldId);
+    await fieldInput(page, "Width (ft)").fill("200");
+    await fieldInput(page, "Width (ft)").press("Enter");
+    await fieldInput(page, "Depth (ft)").fill("60"); // exactly 2 rows: 2·18 + 24
+    await fieldInput(page, "Depth (ft)").press("Enter");
+    await page.waitForTimeout(150);
+    els = await readEls(page);
+    field = els.find((e) => e.id === fieldId);
+    expect(field.h).toBeCloseTo(60, 6);
+    expect(field.w).toBeCloseTo(200, 6);
+
+    const stallsBeforeAdd = await readCarStalls(page);
+
+    // Explode it.
+    await selectAndOpenProperties(page, fieldId);
+    const splitBtn = page.getByTestId("split-parking");
+    await expect(splitBtn).toBeVisible();
+    await splitBtn.click();
+    await page.waitForTimeout(200);
+
+    els = await readEls(page);
+    let stack = byPiece(freePads(els));
+    expect(stack.map((e) => e.type), "split into row / aisle / row, none attached to anything").toEqual(["parking", "paving", "parking"]);
+    stack.forEach((e) => expect(e.attachedTo, "a freestanding split piece stays freestanding").toBeUndefined());
+    const totalBefore = stack.reduce((s, e) => s + e.h, 0);
+
+    // THE REPORTED OPERATION, via the Properties panel's "＋ Row" — select the FIRST piece (not
+    // the outermost) to prove the fix finds the whole stack regardless of which piece was clicked.
+    await selectAndOpenProperties(page, stack[0].id);
+    await page.getByRole("button", { name: "＋ Row", exact: true }).click();
+    await page.waitForTimeout(200);
+
+    els = await readEls(page);
+    stack = byPiece(freePads(els));
+    expect(stack.map((e) => e.type), "a new row arrived WITH its own aisle ahead of it").toEqual(["parking", "paving", "parking", "paving", "parking"]);
+    expect(stack.reduce((s, e) => s + e.h, 0), "no pavement gained or lost by the append").toBeCloseTo(totalBefore + 18 + 24, 6);
+    stack.forEach((e) => { expect(e.w).toBeCloseTo(200, 6); expect(e.attachedTo).toBeUndefined(); });
+
+    // Same op again, this time via the ON-CANVAS "+" node on a DIFFERENT (middle) piece — the
+    // panel's "＋ Row" and the shape's own edge control must agree, per the dispatch. Each piece
+    // is only 18′ deep, and the on-shape control has its own legibility zoom gate
+    // (FEAT_BTN_MIN_PX = 72px) that the whole-site default view doesn't clear — park the viewport
+    // on this piece at a scale that does, via the E2E-only `__plannerView.centerOn` test hook
+    // (read-only navigation aid; never runs in production, see its own header).
+    const mid = stack[2];
+    await page.evaluate((p) => window.__plannerView.centerOn(p.cx, p.cy, p.ppf), { cx: mid.cx, cy: mid.cy, ppf: 6 });
+    await page.waitForTimeout(150);
+    await selectOnly(page, mid.id); // a middle "parking" row, not the outermost
+    await clickFeatTitle(page, "Add one parking row", 0);
+
+    els = await readEls(page);
+    stack = byPiece(freePads(els));
+    expect(stack.map((e) => e.type)).toEqual(["parking", "paving", "parking", "paving", "parking", "paving", "parking"]);
+    expect(stack.reduce((s, e) => s + e.h, 0)).toBeCloseTo(totalBefore + 2 * (18 + 24), 6);
+
+    // COUNTS: the Yield panel's Car stalls readout grew by exactly the two new rows' worth of
+    // stalls, never silently stale (B1625728's own reasoning — counts are derived live from the
+    // element list on every render — checked here rather than just cited).
+    const stallsAfterAdd = await readCarStalls(page);
+    const perRowStalls = stallsAfterAdd > stallsBeforeAdd ? Math.round((stallsAfterAdd - stallsBeforeAdd) / 2) : 0;
+    expect(perRowStalls, "each new row added real, countable stalls").toBeGreaterThan(0);
+
+    // Back out to the whole-stack view — the centerOn() call above parked the viewport tight on
+    // one piece, and the remaining steps click pieces anywhere along the stack.
+    await page.getByRole("button", { name: "Zoom to fit" }).first().click();
+    await page.waitForTimeout(150);
+
+    // Undo restores exactly the prior state in one step (both new pieces from the second add).
+    const cbox = await canvas(page).boundingBox();
+    await page.mouse.click(cbox.x + 20, cbox.y + 20);
+    await page.waitForTimeout(150);
+    await page.keyboard.press("Control+z");
+    await page.waitForTimeout(200);
+    els = await readEls(page);
+    stack = byPiece(freePads(els));
+    expect(stack.map((e) => e.type)).toEqual(["parking", "paving", "parking", "paving", "parking"]);
+    expect(stack.reduce((s, e) => s + e.h, 0)).toBeCloseTo(totalBefore + 18 + 24, 6);
+
+    // － Row via the Properties panel walks back down ONE PIECE AT A TIME, outermost first —
+    // mirroring the wall-bonded ladder's own LIFO exactly (a single click peels one piece, which
+    // may leave a bare trailing aisle for one step, same as growEmployeeSide's ladder does).
+    await selectAndOpenProperties(page, stack[0].id);
+    await page.getByRole("button", { name: "－ Row", exact: true }).click();
+    await page.waitForTimeout(200);
+    els = await readEls(page);
+    stack = byPiece(freePads(els));
+    expect(stack.map((e) => e.type), "the outermost row was removed, one piece at a time").toEqual(["parking", "paving", "parking", "paving"]);
+    expect(stack.reduce((s, e) => s + e.h, 0)).toBeCloseTo(totalBefore + 24, 6);
+
+    // A second "－ Row" removes the now-trailing bare aisle too, back to the original 3-piece
+    // stack — a clean round trip.
+    await selectAndOpenProperties(page, stack[0].id);
+    await page.getByRole("button", { name: "－ Row", exact: true }).click();
+    await page.waitForTimeout(200);
+    els = await readEls(page);
+    stack = byPiece(freePads(els));
+    expect(stack.map((e) => e.type), "round trip: back to the original split stack").toEqual(["parking", "paving", "parking"]);
+    expect(stack.reduce((s, e) => s + e.h, 0)).toBeCloseTo(totalBefore, 6);
+
+    expect(errors, `page errors: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("a freestanding SINGLE-LOADED split field (odd, ends on its own reserved aisle): '+' adds only a row", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+
+    await startBlank(page);
+    const box = await canvas(page).boundingBox();
+    await drawFreestandingField(page, box);
+    let els = await readEls(page);
+    const fieldId = els.find((e) => e.type === "parking" && !e.attachedTo).id;
+
+    await selectAndOpenProperties(page, fieldId);
+    await fieldInput(page, "Depth (ft)").fill("42"); // 1 row: 18 + 24
+    await fieldInput(page, "Depth (ft)").press("Enter");
+    await page.waitForTimeout(150);
+
+    await selectAndOpenProperties(page, fieldId);
+    await page.getByTestId("split-parking").click();
+    await page.waitForTimeout(200);
+
+    els = await readEls(page);
+    let stack = byPiece(freePads(els));
+    expect(stack.map((e) => e.type), "a single-loaded freestanding bay explodes to row + its own aisle").toEqual(["parking", "paving"]);
+
+    await selectAndOpenProperties(page, stack[0].id);
+    await page.getByRole("button", { name: "＋ Row", exact: true }).click();
+    await page.waitForTimeout(200);
+
+    els = await readEls(page);
+    stack = byPiece(freePads(els));
     expect(stack.map((e) => e.type)).toEqual(["parking", "paving", "parking"]);
     expect(stack.reduce((s, e) => s + e.h, 0)).toBeCloseTo(18 + 24 + 18, 6);
 

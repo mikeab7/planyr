@@ -9811,7 +9811,7 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
 4. Close the tab; open a genuinely fresh tab/window on the bare domain. **Expect:** "open where I left off" still resumes correctly when the last real route named a project; a boot landing on the Dashboard or any project-less route must not silently jump into Goose Creek's (or any) schedule.
 5. Repeat steps 1–2 a few times across a short session to catch the "it doesn't always happen" timing the owner described, and record the exact hash sequence observed each time (DevTools console `window.location.hash`, or the Network/history panel).
 
-**Result:** ⏳ pending — needs a real signed-in browser session with real, multi-project account history; not reachable from this sandbox. `Cadence: once`.
+**Result:** ⏳ partially observed, 2026-09-15 — recorded from a live signed-in pass reported into a dispatch (project `smqfy48tlk9j`/Goose Creek, three deploys, ending build `ef4b6e0`). Steps 1–2's URL/crumb half PASSED as written: a fresh `#/schedule` load and a Schedule-tab click from Site's project-less state both stayed on a bare, project-less `#/schedule` (`keptProject:false` from Site, Schedule and Review) — the route/breadcrumb adoption this item's fix targets did not recur. But step 1's FULLER expectation — "Goose Creek's grid must NOT reappear uninvited" — FAILED: the grid underneath kept rendering Goose Creek's real 32-row Master Schedule, fully visible and clickable, under the honestly-empty breadcrumb. That is a DIFFERENT mechanism (the render gate never covered a project-less route at all — see **B1644368**, filed and fixed this same session) than the one this item's `bootCarryOutAllowed`/`shouldNeutralizeToReports` fix addresses, so this item's own fix is not in question; only its own verification steps' fuller claim was not yet true when tested. Steps 3–5 were not separately reported. This entry stays parked (not moved to Done) until a live pass confirms the grid half too — see **V1173216** for that half's own dedicated live-verify entry, now that a mechanism exists to test.
 
 ### V1167793 — B1638835: the full module × leading-crumb navigation matrix, with two real projects in play, never lands on a project nobody chose `Blocker: auth` `Blocker: real-data`
 
@@ -9827,6 +9827,19 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
 7. Record the exact hash sequence for any step that doesn't match its expectation, so a recurrence has a concrete trace rather than "sometimes."
 
 **Result:** ⏳ pending — needs a real signed-in browser session with at least two real projects; not reachable from this sandbox. `Cadence: once`.
+
+### V1173216 — B1644368: a project-less Schedule route never shows (or lets you edit) a different project's real grid, on a real signed-in account `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** The corrected gate (`isGridMismatched` treating a project-less route the same as a routed one — matched only once the iframe confirms its neutral "reports" section) and the retried neutralize post are both proven as pure/source-guarded logic without a browser (`test/schedulerNavState.test.js`, 9 new/updated cases). What cannot be proven here: the actual reported symptom, which depends on the embedded scheduler's own **account-wide, cloud-persisted** `aPid` field genuinely naming a project — this sandbox has no way to manufacture that ambient state, and no way to sign in to confirm a real click inside the (now hidden-until-confirmed) grid is genuinely refused.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, on the Goose Creek account (or any account with 2+ real projects each carrying a Schedule):**
+1. Open Goose Creek's Schedule tab so the embedded app's own `aPid` is genuinely Goose Creek's. Navigate to Site's project-less "Select a project" state, then click the Schedule tab (or hand-type a bare `#/schedule`). **Expect:** the breadcrumb never shows a schedule name next to "Select a project," and the grid area shows a brief loader then the iframe's own neutral reports view — Goose Creek's Master Schedule must never be visible, not even briefly.
+2. While in that neutral state, click where a task row would be. **Expect:** nothing happens — the grid is genuinely unclickable, not merely visually hidden.
+3. From Site with a DIFFERENT real project routed, click Schedule. **Expect:** Schedule correctly follows that project's own schedule immediately (the carry-IN path, unaffected by this fix).
+4. Repeat step 1 several times across a short session (this fix's correction relies on a retry loop, so confirm the neutral view is reached reliably, not merely "usually" — the owner's own "it doesn't always happen" framing of the original report).
+5. Record the exact hash + breadcrumb + grid-content sequence observed for each step, so a recurrence has a concrete trace.
+
+**Result:** ⏳ pending — needs a real signed-in browser session; not reachable from this sandbox. `Cadence: once`.
 
 ## ✅ Verified / ❌ Failed — history
 

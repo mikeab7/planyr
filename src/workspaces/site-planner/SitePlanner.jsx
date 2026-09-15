@@ -48,7 +48,7 @@ import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
 import { createViewChangeRecorder, attachTimeline } from "./lib/viewChangeRecorder.js";
 import { createViewFramingGate } from "./lib/viewFramingGate.js";
 import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody, stackHoldsFeature, parseFeatureKey, stackAtPoint, nextPickIndex, ACTION_ATTR } from "./lib/featureTarget.js";
-import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
+import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving, freeParkStack } from "./lib/parking.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale, overlayRasterKey, HIRES_CACHE_PER_OVERLAY } from "./lib/overlayPdf.js";
 import { isDwgFile, convertDwgToDxf } from "./lib/convertClient.js";
 import { uploadOverlayFile, downloadOverlayBytes, downloadOverlayDataUrl, fetchOverlayBytes, fetchOverlayDataUrl, deleteOverlayObject, MAX_BYTES as OVERLAY_MAX_BYTES } from "./lib/overlayStorage.js";
@@ -17567,6 +17567,45 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     );
   })();
 
+  /* NEW-1 (deliberate remainder of B1625728) — the FREESTANDING twin of addSideParkPieceBeyond:
+     "+"/"−" on one piece of a split stack that isn't bonded to any building. B1625728 grouped
+     wall-bonded siblings by host + side (sideParkPadsOn); a freestanding field has no host to
+     group by, which is exactly the gap that item flagged and left open. `freeParkStack`
+     (lib/parking.js) finds the siblings from geometry instead (same width/rotation, touching,
+     walked outward from whichever piece was clicked) — mirroring the "geometry, with the tag as
+     a fast path" rule already used for the wall case. Growing/shrinking always acts on the
+     OUTERMOST piece of the stack, exactly like the wall ladder's LIFO. */
+  const growFreeParkStack = (stack, dir) => {
+    const outer = stack[stack.length - 1];
+    if (dir > 0) {
+      const outerCfg = cfgOf(outer);
+      const ai = outerCfg.aisle ?? settings.aisle;
+      const depth = settings.stallDepth;                     // one stall row
+      const needsAisle = outer.type !== "paving";             // outer is a row → no aisle beyond it yet
+      const rot = ((outer.rot || 0) % 360 + 360) % 360;
+      const idx0 = stack.reduce((m, p, i) => Math.max(m, Number.isFinite(p.sideParkPiece) ? p.sideParkPiece : i), -1) + 1;
+      let cursor = outer.h / 2;                               // local-y offset from outer's own centre to its far edge
+      const place = (pdepth, idx, type, cfgPatch) => {
+        const off = rot2(0, cursor + pdepth / 2, rot);
+        cursor += pdepth;
+        return { id: uid(), type, cx: outer.cx + off.x, cy: outer.cy + off.y, w: outer.w, h: pdepth, rot, sideParkPiece: idx, ...cfgPatch };
+      };
+      const rowCfg = outer.cfg ? { cfg: outer.cfg } : {};
+      const newEls = needsAisle
+        ? [place(ai, idx0, "paving", {}), place(depth, idx0 + 1, "parking", rowCfg)]
+        : [place(depth, idx0, "parking", rowCfg)];
+      pushHistory();
+      setEls((a) => [...a, ...newEls]);
+      setSel({ kind: "el", id: newEls[newEls.length - 1].id });
+    } else {
+      // A genuinely exploded piece always carries exactly one row (explodeParkingBands never
+      // produces more) — this in-place-shrink-first rung mirrors growEmployeeSide's own ladder
+      // for a legacy/edited piece that somehow still holds more than one.
+      const rows = parkRowsForDepth(outer.h, cfgOf(outer).stallDepth || settings.stallDepth, cfgOf(outer).aisle ?? settings.aisle);
+      if (outer.type === "parking" && rows > 1) growParking(outer, -1);
+      else removeFeature(outer.id);
+    }
+  };
   // Grow a parking field one row deeper (keeping its near edge fixed); the stall
   // striping auto-fills the new depth. Loops, so you can stack rows/aisles.
   const growParking = (el, dir = 1) => {
@@ -17579,6 +17618,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (el.attachedTo && el.sideParkSide) {
       const host = els.find((x) => x.id === el.attachedTo && !x.points);
       if (host && sideParkPadsOn(host, el.sideParkSide).length > 1) { growEmployeeSide(host, el.sideParkSide, dir); return; }
+    }
+    // NEW-1 (deliberate remainder of B1625728) — the freestanding half of the same fix.
+    if (!el.attachedTo) {
+      const stack = freeParkStack(el, els);
+      if (stack.length > 1) { growFreeParkStack(stack, dir); return; }
     }
     const cfg = cfgOf(el);
     const sd = cfg.stallDepth || settings.stallDepth, ai = cfg.aisle ?? settings.aisle;
