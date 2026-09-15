@@ -160,10 +160,24 @@ describe("account preference edits (pure)", () => {
     expect(p0.planStandards.parcelStyle.stroke).toBe("#111111");
   });
   it("normalizes a missing / garbage prefs blob into the empty shape", () => {
-    // `measureStyle` joined the shape with the measurement-standards item — additive, so an
-    // older prefs row simply normalizes to an empty bag and nothing needs migrating.
-    expect(_normalizePrefs(null).planStandards).toEqual({ parcelStyle: {}, typeStyles: {}, measureStyle: {} });
-    expect(_normalizePrefs("nope").planStandards).toEqual({ parcelStyle: {}, typeStyles: {}, measureStyle: {} });
+    // `measureStyle`/`buildingStyle` joined the shape with the measurement-standards and
+    // building-program items — additive, so an older prefs row simply normalizes to an
+    // empty bag and nothing needs migrating.
+    expect(_normalizePrefs(null).planStandards).toEqual({ parcelStyle: {}, typeStyles: {}, measureStyle: {}, buildingStyle: {} });
+    expect(_normalizePrefs("nope").planStandards).toEqual({ parcelStyle: {}, typeStyles: {}, measureStyle: {}, buildingStyle: {} });
+  });
+  it("buildingStyle round-trips a whole tier-rules object as one value (NEW-1) and survives normalize", () => {
+    const rules = { clearHeight: [{ upTo: 100000, value: 28 }, { upTo: null, value: 34 }], slab: [{ upTo: null, value: 8 }] };
+    let p = setStandardPref(_normalizePrefs(null), "buildingStyle", "rules", rules);
+    expect(getStandardPref(p, "buildingStyle", "rules")).toEqual(rules);
+    // Re-normalizing (as every load/save round-trip does) must not strip the bag.
+    p = _normalizePrefs(p);
+    expect(getStandardPref(p, "buildingStyle", "rules")).toEqual(rules);
+  });
+  it("a null value clears the account building-rules default", () => {
+    let p = setStandardPref(_normalizePrefs(null), "buildingStyle", "rules", { clearHeight: [], slab: [] });
+    p = setStandardPref(p, "buildingStyle", "rules", null);
+    expect(getStandardPref(p, "buildingStyle", "rules")).toBeUndefined();
   });
 });
 

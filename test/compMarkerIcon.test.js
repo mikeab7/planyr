@@ -40,6 +40,13 @@ describe("compMarkerIcon", () => {
     }
   });
 
+  // B1628912 (NEW-1) — sized down from 18/22 (owner: comps read heavier than they should next to
+  // everything else on the map).
+  it("sizes the resting marker at 14 and the selected marker at 17", () => {
+    expect(compMarkerSize(false).size).toEqual([14, 14]);
+    expect(compMarkerSize(true).size).toEqual([17, 17]);
+  });
+
   it("draws a solid opaque white rect behind the colored one, wide enough for a real border", () => {
     const svg = compMarkerSvg("lease", { selected: false });
     const whiteRect = svg.match(/<rect[^>]*fill="#fff"[^>]*\/>/)[0];
@@ -48,10 +55,11 @@ describe("compMarkerIcon", () => {
     const outerW = Number(wMatch[1]);
     const colorRect = svg.match(/<rect[^>]*fill="#3f8f5f"[^>]*\/>/)[0];
     const innerW = Number(colorRect.match(/width="([\d.]+)"/)[1]);
-    // The border is the gap between the two rects' half-widths — at least 1.5px, per the owner's
-    // asked-for range, and strictly less than the whole marker (never so thick it swallows the fill).
+    // The border is the gap between the two rects' half-widths — now PROPORTIONAL to the marker's
+    // own size (NEW-1) rather than a fixed px pair, so it stays comfortably more than a hairline
+    // at the smaller resting size without being oversized if the marker is ever resized again.
     const border = (outerW - innerW) / 2;
-    expect(border).toBeGreaterThanOrEqual(1.5);
+    expect(border).toBeGreaterThanOrEqual(1.2);
     expect(innerW).toBeGreaterThan(0);
   });
 
