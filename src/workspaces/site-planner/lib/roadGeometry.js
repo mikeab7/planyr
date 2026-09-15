@@ -1292,6 +1292,16 @@ export function nearestRectEdge(P, edges, opts = {}) {
   return best;
 }
 
+/* Is P INSIDE the rect these `edges` bound (B1612608, item 2)? P sits on the inward side of every
+ * edge — the same `outN` each edge already carries, so this is free of any new geometry primitive.
+ * This is what lets "a road endpoint placed well inside a truck court, not just near its edge"
+ * connect: `nearestRectEdge`'s distance alone can be large at the centre of a big court, but the
+ * endpoint is unambiguously ON the paved surface either way. */
+export function rectContainsPoint(P, edges) {
+  if (!P || !Number.isFinite(P.x) || !Number.isFinite(P.y) || !Array.isArray(edges) || edges.length < 3) return false;
+  return edges.every((e) => dot(e.outN, sub(P, e.mid)) <= 1e-6);
+}
+
 /* Curb / border stroke width in PIXELS for a true real-world curb of `curbFt` feet at the
  * current `ppf` (pixels-per-foot), floored to `minPx` so it stays visible when the true
  * width goes sub-pixel at overview zoom. NO ceiling — a 6" curb SHOULD read thicker as you

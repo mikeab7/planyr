@@ -182,6 +182,83 @@ was never clicked" quietly ships broken.
 7. Delete a pinned project from the switcher. **Expect:** it's gone from the Pinned section too, not left behind as a stale entry.
 - **Stopping rule:** closes when steps 1–7 are observed on `planyr.io`, or when any step fails and is filed as a recurrence against B1631939, per STANDING RULE #2 (a failure here is a FINDING, not a silent close).
 
+### V1157504 — B1631648: a road's own sharp turn holds its stated width and reads as a clean corner, not a lobe/pinch `Blocker: real-data`
+
+**Why this needs a live pass.** A zoom-/rendering-dependent geometry fix (PERCEPTUAL-PARITY: the bar is whether the owner can SEE it right at his own working zoom, not just whether the numbers check out). Everything the sandbox can prove is already proven: the angle sweep (150°→15° × five widths) is unit-tested against the fix and separately confirmed RED on unmodified `origin/main` in a throwaway worktree, the surface is proven a simple polygon at every angle tested, and PDF/print parity is proven live in a headless browser (`e2e/road-sharp-turn-parity.spec.js`). What is NOT provable here: whether it looks right to a human eye on a real monitor, and specifically whether it fixes the EXACT geometry in the owner's own screenshot.
+
+**No standing throwaway project exists** (the old one was deleted) — this check needs a fresh throwaway plan (or a throwaway duplicate of a real one) created first; state exactly what was created/touched, per the owner constraint on live checks.
+
+**Steps, each with a named expected result:**
+1. Open a throwaway plan (new project, or an explicit duplicate of a real one — never edit one of Michael's real plans directly). Draw a road (any preset width) with a tight turn — ideally recreate the shape from the original screenshot if it's still available (a ~36 ft road turning off a straight leg into a short stub at roughly 90° or sharper); otherwise three clicks: straight in, then a second point turning ~60–75° over a short run. **Expect:** the corner reads as a rounded/mitred road corner — a clean bend — not a blob bulging past the road's own width on the outside, and not a pinched throat on the inside where the two edges nearly touch.
+2. Zoom in on the corner at a normal working zoom (not maximally zoomed in). **Expect:** the pavement fill visibly holds a constant width along both legs right up to the corner; the curb stroke line (if visible at this zoom) tracks the pavement edge, not floating outside it.
+3. Run the script below in DevTools console on that plan. **Expect:** `PASS: true` and `simple: true` for every road region.
+4. State what was created/touched (the throwaway plan's id/name) so it can be cleaned up or left as a known throwaway.
+
+```js
+(() => {
+  const chunks = [...document.querySelectorAll('script[src]')].map(s => s.src.split('/').pop())
+    .filter(n => /SitePlanner|index/.test(n));
+  const paths = [...document.querySelectorAll('[data-testid="road-network-surface"]')];
+  if (!paths.length) return { PASS: false, why: 'no road-network-surface path on screen — draw a road first', chunks };
+  // Parse the straight-line "M x,y L x,y … Z" path data regionPathD emits (no curves) into rings.
+  const toRings = (d) => d.split(/(?=M)/).map(sub => {
+    const pts = [...sub.matchAll(/([\-\d.]+),([\-\d.]+)/g)].map(m => ({ x: +m[1], y: +m[2] }));
+    return pts;
+  }).filter(r => r.length >= 3);
+  const ccw = (a, b, c) => (c.y - a.y) * (b.x - a.x) > (b.y - a.y) * (c.x - a.x);
+  const cross = (a, b, c, d) => ccw(a, c, d) !== ccw(b, c, d) && ccw(a, b, c) !== ccw(a, b, d);
+  const isSimple = (ring) => {
+    const n = ring.length;
+    for (let i = 0; i < n; i++) { const a = ring[i], b = ring[(i + 1) % n];
+      for (let j = i + 1; j < n; j++) { const c = ring[j], d = ring[(j + 1) % n];
+        if (j === (i + 1) % n || (j + 1) % n === i) continue;
+        if (cross(a, b, c, d)) return false; } }
+    return true;
+  };
+  const results = paths.map((p, i) => {
+    const rings = toRings(p.getAttribute('d') || '');
+    return { region: i, rings: rings.length, simple: rings.every(isSimple) };
+  });
+  return { PASS: results.every(r => r.simple), chunks, results };
+})()
+```
+- **Stopping rule:** closes when steps 1–4 are observed on a real screen, or a specific residual (which angle/width, a screenshot) is filed as a recurrence against B1631648.
+
+### V1157505 — B1631649: a road placed against a truck court / paving pad joins the moment placement completes, and the reused snap tolerance feels right `Blocker: real-data`
+
+**Why this needs a live pass.** The full connect mechanism (target-type widening, first-point check, containment, undo, save/reload round-trip) is red-proofed end-to-end in `e2e/road-drive-connect-placement.spec.js` (13 tests, a real headless browser driving the real canvas, logged out, against `localStorage`). Two things only a real account and the owner's own judgment can confirm: (1) a genuine signed-in save/reload through Supabase, not just `localStorage`; (2) whether the REUSED connect tolerance (12 screen px, capped at 10 plan ft — the same one every other connect magnet in the app already uses) feels right on his own plans and drawing habits, which the brief itself names as an open, tunable question.
+
+**No standing throwaway project exists** — this check needs a fresh throwaway plan; state exactly what was created/touched.
+
+**Steps, each with a named expected result:**
+1. On a throwaway plan (new, or an explicit duplicate — never a real plan), draw a Paving rectangle (or Parking, or a bonded dock truck court). Draw a road ending exactly on/near its edge. **Expect:** the moment you finish the road (Enter/double-click), it visually welds onto the target with a rounded curb return where they meet — no second click, no manual "connect" step, and a brief confirmation toast naming the target type (truck court / parking drive).
+2. Draw a second road, this time STARTING with your first click on/near the paving pad's edge, then drawing away from it. **Expect:** the same connect happens — this is the fix's own new case (previously only the LAST point of a fresh road ever connected).
+3. Draw a third road with an endpoint dropped well inside a large paving pad (not just near its edge). **Expect:** it still connects (a rounded return renders where the road meets the pad's edge), and the endpoint is NOT visibly relocated — it stays exactly where you clicked.
+4. Draw a road clearly away from anything. **Expect:** it places exactly as before, no connection, no toast.
+5. Select an existing, unconnected road and drag its loose endpoint onto a paving pad's edge. **Expect:** it connects on release, same as a fresh placement.
+6. Press Ctrl/⌘+Z right after a connecting placement. **Expect:** the whole road (geometry and the connection) disappears in one undo — not a two-step undo.
+7. Reload the page (real signed-in reload, not just a tab refresh of unsaved state). **Expect:** the connection is still there — same rounded return, same target.
+8. **The subjective part, stated plainly so it isn't skipped:** try drawing a few roads near a few different targets at your normal working zoom and habits. Does the connect trigger about when you'd expect it to (not so eager it grabs a road you didn't mean to connect, not so shy you have to hunt for the exact pixel)? Say so either way — if it's off, name whether it felt too eager or too shy and roughly by how much, so the one shared tolerance constant can be tuned.
+9. Run the script below in DevTools console. **Expect:** `PASS: true`.
+10. State what was created/touched (the throwaway plan's id/name).
+
+```js
+(() => {
+  const chunks = [...document.querySelectorAll('script[src]')].map(s => s.src.split('/').pop())
+    .filter(n => /SitePlanner|index/.test(n));
+  const map = JSON.parse(localStorage.getItem('planarfit:sites:v1') || '{}');
+  const site = map[Object.keys(map)[0]] || {};
+  const roads = (site.els || []).filter(e => e.type === 'road');
+  const connected = roads.filter(r => r.driveTee);
+  return {
+    PASS: connected.length > 0,
+    chunks,
+    roadCount: roads.length,
+    connected: connected.map(r => ({ id: r.id, kind: r.driveTee.kind, targetId: r.driveTee.targetId, returnR: r.driveTee.returnR })),
+  };
+})()
+```
+- **Stopping rule:** closes when steps 1–10 are observed and his read on the tolerance feel (step 8) is recorded, or a specific residual is filed as a recurrence against B1631649.
 ### V1160592 — B1631632: "Save for all projects" carries the building-program tier table to the account, and a brand-new SIGNED-IN project reads it `Blocker: auth`
 
 **Why this needs a real pass.** Everything about the new tier table's editing, per-building override, undo behavior, and print-time summary is verified live in this sandbox, logged out, in a real headless Chromium (`ui-audit/verify-building-program-standards.mjs`, 27/27 checks). The ONE thing that sandbox structurally cannot do is sign in — the Supabase auth handshake is CORS-blocked here — so the "Save for all projects" button is correctly DISABLED in every sandbox run (`disabled={!cloudReady}`, pre-existing, unrelated to this item). What's pending is only the SIGNED-IN click-through of a pre-existing, already-relied-on mechanism (the same `commitUserPrefs`/`saveUserPrefs` cloud round trip that parcelStyle/typeStyles/measureStyle's own "Save for all projects" already uses) now also carrying one more field.
@@ -9683,6 +9760,34 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
 7. Delete the throwaway note and say exactly what was created/removed.
 
 **Result:** ⏳ pending — needs the owner's own real browser/machine, since this item's root cause is specifically an environment this sandbox cannot reproduce. `Cadence: once`.
+
+### V1167792 — B1638832: a project-less module route no longer silently adopts a stale ambient project on a real, signed-in account `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** The decision logic (`shouldAdoptLinkedSiteIntoRoute`'s new `bootCarryOutAllowed` gate, and its counterpart `shouldNeutralizeToReports`) is fully proven as pure functions (`test/schedulerLinkPanel.test.js`, 23 cases) and confirmed end-to-end in a headless, signed-out sandbox run: from Site's own project-less state, clicking the Schedule tab lands on a bare `#/schedule` with no project adopted, and a direct fresh load of `#/schedule` renders cleanly with the crumb reading "Reports." What cannot be proven here: the actual reported symptom, which depends on the embedded scheduler's own **account-wide, cloud-persisted** `aPid` field genuinely disagreeing with the routed project — a state this sandbox has no way to manufacture (a fresh session has no ambient history at all), and the exact case the owner hit on Goose Creek.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, on the Goose Creek account (or any account with 2+ real projects each carrying a Schedule):**
+1. Open Goose Creek's Schedule tab (so the embedded app's `aPid` is genuinely Goose Creek's). Navigate to Site and reach its project-less "Select a project" state (e.g. via the "Map" crumb). Click the Schedule tab. **Expect:** the URL reads a bare `#/schedule`, the crumb reads "Reports," and the grid shows the cross-project reports view — Goose Creek's grid must NOT reappear uninvited.
+2. From the same project-less state, hand-type a bare `#/schedule` URL into the address bar and load it. **Expect:** the identical neutral result.
+3. From Site with a DIFFERENT real project routed (e.g. Grand Port), click Schedule. **Expect:** Schedule correctly follows Grand Port immediately (the carry-IN path, unaffected by this fix) — confirms the fix didn't disturb the legitimate case.
+4. Close the tab; open a genuinely fresh tab/window on the bare domain. **Expect:** "open where I left off" still resumes correctly when the last real route named a project; a boot landing on the Dashboard or any project-less route must not silently jump into Goose Creek's (or any) schedule.
+5. Repeat steps 1–2 a few times across a short session to catch the "it doesn't always happen" timing the owner described, and record the exact hash sequence observed each time (DevTools console `window.location.hash`, or the Network/history panel).
+
+**Result:** ⏳ pending — needs a real signed-in browser session with real, multi-project account history; not reachable from this sandbox. `Cadence: once`.
+
+### V1167793 — B1638835: the full module × leading-crumb navigation matrix, with two real projects in play, never lands on a project nobody chose `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** `test/routeSingleWriter.test.js` proves the STRUCTURAL half — exactly three, reviewed, allowlisted places write `window.location.hash` directly, and no code anywhere listens to `popstate` — which is sandbox-provable by source inspection and stays true regardless of account state. What it cannot prove is the dispatch's own explicit ask: a live matrix with **two real projects in play**, which is precisely the shape a single-project (or project-less) sandbox session cannot exercise, and is named in the original report as "probably why this has survived two previous passes."
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, on an account with at least two real projects (each with a linked Schedule so the Schedule tab has something project-specific to show):**
+1. From EVERY module tab (Site, Schedule, Review, Library, Notes, Spreadsheet), click every OTHER module tab, once with a project actively routed and once from that module's own project-less state. **Expect:** the destination always matches what that module's own project-less/project-routed state should show — never a different, unchosen project's data.
+2. Click the leading crumb from all six modules (Site's "Map," Schedule's "Reports," and the shared "Dashboard" on the other four). **Expect:** each leads to exactly the destination its label names, every time.
+3. Enter each of the seven project-less routes directly (`#/`, `#/site`, `#/schedule`, `#/markup`, `#/library`, `#/notes`, `#/spreadsheet`) via a fresh address-bar load. **Expect:** each renders its own module's genuine "no project" state — never a specific project's data appearing uninvited.
+4. Cold-load each of the above (a real fresh tab, not a reload) and confirm the same expectations hold.
+5. Use Back and Forward after each of the above and confirm the browser history navigates cleanly with no double-landing (a hash that settles on one value, then jumps to a second one a beat later, with no further click).
+6. Repeat the FULL matrix above with a SECOND real project as the "recently active elsewhere" one (e.g. leave Project B's Schedule open, then run the whole sweep starting from Project A) — this is the case a single-project test cannot show a wrong-project landing at all, and the one most likely to catch a remaining instance of the B1638832 class outside Scheduler.
+7. Record the exact hash sequence for any step that doesn't match its expectation, so a recurrence has a concrete trace rather than "sometimes."
+
+**Result:** ⏳ pending — needs a real signed-in browser session with at least two real projects; not reachable from this sandbox. `Cadence: once`.
 
 ## ✅ Verified / ❌ Failed — history
 

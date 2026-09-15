@@ -153,6 +153,58 @@ export function clipPolylineOutside(line, rings) {
   }
 }
 
+/* Robust pavement-surface buffer of a road's CENTERLINE — the offset-polygon construction AT THE
+ * JOIN (B1612608, item 1), not the centerline itself (which roadGeometry.js's arc/smooth/sharp
+ * corner treatment already owns).
+ *
+ * `roadStripRing` (siteGeometry.js) used to build a road's pavement ring with
+ * `metesAndBounds.bufferPolyline` — a per-vertex offset that mitres each side of the centerline
+ * INDEPENDENTLY, with an ad hoc clamp (a flat ×3 scale, applied identically to the convex and the
+ * concave side of a turn) and no awareness of the other side. At a tight interior angle that
+ * construction is exactly what the owner's screenshot shows: the outside swells into a rounded
+ * lobe well past the road's own width (the clamp still lets the miter run out to 3× the half-
+ * width), and the inside overshoots PAST the opposite edge into a self-crossing "bowtie" (nothing
+ * ever checks the inside offset against the outside one), which is the "pinches to a narrow
+ * throat" symptom and the reason the drawn surface stops holding its stated width.
+ *
+ * This is the fix: ONE robust Clipper offset over the whole open centerline (both sides resolved
+ * together, not independently), with a MITERED join capped at `ROAD_JOIN_MITER_LIMIT` that
+ * automatically substitutes a flat BEVEL past the limit (Clipper's own jtMiter behaviour — the
+ * "usual correct shape" the item asks for), plus Clipper's own self-intersection repair — so a
+ * switchback whose two corners' influence zones overlap, or a segment shorter than the road's own
+ * width, still comes back as one simple polygon instead of folding over itself. Flat end caps
+ * (etOpenButt) match `bufferPolyline`'s documented cap behaviour, so an ordinary road's ends are
+ * unchanged. Same SCALE / CLEAN_DELTA as the rest of this module (already this repo's engine for
+ * robust road-surface polygon ops).
+ *
+ * Returns null on degenerate input (<2 usable points, non-positive width) or a result Clipper
+ * pinches to nothing — `roadStripRing` falls back to the old buffer in that case (never a
+ * silently dropped road surface). Pure: world feet in, world feet out. Unit-tested
+ * (test/roadSurfaceJoin.test.js — the angle sweep + every adjacent case the item names). */
+export const ROAD_JOIN_MITER_LIMIT = 2;    // matches this repo's existing ClipperOffset convention (pondOffset.js's MITER)
+export function roadSurfaceRing(pts, width) {
+  const clean = (pts || []).filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y));
+  if (clean.length < 2 || !(width > 0)) return null;
+  try {
+    const path = toPath(clean);
+    const co = new ClipperLib.ClipperOffset(ROAD_JOIN_MITER_LIMIT, CLEAN_DELTA);
+    co.AddPath(path, ClipperLib.JoinType.jtMiter, ClipperLib.EndType.etOpenButt);
+    const sol = new ClipperLib.Paths();
+    co.Execute(sol, (width / 2) * SCALE);
+    let best = null, bestA = -1;
+    for (const p of sol) {
+      if (!p || p.length < 3) continue;
+      const a = Math.abs(ClipperLib.Clipper.Area(p));
+      if (a > bestA) { bestA = a; best = p; }
+    }
+    if (!best) return null;
+    const r = fromPath(ClipperLib.Clipper.Area(best) < 0 ? best.slice().reverse() : best);
+    return r.length >= 3 ? r : null;
+  } catch {
+    return null;
+  }
+}
+
 /* NEW-1 (junction outline-cut rotation) — the INTERRUPTED outline of a RECT element a drive tees into.
  *
  * A road that tees into a parking field / truck court / paving pad is not pavement the field can

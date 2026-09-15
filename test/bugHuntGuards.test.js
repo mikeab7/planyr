@@ -321,11 +321,16 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     //  control so measurements inherit the recently-used-colours list like everything else.
     //  NEW-EASE-STYLE added three: an easement's fill + outline colour, and an encumbrance's fill
     //  colour, in the appearance-editing work that gave both kinds a user-editable colour/fill/hatch.
-    //  The closed-markup properties redesign added outline, fill, and hatch colour controls.)
+    //  The closed-markup properties redesign added outline, fill, and hatch colour controls.
+    //  B1618656 NEW-1 — the properties-panel grid redesign added two more: the parcel Boundary
+    //  section and the Measurement Line/Colour row each now branch on whether there's a real
+    //  Fill side to pair against (PairedField) or not (plain Field), so the Outline/Line colour
+    //  control's own `{...colorCtl(...)}` call — and its `<ColorField>` tag — appears once per
+    //  branch in source, same as any other duplicated-but-mutually-exclusive JSX branch.)
     expect(src).toMatch(/const colorCtl = \(apply, hist = true, commit = null\) => \(\{\s*\n\s*pick: livePick\(apply, hist, commit\),/);
-    expect((src.match(/\{\.\.\.colorCtl\(\(v\) =>/g) || []).length).toBe(29);
+    expect((src.match(/\{\.\.\.colorCtl\(\(v\) =>/g) || []).length).toBe(31);
     expect((src.match(/pick=\{livePick\(\(v\) =>/g) || []).length).toBe(1);
-    expect((src.match(/<ColorField /g) || []).length).toBe(30);
+    expect((src.match(/<ColorField /g) || []).length).toBe(32);
     // A swatch click is a DISCRETE commit: exactly one undo frame, then the color is recorded.
     expect(src).toMatch(/onSwatch: \(v\) => \{ if \(hist\) pushHistory\(\); apply\(v\); pushRecent\(v\);/);
     // NEW-4 (bug) — the wheel picks LIVE, so `change` fires for EVERY shade the cursor crosses.

@@ -10,12 +10,15 @@ import { fileURLToPath } from "node:url";
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
 
 describe("B828: undo records a frame on every editable-state mutation (wiring guards)", () => {
-  it("parcel fill 'Translucence' slider coalesces one drag into one undo frame via sliderHistory", () => {
+  it("parcel fill 'Translucence' opacity field pushes exactly one undo frame per commit", () => {
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
-    // the fillOpacity range spreads {...sliderHistory(apply)} — the house rule for EVERY opacity slider
-    expect(src).toMatch(/value=\{selParcel\.fillOpacity \?\? 0\.12\}\s*\n\s*\{\.\.\.sliderHistory\(\(e\) => setSelParcel\(\{ fillOpacity: \+e\.target\.value \}\)\)\}/);
-    // and is NOT back on a bare, un-undoable onChange (setSelParcel never pushes on its own)
-    expect(src).not.toMatch(/onChange=\{\(e\) => setSelParcel\(\{ fillOpacity: \+e\.target\.value \}\)\}/);
+    // B1618656 NEW-1 — the properties-panel grid redesign replaced the continuous opacity SLIDER
+    // (which needed sliderHistory's own drag-batching) with a discrete PercentField that commits
+    // once (blur/Enter); the guarantee this test protects — never un-undoable, never two frames per
+    // edit — now comes from an explicit pushHistory() in the same onCommit, not from sliderHistory.
+    expect(src).toMatch(/value=\{selParcel\.fillOpacity \?\? 0\.12\}[\s\S]{0,40}onCommit=\{\(v\) => \{ pushHistory\(\); setSelParcel\(\{ fillOpacity: v \}\); \}\}/);
+    // and is NOT back on a bare, un-undoable commit (setSelParcel never pushes on its own)
+    expect(src).not.toMatch(/onCommit=\{\(v\) => setSelParcel\(\{ fillOpacity: v \}\)\}/);
   });
 
   it("raster overlay 'Width' input pushes one history frame per edit session (onFocus)", () => {
