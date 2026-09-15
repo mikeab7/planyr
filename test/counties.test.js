@@ -153,8 +153,11 @@ describe("statewideFallbackFor — county-scoped TxGIO backup (B244/B787)", () =
     expect(ch.scopeWhere).toBe("county='CHAMBERS'");
   });
 
-  it("Waller → null (its PRIMARY is already TxGIO; no separate backup)", () => {
-    expect(statewideFallbackFor("waller")).toBeNull();
+  it("Waller → the TxGIO layer scoped to WALLER (NEW-1, 2026-09-12: Waller's primary moved to the different TX_STATEWIDE_STRATMAP_LAYER, so it now gets a genuine, distinct backup here instead of the old self-referential null)", () => {
+    const w = statewideFallbackFor("waller");
+    expect(w).not.toBeNull();
+    expect(w.layerUrl).toBe(STATEWIDE_PARCEL_LAYER);
+    expect(w.scopeWhere).toBe("county='WALLER'");
   });
 
   it("an unknown county → null", () => {
