@@ -313,7 +313,7 @@ import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES,
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, parcelSplitNames, lineageConflicts } from "./lib/siteModel.js";
-import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, nodeJunction, cardinalTeePoint, roadBearingDeg } from "./lib/roadGeometry.js";
+import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, rectContainsPoint, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, nodeJunction, cardinalTeePoint, roadBearingDeg } from "./lib/roadGeometry.js";
 import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, rectOutlineCutSegments } from "./lib/roadNetwork.js";
 import {
   roundaboutDiameterFor, roundaboutBandFor,
@@ -1418,9 +1418,12 @@ function driveJunctionsOf(els, settings) {
     if (!T || T.points || !(T.w > 0) || !(T.h > 0) || typeof T.cx !== "number") continue;
     const edges = rectEdges(T.cx, T.cy, T.w, T.h, T.rot || 0);
     let ei = -1, hit = null;                                        // which endpoint sits on the target edge?
+    // B1612608/NEW-2 — a welded endpoint well inside a big court reads a large distance to every
+    // edge (findDriveConnect never moved it there — see that function's header), so it must also
+    // pass here on CONTAINMENT alone; the nearest edge is still used to orient the curb return.
     for (const idx of [0, S.pts.length - 1]) {
       const h = nearestRectEdge(S.pts[idx], edges, { facingOnly: false });
-      if (h && h.dist <= 6 && (!hit || h.dist < hit.dist)) { hit = h; ei = idx; }
+      if (h && (h.dist <= 6 || rectContainsPoint(S.pts[idx], edges)) && (!hit || h.dist < hit.dist)) { hit = h; ei = idx; }
     }
     if (!hit) continue;
     const P = S.pts[ei];                                            // the road's welded endpoint
@@ -5890,24 +5893,46 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (plan.deleteTarget) tombstone([targetId]);
   };
 
-  /* ---- Road → parking-drive / truck-court connect (B955/NEW-1) ----
-     A PARKING field or a TRUCK COURT paving strip is also a connect target: a road endpoint welds
-     onto the facing rectangle edge and the junction renders as a TYPE-SCALED clean intersection —
-     car-scale returns (~20 ft) for a parking drive, truck-scale (~50 ft) for a dock-court drive.
-     v1 connects to the nearest FACING edge (the aisle-mouth / access-edge the road approaches);
-     picking the exact aisle opening + a 3-centred compound truck return are flagged fast-follows. */
+  /* ---- Road → parking-drive / truck-court / paving connect (B955/NEW-1; widened B1612608 item 2) ----
+     A PARKING field, a TRUCK COURT, or any other hand-drawn PAVING pad is a connect target: a road
+     endpoint welds onto the facing rectangle edge and the junction renders as a TYPE-SCALED clean
+     intersection — car-scale returns (~20 ft) for a parking drive, truck-scale (~50 ft) for a
+     paving/dock-court drive. v1 connects to the nearest FACING edge (the aisle-mouth / access-edge
+     the road approaches); picking the exact aisle opening + a 3-centred compound truck return are
+     flagged fast-follows.
+     B1612608/NEW-2 — every `type:"paving"` rect is a target now, not only the auto-generated
+     bonded dock zone (`el.truckCourt`): the owner's most common case ("a road meeting a truck
+     court") is at least as often a hand-drawn paving pad — the same tool draws "paving / drive /
+     truck court" as one thing — and the old `el.truckCourt` gate silently excluded every one of
+     those. An untagged paving pad defaults to the truck-scale return (matching the named case);
+     the return radius is editable per-junction either way, so a car-scale drive is one edit, not a
+     blocker. A road never connects to a BUILDING here — a building is not paving, and painting a
+     driveway INTO a wall is not a connection this tool should ever make silently. Irregular
+     (click-drawn / `el.points`) paving is NOT yet a connect target — `rectEdges` needs a rectangle;
+     see the item's PR for why that is reported rather than built here. */
   const driveTargetKind = (el) => (el && !el.points && typeof el.cx === "number" && el.w > 0 && el.h > 0
-    ? (el.type === "parking" ? "parking" : (el.type === "paving" && el.truckCourt ? "truckcourt" : null)) : null);
-  const driveTargetsOf = () => els.filter((x) => driveTargetKind(x)).map((x) => ({ id: x.id, kind: driveTargetKind(x), edges: rectEdges(x.cx, x.cy, x.w, x.h, x.rot || 0) }));
+    ? (el.type === "parking" ? "parking" : el.type === "paving" ? "truckcourt" : null) : null);
+  // B494049's rule for road magnets applies here too — a hidden target is not a magnet: connecting
+  // to a court you cannot see moves nothing but leaves a relationship you cannot explain.
+  const driveTargetsOf = () => visibleEls(hiddenGroups, els).filter((x) => driveTargetKind(x)).map((x) => ({ id: x.id, kind: driveTargetKind(x), edges: rectEdges(x.cx, x.cy, x.w, x.h, x.rot || 0) }));
   const DRIVE_RETURN = { parking: 15, truckcourt: 24 }; // B1005 — curb-return seed (ft): car ≈15, truck ≈24 (single fillet; teeGeometry caps the reach to R at any angle, so it stays a tidy rounded corner — dial up per-junction for a genuine WB-62 turn)
-  // Nearest parking/truck-court edge to a moving road endpoint, within `tolFt`.
+  // Nearest parking/truck-court/paving edge to a moving road endpoint, within `tolFt` — OR anywhere
+  // the endpoint is CONTAINED in the target at all (B1612608/NEW-2: "lands on, overlaps, or falls
+  // within tolerance" — a point well inside a big court reads a large distance to every edge, but
+  // it is unambiguously on the paved surface). A contained point is never relocated (the weld point
+  // returned is the endpoint itself, exactly where it was placed — only a genuinely NEAR-edge match
+  // snaps to the precise edge point, the same small nudge every other connect magnet already makes).
   const findDriveConnect = (P, tolFt) => {
     let best = null;
     for (const t of driveTargetsOf()) {
       // facingOnly:false — a road drawn TO the edge ends ON it (not strictly outside); the nearest edge
       // is still the one the road approaches, so consider all edges and take the nearest within tolerance.
       const hit = nearestRectEdge(P, t.edges, { facingOnly: false });
-      if (hit && hit.dist <= tolFt && (!best || hit.dist < best.dist)) best = { kind: "drive", targetId: t.id, targetKind: t.kind, pt: hit.pt, dist: hit.dist };
+      if (!hit) continue;
+      const inside = hit.dist > tolFt && rectContainsPoint(P, t.edges);
+      if ((hit.dist <= tolFt || inside) && (!best || hit.dist < best.dist)) {
+        best = { kind: "drive", targetId: t.id, targetKind: t.kind, pt: inside ? { x: P.x, y: P.y } : hit.pt, dist: inside ? 0 : hit.dist };
+      }
     }
     return best;
   };
@@ -9857,6 +9882,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (c && c.kind === "road") { targetId = c.road.roadId; plan = planRoadConnect(el, raw.length - 1, els.find((x) => x.id === c.road.roadId), c.road, defR); }
       else if (c && c.kind === "drive") { drive = c.drive; }
     }
+    // B1612608/NEW-2 — the STARTING point is a placement endpoint too. A road begun AT a truck
+    // court (clicked there first, then drawn away) used to connect nothing at all, because only
+    // the final point was ever checked here — "placing a road so it meets an existing surface
+    // leaves the two as separate shapes" regardless of which end was drawn first. Checked only
+    // when the final point found nothing on its own: the road's single `driveTee` field can name
+    // one target, and the final point keeps the priority it already had (a named, reported
+    // limitation — see findDriveConnect's header for "both ends to two different targets").
+    let startDrive = null;
+    if (!altSnapOffRef.current && !plan && !drive) {
+      const c0 = resolveEndpointConnect(raw[0], { id: el.id, index: 0 });
+      if (c0 && c0.kind === "drive") startDrive = c0.drive;
+    }
     if (plan) {
       let mGeom = plan.moving;
       if (plan.action === "merge") { // round the fresh junction corner to the class min (NEW-2)
@@ -9875,6 +9912,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       el = reRoad({ ...el, pts: el.pts.map((p, i) => i === last ? { x: drive.pt.x, y: drive.pt.y } : p),
         driveTee: { targetId: drive.targetId, kind: drive.targetKind, returnR: DRIVE_RETURN[drive.targetKind], flare: 0 } });
       setEls((a) => [...a, el]);
+    } else if (startDrive) { // same, but the STARTING point welded (B1612608/NEW-2)
+      el = reRoad({ ...el, pts: el.pts.map((p, i) => i === 0 ? { x: startDrive.pt.x, y: startDrive.pt.y } : p),
+        driveTee: { targetId: startDrive.targetId, kind: startDrive.targetKind, returnR: DRIVE_RETURN[startDrive.targetKind], flare: 0 } });
+      setEls((a) => [...a, el]);
     } else {
       setEls((a) => [...a, el]);
     }
@@ -9883,8 +9924,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setRoadSnapTarget(null);
     setTool("select");
     if (plan && plan.action === "merge") flashWarn("Connected to the existing road — joined into one and rounded the junction corner.", 5000);
-    else if (drive) flashWarn(drive.targetKind === "truckcourt" ? "Connected to the truck court — truck-scale curb returns." : "Connected to the parking drive — car-scale curb returns.", 5000);
-    else {
+    else if (drive || startDrive) {
+      const dk = (drive || startDrive).targetKind;
+      flashWarn(dk === "truckcourt" ? "Connected to the truck court — truck-scale curb returns." : "Connected to the parking drive — car-scale curb returns.", 5000);
+    } else {
       const st = roadRadiusStatus(el, settings); // B599/NEW-4: warn loudly on commit, never block
       if (st) flashWarn(`⚠ ${f0(st.minR)}′ radius — below ${f0(st.threshold)}′ min for ${st.label}`, 7000);
     }
@@ -24036,6 +24079,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       live-draft strip below the <svg> (liveDraftReadout). */}
                 </g>
               ); })()}
+              {/* B1612608/NEW-2 — the connect magnet for the road tool's VERY FIRST point. The preview
+                  below only exists once draftRoadPts holds something, so a road STARTED at a truck
+                  court showed no ring before the first click even though the click itself already
+                  welds there (finishRoad/the point-drop handler both call resolveEndpointConnect
+                  unconditionally) — a connection with no warning before it happens. Same ring, same
+                  tolerance, same bypass (Alt) as every later point. */}
+              {tool === "road" && roadWidth !== "free" && !draftRoadPts && cursor && !altSnapOffRef.current && (() => {
+                const c = resolveEndpointConnect(cursor, null);
+                if (!c) return null;
+                const p = f2p(c.pt);
+                return <g pointerEvents="none"><circle cx={p.x} cy={p.y} r={9} fill="none" stroke={SEL_BLUE} strokeWidth={2.5} /><circle cx={p.x} cy={p.y} r={3.5} fill={SEL_BLUE} /></g>;
+              })()}
               {/* centerline road preview (B596/NEW-1): live tessellated centerline + the
                   provisional pavement+curb offset strip as points are placed */}
               {draftRoadPts && draftRoadPts.length > 0 && (() => {
