@@ -17,7 +17,7 @@
  *   3. County GIS hostname pattern + REST-directory walk (UNTRIED before this)  — routeCountyHostname
  *   4. The state's own open-data organization, filtered to the county    — routeStateOpenData
  *
- * ACCEPTANCE TEST for a candidate layer — ALL FOUR must hold (acceptCandidate):
+ * ACCEPTANCE TEST for a candidate layer — ALL SIX must hold (acceptCandidate):
  *   - answers a point query inside the FL/TN timing budget (ENVELOPE_QUERY_BUDGET_MS = 8000ms, the
  *     same constant + ~7-mile envelope shape statewideCoverage.mjs already measured against Florida/
  *     Tennessee — reused verbatim, not re-derived);
@@ -29,7 +29,18 @@
  *     — the check that catches the City-of-Detroit-offered-as-Wayne-County class of error;
  *   - is not a test/demo/sandbox/draft/archive/historical service and is not a stale vintage — see
  *     REJECT_TITLE_RE / STALE_YEAR_THRESHOLD below (item 2's rejection rules, applied as a hard reject
- *     rather than a ranking demotion, per the brief's "is not a test service... see item 2").
+ *     rather than a ranking demotion, per the brief's "is not a test service... see item 2");
+ *   - ⛔ NAMED TRAP #2, THE CITY-HOLE (2026-09-15) — when the caller supplies a `largestCity`
+ *     point, a point query THERE must also return a real feature, checked SEPARATELY from the three
+ *     generic spread points. Count and extent are BOTH necessary and NOT sufficient: Minnehaha
+ *     County, SD is the worked example — a plausible 23,044-polygon count, a full-county extent, and
+ *     a point query at Sioux Falls, its own largest city, returns ZERO because the city publishes its
+ *     own parcels separately. See `probeLargestCity` below;
+ *   - ⛔ NAMED TRAP #3, THE TITLE IS NEVER THE MEASUREMENT (2026-09-15) — a title claiming
+ *     "countywide" is a CLAIM, not evidence. "Land Trust of Jackson County Missouri Parcels
+ *     (Countywide)" says countywide in its own title and holds exactly 516 features — a land-bank
+ *     HOLDINGS subset, not the county's parcel fabric. See COUNTYWIDE_CLAIM_RE / COUNTYWIDE_MIN_FEATURES
+ *     below.
  *
  * RANKING (item 2) — among every candidate a SINGLE successful route returns that clears acceptance,
  * prefer (a) most recent vintage (a year in the title/name, or the service's own editingInfo date),
@@ -246,6 +257,44 @@ export function vintageOf(candidate) {
   return { year: null, basis: "unknown" };
 }
 
+/* ⛔ NAMED TRAP #3 — THE TITLE IS NEVER THE MEASUREMENT (2026-09-15). A service's own title claiming
+ * "countywide" is a CLAIM made by whoever published it, not evidence of what the layer actually
+ * holds. The worked example: "Land Trust of Jackson County Missouri Parcels (Countywide)"
+ * (services.arcgis.com/sbDzK061dd6DNPHv/arcgis/rest/services/ab748f/FeatureServer/0) says
+ * countywide in its own title and holds exactly 516 features — a land-bank HOLDINGS subset (parcels
+ * the land trust itself owns), not the county's parcel fabric. Neither the field-shape check nor the
+ * per-point spread probes catch this on their own — 516 features can still be ownership-shaped and
+ * can still happen to cover 3 spread points if they are scattered widely enough. COUNTYWIDE_MIN_FEATURES
+ * is deliberately low: well under every real countywide layer this repo has wired (the smallest,
+ * Ada County ID's shared multi-county service aside, runs in the tens of thousands), and comfortably
+ * above 516 — it exists to catch an implausible title/count mismatch, never to second-guess a
+ * genuinely small rural county. */
+export const COUNTYWIDE_CLAIM_RE = /county.?wide/i;
+export const COUNTYWIDE_MIN_FEATURES = 2000;
+
+async function fetchLayerCount(url) {
+  const res = await fetchJson(`${url}/query?where=1%3D1&returnCountOnly=true&f=json`);
+  if (!res.ok || !res.json || res.json.error || typeof res.json.count !== "number") return null;
+  return res.json.count;
+}
+
+/* ⛔ NAMED TRAP #2 — THE CITY-HOLE (2026-09-15). A county layer can carry a CORRECT count and a
+ * CORRECT extent and still have a hole exactly where the county's largest city sits, because the
+ * city publishes its own parcels separately and the county's own layer simply omits them. Neither
+ * count nor extent can catch this — both are legitimately correct on the county's own rural
+ * remainder. Minnehaha County, SD is the worked example: full-county extent, a plausible
+ * 23,044-polygon count, and a point query at downtown Sioux Falls — its own largest city — returns
+ * ZERO, while a rural point 15 miles away returns a real parcel. The only test that catches it is a
+ * point query AT the county's largest city, run as its own named check, separate from the three
+ * generic geometry-spread points (which pick maximally-SPREAD points and can miss the city
+ * entirely, or pick a point near enough to it to pass by luck). A caller that knows a county's
+ * largest city passes it as `largestCity: { name, lat, lng }`. */
+async function probeLargestCity(url, largestCity) {
+  if (!largestCity) return null;
+  const r = await envelopeAttrQuery(url, largestCity.lat, largestCity.lng);
+  return { name: largestCity.name, lat: largestCity.lat, lng: largestCity.lng, ok: r.ok, ms: r.ms, featureCount: r.features.length, error: r.error };
+}
+
 /* ---------------------------------------------------------------------------------------------
  * Acceptance test — the four bullets from the header, run against ONE candidate layer URL.
  * -------------------------------------------------------------------------------------------- */
@@ -278,8 +327,10 @@ async function envelopeAttrQuery(url, lat, lng) {
   return { ok: !overBudget && features.length > 0, ms: res.ms, blocked: !!res.blocked, overBudget, features, error: arcgisError ? res.json.error.message : res.error };
 }
 
-/* Runs the full acceptance test against one candidate. Returns { accepted, reasons, vintage, probes }. */
-export async function acceptCandidate(candidate, spreadPoints, { now = new Date() } = {}) {
+/* Runs the full acceptance test against one candidate. Returns { accepted, reasons, vintage, probes }.
+ * `largestCity: { name, lat, lng }` is optional — when supplied, NAMED TRAP #2 (the city-hole) runs
+ * as an extra, separate probe (see that function's own header). */
+export async function acceptCandidate(candidate, spreadPoints, { now = new Date(), largestCity = null } = {}) {
   const rejected = rejectCandidate(candidate, { now });
   if (rejected) return { accepted: false, reasons: [rejected], probes: [] };
   if (!candidate.url) return { accepted: false, reasons: ["no usable service/layer URL"], probes: [] };
@@ -298,6 +349,16 @@ export async function acceptCandidate(candidate, spreadPoints, { now = new Date(
   const reReject = rejectCandidate(full, { now }); // editDate can surface a year rejectCandidate's title pass missed
   if (reReject) return { accepted: false, reasons: [reReject], probes: [] };
 
+  // NAMED TRAP #3 — the title is never the measurement. Cheap (one count query), so run it before
+  // the spread-point probing below.
+  const label = `${candidate.title || ""} ${candidate.serviceName || ""}`;
+  if (COUNTYWIDE_CLAIM_RE.test(label)) {
+    const count = await fetchLayerCount(candidate.url);
+    if (count != null && count < COUNTYWIDE_MIN_FEATURES) {
+      return { accepted: false, reasons: [`title claims "countywide" but the layer holds only ${count} features (floor: ${COUNTYWIDE_MIN_FEATURES}) — see NAMED TRAP #3 in this file's header`], probes: [] };
+    }
+  }
+
   if (!spreadPoints.length)
     return { accepted: false, reasons: ["no geometry-verified spread points available for this county (not in county-polygons.json)"], probes: [] };
 
@@ -311,6 +372,24 @@ export async function acceptCandidate(candidate, spreadPoints, { now = new Date(
     }
     allFeatures.push(...r.features);
   }
+
+  // NAMED TRAP #2 — the city-hole. Separate from the generic spread points above: those pick
+  // maximally-SPREAD points and can miss the county's largest city entirely (or hit near enough to
+  // it to pass by luck), which is exactly how Minnehaha County SD's own layer would otherwise have
+  // been accepted with a real hole over Sioux Falls.
+  let cityHoleProbe = null;
+  if (largestCity) {
+    cityHoleProbe = await probeLargestCity(candidate.url, largestCity);
+    if (cityHoleProbe && !cityHoleProbe.ok) {
+      return {
+        accepted: false,
+        reasons: [`city-hole: zero features at ${cityHoleProbe.name}, this county's own largest city, despite passing every generic spread point — see NAMED TRAP #2 in this file's header`],
+        probes,
+        cityHoleProbe,
+      };
+    }
+  }
+
   // Ownership-shaped with a REAL value, not just schema — a field merely EXISTING is exactly how a
   // PLSS survey grid or an address-point layer would otherwise pass (see the ruled-out fixtures in
   // the dispatch brief). Checked across every feature every spread-point probe actually returned.
@@ -324,7 +403,7 @@ export async function acceptCandidate(candidate, spreadPoints, { now = new Date(
   if (!hasRealValue)
     return { accepted: false, reasons: [`ownership-shaped fields (${matchedFieldNames.join(", ")}) exist in the schema but every sampled feature returned them empty`], probes };
 
-  return { accepted: true, reasons: [], vintage: vintageOf(full), fields, probes, geometryType: meta.geometryType, editDate: meta.editDate };
+  return { accepted: true, reasons: [], vintage: vintageOf(full), fields, probes, cityHoleProbe, geometryType: meta.geometryType, editDate: meta.editDate };
 }
 
 /* ---------------------------------------------------------------------------------------------
@@ -551,7 +630,7 @@ function harvestHostnames(rows, county) {
 /* ---------------------------------------------------------------------------------------------
  * Per-county pipeline — try routes IN ORDER, stop at the first that produces an ACCEPTED candidate.
  * -------------------------------------------------------------------------------------------- */
-export async function discoverCounty({ county, state, parishName, replace }) {
+export async function discoverCounty({ county, state, parishName, replace, largestCity }) {
   const stateName = (STATE_CANDIDATES[state] && STATE_CANDIDATES[state].name) || state;
   const record = findCountyRecord(parishName || county, state);
   const idx = record ? countyIndex() : null;
@@ -567,23 +646,23 @@ export async function discoverCounty({ county, state, parishName, replace }) {
   // itself doesn't win.
   const hub = await route1Hub(county, stateName);
   out.routesAttempted.push({ route: "hub-datasets", candidatesFound: hub.length });
-  let winner = await pickWinner(hub, spread, "hub-datasets", out.rejected);
+  let winner = await pickWinner(hub, spread, "hub-datasets", out.rejected, largestCity);
   if (winner) { out.chosen = winner; return out; }
 
   const agol = await route2Agol(county, stateName, state);
   out.routesAttempted.push({ route: "agol-search", candidatesFound: agol.length });
-  winner = await pickWinner(agol, spread, "agol-search", out.rejected);
+  winner = await pickWinner(agol, spread, "agol-search", out.rejected, largestCity);
   if (winner) { out.chosen = winner; return out; }
 
   const harvested = harvestHostnames([...hub, ...agol], county);
   const r3 = await route3Hostname(county, state, stateName, harvested);
   out.routesAttempted.push({ route: "county-hostname", candidatesFound: r3.candidates.length, hostsAttempted: r3.attempts });
-  winner = await pickWinner(r3.candidates, spread, "county-hostname", out.rejected);
+  winner = await pickWinner(r3.candidates, spread, "county-hostname", out.rejected, largestCity);
   if (winner) { out.chosen = winner; return out; }
 
   const opendata = await route4StateOpenData(county, stateName, state);
   out.routesAttempted.push({ route: "state-open-data", candidatesFound: opendata.length });
-  winner = await pickWinner(opendata, spread, "state-open-data", out.rejected);
+  winner = await pickWinner(opendata, spread, "state-open-data", out.rejected, largestCity);
   if (winner) { out.chosen = winner; return out; }
 
   return out;
@@ -609,8 +688,8 @@ async function mapLimit(items, limit, fn) {
   return out;
 }
 
-async function pickWinner(candidates, spread, routeLabel, rejectedOut) {
-  const verdicts = await mapLimit(candidates, CANDIDATE_CONCURRENCY, (c) => acceptCandidate(c, spread));
+async function pickWinner(candidates, spread, routeLabel, rejectedOut, largestCity) {
+  const verdicts = await mapLimit(candidates, CANDIDATE_CONCURRENCY, (c) => acceptCandidate(c, spread, { largestCity }));
   const measured = [];
   candidates.forEach((c, i) => {
     const verdict = verdicts[i];

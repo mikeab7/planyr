@@ -163,8 +163,10 @@ describe("the derivation changes nothing about enumeration or the statewide pseu
     const keys = Object.keys(COUNTIES_MAP);
     expect(keys).not.toContain("dallas");
     // ~18 dialed-in TX+CO rows + 32 statewide pseudo-keys + 13 Idaho counties (B1344721) + 19
-    // other-state counties (B1344722) + 9 Tier-1 counties (B1551617), not 254 or 3,143.
-    expect(keys.length).toBeLessThan(100);
+    // other-state counties (B1344722) + 9 Tier-1 counties (B1551617) + 8 more (2026-09-15: SD
+    // Pennington/Minnehaha/Sioux Falls, PA Luzerne/Lackawanna, MI Macomb, MO Kansas
+    // City/Independence), not 254 or 3,143.
+    expect(keys.length).toBeLessThan(120);
   });
 
   it("candidateCountiesForPoint still answers via the existing txgio_statewide fallback for a derived county — unchanged, not doubled", () => {
