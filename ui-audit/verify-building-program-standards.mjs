@@ -18,8 +18,11 @@
  *   D: reordering two rows (▲▼) does not change what a building resolves to (order is cosmetic).
  *   E: a per-building override wins, is visibly flagged ("set ↺" vs "auto"), survives a resize
  *      across a tier boundary (does not jump), and reverts cleanly.
- *   F: the Properties panel for a selected building carries the new "Standards → Buildings"
- *      pointer line.
+ *   F: the Properties panel for a selected building carries the "Standards → Buildings" pointer
+ *      line — for BOTH a dragged-rectangle building AND a hand-click-drawn freehand (polygon)
+ *      building (B1614128 — the freehand case fell to the generic "Polygon · N points" fallback
+ *      and lost the pointer AND its clear-height/slab override entirely, because it has `points`
+ *      but no `footEdit`, which the Properties panel's outer gate required).
  *   G: the print compose screen's building panel summarizes the tiers (no duplicate editor) and
  *      still lets you review/adjust per-building overrides, matching the canvas values (PDF-PARITY).
  *   H: "Save for all projects" persists the tier table to the account (localStorage mirror,
@@ -49,6 +52,13 @@ const els = [
   { id: "bLow", type: "building", cx: -1000, cy: -400, w: 300, h: 200, rot: 0 }, // 60,000 SF — below lowest tier → 32'/6"
   { id: "bBoundary", type: "building", cx: 0, cy: -400, w: 700, h: 200, rot: 0 }, // 140,000 SF — on the boundary → 36'/7"
   { id: "bHigh", type: "building", cx: 700, cy: -400, w: 900, h: 700, rot: 0 },  // 630,000 SF — above highest tier → 40'/7"
+  // B1614128 — a hand-click-drawn (freehand) building: `points`, no `footEdit`, no `w`/`h`/`cx`/`cy`
+  // at all — exactly what closeElPoly() produces when you click corner points on the canvas rather
+  // than drag a rectangle. 5 points, 50,000 SF (shoelace-verified) → same tier as bLow, 32'/6".
+  // Positioned centered-ish (like bBoundary) and below the other buildings' y-band — NOT at the far
+  // edge of the parcel, which renders under the docked left rail once a panel is open and silently
+  // swallows a click meant for the canvas (measured: that's what the far-corner placement did here).
+  { id: "bFree", type: "building", rot: 0, points: [{ x: -125, y: 100 }, { x: 125, y: 100 }, { x: 125, y: 250 }, { x: 0, y: 350 }, { x: -125, y: 250 }] },
 ];
 const site = {
   id: "bps1", groupId: "bps1", site: "Verify BPS", name: "Plan 1",
@@ -99,6 +109,22 @@ const labelCenter = (page, reSource) => page.evaluate((src) => {
 // opens Properties" — B750/B935). A native double click needs the real clickCount sequence.
 const dblclickBuildingLabel = async (page, sfNeedle) => {
   const c = await labelCenter(page, sfNeedle);
+  if (!c) return false;
+  await page.mouse.dblclick(c.x, c.y);
+  await page.waitForTimeout(500);
+  return true;
+};
+// A freehand (points-only) building doesn't get the multi-line "N SF" canvas label at all
+// (buildingLabelLines only renders for !poly buildings — SitePlanner.jsx ~16972), so it can't be
+// found by label text. Every element's own <g> carries data-el-id regardless of shape; use that.
+const elCenter = (page, elId) => page.evaluate((id) => {
+  const el = document.querySelector(`[data-el-id="${id}"]`);
+  if (!el) return null;
+  const b = el.getBoundingClientRect();
+  return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+}, elId);
+const dblclickElId = async (page, elId) => {
+  const c = await elCenter(page, elId);
   if (!c) return false;
   await page.mouse.dblclick(c.x, c.y);
   await page.waitForTimeout(500);
@@ -161,6 +187,61 @@ await openStandards(page);
     const addCount = await page.locator('button:has-text("+ Add tier")').count();
     log(addCount === 2, `F: the jump opens Standards with "Buildings — program" EXPANDED (found ${addCount} "+ Add tier" buttons, want 2)`);
   }
+}
+
+// ---------- F2: the SAME pointer line + Structure fields, on a FREEHAND (polygon) building ----------
+// (B1614128 — this is the case the pointer line originally missed. dblclickBuildingLabel can't find
+// it, since a freehand building carries no "N SF" canvas label at all — select it by data-el-id.)
+{
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  const found = await dblclickElId(page, "bFree");
+  log(found, "F2: selected the freehand (5-point polygon) building");
+  if (found) {
+    const bodyTxt = await bodyText(page);
+    log(bodyTxt.includes("Polygon · 5 points"), "F2: the panel confirms it's reading the freehand building (\"Polygon · 5 points\")");
+    const jumpBtn2 = page.locator('button:has-text("Standards → Buildings")');
+    const hasJump2 = (await jumpBtn2.count()) > 0;
+    log(hasJump2, "F2: the FREEHAND building's Properties panel also shows the \"Standards → Buildings\" pointer line");
+    // Settle "is a per-building clear-height/slab override reachable on a freehand building" —
+    // the ticket's second question. The auto value for this 50,000 SF pentagon is the same tier
+    // as bLow (32'/6"), so this doubles as a B-style auto-value check for the polygon path.
+    const clear = await fieldValue(page, "Clear height (ft)");
+    const slab = await fieldValue(page, "Slab (in)");
+    log(clear === "32", `F2: freehand building (50,000 SF) shows the correct auto clear height 32' (got ${clear})`);
+    log(slab === "6", `F2: freehand building (50,000 SF) shows the correct auto slab 6" (got ${slab})`);
+    const clearInput = page.locator('text=Clear height (ft)').locator("xpath=following::input[1]");
+    if (await clearInput.count()) {
+      await clearInput.fill("91");
+      await clearInput.press("Enter");
+      await page.waitForTimeout(400);
+      const v1 = await clearInput.inputValue();
+      log(v1 === "91", `F2: per-building override IS reachable on a freehand building (set 91', got ${v1})`);
+      const txt2 = await bodyText(page);
+      log(txt2.includes("set ↺"), "F2: the freehand building's overridden field shows the \"set ↺\" revert control");
+      const revertBtn2 = page.locator('button[title="Revert to auto (by size)"]').first();
+      if (await revertBtn2.count()) {
+        await revertBtn2.click({ timeout: 5000 });
+        await page.waitForTimeout(400);
+        const v2 = await page.locator('text=Clear height (ft)').locator("xpath=following::input[1]").inputValue();
+        log(v2 === "32", `F2: reverting a freehand building's override goes back to auto (32', got ${v2})`);
+      } else log(false, "F2: could not find the revert control on the freehand building");
+    } else log(false, "F2: no Clear height input found on the freehand building — override is NOT reachable");
+    // Follow the freehand building's own jump link too — proves it actually works (not just
+    // present), and restores the Standards dock with "Buildings — program" EXPANDED, which every
+    // section from here on (C onward) expects (exactly the state F left behind). Re-opening the
+    // dock plainly (openStandards) leaves the section COLLAPSED — the accordion's open state does
+    // not survive the dock round-trip on its own, only a fresh jump click re-expands it.
+    if (hasJump2) {
+      await jumpBtn2.first().click({ timeout: 5000 });
+      await page.waitForTimeout(500);
+      const addCount2 = await page.locator('button:has-text("+ Add tier")').count();
+      log(addCount2 === 2, `F2: the freehand building's jump ALSO opens Standards with "Buildings — program" EXPANDED (found ${addCount2} "+ Add tier" buttons, want 2)`);
+    }
+  }
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  await openStandards(page);
 }
 
 // ---------- C: add / edit / remove a tier, list stays resolvable ----------

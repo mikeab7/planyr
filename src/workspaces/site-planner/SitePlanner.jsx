@@ -26661,6 +26661,45 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               ) : selEl.type === "pond" ? null : (
                 <div style={{ fontSize: 11.5, color: PAL.muted, marginBottom: 4, lineHeight: 1.5 }}>Polygon · {selEl.points.length} points. Drag the body to move. Drag a <b>dot</b> to move a corner, click a <b>＋</b> on an edge to add one, <b>Shift-click</b> a dot to delete. Double-click to change type.</div>
               )}
+              {/* B1614128 — a hand-click-drawn (freehand) building never satisfied the
+                  `!selEl.points || selEl.footEdit` gate above (it has points but no dock frame), so
+                  it fell straight to the generic "Polygon · N points" fallback and lost its Structure
+                  fields AND the Standards → Buildings pointer entirely — even though the printed
+                  exhibit already prices its clear height/slab off the same tiers (buildingSqft reads
+                  polygon area for any shape). Column grid + the dock-frame Loading UI stay OUT here on
+                  purpose: a freehand outline has no wall to hang a grid or a dock zone off, and
+                  footprintLength/footprintDepth need el.w/el.h, which this shape never has —
+                  effectiveBuildingProps only needs sf, so clear height/slab don't share that gap. */}
+              {isBuilding(selEl) && selEl.points && !selEl.footEdit && (() => {
+                const sf = buildingSqft(selEl);
+                const props = effectiveBuildingProps(selEl, sf, buildingRules);
+                const autoTag = { fontSize: 10, color: PAL.muted, marginLeft: 2 };
+                const resetBtn = { ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent, marginLeft: 2 };
+                return (
+                  <>
+                    <div style={subHead}>Structure</div>
+                    <Field label="Clear height (ft)">
+                      <span style={ROW4}>
+                        <NumInput style={{ ...numInput, width: 52 }} value={props.clearHeight.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ clearHeightOverride: n }); }} />
+                        {props.clearHeight.overridden
+                          ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ clearHeightOverride: null }); }} style={resetBtn}>set ↺</button>
+                          : <span style={autoTag}>auto</span>}
+                      </span>
+                    </Field>
+                    <Field label="Slab (in)">
+                      <span style={ROW4}>
+                        <NumInput style={{ ...numInput, width: 52 }} value={props.slab.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ slabThicknessOverride: n }); }} />
+                        {props.slab.overridden
+                          ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ slabThicknessOverride: null }); }} style={resetBtn}>set ↺</button>
+                          : <span style={autoTag}>auto</span>}
+                      </span>
+                    </Field>
+                    <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 10 }}>
+                      This building's clear height & slab start from <button style={linkBtn} onClick={() => jumpToStandards("building")}>Standards → Buildings ↗</button>
+                    </div>
+                  </>
+                );
+              })()}
               {selEl.type !== "pond" && (() => {
                 const poly = !!selEl.points;
                 const area = isCenterlineRoad(selEl) ? roadStripArea(selEl, settings, sharpFor(selEl), roundTrim(selEl), roundabouts.areaById.get(selEl.id)) : poly ? polyArea(selEl.points) : selEl.w * selEl.h;
