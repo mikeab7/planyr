@@ -45,6 +45,50 @@ unreachable regardless. Full writeup: `BACKLOG.md`'s `B986096` Recurrence ×10 b
 browser, try localhost first** — it may answer most of what's needed even when every external host
 is dark.
 
+**⛔ B1619792 — THE COLUMN-GRID TWO-BUILDING FIXTURE, AND THE TRAP A FREEHAND BUILDING SETS FOR
+ANYONE VERIFYING IT LIVE.** Read this before spending an hour on what a prior session's dispatch
+brief called "I could not stage the case on a throwaway."
+
+**Three building shapes exist in the Site Planner, and only two of them ever draw an interior
+column grid** (`src/workspaces/site-planner/lib/buildingGrid.js` + the two render sites in
+`SitePlanner.jsx`, one for each shape):
+1. **An ordinary rectangle** — drag the "Building" tool once, never reshaped afterward. Grid gated
+   on `gridLinesVisible(ppf)` alone (`SitePlanner.jsx`, the plain `el.w`/`el.h` render branch).
+2. **A rectangle RESHAPED** via the footprint-edit tool (`el.footEdit` — e.g. dragging one corner
+   in or out after drawing it as a rectangle). Same gate, clipped to the now-irregular outline
+   (the `buildingChrome` / `frameBBox` render branch).
+3. **A building drawn as a free-form polygon from scratch** — clicking each vertex directly,
+   never starting from a dragged rectangle. This has **no dock frame** to hang a grid or dock
+   doors on, so it renders fill-only, **by design** — the code's own comment calls this "no
+   regression — parity requirement." This has always been true; it predates and is unrelated to
+   B1614544 (the "gridlines show on some buildings but not others at the same zoom" fix). **If you
+   draw a building by clicking individual points and see no grid at any zoom, that is expected —
+   it is not the bug to chase.**
+
+**The recipe that produces a real, two-building, both-carry-a-grid fixture — through the actual
+UI, not a localStorage seed:**
+1. Open the app, switch to the Site Planner tab, click **"Draw"** (`map-toolbar-draw`) to start a
+   blank, unsigned **"this device"** plan — no sign-in, no parcel lookup needed.
+2. Click the **"Building"** tool button, then **click-drag** (press, move, release) one small
+   rectangle on the canvas.
+3. Click **"Building"** again, click-drag a much larger rectangle elsewhere on the canvas. Two
+   plain drags, not two free-form polygons.
+4. Zoom in (mouse wheel) and confirm interior column lines appear on **both** at the same notch —
+   never one before the other.
+5. **File ▾ → Export PNG/PDF** and confirm the exported sheet shows the same grid the canvas did.
+
+`ui-audit/verify-grid-real-draw.mjs` automates exactly this recipe against a live build (default
+`https://planyr.io`, override with `--base=`) — it drives the real "Building" tool via
+`page.mouse` click-drag (not seeded model data), sweeps view scale both through the `window.__plannerView`
+test hook and through one real `page.mouse.wheel()` gesture, and checks export parity. Read its
+header before extending it. It is a companion to, not a replacement for,
+`ui-audit/verify-grid-view-scale.mjs`, which proves the underlying model logic (`gridLinesVisible`)
+against seeded fixtures — this one proves the actual drawing tool produces a shape that logic
+applies to. Each run creates its own throwaway "this device" plan in whatever browser profile ran
+it (named "Untitled site" unless a county lookup resolves one) — in a headless sandbox run that
+plan lives only in that ephemeral browser profile and needs no cleanup; on a real machine, delete
+it from the Library like any other throwaway.
+
 ## Stack
 Vite + React 18, plain JS/JSX, inline styles, the `PAL` drafting palette, terse
 comments. Map = Leaflet + esri-leaflet. Planner canvas = hand-rolled SVG. **Units:

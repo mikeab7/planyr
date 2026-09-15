@@ -342,3 +342,47 @@ in `SitePlanner.jsx` together deliver exactly this, end to end.
 tests; the pointer from root `CLAUDE.md`. Everything else audited above was already correct,
 tested, and (bar the two live-verify items, which are blocked on capabilities this session does
 not have) already live.
+
+---
+
+## 8. NEW-2 (B1629616, 2026-09-15) — concurrency audit of four tables reported to have no
+version column at all
+
+The dispatch named `public.notes_pages`, `public.comps`, `public.site_elements` and
+`public.planar_data` as apparently lacking any version/rev column, on the premise that `sites`
+and `model_sheets` have one and these four do not — "optimistic concurrency is not merely unused
+on those four, the raw material is absent." **That premise is stale for three of the four.**
+Reading the code and the live schema directly (`information_schema.columns` against
+`lyeqzkuiwngunutlkkmi`, not the dispatch's paraphrase — AUDIT-FIRST): two of the four already
+carry a `rev` column that IS the version token, one carries the equivalent one level down (per
+row rather than per table), and only one is a genuine, unprotected gap. A fifth table
+(`planar_data`) is a real but *partial* gap: the token exists, only the database-side enforcement
+does not. Two sibling tables (`planar_history`/`planar_suggestions`) were pulled into the same
+pass because the dispatch's own family (the scheduler's ownership migration) touches all three,
+and both turned out to be safe by construction. Each table now carries a `comment on table`
+recording this so a ninth audit does not re-derive it (see the `db/*_concurrency_audit_20260915.sql`
+files for the applied text) — this section is the fuller reasoning behind those comments.
+
+| Table | Token present? | Write pattern | Verdict |
+|---|---|---|---|
+| `notes_pages` | `rev` bigint, server-bumped by the `notes_touch_rev` `BEFORE INSERT OR UPDATE` trigger | client sends `.eq("rev", baseRev)` on every UPDATE (`notesCloud.js` — see that file's own header, "every UPDATE carries `and rev = <the rev the client read>`") | **Protected.** Zero rows updated = another device moved first, surfaced as "changed on another device," never clobbered. This is not merely "has a rev column" — the client is proven to route every real write through the guard. |
+| `notes_trees` | same `rev`, same trigger | same shape, whole-blob replace, same `.eq("rev", baseRev)` guard | **Protected.** Identical reasoning to `notes_pages`. |
+| `notes_images` | same `rev`, same trigger | the only UPDATE call sites (`notesCloud.js`) touch `deleted_at` alone (bin/purge); every content field (`path`/`mime`/`bytes`/`width`/`height`) is set once at INSERT and never rewritten | **Protected structurally.** No content field has a second writer, so there is nothing for a lost update to destroy; the tombstone-only updates are idempotent regardless of interleaving. |
+| `site_elements` | `rev` bigint **per `(site_id, kind, id)` row**, not a table-level counter | `commit_elements()` (the RPC) requires `expected` (the client's last-seen rev) on every `update`/`delete` op — raises if omitted — and returns `status: "conflict"` with the current row on a mismatch, never applying the write | **Protected, and more granular than `sites.version`.** A table-level version would be the WRONG shape here — it would force every element edit through one shared counter and manufacture false conflicts between two edits to unrelated elements on the same site. Per-row `rev` is the correct generalization, not a missing instance of the sites pattern. |
+| `comps` | **none** | `updateComp()` (`compsStore.js`) — `supabase.from("comps").update(compToRow(comp)).eq("id", id)`. `compToRow` serializes **every** column from the in-memory draft (confirmed by reading it: `comp_type`, `comp_date`, `title`, `notes`, the whole anchor, every land/building/lease field), never a diff. No `version`/`rev`/`updated_at`-comparison guard anywhere in the call. | **Genuine gap.** A `CompsPanel` edit form opened from a stale snapshot (the exact "two machines, tabs open for days" shape the dispatch names) and then saved will silently overwrite every field with that snapshot's values, including any field changed elsewhere in the interim — a true lost update, not merely a theoretical one. `compsStore.js`'s own header states the design reasoning ("comps don't have cloudSync.js's multi-tab autosave race") — that reasoning is the "claim needing evidence" the dispatch warned against, and it does not hold: the write shape (whole-row replace, single-owner-writable, editable from a long-lived form) is exactly the shape that produces a silent lost update whenever the SAME owner has the record open on two devices. Filed as **B1629617** (`updateComp`/`insertComp` need to route through `shared/cloud/optimisticUpsert.js`'s `casUpsert`, the same primitive `sites`/`doc_reviews`/`model_sheets` already share — `comps`' PK is a plain single `id`, so this is a straightforward fourth caller, not a new mechanism) — not implemented here, per the dispatch's own instruction not to widen this item. |
+| `planar_data` | **yes, but not as a column** — `value->>'__rev'`, an integer embedded inside the jsonb blob itself | the ONE write call site, `_rawSet` (`public/sequence/index.html`, confirmed by grepping every `.from(TABLE)` reference — there is exactly one `upsert`), re-reads the cloud's current `value->>'__rev'` immediately before writing, refuses or three-way-merges (`mergeCloudDoc`) when the cloud has moved ahead of what this tab last knew, and stamps `parsed.__rev = cloudRev + 1` — but the actual Postgres statement is a plain `.upsert({key, value}, {onConflict:"key"})` with **no `WHERE` clause tying it to the expected rev**. A prior session (B851 recurrence fix, same file, the long comment above `_saveQueue`) already root-caused and partly closed this: SAME-TAB overlapping saves are now serialized through a FIFO queue, closing 2 of 3 measured race interleavings (`test/schedulerSaveQueue.test.js`). The remaining interleaving — two DIFFERENT tabs/devices racing the read-check-then-write window — is not closed, because nothing DB-side rejects it; that prior session's own comment says so explicitly ("no server-side compare-and-swap"). | **Partial gap — the token exists, the database backstop does not.** This is a different shape from `comps`: the client already reasons correctly about staleness and already merges rather than blindly clobbering in the common case, so the exposure is narrower (only the true TOCTOU race window between the check and the write, not "every save"). Filed as **B1629618** — a `BEFORE UPDATE` trigger refusing a write whose `value->>'__rev'` does not exceed the stored one, which is safe to add cheaply *because* every write already funnels through the one `_rawSet` call site (confirmed above) — but this table drives the owner's live, actively-used Schedule and its call site sits inside a single 17,000+-line hand-maintained file this session has not fully read start to end, so the fix is filed for a dedicated, reviewed session rather than risked here. Not a hard technical blocker in the DANGEROUS-MEANS-UNOBSERVABLE sense (the write path IS observable and IS singular) — it is a deliberate, stated caution given the stakes of getting a trigger on this exact table wrong, and it is exactly the disposition the dispatch itself names as legitimate ("file THAT as its own item... rather than widening this one"). |
+| `planar_history` | none, and none needed | INSERT-only — no UPDATE policy exists on the table (`planar_tables_owner_only_no_team_default.sql`) and no UPDATE call site anywhere in the app | **Safe by construction.** A lost update needs an update path; there is not one. |
+| `planar_suggestions` | none, and none needed for the write shape that exists | every UPDATE call site (`public/sequence/index.html`'s mark-approved/dismissed/pending handlers) sets `status` alone, scoped to one row's `id` — never a whole-row replace; `patch`/`note_text`/`email_*` are written once at INSERT by the ingestion pipeline and never rewritten | **Safe.** A lost update here is "the wrong of two clicked verdicts stuck" on one enum field, not destroyed content — harmless in the sense the dispatch asked to distinguish from "impossible." |
+
+**Why the dispatch's premise was wrong for three of the four:** it read "no table named `version`
+next to `sites`/`model_sheets`" as "no concurrency protection," but this codebase already uses
+**two different vocabularies** for the identical guarantee — `version` (client-incremented,
+table-level, the `optimisticUpsert.js` family) and `rev` (server-incremented by a trigger, either
+table-level or per-row). Both are the same compare-and-swap contract under a different name;
+neither is more "real" than the other. The corrected finding is not "these four need auditing
+because they lack the raw material" — it is "three different concurrency mechanisms already
+coexist in this schema, and the count of genuinely unprotected tables among the four named is
+one whole gap (`comps`) and one partial gap (`planar_data`'s missing database-side enforcement),"
+which is a materially smaller finding than the dispatch's framing implied, and it is reported
+here plainly rather than the wider "four tables need fixing" the premise suggested.
+
