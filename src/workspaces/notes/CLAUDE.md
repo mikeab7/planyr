@@ -916,10 +916,24 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   not ask for one. Two new grips (`note-page-height-grip-top`/`-bottom`, desktop-only) feed the
   SAME stored number the width grips' shape already established: growth is always downward
   (`dom.style.minHeight`, the same property the unpinned "max(46vh, need)" default already wrote
-  to), the bottom edge grows it directly, and the top edge grows it too while scrolling `note-mat`
-  by the identical amount — the width feature's own left-edge algebra, transposed. A drag's own
-  live floor (`heightContentFloorRef`) is `need` alone, never the current pin, for the exact
-  reason `widthContentFloorRef` is (§5-1 of the carry-forward file).
+  to), and the bottom edge grows it directly. A drag's own live floor (`heightContentFloorRef`) is
+  `need` alone, never the current pin, for the exact reason `widthContentFloorRef` is (§5-1 of the
+  carry-forward file).
+  - **⛔ THE TOP EDGE TAKES TWO ROUNDS TO GET RIGHT AND HAS NOW HAD THEM (B1605664, then B1605664
+    ×2) — `topEdgeCompensation` in `lib/notesPageHeight.js` is the whole rule, read it there.**
+    GROWING scrolls `note-mat` (the width feature's left-edge algebra, transposed — the room it
+    needs was just created by the taller page). SHRINKING cannot: that needs `scrollTop` to go
+    negative and a note page opens at 0, where the browser silently clamps it — so shrinking opens
+    real space ABOVE the page instead, as `note-sheet`'s own `margin-top` (`sheetTopPad`).
+    ⛔ **THE PAGE, NOT THE BODY.** Round 1 put that offset on `dom` as a `transform`, which slid
+    the TEXT down inside a page whose own edges never moved — and the harness, which measured
+    `note-body`, called it green. `note-sheet` is a flex item of `note-mat`, so a margin there
+    never collapses and never clamps. Read §25 of the carry-forward file before measuring anything
+    about a page edge.
+  - **AND THE EDGE YOU DRAGGED STAYS GRABBABLE WHEN YOU LET GO (B1609184)** — a top-edge grow can
+    scroll the edge, and the grip on it, clean out of the mat's visible box. `scrollToReach` gives
+    back the least scroll that brings the whole grip back, at RELEASE only, and nothing at all when
+    it is already in view.
   - **⛔ AND `box.bottom` STOPPED MEANING "WHERE THE FLOW ENDS" THE MOMENT A PIN COULD SET IT PAST
     REAL CONTENT.** `focusFromMat`'s "click below → caret at end" branch (B1550976) used to compare
     against `box.bottom` because that was always identical to the last real line's own bottom edge
