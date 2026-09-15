@@ -22,7 +22,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  dashboardNavActions, shouldShowLinkPanel, shouldAdoptLinkedSiteIntoRoute,
+  dashboardNavActions, shouldShowLinkPanel, shouldAdoptLinkedSiteIntoRoute, shouldNeutralizeToReports,
 } from "../src/workspaces/scheduler/lib/navState.js";
 
 // The owner's starting state: routed at an unlinked site, iframe ready, empty state showing.
@@ -100,22 +100,106 @@ describe("no ping-pong between the Dashboard clear and the carry-OUT adoption", 
   it("suppresses the carry-out adoption in the window before the iframe confirms reports", () => {
     // Route just cleared; the iframe hasn't reported section "reports" yet. Without the guard the
     // carry-out would re-adopt the active schedule's linked site → the empty state reappears.
-    expect(shouldAdoptLinkedSiteIntoRoute({ isActive: true, section: "projects", projectId: null, dashboardIntent: true })).toBe(false);
+    expect(shouldAdoptLinkedSiteIntoRoute({
+      isActive: true, section: "projects", projectId: null, dashboardIntent: true, bootCarryOutAllowed: true,
+    })).toBe(false);
   });
 
-  it("still adopts normally once the intent is cleared by the next nav-state", () => {
-    expect(shouldAdoptLinkedSiteIntoRoute({ isActive: true, section: "projects", projectId: null, dashboardIntent: false })).toBe(true);
+  it("still adopts normally once the intent is cleared by the next nav-state, WHILE the boot privilege stands", () => {
+    expect(shouldAdoptLinkedSiteIntoRoute({
+      isActive: true, section: "projects", projectId: null, dashboardIntent: false, bootCarryOutAllowed: true,
+    })).toBe(true);
   });
 
   it("stays inert once the iframe is actually on reports, intent or not", () => {
-    expect(shouldAdoptLinkedSiteIntoRoute({ isActive: true, section: "reports", projectId: null, dashboardIntent: false })).toBe(false);
+    expect(shouldAdoptLinkedSiteIntoRoute({
+      isActive: true, section: "reports", projectId: null, dashboardIntent: false, bootCarryOutAllowed: true,
+    })).toBe(false);
   });
 
   it("keeps the keep-alive gate: a HIDDEN scheduler never writes the route", () => {
-    expect(shouldAdoptLinkedSiteIntoRoute({ isActive: false, section: "projects", projectId: null, dashboardIntent: false })).toBe(false);
+    expect(shouldAdoptLinkedSiteIntoRoute({
+      isActive: false, section: "projects", projectId: null, dashboardIntent: false, bootCarryOutAllowed: true,
+    })).toBe(false);
   });
 
   it("keeps the loop-free gate: a route that already carries a project is never re-written", () => {
-    expect(shouldAdoptLinkedSiteIntoRoute({ isActive: true, section: "projects", projectId: "gid", dashboardIntent: false })).toBe(false);
+    expect(shouldAdoptLinkedSiteIntoRoute({
+      isActive: true, section: "projects", projectId: "gid", dashboardIntent: false, bootCarryOutAllowed: true,
+    })).toBe(false);
+  });
+});
+
+/* NEW-1 (owner report, 2026-09-15 — "sometimes when I'm clicking between modules... it takes me
+ * to the wrong place"). REPRODUCED live: a module-tab click from Site's own project-less "Select a
+ * project" state landed on a specific project's schedule nobody chose; a hand-typed `#/schedule`
+ * (no project id anywhere in the URL) did the same. Root cause: the carry-out effect above adopted
+ * whatever the embedded app's own persisted, ACCOUNT-WIDE `aPid` field happened to hold — "what
+ * schedule was last open" (possibly from a different tab, device or session), not "what the user
+ * just chose" — on EVERY arrival at a project-less route, not only the app's own genuine boot.
+ * `bootCarryOutAllowed` closes that: it must be explicitly granted (the same boot-resume privilege
+ * SitePlannerApp.jsx's `mayResumeLastSite` already gates on), never assumed true by default.
+ */
+describe("NEW-1 — the carry-out adoption requires the boot-resume privilege, not just an empty route", () => {
+  it("a project-less route with no boot privilege never silently adopts the iframe's ambient project", () => {
+    expect(shouldAdoptLinkedSiteIntoRoute({
+      isActive: true, section: "projects", projectId: null, dashboardIntent: false, bootCarryOutAllowed: false,
+    })).toBe(false);
+  });
+
+  it("defaults to false when the caller omits it entirely — never a silent opt-in", () => {
+    expect(shouldAdoptLinkedSiteIntoRoute({ isActive: true, section: "projects", projectId: null })).toBe(false);
+  });
+
+  it("the boot privilege is the ONLY thing separating this from the pre-fix always-adopt behaviour", () => {
+    const base = { isActive: true, section: "projects", projectId: null, dashboardIntent: false };
+    expect(shouldAdoptLinkedSiteIntoRoute({ ...base, bootCarryOutAllowed: true })).toBe(true);
+    expect(shouldAdoptLinkedSiteIntoRoute({ ...base, bootCarryOutAllowed: false })).toBe(false);
+  });
+});
+
+describe("NEW-1 — shouldNeutralizeToReports: the honest counterpart when carry-out is refused", () => {
+  it("tells the iframe to show its neutral cross-project view when the route is honestly project-less", () => {
+    expect(shouldNeutralizeToReports({
+      isActive: true, section: "projects", projectId: null, bootCarryOutAllowed: false, dashboardIntent: false,
+    })).toBe(true);
+  });
+
+  it("stands down while the boot privilege still stands — let carry-out try adopting first", () => {
+    expect(shouldNeutralizeToReports({
+      isActive: true, section: "projects", projectId: null, bootCarryOutAllowed: true, dashboardIntent: false,
+    })).toBe(false);
+  });
+
+  it("stands down once the iframe is already on reports — nothing left to correct", () => {
+    expect(shouldNeutralizeToReports({
+      isActive: true, section: "reports", projectId: null, bootCarryOutAllowed: false, dashboardIntent: false,
+    })).toBe(false);
+  });
+
+  it("stands down on a routed project — this is the project-less case only", () => {
+    expect(shouldNeutralizeToReports({
+      isActive: true, section: "projects", projectId: "gid", bootCarryOutAllowed: false, dashboardIntent: false,
+    })).toBe(false);
+  });
+
+  it("stands down while hidden (keep-alive gate) and during a pending Dashboard press", () => {
+    expect(shouldNeutralizeToReports({
+      isActive: false, section: "projects", projectId: null, bootCarryOutAllowed: false, dashboardIntent: false,
+    })).toBe(false);
+    expect(shouldNeutralizeToReports({
+      isActive: true, section: "projects", projectId: null, bootCarryOutAllowed: false, dashboardIntent: true,
+    })).toBe(false);
+  });
+
+  it("the two functions are never both true at once — mutually exclusive by construction", () => {
+    for (const bootCarryOutAllowed of [true, false]) {
+      for (const dashboardIntent of [true, false]) {
+        const args = { isActive: true, section: "projects", projectId: null, bootCarryOutAllowed, dashboardIntent };
+        const adopt = shouldAdoptLinkedSiteIntoRoute(args);
+        const neutralize = shouldNeutralizeToReports(args);
+        expect(adopt && neutralize).toBe(false);
+      }
+    }
   });
 });
