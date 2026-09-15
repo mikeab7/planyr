@@ -3958,11 +3958,14 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           const revealStyle = { opacity: showActions ? 1 : 0, transition: "opacity .12s", pointerEvents: showActions ? "auto" : "none" };
           const chip = disp.kind === "team"
             ? (
+              // B1614656 (NEW-1) — the badge shows short INITIALS, never the full team name: a
+              // wide name (e.g. "HIP Houston") grown from this zero-width anchor covered part of
+              // the site name. The full name is never lost — it's the tooltip/aria-label.
               <span tabIndex={0} title={`Shared with ${disp.name}`} aria-label={`Shared with ${disp.name}`}
-                style={{ position: "absolute", right: 0, top: "50%", transform: "translateY(-50%)", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                style={{ position: "absolute", right: 0, top: "50%", transform: "translateY(-50%)", whiteSpace: "nowrap", textAlign: "center",
                   fontSize: 9.5, fontWeight: 700, color: PAL.accent, background: "var(--surface-overlay)",
                   border: `1px solid ${PAL.accent}`, borderRadius: RADIUS.pill, padding: "1px 6px", lineHeight: 1.5, ...revealStyle }}>
-                {disp.name}
+                {disp.initials}
               </span>
             )
             // "unknown" — shared, but the team no longer names anything this account can see
