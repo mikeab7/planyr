@@ -166,6 +166,21 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1160896 — B1631939: pinned/reordered projects in the header switcher actually follow the owner's account across devices, and survive a real sign-in `Blocker: auth`
+
+**What was verified here, extensively, without a real signed-in pass.** Driven headless in a real Chromium build against three real seeded projects (not a synthetic fixture), logged out: pinning from the switcher's kebab lifts a project into a "Pinned" section below the always-first current project; a second pin puts it above the first (most-recently-pinned-first, matching the existing Sites-panel convention — see V480816); keyboard ArrowUp/ArrowDown on the drag handle reorders the pinned section; unpinning removes a project from that section; deleting a pinned project cleans it out of the pinned list (no ghost pin left behind); a reload of the page (localStorage left genuinely alone) shows the same pin state and order restored, via `userPrefs.js`'s existing localStorage mirror of the account-scope `sitesPanel` bag; a non-matching search query empties the whole list, current and pinned rows included, rather than force-showing either.
+
+**What is NOT proven, and cannot be from this sandbox.** The same gap V480816 already names for this exact store: the round trip through real Supabase, on the owner's real account, showing a pin/reorder made on one device or browser tab appearing on another — CORS-blocked from this sandbox's auth. Also unwatched: the "Saved on this computer only" warning firing only on a genuine signed-in write failure, never on the ordinary signed-out case.
+
+**Steps, each with a named expected result.**
+1. Sign in on `planyr.io`, open the project switcher (the project name in the row-1 header), and pin (via right-click or the row's kebab) a project that is NOT the one you're standing in. **Expect:** it lifts into a new "Pinned" section directly below the current project (which stays first).
+2. Pin a second project. **Expect:** it appears ABOVE the first pin (most-recently-pinned first).
+3. Drag the second pin below the first (or focus its drag handle and press ArrowDown). **Expect:** the order swaps immediately.
+4. Reload the page. **Expect:** the current project, both pins, and their order are exactly as left.
+5. Open `planyr.io` in a second browser (or a private window) signed into the SAME account. **Expect:** the same pins and order appear there too — the cross-device confirmation the whole feature exists for.
+6. Also confirm the SAME pin appears (or can be toggled) from the Map view's own Sites-panel row menu (B859505) — pinning from either surface is meant to be the one shared list.
+7. Delete a pinned project from the switcher. **Expect:** it's gone from the Pinned section too, not left behind as a stale entry.
+- **Stopping rule:** closes when steps 1–7 are observed on `planyr.io`, or when any step fails and is filed as a recurrence against B1631939, per STANDING RULE #2 (a failure here is a FINDING, not a silent close).
 ### V1168544 — B1639584: Texas statewide parcels (StratMap) as the click-routing fallback behind the 8 wired counties `Blocker: live-GIS`
 
 **Why this needs its own live pass.** GIS endpoint behaviour is a mandatory LIVE-VERIFY class, and this item is specifically about whether a real ArcGIS host returns real parcels — which only a live query against `services1.arcgis.com` can show, and that host sits outside this sandbox's egress allowlist. The ROUTING LOGIC (which candidate a Texas point resolves to, and that it is exactly one for both a wired and an unwired county) is fully proven sandbox-side against the real, unmodified `candidateCountiesForPoint`/`identifyParcelEager` machinery, listed below — nothing about that logic depends on the endpoint answering.
@@ -9777,7 +9792,7 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
 4. Close the tab; open a genuinely fresh tab/window on the bare domain. **Expect:** "open where I left off" still resumes correctly when the last real route named a project; a boot landing on the Dashboard or any project-less route must not silently jump into Goose Creek's (or any) schedule.
 5. Repeat steps 1–2 a few times across a short session to catch the "it doesn't always happen" timing the owner described, and record the exact hash sequence observed each time (DevTools console `window.location.hash`, or the Network/history panel).
 
-**Result:** ⏳ pending — needs a real signed-in browser session with real, multi-project account history; not reachable from this sandbox. `Cadence: once`.
+**Result:** ⏳ partially observed, 2026-09-15 — recorded from a live signed-in pass reported into a dispatch (project `smqfy48tlk9j`/Goose Creek, three deploys, ending build `ef4b6e0`). Steps 1–2's URL/crumb half PASSED as written: a fresh `#/schedule` load and a Schedule-tab click from Site's project-less state both stayed on a bare, project-less `#/schedule` (`keptProject:false` from Site, Schedule and Review) — the route/breadcrumb adoption this item's fix targets did not recur. But step 1's FULLER expectation — "Goose Creek's grid must NOT reappear uninvited" — FAILED: the grid underneath kept rendering Goose Creek's real 32-row Master Schedule, fully visible and clickable, under the honestly-empty breadcrumb. That is a DIFFERENT mechanism (the render gate never covered a project-less route at all — see **B1644368**, filed and fixed this same session) than the one this item's `bootCarryOutAllowed`/`shouldNeutralizeToReports` fix addresses, so this item's own fix is not in question; only its own verification steps' fuller claim was not yet true when tested. Steps 3–5 were not separately reported. This entry stays parked (not moved to Done) until a live pass confirms the grid half too — see **V1173216** for that half's own dedicated live-verify entry, now that a mechanism exists to test.
 
 ### V1167793 — B1638835: the full module × leading-crumb navigation matrix, with two real projects in play, never lands on a project nobody chose `Blocker: auth` `Blocker: real-data`
 
@@ -9793,6 +9808,19 @@ Proven in `vite preview` AND on the **real Cloudflare branch-preview deploy** (`
 7. Record the exact hash sequence for any step that doesn't match its expectation, so a recurrence has a concrete trace rather than "sometimes."
 
 **Result:** ⏳ pending — needs a real signed-in browser session with at least two real projects; not reachable from this sandbox. `Cadence: once`.
+
+### V1173216 — B1644368: a project-less Schedule route never shows (or lets you edit) a different project's real grid, on a real signed-in account `Blocker: auth` `Blocker: real-data`
+
+**Why this needs its own real pass.** The corrected gate (`isGridMismatched` treating a project-less route the same as a routed one — matched only once the iframe confirms its neutral "reports" section) and the retried neutralize post are both proven as pure/source-guarded logic without a browser (`test/schedulerNavState.test.js`, 9 new/updated cases). What cannot be proven here: the actual reported symptom, which depends on the embedded scheduler's own **account-wide, cloud-persisted** `aPid` field genuinely naming a project — this sandbox has no way to manufacture that ambient state, and no way to sign in to confirm a real click inside the (now hidden-until-confirmed) grid is genuinely refused.
+
+**Steps, each with a named expected result — on `planyr.io`, signed in, on the Goose Creek account (or any account with 2+ real projects each carrying a Schedule):**
+1. Open Goose Creek's Schedule tab so the embedded app's own `aPid` is genuinely Goose Creek's. Navigate to Site's project-less "Select a project" state, then click the Schedule tab (or hand-type a bare `#/schedule`). **Expect:** the breadcrumb never shows a schedule name next to "Select a project," and the grid area shows a brief loader then the iframe's own neutral reports view — Goose Creek's Master Schedule must never be visible, not even briefly.
+2. While in that neutral state, click where a task row would be. **Expect:** nothing happens — the grid is genuinely unclickable, not merely visually hidden.
+3. From Site with a DIFFERENT real project routed, click Schedule. **Expect:** Schedule correctly follows that project's own schedule immediately (the carry-IN path, unaffected by this fix).
+4. Repeat step 1 several times across a short session (this fix's correction relies on a retry loop, so confirm the neutral view is reached reliably, not merely "usually" — the owner's own "it doesn't always happen" framing of the original report).
+5. Record the exact hash + breadcrumb + grid-content sequence observed for each step, so a recurrence has a concrete trace.
+
+**Result:** ⏳ pending — needs a real signed-in browser session; not reachable from this sandbox. `Cadence: once`.
 
 ## ✅ Verified / ❌ Failed — history
 

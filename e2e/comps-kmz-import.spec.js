@@ -31,7 +31,9 @@ const writeTmp = (name, bytes) => {
 async function openCompsTab(page) {
   await page.goto("/");
   await openModule(page, "site-planner");
-  await page.getByRole("tab", { name: "Comps" }).click();
+  // NEW-2 — the rail tab was relabeled "Records" (the settled "site record" term); see
+  // MapFinder.jsx's RailTab comment.
+  await page.getByRole("tab", { name: "Records" }).click();
 }
 
 // The KML-import input lives beside "＋ Paste comps" in the Comps list view — B849233's original

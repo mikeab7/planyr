@@ -378,6 +378,35 @@ export function applyFrozenOrder(list = [], orderIds = null) {
   return [...known, ...rest];
 }
 
+// NEW-3/NEW-4 — the switcher's real display order: the project you are CURRENTLY INSIDE always
+// leads, then any PINNED projects (in the order the user arranged them — most-recently-pinned
+// first is `userPrefs.js`'s own convention; this function doesn't re-order that list, only
+// places it), then everything else in whatever order the caller already sorted it (recency, by
+// default). A project appears exactly once: being current or pinned LIFTS it out of the rest of
+// the list rather than duplicating it — current always wins over pinned when a project is both,
+// so it is never listed twice ("current" tops "pinned to top" — see the owner's own phrasing,
+// "should be the top one"). This runs BEFORE `applyFrozenOrder`, which then holds row POSITIONS
+// steady during an in-progress rename exactly as it already does — the two compose because this
+// function is a pure re-sort of the same list shape `applyFrozenOrder` already accepts.
+export function reorderWithCurrentAndPinned(list = [], currentId = null, pinnedIds = []) {
+  const arr = (list || []).filter(Boolean);
+  let current = null;
+  const remaining = new Map();
+  for (const p of arr) {
+    if (!p || p.id == null) continue;
+    if (!current && currentId != null && p.id === currentId) { current = p; continue; }
+    if (!remaining.has(p.id)) remaining.set(p.id, p);
+  }
+  const pinned = [];
+  for (const id of pinnedIds || []) {
+    if (id === currentId) continue; // already leading as `current` — never duplicated below it
+    const p = remaining.get(id);
+    if (p) { pinned.push(p); remaining.delete(id); }
+  }
+  const rest = arr.filter((p) => p && p.id != null && remaining.has(p.id));
+  return [...(current ? [current] : []), ...pinned, ...rest];
+}
+
 // Compact relative timestamp for the switcher rows ("just now", "5m ago", "3h ago",
 // "2d ago", "3w ago", then a short calendar date for anything older than ~a month).
 // `now` is injectable so the behavior is deterministic under test.

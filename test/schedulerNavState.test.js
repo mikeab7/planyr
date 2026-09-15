@@ -263,8 +263,7 @@ describe("isGridMismatched — the route↔grid mismatch is made IMPOSSIBLE TO S
     expect(isGridMismatched(RICHFIELD, "rf", 5, /* pickShowing */ true)).toBe(false);
   });
 
-  it("GREEN: no route, or the routed site has no schedule at all — the empty state owns that case, not this gate", () => {
-    expect(isGridMismatched(RICHFIELD, null, 6, false)).toBe(false);
+  it("GREEN: the routed site has no schedule at all — the empty state owns that case, not this gate", () => {
     expect(isGridMismatched(RICHFIELD, "unlinked-site", 6, false)).toBe(false);
   });
 
@@ -276,6 +275,43 @@ describe("isGridMismatched — the route↔grid mismatch is made IMPOSSIBLE TO S
     for (let i = 0; i < 5; i++) {
       expect(isGridMismatched(RICHFIELD, "rf", 6, false)).toBe(true);
     }
+  });
+});
+
+/* B1644368 (NEW-1 amendment, 2026-09-15) — a PROJECT-LESS route used to be an automatic "not
+ * mismatched" (`siteId == null` short-circuited straight to `false`), and that was itself the bug
+ * this session fixed: PR #1712 made the ROUTE and the BREADCRUMB honest on a project-less Schedule
+ * arrival, but the GRID kept showing whatever project the embedded app's own account-wide `aPid`
+ * field happened to hold — live-synced, fully visible, and fully clickable — reproduced live as a
+ * project-less `#/schedule` rendering Goose Creek's real Master Schedule under a breadcrumb reading
+ * "Select a project." These lock the corrected gate: a project-less route now has exactly one
+ * honest "matched" answer (the iframe confirmed it switched to its own neutral reports view), same
+ * as a routed project has exactly one ("the routed site's own linked schedule is active"). */
+describe("isGridMismatched — the project-less case now matches too (B1644368)", () => {
+  const RICHFIELD = sanitizeProjects([
+    { id: 6, name: "Pappadoupolos", linkedSiteId: "pap" },
+    { id: 15, name: "Richfield", linkedSiteId: "rf" },
+    { id: 5, name: "Pursuits" }, // unlinked, cross-cutting
+  ]);
+
+  it("RED: no route, but the grid is still confirmed showing SOME project's own projects section — the exact live repro", () => {
+    expect(isGridMismatched(RICHFIELD, null, 6, /* pickShowing */ false, /* navConfirmed */ true, "projects")).toBe(true);
+  });
+
+  it("GREEN: no route, and the grid has CONFIRMED it switched to its own neutral cross-project view", () => {
+    expect(isGridMismatched(RICHFIELD, null, 6, false, true, "reports")).toBe(false);
+  });
+
+  it("RED: no route, unconfirmed load — fails closed exactly as a routed project would, never assumed safe by omission", () => {
+    expect(isGridMismatched(RICHFIELD, null, 6, false, /* navConfirmed */ false, "reports")).toBe(true);
+  });
+
+  it("GREEN: no route, but a deliberate cross-cutting pick is genuinely showing — pickShowing still wins outright", () => {
+    expect(isGridMismatched(RICHFIELD, null, 5, /* pickShowing */ true, true, "projects")).toBe(false);
+  });
+
+  it("omitting section defaults to \"projects\" — a project-less caller that says nothing is treated as still mismatched, not silently waved through", () => {
+    expect(isGridMismatched(RICHFIELD, null, 6, false, true)).toBe(true);
   });
 });
 
@@ -414,6 +450,21 @@ describe("Scheduler.jsx — the ROUTE outranks the embed's section", () => {
     expect(i).toBeGreaterThan(-1);
     const block = SRC.slice(i, SRC.indexOf("/>", i));
     expect(block).toMatch(/visibility:\s*\(showEmptyState \|\| gridMismatched\)\s*\?\s*"hidden"\s*:\s*"visible"/);
+  });
+
+  // B1644368 (NEW-1 amendment) — the SCHEDULE crumb must never name a schedule the grid itself is
+  // hidden for being wrong/unconfirmed about — that was the dispatch's exact reported repro
+  // ("Select a project" beside "Master Schedule" in the same trail). `gridMismatched` must be
+  // declared BEFORE `showScheduleCrumb` reads it (a `const` used before its declaration throws), and
+  // `showScheduleCrumb`'s own condition must include it.
+  it("the SCHEDULE crumb is suppressed while the grid is mismatched — the self-contradicting breadcrumb this session fixed", () => {
+    const gridIdx = SRC.indexOf("const gridMismatched = ready && isGridMismatched(");
+    const crumbIdx = SRC.indexOf("const showScheduleCrumb = ready && section ===");
+    expect(gridIdx).toBeGreaterThan(-1);
+    expect(crumbIdx).toBeGreaterThan(-1);
+    expect(gridIdx, "gridMismatched must be declared before showScheduleCrumb reads it").toBeLessThan(crumbIdx);
+    const line = SRC.slice(crumbIdx, SRC.indexOf(";", crumbIdx) + 1);
+    expect(line).toMatch(/const showScheduleCrumb = ready && section === "projects" && !gridMismatched;/);
   });
 
   // B1435888 — SUPERSEDES the old "routed project names the breadcrumb even while the embed
@@ -576,9 +627,16 @@ describe("isGridMismatched — navConfirmed makes the gate fail CLOSED across a 
     expect(isGridMismatched(RICHFIELD, "rf", 16, false)).toBe(true);
   });
 
-  it("an unconfirmed load never overrides a deliberate cross-cutting pick or an unrouted/unlinked site — pickShowing and siteId still short-circuit first", () => {
+  it("an unconfirmed load never overrides a deliberate cross-cutting pick — pickShowing still short-circuits first", () => {
     expect(isGridMismatched(RICHFIELD, "rf", 16, /* pickShowing */ true, false)).toBe(false);
-    expect(isGridMismatched(RICHFIELD, null, 16, false, false)).toBe(false);
+  });
+
+  // B1644368 — SUPERSEDES the old assertion here that a project-less `siteId` bypassed
+  // `navConfirmed` and read as matched regardless. It no longer does: an unconfirmed load fails
+  // closed the same way whether or not the route names a project — see that item's own note on
+  // `isGridMismatched` for why "unrouted" stopped being an automatic pass.
+  it("an unconfirmed load on a project-less route ALSO fails closed now — unrouted no longer bypasses navConfirmed", () => {
+    expect(isGridMismatched(RICHFIELD, null, 16, false, false)).toBe(true);
   });
 });
 
@@ -695,7 +753,28 @@ describe("Scheduler.jsx — the shell invalidates its nav belief on EVERY iframe
   });
 
   it("the render gate is fed navConfirmed, not just projects/activeId/pickShowing", () => {
-    expect(SRC).toMatch(/isGridMismatched\(projects, projectId, activeId, pickShowing, navConfirmed\)/);
+    expect(SRC).toMatch(/isGridMismatched\(projects, projectId, activeId, pickShowing, navConfirmed, section\)/);
+  });
+});
+
+/* B1644368 (NEW-1 amendment) — the neutralize-to-reports post must RETRY, not fire once. A single
+ * post at mount races the iframe's own document load (its message listener isn't attached yet —
+ * the exact race `onIframeLoad`'s own `ask()` loop already guards against for `nav-request`), and
+ * unlike the carry-in effect this one has no natural re-drive: `setSection(nav.section)` is a no-op
+ * once the embed's first real report already reads "projects", so a lost first post was never
+ * retried and the stale, fully-clickable grid stayed on screen indefinitely. */
+describe("Scheduler.jsx — the neutralize-to-reports post retries (B1644368)", () => {
+  const SRC = readFileSync(fileURLToPath(new URL("../src/workspaces/scheduler/Scheduler.jsx", import.meta.url)), "utf8");
+
+  it("the neutralize effect posts more than once, on an interval, not a single fire-and-forget call", () => {
+    const i = SRC.indexOf("if (!shouldNeutralizeToReports({");
+    expect(i).toBeGreaterThan(-1);
+    const effectEnd = SRC.indexOf("}, [isActive, section, projectId]);", i);
+    expect(effectEnd).toBeGreaterThan(-1);
+    const block = SRC.slice(i, effectEnd);
+    expect(block).toMatch(/setInterval\(/);
+    // and it cleans the interval up rather than leaking one per re-render
+    expect(block).toMatch(/return \(\) => clearInterval\(t\);/);
   });
 });
 

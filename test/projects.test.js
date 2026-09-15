@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { groupProjects, filterProjects, relTime, suggestNameMatch, normalizeProjectName, resolveCurrentName, withCurrentProject, unionProjectLists, resolveControlledId, shortenDisplayName, findProjectAtOrigin, distanceFeetBetween, SAME_GROUND_FT, hasSavedProjectRecord, applyFrozenOrder } from "../src/shared/projects/projectModel.js";
+import { groupProjects, filterProjects, relTime, suggestNameMatch, normalizeProjectName, resolveCurrentName, withCurrentProject, unionProjectLists, resolveControlledId, shortenDisplayName, findProjectAtOrigin, distanceFeetBetween, SAME_GROUND_FT, hasSavedProjectRecord, applyFrozenOrder, reorderWithCurrentAndPinned } from "../src/shared/projects/projectModel.js";
 import { listProjects } from "../src/shared/projects/projects.js";
 import { setActiveUser } from "../src/workspaces/site-planner/lib/activeUser.js";
 
@@ -666,5 +666,62 @@ describe("applyFrozenOrder", () => {
   it("ignores falsy entries in the list rather than throwing", () => {
     const withHole = [ROWS[0], null, ROWS[1]];
     expect(() => applyFrozenOrder(withHole, ["tachen", "third"])).not.toThrow();
+  });
+});
+
+describe("reorderWithCurrentAndPinned (NEW-3/NEW-4 — the switcher's real display order)", () => {
+  const LIST = [
+    { id: "a", name: "A", updatedAt: 3000 },
+    { id: "b", name: "B", updatedAt: 2000 },
+    { id: "c", name: "C", updatedAt: 1000 },
+    { id: "d", name: "D", updatedAt: 900 },
+  ];
+
+  it("with no current project and no pins, the list is unchanged", () => {
+    expect(reorderWithCurrentAndPinned(LIST, null, [])).toEqual(LIST);
+  });
+
+  it("lifts the CURRENT project to the very top, wherever it sat", () => {
+    const out = reorderWithCurrentAndPinned(LIST, "c", []);
+    expect(out.map((p) => p.id)).toEqual(["c", "a", "b", "d"]);
+  });
+
+  it("a project that is already #1 stays #1 (must not render twice)", () => {
+    const out = reorderWithCurrentAndPinned(LIST, "a", []);
+    expect(out.map((p) => p.id)).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("pinned projects follow current, in the caller's pin order, ahead of everyone else", () => {
+    const out = reorderWithCurrentAndPinned(LIST, "c", ["d", "b"]);
+    expect(out.map((p) => p.id)).toEqual(["c", "d", "b", "a"]);
+  });
+
+  it("⛔ CURRENT WINS OVER PINNED: a project that is both current and pinned appears ONCE, at the top", () => {
+    const out = reorderWithCurrentAndPinned(LIST, "b", ["b", "d"]);
+    expect(out.map((p) => p.id)).toEqual(["b", "d", "a", "c"]);
+    expect(out.filter((p) => p.id === "b")).toHaveLength(1);
+  });
+
+  it("a pinned id no longer in the list is simply skipped, not a crash", () => {
+    const out = reorderWithCurrentAndPinned(LIST, null, ["ghost", "d"]);
+    expect(out.map((p) => p.id)).toEqual(["d", "a", "b", "c"]);
+  });
+
+  it("a current id no longer in the list falls through to plain pin ordering", () => {
+    const out = reorderWithCurrentAndPinned(LIST, "ghost", ["d"]);
+    expect(out.map((p) => p.id)).toEqual(["d", "a", "b", "c"]);
+  });
+
+  it("ignores falsy entries in the list rather than throwing", () => {
+    const withHole = [LIST[0], null, LIST[1]];
+    expect(() => reorderWithCurrentAndPinned(withHole, "a", ["b"])).not.toThrow();
+  });
+
+  it("composes with filterProjects: current still leads a search match, and drops out when it doesn't match", () => {
+    const reordered = reorderWithCurrentAndPinned(LIST, "c", ["d"]);
+    expect(filterProjects(reordered, "c").map((p) => p.id)).toEqual(["c"]);
+    // "b" doesn't match "d" or "c" — current ("c") is absent from a query it doesn't match,
+    // never force-shown.
+    expect(filterProjects(reordered, "z-no-match").map((p) => p.id)).toEqual([]);
   });
 });
