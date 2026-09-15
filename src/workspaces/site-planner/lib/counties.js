@@ -844,6 +844,118 @@ const COUNTIES_RAW = {
     idField: "parcel_id", addrField: "address",
     help: "City of Detroit parcels (city GIS, Esri-hosted) — searches are limited to the city limits, not all of Wayne County. Search by parcel ID or a site address.",
   },
+
+  /* ═══ NEW-1/NEW-3/NEW-4/NEW-5 (2026-09-15) — South Dakota (Pennington), Pennsylvania (Luzerne +
+   * Lackawanna) and Macomb, MI. All MEASURED LIVE from Michael's own browser 2026-09-15; this
+   * sandbox's egress policy blocks the county-hosted ones (Luzerne, Lackawanna) but Pennington's
+   * and Macomb's *.arcgis.com endpoints were independently confirmed reachable, with matching
+   * field lists, directly from this sandbox the same day. ═══ */
+  sd_pennington: {
+    // MEASURED LIVE 2026-09-15: 52,547 parcel polygons, extent matching Pennington County (Rapid
+    // City). Confirmed reachable from this sandbox too (services1.arcgis.com).
+    state: "SD", label: "Pennington County, SD",
+    layerUrl: "https://services1.arcgis.com/AhXvNWFdL7hH4TjJ/arcgis/rest/services/PenningtonParcels/FeatureServer/0",
+    idField: "PIN",
+    help: "Pennington County (Rapid City) parcels (county GIS, Esri-hosted). Search by parcel ID (PIN) or a site address.",
+  },
+  /* ⛔ MINNEHAHA COUNTY HAS A HOLE EXACTLY WHERE ITS OWN LARGEST CITY SITS — the worked example
+   * behind the parcel-source vetting checklist's "city-hole" trap (see /CLAUDE.md → parcel-source
+   * vetting). This county layer covers the RURAL REMAINDER only: MEASURED LIVE 2026-09-15, 23,044
+   * polygons across the whole-county extent, but a point query at downtown Sioux Falls
+   * (-96.7311, 43.5460) returns ZERO — not a right-of-way artifact (a rural point 15 miles away,
+   * -96.95/43.75, returns a real parcel). The city publishes its OWN layer (`sd_siouxfalls`
+   * immediately below, city-scoped — see cityScopes.js), checked BEFORE any county-level
+   * resolution, so the two together are what Minnehaha County gets. Same two-tier shape as
+   * Wayne/Detroit; the difference is Wayne has NO county-level source at all, while Minnehaha has
+   * a real one with a city-shaped hole in it. */
+  sd_minnehaha: {
+    state: "SD", label: "Minnehaha County, SD",
+    layerUrl: "https://gis.minnehahacounty.gov/minnemap/rest/services/Parcels/MapServer/0",
+    idField: "MAP_ID", addrField: "FULL_ADDRESS",
+    help: "Minnehaha County parcels (county GIS) — covers the county outside Sioux Falls' own city limits, which the city publishes separately. Search by parcel ID or a site address.",
+  },
+  /* City of Sioux Falls — city-scoped (see cityScopes.js). Fills the hole `sd_minnehaha` leaves
+   * over its own downtown. MEASURED LIVE 2026-09-15: 67,022 polygons; ACREAGE is a real double
+   * (unlike Lackawanna's StatedArea below, which is a formatted string). */
+  sd_siouxfalls: {
+    state: "SD", label: "City of Sioux Falls, SD",
+    layerUrl: "https://gis.siouxfalls.gov/arcgis/rest/services/Data/Property/MapServer/1",
+    idField: "TAG", addrField: "ADDRESS",
+    help: "City of Sioux Falls parcels (city GIS, Esri-hosted) — searches are limited to the city limits, not all of Minnehaha County. Search by parcel tag or a site address.",
+  },
+  /* Luzerne County, PA. ⛔ LAYER 1 IS THE PARCEL (TAX PARCELS) LAYER on this service — layer 6 on
+   * the SAME service is IMPROVEMENTS, a different table entirely, and must never be wired here.
+   * MEASURED LIVE 2026-09-15: 176,385 polygons, extent matching Luzerne County. No address field
+   * on this layer — left unset rather than invented; a missing addrField degrades to no address
+   * search (see the ID_RE / detectField auto-detection note near the top of this file), never a
+   * guessed column. */
+  pa_luzerne: {
+    state: "PA", label: "Luzerne County, PA",
+    layerUrl: "https://gis.luzernecounty.org/server/rest/services/PublicMap/MapServer/1",
+    idField: "PIN",
+    help: "Luzerne County tax parcels (county GIS). Search by parcel ID (PIN) — no address search; this layer carries no address field.",
+  },
+  /* Lackawanna County, PA. Esri PARCEL-FABRIC schema, not a normal assessor layer — `Name` (not
+   * `PIN`/`APN`) holds the 13-digit parcel PIN and is the idField. ⛔ `StatedArea` holds acreage as
+   * a STRING WITH A UNIT SUFFIX ("2.005 ac", "49.874 ac") — never parse it as a bare number if a
+   * future acreage readout consumes it. It is harmless today: `appraisal.js`'s `GIS_ACRE_RE`
+   * requires literal "gis_area"/"acre" fragments and does not match "StatedArea", so this layer's
+   * acreage-shaped field is correctly invisible to that auto-detection. `Type_` is null on every
+   * sampled row. MEASURED LIVE 2026-09-15: 103,145 polygons, extent matching Lackawanna County.
+   * Do NOT use the sibling `GISViewer/ParcelsPINs` service — identical count, identical fabric
+   * schema, no added value. */
+  pa_lackawanna: {
+    state: "PA", label: "Lackawanna County, PA",
+    layerUrl: "https://gis.lackawannacounty.org/arcgis/rest/services/GISViewer/Parcels/FeatureServer/0",
+    idField: "Name",
+    help: "Lackawanna County tax parcels (county GIS, Esri parcel-fabric schema). Search by parcel PIN — no address search; this layer carries no address field.",
+  },
+  /* Macomb County, MI — the third county of metro Detroit; previously had no parcel source at all.
+   * ⛔ LAYER ID IS 10, NOT 0 — layer 0 does not exist on this service ("Invalid URL"); the service
+   * exposes exactly one layer, id 10, "Macomb County Tax Parcels". MEASURED LIVE 2026-09-15:
+   * 332,971 polygons, extent matching Macomb County; confirmed reachable with a matching field
+   * list directly from this sandbox too (services6.arcgis.com). No city hole — four spread points
+   * (Warren, Sterling Heights, Mount Clemens, Romeo) all resolved correctly.
+   * ⛔ PROVENANCE RISK: published under a PERSONAL ArcGIS Online account, not a county-org one —
+   * the same shape as the Texas statewide source whose owner deleted it and broke the whole state
+   * (docs/STATEWIDE-PARCELS.md). Flagged so a future staleness/vintage check knows to look here
+   * first, and so a county-published replacement is preferred over this one if it ever appears. */
+  mi_macomb: {
+    state: "MI", label: "Macomb County, MI",
+    layerUrl: "https://services6.arcgis.com/K0qS4r8AEJxrE8em/arcgis/rest/services/Macomb_County_Parcel_Data/FeatureServer/10",
+    idField: "TAX_ID", addrField: "ADDRESS",
+    help: "Macomb County tax parcels (Esri-hosted, personal AGOL account — see this entry's own code comment on vintage/removal risk). Search by tax ID or a site address.",
+  },
+
+  /* ═══ NEW-6/NEW-7 (2026-09-15) — Kansas City, MO, city-scoped and spanning FOUR counties
+   * (Jackson, Clay, Platte, Cass), plus Independence, MO, city-scoped and wholly within Jackson.
+   * See cityScopes.js's own header for why a city-scoped source needs no per-county branching: its
+   * boundary ring test is county-agnostic, so one layer answers regardless of which county the
+   * point falls in. mo_clay and mo_platte (above) remain each county's own wired source OUTSIDE
+   * Kansas City's limits; inside them, the city layer takes precedence — the same precedence
+   * cityScopeAnswer already gives mi_detroit over Wayne County. ═══ */
+  mo_kansascity: {
+    // MEASURED LIVE 2026-09-15: 203,425 polygons. The APN prefix (JA/CL/PL/…) names which county a
+    // parcel is in, confirmed by three spread points — Crown Center (JA…, Jackson), north
+    // KC/Northland (CL…, Clay), the airport (PL…, Platte) — all resolving through this ONE layer
+    // via the boundary ring in cityScopes.js, never a per-county branch.
+    state: "MO", label: "City of Kansas City, MO",
+    layerUrl: "https://mapd.kcmo.org/kcgis/rest/services/AGOL/MapServer/6",
+    idField: "APN", addrField: "ADDRESS",
+    help: "City of Kansas City parcels (city GIS) — searches are limited to the city limits, which span Jackson, Clay, Platte and Cass counties. Search by APN or a site address.",
+  },
+  /* City of Independence, MO — city-scoped, wholly within Jackson County. Jackson County publishes
+   * no open countywide parcel service (docs/STATEWIDE-PARCELS.md); Independence and Kansas City
+   * together are what Jackson County gets — the rest of the county has no source wired, which is
+   * an honest gap, not a defect. MEASURED LIVE 2026-09-15: 73,154 polygons, extent covering the
+   * city (not the county). `Name` is confirmed as the idField — its live field-list alias reads
+   * "Parcel APN", confirmed directly from this sandbox (services.arcgis.com), not a guess. */
+  mo_independence: {
+    state: "MO", label: "City of Independence, MO",
+    layerUrl: "https://services.arcgis.com/sbDzK061dd6DNPHv/arcgis/rest/services/COI_Parcels_2_view/FeatureServer/0",
+    idField: "Name", addrField: "SitusAddress",
+    help: "City of Independence parcels (city GIS, Esri-hosted) — searches are limited to the city limits, not all of Jackson County. Search by parcel APN or a site address.",
+  },
 };
 
 /* The counties whose full parcel fabric is snapshot-cached to Google Drive (B629) so the map keeps
@@ -1666,6 +1778,37 @@ const COUNTIES_MAP_RAW = {
     bbox: [42.2550, -83.2877, 42.4504, -82.9103],
     cityScoped: true,
     mapServer: null, layerUrl: COUNTIES.mi_detroit.layerUrl,
+  },
+
+  // NEW-1/NEW-3/NEW-4/NEW-5, 2026-09-15 — see the matching COUNTIES block above for provenance.
+  sd_pennington: { state: "SD", center: [44.0805, -103.2310], zoom: 9, bbox: [43.638, -104.094, 44.514, -101.978], mapServer: null, layerUrl: COUNTIES.sd_pennington.layerUrl },
+  sd_minnehaha: { state: "SD", center: [43.6745, -96.7895], zoom: 10, bbox: [43.487, -97.140, 43.862, -96.439], mapServer: null, layerUrl: COUNTIES.sd_minnehaha.layerUrl },
+  pa_luzerne: { state: "PA", center: [41.2459, -75.8813], zoom: 10, bbox: [40.902, -76.323, 41.426, -75.601], mapServer: null, layerUrl: COUNTIES.pa_luzerne.layerUrl },
+  pa_lackawanna: { state: "PA", center: [41.4090, -75.6624], zoom: 10, bbox: [41.161, -75.833, 41.646, -75.434], mapServer: null, layerUrl: COUNTIES.pa_lackawanna.layerUrl },
+  mi_macomb: { state: "MI", center: [42.5975, -82.8794], zoom: 10, bbox: [42.443, -83.112, 42.902, -82.700], mapServer: null, layerUrl: COUNTIES.mi_macomb.layerUrl },
+
+  /* City-scoped entries (NEW-2/NEW-6/NEW-7, 2026-09-15) — `bbox` is each city's own ring extent,
+   * matching cityScopes.js's CITY_SCOPES bbox exactly (coarse pre-filter only, the ring geometry
+   * there decides). `cityScoped: true` is REQUIRED on every entry a city scope resolves to — see
+   * cityScopes.js's header and mi_detroit's own comment above for why. Test-guarded in
+   * test/cityScopes.test.js. */
+  sd_siouxfalls: {
+    state: "SD", center: [43.5512, -96.7234], zoom: 11,
+    bbox: [43.4643, -96.8488, 43.6381, -96.5981],
+    cityScoped: true,
+    mapServer: null, layerUrl: COUNTIES.sd_siouxfalls.layerUrl,
+  },
+  mo_kansascity: {
+    state: "MO", center: [39.0902, -94.5754], zoom: 10,
+    bbox: [38.8243, -94.7653, 39.3562, -94.3854],
+    cityScoped: true,
+    mapServer: null, layerUrl: COUNTIES.mo_kansascity.layerUrl,
+  },
+  mo_independence: {
+    state: "MO", center: [39.0787, -94.3486], zoom: 11,
+    bbox: [39.0176, -94.4814, 39.1398, -94.2159],
+    cityScoped: true,
+    mapServer: null, layerUrl: COUNTIES.mo_independence.layerUrl,
   },
 };
 

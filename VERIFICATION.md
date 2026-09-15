@@ -166,6 +166,74 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1179280 — B1651248: Pennington County, SD parcels — a real point in Rapid City returns a real parcel `Blocker: live-GIS`
+
+**Why this needs its own live pass.** GIS endpoint behaviour is a mandatory LIVE-VERIFY class. Reachability and field metadata were confirmed directly from this sandbox (`services1.arcgis.com` is on the egress allowlist) — `52,547` polygon features, extent matching Pennington County. What only a live click can show is that a real point inside Rapid City resolves a real parcel through exactly one query.
+
+**What was verified here (sandbox).** `countyKeyForName`/`candidateCountiesForPoint` auto-derive `sd_pennington` from the nationwide county-name geometry with no code change needed (the same mechanism every other per-county entry uses) — `test/countyStatewideDerivation.test.js`/`test/counties.test.js` pass unchanged. `test/gisSources.test.js`'s provenance audit passes with the new row's `verifiedOn` date recorded.
+
+**Steps.**
+1. Open the Site Planner on a Rapid City, SD site (or pan the map there and click a parcel).
+2. Click any lot. **Expect:** exactly ONE parcel query fires, to `services1.arcgis.com/AhXvNWFdL7hH4TjJ/.../PenningtonParcels/FeatureServer/0`, and a real parcel with a real PIN is selected.
+3. Click a lot well outside Pennington County (still in South Dakota). **Expect:** no query to this layer.
+- Stopping rule: closes when step 2 is observed on `planyr.io`, or when it fails and is filed as a recurrence against B1651248.
+
+### V1179281 — B1651249: Sioux Falls resolves to the city layer, a rural Minnehaha point resolves to the county layer — never the wrong one `Blocker: live-GIS`
+
+**Why this needs its own live pass.** The county layer's own hole over Sioux Falls, and the city-scope ring that fills it, are both proven sandbox-side against the real geometry (see below); only a live click can prove the actual `gis.minnehahacounty.gov`/`gis.siouxfalls.gov` endpoints answer correctly and that neither fires against the other.
+
+**What was verified here (sandbox).** `cityScopeAnswer`/`candidateCountiesForPoint` proven against the real fetched boundary ring: downtown Sioux Falls (-96.7311, 43.5460) resolves to `sd_siouxfalls` ALONE; a rural Minnehaha point (-96.95, 43.75) resolves to `sd_minnehaha` ALONE — `test/cityScopes.test.js`'s new suite pins both. The ring itself (Esri Living Atlas Census Populated Places, generalised ~150 m) was independently validated against `SQMI` (79.63, matching Sioux Falls' known area) and both control points before being embedded.
+
+**Steps.**
+1. Click a lot in downtown Sioux Falls. **Expect:** exactly ONE query, to `gis.siouxfalls.gov/.../Data/Property/MapServer/1`, real parcel with a real TAG returned.
+2. Click a lot well outside Sioux Falls but inside Minnehaha County (e.g. a rural point). **Expect:** exactly ONE query, to `gis.minnehahacounty.gov/.../Parcels/MapServer/0`.
+3. Click a lot near the Sioux Falls city line. **Expect:** the near-edge behaviour (may query both) rather than a wrong single answer.
+- Stopping rule: closes when steps 1–2 are observed on `planyr.io`, or when either fails and is filed as a recurrence against B1651249.
+
+### V1179282 — B1651250: Luzerne County, PA parcels — a real point returns a real parcel by PIN `Blocker: live-GIS`
+
+`gis.luzernecounty.org` is blocked from this sandbox; layer choice (layer 1, not the layer-6 Improvements table) and field mapping (`PIN`, no address field) are recorded from the dispatch's own live-browser measurement, not independently re-probed here.
+
+**Steps.**
+1. Click a lot in Luzerne County, PA (e.g. Wilkes-Barre). **Expect:** exactly ONE query, to `gis.luzernecounty.org/server/rest/services/PublicMap/MapServer/1`, a real parcel with a real PIN.
+2. Confirm the returned attributes come from LAYER 1, never layer 6 (Improvements).
+- Stopping rule: closes when step 1 is observed on `planyr.io`, or when it fails and is filed as a recurrence against B1651250.
+
+### V1179283 — B1651251: Lackawanna County, PA parcels — a real point returns a real parcel by its 13-digit PIN `Blocker: live-GIS`
+
+`gis.lackawannacounty.org` is blocked from this sandbox; the parcel-fabric schema (`Name` = the PIN) is recorded from the dispatch's own live-browser measurement.
+
+**Steps.**
+1. Click a lot in Lackawanna County, PA (e.g. Scranton). **Expect:** exactly ONE query, to `gis.lackawannacounty.org/arcgis/rest/services/GISViewer/Parcels/FeatureServer/0`, a real parcel whose `Name` field is a 13-digit PIN.
+- Stopping rule: closes when step 1 is observed on `planyr.io`, or when it fails and is filed as a recurrence against B1651251.
+
+### V1179284 — B1651252: Macomb County, MI parcels — four spread points across the county each return a real parcel, no city hole `Blocker: live-GIS`
+
+**What was verified here (sandbox).** Reachability and field metadata confirmed directly from this sandbox (`services6.arcgis.com`) — `332,971` polygon features, fields match exactly.
+
+**Steps.**
+1. Click a lot in Warren, MI. **Expect:** a real parcel at 11064 10 Mile Rd (or nearby), via `services6.arcgis.com/K0qS4r8AEJxrE8em/.../Macomb_County_Parcel_Data/FeatureServer/10`.
+2. Repeat for Sterling Heights, Mount Clemens and Romeo. **Expect:** each returns a real, distinct parcel — confirming no city-shaped hole in this county's coverage.
+- Stopping rule: closes when steps 1–2 are observed on `planyr.io`, or when either fails and is filed as a recurrence against B1651252.
+
+### V1179285 — B1651253: Kansas City, MO parcels resolve through ONE ring across Jackson, Clay and Platte counties `Blocker: live-GIS`
+
+**Why this needs its own live pass.** The county-agnostic ring resolution is proven sandbox-side against the real fetched boundary (`test/cityScopes.test.js`); only a live click can prove `mapd.kcmo.org` itself answers correctly for a point in each county.
+
+**Steps.**
+1. Click a lot at Crown Center (Jackson County). **Expect:** exactly ONE query, to `mapd.kcmo.org/kcgis/rest/services/AGOL/MapServer/6`, a real parcel with an APN starting `JA`.
+2. Click a lot in the Northland (Clay County, inside KC limits). **Expect:** the same layer, an APN starting `CL`.
+3. Click a lot near KCI airport (Platte County). **Expect:** the same layer, an APN starting `PL`.
+4. Click a lot in Liberty, MO (Clay County, OUTSIDE KC limits). **Expect:** routes to `mo_clay` instead, never the KC layer.
+- Stopping rule: closes when steps 1–4 are observed on `planyr.io`, or when any fails and is filed as a recurrence against B1651253.
+
+### V1179286 — B1651254: Independence, MO parcels — a real point returns a real parcel, distinct from the Kansas City ring `Blocker: live-GIS`
+
+**Steps.**
+1. Click a lot in Independence, MO. **Expect:** exactly ONE query, to `services.arcgis.com/sbDzK061dd6DNPHv/.../COI_Parcels_2_view/FeatureServer/0`, a real parcel whose `Name` field is a parcel APN.
+2. Click a lot in downtown Kansas City. **Expect:** routes to `mo_kansascity`, never `mo_independence`.
+- Stopping rule: closes when steps 1–2 are observed on `planyr.io`, or when either fails and is filed as a recurrence against B1651254.
+
 ### V1160896 — B1631939: pinned/reordered projects in the header switcher actually follow the owner's account across devices, and survive a real sign-in `Blocker: auth`
 
 **What was verified here, extensively, without a real signed-in pass.** Driven headless in a real Chromium build against three real seeded projects (not a synthetic fixture), logged out: pinning from the switcher's kebab lifts a project into a "Pinned" section below the always-first current project; a second pin puts it above the first (most-recently-pinned-first, matching the existing Sites-panel convention — see V480816); keyboard ArrowUp/ArrowDown on the drag handle reorders the pinned section; unpinning removes a project from that section; deleting a pinned project cleans it out of the pinned list (no ghost pin left behind); a reload of the page (localStorage left genuinely alone) shows the same pin state and order restored, via `userPrefs.js`'s existing localStorage mirror of the account-scope `sitesPanel` bag; a non-matching search query empties the whole list, current and pinned rows included, rather than force-showing either.

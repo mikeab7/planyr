@@ -150,3 +150,92 @@ describe("a Wayne County point never reaches Oakland County's service (B1597232)
     expect(candidateCountiesForPoint(42.6389, -83.2910)).toEqual(["mi_oakland"]);
   });
 });
+
+/* NEW-2 (2026-09-15) — Sioux Falls fills the hole Minnehaha County's own layer leaves over its
+ * downtown (measured live: a point query there returns zero on the county layer). Same two-tier
+ * shape as Detroit/Wayne, except Minnehaha DOES have a real county-level source outside the city. */
+describe("Sioux Falls fills the hole in Minnehaha County's own layer (NEW-2)", () => {
+  const DOWNTOWN_SF = [43.5460, -96.7311];
+  const RURAL_MINNEHAHA = [43.75, -96.95]; // 1 feature on the county layer per the dispatch brief
+
+  it("hits downtown Sioux Falls, misses a rural Minnehaha point", () => {
+    expect(cityScopeAnswer(...DOWNTOWN_SF)).toEqual({
+      key: "sd_siouxfalls", name: "Sioux Falls", state: "SD", nearEdge: false,
+    });
+    expect(cityScopeAnswer(...RURAL_MINNEHAHA)).toBeNull();
+  });
+
+  it("sd_siouxfalls is a real, distinct, cityScoped entry", () => {
+    expect(COUNTIES_MAP.sd_siouxfalls).toBeTruthy();
+    expect(COUNTIES_MAP.sd_siouxfalls.cityScoped).toBe(true);
+    expect(COUNTIES.sd_siouxfalls.layerUrl).toMatch(/siouxfalls\.gov/);
+  });
+
+  it("downtown Sioux Falls resolves to sd_siouxfalls alone via the full click-routing chain", () => {
+    expect(countyIdentity(...DOWNTOWN_SF)).toEqual({
+      status: "ok", key: "sd_siouxfalls", name: "Sioux Falls", state: "SD", nearEdge: false,
+    });
+    expect(countyForView(...DOWNTOWN_SF)).toBe("sd_siouxfalls");
+    expect(candidateCountiesForPoint(...DOWNTOWN_SF)).toEqual(["sd_siouxfalls"]);
+  });
+
+  it("a rural Minnehaha point routes to the county layer, never the city one", () => {
+    expect(candidateCountiesForPoint(...RURAL_MINNEHAHA)).toEqual(["sd_minnehaha"]);
+  });
+});
+
+/* NEW-6/NEW-7 (2026-09-15) — Kansas City spans four counties; the ring test is county-agnostic, so
+ * one boundary answers regardless of which county a point falls in. Independence is a second,
+ * non-overlapping city scope wholly inside Jackson County. */
+describe("Kansas City spans four counties through one county-agnostic ring test (NEW-6)", () => {
+  const CROWN_CENTER = [39.0836, -94.5822];   // Jackson County
+  const NORTHLAND = [39.2500, -94.5800];      // Clay County
+  const KCI_AIRPORT = [39.2976, -94.7139];    // Platte County
+
+  it.each([
+    ["Crown Center (Jackson Co.)", CROWN_CENTER],
+    ["Northland (Clay Co.)", NORTHLAND],
+    ["KCI airport (Platte Co.)", KCI_AIRPORT],
+  ])("%s all resolve to the SAME mo_kansascity ring, regardless of county", (_label, pt) => {
+    expect(cityScopeAnswer(...pt)).toEqual({
+      key: "mo_kansascity", name: "Kansas City", state: "MO", nearEdge: false,
+    });
+    expect(candidateCountiesForPoint(...pt)).toEqual(["mo_kansascity"]);
+  });
+
+  it("mo_kansascity is a real, distinct, cityScoped entry", () => {
+    expect(COUNTIES_MAP.mo_kansascity).toBeTruthy();
+    expect(COUNTIES_MAP.mo_kansascity.cityScoped).toBe(true);
+    expect(COUNTIES.mo_kansascity.idField).toBe("APN");
+  });
+
+  it("a real Clay County point OUTSIDE Kansas City still reaches mo_clay, not the city layer", () => {
+    // Liberty, MO — squarely inside Clay County, well north of KC's own limits.
+    const LIBERTY_MO = [39.2461, -94.4191];
+    expect(cityScopeAnswer(...LIBERTY_MO)).toBeNull();
+  });
+});
+
+describe("Independence, MO — a second, non-overlapping city scope inside Jackson County (NEW-7)", () => {
+  const INDEPENDENCE_CENTER = [39.0911, -94.4155];
+  const CROWN_CENTER = [39.0836, -94.5822]; // Kansas City, not Independence
+
+  it("hits its own centre, and is distinct from the Kansas City ring", () => {
+    expect(cityScopeAnswer(...INDEPENDENCE_CENTER)).toEqual({
+      key: "mo_independence", name: "Independence", state: "MO", nearEdge: false,
+    });
+    expect(cityScopeAnswer(...CROWN_CENTER)).not.toEqual(
+      expect.objectContaining({ key: "mo_independence" })
+    );
+  });
+
+  it("mo_independence is a real, distinct, cityScoped entry", () => {
+    expect(COUNTIES_MAP.mo_independence).toBeTruthy();
+    expect(COUNTIES_MAP.mo_independence.cityScoped).toBe(true);
+    expect(COUNTIES.mo_independence.idField).toBe("Name");
+  });
+
+  it("resolves alone via the full click-routing chain", () => {
+    expect(candidateCountiesForPoint(...INDEPENDENCE_CENTER)).toEqual(["mo_independence"]);
+  });
+});

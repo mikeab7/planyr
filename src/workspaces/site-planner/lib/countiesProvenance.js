@@ -242,6 +242,39 @@ export const COUNTY_VERIFICATION = {
     verifiedOn: "2026-09-12",
     verifiedNote: "Layer metadata (field list: parcel_id, address, tax_status, tax_status_description, 51 fields total) confirmed LIVE from this sandbox — services2.arcgis.com is reachable here. The dispatch's own live-browser measurement (2026-09-11 evening Central) queried a real point at downtown Detroit (42.3314, -83.0458) and returned a parcel with 46 populated fields. Detroit_MP_Parcel_Authoritative was PREVIOUSLY declined as a Wayne County candidate (B1455635/B1551617) for exactly the reason it is now wired only as a CITY scope: it is Detroit's own authoritative parcel layer and would silently return nothing across the rest of Wayne County. The boundary geometry cityScopes.js uses to decide whether a point is inside Detroit at all — 'City of Detroit Boundary', City of Detroit's own ArcGIS Online org (OpenDataAdmin_detroitmi, item 86b221bb68ca4364afe81d156e54f95c, public_authoritative) — was independently queried and verified live from this sandbox the same session; see that module's own header for the full provenance and the three control points (downtown Detroit hits; Livonia and Taylor, both real Wayne County cities, do not).",
   },
+
+  /* ═══ 2026-09-15 — South Dakota (Pennington + Minnehaha/Sioux Falls), Pennsylvania (Luzerne +
+   * Lackawanna), Macomb MI, and the Kansas City/Independence MO city-scoped pair. All measured
+   * live from Michael's own browser 2026-09-15; the *.arcgis.com endpoints (Pennington, Macomb,
+   * Independence) were additionally confirmed reachable, with matching field lists, directly from
+   * this sandbox the same day. ═══ */
+  sd_pennington: {
+    verifiedOn: "2026-09-15",
+    verifiedNote: "VERIFIED LIVE from Michael's own browser and independently re-confirmed from this sandbox (services1.arcgis.com is reachable here): 52,547 parcel polygons, extent matching Pennington County (Rapid City), fields include PIN/TaxID/Acres/LotStreetN/LegalDescr/Subdivisio.",
+  },
+  sd_minnehaha: {
+    verifiedNote: "gis.minnehahacounty.gov is blocked by this build environment's egress policy. VERIFIED LIVE from Michael's own browser 2026-09-15: 23,044 parcel polygons across the whole-county extent — but this layer has a HOLE exactly where Sioux Falls sits (a point query at downtown Sioux Falls, -96.7311/43.5460, returns ZERO; a rural point 15 miles away, -96.95/43.75, returns a real parcel). See sd_siouxfalls below for the city's own layer, which fills the hole, and cityScopes.js for the resolution mechanism. This is the worked example behind the parcel-source vetting 'city-hole' trap (ui-audit/discover-county-parcels.mjs).",
+  },
+  sd_siouxfalls: {
+    verifiedNote: "gis.siouxfalls.gov is blocked by this build environment's egress policy. VERIFIED LIVE from Michael's own browser 2026-09-15: 67,022 parcel polygons, extent covering the city (not the county); ACREAGE is a real double, unlike Lackawanna's StatedArea below. City-scoped (cityScopes.js) — the boundary ring itself comes from Esri's own Living Atlas 'USA Census Populated Place Areas' (services.arcgis.com/P3ePLMYs2RVChkJx/…), queried live from this sandbox 2026-09-15 (the city's own AGOL account publishes no reachable mirror of its 'City Limits' layer — see cityScopes.js's own header for the full provenance).",
+  },
+  pa_luzerne: {
+    verifiedNote: "gis.luzernecounty.org is blocked by this build environment's egress policy. VERIFIED LIVE from Michael's own browser 2026-09-15: 176,385 parcel polygons, extent matching Luzerne County. Layer 1 ('PublicMap/MapServer/1') is the parcel (tax parcels) layer; layer 6 on the same service is IMPROVEMENTS, a different table, and is not wired.",
+  },
+  pa_lackawanna: {
+    verifiedNote: "gis.lackawannacounty.org is blocked by this build environment's egress policy. VERIFIED LIVE from Michael's own browser 2026-09-15: 103,145 parcel polygons, extent matching Lackawanna County, Esri parcel-fabric schema (Name = the 13-digit parcel PIN, confirmed by sampled attributes). Do not wire the sibling GISViewer/ParcelsPINs service — identical count and schema, no added value.",
+  },
+  mi_macomb: {
+    verifiedOn: "2026-09-15",
+    verifiedNote: "VERIFIED LIVE from Michael's own browser and independently re-confirmed from this sandbox (services6.arcgis.com is reachable here, field list matches exactly: TAX_ID/ADDRESS/TAX_TYPE/CVT_NAME/…): 332,971 parcel polygons, extent matching Macomb County. Layer ID is 10, NOT 0 (layer 0 does not exist on this service — 'Invalid URL'). ⛔ Published under a PERSONAL ArcGIS Online account, not a county-org account — the same provenance risk as the Texas statewide source whose owner deleted it (docs/STATEWIDE-PARCELS.md); flagged here so a future staleness check looks at this row first.",
+  },
+  mo_kansascity: {
+    verifiedNote: "mapd.kcmo.org is blocked by this build environment's egress policy. VERIFIED LIVE from Michael's own browser 2026-09-15: 203,425 parcel polygons; a 3-point spread across the whole city (Crown Center/Jackson Co., Northland/Clay Co., the airport/Platte Co.) all answered with real, distinct parcels through this ONE layer. City-scoped (cityScopes.js) and spans Jackson, Clay, Platte and Cass counties — the ring test is county-agnostic, so no per-county branching is needed. The boundary ring comes from Esri's own Living Atlas 'USA Census Populated Place Areas' (services.arcgis.com/P3ePLMYs2RVChkJx/…), queried live from this sandbox 2026-09-15, after the city's own AGOL-hosted 'CityLimit' layer (services.arcgis.com/4o5uMWTHuOhUVJPd/…) was found to answer `returnCountOnly` with 0 features despite advertising a real extent — an empty hosted layer, confirmed live, not a reachability block. See cityScopes.js's own header for the full provenance.",
+  },
+  mo_independence: {
+    verifiedOn: "2026-09-15",
+    verifiedNote: "VERIFIED LIVE from Michael's own browser and independently re-confirmed from this sandbox (services.arcgis.com/sbDzK061dd6DNPHv is reachable here): 73,154 parcel polygons, extent covering the city (not Jackson County). `Name` is confirmed as the idField — its live field-list alias reads 'Parcel APN'. City-scoped (cityScopes.js), wholly within Jackson County, which publishes no open countywide parcel service of its own (docs/STATEWIDE-PARCELS.md) — Independence and Kansas City together are what Jackson County gets; the rest of the county has no source wired, an honest gap rather than a defect.",
+  },
 };
 
 /* Convenience accessors so callers never reach into the shape directly. */

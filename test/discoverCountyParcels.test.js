@@ -9,6 +9,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   rejectCandidate, rankScore, vintageOf, spreadProbePoints, acceptCandidate,
   REJECT_TITLE_RE, STALE_YEAR_THRESHOLD, TIER1_COUNTIES, candidateHostnames, discoverCounty,
+  COUNTYWIDE_CLAIM_RE, COUNTYWIDE_MIN_FEATURES,
 } from "../ui-audit/discover-county-parcels.mjs";
 import { resetHostHealth, resetHostThrottle } from "../ui-audit/lib/hostThrottle.mjs";
 
@@ -203,6 +204,116 @@ describe("acceptCandidate — the four-bullet acceptance test, network mocked", 
     expect(r.accepted).toBe(false);
     expect(r.blocked).toBe(true);
     expect(r.reasons[0]).toMatch(/blocked by this sandbox/);
+  });
+});
+
+/* ⛔ NAMED TRAP #3 (NEW-8, 2026-09-15) — a title claiming "countywide" is a CLAIM, not evidence.
+ * The worked example is the exact one the dispatch brief ruled out: "Land Trust of Jackson County
+ * Missouri Parcels (Countywide)" — 516 features, a land-bank holdings subset. */
+describe("NAMED TRAP #3 — the title is never the measurement (a 'countywide' claim vs the real count)", () => {
+  const SPREAD = [{ lat: 1, lng: 1 }, { lat: 2, lng: 2 }, { lat: 3, lng: 3 }];
+  afterEach(() => { vi.unstubAllGlobals(); resetHostHealth(); resetHostThrottle(); });
+
+  it("COUNTYWIDE_CLAIM_RE matches the exact reported title", () => {
+    expect(COUNTYWIDE_CLAIM_RE.test("Land Trust of Jackson County Missouri Parcels (Countywide)")).toBe(true);
+    expect(COUNTYWIDE_CLAIM_RE.test("County-Wide Parcels")).toBe(true);
+    expect(COUNTYWIDE_CLAIM_RE.test("Jackson County Parcels")).toBe(false); // "County" alone is not a countywide CLAIM
+  });
+
+  it("rejects a 'countywide'-titled layer whose real count is implausibly small (the Jackson County land-trust case, 516 features)", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { fields: [{ name: "OWNER" }], geometryType: "esriGeometryPolygon" })) // metadata
+      .mockResolvedValueOnce(jsonResponse(200, { count: 516 })); // returnCountOnly
+    vi.stubGlobal("fetch", fetchMock);
+    const r = await acceptCandidate(
+      { title: "Land Trust of Jackson County Missouri Parcels (Countywide)", url: "https://example.test/ab748f/FeatureServer/0" },
+      SPREAD
+    );
+    expect(r.accepted).toBe(false);
+    expect(r.reasons[0]).toMatch(/countywide.*only 516 features/);
+    // Never reached the spread-point probes — the count check runs first and is cheaper.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts a 'countywide'-titled layer whose count clears the floor", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { fields: [{ name: "OWNER" }], geometryType: "esriGeometryPolygon" }))
+      .mockResolvedValueOnce(jsonResponse(200, { count: COUNTYWIDE_MIN_FEATURES + 1 }))
+      .mockResolvedValueOnce(jsonResponse(200, { features: [{ attributes: { OWNER: "Jane Doe" } }] }))
+      .mockResolvedValueOnce(jsonResponse(200, { features: [{ attributes: { OWNER: "John Roe" } }] }))
+      .mockResolvedValueOnce(jsonResponse(200, { features: [{ attributes: { OWNER: "Ann Poe" } }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const r = await acceptCandidate({ title: "Real County Parcels (Countywide)", url: "https://example.test/x/FeatureServer/0" }, SPREAD);
+    expect(r.accepted).toBe(true);
+  });
+
+  it("a title with no 'countywide' claim never triggers the count query at all", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { fields: [{ name: "OWNER" }], geometryType: "esriGeometryPolygon" }))
+      .mockResolvedValueOnce(jsonResponse(200, { features: [{ attributes: { OWNER: "Jane Doe" } }] }))
+      .mockResolvedValueOnce(jsonResponse(200, { features: [{ attributes: { OWNER: "John Roe" } }] }))
+      .mockResolvedValueOnce(jsonResponse(200, { features: [{ attributes: { OWNER: "Ann Poe" } }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const r = await acceptCandidate({ title: "Jackson County Parcels", url: "https://example.test/x/FeatureServer/0" }, SPREAD);
+    expect(r.accepted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(4); // metadata + 3 spread points, no count query
+  });
+});
+
+/* ⛔ NAMED TRAP #2 (NEW-8, 2026-09-15) — a county layer with a correct count and a correct extent
+ * can still have a hole exactly where the county's largest city sits. Minnehaha County, SD is the
+ * worked example: real elsewhere, zero at Sioux Falls. */
+describe("NAMED TRAP #2 — the city-hole (a county's largest city returns zero despite passing every spread point)", () => {
+  const SPREAD = [{ lat: 1, lng: 1 }, { lat: 2, lng: 2 }, { lat: 3, lng: 3 }];
+  const SIOUX_FALLS = { name: "Sioux Falls", lat: 43.5460, lng: -96.7311 };
+  afterEach(() => { vi.unstubAllGlobals(); resetHostHealth(); resetHostThrottle(); });
+
+  it("rejects when every spread point passes but the named largest-city point returns zero", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { fields: [{ name: "OWNER" }], geometryType: "esriGeometryPolygon" })) // metadata
+      .mockResolvedValueOnce(jsonResponse(200, { features: [{ attributes: { OWNER: "1" } }] })) // spread 1 — rural, real
+      .mockResolvedValueOnce(jsonResponse(200, { features: [{ attributes: { OWNER: "2" } }] })) // spread 2 — rural, real
+      .mockResolvedValueOnce(jsonResponse(200, { features: [{ attributes: { OWNER: "3" } }] })) // spread 3 — rural, real
+      .mockResolvedValueOnce(jsonResponse(200, { features: [] })); // the named city point — the hole
+    vi.stubGlobal("fetch", fetchMock);
+    const r = await acceptCandidate(
+      { title: "Minnehaha County Parcels", url: "https://example.test/minnehaha/MapServer/0" },
+      SPREAD,
+      { largestCity: SIOUX_FALLS }
+    );
+    expect(r.accepted).toBe(false);
+    expect(r.reasons[0]).toMatch(/city-hole.*Sioux Falls/);
+    expect(r.cityHoleProbe.ok).toBe(false);
+  });
+
+  it("accepts when the named largest-city point also returns real data", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { fields: [{ name: "OWNER" }], geometryType: "esriGeometryPolygon" }))
+      .mockResolvedValueOnce(jsonResponse(200, { features: [{ attributes: { OWNER: "1" } }] }))
+      .mockResolvedValueOnce(jsonResponse(200, { features: [{ attributes: { OWNER: "2" } }] }))
+      .mockResolvedValueOnce(jsonResponse(200, { features: [{ attributes: { OWNER: "3" } }] }))
+      .mockResolvedValueOnce(jsonResponse(200, { features: [{ attributes: { OWNER: "4" } }] })); // the city point — real
+    vi.stubGlobal("fetch", fetchMock);
+    const r = await acceptCandidate(
+      { title: "A Real Statewide-Quality County Layer", url: "https://example.test/x/MapServer/0" },
+      SPREAD,
+      { largestCity: SIOUX_FALLS }
+    );
+    expect(r.accepted).toBe(true);
+    expect(r.cityHoleProbe.ok).toBe(true);
+  });
+
+  it("with no largestCity supplied, the extra probe never runs at all (byte-identical to before this trap existed)", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { fields: [{ name: "OWNER" }], geometryType: "esriGeometryPolygon" }))
+      .mockResolvedValueOnce(jsonResponse(200, { features: [{ attributes: { OWNER: "1" } }] }))
+      .mockResolvedValueOnce(jsonResponse(200, { features: [{ attributes: { OWNER: "2" } }] }))
+      .mockResolvedValueOnce(jsonResponse(200, { features: [{ attributes: { OWNER: "3" } }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const r = await acceptCandidate({ title: "A Real County Layer", url: "https://example.test/x/MapServer/0" }, SPREAD);
+    expect(r.accepted).toBe(true);
+    expect(r.cityHoleProbe).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 });
 

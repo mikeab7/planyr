@@ -352,6 +352,36 @@ recorded as genuinely not found by routes 1-3, not sandbox-blocked (see "Not fou
 below). Route 4 (state open-data org search) surfaced no additional accepted candidate beyond what
 routes 1-2 already found for this roster.
 
+### Tier 1 continuation — 2026-09-15
+
+All eight measured live from Michael's own browser 2026-09-15; three (`sd_pennington`, `mi_macomb`,
+`mo_independence`) additionally confirmed reachable, with matching field lists, directly from this
+sandbox the same day (all three sit on `*.arcgis.com`).
+
+| State | County/City | Wired key | Notes |
+|---|---|---|---|
+| SD | Pennington | `sd_pennington` | 52,547 parcels, extent matching the county (Rapid City). South Dakota had ZERO parcel coverage before this session. |
+| SD | Minnehaha (rural remainder) | `sd_minnehaha` | ⛔ **THE CITY-HOLE, worked example.** 23,044 parcels across the whole-county extent — count and extent both look correct — but a point query at downtown Sioux Falls (its own largest city) returns ZERO; a rural point 15 miles away returns a real parcel. This is now a NAMED TRAP in `ui-audit/discover-county-parcels.mjs`'s acceptance test (`largestCity` probe, run separately from the three generic spread points). |
+| SD | Sioux Falls (city) | `sd_siouxfalls` | City-scoped (`cityScopes.js`) — fills the hole above. 67,022 parcels. Boundary ring sourced from Esri's Living Atlas Census Populated Places (the city's own AGOL account publishes no reachable mirror of its real "City Limits" layer). |
+| PA | Luzerne | `pa_luzerne` | 176,385 parcels. **CLOSES the 2026-09-11 lead below** — `gis.luzernecounty.org` was already recorded as a real, correctly-named candidate blocked in this sandbox; it answers from an open-egress browser, confirming that record rather than correcting it. Layer 1 is the parcel layer; layer 6 on the same service is Improvements, not wired. |
+| PA | Lackawanna | `pa_lackawanna` | 103,145 parcels, Esri parcel-fabric schema (`Name` = the 13-digit PIN). **CLOSES the 2026-09-11 lead below** — same shape as Luzerne. |
+| MI | Macomb | `mi_macomb` | 332,971 parcels, on `services6.arcgis.com` (an AGOL-hosted layer, not `gis.macombgov.org` — the county's own host that the 2026-09-11 "not found by routes 1-3, tried from Michael's own browser" record below genuinely could not reach). **Different endpoint, not a correction of that finding** — the county host is still unreached; this is a separately-published copy. ⛔ Published under a personal AGOL account, not a county org — flagged as a provenance/vintage risk, the same shape as the Texas statewide source whose owner deleted it. |
+| MO | Kansas City (city) | `mo_kansascity` | City-scoped (`cityScopes.js`), spans Jackson/Clay/Platte/Cass counties — the ring test is county-agnostic, so one layer answers regardless of county. 203,425 parcels. The city's own AGOL-hosted "CityLimit" boundary layer answers `returnCountOnly` with 0 features (an empty hosted layer, not a reachability block) — the boundary ring instead comes from Esri's Living Atlas Census Populated Places. |
+| MO | Independence (city) | `mo_independence` | City-scoped, wholly within Jackson County. 73,154 parcels. |
+
+**Jackson County, MO still has no COUNTYWIDE source** — this correction is about the two cities
+inside it, not the county. `gis.jacksongov.org` / `maps.jacksongov.org` still did not answer (see
+below); Kansas City and Independence together are what Jackson County gets, exactly the shape this
+repo already uses for Wayne County MI (Detroit) — the rest of Jackson County (Lee's Summit, Blue
+Springs, Grandview, unincorporated land, …) has no source wired, an honest gap, not a defect.
+
+**Washington statewide parcels remain declined on LICENCE grounds, unchanged (B759/760).** A
+2026-09-12 brief separately instructed wiring Washington statewide; that instruction was WRONG and
+was retracted by the same 2026-09-15 dispatch that produced the rows above — this repo's own record
+(above, "Washington (WA)") already flags the WA Geospatial Portal's parcel mosaic as licence-restricted
+("State of Washington business only" for some counties) and pending an owner decision. Washington
+was correctly NOT touched this session.
+
 ### Excluded — measured, answered, and deliberately NOT wired
 
 Recorded here so nobody re-adds them without re-deriving the same answer:
@@ -424,8 +454,10 @@ strong leads for a live pass, not a guess:**
 - **Cobb County, GA** — `gis.cobbcounty.org`, AGOL item "Parcels - GA - Cobb County".
 - **Spartanburg County, SC** — `smpesri.scdot.org`, AGOL item "Parcels - SC - Spartanburg County".
 - **Luzerne County, PA** — `gis.luzernecounty.org`, AGOL items "Luzerne County Parcels" AND
-  "Parcels - PA - Luzerne County" (two, same host).
+  "Parcels - PA - Luzerne County" (two, same host). **✅ WIRED 2026-09-15 — see "Tier 1
+  continuation" above (`pa_luzerne`).**
 - **Lackawanna County, PA** — `gis.lackawannacounty.org`, AGOL item "Lackawanna County Parcels".
+  **✅ WIRED 2026-09-15 — see "Tier 1 continuation" above (`pa_lackawanna`).**
 
 **Re-attempted this session, no good candidate on any route — every hit was either wrong-state
 noise (a same-named county elsewhere: Jackson County OR for Jackson MO, Winnebago County WI for
@@ -445,9 +477,13 @@ Henry (GA) · Winnebago (IL) · ~~Orleans (LA)~~.
 sandbox) and STILL did not answer, so these are genuinely harder than a sandbox block, never "no
 source":**
 - **Macomb County, MI** — `gis.macombgov.org` (the route 3 hostname harvest's own candidate,
-  AGOL item "Parcels - MI - Macomb County") did not answer live either.
+  AGOL item "Parcels - MI - Macomb County") did not answer live either. This finding is UNCHANGED —
+  `mi_macomb` (wired 2026-09-15, "Tier 1 continuation" above) is a DIFFERENT, separately-published
+  AGOL layer on `services6.arcgis.com`, not this host answering after all.
 - **Johnson County, KS** — `aims.jocogov.org` did not answer live.
-- **Jackson County, MO** — `gis.jacksongov.org` did not answer live.
+- **Jackson County, MO** — `gis.jacksongov.org` did not answer live. Still true at the COUNTY level —
+  see "Tier 1 continuation" above for why Kansas City and Independence (both CITY-scoped, wired
+  2026-09-15) are what Jackson County gets instead.
 
 **Not on this session's Tier 1 roster, unchanged from the 2026-09-10 pass — several almost
 certainly publish parcels through a route not yet tried against them specifically:**
@@ -464,15 +500,15 @@ them, which is a much narrower claim.
 | State | County | Hostnames tried, none answered |
 |---|---|---|
 | MI | Wayne (outside Detroit) | `gis.waynecounty.com` · `maps.waynecounty.com` · `gisapps.waynecounty.com` — reconfirmed 2026-09-11 evening (B1583297). **The City of Detroit ITSELF, inside Wayne County, is now wired separately as a city-scoped source (`mi_detroit`, B1583296) — this row is about the COUNTY-wide gap only, i.e. every Wayne County city that is not Detroit.** |
-| MI | Macomb | `gis.macombgov.org` · `maps.macombgov.org` — reconfirmed 2026-09-11 evening (B1583297). |
+| MI | Macomb | `gis.macombgov.org` · `maps.macombgov.org` — reconfirmed 2026-09-11 evening (B1583297); still unreached. `mi_macomb` (wired 2026-09-15) is a different, separately-published AGOL layer, not this host. |
 | GA | Cobb | `gis.cobbcounty.org` · `gis.cobbcounty.gov` — reconfirmed 2026-09-11 evening (B1583297). |
 | GA | Fulton | `gis.fultoncountyga.gov` · `gisdata.fultoncountyga.gov` (already wired via route 1 — `ga_fulton` — so this is the hostname route failing, not the county; the county's OWN host might carry a fresher vintage than the AGOL copy, which is why this is still worth closing) — reconfirmed 2026-09-11 evening (B1583297). |
 | GA | Henry | `gis.co.henry.ga.us` — reconfirmed 2026-09-11 evening (B1583297). |
-| PA | Luzerne | `gis.luzernecounty.org` — reconfirmed 2026-09-11 evening (B1583297). |
-| PA | Lackawanna | `maps.lackawannacounty.org` — reconfirmed 2026-09-11 evening (B1583297). |
+| PA | Luzerne | `gis.luzernecounty.org` — reconfirmed 2026-09-11 evening (B1583297). ✅ WIRED 2026-09-15 (`pa_luzerne`) — this host answers from open egress. |
+| PA | Lackawanna | `maps.lackawannacounty.org` — reconfirmed 2026-09-11 evening (B1583297). ✅ WIRED 2026-09-15 (`pa_lackawanna`) — this host answers from open egress. |
 | IL | Winnebago | `gis.wincoil.gov` — reconfirmed 2026-09-11 evening (B1583297). |
 | MO | Clay | `gis.claycountymo.gov` (already wired via route 2 — `mo_clay` — same note as Fulton) — reconfirmed 2026-09-11 evening (B1583297). |
-| MO | Jackson | `gis.jacksongov.org` · `maps.jacksongov.org` — reconfirmed 2026-09-11 evening (B1583297). |
+| MO | Jackson | `gis.jacksongov.org` · `maps.jacksongov.org` — reconfirmed 2026-09-11 evening (B1583297); still no countywide source. Kansas City and Independence, both CITY-scoped, wired 2026-09-15 — see "Tier 1 continuation" above. |
 
 **⚠ Johnson County, KS is a DIFFERENT case and deserves its own line, because its host DID answer.**
 `aims.jocogov.org` / `gis.jocogov.org` / **`maps.jocogov.org`** (the third hostname added 2026-09-11
