@@ -313,7 +313,7 @@ import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES,
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, parcelSplitNames, lineageConflicts } from "./lib/siteModel.js";
-import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, rectContainsPoint, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, nodeJunction, cardinalTeePoint, roadBearingDeg } from "./lib/roadGeometry.js";
+import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, rectContainsPoint, polygonEdges, polygonContainsPoint, polygonDepthBehind, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, nodeJunction, cardinalTeePoint, roadBearingDeg } from "./lib/roadGeometry.js";
 import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, rectOutlineCutSegments } from "./lib/roadNetwork.js";
 import {
   roundaboutDiameterFor, roundaboutBandFor,
@@ -1370,9 +1370,10 @@ function teeJunctionsOf(els, settings) {
   return out;
 }
 // B955/NEW-1 — road → parking-drive / truck-court junctions for the clean-intersection render. Reads
-// el.driveTee (set at connect), locates the connected endpoint on the target rect's facing edge, and
-// reuses teeGeometry with the target edge as the "through" edge (no through curb; return radius scaled
-// by target type). Returns [{ sideId, targetId, kind, geom }]. Pure over (els, settings); memoized.
+// el.driveTee (set at connect), locates the connected endpoint on the target's facing edge (a rect's
+// via rectEdges, a free-drawn polygon pad/field's via polygonEdges — B<PENDING> NEW-2), and reuses
+// teeGeometry with the target edge as the "through" edge (no through curb; return radius scaled by
+// target type). Returns [{ sideId, targetId, kind, geom }]. Pure over (els, settings); memoized.
 // B959/NEW-1 — truck-court entrance sized by STANDARD CIVIL DRIVEWAY PRACTICE, design vehicle WB-62:
 // a SINGLE curb-return fillet of ≈50 ft (matches the truck's ~45 ft outer swept path), NOT the
 // public-street 120–125 ft simple-curve-with-taper or 400–440 ft 3-centered compound-curve templates
@@ -1415,15 +1416,22 @@ function driveJunctionsOf(els, settings) {
   for (const S of els || []) {
     if (!isCenterlineRoad(S) || S.attachedTo || !S.driveTee) continue;
     const T = byId.get(S.driveTee.targetId);
-    if (!T || T.points || !(T.w > 0) || !(T.h > 0) || typeof T.cx !== "number") continue;
-    const edges = rectEdges(T.cx, T.cy, T.w, T.h, T.rot || 0);
+    // B<PENDING> NEW-2 — a free-drawn POLYGON pad/parking field is a valid drive target too, not
+    // just an axis-aligned rect: `polygonEdges`/`polygonContainsPoint` are the polygon analogues of
+    // `rectEdges`/`rectContainsPoint`, in the exact shape `nearestRectEdge` already consumes.
+    if (!T || typeof T.cx !== "number") continue;
+    const isPoly = Array.isArray(T.points) && T.points.length >= 3;
+    if (!isPoly && !(T.w > 0 && T.h > 0)) continue;
+    const edges = isPoly ? polygonEdges(T.points) : rectEdges(T.cx, T.cy, T.w, T.h, T.rot || 0);
+    if (!edges.length) continue;
+    const containsPoint = (p) => (isPoly ? polygonContainsPoint(p, T.points) : rectContainsPoint(p, edges));
     let ei = -1, hit = null;                                        // which endpoint sits on the target edge?
     // B1612608/NEW-2 — a welded endpoint well inside a big court reads a large distance to every
     // edge (findDriveConnect never moved it there — see that function's header), so it must also
     // pass here on CONTAINMENT alone; the nearest edge is still used to orient the curb return.
     for (const idx of [0, S.pts.length - 1]) {
       const h = nearestRectEdge(S.pts[idx], edges, { facingOnly: false });
-      if (h && (h.dist <= 6 || rectContainsPoint(S.pts[idx], edges)) && (!hit || h.dist < hit.dist)) { hit = h; ei = idx; }
+      if (h && (h.dist <= 6 || containsPoint(S.pts[idx])) && (!hit || h.dist < hit.dist)) { hit = h; ei = idx; }
     }
     if (!hit) continue;
     const P = S.pts[ei];                                            // the road's welded endpoint
@@ -1449,7 +1457,14 @@ function driveJunctionsOf(els, settings) {
     // teeGeometry already clamps the return to the run it's given, so feed it the court's real limits —
     // min(connect-edge length, court depth behind that edge). A roomy court keeps the ≈50 ft default; a
     // shallow/short court shrinks it to fit (and it never reaches the building — that's also z-order-guarded).
-    const perpDepth = hit.edge.axis === "y" ? T.h : T.w;           // court depth behind the connect edge (see rectEdges axis)
+    // Court depth behind the connect edge: a rect's is read straight off its own w/h (see rectEdges'
+    // axis); a polygon has no such fixed axis, so `polygonDepthBehind` measures it the same way the
+    // radius clamp actually uses it — the farthest any polygon vertex projects behind this edge
+    // along its own inward normal (an over-estimate on a concave field, never an under-estimate, so
+    // it can only ever under-clamp the return, never let it punch out the far side of the field).
+    const perpDepth = isPoly
+      ? polygonDepthBehind(T.points, hit.pt, { x: -hit.edge.outN.x, y: -hit.edge.outN.y })
+      : (hit.edge.axis === "y" ? T.h : T.w);
     const edgeRunPos = (hit.edge.b.x - P.x) * hit.edge.dir.x + (hit.edge.b.y - P.y) * hit.edge.dir.y;   // T → edge end b
     const edgeRunNeg = (P.x - hit.edge.a.x) * hit.edge.dir.x + (P.y - hit.edge.a.y) * hit.edge.dir.y;   // T → edge end a
     const obstacle = buildingRunLimit(els, P, hit.edge.dir, hit.edge.outN, Rseed);   // NEW-4 — never under a building
@@ -5907,14 +5922,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      those. An untagged paving pad defaults to the truck-scale return (matching the named case);
      the return radius is editable per-junction either way, so a car-scale drive is one edit, not a
      blocker. A road never connects to a BUILDING here — a building is not paving, and painting a
-     driveway INTO a wall is not a connection this tool should ever make silently. Irregular
-     (click-drawn / `el.points`) paving is NOT yet a connect target — `rectEdges` needs a rectangle;
-     see the item's PR for why that is reported rather than built here. */
-  const driveTargetKind = (el) => (el && !el.points && typeof el.cx === "number" && el.w > 0 && el.h > 0
+     driveway INTO a wall is not a connection this tool should ever make silently.
+     B<PENDING> NEW-2 — a free-drawn POLYGON pad/parking field (`el.points`) is now a target too:
+     `rectEdges` needed a rectangle, but `polygonEdges`/`polygonContainsPoint` are the same shape
+     over an arbitrary ring, and `nearestRectEdge` already consumes either without change. */
+  const driveTargetKind = (el) => (el && typeof el.cx === "number"
+    && (Array.isArray(el.points) ? el.points.length >= 3 : el.w > 0 && el.h > 0)
     ? (el.type === "parking" ? "parking" : el.type === "paving" ? "truckcourt" : null) : null);
   // B494049's rule for road magnets applies here too — a hidden target is not a magnet: connecting
   // to a court you cannot see moves nothing but leaves a relationship you cannot explain.
-  const driveTargetsOf = () => visibleEls(hiddenGroups, els).filter((x) => driveTargetKind(x)).map((x) => ({ id: x.id, kind: driveTargetKind(x), edges: rectEdges(x.cx, x.cy, x.w, x.h, x.rot || 0) }));
+  const driveTargetsOf = () => visibleEls(hiddenGroups, els).filter((x) => driveTargetKind(x)).map((x) => ({
+    id: x.id, kind: driveTargetKind(x), points: x.points,
+    edges: x.points ? polygonEdges(x.points) : rectEdges(x.cx, x.cy, x.w, x.h, x.rot || 0),
+  }));
   const DRIVE_RETURN = { parking: 15, truckcourt: 24 }; // B1005 — curb-return seed (ft): car ≈15, truck ≈24 (single fillet; teeGeometry caps the reach to R at any angle, so it stays a tidy rounded corner — dial up per-junction for a genuine WB-62 turn)
   // Nearest parking/truck-court/paving edge to a moving road endpoint, within `tolFt` — OR anywhere
   // the endpoint is CONTAINED in the target at all (B1612608/NEW-2: "lands on, overlaps, or falls
@@ -5929,7 +5949,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // is still the one the road approaches, so consider all edges and take the nearest within tolerance.
       const hit = nearestRectEdge(P, t.edges, { facingOnly: false });
       if (!hit) continue;
-      const inside = hit.dist > tolFt && rectContainsPoint(P, t.edges);
+      // `rectContainsPoint`'s "inside every edge's half-plane" shortcut only holds for a convex
+      // rect; a free-drawn polygon needs the real ray-cast (`polygonContainsPoint`, correct for a
+      // concave ring too).
+      const inside = hit.dist > tolFt && (t.points ? polygonContainsPoint(P, t.points) : rectContainsPoint(P, t.edges));
       if ((hit.dist <= tolFt || inside) && (!best || hit.dist < best.dist)) {
         best = { kind: "drive", targetId: t.id, targetKind: t.kind, pt: inside ? { x: P.x, y: P.y } : hit.pt, dist: inside ? 0 : hit.dist };
       }
@@ -9671,6 +9694,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           setEls((a) => [...a, el]);
           setSel({ kind: "el", id: el.id });
           setTool("select");
+        } else {
+          // LOUD-FAILURE (NEW-1, live-check finding) — unlike the free-draw branch below (which
+          // falls back to a click-started polygon), a fixed-width preset has no meaningful
+          // "clicked, didn't drag" fallback: its whole point is a length the drag itself supplies.
+          // The old code silently dropped this case — nothing committed, no message, the preset
+          // tool left armed with zero visible feedback, reading as "the tool is broken". Say so and
+          // leave the preset armed so the very next drag (this time long enough) still works.
+          flashWarn("⚠ Drag to draw the preset — that release was too short to place anything");
         }
       } else if (draftRect.w >= 4 && draftRect.h >= 4) {
         const curb = +settings.roadCurb || CURB;
