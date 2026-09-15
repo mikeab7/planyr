@@ -5140,6 +5140,21 @@ reads `"framed"`, so `fit()` ran against a real container and had nothing to fra
 distinction between *"nothing to frame"* and *"could not frame"*, and it is why no check here judges
 on the numbers.
 
+**⛔ FOLLOW-UP, same item, 2026-09-15: `CLAUDE.md`'s Owner product constraint #8 was STALE THE
+MOMENT #1696 MERGED, and nothing caught it.** That entry read *"the mechanism that enforced it is
+REVERTED and the requirement is not enforced right now"* and *"there is currently no shipped
+mechanism for it to check"* — both false as soon as the gate was back, and the `Owner product
+constraints` section is authoritative over any dispatch brief, so a future session reading it would
+have been told there is no gate. Definition of Done item 4 requires checking a change against that
+section before opening a PR; the check was done against the constraint's INTENT (the live-pass
+requirement, honoured — V1145488) and not against its STATUS TEXT, which is the half that went
+wrong. The entry now records what is true, keeps the live-pass requirement completely unweakened,
+and states plainly that the incident doc's stricter *before merging* wording was NOT met by this
+re-land — it shipped first and parked the pass on the dispatcher's explicit direction. **The general
+lesson, worth more than this fix:** a constraint entry carrying a STATUS ("suspended", "reverted",
+"not enforced") goes stale the moment the status changes, and the session that changes it is the only
+one positioned to notice. Re-read the entry, not just its intent.
+
 - Verify: live `Blocker: auth` — **V1145488**.
 - Stopping rule: UNCHANGED and now met on the sandbox half — closes when V1145488 records a signed-in
   pass on the owner's own browser (chunk hash read in the same observation as the result) plus his
