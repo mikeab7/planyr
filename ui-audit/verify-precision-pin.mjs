@@ -1,17 +1,20 @@
 /**
- * B433 + B434 — verify the precision-pin map markers + the corrected status palette.
+ * B433 + B434 (+ B1628913/NEW-2, superseding the precision pin) — verify the site map
+ * markers + the corrected status palette.
  *
  * Seeds one site per status (status at TOP LEVEL, the logged-out path). Confirms:
- *   B434 (the precision pin):
+ *   B1628913 (the plain circle — "keep the top piece exactly the same, just make it a
+ *   circle instead of a pin"; the bulb WAS the top piece, so the marker is now the bulb
+ *   alone):
  *     1. All FIVE statuses render by default — Dead included (NEW-1, 2026-08-27: a Dead
  *        pin used to be hidden unless the user filtered to it, which is exactly what made
  *        a site marked dead read as "disappeared entirely"; it still recedes via size/
  *        opacity/z-order, it just never vanishes).
- *     2. Each pin is a BULB + STALK + GROUND RING (the survey-monument read).
- *     3. The ground-ring center sits at the viewBox bottom (cy=34) and the icon anchor
- *        is the hit-box bottom-center (margin = -[17,46]) → the ring center IS the spot.
- *     4. The ground ring shows PROGRESS: sweep length tracks status
- *        (Complete 100% > Active 60% > On-hold 30% > Pursuit 10%; Dead's is 0%).
+ *     2. Each marker is the BULB ALONE — no stalk, no ground ring.
+ *     3. The bulb's own center is the anchor: the hit box is fixed (34×46) and the icon
+ *        anchor is now its CENTER (margin = -[17,23]), not its old bottom-center.
+ *     4. No progress sweep survives — that cue rode the ground ring, which is gone with it
+ *        (not reintroduced as a ring drawn around the circle).
  *     5. Size tiers track importance: Pursuit > Active > On-hold > Complete > Dead.
  *     6. SOLID bulb fill + a WHITE keyline (white disc behind it) — never hollow.
  *   B433 (the palette):
@@ -26,7 +29,8 @@ import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 
-const BASE = process.env.BASE_URL || "http://localhost:4173/";
+// "#/site" — bare "#/" now lands on the Dashboard (B1213312); this harness needs the map.
+const BASE = process.env.BASE_URL || "http://localhost:4173/#/site";
 const OUT = new URL("./screens/precision-pin/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 
@@ -44,7 +48,8 @@ const seed = `(() => { try {
   localStorage.removeItem('planarfit:currentSite:v1');
 } catch (e) {} })();`;
 
-const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1228/chrome-linux64/chrome";
+// Let Playwright resolve its bundled Chromium (PLAYWRIGHT_BROWSERS_PATH is set); PW_CHROME overrides.
+const EXEC = process.env.PW_CHROME || undefined;
 const results = [];
 const ok = (label, cond, extra = "") => { results.push({ cond }); console.log(`  ${cond ? "✓" : "✗"} ${label}${extra ? ` — ${extra}` : ""}`); };
 
@@ -101,19 +106,21 @@ async function run() {
   ok("All five statuses render by default (5 markers)", markers.length === 5, `${markers.length} markers`);
   ok("Pursuit / Active / On-hold / Complete / Dead all render", !!(pursuit && active && onhold && complete && dead));
 
-  // 2 — precision-pin structure: bulb (cy 10.5) + stalk (<line>) + ground ring (cy 34).
-  const isPin = (m) => m && /<circle cx="13" cy="10.5" r="6.8"/.test(m.html) && /<line /.test(m.html) && /<circle cx="13" cy="34" r="5"/.test(m.html);
-  ok("Every pin = bulb + stalk + ground ring", [pursuit, active, onhold, complete, dead].every(isPin));
+  // 2 — B1628913: the marker is the bulb ALONE — no stalk, no ground ring.
+  const isPin = (m) => m && /<circle cx="13" cy="10.5" r="6.8"/.test(m.html);
+  const hasNoStalkOrRing = (m) => m && !/<line /.test(m.html) && !/<circle cx="13" cy="34"/.test(m.html);
+  ok("Every marker is the bulb circle", [pursuit, active, onhold, complete, dead].every(isPin));
+  ok("No marker carries a stalk or a ground ring", [pursuit, active, onhold, complete, dead].every(hasNoStalkOrRing));
 
-  // 3 — anchor = the ground-ring center: ring center sits at viewBox bottom (cy=34) and
-  // Leaflet anchors the icon at its bottom-center (margins -17 / -46 = -[HIT_W/2, HIT_H]).
-  const anchored = (m) => m && m.marginLeft === "-17px" && m.marginTop === "-46px";
-  ok("Anchor is the ground-ring center (bottom-center, margin -17/-46)", [pursuit, active, onhold, complete, dead].every(anchored), `${pursuit?.marginLeft}/${pursuit?.marginTop}`);
+  // 3 — anchor = the bulb's own center: the hit box is fixed (34×46) and Leaflet anchors
+  // the icon at its CENTER now (margins -17 / -23 = -[HIT_W/2, HIT_H/2]), not its old bottom.
+  const anchored = (m) => m && m.marginLeft === "-17px" && m.marginTop === "-23px";
+  ok("Anchor is the hit box's center (margin -17/-23)", [pursuit, active, onhold, complete, dead].every(anchored), `${pursuit?.marginLeft}/${pursuit?.marginTop}`);
 
-  // 4 — ground-ring PROGRESS sweep tracks status (Complete 100 > Active 60 > On-hold 30 > Pursuit 10);
-  // Dead is 0% and renders NO sweep arc at all (just the faint full track), so sweepOf(dead) is null.
+  // 4 — the ground ring's progress sweep is gone WITH the ring — no <circle> stroke-dasharray
+  // survives anywhere on the marker (never reintroduced as a ring drawn around the circle).
   const sp = sweepOf(pursuit), sa = sweepOf(active), so = sweepOf(onhold), sc = sweepOf(complete), sd = sweepOf(dead);
-  ok("Ground ring shows progress; sweep Complete > Active > On-hold > Pursuit, Dead has none", sc > sa && sa > so && so > sp && sp > 0 && sd == null, `${sc} > ${sa} > ${so} > ${sp}, dead=${sd}`);
+  ok("No progress sweep on any marker (the ring it rode is gone)", [sp, sa, so, sc, sd].every((s) => s == null), `${sp}/${sa}/${so}/${sc}/${sd}`);
 
   // 5 — size tiers (Pursuit largest → Dead smallest, all five visible).
   const wp = pursuit?.svgW, wa = active?.svgW, wo = onhold?.svgW, wc = complete?.svgW, wd = dead?.svgW;
