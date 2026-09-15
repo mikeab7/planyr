@@ -86,6 +86,12 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   a table crashing on `setContent` against a torn-down instance) — read it before changing the save
   path. There must never be a "sync content on pageId change" effect; the search effect there is
   decorations-only and guards `isDestroyed`, which is the bar any new effect has to clear.
+  **⛔ `onUpdate` GATES ON `hasUserInputRef` (B1662464) — a load-time schema settle (default attrs,
+  `TrailingNode`'s trailing paragraph) is a real doc-changed transaction with zero keystrokes, and
+  it used to be saved, `touchPage`d and version-snapshotted exactly like a real edit ("opening a
+  note writes to it"). `hasUserInputRef` is set only by a genuine `isTrusted` DOM event; see
+  `docs/NOTES-CARRY-FORWARD.md` §5 entry 17 before touching `onUpdate`, the periodic version
+  snapshot, or the forced close-snapshot.**
   **⛔ FOUR MEANINGS NOW COMPETE FOR ONE PRESS ON THE MAT** (B1597760/B1597761): a press that does
   not travel PLACES · a press that travels PANS the canvas · a press that travels with Shift held
   draws the marquee · a press that starts on one of the sheet's four edge grips resizes the page.

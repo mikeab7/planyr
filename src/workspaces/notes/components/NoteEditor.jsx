@@ -1233,6 +1233,33 @@ export default function NoteEditor({
   const lastDocRef = useRef(null);
   const timerRef = useRef(0);
 
+  /* ⛔ NEW-1 (B1662464) — "OPENING A NOTE WRITES TO IT." Tiptap's own mount-time schema settle
+   * (missing node attrs filled to their defaults, a trailing paragraph inserted by the
+   * TrailingNode extension so the cursor has somewhere to land after a table/list) is a REAL
+   * doc-changed transaction, and `onUpdate` below could not tell it apart from a keystroke — so
+   * opening ANY note stamped `updatedAt` to "now", queued a write, and could mint a "While you
+   * were typing" version row (the periodic snapshot effect further down, and the forced one on
+   * close) for a page nobody touched. Measured directly with zero browser interaction, across
+   * six documents with varied run/mark shapes: every one changed shape and got saved on the
+   * very first open.
+   *
+   * The fix is not a special case for the settle — it is refusing to call ANY of it an edit
+   * until something a person actually did says otherwise. `hasUserInputRef` starts false and
+   * is set true ONLY by a genuine, browser-trusted DOM event, never by a command, an effect, or
+   * anything this component's own code dispatches. `onUpdate` still tracks the live document on
+   * every transaction (a real edit is never lost the instant it happens); it just does not
+   * queue a write, a dirty status, or a version row until this flips. Listening on `window`
+   * rather than this editor's own DOM node is deliberate — the toolbar and its menus render
+   * outside the editable body, and a real click there must count too. */
+  const hasUserInputRef = useRef(false);
+  useEffect(() => {
+    const mark = (e) => { if (e.isTrusted) hasUserInputRef.current = true; };
+    const opts = { capture: true, passive: true };
+    const kinds = ["pointerdown", "keydown", "paste", "drop", "cut"];
+    for (const kind of kinds) window.addEventListener(kind, mark, opts);
+    return () => { for (const kind of kinds) window.removeEventListener(kind, mark, opts); };
+  }, []);
+
   /* Callbacks land in a ref so `flush` can be referentially stable: an unstable flush would
    * re-register the unmount cleanup and the beforeunload listener on every parent render,
    * which is exactly the kind of churn that made the original ordering bug intermittent. */
@@ -1362,6 +1389,12 @@ export default function NoteEditor({
       // flush; `lastDocRef` is the version snapshot's and is never emptied. See the unmount
       // effect below for the cleanup-order bug that separating them fixes.
       lastDocRef.current = { id: pageId, doc };
+      // ⛔ B1662464 — see `hasUserInputRef`'s own note above. A transaction nobody's keyboard
+      // or pointer caused (the mount-time schema settle) updates `lastDocRef` so a REAL edit
+      // right after it is never missing context, but it queues nothing: no dirty status, no
+      // save timer. The next genuine `onUpdate` — the one a real keystroke causes — runs with
+      // this already true and behaves exactly as before.
+      if (!hasUserInputRef.current) return;
       pendingRef.current = { id: pageId, doc };
       onStatusRef.current?.("unsaved");
       if (timerRef.current) clearTimeout(timerRef.current);
@@ -1589,7 +1622,10 @@ export default function NoteEditor({
   useEffect(() => {
     if (!editor || editor.isDestroyed || !docTick) return undefined;
     const t = setTimeout(() => {
-      if (editor.isDestroyed) return;
+      // ⛔ B1662464 — `docTick` bumps on `selectionUpdate` too (just moving the caret), and on
+      // the mount-time schema settle `onUpdate` no longer treats as an edit. Neither is
+      // "typing", so neither may mint a row labelled that way.
+      if (editor.isDestroyed || !hasUserInputRef.current) return;
       snapshotPage(pageId, editor.getJSON()).then((r) => { if (r.taken && historyOpen) refreshVersions(); });
     }, 1500);
     return () => clearTimeout(t);
@@ -1606,6 +1642,10 @@ export default function NoteEditor({
    * `lastDocRef` is written at edit time and never cleared by anybody, so leaving a page
    * that was typed into always leaves a row behind, and one that was not still leaves none. */
   useEffect(() => () => {
+    // ⛔ B1662464 — `lastDocRef` is written by every `onUpdate`, including the mount-time
+    // settle nobody asked for; only force a "when you left the page" row if a real edit ever
+    // actually happened in this session.
+    if (!hasUserInputRef.current) return;
     const last = lastDocRef.current;
     if (last?.id === pageId && last.doc) snapshotPage(pageId, last.doc, { reason: "closed", force: true });
   }, [pageId]);

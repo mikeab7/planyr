@@ -166,6 +166,19 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1190496 — B1662464: is real content still missing from the note "Silvestri - Utility" (or any note), and if so, restore it Michael's way `Blocker: real-data`
+
+**Why this needs a live pass, and what it is NOT.** This is not asking anyone to re-diagnose the write-on-open mechanism — that half is fixed and sandbox-proved (B1662464's own body, `ui-audit/verify-notes-write-on-open.mjs`, 6/6 shapes, red-proved against the pre-fix build). This is the narrower, still-open question the sandbox genuinely cannot answer: a real note on Michael's own signed-in account was observed to have lost a contact's name ("…Jerry Hayley Kandice Cabets…" → "…Jerry Hayley…") sometime in the few minutes before it was reported, and no repro in this sandbox (six varied multi-run/mark shapes, all with the confirmed write-on-open mechanism reproduced and then fixed) ever reproduced actual TEXT loss — only the cosmetic shape change (default attrs filled in, a trailing paragraph appended). So the specific loss is unexplained, not merely unfixed, and per `CLAUDE.md`'s STANDING RULE #2 an owner-reported symptom may not be closed on that null. This needs real, signed-in access to the actual row (or Michael's own answer) to settle.
+
+**What was verified here (sandbox).** The write-on-open mechanism is fixed and cannot regress silently. Six document shapes (identical-mark runs, differing `textStyle` between adjacent runs, bold vs. plain, an autolink-shaped email mark, a real Tab-sunk nested list item, an item wearing Tab's flat `indent` attribute) were opened with zero interaction, before and after the fix — before: 0/6 (every one changed shape and stamped `updatedAt`); after: 6/6 (nothing changes on mere open). None of the six lost any text at any point, sandboxed or not.
+
+**Steps, each with a named expected result:**
+1. On a Cowork session with real signed-in access to Michael's account (or with Michael himself), open the real note "Silvestri - Utility" and find the "Contacts:" line this item quotes. **Expect one of two honest outcomes, not a guess:** (a) it still reads "…Jerry Hayley Kandice Cabets…" — the content was never actually lost (a stale read, a truncation in how it was first displayed, or similar), record that and close; or (b) it still reads the shortened "…Jerry Hayley…" — the loss is real and current.
+2. If (b): open Version History on that page and confirm an earlier revision (the report cites one from "3m ago") still carries the fuller line. **Expect:** it does — Version History is the recovery path, and this step confirms it actually captured a pre-loss copy as `CLAUDE.md`'s own rule requires.
+3. If (b): tell Michael directly what was found (which line, which revision has it) and ask whether he wants it restored. **Do not restore it without his answer** — the report is explicit that this is his call. **Expect:** a plain yes/no, acted on accordingly.
+4. Whichever of (a)/(b) applies, do not restage or edit the real note beyond what step 3 authorizes, and do not use this real note for any further reproduction — a throwaway duplicate is the right tool for that (owner constraint #7).
+- Stopping rule: closes when step 1 resolves to (a) with nothing further to do, or when (b) is confirmed and Michael's answer from step 3 has been acted on (restored or deliberately left as-is). If a live pass ever reveals a mechanism that DOES destroy text (not just cosmetic shape) on open/reopen, file it as its own bug against the mechanism found, referencing this item.
+
 ### V1173824 — B1645792: a road tee-ing into a truck court / paving pad at an oblique angle shows a real rounded curb return, not a raw notch
 
 **Why this needs a live pass.** A rendering-shape fix (PERCEPTUAL-PARITY: the bar is whether the
