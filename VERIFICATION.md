@@ -177,9 +177,13 @@ corner) is unit-tested against the fix and separately confirmed RED on unmodifie
 Chromium driving the real canvas (`e2e/road-drive-junction-fillet.spec.js`), including a
 byte-identical PDF/print export parity check. A visual screenshot of the fix was also inspected
 this session and reads as a clean, properly rounded curb return with no notch, no disconnected
-island, and no exposed raw flat-cap edge. What is NOT provable here: whether it looks right on a
-real monitor at the owner's own DPI/zoom, and specifically whether it fixes the EXACT geometry in
-his original screenshot (not available to this session — only his verbal description was).
+island, and no exposed raw flat-cap edge — confirmed twice: once against this session's local
+build, and again against PR #1722's own Cloudflare Pages branch preview deploy
+(`claude-vibrant-curie-7olpix.planyr.pages.dev`, commit `c5cb133`), i.e. the actual deployed
+artifact, not just a local dev server. Same clean result both times. What is NOT provable here:
+whether it looks right on a real monitor at the owner's own DPI/zoom, and specifically whether it
+fixes the EXACT geometry in his original screenshot (not available to this session — only his
+verbal description was).
 
 **No standing throwaway project exists** — this check needs a fresh throwaway plan (or an explicit
 duplicate of a real one) created first; state exactly what was created/touched, per the owner
