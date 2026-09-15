@@ -16,7 +16,11 @@ import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 
-const BASE = process.env.BASE_URL || "http://localhost:4173/";
+// B1614656 — bare BASE_URL now lands on the Dashboard (B1213312's "#/" = Dashboard, not an alias
+// for "site-planner, no project" anymore), so this harness silently found zero site rows. "#/site"
+// is the Site Planner's own route with no project selected — the Map/Sites-panel screen this
+// harness exists to check.
+const BASE = (process.env.BASE_URL || "http://localhost:4173/") + "#/site";
 const OUT = new URL("./screens/b845088-b845089/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";

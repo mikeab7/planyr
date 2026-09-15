@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sharedWithDisplay } from "../src/workspaces/site-planner/lib/sharedWithTeam.js";
+import { sharedWithDisplay, entityInitials } from "../src/workspaces/site-planner/lib/sharedWithTeam.js";
 
 /* B845088 (NEW-1) — owner override (live review, 2026-08-30): show the TEAM a site is shared
  * with, never the people in it. This retires the roster-monogram (B859504 + its same-day
@@ -13,15 +13,15 @@ describe("sharedWithDisplay (pure)", () => {
     expect(sharedWithDisplay(undefined, [])).toEqual({ kind: "none" });
   });
 
-  it("teamId resolves against the viewer's own team list → the team's NAME, never a roster", () => {
+  it("teamId resolves against the viewer's own team list → the team's NAME, never a roster — plus its short initials", () => {
     const myTeams = [{ id: "t1", name: "HIP Houston" }, { id: "t2", name: "Acme Devco" }];
-    expect(sharedWithDisplay("t1", myTeams)).toEqual({ kind: "team", name: "HIP Houston" });
-    expect(sharedWithDisplay("t2", myTeams)).toEqual({ kind: "team", name: "Acme Devco" });
+    expect(sharedWithDisplay("t1", myTeams)).toEqual({ kind: "team", name: "HIP Houston", initials: "HH" });
+    expect(sharedWithDisplay("t2", myTeams)).toEqual({ kind: "team", name: "Acme Devco", initials: "AD" });
   });
 
-  it("a team with a blank/missing name still returns a non-blank name (never an empty chip)", () => {
-    expect(sharedWithDisplay("t1", [{ id: "t1", name: "" }])).toEqual({ kind: "team", name: "Shared team" });
-    expect(sharedWithDisplay("t1", [{ id: "t1" }])).toEqual({ kind: "team", name: "Shared team" });
+  it("a team with a blank/missing name still returns a non-blank name and initials (never an empty chip)", () => {
+    expect(sharedWithDisplay("t1", [{ id: "t1", name: "" }])).toEqual({ kind: "team", name: "Shared team", initials: "ST" });
+    expect(sharedWithDisplay("t1", [{ id: "t1" }])).toEqual({ kind: "team", name: "Shared team", initials: "ST" });
   });
 
   it("teamId set but not on the viewer's own team list → 'unknown' (the caller falls back to the plain glyph, never a blank or a guessed name)", () => {
@@ -35,7 +35,40 @@ describe("sharedWithDisplay (pure)", () => {
   });
 
   it("ignores malformed entries in the team list instead of throwing", () => {
-    expect(sharedWithDisplay("t1", [null, undefined, { id: "t1", name: "HIP Houston" }])).toEqual({ kind: "team", name: "HIP Houston" });
+    expect(sharedWithDisplay("t1", [null, undefined, { id: "t1", name: "HIP Houston" }])).toEqual({ kind: "team", name: "HIP Houston", initials: "HH" });
+  });
+});
+
+/* B1614656 (NEW-1) — the badge shows initials for ANY entity, derived generically, never a
+ * hardcoded team name. Repro: at a ~1290px-wide window, a wide team name ("HIP Houston") covered
+ * part of the site name when the chip revealed. Rule: one letter per word, uppercased, capped at
+ * 3; a single word takes its own first two letters.
+ */
+describe("entityInitials (pure)", () => {
+  it("multi-word names take one letter per word, uppercased", () => {
+    expect(entityInitials("HIP Houston")).toBe("HH");
+    expect(entityInitials("Acme Devco")).toBe("AD");
+    expect(entityInitials("hip houston")).toBe("HH");
+  });
+
+  it("a single word takes its own first two letters, uppercased", () => {
+    expect(entityInitials("Richfield")).toBe("RI");
+    expect(entityInitials("acme")).toBe("AC");
+    expect(entityInitials("X")).toBe("X");
+  });
+
+  it("caps at 3 letters for names with 4+ words", () => {
+    expect(entityInitials("Alpha Bravo Charlie Delta")).toBe("ABC");
+  });
+
+  it("collapses repeated whitespace and ignores leading/trailing space", () => {
+    expect(entityInitials("  HIP   Houston  ")).toBe("HH");
+  });
+
+  it("a blank/missing name returns an empty string rather than throwing", () => {
+    expect(entityInitials("")).toBe("");
+    expect(entityInitials(null)).toBe("");
+    expect(entityInitials(undefined)).toBe("");
   });
 });
 
@@ -50,5 +83,17 @@ describe("MapFinder.jsx wires the team-chip display through sharedWithDisplay, n
     expect(src).not.toMatch(/sharedWithMonogram\.js/);
     expect(src).not.toMatch(/\blistMembers\b/);
     expect(src).not.toMatch(/\binitialsOf\b/);
+  });
+
+  // ⛔ B1614656 REGRESSION GUARD — the visible chip text must be the short `disp.initials`, never
+  // the full `disp.name` (that would reintroduce the original covering-the-site-name defect); the
+  // tooltip/aria-label must keep the FULL name so it's never lost, only shortened on the badge.
+  it("renders disp.initials as the chip's visible text and disp.name in its tooltip/aria-label", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+    expect(src).toMatch(/\{disp\.initials\}/);
+    expect(src).not.toMatch(/(?<!\$)\{disp\.name\}/);
+    expect(src).toMatch(/title=\{`Shared with \$\{disp\.name\}`\}/);
+    expect(src).toMatch(/aria-label=\{`Shared with \$\{disp\.name\}`\}/);
   });
 });

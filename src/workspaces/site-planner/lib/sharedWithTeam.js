@@ -20,17 +20,37 @@
  *
  * myTeams: the viewer's own [{id, name}] list (teams.listMyTeams()'s shape).
  * Returns one of:
- *   { kind: "none" }        — s.teamId is falsy. No indicator (unchanged from before).
- *   { kind: "team", name }  — s.teamId resolves to a team the viewer is a member of.
- *   { kind: "unknown" }     — s.teamId is set but names no team on the viewer's own list (the team
- *                             was deleted, or the viewer left it since the site was shared). The
- *                             row is still shared, but this account can no longer say with whom —
- *                             the caller falls back to the plain share glyph, never a blank or a
- *                             guessed name.
+ *   { kind: "none" }                  — s.teamId is falsy. No indicator (unchanged from before).
+ *   { kind: "team", name, initials }  — s.teamId resolves to a team the viewer is a member of.
+ *   { kind: "unknown" }               — s.teamId is set but names no team on the viewer's own list
+ *                             (the team was deleted, or the viewer left it since the site was
+ *                             shared). The row is still shared, but this account can no longer say
+ *                             with whom — the caller falls back to the plain share glyph, never a
+ *                             blank or a guessed name.
+ *
+ * B1614656 (NEW-1) — on a real work-laptop-width panel, a wide team name (e.g. "HIP Houston")
+ * covered part of the site name when the chip revealed. `initials` is the short form the badge
+ * renders at rest; `name` (the full team name) stays available for the tooltip/aria-label and is
+ * never dropped — see `entityInitials` below for the derivation rule.
  */
 export function sharedWithDisplay(teamId, myTeams) {
   if (!teamId) return { kind: "none" };
   const t = (myTeams || []).find((x) => x && x.id === teamId);
   if (!t) return { kind: "unknown" };
-  return { kind: "team", name: t.name || "Shared team" };
+  const name = t.name || "Shared team";
+  return { kind: "team", name, initials: entityInitials(name) };
+}
+
+/* Generic short form of ANY entity name, for a badge with no room for the full string. Never
+ * hardcode a specific team's abbreviation here — this must work for a name this codebase has never
+ * seen. Rule: one letter per word, uppercased, up to 3 letters ("HIP Houston" -> "HH", "Acme Devco
+ * Partners" -> "ADP"); a single word takes its own first two letters ("Richfield" -> "RI"). Words
+ * are split on whitespace only, so a hyphenated one-word name (e.g. "Acme-Devco") is still treated
+ * as one word by design.
+ */
+export function entityInitials(name) {
+  const words = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return words.map((w) => w[0]).join("").slice(0, 3).toUpperCase();
 }
