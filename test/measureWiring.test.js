@@ -46,7 +46,11 @@ describe("NEW-1: measurements are styled through the ONE resolver, on every mode
     expect(SP).toMatch(/colorCtl\(\(v\) => liveMeasure\(\{ fill: v \}\)\)/);
     expect(SP).toMatch(/setSelMeasure\(\{ weight: n \}\)/);
     expect(SP).toMatch(/setSelMeasure\(\{ dash: e\.target\.value \}\)/);
-    expect(SP).toMatch(/liveMeasure\(\{ fillOpacity: \+e\.target\.value \}\)/);
+    // B1618656 NEW-1 — the properties-panel grid redesign replaced the continuous opacity slider
+    // with a discrete PercentField (commits once, on blur/Enter); it now goes through the SAME
+    // one-undo-frame committer weight/dash already use, rather than the live/no-history writer a
+    // continuous slider needed sliderHistory to batch.
+    expect(SP).toMatch(/setSelMeasure\(\{ fillOpacity: v \}\)/);
     // reuses the ONE shared line-style list, not a parallel one
     expect(SP).toMatch(/value=\{m\.dash \|\| MEASURE_LINE\.dash\}[\s\S]{0,220}\{DASH_OPTIONS\}/);
   });
