@@ -427,11 +427,30 @@ export default function Scheduler({
   // exactly the "takes me to the wrong place" report this whole fix answers. Tell the iframe to
   // show its own neutral, cross-project Dashboard (reports) view instead, matching the Site
   // Planner's own "Select a project" state for "nothing chosen."
+  //
+  // ⛔ B1644368 (NEW-1 amendment, 2026-09-15) — A SINGLE POST WAS NEVER ENOUGH. This effect's only
+  // firing is the render right after mount, while `section` still holds its default ("projects") —
+  // before the iframe's OWN document has loaded and attached its message listener, so the very
+  // first (and only) `planar:nav-dashboard` post is reliably lost, the exact race `onIframeLoad`'s
+  // own `ask()` retry loop already guards against for `nav-request`. And because `setSection(nav.
+  // section)` is a no-op once the embed's first real report already reads "projects" (React bails a
+  // `useState` update that doesn't change the value), this effect's own deps never see a second
+  // change to re-fire it — so a lost first post was NEVER retried, and the iframe stayed on its
+  // stale, fully-visible-and-clickable ambient project indefinitely. Retry it the same way
+  // `onIframeLoad` retries `nav-request` (a few polite tries over ~2.3s); it naturally stops the
+  // moment a real nav-state confirms "reports" (the gate above then reads false and the effect's own
+  // cleanup already cleared the interval on the re-run).
   useEffect(() => {
     if (!shouldNeutralizeToReports({
       isActive, section, projectId, dashboardIntent: dashboardIntentRef.current, bootCarryOutAllowed: bootCarryOutRef.current,
     })) return;
     post({ type: "planar:nav-dashboard" });
+    let tries = 0;
+    const t = setInterval(() => {
+      if (++tries >= 6) { clearInterval(t); return; }
+      post({ type: "planar:nav-dashboard" });
+    }, 380);
+    return () => clearInterval(t);
   }, [isActive, section, projectId]);
 
   // Picking a schedule from the breadcrumb is a USER action: switch to it, and if it's linked to a
@@ -524,11 +543,39 @@ export default function Scheduler({
   // and grid-mismatch render gates) — see their own call sites further down.
   const currentProject = projectId != null && routedSiteName ? { id: projectId, name: routedSiteName } : null;
 
+  // NEW-5 (B1080544) — the render gate: a routed project WITH a linked schedule whose grid hasn't
+  // (yet, or any longer) caught up must never be visibly shown as if it had. `showEmptyState`
+  // covers "no schedule exists"; this covers "a schedule exists but the wrong one is on screen" —
+  // the case a global `aPid` drifting away from the route produces. See navState.js's own header.
+  // B851 ×4 (NEW-1) — `navConfirmed` closes the gap the prior three fixes left: without it, this
+  // gate trusted `activeId` even across an iframe reload the shell hadn't yet heard back from, so a
+  // stale-but-still-matching belief read as "fine" while the reloaded document was already showing a
+  // different project underneath. See navState.js's isGridMismatched header for the full mechanism.
+  // B1644368 (NEW-1 amendment) — `section` is now part of the answer too: a PROJECT-LESS route is
+  // matched only once the grid confirms it switched to its own neutral reports view, never by
+  // default. Without this a stranger project's grid stayed fully visible AND clickable under an
+  // honestly-empty breadcrumb — see navState.js's own header on this function for the live repro.
+  // Computed here, ABOVE `showScheduleCrumb` (moved up from its old spot further down), because
+  // that crumb now reads it too — see that const's own note on why.
+  const gridMismatched = ready && isGridMismatched(projects, projectId, activeId, pickShowing, navConfirmed, section);
+
   // B1435888 — the SCHEDULE crumb (ScheduleCrumb, wired as `planSlot` below) renders whenever the
   // embed is on its own projects section (never on its Dashboard/"reports" view, which has no
   // schedule open) and has reported in at least once — so it never flashes "Select a schedule"
   // during the ~2 s boot window `ready` already covers everywhere else in this file.
-  const showScheduleCrumb = ready && section === "projects";
+  //
+  // ⛔ B1644368 (NEW-1 amendment, 2026-09-15) — AND `!gridMismatched`, closing the self-contradicting
+  // breadcrumb the dispatch reported verbatim: "Select a project / Master Schedule" in the SAME
+  // trail. `activeId` below is the iframe's OWN belief — exactly the value `gridMismatched` can
+  // already prove is wrong (a foreign/stale schedule, or an unconfirmed load) — and this crumb used
+  // to name it regardless, independent of whether the grid underneath was even being shown. That
+  // let the SCHEDULE crumb read a real project's schedule name while the PROJECT crumb honestly read
+  // "Select a project," and while the grid itself sat hidden behind `gridMismatched`'s own loader —
+  // a shorter-lived but still-real instance of the identical contradiction, not merely on a
+  // project-less route but on ANY unconfirmed/mismatched grid, including the pre-existing routed
+  // case B1080544 never closed this half of. Once the grid is confirmed correct (or a deliberate
+  // pick is showing, via `pickShowing` inside `gridMismatched`), this crumb resumes exactly as before.
+  const showScheduleCrumb = ready && section === "projects" && !gridMismatched;
 
   // The Schedule tab's EMPTY STATE (NEW-2): the route points at a site that has NO linked schedule
   // yet, so there is no grid to show — we render the create/link surface INSTEAD OF the iframe
@@ -551,16 +598,6 @@ export default function Scheduler({
   const iframeFullyReported = ready && toolbar.ready;
   const showEmptyState = !pickShowing && shouldShowLinkPanel({ ready: iframeFullyReported, projectId, linkedSchedule, routedSiteName });
   const suggestedMatch = showEmptyState ? suggestNameMatch(routedSiteName, projects) : null;
-
-  // NEW-5 (B1080544) — the render gate: a routed project WITH a linked schedule whose grid hasn't
-  // (yet, or any longer) caught up must never be visibly shown as if it had. `showEmptyState`
-  // covers "no schedule exists"; this covers "a schedule exists but the wrong one is on screen" —
-  // the case a global `aPid` drifting away from the route produces. See navState.js's own header.
-  // B851 ×4 (NEW-1) — `navConfirmed` closes the gap the prior three fixes left: without it, this
-  // gate trusted `activeId` even across an iframe reload the shell hadn't yet heard back from, so a
-  // stale-but-still-matching belief read as "fine" while the reloaded document was already showing a
-  // different project underneath. See navState.js's isGridMismatched header for the full mechanism.
-  const gridMismatched = ready && isGridMismatched(projects, projectId, activeId, pickShowing, navConfirmed);
 
   // B566 — the Schedule workspace now shows the SAME unified top-right cloud sync badge as the
   // Site Planner (Row-1 right zone of AppHeader), driven by the embedded app's already-reported

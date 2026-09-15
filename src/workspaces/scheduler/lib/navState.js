@@ -313,10 +313,27 @@ export function shouldNeutralizeToReports({
  * anything else, and sets it true only inside the nav-state message handler). An un-announced grid —
  * `navConfirmed === false` — is ALWAYS treated as mismatched, fail CLOSED, never matched-by-default,
  * regardless of what the stale `projects`/`activeId` belief says. Defaults to `true` so every existing
- * caller (and every pre-×4 unit test) keeps its prior meaning unchanged. */
-export function isGridMismatched(projects, siteId, activeId, pickShowing, navConfirmed = true) {
-  if (siteId == null || pickShowing) return false;
-  if (!navConfirmed) return true; // fail closed: no confirmation from THIS load yet
+ * caller (and every pre-×4 unit test) keeps its prior meaning unchanged.
+ *
+ * ⛔ B1644368 (NEW-1 amendment, 2026-09-15) — A PROJECT-LESS ROUTE USED TO BE AN AUTOMATIC "NOT
+ * MISMATCHED", AND THAT WAS ITSELF THE BUG. `siteId == null` used to short-circuit straight to
+ * `false` on the reasoning "nothing to mismatch — the empty state owns that case" — true for the
+ * empty state, false for this gate: a project-less route has an honest answer too (the iframe's own
+ * neutral, cross-project "reports" section, the same view `shouldNeutralizeToReports` tells it to
+ * show), and anything else — some OTHER project's grid, live-synced and fully clickable, left over
+ * from that account's ambient `aPid` — is exactly as much a mismatch as a routed project showing the
+ * wrong schedule. Reproduced live: a project-less `#/schedule` rendered Goose Creek's real Master
+ * Schedule, editable, under a breadcrumb honestly reading "Select a project." So `siteId == null` no
+ * longer bypasses `navConfirmed` either (an unconfirmed load fails closed exactly as a routed one
+ * does — it moved above the siteId branch, not merely alongside it) and resolves to "matched" only
+ * once a confirmed nav-state reports `section === "reports"`. `pickShowing` still wins outright
+ * first — a deliberate cross-cutting pick (Pursuits/Operations) is a legitimate thing to show with
+ * no project routed. See Scheduler.jsx's own neutralize-effect header for the retry half of this fix
+ * — the render gate alone cannot correct a lost post, only hide the wrong picture while one is owed. */
+export function isGridMismatched(projects, siteId, activeId, pickShowing, navConfirmed = true, section = "projects") {
+  if (pickShowing) return false;
+  if (!navConfirmed) return true; // fail closed: no confirmation from THIS load yet, routed or not
+  if (siteId == null) return section !== "reports"; // matched only once the neutral view is confirmed
   const linked = findAllBySiteId(projects, siteId);
   if (linked.length === 0) return false; // nothing linked yet — the empty state (not this gate) applies
   return !linked.some((p) => p.id === activeId);
