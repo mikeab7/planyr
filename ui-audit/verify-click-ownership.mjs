@@ -31,6 +31,13 @@
  * repeated-Alt-cycles-deeper-then-wraps behaviour on a genuine two-deep stack (two fully
  * overlapping buildings), for both buttons.
  *
+ * ROW F (NEW-1, B1610592, 2026-09-15) adds a PRIOR-MENU dimension on top of all of the above: does
+ * dismissing one context menu (Escape, or an outside click) leave anything behind that steals the
+ * next right-click, on the exact occluded-badge geometry B1609136 fixed? Settled GREEN, 24/24,
+ * stable across repeated runs — the live report that prompted it was browser-automation instability
+ * (synthetic right-clicks with no pointer travel between them), not a product defect. See that row's
+ * own header comment for the full write-up.
+ *
  * Needs `npm run preview` on :4173 (or BASE_URL). Runs logged out, no external GIS, no real data.
  */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
@@ -63,8 +70,39 @@ const site = {
   els: [BLDG1, BLDG2, BLDG4, BLDG3], markups: [], // BLDG4 before BLDG3: insertion order agrees with z, belt-and-suspenders
   settings: { showDims: true }, updatedAt: Date.now(),
 };
+
+/* ---- Row F's own fixture (NEW-1, B1610592, 2026-09-15) --------------------------------------
+ * A SEPARATE small site, not more elements piled onto the Row A/A2 one above — those rows depend
+ * on Building 1 being CENTRED on the lot (so the badge sits over its body but under no handle) and
+ * on there being exactly a ONE-deep stack behind the badge; adding a genuinely occluding building
+ * to that same plan, or widening its "fit" bounding box, would risk the very rows this file already
+ * proves clean. Row F needs the OPPOSITE geometry — a building whose own CORNER (where a resize
+ * handle renders) coincides with the badge's anchor point — which B1609136's own fix note recorded
+ * could NOT be reproduced with a simple centred building; only an off-centre one whose corner meets
+ * the lot's `polylabel` shows the occlusion at all.
+ *
+ * `LOT2` is the identical 440×320 rect (polylabel of a rectangle IS its centroid, (1000,1000) in
+ * its own local frame), and `BLDG5` is shifted so its bottom-right corner lands exactly there:
+ * cx=850,cy=900,w=300,h=200 → corner at (850+150, 900+100) = (1000,1000). Selecting it renders a
+ * corner resize grip AT the badge's own anchor, the exact B1609136 geometry, live, not asserted
+ * from a hand-built feature stack. `BLDG6` is a standalone building (same shape as Row B's) that
+ * plays the role of "a DIFFERENT element" for the prior-context-menu checks below.
+ */
+const SITE_ID2 = "zz-prior-menu";
+const LOT2 = { id: "zzlot2", points: [
+  { x: 780, y: 840 }, { x: 1220, y: 840 }, { x: 1220, y: 1160 }, { x: 780, y: 1160 },
+] };
+const BLDG5 = { id: "zzelBldg5", type: "building", cx: 850, cy: 900, w: 300, h: 200, rot: 0 };
+const BLDG6 = { id: "zzelBldg6", type: "building", cx: 1550, cy: 1000, w: 300, h: 200, rot: 0 };
+const site2 = {
+  id: SITE_ID2, groupId: SITE_ID2, site: "ZZ Prior-menu dimension", name: "Plan 1",
+  origin: null, county: null, parcels: [LOT2], measures: [], callouts: [], underlay: null,
+  els: [BLDG5, BLDG6], markups: [],
+  settings: { showDims: true }, updatedAt: Date.now(),
+};
+
 const seed = `(() => { try {
-  localStorage.setItem('planarfit:sites:v1', ${JSON.stringify(JSON.stringify({ [SITE_ID]: site }))});
+  localStorage.setItem('planarfit:sites:v1', ${JSON.stringify(JSON.stringify({ [SITE_ID]: site, [SITE_ID2]: site2 }))});
   localStorage.removeItem('planarfit:currentSite:v1');
 } catch (e) {} })();`;
 
@@ -379,6 +417,162 @@ try {
     const etxt = await menuText();
     ok("E a right-click on truly empty canvas still opens the empty-canvas menu", /Zoom to fit|Paste/.test(etxt), etxt.slice(0, 80));
     await closeAnyMenu();
+  }
+
+  /* ============================== ROW F — the PRIOR-MENU dimension (NEW-1, B1610592) ==============
+   * Settles a live observation from production, not a hypothesis: with a building selected so its
+   * OWN corner grip sits exactly on the parcel acreage badge (B1609136's occlusion geometry, built
+   * into BLDG5/LOT2 above), does a right-click on the badge ever resolve to the BUILDING instead of
+   * the PARCEL when the immediately preceding interaction was a DIFFERENT context menu — however it
+   * was dismissed — rather than a fresh press with nothing in front of it? Driven entirely through
+   * Playwright's real input path (page.mouse.click / page.keyboard.press — genuine CDP input
+   * events, the same ones every other row in this file uses), never a hand-rolled dispatchEvent and
+   * never a synthetic zero-travel double right-click.
+   */
+  // Switch to Row F's own plan by navigating the app's own hash route directly
+  // (`#/project/<id>/site` — read off the live URL after the first project switch above), rather
+  // than drive the project-switcher dropdown a second time. That dropdown renders a real
+  // `<button onClick={() => pickProject(...)}>` per row, but a second, closed copy of the whole
+  // switcher stays mounted for the kept-alive Map finder route (the same pattern behind the
+  // project-crumb button's own stale-match trap noted above), and this file's one live attempt at a
+  // second in-session switch landed on that copy and reset the workspace to "no project selected"
+  // instead — a direct hash navigation avoids the fragile second interaction entirely.
+  await page.goto(`${BASE}#/project/${SITE_ID2}/site`, { waitUntil: "load" });
+  await page.waitForTimeout(1500);
+  await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 25000 });
+  await page.waitForTimeout(1200);
+  if (!await fitView()) {
+    ok("Row F setup: Row F's own plan is on screen", false);
+  } else {
+    const badge2Pt = await rectCenter('[data-chrome="acreage-badge"][data-chip-parcel="zzlot2"]');
+    const bldg5Pt = await rectCenter('[data-el-id="zzelBldg5"]');
+    const bldg6LabelPt = await rectCenter('[data-label-for="zzelBldg6"]');
+    if (!badge2Pt || !bldg5Pt) {
+      ok("Row F setup: the badge and Building 5 are on screen", false);
+    } else {
+      const selectBldg5 = async () => {
+        await deselect();
+        await page.mouse.click(bldg5Pt.x, bldg5Pt.y);
+        await page.waitForTimeout(150);
+        return (await selection()) === "el:zzelBldg5";
+      };
+      // Escape / an outside click are the app's own two dismissals (ContextMenu.jsx) — the outside
+      // click lands on the menu's own full-viewport backdrop, which is what a "left-click on empty
+      // ground" actually hits while a menu is open, so `emptyPoint()`'s canvas-fraction probe is the
+      // faithful equivalent, not a hardcoded corner pixel.
+      const dismissBy = async (method) => {
+        if (method === "escape") { await page.keyboard.press("Escape"); }
+        else { const p = await emptyPoint(); await page.mouse.click(p ? p.x : 10, p ? p.y : 10); }
+        await page.waitForTimeout(150);
+      };
+      const rightClickBadge = async () => {
+        await page.mouse.move(badge2Pt.x, badge2Pt.y);
+        await page.waitForTimeout(150); // let the hover latch arm (B1327/B280402)
+        await page.mouse.click(badge2Pt.x, badge2Pt.y, { button: "right" });
+        await page.waitForTimeout(150);
+        return menuText();
+      };
+
+      // Setup proof: with Building 5 selected, is the badge's own point GENUINELY occluded by its
+      // corner grip, the way the production report describes — not merely nearby? Read the real DOM
+      // stack at that exact pixel instead of assuming the engineered geometry landed where intended.
+      if (await selectBldg5()) {
+        // The badge is `pointer-events:none` (so `elementsFromPoint` skips it entirely) until the
+        // pointer has rested on it (B1327/B280402) — hover first, the same precondition every real
+        // right-click on it needs, or this reads as "not occluding" for the wrong reason.
+        await page.mouse.move(badge2Pt.x, badge2Pt.y);
+        await page.waitForTimeout(150);
+        // `closest`, not a bare attribute read — `elementsFromPoint` returns the actual painted leaf
+        // nodes (a `<rect>`/`<text>`), and both `data-handle` and `data-chrome` are stamped on an
+        // ANCESTOR group, exactly the way the app's own occlusion check (SitePlanner.jsx's handle-
+        // layer `onContextMenu`) reads it.
+        const stack = await page.evaluate(({ x, y }) => [...document.elementsFromPoint(x, y)]
+          .map((n) => (n.closest && (n.closest("[data-handle]")?.getAttribute("data-handle") || n.closest("[data-chrome]")?.getAttribute("data-chrome"))) || null)
+          .filter(Boolean), { x: badge2Pt.x, y: badge2Pt.y });
+        ok("Row F setup: Building 5's corner grip genuinely occludes the badge at this pixel", stack.includes("corner") && stack.includes("acreage-badge"), stack.join(","));
+      } else ok("Row F setup: Building 5 selects", false);
+
+      // (a) — nothing before. Re-proves B1609136's own fix live in a real render — its shipped
+      // regression coverage is pure-JS over a hand-built feature stack, never a real DOM/browser.
+      if (await selectBldg5()) {
+        const txt = await rightClickBadge();
+        ok("F(a) nothing before — building selected, right-click the occluded badge still opens the PARCEL's menu", txt.includes("Merge parcels"), txt.slice(0, 80));
+        await closeAnyMenu();
+      } else ok("F(a) setup: Building 5 selected", false);
+
+      // (b)/(c) — a DIFFERENT element's menu (Building 6's), dismissed by Escape / by an outside
+      // click, THEN Building 5 re-selected (right-clicking Building 6 selects it — a real user's
+      // stray right-click elsewhere changes the selection the same way here), THEN the occluded badge.
+      for (const method of ["escape", "outside"]) {
+        const label = method === "escape" ? "b" : "c";
+        if (!(await selectBldg5()) || !bldg6LabelPt) { ok(`F(${label}) setup: Building 5 selected`, false); continue; }
+        await page.mouse.click(bldg6LabelPt.x, bldg6LabelPt.y, { button: "right" }); // Building 6's OWN menu
+        await page.waitForTimeout(150);
+        await dismissBy(method);
+        if (!(await selectBldg5())) { ok(`F(${label}) re-setup: Building 5 re-selected`, false); continue; }
+        const txt = await rightClickBadge();
+        ok(`F(${label}) a DIFFERENT element's menu (Building 6's), dismissed via ${method === "escape" ? "Escape" : "an outside click"} — badge still opens the PARCEL's menu`,
+          txt.includes("Merge parcels"), txt.slice(0, 80));
+        await closeAnyMenu();
+      }
+
+      // (d) — a context menu opened on a CONTROL POINT of the SELECTED element, dismissed, then the
+      // badge. A plain rect building has no editable vertices of its own (only resize/rotate grips),
+      // so its "control point" menu is the one Row C already proved: a right-click on its own corner
+      // grip forwards to its own element menu via the handle layer's blanket fallback — exactly the
+      // chrome occluding the badge in the first place, so this replays the reported sequence at the
+      // SAME pixel: right-click it once (via the grip), dismiss, right-click it again (via the badge).
+      if (await selectBldg5()) {
+        const corner = await rectCenter('[data-handle="corner"]');
+        if (corner) {
+          await page.mouse.click(corner.x, corner.y, { button: "right" });
+          await page.waitForTimeout(150);
+          await dismissBy("escape");
+          if (await selectBldg5()) {
+            const txt = await rightClickBadge();
+            ok("F(d) a menu opened on the SELECTED element's own control point (its resize grip), dismissed — badge still opens the PARCEL's menu",
+              txt.includes("Merge parcels"), txt.slice(0, 80));
+            await closeAnyMenu();
+          } else ok("F(d) re-setup: Building 5 re-selected", false);
+        } else ok("F(d) setup: a resize corner grip is on screen", false);
+      } else ok("F(d) setup: Building 5 selected", false);
+
+      // (d2) — the same dimension against a GENUINE vertex "Delete control point" menu (not a grip
+      // forward): select the parcel itself (vertex-editable, 4 points), right-click one of its own
+      // control points, dismiss, then right-click its own badge again.
+      await deselect();
+      await page.mouse.move(badge2Pt.x, badge2Pt.y);
+      await page.waitForTimeout(150);
+      await page.mouse.click(badge2Pt.x, badge2Pt.y);
+      await page.waitForTimeout(150);
+      if (await selection() === "parcel:zzlot2") {
+        const vtx = await rectCenter('[data-testid="vtx-handle"]');
+        if (vtx) {
+          await page.mouse.click(vtx.x, vtx.y, { button: "right" });
+          await page.waitForTimeout(150);
+          const vtxTxt = await menuText();
+          const openedVtxMenu = /Delete control point/.test(vtxTxt);
+          await dismissBy("escape");
+          const txt2 = await rightClickBadge();
+          ok("F(d2) a genuine vertex 'Delete control point' menu on the SELECTED parcel, dismissed — its own badge still opens the PARCEL's menu",
+            openedVtxMenu && txt2.includes("Merge parcels"), `${vtxTxt.slice(0, 40)} -> ${txt2.slice(0, 80)}`);
+          await closeAnyMenu();
+        } else ok("F(d2) setup: a parcel vertex control point is on screen", false);
+      } else ok("F(d2) setup: the parcel is selected", false);
+
+      // (e) — regression: none of the above priors leave the resolver believing something is under
+      // a point where nothing is. Genuinely empty canvas still opens the empty-canvas menu.
+      await deselect();
+      const empty2 = await emptyPoint();
+      if (!empty2) { ok("F(e) setup: found a genuinely empty canvas point", false); }
+      else {
+        await page.mouse.click(empty2.x, empty2.y, { button: "right" });
+        await page.waitForTimeout(150);
+        const ftxt = await menuText();
+        ok("F(e) after the prior-menu checks, a right-click on truly empty canvas still opens the empty-canvas menu", /Zoom to fit|Paste/.test(ftxt), ftxt.slice(0, 80));
+        await closeAnyMenu();
+      }
+    }
   }
 
   const passed = results.filter((r) => r.pass).length;
