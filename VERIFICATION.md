@@ -166,6 +166,46 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1173824 — B1645792: a road tee-ing into a truck court / paving pad at an oblique angle shows a real rounded curb return, not a raw notch
+
+**Why this needs a live pass.** A rendering-shape fix (PERCEPTUAL-PARITY: the bar is whether the
+owner can SEE it right at his own working zoom, matching his original repro shape, not just
+whether the numbers check out). Everything the sandbox can prove is already proven: the angle
+sweep (0–89° × five widths/radii/pad sizes, a rotated pad, connecting a few feet from a pad
+corner) is unit-tested against the fix and separately confirmed RED on unmodified `origin/main`
+(`test/roadDriveJunctionFillet.test.js`); the same RED→GREEN is reproduced live in a headless
+Chromium driving the real canvas (`e2e/road-drive-junction-fillet.spec.js`), including a
+byte-identical PDF/print export parity check. A visual screenshot of the fix was also inspected
+this session and reads as a clean, properly rounded curb return with no notch, no disconnected
+island, and no exposed raw flat-cap edge. What is NOT provable here: whether it looks right on a
+real monitor at the owner's own DPI/zoom, and specifically whether it fixes the EXACT geometry in
+his original screenshot (not available to this session — only his verbal description was).
+
+**No standing throwaway project exists** — this check needs a fresh throwaway plan (or an explicit
+duplicate of a real one) created first; state exactly what was created/touched, per the owner
+constraint on live checks. Never touch one of Michael's real plans.
+
+**Steps, each with a named expected result:**
+1. Open a throwaway plan (new project — never edit one of Michael's real plans directly). Draw a
+   truck court / paving pad (a wide rectangle). Draw a road (36–40 ft preset) ending on the pad's
+   edge at an oblique angle (not perpendicular — aim for roughly 30–60° off square). **Expect:**
+   both sides of the junction show a smooth, rounded curb-return arc blending the road's pavement
+   into the pad's edge — no straight diagonal edge exposed, no gap/notch of bare ground between
+   the road and the pad, no floating triangular scrap of pavement near (but not touching) the road.
+2. Zoom in on the junction at a normal working zoom. **Expect:** the fillet reads as ONE continuous
+   piece of pavement — the road widening smoothly into the return on both the acute and the obtuse
+   side of the approach — not two shapes that merely happen to sit near each other.
+3. Repeat with a generic Parking-type pad instead of a truck court, and with the road approached at
+   a different oblique angle (try both a shallow ~15–20° and a steep ~70–80° approach). **Expect:**
+   the same clean result at every angle tried.
+4. Print/export the sheet (or use the app's PDF export) and compare the junction to the on-screen
+   canvas. **Expect:** identical — the exported pavement shape matches the screen exactly (already
+   proven byte-identical in the headless e2e spec; this step is the human confirmation).
+5. State what was created/touched (the throwaway plan's id/name) so it can be cleaned up or left as
+   a known throwaway.
+- **Stopping rule:** closes when steps 1–5 are observed on a real screen, or a specific residual
+  (which angle/pad shape, a screenshot) is filed as a recurrence against B1645792.
+
 ### V1160896 — B1631939: pinned/reordered projects in the header switcher actually follow the owner's account across devices, and survive a real sign-in `Blocker: auth`
 
 **What was verified here, extensively, without a real signed-in pass.** Driven headless in a real Chromium build against three real seeded projects (not a synthetic fixture), logged out: pinning from the switcher's kebab lifts a project into a "Pinned" section below the always-first current project; a second pin puts it above the first (most-recently-pinned-first, matching the existing Sites-panel convention — see V480816); keyboard ArrowUp/ArrowDown on the drag handle reorders the pinned section; unpinning removes a project from that section; deleting a pinned project cleans it out of the pinned list (no ghost pin left behind); a reload of the page (localStorage left genuinely alone) shows the same pin state and order restored, via `userPrefs.js`'s existing localStorage mirror of the account-scope `sitesPanel` bag; a non-matching search query empties the whole list, current and pinned rows included, rather than force-showing either.
