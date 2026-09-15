@@ -249,22 +249,42 @@ export function ownerKey(attrs, { skip = null } = {}) {
 /* NEW-1 (2026-09-12) — a source can publish BOTH a GIS-measured area column and a "legal" one
  * whose values are the raw appraisal-roll text in an inconsistent format (a unit suffix on some
  * rows, bare on others — Texas's own statewide StratMap layer does exactly this: LEGAL_AREA reads
- * "16.02 a" on one parcel and "0.6658" bare on the next, while GIS_AREA is a plain number). A flat
- * "first key in attrs order that matches" (the shape every other row here uses) let the legal-text
- * column win the Acreage row whenever it happened to be listed first — which is this layer's own
- * field order (LEGAL_AREA precedes GIS_AREA). `acreageKey` prefers a GIS/measured area column over
- * a "legal" one, the same ordered-preference shape `ownerKey`/`situsKey` already use for their own
- * ambiguities, so the row always shows the reliable number regardless of attribute order. Existing
- * sources that carry only one of the two kinds are unaffected — there is nothing to prefer between. */
+ * "16.02 a" on one parcel and "0.6658" bare on the next, while GIS_AREA is normally a plain
+ * number). A flat "first key in attrs order that matches" (the shape every other row here uses)
+ * let the legal-text column win the Acreage row whenever it happened to be listed first — which is
+ * this layer's own field order (LEGAL_AREA precedes GIS_AREA). `acreageKey` prefers a GIS/measured
+ * area column over a "legal" one, the same ordered-preference shape `ownerKey`/`situsKey` already
+ * use for their own ambiguities, so the row always shows the reliable number regardless of
+ * attribute order. Existing sources that carry only one of the two kinds are unaffected — there is
+ * nothing to prefer between.
+ *
+ * ⛔ NEW-2 (2026-09-15, B1639584 ×2) — "normally a plain number" above is NOT true when this SAME
+ * StratMap schema arrives through TxGIO's own MapServer /identify (counties.js's
+ * TXGIO_STATEWIDE_LAYER, the /query-disabled government host — see its own header): /identify
+ * serializes GIS_AREA as a TRUNCATED string in scientific notation (sampled live: "5.0968505128e-",
+ * missing its exponent digits), which parses as garbage, while LEGAL_AREA comes back clean
+ * (sampled: "53.803"). That is an /identify formatting artifact of THIS transport, not a property
+ * of the underlying data, so the fix is not "prefer legal for this one layer" — it is "never prefer
+ * a GIS column whose value doesn't actually look like a number", which also protects any other
+ * source that ever publishes a genuinely garbled GIS-area column. A malformed GIS value now falls
+ * through to LEGAL_AREA exactly as if the GIS column were absent. */
 const GIS_ACRE_RE = /(gis_?acre|calc_?acre|^acre|acreage|deed_?acre|gis_?area|land_?size_?ac)/i;
 const LEGAL_ACRE_RE = /(legal_?acre|legal_?area)/i;
+// A bare, fully-formed decimal number (optionally negative) — deliberately stricter than
+// `Number.isFinite(Number(v))` alone would read to a human: it exists to make the intent explicit
+// (accept "53.803", reject the truncated-scientific-notation shape /identify emits) even though
+// `Number()` already rejects "5.0968505128e-" as invalid syntax (an incomplete exponent).
+const looksLikeAcreageNumber = (v) => {
+  const s = String(v ?? "").trim();
+  return s !== "" && Number.isFinite(Number(s));
+};
 export function acreageKey(attrs, { skip = null } = {}) {
   if (!attrs) return null;
   let legal = null;
   for (const key of Object.keys(attrs)) {
     if (skip && skip.has(key)) continue;
     if (isPlaceholderValue(attrs[key])) continue;
-    if (GIS_ACRE_RE.test(key)) return key;
+    if (GIS_ACRE_RE.test(key) && looksLikeAcreageNumber(attrs[key])) return key;
     if (legal == null && LEGAL_ACRE_RE.test(key)) legal = key;
   }
   return legal;

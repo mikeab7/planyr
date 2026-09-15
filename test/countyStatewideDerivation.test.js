@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync } from "node:fs";
 import {
   COUNTIES, COUNTIES_MAP, countyIdentity, countyKeyForName, noParcelSourceNote,
-  candidateCountiesForPoint, STATEWIDE_KEYS, STATEWIDE_PARCEL_LAYER, TX_STATEWIDE_STRATMAP_LAYER,
+  candidateCountiesForPoint, STATEWIDE_KEYS, STATEWIDE_PARCEL_LAYER,
 } from "../src/workspaces/site-planner/lib/counties.js";
 import { setCountyPolygons } from "../src/workspaces/site-planner/lib/countyPolygons.js";
 
@@ -72,9 +72,9 @@ describe("statewide derivation — a Texas county with no dialed-in row (B853712
     expect(noParcelSourceNote(id)).toBeNull();
   });
 
-  it("a derived county's COUNTIES_MAP row rides the universal TX statewide (StratMap) layer, flagged as derived", () => {
+  it("a derived county's COUNTIES_MAP row rides the universal TxGIO layer, flagged as derived", () => {
     const m = COUNTIES_MAP.dallas;
-    expect(m.layerUrl).toBe(TX_STATEWIDE_STRATMAP_LAYER);
+    expect(m.layerUrl).toBe(STATEWIDE_PARCEL_LAYER);
     expect(m.state).toBe("TX");
     expect(m.statewideDerived).toBe(true);
     expect(m.bbox).toHaveLength(4);
@@ -83,20 +83,19 @@ describe("statewide derivation — a Texas county with no dialed-in row (B853712
     expect(minLng).toBeLessThan(maxLng);
   });
 
-  it("a derived county's COUNTIES row rides the same layer with its real field names, unscoped", () => {
-    // NEW-1 (2026-09-12) — TX_STATEWIDE_STRATMAP_LAYER carries no county-name column (unlike the
-    // old TXGIO_STATEWIDE_LAYER a derived county used to ride), so there is no scopeWhere to build
-    // — a derived county's search reaches the whole state rather than being confined to it.
+  it("a derived county's COUNTIES row carries a scopeWhere naming ITS OWN county, not another's", () => {
     const c = COUNTIES.dallas;
-    expect(c.layerUrl).toBe(TX_STATEWIDE_STRATMAP_LAYER);
-    expect(c.scopeWhere).toBeUndefined();
-    expect(c.idField).toBe("Prop_ID");
-    expect(c.addrField).toBe("SITUS_ADDR");
+    expect(c.layerUrl).toBe(STATEWIDE_PARCEL_LAYER);
+    expect(c.scopeWhere).toBe("county='DALLAS'");
+    expect(c.idField).toBe("prop_id");
+    expect(c.addrField).toBe("situs_addr");
     expect(c.statewideDerived).toBe(true);
   });
 
-  it("Van Zandt (a two-word county name) still derives cleanly with the new layer", () => {
-    expect(COUNTIES.vanzandt.layerUrl).toBe(TX_STATEWIDE_STRATMAP_LAYER);
+  it("Van Zandt's scopeWhere carries the space TxGIO's own `county` column uses", () => {
+    // Routing KEYS strip whitespace ("vanzandt"); the county's real name, used in the where-clause
+    // and the display label, keeps it.
+    expect(COUNTIES.vanzandt.scopeWhere).toBe("county='VAN ZANDT'");
     expect(COUNTIES.vanzandt.label).toBe("Van Zandt County");
   });
 
@@ -117,7 +116,6 @@ describe("the dialed-in tier is never shadowed by the derived tier (owner instru
 
   it("Harris's own HCAD endpoint wins over the statewide layer — the derivation never overwrites it", () => {
     expect(COUNTIES_MAP.harris.layerUrl).not.toBe(STATEWIDE_PARCEL_LAYER);
-    expect(COUNTIES_MAP.harris.layerUrl).not.toBe(TX_STATEWIDE_STRATMAP_LAYER);
     expect(COUNTIES_MAP.harris.layerUrl).toMatch(/gis\.hctx\.net/);
   });
 
@@ -163,8 +161,10 @@ describe("the derivation changes nothing about enumeration or the statewide pseu
     const keys = Object.keys(COUNTIES_MAP);
     expect(keys).not.toContain("dallas");
     // ~18 dialed-in TX+CO rows + 32 statewide pseudo-keys + 13 Idaho counties (B1344721) + 19
-    // other-state counties (B1344722) + 9 Tier-1 counties (B1551617), not 254 or 3,143.
-    expect(keys.length).toBeLessThan(100);
+    // other-state counties (B1344722) + 9 Tier-1 counties (B1551617) + 8 more (2026-09-15: SD
+    // Pennington/Minnehaha/Sioux Falls, PA Luzerne/Lackawanna, MI Macomb, MO Kansas
+    // City/Independence), not 254 or 3,143.
+    expect(keys.length).toBeLessThan(120);
   });
 
   it("candidateCountiesForPoint still answers via the existing txgio_statewide fallback for a derived county — unchanged, not doubled", () => {

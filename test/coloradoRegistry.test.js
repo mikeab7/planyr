@@ -107,12 +107,9 @@ describe("NEW-5 · the fallback chain has a Colorado bottom tier", () => {
   });
 
   it("returns null for a county already ON the composite — no self-referential backup", () => {
+    // Exactly the Waller case in Texas.
     expect(statewideFallbackFor("co_jefferson")).toBeNull();
-    // NEW-1 (2026-09-12) — Waller is no longer this case: its primary moved to a DIFFERENT TX
-    // statewide layer (TX_STATEWIDE_STRATMAP_LAYER) than the one this backup uses
-    // (STATEWIDE_PARCEL_LAYER/TXGIO_STATEWIDE_LAYER), so it now gets a genuine backup here — see
-    // test/counties.test.js's own Waller case for the assertion.
-    expect(statewideFallbackFor("waller")).not.toBeNull();
+    expect(statewideFallbackFor("waller")).toBeNull();
   });
 
   it("keeps the two states' statewide layers distinct", () => {

@@ -74,19 +74,10 @@ export function scanInlineUrls() {
  *     recorded, not shipped.
  * A row with neither is a guessed URL, and that is the thing this check exists to stop. */
 const STATEWIDE_COMPOSITES = [
-  "stratmap_land_parcels",       // the old TXGIO_STATEWIDE_LAYER (feature.geographic.texas.gov)
-  "2019_Texas_Parcels_StratMap", // NEW-1 (2026-09-12) — TX_STATEWIDE_STRATMAP_LAYER, the current
-                                  // universal TX click-routing fallback (see counties.js header)
+  "stratmap_land_parcels",       // TxGIO
   "Colorado_Public_Parcels",     // Colorado OIT
 ];
 const onComposite = (url) => STATEWIDE_COMPOSITES.some((frag) => String(url || "").includes(frag));
-
-/* NEW-1 (2026-09-12) — TX_STATEWIDE_STRATMAP_LAYER carries no county-name column (unlike the old
- * TxGIO layer's `county` field), so nothing riding it — Waller included — can build a scopeWhere.
- * The scopeWhere requirement below still holds for every OTHER composite; this is a single named
- * exception for the one composite that genuinely cannot satisfy it, not a general loosening. */
-const UNSCOPABLE_COMPOSITE_FRAGMENTS = ["2019_Texas_Parcels_StratMap"];
-const compositeIsUnscopable = (url) => UNSCOPABLE_COMPOSITE_FRAGMENTS.some((frag) => String(url || "").includes(frag));
 
 export function scanCountyProvenance() {
   const problems = [];
@@ -115,7 +106,7 @@ export function scanCountyProvenance() {
       if (!declared) problems.push(`countiesProvenance.js ${key}: candidateUrl with no provenance — an unverified URL must say where it came from and why it was not probed.`);
       if (!composite) problems.push(`counties.js ${key}: has a candidateUrl but its primary is not the statewide composite — an unverified candidate must not be the fallback for a shipped endpoint.`);
     }
-    if (composite && !c.scopeWhere && !compositeIsUnscopable(c.layerUrl)) {
+    if (composite && !c.scopeWhere) {
       problems.push(`counties.js ${key}: rides the statewide composite with no \`scopeWhere\` — an unscoped search can match a like-named parcel in another county.`);
     }
   }

@@ -6,11 +6,9 @@
  * on demand, so the mechanism is a normal CI check instead of a wait for a real one.
  *
  * Fully hermetic — no real network to any GIS host or to Google Drive is needed or attempted:
- *   - The live parcel hosts (gisdata.pandai.com [Chambers CCAD], feature.geographic.texas.gov
- *     [the universal statewide text-search backup], services1.arcgis.com [TX_STATEWIDE_STRATMAP_LAYER
- *     — Waller's only live source since NEW-1, 2026-09-12, and the universal click-routing
- *     fallback], www.gis.hctx.net [Harris HCAD]) are either ABORTED (outage scenarios) or served a
- *     canned ArcGIS JSON hit
+ *   - The three live parcel hosts (gisdata.pandai.com [Chambers CCAD], feature.geographic.texas.gov
+ *     [TxGIO statewide — Waller's only live source, and the universal fallback], www.gis.hctx.net
+ *     [Harris HCAD]) are either ABORTED (outage scenarios) or served a canned ArcGIS JSON hit
  *     (Harris control) via page.route — never dialed for real, so this runs in any environment,
  *     including this sandbox (whose egress proxy resets Chromium's connection to real GIS hosts
  *     and to planyr.io — the reason V199 itself could never be driven from here).
@@ -184,10 +182,7 @@ for (const [county, pt] of [["chambers", CHAMBERS], ["waller", WALLER]]) {
   console.log(`\n--- ${Label}, live parcel sources down ---`);
   const { page, pageErrors } = await newPage(browser);
   await installRoutes(page, {
-    // NEW-1 (2026-09-12) — Waller's live source moved off feature.geographic.texas.gov (TxGIO) to
-    // services1.arcgis.com (TX_STATEWIDE_STRATMAP_LAYER); block both hosts so either county's
-    // scenario still simulates a genuine outage regardless of which one it rides.
-    blockHosts: ["gisdata.pandai.com", "feature.geographic.texas.gov", "services1.arcgis.com", "www.gis.hctx.net"],
+    blockHosts: ["gisdata.pandai.com", "feature.geographic.texas.gov", "www.gis.hctx.net"],
     geocodeTo: { ...pt, label: `Test Lot, ${Label} County, TX` },
   });
   await page.addInitScript(seedFor(`s_${county}`, pt.lat, pt.lng, county));

@@ -205,6 +205,73 @@ constraint on live checks. Never touch one of Michael's real plans.
    a known throwaway.
 - **Stopping rule:** closes when steps 1–5 are observed on a real screen, or a specific residual
   (which angle/pad shape, a screenshot) is filed as a recurrence against B1645792.
+### V1179280 — B1651248: Pennington County, SD parcels — a real point in Rapid City returns a real parcel `Blocker: live-GIS`
+
+**Why this needs its own live pass.** GIS endpoint behaviour is a mandatory LIVE-VERIFY class. Reachability and field metadata were confirmed directly from this sandbox (`services1.arcgis.com` is on the egress allowlist) — `52,547` polygon features, extent matching Pennington County. What only a live click can show is that a real point inside Rapid City resolves a real parcel through exactly one query.
+
+**What was verified here (sandbox).** `countyKeyForName`/`candidateCountiesForPoint` auto-derive `sd_pennington` from the nationwide county-name geometry with no code change needed (the same mechanism every other per-county entry uses) — `test/countyStatewideDerivation.test.js`/`test/counties.test.js` pass unchanged. `test/gisSources.test.js`'s provenance audit passes with the new row's `verifiedOn` date recorded.
+
+**Steps.**
+1. Open the Site Planner on a Rapid City, SD site (or pan the map there and click a parcel).
+2. Click any lot. **Expect:** exactly ONE parcel query fires, to `services1.arcgis.com/AhXvNWFdL7hH4TjJ/.../PenningtonParcels/FeatureServer/0`, and a real parcel with a real PIN is selected.
+3. Click a lot well outside Pennington County (still in South Dakota). **Expect:** no query to this layer.
+- Stopping rule: closes when step 2 is observed on `planyr.io`, or when it fails and is filed as a recurrence against B1651248.
+
+### V1179281 — B1651249: Sioux Falls resolves to the city layer, a rural Minnehaha point resolves to the county layer — never the wrong one `Blocker: live-GIS`
+
+**Why this needs its own live pass.** The county layer's own hole over Sioux Falls, and the city-scope ring that fills it, are both proven sandbox-side against the real geometry (see below); only a live click can prove the actual `gis.minnehahacounty.gov`/`gis.siouxfalls.gov` endpoints answer correctly and that neither fires against the other.
+
+**What was verified here (sandbox).** `cityScopeAnswer`/`candidateCountiesForPoint` proven against the real fetched boundary ring: downtown Sioux Falls (-96.7311, 43.5460) resolves to `sd_siouxfalls` ALONE; a rural Minnehaha point (-96.95, 43.75) resolves to `sd_minnehaha` ALONE — `test/cityScopes.test.js`'s new suite pins both. The ring itself (Esri Living Atlas Census Populated Places, generalised ~150 m) was independently validated against `SQMI` (79.63, matching Sioux Falls' known area) and both control points before being embedded.
+
+**Steps.**
+1. Click a lot in downtown Sioux Falls. **Expect:** exactly ONE query, to `gis.siouxfalls.gov/.../Data/Property/MapServer/1`, real parcel with a real TAG returned.
+2. Click a lot well outside Sioux Falls but inside Minnehaha County (e.g. a rural point). **Expect:** exactly ONE query, to `gis.minnehahacounty.gov/.../Parcels/MapServer/0`.
+3. Click a lot near the Sioux Falls city line. **Expect:** the near-edge behaviour (may query both) rather than a wrong single answer.
+- Stopping rule: closes when steps 1–2 are observed on `planyr.io`, or when either fails and is filed as a recurrence against B1651249.
+
+### V1179282 — B1651250: Luzerne County, PA parcels — a real point returns a real parcel by PIN `Blocker: live-GIS`
+
+`gis.luzernecounty.org` is blocked from this sandbox; layer choice (layer 1, not the layer-6 Improvements table) and field mapping (`PIN`, no address field) are recorded from the dispatch's own live-browser measurement, not independently re-probed here.
+
+**Steps.**
+1. Click a lot in Luzerne County, PA (e.g. Wilkes-Barre). **Expect:** exactly ONE query, to `gis.luzernecounty.org/server/rest/services/PublicMap/MapServer/1`, a real parcel with a real PIN.
+2. Confirm the returned attributes come from LAYER 1, never layer 6 (Improvements).
+- Stopping rule: closes when step 1 is observed on `planyr.io`, or when it fails and is filed as a recurrence against B1651250.
+
+### V1179283 — B1651251: Lackawanna County, PA parcels — a real point returns a real parcel by its 13-digit PIN `Blocker: live-GIS`
+
+`gis.lackawannacounty.org` is blocked from this sandbox; the parcel-fabric schema (`Name` = the PIN) is recorded from the dispatch's own live-browser measurement.
+
+**Steps.**
+1. Click a lot in Lackawanna County, PA (e.g. Scranton). **Expect:** exactly ONE query, to `gis.lackawannacounty.org/arcgis/rest/services/GISViewer/Parcels/FeatureServer/0`, a real parcel whose `Name` field is a 13-digit PIN.
+- Stopping rule: closes when step 1 is observed on `planyr.io`, or when it fails and is filed as a recurrence against B1651251.
+
+### V1179284 — B1651252: Macomb County, MI parcels — four spread points across the county each return a real parcel, no city hole `Blocker: live-GIS`
+
+**What was verified here (sandbox).** Reachability and field metadata confirmed directly from this sandbox (`services6.arcgis.com`) — `332,971` polygon features, fields match exactly.
+
+**Steps.**
+1. Click a lot in Warren, MI. **Expect:** a real parcel at 11064 10 Mile Rd (or nearby), via `services6.arcgis.com/K0qS4r8AEJxrE8em/.../Macomb_County_Parcel_Data/FeatureServer/10`.
+2. Repeat for Sterling Heights, Mount Clemens and Romeo. **Expect:** each returns a real, distinct parcel — confirming no city-shaped hole in this county's coverage.
+- Stopping rule: closes when steps 1–2 are observed on `planyr.io`, or when either fails and is filed as a recurrence against B1651252.
+
+### V1179285 — B1651253: Kansas City, MO parcels resolve through ONE ring across Jackson, Clay and Platte counties `Blocker: live-GIS`
+
+**Why this needs its own live pass.** The county-agnostic ring resolution is proven sandbox-side against the real fetched boundary (`test/cityScopes.test.js`); only a live click can prove `mapd.kcmo.org` itself answers correctly for a point in each county.
+
+**Steps.**
+1. Click a lot at Crown Center (Jackson County). **Expect:** exactly ONE query, to `mapd.kcmo.org/kcgis/rest/services/AGOL/MapServer/6`, a real parcel with an APN starting `JA`.
+2. Click a lot in the Northland (Clay County, inside KC limits). **Expect:** the same layer, an APN starting `CL`.
+3. Click a lot near KCI airport (Platte County). **Expect:** the same layer, an APN starting `PL`.
+4. Click a lot in Liberty, MO (Clay County, OUTSIDE KC limits). **Expect:** routes to `mo_clay` instead, never the KC layer.
+- Stopping rule: closes when steps 1–4 are observed on `planyr.io`, or when any fails and is filed as a recurrence against B1651253.
+
+### V1179286 — B1651254: Independence, MO parcels — a real point returns a real parcel, distinct from the Kansas City ring `Blocker: live-GIS`
+
+**Steps.**
+1. Click a lot in Independence, MO. **Expect:** exactly ONE query, to `services.arcgis.com/sbDzK061dd6DNPHv/.../COI_Parcels_2_view/FeatureServer/0`, a real parcel whose `Name` field is a parcel APN.
+2. Click a lot in downtown Kansas City. **Expect:** routes to `mo_kansascity`, never `mo_independence`.
+- Stopping rule: closes when steps 1–2 are observed on `planyr.io`, or when either fails and is filed as a recurrence against B1651254.
 
 ### V1160896 — B1631939: pinned/reordered projects in the header switcher actually follow the owner's account across devices, and survive a real sign-in `Blocker: auth`
 
@@ -221,26 +288,45 @@ constraint on live checks. Never touch one of Michael's real plans.
 6. Also confirm the SAME pin appears (or can be toggled) from the Map view's own Sites-panel row menu (B859505) — pinning from either surface is meant to be the one shared list.
 7. Delete a pinned project from the switcher. **Expect:** it's gone from the Pinned section too, not left behind as a stale entry.
 - **Stopping rule:** closes when steps 1–7 are observed on `planyr.io`, or when any step fails and is filed as a recurrence against B1631939, per STANDING RULE #2 (a failure here is a FINDING, not a silent close).
-### V1168544 — B1639584: Texas statewide parcels (StratMap) as the click-routing fallback behind the 8 wired counties `Blocker: live-GIS`
+### V1168544 — B1639584 (×2): Texas statewide parcels via TxGIO's own `/identify` (the third-party StratMap mirror this item originally shipped is confirmed dead) `Blocker: live-GIS`
 
-**Why this needs its own live pass.** GIS endpoint behaviour is a mandatory LIVE-VERIFY class, and this item is specifically about whether a real ArcGIS host returns real parcels — which only a live query against `services1.arcgis.com` can show, and that host sits outside this sandbox's egress allowlist. The ROUTING LOGIC (which candidate a Texas point resolves to, and that it is exactly one for both a wired and an unwired county) is fully proven sandbox-side against the real, unmodified `candidateCountiesForPoint`/`identifyParcelEager` machinery, listed below — nothing about that logic depends on the endpoint answering.
+**⛔ CORRECTED 2026-09-15 — this V# previously described a check against `services1.arcgis.com/.../2019_Texas_Parcels_StratMap/FeatureServer/0`, which no longer exists (HTTP 200, `{"error":{"code":400,"message":"Invalid URL"}}` at the SERVICE ROOT).** The fix now under test reverts to `feature.geographic.texas.gov` (TxGIO's own government host, `TXGIO_STATEWIDE_LAYER`) via its `/identify` operation (its `/query` has been permanently disabled since B627) — see B1639584 (×2)'s own header for the full incident. The steps below are rewritten for the CURRENT fix; do not run them against the old URL.
+
+**Why this needs its own live pass.** GIS endpoint behaviour is a mandatory LIVE-VERIFY class, and this item is specifically about whether a real ArcGIS host returns real parcels — which only a live query against `feature.geographic.texas.gov` can show, and that host sits outside this sandbox's egress allowlist. The ROUTING LOGIC (which candidate a Texas point resolves to, and that it is exactly one for both a wired and an unwired county) is fully proven sandbox-side against the real, unmodified `candidateCountiesForPoint`/`identifyParcelEager`/`identifyAtPoint` machinery, listed below — nothing about that logic depends on the endpoint answering.
 
 **What was verified HERE (this session, sandbox, against the real production code — not a mock).**
-1. `test/countyStatewideDerivation.test.js` — every existing candidate-list fixture re-asserted unchanged: Harris → `["harris", "txgio_statewide"]`, Chambers → `["chambers", "txgio_statewide"]` (once), Fort Bend (Sugar Land straddle) → `["fortbend", "txgio_statewide"]`, Huntsville/Walker (a derived, unwired county) → `["txgio_statewide"]` alone, Conroe/Texas City → `[county, "txgio_statewide"]`. The KEY LIST candidateCountiesForPoint returns is byte-identical to before this item; only the URL the `txgio_statewide` key resolves to moved.
-2. `test/counties.test.js`, `test/coloradoRegistry.test.js`, `test/parcelSourcePolicy.test.js` — the "one URL, one health policy" invariant (`isStatewideLayerUrl`) still holds after Waller and `txgio_statewide` both moved to the new layer; Waller's own outage-backup behavior (`statewideFallbackFor`) updated and re-proven (see the item for why it now returns a real object instead of `null`).
-3. `test/appraisal.test.js` — the new `acreageKey` ordered-resolver proven against the exact reported StratMap field order (`LEGAL_AREA` before `GIS_AREA`) and values, plus fallback/placeholder/skip cases; the pre-existing TxGIO fixture's expectation corrected to the fixed, now-general rule.
-4. `test/gisSources.test.js` (county provenance audit — every county row must be live-verified, on its composite, or explained) and `test/goldenMasterTexas.test.js` (Texas characterisation snapshot, which fails loudly rather than silently on any Texas output drift) both re-pass with the new URL named as a recognised, deliberately-unscopable composite — the golden master's 4-value diff (both new layerUrls + Waller's new statewide-backup object) is named in the item, not silently regenerated.
-5. Full suite: `npx vitest run` — **852 files / 17,302 tests, all green**, no regression in any adjacent county-routing suite.
+1. `test/countyStatewideDerivation.test.js` — every candidate-list fixture reverted to its pre-2026-09-12 shape: Harris → `["harris", "txgio_statewide"]`, Chambers → `["chambers", "txgio_statewide"]` (once), Fort Bend (Sugar Land straddle) → `["fortbend", "txgio_statewide"]`, Huntsville/Walker (a derived, unwired county) → `["txgio_statewide"]` alone, Conroe/Texas City → `[county, "txgio_statewide"]`.
+2. `test/counties.test.js`, `test/coloradoRegistry.test.js` — the "one URL, one health policy" invariant (`isStatewideLayerUrl`) holds; Waller's `statewideFallbackFor` is `null` again (self-referential — its primary and the text-search backup are once again the same layer).
+3. `test/appraisal.test.js` — `acreageKey`'s GIS-preference mechanism (kept from the original item — correct independent of which layer is live) now also proven against the NEW trap: `/identify` returns `GIS_AREA` as truncated scientific notation ("5.0968505128e-"), and the resolver correctly falls through to the clean `LEGAL_AREA` instead of surfacing unparseable garbage. Case-insensitivity of every field-matching regex against `/identify`'s UPPERCASE attribute keys re-confirmed (no code change was needed there).
+4. `test/gisSources.test.js` / `ui-audit/gis-source-audit.mjs` (county provenance audit) and the Texas golden master fixture both re-pass with the dead-mirror exception removed and the original composite recognised again.
+5. Full suite: `npx vitest run` — **855 files / 17,392 tests, all green**, no regression in any adjacent county-routing suite. `npm run build` clean.
 
-**What this does NOT prove, and why the item still parks:** that `services1.arcgis.com/.../2019_Texas_Parcels_StratMap/FeatureServer/0` itself returns a real parcel at a real point — that host is blocked from this sandbox, so nothing here queried it. **This is the owner's own live measurement, recorded as evidence for this item, not re-derived by this session:** 14,333,926 features; real addresses returned at Fort Worth/Sundance Square (307 stacked-condo features, first "500 THROCKMORTON ST # 2806"), AllianceTexas ("12350 TIMBERLAND BLVD"), downtown Dallas ("1400 YOUNG ST, DALLAS, TX 75201"), Frisco ("7026 MAIN ST"), Denton ("110 W HICKORY ST"), Grapevine ("213 W HUDGINS ST"), El Paso ("401 MILLS AVE") and Lubbock ("2500 BROADWAY"); three zero-hit points (downtown Fort Worth, Arlington, Amarillo) confirmed to sit in street right-of-way, not a coverage hole.
+**What this does NOT prove, and why the item still parks:** that `feature.geographic.texas.gov`'s `/identify` op itself returns a real parcel at a real point — that host is blocked from this sandbox, so nothing here queried it live. **This is evidence recorded for this item, not re-derived by this session, per the dispatch's own live samples (2026-09-15):** real addresses returned via `/identify` at AllianceTexas (-97.2900/32.9500, "12350 TIMBERLAND BLVD", county TARRANT, owner KELLER ISD, `legal_area` 53.803), Dallas (-96.7970/32.7767), Houston (-95.3620/29.7580, "1111 RUSK ST 286", county HARRIS), El Paso, Lubbock, Austin, San Antonio, Amarillo, Canyon — all `TAX_YEAR` 2025; two right-of-way points confirmed to correctly return zero, not a coverage gap.
 
 **Steps, each with its named expected result. Run on the Site tab of planyr.io with the browser Network panel open, filtering on `/query` or `/identify`.**
-1. Click a lot inside Harris County (e.g. downtown Houston). **Expect:** exactly ONE parcel query fires, to `gis.hctx.net` (HCAD) — the StratMap layer must NOT also be queried for a point a real CAD already covers, or must lose the race silently if it races (the existing "a real CAD hit wins immediately" rule); either way the SELECTED parcel and its attributes must be HCAD's.
-2. Click a lot in Tarrant County (Fort Worth), Dallas County, Denton County, or Collin County (Frisco). **Expect:** exactly ONE parcel query, to `services1.arcgis.com/.../2019_Texas_Parcels_StratMap/FeatureServer/0`, and a real, correct parcel is selected with a real `Prop_ID`/owner/address.
-3. Click a lot in Waller County. **Expect:** the outline layer renders as a normal vector layer (not the old server-rendered image) and a click still selects the lot via the same new layer.
+1. Click a lot inside Harris County (e.g. downtown Houston). **Expect:** exactly ONE parcel query fires, to `gis.hctx.net` (HCAD) — the TxGIO layer must NOT also be queried for a point a real CAD already covers (this is now enforced by B1639697's `suppressRedundantStatewide`, not just a race outcome — verify it together with V1168545 below).
+2. Click a lot in Tarrant County (Fort Worth), Dallas County, Denton County, or Collin County (Frisco). **Expect:** exactly ONE query, an `/identify` call to `feature.geographic.texas.gov/.../stratmap_land_parcels_48_most_recent/MapServer/0/identify`, and a real, correct parcel is selected with a real `PROP_ID`/owner/address.
+3. Click a lot in Waller County. **Expect:** the outline layer renders as a server-rendered image overlay (not a queryable vector layer — TxGIO's `/query` is disabled) and a click still selects the lot via `/identify`.
 4. Read the served chunk hash in the SAME observation as steps 1–3 (Network tab, or `document.querySelectorAll('script[src]')`) and confirm it is the post-merge build.
 - Result: ⏳ pending — the routing is sandbox-confirmed against the real committed code (listed above); the live endpoint pass needs a network outside this sandbox's egress allowlist. `Cadence: once`.
-- Stopping rule: closes when steps 1–3 are observed on planyr.io, or when any step fails and is filed as a recurrence against B1639584.
+- Stopping rule: closes when steps 1–3 are observed on planyr.io, or when any step fails and is filed as a further recurrence against B1639584.
+
+### V1168545 — B1639697: a single healthy county parcel source queries alone; the statewide layer no longer fires alongside it `Blocker: live-GIS`
+
+**Why this needs its own live pass.** Confirming an exact NETWORK REQUEST COUNT is only observable in a real browser's Network panel — a sandbox unit test proves the pure `suppressRedundantStatewide` rule and its wiring (below), but not that the real click handlers in `MapFinder.jsx`/`SitePlanner.jsx` actually reach it end to end against live hosts. Best run in the SAME click-through pass as V1168544 above (steps 1–2 here overlap those steps' own Network-panel observation).
+
+**What was verified HERE (this session, sandbox, against the real production code).**
+1. `test/sourceHealth.test.js`'s new `suppressRedundantStatewide` block (5 tests): a single healthy primary collapses the candidate list to one; an unhealthy sole primary (breaker open) keeps the statewide fallback; a straddle (2+ real primaries) is untouched; a statewide-only area (every derived TX county) is untouched; a KNOWN-GOOD ARM reproduces the exact reported repro end to end through the real `filterHealthyCandidates` + `STATEWIDE_KEYS`.
+2. `test/parcelClickRouting.test.js` (the source guard over `SitePlanner.jsx`'s in-planner identify region) re-passes, confirming the in-planner double-click-to-import path was also wired (not just the Map-search flow the original repro used).
+3. Full suite: `npx vitest run` — **855 files / 17,392 tests, all green.**
+
+**Steps, each with a named expected result. Run on the Site tab of planyr.io with the browser Network panel open, filtering on `/query` or `/identify`.**
+1. Click a lot inside Harris County (or Fort Bend, Montgomery, Brazoria, Galveston, Chambers, Liberty, Austin). **Expect:** exactly ONE parcel request fires this click, to that county's own CAD — no request to `feature.geographic.texas.gov` at all.
+2. Click a lot in Tarrant, Dallas, Denton, Collin, Travis, or Bexar County (no dialed-in CAD). **Expect:** exactly ONE parcel request fires, to `feature.geographic.texas.gov`'s `/identify`.
+3. Force a genuine outage on one dialed-in county (e.g. block `gis.hctx.net` via devtools request blocking) and click three times inside Harris. **Expect:** the first click may take longer (querying the now-unhealthy primary alone before failing), but by the third click the statewide layer is queried instead and a real parcel (flagged "backup") is still selected — the outage backstop must still work, just no longer racing in parallel from the first click.
+4. Read the served chunk hash in the SAME observation as steps 1–3 and confirm it is the post-merge build.
+- Result: ⏳ pending — the suppression rule is sandbox-confirmed against the real committed code (listed above); the live query-count pass needs a network outside this sandbox's egress allowlist. `Cadence: once`.
+- Stopping rule: closes when steps 1–3 are observed on planyr.io, or when any step fails and is filed as a recurrence against B1639697.
 
 ### V1157504 — B1631648: a road's own sharp turn holds its stated width and reads as a clean corner, not a lobe/pinch `Blocker: real-data`
 

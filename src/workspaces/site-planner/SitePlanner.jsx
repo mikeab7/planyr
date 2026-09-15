@@ -217,7 +217,7 @@ import {
   feetToLatLng,
   humanizeError,
 } from "./lib/arcgis.js";
-import { filterHealthyCandidates, recordSourceResult } from "./lib/sourceHealth.js";
+import { filterHealthyCandidates, recordSourceResult, suppressRedundantStatewide } from "./lib/sourceHealth.js";
 import { apprRows, apprAll, apprVal, findAttr, situsAddress, ownerName, parcelPanelRows } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
@@ -15822,7 +15822,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       .map((county, i) => ({ county, url: urls[i], statewide: STATEWIDE_KEYS.includes(county) }))
       .filter((c) => c.url);
     const realPrimaries = all.filter((c) => !c.statewide);
-    return { candidates: filterHealthyCandidates(all, STATEWIDE_KEYS), realPrimaries };
+    const healthy = filterHealthyCandidates(all, STATEWIDE_KEYS);
+    // NEW-2 (B1639697) — a single healthy real CAD needs no statewide co-query; see
+    // suppressRedundantStatewide's own header (sourceHealth.js) for why this is safe against the
+    // outage-resilience behavior the parallel race otherwise exists for.
+    const candidates = suppressRedundantStatewide(healthy, realPrimaries, STATEWIDE_KEYS);
+    return { candidates, realPrimaries };
   };
   // Stable per-lot key: the CAD OBJECTID when present, else the first vertex — so a
   // re-click on the same lot toggles it, and we never add the same lot twice.
