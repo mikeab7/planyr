@@ -166,6 +166,22 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1160896 — B1631939: pinned/reordered projects in the header switcher actually follow the owner's account across devices, and survive a real sign-in `Blocker: auth`
+
+**What was verified here, extensively, without a real signed-in pass.** Driven headless in a real Chromium build against three real seeded projects (not a synthetic fixture), logged out: pinning from the switcher's kebab lifts a project into a "Pinned" section below the always-first current project; a second pin puts it above the first (most-recently-pinned-first, matching the existing Sites-panel convention — see V480816); keyboard ArrowUp/ArrowDown on the drag handle reorders the pinned section; unpinning removes a project from that section; deleting a pinned project cleans it out of the pinned list (no ghost pin left behind); a reload of the page (localStorage left genuinely alone) shows the same pin state and order restored, via `userPrefs.js`'s existing localStorage mirror of the account-scope `sitesPanel` bag; a non-matching search query empties the whole list, current and pinned rows included, rather than force-showing either.
+
+**What is NOT proven, and cannot be from this sandbox.** The same gap V480816 already names for this exact store: the round trip through real Supabase, on the owner's real account, showing a pin/reorder made on one device or browser tab appearing on another — CORS-blocked from this sandbox's auth. Also unwatched: the "Saved on this computer only" warning firing only on a genuine signed-in write failure, never on the ordinary signed-out case.
+
+**Steps, each with a named expected result.**
+1. Sign in on `planyr.io`, open the project switcher (the project name in the row-1 header), and pin (via right-click or the row's kebab) a project that is NOT the one you're standing in. **Expect:** it lifts into a new "Pinned" section directly below the current project (which stays first).
+2. Pin a second project. **Expect:** it appears ABOVE the first pin (most-recently-pinned first).
+3. Drag the second pin below the first (or focus its drag handle and press ArrowDown). **Expect:** the order swaps immediately.
+4. Reload the page. **Expect:** the current project, both pins, and their order are exactly as left.
+5. Open `planyr.io` in a second browser (or a private window) signed into the SAME account. **Expect:** the same pins and order appear there too — the cross-device confirmation the whole feature exists for.
+6. Also confirm the SAME pin appears (or can be toggled) from the Map view's own Sites-panel row menu (B859505) — pinning from either surface is meant to be the one shared list.
+7. Delete a pinned project from the switcher. **Expect:** it's gone from the Pinned section too, not left behind as a stale entry.
+- **Stopping rule:** closes when steps 1–7 are observed on `planyr.io`, or when any step fails and is filed as a recurrence against B1631939, per STANDING RULE #2 (a failure here is a FINDING, not a silent close).
+
 ### V1160592 — B1631632: "Save for all projects" carries the building-program tier table to the account, and a brand-new SIGNED-IN project reads it `Blocker: auth`
 
 **Why this needs a real pass.** Everything about the new tier table's editing, per-building override, undo behavior, and print-time summary is verified live in this sandbox, logged out, in a real headless Chromium (`ui-audit/verify-building-program-standards.mjs`, 27/27 checks). The ONE thing that sandbox structurally cannot do is sign in — the Supabase auth handshake is CORS-blocked here — so the "Save for all projects" button is correctly DISABLED in every sandbox run (`disabled={!cloudReady}`, pre-existing, unrelated to this item). What's pending is only the SIGNED-IN click-through of a pre-existing, already-relied-on mechanism (the same `commitUserPrefs`/`saveUserPrefs` cloud round trip that parcelStyle/typeStyles/measureStyle's own "Save for all projects" already uses) now also carrying one more field.
