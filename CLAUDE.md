@@ -1296,6 +1296,16 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
      three). Patching the key that reproduced would have left the one that did not, on his machine,
      unexplained and unfixed. Closing the STATE GAP retires both, plus the unmount nobody planned
      for. When a user reports one exit, audit all four, on every editor of that surface.
+     **⛔ AND THE OUTCOME, WHICH IS THE PART THAT MATTERS AND MUST NOT BE READ OFF THE SENTENCE
+     ABOVE: THE ENTER ARM WAS REAL.** Michael re-ran his own four-exit test on his signed-in
+     browser against the merge commit itself (V978448, passed 2026-09-15, build named in the same
+     observation) and reported Enter both **saving** and no longer jumping the cursor down a row
+     with the value discarded. So "Enter did not reproduce here" was a statement about the
+     SANDBOX — logged out, local fixture, no cloud round-trip — and never about the defect. Do not
+     read this clause as "the unreproduced arm was imaginary": it is the cleanest instance this
+     repo has of **STANDING RULE #2 clause 1** — a first-hand owner report is evidence, a failed
+     reproduction is not a refutation, and when the two disagree the INSTRUMENT is on trial. Had
+     the null been taken as a disposition, Enter would have shipped unfixed.
   5. **MACHINE-ENFORCED, both halves.** `ui-audit/verify-cell-editor-exit-contract.mjs` drives every
      editable cell in the Schedule grid through Escape · Enter · Tab · click-away in a real browser
      and prints the audit table (it carries a known-good arm and declares the run VOID rather than
