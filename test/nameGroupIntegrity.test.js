@@ -13,7 +13,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  jsonbGroupKeyOf, columnGroupKeyOf, groupKeyMismatch, nameMismatch, scheduleNameDrift, auditRows,
+  jsonbGroupKeyOf, columnGroupKeyOf, groupKeyMismatch, nameMismatch, unstampedRow, scheduleNameDrift, auditRows,
 } from "../src/workspaces/site-planner/lib/nameGroupIntegrity.js";
 
 // The real disagreeing row, verbatim (id/group_id/data.groupId/site/data.site), read from
@@ -100,6 +100,36 @@ describe("nameMismatch — a row disagreeing with ITSELF (never legitimate, live
   });
 });
 
+describe("unstampedRow — a row with no valid rename stamp for sites_preserve_rename_stamp to protect (NEW-1, 2026-09-15)", () => {
+  it("RED: no siteRenamedAt key at all — the real smu1z3h60nbu shape measured 2026-09-15", () => {
+    expect(unstampedRow({ id: "smu1z3h60nbu", data: { groupId: "smu1z3h60nbu", site: "Untitled site" } }))
+      .toEqual({ id: "smu1z3h60nbu" });
+  });
+
+  it("RED: a present-but-empty marker (JSON null) — the pre-2026-09-10 write shape", () => {
+    expect(unstampedRow({ id: "p1", data: { site: "X", siteRenamedAt: null } })).toEqual({ id: "p1" });
+  });
+
+  it("RED: no data object at all", () => {
+    expect(unstampedRow({ id: "p2", data: null })).toEqual({ id: "p2" });
+  });
+
+  it("GREEN: a real epoch-ms stamp", () => {
+    expect(unstampedRow({ id: "p3", data: { site: "X", siteRenamedAt: 1785525795307 } })).toBeNull();
+  });
+
+  it("GREEN: a numeric-string stamp — renameStamp's own tolerance (PostgREST's data->>'x' shape); a\n" +
+     "     row this check flags must agree with what projectName.renameStamp — the ONE parse — says,\n" +
+     "     never a stricter re-derivation", () => {
+    expect(unstampedRow({ id: "p4", data: { site: "X", siteRenamedAt: "1785525795307" } })).toBeNull();
+  });
+
+  it("a row with no id is never reported (nothing to name)", () => {
+    expect(unstampedRow({ data: {} })).toBeNull();
+    expect(unstampedRow(null)).toBeNull();
+  });
+});
+
 describe("scheduleNameDrift — informational only, per its own header", () => {
   it("flags a stale hint against the resolved authoritative name", () => {
     expect(scheduleNameDrift({ id: "p1", data: { scheduleProjectName: "Old Schedule Name" } }, "Woods Road"))
@@ -155,5 +185,25 @@ describe("auditRows — the whole-account pass", () => {
     const row = { ...E2E_FIXTURE_TESTFIT_ROW(), deleted_at: "2026-08-01T00:00:00Z" };
     const { groupKeyMismatches } = auditRows([row]);
     expect(groupKeyMismatches).toEqual([{ id: "e2e-fixture-testfit", jsonbKey: "e2e-fixture-testfit", columnKey: "e2e-fixture" }]);
+  });
+
+  it("NEW-1 (2026-09-15): catches a row with no valid rename stamp — the real smu1z3h60nbu shape,\n" +
+     "     whether it is live or (per rename_stamp_backfill_20260912.sql's own trashed-included\n" +
+     "     scope) soft-deleted", () => {
+    const stamped = { id: "s1", group_id: null, site: "Woods Road", data: { groupId: null, site: "Woods Road", siteRenamedAt: 1785525795307 }, deleted_at: null };
+    const newborn = { id: "smu1z3h60nbu", group_id: null, site: "Untitled site", data: { groupId: "smu1z3h60nbu", site: "Untitled site" }, deleted_at: null };
+    const trashed = { id: "t1", group_id: null, site: "Old Draft", data: { groupId: "t1", site: "Old Draft" }, deleted_at: "2026-08-01T00:00:00Z" };
+    const { unstampedRows } = auditRows([stamped, newborn, trashed]);
+    expect(unstampedRows).toEqual([{ id: "smu1z3h60nbu" }, { id: "t1" }]);
+  });
+
+  it("reports NOTHING for unstampedRows once every row carries a valid stamp — the whole-account\n" +
+     "     shape measured 2026-09-15 after the INSERT-trigger fix and the one-row repair (127/127)", () => {
+    const rows = [
+      { id: "s1", data: { groupId: null, site: "Woods Road", siteRenamedAt: 1785525795307 }, deleted_at: null },
+      { id: "s2", data: { groupId: "s1", site: "Woods Road", siteRenamedAt: 1785525795307 }, deleted_at: null },
+    ];
+    const { unstampedRows } = auditRows(rows);
+    expect(unstampedRows).toEqual([]);
   });
 });
