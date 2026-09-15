@@ -179,24 +179,33 @@ was never clicked" quietly ships broken.
 4. Whichever of (a)/(b) applies, do not restage or edit the real note beyond what step 3 authorizes, and do not use this real note for any further reproduction — a throwaway duplicate is the right tool for that (owner constraint #7).
 - Stopping rule: closes when step 1 resolves to (a) with nothing further to do, or when (b) is confirmed and Michael's answer from step 3 has been acted on (restored or deliberately left as-is). If a live pass ever reveals a mechanism that DOES destroy text (not just cosmetic shape) on open/reopen, file it as its own bug against the mechanism found, referencing this item.
 
-### V1173824 — B1645792: a road tee-ing into a truck court / paving pad at an oblique angle shows a real rounded curb return, not a raw notch
+### V1173824 (×2) — B1645792: a road tee-ing into a truck court / paving pad at an oblique angle shows a real rounded curb return, not a raw notch
 
-**Why this needs a live pass.** A rendering-shape fix (PERCEPTUAL-PARITY: the bar is whether the
-owner can SEE it right at his own working zoom, matching his original repro shape, not just
-whether the numbers check out). Everything the sandbox can prove is already proven: the angle
-sweep (0–89° × five widths/radii/pad sizes, a rotated pad, connecting a few feet from a pad
-corner) is unit-tested against the fix and separately confirmed RED on unmodified `origin/main`
-(`test/roadDriveJunctionFillet.test.js`); the same RED→GREEN is reproduced live in a headless
-Chromium driving the real canvas (`e2e/road-drive-junction-fillet.spec.js`), including a
-byte-identical PDF/print export parity check. A visual screenshot of the fix was also inspected
-this session and reads as a clean, properly rounded curb return with no notch, no disconnected
-island, and no exposed raw flat-cap edge — confirmed twice: once against this session's local
-build, and again against PR #1722's own Cloudflare Pages branch preview deploy
-(`claude-vibrant-curie-7olpix.planyr.pages.dev`, commit `c5cb133`), i.e. the actual deployed
-artifact, not just a local dev server. Same clean result both times. What is NOT provable here:
-whether it looks right on a real monitor at the owner's own DPI/zoom, and specifically whether it
-fixes the EXACT geometry in his original screenshot (not available to this session — only his
-verbal description was).
+**⛔ THIS V# ALREADY FAILED ONCE — record that, don't smooth over it.** The PASS-reading confidence
+this section stated previously (a screenshot inspected against a Cloudflare Pages branch preview,
+"clean result both times") was against the FIRST fix (PR #1722 / merge `0f17770`) and was WRONG: a
+live check of the deployed production build (`6d0d578`) found two real residuals the screenshot
+inspection missed — a small unpaved notch at the throat (invisible at the zoom/crop the screenshot
+happened to use) and a straight-sided (not arced) return on the road→pad case specifically. Per
+STANDING RULE #2, that is a FINDING, not a disposition, and the fix below is the reproduce-and-fix
+response to it — recorded here as the amendment (B1645792 ×2) it actually is.
+
+**Why this still needs a live pass.** A rendering-shape fix (PERCEPTUAL-PARITY: the bar is whether
+the owner can SEE it right at his own working zoom, matching his original repro shape, not just
+whether the numbers check out). Everything the sandbox can prove is now proven AGAINST THE BUG'S
+OWN DEFINITION this time (a point-in-polygon "is this spot paved by the pad or the road" scan, not
+just "does it look clean in a screenshot"): a wider 0–89° angle sweep (both truck-court and
+generic-pad sizes) is unit-tested and confirmed RED against the merged `0f17770` fix before this
+amendment's own fix was written (`test/roadDriveJunctionFillet.test.js`, the new "NEW-1 (B1645792
+amendment)" describe block, 8 tests); the same RED→GREEN is reproduced live in a headless Chromium
+driving the real canvas (`e2e/road-drive-junction-fillet.spec.js`, unmodified, re-run 3/3 green
+including the PDF/print export-parity check). Rendered SVGs across 8 angle/pad combinations were
+visually inspected this session (not just point-scanned) and show continuous pavement coverage and
+a genuinely curved return on the obtuse side at every angle. **What is still NOT provable here, the
+same gap the first PASS-reading missed:** whether it looks right on the owner's own monitor at his
+own DPI/zoom, on his own original repro geometry — which is exactly the gap a screenshot-only
+sandbox check cannot close, and why this V# stays open rather than being marked passed again on
+another sandbox-side inspection.
 
 **No standing throwaway project exists** — this check needs a fresh throwaway plan (or an explicit
 duplicate of a real one) created first; state exactly what was created/touched, per the owner
@@ -221,7 +230,9 @@ constraint on live checks. Never touch one of Michael's real plans.
 5. State what was created/touched (the throwaway plan's id/name) so it can be cleaned up or left as
    a known throwaway.
 - **Stopping rule:** closes when steps 1–5 are observed on a real screen, or a specific residual
-  (which angle/pad shape, a screenshot) is filed as a recurrence against B1645792.
+  (which angle/pad shape, a screenshot) is filed as a recurrence against B1645792. This V# has
+  already recorded one such residual (this amendment) — a second one re-opens it again, by name,
+  rather than a silent third attempt at the same screenshot-only confidence.
 
 ### V1180736 — B1652704/B1652705/B1652706: the Text box / Callout properties panel — weight/dash/opacity, and its shared-table rebuild — hold on real production, at desktop and phone widths
 
@@ -239,6 +250,39 @@ constraint on live checks. Never touch one of Michael's real plans.
 7. Open Chrome DevTools' device toolbar (or a real iPhone) at iPhone SE and iPhone 15 widths, both orientations. Re-select the text box (via the Panels drawer → Properties on narrow). **Expect:** the same panel, no horizontal scrolling/clipping, the bottom sheet opens and every row still lines up on one left edge.
 8. Ideally, repeat steps 1–5 once more using real WebKit (`npx playwright install webkit && npx playwright install-deps webkit` if not already present) against the deployed `planyr.io` URL rather than DevTools emulation, per `docs/PHONE-TESTING.md`.
 - **Stopping rule:** closes when steps 1–7 (8 if WebKit is available) are observed against the deployed build, or a specific residual is filed as a recurrence against whichever of B1652704/B1652705/B1652706 it belongs to.
+
+### V1192544 — B1664512: a road connects and fillets cleanly into a FREE-DRAWN polygon pad / parking field, same as a rect one
+
+**Why this needs a live pass.** A rendering-shape + connect-topology fix, same PERCEPTUAL-PARITY
+bar as V1173824: the sandbox proves the geometry (`polygonEdges`/`polygonContainsPoint`/
+`polygonDepthBehind` unit-tested against `rectEdges`/`rectContainsPoint` on the same footprint,
+plus a 0–89° angle sweep dissolving to one connected simple region on a polygon-drawn rectangular
+field AND a genuinely concave L-shaped one, `test/roadGeometry.test.js` + `test/roadDriveJunctionFillet.test.js`)
+but cannot prove the actual DRAWING TOOL magnet-connects a road to a freehand-drawn field on the
+owner's own screen, at his own zoom, using the real Parking/paving freehand tool rather than a
+replicated math scenario.
+
+**No standing throwaway project exists** — this check needs a fresh throwaway plan created first;
+state exactly what was created/touched. Never touch one of Michael's real plans.
+
+**Steps, each with a named expected result:**
+1. Open a throwaway plan. Draw a parking field or paving pad using the FREEHAND (polygon) draw
+   tool — NOT a rectangle preset — so it has an irregular, non-rectangular outline (even a mild
+   L-shape or a rounded-corner-ish polygon is enough). **Expect:** the field draws normally, same
+   as before this fix (this fix touches only what a ROAD does when it approaches this field, not
+   how the field itself is drawn).
+2. Draw a road (a 36 ft preset works well) ending on one of the polygon field's edges at an
+   oblique angle. **Expect:** the road's endpoint magnet-snaps onto the field's edge (same as it
+   already does for a rectangle field) and, once connected, the junction renders a smooth, rounded
+   curb-return fillet — no raw straight-edge butt joint, no notch, no floating pavement scrap.
+3. Try connecting near the MIDDLE of a concave (inward) corner of the field if one exists.
+   **Expect:** still connects and fillets cleanly — no crash, no wildly oversized return punching
+   into the field's own concavity.
+4. Zoom in on the junction. **Expect:** reads as one continuous piece of pavement, matching the
+   look of a rect-target junction (V1173824's own steps 1–2).
+5. State what was created/touched (the throwaway plan's id/name).
+- **Stopping rule:** closes when steps 1–5 are observed on a real screen, or a specific residual is
+  filed as a recurrence against B1664512.
 
 ### V1179280 — B1651248: Pennington County, SD parcels — a real point in Rapid City returns a real parcel `Blocker: live-GIS`
 
