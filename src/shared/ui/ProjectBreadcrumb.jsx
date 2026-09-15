@@ -380,18 +380,19 @@ export default function ProjectBreadcrumb({
   const pendingRefocusIdRef = useRef(null);
   /* NEW-4 — pinned project ids, most-recently-pinned first, and the account-scope store behind
    * them. This REUSES the store the map view's own Sites panel already ships (B855952/B855953,
-   * `site-planner/lib/userPrefs.js`'s `sitesPanel.pinned`) rather than inventing a second one —
-   * a project pinned from either surface is pinned on both, on every device, because it is
-   * literally the same array. That module is workspace-specific and pulls in Supabase + the
-   * Standards style resolvers, so — same reasoning as `reportBreadcrumbDefect` and the notes
-   * census below — it is reached ONLY by a dynamic `import()`: a static import would put all of
-   * that on every route's boot chunk, since this breadcrumb is chrome on every route. */
+   * `site-planner/lib/userPrefsStore.js`'s `sitesPanel.pinned`) rather than inventing a second one
+   * — a project pinned from either surface is pinned on both, on every device, because it is
+   * literally the same array. `userPrefsStore.js` (not its sibling `userPrefs.js`, which also
+   * publishes plan-standards defaults into the canvas style resolvers — irrelevant here, and
+   * `planStyle.js`'s ~24 KB the header has no business downloading) is reached ONLY by a dynamic
+   * `import()`: a static import would put it on every route's boot chunk, since this breadcrumb is
+   * chrome on every route (see that file's header for the CI regression, PR #1714, this avoids). */
   const userPrefsModRef = useRef(null);
-  const loadUserPrefsMod = () => (userPrefsModRef.current ||= import("../../workspaces/site-planner/lib/userPrefs.js"));
+  const loadUserPrefsMod = () => (userPrefsModRef.current ||= import("../../workspaces/site-planner/lib/userPrefsStore.js"));
   const [pinnedIds, setPinnedIds] = useState([]);
   const acctPrefsRef = useRef(null); // the full account-prefs object, once a load resolves
   const refreshPins = () => {
-    loadUserPrefsMod().then((mod) => mod.loadUserPrefs(activeUid())).then(({ prefs }) => {
+    loadUserPrefsMod().then((mod) => mod.loadPrefsRaw(activeUid())).then(({ prefs }) => {
       acctPrefsRef.current = prefs;
       setPinnedIds(prefs.sitesPanel.pinned);
     }).catch(() => {});
@@ -405,7 +406,7 @@ export default function ProjectBreadcrumb({
     loadUserPrefsMod().then((mod) => {
       const next = mod.setSitesPanelPref(acctPrefsRef.current, { pinned: nextIds });
       acctPrefsRef.current = next;
-      return mod.saveUserPrefs(activeUid(), next);
+      return mod.savePrefsRaw(activeUid(), next);
     }).then((res) => {
       if (res.ok || res.error === "not signed in") return;
       // No literal "⚠" here — this file's own NEW-3 rule: a text warning glyph resolves to a
