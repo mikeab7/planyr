@@ -1,3 +1,15 @@
+### V1149440 — B1614544: on the deployed build, buildings of every size show/hide their column grid together, at any zoom, rotation, off-screen position, or export ✅ **PASSED 2026-09-15 — Claude, headless Chromium against `https://planyr.io` (logged out, no auth/GIS needed)**
+
+**Why this was parked at all, given nothing here needs sign-in, real project data, or a live GIS endpoint.** `CLAUDE.md`'s LIVE-VERIFY rule names **zoom-/data-density-dependent rendering** and **PDF/export parity** as mandatory-live classes regardless of how thoroughly a sandbox proved the mechanism — this fix is squarely both. So it parked on principle, not because anything was missing sandbox-side.
+
+**What was verified here, this session, sandbox (exhaustive — see B1614544 for the full readout).** `ui-audit/verify-grid-view-scale.mjs` against the local build: mixed-size buildings across a 25-step zoom sweep never show a mixed frame (and the sweep is proven capable of showing the retired per-building bug); same-size buildings; rotated buildings (37°/53°); a building panned ~92% off-screen; and the exported sheet for a small-only and a large-only plan agreeing with each other from two very different live trigger zooms.
+
+**LIVE PASS, same session, post-merge (PR #1703, merged as `7bb00f69`).**
+1. Read the served chunk hash in the same observation as the check below: `SitePlannerApp-xzjebljs.js`, confirmed newer than the merge (distinct from the pre-merge `SitePlannerApp-DxbiKv3Y.js`).
+2. `node ui-audit/verify-grid-view-scale.mjs --base=https://planyr.io` → exit 0, `✅ ALL GRID VIEW-SCALE CHECKS PASSED` — the identical battery that passed locally, now against the live CDN-served bundle.
+
+- Result: ✅ **PASSED 2026-09-15**, against chunk `SitePlannerApp-xzjebljs.js`. Moved here with B1614544.
+
 ### V40 — Scheduling grid: ↓ from last task → "+ New task" highlighted; Enter creates task + opens name edit ✅ **PASSED 2026-09-10 — Claude, headless Chromium against the built app (logged out, no auth/GIS needed)**
 > ⚠ **SHARED ID — V40 also names another item in this file:** “Delete removes the selected element on the first press (B154) ✅”. Nothing was renumbered (B308704): a renumber would silently repoint every existing *see V40* at one twin. Read a cross-reference to V40 against all of them.
 
