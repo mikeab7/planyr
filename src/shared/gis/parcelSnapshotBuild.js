@@ -51,6 +51,46 @@ export function leanFeature(feature, { keep = KEEP_FIELDS, decimals = 6 } = {}) 
   return { type: "Feature", properties: leanProps(feature.properties, keep), geometry };
 }
 
+/* B1657600 — Esri JSON polygon rings ([[[x,y],…],…], each an OUTER (clockwise, negative shoelace
+ * area) or HOLE (counter-clockwise, positive) ring per the ArcGIS convention) → a GeoJSON
+ * Polygon/MultiPolygon geometry. Needed because /identify (unlike /query with f=geojson) always
+ * answers in Esri JSON — this is the one place a per-tile identify pull is turned into the same
+ * GeoJSON shape /query already produces, so buildSnapshotFC never has to care which op fetched a
+ * feature. A hole is assigned to whichever outer ring contains its first vertex (parcels are
+ * essentially always a single ring or a small multipart tract with at most a stray donut — this
+ * matches the nesting every ArcGIS→GeoJSON converter uses, without a new dependency for a
+ * Node-only build script). Returns null for a feature with no outer ring at all (malformed). */
+const shoelaceArea = (ring) => {
+  let a = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const j = (i + 1) % ring.length;
+    a += ring[i][0] * ring[j][1] - ring[j][0] * ring[i][1];
+  }
+  return a / 2;
+};
+const pointInRing = ([x, y], ring) => {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+};
+export function esriRingsToGeoJsonGeometry(rings) {
+  if (!rings || !rings.length) return null;
+  const outers = [], holes = [];
+  for (const ring of rings) (shoelaceArea(ring) < 0 ? outers : holes).push(ring);
+  if (!outers.length) return null;
+  const polys = outers.map((outer) => ({ outer, holes: [] }));
+  for (const hole of holes) (polys.find((p) => pointInRing(hole[0], p.outer)) || polys[0]).holes.push(hole);
+  // GeoJSON's right-hand rule is the opposite of Esri's: exterior CCW (positive area), holes CW.
+  const gjRing = (ring, wantCCW) => (shoelaceArea(ring) > 0) === wantCCW ? ring : [...ring].reverse();
+  const gjPoly = ({ outer, holes: hs }) => [gjRing(outer, true), ...hs.map((h) => gjRing(h, false))];
+  return polys.length === 1
+    ? { type: "Polygon", coordinates: gjPoly(polys[0]) }
+    : { type: "MultiPolygon", coordinates: polys.map(gjPoly) };
+}
+
 /* A raw feature list → a compact snapshot FeatureCollection + its [w,s,e,n] extent. Drops features
  * with no polygon geometry. Pure. */
 export function buildSnapshotFC(features, opts = {}) {

@@ -212,6 +212,9 @@ body { font: 11.5pt/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sa
 .note-body ul, .note-body ol { padding-left: 1.5em; margin: 1em 0 0 0; }
 .note-body li { margin: 2px 0; }
 .note-body li p { margin: 0; }
+/* ⛔ MIRRORS EDITOR_CSS's IDENTICAL FIX (PDF-PARITY) — a list nested inside a list item is the
+   next line of the same list, not a new block; see that file's comment for the measurement. */
+.note-body li > ul, .note-body li > ol { margin-top: 2px; }
 /* PDF-PARITY for the indent attribute's stylesheet table (B842949) — mirrors the identical
    table in components/NoteEditor.jsx → EDITOR_CSS, construct for construct. */
 ${indentCssRules(".note-body li")}
@@ -341,10 +344,12 @@ function pageBlock({ title, html, updatedAt, headingClass = "note-page-head", sh
  *  which the screen shows by indentation and paper shows as a **trail line** above the
  *  title — `Grand Port › Entitlements`. It is the same information the rail carries, and it
  *  is the reason a printed branch is still readable when the sheets get separated. */
-/** The note's density as two literal rules, appended after the base sheet so it wins. */
+/** The note's density as three literal rules, appended after the base sheet so it wins. The
+ *  third mirrors EDITOR_CSS's nested-list override at the chosen density's own gap, so a
+ *  Comfortable note's printed nested items keep the same gap its sibling items get, on paper. */
 function densityCss(id) {
   const d = densityFor(id);
-  return `\n.note-body { line-height: ${d.line}; }\n.note-body li { margin: ${d.listGap}px 0; }`;
+  return `\n.note-body { line-height: ${d.line}; }\n.note-body li { margin: ${d.listGap}px 0; }\n.note-body li > ul, .note-body li > ol { margin-top: ${d.listGap}px; }`;
 }
 
 export function buildPrintDocument({ title, meta = "", pages = [], density = DEFAULT_DENSITY } = {}) {

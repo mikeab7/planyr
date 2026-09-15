@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import {
   candidateCountiesForPoint, COUNTIES_MAP, countyKeyForName, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote,
   STATEWIDE_PARCEL_LAYER, statewideFallbackFor, countyForView, countyBboxIntersectsView,
+  isIdentifyOnlyLayerUrl, isStatewideLayerUrl,
 } from "../src/workspaces/site-planner/lib/counties.js";
 
 // candidateCountiesForPoint routes a map click to the CAD service(s) that could
@@ -159,6 +160,26 @@ describe("statewideFallbackFor — county-scoped TxGIO backup (B244/B787)", () =
 
   it("an unknown county → null", () => {
     expect(statewideFallbackFor("nowhere")).toBeNull();
+  });
+});
+
+describe("isIdentifyOnlyLayerUrl (B1657600) — a URL's /query capability, not its county key", () => {
+  it("the TxGIO statewide layer is identify-only (its /query has been disabled since B627)", () => {
+    expect(isIdentifyOnlyLayerUrl(STATEWIDE_PARCEL_LAYER)).toBe(true);
+  });
+  it("Waller inherits it — parked on the SAME url as txgio_statewide", () => {
+    expect(COUNTIES_MAP.waller.layerUrl).toBe(STATEWIDE_PARCEL_LAYER);
+    expect(isIdentifyOnlyLayerUrl(COUNTIES_MAP.waller.layerUrl)).toBe(true);
+  });
+  it("a real county CAD (Harris) is NOT identify-only", () => {
+    expect(isIdentifyOnlyLayerUrl(COUNTIES_MAP.harris.layerUrl)).toBe(false);
+  });
+  it("Colorado's statewide composite is NOT identify-only — statewide and query-disabled are different axes", () => {
+    expect(isStatewideLayerUrl(COUNTIES_MAP.co_statewide.layerUrl)).toBe(true);
+    expect(isIdentifyOnlyLayerUrl(COUNTIES_MAP.co_statewide.layerUrl)).toBe(false);
+  });
+  it("tolerates a trailing slash, like isStatewideLayerUrl", () => {
+    expect(isIdentifyOnlyLayerUrl(STATEWIDE_PARCEL_LAYER + "/")).toBe(true);
   });
 });
 

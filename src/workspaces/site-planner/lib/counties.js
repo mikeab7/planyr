@@ -1301,6 +1301,12 @@ const COUNTIES_MAP_RAW = {
     mapServer: null,
     statewide: true,
     layerUrl: TXGIO_STATEWIDE_LAYER,
+    // B1657600 — this layer's /query has been disabled at the SERVICE since B627 (see the const's
+    // own header above); every click used to fire /query anyway, catch the "not supported" body,
+    // and THEN fall back to /identify — a wasted, always-failing round trip on every one of the
+    // ~245 Texas counties this composite backs. Declaring it up front lets queryAtPoint skip
+    // straight to /identify. See isIdentifyOnlyLayerUrl below.
+    identifyOnly: true,
   },
 
   /* ═══ COLORADO (NEW-5) ═══════════════════════════════════════════════════════════════════
@@ -2220,6 +2226,19 @@ export const STATEWIDE_LAYER_URLS = Object.freeze(
   Object.values(COUNTIES_MAP).filter((c) => c.statewide).map((c) => trimLayerUrl(c.layerUrl)),
 );
 export const isStatewideLayerUrl = (url) => STATEWIDE_LAYER_URLS.includes(trimLayerUrl(url));
+
+/* B1657600 — a URL's QUERY CAPABILITY is likewise a property of the endpoint, not of whichever
+ * county key names it, and it is a DIFFERENT axis from `statewide` above: `co_statewide`
+ * (Colorado's composite) is `statewide:true` and fully query-capable, while `txgio_statewide`
+ * (Texas's) is `statewide:true` and permanently query-disabled (B627) — conflating the two would
+ * wrongly skip /query for a healthy state's composite the day it gets wired. `identifyOnly:true`
+ * on a config entry declares the fact once; every OTHER county key parked on the same URL (Waller,
+ * and any derived statewide-fallback Texas county) inherits it for free because this is keyed on
+ * the URL, exactly like `isStatewideLayerUrl` above. */
+export const IDENTIFY_ONLY_LAYER_URLS = Object.freeze(
+  Object.values(COUNTIES_MAP).filter((c) => c.identifyOnly).map((c) => trimLayerUrl(c.layerUrl)),
+);
+export const isIdentifyOnlyLayerUrl = (url) => IDENTIFY_ONLY_LAYER_URLS.includes(trimLayerUrl(url));
 
 /* NEW-2 — the dev-time assertion that stops the next county parked on a composite from
  * reintroducing the double-add. Two config entries may share a layer URL ONLY when that URL is a

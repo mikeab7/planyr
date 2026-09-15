@@ -11,18 +11,18 @@
  *
  * SOURCE-RESILIENT (B629 NEW-1): each county carries an ORDERED list of candidate providers, tried
  * in turn until one clears its min-count — so one host going dark fails over automatically instead
- * of blocking the build. Two provider kinds:
- *   • { kind:"query", url, where }        — a direct /query with a where-clause (the source has a
- *                                           county field, or IS one county, e.g. FBCAD).
- *   • { kind:"county-poly", url, county } — the source has NO county field (the AGO StratMap layer),
- *                                           so fetch that county's boundary polygon (TxDOT) and
- *                                           POST-spatial-query the parcels layer scoped to it.
- *
- * WHY the AGO StratMap layer is primary for Chambers/Waller (2026-07-04): the Texas state parcel
- * `/query` went dark on BOTH hosts at once — `feature.tnris.org` 503, and `feature.geographic.texas.gov`
- * returns 400 "operation is not supported" (the B627 outage). The public ArcGIS-Online-hosted
- * "StratMap25" FeatureServer (TPWD-owned, services1.arcgis.com) is the same StratMap data, 2025
- * vintage, query-enabled, on an independent host — verified live: Chambers 38,293 · Waller 48,741.
+ * of blocking the build. Three provider kinds:
+ *   • { kind:"query", url, where }         — a direct /query with a where-clause (the source has a
+ *                                            county field, or IS one county, e.g. FBCAD).
+ *   • { kind:"county-poly", url, county }  — the source has NO county field, so fetch that county's
+ *                                            boundary polygon (TxDOT) and POST-spatial-query the
+ *                                            parcels layer scoped to it. (No SOURCES entry uses this
+ *                                            today — the AGO StratMap mirror it was built for died,
+ *                                            B1639698 — but it's generic, tested infrastructure kept
+ *                                            for a future query-capable-but-county-less source.)
+ *   • { kind:"identify-tile", url, county } — the source's /query is DISABLED (TXGIO_PARCELS, B627),
+ *                                            so extract via recursive /identify over envelope tiles
+ *                                            instead. See `identifyTileCounty`'s own header.
  *
  * Usage:
  *   node scripts/build-parcel-snapshot.mjs                 # all counties → Drive (needs GOOGLE_* env)
@@ -32,31 +32,27 @@
  */
 import zlib from "node:zlib";
 import { pathToFileURL } from "node:url";
-import { buildSnapshotFC } from "../src/shared/gis/parcelSnapshotBuild.js";
+import { buildSnapshotFC, esriRingsToGeoJsonGeometry } from "../src/shared/gis/parcelSnapshotBuild.js";
 
 const PAGE = 2000; // ArcGIS maxRecordCount for these layers
 const UA = { "user-agent": "Mozilla/5.0 (compatible; PlanyrParcelSnapshot/1.0; +https://planyr.io)" };
 
-// ⛔ CONFIRMED DEAD 2026-09-15 (B1639584/B1639698) — this third-party AGOL mirror (owner
-// `TPWD_LawEnforcement`) was taken down; it now returns HTTP 200 with `{"error":{"code":400,
-// "message":"Invalid URL"}}` at the SERVICE ROOT, not just this layer. Its use here (a
-// `county-poly` provider, tried FIRST for both Chambers and Waller below) is therefore currently
-// non-functional; the nightly job's own keep-last-good/auto-issue mechanism (see
-// .github/workflows/parcel-snapshot.yml's header) will surface this on its own. TXGIO_PARCELS
-// below cannot stand in as a bulk source either — its /query is permanently disabled (B627, not a
-// transient outage), and /identify (this repo's working substitute for a single point — see
-// counties.js's TXGIO_STATEWIDE_LAYER) has no bulk/paged equivalent, so it cannot page a whole
-// county. Rebuilding this pipeline needs a NEW /query-capable statewide TX parcel mirror — filed,
-// not fixed, as a follow-on (dedupe-first against BACKLOG.md before re-filing). Until then this
-// script will fail nightly and the existing Drive snapshots simply go stale in place — the app
-// itself is unaffected either way (capture-when-up, serve-when-down).
+// ✅ FIXED 2026-09-15 (B1639698 amendment) — the dead AGO StratMap mirror (owner
+// `TPWD_LawEnforcement`, taken down; returned HTTP 200 with `{"error":{"code":400,"message":
+// "Invalid URL"}}` at the SERVICE ROOT) is GONE from SOURCES below. The replacement is the SAME
+// government TxGIO service the live app's click path uses (`TXGIO_PARCELS`, identical to
+// counties.js's `TXGIO_STATEWIDE_LAYER`) — confirmed live to carry both Chambers and Waller. Its
+// `/query` op is permanently disabled (B627) and `returnCountOnly` is unsupported too (same
+// service, same limitation), so a bulk page can't ask "how many total" or page by offset the way
+// FBCAD does. `identifyTileCounty` below is the substitute: /identify accepts an ENVELOPE
+// geometry, not just a point, so a rectangle tiled over the county's own bounding box works as a
+// bulk spatial query — completeness is judged PER TILE (did THIS request come back at the
+// server's own declared per-request ceiling?), never from a total feature count for the county,
+// which this service cannot supply. See `identifyTileCounty`'s own header for the full mechanism.
 //
-// The AGO-hosted StratMap 2025 parcels FeatureServer (query-enabled, reliable, independent of the
-// dark TxGIO /query). Has NO county field, so county pulls scope by the county polygon.
-const AGO_STRATMAP = "https://services1.arcgis.com/1mtXwieMId59thmg/arcgis/rest/services/2019_Texas_Parcels_StratMap/FeatureServer/0";
-// The state's own parcels MapServer — authoritative + HAS a `county` field, but its /query is dark
-// as of 2026-07-04 (B627). Kept as a preferred-when-healthy fallback: it fails fast while dark and
-// the build falls through to the AGO source; when TxGIO re-enables /query it takes over again.
+// The state's own parcels MapServer — authoritative + HAS a `county` field. Its /query stays a
+// preferred-when-healthy first attempt (self-heals for free if TxGIO ever re-enables it — a
+// single fast-failing request costs nothing in a nightly job); identify-tile is the reliable path.
 const TXGIO_PARCELS = "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0";
 // TxDOT statewide county boundaries (query-enabled, reliable) — the scoping polygon source.
 const COUNTY_BOUNDARIES = "https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/Texas_County_Boundaries/FeatureServer/0";
@@ -70,15 +66,15 @@ export const SOURCES = {
   chambers: {
     minCount: 20000, // verified ~38,293
     sources: [
-      { kind: "county-poly", url: AGO_STRATMAP, county: "Chambers" },
-      { kind: "query", url: TXGIO_PARCELS, where: "county='CHAMBERS'" }, // preferred when its /query is healthy again
+      { kind: "query", url: TXGIO_PARCELS, where: "county='CHAMBERS'" }, // self-heals if TxGIO ever re-enables /query
+      { kind: "identify-tile", url: TXGIO_PARCELS, county: "Chambers" },
     ],
   },
   waller: {
     minCount: 20000, // verified ~48,741
     sources: [
-      { kind: "county-poly", url: AGO_STRATMAP, county: "Waller" },
       { kind: "query", url: TXGIO_PARCELS, where: "county='WALLER'" },
+      { kind: "identify-tile", url: TXGIO_PARCELS, county: "Waller" },
     ],
   },
 };
@@ -113,10 +109,122 @@ export function queryParamsFor(provider, rings, bbox) {
   return p;
 }
 
+// The layer's own maxRecordCount ceiling, so tile-splitting never invents a magic number. Falls
+// back to a conservative default if metadata is unreachable/silent — this is only a SPLIT
+// heuristic (whether to trust THIS tile's page or subdivide it), never a stand-in for the
+// county's total feature count, which this service cannot supply (returnCountOnly is disabled).
+const IDENTIFY_TILE_CAP_FALLBACK = 1000;
+export async function layerMaxRecordCount(layerUrl, { fetchImpl = fetch } = {}) {
+  try {
+    const res = await fetchImpl(`${layerUrl.replace(/\/+$/, "")}?f=json`, { headers: UA });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const j = await res.json();
+    const n = Number(j && j.maxRecordCount);
+    if (Number.isFinite(n) && n > 0) return n;
+  } catch (_) { /* fall through to the conservative default */ }
+  return IDENTIFY_TILE_CAP_FALLBACK;
+}
+
+// A tile's [w,s,e,n] envelope → its four quadrants (pure — unit-tested).
+export function quarterSplit([w, s, e, n]) {
+  const mx = (w + e) / 2, my = (s + n) / 2;
+  return [[w, s, mx, my], [mx, s, e, my], [w, my, mx, n], [mx, my, e, n]];
+}
+
+// Bounding box of a set of Esri-style rings ([[[x,y],…],…] or a flat ring list). Pure.
+export function boundsOfRings(rings) {
+  let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
+  for (const ring of rings) for (const [x, y] of ring) { if (x < w) w = x; if (x > e) e = x; if (y < s) s = y; if (y > n) n = y; }
+  return [w, s, e, n];
+}
+
+// A field lookup that doesn't care about case — /identify capitalizes attribute names
+// (PROP_ID, COUNTY, …) while the layer's own metadata lists them lowercase (prop_id, county, …).
+export function attrValue(attrs, name) {
+  if (!attrs) return undefined;
+  const key = Object.keys(attrs).find((k) => k.toLowerCase() === name.toLowerCase());
+  return key === undefined ? undefined : attrs[key];
+}
+
+const IDENTIFY_TILE_MIN_SPAN_DEG = 0.0008; // ~250 ft — floor so a bad cap read can't recurse forever
+const IDENTIFY_TILE_MAX_DEPTH = 18;
+
+/* One /identify call over an ENVELOPE (not a single click point) — the operation honors a
+ * rectangle exactly like it honors a point, which is what turns it into a bulk spatial query for a
+ * service whose /query is disabled (B627). Returns the raw `results` array (Esri JSON). */
+export async function identifyEnvelope(layerUrl, [w, s, e, n], { fetchImpl = fetch } = {}) {
+  const m = /^(.*\/MapServer)\/(\d+)\/?$/i.exec(layerUrl.replace(/\/+$/, ""));
+  if (!m) throw new Error(`identify-tile needs a .../MapServer/<id> layer url, got ${layerUrl}`);
+  const [, service, id] = m;
+  const params = new URLSearchParams({
+    f: "json",
+    geometry: JSON.stringify({ xmin: w, ymin: s, xmax: e, ymax: n, spatialReference: { wkid: 4326 } }),
+    geometryType: "esriGeometryEnvelope",
+    sr: "4326",
+    layers: `all:${id}`,
+    tolerance: "0",
+    mapExtent: `${w},${s},${e},${n}`,
+    imageDisplay: "700,700,96",
+    returnGeometry: "true",
+  });
+  const res = await fetchImpl(`${service}/identify?${params}`, { headers: UA });
+  if (!res.ok) throw new Error(`HTTP ${res.status} identify-tile ${layerUrl} @${w},${s},${e},${n}`);
+  const j = await res.json();
+  if (j.error) throw new Error(`identify error: ${j.error.message || JSON.stringify(j.error)}`);
+  return j.results || [];
+}
+
+/* Extract every parcel of ONE county from a /query-disabled MapServer by recursively subdividing
+ * its bounding box into ENVELOPE tiles and asking /identify per tile — the substitute for a bulk
+ * /query this service (TXGIO_PARCELS) permanently disabled (B627), whose `returnCountOnly` is ALSO
+ * unsupported, so nothing here may ask "how many total" either.
+ *
+ * A tile is trusted whole when its own result count is BELOW the layer's declared
+ * maxRecordCount (`layerMaxRecordCount`); a tile AT that ceiling is a possibly-arbitrary subset —
+ * its contents are discarded and it is split into four instead, so completeness never depends on
+ * the county's total feature count, only on whether ONE request came back at the server's own
+ * per-request limit. Results are deduped by PROP_ID (falling back to OBJECTID, then kept
+ * undeduplicated as a last resort) because adjacent tiles legitimately re-return a parcel that
+ * straddles their shared edge, and filtered to the target county via the identify response's own
+ * COUNTY attribute (both read case-insensitively via `attrValue` — see its own header) — the
+ * bounding-box root is a rectangle, so a corner tile can genuinely reach into a neighboring
+ * county. Returns GeoJSON Features, ready for `buildSnapshotFC`. */
+export async function identifyTileCounty(layerUrl, county, { fetchImpl = fetch, ringsFetcher = fetchCountyPolygon, bbox = null, maxTiles = Infinity } = {}) {
+  const root = bbox ? bbox.split(",").map(Number) : boundsOfRings(await ringsFetcher(county));
+  const cap = await layerMaxRecordCount(layerUrl, { fetchImpl });
+  const found = new Map();
+  let unkeyed = 0, tiles = 0;
+  const queue = [{ box: root, depth: 0 }];
+  while (queue.length) {
+    if (tiles >= maxTiles) break;
+    const { box, depth } = queue.shift();
+    tiles++;
+    const results = await identifyEnvelope(layerUrl, box, { fetchImpl });
+    const spanDeg = Math.min(box[2] - box[0], box[3] - box[1]);
+    if (results.length >= cap && depth < IDENTIFY_TILE_MAX_DEPTH && spanDeg > IDENTIFY_TILE_MIN_SPAN_DEG) {
+      for (const child of quarterSplit(box)) queue.push({ box: child, depth: depth + 1 });
+      continue; // a capped page's CONTENTS are an arbitrary subset — only its children are trusted
+    }
+    for (const r of results) {
+      if (!r || !r.geometry || !r.geometry.rings) continue;
+      const attrs = r.attributes || {};
+      const cty = attrValue(attrs, "county");
+      if (cty && String(cty).toUpperCase() !== String(county).toUpperCase()) continue; // a neighbor the bbox reached
+      const key = attrValue(attrs, "prop_id") ?? attrValue(attrs, "objectid");
+      found.set(key != null ? String(key) : `__unkeyed_${unkeyed++}`, r);
+    }
+  }
+  return [...found.values()]
+    .map((r) => ({ type: "Feature", properties: r.attributes || {}, geometry: esriRingsToGeoJsonGeometry(r.geometry.rings) }))
+    .filter((f) => f.geometry);
+}
+
 /* Page every feature from one provider as GeoJSON (outSR 4326). A county-poly provider POSTs (the
  * polygon is too big for a URL); a plain query GETs. `maxPages` caps the pull for a dry-run.
  * Throws on any HTTP/ArcGIS error so the caller falls through to the next candidate. */
 export async function pageProvider(provider, { bbox, maxPages = Infinity, fetchImpl = fetch, ringsFetcher = fetchCountyPolygon } = {}) {
+  if (provider.kind === "identify-tile")
+    return identifyTileCounty(provider.url, provider.county, { fetchImpl, ringsFetcher, bbox, maxTiles: maxPages });
   const base = `${provider.url.replace(/\/+$/, "")}/query`;
   const rings = provider.kind === "county-poly" ? await ringsFetcher(provider.county) : null;
   const usePost = provider.kind === "county-poly";
@@ -142,11 +250,14 @@ export async function pageProvider(provider, { bbox, maxPages = Infinity, fetchI
   return feats;
 }
 
-/* Stamp the county name onto every feature (the AGO StratMap layer has no county field, but the
- * "Cached copy · <County>" badge + the app read `county` off the attributes). Mutates + returns fc. */
+/* Stamp the county name onto every feature that doesn't already carry one, so the "Cached copy ·
+ * <County>" badge + the app's own `county` attribute read always have something. Checked
+ * case-insensitively (`attrValue`) — /identify's own `COUNTY` attribute must count as already
+ * present, or every identify-tile feature would end up with BOTH a `COUNTY` and a redundant
+ * lowercase `county` key. Mutates + returns fc. */
 export function stampCounty(fc, county) {
   const cty = String(county).toUpperCase();
-  for (const f of fc.features) if (f.properties && !f.properties.county) f.properties.county = cty;
+  for (const f of fc.features) if (f.properties && attrValue(f.properties, "county") == null) f.properties.county = cty;
   return fc;
 }
 
