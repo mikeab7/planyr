@@ -180,13 +180,37 @@ async function clearOwner(row) {
   }
   await page.keyboard.press("Tab"); await pacedWait(page, 420);
 }
+/* ⛔ TWO WAYS TO PUT A CHIP IN THE EDITOR, AND THEY ARE NOT INTERCHANGEABLE HERE.
+ *
+ * `pickFromList` CLICKS a row in the contact dropdown. That is the gesture the owner actually
+ * reported ("click one contact from the list so it appears as a tag"), so every TRIAL below uses
+ * it — swapping it for something more convenient would leave the reported gesture untested, which
+ * is the WRONG-CASE mistake in miniature.
+ *
+ * `seedByComma` types the name followed by a comma; the comma parser commits it as a tag with no
+ * click at all. That is used for SETUP ONLY — minting contacts and staging prior owners, where the
+ * question is "is this chip on the task", never "does clicking the list work".
+ *
+ * Why the second one exists at all: Michael's own live pass (V978448, 2026-09-15) reported that
+ * coordinate clicks on the dropdown MISSED REPEATEDLY on the real page and that refining the
+ * arithmetic did not help, while the comma route worked first time. The dropdown is a fixed-position
+ * popup portaled to the body and re-measured every frame by a rAF loop, so its rect is a moving
+ * target for anything computing coordinates; a text-locator click is steadier than raw coordinates
+ * but is still geometry-dependent. Setup that fails for a reason unrelated to the property under
+ * test is a harness that wastes a run, so setup takes the route with no geometry in it. */
 async function setOwners(row, names) {
   await clearOwner(row);
   if (!names.length) return;
   await cellOf(row, COL.owner).dblclick(); await pacedWait(page, 280);
-  for (const nm of names) { await pickFromList(nm); }
+  for (const nm of names) { await seedByComma(nm); }
   await page.keyboard.press("Tab"); await pacedWait(page, 420);
 }
+/* SETUP ONLY — never a trial. Assumes the picker is already open. */
+async function seedByComma(name) {
+  await page.keyboard.type(name, { delay: 20 }); await pacedWait(page, 140);
+  await page.keyboard.press(",");                await pacedWait(page, 220);
+}
+/* THE REPORTED GESTURE — used by every trial. */
 async function pickFromList(name) {
   await page.locator(`[data-contact-dd] >> text="${name}"`).first().click({ force: true });
   await pacedWait(page, 220);
