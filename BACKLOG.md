@@ -153,71 +153,6 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 
 **Files.** `src/workspaces/site-planner/SitePlanner.jsx` (revert), `src/workspaces/site-planner/SitePlannerApp.jsx` (`applyUser` dedup-marker timing fix), `.github/ci-gates.yml` (gate removed), `test/ciGates.test.js` (counts 21→20), `test/bootFraming.test.js` (deleted), `e2e/canvas-boot-visibility.spec.js` (new, permanent), `CLAUDE.md` (constraint 8 amended), `BACKLOG.md` (this item + B1574432 reopened below). Full incident writeup, including every hypothesis tested and refuted, and what a future re-attempt at B1574432 needs that this repo does not yet have: `docs/incidents/B1594320-CANVAS-VISIBILITY-OUTAGE.md`.
 
-### B1574432 — The canvas painted a framing it was about to throw away: every cold load flashed the hardcoded default view before the real one `[Site Planner]` (bug) #site-planner #ui #perf #view  *(owner report with a 60 fps iPhone screen recording, 2026-09-11, 9:35 PM Central, verbatim: "fix this flashing that happens when you load the page, you tried fixing this before and it didn't work." Fifth attempt at the "frenetic startup" family. Minted **B1574432 / V1127680** from this branch's reserved block B1574432–B1574447 · V1127680–V1127695 against freshly-fetched `origin/main` 9ebd6b34. DEDUPE-FIRST — searched Open/⏳Verify/Done for "flash", "framing", "boot fit", "cold load", "requestFit", "zooms in very close", plus the whole flash family by name (**B65** tile ghost · **B821**/**B837**/**B933**/**B962**/**B842** the panel-toggle reflow + un-ghosted `setView` tile-wipe · **B1448** the boot-fit timer's ownership guard · **B1219152** the view-change recorder · **B1237920** the perf recorder's boot blind spot): **NOT a recurrence of any of them.** Every prior item in that family is about the BASEMAP (a tile wipe, a ghost, a one-frame reflow) or about WHO IS ALLOWED to move the view; not one of them touches the fact that the planner PAINTS a framing computed from no model and no container before computing the real one. Net-new.)*
-
-**Recurrence: (×2). REOPENED 2026-09-12 — the fix below was REVERTED.** This item's own `framingCommitted` mechanism (below) shipped with its riskiest path — the real signed-in `loadEpoch` remount — explicitly UNVERIFIED (`Blocker: auth`, this sandbox cannot sign in). It went live and, within hours, made the Site Planner canvas **permanently invisible and unclickable on planyr.io for every signed-in user opening any project** — a P0 total outage, filed and fixed same-session as **B1594320**, which reverts everything below (the `framingCommitted` state, both layout effects, the 1.5s watchdog, the `visibility: hidden` styling on the drawing and both map hosts, `mountIdRef`/`data-planner-mount`, the `fit(box)` signature, the required CI gate, and `test/bootFraming.test.js`). **Read B1594320 first** — it has the incident, the investigation (including why the exact trigger could not be reproduced even in a dedicated follow-up session), and why a full revert rather than a narrower patch. The analysis and measurements below are KEPT as the historical record of the flash bug itself (still real, now back) — do not re-derive them — but do NOT re-ship this exact mechanism without a genuine signed-in live pass first; that is precisely the gap that caused the outage.
-- Verify: live `Blocker: auth` — unchanged: the flash itself (as opposed to the outage it was rebuilt into) still needs a real signed-in phone boot to confirm either fixed or not. See **V1127680**, also reopened.
-- Stopping rule: closes when a FUTURE fix for this item ships with `ui-audit/verify-boot-framing.mjs --base=<url>` (or equivalent) run from a machine with real signed-in browser egress, confirmed against the actual `applyUser` remount path — not the sandbox's route-change proxy for it — before merging, in addition to the owner's own phone confirmation.
-
-**⛔ LIVE MEASUREMENT, same day, from a session with real signed-in browser access this sandbox does
-not have (see `docs/incidents/B1594320-CANVAS-VISIBILITY-OUTAGE.md`'s own "LIVE MEASUREMENT UPDATE"
-section for the full readout).** Measured directly on `planyr.io`, project `smtvztgdsp5p`, while the
-ORIGINAL (pre-revert) bundle was still live: `document.visibilityState: "hidden"`,
-`document.hasFocus(): false`, zero `requestAnimationFrame` callbacks in 6.3s, while a plain
-`setTimeout(…, 1500)` DID fire (throttled ~800ms late). This settles what this item's own analysis
-above left as a hypothesis: BOTH the layout effect and the 1.5s watchdog carried the identical guard
-`if (document.visibilityState !== "visible") return;` — a direct, explicit early-return, not an
-indirect `requestAnimationFrame` dependency — so on a tab that boots hidden and stays that way, the
-watchdog's `setTimeout` is never even scheduled. A LOUD-FAILURE rescue that refuses to arm itself in
-exactly the condition it exists to catch is not a rescue. **A future fix's watchdog must fire on a
-plain wall-clock timer NOT gated on `document.visibilityState`** (the layout effect's own gate is
-fine to keep — you cannot trust a measurement taken while hidden — it is specifically the watchdog
-that must not defer to the same condition). **Left explicitly open, per that same live session's own
-caution: the FOREGROUNDED cold load remains UNMEASURED.** Do not inherit "always broken" as a
-premise for a future fix — only the hidden-tab case has been measured as broken.
-
-**⛔ TWO CLAIMS IN THE DISPATCH BRIEF ARE WRONG, AND BOTH ARE WHY FOUR ATTEMPTS MISSED THIS.**
-
-1. **"The loadEpoch remount path: setLoadEpoch is never called. Eliminated."** It is called — `SitePlannerApp.jsx:350`, inside `applyUser`, on **every signed-in boot resume**, in the same batched commit as `setCloudLoading(false)` (which is the un-dim in the recording) and `setActiveSiteId(resumeId)`. The planner is keyed `` key={`${activeSiteId}:${loadEpoch}`} ``, so a signed-in cold load **remounts the planner partway through boot**. A grep confined to `SitePlanner.jsx` finds nothing; the call lives in `SitePlannerApp.jsx`.
-2. **"The remaining flash does not show up as an unrequested Leaflet view change."** Reproduced locally with the owner's exact arming path (`?planyrDiag=1` before the hash route) on a real plan, the app's own recorder reads **`{ changes: 1, unrequested: 1, unrequestedZooms: 1 }`** for precisely this transition — `0.35 → 0.0831`, `gesture: null`, `visibility: "visible"`. It is not blind to the transition itself. It is blind to (a) a framing that was never DISPATCHED — a fresh mount PAINTS its `useState` initial view with no `setView` at all — and (b) anything across a remount, because the ring is a `useRef` and `window.__plannerViewChanges` is re-pointed by whichever mount ran its effect last. A `changes: 0` read on production is the instrument's SCOPE, not the defect's absence.
-
-**THE MEASUREMENT (`ui-audit/verify-boot-framing.mjs`, new).** Samples the COMMITTED framing — `data-view-ppf` / `-offx` / `-offy`, the SVG transform's own inputs, not a proxy for them — once per ANIMATION FRAME on a real cold boot of a real plan at phone width, and counts only framings the canvas actually PAINTED. Against the unfixed build:
-
-```
-ARM: visible                          PAINTED framings: 2
-  1. ppf=0.35    off=(60, 60)          first painted t=671ms   held  82ms over  6 frames
-  2. ppf=0.0831  off=(283.9, 340.2)    first painted t=801ms   held the rest of the run
-
-ARM: remount (a second plan opens over a painted one)   PAINTED framings: 4  (2 mounts × 2)
-  3. ppf=0.35    off=(60, 60)          first painted t=3166ms  held 102ms over  8 frames   ← THE FLASH
-  4. ppf=0.0831  off=(283.9, 340.2)    first painted t=3300ms  held the rest of the run
-```
-
-**ROOT CAUSE, and it is not a race against the data.** The brief's leading hypothesis — a fit running against an incomplete model — is **REFUTED**. The framing that flashes is not a fit against anything: it is `useState({ ppf: 0.35, offX: 60, offY: 60 })`, a literal in `SitePlanner.jsx`, computed from **no model and no container**, painted immediately because the SVG renders the plan's content on the first commit, and then replaced ~120 ms later when the `active` effect's `setTimeout` requests the real fit. The model is not late at all — `restored` is read SYNCHRONOUSLY from storage in a `useMemo` at mount, so the complete plan is in hand before the first render. The only late input is the CONTAINER'S SIZE, which is not measured until layout.
-
-On the first boot those frames sit behind the loading screen and nobody sees them. On the remount they land on top of a fully painted plan. **Same defect, twice per signed-in boot; only the second is visible** — which is exactly why it read as intermittent and why `0.35` is 4.2× closer than the settled framing on this plan: at that zoom a large building fills a phone screen edge to edge, and the remount's fresh Leaflet map has no tiles yet, which is the recording's "no aerial visible behind it, just the pale building fill."
-
-**WHAT THE DIM AND THE TOAST ARE (brief item (e)).** Cosmetic, and not a second render pass: `cloudLoading` in `SitePlannerApp.jsx` paints a fixed `rgba(20,18,15,0.35)` scrim with the "Loading your sites…" pill, `pointerEvents: "none"`. The un-dim carries no re-fit of its own — but it is the same commit as the `loadEpoch` bump, which is why the flash appears to ride the un-dim. They are correlated, not causal.
-
-**THE FIX — the intermediate framing does not exist, rather than being outrun.** A framing is a function of the MODEL and the CONTAINER. The model is complete at mount; the container is measurable in a layout effect. So the first framing is computed in a **`useLayoutEffect`** — after the DOM exists, BEFORE the browser paints — from the container's own freshly read `getBoundingClientRect()` (never the placeholder `size` state, which is still `{ w: 800, h: 560 }` on the first render; `fit()` grew an optional explicit-box argument for exactly this). The first painted frame therefore already carries the final framing, on every mount, remount included. Nothing is debounced, delayed, or hidden behind a timer. Same discipline as VIEWPORT-STABLE (a), which this file already applies to panel-toggle reflow.
-
-**The second half — `framingCommitted`, which covers the case that defeated an earlier fix.** A document that boots HIDDEN has its rAF suspended and its readiness gate correctly refuses to frame (measured before the fix: such a tab held `ppf 0.35` for the whole five-second window), and when it is foregrounded **the browser paints the DOM as it stands before any effect of ours runs**. So until a framing has actually been committed, the canvas stack paints nothing at all — the drawing and both map hosts carry `visibility: hidden`. A blank sheet for a frame is honest; a framing the app is about to throw away is the bug. On an ordinary visible boot this gate is released inside the same commit as the first paint and is never observable. Deliberately SEPARATE from `viewFramed`, which is a different fact (`layerGateReady` depends on it — B1234400's subject, not this one). LOUD-FAILURE: a 1.5 s watchdog reports `boot-framing-stalled` telemetry and reveals the drawing anyway, so this can never leave a blank canvas.
-
-**EVERY FRAMING PATH, AND WHICH ONES RUN ON A COLD LOAD (brief item (b)).** 19 `setView(` call sites in `SitePlanner.jsx`, audited and classified; measured on a real cold boot with Leaflet's own `setView`/`setZoom`/`fitBounds`/`flyTo`/`panTo`/`panBy`/`invalidateSize`/`setZoomAround` instrumented before the app's first script ran:
-- **Runs on a cold load: exactly ONE** — the planner's own boot framing, now in the layout effect (`frame:boot-committed`, container `430×773`, fired 18 ms BEFORE the `planner:mount` passive effect). One `setView` dispatch, one painted framing.
-- **Leaflet: 8 calls, none of them an independent framing decision.** Map creation at `ppfToZoom(view.ppf)` (it is born at the drawing's own zoom — B1234400's own fix), then `setView`/`panBy` commit-mirrors of the planner view, plus one `invalidateSize`. The basemap is a slaved backdrop; it has no opinion of its own about where the view goes. No `fitBounds`, `flyTo` or `setZoomAround` fires at all.
-- **Never runs on a cold load** (each traces to a real user action, and each is already covered by `lib/viewFramingGate.js`'s ticket): `closePoly` (a drawn parcel) · `addRectParcel` · the county-record parcel lookup · the "Fit view" / "Zoom to fit" buttons · `frameToActiveParcels` (Site Analysis "show on map") · `revealPasted` (Ctrl+V) · `zoomToElements` (a conflict toast's "Show") · `flushWheel` (wheel zoom) · the pinch and drag-pan paths · the +/− zoom buttons · `onZoomTo` · the E2E-only `centerOn` probe. Two further `setView`s are not framings at all: the panel-reflow `offX` compensation (VIEWPORT-STABLE) and the phone bottom-sheet's `offY` nudge that keeps a selected feature above the sheet.
-
-**THE GUARD, and it is proven RED before the fix (brief item (g)).** `ui-audit/verify-boot-framing.mjs` — three arms plus a known-good arm, wired as a required gate in `.github/ci-gates.yml` and as `npm run verify:bootframing`:
-- **visible** — an ordinary cold load. **backgrounded → foregrounded** — the document reads as hidden through boot AND its frame loop is genuinely de-prioritised (a decoy page brought to the front; the harness prints the throttled frame count as the evidence, rather than claiming a suppression it only asserted). **remount** — a second plan opens over a painted one, the structural twin of the `loadEpoch` bump.
-- **KNOWN-GOOD ARM** (DRIVER-SCROLL-IS-NOT-APP-SCROLL §6): a deliberate pan must read as a new painted framing, or the rig cannot see framings at all and the run refuses to print a score.
-- **⛔ ITS OWN TEETH PROOF CAUGHT A FALSE GREEN IN IT.** The first verdict was "every mount painted exactly one framing." Run against a build with no `data-planner-mount` stamp — the very build it was written to fail — it saw ZERO mounts, so zero offenders, so it printed ✅ over a listing that showed the default framing painted twice. A framing that cannot be attributed is not a framing that passes; that is now a stated vacuity, pinned in `test/bootFraming.test.js`. With the stamp present and only the fix disabled, all three arms go red and name the offending mount. 3/3 consecutive clean runs with the fix in.
-- An ATTRIBUTE IS NOT A PAINT: the sampler resolves the canvas's real paint-visibility per frame, so a framing the canvas merely HELD while deliberately unpainted is reported separately and never counted.
-- **`--base=<url>` runs every arm against an ALREADY-DEPLOYED build** (a Cloudflare preview, or planyr.io) instead of serving `dist/`, through `HTTPS_PROXY` when one is set — the "prove the browser is running the build you are judging" rule, and the one command that closes V1127680's production half from any machine with real browser egress. **It cannot be run from THIS sandbox, and that was measured rather than assumed:** `curl` returns 200 from the PR's own preview URL while Chromium returns `net::ERR_CONNECTION_RESET` for the same URL with and without the egress proxy passed at launch (isolated with a bare Playwright script after two harness-level attempts failed). Browser egress here is blocked independently of `curl`'s — the same wall every harness in this repo works around with `--no-tiles`.
-
-**Measured effect.** Before: 2 painted framings per mount (4 across a remount). After: 1 per mount (2 across a remount), and the first painted frame is already the final framing. At rest nothing changed — the full visual-regression baseline suite is green, so this is a change to WHICH FRAMES GET PAINTED during boot, not to the picture.
-
-**Files.** `src/workspaces/site-planner/SitePlanner.jsx` (the layout effect, the `framingCommitted` gate on the drawing + both map hosts, `fit(box)`, the `data-planner-mount` stamp) · `ui-audit/lib/bootFraming.mjs` + `ui-audit/verify-boot-framing.mjs` (new) · `test/bootFraming.test.js` (new, 14 tests) · `.github/ci-gates.yml` · `package.json`.
 ### B1583296 — Wire the City of Detroit as a CITY-scoped parcel source, not as Wayne County `[Site Planner]` (feature) #gis #parcel #site-planner  *(owner chat block, 2026-09-11 evening Central, item 1: `Detroit_MP_Parcel_Authoritative` — previously and correctly REJECTED as a Wayne County candidate (B1455635/B1551617/B1574258) because it is the City of Detroit only and would silently return nothing across most of Wayne County — measured live tonight at downtown Detroit (42.3314, -83.0458) returning a parcel with 46 populated fields, "do not re-derive." Explicit instruction: wire it scoped to the city, add sub-county scoping if it doesn't exist, and say loudly if that is a genuine architectural addition rather than a config line. Minted **B1583296** from this branch's reserved block B1583296–B1583311 against freshly-fetched `origin/main` 453623a. DEDUPE-FIRST — searched Open/⏳Verify/Done for "Detroit", "sub-county", "city-scoped", "mi_wayne", "cityScope": no prior item proposes a sub-county resolution tier; B1455635 only records the exclusion, B1551617/B1574258 only re-confirm Wayne has no county-wide source. Net-new.)*
 
 `[x]` **IMPLEMENTED THIS SESSION — and it IS a genuine architectural addition, not a config line, stated loudly per the dispatch's own instruction.**
@@ -5043,6 +4978,172 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
+### B1574432 — The canvas painted a framing it was about to throw away: every cold load flashed the hardcoded default view before the real one `[Site Planner]` (bug) #site-planner #ui #perf #view  *(owner report with a 60 fps iPhone screen recording, 2026-09-11, 9:35 PM Central, verbatim: "fix this flashing that happens when you load the page, you tried fixing this before and it didn't work." Fifth attempt at the "frenetic startup" family. Minted **B1574432 / V1127680** from this branch's reserved block B1574432–B1574447 · V1127680–V1127695 against freshly-fetched `origin/main` 9ebd6b34. DEDUPE-FIRST — searched Open/⏳Verify/Done for "flash", "framing", "boot fit", "cold load", "requestFit", "zooms in very close", plus the whole flash family by name (**B65** tile ghost · **B821**/**B837**/**B933**/**B962**/**B842** the panel-toggle reflow + un-ghosted `setView` tile-wipe · **B1448** the boot-fit timer's ownership guard · **B1219152** the view-change recorder · **B1237920** the perf recorder's boot blind spot): **NOT a recurrence of any of them.** Every prior item in that family is about the BASEMAP (a tile wipe, a ghost, a one-frame reflow) or about WHO IS ALLOWED to move the view; not one of them touches the fact that the planner PAINTS a framing computed from no model and no container before computing the real one. Net-new.)*
+
+**Recurrence: (×2). REOPENED 2026-09-12 — the fix below was REVERTED.** This item's own `framingCommitted` mechanism (below) shipped with its riskiest path — the real signed-in `loadEpoch` remount — explicitly UNVERIFIED (`Blocker: auth`, this sandbox cannot sign in). It went live and, within hours, made the Site Planner canvas **permanently invisible and unclickable on planyr.io for every signed-in user opening any project** — a P0 total outage, filed and fixed same-session as **B1594320**, which reverts everything below (the `framingCommitted` state, both layout effects, the 1.5s watchdog, the `visibility: hidden` styling on the drawing and both map hosts, `mountIdRef`/`data-planner-mount`, the `fit(box)` signature, the required CI gate, and `test/bootFraming.test.js`). **Read B1594320 first** — it has the incident, the investigation (including why the exact trigger could not be reproduced even in a dedicated follow-up session), and why a full revert rather than a narrower patch. The analysis and measurements below are KEPT as the historical record of the flash bug itself (still real, now back) — do not re-derive them — but do NOT re-ship this exact mechanism without a genuine signed-in live pass first; that is precisely the gap that caused the outage.
+- Verify: live `Blocker: auth` — unchanged: the flash itself (as opposed to the outage it was rebuilt into) still needs a real signed-in phone boot to confirm either fixed or not. See **V1127680**, also reopened.
+- Stopping rule: closes when a FUTURE fix for this item ships with `ui-audit/verify-boot-framing.mjs --base=<url>` (or equivalent) run from a machine with real signed-in browser egress, confirmed against the actual `applyUser` remount path — not the sandbox's route-change proxy for it — before merging, in addition to the owner's own phone confirmation.
+
+**⛔ LIVE MEASUREMENT, same day, from a session with real signed-in browser access this sandbox does
+not have (see `docs/incidents/B1594320-CANVAS-VISIBILITY-OUTAGE.md`'s own "LIVE MEASUREMENT UPDATE"
+section for the full readout).** Measured directly on `planyr.io`, project `smtvztgdsp5p`, while the
+ORIGINAL (pre-revert) bundle was still live: `document.visibilityState: "hidden"`,
+`document.hasFocus(): false`, zero `requestAnimationFrame` callbacks in 6.3s, while a plain
+`setTimeout(…, 1500)` DID fire (throttled ~800ms late). This settles what this item's own analysis
+above left as a hypothesis: BOTH the layout effect and the 1.5s watchdog carried the identical guard
+`if (document.visibilityState !== "visible") return;` — a direct, explicit early-return, not an
+indirect `requestAnimationFrame` dependency — so on a tab that boots hidden and stays that way, the
+watchdog's `setTimeout` is never even scheduled. A LOUD-FAILURE rescue that refuses to arm itself in
+exactly the condition it exists to catch is not a rescue. **A future fix's watchdog must fire on a
+plain wall-clock timer NOT gated on `document.visibilityState`** (the layout effect's own gate is
+fine to keep — you cannot trust a measurement taken while hidden — it is specifically the watchdog
+that must not defer to the same condition). **Left explicitly open, per that same live session's own
+caution: the FOREGROUNDED cold load remains UNMEASURED.** Do not inherit "always broken" as a
+premise for a future fix — only the hidden-tab case has been measured as broken.
+
+**⛔ TWO CLAIMS IN THE DISPATCH BRIEF ARE WRONG, AND BOTH ARE WHY FOUR ATTEMPTS MISSED THIS.**
+
+1. **"The loadEpoch remount path: setLoadEpoch is never called. Eliminated."** It is called — `SitePlannerApp.jsx:350`, inside `applyUser`, on **every signed-in boot resume**, in the same batched commit as `setCloudLoading(false)` (which is the un-dim in the recording) and `setActiveSiteId(resumeId)`. The planner is keyed `` key={`${activeSiteId}:${loadEpoch}`} ``, so a signed-in cold load **remounts the planner partway through boot**. A grep confined to `SitePlanner.jsx` finds nothing; the call lives in `SitePlannerApp.jsx`.
+2. **"The remaining flash does not show up as an unrequested Leaflet view change."** Reproduced locally with the owner's exact arming path (`?planyrDiag=1` before the hash route) on a real plan, the app's own recorder reads **`{ changes: 1, unrequested: 1, unrequestedZooms: 1 }`** for precisely this transition — `0.35 → 0.0831`, `gesture: null`, `visibility: "visible"`. It is not blind to the transition itself. It is blind to (a) a framing that was never DISPATCHED — a fresh mount PAINTS its `useState` initial view with no `setView` at all — and (b) anything across a remount, because the ring is a `useRef` and `window.__plannerViewChanges` is re-pointed by whichever mount ran its effect last. A `changes: 0` read on production is the instrument's SCOPE, not the defect's absence.
+
+**THE MEASUREMENT (`ui-audit/verify-boot-framing.mjs`, new).** Samples the COMMITTED framing — `data-view-ppf` / `-offx` / `-offy`, the SVG transform's own inputs, not a proxy for them — once per ANIMATION FRAME on a real cold boot of a real plan at phone width, and counts only framings the canvas actually PAINTED. Against the unfixed build:
+
+```
+ARM: visible                          PAINTED framings: 2
+  1. ppf=0.35    off=(60, 60)          first painted t=671ms   held  82ms over  6 frames
+  2. ppf=0.0831  off=(283.9, 340.2)    first painted t=801ms   held the rest of the run
+
+ARM: remount (a second plan opens over a painted one)   PAINTED framings: 4  (2 mounts × 2)
+  3. ppf=0.35    off=(60, 60)          first painted t=3166ms  held 102ms over  8 frames   ← THE FLASH
+  4. ppf=0.0831  off=(283.9, 340.2)    first painted t=3300ms  held the rest of the run
+```
+
+**ROOT CAUSE, and it is not a race against the data.** The brief's leading hypothesis — a fit running against an incomplete model — is **REFUTED**. The framing that flashes is not a fit against anything: it is `useState({ ppf: 0.35, offX: 60, offY: 60 })`, a literal in `SitePlanner.jsx`, computed from **no model and no container**, painted immediately because the SVG renders the plan's content on the first commit, and then replaced ~120 ms later when the `active` effect's `setTimeout` requests the real fit. The model is not late at all — `restored` is read SYNCHRONOUSLY from storage in a `useMemo` at mount, so the complete plan is in hand before the first render. The only late input is the CONTAINER'S SIZE, which is not measured until layout.
+
+On the first boot those frames sit behind the loading screen and nobody sees them. On the remount they land on top of a fully painted plan. **Same defect, twice per signed-in boot; only the second is visible** — which is exactly why it read as intermittent and why `0.35` is 4.2× closer than the settled framing on this plan: at that zoom a large building fills a phone screen edge to edge, and the remount's fresh Leaflet map has no tiles yet, which is the recording's "no aerial visible behind it, just the pale building fill."
+
+**WHAT THE DIM AND THE TOAST ARE (brief item (e)).** Cosmetic, and not a second render pass: `cloudLoading` in `SitePlannerApp.jsx` paints a fixed `rgba(20,18,15,0.35)` scrim with the "Loading your sites…" pill, `pointerEvents: "none"`. The un-dim carries no re-fit of its own — but it is the same commit as the `loadEpoch` bump, which is why the flash appears to ride the un-dim. They are correlated, not causal.
+
+**THE FIX — the intermediate framing does not exist, rather than being outrun.** A framing is a function of the MODEL and the CONTAINER. The model is complete at mount; the container is measurable in a layout effect. So the first framing is computed in a **`useLayoutEffect`** — after the DOM exists, BEFORE the browser paints — from the container's own freshly read `getBoundingClientRect()` (never the placeholder `size` state, which is still `{ w: 800, h: 560 }` on the first render; `fit()` grew an optional explicit-box argument for exactly this). The first painted frame therefore already carries the final framing, on every mount, remount included. Nothing is debounced, delayed, or hidden behind a timer. Same discipline as VIEWPORT-STABLE (a), which this file already applies to panel-toggle reflow.
+
+**The second half — `framingCommitted`, which covers the case that defeated an earlier fix.** A document that boots HIDDEN has its rAF suspended and its readiness gate correctly refuses to frame (measured before the fix: such a tab held `ppf 0.35` for the whole five-second window), and when it is foregrounded **the browser paints the DOM as it stands before any effect of ours runs**. So until a framing has actually been committed, the canvas stack paints nothing at all — the drawing and both map hosts carry `visibility: hidden`. A blank sheet for a frame is honest; a framing the app is about to throw away is the bug. On an ordinary visible boot this gate is released inside the same commit as the first paint and is never observable. Deliberately SEPARATE from `viewFramed`, which is a different fact (`layerGateReady` depends on it — B1234400's subject, not this one). LOUD-FAILURE: a 1.5 s watchdog reports `boot-framing-stalled` telemetry and reveals the drawing anyway, so this can never leave a blank canvas.
+
+**EVERY FRAMING PATH, AND WHICH ONES RUN ON A COLD LOAD (brief item (b)).** 19 `setView(` call sites in `SitePlanner.jsx`, audited and classified; measured on a real cold boot with Leaflet's own `setView`/`setZoom`/`fitBounds`/`flyTo`/`panTo`/`panBy`/`invalidateSize`/`setZoomAround` instrumented before the app's first script ran:
+- **Runs on a cold load: exactly ONE** — the planner's own boot framing, now in the layout effect (`frame:boot-committed`, container `430×773`, fired 18 ms BEFORE the `planner:mount` passive effect). One `setView` dispatch, one painted framing.
+- **Leaflet: 8 calls, none of them an independent framing decision.** Map creation at `ppfToZoom(view.ppf)` (it is born at the drawing's own zoom — B1234400's own fix), then `setView`/`panBy` commit-mirrors of the planner view, plus one `invalidateSize`. The basemap is a slaved backdrop; it has no opinion of its own about where the view goes. No `fitBounds`, `flyTo` or `setZoomAround` fires at all.
+- **Never runs on a cold load** (each traces to a real user action, and each is already covered by `lib/viewFramingGate.js`'s ticket): `closePoly` (a drawn parcel) · `addRectParcel` · the county-record parcel lookup · the "Fit view" / "Zoom to fit" buttons · `frameToActiveParcels` (Site Analysis "show on map") · `revealPasted` (Ctrl+V) · `zoomToElements` (a conflict toast's "Show") · `flushWheel` (wheel zoom) · the pinch and drag-pan paths · the +/− zoom buttons · `onZoomTo` · the E2E-only `centerOn` probe. Two further `setView`s are not framings at all: the panel-reflow `offX` compensation (VIEWPORT-STABLE) and the phone bottom-sheet's `offY` nudge that keeps a selected feature above the sheet.
+
+**THE GUARD, and it is proven RED before the fix (brief item (g)).** `ui-audit/verify-boot-framing.mjs` — three arms plus a known-good arm, wired as a required gate in `.github/ci-gates.yml` and as `npm run verify:bootframing`:
+- **visible** — an ordinary cold load. **backgrounded → foregrounded** — the document reads as hidden through boot AND its frame loop is genuinely de-prioritised (a decoy page brought to the front; the harness prints the throttled frame count as the evidence, rather than claiming a suppression it only asserted). **remount** — a second plan opens over a painted one, the structural twin of the `loadEpoch` bump.
+- **KNOWN-GOOD ARM** (DRIVER-SCROLL-IS-NOT-APP-SCROLL §6): a deliberate pan must read as a new painted framing, or the rig cannot see framings at all and the run refuses to print a score.
+- **⛔ ITS OWN TEETH PROOF CAUGHT A FALSE GREEN IN IT.** The first verdict was "every mount painted exactly one framing." Run against a build with no `data-planner-mount` stamp — the very build it was written to fail — it saw ZERO mounts, so zero offenders, so it printed ✅ over a listing that showed the default framing painted twice. A framing that cannot be attributed is not a framing that passes; that is now a stated vacuity, pinned in `test/bootFraming.test.js`. With the stamp present and only the fix disabled, all three arms go red and name the offending mount. 3/3 consecutive clean runs with the fix in.
+- An ATTRIBUTE IS NOT A PAINT: the sampler resolves the canvas's real paint-visibility per frame, so a framing the canvas merely HELD while deliberately unpainted is reported separately and never counted.
+- **`--base=<url>` runs every arm against an ALREADY-DEPLOYED build** (a Cloudflare preview, or planyr.io) instead of serving `dist/`, through `HTTPS_PROXY` when one is set — the "prove the browser is running the build you are judging" rule, and the one command that closes V1127680's production half from any machine with real browser egress. **It cannot be run from THIS sandbox, and that was measured rather than assumed:** `curl` returns 200 from the PR's own preview URL while Chromium returns `net::ERR_CONNECTION_RESET` for the same URL with and without the egress proxy passed at launch (isolated with a bare Playwright script after two harness-level attempts failed). Browser egress here is blocked independently of `curl`'s — the same wall every harness in this repo works around with `--no-tiles`.
+
+**Measured effect.** Before: 2 painted framings per mount (4 across a remount). After: 1 per mount (2 across a remount), and the first painted frame is already the final framing. At rest nothing changed — the full visual-regression baseline suite is green, so this is a change to WHICH FRAMES GET PAINTED during boot, not to the picture.
+
+**Files.** `src/workspaces/site-planner/SitePlanner.jsx` (the layout effect, the `framingCommitted` gate on the drawing + both map hosts, `fit(box)`, the `data-planner-mount` stamp) · `ui-audit/lib/bootFraming.mjs` + `ui-audit/verify-boot-framing.mjs` (new) · `test/bootFraming.test.js` (new, 14 tests) · `.github/ci-gates.yml` · `package.json`.
+
+**⛔ RE-LANDED 2026-09-15 (sixth attempt at this family) — THE GATE IS BACK, AND ALL THREE CONDITIONS
+`docs/incidents/B1594320-CANVAS-VISIBILITY-OUTAGE.md` SETS FOR A RE-ATTEMPT ARE DISCHARGED.** The
+flash was still live on production this morning: the deployed `SitePlannerApp-Bz_McZ8T.js` contains
+`frame:deferred`, `visibilitychange` and `pageshow` (B1600353 is there and holding) but contains no
+`framingCommitted`, no `boot-framing-stalled` and no `data-planner-mount` — nothing suppressed the
+flash. Reproduced here before anything was changed, against `main` at phone width on the 66-element
+Goose Creek fixture: `ppf 0.35 off (60, 60)` — the `useState` boot default — **painted for 106 ms
+over SIX FRAMES**, then replaced by the real `ppf 0.0831`; on the remount arm, painted **twice**,
+once per mount. That reproduces this item's own 2026-09-11 measurement almost exactly.
+
+**THE THREE CONDITIONS, each discharged by name (this is the checklist the incident doc sets, not a
+paraphrase of it):**
+
+1. **"A way to actually exercise the signed-in `loadEpoch` remount from a sandbox with no live
+   Supabase access… Nobody has built this yet."** — BUILT: `ui-audit/lib/authRemount.mjs` +
+   `ui-audit/verify-boot-framing-auth.mjs` (`npm run verify:bootframingauth`). It plants a resumable
+   non-expired session in the storage key supabase-js reads and answers GoTrue/PostgREST from the
+   harness, so the **real** `@supabase/auth-js` produces the `INITIAL_SESSION` + `SIGNED_IN` pair
+   itself (`_emitInitialSession` racing `_recoverAndRefresh`'s broadcast) rather than the doc's
+   proposed simulation of it — better evidence, since the timing is the client's own. The cloud pull
+   settles, `applyUser` bumps `loadEpoch`, and the harness **measures 2 planner mounts**: the
+   configuration the owner filmed, driven with no credentials and touching no real account.
+   Two traps it had to close, both of which made the first cut report a framing failure that was
+   nothing of the kind: `fixtureSeed` seeds the LOGGED-OUT store (`planarfit:sites:v1`) while a
+   signed-in boot reads `planarfit:sites:cloud:<uid>`; and a blanket `[]` for PostgREST makes
+   `cloudCheckDeleted` read "no rows" → Shell renders *"This project doesn't exist"* and no planner
+   ever mounts.
+2. **"A hard ceiling on the watchdog that survives a remount."** — `lib/bootFramingDeadline.js`. The
+   deadline is ABSOLUTE and PER-PLAN, stamped once at the first mount and held above the component,
+   so a remount arms a timer for the time REMAINING. Module scope, deliberately not `sessionStorage`
+   (which survives a RELOAD, so the second cold load of a tab's life would read an expired stamp,
+   reveal instantly, and the gate would silently stop working with the flash back).
+   **Proven, not asserted:** the ceiling arm drives 7 real remounts ~700 ms apart (inside the 1500 ms
+   ceiling) on a container forced degenerate, and the canvas is still revealed by the ceiling.
+   Mutating the deadline to the per-mount shape — which is what #1686's branch carried, and which
+   this doc explicitly says is NOT good enough — leaves the canvas **permanently hidden** and the arm
+   goes RED. That is the B1594320 outage reproduced on demand and caught.
+3. **"Do not re-ship a hide-until-ready gate on this element without a genuine signed-in live pass
+   BEFORE merging."** — parked, not waived: **V1145488**, with an exact one-`evaluate` checklist that
+   reads the served chunk name in the same observation as every result.
+
+**THE MECHANISM, and how it differs from the one that caused the P0:**
+- **The reveal is CAUSED BY the framing, in the same commit.** `fit()` itself sets it, so there is no
+  path that reveals a framed canvas and none that frames a hidden one — they are one statement.
+  B1574432's original had them as two separate decisions that could drift, and they did.
+- **The ceiling effect has an EMPTY dep array and NO condition of any kind** — not `active`, not
+  `document.visibilityState`, not the container. That one line is the P0: the original's deps were
+  `[framingCommitted, active]` plus an early return on `visibilityState !== "visible"`, so in a
+  document that booted hidden its `setTimeout` was **never scheduled**.
+- **Readiness is the RAW RECT, never `visibilityState`.** Production measured a real 969x408 container
+  while hidden; `getBoundingClientRect()` is layout-accurate in a tab that is merely not frontmost.
+  So the gate now opens correctly *during* a hidden boot and the ceiling is a rare backstop rather
+  than the load-bearing path — the inversion that killed the last attempt. **This corrects this
+  item's own note above** ("the layout effect's own gate is fine to keep"), exactly as B1600352
+  already corrected the same sentence in the incident doc.
+- **The ceiling tries to FRAME before it gives up** (incident §5: "either frame as part of revealing,
+  or never reveal without a framing"), and only a genuinely unmeasurable container falls through to a
+  bare reveal — which is LOUD: `boot-framing-stalled` telemetry, and `data-planner-reveal="ceiling"`
+  for anything watching from outside the page.
+- **B1600353 IS NOT TOUCHED.** The hidden-boot framing fix is live and correct; this rides on top of
+  it. Confirmed by the harness's hidden arm, which still reads `ppf 0.0831`, plan on screen and
+  hit-testable, before it foregrounds anything.
+- **PDF-PARITY is structural, not asserted:** `exportSheet.js`'s clone calls
+  `clone.removeAttribute("style")`, so `visibility` can never reach a sheet. No export change needed.
+
+**⛔ AND THE RIG WAS STILL LYING — FIXED IN THE SAME CHANGE.** Running `verify-boot-framing.mjs`
+against `main` this morning printed `PAINTED framings: 2`, listed `ppf=0.35 off=(60,60) held 106ms
+over 6 frames`, and then reported **`⊘ flash verdict not applicable`** and exited 0. Its flash
+verdict is per-MOUNT and the mount comes from `data-planner-mount` — an attribute only the fix adds —
+so the detector was disarmed by the absence of the fix and the only build it could ever fail was one
+that already had it. (B1600353's second commit introduced that `gateAbsent` branch for a good
+reason; this is its unintended consequence.) `bootDefaultFlashes` now asks the question directly of
+the pixels, with no dependence on anything the fix adds: **was the boot default painted and then
+THROWN AWAY?** ⛔ The triple alone is deliberately NOT the signature — `ppf 0.35 off (60,60)` is also
+the honest answer `fit()` computes for a genuinely empty plan, and a check that failed on it would
+report every empty plan as broken. REPLACEMENT is the discriminator.
+
+**RED-PROOFED BOTH WAYS, on real builds rather than by reasoning:**
+- against `main` (no gate): the repaired rig **exits 1**, naming the flash on all three arms
+  (`visible` 2 framings, `backgrounded` 2, `remount` 4) — where before it exited 0.
+- the P0 reintroduced (a `visibilityState` guard added back to the ceiling): the watchdog arm goes
+  RED, *"the canvas was STILL unrevealed after 6349 ms"*, exit 1 — while the other arms stay green,
+  which is correct, since their containers are measurable.
+- the per-mount deadline (#1686's shape): the auth ceiling arm goes RED, canvas permanently hidden.
+- with the fix: `visible` 1 framing · `backgrounded` 1 · `remount` 2 mounts / 2 framings · watchdog
+  revealed at 2237 ms on a wall clock in a hidden document · auth resume 2 mounts, no flash on either.
+
+**ADJACENT CASES, all driven and all green** (`npm run verify:bootframingcases`): foregrounded cold
+load at phone and desktop width · hidden boot · a project with NO PARCEL · a parcel with NO ELEMENTS ·
+a genuinely EMPTY plan · and Map / Schedule / Notes / Review reached by clicking the real visible tab
+(both module hosts stay mounted, so a bare text locator hits the `inert` copy and times out).
+⚠ The empty-plan case renders exactly `ppf 0.35 off (60, 60)` and is a **PASS**: `data-planner-reveal`
+reads `"framed"`, so `fit()` ran against a real container and had nothing to frame. That is the
+distinction between *"nothing to frame"* and *"could not frame"*, and it is why no check here judges
+on the numbers.
+
+- Verify: live `Blocker: auth` — **V1145488**.
+- Stopping rule: UNCHANGED and now met on the sandbox half — closes when V1145488 records a signed-in
+  pass on the owner's own browser (chunk hash read in the same observation as the result) plus his
+  own phone confirmation that the flash is gone.
 ### B1341728 — Escape (and, as he measured it, Enter) discarded an owner already showing as a finished chip in the Owner cell `[Scheduler]` (bug) #scheduler #ui #keyboard #testing  *(owner chat block 2026-09-15, measured LIVE on his own account on a throwaway duplicate — "Operations (Copy)", a duplicate of the 8-task Operations schedule under Goose Creek, deleted by him afterwards; no real schedule was edited. Minted **B1341728 / V978448** from this branch's reserved block B1341728–B1341743 · V978448–V978463 against freshly-fetched `origin/main` e653cd7. DEDUPE-FIRST — searched Open / ⏳ Verify / Done / Done-archive for `ContactPicker`, `responsibleParty`, `Owner cell`, `owner chip`, `cancelEditing`, `Escape discards`, `B443536`, `B1213314`, `B1557008`: **B443536** (Done) is a different defect in this same editor — it ate the first character typed, nothing to do with exits; **B1213314** (Done) asked only whether the field is REACHABLE and round-trips, and the owner's own constraint from that item — tasks do not need an owner, never nag for one — is honoured here and untouched; **B1557008–B1557013** built the multi-owner chip redesign this defect rides on, and the multi-add flow it introduced is explicitly PRESERVED (owner, verbatim: "it's fine if it asks for a second one, but like, let me move out without deleting what I just did"). No prior item is about what an exit gesture does to an unsaved value. Net-new.)*
 
 `[x]` **HIS MEASUREMENT, verbatim shape.** Open a task's Owner cell, click one contact from the list so it appears as a tag, then leave the cell: **Escape** → owner discarded, cell reverts to the last saved state · **Enter** → owner discarded, and the cursor moves down one row so the loss is silent · **Tab** → saved · **click away** → saved. Owners already SAVED before the edit survived all four, so this destroyed NEW work only. He confirmed the Enter case by reopening the cell: the editor came back empty with "Type a name…".
