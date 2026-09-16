@@ -154,8 +154,28 @@ Each is phrased as a testable sentence, followed by what proves it and its **cur
     `nameMismatch`/`groupKeyMismatch`/`auditRows`; `test/nameGroupIntegrity.test.js` (proven red on
     the real production disagreement, not a synthetic stand-in); the live sweep
     `scripts/audit-name-group-integrity.mjs`. **✅ holds** — measured clean account-wide 2026-09-12
-    after `backfill_group_id_column()` closed the one known row. **⛔ NOT YET DONE, stated plainly
-    rather than silently left**: the several client resolvers that still read the `group_id`
+    after `backfill_group_id_column()` closed the one known row.
+    **⛔ NEW-2 (2026-09-16) — THE NAME-MISMATCH HALF IS NOW DATABASE-ENFORCED, NOT MERELY DETECTED.**
+    `db/sites_site_column_mirror.sql`'s `sites_site_column_mirror` (BEFORE INSERT OR UPDATE) derives
+    `site` from `data->>'site'` unconditionally whenever the jsonb carries a `site` key, so no
+    caller — this client, a future client, a hand-built request, an admin script — can leave the two
+    disagreeing, structurally, not by discipline. A `GENERATED ALWAYS AS (...) STORED` column was
+    considered and rejected: tested live (against a throwaway project, never this one) that a
+    generated column reads as `NULL` inside `NEW` for every BEFORE ROW trigger that fires before it,
+    which would have silently broken `sites_enforce_version_monotonic`'s `new.site is not distinct
+    from old.site` read (invariant §16) — a guard this item was explicitly told not to touch. `site`
+    therefore stays a plain, trigger-mirrored column; `data->>'site'` is the one write surface this
+    client's own model already trusted (confirmed by grepping every `.select(...)` this client
+    issues against `public.sites` — the primary cloud-pull hydration path never selects the `site`
+    column at all). `db/test/sites_site_column_mirror.test.sql` (self-rolling-back, run live against
+    production, mutation-proven — every case checked to genuinely diverge with the trigger dropped,
+    not merely intercepted earlier by `sites_enforce_version_monotonic`'s own version requirement).
+    **What did NOT change:** `scheduleProjectName` — audited on the same pass and found to be a
+    genuinely separate, live fact (the linked Schedule's own name, read by `functions/api/mcp/
+    _tools.js`/`_metrics.js` and written by `Shell.jsx`'s `scheduleLinkOf`/`setScheduleLink`, 12 of
+    135 rows non-empty and correctly paired with a real `scheduleProjectId` today) — correctly
+    excluded from this collapse, per this row's own existing text below.
+    **⛔ NOT YET DONE, stated plainly rather than silently left**: the several client resolvers that still read the `group_id`
     COLUMN directly (`storage.js`'s `listDeletedProjects`/`listDeletedPlansInGroup`/
     `groupStillHasLivePlans` and others, `cloudSync.js`'s `cloudCheckDeleted`) are unchanged — they
     happen to agree with the jsonb key on every row today (that's what "latent" means), and this

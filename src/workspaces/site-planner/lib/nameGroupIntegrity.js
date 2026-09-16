@@ -35,6 +35,12 @@
  * and it is the ONE place any of these questions is asked — `scripts/audit-name-group-integrity.mjs`
  * (live, whole-account) and `test/nameGroupIntegrity.test.js` (seeded, CI-enforced) both call it
  * rather than re-deriving any check.
+ *
+ * ⛔ NEW-2 (2026-09-16) — `nameMismatch` should now NEVER fire in production. `db/sites_site_
+ * column_mirror.sql` makes the column/jsonb agreement it checks a DATABASE-ENFORCED invariant, not
+ * a discipline every writer has to keep — see that file and docs/DATA.md §2.15 for the full
+ * reasoning. This detector stays: it is the CI-side proof the guarantee holds, and the one thing
+ * that would notice if a future migration ever bypassed the trigger.
  */
 import { nameAuthority, renameStamp, groupKeyOf as modelGroupKeyOf } from "./projectName.js";
 
