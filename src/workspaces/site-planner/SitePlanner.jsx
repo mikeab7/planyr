@@ -327,7 +327,7 @@ import {
   SQFT_PER_ACRE, rot2, elCorners, polyArea, ringOf, carStalls, trailerStalls, estStalls, estTrailers,
   CURB, CURB_6, CURB_12, curbWidthOf, curbEdgesOf, isCenterlineRoad, roadCurbWidth,
   roadDefaultRadius, roadDenseCenterline, roadStripRing, roadStripArea,
-  TEE_COINCIDE_FT, teeTargetOf, roadJunctionVerticesOf, roundaboutsForSite,
+  TEE_COINCIDE_FT, teeTargetOf, teeTargetPointOf, roadJunctionVerticesOf, roundaboutsForSite,
 } from "./lib/siteGeometry.js";
 import { siteMetrics } from "./lib/siteMetrics.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide,
@@ -1286,12 +1286,17 @@ function teeJunctionsOf(els, settings) {
   for (const S of roads) {
     for (const ei of [0, S.pts.length - 1]) {
       const P = S.pts[ei];
-      const hit = teeTargetOf(roads, S, P);
+      // teeTargetPointOf (B1713104) — tries the real-vertex rule first (byte-identical to
+      // teeTargetOf for every plan that already has one), then falls back to projecting P onto the
+      // through road's own SEGMENTS when no vertex is there. `hit.pts` is G.pts unchanged in the
+      // vertex case, or a local copy with the projected point spliced in at `gvi` in the fallback
+      // case — either way it is the array roadRunFrom must walk, never the road's own stored `G.pts`.
+      const hit = teeTargetPointOf(roads, S, P);
       if (!hit) continue;
-      const { G, gvi } = hit;
+      const { G, gvi, pts: gPts } = hit;
       const sideRun = roadRunFrom(S.pts, ei, ei === 0 ? 1 : -1, roadTangentNoise(S));   // into the side road's body
       const sideDir = { x: sideRun.far.x - P.x, y: sideRun.far.y - P.y };
-      const backRun = roadRunFrom(G.pts, gvi, -1, roadTangentNoise(G)), fwdRun = roadRunFrom(G.pts, gvi, 1, roadTangentNoise(G));
+      const backRun = roadRunFrom(gPts, gvi, -1, roadTangentNoise(G)), fwdRun = roadRunFrom(gPts, gvi, 1, roadTangentNoise(G));
       const a = backRun.far, b = fwdRun.far;
       const din = { x: P.x - a.x, y: P.y - a.y }, dout = { x: b.x - P.x, y: b.y - P.y };  // through tangents at the vertex
       const li = Math.hypot(din.x, din.y) || 1, lo = Math.hypot(dout.x, dout.y) || 1;
