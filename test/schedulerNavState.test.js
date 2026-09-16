@@ -851,9 +851,97 @@ describe("Scheduler.jsx — the Task Report row-click fix is wired in (B1614528)
   it("a resolved navigation with a linked site adopts it into the route via the freshness ref, not a stale closure", () => {
     const i = SRC.indexOf("const navAction = resolveReportRowNavigation(");
     expect(i).toBeGreaterThan(-1);
-    const block = SRC.slice(i, i + 500);
+    const block = SRC.slice(i, i + 1100);
     expect(block).toMatch(/onProjectChangeRef\.current\?\.\(navAction\.linkedSiteId\)/);
     expect(block).toMatch(/explicitPickRef\.current = \{ id: navAction\.activeId, projectId: navAction\.linkedSiteId \};/);
+  });
+});
+
+/* NEW-1 (B1614528 follow-up, 2026-09-16) — the Task Report row link lands on the schedule but the
+ * task itself is never selected, because a genuine "reports"→"projects" transition for a LINKED
+ * project still bounces through `planar:nav-dashboard` once before settling: `onProjectChange`
+ * writes `window.location.hash` (route.js's `navigate`), which only updates the `projectId` prop
+ * once its own hashchange event fires — a real, later browser task, never synchronous with and
+ * never batched into this same message handler's setState calls. So the very next render sees
+ * `section` already "projects" but `projectId` still stale, `isPickShowing` reads "not showing,"
+ * and `shouldNeutralizeToReports` fires the bounce into that one-tick gap — which then round-trips
+ * through the embed and clobbers whatever task selection `goToTask` had already set. See
+ * navState.js's `isPickShowing` header and Scheduler.jsx's `pendingRouteProjectIdRef` for the full
+ * mechanism. These lock the pure decision function plus the Scheduler.jsx wiring facts a source
+ * guard can verify without a jsdom/React harness (this repo has none for this file — see the
+ * B1614528 block above); ui-audit/verify-report-row-navigation.mjs proves the end-to-end behavior
+ * (no bounce, correct route, pick showing) against a same-origin `/sequence/` stub in a real
+ * browser — the closest thing to a live pass this sandbox can drive, since the real embedded app's
+ * in-browser Babel loads from a CDN this sandbox's egress blocks (same wall V1149424 already names
+ * for this iframe). */
+describe("isPickShowing — pendingProjectId bridges the route-write race (NEW-1, B1614528 follow-up)", () => {
+  it("without a pending value, a linked pick reads as NOT showing while the route prop is still stale (the pre-fix shape)", () => {
+    expect(isPickShowing({ id: 47, projectId: "smqfy48tlk9j" }, 47, "projects", null)).toBe(false);
+  });
+
+  it("a pending value matching the pick's own projectId lets it read as showing immediately, before the route prop catches up", () => {
+    expect(isPickShowing({ id: 47, projectId: "smqfy48tlk9j" }, 47, "projects", null, "smqfy48tlk9j")).toBe(true);
+  });
+
+  it("once the real projectId prop catches up, the pick still reads as showing with no pending value needed", () => {
+    expect(isPickShowing({ id: 47, projectId: "smqfy48tlk9j" }, 47, "projects", "smqfy48tlk9j")).toBe(true);
+    expect(isPickShowing({ id: 47, projectId: "smqfy48tlk9j" }, 47, "projects", "smqfy48tlk9j", null)).toBe(true);
+  });
+
+  it("a pending value defaults to null and never changes behavior for every pre-existing (4-arg) call", () => {
+    expect(isPickShowing({ id: 7, projectId: "gc" }, 7, "projects", "gc")).toBe(true);
+    expect(isPickShowing({ id: 7, projectId: "gc" }, 7, "projects", "grand")).toBe(false);
+    expect(isPickShowing(null, null, "projects", "gc")).toBe(false);
+  });
+
+  it("a pending value can never manufacture a match against the WRONG pick — activeId/section/pick.id still gate first", () => {
+    // wrong activeId
+    expect(isPickShowing({ id: 47, projectId: "smqfy48tlk9j" }, 99, "projects", null, "smqfy48tlk9j")).toBe(false);
+    // wrong section
+    expect(isPickShowing({ id: 47, projectId: "smqfy48tlk9j" }, 47, "reports", null, "smqfy48tlk9j")).toBe(false);
+    // no pick at all
+    expect(isPickShowing(null, 47, "projects", null, "smqfy48tlk9j")).toBe(false);
+  });
+
+  it("the unlinked/cross-cutting case (pick.projectId null) is unaffected by a null pending value", () => {
+    expect(isPickShowing({ id: 5, projectId: null }, 5, "projects", null)).toBe(true);
+    expect(isPickShowing({ id: 5, projectId: null }, 5, "projects", null, null)).toBe(true);
+  });
+});
+
+describe("Scheduler.jsx — pendingRouteProjectIdRef bridges the route-write race (NEW-1, B1614528 follow-up)", () => {
+  const SRC = readFileSync(fileURLToPath(new URL("../src/workspaces/scheduler/Scheduler.jsx", import.meta.url)), "utf8");
+
+  it("declares the ref and threads it into the pickShowing computation", () => {
+    expect(SRC).toMatch(/const pendingRouteProjectIdRef = useRef\(null\);/);
+    expect(SRC).toMatch(
+      /const pickShowing = isPickShowing\(explicitPickRef\.current, activeId, section, projectId, pendingRouteProjectIdRef\.current\);/,
+    );
+  });
+
+  it("sets the pending ref from the resolved navAction before calling onProjectChange, so the SAME tick's re-render already bridges the gap", () => {
+    const i = SRC.indexOf("if (navAction) {");
+    expect(i).toBeGreaterThan(-1);
+    const block = SRC.slice(i, i + 900);
+    const setIdx = block.indexOf("pendingRouteProjectIdRef.current = navAction.linkedSiteId;");
+    const callIdx = block.indexOf("onProjectChangeRef.current?.(navAction.linkedSiteId)");
+    expect(setIdx).toBeGreaterThan(-1);
+    expect(callIdx).toBeGreaterThan(-1);
+    expect(setIdx).toBeLessThan(callIdx); // set BEFORE the route write, not after
+  });
+
+  it("clears the pending ref once the real projectId prop actually changes, so a stale bridge can never outlive its own navigation", () => {
+    expect(SRC).toMatch(/useEffect\(\(\) => \{ pendingRouteProjectIdRef\.current = null; \}, \[projectId\]\);/);
+  });
+
+  it("a fresh selectSchedule() pick and a Dashboard press both retire any leftover pending bridge", () => {
+    const selIdx = SRC.indexOf("const selectSchedule = (id) => {");
+    expect(selIdx).toBeGreaterThan(-1);
+    expect(SRC.slice(selIdx, selIdx + 1700)).toMatch(/pendingRouteProjectIdRef\.current = null;/);
+
+    const dashIdx = SRC.indexOf("const goDashboardWithinModule = () => {");
+    expect(dashIdx).toBeGreaterThan(-1);
+    expect(SRC.slice(dashIdx, dashIdx + 400)).toMatch(/pendingRouteProjectIdRef\.current = null;/);
   });
 });
 

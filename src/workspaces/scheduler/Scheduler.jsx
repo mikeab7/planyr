@@ -123,6 +123,20 @@ export default function Scheduler({
   // cross-cutting one), so a genuine switch to a DIFFERENT routed project invalidates the pick
   // instead of latching it forever — see isPickShowing's own header for the deadlock this fixes.
   const explicitPickRef = useRef(null);
+  // ⛔ NEW-1 (B1614528 follow-up) — the route-write race: `onProjectChange` (below) writes
+  // `window.location.hash` (route.js's `navigate`), and the resulting `projectId` prop only
+  // updates once the hashchange event fires — a real browser task, never synchronous with and
+  // never batched into the `setState` calls this same message handler already makes. Without this,
+  // the very next render sees `section` already flipped to "projects" but `projectId` still the OLD
+  // value, `isPickShowing` reads "not showing," and `shouldNeutralizeToReports` fires a real
+  // `planar:nav-dashboard` into the one-tick gap — the bounce that clobbered the embed's own
+  // just-set task selection. Set the instant a linked report-row pick calls `onProjectChange`;
+  // cleared the moment the real `projectId` prop next changes (see the effect just below the nav
+  // message handler) — by then either it matches (the ordinary case, and `projectId` itself is
+  // authoritative from here on) or something else superseded it, and either way holding onto a
+  // stale anticipated value past that point would be wrong. See navState.js's `isPickShowing`
+  // header for the full mechanism.
+  const pendingRouteProjectIdRef = useRef(null);
   // B1614528 — the message-listener effect below is deliberately "attach once" (see its own deps
   // comment), so it can't just list `projectId`/`onProjectChange` to stay current: `onProjectChange`
   // in particular is a fresh inline function every Shell render (Shell.jsx passes
@@ -228,6 +242,13 @@ export default function Scheduler({
       });
       if (navAction) {
         explicitPickRef.current = { id: navAction.activeId, projectId: navAction.linkedSiteId };
+        // NEW-1 — always mirrors this pick's own `projectId` exactly (null for the unlinked/
+        // cross-cutting case too), set BEFORE calling onProjectChange, so the render this same
+        // tick's setState calls above trigger already reads `pendingRouteProjectIdRef.current`
+        // when it computes `pickShowing` — no need to wait for the hashchange round trip that
+        // adopts a linked pick into the real `projectId` prop. See this ref's own header and
+        // isPickShowing's in navState.js.
+        pendingRouteProjectIdRef.current = navAction.linkedSiteId;
         if (navAction.linkedSiteId != null) { try { onProjectChangeRef.current?.(navAction.linkedSiteId); } catch (_) {} }
       }
       // See multiLinkTelemetrySigRef's header above. Group the RAW (already-sanitized) list by
@@ -260,6 +281,12 @@ export default function Scheduler({
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
   }, [markReady, onScheduleLinkChanged, setNavConfirmedBoth]); // all stable useCallbacks → still effectively attach-once
+
+  // NEW-1 — once the REAL routed `projectId` prop actually changes, the anticipated value has
+  // either been confirmed (the ordinary case — `projectId` itself is now authoritative and
+  // `isPickShowing` no longer needs the bridge) or superseded by something else entirely, and
+  // holding onto it past that point would be wrong either way. See the ref's own header above.
+  useEffect(() => { pendingRouteProjectIdRef.current = null; }, [projectId]);
 
   // When the iframe document finishes loading, ASK the embedded app to (re-)announce its
   // nav-state, retrying briefly in case its own message listener isn't attached yet. The lone
@@ -381,7 +408,12 @@ export default function Scheduler({
   // site, carry that site into the route so the Site/Review tabs follow. Computed HERE (before the
   // carry-in effect below) because NEW-5's fix needs it as the carry-in's ONLY suppression signal —
   // see that effect's own note.
-  const pickShowing = isPickShowing(explicitPickRef.current, activeId, section, projectId);
+  //
+  // NEW-1 (B1614528 follow-up) — `pendingRouteProjectIdRef.current` bridges the route-write race:
+  // while a linked report-row pick's `onProjectChange` call is still in flight (the `projectId`
+  // prop hasn't caught up to it yet), this lets the pick read as showing on the SAME render it was
+  // recorded on, rather than one render late — see that ref's own header and isPickShowing's.
+  const pickShowing = isPickShowing(explicitPickRef.current, activeId, section, projectId, pendingRouteProjectIdRef.current);
 
   // SELF-HEALING (B851 — the route↔grid divergence): this is a RE-DRIVE, not a fire-once. The
   // original one-shot (deps `[ready, projectId]`) posted the select a single time when `ready`
@@ -532,6 +564,11 @@ export default function Scheduler({
     // instant the routed project genuinely changes to something else. A bare schedule id here is
     // what let the pick latch forever regardless of later project switches — see that fix's header.
     explicitPickRef.current = { id: sch.id, projectId: linked != null ? linked : projectId };
+    // NEW-1 — a fresh, unrelated pick must never inherit a stale bridge left over from an earlier
+    // report-row navigation (see pendingRouteProjectIdRef's own header); this pick has its own
+    // `onProjectChange` call just below if it needs one, and isPickShowing falls back to the real
+    // `projectId` prop once this is cleared.
+    pendingRouteProjectIdRef.current = null;
     post({ type: "planar:nav-select", id: sch.id });
     if (linked != null && linked !== projectId) { try { onProjectChange?.(linked); } catch (_) {} }
   };
@@ -565,6 +602,7 @@ export default function Scheduler({
     const { post: msg, clearRoute } = dashboardNavActions({ projectId });
     if (clearRoute) dashboardIntentRef.current = true; // arm before the route write (see the carry-out effect)
     explicitPickRef.current = null; // leaving the projects section retires any standing pick
+    pendingRouteProjectIdRef.current = null; // NEW-1 — retires any in-flight bridge along with it
     post(msg);
     if (clearRoute) { try { onProjectChange?.(null); } catch (_) {} }
   };
