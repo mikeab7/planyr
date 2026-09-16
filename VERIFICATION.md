@@ -206,9 +206,25 @@ was never clicked" quietly ships broken.
 4. Whichever of (a)/(b) applies, do not restage or edit the real note beyond what step 3 authorizes, and do not use this real note for any further reproduction — a throwaway duplicate is the right tool for that (owner constraint #7).
 - Stopping rule: closes when step 1 resolves to (a) with nothing further to do, or when (b) is confirmed and Michael's answer from step 3 has been acted on (restored or deliberately left as-is). If a live pass ever reveals a mechanism that DOES destroy text (not just cosmetic shape) on open/reopen, file it as its own bug against the mechanism found, referencing this item.
 
-### V1173824 (×2) — B1645792: a road tee-ing into a truck court / paving pad at an oblique angle shows a real rounded curb return, not a raw notch
+### V1173824 (×3) — B1645792: a road tee-ing into a truck court / paving pad at an oblique angle shows a real rounded curb return, not a raw notch
 
-**⛔ THIS V# ALREADY FAILED ONCE — record that, don't smooth over it.** The PASS-reading confidence
+**⛔ THIS V# HAS NOW FAILED TWICE — record the second failure, don't smooth over it (2026-09-16).**
+A live check of the DEPLOYED build (`b8d3c27`, then `f7408e0` after a deploy landed mid-check) found
+the ×2 fix ALSO left a real enclosed notch — 121.3–125.8 sq ft, roughly 8.4 ft deep by 32.2 ft along
+the pad edge, at every oblique angle tried (not just one). **This is a FINDING, not a disposition**
+(STANDING RULE #2), and per the dispatch's own explicit instruction it is recorded here rather than
+smoothed into a quiet re-pass. Root cause this time, isolated and RED-proofed before writing the
+fix: the ×2 amendment's own "add `T` to the hull" step is what caused it — a convex hull silently
+drops `capCorner` (the driveway's real flat-cap corner) whenever it becomes collinear with `T` and
+the pad-edge tangent, which the "add `T`" step made MORE likely to happen, not less. Full diagnosis
+and fix on `B1645792`'s "Recurrence (×3)" block. **The acceptance test itself was rebuilt first** —
+the prior `throatNotchCells` instrument scanned only 12 ft around the tee point with a one-step
+"are my neighbours already paved" heuristic, which is why it read green on a notch that reaches 30+
+ft along the pad edge; it is replaced with a real flood fill (`ui-audit/lib/paveFloodFill.mjs` —
+BFS from the scan box's own border, plus a mandatory self-test control), proven RED against the
+unmodified ×2 fix (115.5–123.75 sq ft, matching the live numbers) before the new fix was written.
+
+**⛔ THIS V# ALREADY FAILED ONCE BEFORE THAT — record that too, don't smooth over it.** The PASS-reading confidence
 this section stated previously (a screenshot inspected against a Cloudflare Pages branch preview,
 "clean result both times") was against the FIRST fix (PR #1722 / merge `0f17770`) and was WRONG: a
 live check of the deployed production build (`6d0d578`) found two real residuals the screenshot
@@ -216,6 +232,15 @@ inspection missed — a small unpaved notch at the throat (invisible at the zoom
 happened to use) and a straight-sided (not arced) return on the road→pad case specifically. Per
 STANDING RULE #2, that is a FINDING, not a disposition, and the fix below is the reproduce-and-fix
 response to it — recorded here as the amendment (B1645792 ×2) it actually is.
+
+**Re-confirmed against a REAL DEPLOYED build, not just the local dev server (2026-09-16).** Once
+PR #1733's own Cloudflare Pages branch preview came up
+(`https://claude-trusting-goodall-2ci9.planyr.pages.dev`, commit `03c7a05`), `ui-audit/verify-road-junction-paving.mjs`
+was re-run against it via `--base` — all three shapes (oblique truck-court, exactly-perpendicular
+parking field, free-drawn polygon field) came back zero enclosed unpaved area, self-test confirmed,
+against real deployed bytes rather than a local dev server. Same technique earlier V#s on this file
+(V1173824's own prior round, V1180736) used checking a PR's own preview before its production merge.
+This covers V1203696 and V1192544 (×2) too — one run, three scenarios.
 
 **Why this still needs a live pass.** A rendering-shape fix (PERCEPTUAL-PARITY: the bar is whether
 the owner can SEE it right at his own working zoom, matching his original repro shape, not just
@@ -257,9 +282,47 @@ constraint on live checks. Never touch one of Michael's real plans.
 5. State what was created/touched (the throwaway plan's id/name) so it can be cleaned up or left as
    a known throwaway.
 - **Stopping rule:** closes when steps 1–5 are observed on a real screen, or a specific residual
-  (which angle/pad shape, a screenshot) is filed as a recurrence against B1645792. This V# has
-  already recorded one such residual (this amendment) — a second one re-opens it again, by name,
-  rather than a silent third attempt at the same screenshot-only confidence.
+  (which angle/pad shape, a screenshot) is filed as a recurrence against B1645792. This V# has now
+  recorded TWO such residuals (this ×3 amendment is the second) — a third re-opens it again, by
+  name, rather than a silent fourth attempt at the same screenshot-only confidence. The acceptance
+  test behind this fix is materially stronger than either prior round's (a real flood fill with a
+  self-test control, proven RED before the fix, plus a live-driven browser proof reading the exact
+  region data the SVG path is built from) — but none of that substitutes for step 1 on a real
+  screen, which is what actually caught both prior residuals.
+
+### V1203696 — B1681520: a near-perpendicular (incl. EXACTLY perpendicular) road into a rect pad shows two clean curb returns, never a detached sliver or an enclosed gap
+
+**Why this needs a live pass, and why it is a SEPARATE V# from V1173824 despite sharing a fix.**
+Same PERCEPTUAL-PARITY bar and the same underlying code (`teeGeometry`'s wedge builder) as
+V1173824, but a DIFFERENT reported symptom (a REGRESSION on the perpendicular/near-perpendicular
+case specifically, clean on `6d0d578` before PR #1729) that was never separately tracked — the
+dispatch's own reuse instruction named only B1645792/B1664512, not this shape, so it is filed and
+verified on its own item even though one commit fixes both.
+
+**What was verified here (sandbox).** The owner's exact shape — a truly vertical road into a rect
+pad's horizontal bottom edge — plus a 0–15° near-perpendicular sweep, all confirmed by the real
+flood fill (`ui-audit/lib/paveFloodFill.mjs`) to leave zero enclosed unpaved area and dissolve to
+ONE connected, simple pavement region (never a stranded/detached return on either side). Confirmed
+RED against the unmodified fix (123.8 sq ft enclosed at exactly 0°, closely matching the owner's own
+126.8 sq ft measurement); confirmed GREEN after. **What is NOT provable here:** whether it looks
+right on the owner's own monitor at his own zoom, on his own original repro geometry.
+
+**No standing throwaway project exists** — this check needs a fresh throwaway plan created first;
+state exactly what was created/touched. Never touch one of Michael's real plans.
+
+**Steps, each with a named expected result:**
+1. Open a throwaway plan. Draw a parking field or paving pad (a rectangle). Draw a road ending
+   EXACTLY perpendicular onto one of its straight edges (no oblique angle at all). **Expect:** BOTH
+   curb returns (left and right of the drive) show a smooth, rounded fillet blending cleanly into
+   the pad edge — no gap of bare ground on either side, no detached/floating pavement sliver
+   separated from the road body.
+2. Nudge the road's approach angle a small amount off perpendicular (~10–15°) and repeat. **Expect:**
+   the same clean result — no gap opens up on either side at this small deviation.
+3. Zoom in on both curb returns at a normal working zoom. **Expect:** each reads as one continuous
+   piece of pavement joining the drive to the pad, not two shapes that merely sit near each other.
+4. State what was created/touched (the throwaway plan's id/name).
+- **Stopping rule:** closes when steps 1–4 are observed on a real screen, or a specific residual is
+  filed as a recurrence against B1681520.
 
 ### V1180736 — B1652704/B1652705/B1652706: the Text box / Callout properties panel — weight/dash/opacity, and its shared-table rebuild — hold on real production, at desktop and phone widths
 
@@ -278,16 +341,36 @@ constraint on live checks. Never touch one of Michael's real plans.
 8. Ideally, repeat steps 1–5 once more using real WebKit (`npx playwright install webkit && npx playwright install-deps webkit` if not already present) against the deployed `planyr.io` URL rather than DevTools emulation, per `docs/PHONE-TESTING.md`.
 - **Stopping rule:** closes when steps 1–7 (8 if WebKit is available) are observed against the deployed build, or a specific residual is filed as a recurrence against whichever of B1652704/B1652705/B1652706 it belongs to.
 
-### V1192544 — B1664512: a road connects and fillets cleanly into a FREE-DRAWN polygon pad / parking field, same as a rect one
+### V1192544 (×2) — B1664512: a road connects and fillets cleanly into a FREE-DRAWN polygon pad / parking field, same as a rect one
 
-**Why this needs a live pass.** A rendering-shape + connect-topology fix, same PERCEPTUAL-PARITY
-bar as V1173824: the sandbox proves the geometry (`polygonEdges`/`polygonContainsPoint`/
+**⛔ THIS V# ALREADY FAILED ONCE — record that, don't smooth over it (2026-09-16).** A live check of
+the deployed build found the ×1 fix did NOT work at all: a free-draw polygon car-parking field
+never became a drive target, tested at five endpoint positions, with a rectangular field (the
+control, same session/build) connecting fine. **This is a FINDING, not a disposition.** Root cause,
+found live (a static code read of the shipped fix alone did not catch it — it read as though this
+V# should already pass): `driveTargetKind` (the connect decision) and `driveJunctionsOf` (the render
+decision) both correctly branch on `Array.isArray(el.points)` exactly as the ×1 fix describes, but
+BOTH also carried an UNRELATED, unconditional `typeof el.cx === "number"` precondition ahead of that
+branch — and a freshly free-drawn polygon element (`closeElPoly`, `{ id, type, points, rot }`) never
+has a `cx` until its first reshape. So the ×1 fix's own geometry was correct and never ran: the
+connect silently rejected the field from the moment it was drawn, in BOTH places, independently.
+Fixed by reordering the precondition in both functions so `cx` only gates the RECT branch. Full
+diagnosis on `B1664512`'s "Recurrence (×2)" block. **This is exactly the class of bug a pure
+geometry test cannot see** — `test/roadDriveJunctionFillet.test.js`'s polygon suite replicates
+`driveJunctionsOf`'s math directly, bypassing the connect-decision layer this bug lived in — so the
+new acceptance test for this is a REAL, UI-driven e2e spec (`e2e/road-drive-polygon-connect.spec.js`,
+free-draw the tool, draw the road, assert a real `driveTee` fires and the render shows a real
+fillet), proven RED against the unmodified fix (all 3 cases: `drives.length` stuck at 0) before the
+new fix was written.
+
+**Why this still needs a live pass.** A rendering-shape + connect-topology fix, same PERCEPTUAL-PARITY
+bar as V1173824: the sandbox now proves BOTH the geometry (`polygonEdges`/`polygonContainsPoint`/
 `polygonDepthBehind` unit-tested against `rectEdges`/`rectContainsPoint` on the same footprint,
 plus a 0–89° angle sweep dissolving to one connected simple region on a polygon-drawn rectangular
 field AND a genuinely concave L-shaped one, `test/roadGeometry.test.js` + `test/roadDriveJunctionFillet.test.js`)
-but cannot prove the actual DRAWING TOOL magnet-connects a road to a freehand-drawn field on the
-owner's own screen, at his own zoom, using the real Parking/paving freehand tool rather than a
-replicated math scenario.
+AND, this round, the actual DRAWING TOOL magnet-connecting a road to a freehand-drawn field — a real
+UI-driven e2e proof, not a replicated math scenario — but still cannot prove it looks right on the
+owner's own screen, at his own zoom, using the real Parking/paving freehand tool.
 
 **No standing throwaway project exists** — this check needs a fresh throwaway plan created first;
 state exactly what was created/touched. Never touch one of Michael's real plans.
@@ -309,7 +392,8 @@ state exactly what was created/touched. Never touch one of Michael's real plans.
    look of a rect-target junction (V1173824's own steps 1–2).
 5. State what was created/touched (the throwaway plan's id/name).
 - **Stopping rule:** closes when steps 1–5 are observed on a real screen, or a specific residual is
-  filed as a recurrence against B1664512.
+  filed as a recurrence against B1664512. This V# has already recorded one such residual (this ×2
+  amendment) — a second one re-opens it again, by name.
 
 ### V1179280 — B1651248: Pennington County, SD parcels — a real point in Rapid City returns a real parcel `Blocker: live-GIS`
 

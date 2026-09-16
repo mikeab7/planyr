@@ -1420,9 +1420,19 @@ function driveJunctionsOf(els, settings) {
     // B1664512 NEW-2 — a free-drawn POLYGON pad/parking field is a valid drive target too, not
     // just an axis-aligned rect: `polygonEdges`/`polygonContainsPoint` are the polygon analogues of
     // `rectEdges`/`rectContainsPoint`, in the exact shape `nearestRectEdge` already consumes.
-    if (!T || typeof T.cx !== "number") continue;
+    // NEW-3 (this round) — `typeof T.cx !== "number"` used to run BEFORE the `isPoly` branch below,
+    // so it silently dropped every polygon target: `closeElPoly` commits a fresh free-drawn polygon
+    // as `{ id, type, points, rot }` with no `cx` at all (one is synced in only on its first reshape,
+    // via the reshape's own bounding-box recompute). The connect itself (`driveTargetKind`/`findDriveConnect`, same bug, fixed
+    // alongside this) had already started storing a real `driveTee` on the road — this render-side
+    // gate is what kept throwing the junction away afterward, so the road's own surface stayed a
+    // bare, unfilleted rectangle with no visible curb return and no "Connected to…" toast (the toast
+    // fires at connect time regardless; only the geometry silently never appeared). `cx` is only
+    // ever read on the RECT branch (`rectEdges(T.cx, T.cy, …)` two lines down), so only that branch
+    // may require it.
+    if (!T) continue;
     const isPoly = Array.isArray(T.points) && T.points.length >= 3;
-    if (!isPoly && !(T.w > 0 && T.h > 0)) continue;
+    if (!isPoly && !(typeof T.cx === "number" && T.w > 0 && T.h > 0)) continue;
     const edges = isPoly ? polygonEdges(T.points) : rectEdges(T.cx, T.cy, T.w, T.h, T.rot || 0);
     if (!edges.length) continue;
     const containsPoint = (p) => (isPoly ? polygonContainsPoint(p, T.points) : rectContainsPoint(p, edges));
@@ -5927,8 +5937,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      B1664512 NEW-2 — a free-drawn POLYGON pad/parking field (`el.points`) is now a target too:
      `rectEdges` needed a rectangle, but `polygonEdges`/`polygonContainsPoint` are the same shape
      over an arbitrary ring, and `nearestRectEdge` already consumes either without change. */
-  const driveTargetKind = (el) => (el && typeof el.cx === "number"
-    && (Array.isArray(el.points) ? el.points.length >= 3 : el.w > 0 && el.h > 0)
+  // NEW-1 (this round) — `cx`/`cy` is a RECT-only field: `closeElPoly` commits a fresh free-drawn
+  // polygon element as `{ id, type, points, rot }` with no centroid at all (one gets synced in only
+  // on its first reshape, via the reshape's own bounding-box recompute). The old `typeof el.cx === "number"` precondition ran
+  // BEFORE branching on `el.points`, so it silently rejected EVERY polygon pad/parking field as a
+  // drive target from the moment it was drawn — never a rendering defect, a connect that never
+  // started (measured: `resolveEndpointConnect` returning null for a road ending 24 ft inside, 12 ft
+  // inside, exactly on, and 5 ft outside a freshly drawn polygon field, all four). `cx` is only ever
+  // read on the RECT branch below (`rectEdges(x.cx, x.cy, ...)` in `driveTargetsOf`), so it only
+  // needs to gate that branch.
+  const driveTargetKind = (el) => (el
+    && (Array.isArray(el.points) ? el.points.length >= 3 : typeof el.cx === "number" && el.w > 0 && el.h > 0)
     ? (el.type === "parking" ? "parking" : el.type === "paving" ? "truckcourt" : null) : null);
   // B494049's rule for road magnets applies here too — a hidden target is not a magnet: connecting
   // to a court you cannot see moves nothing but leaves a relationship you cannot explain.
@@ -22533,10 +22552,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       regions: roadNet.regions.map((r) => ({ ids: r.ids, outer: r.region.outer, holes: r.region.holes })),
       tees: teeJunctions.map((t) => ({ sideId: t.sideId, throughId: t.throughId, R: t.geom.R, wedges: t.geom.wedges.length, returns: t.geom.returns.map((a) => a.length) })),
       drives: driveJunctions.map((d) => ({ sideId: d.sideId, kind: d.kind, R: d.geom.R, wedges: d.geom.wedges.length })),
+      // NEW-4 — the drive target's own PAVED ring, in world feet, for a flood-fill acceptance check
+      // (ui-audit/verify-road-junction-paving.mjs): "is (pad ∪ every dissolved road region) free of
+      // an enclosed unpaved cell" needs the pad's real geometry, not just the road network's.
+      pads: driveJunctions.map((d) => {
+        const T = (els || []).find((e) => e.id === d.targetId);
+        if (!T) return null;
+        if (Array.isArray(T.points) && T.points.length >= 3) return { targetId: T.id, ring: T.points };
+        if (typeof T.cx === "number" && T.w > 0 && T.h > 0) {
+          return { targetId: T.id, ring: rectEdges(T.cx, T.cy, T.w, T.h, T.rot || 0).map((e) => e.a) };
+        }
+        return null;
+      }).filter(Boolean),
     });
     window.__plannerRoadNet = hook;
     return () => { if (window.__plannerRoadNet === hook) window.__plannerRoadNet = null; }; // NEW-3 — see the note on __plannerView
-  }, [roadNet, teeJunctions, driveJunctions]);
+  }, [roadNet, teeJunctions, driveJunctions, els]);
   /* NEW-1 — E2E/self-audit hook for the EXPORT SHEET (same `window.__PLANYR_E2E` gate; never runs in
      production). The measurement/export defect is invisible to any source reading — it only exists in
      the CLONE the sheet is built from — so the guard spec has to inspect the real built sheet. No dep
