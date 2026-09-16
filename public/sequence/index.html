@@ -3427,20 +3427,38 @@ const fmtPreds = preds => normPreds(preds).map(p => {
 }).join(", ");
 
 // Validate a proposed predecessor list for task `id` against the project's tasks. Returns
-// { preds, selfRemoved, unknownIds, cyclic } where `preds` is the accepted subset with
+// { preds, selfRemoved, unknownIds, cyclic, ancestor } where `preds` is the accepted subset with
 //   • self-references dropped (a task can't depend on itself), and
 //   • references to ids that don't exist in this project dropped (they'd render as a live
 //     dependency but do nothing — cascadeDates filters them), and
 //   • references that would create a circular dependency dropped (A→B→A produces silently
-//     arbitrary dates otherwise — cascadeDates doesn't loop, but the result is meaningless).
+//     arbitrary dates otherwise — cascadeDates doesn't loop, but the result is meaningless), and
+//   • references to this task's own ANCESTOR (its parent/grandparent/…) dropped — NEW-1, owner
+//     report 2026-09-16: an ancestor's dates are rollup-derived from every descendant (this task
+//     included), so this closes a cycle through rollupParentDates that `reachesId` below can never
+//     see (rollup is a separate dependency channel from the predecessor graph it walks) — left in,
+//     the date ratchets forward without bound on every recompute (cascadeDates drops the same edge
+//     defensively for data already carrying it, but the UI must refuse a NEW one at entry too).
 // Pure (no React/DOM) so it's unit-testable; the caller surfaces a toast per dropped reason.
 const validatePredEdit = (tasks, id, parsed) => {
   const list = Array.isArray(parsed) ? parsed : [];
   const selfRemoved = list.some(p => p && p.id === id);
   let preds = list.filter(p => p && p.id !== id);
-  const known = new Set((Array.isArray(tasks) ? tasks : []).map(t => t.id));
+  const byId = {};
+  (Array.isArray(tasks) ? tasks : []).forEach(t => { byId[t.id] = t; });
+  const known = new Set(Object.keys(byId).map(Number));
   const unknownIds = [...new Set(preds.filter(p => !known.has(p.id)).map(p => p.id))];
   preds = preds.filter(p => known.has(p.id));
+  const isAncestorOfId = startId => {
+    let p = byId[id] && byId[id].parentId, seenP = new Set([id]);
+    while (p != null && byId[p] && !seenP.has(p)) {
+      if (p === startId) return true;
+      seenP.add(p); p = byId[p].parentId;
+    }
+    return false;
+  };
+  const ancestor = [...new Set(preds.filter(p => isAncestorOfId(p.id)).map(p => p.id))];
+  preds = preds.filter(p => !isAncestorOfId(p.id));
   // Existing depends-on adjacency (id → [predecessor ids]) from the stored tasks.
   const predMap = {};
   (Array.isArray(tasks) ? tasks : []).forEach(t => { predMap[t.id] = normPreds(t.predecessors).map(p => p.id); });
@@ -3468,13 +3486,9 @@ const validatePredEdit = (tasks, id, parsed) => {
     }
     return false;
   };
-  const ancestors = ancestorIdsOf(tasks, id);
-  const accepted = [], cyclic = [], ancestorIds = [];
-  preds.forEach(p => {
-    if (reachesId(p.id)) { cyclic.push(p.id); if (ancestors.has(p.id)) ancestorIds.push(p.id); }
-    else accepted.push(p);
-  });
-  return { preds: accepted, selfRemoved, unknownIds, cyclic, ancestorIds };
+  const accepted = [], cyclic = [];
+  preds.forEach(p => { if (reachesId(p.id)) cyclic.push(p.id); else accepted.push(p); });
+  return { preds: accepted, selfRemoved, unknownIds, cyclic, ancestor };
 };
 
 // Constrained start of a task given one predecessor dep (MS Project convention)
@@ -3654,14 +3668,30 @@ const applyMeetingBinding = (t, body, predEarly, drivingMeetingDate, minAfterDat
     t.start = t.end = ""; t.meetingDeadline = ""; t.meetingInfeasible = false; t.meetingDateOffCalendar = false;
     return;
   }
-  // Fixed-point guard: with NO external constraint (no preds, no pin, no driving meeting, no
-  // minMeetingsAfter), packetReady is the task's OWN previously-snapped start. Re-deriving
-  // eligibility from it would RATCHET one meeting forward per cascade (the deadline always
-  // precedes its meeting, so a meeting is never "eligible" from its own date). If the start is
-  // still one of the body's meetings, keep it; a cancelled/blacked-out date falls through and
-  // re-snaps forward from here.
-  if (!predEarly && !drivingMeetingDate && !(t.minMeetingsAfter && t.minMeetingsAfter.n > 0 && minAfterDate)) {
-    if (meetingDatesInRange(body, packetReady, packetReady).length) {
+  // "must be the n-th subsequent meeting" — computed once, up front, so both the fixed-point
+  // guard below AND the full re-derivation further down read the SAME floor.
+  let minAfterFloor = "";
+  if (t.minMeetingsAfter && t.minMeetingsAfter.n > 0 && minAfterDate) {
+    const seq = meetingDatesInRange(body, addD(minAfterDate, 1), addD(minAfterDate, 366 * 3));
+    const nth = seq[t.minMeetingsAfter.n - 1];
+    if (nth) minAfterFloor = addD(nth, -1);
+  }
+  // Fixed-point guard: with NO real predecessor-derived date (no live predecessor edge, no driving
+  // meeting), packetReady falls back to this task's OWN previously-snapped start — true whether or
+  // not a minMeetingsAfter floor also applies. Re-deriving eligibility from a self-referential date
+  // would RATCHET one meeting forward per cascade (the deadline always precedes its meeting, so a
+  // meeting is never "eligible" from its own date). If the start is still one of the body's meetings
+  // AND still clears the minMeetingsAfter floor, keep it; only a stale/cancelled/blacked-out/
+  // no-longer-eligible date falls through and re-snaps forward from here.
+  // NEW-1 (owner report 2026-09-16: a Master Schedule task auto-recalculated on EVERY load, moving
+  // ~3 months forward each time) — this guard used to exempt itself the instant minMeetingsAfter was
+  // set, on the wrong theory that minMeetingsAfter always supplies an external anchor. It doesn't:
+  // minMeetingsAfter only ever tightens `afterDate` (a floor), never `readyDate` itself, so a
+  // pred-less, non-driven, minMeetingsAfter-only bound task fed its own prior start right back into
+  // the search — exactly the self-reference this guard exists to stop — and ratcheted forward one
+  // (or more) meetings on every single load, forever, writing the drifted date back each time.
+  if (!predEarly && !drivingMeetingDate) {
+    if ((!minAfterFloor || packetReady > minAfterFloor) && meetingDatesInRange(body, packetReady, packetReady).length) {
       t.start = t.end = packetReady;
       t.meetingDeadline = agendaDeadline(body, packetReady) || "";
       t.meetingInfeasible = false; t.meetingDateOffCalendar = false;
@@ -3674,11 +3704,7 @@ const applyMeetingBinding = (t, body, predEarly, drivingMeetingDate, minAfterDat
     // sameDayFilingAllowed=false: the next agenda closed before this evening's meeting → strict.
     if (!body.sameDayFilingAllowed) { const nd = addD(drivingMeetingDate, 1); if (nd > readyDate) readyDate = nd; }
   }
-  if (t.minMeetingsAfter && t.minMeetingsAfter.n > 0 && minAfterDate) {   // "must be the n-th subsequent meeting"
-    const seq = meetingDatesInRange(body, addD(minAfterDate, 1), addD(minAfterDate, 366 * 3));
-    const nth = seq[t.minMeetingsAfter.n - 1];
-    if (nth) { const before = addD(nth, -1); if (!afterDate || before > afterDate) afterDate = before; }
-  }
+  if (minAfterFloor && (!afterDate || minAfterFloor > afterDate)) afterDate = minAfterFloor;
   const elig = nextEligibleMeeting(body, readyDate, afterDate);
   if (elig) { t.start = t.end = elig.meetingDate; t.meetingDeadline = elig.deadline; t.meetingInfeasible = false; t.meetingDateOffCalendar = false; }
   else { t.start = t.end = ""; t.meetingDeadline = ""; t.meetingInfeasible = false; t.meetingDateOffCalendar = false; }
@@ -3691,6 +3717,24 @@ const cascadeDates = (tasks, bodies = []) => {
   const parentIds = new Set(tasks.filter(t => t.parentId !== null && t.parentId !== undefined).map(t => t.parentId));
   const map = {};
   tasks.forEach(t => { map[t.id] = {...t, predecessors: normPreds(t.predecessors)}; });
+  // NEW-1 (owner report 2026-09-16) — a predecessor edge naming one of THIS task's own ANCESTORS
+  // (its parent, grandparent, …) is not resolvable: an ancestor's dates are ALWAYS rollup-derived
+  // from every descendant (this task included — see rollupParentDates), so treating that ancestor
+  // as a predecessor closes a cycle through the rollup that validatePredEdit's graph-cycle check
+  // never sees (rollup is a completely separate dependency channel from the predecessor graph it
+  // walks). Left alone, every cascade pass reads the ancestor's END — rolled up from the LAST pass,
+  // which already folds in THIS task's own just-advanced end — and derives a strictly LATER date
+  // from it, with no fixed point: the live symptom (Michael's real "HW Review" task, a child of
+  // "Contract" naming "Contract" itself as an FS predecessor, recalculating to a new, later date on
+  // EVERY load, forever, and persisting it). Cycle-guarded so a corrupted parentId chain can't loop.
+  const isAncestorOf = (ancestorId, taskId) => {
+    let p = map[taskId] && map[taskId].parentId, seenP = new Set([taskId]);
+    while (p != null && map[p] && !seenP.has(p)) {
+      if (p === ancestorId) return true;
+      seenP.add(p); p = map[p].parentId;
+    }
+    return false;
+  };
   const adj = {}; const inDeg = {};
   tasks.forEach(t => { adj[t.id] = []; inDeg[t.id] = 0; });
   tasks.forEach(t => map[t.id].predecessors.forEach(p => {
@@ -3710,14 +3754,16 @@ const cascadeDates = (tasks, bodies = []) => {
 
   queue.forEach(id => {
     const t = map[id];
-    const preds = t.predecessors.filter(p => map[p.id]);
+    const preds = t.predecessors.filter(p => map[p.id] && !isAncestorOf(p.id, id));
     // B443249 — predecessors that contribute NO date: an id with no row in this project (missing), or a
     // live row that has no dates of its own yet (unscheduled). Both were dropped in total silence by the
     // filters above/below, so the successor rendered a confident date derived from a SUBSET of its stated
     // inputs and nothing anywhere said so (LOUD-FAILURE). Recorded per task so the grid can mark them.
     // Topological order guarantees a live predecessor is already resolved when we read it here.
+    // NEW-1 — an ancestor-referencing edge is ALSO recorded here (never silently dropped) so the
+    // Predecessors cell flags it exactly like any other predecessor that drives nothing.
     t.predUnresolved = t.predecessors
-      .filter(p => !map[p.id] || !(map[p.id].end || map[p.id].start))
+      .filter(p => !map[p.id] || !(map[p.id].end || map[p.id].start) || isAncestorOf(p.id, id))
       .map(p => p.id);
     // A meeting-bound task (B816): a real body, not a summary/parent (parents come from rollup), not a
     // locked finish (bound+pinnedEnd is rejected on entry — if both are set the lock wins as a safe fallback).
@@ -12326,14 +12372,10 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
       // Drop self-references (Fix #16), references to ids that don't exist, and references
       // that would create a circular dependency — each surfaced with a toast so the edit is
       // honest rather than silently stored-but-inert / silently-wrong.
-      const { preds, selfRemoved, unknownIds, cyclic, ancestorIds } = validatePredEdit(proj?.tasks || tasks, id, parsePreds(val));
-      // NEW-1 (B1696640) — an ancestor link gets its OWN plain-English reason (a summary row's
-      // dates roll up from its children, so the link would loop forever) instead of the generic
-      // circular-dependency message; any other cyclic id in the same edit still gets that one.
-      const otherCyclic = cyclic.filter(cid => !ancestorIds.includes(cid));
+      const { preds, selfRemoved, unknownIds, cyclic, ancestor } = validatePredEdit(proj?.tasks || tasks, id, parsePreds(val));
       if (selfRemoved) showToast(`Task ${id} can't be its own predecessor — removed.`);
-      else if (ancestorIds.length) showToast(`Task ${id} can't depend on its own parent/summary row (task ${ancestorIds.join(", ")}) — a summary row's dates come from its children, so that link would loop forever. Ignored.`);
-      else if (otherCyclic.length) showToast(`That would create a circular dependency (task ${otherCyclic.join(", ")}) — ignored.`);
+      else if (cyclic.length) showToast(`That would create a circular dependency (task ${cyclic.join(", ")}) — ignored.`);
+      else if (ancestor.length) showToast(`Task ${ancestor.join(", ")} is this task's own summary row — a summary's dates come FROM its tasks, not the other way around. Ignored.`);
       else if (unknownIds.length) showToast(`No task ${unknownIds.join(", ")} in this project — ignored.`);
       updateTask(id, {predecessors: preds});
     }
@@ -13693,7 +13735,10 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
       return <DepCell items={preds} renderLabel={p => fmtPreds([p])} renderName={p => getTaskName(p.id)} s={s}
         flagged={p => un.has(p.id)}
         title={unNames.length
-          ? `This date is NOT driven by ${unNames.length === 1 ? "" : "any of "}${unNames.join("; ")} — ${unNames.length === 1 ? "it has" : "they have"} no dates. The date shown comes from the remaining predecessors only.`
+          // NEW-1 — a flagged id can ALSO be one of this task's own ancestors (its summary row), never
+          // just "no dates" — a summary's dates come FROM its tasks, so listing it back as a predecessor
+          // is a cycle the app can't resolve and ignores, same as a dateless predecessor.
+          ? `This date is NOT driven by ${unNames.length === 1 ? "" : "any of "}${unNames.join("; ")} — ${unNames.length === 1 ? "it has" : "they have"} no dates, or it's this task's own summary row (a cycle). The date shown comes from the remaining predecessors only.`
           : predLagPlainEnglish(fmtPreds(preds))} />;
     }
     case "successors": {

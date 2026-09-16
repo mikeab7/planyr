@@ -210,9 +210,21 @@ export const validatePredEdit = (tasks, id, parsed) => {
   const list = Array.isArray(parsed) ? parsed : [];
   const selfRemoved = list.some(p => p && p.id === id);
   let preds = list.filter(p => p && p.id !== id);
-  const known = new Set((Array.isArray(tasks) ? tasks : []).map(t => t.id));
+  const byId = {};
+  (Array.isArray(tasks) ? tasks : []).forEach(t => { byId[t.id] = t; });
+  const known = new Set(Object.keys(byId).map(Number));
   const unknownIds = [...new Set(preds.filter(p => !known.has(p.id)).map(p => p.id))];
   preds = preds.filter(p => known.has(p.id));
+  const isAncestorOfId = startId => {
+    let p = byId[id] && byId[id].parentId, seenP = new Set([id]);
+    while (p != null && byId[p] && !seenP.has(p)) {
+      if (p === startId) return true;
+      seenP.add(p); p = byId[p].parentId;
+    }
+    return false;
+  };
+  const ancestor = [...new Set(preds.filter(p => isAncestorOfId(p.id)).map(p => p.id))];
+  preds = preds.filter(p => !isAncestorOfId(p.id));
   const predMap = {};
   (Array.isArray(tasks) ? tasks : []).forEach(t => { predMap[t.id] = normPreds(t.predecessors).map(p => p.id); });
   const childrenOf = {};
@@ -231,13 +243,9 @@ export const validatePredEdit = (tasks, id, parsed) => {
     }
     return false;
   };
-  const ancestors = ancestorIdsOf(tasks, id);
-  const accepted = [], cyclic = [], ancestorIds = [];
-  preds.forEach(p => {
-    if (reachesId(p.id)) { cyclic.push(p.id); if (ancestors.has(p.id)) ancestorIds.push(p.id); }
-    else accepted.push(p);
-  });
-  return { preds: accepted, selfRemoved, unknownIds, cyclic, ancestorIds };
+  const accepted = [], cyclic = [];
+  preds.forEach(p => { if (reachesId(p.id)) cyclic.push(p.id); else accepted.push(p); });
+  return { preds: accepted, selfRemoved, unknownIds, cyclic, ancestor };
 };
 export const constrainedStartFrom = (pred, dep, taskDur) => {
   const lag = dep.lag || 0;
@@ -662,8 +670,14 @@ export const applyMeetingBinding = (t, body, predEarly, drivingMeetingDate, minA
     t.start = t.end = ""; t.meetingDeadline = ""; t.meetingInfeasible = false; t.meetingDateOffCalendar = false;
     return;
   }
-  if (!predEarly && !drivingMeetingDate && !(t.minMeetingsAfter && t.minMeetingsAfter.n > 0 && minAfterDate)) {
-    if (meetingDatesInRange(body, packetReady, packetReady).length) {
+  let minAfterFloor = "";
+  if (t.minMeetingsAfter && t.minMeetingsAfter.n > 0 && minAfterDate) {
+    const seq = meetingDatesInRange(body, addD(minAfterDate, 1), addD(minAfterDate, 366 * 3));
+    const nth = seq[t.minMeetingsAfter.n - 1];
+    if (nth) minAfterFloor = addD(nth, -1);
+  }
+  if (!predEarly && !drivingMeetingDate) {
+    if ((!minAfterFloor || packetReady > minAfterFloor) && meetingDatesInRange(body, packetReady, packetReady).length) {
       t.start = t.end = packetReady;
       t.meetingDeadline = agendaDeadline(body, packetReady) || "";
       t.meetingInfeasible = false; t.meetingDateOffCalendar = false;
@@ -675,11 +689,7 @@ export const applyMeetingBinding = (t, body, predEarly, drivingMeetingDate, minA
     afterDate = drivingMeetingDate;
     if (!body.sameDayFilingAllowed) { const nd = addD(drivingMeetingDate, 1); if (nd > readyDate) readyDate = nd; }
   }
-  if (t.minMeetingsAfter && t.minMeetingsAfter.n > 0 && minAfterDate) {
-    const seq = meetingDatesInRange(body, addD(minAfterDate, 1), addD(minAfterDate, 366 * 3));
-    const nth = seq[t.minMeetingsAfter.n - 1];
-    if (nth) { const before = addD(nth, -1); if (!afterDate || before > afterDate) afterDate = before; }
-  }
+  if (minAfterFloor && (!afterDate || minAfterFloor > afterDate)) afterDate = minAfterFloor;
   const elig = nextEligibleMeeting(body, readyDate, afterDate);
   if (elig) { t.start = t.end = elig.meetingDate; t.meetingDeadline = elig.deadline; t.meetingInfeasible = false; t.meetingDateOffCalendar = false; }
   else { t.start = t.end = ""; t.meetingDeadline = ""; t.meetingInfeasible = false; t.meetingDateOffCalendar = false; }
@@ -690,6 +700,16 @@ export const cascadeDates = (tasks, bodies = []) => {
   const parentIds = new Set(tasks.filter(t => t.parentId !== null && t.parentId !== undefined).map(t => t.parentId));
   const map = {};
   tasks.forEach(t => { map[t.id] = {...t, predecessors: normPreds(t.predecessors)}; });
+  // NEW-1 — a predecessor edge naming one of THIS task's own ancestors is not resolvable (an
+  // ancestor's dates are rollup-derived from every descendant); see index.html for the full note.
+  const isAncestorOf = (ancestorId, taskId) => {
+    let p = map[taskId] && map[taskId].parentId, seenP = new Set([taskId]);
+    while (p != null && map[p] && !seenP.has(p)) {
+      if (p === ancestorId) return true;
+      seenP.add(p); p = map[p].parentId;
+    }
+    return false;
+  };
   const adj = {}; const inDeg = {};
   tasks.forEach(t => { adj[t.id] = []; inDeg[t.id] = 0; });
   tasks.forEach(t => map[t.id].predecessors.forEach(p => {
@@ -709,11 +729,12 @@ export const cascadeDates = (tasks, bodies = []) => {
 
   queue.forEach(id => {
     const t = map[id];
-    const preds = t.predecessors.filter(p => map[p.id]);
+    const preds = t.predecessors.filter(p => map[p.id] && !isAncestorOf(p.id, id));
     // B443249 — predecessors that contribute NO date (missing id, or a live row with no dates of its own).
     // Both were dropped in silence, so the successor showed a date derived from a SUBSET of its inputs.
+    // NEW-1 — an ancestor-referencing edge is recorded here too, never silently dropped.
     t.predUnresolved = t.predecessors
-      .filter(p => !map[p.id] || !(map[p.id].end || map[p.id].start))
+      .filter(p => !map[p.id] || !(map[p.id].end || map[p.id].start) || isAncestorOf(p.id, id))
       .map(p => p.id);
     const bound = !!(t.meetingBound && bodyMap[t.meetingBodyId] && !parentIds.has(t.id) && !(t.pinnedEnd && t.end));
     // B864 — bound to a calendar that no longer exists (a lost meeting body). PRESERVE the stored date
