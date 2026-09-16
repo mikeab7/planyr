@@ -114,6 +114,117 @@ export function selfTestControl(isPaved, bbox, step, discCenter, discR) {
   return floodFillEnclosed(withHole, bbox, step);
 }
 
+/* NEW-1 (this dispatch) — THE MEASUREMENT `floodFillEnclosed` CANNOT MAKE: a concavity cut into the
+ * paved area that is OPEN to the surrounding grass (reachable from the scan box's own border) is
+ * invisible to a border-flood-fill by construction — the fill walks straight through it. Three PRs
+ * (B1645792 and its two amendments) each shipped a fully green suite built entirely on
+ * `floodFillEnclosed`, and the owner's real junction is visibly broken tonight: the defect is a
+ * bevel cut out of the pavement that is open to the grass — a boundary CONCAVITY, not a hole — so
+ * every one of those green runs measured a true, meaningless zero.
+ *
+ * `convexDeficiency` asks a different, complementary question: within a window, how much of the
+ * CONVEX HULL of the paved cells is NOT paved? A perfectly filled convex shape (a rectangle, a
+ * square corner) has zero deficiency. A corner that got a real, tangent, constant-radius curb
+ * return has a SMALL, bounded deficiency — exactly the circular segment the fillet itself cuts from
+ * the square corner (this is expected and correct; a fillet is concave relative to the corner it
+ * rounds). A corner that got a raw bevel or no return at all has a LARGE deficiency — the whole
+ * triangular gore the return should have filled. So this is a RATIO/MAGNITUDE measure, not a
+ * strict-zero one like the enclosed-hole scan: the acceptance test compares the deficiency at each
+ * junction corner against the deficiency the SAME junction's own best (working) corner shows, or
+ * against a stated ceiling — never a bare "must be exactly 0", which a legitimate fillet can never
+ * satisfy. Keep `floodFillEnclosed` running alongside this — the two catch different shapes of the
+ * same underlying defect (an enclosed courtyard vs. an open notch), and neither substitutes for the
+ * other. */
+
+// Convex hull (monotone chain), dependency-free — mirrors roadGeometry.js's own (unexported) hull so
+// this ui-audit lib stays free of a source import (it measures RENDERED geometry, never re-derives
+// it). Returns a CCW ring of >= 3 points, or null for < 3 distinct input points.
+export function convexHullOf(points) {
+  const pts = (points || [])
+    .filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y))
+    .map((p) => ({ x: p.x, y: p.y }))
+    .sort((a, b) => a.x - b.x || a.y - b.y);
+  const n = pts.length;
+  if (n < 3) return null;
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const p = pts[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  lower.pop(); upper.pop();
+  const hull = lower.concat(upper);
+  return hull.length >= 3 ? hull : null;
+}
+
+/* Real convex-deficiency scan: grid-sample `bbox` at `step`, take the convex hull of every PAVED
+ * cell, then count UNPAVED cells that fall inside that hull. Returns world-feet points for the
+ * deficient cells (capped by grid resolution), plus counts — same shape discipline as
+ * `floodFillEnclosed` so a caller can treat the two uniformly. */
+export function convexDeficiency(isPaved, bbox, step) {
+  const nx = Math.max(2, Math.round((bbox.x1 - bbox.x0) / step) + 1);
+  const ny = Math.max(2, Math.round((bbox.y1 - bbox.y0) / step) + 1);
+  const ptAt = (i, j) => ({ x: bbox.x0 + i * step, y: bbox.y0 + j * step });
+  const pavedPts = [];
+  const cells = [];
+  let pavedCount = 0;
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const p = ptAt(i, j);
+      const paved = isPaved(p);
+      cells.push({ p, paved });
+      if (paved) { pavedPts.push(p); pavedCount++; }
+    }
+  }
+  const hull = convexHullOf(pavedPts);
+  if (!hull) return { deficient: [], deficientCount: 0, pavedCount, hull: null, nx, ny, step };
+  const deficient = [];
+  for (const c of cells) {
+    if (c.paved) continue;
+    if (pointInRing(c.p, hull)) deficient.push(c.p);
+  }
+  return { deficient, deficientCount: deficient.length, pavedCount, hull, nx, ny, step };
+}
+
+/* Approximate real-world area (sq ft) of the deficient cells — mirrors `enclosedAreaSqFt`. */
+export function deficiencyAreaSqFt(result) {
+  return result.deficientCount * result.step * result.step;
+}
+
+/* THE MANDATORY CONTROL for convex deficiency (same discipline `selfTestControl` enforces for the
+ * enclosed-hole scan, and the SAME shape DRIVER-SCROLL-IS-NOT-APP-SCROLL §6 asks for: a probe must
+ * report its KNOWN answer before its unknown one is trusted). Erasing a disc from an otherwise
+ * solidly-paved square must produce a LARGE, nonzero deficiency — proving the scan box/step/hull can
+ * see a concavity at all before its "small" or "zero" reading on the real geometry is trusted. */
+export function convexDeficiencySelfTest(isPaved, bbox, step, discCenter, discR) {
+  const r = discR > 0 ? discR : Math.max(step * 1.5, 1.5);
+  const withHole = (pt) => isPaved(pt) && Math.hypot(pt.x - discCenter.x, pt.y - discCenter.y) > r;
+  return convexDeficiency(withHole, bbox, step);
+}
+
+/* Run the convex-deficiency scan + its own self-test in one call, and THROW if the control doesn't
+ * come back non-zero — mirrors `assertMeasurableFloodFill` exactly, so a caller cannot accidentally
+ * trust a vacuous reading from either measure. */
+export function assertMeasurableConvexDeficiency(isPaved, bbox, step, discCenter, discR, label) {
+  const real = convexDeficiency(isPaved, bbox, step);
+  const control = convexDeficiencySelfTest(isPaved, bbox, step, discCenter, discR);
+  if (!(control.deficientCount > 0)) {
+    throw new Error(
+      `paveFloodFill convex-deficiency self-test FAILED${label ? ` (${label})` : ""}: subtracting a ` +
+      `disc at (${discCenter.x.toFixed(1)}, ${discCenter.y.toFixed(1)}) r=${discR ?? "auto"} produced ` +
+      `${control.deficientCount} deficient cells (expected > 0) — this scan cannot see a concavity at ` +
+      `all; its reading on the real geometry is VACUOUS, not a pass.`
+    );
+  }
+  return { real, control };
+}
+
 /* Run the scan + its own self-test in one call, and THROW if the self-test doesn't come back
  * non-zero — a caller that ignores the return value can't accidentally trust a vacuous zero. */
 export function assertMeasurableFloodFill(isPaved, bbox, step, discCenter, discR, label) {
