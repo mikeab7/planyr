@@ -18,7 +18,7 @@
  * local `isSimplePolygon` rather than trusting the library under test.
  */
 import { describe, it, expect } from "vitest";
-import { rectEdges, nearestRectEdge, teeGeometry, nodeJunction } from "../src/workspaces/site-planner/lib/roadGeometry.js";
+import { rectEdges, polygonEdges, nearestRectEdge, teeGeometry, nodeJunction, roadEdgeCrossing, rectContainsPoint } from "../src/workspaces/site-planner/lib/roadGeometry.js";
 import { dissolveRings } from "../src/workspaces/site-planner/lib/roadNetwork.js";
 import { roadStripRing, roadCurbWidth } from "../src/workspaces/site-planner/lib/siteGeometry.js";
 
@@ -47,12 +47,12 @@ function ringTurnSpikes(ring, turnBoundDeg, shortSegFt) {
   return out;
 }
 
-function assertNoTangentSpikes(dissolved, label) {
+function assertNoTangentSpikes(dissolved, label, turnBoundDeg = TURN_BOUND_DEG, shortSegFt = SHORT_SEG_FT) {
   for (const region of dissolved) {
-    const spikes = ringTurnSpikes(region.outer, TURN_BOUND_DEG, SHORT_SEG_FT);
+    const spikes = ringTurnSpikes(region.outer, turnBoundDeg, shortSegFt);
     expect(spikes, `${label}: outer ring carries a turn-angle spike at a tangent point — ${JSON.stringify(spikes)}`).toEqual([]);
     for (const hole of region.holes || []) {
-      const hspikes = ringTurnSpikes(hole, TURN_BOUND_DEG, SHORT_SEG_FT);
+      const hspikes = ringTurnSpikes(hole, turnBoundDeg, shortSegFt);
       expect(hspikes, `${label}: hole ring carries a turn-angle spike — ${JSON.stringify(hspikes)}`).toEqual([]);
     }
   }
@@ -123,6 +123,118 @@ describe("NEW-1 (B1611840) — dissolved junction rings carry no degenerate tang
   it("road -> road tee: oblique sweep is free of turn-angle spikes at the curb-return tangent points", () => {
     for (const sideDeg of [90, 80, 60, 45, 30, 15, 100, 120]) {
       assertNoTangentSpikes(nodeJunctionScenario(sideDeg), `road tee side=${sideDeg}deg`);
+    }
+  });
+});
+
+/* NEW-1 (B1690816) — the sweep above used the SAME 100° bound as production's own `RING_SPIKE_TURN_DEG`,
+ * so it could never see a spike that rides UNDER that bound. Measured live on deployed build 9164d24: an
+ * oblique road-into-pad junction still carries two spurious vertices 0.04–0.05 ft apart, each turning
+ * ~82–88° — comfortably under the old 100° bound. This is the RED-PROOF for that miss: a fine-grained
+ * (0.1°) sweep, using a TIGHTER, still-independent 60° bound (above the one real ceiling a tessellated
+ * arc vertex can reach — DEFAULT_TESS_DEG=6° in roadGeometry.js — and below every measured defect here),
+ * across every adjacent case the item named. Confirmed RED against unmodified `origin/main` (9164d24)
+ * before any fix was written; confirmed GREEN after `RING_SPIKE_TURN_DEG` moved to `DEFAULT_TESS_DEG * 5`. */
+const TIGHT_TURN_BOUND_DEG = 60;
+
+// Free-drawn POLYGON pad target (B1664512's own target kind) — an irregular, non-axis-aligned hexagon,
+// so `polygonEdges`' own edge list (not `rectEdges`') is what's under test.
+function polygonDriveJunctionScenario(angleDeg, opts = {}) {
+  const { width = 36, driveLen = 300, R = 24 } = opts;
+  const points = [
+    { x: -120, y: -75 }, { x: 40, y: -95 }, { x: 130, y: -40 },
+    { x: 110, y: 80 }, { x: -30, y: 100 }, { x: -140, y: 30 },
+  ];
+  const edges = polygonEdges(points);
+  const e = edges[0];
+  const P = { x: e.mid.x, y: e.mid.y };
+  const rad = (angleDeg * Math.PI) / 180;
+  const c = Math.cos(rad), s = Math.sin(rad);
+  const dir = { x: e.outN.x * c + e.dir.x * s, y: e.outN.y * c + e.dir.y * s };
+  const far = { x: P.x + dir.x * driveLen, y: P.y + dir.y * driveLen };
+  const road = { type: "road", pts: [far, P], vtx: [{}, {}], travelW: width, curb: 0.5, roadClass: "aisle" };
+  const hit = nearestRectEdge(P, edges, { facingOnly: false });
+  const sideDir = { x: far.x - P.x, y: far.y - P.y };
+  const edgeRunPos = (hit.edge.b.x - P.x) * hit.edge.dir.x + (hit.edge.b.y - P.y) * hit.edge.dir.y;
+  const edgeRunNeg = (P.x - hit.edge.a.x) * hit.edge.dir.x + (P.y - hit.edge.a.y) * hit.edge.dir.y;
+  const geom = teeGeometry({
+    T: P, throughDir: hit.edge.dir, sideDir, phT: 0, phS: roadOuterHalf(road),
+    R: Math.min(R, 60), flare: 0, curbT: 0.5, curbS: roadCurbWidth(road),
+    throughAvailPos: Math.max(0, edgeRunPos), throughAvailNeg: Math.max(0, edgeRunNeg), sideAvail: driveLen - 1,
+  });
+  const strip = roadStripRing(road, {}, undefined, undefined);
+  const wedges = geom ? geom.wedges : [];
+  return dissolveRings([strip, ...wedges]);
+}
+
+// A road ending well INSIDE a pad (not near its edge) — mirrors roadDeepEndpointJunction.test.js's own
+// buildRoadIntoPad, but sweeping the APPROACH ANGLE finely (that suite only ever swept insideDist).
+function deepInsidePadScenario(angleDeg, insideDist, opts = {}) {
+  const { padW = 400, padH = 600, width = 36, outsideLen = 100 } = opts;
+  const pad = { cx: 0, cy: 0, w: padW, h: padH, rot: 0 };
+  const edges = rectEdges(pad.cx, pad.cy, pad.w, pad.h, 0);
+  const edgeY = -padH / 2;
+  const rad = (angleDeg * Math.PI) / 180;
+  const dir = { x: Math.sin(rad), y: Math.cos(rad) };
+  const outside = { x: -dir.x * outsideLen, y: edgeY - dir.y * outsideLen };
+  const P = { x: dir.x * insideDist, y: edgeY + dir.y * insideDist };
+  const road = { type: "road", pts: [outside, P], vtx: [{}, {}], travelW: width, curb: 0.5, roadClass: "aisle" };
+  const h = nearestRectEdge(P, edges, { facingOnly: false });
+  const contains = rectContainsPoint(P, edges);
+  if (!h || !(h.dist <= 6 || contains)) return [];
+  const crossing = roadEdgeCrossing(outside, P, edges);
+  const edge = crossing ? crossing.edge : h.edge;
+  const pt = crossing ? crossing.pt : P;
+  const insideRunFt = Math.hypot(P.x - pt.x, P.y - pt.y);
+  const sideAvail = Math.max(0, Math.hypot(outside.x - P.x, outside.y - P.y) - insideRunFt);
+  const sideDir = { x: road.pts[0].x - road.pts[1].x, y: road.pts[0].y - road.pts[1].y };
+  const edgeRunPos = (edge.b.x - pt.x) * edge.dir.x + (edge.b.y - pt.y) * edge.dir.y;
+  const edgeRunNeg = (pt.x - edge.a.x) * edge.dir.x + (pt.y - edge.a.y) * edge.dir.y;
+  const perpDepth = edge.axis === "y" ? pad.h : pad.w;
+  const geom = teeGeometry({
+    T: pt, throughDir: edge.dir, sideDir, phT: 0, phS: roadOuterHalf(road),
+    R: Math.min(24, Math.max(1, perpDepth)), flare: 0, curbT: 0.5, curbS: roadCurbWidth(road),
+    throughAvailPos: Math.max(0, edgeRunPos), throughAvailNeg: Math.max(0, edgeRunNeg), sideAvail,
+  });
+  const strip = roadStripRing(road, {}, undefined, undefined);
+  const wedges = geom ? geom.wedges : [];
+  return dissolveRings([strip, ...wedges]);
+}
+
+describe("NEW-1 (B1690816) — sub-100° tangent-point spurs collapseRingSpikes was built to remove but missed", () => {
+  it("road -> paving-pad, oblique: a fine-grained sweep finds no spike above the tight bound (RED pre-fix)", () => {
+    for (let a = 0; a <= 89; a += 0.5) {
+      assertNoTangentSpikes(driveJunctionScenario(a, { width: 36, R: 24, padW: 200, padH: 150 }), `pad angle ${a}`, TIGHT_TURN_BOUND_DEG);
+    }
+  });
+
+  it("road -> paving-pad, near-perpendicular: the same fine sweep close to 90°", () => {
+    for (const R of [10, 15, 24, 40]) {
+      for (const width of [24, 36, 48]) {
+        for (let a = 80; a <= 89.9; a += 0.5) {
+          assertNoTangentSpikes(driveJunctionScenario(a, { width, R, padW: 200, padH: 150 }), `pad angle ${a} R=${R} width=${width}`, TIGHT_TURN_BOUND_DEG);
+        }
+      }
+    }
+  });
+
+  it("road -> road tee: the same fine sweep across the oblique range", () => {
+    for (let sideDeg = 5; sideDeg <= 175; sideDeg += 1) {
+      assertNoTangentSpikes(nodeJunctionScenario(sideDeg), `road tee side=${sideDeg}deg`, TIGHT_TURN_BOUND_DEG);
+    }
+  });
+
+  it("free-drawn POLYGON pad: the same defect class, on a non-rect target", () => {
+    for (let a = 0; a <= 89; a += 0.5) {
+      assertNoTangentSpikes(polygonDriveJunctionScenario(a), `polygon pad angle ${a}`, TIGHT_TURN_BOUND_DEG);
+    }
+  });
+
+  it("road ending DEEP INSIDE a pad: the same defect class, at every approach angle", () => {
+    for (const insideDist of [50, 150, 300]) {
+      for (let a = 0; a <= 45; a += 1) {
+        assertNoTangentSpikes(deepInsidePadScenario(a, insideDist), `deep-inside angle=${a} dist=${insideDist}`, TIGHT_TURN_BOUND_DEG);
+      }
     }
   });
 });
