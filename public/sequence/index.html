@@ -3462,7 +3462,19 @@ const validatePredEdit = (tasks, id, parsed) => {
   // Existing depends-on adjacency (id → [predecessor ids]) from the stored tasks.
   const predMap = {};
   (Array.isArray(tasks) ? tasks : []).forEach(t => { predMap[t.id] = normPreds(t.predecessors).map(p => p.id); });
-  // A new edge id→p closes a cycle iff p already (transitively) depends on id.
+  // NEW-1 (B1696640) — a SUMMARY row's dates roll up from its children (rollupParentDates), so a
+  // parent "depends on" every one of its children exactly as if they were its own predecessors — an
+  // edge `predMap` never carried, since a parent's `predecessors` field is never read (B443248).
+  // Folding children-of-parent into the same adjacency this DFS already walks catches a task naming
+  // its own parent/ancestor as a predecessor at ANY depth, and any other rollup-mediated cycle shape,
+  // with no separate special case.
+  const childrenOf = {};
+  (Array.isArray(tasks) ? tasks : []).forEach(t => {
+    if (!t || t.parentId === null || t.parentId === undefined) return;
+    (childrenOf[t.parentId] = childrenOf[t.parentId] || []).push(t.id);
+  });
+  // A new edge id→p closes a cycle iff p already (transitively) depends on id — through its own
+  // predecessors, or (if p is a summary row) through any of its children's dates.
   const reachesId = startId => {
     const stack = [startId], seen = new Set();
     while (stack.length) {
@@ -3470,6 +3482,7 @@ const validatePredEdit = (tasks, id, parsed) => {
       if (cur === id) return true;
       if (seen.has(cur)) continue; seen.add(cur);
       (predMap[cur] || []).forEach(x => stack.push(x));
+      (childrenOf[cur] || []).forEach(x => stack.push(x));
     }
     return false;
   };
@@ -3967,6 +3980,47 @@ const detectCascadeDrift = (storedTasks, engineTasks) => {
   });
   return out;
 };
+// NEW-1 (B1696640) — ancestor ids of `id` within `tasks`, walking the parentId chain upward
+// (seen-set guards a corrupt parentId cycle — same defense as normalizeIds' own walk). A parent's
+// dates are the ROLLUP of its children (rollupParentDates), so a task predecessor-linked to any of
+// its own ancestors chases that rollup forever: the child's start derives from the ancestor's
+// finish, and the ancestor's finish is in part derived from that same child's finish. cascadeDates
+// skips computing a parent's OWN date from predecessors entirely (B443248 — `if
+// (parentIds.has(t.id)) return`), so this can never be resolved by iterating harder;
+// recomputeSchedule's 12-pass cap just stops mid-ratchet, the un-converged dates get saved, and the
+// NEXT load ratchets further still. Shared by validatePredEdit (blocks the edge at entry) and
+// stripAncestorPredecessors (repairs data that already has it). Pure — mirrored in
+// ui-audit/stress/scheduler-engine.mjs.
+const ancestorIdsOf = (tasks, id) => {
+  const byId = {};
+  (Array.isArray(tasks) ? tasks : []).forEach(t => { if (t) byId[t.id] = t; });
+  const out = new Set();
+  const seen = new Set([id]);
+  let p = byId[id] ? byId[id].parentId : null;
+  while (p != null && byId[p] && !seen.has(p)) { out.add(p); seen.add(p); p = byId[p].parentId; }
+  return out;
+};
+// NEW-1 (B1696640) — repair data that already has the ancestor-predecessor edge above: drop only
+// the offending link(s) from each affected task, leaving every other predecessor untouched. Returns
+// the fixed tasks plus a `removed` list (id/name/parentId/droppedIds) so the load path can surface
+// exactly which rows were touched (LOUD-FAILURE), rather than silently swapping the dates. Pure —
+// mirrored in ui-audit/stress/scheduler-engine.mjs.
+const stripAncestorPredecessors = tasks => {
+  const list = Array.isArray(tasks) ? tasks : [];
+  const removed = [];
+  const fixed = list.map(t => {
+    if (!t) return t;
+    const preds = normPreds(t.predecessors);
+    if (!preds.length) return t;
+    const ancestors = ancestorIdsOf(list, t.id);
+    if (!ancestors.size) return t;
+    const droppedIds = preds.filter(p => ancestors.has(p.id)).map(p => p.id);
+    if (!droppedIds.length) return t;
+    removed.push({ id: t.id, name: t.name || t.title || ("Task " + t.id), parentId: t.parentId, droppedIds });
+    return { ...t, predecessors: preds.filter(p => !ancestors.has(p.id)) };
+  });
+  return { tasks: fixed, removed };
+};
 // B864(b) — pure 3-way merge for the cloud whole-document save (mirrored + unit-tested in
 // ui-audit/stress/scheduler-engine.mjs). The Scheduler cloud-saves the WHOLE document last-write-wins; the
 // rev-gate only BLOCKS a stale tab, so a sibling tab's independent addition (e.g. a just-created meeting
@@ -4017,13 +4071,43 @@ const mergeCloudDoc = (base, ours, theirs) => {
   }
   return out;
 };
+// NEW-3 (B1696642) — how many task rows a merge actually brought in from elsewhere, so the toast
+// can say WHAT changed instead of guessing WHERE it came from (the cloud row this merge reads carries
+// no tab/window/device identity — see the `planar:merged` listener). Compares this tab's own doc as
+// of save-start (`before`, i.e. `preOurs`) against the merged result (`after`): a task row added,
+// removed, or changed between the two is exactly what the foreign save contributed, since `after` is
+// the 3-way merge of the true ancestor, `before`, and the newer cloud copy. Pure — mirrored in
+// ui-audit/stress/scheduler-engine.mjs.
+const countChangedTaskRows = (before, after) => {
+  try {
+    const bp = (before && before.projects) || {};
+    const ap = (after && after.projects) || {};
+    let n = 0;
+    new Set([...Object.keys(bp), ...Object.keys(ap)]).forEach(pid => {
+      const bt = {}; (bp[pid]?.tasks || []).forEach(t => { if (t) bt[t.id] = t; });
+      const at = {}; (ap[pid]?.tasks || []).forEach(t => { if (t) at[t.id] = t; });
+      new Set([...Object.keys(bt), ...Object.keys(at)]).forEach(id => {
+        if (!_mEq(bt[id], at[id])) n++;
+      });
+    });
+    return n;
+  } catch { return 0; }
+};
 
 // B836 — load-path glue: run the normal recompute (cascade → rollup) on a project's already-stripped
-// tasks AND record any drift it corrected into `sink`. Keeps the three load sites DRY and identical.
-const recascadeWithDrift = (tasks, projName, sink) => {
-  const out = recomputeSchedule(tasks);                 // the recompute returns NEW objects — `tasks` keeps its stored starts for the diff
-  const dr = detectCascadeDrift(tasks, out);
-  if (dr.length) sink.push({ project: projName, tasks: dr });
+// tasks AND record any drift it corrected into `driftSink`. Keeps the load sites DRY and identical.
+// NEW-1 (B1696640) — ALSO strips any ancestor-predecessor edge before the recompute ever runs (that
+// edge can never converge — see stripAncestorPredecessors above), recording what it dropped into
+// `ancestorSink`. A row whose predecessors were just repaired is reported ONLY there, not a second
+// time in `driftSink` too — its date moved BECAUSE of the repair, so the ancestor notice is the
+// complete explanation and a duplicate "recalculated" line would just be confusing noise.
+const recascadeWithDrift = (tasks, pid, projName, driftSink, ancestorSink) => {
+  const { tasks: clean, removed } = stripAncestorPredecessors(tasks);
+  if (removed.length && ancestorSink) ancestorSink.push({ project: projName, pid, tasks: removed });
+  const out = recomputeSchedule(clean);                 // the recompute returns NEW objects — `clean` keeps its stored starts for the diff
+  const removedIds = new Set(removed.map(r => r.id));
+  const dr = detectCascadeDrift(clean, out).filter(d => !removedIds.has(d.id));
+  if (dr.length) driftSink.push({ project: projName, pid, tasks: dr });
   return out;
 };
 
@@ -7676,6 +7760,7 @@ function App() {
   // "cloud unreachable" so the banner doesn't wrongly tell them to check their connection.
   const [authRequired, setAuthRequired] = useState(false);
   const [driftNotice, setDriftNotice] = useState(null);   // B836 — non-pinned tasks whose saved start the load re-cascade corrected; surfaced loudly (banner)
+  const [ancestorPredNotice, setAncestorPredNotice] = useState(null);   // NEW-1 (B1696640) — tasks whose predecessors named their own parent/ancestor; the link was dropped on load
   const [staleNotice, setStaleNotice] = useState(false);
   const didInitialLoad = useRef(false);
   const prevCoreRef = useRef(null);   // B1107680 — last `data` whose CORE (versioned) portion was considered for a cloud save
@@ -7958,12 +8043,17 @@ function App() {
         d._pinnedClean = true;
         HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
         const driftFound = [];   // B836 — same drift surfacing on import / version-restore
+        const ancestorFound = [];   // NEW-1 (B1696640) — same ancestor-predecessor repair on import / version-restore
         Object.keys(d.projects).forEach(pid => {
           let tasks = d.projects[pid].tasks.map(({_pinStart, __wasDirectEdit, ...t}) => t);
-          d.projects[pid] = {...d.projects[pid], tasks: recascadeWithDrift(tasks, d.projects[pid].name || pid, driftFound)};
+          d.projects[pid] = {...d.projects[pid], tasks: recascadeWithDrift(tasks, pid, d.projects[pid].name || pid, driftFound, ancestorFound)};
         });
         if (driftFound.length) { setDriftNotice(driftFound); console.warn("[planar cascade-drift] imported/restored data had saved starts out of sync with predecessors (auto-recalculated, B835/B836):", driftFound); }
+        if (ancestorFound.length) { setAncestorPredNotice(ancestorFound); console.warn("[planar ancestor-pred] imported/restored data had a task naming its own parent/ancestor as a predecessor (dropped, NEW-1):", ancestorFound); }
         setData(resolveViewState(d));   // B1107680 — never let an import/restore's snapshot-time aPid/view yank this tab elsewhere
+        // NEW-1 (B1696640) — this path runs well after the initial mount, so the normal
+        // coreChanged-driven autosave effect (below) picks up the repair on its own; no explicit
+        // save needed here the way the very-first-load path (below) requires one.
       };
       try {
         const isMobile = window.innerWidth < 768;
@@ -7981,15 +8071,28 @@ function App() {
           d._pinnedClean = true;
           HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
           const driftFound = [];   // B836 — collect non-pinned tasks whose saved start the recompute corrected
+          const ancestorFound = [];   // NEW-1 (B1696640) — collect tasks whose predecessors named their own parent/ancestor
           Object.keys(d.projects).forEach(pid => {
             let tasks = d.projects[pid].tasks.map(t => {
               const {_pinStart, __wasDirectEdit, pinnedStart, ...rest} = t;
               if (!needsPinClean && pinnedStart) rest.pinnedStart = true; // preserve intentional pins
               return rest;
             });
-            d.projects[pid] = {...d.projects[pid], tasks: recascadeWithDrift(tasks, d.projects[pid].name || pid, driftFound)};
+            d.projects[pid] = {...d.projects[pid], tasks: recascadeWithDrift(tasks, pid, d.projects[pid].name || pid, driftFound, ancestorFound)};
           });
           if (driftFound.length) { setDriftNotice(driftFound); console.warn("[planar cascade-drift] saved starts that didn't match their predecessor chain were auto-recalculated on load (B835/B836):", driftFound); }
+          if (ancestorFound.length) {
+            setAncestorPredNotice(ancestorFound);
+            console.warn("[planar ancestor-pred] a task named its own parent/ancestor as a predecessor — link dropped and dates recalculated (NEW-1):", ancestorFound);
+            // NEW-1 (B1696640) — this repair happens on the very-first-load path, which the normal
+            // autosave effect deliberately SKIPS (loading must never mint a new version on its own —
+            // that's what made two freshly-opened tabs fight, B1107680). Without an explicit save
+            // here, the corrected predecessors never reach storage, so the NEXT load re-reads the
+            // same broken link and shows the same notice again — exactly the "fires on every load"
+            // defect this item exists to end. attemptCloudSave strips view state itself
+            // (stripViewState), so it doesn't need the resolved `d` resolveViewState below produces.
+            attemptCloudSave(d);
+          }
           setData(resolveViewState(d)); return;   // B1107680 — migrate the 13 view-state keys off the cloud doc on first read
         }
         // First load (Supabase empty) — seed from inline data or SEED constant
@@ -7998,11 +8101,20 @@ function App() {
           // Enforce predecessor relationships on load (seed data — no stale pins)
           HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
           d._pinnedClean = true;
+          // NEW-1 (B1696640) — a hand-embedded __PLANAR_DATA__ seed (or a future SEED edit) can
+          // carry the same ancestor-predecessor bug as a real stored doc; route it through the same
+          // strip+notice as the other two load paths rather than the bare recomputeSchedule this used
+          // to call directly. No explicit save here — there's no stored doc yet to protect, and the
+          // FIRST real save (of any edit) persists the already-clean result.
+          const seedAncestorFound = [];
           Object.keys(d.projects).forEach(pid => {
             let tasks = d.projects[pid].tasks.map(({_pinStart, __wasDirectEdit, ...t}) => t);
-            tasks = recomputeSchedule(tasks);
-            d.projects[pid] = {...d.projects[pid], tasks};
+            d.projects[pid] = {...d.projects[pid], tasks: recascadeWithDrift(tasks, pid, d.projects[pid].name || pid, [], seedAncestorFound)};
           });
+          if (seedAncestorFound.length) {
+            setAncestorPredNotice(seedAncestorFound);
+            console.warn("[planar ancestor-pred] seed data had a task naming its own parent/ancestor as a predecessor (dropped, NEW-1):", seedAncestorFound);
+          }
         if (window.__planarCloudError) setOfflineFallback(true);
         else if (window.__planarAuthRequired) setAuthRequired(true);
         setData(resolveViewState(d));
@@ -8162,11 +8274,22 @@ function App() {
       const merged = e && e.detail && e.detail.value;
       const anc = e && e.detail && e.detail.base;
       if (!merged || !merged.projects) return;
+      // NEW-3 (B1696642) — this merge is detected purely from the cloud ROW's rev number, which
+      // carries no tab/window/device identity. The old "from another tab" wording claimed a scope
+      // this app can never actually know (it fires identically for another window or another device
+      // entirely — the owner saw it while working in only one tab) — say only what's known: that
+      // something changed elsewhere, and how many rows it touched.
+      const changedRows = countChangedTaskRows(anc, merged);
       setData(cur => {
         if (!cur) return merged;
         try { return mergeCloudDoc(anc, cur, merged); } catch { return merged; }
       });
-      if (typeof showToast === "function") showToast("Merged in changes from another tab.", { type: "info", duration: 4000 });
+      if (typeof showToast === "function") {
+        const msg = changedRows > 0
+          ? `Merged in changes saved elsewhere — ${changedRows} task${changedRows===1?"":"s"} updated.`
+          : "Merged in changes saved elsewhere.";
+        showToast(msg, { type: "info", duration: 4000 });
+      }
     };
     window.addEventListener("planar:merged", onMerged);
     return () => window.removeEventListener("planar:merged", onMerged);
@@ -10044,10 +10167,13 @@ function App() {
           display:"flex",alignItems:"center",gap:10,fontSize:12.5,lineHeight:1.45,flexShrink:0,zIndex:31}}>
           <span style={{fontSize:14,flexShrink:0}}>&#8635;</span>
           <span style={{flex:1}}>
-            <strong>A newer version was saved on another device.</strong>{" "}
+            {/* NEW-3 (B1696642) — this fires from a rev check against the cloud row alone, which
+                carries no tab/window/device identity. "Another device" claimed a scope this app can't
+                actually see (it could equally be another tab on THIS device) — say only what's known. */}
+            <strong>A newer version was saved elsewhere.</strong>{" "}
             {saveStatus==="saved"
               ? "Reload to load the latest."
-              : "You have unsaved changes here -- reloading replaces them with the other device's version. Your copy is kept in Version History either way."}
+              : "You have unsaved changes here -- reloading replaces them with the newer version. Your copy is kept in Version History either way."}
           </span>
           <button onClick={()=>window.location.reload()}
             style={{flexShrink:0,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,
@@ -10056,23 +10182,69 @@ function App() {
           </button>
         </div>
       )}
+      {ancestorPredNotice && ancestorPredNotice.length > 0 && (() => {
+        // NEW-1 (B1696640) — LOUD surface for the load-time repair above: a task whose predecessor
+        // named its own parent/ancestor (that link can never converge — a summary row's dates are the
+        // ROLLUP of its children, so the two halves chase each other forever) had the link dropped and
+        // its dates recalculated. One notice, once — the repair is persisted immediately (see the load
+        // effect), so it doesn't recur on the next open the way it did before this fix.
+        const flat = ancestorPredNotice.flatMap(p => (p.tasks || []).map(t => ({...t, project: p.project, pid: p.pid})));
+        const n = flat.length;
+        const shown = flat.slice(0, 3);
+        const extra = n - shown.length;
+        return (
+          <div style={{background:"#fffbeb",borderBottom:"1px solid #fde68a",color:"#92400e",padding:"7px 14px",
+            display:"flex",alignItems:"flex-start",gap:10,fontSize:12.5,lineHeight:1.45,flexShrink:0,zIndex:31}}>
+            <span style={{fontSize:14,flexShrink:0}}>&#9888;</span>
+            <span style={{flex:1}}>
+              <strong>{n} task{n===1?"":"s"} named {n===1?"its own":"their own"} parent summary row as a predecessor — the link would loop forever, so it was removed and {n===1?"its date was":"their dates were"} recalculated.</strong>{" "}
+              {shown.map((t, i) => (
+                <React.Fragment key={t.pid + ":" + t.id}>
+                  {i > 0 ? "; " : ""}
+                  <span onClick={() => goToTask(t.pid, t.id)} title="Click to jump to this row"
+                    style={{cursor:"pointer", textDecoration:"underline", textDecorationStyle:"dotted"}}>
+                    {t.project ? t.project + " " : ""}#{t.id} "{t.name}"
+                  </span>
+                </React.Fragment>
+              ))}
+              {extra > 0 ? `; +${extra} more` : ""}. Add back a real dependency (a sibling task, not the summary row) if one was intended.
+            </span>
+            <button onClick={()=>setAncestorPredNotice(null)}
+              style={{flexShrink:0,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,
+                background:"#fff",border:"1px solid #fcd34d",color:"#92400e",borderRadius:5,padding:"4px 12px"}}>
+              Dismiss
+            </button>
+          </div>
+        );
+      })()}
       {driftNotice && driftNotice.length > 0 && (() => {
         // B836 — LOUD surface for cascade drift the load quietly corrected. A non-pinned task whose
         // SAVED start didn't match its predecessor chain (B835) used to be re-derived in silence,
         // hiding the fact that the stored value was ever wrong. Now the correction is announced so
         // the user can confirm it matches their intent (or pin/lag a gap that was deliberate).
-        const flat = driftNotice.flatMap(p => (p.tasks || []).map(t => ({...t, project: p.project})));
+        // NEW-2 (B1696641) — each named row now carries its own ID and jumps to the row on click:
+        // project NAME alone doesn't disambiguate (an account can hold several same-named projects,
+        // and a project can hold several same-named tasks), but the ID always does.
+        const flat = driftNotice.flatMap(p => (p.tasks || []).map(t => ({...t, project: p.project, pid: p.pid})));
         const n = flat.length;
-        const sample = flat.slice(0, 3)
-          .map(t => `${t.project ? t.project + " — " : ""}"${t.name}" ${fmtD(t.from) || "(no date)"}→${fmtD(t.to)}`)
-          .join("; ");
+        const shown = flat.slice(0, 3);
+        const extra = n - shown.length;
         return (
           <div style={{background:"#fffbeb",borderBottom:"1px solid #fde68a",color:"#92400e",padding:"7px 14px",
             display:"flex",alignItems:"flex-start",gap:10,fontSize:12.5,lineHeight:1.45,flexShrink:0,zIndex:31}}>
             <span style={{fontSize:14,flexShrink:0}}>&#9888;</span>
             <span style={{flex:1}}>
               <strong>{n} saved task {n===1?"date was":"dates were"} out of sync with {n===1?"its":"their"} predecessor{n===1?"":"s"} and {n===1?"has":"have"} been recalculated.</strong>{" "}
-              {sample}{n>3?`; +${n-3} more`:""}. Check they match your intended schedule — if a gap was deliberate, pin the date or add a lag.
+              {shown.map((t, i) => (
+                <React.Fragment key={t.pid + ":" + t.id}>
+                  {i > 0 ? "; " : ""}
+                  <span onClick={() => goToTask(t.pid, t.id)} title="Click to jump to this row"
+                    style={{cursor:"pointer", textDecoration:"underline", textDecorationStyle:"dotted"}}>
+                    {t.project ? t.project + " " : ""}#{t.id} "{t.name}" {fmtD(t.from) || "(no date)"}→{fmtD(t.to)}
+                  </span>
+                </React.Fragment>
+              ))}
+              {extra > 0 ? `; +${extra} more` : ""}. Check they match your intended schedule — if a gap was deliberate, pin the date or add a lag.
             </span>
             <button onClick={()=>setDriftNotice(null)}
               style={{flexShrink:0,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,
@@ -10086,8 +10258,13 @@ function App() {
         // B616 — LOUD, unmissable surface for locked-finish conflicts in the active project. A
         // conflicted task keeps its locked finish; this banner makes the user resolve it rather
         // than the schedule silently overrunning or overwriting the lock.
+        // NEW-2 (B1696641) — same "names a task, not a row" gap driftNotice had: add the row ID and
+        // make each named row jump to it (this banner is already scoped to the active project, so no
+        // project-name ambiguity here — just the row).
         const cft = (data?.projects?.[data.aPid]?.tasks || []).filter(t => t.finishConflict);
         if (!cft.length) return null;
+        const shown = cft.slice(0, 3);
+        const extra = cft.length - shown.length;
         return (
           <div style={{background:"#fef2f2",borderBottom:"1px solid #fecaca",color:"#991b1b",padding:"7px 14px",
             display:"flex",alignItems:"center",gap:10,fontSize:12.5,lineHeight:1.45,flexShrink:0,zIndex:31}}>
@@ -10095,7 +10272,15 @@ function App() {
             <span style={{flex:1}}>
               <strong>{cft.length} task{cft.length>1?"s":""} can’t meet {cft.length>1?"their":"its"} locked finish date.</strong>{" "}
               The predecessor chain needs more time than the locked finish allows
-              ({cft.slice(0,3).map(t=>t.name||`Task ${t.id}`).join(", ")}{cft.length>3?`, +${cft.length-3} more`:""}).
+              ({shown.map((t, i) => (
+                <React.Fragment key={t.id}>
+                  {i > 0 ? ", " : ""}
+                  <span onClick={() => goToTask(data.aPid, t.id)} title="Click to jump to this row"
+                    style={{cursor:"pointer", textDecoration:"underline", textDecorationStyle:"dotted"}}>
+                    #{t.id} "{t.name||("Task "+t.id)}"
+                  </span>
+                </React.Fragment>
+              ))}{extra > 0 ? `, +${extra} more` : ""}).
               Move the finish, shorten the duration, or change the dependency.
             </span>
           </div>

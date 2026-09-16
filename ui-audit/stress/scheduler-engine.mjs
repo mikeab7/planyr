@@ -227,6 +227,11 @@ export const validatePredEdit = (tasks, id, parsed) => {
   preds = preds.filter(p => !isAncestorOfId(p.id));
   const predMap = {};
   (Array.isArray(tasks) ? tasks : []).forEach(t => { predMap[t.id] = normPreds(t.predecessors).map(p => p.id); });
+  const childrenOf = {};
+  (Array.isArray(tasks) ? tasks : []).forEach(t => {
+    if (!t || t.parentId === null || t.parentId === undefined) return;
+    (childrenOf[t.parentId] = childrenOf[t.parentId] || []).push(t.id);
+  });
   const reachesId = startId => {
     const stack = [startId], seen = new Set();
     while (stack.length) {
@@ -234,6 +239,7 @@ export const validatePredEdit = (tasks, id, parsed) => {
       if (cur === id) return true;
       if (seen.has(cur)) continue; seen.add(cur);
       (predMap[cur] || []).forEach(x => stack.push(x));
+      (childrenOf[cur] || []).forEach(x => stack.push(x));
     }
     return false;
   };
@@ -873,6 +879,47 @@ export const detectCascadeDrift = (storedTasks, engineTasks) => {
   return out;
 };
 
+// NEW-1 — ancestor ids of `id` within `tasks`, walking the parentId chain upward. VERBATIM mirror
+// of public/sequence/index.html.
+export const ancestorIdsOf = (tasks, id) => {
+  const byId = {};
+  (Array.isArray(tasks) ? tasks : []).forEach(t => { if (t) byId[t.id] = t; });
+  const out = new Set();
+  const seen = new Set([id]);
+  let p = byId[id] ? byId[id].parentId : null;
+  while (p != null && byId[p] && !seen.has(p)) { out.add(p); seen.add(p); p = byId[p].parentId; }
+  return out;
+};
+// NEW-1 — drops a task's predecessor link(s) that name its own ancestor (a summary row's dates roll
+// up from its children, so that edge can never converge). VERBATIM mirror of public/sequence/index.html.
+export const stripAncestorPredecessors = tasks => {
+  const list = Array.isArray(tasks) ? tasks : [];
+  const removed = [];
+  const fixed = list.map(t => {
+    if (!t) return t;
+    const preds = normPreds(t.predecessors);
+    if (!preds.length) return t;
+    const ancestors = ancestorIdsOf(list, t.id);
+    if (!ancestors.size) return t;
+    const droppedIds = preds.filter(p => ancestors.has(p.id)).map(p => p.id);
+    if (!droppedIds.length) return t;
+    removed.push({ id: t.id, name: t.name || t.title || ("Task " + t.id), parentId: t.parentId, droppedIds });
+    return { ...t, predecessors: preds.filter(p => !ancestors.has(p.id)) };
+  });
+  return { tasks: fixed, removed };
+};
+// B836 — load-path glue: run the normal recompute (cascade → rollup) AND strip ancestor-predecessor
+// edges first (they can never converge). VERBATIM mirror of public/sequence/index.html.
+export const recascadeWithDrift = (tasks, pid, projName, driftSink, ancestorSink) => {
+  const { tasks: clean, removed } = stripAncestorPredecessors(tasks);
+  if (removed.length && ancestorSink) ancestorSink.push({ project: projName, pid, tasks: removed });
+  const out = recomputeSchedule(clean);
+  const removedIds = new Set(removed.map(r => r.id));
+  const dr = detectCascadeDrift(clean, out).filter(d => !removedIds.has(d.id));
+  if (dr.length) driftSink.push({ project: projName, pid, tasks: dr });
+  return out;
+};
+
 // B864(b) — pure 3-way merge for the cloud whole-document save (VERBATIM mirror of public/sequence/index.html).
 // The Scheduler cloud-saves the ENTIRE document last-write-wins; its rev-gate only BLOCKS a stale tab (and
 // snapshots the loser to history), so a sibling tab's independent addition — e.g. a just-created meeting
@@ -933,6 +980,23 @@ export const mergeCloudDoc = (base, ours, theirs) => {
     }
   }
   return out;
+};
+// NEW-3 — how many task rows a merge actually brought in from elsewhere. VERBATIM mirror of
+// public/sequence/index.html.
+export const countChangedTaskRows = (before, after) => {
+  try {
+    const bp = (before && before.projects) || {};
+    const ap = (after && after.projects) || {};
+    let n = 0;
+    new Set([...Object.keys(bp), ...Object.keys(ap)]).forEach(pid => {
+      const bt = {}; (bp[pid]?.tasks || []).forEach(t => { if (t) bt[t.id] = t; });
+      const at = {}; (ap[pid]?.tasks || []).forEach(t => { if (t) at[t.id] = t; });
+      new Set([...Object.keys(bt), ...Object.keys(at)]).forEach(id => {
+        if (!_mEq(bt[id], at[id])) n++;
+      });
+    });
+    return n;
+  } catch { return 0; }
 };
 
 // B835 (recurrence ×2) — the scheduling-input gate updateTask uses to decide whether an edit must re-run
