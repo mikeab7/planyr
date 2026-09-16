@@ -99,31 +99,40 @@ await page.waitForTimeout(200);
 try { await page.getByText("Properties", { exact: true }).first().click({ timeout: 3000 }); } catch (e) { /* noop */ }
 await page.waitForTimeout(300);
 
-// ---- NEW-3: the panel shares one left gutter edge across single rows, the Fill|Line pair and the X|Y pair ----
-// Only the TOP-LEVEL Field/PairedField rows use the shared 64px label gutter — NumInput wraps its
-// own ▲▼ stepper in a `data-field-group` div too (a keyboard-scope marker), so isolate rows by the
-// shared grid template rather than the attribute alone.
+// ---- NEW-3: the panel shares one left gutter edge across single rows, paired rows AND the
+//      column-HEADER row (Fill|Line / X|Y). `data-row-align="1"` marks all three row kinds —
+//      Field/PairedField carry it alongside `data-field-group` (the keyboard-latch marker, which
+//      a plain header never gets since it holds no input), PairedFieldHead carries it alone.
+//      ⛔ NEW-1 (see the guard note on PairedFieldHead in SitePlanner.jsx): the PRIOR version of this
+//      check filtered on `data-field-group="1"` alone, which the header row never carries — so it
+//      silently measured zero header rows and reported "one left edge" while the header rendered
+//      2px off every row it labels. Filtering on gridTemplateColumns alone doesn't catch it either:
+//      all three row kinds already declared the same 64px first track, which is exactly what was
+//      passing while the bug shipped — only a rendered getBoundingClientRect() sees the stray margin.
 const layout = await page.evaluate(() => {
-  const groups = [...document.querySelectorAll('[data-field-group="1"]')].filter((g) => {
+  const groups = [...document.querySelectorAll('[data-row-align="1"]')].filter((g) => {
     const cs = getComputedStyle(g);
     return cs.display === "grid" && cs.gridTemplateColumns.startsWith("64px");
   });
   const heads = [...document.querySelectorAll("*")].filter((el) => el.children.length === 0 && (el.textContent === "Fill" || el.textContent === "Line" || el.textContent === "X" || el.textContent === "Y"));
   const rowInfo = groups.map((g) => {
     const cs = getComputedStyle(g);
-    return { cols: cs.gridTemplateColumns, left: g.getBoundingClientRect().x, label: (g.children[0]?.textContent || "").trim() };
+    const isHead = !g.hasAttribute("data-field-group");
+    return { cols: cs.gridTemplateColumns, left: g.getBoundingClientRect().x, label: (g.children[0]?.textContent || "").trim(), isHead };
   });
   return { rowInfo, hasFill: !!heads.find((h) => h.textContent === "Fill"), hasLine: !!heads.find((h) => h.textContent === "Line") };
 });
 const weightRow = layout.rowInfo.find((r) => r.label === "Weight");
 const paddingRow = layout.rowInfo.find((r) => r.label === "Padding");
 const colourRows = layout.rowInfo.filter((r) => r.label === "Colour");
-const singleRows = layout.rowInfo.filter((r) => r.cols.split(" ").length === 2);
-const pairedRows = layout.rowInfo.filter((r) => r.cols.split(" ").length === 3);
+const singleRows = layout.rowInfo.filter((r) => !r.isHead && r.cols.split(" ").length === 2);
+const pairedRows = layout.rowInfo.filter((r) => !r.isHead && r.cols.split(" ").length === 3);
+const headRows = layout.rowInfo.filter((r) => r.isHead);
 log(layout.hasFill && layout.hasLine, `NEW-3 the FILL | LINE paired column header renders`);
 log(!!weightRow && !!paddingRow, `NEW-3 Weight and Padding rows both render on the rebuilt panel`);
+log(headRows.length >= 1, `NEW-3 at least one column-header row is present in the measured set (found ${headRows.length})`);
 const leftEdges = new Set(layout.rowInfo.map((r) => Math.round(r.left)));
-log(leftEdges.size === 1, `NEW-3 every row (single-column and paired) shares ONE left gutter edge — edges seen: ${[...leftEdges].join(",")}`);
+log(leftEdges.size === 1, `NEW-3 every row (single-column, paired, AND the column-header row) shares ONE left gutter edge — edges seen: ${[...leftEdges].join(",")}`);
 log(singleRows.length >= 5 && pairedRows.length >= 5, `NEW-3 both single (${singleRows.length}) and paired (${pairedRows.length}) row shapes are present`);
 log(colourRows.length === 2, `NEW-3 exactly one single-column Colour row (text) + one paired Colour row (fill/line) — found ${colourRows.length}`);
 

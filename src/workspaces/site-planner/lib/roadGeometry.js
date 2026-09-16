@@ -43,6 +43,30 @@ const len = (a) => Math.hypot(a.x, a.y);
 const unit = (a) => { const l = len(a) || 1; return { x: a.x / l, y: a.y / l }; };
 const dot = (a, b) => a.x * b.x + a.y * b.y;
 const cross = (a, b) => a.x * b.y - a.y * b.x;
+const polygonArea = (ring) => {
+  let s = 0;
+  for (let i = 0; i < ring.length; i++) { const a = ring[i], b = ring[(i + 1) % ring.length]; s += a.x * b.y - b.x * a.y; }
+  return Math.abs(s / 2);
+};
+/* Is `ring` a simple (non-self-intersecting) polygon? O(n²) — only ever run on a single small
+ * junction wedge (a few dozen points at most), never on a whole plan. Used to verify a candidate
+ * polygon BEFORE returning it from a construction (like `restoreArcOnHull`) that is not simple by
+ * construction the way a convex hull is. */
+function isSimplePolygon(ring) {
+  const n = ring && ring.length;
+  if (!n || n < 3) return false;
+  const ccw = (a, b, c) => (c.y - a.y) * (b.x - a.x) > (b.y - a.y) * (c.x - a.x);
+  const segCross = (a, b, c, d) => ccw(a, c, d) !== ccw(b, c, d) && ccw(a, b, c) !== ccw(a, b, d);
+  for (let i = 0; i < n; i++) {
+    const a = ring[i], b = ring[(i + 1) % n];
+    for (let j = i + 1; j < n; j++) {
+      const c = ring[j], d = ring[(j + 1) % n];
+      if (j === (i + 1) % n || (j + 1) % n === i) continue;
+      if (segCross(a, b, c, d)) return false;
+    }
+  }
+  return true;
+}
 
 /* Total length (ft) of a polyline. */
 export function polylineLength(pts) {
@@ -1263,7 +1287,39 @@ export function teeGeometry(params) {
     const sTan2 = dot(sub(f.tan2, capCorner), d);        // tan2's position along the cap line (0 = at the cap)
     const farPt = add(capCorner, mul(d, Math.max(sTan2, 0) + sideTuck)); // past the cap, into the strip
     const farPtIn = add(farPt, mul(inS, deepS));
-    return convexHull([back1, ...f.arc.map((p) => ({ x: p.x, y: p.y })), back2, capCorner, farPt, farPtIn]);
+    const arcPts = f.arc.map((p) => ({ x: p.x, y: p.y }));
+    const hull = convexHull([back1, ...arcPts, back2, capCorner, farPt, farPtIn]);
+    if (!hull) return hull;
+    // Restoring the arc, and reaching for T, are both scoped to deepT===0 — the drive-into-a-pad
+    // case, which is `teeGeometry`'s only live caller (phT: 0 always, so back1 === tan1 === arc[0]
+    // exactly, and T sits exactly on the through/pad edge line since E0===T only when phT=0). When
+    // deepT > 0 (a hypothetical phT > 0 road-to-road caller — exercised only by this lib's own
+    // generic test, never by the live app) `back1` is tan1 pushed OFF the arc by `deepT`, and T is
+    // OFF the mouth edge by `phT` — splicing the arc back in against that non-matching anchor
+    // introduced a hair-thin self-touching sliver in exactly that case (measured — a road-to-road
+    // tee gained a 2.8–10.7 sqft "hole" it never had before). Left untouched, phT > 0 keeps the
+    // pre-existing (unflattened-arc-risk, but proven simple) hull behaviour.
+    if (deepT > EPS) return hull;
+    // Near-perpendicular residual (B1645792 (×2), live-check finding): at a shallow
+    // approach angle the strip's own tilted flat cap can dip a hair below the pad edge between T
+    // (the tee point) and `capCorner` — the reach above doesn't cover it, since it is anchored at
+    // `back1`/`tan2`, not at T. Try adding T to the SAME hull (never a separate merged piece — a
+    // second piece that only shares a single vertex with the first pinches into a visible cusp
+    // instead of real overlap, measured while getting here) — verified exactly like the arc splice
+    // below: only used if it stays simple and never shrinks the wedge's own coverage.
+    const hullWithT = convexHull([T, back1, ...arcPts, back2, capCorner, farPt, farPtIn]);
+    const base = (hullWithT && isSimplePolygon(hullWithT) && polygonArea(hullWithT) >= polygonArea(hull) - EPS)
+      ? hullWithT
+      : hull;
+    const restored = restoreArcOnHull(base, arcPts);
+    // ⛔ The splice is a geometric IMPROVEMENT attempt, never a guarantee — MEASURED to
+    // self-intersect on some angle/pad-size combinations (a 30° parking-scale return, a flared
+    // throat, a rotated-pad edge case), reproducing the exact class of bug this fix must not
+    // reintroduce. The hull's own simplicity is proven by construction; the spliced result is not,
+    // so it is verified here and DISCARDED — falling back to the plain (arc-flattening but always
+    // simple and always correctly connected) hull — the moment it fails. Never ship an unverified
+    // splice: a self-crossing wedge is a worse defect than a straightened curb return.
+    return isSimplePolygon(restored) ? restored : base;
   };
   // Corner A sits on the +perpS edge, so its pavement lies toward -perpS; corner B is the mirror.
   const wedges = [wedge(fA, mul(perpS, -1)), wedge(fB, perpS)].filter(Boolean);
@@ -1336,6 +1392,66 @@ export function rectContainsPoint(P, edges) {
   return edges.every((e) => dot(e.outN, sub(P, e.mid)) <= 1e-6);
 }
 
+/* B1664512 NEW-2 — the world-space edges of a free-drawn POLYGON pad/parking field (`points`),
+ * in the exact `{a, b, dir, outN, mid, len}` shape `rectEdges` already produces — so
+ * `nearestRectEdge` (already agnostic to where its `edges` came from) works unchanged on either.
+ * `outN` is oriented away from the polygon's own centroid, same convention as `rectEdges`'s "away
+ * from centre" — correct for a convex ring and for the common mild concavities a drawn pad/parking
+ * field actually has; a ring under 3 points returns []. */
+export function polygonEdges(points) {
+  const pts = (points || []).filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y));
+  const n = pts.length;
+  if (n < 3) return [];
+  const centre = pts.reduce((s, p) => add(s, p), { x: 0, y: 0 });
+  centre.x /= n; centre.y /= n;
+  const edges = [];
+  for (let i = 0; i < n; i++) {
+    const a = pts[i], b = pts[(i + 1) % n];
+    if (a.x === b.x && a.y === b.y) continue;               // a closed ring's dupe last==first point
+    const dir = unit(sub(b, a));
+    const mid = mul(add(a, b), 0.5);
+    let outN = { x: dir.y, y: -dir.x };
+    if (dot(outN, sub(centre, mid)) > 0) outN = mul(outN, -1); // point AWAY from the centroid
+    edges.push({ a, b, dir, outN, mid, len: len(sub(b, a)) });
+  }
+  return edges;
+}
+
+/* Is P inside the polygon `points` bounds? A real ray-cast (`pointInRing`'s own even-odd test,
+ * reimplemented here so this pure-geometry module stays free of a cross-folder import), correct
+ * for a concave ring — unlike `rectContainsPoint`'s "inside every edge's half-plane" shortcut,
+ * which only holds for a convex shape. */
+export function polygonContainsPoint(P, points) {
+  const ring = points || [];
+  if (!P || !Number.isFinite(P.x) || !Number.isFinite(P.y) || ring.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i].x, yi = ring[i].y, xj = ring[j].x, yj = ring[j].y;
+    if ((yi > P.y) !== (yj > P.y) && P.x < ((xj - xi) * (P.y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/* How far the polygon `points` reaches BEHIND the given edge, measured from `at` along the edge's
+ * OWN inward normal — the polygon analogue of a rect's `w`/`h` in `driveJunctionsOf`'s `perpDepth`
+ * (which curb-return radius must never exceed: a shallow field caps the return, a deep one doesn't).
+ * A true per-ray exit distance needs a full polygon raycast; this is a bounded, always-safe
+ * APPROXIMATION instead — the max projection of every vertex onto the inward normal, from `at` —
+ * which can only ever OVER-estimate depth on a concave ring (never under), so it can only ever
+ * under-clamp a return radius, never manufacture a return that reaches past the field's own edge on
+ * the far side (that would need the radius to exceed this by the concavity's own depth, which no
+ * realistic pad/parking-field shape does). */
+export function polygonDepthBehind(points, at, inwardN) {
+  const ring = points || [];
+  if (!at || !inwardN || ring.length < 3) return 0;
+  let maxProj = 0;
+  for (const p of ring) {
+    const proj = dot(sub(p, at), inwardN);
+    if (proj > maxProj) maxProj = proj;
+  }
+  return maxProj;
+}
+
 /* Curb / border stroke width in PIXELS for a true real-world curb of `curbFt` feet at the
  * current `ppf` (pixels-per-foot), floored to `minPx` so it stays visible when the true
  * width goes sub-pixel at overview zoom. NO ceiling — a 6" curb SHOULD read thicker as you
@@ -1361,6 +1477,50 @@ function convexHull(points) {
   lower.pop(); upper.pop();
   const hull = lower.concat(upper);
   return hull.length >= 3 ? hull : null;
+}
+
+/* B1645792 (×2) — `teeGeometry`'s wedge builder hulls the fillet ARC
+ * together with the straight points needed to bridge to the driveway's real flat-cap corner
+ * (`teeGeometry`'s own header explains why both are needed). A convex hull of that combined set is
+ * simple by construction — which is exactly why it was chosen — but it is free to draw its own
+ * boundary edge directly between two non-adjacent arc points (or skip the arc's interior almost
+ * entirely) whenever the bridging points reach farther out than the arc's own curve, which
+ * FLATTENS the curb return into a straight-sided wedge and can leave a real gap where the hull's
+ * shortcut edge doesn't reach all the way to a piece of pavement the arc's true curve would have
+ * covered — both measured defects in a live check of the shipped B1645792 fix.
+ *
+ * The fix restores the true arc onto the hull's own boundary AFTER the hull is computed, rather
+ * than reconstructing the reach logic: walk the hull's vertices, and wherever TWO of them are both
+ * points from the original `arc` (in increasing arc order — a hull can reorder nothing, so this can
+ * only mean the hull took a chord shortcut across the arc points in between), splice the missing
+ * arc points back in between them. This can only ever move the boundary INWARD along that stretch
+ * (from the chord onto the true curve, which the hull excluded for being strictly inside it) — never
+ * outward — so the result stays a simple polygon with no new self-intersection, and the reach/
+ * connectivity behaviour the hull was chosen for is completely unchanged everywhere else. */
+function restoreArcOnHull(hull, arc) {
+  if (!Array.isArray(hull) || !Array.isArray(arc) || arc.length < 2) return hull;
+  const TOL = 1e-6;
+  const arcIndexOf = (p) => arc.findIndex((a) => Math.abs(a.x - p.x) < TOL && Math.abs(a.y - p.y) < TOL);
+  const out = [];
+  let emittedUpTo = -1;                                    // highest arc index already placed in `out`
+  for (let k = 0; k < hull.length; k++) {
+    const v = hull[k];
+    const idx = arcIndexOf(v);
+    if (idx >= 0 && idx <= emittedUpTo) continue;          // this arc point already went out via a splice — skip
+                                                            // the duplicate rather than revisit the same point
+    out.push(v);
+    if (idx < 0 || idx >= arc.length - 1) continue;        // not an arc point, or already the arc's own last point
+    const next = hull[(k + 1) % hull.length];
+    const nextIdx = arcIndexOf(next);
+    // If the hull's very next vertex resumes the arc further along, fill only the gap between them
+    // (the ordinary case). Otherwise the hull's next vertex abandons the arc entirely (the flattened
+    // case) — splice in the WHOLE rest of the arc here, right after its first surviving point,
+    // rather than leaving it for a `tan2` that may or may not still be a hull vertex elsewhere.
+    const upTo = nextIdx > idx ? nextIdx : arc.length;
+    for (let m = idx + 1; m < upTo; m++) out.push({ x: arc[m].x, y: arc[m].y });
+    emittedUpTo = Math.max(emittedUpTo, upTo - 1);
+  }
+  return out;
 }
 
 /* ---- Seamless road-to-road weld cover (B960/NEW-2) ------------------------------------

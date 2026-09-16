@@ -5,6 +5,7 @@ import {
   findRoadConnect, roadsMergeCompatible, concatRoads, planRoadConnect, fixRoadRadii,
   teeGeometry, rectEdges, nearestRectEdge, weldCoverPolygon,
   dedupeRoadVertices, ROAD_VERTEX_COLLAPSE_FT,
+  polygonEdges, polygonContainsPoint, polygonDepthBehind,
 } from "../src/workspaces/site-planner/lib/roadGeometry.js";
 import {
   speedMinRadius, classMinRadius, classDefaultRadius, roadClassOf, ROAD_CLASS_SEEDS,
@@ -963,5 +964,64 @@ describe("dedupeRoadVertices — one-shot load cleanup (NEW-3)", () => {
 
   it("leaves a 2-point road untouched (no interior to collapse)", () => {
     expect(dedupeRoadVertices([{ x: 0, y: 0 }, { x: 0.2, y: 0 }], [{}, {}])).toBeNull();
+  });
+});
+
+// B1664512 NEW-2 — the polygon analogues of rectEdges/rectContainsPoint, so a free-drawn
+// polygon pad/parking field can be a drive-tee target the same way an axis-aligned rect is.
+describe("polygonEdges / polygonContainsPoint / polygonDepthBehind — polygon drive-target primitives", () => {
+  // A simple square, same footprint as a 100x100 rect centred at the origin.
+  const square = [{ x: -50, y: -50 }, { x: 50, y: -50 }, { x: 50, y: 50 }, { x: -50, y: 50 }];
+  // An L-shaped (concave) field.
+  const lShape = [
+    { x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }, { x: 50, y: 50 }, { x: 50, y: 100 }, { x: 0, y: 100 },
+  ];
+
+  it("produces 4 outward-normal edges for a square, matching rectEdges on the same footprint", () => {
+    const pe = polygonEdges(square);
+    expect(pe).toHaveLength(4);
+    const re = rectEdges(0, 0, 100, 100, 0);
+    // Order/start vertex can differ, so compare as sets of {mid, outN}.
+    const key = (e) => `${e.mid.x.toFixed(2)},${e.mid.y.toFixed(2)}|${e.outN.x.toFixed(2)},${e.outN.y.toFixed(2)}`;
+    const peKeys = new Set(pe.map(key)), reKeys = new Set(re.map(key));
+    expect(peKeys).toEqual(reKeys);
+  });
+
+  it("returns [] for a degenerate ring (fewer than 3 points)", () => {
+    expect(polygonEdges([{ x: 0, y: 0 }, { x: 1, y: 1 }])).toEqual([]);
+  });
+
+  it("nearestRectEdge works unchanged over polygon edges (it only reads {a,b,dir,outN,mid})", () => {
+    const pe = polygonEdges(square);
+    const hit = nearestRectEdge({ x: 0, y: -60 }, pe, { facingOnly: false });
+    expect(hit).toBeTruthy();
+    expect(hit.dist).toBeCloseTo(10, 6);
+    expect(hit.edge.outN.y).toBeCloseTo(-1, 6); // the bottom edge, facing away from the centroid
+  });
+
+  it("polygonContainsPoint matches point-in-square for a convex ring", () => {
+    expect(polygonContainsPoint({ x: 0, y: 0 }, square)).toBe(true);
+    expect(polygonContainsPoint({ x: 49, y: 49 }, square)).toBe(true);
+    expect(polygonContainsPoint({ x: 51, y: 0 }, square)).toBe(false);
+    expect(polygonContainsPoint({ x: 0, y: -51 }, square)).toBe(false);
+  });
+
+  it("polygonContainsPoint is correct on a CONCAVE ring, unlike a half-plane rect test", () => {
+    expect(polygonContainsPoint({ x: 25, y: 25 }, lShape)).toBe(true);   // inside the "foot"
+    expect(polygonContainsPoint({ x: 75, y: 25 }, lShape)).toBe(true);   // inside the "leg"
+    expect(polygonContainsPoint({ x: 75, y: 75 }, lShape)).toBe(false);  // inside the notch — NOT the field
+    expect(polygonContainsPoint({ x: 200, y: 200 }, lShape)).toBe(false);
+  });
+
+  it("polygonDepthBehind reports how far the ring reaches behind a point along a normal", () => {
+    // From the bottom edge's midpoint, looking INTO the square (inward normal is +y here).
+    const depth = polygonDepthBehind(square, { x: 0, y: -50 }, { x: 0, y: 1 });
+    expect(depth).toBeCloseTo(100, 6); // reaches to the far (top) edge at y=+50
+  });
+
+  it("polygonDepthBehind returns 0 for a degenerate ring or missing inputs", () => {
+    expect(polygonDepthBehind([], { x: 0, y: 0 }, { x: 0, y: 1 })).toBe(0);
+    expect(polygonDepthBehind(square, null, { x: 0, y: 1 })).toBe(0);
+    expect(polygonDepthBehind(square, { x: 0, y: 0 }, null)).toBe(0);
   });
 });
