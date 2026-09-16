@@ -1878,6 +1878,109 @@ const oldStored = await readBody(oldPage);
 ok("...and merely OPENING it did not rewrite it — the migration is a read, not a silent edit",
   !!(oldStored?.content || []).find((n) => n.type === "noteSketch")?.attrs?.outline);
 
+/* ════ 23b. B1683296 — A BLANK, NEVER-TYPED-INTO BOX MUST NEVER BE DESTROYED WITH NOTHING
+ * LEFT TO REPLACE IT (owner report: "double-click no longer works to create new text boxes").
+ *
+ * The owner's own diagnostic used untrusted, page-dispatched synthetic events (his environment
+ * could not deliver a trusted click that session) and measured: a pending, uncommitted box
+ * present, then a press elsewhere — node count 1 → 0, nothing created, nothing focused. This
+ * session reproduced it with REAL trusted `page.mouse` input and found the true mechanism: the
+ * discard (on the very first press, via focus leaving the label field) is unconditional, but
+ * the replacement used to be gated entirely on the browser recognising a native `dblclick` —
+ * two real, separately-dispatched presses 900ms apart never raise one, so the box vanished and
+ * nothing replaced it. Fixed by RELOCATING the untouched pending box to wherever the next press
+ * on the canvas lands, rather than discarding it and waiting for a `dblclick` that might not
+ * come; a single press is now already enough, and typing into it still commits normally. */
+await tb("notes-new-page").click();
+await page.waitForSelector('[data-testid="note-body"]', { timeout: 15000 });
+await page.waitForTimeout(900);
+const raceTree = await readTree();
+const racePage = raceTree.pages[raceTree.pages.length - 1].id;
+await tb("nt-box").click();                              // a blank, uncommitted, never-typed-into box
+await page.waitForSelector('[data-testid="note-sketch"]', { timeout: 15000 });
+await page.waitForTimeout(600);
+ok("a blank box is pending and focused (nt-box commits its empty box immediately, unlike the sketch's own +Box button — this is the exact path the report used)",
+  await page.locator('[data-testid="sketch-box-edit"]:visible').count() === 1
+  && await page.locator("[data-sketch-node]").count() === 1);
+
+const raceSpot = async (dy) => {
+  const c = await page.locator("[data-sketch-canvas]").boundingBox();
+  return { x: c.x + c.width / 2, y: Math.min(c.y + c.height - 20, c.y + 40 + dy) };
+};
+
+/* (c) a FAST native double-click elsewhere, box still blank: a box exists at the new point,
+ * still ready to type into — the count never nets to zero. */
+const s1 = await raceSpot(40);
+await page.mouse.dblclick(s1.x, s1.y);
+await page.waitForTimeout(400);
+ok("(c) a native double-click elsewhere relocates the pending box rather than losing it",
+  await page.locator("[data-sketch-node]").count() === 1
+  && await page.locator('[data-testid="sketch-box-edit"]:visible').count() === 1,
+  `${await page.locator("[data-sketch-node]").count()} box(es)`);
+await page.keyboard.type("Placed by dblclick", { delay: 8 });
+await page.keyboard.press("Escape");
+await settle();
+let raceNode = null;
+const raceSketch = async () => {
+  const doc = await readBody(racePage);
+  let found = null;
+  const walk = (n) => { if (!n || typeof n !== "object") return; if (n.type === "noteSketch") found = n; (n.content || []).forEach(walk); };
+  walk(doc);
+  return found;
+};
+raceNode = await raceSketch();
+ok("...and typing into it commits normally", raceNode?.attrs?.boxes?.[0]?.label === "Placed by dblclick",
+  JSON.stringify(raceNode?.attrs?.boxes));
+
+/* THE EXACT REPORTED RACE: two SEPARATE, SLOW presses — no native `dblclick` at all — while a
+ * fresh blank box is pending. Before the fix this discarded the box on press 1 and created
+ * nothing on press 2 (node count 1 → 0). */
+await tb("sketch-add-box").click();
+await page.waitForTimeout(300);
+const dblEvents = await page.evaluate(() => {
+  window.__dblCount = 0;
+  window.addEventListener("dblclick", () => { window.__dblCount += 1; }, true);
+  return true;
+});
+const s2 = await raceSpot(120);
+await page.mouse.move(s2.x, s2.y);
+await page.mouse.down();
+await page.mouse.up();
+await page.waitForTimeout(900);            // exceed any native double-click recognition window
+await page.mouse.down();
+await page.mouse.up();
+await page.waitForTimeout(400);
+const nativeDbl = await page.evaluate(() => window.__dblCount);
+ok("the slow two-press sequence really did not raise a native double-click (proves this is the race)",
+  nativeDbl === 0, `${nativeDbl} dblclick event(s)`);
+ok("⛔ THE EXACT REPORTED BUG: two slow presses, no native dblclick — the box is never lost",
+  await page.locator("[data-sketch-node]").count() >= 1
+  && await page.locator('[data-testid="sketch-box-edit"]:visible').count() === 1,
+  `${await page.locator("[data-sketch-node]").count()} box(es)`);
+await page.keyboard.type("Survived the slow race", { delay: 8 });
+await page.keyboard.press("Escape");
+await settle();
+raceNode = await raceSketch();
+ok("...and it is still typeable and commits correctly",
+  (raceNode?.attrs?.boxes || []).some((b) => b.label === "Survived the slow race"),
+  JSON.stringify(raceNode?.attrs?.boxes));
+
+/* (d) double-clicking ON an existing box still just opens its editor — no relocate, no new box. */
+const raceBoxId = raceNode.attrs.boxes[0].id;
+await page.keyboard.press("Escape");
+await settle();
+const raceBoxCountBefore = await page.locator("[data-sketch-node]").count();
+await page.mouse.dblclick(
+  (await page.locator(`[data-sketch-node="${raceBoxId}"] .planyr-sketch-box`).boundingBox()).x + 10,
+  (await page.locator(`[data-sketch-node="${raceBoxId}"] .planyr-sketch-box`).boundingBox()).y + 10,
+);
+await page.waitForTimeout(400);
+ok("(d) double-clicking ON an existing box opens its editor and creates nothing new",
+  await page.locator("[data-sketch-node]").count() === raceBoxCountBefore
+  && await page.evaluate(() => document.activeElement?.getAttribute("data-testid")) === "sketch-box-label");
+await page.keyboard.press("Escape");
+await settle();
+
 /* ════ 24. THE HEADER REMEMBERS THE PROJECT, AND THE RAIL NEVER LIES ABOUT ONE.
  *
  * Two owner reports from 2026-08-04, both about the same screen.

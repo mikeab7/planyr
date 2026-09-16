@@ -2348,11 +2348,20 @@ export default function NoteEditor({
     if (!editor || editor.isDestroyed) return;
     const el = e.target;
     if (!(el instanceof Element)) return;
-    if (el.closest("input, textarea, select, button, a")) return;
-    /* ⛔ ANY PRESS FORGETS AN ARMED CARET (NEW-8). Clicking a second spot re-arms there — the
-     * blank-space branch below does that on its way through — and clicking anything else simply
-     * drops it. Silently, in every case: nothing was created, so nothing has to be undone. */
+    /* ⛔ ANY PRESS FORGETS AN ARMED CARET (NEW-8), and that has to run BEFORE the
+     * input/textarea/etc bail below — not after (B1683298, found chasing an unrelated
+     * sketch-mode bug). A node view can embed its own real `<input>` inside the document (a
+     * sketch box's label field, e.g.) — pressing it IS a press inside the mat, and this
+     * function's own comment already says "ANY press forgets an armed caret," but the early
+     * return used to skip that call whenever the target happened to be one of these embedded
+     * controls, so a stray placement caret armed by an earlier, unrelated click on blank
+     * note-body space survived untouched. The very next character typed into that box was then
+     * hijacked by the window-level "first keystroke" handler above and created an unrelated
+     * anchored block instead — measured directly, reproducing exactly that. `cancelPendingPlace`
+     * is side-effect-free beyond clearing that one piece of state, so calling it unconditionally
+     * changes nothing about how the input itself handles the press. */
     cancelPendingPlace();
+    if (el.closest("input, textarea, select, button, a")) return;
 
     /* ⛔ A PRESS INSIDE AN ANCHORED BLOCK IS A PRESS ON CONTENT. This was the owner's ORIGINAL
      * complaint — *"it keeps wanting to just go to wherever there is text on the left"* — and
