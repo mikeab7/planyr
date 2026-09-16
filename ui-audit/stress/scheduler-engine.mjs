@@ -999,6 +999,69 @@ export const countChangedTaskRows = (before, after) => {
   } catch { return 0; }
 };
 
+// NEW-1 (owner follow-on to B1696640/B1696641/B1696642, 2026-09-16) — the schedule-ownership model
+// (which Planyr project a schedule belongs to) plus the notice-label helpers built on it. VERBATIM
+// mirror of public/sequence/index.html.
+export const ORG_OWNER_KEY = "__org__";
+export const OWNER_KIND_SITE = "site";
+export const OWNER_KIND_ORG = "org";
+export const ORG_OWNER_LABEL = "Organization";
+export function ownerOf(schedule) {
+  const s = schedule && typeof schedule === "object" ? schedule : {};
+  const siteId = s.linkedSiteId != null && s.linkedSiteId !== "" ? s.linkedSiteId : null;
+  const siteName = s.linkedSiteName != null && s.linkedSiteName !== "" ? s.linkedSiteName : null;
+  if (s.ownerKind === OWNER_KIND_ORG) return { kind: OWNER_KIND_ORG, siteId: null, siteName: null, key: ORG_OWNER_KEY };
+  if (s.ownerKind === OWNER_KIND_SITE && siteId != null) return { kind: OWNER_KIND_SITE, siteId, siteName, key: siteId };
+  if (s.ownerKind == null && siteId != null) return { kind: OWNER_KIND_SITE, siteId, siteName, key: siteId };
+  return { kind: OWNER_KIND_ORG, siteId: null, siteName: null, key: ORG_OWNER_KEY };
+}
+
+// "<Project> / <Schedule>" — the disambiguating label for a notice naming a row possibly outside
+// the schedule on screen (two Planyr projects can each hold a schedule named "Master Schedule").
+export function crossScheduleLabel(schedule) {
+  const name = (schedule && schedule.name) || "Untitled schedule";
+  const owner = ownerOf(schedule);
+  const left = owner.kind === OWNER_KIND_ORG ? ORG_OWNER_LABEL : (owner.siteName || "an unnamed project");
+  return `${left} / ${name}`;
+}
+
+// The prefix a notice prints before "#<id> "<name>"": nothing for a row already on screen, else
+// crossScheduleLabel + a trailing space. String-compares pid/currentPid (object-key vs numeric id).
+export function scheduleRowPrefix(projects, pid, currentPid) {
+  if (pid == null || String(pid) === String(currentPid)) return "";
+  const schedule = projects && projects[pid];
+  if (!schedule) return "";
+  return crossScheduleLabel(schedule) + " ";
+}
+
+// Which schedules (pids) a merge actually touched, for the "Merged in changes saved elsewhere" toast.
+export const changedProjectIds = (before, after) => {
+  try {
+    const bp = (before && before.projects) || {};
+    const ap = (after && after.projects) || {};
+    const out = [];
+    new Set([...Object.keys(bp), ...Object.keys(ap)]).forEach(pid => {
+      const bt = {}; (bp[pid]?.tasks || []).forEach(t => { if (t) bt[t.id] = t; });
+      const at = {}; (ap[pid]?.tasks || []).forEach(t => { if (t) at[t.id] = t; });
+      let changed = false;
+      new Set([...Object.keys(bt), ...Object.keys(at)]).forEach(id => {
+        if (!_mEq(bt[id], at[id])) changed = true;
+      });
+      if (changed) out.push(pid);
+    });
+    return out;
+  } catch { return []; }
+};
+
+// The short "where" phrase for the merge toast.
+export function mergeLocationPhrase(projects, changedPids, currentPid) {
+  if (!changedPids || !changedPids.length) return "";
+  if (changedPids.length === 1 && String(changedPids[0]) === String(currentPid)) return "in this schedule";
+  const shown = changedPids.slice(0, 2).map(pid => crossScheduleLabel((projects && projects[pid]) || {}));
+  const extra = changedPids.length - shown.length;
+  return "in " + shown.join(", ") + (extra > 0 ? `, +${extra} more` : "");
+}
+
 // B835 (recurrence ×2) — the scheduling-input gate updateTask uses to decide whether an edit must re-run
 // cascadeDates + rollupParentDates before persist. VERBATIM mirror of public/sequence/index.html.
 // A typed duration edit commits {durValue,durUnit} (grid + master-view cells) and an unpin/unlock

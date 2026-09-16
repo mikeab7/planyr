@@ -3838,3 +3838,123 @@ describe("NEW-3 — the merge/stale banners say what's known, never an unknowabl
     expect(src).toMatch(/A newer version was saved elsewhere/);
   });
 });
+
+// ── NEW-1 (owner follow-on to B1696640/B1696641/B1696642, 2026-09-16) ───────────────────────────
+// "also it says master schedule so i dont even know which project this is attached to" — a notice
+// naming a row's schedule by NAME ALONE is still ambiguous, because two different Planyr projects
+// can each hold a schedule named "Master Schedule" (the owner's own live account does exactly
+// this). These helpers print "<Project> / <Schedule>" for a row outside the schedule on screen,
+// and nothing for a row already in view.
+describe("crossScheduleLabel — \"<Project> / <Schedule>\", never a bare (ambiguous) schedule name", () => {
+  it("a site-owned schedule with a cached project name", () => {
+    expect(E.crossScheduleLabel({ name: "Master Schedule", ownerKind: "site", linkedSiteId: "s1", linkedSiteName: "Goose Creek" }))
+      .toBe("Goose Creek / Master Schedule");
+  });
+  it("an org-owned schedule always gets the fixed organization label", () => {
+    expect(E.crossScheduleLabel({ name: "Land Sale", ownerKind: "org" })).toBe("Organization / Land Sale");
+  });
+  it("a site-owned schedule whose cached name hasn't caught up yet never falls back to a bare name", () => {
+    const label = E.crossScheduleLabel({ name: "Master Schedule", ownerKind: "site", linkedSiteId: "s1", linkedSiteName: null });
+    expect(label).not.toBe("Master Schedule");
+    expect(label.endsWith("/ Master Schedule")).toBe(true);
+  });
+  it("a missing/junk schedule still returns a label, never throws", () => {
+    expect(() => E.crossScheduleLabel(null)).not.toThrow();
+    expect(E.crossScheduleLabel(null)).toContain("Untitled schedule");
+  });
+});
+
+describe("scheduleRowPrefix — drops the prefix ONLY for the schedule already on screen", () => {
+  const projects = {
+    1: { id: 1, name: "Master Schedule", ownerKind: "site", linkedSiteId: "s1", linkedSiteName: "Goose Creek" },
+    2: { id: 2, name: "Master Schedule", ownerKind: "site", linkedSiteId: "s2", linkedSiteName: "Grand Port" },
+  };
+  it("a row in the CURRENT schedule gets no prefix at all", () => {
+    expect(E.scheduleRowPrefix(projects, 1, 1)).toBe("");
+  });
+  it("string pid vs numeric currentPid (Object.keys vs .aPid) still match — no false 'elsewhere'", () => {
+    expect(E.scheduleRowPrefix(projects, "1", 1)).toBe("");
+    expect(E.scheduleRowPrefix(projects, 1, "1")).toBe("");
+  });
+  it("a row in a DIFFERENT schedule gets the full disambiguating prefix, even though both are named the same", () => {
+    expect(E.scheduleRowPrefix(projects, 2, 1)).toBe("Grand Port / Master Schedule ");
+    expect(E.scheduleRowPrefix(projects, 1, 2)).toBe("Goose Creek / Master Schedule ");
+  });
+  it("a pid with no resolvable schedule degrades to no prefix rather than throwing", () => {
+    expect(() => E.scheduleRowPrefix(projects, 999, 1)).not.toThrow();
+    expect(E.scheduleRowPrefix(projects, 999, 1)).toBe("");
+  });
+});
+
+describe("changedProjectIds — which schedules a merge actually touched", () => {
+  const doc = (projects) => ({ projects });
+  it("no changes → empty", () => {
+    const a = doc({ 1: { tasks: [{ id: 1, name: "x" }] } });
+    expect(E.changedProjectIds(a, a)).toEqual([]);
+  });
+  it("names only the pid(s) that actually changed, not every pid in the document", () => {
+    const before = doc({ 1: { tasks: [{ id: 1, name: "x" }] }, 2: { tasks: [{ id: 9, name: "z" }] } });
+    const after = doc({ 1: { tasks: [{ id: 1, name: "x" }] }, 2: { tasks: [{ id: 9, name: "z-edited" }] } });
+    expect(E.changedProjectIds(before, after)).toEqual(["2"]);
+  });
+  it("multiple changed schedules are all reported", () => {
+    const before = doc({ 1: { tasks: [{ id: 1, name: "x" }] }, 2: { tasks: [{ id: 9, name: "z" }] } });
+    const after = doc({ 1: { tasks: [{ id: 1, name: "x-edited" }] }, 2: { tasks: [{ id: 9, name: "z-edited" }] } });
+    expect(E.changedProjectIds(before, after).sort()).toEqual(["1", "2"]);
+  });
+  it("never throws on junk input", () => {
+    expect(() => E.changedProjectIds(null, undefined)).not.toThrow();
+    expect(E.changedProjectIds(null, undefined)).toEqual([]);
+  });
+});
+
+describe("mergeLocationPhrase — the merge toast's \"where\", never silent about which schedule", () => {
+  const projects = {
+    1: { id: 1, name: "Master Schedule", ownerKind: "site", linkedSiteId: "s1", linkedSiteName: "Goose Creek" },
+    2: { id: 2, name: "Master Schedule", ownerKind: "site", linkedSiteId: "s2", linkedSiteName: "Grand Port" },
+    3: { id: 3, name: "Land Sale", ownerKind: "org" },
+  };
+  it("nothing changed → empty phrase", () => {
+    expect(E.mergeLocationPhrase(projects, [], 1)).toBe("");
+  });
+  it("the only changed schedule IS the one on screen → short, still says something", () => {
+    expect(E.mergeLocationPhrase(projects, ["1"], 1)).toBe("in this schedule");
+  });
+  it("the changed schedule is a DIFFERENT, same-named schedule → full disambiguating label, never bare", () => {
+    expect(E.mergeLocationPhrase(projects, ["2"], 1)).toBe("in Grand Port / Master Schedule");
+  });
+  it("multiple changed schedules are named, capped with a '+N more'", () => {
+    expect(E.mergeLocationPhrase(projects, ["1", "2"], 3)).toBe("in Goose Creek / Master Schedule, Grand Port / Master Schedule");
+    expect(E.mergeLocationPhrase(projects, ["1", "2", "3"], 1)).toBe("in Goose Creek / Master Schedule, Grand Port / Master Schedule, +1 more");
+  });
+});
+
+describe("NEW-1 — the cross-schedule label helpers are wired into every notice that names a row, and mirrored", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+
+  it("crossScheduleLabel/scheduleRowPrefix/changedProjectIds/mergeLocationPhrase are defined in both the app source and the engine mirror", () => {
+    for (const fn of ["crossScheduleLabel", "scheduleRowPrefix", "changedProjectIds", "mergeLocationPhrase"]) {
+      expect(src, `${fn} missing from public/sequence/index.html`).toMatch(new RegExp("(function|const) " + fn));
+      expect(mjs, `${fn} missing from the engine mirror`).toContain("export " + (fn === "crossScheduleLabel" || fn === "scheduleRowPrefix" || fn === "mergeLocationPhrase" ? "function " : "const ") + fn);
+    }
+  });
+  it("the ancestor-predecessor notice prints the disambiguating prefix in front of every named row, not just the schedule's own name", () => {
+    expect(src).toMatch(/\{scheduleRowPrefix\(data\.projects, t\.pid, data\.aPid\)\}#\{t\.id\} "\{t\.name\}"/);
+  });
+  it("the drift notice prints the disambiguating prefix too", () => {
+    expect(src).toMatch(/\{scheduleRowPrefix\(data\.projects, t\.pid, data\.aPid\)\}#\{t\.id\} "\{t\.name\}" \{fmtD\(t\.from\)/);
+  });
+  it("the locked-finish (B616) banner is untouched — it's already scoped to the active project, nothing to disambiguate", () => {
+    expect(src).toMatch(/onClick=\{\(\) => goToTask\(data\.aPid, t\.id\)\}/);
+  });
+  it("the merge toast names WHERE the merge landed, not just how many rows", () => {
+    expect(src).toMatch(/const changedPids = changedProjectIds\(anc, merged\);/);
+    expect(src).toMatch(/const where = mergeLocationPhrase\(merged\.projects, changedPids, dataRef\.current\?\.aPid\);/);
+    expect(src).toMatch(/\$\{changedRows\} task\$\{changedRows===1\?"":"s"\} updated\$\{where \? " " \+ where : ""\}/);
+  });
+  it("the 'newer version saved elsewhere' banner names the CURRENT tab's own schedule (never dropped — it's a standalone banner, not a per-row notice)", () => {
+    expect(src).toMatch(/Reload to load the latest version of \$\{crossScheduleLabel\(data\.projects\?\.\[data\.aPid\]\)\}\./);
+    expect(src).toMatch(/You have unsaved changes in \$\{crossScheduleLabel\(data\.projects\?\.\[data\.aPid\]\)\} -- reloading replaces them/);
+  });
+});
