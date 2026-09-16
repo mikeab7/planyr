@@ -173,6 +173,7 @@ import { seedTemplateRecords } from "./notesTemplates.js";
 import { countEmptyAnchors, pruneEmptyAnchors } from "./notesAnchorPrune.js";
 import { relativeTime } from "./notesTime.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
+import { mergeNoteDocs } from "./notesBlockMerge.js";
 
 /* The key strings live in `notesKeys.js` — a leaf with no dependencies — so the ONE other
  * module allowed to touch these keys (`notesProjectLink.js`, which answers "what is this
@@ -838,6 +839,8 @@ export async function purgePages(pageIds) {
   // A purged page's HISTORY goes with it (NEW-3). "Delete forever" that left thirty
   // snapshots of the deleted note on the device would be a bin with a hole in it.
   await deletePageVersions(ids);
+  // And its recorded MERGE BASE (NEW-1) — a dead page has nothing left to merge.
+  await forgetMergeBases(ids);
   if (scoped()) {
     for (const id of ids) sync.pages[id] = { rev: sync.pages[id]?.rev ?? null, dirty: false, purged: true, auto: false };
     for (const id of imageIds) sync.images[id] = { up: false, purged: true };
@@ -1129,13 +1132,23 @@ function emitPagesChanged(pageIds) {
   for (const fn of pageListeners) { try { fn(ids); } catch (_) { /* a bad listener must not mute the rest */ } }
 }
 
-/** ⛔ THE SAME ANNOUNCEMENT WITHOUT THE DIRTY GUARD — and it has exactly one legitimate
- *  caller shape (NEW-4). `emitPagesChanged` skips a page this window has unflushed edits
- *  on, because a remount would discard them: correct for a change arriving from OUTSIDE
- *  (a sibling window, the cloud seed), where we cannot know what the editor holds. This
- *  one is for a change THIS module just made itself, to a page it has already established
- *  no open editor is holding (`openDoc` is checked first). Never call it for a write whose
- *  page might be on screen. */
+/** ⛔ THE SAME ANNOUNCEMENT WITHOUT THE DIRTY GUARD — TWO legitimate caller shapes now.
+ *  `emitPagesChanged` skips a page this window has unflushed edits on, because a remount
+ *  would discard them: correct for a change arriving from OUTSIDE (a sibling window, the
+ *  cloud seed) where the write is a WHOLESALE REPLACEMENT and we cannot know what the
+ *  editor holds.
+ *   (NEW-4) a change THIS module just made itself, to a page it has already established
+ *     no open editor is holding (`openDoc` is checked first).
+ *   (NEW-1) `resolveDivergence`'s per-paragraph merge. Its write is NOT a wholesale
+ *     replacement — it is built FROM this window's own last-read storage (`readPage`), so it
+ *     already carries everything local had, plus whatever the other side added that local
+ *     never touched. A remount here cannot lose local content the way adopting a raw remote
+ *     copy could; the residual risk is only the narrow async gap between reading that
+ *     snapshot and writing the merge result, and `resolveDivergence` snapshots the pre-merge
+ *     state to Version History before writing specifically so that gap is recoverable rather
+ *     than silent. The page staying `dirty` afterward (it is still owed to the cloud) is
+ *     exactly why `emitPagesChanged`'s guard would wrongly swallow this announcement — the
+ *     guard is testing the wrong fact for a merge that already accounts for local's content. */
 function announcePages(pageIds) {
   const ids = (pageIds || []).filter(Boolean);
   if (!ids.length) return;
@@ -1151,6 +1164,51 @@ function emitConflicts() {
   for (const fn of conflictListeners) { try { fn(ids); } catch (_) { /* a bad listener must not mute the rest */ } }
 }
 
+/* ---- the merge base (NEW-1, the per-paragraph merge) -----------------------------------
+ *
+ * ONE document per page: the last copy this device and the server are BOTH known to have
+ * agreed on. `lib/notesBlockMerge.js`'s 3-way merge needs a real shared ancestor to tell
+ * "which side touched this block" from "which side's copy is simply the untouched original"
+ * — see that file's own header for why a base cannot be guessed from just the two current
+ * copies. This is recorded at every point BELOW where local and server are PROVEN identical
+ * (never guessed, never derived from a timestamp): a fresh adopt, a successful push, either
+ * side of a resolved conflict, and settling a divergence quietly. Lives in IndexedDB
+ * (`notesImageDb.js`'s `mergeBase` store) — TIER-BY-REBUILDABILITY: it is a CACHE, not user
+ * data. Losing it costs nothing but the ability to merge silently; every call site here
+ * degrades to the existing whole-document pick-one banner rather than treating a failed
+ * read/write as an error. */
+const mergeBaseKey = (pageId, s = scope) => `${s}:${pageId}`;
+
+async function recordMergeBase(pageId, doc, rev) {
+  if (!pageId || doc == null) return;
+  try {
+    const db = await imageDb();
+    if (!db.notesIdbAvailable()) return;
+    await db.idbPutMergeBase({ key: mergeBaseKey(pageId), scope, pageId, doc, rev: Number.isFinite(rev) ? rev : null });
+  } catch (_) { /* the merge base is a cache, not data — a miss just means no silent merge next time */ }
+}
+
+async function mergeBaseFor(pageId) {
+  try {
+    const db = await imageDb();
+    if (!db.notesIdbAvailable()) return null;
+    const rec = await db.idbGetMergeBase(mergeBaseKey(pageId));
+    return rec?.doc ?? null;
+  } catch (_) { return null; }
+}
+
+/** Drop a page's recorded merge base — called wherever its body is destroyed for real, so a
+ *  purged page's stale base cannot outlive it (harmless either way — a miss just means no
+ *  merge is attempted next time — but a dead base is dead weight). */
+async function forgetMergeBases(pageIds) {
+  const ids = (pageIds || []).filter(Boolean);
+  if (!ids.length) return;
+  try {
+    const db = await imageDb();
+    await db.idbDeleteMergeBases(ids.map((id) => mergeBaseKey(id)));
+  } catch (_) { /* the merge base is a cache, not data — a leaked one costs nothing but tidiness */ }
+}
+
 /* ⛔ A NO-OP CONFLICT MUST NEVER PROMPT (B1391).
  *
  * Both paths that can lose a revision race — the seed's plan and a refused push — come
@@ -1161,12 +1219,17 @@ function emitConflicts() {
  *                      write locally (the text is already the same) and nothing to say.
  *   • nothing-local  → this device has no body or an empty one; take the row's, and tell
  *                      the workspace so an editor open on that page re-reads it.
- *   • diverged       → return false. The caller names it, and the user chooses.
+ *   • diverged       → return false. The caller names it, and the user chooses — UNLESS
+ *                      `resolveDivergence` (below) can narrow it to a real per-paragraph
+ *                      disagreement or resolve it outright. That is a SEPARATE function,
+ *                      deliberately: this one's contract (identical/nothing-local/litter-only
+ *                      settle quietly, everything else returns false) is unchanged and still
+ *                      covers every case this file's own tests were written against.
  *
  * Returns true when the page was settled without a word. A settled page is also REMOVED
  * from any existing conflict entry: a conflict that has since become a non-conflict must
  * not leave a bar on screen with nothing behind it. */
-function settleQuietly(pageId, row) {
+async function settleQuietly(pageId, row) {
   if (!judgeConflictFn || !row || row.purged) return false;
   const localDoc = readPage(pageId);
   const verdict = judgeConflictFn({ localDoc, serverDoc: row.doc });
@@ -1192,6 +1255,61 @@ function settleQuietly(pageId, row) {
   }
   sync.pages[pageId] = { rev: row.rev, dirty: false, purged: false, auto: false };
   conflicts.delete(pageId);
+  await recordMergeBase(pageId, row.doc, row.rev);
+  return true;
+}
+
+/* ⛔ NEW-1 — THE PER-PARAGRAPH MERGE, ATTEMPTED BEFORE A REAL DIVERGENCE BECOMES A BANNER.
+ *
+ * Reached only when `settleQuietly` has already said the two copies genuinely differ. This
+ * is a SEPARATE function, not a branch inside `settleQuietly`, because it can fail to help
+ * (no recorded base — the ordinary state for a page that has never resolved a conflict
+ * since this feature shipped) and the caller's fallback in that case is the untouched,
+ * pre-existing whole-document banner — `resolveDivergence` returning false must look
+ * IDENTICAL to `settleQuietly` returning false always did.
+ *
+ * Two outcomes when a base IS available:
+ *   • CLEAN  — nothing overlaps; both sides' edits fold into one document with no word to
+ *     anybody. It becomes this device's new dirty body, guarded on the server's rev, and a
+ *     push is scheduled immediately (same shape as `settleQuietly`'s litter-only path).
+ *   • NARROWED CONFLICT — something genuinely overlaps. The conflict entry is still raised
+ *     (nothing here suppresses a real disagreement) but `serverDoc` becomes `theirsDoc`
+ *     rather than the server's raw row, and this device's own copy becomes `mineDoc` —
+ *     both already carrying every OTHER edit from both sides, so `ConflictReview`'s existing
+ *     redline naturally shows only the words actually in dispute instead of the whole note.
+ *
+ * Either way, a snapshot of what THIS device held a moment before is taken first
+ * (`snapshotPage`, `reason:"before-merge"`) — "a live check runs... and the session says
+ * exactly what was touched" / the owner's own "usable pre-merge revision" ask — best-effort,
+ * because a snapshot failure must not block a merge that is otherwise perfectly safe. */
+async function resolveDivergence(pageId, row) {
+  if (!row) return false;
+  const base = await mergeBaseFor(pageId);
+  if (base == null) return false;
+  const localDoc = readPage(pageId);
+  const result = mergeNoteDocs({ baseDoc: base, localDoc, serverDoc: row.doc });
+  if (!result) return false;
+
+  await snapshotPage(pageId, localDoc, { reason: "before-merge", pinned: true, force: true });
+
+  if (result.clean) {
+    if (!writePageLocal(pageId, result.mergedDoc)) return false;   // LOUD-FAILURE
+    sync.pages[pageId] = { rev: row.rev, dirty: true, purged: false, auto: false };
+    conflicts.delete(pageId);
+    // ⛔ `announcePages`, not `emitPagesChanged` — see that function's own header (NEW-1). The
+    // page is still `dirty` (owed to the cloud), which would make the ordinary guard swallow
+    // this announcement even though the merged content already carries everything local had.
+    announcePages([pageId]);
+    schedulePush();
+    return true;
+  }
+
+  // A real disagreement remains. `sync.pages[pageId]` is left exactly as `settleQuietly`
+  // leaves it on any other real conflict — still dirty against its old base — because the
+  // eventual resolve (`resolveNotesConflict`) is what advances it, not this narrowing step.
+  if (!writePageLocal(pageId, result.mineDoc)) return false;
+  announcePages([pageId]);
+  conflicts.set(pageId, { serverDoc: result.theirsDoc, serverRev: row.rev, serverUpdatedAt: row.updatedAt ?? null, at: Date.now() });
   return true;
 }
 
@@ -1217,15 +1335,20 @@ export async function resolveNotesConflict(pageId, choice) {
     emitPagesChanged([pageId]);   // the editor must show the copy that was just chosen
     emitConflicts();
     noteSynced();
+    // NEW-1: this device and the server are now PROVEN identical — record it as the merge
+    // base so the next divergence on this page can be resolved per-paragraph again.
+    await recordMergeBase(pageId, entry.serverDoc, entry.serverRev);
     return { ok: true };
   }
-  const r = await c.forcePage(client(), pageId, readPage(pageId));
+  const mineDoc = readPage(pageId);
+  const r = await c.forcePage(client(), pageId, mineDoc);
   if (!r.ok) return { ok: false, error: reportSyncFailure(r.error) || r.error || "the push was refused" };
   sync.pages[pageId] = { rev: r.rev, dirty: false, purged: false, auto: false };
   saveSyncState();
   conflicts.delete(pageId);
   emitConflicts();
   noteSynced();
+  await recordMergeBase(pageId, mineDoc, r.rev);
   return { ok: true };
 }
 
@@ -1446,6 +1569,7 @@ async function seed({ full }) {
       if (imgs.length) await deleteNoteImages(imgs);
       for (const id of plan.purged) sync.pages[id] = { rev: sync.pages[id]?.rev ?? null, dirty: false, purged: true, auto: false };
       for (const id of imgs) sync.images[id] = { up: false, purged: true };
+      await forgetMergeBases(plan.purged);   // NEW-1: nothing left here to merge
     }
 
     /* ⛔ AND THE ZOMBIES GO WITH THEM. A bin entry every one of whose pages the SERVER says is
@@ -1488,7 +1612,15 @@ async function seed({ full }) {
       for (const id of plan.adopt) {
         const row = got.pages[id];
         if (!row || row.purged) continue;
-        if (writePageLocal(id, row.doc)) { sync.pages[id] = { rev: row.rev, dirty: false, purged: false, auto: false }; adopted.push(id); }
+        if (writePageLocal(id, row.doc)) {
+          sync.pages[id] = { rev: row.rev, dirty: false, purged: false, auto: false };
+          adopted.push(id);
+          // ⛔ NEW-1 — this device and the server are PROVEN identical right here (we just
+          // wrote the server's own row), which is exactly the fact the per-paragraph merge
+          // needs a base to be. Best-effort: a failed write here costs nothing but a future
+          // merge attempt, never a banner.
+          await recordMergeBase(id, row.doc, row.rev);
+        }
       }
       // An adopted body under an OPEN editor is the self-race, not a background detail —
       // the workspace re-reads it rather than letting a stale document commit cleanly.
@@ -1499,7 +1631,12 @@ async function seed({ full }) {
         if (!row) continue;
         // A MOVED REVISION IS NOT YET A DISAGREEMENT (B1391). Only a real divergence may
         // interrupt; identical text, or nothing here to lose, reconciles in silence.
-        if (settleQuietly(id, row)) { changed = true; continue; }
+        if (await settleQuietly(id, row)) { changed = true; continue; }
+        // ⛔ NEW-1 — a genuine divergence tries the per-paragraph merge before falling back to
+        // the whole-document banner. `resolveDivergence` returns false in EXACTLY the cases
+        // the old code below already handled (no base recorded, or the merge itself declined),
+        // so an untouched page sees no behaviour change at all.
+        if (await resolveDivergence(id, row)) { changed = true; continue; }
         conflicts.set(id, { serverDoc: row.doc, serverRev: row.rev, serverUpdatedAt: row.updatedAt ?? null, at: Date.now() });
         changed = true;
       }
@@ -1581,14 +1718,21 @@ async function pushPending() {
     const doc = readPage(id);
     if (doc == null) { sync.pages[id] = { ...sync.pages[id], dirty: false, auto: false }; continue; }
     const r = await c.pushPage(client(), id, doc, sync.pages[id].rev);
-    if (r.ok) { sync.pages[id] = { rev: r.rev, dirty: false, purged: false, auto: false }; continue; }
+    if (r.ok) {
+      sync.pages[id] = { rev: r.rev, dirty: false, purged: false, auto: false };
+      await recordMergeBase(id, doc, r.rev);   // NEW-1: this device and the server just agreed
+      continue;
+    }
     if (r.conflict) {
       const got = await c.fetchPages(client(), [id]);
       const row = got.pages?.[id];
       if (row?.purged) { deletePages([id]); sync.pages[id] = { rev: row.rev, dirty: false, purged: true, auto: false }; continue; }
       // THE REFUSAL IS NOT THE BUG REPORT (B1391). The guard did its job — now find out
       // whether the two copies actually differ before saying a word to anyone.
-      if (row && settleQuietly(id, row)) { emitConflicts(); continue; }
+      if (row && await settleQuietly(id, row)) { emitConflicts(); continue; }
+      // ⛔ NEW-1 — same fallback order as the seed's own conflicts loop: try the per-paragraph
+      // merge before raising the whole-document banner.
+      if (row && await resolveDivergence(id, row)) { emitConflicts(); continue; }
       /* ⛔ NEW-1/B1055088 — A HOUSEKEEPING-ONLY WRITE NEVER SURFACES A CONFLICT, EVEN ON A RACE.
        * `planPageSeed` already keeps an `auto`-dirty page out of `plan.conflicts` at PLAN time;
        * this is the narrow race where the row moved between that plan and this push actually

@@ -19,6 +19,7 @@
  * to prove this suite goes red on it, with the exact fingerprint the owner found by hand.
  */
 import "fake-indexeddb/auto";
+import { IDBFactory } from "fake-indexeddb";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { adoptDeletedOrphans, copyPageWithin, migrate, pageProjectIndex, allPageIds, addPage } from "../src/workspaces/notes/lib/notesModel.js";
@@ -140,8 +141,19 @@ function clientFor(server) {
 
 /* ---- a client window --------------------------------------------------------------------
  *
- * Its own localStorage (two windows of one browser share storage; two COMPUTERS do not, and
- * the cross-device case is the stricter one), its own module instance, one shared server. */
+ * Its own localStorage AND its own IndexedDB (two windows of one browser share BOTH; two
+ * COMPUTERS do not, and the cross-device case is the stricter one — the case every test in
+ * this file actually models), its own module instance, one shared server.
+ *
+ * ⛔ INDEXEDDB IS ISOLATED PER WINDOW TOO (NEW-1) — IT WAS NOT, AND THAT WAS A HOLE IN THIS
+ * FIXTURE, NOT JUST IN A FEATURE. `fake-indexeddb/auto` installs ONE global `indexedDB`, so
+ * before this fix every "computer" opened by this helper silently shared one fake database —
+ * invisible until `notesBlockMerge.js`'s merge base (stored in IndexedDB, keyed only by
+ * account scope + page id, exactly as it would be on one real device) started reading a
+ * SIBLING "computer"'s writes as its own. Two real, separate computers never share an
+ * IndexedDB at all, so this was purely a fixture gap — but it is exactly the kind the notes
+ * carry-forward doc's "the one fixture that finds real bugs" principle exists to catch: a
+ * shortcut in the test's own isolation reads as a product defect until the test is fixed. */
 async function openWindow(server) {
   const mem = new Map();
   const localStorage = {
@@ -152,6 +164,8 @@ async function openWindow(server) {
     removeItem: (k) => { mem.delete(k); },
     clear: () => mem.clear(),
   };
+  const indexedDB = new IDBFactory();
+  globalThis.indexedDB = indexedDB;
   globalThis.window = {
     localStorage,
     addEventListener() {}, removeEventListener() {},
@@ -164,12 +178,12 @@ async function openWindow(server) {
   vi.doMock("../src/workspaces/site-planner/lib/supabase.js", () => ({ supabase: clientFor(server) }));
   const store = await import("../src/workspaces/notes/lib/notesStore.js");
   const scan = await import("../src/workspaces/notes/lib/notesScan.js");
-  return { store: { ...store, ...scan }, mem, localStorage };
+  return { store: { ...store, ...scan }, mem, localStorage, indexedDB };
 }
 
 /** Point a freshly-opened window's globals back at its own storage — two windows exist at
- *  once in these tests, and only one `globalThis.window` does. */
-const focus = (w) => { globalThis.window.localStorage = w.localStorage; };
+ *  once in these tests, and only one `globalThis.window`/`globalThis.indexedDB` does. */
+const focus = (w) => { globalThis.window.localStorage = w.localStorage; globalThis.indexedDB = w.indexedDB; };
 
 const readTree = (w) => migrate(w.store.readTreeRaw());
 const projectsOf = (tree) => Object.fromEntries(pageProjectIndex(tree));
@@ -615,6 +629,113 @@ describe("a housekeeping write never raises a conflict (NEW-1/B1055088)", () => 
 
     // This is the genuine case the feature must never suppress: two real edits, named.
     expect(A.store.notesConflicts()).toEqual(["gp_coord"]);
+  });
+});
+
+/* ⛔ NEW-1 — THE PER-PARAGRAPH MERGE, END TO END THROUGH THE REAL STORE. Everything above this
+ * point proves the WHOLE-DOCUMENT conflict system (unchanged); these prove the new narrowing
+ * step in front of it — `settleQuietly` still says "diverged", and `resolveDivergence` (in
+ * `notesStore.js`) is what tries a per-paragraph merge before a real banner is raised. */
+describe("the per-paragraph merge (NEW-1) — different paragraphs land silently, same paragraph still asks", () => {
+  it("two clients editing DIFFERENT paragraphs of the same note both land, with no conflict at all", async () => {
+    const server = fakeServer();
+    const base = doc("Utility Facilities", "Water Authority", "Sanitary — Discharge Permit");
+
+    const A = await openWindow(server);
+    focus(A);
+    A.store.setNotesScope(UID);
+    A.store.writeTree(seedTree());
+    A.store.writePage("gp_coord", base);
+    A.store.writePage("co_page1", doc("Weld County — dead pursuit"));
+    await A.store.startNotesSync({});   // A's merge base for gp_coord is now recorded: `base`
+
+    const B = await openWindow(server);
+    focus(B);
+    B.store.setNotesScope(UID);
+    await B.store.startNotesSync({});   // B adopts the same row -> B's own merge base is `base` too
+    expect(B.store.readPage("gp_coord")).toEqual(base);
+
+    // Two DIFFERENT paragraphs, two DIFFERENT windows.
+    B.store.writePage("gp_coord", doc("Utility Facilities", "Water Authority", "Sanitary — Discharge Permit — filed"));
+    focus(A);
+    A.store.writePage("gp_coord", doc("Utility Facilities — MUD 377", "Water Authority", "Sanitary — Discharge Permit"));
+    await A.store.refreshNotesSync();
+    expect(server.pages.get("gp_coord").doc).toEqual(
+      doc("Utility Facilities — MUD 377", "Water Authority", "Sanitary — Discharge Permit"),
+    );
+
+    // B's push is refused (the server moved) — and the OLD code would show a banner here.
+    // The NEW code notices the two edits do not overlap and folds both in, silently.
+    focus(B);
+    await B.store.refreshNotesSync();
+    expect(B.store.notesConflicts()).toEqual([]);
+    const merged = doc("Utility Facilities — MUD 377", "Water Authority", "Sanitary — Discharge Permit — filed");
+    expect(B.store.readPage("gp_coord")).toEqual(merged);
+
+    // The merged copy is owed to the cloud — one more sync cycle lands it there and A converges.
+    await B.store.refreshNotesSync();
+    expect(server.pages.get("gp_coord").doc).toEqual(merged);
+    focus(A);
+    await A.store.refreshNotesSync();
+    expect(A.store.readPage("gp_coord")).toEqual(merged);
+    expect(A.store.notesConflicts()).toEqual([]);
+
+    // ⛔ AND A USABLE PRE-MERGE REVISION SURVIVES, in B's own Version History — the dispatch
+    // brief's own requirement, checked rather than assumed.
+    focus(B);
+    const versions = await B.store.readPageVersions("gp_coord");
+    expect(versions.some((v) => v.reason === "before-merge")).toBe(true);
+  });
+
+  it("two clients editing the SAME paragraph still asks, and neither non-conflicting edit is lost", async () => {
+    const server = fakeServer();
+    const base = doc("Utility Facilities", "Water Authority", "Sanitary — Discharge Permit");
+
+    const A = await openWindow(server);
+    focus(A);
+    A.store.setNotesScope(UID);
+    A.store.writeTree(seedTree());
+    A.store.writePage("gp_coord", base);
+    A.store.writePage("co_page1", doc("Weld County — dead pursuit"));
+    await A.store.startNotesSync({});
+
+    const B = await openWindow(server);
+    focus(B);
+    B.store.setNotesScope(UID);
+    await B.store.startNotesSync({});
+
+    // BOTH windows touch paragraph 1 — a real disagreement — but each ALSO edits a different,
+    // non-conflicting paragraph in the same save.
+    B.store.writePage("gp_coord", doc("Utility Facilities — B's version", "Water Authority", "Sanitary — Discharge Permit — filed"));
+    focus(A);
+    A.store.writePage("gp_coord", doc("Utility Facilities — A's version", "Water Authority — confirmed", "Sanitary — Discharge Permit"));
+    await A.store.refreshNotesSync();
+
+    focus(B);
+    await B.store.refreshNotesSync();
+    // A real conflict is still raised — this file's whole point is that NOT every divergence
+    // resolves silently, only ones that genuinely do not overlap.
+    expect(B.store.notesConflicts()).toEqual(["gp_coord"]);
+    const entry = B.store.notesConflictFor("gp_coord");
+
+    // ⛔ NEITHER CANDIDATE HAS LOST ANYTHING — but they are not symmetric, and that is
+    // correct diff3 behaviour, not a bug: B never touched paragraph 2, so B's own candidate
+    // ("mine") shows it exactly as B always had it (the UNEDITED original), never quietly
+    // adopting A's edit to a paragraph B did not touch. A's edit to that paragraph survives
+    // in full in "theirs" — reviewable, recoverable, never destroyed — which is exactly what
+    // picking "Keep theirs" below proves.
+    expect(B.store.readPage("gp_coord")).toEqual(
+      doc("Utility Facilities — B's version", "Water Authority", "Sanitary — Discharge Permit — filed"),
+    );
+    expect(entry.serverDoc).toEqual(
+      doc("Utility Facilities — A's version", "Water Authority — confirmed", "Sanitary — Discharge Permit — filed"),
+    );
+
+    // And the existing resolve path still works, unmodified, over these narrowed candidates.
+    const res = await B.store.resolveNotesConflict("gp_coord", "theirs");
+    expect(res.ok).toBe(true);
+    expect(B.store.readPage("gp_coord")).toEqual(entry.serverDoc);
+    expect(B.store.notesConflicts()).toEqual([]);
   });
 });
 

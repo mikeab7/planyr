@@ -28,7 +28,7 @@ import { EditorState, TextSelection } from "@tiptap/pm/state";
 
 import { NOTE_EXTENSIONS } from "../src/workspaces/notes/lib/notesExtensions.js";
 import { shiftIndent, MAX_INDENT, INDENTABLE } from "../src/workspaces/notes/lib/notesListIndent.js";
-import { indentAttrs, indentCssRules, readIndent } from "../src/workspaces/notes/lib/notesIndentLevel.js";
+import { indentAttrs, indentCssRules, readIndent, listMarkerCssRules, MAX_MARKER_DEPTH } from "../src/workspaces/notes/lib/notesIndentLevel.js";
 import { docToMarkdown } from "../src/workspaces/notes/lib/notesMarkdown.js";
 import { buildPrintDocument } from "../src/workspaces/notes/lib/notesPrint.js";
 
@@ -218,6 +218,56 @@ describe("the level is carried, not lost, by everything that reads a document", 
     const before = bullets("first", "second");
     const down = run(run(before, +1).json, -1);
     expect(docToMarkdown(down.json).markdown).toBe(docToMarkdown(before).markdown);
+  });
+
+  it("⛔ NEW-2: nested list markers step through the outline convention, decimal→alpha→roman "
+     + "and disc→circle→square, cycling every third real level", () => {
+    const css = listMarkerCssRules(".note-body");
+    const hop = ':is(ol, ul:not([data-type="taskList"])) > li > ';
+    // Depth 0: no ancestor hop required at all.
+    expect(css).toContain(".note-body ol > li { list-style-type: decimal; }");
+    expect(css).toContain('.note-body ul:not([data-type="taskList"]) > li { list-style-type: disc; }');
+    // Depth 1: one real ancestor hop.
+    expect(css).toContain(`.note-body ${hop}ol > li { list-style-type: lower-alpha; }`);
+    expect(css).toContain(`.note-body ${hop}ul:not([data-type="taskList"]) > li { list-style-type: circle; }`);
+    // Depth 2: two real ancestor hops.
+    expect(css).toContain(`.note-body ${hop}${hop}ol > li { list-style-type: lower-roman; }`);
+    expect(css).toContain(`.note-body ${hop}${hop}ul:not([data-type="taskList"]) > li { list-style-type: square; }`);
+    // Depth 3 CYCLES back to decimal/disc rather than inventing a fourth marker style.
+    expect(css).toContain(`.note-body ${hop}${hop}${hop}ol > li { list-style-type: decimal; }`);
+    // The generator stops at the documented ceiling — nothing past MAX_MARKER_DEPTH hops.
+    expect(css).not.toContain(hop.repeat(MAX_MARKER_DEPTH + 1));
+  });
+
+  it("⛔ the flat data-indent attribute steps the SAME cycle, independent of real nesting depth", () => {
+    const css = listMarkerCssRules(".note-body");
+    expect(css).toContain('.note-body ol li[data-indent="1"] { list-style-type: lower-alpha; }');
+    expect(css).toContain('.note-body ol li[data-indent="2"] { list-style-type: lower-roman; }');
+    expect(css).toContain('.note-body ol li[data-indent="3"] { list-style-type: decimal; }');
+    expect(css).toContain('.note-body ul:not([data-type="taskList"]) li[data-indent="1"] { list-style-type: circle; }');
+    expect(css).toContain('.note-body ul:not([data-type="taskList"]) li[data-indent="2"] { list-style-type: square; }');
+    // Level 0 needs no rule at all — indentAttrs renders nothing there.
+    expect(css).not.toContain('[data-indent="0"]');
+  });
+
+  it("⛔ SAFETY: a checklist's own <li> is NEVER a target of these rules — the checkbox is the "
+     + "only marker, and `list-style:none` inherited from ul[data-type=\"taskList\"] must survive "
+     + "untouched by any bare `ul` selector this file generates", () => {
+    const css = listMarkerCssRules(".note-body");
+    // A positive check, not just a negative one: every single "ul" token this generator ever
+    // writes is immediately qualified with the exclusion — there is no bare "ul" left that
+    // could match a checklist's own <ul> and win over its inherited `none` by targeting the
+    // <li> directly (inheritance loses to any rule that targets the element itself).
+    const ulTokens = css.match(/\bul\b(:not\(\[data-type="taskList"\]\))?/g) || [];
+    expect(ulTokens.length).toBeGreaterThan(0);
+    expect(ulTokens.every((t) => t === 'ul:not([data-type="taskList"])')).toBe(true);
+  });
+
+  it("⛔ PDF-PARITY: the editor and the print sheet read the identical marker table, construct for construct", () => {
+    const editorCss = listMarkerCssRules(".planyr-note .ProseMirror");
+    const printCss = listMarkerCssRules(".note-body");
+    // Same shape modulo the scope prefix — strip each scope and compare the remainder.
+    expect(editorCss.replaceAll(".planyr-note .ProseMirror", "")).toBe(printCss.replaceAll(".note-body", ""));
   });
 
   it("a TASK item takes a level the same way a bullet does", () => {

@@ -828,10 +828,43 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   litter cleanup today), so an automatic rewrite adopts a moved server row in silence instead of
   naming a conflict over content nobody touched; route any FUTURE automatic body rewrite through
   the same `auto` path, never straight through `writePage`.
+- **`lib/notesBlockMerge.js` — THE PER-PARAGRAPH MERGE (NEW-1, "like we do on the site planner…
+  both the edits go in").** PURE 3-way diff3-style merge over `flattenBlocks`' output
+  (`notesRedline.js` — the SAME flattener the redline view uses, extended for this: every leaf
+  now carries its own untouched `node` and every wrapper its own raw `attrs`, so a merge can
+  rebuild an exact document rather than re-deriving one from decomposed runs). Needs a real
+  BASE document — the last copy local and server are PROVEN to have agreed on — never guesses
+  one from just the two current copies (two-way diffing cannot tell "only I touched this" from
+  "we both changed the same original into two different things"). Two ranges cluster into one
+  region only on a GENUINE overlap (`<`, never `<=` — a pure insertion sharing only a boundary
+  point with a neighbouring edit is not a disagreement, found by this file's own two-client
+  test after an early `<=` produced false conflicts on exactly that shape). A cluster touched
+  by only one side applies silently; one touched by both is a real conflict UNLESS both sides
+  produced byte-identical results — and even then, a side's own contribution to an overlapping
+  cluster is filled with the ORIGINAL base blocks wherever that side's own hunks don't reach
+  (found the same way: naively concatenating only "this side's own replacement blocks" for a
+  wider union silently dropped a paragraph neither side had touched). Returns `null` when it
+  cannot run at all — the caller (`notesStore.js`) falls back to the pre-existing whole-document
+  pick-one banner, which is the CORRECT outcome, not a failure. `notesStore.js` supplies the
+  merge base from a dedicated IndexedDB store (`notesImageDb.js`'s `mergeBase`, see below) and
+  narrows the SAME `ConflictNotice`/`ConflictReview` UI to just the disputed region by feeding
+  it `mineDoc`/`theirsDoc` — both already carrying every non-conflicting edit from both sides —
+  instead of the raw two originals, so no new UI was needed. **Confirmed, not assumed:** Site
+  Planner's per-tab-session journal namespacing (B846) has no Notes equivalent to port — Notes'
+  cross-tab coordination already goes through `notesCloud.js`'s server-owned `rev` +
+  `mergeSyncState`, and the Silvestri "Utility" banner was that system correctly detecting a
+  real divergence at whole-document granularity, not a namespacing bug. Derived-write
+  protection (Site Planner's `isDirectEdit`/`direct` tag) is likewise already covered here by
+  `hasUserInputRef` (B1662464, `NoteEditor.jsx`) gating what ever reaches `dirty` in the first
+  place.
 - `db/notes_cloud_sync.sql` — the APPLIED DDL, committed as a record (production, 2026-07-31,
   migration `notes_cloud_sync_b1291`). Three own-row-RLS tables + the private `notes-images` bucket.
 - `lib/notesImageDb.js` — the raw IndexedDB tier under the image store, and the local CACHE in front
-  of the cloud bucket. Nothing else may import it.
+  of the cloud bucket. Nothing else may import it. **v3 (NEW-1) adds the `mergeBase` store** — ONE
+  row per page, `<scope>:<pageId>`, always overwritten, holding the last document local and server
+  are proven to agree on (`notesStore.js`'s `recordMergeBase`/`mergeBaseFor`/`forgetMergeBases`).
+  TIER-BY-REBUILDABILITY: it is a cache, not data — losing it only costs the ability to merge
+  silently next time, never a note's own words.
 - `lib/notesImageIntake.js` — a pasted/dropped file → a downscaled, re-encoded data URL. GIF and
   SVG pass through untouched (a canvas would silently flatten them).
 - `lib/notesImageNode.js` — the `noteImage` schema node + the paste/drop plugin + the node view

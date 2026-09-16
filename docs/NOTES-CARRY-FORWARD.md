@@ -331,6 +331,25 @@ Two more found since, each worth its own line because each returned a confident 
    opens its own** — the existing per-section `await page.context().close()` calls in this repo's
    own harnesses exist for exactly this, and a section that skips it is not merely untidy.
 
+30. **⛔ TWO FAKE "COMPUTERS" IN A TEST SHARE ONE INDEXEDDB UNLESS EACH GETS ITS OWN `IDBFactory`
+   (NEW-1, 2026-09-16).** `test/notesTwoClientConflict.test.js` and `test/notesConflictDefer.test.js`
+   simulate two separate devices via `fake-indexeddb/auto` + a hand-rolled per-window
+   `localStorage` — but `fake-indexeddb/auto` installs ONE global `indexedDB`, so before this was
+   fixed every "computer" the harness opened silently shared one fake database. Invisible for two
+   years of image/version-history tests because nothing in them compared what one "device" wrote
+   against what another read back — until the per-paragraph merge's base snapshot (stored in
+   IndexedDB, keyed only by account scope + page id, exactly as it would be on one real device)
+   started reading a SIBLING "computer"'s own record as if it were this device's own history,
+   manufacturing false conflict resolutions in the test alone. Two real computers never share an
+   IndexedDB at all, so this was purely a fixture gap, not a product one — but it is exactly the
+   shape trap 2's fixture-simplification rule warns about, one tier down: `openWindow` now hands
+   each window its OWN `new IDBFactory()` and `focus(w)` swaps `globalThis.indexedDB` along with
+   `globalThis.localStorage`; `reopenWindow` (a same-device RELOAD, not a new computer) reuses the
+   SAME factory as the window it is reloading, matching how a real browser reload keeps IndexedDB
+   intact. **Any future two-"device" test in this module must open its own `IDBFactory` per
+   device** — a shared one will silently leak whichever feature next reads/writes IndexedDB
+   per-account rather than per-tab.
+
 See also `ui-audit/TRAPS.md`, and the named rules **FOREGROUND-OR-VOID** (a background tab cannot
 be measured — not its clock, not its pixels) and **COUNT-EVERY-KIND**.
 
