@@ -313,7 +313,7 @@ import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES,
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, parcelSplitNames, lineageConflicts } from "./lib/siteModel.js";
-import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, rectContainsPoint, polygonEdges, polygonContainsPoint, polygonDepthBehind, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, nodeJunction, cardinalTeePoint, roadBearingDeg } from "./lib/roadGeometry.js";
+import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, rectContainsPoint, polygonEdges, polygonContainsPoint, polygonDepthBehind, roadEdgeCrossing, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, nodeJunction, cardinalTeePoint, roadBearingDeg } from "./lib/roadGeometry.js";
 import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, rectOutlineCutSegments } from "./lib/roadNetwork.js";
 import {
   roundaboutDiameterFor, roundaboutBandFor,
@@ -1450,6 +1450,22 @@ function driveJunctionsOf(els, settings) {
     // trusting the adjacent vertex; see roadRunFrom.
     const sideRun = roadRunFrom(S.pts, ei, ei === 0 ? 1 : -1, roadTangentNoise(S));
     const sideDir = { x: sideRun.far.x - P.x, y: sideRun.far.y - P.y };
+    // B1611841 (NEW-2) — resolve the junction at the pad FACE the road actually crosses, never at
+    // the raw endpoint. `hit` above only ever answers "which edge sits nearest P" — correct while P
+    // is near the target's own perimeter, but a CONTAINED endpoint (the B1612608 connect rule this
+    // loop already honours) can sit well past the target's own midline, where the nearest edge
+    // silently flips to a side the road never crossed. `roadEdgeCrossing` asks the right question
+    // directly: where the segment from the drive's own approach point (`sideRun.far`) to `P`
+    // crosses the target's boundary. Falls back to the pre-existing `hit`/`P` behaviour — byte-
+    // identical to before this fix — whenever no real crossing is found (e.g. the whole visible
+    // road segment already sits inside the target).
+    const crossing = roadEdgeCrossing(sideRun.far, P, edges);
+    const junctionEdge = crossing ? crossing.edge : hit.edge;
+    const junctionPt = crossing ? crossing.pt : P;
+    // The portion of the drive's own run that now sits INSIDE the target (from the crossing to P)
+    // no longer counts as "approach" available to the curb return's side reach — it is absorbed
+    // into the pad's own pavement instead (the pad's opaque fill already paints over it).
+    const insideRunFt = Math.hypot(P.x - junctionPt.x, P.y - junctionPt.y);
     const kind = S.driveTee.kind === "truckcourt" ? "truckcourt" : "parking";
     // NEW-4 — the curb return is sized by the DESIGN VEHICLE OF THE DRIVE (its road class), the same
     // source road→road tees already use, NOT by what it happens to be driving into. A fire lane entering
@@ -1474,13 +1490,13 @@ function driveJunctionsOf(els, settings) {
     // along its own inward normal (an over-estimate on a concave field, never an under-estimate, so
     // it can only ever under-clamp the return, never let it punch out the far side of the field).
     const perpDepth = isPoly
-      ? polygonDepthBehind(T.points, hit.pt, { x: -hit.edge.outN.x, y: -hit.edge.outN.y })
-      : (hit.edge.axis === "y" ? T.h : T.w);
-    const edgeRunPos = (hit.edge.b.x - P.x) * hit.edge.dir.x + (hit.edge.b.y - P.y) * hit.edge.dir.y;   // T → edge end b
-    const edgeRunNeg = (P.x - hit.edge.a.x) * hit.edge.dir.x + (P.y - hit.edge.a.y) * hit.edge.dir.y;   // T → edge end a
-    const obstacle = buildingRunLimit(els, P, hit.edge.dir, hit.edge.outN, Rseed);   // NEW-4 — never under a building
+      ? polygonDepthBehind(T.points, junctionPt, { x: -junctionEdge.outN.x, y: -junctionEdge.outN.y })
+      : (junctionEdge.axis === "y" ? T.h : T.w);
+    const edgeRunPos = (junctionEdge.b.x - junctionPt.x) * junctionEdge.dir.x + (junctionEdge.b.y - junctionPt.y) * junctionEdge.dir.y;   // junctionPt → edge end b
+    const edgeRunNeg = (junctionPt.x - junctionEdge.a.x) * junctionEdge.dir.x + (junctionPt.y - junctionEdge.a.y) * junctionEdge.dir.y;   // junctionPt → edge end a
+    const obstacle = buildingRunLimit(els, junctionPt, junctionEdge.dir, junctionEdge.outN, Rseed);   // NEW-4 — never under a building
     const geom = teeGeometry({
-      T: { x: P.x, y: P.y }, throughDir: hit.edge.dir, sideDir,
+      T: { x: junctionPt.x, y: junctionPt.y }, throughDir: junctionEdge.dir, sideDir,
       // phS at BACK-OF-CURB (roadOuterHalf), not face-of-curb: the cover unions with the drive's
       // back-of-curb strip, so the fillet must round the STRIP's outer corner — else the wider strip
       // corner sits outside the fillet and the union shows a sharp (un-rounded) acute edge (B989).
@@ -1495,7 +1511,10 @@ function driveJunctionsOf(els, settings) {
       // NEW-4 folds in the building clamp so the return can never run under a dock bump-out.
       throughAvailPos: Math.max(0, Math.min(edgeRunPos, obstacle.pos)),
       throughAvailNeg: Math.max(0, Math.min(edgeRunNeg, obstacle.neg)),
-      sideAvail: sideRun.dist,
+      // NEW-2 — the reach available BEYOND the junction point, not the drive's whole recorded run:
+      // when the endpoint sits inside the target, that portion is absorbed into the pad rather than
+      // counted as approach pavement the return can sweep across.
+      sideAvail: Math.max(0, sideRun.dist - insideRunFt),
     });
     if (geom) out.push({ sideId: S.id, targetId: T.id, kind, geom });
   }

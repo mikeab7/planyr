@@ -58,6 +58,69 @@ function closePaths(paths, d) {
   return back && back.length ? back : paths;
 }
 
+/* B1611840 (NEW-1) — a dissolved junction ring can carry a spurious near-duplicate vertex right at
+ * a curb-return tangent point. The pieces being unioned come from two different generators (a
+ * tessellated strip, an analytically solved fillet wedge, occasionally a defensive convex-hull
+ * fallback) that rarely land on exactly the same point, and the morphological close above (which
+ * exists precisely to bridge that sub-inch gap) can itself leave a short "in and out" detour of a
+ * few hundredths to a couple of feet where two pieces meet. Sub-inch, no enclosed unpaved area,
+ * nothing visible today at working zoom — but the same species of numerical noise that has already
+ * grown into a visible thin paved spike once, when a later geometry change nudged it into view. So
+ * this cleans the ring rather than waiting for a repeat.
+ *
+ * A LEGITIMATE sharp turn in this geometry (a road's own flat end cap, ~90°; the mouth chord
+ * between two curb returns meeting near-perpendicular, close to 180°) always rides a segment of
+ * REAL length — the road's own half-width or more. Only a spurious point rides a SHORT one. So a
+ * vertex is a spike only when BOTH the turn there exceeds a sane bound AND at least one of its
+ * adjoining segments is short: a smoothly tessellated arc (DEFAULT_TESS_DEG per vertex,
+ * roadGeometry.js) never turns anywhere near this much per vertex however short its chords get at
+ * a tight radius, so this can never eat real curvature. */
+export const RING_SPIKE_TURN_DEG = 100;   // a real corner here never turns this sharply on a short segment
+export const RING_SPIKE_LEN_FT = 2.0;     // above every measured spurious segment, below the shortest real one
+
+// Per-vertex signed turn angle (degrees, 0 = straight through, ±180 = a full reversal) between the
+// incoming and outgoing edge, paired with both adjoining segment lengths.
+export function ringTurnAngles(ring) {
+  const n = ring && ring.length;
+  if (!n || n < 3) return [];
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const a = ring[(i - 1 + n) % n], b = ring[i], c = ring[(i + 1) % n];
+    const v1x = b.x - a.x, v1y = b.y - a.y, v2x = c.x - b.x, v2y = c.y - b.y;
+    const len1 = Math.hypot(v1x, v1y), len2 = Math.hypot(v2x, v2y);
+    if (!(len1 > 1e-9) || !(len2 > 1e-9)) { out.push({ i, turnDeg: 0, len1, len2 }); continue; }
+    const turnDeg = (Math.atan2(v1x * v2y - v1y * v2x, v1x * v2x + v1y * v2y) * 180) / Math.PI;
+    out.push({ i, turnDeg, len1, len2 });
+  }
+  return out;
+}
+
+// Every vertex that reads as a spurious spike (see the header above for why this pair of
+// conditions, together, can never convict real curvature or a real corner).
+export function ringSpikes(ring, opts = {}) {
+  const turnDeg = Number.isFinite(opts.turnDeg) ? opts.turnDeg : RING_SPIKE_TURN_DEG;
+  const lenFt = Number.isFinite(opts.lenFt) ? opts.lenFt : RING_SPIKE_LEN_FT;
+  return ringTurnAngles(ring).filter((v) => Math.abs(v.turnDeg) > turnDeg && (v.len1 < lenFt || v.len2 < lenFt));
+}
+
+/* Collapse spurious spike vertices out of a closed ring before it is emitted. Iteratively removes
+ * ONE vertex per pass (re-measuring afterward, since removing a vertex can expose a new short
+ * segment between its former neighbours) until none remain or the ring would drop below a
+ * triangle. This only ever REMOVES a vertex sitting on a short, sharply-turning detour, so the
+ * covered area can only change by a small, bounded amount — never a visible edit at working zoom
+ * (PERCEPTUAL-PARITY). A ring already at or below a triangle is returned unchanged. */
+export function collapseRingSpikes(ring, opts = {}) {
+  if (!Array.isArray(ring) || ring.length < 4) return ring;
+  const pts = ring.slice();
+  let guard = ring.length + 8; // one removal per pass — this can never run long
+  while (guard-- > 0 && pts.length > 3) {
+    const spikes = ringSpikes(pts, opts);
+    if (!spikes.length) break;
+    pts.splice(spikes[0].i, 1);
+  }
+  return pts;
+}
+
 /* Union `rings` (world-feet closed polygons) into dissolved regions.
  * Returns [{ outer, holes: [ring…] }, …] — one entry per resulting region, holes separated so a caller
  * can emit an even-odd path. Returns [] for no valid input; on any clipper failure it degrades to the
@@ -65,7 +128,7 @@ function closePaths(paths, d) {
 export function dissolveRings(rings, opts = {}) {
   const valid = (rings || []).filter(isRing);
   if (!valid.length) return [];
-  if (valid.length === 1) return [{ outer: valid[0].map((p) => ({ x: p.x, y: p.y })), holes: [] }];
+  if (valid.length === 1) return [{ outer: collapseRingSpikes(valid[0].map((p) => ({ x: p.x, y: p.y }))), holes: [] }];
   const close = Number.isFinite(opts.close) ? opts.close : CLOSE_FT;
   try {
     const clip = new ClipperLib.Clipper();
@@ -94,11 +157,11 @@ export function dissolveRings(rings, opts = {}) {
     const walk = (node) => {
       for (const child of node.Childs()) {
         if (child.IsHole()) continue;
-        const outer = fromPath(child.Contour());
+        const outer = collapseRingSpikes(fromPath(child.Contour()));
         const holes = [];
         for (const h of child.Childs()) {
           if (!h.IsHole()) continue;
-          const hr = fromPath(h.Contour());
+          const hr = collapseRingSpikes(fromPath(h.Contour()));
           if (hr.length >= 3) holes.push(hr);
           walk(h); // an island inside the hole is its own region
         }
