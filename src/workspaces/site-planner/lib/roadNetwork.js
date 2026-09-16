@@ -22,7 +22,8 @@
  * Pure: world feet in, world feet out. No React, no DOM. Unit-tested in test/roadNetwork.test.js.
  */
 import ClipperLib from "clipper-lib";
-import { pointInRing } from "./ringMath.js";
+import { pointInRing, ringArea } from "./ringMath.js";
+import { DEFAULT_TESS_DEG } from "./roadGeometry.js";
 
 const SCALE = 100;            // feet → centi-feet (~1/8"), matching pondOffset.js / polyClip.js
 const CLEAN_DELTA = SCALE * 0.01;
@@ -72,11 +73,45 @@ function closePaths(paths, d) {
  * between two curb returns meeting near-perpendicular, close to 180°) always rides a segment of
  * REAL length — the road's own half-width or more. Only a spurious point rides a SHORT one. So a
  * vertex is a spike only when BOTH the turn there exceeds a sane bound AND at least one of its
- * adjoining segments is short: a smoothly tessellated arc (DEFAULT_TESS_DEG per vertex,
- * roadGeometry.js) never turns anywhere near this much per vertex however short its chords get at
- * a tight radius, so this can never eat real curvature. */
-export const RING_SPIKE_TURN_DEG = 100;   // a real corner here never turns this sharply on a short segment
+ * adjoining segments is short — and that LENGTH half is what already excludes every legitimate
+ * sharp turn, since a flat end cap or a mouth chord never rides a short leg. The turn half exists
+ * only to protect a smoothly tessellated arc from being mistaken for a spike.
+ *
+ * ⛔ (NEW-1, follow-up) — 100° was NOT that protection; it was slack the length guard didn't need.
+ * Measured on the deployed B1611840 build: an oblique road-into-pad junction still carried two
+ * spurious vertices 0.04–0.05 ft apart, turning ~82–88° each — comfortably UNDER the old 100°
+ * bound, so `ringSpikes` never saw them (`test/roadJunctionRingCleanup.test.js`'s red-proof used
+ * the SAME 100° bound as its own instrument and so couldn't see them either). The only real ceiling
+ * a tessellated arc vertex can ever reach is `DEFAULT_TESS_DEG` (roadGeometry.js) itself: the arc
+ * builder always spends `ceil(sweepDeg / DEFAULT_TESS_DEG)` steps, so no single step can ever turn
+ * more than `DEFAULT_TESS_DEG` — never "however short its chords get," an exact bound, not a
+ * hand-wave. Since every legitimate sharp turn is already excluded by LENGTH (above), the turn bound
+ * only has to clear that one real ceiling, with margin for a small-radius arc's rounding — so it is
+ * pinned well below the reported 82–88° defects instead of well above a 90° corner that was never
+ * this guard's job to exclude. Swept over a fine-grained oblique angle sweep (every 0.1° from 0–89°,
+ * both a rect pad and a road-to-road tee, two width/radius classes) confirms the new bound leaves no
+ * ring — other than an already-triangular sliver, which no single-vertex removal can shrink further
+ * — carrying a turn this sharp on a segment this short. */
+export const RING_SPIKE_TURN_DEG = DEFAULT_TESS_DEG * 5;   // 30° — >5x the one real ceiling (see above); every
+                                                            // legitimate sharp turn is excluded by LEN_FT instead
 export const RING_SPIKE_LEN_FT = 2.0;     // above every measured spurious segment, below the shortest real one
+
+/* A vertex-level spike rides on an otherwise-viable ring; `collapseRingSpikes` deliberately leaves a
+ * ring alone once it is down to a triangle (removing a vertex from a triangle isn't a "collapse",
+ * it's deleting the shape). But the SAME union that leaves a spurious detour on a real ring can also
+ * emit a whole SEPARATE micro-polygon: a phantom disconnected fleck of pavement (its own tiny outer
+ * region) or a phantom enclosed fleck of "unpaved" ground (a tiny hole) — found sweeping the
+ * road-to-road tee case (a 1.3 sf triangular hole at a road-tee side angle nothing had swept before)
+ * and the road-into-pad case (a 0.03 sf triangular island). Neither is a spike on a ring; both are the
+ * ring. So this is a separate, AREA-based floor, applied to a whole emitted outer/hole ring after
+ * `collapseRingSpikes` has already done what it can: below it, nothing this small can be a real
+ * feature — the smallest real thing this module ever emits is a roundabout's own central island
+ * (`ROUNDABOUT_MIN_D`/`circulatoryWidthFt`, roundabout.js: even at the smallest class band the
+ * island clears ~130 sf) — so a micro-region this size is numerical noise, not geometry, and is
+ * dropped outright rather than rendered as a fleck of paint or a fleck of bare ground. */
+export const RING_MICRO_AREA_FLOOR_SQFT = 10;   // ~7.5x the largest measured noise fragment (1.33 sf),
+                                                 // ~13x below the smallest legitimate feature (a
+                                                 // roundabout island, ~130 sf at the smallest class band)
 
 // Per-vertex signed turn angle (degrees, 0 = straight through, ±180 = a full reversal) between the
 // incoming and outgoing edge, paired with both adjoining segment lengths.
@@ -162,10 +197,10 @@ export function dissolveRings(rings, opts = {}) {
         for (const h of child.Childs()) {
           if (!h.IsHole()) continue;
           const hr = collapseRingSpikes(fromPath(h.Contour()));
-          if (hr.length >= 3) holes.push(hr);
+          if (hr.length >= 3 && ringArea(hr) >= RING_MICRO_AREA_FLOOR_SQFT) holes.push(hr);
           walk(h); // an island inside the hole is its own region
         }
-        if (outer.length >= 3) out.push({ outer, holes });
+        if (outer.length >= 3 && ringArea(outer) >= RING_MICRO_AREA_FLOOR_SQFT) out.push({ outer, holes });
       }
     };
     walk(tree);
