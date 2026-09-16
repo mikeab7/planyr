@@ -1277,13 +1277,37 @@ export function teeGeometry(params) {
   // it is a hull, so it is a simple polygon by construction, always.)
   const sideTuck = Math.max(0.5, Math.min(phS * 0.15, 3));
   const wedge = (f, inS) => {
-    if (!f || !(f.R > EPS) || !Array.isArray(f.arc) || f.arc.length < 2) return null;
-    const back1 = add(f.tan1, mul(inT, deepT));         // tan1 pushed into the through pavement
-    const back2 = add(f.tan2, mul(inS, deepS));         // tan2 pushed into the side pavement
+    if (!f) return null;
+    const hasArc = f.R > EPS && Array.isArray(f.arc) && f.arc.length >= 2;
     // The real flat-cap corner on the SAME edge line `f.tan2` sits on: that line is offset from T
     // by `inS*(-phS)` (e.g. wedge A's corner sits on the +perpS edge while its pavement thickens
     // toward -perpS — see the call site below).
     const capCorner = add(T, mul(inS, -phS));
+    // NEW-2 (B1703665) — NO ROOM FOR ANY CURVE IS NOT THE SAME THING AS NO PAVEMENT. `fillet()`
+    // degenerates to a bare, un-rounded corner (R:0) whenever the reach clamp collapses to ~zero —
+    // which, for a driveway wider than the room left before the pad's own corner, is the ORDINARY
+    // case, not a rare edge case (the drive's own half-width, `phS`, is roughly what the fillet's
+    // natural anchor sits out at; any pad edge shorter than that starves it every time). The old
+    // code bailed out to `null` here, so the road's own strip cap — which is drawn at FULL WIDTH
+    // regardless of any wedge (`roadStripRing` knows nothing about `avail`) — was left exposed at
+    // whatever raw angle the driveway happens to approach at, cutting a real triangular gore of
+    // missing pavement open to the grass between the strip's own edge and the pad's edge (measured
+    // live: ~105 sq ft on a 36 ft drive at a mild oblique angle — NEW-2 in the dispatch). A curved
+    // return needs genuine ROOM ALONG THE EDGE to sweep through, which is exactly what is missing
+    // here; but the GORE between the strip's cap corner (`capCorner`, already part of the strip's
+    // own drawn footprint — see the header above) and the pad-edge corner the fillet math found
+    // (`f.tan1`, `T + phS`-ish once R is stripped to 0) is small, real, and belongs to the drive —
+    // filling it SHARP is strictly additive (only ever closes the gore the strip already implies)
+    // and is never worse than the raw exposed cap it replaces. A true curved return still wins
+    // whenever the room exists; this is the honest floor under it, never a substitute for one.
+    if (!hasArc) {
+      if (deepT > EPS) return null;   // road-to-road hull path — teeGeometry's one live caller (driveJunctionsOf) is always deepT===0
+      const corner = f.tan1;          // === f.tan2 in the degenerate case — the raw, un-rounded corner
+      const ring = [T, capCorner, corner];
+      return isSimplePolygon(ring) && polygonArea(ring) > 1e-6 ? ring : null;
+    }
+    const back1 = add(f.tan1, mul(inT, deepT));         // tan1 pushed into the through pavement
+    const back2 = add(f.tan2, mul(inS, deepS));         // tan2 pushed into the side pavement
     const sTan2 = dot(sub(f.tan2, capCorner), d);        // tan2's position along the cap line (0 = at the cap)
     const farPt = add(capCorner, mul(d, Math.max(sTan2, 0) + sideTuck)); // past the cap, into the strip
     const farPtIn = add(farPt, mul(inS, deepS));
