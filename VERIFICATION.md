@@ -233,6 +233,15 @@ happened to use) and a straight-sided (not arced) return on the road→pad case 
 STANDING RULE #2, that is a FINDING, not a disposition, and the fix below is the reproduce-and-fix
 response to it — recorded here as the amendment (B1645792 ×2) it actually is.
 
+**Re-confirmed against a REAL DEPLOYED build, not just the local dev server (2026-09-16).** Once
+PR #1733's own Cloudflare Pages branch preview came up
+(`https://claude-trusting-goodall-2ci9.planyr.pages.dev`, commit `03c7a05`), `ui-audit/verify-road-junction-paving.mjs`
+was re-run against it via `--base` — all three shapes (oblique truck-court, exactly-perpendicular
+parking field, free-drawn polygon field) came back zero enclosed unpaved area, self-test confirmed,
+against real deployed bytes rather than a local dev server. Same technique earlier V#s on this file
+(V1173824's own prior round, V1180736) used checking a PR's own preview before its production merge.
+This covers V1203696 and V1192544 (×2) too — one run, three scenarios.
+
 **Why this still needs a live pass.** A rendering-shape fix (PERCEPTUAL-PARITY: the bar is whether
 the owner can SEE it right at his own working zoom, matching his original repro shape, not just
 whether the numbers check out). Everything the sandbox can prove is now proven AGAINST THE BUG'S
