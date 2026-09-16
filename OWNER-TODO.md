@@ -7,12 +7,12 @@
 
 _Last updated: 2026-09-16._
 
-## 📅 "HW Review" on Goose Creek's Master Schedule — restore its old date, or leave it? (B1701360)
+## 📅 "HW Review" on Grand Port's Master Schedule — restore its old date, or leave it? (B1701360)
 
-> **Short version: the bug that kept pushing "HW Review," on Goose Creek's Master Schedule, further
+> **Short version: the bug that kept pushing "HW Review," on Grand Port's Master Schedule, further
 > into the future every time you loaded the schedule is fixed — it can't happen again, to that task
 > or any other.** (Naming the project here because you've got a second, unrelated schedule also
-> called "Master Schedule" — this one's the Goose Creek one.) But fixing the
+> called "Master Schedule" — this one's the Grand Port one, not Goose Creek's.) But fixing the
 > bug doesn't undo what it already did: right now that task's date is wherever the bug left it
 > (settling around late August 2026, driven by its one real link to "Begin Drafting Contract").
 >
