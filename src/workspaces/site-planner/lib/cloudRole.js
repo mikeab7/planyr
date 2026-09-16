@@ -10,6 +10,7 @@ import { supabase } from "./supabase.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { ROLES } from "./siteStatus.js";
 import { _siteVersions as siteVersions, _lastHeaderSig as lastHeaderSig } from "./cloudSync.js";
+import { isMissingVersionColumn } from "../../../shared/cloud/optimisticUpsert.js";
 
 /* NEW-1 — FLIP A SITE'S ROLE AT THE SOURCE OF TRUTH, IN ONE WRITE.
  *
@@ -49,9 +50,23 @@ const isMissingFunction = (e) =>
   !!e && (e.code === "PGRST202" || /could not find the function|does not exist/i.test(e.message || ""));
 
 /* Degrade path for a DB without db/set_site_group_role.sql. Reads the group's rows FROM THE
- * SERVER (never from local storage) and rewrites each one's role. */
+ * SERVER (never from local storage) and rewrites each one's role.
+ *
+ * NEW-1 (2026-09-16) — this used to write `{ data: {...} }` with no `version` in the payload at
+ * all and no `.select()` on the update, so it never asked whether the write actually landed. Once
+ * `sites_enforce_version_monotonic` (db/sites_version_monotonic_guard.sql) went live, THAT write
+ * is refused outright every time: the trigger only lets a content-changing UPDATE through when its
+ * incoming `version` is strictly greater than the row's stored one, and an update that never sets
+ * `version` leaves it unchanged, so `new.version > old.version` is always false. PostgREST reports
+ * that refusal as an ordinary 200 with zero rows — indistinguishable from success to code that
+ * never asked for the row back, which is exactly what `if (error) failed += 1; else {...}` did.
+ * Now every write both (a) advances `version` past what was just read, so the trigger has a real
+ * claim of freshness to accept, and (b) asks for the row back via `.select("id")` and counts an
+ * empty return as a failure exactly like an `error` — a write the database refused is reported as
+ * refused, never as done. */
 async function cloudSetSiteRoleFallback(uid, groupId, role) {
-  const sel = await supabase.from("sites").select("id, data");
+  let sel = await supabase.from("sites").select("id, data, version");
+  if (sel.error && isMissingVersionColumn(sel.error)) sel = await supabase.from("sites").select("id, data"); // truly pre-B314 schema
   if (sel.error) {
     reportClientEvent("cloud-read-failed", "role flip fallback couldn't read the group", { groupId, error: sel.error.message || "" });
     return { ok: false, rows: 0, atomic: false, error: sel.error.message || "couldn't read the project" };
@@ -63,10 +78,16 @@ async function cloudSetSiteRoleFallback(uid, groupId, role) {
     // B1181104 — stamp the jsonb's OWN `updatedAt` too, same as the primary RPC now does: without
     // it a role flip here is invisible to `mergeSiteContent`'s newer-wins tie-break, and a client
     // holding a stale locally-cached copy of this row can never self-heal on a later pull.
-    const { error } = await supabase.from("sites")
-      .update({ data: { ...r.data, role, updatedAt: Date.now() } }).eq("id", r.id);
+    const payload = { data: { ...r.data, role, updatedAt: Date.now() } };
+    if (r.version != null) payload.version = r.version + 1; // absent only on the version-less-schema fallback above
+    const { data, error } = await supabase.from("sites").update(payload).eq("id", r.id).select("id");
     if (error) failed += 1;
-    else { delete lastHeaderSig[r.id]; delete siteVersions[r.id]; }
+    else if (r.version != null && (!Array.isArray(data) || data.length === 0)) {
+      // The row was read but the write matched/advanced nothing — another writer moved it (or, on
+      // a DB carrying the version guard, this row's version claim was stale by the time we wrote).
+      failed += 1;
+      reportClientEvent("role-flip-row-refused", "site role flip write affected no rows", { id: r.id, groupId });
+    } else { delete lastHeaderSig[r.id]; delete siteVersions[r.id]; }
   }
   if (failed) {
     reportClientEvent("cloud-write-failed", "role flip fallback partly failed", { groupId, failed, total: rows.length });
