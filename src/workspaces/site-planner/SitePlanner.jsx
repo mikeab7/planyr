@@ -4088,18 +4088,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [savedToCloudOnly, setSavedToCloudOnly] = useState(false);
   const [saveNowMsg, setSaveNowMsg] = useState("");
   const [storageOpen, setStorageOpen] = useState(false);  // NEW-3 — the on-device storage census dialog
-  // True when a cloud write was REJECTED because another session advanced this project since
-  // we loaded it (B314 optimistic concurrency). Distinct from cloudSaveFailed (a write that
-  // didn't reach the cloud, retries on next edit): a conflict won't clear by retrying — the
-  // user must reload to get the latest before saving, so it gets its own loud "reload" banner.
-  // Work is NOT lost: the edit is saved on this device, and reload union-merges it with the
-  // other session's change (mergeSiteContent), then re-pushes the combined result.
   // B672 — the doc-level cloudConflict state + its blocking "changed in another session … Take
   // over editing" banner are RETIRED BY ARCHITECTURE (the B455/B460/B558/B596 false-conflict
   // class). Elements are per-row rev-guarded in site_elements (a real collision surfaces per
-  // element, B673); the header row self-heals a stale CAS inside cloudUpsert (refetch + one
-  // re-push). A residual header conflict (a live write race that also lost the retry) is treated
-  // as a transient failed write — retried on the next edit, never a blocking banner.
+  // element, B673); the header row self-heals a stale CAS inside cloudUpsert (refetch a fresh
+  // version + one re-push, whole-header last-write-wins) whenever the FIRST attempt loses the
+  // race — that heal is silent by design and stays silent, because it genuinely resolves things.
+  // NEW-1 (2026-09-16) — what happens when the heal ALSO loses (or has nothing fresh to heal
+  // with) is NOT silent any more. `cloudUpsertCore` returns `unresolved:true` for exactly that
+  // case — which covers both an ordinary stale-version loss that survived the one self-heal retry
+  // AND a write the database's own sites_enforce_version_monotonic trigger refused outright
+  // (PostgREST reports either as the identical "200, zero rows returned," so the client treats
+  // them the same way: it doesn't know which happened and doesn't need to). Unlike cloudSaveFailed
+  // (a transient failure — a network blip, a momentary write error — where "will retry on your
+  // next edit" is literally true), retrying from THIS tab's still-stale local state would fail the
+  // identical way every time. So siteConflict gets its own banner that names the real cause and
+  // its own fix (reload), and gates OFF the autosave cloud push below (the local on-device save
+  // keeps running unconditionally, so nothing typed while this banner is up is ever lost) — the
+  // "stops silently accepting edits until reload" shape, chosen over reload-and-reapply because
+  // the header this guards is exactly the rarely-contended meta/settings/overlays content the
+  // existing one-shot self-heal already merges safely in the common case; only the genuinely
+  // unresolved tail end needed a loud, not-silently-retried state at all.
+  const [siteConflict, setSiteConflict] = useState(false);
+  const siteConflictRef = useRef(false); siteConflictRef.current = siteConflict;
   // B455/NEW-7 — single-active-editor lockout. When the same plan is open in another tab of
   // THIS browser, only the lock-holder edits; a background tab goes read-only so it can't push
   // a save over the active tab's newer cloud row (the structural fix for the stale-tab clobber).
@@ -4129,7 +4140,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       import("./lib/drainageTiming.js").then((m) => m.noteDrainageSave(ms)).catch(() => {});
     };
     return pushSiteToCloud(id)
-      .then((c) => { clearTimeout(wd); stamp(); setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudSaveFailed(!c.ok); })
+      .then((c) => {
+        clearTimeout(wd); stamp();
+        setSaveStatus(c.ok ? "saved" : "unsaved");
+        // NEW-1 — an unresolved conflict gets its OWN banner (below), never the generic
+        // "didn't reach the cloud, will retry" one: retrying from this tab's still-stale local
+        // state would fail the identical way, so saying "will retry" here would be false.
+        setSiteConflict(!!c.unresolved);
+        setCloudSaveFailed(!c.ok && !c.unresolved);
+      })
       .catch(() => { clearTimeout(wd); stamp(); setSaveStatus("unsaved"); setCloudSaveFailed(true); });
   };
   // Autosave this site (debounced). Persists on the FIRST real edit (so a 1-element
@@ -4209,8 +4228,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // B455/NEW-7 — DON'T push over a conflict, or from a read-only background tab: the
       // local save above still ran (work preserved), and reload union-merges it. Pushing
       // here is exactly the stale-tab clobber we're preventing.
+      // NEW-1 (2026-09-16) — siteConflictRef is the wiring this comment already described but
+      // never had: an unresolved cloud conflict (cloudPushWithWatchdog's unresolved outcome, set
+      // by the site-conflict banner below) now actually gates the autosave push, not just
+      // read-only. Continuing to push here would just repeat the SAME refused write every 400ms
+      // while the banner tells the user to reload — never a real fix, only a busier failure.
       if (isCloudActive()) {
-        if (readOnlyRef.current) {
+        if (readOnlyRef.current || siteConflictRef.current) {
           setSaveStatus("unsaved");
           // B468/NEW-5 — an edit happened but its cloud push was suppressed (read-only tab or an
           // active conflict). The immediate local mirror above still saved it; record WHY it didn't
@@ -4232,10 +4256,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             } else {
               // B474 review (#17/#18): the latest edit reached NEITHER device nor cloud — clear any stale
               // amber "saved to your account" so it can't keep falsely claiming safety. (B672: a header
-              // CAS conflict now self-heals inside cloudUpsert; a residual conflict is treated the same
-              // as any failed write — loud banner + retry, never a blocking take-over prompt.)
+              // CAS conflict self-heals once inside cloudUpsert; NEW-1: an unresolved conflict here gets
+              // the same dedicated reload banner as the ordinary autosave path, not the generic retry one
+              // — retrying without a reload would fail identically, and the device write already failed
+              // too, so this plan's edits currently aren't safe on either side.)
+              const unresolved = !!(r && r.unresolved);
               setSaveStatus("unsaved"); setSavedToCloudOnly(false);
-              setCloudSaveFailed(true); reportClientEvent("save-both-failed", "device storage full AND cloud push failed", { id: siteId, error: (r && r.error) || "", conflict: !!(r && r.conflict) });
+              setSiteConflict(unresolved); setCloudSaveFailed(!unresolved);
+              reportClientEvent("save-both-failed", "device storage full AND cloud push failed", { id: siteId, error: (r && r.error) || "", conflict: !!(r && r.conflict) });
             }
           }).catch(() => { setSaveStatus("unsaved"); setSavedToCloudOnly(false); setCloudSaveFailed(true); });  // B506: a rejected cloud push must not strand the badge on "saving"
         }
@@ -20705,6 +20733,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // so the connection being fine is NOT the same as "your edits are saving". Surfaced as its own
     // amber "Read-only — not saving" badge state, ahead of the synced/offline resting states.
     if (cloudActive && readOnly) return "readonly";
+    // NEW-1 — an unresolved header conflict (this tab's plan changed elsewhere and its own last
+    // write was refused) is at least as loud as the per-element engine's own "stale" state right
+    // below, and for the identical reason: nothing will land here again until a reload.
+    if (cloudActive && siteConflict) return "error";
     // B671 — the per-element write engine feeds the SAME badge: a dropped element commit is
     // crash-severity (LOUD-FAILURE) → "error"; in-flight / retrying element commits → "saving".
     /* ⛔ NEW-1 — `stale` IS THE LOUDEST STATE THERE IS, and it used to fall through to green.
@@ -23102,7 +23134,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // NEW-1 — also retries a failed BACKGROUND push (rename/status/new-site) when that's what's
         // driving the badge; harmless to include when it isn't (onRetryBackgroundPush is then unset).
         onRetrySave={() => { retryCloudSave(); retryElems(); onRetryBackgroundPush?.(); }}
-        saveDetail={elemSync.state === "stale" ? "This tab is out of date — reload to keep saving" :
+        saveDetail={siteConflict ? "This plan changed elsewhere — reload to keep saving" :
+          elemSync.state === "stale" ? "This tab is out of date — reload to keep saving" :
           elemSync.state === "failed" ? "Some changes haven't reached the cloud — Retry" : elemSync.pending > 0 && (elemSync.state === "syncing" || elemSync.state === "retrying") ? `Syncing ${elemSync.pending} change${elemSync.pending === 1 ? "" : "s"}…` :
           backgroundPushFailed ? backgroundPushDetail : undefined}
         centerContent={<JurisdictionBadge badge={jurBadge} />}
@@ -23130,9 +23163,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <button onClick={takeOverEditing} data-testid="takeover-btn" title="Make this the active tab and save your changes to the cloud now" style={{ flex: "none", cursor: "pointer", background: "#d6b24a", color: "#2a2410", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Take over editing here</button>
         </div>
       )}
+      {/* NEW-1 (2026-09-16) — a write this tab made was REFUSED (this plan changed elsewhere, or
+          the server's own version guard rejected a stale write) and the one self-heal retry
+          couldn't resolve it either. Distinct from cloudSaveFailed below (a transient failure,
+          where "will retry" is literally true): retrying from this tab's still-stale local state
+          would fail the identical way, so the only real fix is a reload — the autosave above has
+          already stopped pushing (siteConflictRef) so nothing keeps silently failing in the
+          background. Nothing is lost: every edit is still on this device (writeMirror runs
+          unconditionally above), a reload just needs to happen before the NEXT one is safe to send. */}
+      {siteConflict && !localSaveFailed && (
+        <div role="alert" data-testid="site-conflict-banner" style={{ ...topBanner, maxWidth: "min(620px, calc(100vw - 16px))", background: "#7c2d12", border: "1px solid #f59e0b" }}>
+          <span style={bannerText}>⚠ <b>This plan changed elsewhere.</b> Your last change here <b>couldn't be saved</b> — it's still on this device, but <b>won't sync until you reload</b> to pick up the latest.</span>
+          <button onClick={() => { try { window.location.reload(); } catch (_) {} }} data-testid="site-conflict-reload" title="Reload to get the latest version of this plan and keep saving" style={{ flex: "none", cursor: "pointer", background: "#f59e0b", color: "#1a1206", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Reload</button>
+        </div>
+      )}
       {/* B474 review (#8): gated on !localSaveFailed — "saved on this device" is false when the device
           write failed too; the red local-save-failed banner is the authoritative message in that case. */}
-      {cloudSaveFailed && !localSaveFailed && (
+      {cloudSaveFailed && !localSaveFailed && !siteConflict && (
         <div role="alert" style={{ ...topBanner, maxWidth: "min(620px, calc(100vw - 16px))", background: "#7c2d12", border: "1px solid #f59e0b" }}>
           <span style={bannerText}>⚠ Your last change <b>didn't reach the cloud</b>. It's saved on this device and will retry on your next edit — your work is not lost.</span>
           <button onClick={retryCloudSave} title="Try saving to the cloud again now" style={{ flex: "none", cursor: "pointer", background: "#f59e0b", color: "#1a1206", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Retry now</button>
