@@ -1190,6 +1190,126 @@ describe("bound-task fixed point — a pred-less bound task must NOT ratchet a m
   });
 });
 
+// ── NEW-1 (owner report 2026-09-16) — a pred-less bound task with ONLY a minMeetingsAfter floor
+// ratcheted forward one meeting on EVERY cascade, forever: the fixed-point guard above exempted
+// itself the instant minMeetingsAfter was set (on the wrong theory that minMeetingsAfter always
+// supplies an external anchor — it only ever tightens `afterDate`, never `readyDate`), so
+// packetReady still fell back to the task's own previously-snapped start. Live symptom: "HW
+// Review" recalculated on every single page load and the recalculated date was PERSISTED, moving
+// a real task roughly a quarter into the future per load (12/22/26 → 03/19/27 → 06/14/27 →
+// 09/07/27) with no user edit. Reproduced here with a weekly body so the ratchet is visible in a
+// couple of cascades rather than requiring a monthly-cadence multi-year run.
+describe("bound-task fixed point — a minMeetingsAfter-only bound task must NOT ratchet either (NEW-1, 2026-09-16)", () => {
+  const weekly = { id: "mb_wk", name: "Weekly review board",
+    recurrence: [{ freq: "weekly", weekday: 3 }],                       // every Wednesday
+    agendaLead: { type: "weekdayAnchor", weeksBefore: 1, weekday: 4 } }; // agenda due the Thu a week before
+  const mk = (id, o = {}) => ({ id, name: "t" + id, start: "", end: "", duration: 1, durValue: 1, durUnit: "d", predecessors: [], parentId: null, ...o });
+
+  it("first cascade snaps forward past the minMeetingsAfter floor; repeat cascades are a FIXED POINT (this MUST fail on the pre-fix engine)", () => {
+    const anchor = mk(1, { start: "2026-01-05" });   // stable, unrelated task the floor is measured from
+    let tasks = [anchor, mk(2, { name: "HW Review", meetingBound: true, meetingBodyId: "mb_wk",
+      start: "2026-01-20", minMeetingsAfter: { taskId: 1, n: 1 } })];
+    let r = E.cascadeDates(tasks, [weekly]);
+    const firstSnap = r[1].start;
+    expect(firstSnap).not.toBe("");
+    // Re-run the SAME cascade on its own output, simulating a second page load with no edits.
+    // A correct repair is idempotent: this must reproduce EXACTLY the same date, not roll forward again.
+    r = E.cascadeDates(r, [weekly]);
+    expect(r[1].start).toBe(firstSnap);
+    r = E.cascadeDates(r, [weekly]);
+    expect(r[1].start).toBe(firstSnap);
+    r = E.cascadeDates(r, [weekly]);
+    expect(r[1].start).toBe(firstSnap);
+  });
+
+  it("a plain (non-meeting) FS successor of the ratcheting task must not keep drifting across simulated reloads either", () => {
+    // This is the shape Michael actually saw: "HW Review" itself is a plain successor riding on a
+    // meeting-bound predecessor — detectCascadeDrift correctly EXEMPTS meeting-bound rows (a re-snap
+    // there is legitimate), so only a downstream plain task's drift is ever visible in the banner.
+    const anchor = mk(3, { start: "2026-01-05" });   // independent, stable task the floor is measured from
+    const bound = mk(1, { name: "2nd Reading", meetingBound: true, meetingBodyId: "mb_wk",
+      start: "2026-01-20", minMeetingsAfter: { taskId: 3, n: 1 } });
+    let stored = [anchor, bound, mk(2, { name: "HW Review", start: "2026-01-27", predecessors: [{ id: 1, type: "FS" }] })];
+    // Simulate 4 consecutive "page loads": recompute, record what a load-time drift check would see,
+    // persist the recomputed result as the next load's input (exactly what the app's load path does).
+    const seenDrift = [];
+    for (let i = 0; i < 4; i++) {
+      const engine = E.recomputeSchedule(stored, [weekly]);
+      const drift = E.detectCascadeDrift(stored, engine);
+      seenDrift.push(drift.map(d => d.id));
+      stored = engine;
+    }
+    // A load that changes nothing must write nothing: after the first corrective load, later loads
+    // must report NO drift at all for "HW Review" (or anything else).
+    expect(seenDrift[1]).toEqual([]);
+    expect(seenDrift[2]).toEqual([]);
+    expect(seenDrift[3]).toEqual([]);
+  });
+});
+
+// ── NEW-1 (owner report 2026-09-16) — THE ACTUAL root cause on Michael's real Master Schedule,
+// found by querying his production data directly: task "HW Review" (id 261) lists its OWN PARENT
+// summary row ("Contract", id 259) as an FS predecessor, alongside a real sibling predecessor
+// (260). A summary row's dates are ALWAYS rollup-derived from its children (rollupParentDates),
+// so reading the parent's end back as a predecessor input closes a cycle no predecessor-graph
+// check (validatePredEdit's `reachesId`) can see — it walks the predecessor graph, not the rollup
+// relationship. Confirmed live: the production row read start "2027-09-07", exactly matching the
+// last of the four dates Michael's console captured across four page loads (12/22/26 → 03/19/27 →
+// 06/14/27 → 09/07/27), each about a quarter later than the last, with no user edit in between.
+describe("cascade fixed point — a task naming its OWN ANCESTOR (summary row) as a predecessor must not ratchet forever (NEW-1, 2026-09-16)", () => {
+  const mk = (id, o = {}) => ({ id, name: "t" + id, start: "", end: "", duration: 1, durValue: 1, durUnit: "d", predecessors: [], parentId: null, ...o });
+
+  it("reproduces Michael's real 'Contract' / 'HW Review' shape and converges to a FIXED POINT after one correction (this MUST fail on the pre-fix engine)", () => {
+    const parent = mk(259, { name: "Contract", start: "2026-08-12", end: "2027-09-13", duration: 10, durValue: 10, pinnedStart: true, parentId: null });
+    const sibling = mk(260, { name: "Begin Drafting Contract", start: "2026-08-12", end: "2026-08-21", duration: 8, durValue: 8, pinnedStart: true, parentId: 259, predecessors: [{ id: 259, type: "FS" }] });
+    const child = mk(261, { name: "HW Review", start: "2027-09-07", end: "2027-09-13", duration: 5, durValue: 5, parentId: 259,
+      predecessors: [{ id: 259, type: "FS" }, { id: 260, type: "FS" }] });   // 259 is child's OWN PARENT — the bad edge
+    let stored = [parent, sibling, child];
+    const seenDrift = [];
+    let lastStart = null;
+    for (let i = 0; i < 5; i++) {
+      const engine = E.recomputeSchedule(stored, []);
+      const drift = E.detectCascadeDrift(stored, engine);
+      seenDrift.push(drift.map(d => d.id));
+      const hw = engine.find(t => t.id === 261);
+      if (lastStart !== null) expect(hw.start).toBe(lastStart);   // idempotent from the second load on
+      lastStart = hw.start;
+      stored = engine;
+    }
+    // A load that changes nothing must write nothing: after the first corrective load, no more drift.
+    expect(seenDrift[1]).toEqual([]);
+    expect(seenDrift[2]).toEqual([]);
+    expect(seenDrift[3]).toEqual([]);
+    expect(seenDrift[4]).toEqual([]);
+    // The ancestor edge is IGNORED for scheduling (261 derives only from real sibling 260), not
+    // silently vanished — it's still flagged so the row visibly shows why.
+    const finalChild = E.recomputeSchedule(stored, []).find(t => t.id === 261);
+    expect(finalChild.predUnresolved).toContain(259);
+  });
+
+  it("validatePredEdit rejects a NEW ancestor-referencing predecessor at entry (defense in depth)", () => {
+    const tasks = [mk(1, { parentId: null }), mk(2, { parentId: 1 })];   // task 2's parent is task 1
+    const { preds, ancestor } = E.validatePredEdit(tasks, 2, [{ id: 1, type: "FS", lag: 0 }]);
+    expect(ancestor).toEqual([1]);
+    expect(preds).toEqual([]);
+  });
+
+  it("validatePredEdit still accepts a real (non-ancestor) predecessor unchanged", () => {
+    const tasks = [mk(1, { parentId: null }), mk(2, { parentId: 1 }), mk(3, { parentId: 1 })];
+    const { preds, ancestor } = E.validatePredEdit(tasks, 3, [{ id: 2, type: "FS", lag: 0 }]);
+    expect(ancestor).toEqual([]);
+    expect(preds.map(p => p.id)).toEqual([2]);
+  });
+
+  it("a grandparent-referencing edge is caught too (walks the full ancestor chain)", () => {
+    const grandparent = mk(1, { name: "Phase", start: "2026-01-01", end: "2026-12-31", duration: 200, durValue: 200, pinnedStart: true, parentId: null });
+    const parent = mk(2, { name: "Sub-phase", parentId: 1 });
+    const child = mk(3, { name: "Leaf", parentId: 2, predecessors: [{ id: 1, type: "FS" }] });   // 1 is 3's GRANDPARENT
+    const r = E.cascadeDates([grandparent, parent, child], []);
+    expect(r.find(t => t.id === 3).predUnresolved).toContain(1);
+  });
+});
+
 // ── NEW-1 — a pinned date on a meeting-bound row that ISN'T a real meeting day must flag LOUDLY.
 // `pinnedStart` (not the never-set `pinnedMeetingDate`) is what a plain grid date-cell edit sets on
 // ANY task, so this is the owner's exact repro shape: type a date directly into a meeting-bound
@@ -1369,9 +1489,9 @@ describe("anti-drift: the deadline-row wiring exists VERBATIM in src + mirror", 
     expect(src).toMatch(/if \(task\.deadlineInfeasible\) return "red";/);
     expect(mjs).toMatch(/if \(task\.deadlineInfeasible\) return "red";/);
   });
-  it("the pred-less fixed-point guard (no per-cascade ratchet) exists in both", () => {
-    expect(src).toMatch(/if \(meetingDatesInRange\(body, packetReady, packetReady\)\.length\) \{/);
-    expect(mjs).toMatch(/if \(meetingDatesInRange\(body, packetReady, packetReady\)\.length\) \{/);
+  it("the pred-less fixed-point guard (no per-cascade ratchet) exists in both, and covers minMeetingsAfter too", () => {
+    expect(src).toMatch(/\(!minAfterFloor \|\| packetReady > minAfterFloor\) && meetingDatesInRange\(body, packetReady, packetReady\)\.length\) \{/);
+    expect(mjs).toMatch(/\(!minAfterFloor \|\| packetReady > minAfterFloor\) && meetingDatesInRange\(body, packetReady, packetReady\)\.length\) \{/);
   });
 });
 
@@ -2379,8 +2499,8 @@ describe("anti-drift: B443248/B443249/B443250 exist VERBATIM in src + mirror", (
   it("cascadeDates skips date derivation for a summary row in both", () => {
     for (const s of [src, mjs]) expect(s).toMatch(/if \(parentIds\.has\(t\.id\)\) \{ t\.finishConflict = false; t\.startConflict = false; return; \}/);
   });
-  it("predUnresolved is computed in both", () => {
-    for (const s of [src, mjs]) expect(s).toMatch(/\.filter\(p => !map\[p\.id\] \|\| !\(map\[p\.id\]\.end \|\| map\[p\.id\]\.start\)\)/);
+  it("predUnresolved is computed in both, and flags an ancestor-referencing predecessor too", () => {
+    for (const s of [src, mjs]) expect(s).toMatch(/\.filter\(p => !map\[p\.id\] \|\| !\(map\[p\.id\]\.end \|\| map\[p\.id\]\.start\) \|\| isAncestorOf\(p\.id, id\)\)/);
   });
   it("the pinned-start conflict flag is set in both", () => {
     for (const s of [src, mjs]) expect(s).toMatch(/if \(t\.pinnedStart && t\.start && predEarly && predEarly > t\.start\) t\.startConflict = true;/);
