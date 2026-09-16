@@ -174,8 +174,7 @@ async function cloudUpsertCore(uid, model, isRetry) {
     // re-push ONCE (whole-header last-write-wins — the header is rarely-contended meta/settings/
     // overlays; the elements it used to carry are per-row rev-guarded in site_elements now). The
     // old loud "changed in another session → Take over editing" banner class (B455/B460/B558/B596)
-    // is retired BY ARCHITECTURE — there is no whole-doc payload left to fight over. If the retry
-    // ALSO conflicts (a live write race), report + bail; the next autosave push heals it.
+    // is retired BY ARCHITECTURE — there is no whole-doc payload left to fight over.
     if (!isRetry) {
       const fresh = await fetchSiteForReconcile(uid, m.id); // refreshes siteVersions[m.id]
       if (fresh !== null || siteVersions[m.id] != null) {
@@ -183,8 +182,17 @@ async function cloudUpsertCore(uid, model, isRetry) {
         return cloudUpsertCore(uid, model, true);
       }
     }
+    // NEW-1 (2026-09-16) — the retry ALSO conflicted (or a live write race means we have nothing
+    // fresh to retry with): this is no longer a transient, retry-on-next-edit failure. `0 rows`
+    // here is EXACTLY what a server-side refusal (sites_enforce_version_monotonic, or an ordinary
+    // stale-version loss that survived one self-heal) looks like over PostgREST — there is no
+    // separate "the write was refused" signal to ask for; the caller must treat an empty return as
+    // the refusal itself. `unresolved:true` tells the caller this tab's local copy is now provably
+    // behind the row another session/device wrote, so silently retrying on the next edit (the old
+    // behavior) would keep failing the identical way and never tell the person who made the edit
+    // that it didn't land — the caller surfaces this LOUDLY and stops pushing until a reload.
     reportClientEvent("cloud-conflict", "stale write rejected twice (sites CAS)", { id: m.id, reason: "cas-409", expected: siteVersions[m.id] });
-    return { ok: false, conflict: true };
+    return { ok: false, conflict: true, unresolved: true };
   }
   if (r.degrade) {
     // The `version` column isn't migrated in yet → fall back to a plain upsert (today's
