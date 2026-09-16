@@ -1300,25 +1300,60 @@ export function teeGeometry(params) {
     // tee gained a 2.8–10.7 sqft "hole" it never had before). Left untouched, phT > 0 keeps the
     // pre-existing (unflattened-arc-risk, but proven simple) hull behaviour.
     if (deepT > EPS) return hull;
-    // Near-perpendicular residual (B1645792 (×2), live-check finding): at a shallow
-    // approach angle the strip's own tilted flat cap can dip a hair below the pad edge between T
-    // (the tee point) and `capCorner` — the reach above doesn't cover it, since it is anchored at
-    // `back1`/`tan2`, not at T. Try adding T to the SAME hull (never a separate merged piece — a
-    // second piece that only shares a single vertex with the first pinches into a visible cusp
-    // instead of real overlap, measured while getting here) — verified exactly like the arc splice
-    // below: only used if it stays simple and never shrinks the wedge's own coverage.
+    // ---- Drive-into-pad case (deepT === 0, teeGeometry's ONE live caller) ------------------
+    // NEW-1 (this round) — an EXPLICIT ring, replacing the convex-hull construction above for this
+    // branch. Two rounds of hull-based fixes (B1645792, then its ×2 "restore the arc / add T"
+    // amendment) both left a real hole, because a CONVEX HULL only keeps a point that is
+    // geometrically EXTREME — and `capCorner` (the driveway's own real flat-cap corner, the one
+    // vertex that anchors the wedge to where the strip actually ends) is COLLINEAR with, and so
+    // silently DROPPED in favour of, `T` and `back1`/tan1 the moment the approach is at or near
+    // PERPENDICULAR (all three then sit on the pad-edge line together). Once dropped, the hull's
+    // boundary cuts a straight diagonal from `T` down to wherever the arc/backing points happen to
+    // be, opening a real gap between the pad edge and that diagonal — measured at ~124 sq ft on a
+    // plain PERPENDICULAR 36 ft drive into a 200×150 ft pad, so this was never only an oblique-angle
+    // defect; the ×2 amendment's own "add T to the hull" fix is what exposed it, by giving the hull
+    // a second way to discard `capCorner` as redundant.
+    //
+    // The fix stops asking a hull to "discover" this shape and builds it directly, in the one order
+    // the geometry actually needs: `T` → `capCorner` → the fillet arc, walked from its PAD-edge
+    // tangent to its SIDE (driveway) tangent → closing back to `T` along the pad edge. Every one of
+    // those points is a REQUIRED ring member — there is no redundancy step to drop one on. This also
+    // makes `restoreArcOnHull` unnecessary here: the arc is inserted directly, never handed to a hull
+    // that might flatten it.
+    //
+    // `T` is included ONLY when doing so still yields a simple polygon. At (or extremely near) a
+    // PERPENDICULAR approach, `T`, `capCorner` and `back1`/tan1 fall on the same pad-edge line, and
+    // the ring would fold back on itself for a stretch (the exact degeneracy that broke the hull
+    // approach) — but at that exact angle the triangle `T`-`capCorner`-`back1` has ~zero area, so
+    // dropping `T` there costs nothing. At any genuinely oblique angle the three are NOT collinear,
+    // `T` is a real corner of the gore this wedge has to cover, and skipping it left its own small
+    // but real sliver (measured: ~5 sq ft at a 2° approach) between `capCorner` and the road's own
+    // tilted flat cap.
+    // With NO flare, `capCorner` and `tan2` fall on the SAME real driveway-edge line, so the ring
+    // shares a full physical EDGE with the strip there (robust). `flare` widens the fillet's own
+    // anchor line (phSm = phS + flare) OFF the real edge `capCorner` sits on, so without this tuck
+    // the two would share only the single point `capCorner` — proven fragile (measured: dissolving
+    // to 3 regions, a stranded sliver, on a flared perpendicular approach). The tuck runs a short,
+    // fixed distance from `capCorner` straight along `d` (the driveway's own real edge direction) —
+    // exactly onto the strip's own edge, guaranteeing a real overlap regardless of flare.
+    // Gated to an actual flare: at zero flare the tuck sits exactly on the capCorner→tan2 edge
+    // (redundant), and at a very oblique angle with a small pad/large radius it can overshoot the
+    // arc's own reach and self-cross — measured on a 75° parking-scale approach. Only add it when
+    // there is a real phSm/phS offset to bridge.
+    const tuck = flare > EPS ? [add(capCorner, mul(d, sideTuck))] : [];
+    const ringWithT = [T, capCorner, ...tuck, ...arcPts.slice().reverse()];
+    if (isSimplePolygon(ringWithT)) return ringWithT;
+    const ring = [capCorner, ...tuck, ...arcPts.slice().reverse()];
+    if (isSimplePolygon(ring)) return ring;
+    // Defensive fallback ONLY — never regress to nothing. Proven unneeded across the full angle
+    // (0–89°), pad-size, corner-proximity and flare sweep this fix was verified against; kept for any
+    // input shape that sweep didn't reach, so a self-intersecting explicit ring still degrades to the
+    // old (arc-flattening but always simple and always connected) hull rather than vanishing.
     const hullWithT = convexHull([T, back1, ...arcPts, back2, capCorner, farPt, farPtIn]);
     const base = (hullWithT && isSimplePolygon(hullWithT) && polygonArea(hullWithT) >= polygonArea(hull) - EPS)
       ? hullWithT
       : hull;
     const restored = restoreArcOnHull(base, arcPts);
-    // ⛔ The splice is a geometric IMPROVEMENT attempt, never a guarantee — MEASURED to
-    // self-intersect on some angle/pad-size combinations (a 30° parking-scale return, a flared
-    // throat, a rotated-pad edge case), reproducing the exact class of bug this fix must not
-    // reintroduce. The hull's own simplicity is proven by construction; the spliced result is not,
-    // so it is verified here and DISCARDED — falling back to the plain (arc-flattening but always
-    // simple and always correctly connected) hull — the moment it fails. Never ship an unverified
-    // splice: a self-crossing wedge is a worse defect than a straightened curb return.
     return isSimplePolygon(restored) ? restored : base;
   };
   // Corner A sits on the +perpS edge, so its pavement lies toward -perpS; corner B is the mirror.

@@ -48,6 +48,7 @@ import { describe, it, expect } from "vitest";
 import { rectEdges, nearestRectEdge, teeGeometry, polygonEdges, polygonContainsPoint, polygonDepthBehind } from "../src/workspaces/site-planner/lib/roadGeometry.js";
 import { dissolveRings } from "../src/workspaces/site-planner/lib/roadNetwork.js";
 import { roadStripRing, roadCurbWidth } from "../src/workspaces/site-planner/lib/siteGeometry.js";
+import { floodFillEnclosed, pavedPredicate, assertMeasurableFloodFill, enclosedAreaSqFt } from "../ui-audit/lib/paveFloodFill.mjs";
 
 const ccw = (a, b, c) => (c.y - a.y) * (b.x - a.x) > (b.y - a.y) * (c.x - a.x);
 const segCross = (a, b, c, d) => ccw(a, c, d) !== ccw(b, c, d) && ccw(a, b, c) !== ccw(a, b, d);
@@ -210,39 +211,33 @@ function padRingOf(pad) {
     { x: pad.cx + hw, y: pad.cy + hh }, { x: pad.cx - hw, y: pad.cy + hh },
   ];
 }
-function pointInRing(p, ring) {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const a = ring[i], b = ring[j];
-    if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
-  }
-  return inside;
-}
-// Scan a grid around the throat for a cell that is PAVED NOWHERE (neither the pad rect nor any
-// dissolved road region covers it) yet has at least 3 of its 4 orthogonal neighbours paved — an
-// isolated unpaved pocket, i.e. the notch the owner's live check found.
-function throatNotchCells(s, opts = {}) {
-  const { half = 60, step = 0.5, near = 12 } = opts;
-  const padRing = padRingOf(s.pad);
-  const found = [];
-  for (let x = -half; x <= half; x += step) {
-    for (let y = -half; y <= half; y += step) {
-      const pt = { x: s.P.x + x, y: s.P.y + y };
-      if (Math.hypot(x, y) > near) continue; // restrict the scan to right around the tee point
-      const inPad = pointInRing(pt, padRing);
-      let inRoad = false;
-      for (const r of s.dissolved) if (pointInRing(pt, r.outer)) { inRoad = true; break; }
-      if (inPad || inRoad) continue;
-      const nb = [[step, 0], [-step, 0], [0, step], [0, -step]].map(([dx, dy]) => {
-        const p2 = { x: pt.x + dx, y: pt.y + dy };
-        if (pointInRing(p2, padRing)) return true;
-        for (const r of s.dissolved) if (pointInRing(p2, r.outer)) return true;
-        return false;
-      });
-      if (nb.filter(Boolean).length >= 3) found.push(pt);
-    }
-  }
-  return found;
+// NEW-4 (this round) — REPLACES `throatNotchCells`, this suite's own prior instrument, which was
+// itself part of why two rounds shipped green here while the deployed build stayed broken.
+// `throatNotchCells` scanned only within 12 ft of the tee point and flagged a cell only when at
+// least 3 of its 4 immediate neighbours were ALREADY known-paved (a one-step heuristic, not a flood
+// fill) — neither property holds for what a live check actually found: an oblique throat notch
+// measured at 8.4 ft deep by 32.2 ft ALONG THE PAD EDGE (mostly outside a 12 ft window), and a
+// perpendicular regression whose enclosed gap is a wide, uniformly unpaved patch with no paved
+// neighbour anywhere near its interior (invisible to a "is my neighbour paved" test).
+//
+// This is a REAL flood fill (`ui-audit/lib/paveFloodFill.mjs`, BFS from the scan box's own border —
+// see that module's header) over a box sized to comfortably out-reach the pad itself, so a notch
+// anywhere near the junction — however far along the edge an oblique approach pushes it — falls
+// inside the scan. It carries the SAME mandatory self-test control that module's own header
+// requires: a scan that cannot see a deliberately punched hole may not be trusted to report a real
+// zero. Returns the enclosed area in sq ft (0 means genuinely clean, not merely "nothing looked
+// wrong nearby").
+function enclosedSqFt(padRing, s, opts = {}) {
+  const half = opts.half ?? 90;
+  const step = opts.step ?? 0.5;
+  const isPaved = pavedPredicate([padRing], s.dissolved);
+  const bbox = { x0: s.P.x - half, y0: s.P.y - half, x1: s.P.x + half, y1: s.P.y + half };
+  // Self-test disc: a couple of feet INSIDE the pad from the tee point along the connect edge's own
+  // inward normal — always paved (the pad's own interior) on every scenario this file builds.
+  const outN = s.hit && s.hit.edge && s.hit.edge.outN ? s.hit.edge.outN : { x: 0, y: -1 };
+  const discCenter = { x: s.P.x - outN.x * 5, y: s.P.y - outN.y * 5 };
+  const { real } = assertMeasurableFloodFill(isPaved, bbox, step, discCenter, 2, "roadDriveJunctionFillet");
+  return enclosedAreaSqFt(real);
 }
 // A tessellated arc's SAG off its own chord: 0 for a dead-straight run, large for a real curve.
 function arcSag(arc) {
@@ -263,19 +258,19 @@ function arcPointsSurviving(wedgeRing, arc) {
 }
 
 describe("NEW-1 (B1645792 amendment) — oblique road-into-pad: no throat notch, and the returns are real arcs", () => {
-  const ANGLES = [1, 5, 15, 30, 45, 60, 75, 80, 85, 89];
+  const ANGLES = [0, 1, 2, 3, 5, 10, 15, 20, 30, 45, 60, 70, 75, 80, 85, 88, 89];
 
   it("REGRESSION (owner's exact shape): a 36 ft drive into a truck court at 45° leaves no unpaved notch at the throat", () => {
     const s = driveJunctionScenario(45, { width: 36, R: 24, padW: 200, padH: 150 });
-    const notches = throatNotchCells(s);
-    expect(notches, `unpaved notch cells found near the throat: ${JSON.stringify(notches.slice(0, 5))}`).toHaveLength(0);
+    const area = enclosedSqFt(padRingOf(s.pad), s);
+    expect(area, `enclosed unpaved area near the throat: ${area} sq ft`).toBe(0);
   });
 
-  it("no throat notch across the oblique angle sweep", () => {
+  it("no throat notch across the oblique-through-perpendicular angle sweep (0° included — NEW-2's own regression)", () => {
     for (const a of ANGLES) {
       const s = driveJunctionScenario(a, { width: 36, R: 24, padW: 200, padH: 150 });
-      const notches = throatNotchCells(s);
-      expect(notches, `angle ${a}°: unpaved notch cells: ${JSON.stringify(notches.slice(0, 5))}`).toHaveLength(0);
+      const area = enclosedSqFt(padRingOf(s.pad), s);
+      expect(area, `angle ${a}°: enclosed unpaved area near the throat: ${area} sq ft`).toBe(0);
     }
   });
 
@@ -308,7 +303,7 @@ describe("NEW-1 (B1645792 amendment) — oblique road-into-pad: no throat notch,
   it("generic paving pad (not a truck court) also keeps its arcs and stays notch-free", () => {
     for (const a of [15, 45, 75]) {
       const s = driveJunctionScenario(a, { width: 24, R: 15 });
-      expect(throatNotchCells(s)).toHaveLength(0);
+      expect(enclosedSqFt(padRingOf(s.pad), s)).toBe(0);
       for (const arc of s.geom.returns) {
         if (arcSag(arc) < 0.5) continue;
         const wedgeRing = wedgeForArc(s.geom.wedges, arc);
@@ -316,6 +311,38 @@ describe("NEW-1 (B1645792 amendment) — oblique road-into-pad: no throat notch,
         const survived = arcPointsSurviving(wedgeRing, arc);
         expect(survived).toBeGreaterThanOrEqual(Math.ceil(arc.length * 0.75));
       }
+    }
+  });
+});
+
+// NEW-2 (this round) — REGRESSION: a near-perpendicular (incl. EXACTLY perpendicular) road into a
+// rect pad used to leave a real enclosed gap and a detached, comma-shaped curb-return sliver on one
+// side only (measured live: 126.8 sq ft, 19×20.8 ft, at exactly 90°; 107–115 sq ft at ~11° off).
+// Same root cause as NEW-1 above and fixed by the same change: `teeGeometry`'s wedge builder used a
+// convex hull that silently DROPS `capCorner` — the one vertex anchoring the wedge to where the
+// driveway's own strip actually ends — the moment it becomes collinear with `T` and the pad-edge
+// tangent, which is exactly what happens at (or near) a perpendicular approach. A prior round's own
+// "add T to the hull" attempt (B1645792 ×2) made this WORSE, by giving the hull a second way to
+// discard `capCorner` as redundant — which is why this shape regressed on a later PR despite the
+// oblique sweep above staying green throughout.
+describe("NEW-2 (this round) — near-perpendicular road-into-pad: no enclosed gap, no detached return", () => {
+  const NEAR_PERP = [0, 1, 2, 3, 5, 8, 11, 15];
+
+  it("REGRESSION (owner's exact shape): an EXACTLY vertical road into the pad's horizontal bottom edge leaves no enclosed gap", () => {
+    const s = driveJunctionScenario(0, { width: 36, R: 24, padW: 200, padH: 150 });
+    const area = enclosedSqFt(padRingOf(s.pad), s);
+    expect(area, `enclosed unpaved area at a perpendicular approach: ${area} sq ft`).toBe(0);
+    // Both curb returns must be simple, connected pavement — not a stranded sliver on either side.
+    expect(s.dissolved.length, "the pavement is ONE connected region, not a stranded return").toBe(1);
+    expect(isSimplePolygon(s.dissolved[0].outer)).toBe(true);
+  });
+
+  it("no enclosed gap across a small deviation from perpendicular (the owner's ~11° case)", () => {
+    for (const a of NEAR_PERP) {
+      const s = driveJunctionScenario(a, { width: 36, R: 24, padW: 200, padH: 150 });
+      const area = enclosedSqFt(padRingOf(s.pad), s);
+      expect(area, `${a}° off perpendicular: enclosed unpaved area: ${area} sq ft`).toBe(0);
+      expect(s.dissolved.length, `${a}° off perpendicular: one connected region`).toBe(1);
     }
   });
 });
@@ -383,9 +410,16 @@ describe("NEW-2 — polygon pad / parking field is a valid drive target, same as
 
   it("REGRESSION shape (45° into a polygon-drawn rectangular field) matches the rect-target result: no throat notch", () => {
     const s = polygonJunctionScenario(45, rectRing, { width: 36, R: 24 });
-    const padRingLike = rectRing; // reuse the same point-in-ring check the rect suite uses via throatNotchCells's pad param shape
-    const notches = throatNotchCells({ pad: { cx: 0, cy: 0, w: 200, h: 150 }, dissolved: s.dissolved, P: s.P });
-    expect(notches).toHaveLength(0);
+    const area = enclosedSqFt(rectRing, s);
+    expect(area, `enclosed unpaved area near the throat: ${area} sq ft`).toBe(0);
+  });
+
+  it("no enclosed gap at a near-perpendicular approach into a polygon-drawn field either (NEW-2's shape, polygon target)", () => {
+    for (const a of [0, 2, 5, 11]) {
+      const s = polygonJunctionScenario(a, rectRing, { width: 36, R: 24 });
+      const area = enclosedSqFt(rectRing, s);
+      expect(area, `${a}° off perpendicular: enclosed unpaved area: ${area} sq ft`).toBe(0);
+    }
   });
 
   it("connects to a CONCAVE (L-shaped) field without crashing and stays a simple, connected region", () => {
