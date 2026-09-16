@@ -268,14 +268,66 @@ export function shouldAdoptLinkedSiteIntoRoute({
 // `dashboardIntent` is skipped deliberately: a Dashboard press already told the iframe to switch
 // (dashboardNavActions), so re-posting here would be redundant, not wrong — but there is nothing
 // useful for this function to add in that window.
+//
+// ⛔ B1614528 — `pickShowing` is a REQUIRED gate now, same shape as isGridMismatched's own use of
+// it. A genuine cross-cutting pick (Operations/Pursuits, or a Task Report row for a schedule with
+// no linked site — see resolveReportRowNavigation below) can be showing on the "projects" section
+// with the route STILL project-less — that's not ambient drift to correct, it's a deliberate,
+// currently-honored choice, and without this the very act of recording the pick did nothing to
+// stop this function from immediately telling the iframe to abandon it again.
 export function shouldNeutralizeToReports({
-  isActive = true, section = "projects", projectId = null, bootCarryOutAllowed = false, dashboardIntent = false,
+  isActive = true, section = "projects", projectId = null, bootCarryOutAllowed = false, dashboardIntent = false, pickShowing = false,
 } = {}) {
   if (!isActive) return false;
+  if (pickShowing) return false;          // a deliberate cross-cutting pick stands; never neutralized back to reports
   if (projectId != null) return false;
   if (bootCarryOutAllowed) return false;  // the boot privilege still stands — let it try adopting first
   if (dashboardIntent) return false;      // already told the iframe to switch, nothing more to do
   return section === "projects";
+}
+
+/* ---- B1614528 — the Task Report row link must not be dragged back to Dashboard ------------------
+ *
+ * Owner-reported + reproduced on production build 9b52e1a: the Task Report's per-row "Open row in
+ * <project>" icon (public/sequence/index.html's goToTask) visibly does nothing when clicked.
+ *
+ * Mechanism: goToTask flips the embed's OWN `section` from "reports" to "projects" and reports the
+ * clicked task's project as the new `activeId` — a genuine, user-initiated navigation, exactly the
+ * kind selectSchedule() below already knows how to carry into the route. But the Task Report is
+ * only ever reachable with NO project routed (`projectId == null`), so `shouldNeutralizeToReports`
+ * above used to read that very transition as ambient `aPid` drift — the B1644368 case it exists to
+ * catch, some stale project quietly left on screen while the route honestly says "no project" — and
+ * immediately posted `planar:nav-dashboard` to drag the embed straight back, repeating every 380ms.
+ * The row's own click succeeds INSIDE the iframe every single time; the shell silently undoes it
+ * within one frame. Captured message log (BACKLOG.md B1614528): nav-state "projects" 3 → shell fires
+ * nav-dashboard → nav-state "reports" 3 — under 200ms round trip, invisible from the user's chair.
+ *
+ * The fix distinguishes a genuine row click from ordinary ambient drift by WHEN the transition
+ * happens, not by any new message field: ambient drift is what an iframe LOAD's first confirmed
+ * nav-state can report (its own persisted, account-wide aPid, left over from anything); a Task
+ * Report row click is a "reports" → "projects" section change that happens AFTER this same load has
+ * already confirmed "reports" at least once. Scheduler.jsx tracks that with a `prevConfirmedSectionRef`
+ * (reset to null on every iframe load, exactly like `navConfirmedRef`) and passes `cameFromReports`
+ * in — this function only ever sees that one boolean, never raw timing.
+ *
+ * The outcome mirrors selectSchedule's own explicit-pick handling exactly, because it's the same
+ * situation from the other direction:
+ *   - the clicked task's project IS linked to a Site Planner project → adopt that site into the
+ *     route (`linkedSiteId` returned non-null) — same as picking a linked schedule from the crumb,
+ *     so the Site/Review tabs follow.
+ *   - the clicked task's project has NO linked site (Pursuits/Operations) → there is nowhere to
+ *     route to (`linkedSiteId` returned null); the caller records it as a cross-cutting PICK
+ *     instead, exactly like picking Operations/Pursuits from the ScheduleCrumb switcher already
+ *     does. That recorded pick (`pickShowing`, via isPickShowing above) is what stops
+ *     `shouldNeutralizeToReports` and `isGridMismatched` from treating this legitimate, routeless
+ *     "projects" state as something to correct or hide.
+ *
+ * Pure; returns the resolved `{activeId, linkedSiteId}` action or null when there's nothing to do.
+ * The caller (Scheduler.jsx) is responsible for actually setting `explicitPickRef` and calling
+ * `onProjectChange` — this only decides WHETHER a navigation is owed and with what site id. */
+export function resolveReportRowNavigation({ cameFromReports = false, projectId = null, activeId = null, linkedSiteId = null } = {}) {
+  if (!cameFromReports || projectId != null || activeId == null) return null;
+  return { activeId, linkedSiteId: linkedSiteId != null ? linkedSiteId : null };
 }
 
 /* ---- NEW-5 (B1080544) — make a route↔grid mismatch IMPOSSIBLE TO SEE, not merely self-healing ---
