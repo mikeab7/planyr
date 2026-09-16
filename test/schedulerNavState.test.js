@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import {
   sanitizeProjects, parseNavState, deriveCurrentProject, findBySiteId, findAllBySiteId,
   needsScheduleCarryIn, dashboardNavActions, isPickShowing, isGridMismatched, newProjectAction,
+  shouldNeutralizeToReports, resolveReportRowNavigation,
 } from "../src/workspaces/scheduler/lib/navState.js";
 
 const WELL_FORMED = [{ id: 1, name: "Goose Creek" }, { id: 3, name: "Grand Port Logistics" }];
@@ -769,12 +770,90 @@ describe("Scheduler.jsx — the neutralize-to-reports post retries (B1644368)", 
   it("the neutralize effect posts more than once, on an interval, not a single fire-and-forget call", () => {
     const i = SRC.indexOf("if (!shouldNeutralizeToReports({");
     expect(i).toBeGreaterThan(-1);
-    const effectEnd = SRC.indexOf("}, [isActive, section, projectId]);", i);
+    const effectEnd = SRC.indexOf("}, [isActive, section, projectId, pickShowing]);", i);
     expect(effectEnd).toBeGreaterThan(-1);
     const block = SRC.slice(i, effectEnd);
     expect(block).toMatch(/setInterval\(/);
     // and it cleans the interval up rather than leaking one per re-render
     expect(block).toMatch(/return \(\) => clearInterval\(t\);/);
+  });
+});
+
+/* B1614528 — the Task Report row link ("Open row in <project>") is undone by the shell's own
+ * state-correction loop. See navState.js's resolveReportRowNavigation for the full mechanism;
+ * these lock the pure decision function plus the two Scheduler.jsx wiring facts a source guard can
+ * verify without a jsdom/React harness (this repo has none — Node-only vitest, per convention). */
+describe("resolveReportRowNavigation — a genuine Task Report row click must not read as ambient drift (B1614528)", () => {
+  it("null when this isn't a reports→projects transition (an ordinary ambient/boot report)", () => {
+    expect(resolveReportRowNavigation({ cameFromReports: false, projectId: null, activeId: 3, linkedSiteId: "gc" })).toBeNull();
+  });
+
+  it("null when a project is already routed — nothing to adopt, the route already outranks this", () => {
+    expect(resolveReportRowNavigation({ cameFromReports: true, projectId: "gp", activeId: 3, linkedSiteId: "gc" })).toBeNull();
+  });
+
+  it("null when there's no activeId to navigate to", () => {
+    expect(resolveReportRowNavigation({ cameFromReports: true, projectId: null, activeId: null, linkedSiteId: "gc" })).toBeNull();
+  });
+
+  it("a linked schedule resolves to adopting its site into the route", () => {
+    expect(resolveReportRowNavigation({ cameFromReports: true, projectId: null, activeId: 3, linkedSiteId: "gc" }))
+      .toEqual({ activeId: 3, linkedSiteId: "gc" });
+  });
+
+  it("an UNLINKED schedule (Pursuits/Operations) resolves to a cross-cutting pick — linkedSiteId null, not skipped", () => {
+    expect(resolveReportRowNavigation({ cameFromReports: true, projectId: null, activeId: 5, linkedSiteId: null }))
+      .toEqual({ activeId: 5, linkedSiteId: null });
+  });
+});
+
+describe("shouldNeutralizeToReports — a deliberate cross-cutting pick is never dragged back to reports (B1614528)", () => {
+  it("still neutralizes ordinary ambient drift with no pick showing (unchanged prior behaviour)", () => {
+    expect(shouldNeutralizeToReports({ isActive: true, section: "projects", projectId: null })).toBe(true);
+  });
+
+  it("does NOT neutralize while a deliberate pick is showing, even though the route is still project-less", () => {
+    expect(shouldNeutralizeToReports({ isActive: true, section: "projects", projectId: null, pickShowing: true })).toBe(false);
+  });
+
+  it("pickShowing defaults to false — every pre-B1614528 caller keeps its exact prior behaviour", () => {
+    expect(shouldNeutralizeToReports({ isActive: true, section: "projects", projectId: null })).toBe(true);
+    expect(shouldNeutralizeToReports({ isActive: true, section: "reports", projectId: null })).toBe(false);
+  });
+});
+
+describe("Scheduler.jsx — the Task Report row-click fix is wired in (B1614528)", () => {
+  const SRC = readFileSync(fileURLToPath(new URL("../src/workspaces/scheduler/Scheduler.jsx", import.meta.url)), "utf8");
+
+  it("the nav-state handler resolves a genuine report-row navigation before acting on it", () => {
+    expect(SRC).toMatch(/const cameFromReports = prevConfirmedSectionRef\.current === "reports";/);
+    expect(SRC).toMatch(/prevConfirmedSectionRef\.current = nav\.section;/);
+    expect(SRC).toMatch(/resolveReportRowNavigation\(\{/);
+  });
+
+  it("prevConfirmedSectionRef resets on every iframe load, the same shape navConfirmedRef already uses", () => {
+    const i = SRC.indexOf("const onIframeLoad = useCallback(() => {");
+    expect(i).toBeGreaterThan(-1);
+    const askIdx = SRC.indexOf("const ask = () => {", i);
+    const block = SRC.slice(i, askIdx);
+    expect(block).toMatch(/setNavConfirmedBoth\(false\)/);
+    expect(block).toMatch(/prevConfirmedSectionRef\.current = null;/);
+  });
+
+  it("the neutralize effect now also requires `pickShowing` in its gate and its deps", () => {
+    const i = SRC.indexOf("if (!shouldNeutralizeToReports({");
+    expect(i).toBeGreaterThan(-1);
+    const block = SRC.slice(i, SRC.indexOf(")) return;", i));
+    expect(block).toMatch(/pickShowing/);
+    expect(SRC).toMatch(/\}, \[isActive, section, projectId, pickShowing\]\);/);
+  });
+
+  it("a resolved navigation with a linked site adopts it into the route via the freshness ref, not a stale closure", () => {
+    const i = SRC.indexOf("const navAction = resolveReportRowNavigation(");
+    expect(i).toBeGreaterThan(-1);
+    const block = SRC.slice(i, i + 500);
+    expect(block).toMatch(/onProjectChangeRef\.current\?\.\(navAction\.linkedSiteId\)/);
+    expect(block).toMatch(/explicitPickRef\.current = \{ id: navAction\.activeId, projectId: navAction\.linkedSiteId \};/);
   });
 });
 
