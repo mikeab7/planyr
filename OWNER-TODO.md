@@ -5,7 +5,25 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-09-10._
+_Last updated: 2026-09-16._
+
+## 📅 "HW Review" on the Master Schedule — restore its old date, or leave it? (B1701360)
+
+> **Short version: the bug that kept pushing "HW Review" further into the future every time you
+> loaded the schedule is fixed — it can't happen again, to that task or any other.** But fixing the
+> bug doesn't undo what it already did: right now that task's date is wherever the bug left it
+> (settling around late August 2026, driven by its one real link to "Begin Drafting Contract").
+>
+> I dug through your account's own save history and found the date it was sitting on right before
+> the bug started: **October 1, 2026**, tied to a different, real task ("Provide Lender Consent").
+> It sat there safely, untouched, for over a day before something re-linked it — most likely while
+> you were setting up the "Contract" group that day — and that re-link is what planted the loop.
+>
+> I have not touched your actual schedule — only the code. Restoring the date is a one-click change
+> in the app: open "HW Review," set its "depends on" field back to just the one task ("Provide
+> Lender Consent"), and it'll land back on October 1, 2026 on its own.
+> - [ ] **Say the word and I'll do it, or just fix it yourself in the app whenever's convenient.**
+>       Either way, nothing else is at risk — this was the only task actually caught in the loop.
 
 ## ✅ One old project record needs a small repair — say yes or no (B1496320)
 
