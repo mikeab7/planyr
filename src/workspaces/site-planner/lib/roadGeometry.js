@@ -1487,6 +1487,46 @@ export function polygonDepthBehind(points, at, inwardN) {
   return maxProj;
 }
 
+/* B1611841 (NEW-2) — where a road's own drawn segment actually CROSSES a drive target's boundary,
+ * as opposed to whichever edge happens to sit nearest the road's raw endpoint.
+ *
+ * `driveJunctionsOf`'s ONE live caller welds a road endpoint that is CONTAINED anywhere inside a
+ * parking field / truck court / paving pad (B1612608 — "lands on, overlaps, or falls within
+ * tolerance", not just near an edge). `nearestRectEdge(P, edges)` answers "which edge is
+ * geometrically closest to this POINT" — correct only while P sits near the target's own
+ * perimeter. Once a contained endpoint clears the target's midline, the nearest edge silently
+ * FLIPS to a different side than the one the road actually crossed to get there, and every
+ * downstream quantity (`throughDir`, the along-edge run, the court-depth radius clamp) is then
+ * measured against a line the drawn road never followed — producing the reported small degenerate
+ * blob instead of a curb return at the real entry face, regardless of how far past it the endpoint
+ * sits. The fix is to ask a different question: not "which edge is nearest P" but "which edge did
+ * the segment from the road's own approach point to P actually cross."
+ *
+ * `outsidePt` is a point back along the road (its other endpoint, or the next real vertex —
+ * `roadRunFrom`'s own `far`); `insidePt` is the connected endpoint. Returns `{ edge, pt }` for the
+ * crossing closest to `insidePt` (the last edge the segment crosses before reaching it — for a
+ * convex target there is exactly one), or `null` if the segment never crosses any given edge (both
+ * ends on the same side, or a degenerate zero-length segment) — the caller falls back to its own
+ * nearest-edge behaviour in that case, unchanged from before this function existed. */
+export function roadEdgeCrossing(outsidePt, insidePt, edges) {
+  if (!outsidePt || !insidePt || !Array.isArray(edges) || !edges.length) return null;
+  const seg = sub(insidePt, outsidePt);
+  const segLen = len(seg);
+  if (!(segLen > EPS)) return null;
+  const dRoad = unit(seg);
+  let best = null;
+  for (const e of edges) {
+    const hit = lineX(outsidePt, dRoad, e.a, e.dir);
+    if (!hit) continue;
+    const s = dot(sub(hit, e.a), e.dir);              // param along the edge segment
+    if (s < -EPS || s > e.len + EPS) continue;          // crossing falls outside this edge
+    const t = dot(sub(hit, outsidePt), dRoad);          // param along the drawn road segment
+    if (t < -EPS || t > segLen + EPS) continue;         // crossing falls outside the drawn segment
+    if (!best || t > best.t) best = { edge: e, pt: hit, t };
+  }
+  return best ? { edge: best.edge, pt: best.pt } : null;
+}
+
 /* Curb / border stroke width in PIXELS for a true real-world curb of `curbFt` feet at the
  * current `ppf` (pixels-per-foot), floored to `minPx` so it stays visible when the true
  * width goes sub-pixel at overview zoom. NO ceiling — a 6" curb SHOULD read thicker as you
