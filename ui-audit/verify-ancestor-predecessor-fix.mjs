@@ -128,13 +128,22 @@ const notice = await page.evaluate(({ id260, id261 }) => {
 console.log("NOTICE:", JSON.stringify(notice));
 
 // Click the named-row link inside the ancestor-predecessor banner for the first affected row.
+// NEW-1 (owner follow-on, 2026-09-16) — the wrapping `<span style={{flex:1}}>` around the WHOLE
+// banner message also matches "#<id>" in its aggregate textContent (it contains every row link) and
+// comes FIRST in querySelectorAll's document-order result, so a plain `.find` grabbed that outer,
+// onClick-less span instead of the specific inner row link — caught while building
+// verify-cross-schedule-notice-labels.mjs, where clicking a row in a NON-active schedule made the
+// no-op observable (here it went unnoticed because id260/id261 are already in the active project, so
+// the target row was already on screen with or without the click actually doing anything). Keep only
+// the INNERMOST matching span, same dedup already used for the banner lookup above.
 const clickResult = await page.evaluate((id260) => {
   const norm = s => (s || "").replace(/\s+/g, " ").trim();
   const banner = [...document.querySelectorAll("div")].find(d => norm(d.textContent).includes("named") && norm(d.textContent).includes("parent summary row"));
   if (!banner) return { clicked: false };
-  const link = [...banner.querySelectorAll("span")].find(s => new RegExp("#" + id260 + "\\b").test(s.textContent || ""));
+  const candidates = [...banner.querySelectorAll("span")].filter(s => new RegExp("#" + id260 + "\\b").test(s.textContent || ""));
+  const link = candidates.find(s => !candidates.some(o => o !== s && s.contains(o)));
   if (!link) return { clicked: false };
-  link.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
   return { clicked: true };
 }, id260);
 await page.waitForTimeout(500);

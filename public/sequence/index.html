@@ -2916,6 +2916,77 @@ function suggestScheduleName(projects, ownerKind, siteId, siteName) {
 
 /* SCHEDULE-OWNERSHIP:END */
 
+// NEW-1 (owner report 2026-09-16, direct follow-on to B1696640/B1696641/PR #1741) — a notice that
+// names a schedule by its OWN name is still ambiguous even with a row ID attached, because two
+// different Planyr projects can each hold a schedule named "Master Schedule" (the owner's live
+// account does exactly this). "<Project> / <Schedule>" is the one label that disambiguates both
+// axes at once — which project, and which of that project's schedules. Never degrades to a bare
+// schedule name: an org-owned schedule prints the fixed ORG_OWNER_LABEL, and a site-owned schedule
+// whose cached `linkedSiteName` hasn't caught up yet still gets a left half that can't be mistaken
+// for a real project's name, rather than silently falling back to the ambiguous case this exists
+// to close. (Lives OUTSIDE the SCHEDULE-OWNERSHIP sync block above — it's a notice-copy helper
+// built ON TOP of that model, not part of the canonical ownership contract src/shared/schedule/
+// scheduleOwnership.js mirrors, so it has no reason to be duplicated there.)
+function crossScheduleLabel(schedule) {
+  const name = (schedule && schedule.name) || "Untitled schedule";
+  const owner = ownerOf(schedule);
+  const left = owner.kind === OWNER_KIND_ORG ? ORG_OWNER_LABEL : (owner.siteName || "an unnamed project");
+  return `${left} / ${name}`;
+}
+
+// NEW-1 — the prefix a notice should print in front of "#<id> "<name>"" for a row belonging to
+// schedule `pid`: nothing at all when `pid` is the schedule already on screen (`currentPid`) —
+// restating "Goose Creek / Master Schedule" next to every row of the very table you're looking at
+// is pure noise, not disambiguation (PANEL-BREVITY) — otherwise the full label above, with a
+// trailing space so a caller can splice it straight in front of the "#id" it already renders.
+// `pid`/`currentPid` are compared as strings because a schedule id arrives as an object key
+// (always a string, e.g. from `Object.keys(d.projects)`) in some call sites and as the numeric
+// `.id`/`aPid` field in others — a strict `===` here would silently show every row as "elsewhere".
+function scheduleRowPrefix(projects, pid, currentPid) {
+  if (pid == null || String(pid) === String(currentPid)) return "";
+  const schedule = projects && projects[pid];
+  if (!schedule) return "";
+  return crossScheduleLabel(schedule) + " ";
+}
+
+// NEW-1 — which schedules (pids) a merge actually touched, so the "Merged in changes saved
+// elsewhere" toast can say WHERE instead of nothing: the merge is detected from the whole
+// account's cloud document, which holds every schedule under every project, so "something changed"
+// used to read the same whether the edit landed in the schedule on screen or a different project's
+// entirely. Same per-pid add/removed/changed comparison countChangedTaskRows already does, kept as
+// a separate function (rather than changing that one's return shape) so its own existing callers
+// and tests are untouched.
+const changedProjectIds = (before, after) => {
+  try {
+    const bp = (before && before.projects) || {};
+    const ap = (after && after.projects) || {};
+    const out = [];
+    new Set([...Object.keys(bp), ...Object.keys(ap)]).forEach(pid => {
+      const bt = {}; (bp[pid]?.tasks || []).forEach(t => { if (t) bt[t.id] = t; });
+      const at = {}; (ap[pid]?.tasks || []).forEach(t => { if (t) at[t.id] = t; });
+      let changed = false;
+      new Set([...Object.keys(bt), ...Object.keys(at)]).forEach(id => {
+        if (!_mEq(bt[id], at[id])) changed = true;
+      });
+      if (changed) out.push(pid);
+    });
+    return out;
+  } catch { return []; }
+};
+
+// NEW-1 — the short "where" phrase for the merge toast: "in this schedule" when the ONLY schedule
+// touched is the one already on screen (still says something, but doesn't restate its full name —
+// same PANEL-BREVITY reasoning as scheduleRowPrefix above), otherwise "in <label>[, <label>…]" built
+// from crossScheduleLabel so a merge landing in a different — possibly same-named — project's
+// schedule is never mistaken for one that touched what's on screen. Empty string when nothing changed.
+function mergeLocationPhrase(projects, changedPids, currentPid) {
+  if (!changedPids || !changedPids.length) return "";
+  if (changedPids.length === 1 && String(changedPids[0]) === String(currentPid)) return "in this schedule";
+  const shown = changedPids.slice(0, 2).map(pid => crossScheduleLabel((projects && projects[pid]) || {}));
+  const extra = changedPids.length - shown.length;
+  return "in " + shown.join(", ") + (extra > 0 ? `, +${extra} more` : "");
+}
+
 // ── Constants ─────────────────────────────────────────────
 let ROW_H = 24;
 const PPD = 22, TL_H = 30, BUF = 6;
@@ -8279,14 +8350,21 @@ function App() {
       // this app can never actually know (it fires identically for another window or another device
       // entirely — the owner saw it while working in only one tab) — say only what's known: that
       // something changed elsewhere, and how many rows it touched.
+      // NEW-1 (owner follow-on 2026-09-16) — "elsewhere" used to mean only "some other tab/device";
+      // it never said WHICH of the account's schedules the merge actually landed in, even though the
+      // cloud document holds every schedule under every project and a merge can land in one the user
+      // isn't even looking at. changedProjectIds + mergeLocationPhrase name it (dropping the name
+      // when the only schedule touched is the one already on screen — nothing to disambiguate there).
       const changedRows = countChangedTaskRows(anc, merged);
+      const changedPids = changedProjectIds(anc, merged);
+      const where = mergeLocationPhrase(merged.projects, changedPids, dataRef.current?.aPid);
       setData(cur => {
         if (!cur) return merged;
         try { return mergeCloudDoc(anc, cur, merged); } catch { return merged; }
       });
       if (typeof showToast === "function") {
         const msg = changedRows > 0
-          ? `Merged in changes saved elsewhere — ${changedRows} task${changedRows===1?"":"s"} updated.`
+          ? `Merged in changes saved elsewhere — ${changedRows} task${changedRows===1?"":"s"} updated${where ? " " + where : ""}.`
           : "Merged in changes saved elsewhere.";
         showToast(msg, { type: "info", duration: 4000 });
       }
@@ -10170,10 +10248,19 @@ function App() {
             {/* NEW-3 (B1696642) — this fires from a rev check against the cloud row alone, which
                 carries no tab/window/device identity. "Another device" claimed a scope this app can't
                 actually see (it could equally be another tab on THIS device) — say only what's known. */}
+            {/* NEW-1 (owner follow-on 2026-09-16) — this banner can be read in a tab that's no longer
+                on the schedule the reader thinks it is (two projects can each hold a "Master
+                Schedule"), so it now names the ONE thing it always knows for free: which schedule
+                THIS TAB currently has open (data.aPid) — never the schedule that changed remotely
+                (checkRemote only reads the cloud row's __rev scalar, not its projects, so that's
+                genuinely unknowable without fetching the whole document on every 20s poll). Always
+                shown, never dropped for "the schedule on screen" — that exemption is for a per-row
+                notice sitting right next to the row it names; this is a standalone banner with no
+                grid underneath it to supply that context. */}
             <strong>A newer version was saved elsewhere.</strong>{" "}
             {saveStatus==="saved"
-              ? "Reload to load the latest."
-              : "You have unsaved changes here -- reloading replaces them with the newer version. Your copy is kept in Version History either way."}
+              ? `Reload to load the latest version of ${crossScheduleLabel(data.projects?.[data.aPid])}.`
+              : `You have unsaved changes in ${crossScheduleLabel(data.projects?.[data.aPid])} -- reloading replaces them with the newer version. Your copy is kept in Version History either way.`}
           </span>
           <button onClick={()=>window.location.reload()}
             style={{flexShrink:0,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,
@@ -10188,6 +10275,10 @@ function App() {
         // ROLLUP of its children, so the two halves chase each other forever) had the link dropped and
         // its dates recalculated. One notice, once — the repair is persisted immediately (see the load
         // effect), so it doesn't recur on the next open the way it did before this fix.
+        // NEW-1 (owner follow-on 2026-09-16) — a row here can belong to ANY schedule in the account,
+        // not just the one on screen, so the schedule's own name alone is ambiguous (two projects can
+        // each hold a "Master Schedule"); scheduleRowPrefix prints the full disambiguating
+        // "<Project> / <Schedule>" label for a row elsewhere and nothing for a row already on screen.
         const flat = ancestorPredNotice.flatMap(p => (p.tasks || []).map(t => ({...t, project: p.project, pid: p.pid})));
         const n = flat.length;
         const shown = flat.slice(0, 3);
@@ -10203,7 +10294,7 @@ function App() {
                   {i > 0 ? "; " : ""}
                   <span onClick={() => goToTask(t.pid, t.id)} title="Click to jump to this row"
                     style={{cursor:"pointer", textDecoration:"underline", textDecorationStyle:"dotted"}}>
-                    {t.project ? t.project + " " : ""}#{t.id} "{t.name}"
+                    {scheduleRowPrefix(data.projects, t.pid, data.aPid)}#{t.id} "{t.name}"
                   </span>
                 </React.Fragment>
               ))}
@@ -10225,6 +10316,10 @@ function App() {
         // NEW-2 (B1696641) — each named row now carries its own ID and jumps to the row on click:
         // project NAME alone doesn't disambiguate (an account can hold several same-named projects,
         // and a project can hold several same-named tasks), but the ID always does.
+        // NEW-1 (owner follow-on 2026-09-16) — and the schedule's own name alone STILL doesn't
+        // disambiguate which PROJECT it belongs to (two projects can each hold a "Master Schedule");
+        // scheduleRowPrefix prints "<Project> / <Schedule>" for a row in a different schedule than
+        // the one on screen, and nothing when the row is already in view.
         const flat = driftNotice.flatMap(p => (p.tasks || []).map(t => ({...t, project: p.project, pid: p.pid})));
         const n = flat.length;
         const shown = flat.slice(0, 3);
@@ -10240,7 +10335,7 @@ function App() {
                   {i > 0 ? "; " : ""}
                   <span onClick={() => goToTask(t.pid, t.id)} title="Click to jump to this row"
                     style={{cursor:"pointer", textDecoration:"underline", textDecorationStyle:"dotted"}}>
-                    {t.project ? t.project + " " : ""}#{t.id} "{t.name}" {fmtD(t.from) || "(no date)"}→{fmtD(t.to)}
+                    {scheduleRowPrefix(data.projects, t.pid, data.aPid)}#{t.id} "{t.name}" {fmtD(t.from) || "(no date)"}→{fmtD(t.to)}
                   </span>
                 </React.Fragment>
               ))}
@@ -10261,6 +10356,9 @@ function App() {
         // NEW-2 (B1696641) — same "names a task, not a row" gap driftNotice had: add the row ID and
         // make each named row jump to it (this banner is already scoped to the active project, so no
         // project-name ambiguity here — just the row).
+        // NEW-1 (owner follow-on 2026-09-16) — reviewed for the same cross-project ambiguity as
+        // driftNotice/ancestorPredNotice: `data.aPid` scopes this filter, so every row it can ever
+        // show is already the schedule on screen. No prefix to add — there's nothing to disambiguate.
         const cft = (data?.projects?.[data.aPid]?.tasks || []).filter(t => t.finishConflict);
         if (!cft.length) return null;
         const shown = cft.slice(0, 3);
