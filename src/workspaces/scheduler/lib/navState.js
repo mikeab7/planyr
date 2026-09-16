@@ -216,10 +216,33 @@ export function shouldShowLinkPanel({
  * carries the project it belongs to: `projectId` on a linked schedule, or the routed project at
  * pick time for a cross-cutting one. `isPickShowing` requires that recorded project to still match
  * the CURRENTLY ROUTED one — a real project switch invalidates the pick, which is what lets the
- * carry-in effect run again for the newly routed project. */
-export function isPickShowing(pick, activeId, section, projectId) {
+ * carry-in effect run again for the newly routed project.
+ *
+ * ⛔ NEW-1 (B1614528 follow-up, 2026-09-16) — `pendingProjectId` closes the ROUTE-WRITE RACE a Task
+ * Report row click exposed. `projectId` is the OUTER route, and the shell only ever learns a new
+ * one by calling `onProjectChange`, which writes `window.location.hash` (route.js's `navigate`) —
+ * a real hashchange event, delivered on a LATER task, never synchronously and never batched with
+ * the `setState` calls that land in the SAME message handler. So the very next render after a
+ * report-row pick resolves (navState's `resolveReportRowNavigation`, below) commits with `section`
+ * already "projects" but `projectId` still the OLD (null) value — and `isPickShowing` used to read
+ * that as "not showing," which let `shouldNeutralizeToReports` fire a real `planar:nav-dashboard`
+ * during the one-tick gap before the hash write lands. Measured live: the resulting round trip
+ * (nav-dashboard → the embed obediently reports "reports" → the carry-in effect's own
+ * `nav-select-by-site` re-drive) clobbers whatever task selection the embed's own `goToTask` had
+ * already set, even though the shell's FINAL state converges correctly a moment later.
+ * `pendingProjectId` is the route value the caller ALREADY KNOWS it just told `onProjectChange` to
+ * adopt — passing it here lets a pick resolve to "showing" on the very same render that records it,
+ * closing the gap instead of waiting out the hashchange round trip. Optional and defaults to `null`
+ * (a no-op fold into `projectId ?? null`), so every pre-existing caller keeps its exact prior
+ * behaviour — including the breadcrumb's `selectSchedule()`, which was NOT observed to have this
+ * bounce in practice (its own gate additionally requires `activeId` to already match the pick, which
+ * only the iframe's own reply can supply, so a stale render needs BOTH async arrivals to interleave
+ * a particular way) but was left unbridged deliberately: this fix scopes to the reported defect
+ * (the Task Report row link) rather than speculatively touching a path with no reported symptom.
+ * See Scheduler.jsx's own `pendingRouteProjectIdRef` for the caller side. */
+export function isPickShowing(pick, activeId, section, projectId, pendingProjectId = null) {
   if (pick == null || activeId == null || pick.id !== activeId || section !== "projects") return false;
-  return pick.projectId === (projectId ?? null);
+  return pick.projectId === (pendingProjectId ?? projectId ?? null);
 }
 
 // Whether the carry-OUT effect may adopt the iframe's active schedule's linked site into an empty
