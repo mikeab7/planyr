@@ -286,6 +286,59 @@ export const teeTargetOf = (roads, S, P) => {
   }
   return null;
 };
+/* ⛔ B1713104 — GEOMETRIC fallback for a road tee-ing into ANOTHER ROAD whose through road
+ * carries NO vertex at the tee point. `teeTargetOf` above only ever recognises a tee at an EXISTING
+ * interior vertex of the through road (`for i = 1; i < H.pts.length - 1`) — correct for the ordinary
+ * case, where a real connect gesture always SPLICES one in (see `roadRunFrom`'s own header, and
+ * `migrateRoad`'s `pinned` list in siteModel.js, which protects that exact vertex from later
+ * simplification). But a through road with NO interior vertex there at all — a plain two-point
+ * straight run, or one whose spliced vertex was never created because the tee was produced by
+ * dragging/redrawing rather than the connect gesture — has NOTHING for the loop above to find,
+ * however precisely the side road's endpoint lands on it: `teeTargetOf` returns null, `teeJunctionsOf`
+ * never sees a junction, the two roads are never clustered by `dissolveRings`, and each renders as its
+ * own bare strip — "a plain rectangle simply overlapping the other road, no arcs anywhere." Measured
+ * directly (see test/roadRoadTeeGeometricDetection.test.js's red proof): a straight through road with
+ * no interior vertex produces NO hit at any tolerance, on either build side of PRs 1743 and 1744
+ * (this bug predates both — `teeTargetOf` itself is untouched by that range).
+ *
+ * The fix mirrors B1703665 NEW-2's fix for `driveJunctionsOf` (road-to-PAD tees) exactly: try the
+ * real-vertex rule FIRST (byte-identical for every plan that already has one), and only when nothing
+ * is found there, project P onto every through road's SEGMENTS and accept the nearest point within the
+ * same coincidence tolerance — provided it sits clear of the segment's own endpoints (an endpoint hit
+ * is either a real vertex, already tried above, or a WELD, `weldJunctionsOf`'s job, never this one's).
+ *
+ * Returns { G, gvi, pts } where `pts` is either `G.pts` unchanged (a real vertex was found — `gvi`
+ * indexes it directly, exactly as before) or a LOCAL, un-stored copy of `G.pts` with the projected
+ * point spliced in at `gvi` (the virtual case) — exactly what a real connect-time splice would leave,
+ * so `roadRunFrom`/`nodeJunction`'s arm-building reads it identically either way and needs no other
+ * change. Nothing is written back to `H` — the splice is synthesised fresh on every call, same as
+ * `driveJunctionsOf` never mutates the pad it connects to. */
+export const teeTargetPointOf = (roads, S, P) => {
+  const vertexHit = teeTargetOf(roads, S, P);
+  if (vertexHit) return { G: vertexHit.G, gvi: vertexHit.gvi, pts: vertexHit.G.pts };
+  for (const H of roads) {
+    if (H.id === S.id || !Array.isArray(H.pts) || H.pts.length < 2) continue;
+    const tol = teeCoincideFt(S, H);
+    for (let i = 0; i < H.pts.length - 1; i++) {
+      const a = H.pts[i], b = H.pts[i + 1];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const L2 = dx * dx + dy * dy;
+      if (!(L2 > 1e-9)) continue;
+      const L = Math.sqrt(L2);
+      let t = ((P.x - a.x) * dx + (P.y - a.y) * dy) / L2;
+      // Interior of the segment only, clear of both endpoints by the coincidence tolerance — a hit
+      // that close to an endpoint is either a real vertex (already tried above) or a weld candidate.
+      const tMin = tol / L, tMax = 1 - tMin;
+      if (!(t > tMin && t < tMax)) continue;
+      t = Math.max(0, Math.min(1, t));
+      const proj = { x: a.x + dx * t, y: a.y + dy * t };
+      if (Math.hypot(proj.x - P.x, proj.y - P.y) > tol) continue;
+      const pts = [...H.pts.slice(0, i + 1), proj, ...H.pts.slice(i + 1)];
+      return { G: H, gvi: i + 1, pts };
+    }
+  }
+  return null;
+};
 /* Every vertex a road junction lands on, per road: Map<roadId, Set<vertexIndex>>.
  *
  * These corners render SHARP (see roadDenseCenterline). The owner's Goose Creek split is why: his
