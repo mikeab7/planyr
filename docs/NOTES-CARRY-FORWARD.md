@@ -350,6 +350,66 @@ Two more found since, each worth its own line because each returned a confident 
    device** — a shared one will silently leak whichever feature next reads/writes IndexedDB
    per-account rather than per-tab.
 
+31. **⛔ SKETCH MODE'S DOUBLE-CLICK RACE, AND THE THREE UNRELATED TRAPS IT TOOK TO CLOSE IT
+   (B1683296/B1683297/B1683298, 2026-09-16, owner report: "double-click no longer works to
+   create new text boxes").** His own diagnostic used SYNTHETIC (untrusted) events, and its own
+   header said so plainly: "the possibility that a TRUSTED double-click fails for some
+   additional reason is NOT ruled out." It didn't rule it out because the real defect needed a
+   REAL, trusted double-click to reproduce at all — every synthetic-dispatch variant tried in
+   this session (a bare `dblclick`, a full down/up/down/up/dblclick sequence) came back green.
+   **The real mechanism, found only with `page.mouse.dblclick`/two real separate presses:** a box
+   still uncommitted and never typed into is DISCARDED unconditionally on the very first press
+   (via the label field losing focus), while its REPLACEMENT was gated entirely on the browser
+   recognising a native `dblclick` — two real presses 900ms apart never raise one, so the box
+   vanished and nothing replaced it. Fixed (B1683296) by RELOCATING the untouched pending box to
+   the next press's point instead of discarding it, so a single press is already enough — no
+   dependence on native double-click timing survives at all.
+   **Verifying that fix (building NEW-2's own box-count test matrix) walked straight into two
+   MORE, completely unrelated, pre-existing defects — both invisible until a box could actually
+   be relocated under the cursor:**
+   - **A press that does not turn into a drag still called the FULL redraw, `paint()`, instead of
+     `paintSelection()` (B1683297).** `select()`'s own header already names the trap
+     ("a redraw would destroy the element that has DOM focus") — `onPointerUp`'s no-op fallback
+     simply never followed it. Destroying and rebuilding the box's `<g>` on every plain click lost
+     whatever had focus AND broke the browser's own double-click recognition (element identity,
+     not just screen position, factors into whether two clicks form a native `dblclick`) —
+     double-clicking an already-selected, already-committed box to reopen it silently stopped
+     working, with no error and no console signal.
+   - **POINTER CAPTURE RETARGETS `click`/`dblclick`, NOT JUST `pointerup` (B1683297, same fix).**
+     `onPointerDown` arms a potential drag with `drawSlot.setPointerCapture(e.pointerId)` for any
+     press ON a node; once captured, the derived compatibility `click`/`dblclick` events'
+     `e.target` becomes the CAPTURING element (`drawSlot`, a plain DIV) rather than whatever the
+     cursor is actually over. `onDoubleClick` read `e.target` directly, so `target.closest(
+     "[data-sketch-node]")` always missed and a "reopen this box" gesture minted a BRAND NEW box
+     on top of it instead. Fixed by resolving through `document.elementFromPoint(e.clientX,
+     e.clientY)` first, falling back to `e.target` only if that fails — the standard remedy for
+     this exact pointer-capture gotcha, and now the only correct way to read a double-click's
+     target anywhere pointer capture might be live.
+   - **A stray "click and type" placement caret (`NoteEditor.jsx`'s `pendingPlace`) survives a
+     press on ANY embedded, node-view-owned input (B1683298).** `focusFromMat`'s own comment
+     already states the intended rule — "ANY press forgets an armed caret" — but the
+     `el.closest("input, textarea, select, button, a")` early return ran BEFORE the
+     `cancelPendingPlace()` call, not after, so a press landing on a sketch box's own label field
+     (a real `<input>`, embedded in the document like any node view's overlay) skipped
+     cancellation entirely. A caret armed by an earlier, unrelated click on blank note-body space
+     then survived indefinitely and hijacked the FIRST character typed into the sketch box — via
+     the window-capture keydown handler's own "a real field outranks an armed caret" check, which
+     could not save it either, because a node view's overlay input is structurally `dom.contains
+     (active)` and therefore counts as "inside the editor," not as the outranking field it was
+     written for. Fixed by moving `cancelPendingPlace()` before the input exclusion — it is
+     side-effect-free beyond clearing that one piece of state, so nothing about how the input
+     itself handles the press changes.
+   **The shape worth generalising: NONE of the three defects above is specific to sketch mode.**
+   The first two apply to any node view that lets you re-select/re-open something by clicking it;
+   the third applies to ANY node view with its own embedded `<input>`/`<textarea>` (a picture
+   caption, a table cell editor, a future callout field). If a similar "press on my own control
+   did nothing" report ever surfaces on a DIFFERENT node view, check these three mechanisms before
+   assuming a new bug: (a) does a no-op press call `paint()`/an equivalent full redraw instead of
+   a selection-only repaint; (b) does anything read `e.target` on `click`/`dblclick` without first
+   checking whether a `pointerdown` on that same gesture called `setPointerCapture`; (c) does
+   `focusFromMat` (or anything else gating on "did the user click a real control") get bypassed by
+   an input embedded IN the document rather than genuinely external to it.
+
 See also `ui-audit/TRAPS.md`, and the named rules **FOREGROUND-OR-VOID** (a background tab cannot
 be measured — not its clock, not its pixels) and **COUNT-EVERY-KIND**.
 

@@ -245,6 +245,17 @@ export function attachSketchEditor(handle) {
   /* A press on the overlay's own padding must not blur the field it is wrapped around —
    * clicking between the two fields is not "I am done". */
   editor.addEventListener("mousedown", (e) => { if (e.target === editor) e.preventDefault(); });
+  /* ⛔ B1683298 — `mousedown` is DELIBERATELY LEFT TO BUBBLE (never stopped here), because
+   * `NoteEditor.jsx`'s `focusFromMat` (bound as a plain React `onMouseDown` on the mat) needs to
+   * see it: once a box relocates to sit under the pointer (beginBox's relocate path, above), a
+   * SECOND press — the tail of a fast native double-click, or simply the next press in the
+   * slow-click case — can land directly on `labelField` rather than on the canvas surface, and
+   * `focusFromMat`'s own `cancelPendingPlace()` call (see its header) is what forgets a stray
+   * "click and type" placement caret armed by an EARLIER, unrelated click on blank note-body
+   * space. Stopping `mousedown` here would silently re-open the exact bug that call now closes.
+   * `pointerdown`/`click`/`dblclick` ARE stopped: nothing here needs them to reach an ancestor,
+   * and an input's native double-click-to-select-word default is harmless and stays local. */
+  for (const t of ["pointerdown", "click", "dblclick"]) editor.addEventListener(t, (e) => e.stopPropagation());
   editor.addEventListener("keydown", (e) => {
     e.stopPropagation();                        // the note's own Tab/Escape handling is not ours
     if (e.key === "Escape") { e.preventDefault(); closeEditor(true); focusBox(); return; }
@@ -279,8 +290,41 @@ export function attachSketchEditor(handle) {
   /* ---- making a box ------------------------------------------------------------------- */
 
   /** A box arrives at a point and takes the caret. Nothing is written to the document yet —
-   *  see the header: a double-click you thought better of must leave nothing behind. */
+   *  see the header: a double-click you thought better of must leave nothing behind.
+   *
+   *  ⛔ B1683296 — an UNTOUCHED box that is already open (label AND body both still empty)
+   *  is RELOCATED here rather than discarded-then-replaced, whether or not it has been
+   *  committed to the document yet. Note the note toolbar's own "Box" button — the exact path
+   *  Michael's report used — commits its empty box to the document IMMEDIATELY and merely
+   *  OPENS an editor on top of it (`openEditor(id)` with no third argument, which defaults
+   *  `committed` to `true`), so this is not only the uncommitted-preview case.
+   *
+   *  Discarding it unconditionally (on the very first press of what might become a
+   *  double-click) and creating its replacement only once the browser recognises a native
+   *  `dblclick` are two independent, RACING mechanisms: the discard always runs on the first
+   *  press, but a person whose two clicks land even a little slower than the browser's own
+   *  double-click window never gets a `dblclick` at all — measured directly (two real,
+   *  separately-dispatched clicks 900ms apart): the pending box vanished on the first click
+   *  and nothing replaced it on the second, node count 1 → 0, matching Michael's report
+   *  exactly. Relocating removes the race: the box simply follows the next press on empty
+   *  canvas, so a SINGLE press is already enough — no dependence on native double-click
+   *  timing at all. A committed box's move is written straight through (it is already real),
+   *  never accumulated only in the local preview, so refresh() can never snap it back. */
   function beginBox(x, y) {
+    if (editing && !labelField.value.trim() && !bodyField.value.trim()) {
+      const nx = Math.max(0, Math.round(x));
+      const ny = Math.max(0, Math.round(y));
+      if (editing.committed) {
+        handle.commit(moveBox(handle.attrs, editing.id, nx, ny));  // real box: write straight through
+        editing.model = handle.attrs;                              // refresh() already did this; explicit anyway
+      } else {
+        editing.model = moveBox(editing.model, editing.id, nx, ny); // still just a local preview
+      }
+      paint(editing.model);
+      positionEditor();
+      labelField.focus();
+      return;
+    }
     if (editing) closeEditor(true);                 // …and only then read the document
     const { model, id } = addBox(handle.attrs, { x: Math.max(0, Math.round(x)), y: Math.max(0, Math.round(y)) });
     openEditor(id, model, false);
@@ -299,7 +343,16 @@ export function attachSketchEditor(handle) {
     const svg = canvasEl();
     if (!svg) return;
     e.preventDefault();
-    const target = e.target instanceof Element ? e.target : null;
+    /* ⛔ B1683297 — `e.target`, NOT `document.elementFromPoint`, because a press on an
+     * existing box arms a potential drag in `onPointerDown` via `drawSlot.setPointerCapture`,
+     * and a captured pointer's compatibility `click`/`dblclick` events are RETARGETED to the
+     * capturing element (`drawSlot` itself, a plain DIV) — not to whatever is actually under
+     * the cursor. Reading `e.target` there always misses "[data-sketch-node]" and falls
+     * through to "empty spot," minting a brand-new box on top of the one just double-clicked.
+     * Measured directly: double-clicking an existing, already-committed box left it untouched
+     * and added a second, unrelated box at the same point instead of reopening it. */
+    const real = document.elementFromPoint(e.clientX, e.clientY);
+    const target = (real instanceof Element ? real : null) || (e.target instanceof Element ? e.target : null);
     const group = target?.closest("[data-sketch-node]");
     if (group) { openEditor(group.getAttribute("data-sketch-node")); return; }
     /* AN EMPTY SPOT. The box is centred on the press, which is where a person expects the
@@ -320,6 +373,22 @@ export function attachSketchEditor(handle) {
     const gripId = target?.closest("[data-sketch-grip]")?.getAttribute("data-sketch-grip") || null;
     const nodeId = target?.closest("[data-sketch-node]")?.getAttribute("data-sketch-node") || null;
     const edgeEnds = target?.closest("[data-sketch-edge]")?.getAttribute("data-sketch-edge") || null;
+
+    /* ⛔ B1683296 — a press on the BARE canvas while an untouched box is open (label AND
+     * body both still empty — committed to the document already, or not) relocates it (via
+     * beginBox) instead of falling into the generic "close what's open" branch just below,
+     * which would DISCARD/remove it (nothing typed) on this very press with no guarantee
+     * anything replaces it — that guarantee cannot depend on the browser going on to
+     * recognise a native double-click (see beginBox's own header). This also means a single
+     * press is already enough to relocate the box; the double-click gesture no longer has to
+     * land inside the browser's own double-click timing window at all. */
+    if (!gripId && !nodeId && !edgeEnds && editing
+      && !labelField.value.trim() && !bodyField.value.trim()) {
+      e.preventDefault();
+      const pt = canvasPoint(svg, e);
+      beginBox(pt.x - BOX_W / 2, pt.y - BOX_MIN_H / 2);
+      return;
+    }
 
     /* A press anywhere on the canvas ends the edit that is open, and the model is re-read
      * afterwards — so a drag or an arrow always starts from what was actually saved. */
@@ -427,7 +496,18 @@ export function attachSketchEditor(handle) {
     const { moved, preview } = dragging;
     dragging = null;
     if (moved && preview) { handle.commit(preview); say("Box moved."); }
-    else paint();
+    /* ⛔ B1683297 — a press that did NOT turn into a drag calls `paintSelection()`, never
+     * `paint()`. Nothing about the drawing changed (the box never moved), so a full redraw here
+     * is not just wasted work: `paint()` replaces the ENTIRE SVG tree via `drawSlot.replaceChildren`,
+     * destroying the very `<g data-sketch-node>` this same press just focused two lines up in
+     * `onPointerDown`'s `select(...)` call and replacing it with a fresh one holding no focus —
+     * exactly the trap `select`'s own header already names ("a redraw would destroy the element
+     * that has DOM focus"), just reached from the other end of the same gesture. Measured
+     * directly: double-clicking an already-selected, already-committed box to reopen it stopped
+     * working, because press 1's own pointerup tore down and rebuilt the box BEFORE press 2 could
+     * land on it, and the browser's native `dblclick` never formed against two different
+     * elements — `document.activeElement` ended up `<body>`, not the label field. */
+    else paintSelection();
   }
 
   /** One arrow, or a stated reason there is none (LOUD-FAILURE). */
