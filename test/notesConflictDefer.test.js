@@ -16,6 +16,7 @@
  * that differs.
  */
 import "fake-indexeddb/auto";
+import { IDBFactory } from "fake-indexeddb";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const UID = "u1";
@@ -97,11 +98,17 @@ function clientFor(server) {
   };
 }
 
-/** A client window over a GIVEN localStorage backing `Map` — pass a fresh one for a new
- *  browser tab, or an EXISTING one (still holding what a previous window instance wrote) to
- *  simulate that SAME tab reloading: JS module state resets (`vi.resetModules()`), storage
- *  does not. That distinction is the entire point of this file. */
-async function windowOver(server, mem) {
+/** A client window over a GIVEN localStorage backing `Map` (and, NEW-1, a given IndexedDB
+ *  factory) — pass a fresh pair for a new browser tab/computer, or the EXISTING pair (still
+ *  holding what a previous window instance wrote) to simulate that SAME tab reloading: JS
+ *  module state resets (`vi.resetModules()`), storage does not. That distinction is the
+ *  entire point of this file — and it now applies to BOTH storage tiers, not just
+ *  localStorage: a real reload keeps a tab's IndexedDB exactly as it was, same as its
+ *  localStorage, so `reopenWindow` reuses both. (See `test/notesTwoClientConflict.test.js`'s
+ *  own `openWindow` header for why a FRESH `IDBFactory` per genuinely new window matters —
+ *  two real computers never share an IndexedDB, so a shared fake one silently let this
+ *  file's B read A's own merge-base record.) */
+async function windowOver(server, mem, idb) {
   const localStorage = {
     get length() { return mem.size; },
     key: (i) => [...mem.keys()][i] ?? null,
@@ -110,6 +117,7 @@ async function windowOver(server, mem) {
     removeItem: (k) => { mem.delete(k); },
     clear: () => mem.clear(),
   };
+  globalThis.indexedDB = idb;
   globalThis.window = {
     localStorage,
     addEventListener() {}, removeEventListener() {},
@@ -120,11 +128,11 @@ async function windowOver(server, mem) {
   vi.resetModules();
   vi.doMock("../src/workspaces/site-planner/lib/supabase.js", () => ({ supabase: clientFor(server) }));
   const store = await import("../src/workspaces/notes/lib/notesStore.js");
-  return { store, mem, localStorage };
+  return { store, mem, localStorage, indexedDB: idb };
 }
-const openWindow = (server) => windowOver(server, new Map());
-const reopenWindow = (server, w) => windowOver(server, w.mem);   // same storage, fresh module — a reload
-const focus = (w) => { globalThis.window.localStorage = w.localStorage; };
+const openWindow = (server) => windowOver(server, new Map(), new IDBFactory());
+const reopenWindow = (server, w) => windowOver(server, w.mem, w.indexedDB);   // same storage, fresh module — a reload
+const focus = (w) => { globalThis.window.localStorage = w.localStorage; globalThis.indexedDB = w.indexedDB; };
 
 const seedTree = (pageId) => ({ v: 3, pages: [{ id: pageId, title: "Utility", createdAt: 1, updatedAt: 1, pages: [], projectId: null }], trash: [] });
 

@@ -127,6 +127,9 @@ const ALL_NOTES_FILES = [
   // B1586784 (page height by hand, 2026-09-12) — the vertical twin: the pure Fit-to-content/pin
   // resolution rules behind the sheet's own top/bottom edge drag.
   "lib/notesPageHeight.js",
+  // NEW-1 (the per-paragraph merge, 2026-09-16) — the pure 3-way diff3-style block merge over
+  // notesRedline.js's flattened blocks, used when two copies of a page have genuinely diverged.
+  "lib/notesBlockMerge.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
@@ -658,8 +661,11 @@ describe("LOUD-FAILURE — storage is one seam and it never fails silently", () 
          list of NAMED REASONS rather than a shape: "it returns a falsy value" would wave
          through the next real swallowed failure that happens to return null. "A preference is
          not data" covers the zoom level (NEW-3) — a refused read means 100%, which is a
-         correct answer, not a hidden one. */
-      const benign = /a bad listener must not mute the rest|Safari private mode|a preference is not data/.test(m[0])
+         correct answer, not a hidden one. "The merge base is a cache, not data" (NEW-1) covers
+         the per-paragraph merge's base snapshot — TIER-BY-REBUILDABILITY: losing it costs only
+         the ability to merge silently next time, never a note's own text, so it degrades to
+         the pre-existing whole-document banner rather than a hidden failure. */
+      const benign = /a bad listener must not mute the rest|Safari private mode|a preference is not data|the merge base is a cache, not data/.test(m[0])
         || /return\s+(null|\[\]|false|0)/.test(body);
       expect(body.length > 0 && (/fail\(|broadcast\(/.test(body) || benign), `empty or silent catch: ${m[0].slice(0, 90)}`).toBe(true);
     }

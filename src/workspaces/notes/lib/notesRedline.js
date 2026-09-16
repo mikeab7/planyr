@@ -50,6 +50,7 @@
  * INSERTION; a word present only in the second (original) argument is a DELETION.
  */
 import { lcsAlign } from "./notesConflictDiff.js";
+import { readIndent } from "./notesIndentLevel.js";
 
 /* ---- flatten a document into leaf blocks, each carrying its own nesting PATH ------------
  *
@@ -96,10 +97,27 @@ const plainText = (runs) => runs.map((r) => r.text).join("");
 let uidSeq = 0;
 const nextUid = () => { uidSeq += 1; return uidSeq; };
 
-const sigPath = (path) => path.map(({ uid, ...meta }) => meta);
+/* ⛔ `raw` (NEW-1, notesBlockMerge.js) IS EXCLUDED FROM THE SIGNATURE TOO, deliberately for a
+ * DIFFERENT reason than `uid`. `uid` is stripped because it is never the same twice by
+ * construction (see above); `raw` is stripped because it is UI/rarely-meaningful STATE, not
+ * content — a toggle's open/closed fold, in particular — and letting it into the signature
+ * would make opening a section on one side and not the other read as a "changed" block to the
+ * merge and the redline alike, which is not a disagreement anybody typing words cares about.
+ * It exists purely so `notesBlockMerge.js` can rebuild a wrapper node with its EXACT original
+ * attrs rather than re-deriving them from the cherry-picked fields below (`tone`, `title`, …),
+ * which do not cover every attribute a wrapper node can carry (a toggle's `open` state is the
+ * concrete case that is invisible to those fields entirely). */
+const sigPath = (path) => path.map(({ uid, raw, ...meta }) => meta);
 
-function leafBlock(tag, attrs, runs, path) {
-  return { tag, attrs: attrs || {}, runs, path, sig: JSON.stringify(["leaf", tag, attrs || {}, sigPath(path), plainText(runs)]) };
+/* ⛔ `node` CARRIES THE RAW, UNTOUCHED PROSEMIRROR JSON FOR THIS LEAF (NEW-1, notesBlockMerge.js).
+ * Nothing in THIS file reads it — the redline renderer works from `runs`/`attrs` exactly as
+ * before — but `notesBlockMerge.js`'s 3-way merge needs to rebuild an EXACT document from
+ * whichever leaves survive the merge, and re-deriving a node from `runs` would be a second,
+ * lossier serializer (marks order, unrecognised attrs, anything `runsOfInline` does not carry).
+ * Keeping the original node beside the decomposed view means there is only ever one leaf
+ * representation a merge can hand back to the editor unchanged. */
+function leafBlock(tag, attrs, runs, path, node) {
+  return { tag, attrs: attrs || {}, runs, path, node, sig: JSON.stringify(["leaf", tag, attrs || {}, sigPath(path), plainText(runs)]) };
 }
 
 function opaqueBlock(tag, label, node, path) {
@@ -119,14 +137,14 @@ export function flattenBlocks(doc) {
         (node.content || []).forEach((k) => walk(k, path));
         return;
       case "paragraph":
-        out.push(leafBlock("p", {}, runsOfInline(node.content), path));
+        out.push(leafBlock("p", {}, runsOfInline(node.content), path, node));
         return;
       case "heading":
-        out.push(leafBlock("h", { level: node.attrs?.level || 1 }, runsOfInline(node.content), path));
+        out.push(leafBlock("h", { level: node.attrs?.level || 1 }, runsOfInline(node.content), path, node));
         return;
       case "codeBlock": {
         const text = (node.content || []).map((c) => c.text || "").join("");
-        out.push(leafBlock("code", {}, [{ text, marks: [] }], path));
+        out.push(leafBlock("code", {}, [{ text, marks: [] }], path, node));
         return;
       }
       case "horizontalRule":
@@ -137,40 +155,51 @@ export function flattenBlocks(doc) {
        * defeats the whole point (every sibling would then look like its own, un-mergeable
        * wrapper instead of sharing the one list/quote/callout it actually belongs to). */
       case "blockquote": {
-        const p2 = [...path, { type: "blockquote", uid: nextUid() }];
+        const p2 = [...path, { type: "blockquote", raw: node.attrs || null, uid: nextUid() }];
         (node.content || []).forEach((k) => walk(k, p2));
         return;
       }
       case "bulletList":
       case "orderedList": {
-        const p2 = [...path, { type: node.type, start: node.attrs?.start || 1, uid: nextUid() }];
+        const p2 = [...path, { type: node.type, start: node.attrs?.start || 1, raw: node.attrs || null, uid: nextUid() }];
         (node.content || []).forEach((k) => walk(k, p2));
         return;
       }
       case "taskList": {
-        const p2 = [...path, { type: "taskList", uid: nextUid() }];
+        const p2 = [...path, { type: "taskList", raw: node.attrs || null, uid: nextUid() }];
         (node.content || []).forEach((k) => walk(k, p2));
         return;
       }
+      /* ⛔ `indent` JOINS THE WRAPPER SIGNATURE (NEW-1). A Tab/Shift-Tab that only moves an
+       * item's flat `indent` attribute (`lib/notesListIndent.js` — the fallback for an item
+       * with no real sibling to nest under) changes NOTHING this flatten used to look at: the
+       * attribute lives on the wrapper, not on the paragraph inside it, and `sigPath` strips
+       * only `uid`, so an indent-only edit was previously INVISIBLE to both the redline view
+       * and (now) the block merge — a real edit that would silently vanish from a 3-way diff
+       * rather than merge or conflict. Read via `readIndent` so 0/absent/junk all normalise
+       * to the same "no indent" signature the byte-identical round-trip already relies on. */
       case "listItem": {
-        const p2 = [...path, { type: "listItem", uid: nextUid() }];
+        const p2 = [...path, { type: "listItem", indent: readIndent(node.attrs), raw: node.attrs || null, uid: nextUid() }];
         (node.content || []).forEach((k) => walk(k, p2));
         return;
       }
       case "taskItem": {
-        const p2 = [...path, { type: "taskItem", checked: !!node.attrs?.checked, uid: nextUid() }];
+        const p2 = [...path, { type: "taskItem", checked: !!node.attrs?.checked, indent: readIndent(node.attrs), raw: node.attrs || null, uid: nextUid() }];
         (node.content || []).forEach((k) => walk(k, p2));
         return;
       }
       case "noteCallout": {
-        const p2 = [...path, { type: "callout", tone: node.attrs?.tone || node.attrs?.color || null, uid: nextUid() }];
+        const p2 = [...path, { type: "callout", tone: node.attrs?.tone || node.attrs?.color || null, raw: node.attrs || null, uid: nextUid() }];
         (node.content || []).forEach((k) => walk(k, p2));
         return;
       }
       case "noteToggle": {
         const titleNode = (node.content || []).find((c) => c.type === "noteToggleTitle");
         const title = titleNode ? plainText(runsOfInline(titleNode.content)) : "";
-        const p2 = [...path, { type: "toggle", title, uid: nextUid() }];
+        // `raw` carries the exact title NODE (marks and all — `title` above is plain text,
+        // built only for the redline's own display) and the open/closed attribute, neither of
+        // which the cherry-picked fields below can reconstruct on their own.
+        const p2 = [...path, { type: "toggle", title, raw: { attrs: node.attrs || null, titleNode: titleNode || null }, uid: nextUid() }];
         (node.content || []).filter((c) => c.type !== "noteToggleTitle").forEach((k) => walk(k, p2));
         return;
       }

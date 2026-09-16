@@ -21,7 +21,7 @@
 
 import { absoluteStamp } from "./notesTime.js";
 import { DEFAULT_DENSITY, SINGLE, densityFor } from "./notesSpacing.js";
-import { indentCssRules } from "./notesIndentLevel.js";
+import { indentCssRules, listMarkerCssRules } from "./notesIndentLevel.js";
 import { anchorExtentLeft, anchorExtentTop, anchorExtentX } from "./notesBoxResize.js";
 import { tableTotalWidth } from "./notesTableWidth.js";
 
@@ -218,6 +218,9 @@ body { font: 11.5pt/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sa
 /* PDF-PARITY for the indent attribute's stylesheet table (B842949) — mirrors the identical
    table in components/NoteEditor.jsx → EDITOR_CSS, construct for construct. */
 ${indentCssRules(".note-body li")}
+/* PDF-PARITY for the nested-list marker stepping (NEW-2) — mirrors the identical table in
+   components/NoteEditor.jsx → EDITOR_CSS, construct for construct. */
+${listMarkerCssRules(".note-body")}
 .note-body blockquote { border-left: 3px solid #B8418C; padding-left: 0.9em; color: #3A3F4B; margin: 1em 0 0 0; }
 .note-body code { background: #F2F3F6; border: 1px solid #D8DBE2; border-radius: 3px; padding: 0.1em 0.32em; font-family: ui-monospace, "Courier New", monospace; font-size: 0.9em; }
 .note-body pre { background: #F2F3F6; border: 1px solid #D8DBE2; border-radius: 6px; padding: 0.7em 0.85em; white-space: pre-wrap; word-break: break-word; break-inside: avoid; }

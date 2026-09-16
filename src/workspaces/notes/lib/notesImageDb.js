@@ -23,14 +23,15 @@
  * named banner (LOUD-FAILURE). It must never look like a clean save.
  */
 const DB_NAME = "planyr-notes";
-/* v2 (NEW-3/NEW-5) added the `versions` store. The `images` store is UNCHANGED and is not
- * migrated: an upgrade that rewrote every stored picture to add two optional fields would
- * be a long, interruptible transaction over the largest thing in the database, for nothing.
- * An attachment simply carries `kind: "file"` and a `name`; a record written by v1 has
- * neither, and `kind` absent means "image", which is what every v1 record was. */
-const DB_VERSION = 2;
+/* v2 (NEW-3/NEW-5) added the `versions` store. v3 (NEW-1, the per-paragraph merge) adds
+ * `mergeBase` — see its own header below. Both additions are pure ADDS (new stores only);
+ * neither touches a byte of `images` or `versions`, for the same reason v2 left `images`
+ * alone: an upgrade that rewrites every existing record for an unrelated feature is a long,
+ * interruptible transaction over data that does not need to change. */
+const DB_VERSION = 3;
 const STORE = "images";
 const VERSION_STORE = "versions";
+const MERGE_BASE_STORE = "mergeBase";
 
 const idb = (typeof indexedDB !== "undefined" && indexedDB) ? indexedDB : null;
 
@@ -63,6 +64,17 @@ function openDb() {
           const vs = db.createObjectStore(VERSION_STORE, { keyPath: "key" });
           vs.createIndex("page", "page", { unique: false });
           vs.createIndex("scope", "scope", { unique: false });
+        }
+        /* Merge bases (NEW-1). ONE row per page, key `<scope>:<pageId>`, always OVERWRITTEN
+         * — unlike `versions` this is not a growing history, it is a single pointer to "the
+         * last document this device and the server are both known to have agreed on",
+         * refreshed every time a sync actually confirms that. See notesStore.js's own header
+         * on the merge-base functions for why this cannot simply be the newest version-history
+         * row (that timeline is taken on a keystroke-idle schedule, not at sync-confirmed
+         * instants, so it is not provably the shared ancestor a 3-way merge needs). */
+        if (!db.objectStoreNames.contains(MERGE_BASE_STORE)) {
+          const ms = db.createObjectStore(MERGE_BASE_STORE, { keyPath: "key" });
+          ms.createIndex("scope", "scope", { unique: false });
         }
       } catch (_) { /* the open itself still reports through onerror */ }
     };
@@ -228,6 +240,67 @@ export async function idbGetVersion(key) {
     try { req = t.objectStore(VERSION_STORE).get(key); } catch (_) { resolve(null); return; }
     req.onsuccess = () => resolve(req.result || null);
     req.onerror = () => resolve(null);
+  });
+}
+
+/* ---- merge bases (NEW-1) ---------------------------------------------------------------
+ *
+ * Same discipline as the two tiers above: every call resolves, a failure is `{ ok:false,
+ * error }`, and the transaction (not the request) proves durability. Unlike `versions`,
+ * there is exactly ONE live row per page — a fresh `idbPutMergeBase` for the same key simply
+ * replaces it, which is the whole point: this is a pointer to "the last confirmed-synced
+ * copy", not a history. */
+
+/** Write (or replace) one page's merge base. `record` = `{ key, scope, pageId, doc, rev }`. */
+export async function idbPutMergeBase(record) {
+  const db = await openDb();
+  if (!db) return { ok: false, error: UNAVAILABLE };
+  return new Promise((resolve) => {
+    const t = tx(db, "readwrite", MERGE_BASE_STORE);
+    if (!t) { resolve({ ok: false, error: UNAVAILABLE }); return; }
+    let req;
+    try { req = t.objectStore(MERGE_BASE_STORE).put(record); } catch (e) { resolve({ ok: false, error: String(e?.message || e) }); return; }
+    req.onerror = () => resolve({ ok: false, error: String(req.error?.message || req.error?.name || "the write was refused") });
+    t.oncomplete = () => resolve({ ok: true });
+    t.onabort = () => resolve({ ok: false, error: String(t.error?.message || t.error?.name || "the write was rolled back (the database may be full)") });
+    t.onerror = () => resolve({ ok: false, error: String(t.error?.message || t.error?.name || "the write failed") });
+  });
+}
+
+/** One page's merge base, or `null` on a miss / any failure — a miss is a NORMAL state (no
+ *  base has ever been recorded yet, or storage was cleared) and the caller falls back to the
+ *  existing whole-document conflict banner rather than treating this as an error. */
+export async function idbGetMergeBase(key) {
+  const db = await openDb();
+  if (!db) return null;
+  return new Promise((resolve) => {
+    const t = tx(db, "readonly", MERGE_BASE_STORE);
+    if (!t) { resolve(null); return; }
+    let req;
+    try { req = t.objectStore(MERGE_BASE_STORE).get(key); } catch (_) { resolve(null); return; }
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => resolve(null);
+  });
+}
+
+/** Drop merge bases by key — used when a page is purged, so a dead page's base cannot
+ *  outlive it. */
+export async function idbDeleteMergeBases(keys) {
+  const list = (Array.isArray(keys) ? keys : [keys]).filter(Boolean);
+  if (!list.length) return { ok: true, removed: 0 };
+  const db = await openDb();
+  if (!db) return { ok: false, removed: 0, error: UNAVAILABLE };
+  return new Promise((resolve) => {
+    const t = tx(db, "readwrite", MERGE_BASE_STORE);
+    if (!t) { resolve({ ok: false, removed: 0, error: UNAVAILABLE }); return; }
+    const os = t.objectStore(MERGE_BASE_STORE);
+    let removed = 0;
+    for (const k of list) {
+      try { const r = os.delete(k); r.onsuccess = () => { removed += 1; }; } catch (_) { /* counted by the transaction outcome */ }
+    }
+    t.oncomplete = () => resolve({ ok: true, removed });
+    t.onabort = () => resolve({ ok: false, removed: 0, error: String(t.error?.message || "the delete was rolled back") });
+    t.onerror = () => resolve({ ok: false, removed: 0, error: String(t.error?.message || "the delete failed") });
   });
 }
 
