@@ -14,7 +14,7 @@ import { menuPanelStyle } from "../../shared/ui/controls.jsx";
 import {
   parseNavState, deriveCurrentProject, findBySiteId, needsScheduleCarryIn,
   dashboardNavActions, shouldShowLinkPanel, shouldAdoptLinkedSiteIntoRoute, shouldNeutralizeToReports, isPickShowing,
-  isGridMismatched, newProjectAction,
+  isGridMismatched, newProjectAction, resolveReportRowNavigation,
 } from "./lib/navState.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { scheduleSaveState } from "./lib/saveState.js";
@@ -123,6 +123,23 @@ export default function Scheduler({
   // cross-cutting one), so a genuine switch to a DIFFERENT routed project invalidates the pick
   // instead of latching it forever — see isPickShowing's own header for the deadlock this fixes.
   const explicitPickRef = useRef(null);
+  // B1614528 — the message-listener effect below is deliberately "attach once" (see its own deps
+  // comment), so it can't just list `projectId`/`onProjectChange` to stay current: `onProjectChange`
+  // in particular is a fresh inline function every Shell render (Shell.jsx passes
+  // `onProjectChange={(gid, meta) => {...}}` literally), so listing it would defeat the "attach
+  // once" intent for no benefit. These two refs are kept fresh during render instead — the same
+  // "kept current without re-subscribing" shape `bootCarryOutRef` already uses for a different prop.
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
+  const onProjectChangeRef = useRef(onProjectChange);
+  onProjectChangeRef.current = onProjectChange;
+  // B1614528 — the CONFIRMED section this load last announced (never the live `section` state,
+  // which can also hold an as-yet-unconfirmed value). Reset to null on every iframe load (see
+  // onIframeLoad below), exactly like navConfirmedRef — see resolveReportRowNavigation's own
+  // header in navState.js for why this is the one safe signal that a "reports" → "projects"
+  // change is a deliberate in-iframe navigation (a Task Report row's "Open row in <project>" link)
+  // rather than this load's first announcement of ambient aPid drift.
+  const prevConfirmedSectionRef = useRef(null);
   // "New schedule" ASKS for a name and an owner (see NewScheduleModal's header — the old silent
   // auto-naming is what put three empty "Goose Creek (2)/(3)/(4)" schedules on production). null
   // when closed; otherwise { siteId, siteName } — the owner to PRE-SELECT, never a decision.
@@ -184,6 +201,10 @@ export default function Scheduler({
       // deref an undefined entry.
       const nav = parseNavState(e.data);
       if (!nav) return;
+      // B1614528 — capture BEFORE overwriting: was this load's last CONFIRMED section "reports"?
+      // See resolveReportRowNavigation's header (navState.js) for why this is the safe signal.
+      const cameFromReports = prevConfirmedSectionRef.current === "reports";
+      prevConfirmedSectionRef.current = nav.section;
       // The iframe has reported since the Dashboard press — whatever it says is now the truth, so
       // the anti-ping-pong suppression has done its job (B1050).
       dashboardIntentRef.current = false;
@@ -195,6 +216,20 @@ export default function Scheduler({
       // `section` above are no longer a stale pre-reload belief.
       setNavConfirmedBoth(true);
       markReady();   // first nav-state ⇒ the embedded app is interactive
+      // B1614528 — a genuine Task Report row click (see navState.js's own header on this function
+      // for the full mechanism). Setting `explicitPickRef` here, synchronously in the same tick as
+      // the setState calls above, means the re-render they cause already sees the updated pick —
+      // the same ordering selectSchedule() relies on for its own explicit picks.
+      const navAction = resolveReportRowNavigation({
+        cameFromReports,
+        projectId: projectIdRef.current,
+        activeId: nav.activeId,
+        linkedSiteId: (nav.projects.find((p) => p && p.id === nav.activeId) || {}).linkedSiteId ?? null,
+      });
+      if (navAction) {
+        explicitPickRef.current = { id: navAction.activeId, projectId: navAction.linkedSiteId };
+        if (navAction.linkedSiteId != null) { try { onProjectChangeRef.current?.(navAction.linkedSiteId); } catch (_) {} }
+      }
       // See multiLinkTelemetrySigRef's header above. Group the RAW (already-sanitized) list by
       // linkedSiteId; a group of 2+ is exactly the shape unionProjectLists' multi-link branch is
       // supposed to fan out into distinct switcher rows. Report the ids/types as posted (never
@@ -254,6 +289,10 @@ export default function Scheduler({
     // else so the render gate (isGridMismatched's `navConfirmed` arg) fails closed for the whole
     // window between this load and that document's own first nav-state.
     setNavConfirmedBoth(false);
+    // B1614528 — this load hasn't confirmed any section yet, so a first nav-state reporting
+    // "projects" must never be mistaken for a came-from-reports transition (ambient aPid drift
+    // vs. a genuine Task Report row click — see resolveReportRowNavigation's header).
+    prevConfirmedSectionRef.current = null;
     let tries = 0;
     const ask = () => {
       // ⛔ Gating this on `readyRef` (whether the loader has EVER been dismissed) used to make every
@@ -440,9 +479,14 @@ export default function Scheduler({
   // `onIframeLoad` retries `nav-request` (a few polite tries over ~2.3s); it naturally stops the
   // moment a real nav-state confirms "reports" (the gate above then reads false and the effect's own
   // cleanup already cleared the interval on the re-run).
+  //
+  // ⛔ B1614528 — `pickShowing` is now a required suppression too. A Task Report row click on a
+  // schedule with NO linked site (Pursuits/Operations) is recorded as a cross-cutting pick with a
+  // still-project-less route — legitimate, not drift — and this effect must not drag it back to
+  // "reports" the instant it's set. See resolveReportRowNavigation (navState.js) for the full story.
   useEffect(() => {
     if (!shouldNeutralizeToReports({
-      isActive, section, projectId, dashboardIntent: dashboardIntentRef.current, bootCarryOutAllowed: bootCarryOutRef.current,
+      isActive, section, projectId, dashboardIntent: dashboardIntentRef.current, bootCarryOutAllowed: bootCarryOutRef.current, pickShowing,
     })) return;
     post({ type: "planar:nav-dashboard" });
     let tries = 0;
@@ -451,7 +495,7 @@ export default function Scheduler({
       post({ type: "planar:nav-dashboard" });
     }, 380);
     return () => clearInterval(t);
-  }, [isActive, section, projectId]);
+  }, [isActive, section, projectId, pickShowing]);
 
   // Picking a schedule from the breadcrumb is a USER action: switch to it, and if it's linked to a
   // site, carry that site into the route so the Site/Review tabs follow. One-shot (not a reactive
