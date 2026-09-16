@@ -3418,3 +3418,275 @@ describe("NEW-1: the successor prompt's Complete option and its own accept path"
     expect(src).toMatch(/normPreds\(t\.predecessors\)\.some\(pr => pr\.id === taskId\) && t\.health !== 'green'/);
   });
 });
+
+// ── NEW-1 (B1696640) — a task naming its own ancestor as a predecessor loops forever ─────────────
+// A summary row's dates are the ROLLUP of its children (rollupParentDates); if a descendant ALSO
+// predecessor-links to that same summary row, the two halves chase each other: the child's start
+// derives from the ancestor's finish, and the ancestor's finish is in part derived from that same
+// child's finish. cascadeDates skips computing a parent's OWN date from predecessors entirely
+// (B443248), so recomputeSchedule's 12-pass cap just stops mid-ratchet — the un-converged dates get
+// saved, and the NEXT load ratchets further still. Reproduces the owner's live Master Schedule shape
+// (project '2', tasks 259/260/261) read at __rev 4710 on build 9b52e1a.
+describe("ancestorIdsOf — walks the parentId chain, cycle-safe", () => {
+  const tasks = [
+    { id: 258, parentId: null },
+    { id: 259, parentId: 258 },
+    { id: 260, parentId: 259 },
+    { id: 261, parentId: 259 },
+    { id: 999, parentId: null },
+  ];
+  it("returns every ancestor up the chain, not just the immediate parent", () => {
+    expect([...E.ancestorIdsOf(tasks, 260)].sort()).toEqual([258, 259]);
+  });
+  it("a top-level task has no ancestors", () => {
+    expect(E.ancestorIdsOf(tasks, 258).size).toBe(0);
+  });
+  it("an unrelated task is never reported as an ancestor of a sibling", () => {
+    expect(E.ancestorIdsOf(tasks, 260).has(999)).toBe(false);
+  });
+  it("a corrupt parentId cycle terminates instead of looping forever", () => {
+    const cyc = [{ id: 1, parentId: 2 }, { id: 2, parentId: 1 }];
+    expect(() => E.ancestorIdsOf(cyc, 1)).not.toThrow();
+  });
+});
+
+describe("stripAncestorPredecessors — repairs the owner's exact Master Schedule shape", () => {
+  // 259 'Contract' — summary row, children 260/261/262. 260 and 261 each also name 259 (their OWN
+  // parent) as an explicit FS predecessor — the bug. 261 additionally names 260 (its SIBLING),
+  // which is a perfectly legitimate dependency and must survive untouched.
+  const liveShape = () => [
+    { id: 259, name: "Contract", parentId: null, start: "2026-08-12", end: "2027-09-13", pinnedStart: true, durValue: 0, durUnit: "d", predecessors: [] },
+    { id: 260, name: "Begin Drafting Contract", parentId: 259, start: "2026-08-12", end: "2026-08-12", pinnedStart: true, durValue: 1, durUnit: "d", predecessors: [{ id: 259, type: "FS", lag: 0 }] },
+    { id: 261, name: "HW Review", parentId: 259, start: "2027-09-07", end: "2027-09-13", pinnedStart: false, durValue: 5, durUnit: "d", predecessors: [{ id: 259, type: "FS", lag: 0 }, { id: 260, type: "FS", lag: 0 }] },
+    { id: 262, name: "Other Contract Task", parentId: 259, start: "2026-08-13", end: "2026-08-13", pinnedStart: false, durValue: 1, durUnit: "d", predecessors: [] },
+  ];
+
+  it("drops only the ancestor link on 260 and 261, reporting both", () => {
+    const { tasks, removed } = E.stripAncestorPredecessors(liveShape());
+    expect(removed.map(r => r.id).sort()).toEqual([260, 261]);
+    expect(tasks.find(t => t.id === 260).predecessors).toEqual([]);
+    // 261 keeps its SIBLING predecessor (260) — only the ancestor edge (259) is dropped.
+    expect(tasks.find(t => t.id === 261).predecessors).toEqual([{ id: 260, type: "FS", lag: 0 }]);
+  });
+  it("262 (no ancestor predecessor) is untouched", () => {
+    const { tasks, removed } = E.stripAncestorPredecessors(liveShape());
+    expect(removed.some(r => r.id === 262)).toBe(false);
+    expect(tasks.find(t => t.id === 262).predecessors).toEqual([]);
+  });
+  it("clean data (no ancestor links) removes nothing", () => {
+    const clean = [{ id: 1, parentId: null, predecessors: [] }, { id: 2, parentId: 1, predecessors: [{ id: 1, type: "FS", lag: 0 }] }];
+    // task 2's predecessor IS its own parent here too — this fixture is deliberately clean instead:
+    const reallyClean = [{ id: 1, parentId: null, predecessors: [] }, { id: 2, parentId: 1, predecessors: [] }];
+    expect(E.stripAncestorPredecessors(reallyClean).removed).toEqual([]);
+  });
+  it("276-style case: a task's ONLY predecessor is its own parent — strips to empty, not undefined", () => {
+    const shape = [
+      { id: 275, name: "Stripping & Clearing Scope", parentId: null, predecessors: [] },
+      { id: 276, name: "Set up meeting with Carter Construction", parentId: 275, predecessors: [{ id: 275, type: "FS", lag: 0 }] },
+    ];
+    const { tasks, removed } = E.stripAncestorPredecessors(shape);
+    expect(removed).toEqual([{ id: 276, name: "Set up meeting with Carter Construction", parentId: 275, droppedIds: [275] }]);
+    expect(tasks.find(t => t.id === 276).predecessors).toEqual([]);
+  });
+  it("never throws on junk input", () => {
+    expect(() => E.stripAncestorPredecessors(null)).not.toThrow();
+    expect(() => E.stripAncestorPredecessors([null, undefined, { id: 1 }])).not.toThrow();
+  });
+});
+
+describe("recascadeWithDrift — the owner's exact loop now converges instead of ratcheting", () => {
+  const liveShape = () => [
+    { id: 259, name: "Contract", parentId: null, start: "2026-08-12", end: "2027-09-13", pinnedStart: true, durValue: 0, durUnit: "d", predecessors: [] },
+    { id: 260, name: "Begin Drafting Contract", parentId: 259, start: "2026-08-12", end: "2026-08-12", pinnedStart: true, durValue: 1, durUnit: "d", predecessors: [{ id: 259, type: "FS", lag: 0 }] },
+    { id: 261, name: "HW Review", parentId: 259, start: "2027-09-07", end: "2027-09-13", pinnedStart: false, durValue: 5, durUnit: "d", predecessors: [{ id: 259, type: "FS", lag: 0 }, { id: 260, type: "FS", lag: 0 }] },
+  ];
+
+  it("first pass: reports the ancestor repair once and produces a stable, sane date for 261", () => {
+    const driftSink = [], ancestorSink = [];
+    const out = E.recascadeWithDrift(liveShape(), "2", "Master Schedule", driftSink, ancestorSink);
+    expect(ancestorSink).toHaveLength(1);
+    expect(ancestorSink[0].tasks.map(t => t.id).sort()).toEqual([260, 261]);
+    // 261 now derives from its real (sibling) predecessor chain, not its own parent's rollup.
+    const t261 = out.find(t => t.id === 261);
+    expect(t261.start).toBe("2026-08-13"); // next business day after 260 (pinned 8/12, 1d)
+  });
+
+  it("THE ACCEPTANCE TEST — reloading twice in a row produces NO further notice and identical dates", () => {
+    const driftSink1 = [], ancestorSink1 = [];
+    const firstLoad = E.recascadeWithDrift(liveShape(), "2", "Master Schedule", driftSink1, ancestorSink1);
+    expect(ancestorSink1.length).toBeGreaterThan(0); // the repair happened once
+
+    // Second "load" starts from exactly what the first load produced (simulating the repair having
+    // been persisted, per the load effect's explicit attemptCloudSave after a repair).
+    const driftSink2 = [], ancestorSink2 = [];
+    const secondLoad = E.recascadeWithDrift(firstLoad, "2", "Master Schedule", driftSink2, ancestorSink2);
+    expect(ancestorSink2).toEqual([]);   // nothing left to strip
+    expect(driftSink2).toEqual([]);      // nothing drifted — already a fixed point
+    expect(secondLoad.find(t => t.id === 261).start).toBe(firstLoad.find(t => t.id === 261).start);
+    expect(secondLoad.find(t => t.id === 260).start).toBe(firstLoad.find(t => t.id === 260).start);
+  });
+
+  it("WITHOUT the strip, the same shape does not converge to a stable answer across two recomputes (documents why the fix is necessary)", () => {
+    // This intentionally bypasses stripAncestorPredecessors to prove the hazard is real.
+    const firstRaw = E.recomputeSchedule(liveShape());
+    const secondRaw = E.recomputeSchedule(firstRaw);
+    const d1 = firstRaw.find(t => t.id === 261).start;
+    const d2 = secondRaw.find(t => t.id === 261).start;
+    expect(d1).not.toBe(d2);   // the ratchet: two consecutive recomputes disagree
+  });
+
+  it("260 and 261 no longer carry a startConflict after the repair (answers NEW-1(e))", () => {
+    const out = E.recascadeWithDrift(liveShape(), "2", "Master Schedule", [], []);
+    expect(out.find(t => t.id === 260).startConflict).toBeFalsy();
+    expect(out.find(t => t.id === 261).startConflict).toBeFalsy();
+    // 259 is a summary row — cascadeDates always exits before setting startConflict for a parent,
+    // and the grid's own isConflict check is gated `!task.hasChildren`, so a parent can never show
+    // the triangle regardless of any pin — this is a structural property, not something this fix changes.
+  });
+});
+
+describe("validatePredEdit — an ancestor/parent can never be accepted as a predecessor (NEW-1)", () => {
+  const tasks = [
+    { id: 258, parentId: null, predecessors: [] },
+    { id: 259, parentId: 258, predecessors: [] },
+    { id: 260, parentId: 259, predecessors: [] },
+    { id: 261, parentId: 259, predecessors: [] },
+  ];
+  const FS = id => ({ id, type: "FS", lag: 0 });
+
+  it("rejects a task naming its own DIRECT parent, with ancestorIds populated", () => {
+    const r = E.validatePredEdit(tasks, 260, [FS(259)]);
+    expect(r.preds).toEqual([]);
+    expect(r.cyclic).toEqual([259]);
+    expect(r.ancestorIds).toEqual([259]);
+  });
+  it("rejects a task naming a GRANDPARENT (any depth, not just direct parent)", () => {
+    const r = E.validatePredEdit(tasks, 260, [FS(258)]);
+    expect(r.ancestorIds).toEqual([258]);
+  });
+  it("still accepts a legitimate SIBLING predecessor (the rollup-edge addition causes no false positive)", () => {
+    const r = E.validatePredEdit(tasks, 261, [FS(260)]);
+    expect(r.preds).toEqual([FS(260)]);
+    expect(r.cyclic).toEqual([]);
+    expect(r.ancestorIds).toEqual([]);
+  });
+  it("a COUSIN in a different subtree (whose own parent has children) is never falsely flagged", () => {
+    const wide = [
+      { id: 1, parentId: null, predecessors: [] },
+      { id: 2, parentId: 1, predecessors: [] },       // subtree A parent
+      { id: 3, parentId: 2, predecessors: [] },       // subtree A child
+      { id: 4, parentId: 1, predecessors: [] },       // subtree B parent
+      { id: 5, parentId: 4, predecessors: [] },       // subtree B child
+    ];
+    const r = E.validatePredEdit(wide, 5, [FS(3)]);   // cousin depending on cousin — legitimate
+    expect(r.cyclic).toEqual([]);
+    expect(r.preds).toEqual([FS(3)]);
+  });
+  it("mixed edit: keeps the sibling, drops only the ancestor, and separates the two in the result", () => {
+    const r = E.validatePredEdit(tasks, 261, [FS(260), FS(259)]);
+    expect(r.preds).toEqual([FS(260)]);
+    expect(r.cyclic).toEqual([259]);
+    expect(r.ancestorIds).toEqual([259]);
+  });
+  it("the pre-existing multi-hop / two-node cycle tests are unaffected (no parentId set on those fixtures)", () => {
+    const plain = [
+      { id: 1, predecessors: [] },
+      { id: 2, predecessors: [{ id: 1, type: "FS", lag: 0 }] },
+      { id: 3, predecessors: [{ id: 2, type: "FS", lag: 0 }] },
+    ];
+    expect(E.validatePredEdit(plain, 1, [FS(3)]).cyclic).toEqual([3]);
+    expect(E.validatePredEdit(plain, 1, [FS(3)]).ancestorIds).toEqual([]);
+  });
+});
+
+describe("NEW-1 — the fix is wired into the real source + engine mirror (anti-drift)", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+
+  it("ancestorIdsOf + stripAncestorPredecessors are defined in both the app source and the engine mirror", () => {
+    expect(src).toContain("const ancestorIdsOf =");
+    expect(src).toContain("const stripAncestorPredecessors =");
+    expect(mjs).toContain("export const ancestorIdsOf =");
+    expect(mjs).toContain("export const stripAncestorPredecessors =");
+  });
+  it("both real load paths strip ancestor predecessors before recomputing, and surface it loudly", () => {
+    expect((src.match(/recascadeWithDrift\(tasks, pid, d\.projects\[pid\]\.name \|\| pid, driftFound, ancestorFound\)/g) || []).length).toBe(2);
+    expect(src).toContain("setAncestorPredNotice");
+    expect(src).toContain("ancestorPredNotice && ancestorPredNotice.length > 0");
+  });
+  it("the very-first-load path force-saves the repair so it doesn't recur on the next open", () => {
+    expect(src).toMatch(/attemptCloudSave\(d\);/);
+  });
+  it("validatePredEdit gives the ancestor case its own plain-English toast reason", () => {
+    expect(src).toMatch(/can't depend on its own parent\/summary row/);
+  });
+});
+
+// ── NEW-2 (B1696641) — the drift/locked-finish banners name a row (ID + click-to-scroll), not just a name ──
+describe("NEW-2 — banners carry a row ID and jump to the row on click (anti-drift)", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+
+  it("driftNotice renders the task ID and a goToTask jump per named row", () => {
+    expect(src).toMatch(/#\{t\.id\} "\{t\.name\}" \{fmtD\(t\.from\)/);
+    expect(src).toMatch(/onClick=\{\(\) => goToTask\(t\.pid, t\.id\)\}/);
+  });
+  it("the locked-finish (B616) banner also carries the row ID and jumps to it", () => {
+    expect(src).toMatch(/onClick=\{\(\) => goToTask\(data\.aPid, t\.id\)\}/);
+  });
+  it("recascadeWithDrift threads the project id (pid) through to the notice, for disambiguation across same-named projects", () => {
+    expect(src).toMatch(/const recascadeWithDrift = \(tasks, pid, projName, driftSink, ancestorSink\) => \{/);
+    expect(src).toMatch(/driftSink\.push\(\{ project: projName, pid, tasks: dr \}\);/);
+  });
+});
+
+// ── NEW-3 (B1696642) — the merge/stale banners never claim a scope (tab/device) they can't know ─────
+describe("countChangedTaskRows — counts task rows added, removed, or changed between two docs", () => {
+  const doc = (projects) => ({ projects });
+  it("no changes → 0", () => {
+    const a = doc({ 1: { tasks: [{ id: 1, name: "x" }] } });
+    expect(E.countChangedTaskRows(a, a)).toBe(0);
+  });
+  it("a task added in `after` counts once", () => {
+    const before = doc({ 1: { tasks: [{ id: 1, name: "x" }] } });
+    const after = doc({ 1: { tasks: [{ id: 1, name: "x" }, { id: 2, name: "y" }] } });
+    expect(E.countChangedTaskRows(before, after)).toBe(1);
+  });
+  it("a task removed in `after` counts once", () => {
+    const before = doc({ 1: { tasks: [{ id: 1, name: "x" }, { id: 2, name: "y" }] } });
+    const after = doc({ 1: { tasks: [{ id: 1, name: "x" }] } });
+    expect(E.countChangedTaskRows(before, after)).toBe(1);
+  });
+  it("a task's field changed counts once, unchanged tasks don't count", () => {
+    const before = doc({ 1: { tasks: [{ id: 1, name: "x" }, { id: 2, name: "y" }] } });
+    const after = doc({ 1: { tasks: [{ id: 1, name: "x-edited" }, { id: 2, name: "y" }] } });
+    expect(E.countChangedTaskRows(before, after)).toBe(1);
+  });
+  it("sums across multiple projects", () => {
+    const before = doc({ 1: { tasks: [{ id: 1, name: "x" }] }, 2: { tasks: [{ id: 9, name: "z" }] } });
+    const after = doc({ 1: { tasks: [{ id: 1, name: "x-edited" }] }, 2: { tasks: [{ id: 9, name: "z" }, { id: 10, name: "w" }] } });
+    expect(E.countChangedTaskRows(before, after)).toBe(2);
+  });
+  it("never throws on junk input", () => {
+    expect(() => E.countChangedTaskRows(null, undefined)).not.toThrow();
+    expect(E.countChangedTaskRows(null, undefined)).toBe(0);
+  });
+});
+
+describe("NEW-3 — the merge/stale banners say what's known, never an unknowable tab/device (anti-drift)", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+
+  it("countChangedTaskRows is defined in both the app source and the engine mirror", () => {
+    expect(src).toContain("const countChangedTaskRows =");
+    expect(mjs).toContain("export const countChangedTaskRows =");
+  });
+  it("the merge toast no longer claims 'another tab' and reports how many rows changed", () => {
+    expect(src).not.toMatch(/Merged in changes from another tab/);
+    expect(src).toMatch(/Merged in changes saved elsewhere/);
+    expect(src).toMatch(/\$\{changedRows\} task\$\{changedRows===1\?"":"s"\} updated/);
+  });
+  it("the stale-cloud-row banner no longer claims 'another device' (the mirror-image problem)", () => {
+    expect(src).not.toMatch(/A newer version was saved on another device/);
+    expect(src).toMatch(/A newer version was saved elsewhere/);
+  });
+});
