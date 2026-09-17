@@ -11242,21 +11242,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // The depth shown for zone index `i` (first dock side that has it).
   const zoneDepthShown = (b, i) => { const { dockSides } = dockSidesOf(b); for (const s of dockSides) { const z = findZoneIn(els, b, s, i); if (z) return Math.round(zoneDepthOf(z, b, s, i)); } return Math.round(zoneDepthDefaults(settings)[i]); };
-  // Inline LENGTH edit for the truck court (zone 0), applied across every dock side (B492). Stores
-  // the typed length on `alongLen` (relayout caps it to the clear face between bump-outs) so the
-  // court's length along the dock is user-editable, like the sidewalk's Length field.
-  const setCourtLengthAll = (b, newLen) => {
-    const { dockSides } = dockSidesOf(b);
-    const nl = Math.max(1, Math.round(newLen));
-    pushHistory();
-    setEls((a) => {
-      let next = a;
-      dockSides.forEach((side) => { const c = findCourtIn(next, b, side); if (c) next = next.map((x) => (x.id === c.id ? { ...x, alongLen: nl } : x)); });
-      dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
-      return next;
-    });
-  };
-  // The truck-court length shown (the laid-out along-wall extent on the first dock side that has one).
+  // The truck-court length shown (the laid-out along-wall extent on the first dock side that has
+  // one) — NEW-3 (B1749154): read-only in the properties panel. It's the clear dock-face span
+  // between the corner bump-outs, not an independently editable dimension; `courtLengthShown`
+  // still computes it for display here and for the trailer/buffer "auto" length fallback below.
   const courtLengthShown = (b) => { const { dockSides } = dockSidesOf(b); for (const s of dockSides) { const c = findCourtIn(els, b, s); if (c) return Math.round(s === "top" || s === "bottom" ? c.w : c.h); } return Math.round(b.w >= b.h ? b.w : b.h); };
   /* Inline LENGTH edit for an OUTWARD zone (trailer parking, buffer, an appended layer) — the same
    * control the truck court has had, now for the zones stacked beyond it. Stores the typed length
@@ -11945,8 +11934,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const cross = Math.abs(rel - 90) < 45 || Math.abs(rel - 270) < 45;
     const halfX = (cross ? el.h : el.w) / 2, halfY = (cross ? el.w : el.h) / 2;
     const outX = Math.abs(l.x) - host.w / 2 - halfX, outY = Math.abs(l.y) - host.h / 2 - halfY;
-    const axis = (Math.abs(l.x) - host.w / 2) >= (Math.abs(l.y) - host.h / 2) ? "x" : "y";
-    const sign = axis === "x" ? (l.x >= 0 ? 1 : -1) : (l.y >= 0 ? 1 : -1);
+    /* NEW-1 (B1749152) — WHICH WALL THIS ELEMENT HUGS IS STORED, NOT RE-DERIVED, WHENEVER A STORED
+       fact exists. The outX/outY comparison below picks whichever raw offset from the host's own
+       half-extent is larger — a stand-in for "which side is this element on" that only works while
+       the ALONG-the-wall offset stays smaller than the PERPENDICULAR one. It doesn't always: an
+       employee-parking pad sitting off-centre (or short, on a wall a dog-ear bump-out has lengthened)
+       can run farther ALONG its wall than it sticks out PAST it, so the heuristic picks the wrong
+       axis — measured live: a 60 ft pad on a 200 ft left wall, centred 140 ft along it, reads
+       |l.x|-host.w/2 = 9 against |l.y|-host.h/2 = 40 and calls itself a top/bottom pad. A depth-only
+       edge drag then re-pins the ALONG-WALL position instead of the depth: the field snaps toward
+       the wall's centre and its run resets to the span default — "drag the depth handle, the field
+       jumps and grows from the wrong edge." `el.sideParkSide` / `el.sidewalkSide` / a dock zone's own
+       side (`zoneSideOf`) are already-stored facts naming the real wall (dockZones.SIDE_N) — read
+       them first and skip the guess entirely. */
+    const knownSide = el.sideParkSide || el.sidewalkSide || zoneSideOf(els, el);
+    const knownN = knownSide && SIDE_N[knownSide];
+    const axis = knownN ? (knownN[0] !== 0 ? "x" : "y")
+      : ((Math.abs(l.x) - host.w / 2) >= (Math.abs(l.y) - host.h / 2) ? "x" : "y");
+    const sign = knownN ? (knownN[0] !== 0 ? knownN[0] : knownN[1])
+      : (axis === "x" ? (l.x >= 0 ? 1 : -1) : (l.y >= 0 ? 1 : -1));
     const gap = Math.max(0, axis === "x" ? outX : outY);
     return { host: { cx: host.cx, cy: host.cy, w: host.w, h: host.h, rot: hrot }, axis, sign, gap };
   };
@@ -26338,20 +26344,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const nextLabel = n < MAX_DOCK_ZONES ? DOCK_ZONES[n].label : null; // the next one out
                     return (
                       <>
-                        <Field label={`${DOCK_ZONES[i].label} depth (ft)`}>
+                        {/* NEW-2 (B1749153) — plain "Depth (ft)" / "Length (ft)", matching the
+                            sidewalk fields just below: the panel's own selection is already scoped to
+                            this one zone, so re-stating its name ("Truck court depth (ft)") in every
+                            row only pushed the one differentiating word ("depth" vs "length") off the
+                            narrow 64px label gutter — both rows clamped to an identical "Truck
+                            court…" with nothing left to tell them apart. */}
+                        <Field label="Depth (ft)">
                           <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
                             <NumInput style={numInput} value={zoneDepthShown(b || selEl, i)} min={1} onCommit={(n2) => b && side && setZoneDepthAll(b, i, n2)} />
                             <button title="Plan standard depths for new dock zones — edit in Standards" onClick={() => jumpToStandards("dockzones")} style={{ ...linkBtn, fontSize: 10 }}>↗</button>
                           </span>
                         </Field>
-                        {b && side && (
-                          <Field label={`${DOCK_ZONES[i].label} length (ft)`}>
+                        {/* NEW-3 (B1749154) — the truck court's own length is read-only: it's the
+                            clear dock-face span between the corner bump-outs, not an independent
+                            input (an outward zone's length still edits here — it can legitimately run
+                            shorter/longer than the court). `courtLengthShown` keeps computing it either
+                            way, since the trailer/buffer "auto" length and other displays read it. */}
+                        {b && side && i === 0 && (
+                          <Field label="Length (ft)">
+                            <span style={{ fontSize: 12, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, color: PAL.muted }} title="Set by the dock wall's clear face between its corner bump-outs">
+                              {courtLengthShown(b)}′
+                            </span>
+                          </Field>
+                        )}
+                        {b && side && i > 0 && (
+                          <Field label="Length (ft)">
                             <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                              <NumInput style={numInput} value={i === 0 ? courtLengthShown(b) : zoneLengthShown(b, i)} min={1}
-                                onCommit={(n2) => (i === 0 ? setCourtLengthAll(b, n2) : setZoneLengthAll(b, i, n2))} />
-                              {i > 0 && (zoneLengthPinned(b, i)
+                              <NumInput style={numInput} value={zoneLengthShown(b, i)} min={1}
+                                onCommit={(n2) => setZoneLengthAll(b, i, n2)} />
+                              {zoneLengthPinned(b, i)
                                 ? <button title="Go back to matching the truck court's length" onClick={() => setZoneLengthAll(b, i, null)} style={{ ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent }}>set ↺</button>
-                                : <span style={{ fontSize: 10, color: PAL.muted }} title="Matches the truck court until you set a length">auto</span>)}
+                                : <span style={{ fontSize: 10, color: PAL.muted }} title="Matches the truck court until you set a length">auto</span>}
                             </span>
                           </Field>
                         )}
