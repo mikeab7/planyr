@@ -50,8 +50,8 @@ const polygonArea = (ring) => {
 };
 /* Is `ring` a simple (non-self-intersecting) polygon? O(n²) — only ever run on a single small
  * junction wedge (a few dozen points at most), never on a whole plan. Used to verify a candidate
- * polygon BEFORE returning it from a construction (like `restoreArcOnHull`) that is not simple by
- * construction the way a convex hull is. */
+ * polygon BEFORE returning it from a construction (a hull-bridging fan or cap triangle) that is
+ * not simple by construction the way a convex hull is. */
 function isSimplePolygon(ring) {
   const n = ring && ring.length;
   if (!n || n < 3) return false;
@@ -1276,8 +1276,10 @@ export function teeGeometry(params) {
   // edge with the wedge at some angles, so it never actually merges. The hull has no such case:
   // it is a hull, so it is a simple polygon by construction, always.)
   const sideTuck = Math.max(0.5, Math.min(phS * 0.15, 3));
-  const wedge = (f, inS) => {
-    if (!f) return null;
+  // `wedge()` now returns an ARRAY of simple rings (0, 1 or 2) rather than one hand-stitched ring —
+  // see the "NEW-2 (B1717616 ×3)" comment below for why a single ring could never be made safe here.
+  const wedge = (f, inS, cornerPt) => {
+    if (!f) return [];
     const hasArc = f.R > EPS && Array.isArray(f.arc) && f.arc.length >= 2;
     // The real flat-cap corner on the SAME edge line `f.tan2` sits on: that line is offset from T
     // by `inS*(-phS)` (e.g. wedge A's corner sits on the +perpS edge while its pavement thickens
@@ -1301,87 +1303,79 @@ export function teeGeometry(params) {
     // and is never worse than the raw exposed cap it replaces. A true curved return still wins
     // whenever the room exists; this is the honest floor under it, never a substitute for one.
     if (!hasArc) {
-      if (deepT > EPS) return null;   // road-to-road hull path — teeGeometry's one live caller (driveJunctionsOf) is always deepT===0
+      if (deepT > EPS) return [];   // road-to-road hull path — teeGeometry's one live caller (driveJunctionsOf) is always deepT===0
       const corner = f.tan1;          // === f.tan2 in the degenerate case — the raw, un-rounded corner
       const ring = [T, capCorner, corner];
-      return isSimplePolygon(ring) && polygonArea(ring) > 1e-6 ? ring : null;
+      return isSimplePolygon(ring) && polygonArea(ring) > 1e-6 ? [ring] : [];
     }
     const back1 = add(f.tan1, mul(inT, deepT));         // tan1 pushed into the through pavement
     const back2 = add(f.tan2, mul(inS, deepS));         // tan2 pushed into the side pavement
-    const sTan2 = dot(sub(f.tan2, capCorner), d);        // tan2's position along the cap line (0 = at the cap)
-    const farPt = add(capCorner, mul(d, Math.max(sTan2, 0) + sideTuck)); // past the cap, into the strip
-    const farPtIn = add(farPt, mul(inS, deepS));
     const arcPts = f.arc.map((p) => ({ x: p.x, y: p.y }));
-    const hull = convexHull([back1, ...arcPts, back2, capCorner, farPt, farPtIn]);
-    if (!hull) return hull;
-    // Restoring the arc, and reaching for T, are both scoped to deepT===0 — the drive-into-a-pad
-    // case, which is `teeGeometry`'s only live caller (phT: 0 always, so back1 === tan1 === arc[0]
-    // exactly, and T sits exactly on the through/pad edge line since E0===T only when phT=0). When
-    // deepT > 0 (a hypothetical phT > 0 road-to-road caller — exercised only by this lib's own
-    // generic test, never by the live app) `back1` is tan1 pushed OFF the arc by `deepT`, and T is
-    // OFF the mouth edge by `phT` — splicing the arc back in against that non-matching anchor
-    // introduced a hair-thin self-touching sliver in exactly that case (measured — a road-to-road
-    // tee gained a 2.8–10.7 sqft "hole" it never had before). Left untouched, phT > 0 keeps the
-    // pre-existing (unflattened-arc-risk, but proven simple) hull behaviour.
-    if (deepT > EPS) return hull;
+    if (deepT > EPS) {
+      // road-to-road hull path (a hypothetical phT > 0 caller — exercised only by this lib's own
+      // generic test, never by the live app: teeGeometry's one live caller, driveJunctionsOf, is
+      // always deepT===0). Left exactly as before this round — see the header comment above `wedge`
+      // for why this shape (unflattened-arc-risk, but proven simple) is deliberately kept unchanged.
+      const sTan2 = dot(sub(f.tan2, capCorner), d);
+      const farPt = add(capCorner, mul(d, Math.max(sTan2, 0) + sideTuck));
+      const farPtIn = add(farPt, mul(inS, deepS));
+      const hull = convexHull([back1, ...arcPts, back2, capCorner, farPt, farPtIn]);
+      return hull ? [hull] : [];
+    }
     // ---- Drive-into-pad case (deepT === 0, teeGeometry's ONE live caller) ------------------
-    // NEW-1 (this round) — an EXPLICIT ring, replacing the convex-hull construction above for this
-    // branch. Two rounds of hull-based fixes (B1645792, then its ×2 "restore the arc / add T"
-    // amendment) both left a real hole, because a CONVEX HULL only keeps a point that is
-    // geometrically EXTREME — and `capCorner` (the driveway's own real flat-cap corner, the one
-    // vertex that anchors the wedge to where the strip actually ends) is COLLINEAR with, and so
-    // silently DROPPED in favour of, `T` and `back1`/tan1 the moment the approach is at or near
-    // PERPENDICULAR (all three then sit on the pad-edge line together). Once dropped, the hull's
-    // boundary cuts a straight diagonal from `T` down to wherever the arc/backing points happen to
-    // be, opening a real gap between the pad edge and that diagonal — measured at ~124 sq ft on a
-    // plain PERPENDICULAR 36 ft drive into a 200×150 ft pad, so this was never only an oblique-angle
-    // defect; the ×2 amendment's own "add T to the hull" fix is what exposed it, by giving the hull
-    // a second way to discard `capCorner` as redundant.
+    // NEW-1 (B1717616 ×3, 2026-09-17) — TWO COMPLEMENTARY SINGLE-RING SHAPES, replacing every
+    // construction tried before this (a defensive convex hull, then an "explicit ring" that fell back
+    // to a hull). Every prior shape hand-stitched ONE fixed ring order out of `T`, `capCorner` and the
+    // arc, and all of them failed on the SAME underlying fact this round finally named: `capCorner`
+    // (offset `phS` from `T`, fixed), the fillet's own TRUE corner (`cornerPt` — the intersection of
+    // the driveway's real edge LINE with the pad edge) and `tan2` (the arc's driveway-side tangent) are
+    // all on ONE straight line by construction, but their ORDER along it is not fixed — it flips with
+    // the approach angle. `cornerPt` also always sits on the pad-edge line through `T` and `tan1`. So
+    // the naive ring `T → capCorner → tan2 → [arc] → tan1 → T` self-crosses exactly where those two
+    // lines meet — at `cornerPt` — WHENEVER `cornerPt` falls strictly inside both finite edges it
+    // would need to cross (measured: an acute approach puts `cornerPt` 13.8 ft from `T`, `tan1` 37.8 ft
+    // from `T`, both on the SAME pad edge, so the naive ring's `tan1 → T` edge does cross its own
+    // `capCorner → tan2` edge there). `isSimplePolygon` correctly refused that ring in exactly this
+    // shape, so the code fell back to a ring WITHOUT `T` (`capCorner → tan2 → arc → tan1`, closed by a
+    // straight CHORD back to `capCorner`) — simple, but WRONG: the chord cuts straight across the gore,
+    // under-covering by exactly the triangle `T`-`tan1`-`cornerPt`, and the surviving, un-absorbed
+    // `capCorner → tan2` leg is what the fresh measurement found: a lone straight run immediately
+    // followed by the arc reversing hard back toward `capCorner` — a single vertex turning 87–108°.
     //
-    // The fix stops asking a hull to "discover" this shape and builds it directly, in the one order
-    // the geometry actually needs: `T` → `capCorner` → the fillet arc, walked from its PAD-edge
-    // tangent to its SIDE (driveway) tangent → closing back to `T` along the pad edge. Every one of
-    // those points is a REQUIRED ring member — there is no redundancy step to drop one on. This also
-    // makes `restoreArcOnHull` unnecessary here: the arc is inserted directly, never handed to a hull
-    // that might flatten it.
-    //
-    // `T` is included ONLY when doing so still yields a simple polygon. At (or extremely near) a
-    // PERPENDICULAR approach, `T`, `capCorner` and `back1`/tan1 fall on the same pad-edge line, and
-    // the ring would fold back on itself for a stretch (the exact degeneracy that broke the hull
-    // approach) — but at that exact angle the triangle `T`-`capCorner`-`back1` has ~zero area, so
-    // dropping `T` there costs nothing. At any genuinely oblique angle the three are NOT collinear,
-    // `T` is a real corner of the gore this wedge has to cover, and skipping it left its own small
-    // but real sliver (measured: ~5 sq ft at a 2° approach) between `capCorner` and the road's own
-    // tilted flat cap.
-    // With NO flare, `capCorner` and `tan2` fall on the SAME real driveway-edge line, so the ring
-    // shares a full physical EDGE with the strip there (robust). `flare` widens the fillet's own
-    // anchor line (phSm = phS + flare) OFF the real edge `capCorner` sits on, so without this tuck
-    // the two would share only the single point `capCorner` — proven fragile (measured: dissolving
-    // to 3 regions, a stranded sliver, on a flared perpendicular approach). The tuck runs a short,
-    // fixed distance from `capCorner` straight along `d` (the driveway's own real edge direction) —
-    // exactly onto the strip's own edge, guaranteeing a real overlap regardless of flare.
-    // Gated to an actual flare: at zero flare the tuck sits exactly on the capCorner→tan2 edge
-    // (redundant), and at a very oblique angle with a small pad/large radius it can overshoot the
-    // arc's own reach and self-cross — measured on a 75° parking-scale approach. Only add it when
-    // there is a real phSm/phS offset to bridge.
+    // Re-routing THROUGH `cornerPt` instead of passing straight past it (`T → capCorner → cornerPt →
+    // tan1 → [arc] → tan2 → T`, closing directly from `tan2` to `T`) is the standard fix for a
+    // self-crossing ("bowtie") ring — but it only resolves the SAME configuration the naive ring
+    // handles badly. On a DIFFERENT configuration (measured: a 45° approach where `tan2` itself lands
+    // between `capCorner` and `cornerPt` on their shared line) it is the RE-ROUTED ring that now runs a
+    // ring edge back across the earlier `capCorner → cornerPt` edge, and the NAIVE ring was already
+    // simple all along. The two shapes are complementary, not redundant — so both are tried, cheaply
+    // (`isSimplePolygon` is O(n²) on a few dozen points), and whichever is a simple, positive-area
+    // polygon wins; the naive shape is tried first because it is the one the existing test corpus (and
+    // therefore the more common junction geometry) already exercises. `wedges.length` stays exactly 1
+    // per corner (2 per junction) either way, per `roadNetwork.test.js`'s own invariant.
+    // `flare` widens the fillet's own anchor line (phSm = phS + flare) OFF the real edge `capCorner`
+    // sits on — without a bridging point the two share only the single point `capCorner`, which is
+    // too little overlap for the union to connect reliably (measured: dissolves to a stranded wedge
+    // on a flared perpendicular approach). `tuck` runs a short, fixed distance from `capCorner`
+    // straight along `d` (the driveway's own real edge direction) — exactly onto the strip's own
+    // edge — guaranteeing a real shared sub-segment regardless of flare. Gated to an actual flare: at
+    // zero flare the tuck sits exactly on the capCorner→tan2 edge already (redundant).
     const tuck = flare > EPS ? [add(capCorner, mul(d, sideTuck))] : [];
-    const ringWithT = [T, capCorner, ...tuck, ...arcPts.slice().reverse()];
-    if (isSimplePolygon(ringWithT)) return ringWithT;
-    const ring = [capCorner, ...tuck, ...arcPts.slice().reverse()];
-    if (isSimplePolygon(ring)) return ring;
-    // Defensive fallback ONLY — never regress to nothing. Proven unneeded across the full angle
-    // (0–89°), pad-size, corner-proximity and flare sweep this fix was verified against; kept for any
-    // input shape that sweep didn't reach, so a self-intersecting explicit ring still degrades to the
-    // old (arc-flattening but always simple and always connected) hull rather than vanishing.
-    const hullWithT = convexHull([T, back1, ...arcPts, back2, capCorner, farPt, farPtIn]);
-    const base = (hullWithT && isSimplePolygon(hullWithT) && polygonArea(hullWithT) >= polygonArea(hull) - EPS)
-      ? hullWithT
-      : hull;
-    const restored = restoreArcOnHull(base, arcPts);
-    return isSimplePolygon(restored) ? restored : base;
+    const naive = [T, capCorner, ...tuck, ...arcPts.slice().reverse()];
+    if (isSimplePolygon(naive) && polygonArea(naive) > 1e-6) return [naive];
+    const rerouted = [T, capCorner, ...tuck, cornerPt, ...arcPts];
+    if (isSimplePolygon(rerouted) && polygonArea(rerouted) > 1e-6) return [rerouted];
+    // Defensive fallback ONLY — never observed across the full angle (0–89°), pad-size, corner-
+    // proximity and flare sweep this was verified against. `cornerPt → [arc]` alone (the plain
+    // textbook fillet fan, closing straight back to `cornerPt`) is simple by construction for any
+    // legitimate fillet, so degrade to that rather than dropping this side's return outright.
+    const fan = [cornerPt, ...arcPts];
+    if (isSimplePolygon(fan) && polygonArea(fan) > 1e-6) return [fan];
+    const sharp = [T, capCorner, f.tan1];
+    return isSimplePolygon(sharp) && polygonArea(sharp) > 1e-6 ? [sharp] : [];
   };
   // Corner A sits on the +perpS edge, so its pavement lies toward -perpS; corner B is the mirror.
-  const wedges = [wedge(fA, mul(perpS, -1)), wedge(fB, perpS)].filter(Boolean);
+  const wedges = [...wedge(fA, mul(perpS, -1), cornerA), ...wedge(fB, perpS, cornerB)];
   // Legacy mouth polygon — no longer painted, kept so older consumers/tests still resolve.
   const mouth = [...fA.arc, ...fB.arc.slice().reverse()].map((p) => ({ x: p.x, y: p.y }));
   const coverPolys = mouth.length >= 3 ? [mouth] : [];
@@ -1617,50 +1611,6 @@ function convexHull(points) {
   lower.pop(); upper.pop();
   const hull = lower.concat(upper);
   return hull.length >= 3 ? hull : null;
-}
-
-/* B1645792 (×2) — `teeGeometry`'s wedge builder hulls the fillet ARC
- * together with the straight points needed to bridge to the driveway's real flat-cap corner
- * (`teeGeometry`'s own header explains why both are needed). A convex hull of that combined set is
- * simple by construction — which is exactly why it was chosen — but it is free to draw its own
- * boundary edge directly between two non-adjacent arc points (or skip the arc's interior almost
- * entirely) whenever the bridging points reach farther out than the arc's own curve, which
- * FLATTENS the curb return into a straight-sided wedge and can leave a real gap where the hull's
- * shortcut edge doesn't reach all the way to a piece of pavement the arc's true curve would have
- * covered — both measured defects in a live check of the shipped B1645792 fix.
- *
- * The fix restores the true arc onto the hull's own boundary AFTER the hull is computed, rather
- * than reconstructing the reach logic: walk the hull's vertices, and wherever TWO of them are both
- * points from the original `arc` (in increasing arc order — a hull can reorder nothing, so this can
- * only mean the hull took a chord shortcut across the arc points in between), splice the missing
- * arc points back in between them. This can only ever move the boundary INWARD along that stretch
- * (from the chord onto the true curve, which the hull excluded for being strictly inside it) — never
- * outward — so the result stays a simple polygon with no new self-intersection, and the reach/
- * connectivity behaviour the hull was chosen for is completely unchanged everywhere else. */
-function restoreArcOnHull(hull, arc) {
-  if (!Array.isArray(hull) || !Array.isArray(arc) || arc.length < 2) return hull;
-  const TOL = 1e-6;
-  const arcIndexOf = (p) => arc.findIndex((a) => Math.abs(a.x - p.x) < TOL && Math.abs(a.y - p.y) < TOL);
-  const out = [];
-  let emittedUpTo = -1;                                    // highest arc index already placed in `out`
-  for (let k = 0; k < hull.length; k++) {
-    const v = hull[k];
-    const idx = arcIndexOf(v);
-    if (idx >= 0 && idx <= emittedUpTo) continue;          // this arc point already went out via a splice — skip
-                                                            // the duplicate rather than revisit the same point
-    out.push(v);
-    if (idx < 0 || idx >= arc.length - 1) continue;        // not an arc point, or already the arc's own last point
-    const next = hull[(k + 1) % hull.length];
-    const nextIdx = arcIndexOf(next);
-    // If the hull's very next vertex resumes the arc further along, fill only the gap between them
-    // (the ordinary case). Otherwise the hull's next vertex abandons the arc entirely (the flattened
-    // case) — splice in the WHOLE rest of the arc here, right after its first surviving point,
-    // rather than leaving it for a `tan2` that may or may not still be a hull vertex elsewhere.
-    const upTo = nextIdx > idx ? nextIdx : arc.length;
-    for (let m = idx + 1; m < upTo; m++) out.push({ x: arc[m].x, y: arc[m].y });
-    emittedUpTo = Math.max(emittedUpTo, upTo - 1);
-  }
-  return out;
 }
 
 /* ---- Seamless road-to-road weld cover (B960/NEW-2) ------------------------------------
