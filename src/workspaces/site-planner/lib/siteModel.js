@@ -369,7 +369,7 @@ function normalizeWallKids(list, onHeal) {
       const host = hostOf(e);
       if (!host || WALL_STRIP_TYPES.has(e.type)) continue;
       const side = sideOf(host, e);
-      const key = `${host.id} ${side}`;
+      const key = `${host.id} ${side}`;
       let g = byWall.get(key);
       if (!g) { g = { host, side, pads: [] }; byWall.set(key, g); }
       g.pads.push(e);
