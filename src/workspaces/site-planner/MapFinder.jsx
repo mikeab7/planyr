@@ -3947,27 +3947,40 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           </div>
         )}
         {/* B885136 (NEW-1) — the org/team chip: invisible at rest, reveals on hover/focus.
-            NOT a reserved-width flex sibling — a WIDE team name (e.g. "HIP Houston") in a
-            fixed-width flex slot was measured to steal enough room to truncate even a short
-            name like "Richfield" on this panel's real (232px) width, reproducing the exact
-            defect this item exists to fix. Anchored instead on a ZERO-WIDTH relatively-
-            positioned span sitting where the chip would start (right before the locate slot):
-            the name-wrapper above always gets its full flex share regardless of hover state or
-            team presence (never a truncation "did not have to happen"), and the chip paints as
-            an absolutely-positioned overlay, growing left from that fixed anchor, which is what
-            actually satisfies "revealing it on hover does NOT shift the name or the date" —
-            an out-of-flow element cannot shift a sibling's box no matter what it renders. */}
+            ⛔ NEW-1 (this item) — WAS a zero-width absolutely-positioned overlay anchored right
+            before the locate slot, growing LEFT from that fixed x regardless of what else was
+            there. That fixed x sits exactly at the right edge of the name+flags flex box above,
+            so on a row that ALSO carries a standing-fact flag (B845089's "no boundary" / the
+            LOCATIONS-MAP-CARD "no location" chip, `rowFlagGroupStyle`) the flag's own tail sits
+            at that same edge and the two painted on top of each other — reproduced on the
+            owner's real "Untitled site" row (a SHORT name, so B1614656's truncation guard never
+            engaged): "no boundary" measured x96–154, the chip measured x150–162, a real 4px
+            overlap at this panel's actual 232px width. An absolute overlay can only ever avoid
+            ONE sibling (the name, which is all B1614656 measured against) — it knows nothing
+            about a second one sharing its edge. Fixed by putting the chip back IN SEQUENCE: a
+            real (not zero-width) flex item, sized to its own content, sitting after the flags
+            and before the locate slot — so the browser's own flex-shrink pass (not a hand-picked
+            anchor point) is what keeps every sibling clear of it. VIEWPORT-STABLE still holds:
+            the slot's DOM presence and size are constant across hover states (only opacity
+            toggles), so revealing it still never shifts the date column. The name+flags box's
+            available width shrinks by this slot's real width, but the flags' own `flex:"0 1
+            auto"`/`minWidth:0` and the name's `NAME_MIN_PX` floor (B1424624) are unchanged — the
+            existing shrink order (flags give way, then the name's own ellipsis) still applies,
+            just against a smaller total. A wide TEAM NAME can't reopen the truncation defect
+            this replaces, because B1614656 already bounds the badge to short initials (≤3
+            chars) before this ever renders — this item only changes WHERE that bounded chip is
+            laid out, not how wide it can get. */}
         {s.teamId && !isRenaming && (() => {
           const disp = sharedWithDisplay(s.teamId, myTeams);
           if (disp.kind === "none") return null;
           const revealStyle = { opacity: showActions ? 1 : 0, transition: "opacity .12s", pointerEvents: showActions ? "auto" : "none" };
           const chip = disp.kind === "team"
             ? (
-              // B1614656 (NEW-1) — the badge shows short INITIALS, never the full team name: a
-              // wide name (e.g. "HIP Houston") grown from this zero-width anchor covered part of
-              // the site name. The full name is never lost — it's the tooltip/aria-label.
+              // B1614656 (NEW-1) — the badge shows short INITIALS, never the full team name, so
+              // this in-sequence slot stays small even at its widest. The full name is never
+              // lost — it's the tooltip/aria-label.
               <span tabIndex={0} title={`Shared with ${disp.name}`} aria-label={`Shared with ${disp.name}`}
-                style={{ position: "absolute", right: 0, top: "50%", transform: "translateY(-50%)", whiteSpace: "nowrap", textAlign: "center",
+                style={{ whiteSpace: "nowrap", textAlign: "center",
                   fontSize: 9.5, fontWeight: 700, color: PAL.accent, background: "var(--surface-overlay)",
                   border: `1px solid ${PAL.accent}`, borderRadius: RADIUS.pill, padding: "1px 6px", lineHeight: 1.5, ...revealStyle }}>
                 {disp.initials}
@@ -3977,11 +3990,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             // (deleted, or the viewer left it). Still shared, so still say so — just not with whom.
             : (
               <span tabIndex={0} title="Shared" aria-label="Shared"
-                style={{ position: "absolute", right: 0, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", color: PAL.accent, ...revealStyle }}>
+                style={{ display: "flex", alignItems: "center", color: PAL.accent, ...revealStyle }}>
                 <ShareGlyph size={12} />
               </span>
             );
-          return <span style={{ position: "relative", width: 0, height: "100%", flex: "none" }}>{chip}</span>;
+          return <span style={{ display: "flex", alignItems: "center", height: "100%", flex: "none" }}>{chip}</span>;
         })()}
         {/* B845089 (NEW-2) — the right-aligned column is now LAST EDITED, not acreage: "get rid of
             the acreage... date last edited would be more likely to be important" (owner, live
