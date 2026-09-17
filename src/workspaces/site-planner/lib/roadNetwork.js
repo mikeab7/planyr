@@ -329,6 +329,30 @@ export function rectOutlineCutSegments(el, cutters) {
   return out;
 }
 
+/* B1613152 — the INTERRUPTED outline of a POLYGON (freehand-drawn) element a drive tees into.
+ *
+ * `rectOutlineCutSegments` above covers only rect-shaped paving/parking targets (`el.cx/cy/w/h`);
+ * a polygon target (`el.points`, an irregular click-traced pad boundary) had NO equivalent, so its
+ * own outline always drew full and uninterrupted straight across every drive-junction wedge that
+ * crossed it — the exact "line ruled across the opening" `rectOutlineCutSegments`'s own header
+ * describes, one target shape over. On an oblique connection the curb-return wedge's tangent point
+ * sits many feet from the drive's connect point along the pad edge (a reach-capped fillet's tangent
+ * run can approach the return radius itself), so the pad's own un-cut edge line crosses well INSIDE
+ * the wedge's own curved boundary rather than merely grazing it — reading as the curve being
+ * abandoned partway and closed off with a straight bevel, even though the underlying wedge geometry
+ * (`teeGeometry`'s fillet) is a complete, correctly-tessellated arc the whole way through.
+ *
+ * Same contract as `rectOutlineCutSegments`: world feet in, world feet out, pure. No rotation to
+ * counter — a polygon element's `points` are already world-frame (no separate cx/cy/w/h/rot box). */
+export function polygonOutlineCutSegments(el, cutters) {
+  if (!el || !Array.isArray(el.points) || el.points.length < 3) return [];
+  const pts = el.points;
+  const n = pts.length;
+  const out = [];
+  for (let e = 0; e < n; e++) for (const seg of clipPolylineOutside([pts[e], pts[(e + 1) % n]], cutters)) if (seg.length >= 2) out.push(seg);
+  return out;
+}
+
 /* Connected-cluster labelling over a set of ids and the pairs that connect them (a tee, a weld, a
  * shared drive junction). Returns Map<id, clusterIndex>. Ids with no pair still get their own cluster,
  * so a lone road is simply a one-member cluster and takes the identical render path. */
