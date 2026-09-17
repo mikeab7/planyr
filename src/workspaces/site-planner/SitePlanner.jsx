@@ -314,7 +314,7 @@ import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, parcelSplitNames, lineageConflicts } from "./lib/siteModel.js";
 import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, rectContainsPoint, polygonEdges, polygonContainsPoint, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, cardinalTeePoint, roadBearingDeg } from "./lib/roadGeometry.js";
-import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, rectOutlineCutSegments } from "./lib/roadNetwork.js";
+import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, rectOutlineCutSegments, polygonOutlineCutSegments } from "./lib/roadNetwork.js";
 import { driveJunctionsOf, teeJunctionsOf } from "./lib/roadJunctions.js";
 import {
   roundaboutDiameterFor, roundaboutBandFor,
@@ -29665,6 +29665,13 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
   const ghostEl = (k) => <path key={k} d={ghostPath} fill="none" stroke="#2C5D6B" strokeWidth={1.25} strokeDasharray="7 5" opacity={0.8} pointerEvents="none" />;
   if (el.points) { // polygon element (irregular area drawn by clicking points)
     const dPath = el.points.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z";
+    // B1613152 — a drive tees into a POLYGON pad the same way it tees into a rect one (NEW-4 above,
+    // renderElPx's rect branch): the pad's own outline is interrupted where the drive's dissolved
+    // pavement crosses it, so the junction reads as one continuous curb rather than the pad's raw
+    // straight edge cutting a bevel across the curb-return wedge. See polygonOutlineCutSegments's
+    // own header (roadNetwork.js) for why an un-cut polygon edge reads as a truncated arc.
+    const outlineCut = roadNet && roadNet.outlineCuts ? roadNet.outlineCuts.get(el.id) : null;
+    const outlineCutSegs = outlineCut ? polygonOutlineCutSegments(el, outlineCut) : null;
     // B157: in expansion mode paint the two zones with distinct fills — the whole (expanded)
     // shape in the "added" tint, then the existing basin painted on top. The existing basin
     // keeps the cartographic water gradient by default (a normal pond looks unchanged); the
@@ -29748,7 +29755,16 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
         {/* B617: a polygon element is a filled AREA (irregular pond / building / paving / landscape) —
             its outline is a filled-area edge, so it keeps a FIXED pixel weight (the fill carries the
             shape). Only linear features (roads, markup/utility lines) scale. */}
-        <path d={dPath} fill="none" stroke={elStroke} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : (isSel ? st.weight + 1.25 : st.weight)} />
+        <path d={dPath} fill="none" stroke={outlineCutSegs ? "none" : elStroke} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : (isSel ? st.weight + 1.25 : st.weight)} />
+        {outlineCutSegs && outlineCutSegs.length > 0 && (
+          <g data-testid="polygon-outline-cut" data-el-id={el.id}>
+            {outlineCutSegs.map((seg, i) => (
+              <polyline key={`polol${i}`} points={seg.map((q) => { const sp = f2p(q); return `${sp.x},${sp.y}`; }).join(" ")}
+                fill="none" stroke={elStroke} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : (isSel ? st.weight + 1.25 : st.weight)}
+                strokeLinecap="butt" pointerEvents="none" />
+            ))}
+          </g>
+        )}
         {ghostPath && ghostEl("ghost")}
         {el.type === "pond" && pondContourEls(el, f2p, f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x, "pc", lf)}
       </g>
