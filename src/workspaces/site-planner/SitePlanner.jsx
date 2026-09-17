@@ -313,9 +313,9 @@ import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES,
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, parcelSplitNames, lineageConflicts } from "./lib/siteModel.js";
-import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, rectContainsPoint, polygonEdges, polygonContainsPoint, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, nodeJunction, cardinalTeePoint, roadBearingDeg } from "./lib/roadGeometry.js";
+import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, rectContainsPoint, polygonEdges, polygonContainsPoint, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, cardinalTeePoint, roadBearingDeg } from "./lib/roadGeometry.js";
 import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, rectOutlineCutSegments } from "./lib/roadNetwork.js";
-import { driveJunctionsOf, roadRunFrom, roadTangentNoise, buildingRunLimit } from "./lib/roadJunctions.js";
+import { driveJunctionsOf, teeJunctionsOf } from "./lib/roadJunctions.js";
 import {
   roundaboutDiameterFor, roundaboutBandFor,
   normalizeRoundaboutD, roundaboutIslandArea,
@@ -327,7 +327,7 @@ import {
   SQFT_PER_ACRE, rot2, elCorners, polyArea, ringOf, carStalls, trailerStalls, estStalls, estTrailers,
   CURB, CURB_6, CURB_12, curbWidthOf, curbEdgesOf, isCenterlineRoad, roadCurbWidth,
   roadDefaultRadius, roadDenseCenterline, roadStripRing, roadStripArea,
-  TEE_COINCIDE_FT, teeTargetOf, teeTargetPointOf, roadJunctionVerticesOf, roundaboutsForSite,
+  TEE_COINCIDE_FT, roadJunctionVerticesOf, roundaboutsForSite,
 } from "./lib/siteGeometry.js";
 import { siteMetrics } from "./lib/siteMetrics.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide,
@@ -1276,80 +1276,16 @@ const roadCurbLines = (el, settings, sharpAt, trim) => {
 // TEE_COINCIDE_FT / TEE_COINCIDE_MAX_FT / teeCoincideFt moved to ./lib/siteGeometry.js
 // (site-metrics-extraction) — pure, shared with lib/siteMetrics.js.
 // roadRunFrom / roadTangentNoise / buildingRunLimit / driveJunctionsOf moved to
-// ./lib/roadJunctions.js (B<PENDING>) — pure and exported, so the test suite exercises the SAME
+// ./lib/roadJunctions.js (B1703666) — pure and exported, so the test suite exercises the SAME
 // function the renderer calls instead of a hand-copied re-implementation (see that module's header).
 // teeTargetOf / roadJunctionVerticesOf moved to ./lib/siteGeometry.js (site-metrics-extraction) —
 // pure, shared with lib/siteMetrics.js.
-function teeJunctionsOf(els, settings) {
-  const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
-  const out = [];
-  for (const S of roads) {
-    for (const ei of [0, S.pts.length - 1]) {
-      const P = S.pts[ei];
-      // teeTargetPointOf (B1713104) — tries the real-vertex rule first (byte-identical to
-      // teeTargetOf for every plan that already has one), then falls back to projecting P onto the
-      // through road's own SEGMENTS when no vertex is there. `hit.pts` is G.pts unchanged in the
-      // vertex case, or a local copy with the projected point spliced in at `gvi` in the fallback
-      // case — either way it is the array roadRunFrom must walk, never the road's own stored `G.pts`.
-      const hit = teeTargetPointOf(roads, S, P);
-      if (!hit) continue;
-      const { G, gvi, pts: gPts } = hit;
-      const sideRun = roadRunFrom(S.pts, ei, ei === 0 ? 1 : -1, roadTangentNoise(S));   // into the side road's body
-      const sideDir = { x: sideRun.far.x - P.x, y: sideRun.far.y - P.y };
-      const backRun = roadRunFrom(gPts, gvi, -1, roadTangentNoise(G)), fwdRun = roadRunFrom(gPts, gvi, 1, roadTangentNoise(G));
-      const a = backRun.far, b = fwdRun.far;
-      const din = { x: P.x - a.x, y: P.y - a.y }, dout = { x: b.x - P.x, y: b.y - P.y };  // through tangents at the vertex
-      const li = Math.hypot(din.x, din.y) || 1, lo = Math.hypot(dout.x, dout.y) || 1;
-      // The BISECTOR is kept ONLY for the frame the building clamp and the stripe cut work in. It is no
-      // longer the line the returns are built against — that was B1011: at a node that is also a BEND the
-      // through road has two tangents and the bisector follows neither, so one return sat proud of the
-      // real edge (a dart) and the other fell shy of it (a notch).
-      const throughDir = { x: din.x / li + dout.x / lo, y: din.y / li + dout.y / lo };
-      const uT = { x: throughDir.x, y: throughDir.y };
-      const uTl = Math.hypot(uT.x, uT.y) || 1; uT.x /= uTl; uT.y /= uTl;
-      const nrmT = { x: -uT.y, y: uT.x };
-      const openSign = Math.sign(sideDir.x * nrmT.x + sideDir.y * nrmT.y) || 1;
-      const nOpenT = { x: nrmT.x * openSign, y: nrmT.y * openSign };
-      const clsS = roadClassOf(settings, S.roadClass);
-      const teeOverride = S.tee && S.tee.throughId === G.id ? S.tee : null;
-      const R = teeOverride && teeOverride.returnR > 0 ? teeOverride.returnR : classReturnRadius(clsS);
-      const flare = teeOverride && teeOverride.flare > 0 ? teeOverride.flare : 0;
-      const teeObstacle = buildingRunLimit(els, P, uT, nOpenT, R);
-      // B1011 — model the node as ARMS, each measured against ITS OWN tangent: the through road's back
-      // run, its forward run, and the side road. Arm order here is [back, fwd, side] and the ids are what
-      // stop the road's own bend being mistaken for a junction corner.
-      const halfG = roadOuterHalf(G), halfS = roadOuterHalf(S);
-      const nj = nodeJunction({
-        // NEW-2 — the through road's own corner at this node is FLATTENED (roadJunctionVerticesOf →
-        // roadDenseCenterline's `sharpAt`) so its centerline passes through the node the branch is
-        // welded to. Its buffer therefore joins the two through arms with a square miter, so the
-        // junction has to round that corner too — otherwise a road that BENDS at its split reads as
-        // one hard corner beside two clean curb returns. On a collinear split the two through arms
-        // are ~180° apart and this changes nothing (the gap is flat and skipped either way).
-        node: { x: P.x, y: P.y }, R, flatDeg: 178, roundOwnCorner: true,
-        arms: [
-          { dir: { x: a.x - P.x, y: a.y - P.y }, half: halfG, avail: Math.min(backRun.dist, teeObstacle.neg), road: G.id, deep: halfG > 0.01 ? Math.min(halfG * 0.5, 12) : 0 },
-          { dir: { x: b.x - P.x, y: b.y - P.y }, half: halfG, avail: Math.min(fwdRun.dist, teeObstacle.pos), road: G.id, deep: halfG > 0.01 ? Math.min(halfG * 0.5, 12) : 0 },
-          { dir: sideDir, half: halfS + Math.max(0, flare), avail: sideRun.dist, road: S.id, deep: Math.max(1, Math.min(halfS * 0.5, 12)) },
-        ],
-      });
-      if (!nj) continue;
-      // The THROAT on the through road — the span its near curb stripe must be interrupted across — is
-      // between the tangent points the two side-arm corners left on the two THROUGH arms.
-      const sideGaps = nj.gaps.filter((g) => g.a === 2 || g.b === 2);
-      const throughTangents = sideGaps.map((g) => (g.a === 2 ? g.tanB : g.tanA));
-      const geom = {
-        R: nj.R, wedges: nj.wedges, returns: nj.gaps.map((g) => g.arc), corners: nj.corners,
-        throughTangents, nTee: nOpenT, gaps: nj.gaps,
-        throatWidth: throughTangents.length === 2 ? Math.hypot(throughTangents[0].x - throughTangents[1].x, throughTangents[0].y - throughTangents[1].y) : 0,
-      };
-      if (geom) out.push({ sideId: S.id, throughId: G.id, T: { x: P.x, y: P.y }, geom });
-    }
-  }
-  return out;
-}
+// teeJunctionsOf itself moved to ./lib/roadJunctions.js (B1717616) — same reason as driveJunctionsOf's
+// own extraction above: a road-to-road tee's own test suite was hand-copying this exact function's
+// math instead of calling it, which is precisely how the B1011 reach-cap overshoot defect (NEW-2,
+// same B#) went unnoticed by a fully green suite.
 // driveJunctionsOf (B955/NEW-1, plus its DRIVE_RETURN_SEED / BUILDING_CLEAR_FT / buildingRunLimit
-// helpers) moved to ./lib/roadJunctions.js — see that module's header (B<PENDING> NEW-2: geometric
+// helpers) moved to ./lib/roadJunctions.js — see that module's header (B1703666 — geometric
 // detection, not just a stored driveTee flag) and this file's `driveJunctions` useMemo below.
 // B960/NEW-2 — road↔road END-TO-END weld junctions for the seamless-weld render. A weld = one
 // road's ENDPOINT coincident with ANOTHER road's ENDPOINT (a plain weld or the two ends of a loop),
