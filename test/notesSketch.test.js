@@ -20,6 +20,9 @@ import {
   normalizeSketch, outlineFromSketch, removeBox, removeLink, updateBox, wrapText,
 } from "../src/workspaces/notes/lib/notesSketchModel.js";
 import { docToMarkdown, docToText } from "../src/workspaces/notes/lib/notesMarkdown.js";
+import {
+  isSketchDoubleTap, SKETCH_DBLTAP_MS, SKETCH_DBLTAP_PX,
+} from "../src/workspaces/notes/lib/notesSketchEditor.js";
 
 /* A deterministic minter, so a test can name the ids it expects. */
 const minter = () => { let n = 0; return () => `n${++n}`; };
@@ -413,5 +416,45 @@ describe("Markdown export — every word survives, and what a list cannot say is
     const old = docToText(sketchDoc({ outline: [{ id: "a", label: "Old box", body: "old detail" }] }));
     expect(old).toContain("Old box");
     expect(old).toContain("old detail");
+  });
+});
+
+describe("⛔ isSketchDoubleTap — NEW-1, creating the FIRST box no longer needs a native dblclick", () => {
+  const tap = (t, x = 100, y = 100) => ({ t, x, y });
+
+  it("two presses close in time and space pair into a double-click", () => {
+    expect(isSketchDoubleTap(tap(0), tap(150))).toBe(true);
+  });
+
+  it("nothing to pair with (no prior press) is never a double-click", () => {
+    expect(isSketchDoubleTap(null, tap(0))).toBe(false);
+    expect(isSketchDoubleTap(tap(0), null)).toBe(false);
+  });
+
+  it("too slow — at or past the budget — does not pair (the exact reported race: two real, slow, separately-dispatched presses)", () => {
+    expect(isSketchDoubleTap(tap(0), tap(SKETCH_DBLTAP_MS))).toBe(false);
+    expect(isSketchDoubleTap(tap(0), tap(900))).toBe(false);
+  });
+
+  it("right at the edge of the time budget still pairs, one tick under it does not", () => {
+    expect(isSketchDoubleTap(tap(0), tap(SKETCH_DBLTAP_MS - 1))).toBe(true);
+  });
+
+  it("too far — past the distance budget on either axis — does not pair, even if fast", () => {
+    expect(isSketchDoubleTap(tap(0, 0, 0), tap(50, SKETCH_DBLTAP_PX + 1, 0))).toBe(false);
+    expect(isSketchDoubleTap(tap(0, 0, 0), tap(50, 0, SKETCH_DBLTAP_PX + 1))).toBe(false);
+  });
+
+  it("right at the edge of the distance budget still pairs", () => {
+    expect(isSketchDoubleTap(tap(0, 0, 0), tap(50, SKETCH_DBLTAP_PX, SKETCH_DBLTAP_PX))).toBe(true);
+  });
+
+  it("a press that arrives BEFORE the one it is compared to is refused, never treated as a huge gap", () => {
+    expect(isSketchDoubleTap(tap(500), tap(100))).toBe(false);
+  });
+
+  it("a custom budget can be supplied without touching the exported defaults", () => {
+    expect(isSketchDoubleTap(tap(0), tap(500), { ms: 600 })).toBe(true);
+    expect(isSketchDoubleTap(tap(0), tap(500), { ms: 600, px: 1 })).toBe(true);
   });
 });
