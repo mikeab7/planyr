@@ -195,20 +195,38 @@ export const TOP_RIGHT_ROW_RESERVE_PX = 52;
 /* ⛔ NEW-1 (phone-chrome-parity pass, 2026-09-12) — ON NARROW, THE ZOOM STACK SHARES ITS EDGE
  * WITH THE TOOLS EDGE TAB TOO, NOT JUST THE VIEW/LAYERS ROW EVERY SCREEN HAS.
  *
- * Moving the phone "✎ Tools" FAB to an edge tab at `top: 53, height: 84` (mirroring the desktop
- * right rail it stands in for) put a SECOND occupant on the same right edge the zoom stack
- * already shares with the View/Layers row above it — and on a genuinely short canvas (a
- * landscape phone; measured on the exact B1338272 263px-canvas repro) the zoom stack's own
- * un-clamped position sits squarely inside the tab's own band: measured 32×26px real overlap.
- * `TOP_RIGHT_ROW_RESERVE_PX` alone only ever asked the stack to clear the row's ~41px; it has no
- * way to know a second, taller occupant now sits below that row on narrow screens.
+ * Moving the phone "✎ Tools" FAB to an edge tab (mirroring the desktop right rail it stands in
+ * for) put a SECOND occupant on the same right edge the zoom stack already shares with the
+ * View/Layers row above it — and on a genuinely short canvas (a landscape phone; measured on the
+ * exact B1338272 263px-canvas repro) the zoom stack's own un-clamped position sits squarely
+ * inside the tab's own band: measured 32×26px real overlap. `TOP_RIGHT_ROW_RESERVE_PX` alone only
+ * ever asked the stack to clear the row's ~41px; it has no way to know a second, taller occupant
+ * now sits below that row on narrow screens.
+ * ⚠ Originally shipped with the tab at `top: 53` (pushed down to dodge the View/Layers row) —
+ * B1610642 below moved the collision-avoidance onto the ROW instead, so the tab now sits at
+ * `EDGE_TAB_TOP_PX` (the same top Panels uses) and this constant's own `top` term moved with it.
  *
  * `TOOLS_TAB_RESERVE_PX` is that tab's own footprint from the pane top — its `top` + height +
  * the SAME 8px breathing gap `TOP_RIGHT_ROW_RESERVE_PX` already budgets — so `zoomStackBottomPx`
  * can be asked (via its `topReserve` parameter) to clear the tab instead of the bare row when the
  * tab is actually on screen. Desktop is untouched: the tab never renders there, so the call site
- * passes the default `TOP_RIGHT_ROW_RESERVE_PX` unchanged. */
-export const TOOLS_TAB_RESERVE_PX = 53 + 84 + 8; // tab's own top + height + gap = 145
+ * passes the default `TOP_RIGHT_ROW_RESERVE_PX` unchanged.
+ *
+ * ⛔ B1610642 (phone-chrome-parity follow-up) — THE TAB'S OWN `top:53` WAS THE BUG, NOT JUST A
+ * NUMBER THIS CONSTANT HAD TO TRACK. The owner: "Panels [top-left] and Tools [top-right] are
+ * meant to anchor the same top row, but Tools currently sits lower than Panels." The Panels tab
+ * (left edge — nothing else claims that corner) sits at `EDGE_TAB_TOP_PX`; the Tools tab was
+ * pushed to `top:53` specifically to clear the View/Layers row's own right-edge column, which the
+ * Tools tab shares (both are flush against the right screen edge, one above the other). Lowering
+ * ONE tab to dodge a collision reads as visually broken furniture, not a deliberate stack — the
+ * fix moves the COLLISION AVOIDANCE onto the row instead: `TOP_RIGHT_ROW_NARROW_RIGHT_PX` insets
+ * the View/Layers row's own `right` far enough (past the tab's width + a breathing gap) that the
+ * Tools tab can sit at the SAME `EDGE_TAB_TOP_PX` as Panels with no overlap. Desktop is untouched
+ * — that inset only ever applies while `narrow` (the tab never renders there). */
+export const EDGE_TAB_TOP_PX = MAP_OVERLAY_TOP_PX; // the ONE top both edge tabs (Panels + Tools) share
+export const TOOLS_TAB_WIDTH_PX = 40; // both edge tabs' own width
+export const TOP_RIGHT_ROW_NARROW_RIGHT_PX = TOOLS_TAB_WIDTH_PX + 8; // clears the Tools tab's column + a breathing gap
+export const TOOLS_TAB_RESERVE_PX = EDGE_TAB_TOP_PX + 84 + 8; // tab's own top + height + gap = 102
 
 /* The bottom-right zoom stack's actual `bottom` CSS offset, clamped against the canvas's own
  * REAL height so the stack's top edge can never climb into `TOP_RIGHT_ROW_RESERVE_PX`'s band.

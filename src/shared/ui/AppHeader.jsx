@@ -1064,6 +1064,21 @@ export default function AppHeader({
            real floor is the 26px-tall FullscreenButton/SettingsMenu icon buttons already living
            in this row (untouched — out of this item's scope), so 30 is the smallest height that
            doesn't clip them; contents stay vertically centered. */}
+      {/* B1610640 — a chevron rendered as a DIRECT CHILD of the scrolling+positioned `rowRef` (the
+          old shape) is laid out relative to the row's own padding box, but because that box IS
+          what scrolls, the chevron's rendered position scrolled along with the row's content — it
+          read as "shifts left as you scroll right" and never settled at the true edge even once
+          fully scrolled. This new outer, non-scrolling `position:relative` wrapper is a CLOSER
+          positioned ancestor than `rowRef` for anything placed as ITS direct child (CSS resolves
+          `position:absolute` against the NEAREST positioned ancestor) — so the chevrons, now
+          rendered as the wrapper's children (siblings of `rowRef`, not descendants of it), resolve
+          against the wrapper instead and stay pinned to the row's VISIBLE viewport regardless of
+          scroll. `rowRef` KEEPS its own `position:relative` unchanged — other children of the row
+          (the centre badge) still position against the row itself exactly as before; only the
+          chevrons moved. The wrapper adds no layout of its own (block, sized to `rowRef`'s box), so
+          this is a pure position fix — the row's own content, mask and measurement refs are
+          untouched. */}
+      <div style={{ position: "relative" }}>
       <div ref={rowRef} className={narrow ? "no-hscrollbar" : undefined} style={{ height: 30, display: "flex", alignItems: "center", position: "relative", ...rowScroll, WebkitMaskImage: row1Mask, maskImage: row1Mask }}>
 
         {/* ⛔ NEW-2 — NAVIGATION WINS. Read this before changing any of the three zone flexes.
@@ -1227,7 +1242,10 @@ export default function AppHeader({
               used to bound. Do not reintroduce it without a real family split to justify it. */}
           {authControl}
         </div>
-        {/* NEW-2 (B1343201) — tappable scroll affordance, phone only, one side at a time. */}
+      </div>
+        {/* NEW-2 (B1343201) — tappable scroll affordance, phone only, one side at a time.
+            B1610640 — now a sibling of `rowRef` (inside the non-scrolling wrapper above), not a
+            descendant of it, so it no longer drifts with the row's own scroll position. */}
         {narrow && row1Edges.left && <ScrollChevron side="left" onClick={() => pageScrollRow(rowRef, -1)} />}
         {narrow && row1Edges.right && <ScrollChevron side="right" onClick={() => pageScrollRow(rowRef, 1)} />}
       </div>
@@ -1313,6 +1331,10 @@ export default function AppHeader({
         // down by the difference. 30 covers both children at their real measured heights from
         // the very first paint, so the row's cross-axis size — and therefore where every child
         // centers — never depends on which of the two has rendered yet.
+        // B1610640 — see Row 1's identical wrapper comment above: the chevrons move to a
+        // non-scrolling `position:relative` wrapper around `row2Ref` so they stop scrolling with
+        // the row's own content.
+        <div style={{ position: "relative" }}>
         <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ minHeight: 30, display: "flex", alignItems: "center", position: "relative", flexWrap: narrow ? "nowrap" : "wrap", justifyContent: "flex-end", rowGap: 2, borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
           {/* Left zone — module tabs. B1012560: content-sized (`"none"` = `0 0 auto`) and
               never shrinks, same as the 2-zone layout's tabs zone below — primary navigation
@@ -1367,7 +1389,8 @@ export default function AppHeader({
           <div ref={row2RightZoneRef} style={{ flex: narrow ? "1 0 auto" : "none", display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 6, minWidth: narrow ? "auto" : 0, gap: 4, overflow: narrow ? "visible" : "hidden" }}>
             {toolbarContent}
           </div>
-          {row2Chevrons}
+        </div>
+        {row2Chevrons}
         </div>
       ) : (
         // B885137 (NEW-2) — 44px→26px. Every tab STRETCHES to this row's height (ModuleTab's
@@ -1375,6 +1398,8 @@ export default function AppHeader({
         // --control-h-md (CONTROL_H.md) with no separate padding math needed — verified against
         // the mockup's own derived number (6px padding + an 11.5px line ≈ 26) rather than typed
         // in blind.
+        // B1610640 — same non-scrolling wrapper as the branch above; see its comment.
+        <div style={{ position: "relative" }}>
         <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ height: 26, display: "flex", alignItems: "center", position: "relative", borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
 
           {/* Module tabs — the planner's own workspace navigation. Omitted entirely on a
@@ -1413,7 +1438,8 @@ export default function AppHeader({
           >
             {toolbarContent}
           </div>
-          {row2Chevrons}
+        </div>
+        {row2Chevrons}
         </div>
       )}
     </header>

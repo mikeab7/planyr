@@ -111,7 +111,7 @@ import { wseSensitivity } from "./lib/wseSensitivity.js";
  * comment for why both hosts have to move together. */
 const LayerPanel = lazy(() => import("./components/LayerPanel.jsx"));
 // NEW-3 — the ONE map-overlay stacking model (an open panel outranks map chrome).
-import { MAP_CHROME_Z, zoomStackBottomPx, TOOLS_TAB_RESERVE_PX } from "./lib/mapChromeStack.js";
+import { MAP_CHROME_Z, zoomStackBottomPx, TOOLS_TAB_RESERVE_PX, EDGE_TAB_TOP_PX, TOP_RIGHT_ROW_NARROW_RIGHT_PX, TOOLS_TAB_WIDTH_PX } from "./lib/mapChromeStack.js";
 import { districtDrainageNote } from "./lib/floodGroup.js";
 import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
@@ -24438,7 +24438,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               panel, clipping the group header's "N ON" count and covering the opacity slider
               and the "Show above plan" control. The band comes from mapChromeStack.js now, so
               the View popover beside it is fixed by the same change rather than separately. */}
-          <div data-export="skip" style={{ position: "absolute", top: 10, right: 10, bottom: 10, zIndex: MAP_CHROME_Z.panel, display: "flex", gap: 8, alignItems: "flex-start", pointerEvents: "none" }}>
+          {/* B1610642 — on narrow, this row's own `right` is inset past the Tools edge tab's
+              column (`TOP_RIGHT_ROW_NARROW_RIGHT_PX`), so the Tools tab can sit at the same top
+              edge as the Panels tab (`EDGE_TAB_TOP_PX`) without the two overlapping. Desktop never
+              renders that tab, so it keeps the original `right: 10`. */}
+          <div data-export="skip" style={{ position: "absolute", top: 10, right: narrow ? TOP_RIGHT_ROW_NARROW_RIGHT_PX : 10, bottom: 10, zIndex: MAP_CHROME_Z.panel, display: "flex", gap: 8, alignItems: "flex-start", pointerEvents: "none" }}>
           {/* NEW-1 — THE HEIGHT HERE MUST BE `height`, NOT `maxHeight`, and that one word is the
               whole scroll bug. A percentage `max-height` resolves against the containing block's
               height ONLY when that height is definite; this row's own height was `auto`
@@ -24684,7 +24688,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const badgeMaxW = calibPlace.maxWidth ?? undefined;
             return (
               <div onClick={warn && mapRef ? () => { setShowAerial(true); setLeftPanel("references"); setSelOverlay(mapRef.id); setOvCalib({ id: mapRef.id, kind: "trace", pts: [] }); } : undefined}
-                style={{ position: "absolute", left: calibPlace.left, bottom: calibPlace.bottom, maxWidth: badgeMaxW, display: "flex", alignItems: "center", gap: 8, background: cfg.bg, color: "#fff", padding: "5px 11px", borderRadius: 99, fontSize: 11.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.22)", cursor: warn ? "pointer" : "default", zIndex: MAP_CHROME_Z.furniture, overflow: "hidden" }}>
+                // B1610641 — was a bare `99`; RADIUS.pill (999, this file's own imported scale —
+                // "fully rounded — status dots, toggle chips, and any bar whose height IS its
+                // shape", radius.js's own words for exactly this element) is the token every other
+                // genuine pill in the app names explicitly. Both clamp to the identical rendered
+                // stadium shape at this badge's height (border-radius past half the box height is
+                // clamped by the browser either way — verified with a live render, byte-identical
+                // pixels), so this is a token-compliance fix, not a visual one; it stops this badge
+                // being the one pill in the app that names its own magic number instead of the scale.
+                style={{ position: "absolute", left: calibPlace.left, bottom: calibPlace.bottom, maxWidth: badgeMaxW, display: "flex", alignItems: "center", gap: 8, background: cfg.bg, color: "#fff", padding: "5px 11px", borderRadius: RADIUS.pill, fontSize: 11.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.22)", cursor: warn ? "pointer" : "default", zIndex: MAP_CHROME_Z.furniture, overflow: "hidden" }}>
                 <span style={{ width: 7, height: 7, borderRadius: 99, background: cfg.dot, flex: "none", animation: warn ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
                 <span ref={calibBadgeRef} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {cfg.text}{cfg.sub && <span style={{ fontWeight: 400, opacity: 0.85, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>· {cfg.sub}</span>}
@@ -24750,8 +24762,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // measures the View/Layers row's real height rather than assuming a bare offset is tall
             // enough — never a hand-picked number, since a wider aerial-scale range can size the
             // plate taller.
-            // NEW-1 (phone-chrome-parity pass) — on narrow, the Tools edge tab (top:53, height
-            // 84) shares this same right edge above the zoom stack; on a genuinely short canvas
+            // NEW-1 (phone-chrome-parity pass) — on narrow, the Tools edge tab (top:EDGE_TAB_TOP_PX,
+            // height 84, per B1610642) shares this same right edge above the zoom stack; on a genuinely short canvas
             // (a landscape phone) the stack's own un-clamped position can climb into the tab's
             // own band. `topReserve` asks the clamp to clear the TAB, not the bare View/Layers
             // row, whenever the tab is actually on screen — desktop (where it never renders)
@@ -25034,17 +25046,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             edge; on a phone the control that summons it now lives at that same edge instead of
             squatting in the bottom-right corner (which is what forced every piece of bottom
             canvas furniture — the scale bar, north arrow, calibration badge — to reserve extra
-            clearance; see FURNITURE_ROW's own header above). `top: 53` clears the View/Layers
-            row (MAP_OVERLAY_TOP_PX 10 + its collapsed chip height + a gap); the visible corners
-            are the ones facing the canvas (`RADIUS.md`), square where the tab is flush against
-            the true screen edge. `data-canvas-corner="tools-fab"` is unchanged — the shared
-            help/report control's corner-avoidance sweep (shared/ui/cornerClearance.js) and
+            clearance; see FURNITURE_ROW's own header above). `top: EDGE_TAB_TOP_PX` — the SAME
+            top the Panels tab uses (B1610642: this tab used to sit lower, at `top:53`, to dodge
+            the View/Layers row above it; that row is now the one that yields, via its own
+            `TOP_RIGHT_ROW_NARROW_RIGHT_PX` inset, so both edge tabs read as one deliberate row
+            instead of two mismatched ones). The visible corners are the ones facing the canvas
+            (`RADIUS.md`), square where the tab is flush against the true screen edge.
+            `data-canvas-corner="tools-fab"` is unchanged — the shared help/report control's
+            corner-avoidance sweep (shared/ui/cornerClearance.js) and
             verify-help-report-control.mjs's PART A both key off this attribute, not the label. */}
         {narrow && !mobileTools && (
           <button onClick={() => setMobileTools(true)} title="Show the drawing tools" aria-label="Tools"
             data-canvas-corner="tools-fab" data-testid="mobile-tools-tab"
             style={{
-              position: "absolute", right: 0, top: 53, width: 40, height: 84, zIndex: 1190,
+              position: "absolute", right: 0, top: EDGE_TAB_TOP_PX, width: TOOLS_TAB_WIDTH_PX, height: 84, zIndex: 1190,
               display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
               border: "none", borderTop: `1px solid ${PAL.chromeLine}`, borderLeft: `1px solid ${PAL.chromeLine}`, borderBottom: `1px solid ${PAL.chromeLine}`,
               borderRadius: `${RADIUS.md}px 0 0 ${RADIUS.md}px`,
@@ -25359,8 +25374,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               section rail (was "☰ Sections", a bottom-left pill, B917072). Renamed "Panels" — the
               old label named nothing (behind it are Land, Analysis, Drainage, Yield, Properties,
               Overlays, Standards). On desktop this rail IS the left screen edge; the control that
-              summons it now lives at that same edge (`top: 10`, clearing the View/Layers row's
-              own top-right corner — this side has no row to clear). The old "stack above the ✎
+              summons it now lives at that same edge (`top: EDGE_TAB_TOP_PX` — this side has no
+              row to clear, so it never had to move; B1610642 brought the Tools tab on the OTHER
+              edge up to this same top instead of leaving it lower). The old "stack above the ✎
               Properties pill" special case is gone with that pill (NEW-1 removed it entirely —
               Properties is one of the rows this tab's drawer already opens, same as on desktop).
               `state` names (`mobileSections`) are unchanged — only the visible control moved. */}
@@ -25368,7 +25384,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <button onClick={() => setMobileSections(true)} title="Show Land / Analysis / Yield / Properties / Overlays / Standards" aria-label="Panels"
               data-testid="mobile-panels-tab"
               style={{
-                position: "absolute", left: 0, top: 10, width: 40, height: 84, zIndex: 1190,
+                position: "absolute", left: 0, top: EDGE_TAB_TOP_PX, width: TOOLS_TAB_WIDTH_PX, height: 84, zIndex: 1190,
                 display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
                 border: "none", borderTop: `1px solid ${PAL.chromeLine}`, borderRight: `1px solid ${PAL.chromeLine}`, borderBottom: `1px solid ${PAL.chromeLine}`,
                 borderRadius: `0 ${RADIUS.md}px ${RADIUS.md}px 0`,
