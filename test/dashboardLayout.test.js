@@ -3,6 +3,7 @@ import {
   CARD_KEYS, CARD_DEFS, GRID_COLS, DEFAULT_LAYOUT, DEFAULT_ORDER, normalizeLayout, resetLayout,
   availableToAdd, addCard, removeCard, applyGridChange, narrowOrder, toRglItem,
   newCatalogCards, appendNewCatalogCards, normalizeDismissed, dismissCard, undismissCard,
+  JUMP_BACK_IN_COUNT_DEFAULT, JUMP_BACK_IN_COUNT_MIN, JUMP_BACK_IN_COUNT_MAX, normalizeJumpBackInCount,
 } from "../src/workspaces/dashboard/lib/dashboardLayout.js";
 
 describe("DEFAULT_LAYOUT", () => {
@@ -263,5 +264,29 @@ describe("B1422496 — a card added to the catalog after a layout was saved reac
       dismissed = undismissCard(dismissed, "compsSummary");
       expect(newCatalogCards([], dismissed)).toContain("compsSummary");
     });
+  });
+});
+
+describe("normalizeJumpBackInCount (NEW-1, 2026-09-17)", () => {
+  it("a user who has never touched the setting gets the default, not zero or empty", () => {
+    expect(normalizeJumpBackInCount(undefined)).toBe(JUMP_BACK_IN_COUNT_DEFAULT);
+    expect(normalizeJumpBackInCount(null)).toBe(JUMP_BACK_IN_COUNT_DEFAULT);
+  });
+
+  it("a non-finite/garbage value falls back to the default", () => {
+    expect(normalizeJumpBackInCount("nope")).toBe(JUMP_BACK_IN_COUNT_DEFAULT);
+    expect(normalizeJumpBackInCount(NaN)).toBe(JUMP_BACK_IN_COUNT_DEFAULT);
+    expect(normalizeJumpBackInCount({})).toBe(JUMP_BACK_IN_COUNT_DEFAULT);
+  });
+
+  it("clamps below MIN up to MIN, and above MAX down to MAX — never zero, never unbounded", () => {
+    expect(normalizeJumpBackInCount(0)).toBe(JUMP_BACK_IN_COUNT_MIN);
+    expect(normalizeJumpBackInCount(-5)).toBe(JUMP_BACK_IN_COUNT_MIN);
+    expect(normalizeJumpBackInCount(999)).toBe(JUMP_BACK_IN_COUNT_MAX);
+  });
+
+  it("rounds a fractional value and passes an in-range integer through unchanged", () => {
+    expect(normalizeJumpBackInCount(4.6)).toBe(5);
+    expect(normalizeJumpBackInCount(2)).toBe(2);
   });
 });

@@ -24,6 +24,11 @@ describe("DashboardCard — sizeToContent", () => {
     expect(rootStyle).toMatch(/max-height:100%/);
   });
 
+  it("stamps cardKey as data-card-key so a headless check can find a specific card (NEW-1, 2026-09-17)", () => {
+    const html = renderToStaticMarkup(createElement(DashboardCard, { title: "Test", cardKey: "jumpBackIn" }, "body"));
+    expect(html).toMatch(/data-card-key="jumpBackIn"/);
+  });
+
   it("never drops the cap — a card with more content than fits its tile must still be able to scroll internally", () => {
     // The content wrapper keeps flex:1 + overflow:auto regardless of sizeToContent, so a card
     // whose real content exceeds the (capped) tile height scrolls internally rather than

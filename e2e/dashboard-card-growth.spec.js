@@ -107,7 +107,7 @@ test.describe("B1218496 — Dashboard cards don't reflow under an in-flight pres
     await page.goto("/", { waitUntil: "load" });
 
     // Scoped to the "N plan" shape only PursuitsByActivityCard's row carries — JumpBackInCard's
-    // "Last project" row shows the same project name with no plan count, so a bare name match is
+    // own row(s) show the same project name with no plan count, so a bare name match is
     // ambiguous (both cards resolve to the one project in this fixture).
     const row = page.getByRole("button", { name: /Richfield harris.*\d+ plans?/ });
     await expect(row).toBeVisible({ timeout: 20_000 });

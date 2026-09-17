@@ -40,7 +40,7 @@ import { Button, ToggleChip } from "../../shared/ui/controls.jsx";
 import DashboardCard from "./components/DashboardCard.jsx";
 import DashboardTopoBackground from "./components/DashboardTopoBackground.jsx";
 import {
-  JumpBackInCard, PipelineCard, GoingQuietCard, ScheduleHealthCard,
+  JumpBackInCard, JumpBackInCountControl, PipelineCard, GoingQuietCard, ScheduleHealthCard,
   CardSkeleton,
 } from "./components/DashboardCards.jsx";
 import CompsCard from "./components/CompsCard.jsx";
@@ -51,6 +51,7 @@ import { SinceLastHereCard } from "./components/SinceLastHereCard.jsx";
 import {
   CARD_DEFS, GRID_COLS, normalizeLayout, availableToAdd, addCard, removeCard, resetLayout,
   applyGridChange, narrowOrder, toRglItem, dismissCard, undismissCard,
+  JUMP_BACK_IN_COUNT_DEFAULT, JUMP_BACK_IN_COUNT_MIN, JUMP_BACK_IN_COUNT_MAX, normalizeJumpBackInCount,
 } from "./lib/dashboardLayout.js";
 import { pickRecentPlans } from "./lib/recentPlans.js";
 import { loadDashboardLayout, saveDashboardLayout } from "./lib/dashboardPrefs.js";
@@ -66,7 +67,7 @@ import { fetchScheduleProjects, fetchScheduleLastWriteAt } from "./lib/dashboard
 import { fetchAllElementRecency } from "./lib/dashboardElementRecencyFetch.js";
 import { fetchElementsForSites } from "./lib/dashboardYieldFetch.js";
 import { yieldBySite, buildingCountBySite } from "./lib/buildingYield.js";
-import { groupProjectsByGroupId, pipelineCounts, goingQuiet, mostRecentProject } from "./lib/dashboardPipeline.js";
+import { groupProjectsByGroupId, pipelineCounts, goingQuiet, recentProjects } from "./lib/dashboardPipeline.js";
 import { summarizeScheduleHealth } from "./lib/scheduleHealth.js";
 import { needsAttentionList } from "./lib/needsAttentionList.js";
 import { pursuitsTable, quietDaysByGroupFromRows } from "./lib/pursuitsList.js";
@@ -128,6 +129,9 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
   // dashboardPrefs.js's loadDashboardLayout) never re-adds them; see dashboardLayout.js's own
   // header for the full reasoning.
   const [dismissed, setDismissed] = useState([]);
+  // NEW-1 (2026-09-17) — how many recent projects the Jump-back-in card lists; a per-user
+  // preference persisted alongside the layout (see lib/dashboardPrefs.js).
+  const [jumpBackInCount, setJumpBackInCount] = useState(JUMP_BACK_IN_COUNT_DEFAULT);
   const [customizing, setCustomizing] = useState(false);
   const [saveNote, setSaveNote] = useState(null); // null | "saved" | "local" | "error"
   const layoutLoadedRef = useRef(false);
@@ -147,10 +151,11 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
   useEffect(() => {
     let live = true;
     layoutLoadedRef.current = false;
-    loadDashboardLayout(userId).then(({ layout: loaded, dismissed: loadedDismissed }) => {
+    loadDashboardLayout(userId).then(({ layout: loaded, dismissed: loadedDismissed, jumpBackInCount: loadedCount }) => {
       if (!live) return;
       setLayout(loaded);
       setDismissed(loadedDismissed);
+      setJumpBackInCount(loadedCount);
       layoutLoadedRef.current = true;
     });
     return () => { live = false; };
@@ -179,10 +184,10 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
     if (!layoutLoadedRef.current) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
-      saveDashboardLayout(userId, layout, dismissed).then((res) => setSaveNote(res.ok ? "saved" : userId ? "error" : "local"));
+      saveDashboardLayout(userId, layout, dismissed, jumpBackInCount).then((res) => setSaveNote(res.ok ? "saved" : userId ? "error" : "local"));
     }, SAVE_DEBOUNCE_MS);
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
-  }, [layout, dismissed, userId]);
+  }, [layout, dismissed, jumpBackInCount, userId]);
 
   // react-grid-layout calls onLayoutChange on mount and on every width recalculation, not just a
   // real drag/resize — most of those echo back the SAME grid-unit positions (only pixel sizes
@@ -297,7 +302,7 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
   const pursuitsRows = useMemo(() => pursuitsTable(projects, quietDaysByGroup), [projects, quietDaysByGroup]);
 
   const cardData = useMemo(() => ({
-    jumpBackIn: { project: mostRecentProject(projects), doc },
+    jumpBackIn: { projects: recentProjects(projects, jumpBackInCount), doc },
     recentPlans: { plans: pickRecentPlans(sites, 4) },
     pipelineStatus: { counts: pipelineCounts(projects) },
     needsAttention: { rows: needsAttentionRows },
@@ -306,7 +311,7 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
     compsSummary: { data: buildCompsCardData(comps, compsPeriod) },
     scheduleHealth: { rows: scheduleProjects ? summarizeScheduleHealth(scheduleProjects) : [] },
     sinceLastHere: { feed: sinceLastHere?.feed || null },
-  }), [projects, sites, doc, comps, scheduleProjects, needsAttentionRows, pursuitsRows, yieldBySiteMap, sinceLastHere, compsPeriod]);
+  }), [projects, sites, doc, comps, scheduleProjects, needsAttentionRows, pursuitsRows, yieldBySiteMap, sinceLastHere, compsPeriod, jumpBackInCount]);
 
   const openProject = (p) => onNavigate?.({ module: "site-planner", projectId: p.groupId, cross: false, org: false });
   const openSchedule = (p) => onNavigate?.({ module: "scheduler", projectId: p.linkedSiteId, cross: false, org: false });
@@ -332,7 +337,7 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
 
   // NEW-1 — while data is still loading every slot renders the SAME stable-height skeleton
   // instead of its real (variable-height) content; see the `dataReady` effect above.
-  const SKELETON_ROWS = { jumpBackIn: 2, recentPlans: 2, pipelineStatus: 2, scheduleHealth: 3, needsAttention: 4, pursuitsTable: 4, compsSummary: 6, goingQuiet: 3, sinceLastHere: 6, locationsMap: 6 };
+  const SKELETON_ROWS = { jumpBackIn: JUMP_BACK_IN_COUNT_DEFAULT + 1, recentPlans: 2, pipelineStatus: 2, scheduleHealth: 3, needsAttention: 4, pursuitsTable: 4, compsSummary: 6, goingQuiet: 3, sinceLastHere: 6, locationsMap: 6 };
   const CARD_RENDERERS = dataReady ? {
     jumpBackIn: () => <JumpBackInCard {...cardData.jumpBackIn} onOpenProject={openProject} onOpenDoc={openDoc} />,
     recentPlans: () => <RecentPlansCard {...cardData.recentPlans} onOpenProject={openProject} />,
@@ -375,12 +380,21 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
     if (!def || !render) return null;
     return (
       <DashboardCard
+        cardKey={entry.key}
         title={def.title}
         headerMeta={entry.key === "compsSummary" ? compsHeaderMeta : undefined}
         headerRight={entry.key === "sinceLastHere" ? sinceLastHere?.headerSpan : null}
         customizing={customizing}
         showDragHandle={!isNarrow}
         sizeToContent={dataReady && SIZE_TO_CONTENT_CARDS.has(entry.key)}
+        customizeControls={entry.key === "jumpBackIn" ? (
+          <JumpBackInCountControl
+            count={jumpBackInCount}
+            min={JUMP_BACK_IN_COUNT_MIN}
+            max={JUMP_BACK_IN_COUNT_MAX}
+            onChange={(n) => setJumpBackInCount(normalizeJumpBackInCount(n))}
+          />
+        ) : undefined}
         onRemove={() => {
           setLayout((l) => removeCard(l, entry.key));
           setDismissed((d) => dismissCard(d, entry.key));

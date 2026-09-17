@@ -4,6 +4,7 @@
  */
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { STATUS_TOKENS } from "../../../shared/ui/statusTokens.js";
+import { IconButton } from "../../../shared/ui/controls.jsx";
 
 const STATUS_LABEL = { pursuit: "Pursuit", active: "Active", onhold: "On hold", complete: "Complete", dead: "Dead" };
 const STATUS_VAR = { pursuit: "var(--status-pursuit)", active: "var(--status-active)", onhold: "var(--status-onhold)", complete: "var(--status-complete)", dead: "var(--status-dead)" };
@@ -68,20 +69,26 @@ export function CardSkeleton({ rows = 3 }) {
   );
 }
 
-/* ── Jump back in ─────────────────────────────────────────────────────────────────────────── */
-export function JumpBackInCard({ project, doc, onOpenProject, onOpenDoc }) {
-  if (!project && !doc) return <div style={EMPTY}>Nothing to jump back into yet.</div>;
+/* ── Jump back in ─────────────────────────────────────────────────────────────────────────── *
+ * NEW-1 (2026-09-17, owner ask) — was a single most-recent project + the last document; now a
+ * short LIST of recent projects (however many the account has configured, via
+ * `JumpBackInCountControl` below) plus the same document row. Each project row drops the old
+ * "Last project ·" label (repeating it on every row of a list reads odd — the card's own title
+ * already says what this list is) and keeps just its relative time. */
+export function JumpBackInCard({ projects, doc, onOpenProject, onOpenDoc }) {
+  const list = projects || [];
+  if (!list.length && !doc) return <div style={EMPTY}>Nothing to jump back into yet.</div>;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {project && (
-        <ClickableRow onClick={() => onOpenProject?.(project)}>
+      {list.map((project) => (
+        <ClickableRow key={project.groupId} onClick={() => onOpenProject?.(project)}>
           <StatusDot status={project.role === "tracked" ? null : project.status} />
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{project.name}</div>
-            <div style={MUTED}>Last project · {relativeDays(project.updatedAt)}</div>
+            <div style={MUTED}>{relativeDays(project.updatedAt)}</div>
           </div>
         </ClickableRow>
-      )}
+      ))}
       {doc && (
         <ClickableRow onClick={() => onOpenDoc?.(doc)}>
           <span aria-hidden="true" style={{ color: "var(--accent-review)", fontSize: 13, flex: "none" }}>▤</span>
@@ -92,6 +99,25 @@ export function JumpBackInCard({ project, doc, onOpenProject, onOpenDoc }) {
         </ClickableRow>
       )}
     </div>
+  );
+}
+
+/* Customize-mode-only stepper for how many recent projects Jump-back-in lists (NEW-1). Folded
+ * into the card's own header (DashboardCard's `customizeControls` extension point) rather than
+ * living in the resting view — PANEL-BREVITY: a setting nobody is actively changing shouldn't
+ * cost the default view a pixel. Two IconButtons (the same primitive the card's own remove
+ * control uses) around a plain number, clamped by the caller (dashboardLayout.js's MIN/MAX). */
+export function JumpBackInCountControl({ count, min, max, onChange }) {
+  return (
+    <span style={{ display: "flex", alignItems: "center", gap: 4, flex: "none" }} title="How many recent projects to show">
+      <IconButton size={20} disabled={count <= min} onClick={() => onChange(count - 1)} title="Show one fewer">
+        <span style={{ fontSize: 12, lineHeight: 1 }}>−</span>
+      </IconButton>
+      <span style={{ fontSize: 10.5, fontWeight: 600, color: "var(--text-secondary)", minWidth: 12, textAlign: "center" }}>{count}</span>
+      <IconButton size={20} disabled={count >= max} onClick={() => onChange(count + 1)} title="Show one more">
+        <span style={{ fontSize: 12, lineHeight: 1 }}>+</span>
+      </IconButton>
+    </span>
   );
 }
 

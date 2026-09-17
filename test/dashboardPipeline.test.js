@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupProjectsByGroupId, pipelineCounts, goingQuiet, mostRecentProject } from "../src/workspaces/dashboard/lib/dashboardPipeline.js";
+import { groupProjectsByGroupId, pipelineCounts, goingQuiet, recentProjects } from "../src/workspaces/dashboard/lib/dashboardPipeline.js";
 
 const NOW = Date.parse("2026-09-05T00:00:00Z");
 const daysAgo = (n) => new Date(NOW - n * 86400000).toISOString();
@@ -72,19 +72,49 @@ describe("pipelineCounts", () => {
 });
 
 
-describe("mostRecentProject", () => {
-  it("picks the single most recently updated project regardless of status or role", () => {
+describe("recentProjects", () => {
+  it("picks the single most recently updated project regardless of status or role when limit=1", () => {
     const projects = [
       { groupId: "a", status: "complete", role: "pursuit", updatedAt: daysAgo(5) },
       { groupId: "b", status: "active", role: "tracked", updatedAt: daysAgo(0) },
       { groupId: "c", status: "pursuit", role: "pursuit", updatedAt: daysAgo(20) },
     ];
-    expect(mostRecentProject(projects).groupId).toBe("b");
+    expect(recentProjects(projects, 1).map((p) => p.groupId)).toEqual(["b"]);
   });
 
-  it("returns null for an empty list", () => {
-    expect(mostRecentProject([])).toBe(null);
-    expect(mostRecentProject(null)).toBe(null);
+  it("returns the N most recently updated projects, most-recent-first", () => {
+    const projects = [
+      { groupId: "a", status: "complete", role: "pursuit", updatedAt: daysAgo(5) },
+      { groupId: "b", status: "active", role: "tracked", updatedAt: daysAgo(0) },
+      { groupId: "c", status: "pursuit", role: "pursuit", updatedAt: daysAgo(20) },
+      { groupId: "d", status: "onhold", role: "pursuit", updatedAt: daysAgo(1) },
+    ];
+    expect(recentProjects(projects, 3).map((p) => p.groupId)).toEqual(["b", "d", "a"]);
+  });
+
+  it("returns fewer than the limit when there aren't enough projects, never padding", () => {
+    const projects = [{ groupId: "a", status: "pursuit", role: "pursuit", updatedAt: daysAgo(1) }];
+    expect(recentProjects(projects, 3).map((p) => p.groupId)).toEqual(["a"]);
+  });
+
+  it("does not mutate the input array (sorts a copy)", () => {
+    const projects = [
+      { groupId: "a", updatedAt: daysAgo(5) },
+      { groupId: "b", updatedAt: daysAgo(0) },
+    ];
+    const original = [...projects];
+    recentProjects(projects, 5);
+    expect(projects).toEqual(original);
+  });
+
+  it("defaults limit to 1 when omitted", () => {
+    const projects = [{ groupId: "a", updatedAt: daysAgo(5) }, { groupId: "b", updatedAt: daysAgo(0) }];
+    expect(recentProjects(projects).map((p) => p.groupId)).toEqual(["b"]);
+  });
+
+  it("returns [] for an empty/missing list", () => {
+    expect(recentProjects([], 3)).toEqual([]);
+    expect(recentProjects(null, 3)).toEqual([]);
   });
 });
 
