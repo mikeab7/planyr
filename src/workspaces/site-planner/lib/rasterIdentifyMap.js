@@ -122,11 +122,6 @@ function readoutNode(state) {
   return el;
 }
 
-/* How long a non-hit message stays up before dismissing itself. Long enough to read, short
- * enough that it never becomes furniture — the honest-but-brief state the brief asks for
- * instead of a spinner that never resolves or a silence that reads as a dead layer. */
-export const TRANSIENT_MS = 1600;
-
 /* Wire hover + click identify onto a Leaflet map.
  *
  * Options (all read LIVE per event, never captured at attach time — the layer set, the gate
@@ -150,11 +145,9 @@ export function attachRasterIdentify(map, opts = {}) {
     fetchJson = makeIdentifyFetch(),
   } = opts;
 
-  let hoverTip = null, pinned = null, dismissTimer = null, panning = false;
+  let hoverTip = null, pinned = null, panning = false;
 
-  const clearDismiss = () => { if (dismissTimer) { clearTimeout(dismissTimer); dismissTimer = null; } };
   const dropTip = () => {
-    clearDismiss();
     if (hoverTip) { try { map.closeTooltip(hoverTip); } catch (_) {} hoverTip = null; }
   };
 
@@ -165,20 +158,25 @@ export function attachRasterIdentify(map, opts = {}) {
   };
 
   /* One controller for hover (debounced, transient tooltip) and one for click (immediate,
-   * pinned popup) so a click can never be cancelled by the hover that follows it. */
+   * pinned popup) so a click can never be cancelled by the hover that follows it.
+   *
+   * ⛔ NEW-1 (B1613408, 2026-09-17, owner report) — AMBIENT HOVER MAY ONLY EVER SHOW SOMETHING FOR
+   * A GENUINE HIT. A raster layer has no features in the DOM, so the only way to know whether the
+   * cursor sits on one is to ask the service — which means "pending"/"none"/"unsupported"/"error"
+   * fire on every rest position, including bare ground with nothing drawn there at all. That is the
+   * "Checking…" tooltip the owner reported floating over open land with only Drainage channels (a
+   * raster MapServer picture) switched on. B1490144 carved FEMA out of cursor identify entirely for
+   * exactly this reason; this generalises the fix to every raster layer WITHOUT losing the feature —
+   * a real hit still answers below — by simply never rendering a non-hit state for ambient hover.
+   * LOUD-FAILURE still governs a DELIBERATE action: the click-to-pin popup (`onClick` below) keeps
+   * showing every outcome, honestly, exactly as before. */
   const render = (state, at) => {
-    if (state.kind === IDENTIFY_STATE.idle) return dropTip();
+    if (state.kind !== IDENTIFY_STATE.hit) return dropTip();
     dropTip();
     hoverTip = L.tooltip({ direction: "top", offset: [0, -6], opacity: 0.96, className: "pf-identify-tip" })
       .setLatLng(at || state.at)
       .setContent(readoutNode(state));
-    try { hoverTip.addTo(map); } catch (_) { hoverTip = null; return; }
-    // A non-hit says its piece and leaves. A hit stays while the cursor rests on it and is
-    // dropped by the next move/out, like any hover affordance.
-    if (state.kind !== IDENTIFY_STATE.hit && state.kind !== IDENTIFY_STATE.pending) {
-      clearDismiss();
-      dismissTimer = setTimeout(dropTip, TRANSIENT_MS);
-    }
+    try { hoverTip.addTo(map); } catch (_) { hoverTip = null; }
   };
 
   const hover = createHoverIdentify({
