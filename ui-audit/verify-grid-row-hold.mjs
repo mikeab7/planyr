@@ -83,10 +83,13 @@ page.on("pageerror", e => console.log("  [pageerror]", e.message.slice(0, 160)))
 const failures = [];
 const line = s => console.log(s);
 
-async function boot() {
-  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
-  await page.waitForSelector("[data-task-row]", { timeout: 40000 });
-  await installScrollWitness(page, GRID);
+/* NEW-1 — every helper below closes over the scroll container node captured at install time, so
+ * it must be RE-RUN (not just re-pointing window.__g) after anything that remounts the grid — a
+ * Grid/Split/Gantt view switch, in particular, since App's `<ErrorBoundary key={data.view}>`
+ * remounts the whole subtree and the old container node is detached. Extracted out of boot() so
+ * the view-switch scenarios (D, E) can re-install against the fresh node without a page reload. */
+async function installHelpers() {
+  await page.waitForSelector(GRID, { timeout: 20000 });
   await page.evaluate(sel => {
     const g = document.querySelector(sel); window.__g = g;
     window.__rowTop = id => { const r = document.querySelector(`[data-task-row="${id}"]`); if (!r) return null;
@@ -119,6 +122,13 @@ async function boot() {
                  visible: r.top > gr.top + 40 && r.bottom < gr.bottom - 40 };
       }); };
   }, GRID);
+}
+
+async function boot() {
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+  await page.waitForSelector("[data-task-row]", { timeout: 40000 });
+  await installScrollWitness(page, GRID);
+  await installHelpers();
   await page.evaluate(() => { window.__g.scrollTop = Math.floor(window.__g.scrollHeight / 2); });
   await pacedWait(page, 450);
 }
@@ -132,6 +142,31 @@ const midRow = () => page.evaluate(() => {
   });
   return rows.length ? rows[Math.floor(rows.length / 2)].getAttribute("data-task-row") : null;
 });
+
+/** A leaf row comfortably NEAR THE TOP of the viewport — "he clicked it a while ago, then
+ * scrolled away", the exact shape NEW-1 scenarios A/B stage. */
+const nearTopRow = () => page.evaluate(() => {
+  const g = window.__g, gr = g.getBoundingClientRect();
+  const rows = [...document.querySelectorAll("[data-task-row]")].filter(r => {
+    const b = r.getBoundingClientRect();
+    return b.top > gr.top + 40 && b.top < gr.top + 160 && r.querySelector("[data-health-dot]");
+  });
+  return rows.length ? rows[0].getAttribute("data-task-row") : null;
+});
+
+/** Real wheel scrolling (not a scrollTop assignment) toward `target` — this is how he actually
+ * scrolls, and it's what the owner's own repro used ("wheel down to scrollTop 2400"). */
+async function wheelScrollTo(target) {
+  const box = await page.locator(GRID).boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  for (let i = 0; i < 60; i++) {
+    const st = await page.evaluate(() => window.__g.scrollTop);
+    if (st >= target) break;
+    await page.mouse.wheel(0, Math.min(500, target - st + 60));
+    await pacedWait(page, 25);
+  }
+  await pacedWait(page, 250);
+}
 
 async function selectRow(id) {
   await page.locator(`[data-task-row="${id}"] > div`).nth(1).click();
@@ -455,6 +490,224 @@ if (!sliderCount) {
     line(`  ✗ row-height — selected row ${RHROW} moved ${rhAfter.top - rhBefore.top}px: ${rhBefore.top}px → ${rhAfter.top}px`);
   } else {
     line(`  ✓ row-height — selected row ${RHROW} held its place across the resize (${rhBefore.top}px → ${rhAfter.top}px)`);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════
+ * NEW-1 (RECURRENCE of B463922, ×3) — "there's a million ways that I press something on the
+ * schedule and it jumps me to somewhere else... sometimes I'll open something and it'll take me
+ * to somewhere completely different." Five distinct defects, all in GridView:
+ *   A. a tasks-only change (collapse) while the selection sits off screen chases it anyway
+ *   B. same as A, but the change is an undo (Ctrl+Z) — the general case: ANY tasks-identity change
+ *   C. clicking/double-clicking the topmost fully-visible row nudges the view a header's height
+ *   D. a Grid/Split/Gantt view switch remounts the pane and resets it to the top
+ *   E. a dashboard/report jump (goToFocus) replays on a LATER, unrelated remount
+ * Each of A/B/C must FAIL on the pre-fix build (mutation-proven below the file, not inline —
+ * see the PR description for the stash-and-rerun results). D/E are new mechanisms (scroll memory,
+ * a cleared token) with nothing to accidentally satisfy pre-fix, so their assertions are the proof.
+ * ═══════════════════════════════════════════════════════════════════════════════════════════ */
+
+/* A/B share a subtlety neither `step()` nor `keyStep()` was built for: the whole POINT of these
+ * scenarios is that the selected row is scrolled far enough away to be VIRTUALIZED OUT OF THE DOM
+ * entirely — so `window.__selRow()` (which reads the row wearing the blue selection border) reads
+ * `null` whether the selection genuinely survived or was silently cleared, and `step()`'s
+ * `expectSel` check would report a false "the selection moved" on every honest pass. Likewise
+ * `step()`'s vacuity gate reads list LENGTH, which a plain date-edit/undo never changes at all —
+ * using it here would report every honest pass as vacuous. Both scenarios use their own bespoke
+ * assertions instead: the anchor-position check `step()` already does well, plus a real,
+ * DOM-visible proof that the selection/edit actually survived, taken after scrolling back. */
+
+// A. A click near the top, scrolled away, then a tasks-only change (collapse) must not chase it.
+line("\nNEW-1 [A] — a stale selection scrolled off screen must not be chased back by an unrelated collapse\n");
+await boot();
+await page.evaluate(() => { window.__g.scrollTop = 0; });
+await pacedWait(page, 250);
+const A_SEL = await nearTopRow();
+await selectRow(A_SEL);
+await wheelScrollTo(2400);
+const A_TOP = await page.evaluate(() => window.__topRow());
+const A_TOGGLE = await pickToggleRow("Collapse", null);
+await step(`[A] collapse a visible group with the selection (${A_SEL}) scrolled off screen above`, A_TOP, null, () => clickToggle(A_TOGGLE, "Collapse"));
+await page.evaluate(() => { window.__g.scrollTop = 0; });
+await pacedWait(page, 300);
+const A_survived = await page.evaluate(() => window.__selRow());
+if (A_survived !== String(A_SEL)) { failures.push(`[A] the selection did not survive the collapse (expected ${A_SEL}, scrolling back shows ${A_survived})`); line(`  ✗ [A] — selection lost: expected ${A_SEL}, found ${A_survived} after scrolling back`); }
+else line(`  ✓ [A] — the off-screen selection (${A_SEL}) survived the collapse untouched`);
+
+// B. Same setup — the change this time is an UNDO. The general case: ANY tasks-identity change.
+line("\nNEW-1 [B] — same setup, but the change is an UNDO (Ctrl+Z)\n");
+await boot();
+await page.evaluate(() => { window.__g.scrollTop = 0; });
+await pacedWait(page, 250);
+const B_SEL = await nearTopRow();
+await selectRow(B_SEL);
+const B_ORIG = await page.evaluate(i => (document.querySelector(`[data-task-row="${i}"] > div:nth-child(3)`) || {}).innerText, B_SEL);
+await page.locator(`[data-task-row="${B_SEL}"] > div`).nth(2).click(); await pacedWait(page, 200);
+await page.keyboard.press("Control+a").catch(() => {});
+await page.keyboard.type("5/6/27", { delay: 20 });
+await page.keyboard.press("Enter");
+await pacedWait(page, 400);
+const B_edited = await page.evaluate(i => (document.querySelector(`[data-task-row="${i}"] > div:nth-child(3)`) || {}).innerText, B_SEL);
+if (B_edited === B_ORIG) {
+  failures.push(`[B] the setup edit never took (still "${B_ORIG}") — Ctrl+Z would have nothing to prove`);
+  line(`  ✗ [B] — setup edit did not take, "${B_ORIG}" unchanged; scenario cannot run`);
+} else {
+  await wheelScrollTo(2400);
+  const B_TOP = await page.evaluate(() => window.__topRow());
+  const B_before = await page.evaluate(i => window.__rowTop(i), B_TOP);
+  await page.keyboard.press("Control+z");
+  await pacedWait(page, 500);
+  const B_after = await page.evaluate(i => window.__rowTop(i), B_TOP);
+  if (B_after === null) { failures.push(`[B] undo: top-of-view row ${B_TOP} left the rendered window`); line(`  ✗ [B] — top-of-view row ${B_TOP} left the rendered window`); }
+  else if (Math.abs(B_after - B_before) > TOL) { failures.push(`[B] undo (Ctrl+Z) with the selection (${B_SEL}) scrolled off screen above: the view moved ${B_after - B_before}px (top row ${B_TOP}, budget ±${TOL})`); line(`  ✗ [B] — top-of-view row ${B_TOP}: ${B_before}px → ${B_after}px (Δ ${B_after - B_before}px)`); }
+  else line(`  ✓ [B] — undo (Ctrl+Z) with the selection (${B_SEL}) scrolled off screen: top-of-view row ${B_TOP} held (Δ ${B_after - B_before}px)`);
+  await page.evaluate(() => { window.__g.scrollTop = 0; });
+  await pacedWait(page, 300);
+  const B_reverted = await page.evaluate(i => (document.querySelector(`[data-task-row="${i}"] > div:nth-child(3)`) || {}).innerText, B_SEL);
+  if (B_reverted !== B_ORIG) { failures.push(`[B] the undo did not actually revert the edit (expected "${B_ORIG}", got "${B_reverted}")`); line(`  ✗ [B] — undo did not revert: expected "${B_ORIG}", got "${B_reverted}"`); }
+  else line(`  ✓ [B] — the undo genuinely reverted the date (back to "${B_ORIG}") — this scenario proved something, not a vacuous pass`);
+}
+
+// C. The topmost fully-visible row must not be nudged a header's height by selecting it.
+line("\nNEW-1 [C] — clicking (or double-clicking into) the topmost fully-visible row must not nudge it a header's height\n");
+await boot();
+/* The buggy formula only misfires in a narrow band: a row whose TRUE on-screen top sits between
+ * one and two header-heights down (HEADER_H..2*HEADER_H) reads as "above the visible top" and gets
+ * nudged, even though it's genuinely on screen. `__topRow()`'s own 34px threshold (a few px of
+ * slack past HEADER_H) lands just OUTSIDE that band far more often than in it, so picking "the
+ * topmost row" at an arbitrary scrollTop mostly missed the bug entirely (confirmed: it read ✓ even
+ * on the unpatched pre-fix build). Instead, place a real row's on-screen top DIRECTLY inside that
+ * band by measuring where it currently sits and adjusting scrollTop by the exact delta — that
+ * doesn't depend on knowing ROW_H (which this file doesn't expose and which a prior test in this
+ * same run may have changed via the row-height slider). HEADER_H mirrors `TL_H` in
+ * public/sequence/index.html (the sticky grid header's height, a stable, long-standing constant). */
+const HEADER_H = 30;
+const C_CAND = await midRow();
+const candTop = await page.evaluate(i => window.__rowTop(i), C_CAND);
+await page.evaluate(d => { window.__g.scrollTop = Math.max(0, window.__g.scrollTop + d); }, candTop - Math.round(HEADER_H * 1.5));
+await pacedWait(page, 300);
+const C_ROW = C_CAND;
+const placedAt = await page.evaluate(i => window.__rowTop(i), C_ROW);
+if (placedAt === null || placedAt <= HEADER_H || placedAt >= HEADER_H * 2) {
+  failures.push(`[C] could not stage the scenario — row ${C_ROW} landed at ${placedAt}px, not inside the (${HEADER_H}, ${HEADER_H * 2})px band the bug lives in`);
+  line(`  ✗ [C] — could not place row ${C_ROW} inside the danger band (landed at ${placedAt}px)`);
+} else {
+  // Must be a row that's GENUINELY on screen, not just any other id in the DOM: a plain
+  // Playwright `.click()` auto-scrolls to reach an off-screen target (DRIVER-SCROLL-IS-NOT-
+  // APP-SCROLL), which would silently destroy the exact scrollTop just staged above before
+  // C_ROW's position is even measured. `midRow()` is comfortably clear of the header band C_ROW
+  // was deliberately placed in, so it's never the same row.
+  const C_OTHER = await midRow();
+  await selectRow(C_OTHER);
+  const cBefore = await page.evaluate(i => window.__rowTop(i), C_ROW);
+  await selectRow(C_ROW);
+  const cAfter = await page.evaluate(i => window.__rowTop(i), C_ROW);
+  if (cAfter === null) { failures.push("[C] click: the topmost row left the rendered window"); line("  ✗ [C] click — row left the rendered window"); }
+  else if (Math.abs(cAfter - cBefore) > TOL) { failures.push(`[C] click: selecting the topmost visible row nudged it ${cAfter - cBefore}px (budget ±${TOL})`); line(`  ✗ [C] click — row ${C_ROW}: ${cBefore}px → ${cAfter}px (Δ ${cAfter - cBefore}px)`); }
+  else line(`  ✓ [C] click — topmost visible row ${C_ROW} held its place (${cBefore}px → ${cAfter}px)`);
+
+  await selectRow(C_OTHER);
+  const cBefore2 = await page.evaluate(i => window.__rowTop(i), C_ROW);
+  await page.locator(`[data-task-row="${C_ROW}"] > div`).nth(2).dblclick();
+  await pacedWait(page, 300);
+  await page.keyboard.press("Escape");                // close the editor so it doesn't linger for later scenarios
+  await pacedWait(page, 200);
+  const cAfter2 = await page.evaluate(i => window.__rowTop(i), C_ROW);
+  if (cAfter2 === null) { failures.push("[C] double-click: the topmost row left the rendered window"); line("  ✗ [C] double-click — row left the rendered window"); }
+  else if (Math.abs(cAfter2 - cBefore2) > TOL) { failures.push(`[C] double-click: opening an editor on the topmost visible row nudged it ${cAfter2 - cBefore2}px (budget ±${TOL})`); line(`  ✗ [C] double-click — row ${C_ROW}: ${cBefore2}px → ${cAfter2}px (Δ ${cAfter2 - cBefore2}px)`); }
+  else line(`  ✓ [C] double-click — topmost visible row ${C_ROW} held its place opening an editor (${cBefore2}px → ${cAfter2}px)`);
+}
+
+// D. A Grid/Split/Gantt view switch must restore each pane's own scroll position, not reset it.
+line("\nNEW-1 [D] — a Grid/Split/Gantt view switch must restore scroll position, not reset to the top\n");
+await boot();
+await page.evaluate(() => { window.__g.scrollTop = 1400; });
+await pacedWait(page, 300);
+const D_before = await page.evaluate(() => window.__g.scrollTop);
+await page.locator(".hdr-view button", { hasText: "Gantt" }).click();
+await pacedWait(page, 400);
+await page.locator(".hdr-view button", { hasText: "Grid" }).click();
+await installHelpers();                              // the grid remounted — re-bind every helper to the fresh node
+await pacedWait(page, 400);
+const D_after = await page.evaluate(() => document.querySelector('[data-grid-scroll="1"]')?.scrollTop ?? null);
+if (D_after === null) { failures.push("[D] Grid→Gantt→Grid: no grid scroll container after switching back"); line("  ✗ [D] Grid→Gantt→Grid — grid container missing after remount"); }
+else if (Math.abs(D_after - D_before) > TOL) { failures.push(`[D] Grid→Gantt→Grid: scroll position was not restored (${D_before}px reset to ${D_after}px)`); line(`  ✗ [D] Grid→Gantt→Grid — ${D_before}px → ${D_after}px (reset, not restored)`); }
+else line(`  ✓ [D] Grid→Gantt→Grid — scroll position restored (${D_before}px → ${D_after}px)`);
+
+// Split's own grid pane shares the same per-project memory, so Grid → Split also restores.
+await page.evaluate(() => { window.__g.scrollTop = 2100; });
+await pacedWait(page, 300);
+const D2_before = await page.evaluate(() => window.__g.scrollTop);
+await page.locator(".hdr-view button", { hasText: "Gantt" }).click();
+await pacedWait(page, 400);
+await page.locator(".hdr-view button", { hasText: "Split" }).click();
+await pacedWait(page, 400);
+const D2_after = await page.evaluate(() => document.querySelector('[data-grid-scroll="1"]')?.scrollTop ?? null);
+if (D2_after === null) { failures.push("[D] Grid→Split: no grid pane found in Split"); line("  ✗ [D] Grid→Split — grid pane missing in Split"); }
+else if (Math.abs(D2_after - D2_before) > TOL) { failures.push(`[D] Grid→Split: scroll position was not restored (${D2_before}px reset to ${D2_after}px)`); line(`  ✗ [D] Grid→Split — ${D2_before}px → ${D2_after}px (reset, not restored)`); }
+else line(`  ✓ [D] Grid→Split — scroll position restored (${D2_before}px → ${D2_after}px)`);
+
+// The standalone Gantt pane gets its own memory too.
+const D3_before = 900;
+await page.evaluate(v => { const g = document.querySelector('[data-gantt-scroll="1"]'); if (g) g.scrollTop = v; }, D3_before);
+await pacedWait(page, 300);
+await page.locator(".hdr-view button", { hasText: "Gantt" }).click();
+await pacedWait(page, 400);
+await page.locator(".hdr-view button", { hasText: "Grid" }).click();
+await installHelpers();
+await pacedWait(page, 300);
+await page.locator(".hdr-view button", { hasText: "Gantt" }).click();
+await pacedWait(page, 400);
+const D3_after = await page.evaluate(() => document.querySelector('[data-gantt-scroll="1"]')?.scrollTop ?? null);
+if (D3_after === null) { failures.push("[D] standalone Gantt: no scroll container after switching back"); line("  ✗ [D] Gantt — scroll container missing after remount"); }
+else if (Math.abs(D3_after - D3_before) > TOL) { failures.push(`[D] standalone Gantt: scroll position was not restored (${D3_before}px reset to ${D3_after}px)`); line(`  ✗ [D] Gantt — ${D3_before}px → ${D3_after}px (reset, not restored)`); }
+else line(`  ✓ [D] standalone Gantt — scroll position restored (${D3_before}px → ${D3_after}px)`);
+await page.locator(".hdr-view button", { hasText: "Grid" }).click();
+await installHelpers();
+await pacedWait(page, 300);
+
+// E. A dashboard/report jump (goToFocus) must land exactly once — not replay on a later remount.
+line("\nNEW-1 [E] — a Task Report jump must land once and must NOT replay on a later, unrelated view switch\n");
+await boot();
+await page.locator(".hdr-mode button", { hasText: "Dashboard" }).click();
+await pacedWait(page, 400);
+const jumpBtn = page.locator('button[title^="Open row in "]').first();
+const jumpCount = await jumpBtn.count();
+if (!jumpCount) {
+  failures.push("[E] no Task Report jump row found — could not stage the scenario");
+  line("  ✗ [E] — no jump row in the Task Report to click");
+} else {
+  await jumpBtn.click();
+  await pacedWait(page, 500);                        // the 60ms scroll + 120ms pulse landing
+  await installHelpers();                             // goToTask flips section back to "projects" — a fresh GridView mount
+  const landedSel = await page.evaluate(() => window.__selRow());
+  if (!landedSel) {
+    failures.push("[E] the Task Report jump did not land — no row is selected after clicking it");
+    line("  ✗ [E] — jump did not land");
+  } else {
+    const landedTop = await page.evaluate(() => window.__g.scrollTop);
+    const scrollHeight = await page.evaluate(() => window.__g.scrollHeight);
+    // Scroll well clear of the landed position — simulating him continuing to work after the jump —
+    // far enough that a stale goToFocus replaying the jump can't be mistaken for a coincidence.
+    const AWAY_TARGET = landedTop > scrollHeight / 2 ? 40 : Math.max(scrollHeight - 400, landedTop + 800);
+    // Re-read the actual result, not the intended target: a target beyond scrollHeight-clientHeight
+    // is silently CLAMPED by the browser the instant it's assigned, and comparing against the
+    // unclamped number would report a false replay every time the target landed out of range.
+    const AWAY = await page.evaluate(v => { window.__g.scrollTop = v; return window.__g.scrollTop; }, AWAY_TARGET);
+    await pacedWait(page, 250);
+    await page.locator(".hdr-view button", { hasText: "Gantt" }).click();
+    await pacedWait(page, 400);
+    await page.locator(".hdr-view button", { hasText: "Grid" }).click();
+    await installHelpers();
+    await pacedWait(page, 500);                       // long enough for a stale goToFocus's timers to fire if it replayed
+    const afterSwitch = await page.evaluate(() => document.querySelector('[data-grid-scroll="1"]')?.scrollTop ?? null);
+    if (afterSwitch === null) { failures.push("[E] no grid container after the view switch"); line("  ✗ [E] — grid container missing after switch"); }
+    else if (Math.abs(afterSwitch - AWAY) > TOL) {
+      failures.push(`[E] the stale jump replayed on remount — scroll reset from ${AWAY}px to ${afterSwitch}px instead of holding`);
+      line(`  ✗ [E] — replayed: ${AWAY}px → ${afterSwitch}px (expected to hold near ${AWAY}px)`);
+    } else {
+      line(`  ✓ [E] — the jump landed once (selected ${landedSel}) and did NOT replay on the later Grid↔Gantt↔Grid switch (held near ${AWAY}px)`);
+    }
   }
 }
 
