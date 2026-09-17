@@ -49,6 +49,32 @@ export const CARD_DEFS = {
 
 export const CARD_KEYS = Object.keys(CARD_DEFS);
 
+// NEW-1 (2026-09-17, owner ask — "jump back in should be the last couple projects I was working
+// on, and I should be able to increase the amount it shows") — how many recent projects the
+// Jump-back-in card lists, a per-user preference persisted the same way as the rest of the
+// layout (see dashboardPrefs.js's `dashboardJumpBackInCount`). 3 reads as "a couple plus a
+// little headroom" without crowding the card's own "Last document" row at its default width (8
+// of 12 grid columns) — and the card sizes to its own content (DashboardCard's `sizeToContent`),
+// so a higher count grows the card rather than overflowing a fixed box. The ceiling (6) keeps a
+// maxed-out card from turning into an unbounded list; MAX rows still scroll inside the card's own
+// tile once they exceed its reserved height, same as any other card.
+export const JUMP_BACK_IN_COUNT_DEFAULT = 3;
+export const JUMP_BACK_IN_COUNT_MIN = 1;
+export const JUMP_BACK_IN_COUNT_MAX = 6;
+
+/** Normalize a raw persisted jump-back-in count: `null`/`undefined` (never saved — the bootstrap
+ * case for every account before this shipped, same convention as normalizeDismissed's own
+ * bootstrap) or any other non-finite value falls back to the default; any real number clamps
+ * into [MIN, MAX] — never zero, never unbounded. `null`/`undefined` is checked explicitly rather
+ * than left to `Number(raw)` because `Number(null) === 0`, which is finite and would otherwise
+ * clamp a "never set" value down to MIN instead of the default. */
+export function normalizeJumpBackInCount(raw) {
+  if (raw === null || raw === undefined) return JUMP_BACK_IN_COUNT_DEFAULT;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return JUMP_BACK_IN_COUNT_DEFAULT;
+  return clamp(Math.round(n), JUMP_BACK_IN_COUNT_MIN, JUMP_BACK_IN_COUNT_MAX);
+}
+
 // The order a first-run (or reset) Dashboard packs its cards in — row-major, wrapping at
 // GRID_COLS, each card's own defaultW/defaultH. Every catalog card ships by default (NEW-2 — a
 // first-run Dashboard must never be empty); a user who wants a leaner view removes what they

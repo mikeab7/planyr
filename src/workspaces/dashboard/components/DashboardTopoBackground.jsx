@@ -26,11 +26,20 @@
  * Every guard from the source is kept, unchanged in spirit: `prefers-reduced-motion` and a
  * coarse (touch) pointer each render exactly one static frame — no rAF loop, no pointer
  * tracking, so this never runs on a phone; the tab-hidden check cancels the animation frame
- * outright rather than continuing to compute an off-screen picture.
+ * outright rather than continuing to compute an off-screen picture. Both guards mean the SETTLE
+ * easing below (NEW-2) never runs in either case either — there is no rAF loop for it to run in.
+ *
+ * NEW-2 (2026-09-17, owner ask: "the background topo should have some lag to it") — the cursor
+ * highlight's position/intensity now ease toward the raw cursor position (`lib/topoMotion.js`'s
+ * `easeToward`, the SETTLE dial) instead of the plain inline lerp this used to hand-roll three
+ * times. See that file's own header for the full follow/settle/depth reasoning — this component
+ * has no scroll-driven motion at all; the cursor is the only input-driven mover, and the field's
+ * large-scale drift (DEPTH) is pure ambient time, untouched by this item.
  */
 import { useEffect, useRef } from "react";
 import { useTheme, usePalette } from "../../../shared/theme/ThemeProvider.jsx";
 import { BRAND } from "../../../shared/brand/tokens.js";
+import { FOLLOW_RADIUS2, FOLLOW_STRENGTH, DEPTH_RATE, SETTLE_POS, SETTLE_STRENGTH, easeToward } from "../lib/topoMotion.js";
 
 const L0 = -0.86, LSTEP = 0.098, LN = 32;
 const SC = 0.0042;
@@ -118,7 +127,7 @@ export default function DashboardTopoBackground({ paused = false }) {
           if (S > 0.004) {
             const dx = px - ptr.x, dy = py - ptr.y;
             const d2 = (dx * dx + dy * dy) * R2;
-            if (d2 < 9) v += S * 1.6 * Math.exp(-d2);
+            if (d2 < FOLLOW_RADIUS2) v += S * FOLLOW_STRENGTH * Math.exp(-d2);
           }
           field[k++] = v;
         }
@@ -232,10 +241,10 @@ export default function DashboardTopoBackground({ paused = false }) {
     }
     function frame() {
       raf = window.requestAnimationFrame(frame);
-      t += 0.0000625;
-      ptr.x += (ptr.tx - ptr.x) * 0.11;
-      ptr.y += (ptr.ty - ptr.y) * 0.11;
-      ptr.s += (ptr.ts - ptr.s) * 0.065;
+      t += DEPTH_RATE;
+      ptr.x = easeToward(ptr.x, ptr.tx, SETTLE_POS);
+      ptr.y = easeToward(ptr.y, ptr.ty, SETTLE_POS);
+      ptr.s = easeToward(ptr.s, ptr.ts, SETTLE_STRENGTH);
       build();
       draw();
     }

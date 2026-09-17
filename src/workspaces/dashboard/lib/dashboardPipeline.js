@@ -65,13 +65,16 @@ export function pipelineCounts(projects) {
   return counts;
 }
 
-/** The single most recently updated project, of any status/role — "Jump back in" is a literal
+/** The `limit` most recently updated projects, of any status/role — "Jump back in" is a literal
  * "where were you last" signal, not a judgment about which project deserves attention, so
- * nothing here is filtered out. Returns null for an empty list. */
-export function mostRecentProject(projects) {
-  return (projects || []).reduce((best, p) => (
-    !best || Date.parse(p.updatedAt || 0) > Date.parse(best.updatedAt || 0) ? p : best
-  ), null);
+ * nothing here is filtered out. Sorted most-recent-first. Returns [] for an empty list.
+ *
+ * NEW-1 (2026-09-17, owner ask) — generalizes the card's old single-project pick to a short
+ * list, so "Jump back in" can show the last several places he was working, not just one. */
+export function recentProjects(projects, limit = 1) {
+  return [...(projects || [])]
+    .sort((a, b) => Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0))
+    .slice(0, Math.max(0, limit));
 }
 
 /** Open projects (pursuit/active/onhold) that haven't been touched in `idleDays` or more —

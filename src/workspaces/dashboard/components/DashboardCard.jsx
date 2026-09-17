@@ -16,6 +16,13 @@
  * row is byte-identical to before this was added — this is an extension point, not a per-card
  * special case.
  *
+ * `customizeControls` (NEW-1, 2026-09-17) — an optional node rendered in the header, only while
+ * `customizing` is true, before the remove control. Same extension-point shape as `headerMeta`:
+ * every card that doesn't pass it renders exactly as before. Its first use is the Jump-back-in
+ * card's row-count stepper (DashboardCards.jsx's `JumpBackInCountControl`) — a per-card setting
+ * that, like remove/add, only needs to be reachable in Customize mode, not sitting in the
+ * resting view (PANEL-BREVITY).
+ *
  * `sizeToContent` (B1426608) — a card whose content is a short list (rows of
  * text, no chart/map/thumbnail grid) shrinks to its own content height instead of stretching to
  * fill the grid tile react-grid-layout reserved for it, so one quiet row doesn't sit above a
@@ -25,13 +32,18 @@
  * saved to the account, are untouched; only this card's own rendered pixel height changes).
  * Cards that need every pixel of their tile (a real map, a thumbnail grid that measures its own
  * box to lay itself out) leave this off and keep the original fill behavior.
+ *
+ * `cardKey` (NEW-1, 2026-09-17) — the card's own CARD_DEFS key, stamped as `data-card-key` on the
+ * root so a headless check (or a future dev tool) can find a specific card without matching on
+ * its title text.
  */
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { IconButton } from "../../../shared/ui/controls.jsx";
 
-export default function DashboardCard({ title, headerMeta, headerRight, customizing, showDragHandle = true, sizeToContent = false, onRemove, children }) {
+export default function DashboardCard({ title, headerMeta, headerRight, customizing, showDragHandle = true, sizeToContent = false, customizeControls, onRemove, children, cardKey }) {
   return (
     <div
+      data-card-key={cardKey}
       style={{
         height: sizeToContent ? "auto" : "100%",
         maxHeight: "100%",
@@ -66,6 +78,7 @@ export default function DashboardCard({ title, headerMeta, headerRight, customiz
             {headerRight || headerMeta}
           </span>
         )}
+        {customizing && customizeControls}
         {customizing && (
           <IconButton size={22} onClick={onRemove} title="Remove this card">
             <span style={{ fontSize: 14, lineHeight: 1 }}>×</span>
