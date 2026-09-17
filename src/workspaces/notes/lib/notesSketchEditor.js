@@ -48,6 +48,46 @@ import {
   removeBox, removeLink, updateBox,
 } from "./notesSketchModel.js";
 
+/* ⛔ NEW-1 (owner report 2026-09-17, recurrence of B1683296–B1683298) — DOUBLE-CLICKING TRULY
+ * EMPTY CANVAS (nothing pending, nothing being edited) STILL DEPENDED 100% ON THE BROWSER'S OWN
+ * NATIVE `dblclick` RECOGNITION, WITH NO FALLBACK. B1683296 removed that dependency for the ONE
+ * case it covered — a box already open and untouched gets RELOCATED on the very next press
+ * (`onPointerDown`'s own branch, below), so a single press is enough once something is pending.
+ * It could not reach the far more common case: nothing pending at all, e.g. the very first box on
+ * a fresh or long-idle sketch, which is exactly Michael's screenshot (an empty area of a REAL
+ * page). That case had — and, before this fix, still had — no path into `beginBox` except the
+ * `dblclick` DOM event (`onDoubleClick`, wired at the bottom of this file), so any real-world
+ * cause of a native double-click failing to form (slow hands, a remote/virtualised input path, an
+ * OS double-click-speed setting, a few pixels of drift) reproduces as "nothing happens — no box,
+ * no error," with no console signal, because nothing ever ran.
+ *
+ * The fix is the SAME shape as B1683296's, one gesture earlier: reconstruct the pair ourselves
+ * from two `pointerdown`s, the same test a native double-click already uses (same target close
+ * enough in time AND in distance), so creating the FIRST box no longer needs the browser's own
+ * recognition either. Mirrors `site-planner/lib/doubleTap.js`'s `DBLTAP_MS`/`DBLTAP_PX` numbers
+ * rather than importing that module — a cross-workspace import would pull site-planner code into
+ * this lazily-loaded chunk (see this file's own header on why nothing here rides the boot path).
+ * Pure and exported so it is unit-testable away from the DOM; `onPointerDown` below is the only
+ * caller. The existing `dblclick` listener is UNCHANGED and stays wired: for an ordinary fast
+ * double-click it still fires, lands on the box this function already created, and `openEditor`'s
+ * own `editing.id === id` short-circuit (see below) makes that a harmless refocus, never a second
+ * box. */
+export const SKETCH_DBLTAP_MS = 350;
+export const SKETCH_DBLTAP_PX = 14;
+
+/** Does `next` pair with `prev` into a double-click? `prev`/`next` are `{ t, x, y }` — `t` from
+ *  the event's own `timeStamp` (never `Date.now()` read inside the handler — see `doubleTap.js`'s
+ *  header for why that measures queueing delay, not the gesture, on a busy page; this canvas is
+ *  never busy enough for that to matter today, but the discipline costs nothing to keep). A
+ *  `next.t` before `prev.t` (out-of-order delivery, or a hand-built test event) is refused rather
+ *  than treated as a huge gap — refusing costs a double-click, never fires one nobody asked for. */
+export function isSketchDoubleTap(prev, next, { ms = SKETCH_DBLTAP_MS, px = SKETCH_DBLTAP_PX } = {}) {
+  if (!prev || !next) return false;
+  const dt = next.t - prev.t;
+  if (!(dt >= 0) || !(dt < ms)) return false;
+  return Math.abs(next.x - prev.x) <= px && Math.abs(next.y - prev.y) <= px;
+}
+
 const el = (tag, cls, attrs = {}) => {
   const node = document.createElement(tag);
   if (cls) node.className = cls;
@@ -75,6 +115,7 @@ export function attachSketchEditor(handle) {
   let linking = null;           // dragging an arrow out of a grip
   let pendingFrom = null;       // the keyboard route: ↗ Arrow, then pick the second box
   let destroyed = false;
+  let lastBlankTap = null;      // NEW-1: { t, x, y } | null — the last press on bare canvas while idle
 
   /* ---- the tool bar ------------------------------------------------------------------ */
 
@@ -388,6 +429,23 @@ export function attachSketchEditor(handle) {
       const pt = canvasPoint(svg, e);
       beginBox(pt.x - BOX_W / 2, pt.y - BOX_MIN_H / 2);
       return;
+    }
+
+    /* ⛔ NEW-1 — THE IDLE CASE B1683296 COULD NOT REACH: nothing pending, nothing open, a press
+     * on bare canvas. Reconstruct the double-click ourselves (see `isSketchDoubleTap`'s own
+     * header) rather than waiting on the browser's native `dblclick`, which this whole gesture
+     * used to depend on with no fallback. Only tracked while `!editing` — once a box IS open,
+     * the branch just above already relocates on a SINGLE press and timing stops mattering. */
+    if (!gripId && !nodeId && !edgeEnds && !editing) {
+      const tap = { t: e.timeStamp || Date.now(), x: e.clientX, y: e.clientY };
+      if (isSketchDoubleTap(lastBlankTap, tap)) {
+        lastBlankTap = null;                      // consumed — a third press starts a fresh pair
+        e.preventDefault();
+        const pt = canvasPoint(svg, e);
+        beginBox(pt.x - BOX_W / 2, pt.y - BOX_MIN_H / 2);
+        return;
+      }
+      lastBlankTap = tap;
     }
 
     /* A press anywhere on the canvas ends the edit that is open, and the model is re-read
