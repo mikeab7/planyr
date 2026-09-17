@@ -373,9 +373,21 @@ test.describe("electric layer point symbols + hover identify (NEW-1/NEW-2)", () 
     expect(identifyCalls, "no /identify request was made for the raster layer").toBeGreaterThan(0);
   });
 
-  /* FAILURE BEHAVIOUR. The brief is explicit: never a spinner that never resolves, and never a
-   * silent nothing that reads as a dead layer. */
-  test("an unreachable identify service says so, briefly — never a hanging spinner", async ({ page }) => {
+  /* ⛔ NEW-1 (B1613408, 2026-09-17, owner report) — AMBIENT HOVER MUST STAY SILENT UNTIL IT FINDS A
+   * REAL FEATURE. Sweeping the cursor over Katy Hockley Rd / Longenbaugh Rd with only Drainage
+   * channels (a raster MapServer picture) switched on popped a "Checking…" tooltip over bare
+   * ground — because a raster layer has no features in the DOM, so the ONLY way to know whether
+   * the cursor is on one is to ask the service, and that request (and its "pending"/"none"/
+   * "unsupported"/"error" outcomes) used to render for every rest position, everywhere, whether or
+   * not anything was actually there. Owner's words: "I don't want it to do it really for any layer
+   * unless I'm actively over something that's there." B1490144 (below) carved FEMA out of cursor
+   * identify entirely for the same underlying reason; this generalises the fix to every raster
+   * layer WITHOUT losing the feature — the test above proves a genuine hit still answers — by
+   * never rendering a non-hit state for ambient hover. A DELIBERATE action (the map finder's
+   * click-to-pin popup, `rasterIdentifyMap.js`'s `onClick`) is untouched and still reports every
+   * outcome honestly — LOUD-FAILURE governs an action the user asked for, not the mouse merely
+   * passing over the map. */
+  test("hovering EMPTY ground with a raster layer on shows nothing — no Checking…, no flash of failure text", async ({ page }) => {
     await stubElectric(page);
     await page.route("**fwsprimary.wim.usgs.gov/**/MapServer/identify**", (route) => route.abort("failed"));
     await stubWetlandsMetadata(page);
@@ -386,16 +398,33 @@ test.describe("electric layer point symbols + hover identify (NEW-1/NEW-2)", () 
 
     const at = await feetToScreen(page, 400, 400);
     await hoverRasterAt(page, at.x, at.y);
+    // Long enough for the debounce, the failed request, and any retry to fully settle.
+    await page.waitForTimeout(1500);
+    await expect(page.getByTestId("gis-identify-hover")).toHaveCount(0);
+  });
+
+  test("resting over bare ground with a raster layer on never even flashes 'Checking…'", async ({ page }) => {
+    await stubElectric(page);
+    // The service answers HONESTLY (nothing here) rather than failing — the "none" outcome is
+    // exactly as unwanted on ambient hover as an error or a pending spinner.
+    await page.route("**fwsprimary.wim.usgs.gov/**/MapServer/identify**", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ results: [] }) });
+    });
+    await stubWetlandsMetadata(page);
+
+    await openPlanner(page);
+    await toggleLayer(page, /^Wetlands/);
+    await page.waitForTimeout(2000);
+
     const readout = page.getByTestId("gis-identify-hover");
-    await expect(readout).toBeVisible({ timeout: 8000 });
-    /* An honest STATED outcome — which of the failure wordings appears depends on how far the
-     * request got (a direct block, or the cache-proxy retry reaching something that isn't the
-     * service), and all of them are legitimate. What matters is the three things that must
-     * NEVER happen: a spinner left up forever, an empty readout, and a raw internal message. */
-    await expect(readout).toContainText(/couldn't reach|didn't answer|rate-limit|nothing here|unreadable|HTTP \d+|needs the cache proxy/i);
-    await expect(readout).not.toContainText("Checking…");
-    await expect(readout).not.toContainText(/Unexpected token|is not valid JSON|undefined|\[object/i);
-    expect((await readout.innerText()).trim().length).toBeGreaterThan(0);
+    // Sweep across several open-ground points, as the owner's repro did, and confirm the
+    // tooltip never appears at any of them — not even transiently.
+    for (const [fx, fy] of [[300, 300], [500, 500], [700, 300], [300, 700]]) {
+      const at = await feetToScreen(page, fx, fy);
+      await hoverRasterAt(page, at.x, at.y);
+      await page.waitForTimeout(500);
+      await expect(readout).toHaveCount(0);
+    }
   });
 
   /* B1490144 — owner request 2026-09-10, verbatim: "remove the feature where my mouse

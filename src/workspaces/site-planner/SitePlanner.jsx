@@ -7323,15 +7323,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (rasterHover.current) return rasterHover.current;
     const m = rasterIdentifyNow();
     if (!m) { loadRasterIdentify().catch(() => {}); return null; }
+    /* ⛔ NEW-1 (B1613408, 2026-09-17, owner report) — a raster layer has no features in the DOM,
+     * so the only way to know whether the cursor sits on one is to ask the service, which means
+     * "pending"/"none"/"unsupported"/"error" fire on every rest position — including bare ground
+     * with nothing drawn there. That was the "Checking…" tooltip floating over open land with only
+     * Drainage channels (a raster MapServer picture) switched on. B1490144 carved FEMA out of
+     * cursor identify entirely for the same reason; this generalises the fix to every raster layer
+     * without losing the feature — a genuine HIT still answers below — by never surfacing a
+     * non-hit state for ambient hover. (The pinned click card, `gisHit` above, is a deliberate
+     * action and stays fully honest — LOUD-FAILURE is untouched there.) */
     rasterHover.current = makeHoverIdentify({
       debounceMs: 0, // the effect below already debounced on cursor rest
       onState: (state) => {
         const a = rasterAnchor.current;
-        if (!a || state.kind === m.IDENTIFY_STATE.idle) { setGisHover(null); return; }
-        if (state.kind === m.IDENTIFY_STATE.hit) { setGisHover({ ...a, items: state.items }); return; }
-        // Honest non-hit: a short stated outcome, never a spinner that never resolves and never
-        // a silence that would read as a dead layer.
-        setGisHover({ ...a, note: m.stateMessage(state) });
+        if (!a || state.kind !== m.IDENTIFY_STATE.hit) { setGisHover(null); return; }
+        setGisHover({ ...a, items: state.items });
       },
     });
     return rasterHover.current;
@@ -23098,9 +23104,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {it.sourceName && <div style={{ color: PAL.muted, fontSize: 10.5, marginTop: 3 }}>Source: {it.sourceName}</div>}
                 </div>
               ))}
-              {/* The honest non-hit state of a raster identify ("Nothing here", "Source didn't
-                  answer", "Source is rate-limiting — try again"). */}
-              {gisHover.note && <div style={{ color: PAL.muted }}>{gisHover.note}</div>}
             </div>
           )}
           {/* NEW-2 — `transform` below is the MEASURED sub-pixel translate that welds the
