@@ -2990,6 +2990,15 @@ function mergeLocationPhrase(projects, changedPids, currentPid) {
 // ── Constants ─────────────────────────────────────────────
 let ROW_H = 24;
 const PPD = 22, TL_H = 30, BUF = 6;
+// NEW-1 (recurrence of B463922, ×3) — `<ErrorBoundary key={data.view}>` (App's render, well above
+// GridView/GanttView) remounts the whole Grid/Split/Gantt subtree fresh on every view switch, so
+// neither pane's own scroll position survives one. Two small per-project memories, restored on
+// mount (skipped while a goToFocus jump is pending — that jump wins) and updated on every scroll,
+// so switching Grid → Gantt → Grid (or Split → Grid → Split) comes back where he left it instead
+// of resetting to the top. Module-scope, not component state, precisely because it must outlive
+// the remount it's compensating for.
+const GRID_SCROLL_MEMO = new Map();
+const GANTT_SCROLL_MEMO = new Map();
 // B865 — password-manager "leave this input alone" attributes. Spread {...NO_AUTOFILL} as the
 // FIRST attribute on every inline cell / free-text editor so 1Password / LastPass / Bitwarden /
 // Dashlane don't inject an inline icon + identity-autofill card over the grid cell. This iframe
@@ -10206,7 +10215,7 @@ function App() {
   // right-clicked/context row for "Move to…"); structuralTargets expands it to the whole active
   // selection when the anchor is part of one, exactly like indent/outdent do.
   const moveRows = (anchorId, destParentId, insertAfterId) => moveSelectionByIds(structuralTargets(anchorId), destParentId, insertAfterId);
-  const shared = {tasks: flatTasks, succMap, updateTask, deleteTask, getTaskName, proj, setData, setNotesCtx, edit, setEdit, editStartChar, selectedId, setSelectedId, selRange, setSelRange, selectedColIdx, setSelectedColIdx, goToFocus, ganttPPD, setGanttPPD, gridZoom, setHoverZone, insertTask, insertTaskBelow, addTask, addSubtask, duplicateTask, setTaskCtx, rolledHealthMap, healthColStyle: data.healthColStyle || "stoplight", setHealthColStyle: v => setData(d => ({...d, healthColStyle: v})), data, moveRows, isMobile};
+  const shared = {tasks: flatTasks, succMap, updateTask, deleteTask, getTaskName, proj, setData, setNotesCtx, edit, setEdit, editStartChar, selectedId, setSelectedId, selRange, setSelRange, selectedColIdx, setSelectedColIdx, goToFocus, setGoToFocus, ganttPPD, setGanttPPD, gridZoom, setHoverZone, insertTask, insertTaskBelow, addTask, addSubtask, duplicateTask, setTaskCtx, rolledHealthMap, healthColStyle: data.healthColStyle || "stoplight", setHealthColStyle: v => setData(d => ({...d, healthColStyle: v})), data, moveRows, isMobile};
 
   let section = data.section ?? "projects";
   if (section === "suggestions") section = "projects";   // Suggestions tab removed — Review now lives inside Projects
@@ -12034,7 +12043,7 @@ function measuredColWidth(headerLabel, cellValues, floor) {
   return Math.max(floor, Math.ceil(maxW));
 }
 
-function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, setData, setNotesCtx, edit, setEdit, editStartChar, selectedId, setSelectedId, selRange, setSelRange, selectedColIdx, setSelectedColIdx, goToFocus, scrollRef, onScroll, setTaskCtx, insertTask, insertTaskBelow, addTask, addSubtask, duplicateTask, rolledHealthMap, healthColStyle, setHealthColStyle, data, gridZoom=1, setHoverZone, onColWidths, review, moveRows}) {
+function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, setData, setNotesCtx, edit, setEdit, editStartChar, selectedId, setSelectedId, selRange, setSelRange, selectedColIdx, setSelectedColIdx, goToFocus, setGoToFocus, scrollRef, onScroll, setTaskCtx, insertTask, insertTaskBelow, addTask, addSubtask, duplicateTask, rolledHealthMap, healthColStyle, setHealthColStyle, data, gridZoom=1, setHoverZone, onColWidths, review, moveRows}) {
   // Predecessor lookup for the "a predecessor is late" health condition — memoized on the
   // project's own task array so it's built once per data change, not once per row.
   const taskById = useMemo(() => { const m = {}; (proj?.tasks||[]).forEach(t => m[t.id] = t); return m; }, [proj?.tasks]);
@@ -12302,6 +12311,15 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
   // When the anchor row itself disappears (you collapsed the group it lives in) we walk UP the
   // previous list to the nearest row that survived, which is its parent.
   const heldListRef = useRef(tasks);
+  // NEW-1 (recurrence of B463922, ×3) — companion to suppressSelChaseRef: records whether the
+  // selected row was ACTUALLY on screen before this tasks change, so the passive "keep selectedId
+  // visible" effect below can tell a real selection change (always chase, as today) from a
+  // tasks-only change (collapse, undo, a cloud merge, a recompute, a Gantt drag, a status change —
+  // none of which touched selectedId/selectedColIdx), which must chase ONLY when the selection was
+  // already on screen — never drag the view back to a selection the user has since scrolled away
+  // from. Defaults false: on a fresh mount this effect's own `prev === tasks` bail below never
+  // runs, so a remount relies on the scroll-memory restore instead of forcing a chase.
+  const selChaseAllowedRef = useRef(false);
   React.useLayoutEffect(() => {
     const el = ref.current;
     const prev = heldListRef.current;
@@ -12316,6 +12334,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     const topIdx = Math.max(0, Math.min(prev.length - 1, Math.round((st - TL_H) / ROW_H)));
     let anchorIdx = topIdx;
     let usedExpandAnchor = false;
+    let selOnScreen = false;
     if (expandAnchorId != null && edit == null) {
       const ei = prev.findIndex(t => t.id === expandAnchorId);
       if (ei >= 0) { anchorIdx = ei; usedExpandAnchor = true; }
@@ -12323,9 +12342,10 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     if (!usedExpandAnchor && selectedId != null) {
       const si = prev.findIndex(t => t.id === selectedId);
       const sTop = TL_H + si * ROW_H;
-      if (si >= 0 && sTop >= st + TL_H && sTop + ROW_H <= st + el.clientHeight) anchorIdx = si;
+      if (si >= 0 && sTop >= st + TL_H && sTop + ROW_H <= st + el.clientHeight) { anchorIdx = si; selOnScreen = true; }
     }
     suppressSelChaseRef.current = usedExpandAnchor;
+    selChaseAllowedRef.current = selOnScreen;
     // The anchor row may itself have been collapsed away — walk up to the nearest survivor.
     let now = -1;
     while (anchorIdx >= 0) {
@@ -12364,15 +12384,29 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     el.scrollTop = Math.max(0, st + anchor * (ROW_H - prevRH));
   }, [ROW_H]);
 
+  const chasedSelRef = useRef({ id: selectedId, col: selectedColIdx });
   useEffect(() => {
     const suppressSelChase = suppressSelChaseRef.current;
     suppressSelChaseRef.current = false;
+    const prevSel = chasedSelRef.current;
+    chasedSelRef.current = { id: selectedId, col: selectedColIdx };
     if (selectedId === null) return;
     const el = ref.current;
     if (!el) return;
+    // NEW-1 (recurrence of B463922, ×3) — a real selection change (arrow keys, Tab, a fresh
+    // click, a dashboard/successor-prompt jump) always chases the row into view, same as always.
+    // A TASKS-ONLY change chases only when the selected row was already on screen before it
+    // (selChaseAllowedRef, set by the anchor effect above from the very same commit) — otherwise
+    // this effect (which re-runs on every `tasks` change purely because `tasks` is in its deps)
+    // was dragging the view back to a selection the user had long since scrolled away from.
+    const selMoved = prevSel.id !== selectedId || prevSel.col !== selectedColIdx;
+    const shouldChase = selMoved || selChaseAllowedRef.current;
     const idx = tasks.findIndex(t => t.id === selectedId);
-    if (idx >= 0 && !suppressSelChase) {
-      const rowTop = idx * ROW_H, rowBottom = rowTop + ROW_H;
+    if (idx >= 0 && !suppressSelChase && shouldChase) {
+      // Row N's document top is TL_H + N*ROW_H (the sticky header holds TL_H — same formula the
+      // B463922 anchor effect above already uses). Omitting TL_H here nudged the topmost fully-
+      // visible row up by one header height on a plain click/select — bug C of NEW-1.
+      const rowTop = TL_H + idx * ROW_H, rowBottom = rowTop + ROW_H;
       const visTop = el.scrollTop + TL_H, visBottom = el.scrollTop + el.clientHeight;
       if (rowTop < visTop)            el.scrollTop = rowTop - TL_H;
       else if (rowBottom > visBottom) el.scrollTop = rowBottom - el.clientHeight;
@@ -12403,7 +12437,9 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     const el = ref.current; if (!el) return;
     const idx = tasks.findIndex(t => t.__rvTarget) >= 0 ? tasks.findIndex(t => t.__rvTarget) : tasks.findIndex(t => t.__rvProposed);
     if (idx < 0) return;
-    const id = setTimeout(() => { el.scrollTop = Math.max(0, idx * ROW_H - Math.min(120, el.clientHeight / 3)); }, 50);
+    // Same TL_H alignment as the goToFocus landing effect below (NEW-1) — row N's document top is
+    // TL_H + N*ROW_H, the sticky header holds TL_H.
+    const id = setTimeout(() => { el.scrollTop = Math.max(0, TL_H + idx * ROW_H - Math.min(120, el.clientHeight / 3)); }, 50);
     return () => clearTimeout(id);
   }, [rvAnchorId]);
 
@@ -12418,7 +12454,23 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     const idx = tasks.findIndex(t => t.id === goToFocus.taskId);
     if (idx < 0) return;
     const id = setTimeout(() => {
-      el.scrollTop = Math.max(0, idx * ROW_H - Math.min(120, el.clientHeight / 3));
+      // Row N's document top is TL_H + N*ROW_H — the sticky header holds TL_H (same formula the
+      // selection-chase effect above uses). Omitting it here landed the row one header height
+      // higher than intended.
+      el.scrollTop = Math.max(0, TL_H + idx * ROW_H - Math.min(120, el.clientHeight / 3));
+      // NEW-1 (bug E, recurrence of B463922 ×3) — App never cleared this token, so it stayed
+      // truthy in App state after landing; a LATER remount (any view switch, a phone-breakpoint
+      // stack remount) is a brand-new effect instance that runs on mount regardless of whether its
+      // deps "changed", and replayed the jump to this same — by then likely unrelated — row.
+      // Clear it here, once the scroll write above is actually committed, so a later remount sees
+      // goToFocus already null and does nothing. Deliberately NOT cleared synchronously at the top
+      // of this effect: `setGoToFocus` there re-renders App with a new `goToFocus` reference before
+      // this very `setTimeout` fires, and a dependency change on THIS SAME effect runs its own
+      // cleanup first — `clearTimeout(id)` — canceling the landing scroll before it ever happens
+      // (measured: the jump then landed nowhere, silently). Clearing after the write is committed
+      // has nothing left to race. Guarded on the token (`n`) so this can't clobber a NEWER jump
+      // that landed first (shouldn't happen given effect ordering, but it's a one-line guard).
+      setGoToFocus?.(gf => (gf && gf.n === goToFocus.n) ? null : gf);
       // The row may not exist in the DOM until the virtualizer re-renders for
       // the new scrollTop — give React a beat before looking it up.
       setTimeout(() => {
@@ -12434,7 +12486,25 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     return () => clearTimeout(id);
   }, [goToFocus]);
 
-  const handleScroll = e => { setScrollTop(e.currentTarget.scrollTop); if (onScroll) onScroll(e); };
+  // NEW-1 (recurrence of B463922, ×3) — restore this project's last scroll position on mount
+  // (bug D: a Grid↔Gantt↔Split view switch remounts this whole component via App's
+  // `<ErrorBoundary key={data.view}>`, which otherwise resets to the top every time). Skipped
+  // while a goToFocus jump is pending — that jump is a deliberate "go here", so it wins over
+  // "go back to where I was". A layout effect so it applies before paint, same as every other
+  // scroll-position write in this file.
+  const gridMemoKey = proj?.id ?? null;
+  React.useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || gridMemoKey == null) return;
+    const saved = GRID_SCROLL_MEMO.get(gridMemoKey);
+    if (saved != null && !goToFocus) { el.scrollTop = saved; setScrollTop(el.scrollTop); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gridMemoKey]);
+
+  const handleScroll = e => {
+    if (gridMemoKey != null) GRID_SCROLL_MEMO.set(gridMemoKey, e.currentTarget.scrollTop);
+    setScrollTop(e.currentTarget.scrollTop); if (onScroll) onScroll(e);
+  };
 
   const applyUpdate = (id, col, val) => {
     if (col==="start"||col==="end") {
@@ -14267,7 +14337,22 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
       fontFamily:"'Inter',system-ui,sans-serif", whiteSpace:"nowrap", pointerEvents:"none", zIndex:7}}>{task.name}</span>;
   };
 
-  const handleScroll = e => { setScrollTop(e.currentTarget.scrollTop); if (onScroll) onScroll(e); };
+  // NEW-1 (recurrence of B463922, ×3) — same per-project scroll memory as GridView (bug D):
+  // restore on mount so a Grid↔Gantt↔Split view switch (which remounts this component via App's
+  // `<ErrorBoundary key={data.view}>`) comes back where he left it instead of resetting to the top.
+  const ganttMemoKey = proj?.id ?? null;
+  React.useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || ganttMemoKey == null) return;
+    const saved = GANTT_SCROLL_MEMO.get(ganttMemoKey);
+    if (saved != null) { el.scrollTop = saved; setScrollTop(el.scrollTop); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ganttMemoKey]);
+
+  const handleScroll = e => {
+    if (ganttMemoKey != null) GANTT_SCROLL_MEMO.set(ganttMemoKey, e.currentTarget.scrollTop);
+    setScrollTop(e.currentTarget.scrollTop); if (onScroll) onScroll(e);
+  };
   const startIdx = Math.max(0, Math.floor(scrollTop / ROW_H) - BUF);
   const endIdx   = Math.min(tasks.length, startIdx + Math.ceil(vh / ROW_H) + BUF * 2);
   // Fix #14: match GridView's bottom-padding formula so both panes have identical scroll heights
@@ -14357,7 +14442,7 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
           every row's rendered top/height identical AND keeps the scroll-sync below numerically
           correct (scrollTop is copied 1:1 between the two refs, which is only meaningful when both
           sides are scaled the same). Standalone GanttView (no grid to align against) keeps rowZoom=1. */}
-      <div ref={ref} style={{flex:1,overflow:"auto",background:"var(--bg)",cursor:"grab",zoom:rowZoom}} onMouseEnter={onMouseEnter}
+      <div ref={ref} data-gantt-scroll="1" style={{flex:1,overflow:"auto",background:"var(--bg)",cursor:"grab",zoom:rowZoom}} onMouseEnter={onMouseEnter}
         onScroll={handleScroll}
         onMouseDown={onPanDown}
         onMouseMove={onPanMove}
