@@ -49,9 +49,16 @@ const pastedSrc = sliceBetween(
   "const rootOldIds = new Set(cb.sourceRootIds || [cb.sourceRootId]);",
   "}));",
 );
+// NEW-1 (false-conflict/merge-toast inflation) — the real extracted code now also mints a fresh
+// `_sid` (cb.mode === "cut" ? preserve : _mintTaskSid()); supply a trivial, deterministic stand-in
+// so the sandbox resolves it without pulling in the real mint's Date.now()/Math.random() — these
+// tests are about id/parentId/predecessor remapping, not sid uniqueness (that's covered directly
+// in test/schedulerEngine.test.js).
 function computePasted(cb, idMap, target, crossProject) {
-  const fn = new Function("cb", "idMap", "target", "crossProject", `${pastedSrc}\nreturn pasted;`);
-  return fn(cb, idMap, target, crossProject);
+  let _sidN = 0;
+  const _mintTaskSid = () => "sid" + (_sidN++);
+  const fn = new Function("cb", "idMap", "target", "crossProject", "_mintTaskSid", `${pastedSrc}\nreturn pasted;`);
+  return fn(cb, idMap, target, crossProject, _mintTaskSid);
 }
 
 const task = (id, over = {}) => ({

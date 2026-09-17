@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { mergeCloudDoc, _mStripRev, _mIsObj } from "../ui-audit/stress/scheduler-engine.mjs";
+import { mergeCloudDoc, _mStripRev, _mIsObj, _mEq, countChangedTaskRows, changedProjectIds } from "../ui-audit/stress/scheduler-engine.mjs";
 
 // Regression guard for the B851 RECURRENCE (schedule grid shows the wrong project + a false
 // "a newer version was saved on another device" reload prompt), diagnosed via a forced-ordering
@@ -196,12 +196,21 @@ describe("forced-ordering race: overlapping same-tab saves via the real Layer-0/
     const k = "hs-v1";
     const cur = await server.read(readDelay);
     const cloudRev = cur.__rev || 0;
+    // NEW-1 (false-conflict/merge-toast inflation) — faithful mirror of the no-op content-equality
+    // guard added to public/sequence/index.html's _rawSet: content unchanged from the cloud (ignoring
+    // __rev) never writes, never bumps rev, never enters the merge path at all.
+    if (_mEq(_mStripRev(parsed), _mStripRev(cur))) {
+      client.knownRev[k] = cloudRev;
+      client.baseByKey[k] = _mStripRev(JSON.parse(JSON.stringify(cur)));
+      return { blocked: false, noop: true, wroteAPid: cur.aPid };
+    }
+    let mergeInfo = null;
     if (cloudRev > (client.knownRev[k] || 0)) {
       const base = client.baseByKey[k];
       const preOurs = _mStripRev(JSON.parse(JSON.stringify(parsed)));
       if (base !== undefined && _mIsObj(parsed)) {
         const merged = mergeCloudDoc(base, preOurs, _mStripRev(cur));
-        if (merged && _mIsObj(merged)) parsed = merged;
+        if (merged && _mIsObj(merged)) { parsed = merged; mergeInfo = { anc: preOurs, merged: JSON.parse(JSON.stringify(merged)) }; }
         else return { blocked: true };
       } else return { blocked: true };
     }
@@ -209,7 +218,7 @@ describe("forced-ordering race: overlapping same-tab saves via the real Layer-0/
     await server.write(parsed, writeDelay);
     client.knownRev[k] = parsed.__rev;
     client.baseByKey[k] = _mStripRev(JSON.parse(JSON.stringify(parsed)));
-    return { blocked: false, wroteAPid: parsed.aPid };
+    return { blocked: false, wroteAPid: parsed.aPid, mergeInfo };
   }
 
   function baseDoc(aPid) {
@@ -264,5 +273,115 @@ describe("forced-ordering race: overlapping same-tab saves via the real Layer-0/
   it("THE FIX: with the real extracted queue wrapper in front of the same guard, every interleaving converges to the correct, last-intended aPid", async () => {
     const results = await Promise.all(CASES.map(runQueued));
     expect(results).toEqual([1, 1, 1]);
+  });
+});
+
+// ── NEW-1 (false-conflict/merge-toast inflation, owner report 2026-09-17 — "editing one schedule
+// throws a newer-version banner and a merge toast claiming 687 tasks changed across nine schedules")
+// — reproduces the acceptance scenario at the storage-layer/pure-function level, using the SAME
+// real rawSet mirror (no-op guard + Layer-0 merge) and the SAME real countChangedTaskRows/
+// changedProjectIds the app's onMerged handler calls to build the toast.
+describe("multi-tab simulation: one editor, idle siblings, an honest merge toast", () => {
+  function makeServer(initialDoc) {
+    let doc = JSON.parse(JSON.stringify(initialDoc));
+    return {
+      read: (delayMs = 1) => new Promise((res) => setTimeout(() => res(JSON.parse(JSON.stringify(doc))), delayMs)),
+      write: (newDoc, delayMs = 1) => new Promise((res) => setTimeout(() => { doc = JSON.parse(JSON.stringify(newDoc)); res({ ok: true }); }, delayMs)),
+      snapshot: () => JSON.parse(JSON.stringify(doc)),
+    };
+  }
+  // Same guard shape as the describe block above (no-op content check, then Layer-0 merge) — kept
+  // as its own local copy so this scenario doesn't reach into another describe's closure.
+  async function rawSet(client, server, parsed) {
+    parsed = JSON.parse(JSON.stringify(parsed));
+    const k = "hs-v1";
+    const cur = await server.read();
+    const cloudRev = cur.__rev || 0;
+    if (_mEq(_mStripRev(parsed), _mStripRev(cur))) {
+      client.knownRev[k] = cloudRev;
+      client.baseByKey[k] = _mStripRev(JSON.parse(JSON.stringify(cur)));
+      return { noop: true };
+    }
+    let mergeInfo = null;
+    if (cloudRev > (client.knownRev[k] || 0)) {
+      const base = client.baseByKey[k];
+      const preOurs = _mStripRev(JSON.parse(JSON.stringify(parsed)));
+      if (base === undefined || !_mIsObj(parsed)) return { blocked: true };
+      const merged = mergeCloudDoc(base, preOurs, _mStripRev(cur));
+      if (!merged || !_mIsObj(merged)) return { blocked: true };
+      parsed = merged;
+      mergeInfo = { anc: preOurs, merged: JSON.parse(JSON.stringify(merged)) };
+    }
+    parsed.__rev = cloudRev + 1;
+    await server.write(parsed);
+    client.knownRev[k] = parsed.__rev;
+    client.baseByKey[k] = _mStripRev(JSON.parse(JSON.stringify(parsed)));
+    return { blocked: false, mergeInfo };
+  }
+
+  const T = (id, sid, name, o = {}) => ({ id, _sid: sid, name, parentId: null, predecessors: [], ...o });
+  function baseDoc() {
+    return {
+      __rev: 1, aPid: "1",
+      projects: { "1": { id: 1, name: "Pappadoupolos", tasks: [T(1, "a", "Kickoff"), T(2, "b", "Design"), T(3, "c", "Permit")] } },
+    };
+  }
+  function newClient(doc) { return { knownRev: { "hs-v1": doc.__rev }, baseByKey: { "hs-v1": _mStripRev(doc) } }; }
+
+  it("tab A edits repeatedly: never blocked, and idle tabs B/C never write (zero __rev bumps) while nothing of theirs changed", async () => {
+    const server = makeServer(baseDoc());
+    const a = newClient(baseDoc()), b = newClient(baseDoc()), c = newClient(baseDoc());
+
+    // B and C are idle — the SAME content they last loaded, no real edit (stripViewState already
+    // removed any view-only churn like `focused` before this layer ever sees it). Run a few rounds
+    // BEFORE A ever edits, to prove idle tabs alone never bump the shared rev.
+    for (let round = 0; round < 3; round++) {
+      const rb = await rawSet(b, server, baseDoc());
+      const rc = await rawSet(c, server, baseDoc());
+      expect(rb.noop).toBe(true);
+      expect(rc.noop).toBe(true);
+    }
+    expect(server.snapshot().__rev).toBe(1);   // untouched by three rounds of idle "saves"
+
+    // A edits the same task's name three times in a row (three separate autosaves).
+    let aDoc = baseDoc();
+    for (const name of ["Kickoff v2", "Kickoff v3", "Kickoff v4"]) {
+      aDoc = { ...aDoc, projects: { "1": { ...aDoc.projects["1"], tasks: aDoc.projects["1"].tasks.map(t => t.id === 1 ? { ...t, name } : t) } } };
+      const rA = await rawSet(a, server, aDoc);
+      expect(rA.blocked).toBeFalsy();   // A is never told "a newer version was saved elsewhere" for its OWN writes
+    }
+    expect(server.snapshot().projects["1"].tasks[0].name).toBe("Kickoff v4");
+
+    // NOW B and C are idle again (still nothing of THEIRS changed) — they must merge A's real edit
+    // in cleanly, and the toast built from that merge must be honest: exactly one changed task, one
+    // changed schedule — never inflated by the fact that this doc has been through several saves.
+    const rb2 = await rawSet(b, server, baseDoc());
+    expect(rb2.noop).toBeFalsy();
+    expect(rb2.mergeInfo).toBeTruthy();
+    expect(countChangedTaskRows(rb2.mergeInfo.anc, rb2.mergeInfo.merged)).toBe(1);
+    expect(changedProjectIds(rb2.mergeInfo.anc, rb2.mergeInfo.merged)).toEqual(["1"]);
+  });
+
+  it("A inserts a row mid-schedule: the merge toast reports the real small number, not every row below the insert", async () => {
+    const server = makeServer(baseDoc());
+    const a = newClient(baseDoc()), b = newClient(baseDoc());
+
+    // A inserts a brand-new task between "a" and "b", then renumbers — "b" and "c" shift id (2→3,
+    // 3→4) but keep their own _sid and content untouched, exactly like the real renumberTasks.
+    const aDoc = {
+      ...baseDoc(),
+      projects: { "1": { ...baseDoc().projects["1"], tasks: [
+        T(1, "a", "Kickoff"), T(2, "new", "Survey"), T(3, "b", "Design"), T(4, "c", "Permit"),
+      ] } },
+    };
+    const rA = await rawSet(a, server, aDoc);
+    expect(rA.blocked).toBeFalsy();
+
+    // B was idle the whole time (its own doc never changed) — merging A's insert in must report
+    // exactly the ONE real addition, never "every row below the insert" (b and c's shifted ids).
+    const rb = await rawSet(b, server, baseDoc());
+    expect(rb.mergeInfo).toBeTruthy();
+    expect(countChangedTaskRows(rb.mergeInfo.anc, rb.mergeInfo.merged)).toBe(1);
+    expect(changedProjectIds(rb.mergeInfo.anc, rb.mergeInfo.merged)).toEqual(["1"]);
   });
 });

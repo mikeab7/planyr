@@ -940,6 +940,10 @@ export const _mStripRev = o => { if (_mIsObj(o)) { const { __rev, ...rest } = o;
 // by id, not "whole array, active tab wins" (which was silently dropping a sibling's binding). Order follows
 // OURS for shared/our elements; a sibling's brand-new element is appended (load re-derives visual order).
 const _mIdArr = a => Array.isArray(a) && a.length > 0 && a.every(e => _mIsObj(e) && "id" in e);
+// NEW-1 (false-conflict/merge-toast inflation) — match an id-keyed array element by its permanent
+// `_sid` when it carries one (a task, once migrated), falling back to plain `id` for every other
+// id-keyed array. VERBATIM mirror of public/sequence/index.html.
+export const _mKeyOf = e => (_mIsObj(e) && e._sid != null) ? ("sid:" + e._sid) : (e && e.id);
 export const mergeCloudDoc = (base, ours, theirs) => {
   if (_mEq(ours, theirs)) return theirs;
   if (_mEq(ours, base)) return theirs;    // we changed nothing vs base → take the newer cloud
@@ -948,19 +952,21 @@ export const mergeCloudDoc = (base, ours, theirs) => {
   if (Array.isArray(ours) && Array.isArray(theirs)) {
     if (!_mIdArr(ours) || !_mIdArr(theirs)) return ours;   // scalar/mixed array both changed → active tab wins
     const bArr = Array.isArray(base) ? base : [];
-    const byId = arr => { const m = new Map(); arr.forEach(e => { if (!m.has(e.id)) m.set(e.id, e); }); return m; };
-    const bM = byId(bArr), tM = byId(theirs), oSeen = new Set();
+    const byKey = arr => { const m = new Map(); arr.forEach(e => { const k = _mKeyOf(e); if (!m.has(k)) m.set(k, e); }); return m; };
+    const bM = byKey(bArr), tM = byKey(theirs), oSeen = new Set();
     const out = [];
     for (const e of ours) {                // keep OUR order for shared/our-only elements
-      if (oSeen.has(e.id)) continue; oSeen.add(e.id);
-      const inT = tM.has(e.id), inB = bM.has(e.id);
-      if (inT) out.push(mergeCloudDoc(inB ? bM.get(e.id) : undefined, e, tM.get(e.id)));
-      else if (!(inB && _mEq(e, bM.get(e.id)))) out.push(e);   // their delete honored only if we left it as-base
+      const k = _mKeyOf(e);
+      if (oSeen.has(k)) continue; oSeen.add(k);
+      const inT = tM.has(k), inB = bM.has(k);
+      if (inT) out.push(mergeCloudDoc(inB ? bM.get(k) : undefined, e, tM.get(k)));
+      else if (!(inB && _mEq(e, bM.get(k)))) out.push(e);   // their delete honored only if we left it as-base
     }
     for (const e of theirs) {              // append a sibling's brand-new / changed elements (their adds survive)
-      if (oSeen.has(e.id)) continue;
-      const inB = bM.has(e.id);
-      if (!(inB && _mEq(e, bM.get(e.id)))) out.push(e);        // our delete honored only if they left it as-base
+      const k = _mKeyOf(e);
+      if (oSeen.has(k)) continue;
+      const inB = bM.has(k);
+      if (!(inB && _mEq(e, bM.get(k)))) out.push(e);        // our delete honored only if they left it as-base
     }
     return out;
   }
@@ -981,6 +987,22 @@ export const mergeCloudDoc = (base, ours, theirs) => {
   }
   return out;
 };
+// NEW-1 — for TASK content comparison only: map this array's own positional `id` → its permanent
+// `_sid`, then rewrite a task's cross-reference fields from the renumbered id they point at to that
+// same stable sid before comparing. VERBATIM mirror of public/sequence/index.html.
+export const _taskSidMap = tasks => { const m = new Map(); (tasks || []).forEach(t => { if (t && t._sid != null) m.set(t.id, t._sid); }); return m; };
+export const _taskKey = t => (t && t._sid != null) ? ("sid:" + t._sid) : (t ? t.id : t);
+export const _taskFingerprint = (t, sidOf) => {
+  if (!t || typeof t !== "object") return t;
+  const { id, _sid, focused, ...rest } = t;   // id/_sid: identity, compared separately; focused: view-only
+  if (rest.parentId != null) rest.parentId = sidOf.get(rest.parentId) ?? rest.parentId;
+  if (Array.isArray(rest.predecessors)) rest.predecessors = rest.predecessors.map(p => (p && p.id != null) ? { ...p, id: sidOf.get(p.id) ?? p.id } : p);
+  if (rest.deadlineForTaskId != null) rest.deadlineForTaskId = sidOf.get(rest.deadlineForTaskId) ?? rest.deadlineForTaskId;
+  if (rest.minMeetingsAfter && rest.minMeetingsAfter.taskId != null) {
+    rest.minMeetingsAfter = { ...rest.minMeetingsAfter, taskId: sidOf.get(rest.minMeetingsAfter.taskId) ?? rest.minMeetingsAfter.taskId };
+  }
+  return rest;
+};
 // NEW-3 — how many task rows a merge actually brought in from elsewhere. VERBATIM mirror of
 // public/sequence/index.html.
 export const countChangedTaskRows = (before, after) => {
@@ -989,10 +1011,12 @@ export const countChangedTaskRows = (before, after) => {
     const ap = (after && after.projects) || {};
     let n = 0;
     new Set([...Object.keys(bp), ...Object.keys(ap)]).forEach(pid => {
-      const bt = {}; (bp[pid]?.tasks || []).forEach(t => { if (t) bt[t.id] = t; });
-      const at = {}; (ap[pid]?.tasks || []).forEach(t => { if (t) at[t.id] = t; });
-      new Set([...Object.keys(bt), ...Object.keys(at)]).forEach(id => {
-        if (!_mEq(bt[id], at[id])) n++;
+      const bTasks = bp[pid]?.tasks || [], aTasks = ap[pid]?.tasks || [];
+      const bSid = _taskSidMap(bTasks), aSid = _taskSidMap(aTasks);
+      const bt = {}; bTasks.forEach(t => { if (t) bt[_taskKey(t)] = t; });
+      const at = {}; aTasks.forEach(t => { if (t) at[_taskKey(t)] = t; });
+      new Set([...Object.keys(bt), ...Object.keys(at)]).forEach(key => {
+        if (!_mEq(_taskFingerprint(bt[key], bSid), _taskFingerprint(at[key], aSid))) n++;
       });
     });
     return n;
@@ -1041,11 +1065,13 @@ export const changedProjectIds = (before, after) => {
     const ap = (after && after.projects) || {};
     const out = [];
     new Set([...Object.keys(bp), ...Object.keys(ap)]).forEach(pid => {
-      const bt = {}; (bp[pid]?.tasks || []).forEach(t => { if (t) bt[t.id] = t; });
-      const at = {}; (ap[pid]?.tasks || []).forEach(t => { if (t) at[t.id] = t; });
+      const bTasks = bp[pid]?.tasks || [], aTasks = ap[pid]?.tasks || [];
+      const bSid = _taskSidMap(bTasks), aSid = _taskSidMap(aTasks);
+      const bt = {}; bTasks.forEach(t => { if (t) bt[_taskKey(t)] = t; });
+      const at = {}; aTasks.forEach(t => { if (t) at[_taskKey(t)] = t; });
       let changed = false;
-      new Set([...Object.keys(bt), ...Object.keys(at)]).forEach(id => {
-        if (!_mEq(bt[id], at[id])) changed = true;
+      new Set([...Object.keys(bt), ...Object.keys(at)]).forEach(key => {
+        if (!_mEq(_taskFingerprint(bt[key], bSid), _taskFingerprint(at[key], aSid))) changed = true;
       });
       if (changed) out.push(pid);
     });
@@ -1120,6 +1146,12 @@ export const parseFlexDate = s => {
   return iso;
 };
 
+// NEW-1 (false-conflict/merge-toast inflation) — mint a permanent per-task identity, independent
+// of the positional `id` renumberTasks reassigns below. VERBATIM mirror of public/sequence/index.html.
+let _sidSeq = 0;
+export const _mintTaskSid = () => "s" + Date.now().toString(36) + (_sidSeq++).toString(36) + Math.random().toString(36).slice(2, 7);
+export const _legacySid = (pid, id) => `legacy:${pid}:${id}`;
+
 export const renumberTasks = (tasks) => {
   const map = {};
   // B568: first-occurrence wins on a duplicate id (see index.html) — original task in visual order
@@ -1128,6 +1160,7 @@ export const renumberTasks = (tasks) => {
   return tasks.map((t, i) => ({
     ...t,
     id: i + 1,
+    _sid: t._sid || _mintTaskSid(),   // NEW-1 — preserve if present, mint fresh only the first time
     parentId: t.parentId !== null && t.parentId !== undefined ? (map[t.parentId] ?? null) : null,
     predecessors: normPreds(t.predecessors).map(p => ({...p, id: map[p.id]})).filter(p => p.id),
     ...(t.deadlineForTaskId != null ? { deadlineForTaskId: map[t.deadlineForTaskId] ?? null } : {}),
@@ -1216,7 +1249,10 @@ export const normalizeIds = d => {
       while (p != null && byId[p]) { if (seen.has(p)) return {...t, parentId: null}; seen.add(p); p = byId[p].parentId; }
       return t;
     });
-    projects[pid] = {...proj, tasks: renumberTasks(sortByVisualOrder(tasks))};
+    // NEW-1 — deterministic legacy _sid backfill (see index.html's normalizeIds for the full
+    // rationale: two tabs migrating the SAME still-unmigrated doc must derive the identical sid).
+    const tasksWithSid = tasks.map(t => (t._sid ? t : { ...t, _sid: _legacySid(pid, t.id) }));
+    projects[pid] = {...proj, tasks: renumberTasks(sortByVisualOrder(tasksWithSid))};
   });
   const nTid = {...(d.nTid || {})};
   Object.entries(projects).forEach(([pid, proj]) => { nTid[pid] = (proj.tasks?.length || 0) + 1; });

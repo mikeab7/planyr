@@ -3820,6 +3820,141 @@ describe("countChangedTaskRows — counts task rows added, removed, or changed b
   });
 });
 
+// ── NEW-1 (false-conflict/merge-toast inflation, owner report 2026-09-17) ───────────────────────
+// `id` is reassigned by array POSITION on every structural edit (renumberTasks), so it is not a
+// stable identity. Before this fix, an insert/delete anywhere in a schedule shifted the `id` of
+// every task after it — and the toast/merge, keyed on raw `id`, read every one of those shifts as
+// real content change. These tests reproduce the owner's report at the pure-function level: a
+// renumber-only change (same tasks, shifted ids) must count as ZERO changes, and a genuine single
+// insert must count as exactly one, never "every row below the insert".
+describe("NEW-1 — countChangedTaskRows/changedProjectIds ignore renumbering-only noise (keyed on _sid)", () => {
+  const doc = (projects) => ({ projects });
+  const sidTask = (id, sid, o = {}) => ({ id, _sid: sid, name: "t" + sid, parentId: null, predecessors: [], ...o });
+
+  it("a pure renumber (same tasks, shifted positional ids, same _sid) counts as ZERO changes", () => {
+    const before = doc({ 1: { tasks: [sidTask(1, "a"), sidTask(2, "b"), sidTask(3, "c")] } });
+    // Simulate what renumberTasks does after an insert earlier in the array: b and c's `id` shift
+    // by one, but their `_sid` (and every other field) is untouched.
+    const after = doc({ 1: { tasks: [sidTask(1, "a"), sidTask(3, "b"), sidTask(4, "c")] } });
+    expect(E.countChangedTaskRows(before, after)).toBe(0);
+    expect(E.changedProjectIds(before, after)).toEqual([]);
+  });
+
+  it("a genuine single insert counts as ONE change, not every row after it", () => {
+    const before = doc({ 1: { tasks: [sidTask(1, "a"), sidTask(2, "b"), sidTask(3, "c")] } });
+    // Insert a brand-new task ("d") between a and b, then renumber: b and c shift ids (2→3, 3→4)
+    // but keep their own _sid and content — only "d" is a real addition.
+    const after = doc({ 1: { tasks: [sidTask(1, "a"), sidTask(2, "d"), sidTask(3, "b"), sidTask(4, "c")] } });
+    expect(E.countChangedTaskRows(before, after)).toBe(1);
+    expect(E.changedProjectIds(before, after)).toEqual(["1"]);
+  });
+
+  it("a shifted parentId/predecessor reference to the SAME logical task (by _sid) is not a change", () => {
+    // b's parent used to be a (id 1); after a renumber that shifted a to id 2, b's stored parentId
+    // is now 2 — but it still points at the SAME logical task (_sid "a"), so this must not count.
+    const before = doc({ 1: { tasks: [
+      sidTask(1, "a"),
+      sidTask(2, "b", { parentId: 1, predecessors: [{ id: 1, type: "FS", lag: 0 }] }),
+    ] } });
+    const after = doc({ 1: { tasks: [
+      sidTask(2, "a"),
+      sidTask(3, "b", { parentId: 2, predecessors: [{ id: 2, type: "FS", lag: 0 }] }),
+    ] } });
+    expect(E.countChangedTaskRows(before, after)).toBe(0);
+  });
+
+  it("a REAL parent/predecessor change (pointing at a genuinely different task) still counts", () => {
+    const before = doc({ 1: { tasks: [
+      sidTask(1, "a"), sidTask(2, "b"),
+      sidTask(3, "c", { parentId: 1, predecessors: [{ id: 1, type: "FS", lag: 0 }] }),
+    ] } });
+    const after = doc({ 1: { tasks: [
+      sidTask(1, "a"), sidTask(2, "b"),
+      sidTask(3, "c", { parentId: 2, predecessors: [{ id: 2, type: "FS", lag: 0 }] }),   // now points at "b", not "a"
+    ] } });
+    expect(E.countChangedTaskRows(before, after)).toBe(1);
+  });
+
+  it("focused (view-only) never counts as a content change, even without an explicit strip", () => {
+    const before = doc({ 1: { tasks: [sidTask(1, "a", { focused: true })] } });
+    const after = doc({ 1: { tasks: [sidTask(1, "a", { focused: false })] } });
+    expect(E.countChangedTaskRows(before, after)).toBe(0);
+    expect(E.changedProjectIds(before, after)).toEqual([]);
+  });
+
+  it("tasks with no _sid at all (data predating this fix) still degrade to plain id-keying", () => {
+    const before = doc({ 1: { tasks: [{ id: 1, name: "x" }] } });
+    const after = doc({ 1: { tasks: [{ id: 1, name: "x-edited" }] } });
+    expect(E.countChangedTaskRows(before, after)).toBe(1);
+  });
+});
+
+describe("NEW-1 — renumberTasks preserves an existing _sid and mints a fresh one only when absent", () => {
+  it("an existing _sid survives a renumber untouched", () => {
+    const out = E.renumberTasks([{ id: 5, _sid: "keep-me", name: "x", parentId: null, predecessors: [] }]);
+    expect(out[0]._sid).toBe("keep-me");
+    expect(out[0].id).toBe(1);   // id itself is still reassigned by position, as before
+  });
+  it("a task with no _sid gets a freshly minted one", () => {
+    const out = E.renumberTasks([{ id: 5, name: "x", parentId: null, predecessors: [] }]);
+    expect(typeof out[0]._sid).toBe("string");
+    expect(out[0]._sid.length).toBeGreaterThan(0);
+  });
+  it("two tasks that both lack _sid get DIFFERENT freshly minted ones (no collision)", () => {
+    const out = E.renumberTasks([
+      { id: 1, name: "x", parentId: null, predecessors: [] },
+      { id: 2, name: "y", parentId: null, predecessors: [] },
+    ]);
+    expect(out[0]._sid).not.toBe(out[1]._sid);
+  });
+});
+
+describe("NEW-1 — normalizeIds backfills a deterministic _sid for legacy (pre-fix) data", () => {
+  it("two independent normalizeIds passes over the SAME never-migrated doc derive IDENTICAL sids", () => {
+    const raw = () => ({ projects: { 1: { id: 1, name: "P", tasks: [
+      { id: 1, name: "a", parentId: null }, { id: 2, name: "b", parentId: 1 },
+    ] } }, nTid: {} });
+    // Two "tabs" independently normalizing the same still-unmigrated cloud doc must NOT invent
+    // different random identities for the same pre-existing tasks (that would read as a duplicate
+    // add on the first merge between them).
+    const outA = E.normalizeIds(raw());
+    const outB = E.normalizeIds(raw());
+    const sidsA = outA.projects[1].tasks.map(t => t._sid).sort();
+    const sidsB = outB.projects[1].tasks.map(t => t._sid).sort();
+    expect(sidsA).toEqual(sidsB);
+  });
+  it("an already-migrated task's _sid is left untouched on a later load", () => {
+    const d = { projects: { 1: { id: 1, name: "P", tasks: [
+      { id: 1, _sid: "already-set", name: "a", parentId: null },
+    ] } }, nTid: {} };
+    const out = E.normalizeIds(d);
+    expect(out.projects[1].tasks[0]._sid).toBe("already-set");
+  });
+});
+
+describe("NEW-1 — mergeCloudDoc matches task-array elements by _sid, not the renumbered positional id", () => {
+  it("a task renumbered on ONE side still merges as the SAME task (no duplicate, no dropped edit)", () => {
+    const base = { projects: { 1: { tasks: [
+      { id: 1, _sid: "a", name: "orig" }, { id: 2, _sid: "b", name: "other" },
+    ] } } };
+    // ours: an insert shifted "b" from id 2 to id 3, no content edit.
+    const ours = { projects: { 1: { tasks: [
+      { id: 1, _sid: "a", name: "orig" }, { id: 2, _sid: "new", name: "inserted" }, { id: 3, _sid: "b", name: "other" },
+    ] } } };
+    // theirs: a genuine edit to "a"'s name, "b" untouched at its OLD id.
+    const theirs = { projects: { 1: { tasks: [
+      { id: 1, _sid: "a", name: "orig-edited-elsewhere" }, { id: 2, _sid: "b", name: "other" },
+    ] } } };
+    const merged = E.mergeCloudDoc(base, ours, theirs);
+    const tasks = merged.projects[1].tasks;
+    expect(tasks.length).toBe(3);   // "a", "b", and the local insert — no duplicate, nothing dropped
+    const bySid = Object.fromEntries(tasks.map(t => [t._sid, t]));
+    expect(bySid.a.name).toBe("orig-edited-elsewhere");   // their real edit survived
+    expect(bySid.b.name).toBe("other");                   // untouched task recognized as the same one
+    expect(bySid.new.name).toBe("inserted");               // our local insert survived
+  });
+});
+
 describe("NEW-3 — the merge/stale banners say what's known, never an unknowable tab/device (anti-drift)", () => {
   const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
   const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
@@ -3836,6 +3971,48 @@ describe("NEW-3 — the merge/stale banners say what's known, never an unknowabl
   it("the stale-cloud-row banner no longer claims 'another device' (the mirror-image problem)", () => {
     expect(src).not.toMatch(/A newer version was saved on another device/);
     expect(src).toMatch(/A newer version was saved elsewhere/);
+  });
+});
+
+// ── NEW-1 (false-conflict/merge-toast inflation, owner report 2026-09-17) ───────────────────────
+// Structural (anti-drift) checks for the parts of this fix that live in React effects / the
+// storage IIFE rather than in a standalone pure function — a full component-render test isn't
+// available in this repo for this file, so these assert the actual wiring exists in source,
+// mirroring the pattern the "NEW-3" block above already uses for the same reason.
+describe("NEW-1 — false-conflict fixes are wired into the real source (anti-drift)", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+
+  it("_sid is minted at task creation (mkt) and preserved/backfilled through renumberTasks + normalizeIds", () => {
+    expect(src).toMatch(/const _mintTaskSid = \(\)/);
+    expect(src).toMatch(/id, _sid: _mintTaskSid\(\), name,/);              // mkt
+    expect(src).toMatch(/_sid: t\._sid \|\| _mintTaskSid\(\),/);           // renumberTasks
+    expect(src).toMatch(/t\._sid \? t : \{ \.\.\.t, _sid: `legacy:\$\{pid\}:\$\{t\.id\}` \}/); // normalizeIds
+  });
+  it("duplicateTask mints a fresh _sid rather than inheriting the source's", () => {
+    expect(src).toMatch(/const copy = \{\.\.\.src, id: nid, _sid: _mintTaskSid\(\),/);
+  });
+  it("pasteTaskAfter mints fresh sids on copy, preserves them on cut (a move)", () => {
+    expect(src).toMatch(/_sid: cb\.mode === "cut" \? t\._sid : _mintTaskSid\(\),/);
+  });
+  it("mergeCloudDoc's array matching keys by _sid, not the renumbered positional id", () => {
+    expect(src).toMatch(/const _mKeyOf = e =>/);
+  });
+  it("the per-task view-only field (focused) is stripped before it ever reaches the cloud", () => {
+    expect(src).toMatch(/const TASK_VIEW_FIELDS = \["focused"\];/);
+    expect(src).toMatch(/function stripTaskViewFields\(tasks\)/);
+  });
+  it("an autosave whose content is unchanged from the cloud never writes or bumps __rev", () => {
+    expect(src).toMatch(/_mEq\(_mStripRev\(parsed\), _mStripRev\(oldParsed\)\)\) \{/);
+  });
+  it("a successful merge clears the stale-reload banner instead of leaving it to contradict the toast", () => {
+    // Both places that can set staleNotice(true) now have a corresponding clear: the merge handler
+    // clears it unconditionally on success, and the poll clears it the moment it's no longer true.
+    expect(src).toMatch(/setStaleNotice\(false\);\s*\n\s*if \(typeof showToast/);
+    expect(src).toMatch(/if \(!r\.newer\) \{ setStaleNotice\(false\); return; \}/);
+  });
+  it("the Reload button flushes unsaved edits through the real save/merge path before reloading", () => {
+    expect(src).toMatch(/if \(d && saveStatusRef\.current !== "saved"\) \{/);
+    expect(src).toMatch(/window\.storage\.set\("hs-v1", JSON\.stringify\(stripViewState\(d\)\), \{ label: "auto" \}\)/);
   });
 });
 
