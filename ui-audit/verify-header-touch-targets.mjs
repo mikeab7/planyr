@@ -98,27 +98,71 @@ try {
 
   // ── NEW-2: chevron only on an overflowing side, and a tap actually pages the strip ──────────
   console.log("\n=== NEW-2 — scroll affordance (fade + tappable chevron) ===");
-  // ⛔ the chevron is rendered as a DIRECT CHILD of its own row (a sibling of the row's
-  // left/center/right zones), never of `<header>` — querying `row.parentElement` instead of `row`
-  // itself would match EITHER row's chevron (both are header descendants), misattributing Row 2's
-  // genuine six-tab overflow to a Row 1 that already fits. Scope to the row's own subtree.
+  // ⛔ B1610640 — the chevron is now a DIRECT CHILD of a small non-scrolling WRAPPER around its
+  // own row (a sibling of the row, not a descendant of it — see AppHeader.jsx's own comment on
+  // why: a chevron rendered INSIDE the scrolling+positioned row used to scroll along with the
+  // row's own content instead of staying pinned to the visible edge). Each row gets its OWN
+  // wrapper (never shared with the other row), so scoping the chevron search to `row.parentElement`
+  // is exactly as unambiguous as the old "scope to the row itself" was — it still can never pick up
+  // the OTHER row's chevron, because the other row lives in a different wrapper entirely.
   const edgesAndChevrons = async (rowSel) => page.evaluate((sel) => {
     const row = document.querySelector(sel);
     if (!row) return null;
+    const scope = row.parentElement || row;
     const over = row.scrollWidth - row.clientWidth;
     return {
       left: row.scrollLeft > 1, right: row.scrollLeft < over - 1, overflow: over > 1,
-      leftChevron: !!row.querySelector('[aria-label="Scroll left"]'),
-      rightChevron: !!row.querySelector('[aria-label="Scroll right"]'),
+      leftChevron: !!scope.querySelector('[aria-label="Scroll left"]'),
+      rightChevron: !!scope.querySelector('[aria-label="Scroll right"]'),
       scrollLeft: row.scrollLeft,
     };
   }, rowSel);
 
+  // B1610640 — `header > div:first-of-type` used to BE the scrolling row; it is now the
+  // non-scrolling wrapper AROUND it, so the row itself has to be located inside it. Walk up from
+  // a stable anchor inside Row 1 (mirrors Row 2's own `row2Sel` below) rather than assume a fixed
+  // nesting depth, so this keeps working regardless of exactly how the wrapper is shaped.
+  const row1Sel = () => page.evaluate(() => {
+    const anchor = document.querySelector('[data-header-zone="left"]');
+    let row = anchor ? anchor.parentElement : null;
+    while (row && getComputedStyle(row).overflowX !== "auto" && row.parentElement) row = row.parentElement;
+    return row ? (row.dataset.probeRow1 || (row.dataset.probeRow1 = "1")) : null;
+  }).then(() => '[data-probe-row1="1"]');
+
+  // NEW (B1610640) — THE ACTUAL REPRO: the chevron's own on-screen position must track the row's
+  // VISIBLE edge, never the scrolled content. Pre-fix, a chevron rendered INSIDE the scrolling row
+  // was part of the row's own scrollable content, so its rendered position moved with `scrollLeft`
+  // instead of staying pinned to the row's true edge; post-fix (a sibling of the row, inside a
+  // non-scrolling wrapper) its offset from that edge must be identical at any two scroll positions
+  // where it renders at all. Sets `scrollLeft` directly (rather than relying on how far a single
+  // paging tap happens to move a given fixture) so this holds regardless of how much overflow the
+  // scene has, as long as there is enough to keep the chevron showing at both points.
+  const chevronDriftCheck = async (sel) => page.evaluate((s) => {
+    const row = document.querySelector(s);
+    if (!row) return null;
+    const scope = row.parentElement || row;
+    const over = row.scrollWidth - row.clientWidth;
+    const at = (sl) => {
+      row.scrollLeft = sl;
+      const chevron = scope.querySelector('[aria-label="Scroll right"]');
+      if (!chevron) return null;
+      const r = row.getBoundingClientRect(), c = chevron.getBoundingClientRect();
+      return r.right - c.right;
+    };
+    const a = at(1), b = at(Math.max(2, Math.floor(over / 2)));
+    row.scrollLeft = 0; // leave the row as this check found it
+    return { a, b, over };
+  }, sel);
+
   // Row 1 (breadcrumb) at a phone width with a long project+plan — genuinely overflows.
   await load("?project=long&plan=long&module=site-planner", { w: 375, h: 667 });
-  let row1 = "header > div:first-of-type";
+  let row1 = await row1Sel();
   let e = await edgesAndChevrons(row1);
   ok("an overflowing Row 1 shows a RIGHT chevron and no left one at rest (scrollLeft=0)", e.overflow && e.rightChevron && !e.leftChevron, JSON.stringify(e));
+  const drift = await chevronDriftCheck(row1);
+  ok("the right chevron's position relative to the row's own edge does NOT drift across a scroll",
+    drift && drift.a != null && drift.b != null && Math.abs(drift.a - drift.b) <= 1,
+    JSON.stringify(drift));
   // Tap it — it should page the row and, once scrolled some, a left chevron should appear too.
   await page.click('header [aria-label="Scroll right"]');
   await page.waitForTimeout(400); // smooth scroll
@@ -128,6 +172,7 @@ try {
 
   // A strip that already fits (short project, no plan, wide-ish phone) shows NEITHER chevron.
   await load("?project=short&plan=none&module=site-planner", { w: 430, h: 932 });
+  row1 = await row1Sel();
   let eFit = await edgesAndChevrons(row1);
   ok("a Row 1 that already fits shows NO chevron on either side (no permanent furniture)", !eFit.leftChevron && !eFit.rightChevron, JSON.stringify(eFit));
 
@@ -198,6 +243,7 @@ try {
   // the row must still say (via NEW-2's chevron) that there's more, never silently clip mid-word.
   await load("?project=stress&plan=stress&module=site-planner", { w: 375, h: 667 });
   cs = await crumbState();
+  row1 = await row1Sel(); // fresh page — the dataset marker from any earlier scene is gone
   const stressEdges = await edgesAndChevrons(row1);
   ok("NEW-4 stress case: the project crumb still compacted (did everything reasonable)", cs.compact === true, JSON.stringify(cs.proj));
   ok("NEW-4 stress case: if it still doesn't fit, the row says so (right chevron) rather than silently clipping", stressEdges.overflow ? stressEdges.rightChevron : true, JSON.stringify(stressEdges));
@@ -236,8 +282,11 @@ try {
   console.log("\n=== Both strips together ===");
   await load("?project=long&plan=long&module=model", { w: 375, h: 667 });
   const both = await page.evaluate(() => {
-    const rows = [...document.querySelectorAll("header > div")].filter((d) => getComputedStyle(d).overflowX === "auto");
-    return rows.map((r) => ({ overflow: r.scrollWidth - r.clientWidth > 1, hasChevron: !!r.querySelector('[aria-label^="Scroll"]') }));
+    // B1610640 — descendant search (not `>`), since the scrolling rows now sit one level deeper
+    // inside their own non-scrolling wrapper; the chevron search is scoped to the row's PARENT
+    // (the wrapper), since the chevron is now a sibling of the row rather than a child of it.
+    const rows = [...document.querySelectorAll("header div")].filter((d) => getComputedStyle(d).overflowX === "auto");
+    return rows.map((r) => ({ overflow: r.scrollWidth - r.clientWidth > 1, hasChevron: !!(r.parentElement || r).querySelector('[aria-label^="Scroll"]') }));
   });
   ok("every overflowing row (both Row 1 and Row 2 here) carries at least one chevron", both.every((r) => !r.overflow || r.hasChevron), JSON.stringify(both));
 
