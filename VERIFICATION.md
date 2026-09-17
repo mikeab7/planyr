@@ -166,6 +166,27 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1243392 — B1735728: the merge/false-conflict toast fires with the correct schedule + count, on Michael's real account with real tabs `Blocker: real-data`
+
+**Why this needs a live pass, and what it is NOT.** This is not asking anyone to re-diagnose whether the fix works — it's proven three separate ways already: a mutation-proven pure-function/storage-layer unit suite (`test/schedulerEngine.test.js`, `test/schedulerSaveQueue.test.js`, from B1735728's own session), and — new this session (B1747664) — a mutation-proven, single-tab, no-auth **browser** harness (`ui-audit/verify-merge-toast.mjs`) that drives the REAL `/sequence/` page's REAL code (not a re-derivation) against a fully-mocked backend, and fails in exactly the ways the pre-fix commit (`4dae42b0^`) actually fails. What sandbox genuinely cannot reach, and what this entry now narrows to precisely: Michael's own **real account**, with a **real second tab or device**, on a schedule he is actually editing — the one thing a mocked backend cannot stand in for is a genuinely independent second writer.
+
+**What was verified here (sandbox, this session, B1747664).** `ui-audit/verify-merge-toast.mjs` — one real Chromium tab, the built app, a mocked `planar_data`/`planar_history`/`client_errors` backend (nothing leaves the process, no auth needed). "Another device's write" is injected by mutating the mock's stored row between two real, UI-driven edits in the same tab. 5 cases / 29 checks, all passing on the fixed build:
+  1. one field changed in a different schedule → toast names it, count 1.
+  2. a row inserted mid-schedule → count 1 (the real add), never "every row below the insert."
+  3. a project added → toast names it, count 1.
+  4. a project removed → count 1, no crash.
+  5. `task.focused` toggled alone → zero cloud writes, no toast.
+**Mutation-proven against the real pre-fix commit** (`4dae42b0^`): case 2 fails as "3 tasks updated" (not 1) and case 5 fails with a spurious write (`upserts=2` vs the fixed build's `upserts=1`) — reproducing the id-churn and view-field-leak defects the report described, at a small, legible scale. Cases 1/3/4 pass even pre-fix, which is the correct, honest reading: those never hit either specific root cause. Telemetry (`logMergeToastEvent`, new this session) is also confirmed firing in the harness: a `client_errors` row, `module: "scheduler"`, `source: "event:merge-toast"`, carrying the toast's own count + schedule names — so the next real occurrence on Michael's account is a query against that table, not a repro session.
+
+**Steps, each with a named expected result — run on a THROWAWAY DUPLICATE schedule, never one of Michael's real plans, per B822 (unchanged from B1735728's own session):**
+1. Duplicate a real schedule (or use an existing disposable one). Open it in two browser tabs, signed in. In tab A, edit one task's name three times in a row (three separate autosaves ~30s apart). **Expect:** tab A never shows the "newer version was saved elsewhere" banner for its own writes.
+2. In tab B (left idle throughout step 1 — don't touch it, don't even click into it), watch for a merge toast once it catches up. **Expect:** the toast names exactly one task and exactly one schedule (the one edited in tab A) — never a number in the dozens/hundreds, never a schedule that was never touched.
+3. In tab A, insert a brand-new task in the MIDDLE of the task list (not at the end), then check tab B's next toast. **Expect:** it still reports the one real addition — never "every row below the insert."
+4. In tab B, toggle a task's row-collapse ("focused") state a few times while otherwise idle. **Expect:** no banner, no toast, and (checkable via the plan menu → Storage / dev tools network tab) no new cloud write from tab B for that alone.
+5. If a banner ever does appear in either tab, wait ~20s (or click into the tab) without clicking Reload. **Expect:** the banner clears on its own once the tab is caught up, rather than sitting there indefinitely.
+6. **New this session:** query `client_errors` for `source = 'event:merge-toast'` around the time of steps 2–4. **Expect:** one row per toast, naming the same count and schedule the toast itself showed.
+- **Stopping rule:** closes when steps 1–6 all confirm on Michael's real account, dated — or a step fails and is filed as a recurrence against B1735728, per STANDING RULE #2 (a null result is a FINDING, never a silent close).
+
 ### V1235200 — B1727536: the Jump-back-in card's "Last document" never offers a project-less, non-PDF document, and wherever it points, opening it shows something real
 
 **Why this needs a live pass, and what it is NOT.** This is not asking anyone to re-diagnose whether the fix works — the eligibility rule is pure and is proven two ways: a red-proof-turned-green unit suite built around the exact reported row's own real shape, and a direct read of the account's actual current `doc_reviews` data (via a live database query, not the browser) showing what today's real pick becomes under the fixed rule. What sandbox genuinely cannot reach: the actual rendered Dashboard card and an actual click, on a real signed-in `planyr.io` session — the query and the render are two different things, and only the second needs a browser.
