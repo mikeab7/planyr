@@ -2989,6 +2989,25 @@ function mergeLocationPhrase(projects, changedPids, currentPid) {
   return "in " + shown.join(", ") + (extra > 0 ? `, +${extra} more` : "");
 }
 
+// NEW-1 (owner dispatch 2026-09-17) — the merge toast itself was never instrumented, so an owner
+// report of an inflated count ("687 tasks... +7 more") had no record to check it against; a live
+// two-tab sitting was the only way to see one fire. This records every firing — the real schedule
+// list and count the toast just showed — as a client_errors event, so the next occurrence on his
+// account is a query, not a repro session. Fire-and-forget and best-effort: a lost diagnostic row
+// here is not a LOUD-FAILURE case (nothing user-facing depends on it reaching the table), so it
+// never throws into the app and never retries. Uses window.__sb (the already-exposed client)
+// rather than the module-scoped `sb` so this can sit at module scope, above where `sb` is
+// declared, without an ordering dependency — by the time a merge can fire, boot has long finished.
+function logMergeToastEvent(changedRows, changedPids, projects) {
+  try {
+    if (!window.__sb) return;
+    const names = (changedPids || []).map(pid => crossScheduleLabel((projects && projects[pid]) || {}));
+    const msg = `merge toast fired — ${changedRows} task${changedRows===1?"":"s"} updated across ${names.length} schedule${names.length===1?"":"s"}` +
+      (names.length ? `: ${names.join(", ")}` : "");
+    window.__sb.from("client_errors").insert({ module: "scheduler", source: "event:merge-toast", message: msg.slice(0, 2000) }).then(() => {}, () => {});
+  } catch (e) { /* telemetry must never throw into the app */ }
+}
+
 // ── Constants ─────────────────────────────────────────────
 let ROW_H = 24;
 const PPD = 22, TL_H = 30, BUF = 6;
@@ -8489,6 +8508,7 @@ function App() {
           ? `Merged in changes saved elsewhere — ${changedRows} task${changedRows===1?"":"s"} updated${where ? " " + where : ""}.`
           : "Merged in changes saved elsewhere.";
         showToast(msg, { type: "info", duration: 4000 });
+        logMergeToastEvent(changedRows, changedPids, merged.projects);
       }
     };
     window.addEventListener("planar:merged", onMerged);
