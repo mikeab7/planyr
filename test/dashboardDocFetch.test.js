@@ -122,3 +122,55 @@ describe("fetchLastTouchedDoc — never offers a document whose filed project is
     expect(doc.id).toBe("d1");
   });
 });
+
+describe("fetchLastTouchedDoc — B1616656 (×3 recurrence): a project-less, non-PDF document is never a candidate", () => {
+  beforeEach(() => { h.docs = []; h.sites = []; h.sitesErr = null; });
+
+  it("THE EXACT REPORTED ROW — project-less, non-PDF (rvmtov1wtr0459a's own real shape: no `sourceFile` mirror, but `sources[0].name` reads the real .txt) — skipped, falls back to the next candidate", async () => {
+    h.docs = [
+      { id: "rvmtov1wtr0459a", title: "2026.09.05 planyr-dupe-check", project: null, project_id: null, updated_at: "2026-09-10T03:58:50Z", deleted_at: null, sources: [{ name: "planyr-dupe-check.txt" }] },
+      { id: "older-pdf", title: "Older PDF", project: null, project_id: null, updated_at: "2026-09-01T00:00:00Z", deleted_at: null, sources: [{ name: "site-plan.pdf" }] },
+    ];
+    const doc = await fetchLastTouchedDoc();
+    expect(doc.id).toBe("older-pdf");
+  });
+
+  it("project-less AND a PDF — stays eligible, nothing to route to but the canvas can render it", async () => {
+    h.docs = [{ id: "unfiled-pdf", title: "Loose PDF", project: null, project_id: null, updated_at: "2026-09-10T00:00:00Z", deleted_at: null, sources: [{ name: "drawing.pdf" }] }];
+    const doc = await fetchLastTouchedDoc();
+    expect(doc.id).toBe("unfiled-pdf");
+  });
+
+  it("attached to a LIVE project and non-PDF — stays eligible; a live project gives the click somewhere real to land (must not regress this case)", async () => {
+    h.docs = [{ id: "filed-nonpdf", title: "Geotech report", project: "8 South", project_id: "live-proj", updated_at: "2026-09-10T00:00:00Z", deleted_at: null, sources: [{ name: "report.docx" }] }];
+    h.sites = [{ id: "live-proj", group_id: "live-proj", deleted_at: null }];
+    const doc = await fetchLastTouchedDoc();
+    expect(doc.id).toBe("filed-nonpdf");
+  });
+
+  it("attached to a live project and a PDF — unaffected, the ordinary case", async () => {
+    h.docs = [{ id: "filed-pdf", title: "Concept A", project: "Richfield", project_id: "live-proj", updated_at: "2026-09-10T00:00:00Z", deleted_at: null, sources: [{ name: "concept-a.pdf" }] }];
+    h.sites = [{ id: "live-proj", group_id: "live-proj", deleted_at: null }];
+    const doc = await fetchLastTouchedDoc();
+    expect(doc.id).toBe("filed-pdf");
+  });
+
+  it("attached to a DEAD (hard-gone) project and non-PDF — already excluded by the B1340368 dead-project rule, unaffected by this rule", async () => {
+    h.docs = [
+      { id: "dead-nonpdf", title: "Old test file", project: null, project_id: "gone", updated_at: "2026-09-10T00:00:00Z", deleted_at: null, sources: [{ name: "test.txt" }] },
+      { id: "fallback-pdf", title: "Fallback", project: null, project_id: null, updated_at: "2026-09-01T00:00:00Z", deleted_at: null, sources: [{ name: "fallback.pdf" }] },
+    ];
+    h.sites = [];
+    const doc = await fetchLastTouchedDoc();
+    expect(doc.id).toBe("fallback-pdf");
+  });
+
+  it("EVERY document in the account is project-less and non-PDF — drops the line entirely (null), never a live-looking dead end", async () => {
+    h.docs = [
+      { id: "d1", title: "One", project: null, project_id: null, updated_at: "2026-09-10T00:00:00Z", deleted_at: null, sources: [{ name: "one.txt" }] },
+      { id: "d2", title: "Two", project: null, project_id: null, updated_at: "2026-09-09T00:00:00Z", deleted_at: null, sources: [{ name: "two.docx" }] },
+    ];
+    const doc = await fetchLastTouchedDoc();
+    expect(doc).toBeNull();
+  });
+});
