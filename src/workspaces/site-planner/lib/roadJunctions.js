@@ -31,9 +31,9 @@
  * and it can only ever ADD a junction, never remove the explicit-connect path. */
 import {
   teeGeometry, rectEdges, nearestRectEdge, polygonEdges, polygonContainsPoint, polygonDepthBehind,
-  roadEdgeCrossing,
+  roadEdgeCrossing, polygonEdgeRunFrom, nodeJunction,
 } from "./roadGeometry.js";
-import { isCenterlineRoad, roadCurbWidth } from "./siteGeometry.js";
+import { isCenterlineRoad, roadCurbWidth, teeTargetPointOf } from "./siteGeometry.js";
 import { roadClassOf, classReturnRadius } from "./roadClasses.js";
 
 // Same coincidence tolerance `driveJunctionsOf` has always used for "is this endpoint on that edge."
@@ -172,8 +172,18 @@ export function driveJunctionsOf(els, settings) {
     const perpDepth = isPoly
       ? polygonDepthBehind(T.points, junctionPt, { x: -junctionEdge.outN.x, y: -junctionEdge.outN.y })
       : (junctionEdge.axis === "y" ? T.h : T.w);
-    const edgeRunPos = (junctionEdge.b.x - junctionPt.x) * junctionEdge.dir.x + (junctionEdge.b.y - junctionPt.y) * junctionEdge.dir.y;
-    const edgeRunNeg = (junctionPt.x - junctionEdge.a.x) * junctionEdge.dir.x + (junctionPt.y - junctionEdge.a.y) * junctionEdge.dir.y;
+    // NEW-1 (this round) — walk PAST any digitizing vertex the target's own boundary is still
+    // effectively straight through, rather than stopping the reach clamp dead at every one (see
+    // polygonEdgeRunFrom's own header). A no-op on a rect target (4 real 90° corners). Falls back to
+    // the plain direct-projection formula if `junctionEdge` can't be located in its own `edges`
+    // array (defensive only — every caller of this function draws `junctionEdge` from `edges` itself).
+    const junctionEdgeIdx = edges.indexOf(junctionEdge);
+    const edgeRunPos = junctionEdgeIdx >= 0
+      ? polygonEdgeRunFrom(edges, junctionEdgeIdx, junctionPt, 1)
+      : (junctionEdge.b.x - junctionPt.x) * junctionEdge.dir.x + (junctionEdge.b.y - junctionPt.y) * junctionEdge.dir.y;
+    const edgeRunNeg = junctionEdgeIdx >= 0
+      ? polygonEdgeRunFrom(edges, junctionEdgeIdx, junctionPt, -1)
+      : (junctionPt.x - junctionEdge.a.x) * junctionEdge.dir.x + (junctionPt.y - junctionEdge.a.y) * junctionEdge.dir.y;
     const obstacle = buildingRunLimit(els, junctionPt, junctionEdge.dir, junctionEdge.outN, Rseed);   // NEW-4 — never under a building
     const geom = teeGeometry({
       T: { x: junctionPt.x, y: junctionPt.y }, throughDir: junctionEdge.dir, sideDir,
@@ -184,6 +194,70 @@ export function driveJunctionsOf(els, settings) {
       sideAvail: Math.max(0, sideRun.dist - insideRunFt),
     });
     if (geom) out.push({ sideId: S.id, targetId: T.id, kind, geom });
+  }
+  return out;
+}
+
+/* B953/NEW-1, extracted B1717616 — road → ROAD tee junctions for the clean-intersection render (as
+ * opposed to `driveJunctionsOf`'s road → pad/parking family, above). A tee = a centerline road's
+ * ENDPOINT coincident with an INTERIOR vertex of another centerline road (a real one, or the
+ * B1713104 geometric fallback `teeTargetPointOf` synthesises when none is stored). Returns
+ * [{ sideId, throughId, T, geom }]. Pure over (els, settings) — this used to live only inside
+ * SitePlanner.jsx, which is exactly the "test hand-copies the app's math" trap `driveJunctionsOf`'s
+ * own header above describes (three B1645792 rounds shipped green while broken because of it); moving
+ * this one out the same way means a test can drive the identical function the renderer calls. */
+export function teeJunctionsOf(els, settings) {
+  const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
+  const out = [];
+  for (const S of roads) {
+    for (const ei of [0, S.pts.length - 1]) {
+      const P = S.pts[ei];
+      const hit = teeTargetPointOf(roads, S, P);
+      if (!hit) continue;
+      const { G, gvi, pts: gPts } = hit;
+      const sideRun = roadRunFrom(S.pts, ei, ei === 0 ? 1 : -1, roadTangentNoise(S));   // into the side road's body
+      const sideDir = { x: sideRun.far.x - P.x, y: sideRun.far.y - P.y };
+      const backRun = roadRunFrom(gPts, gvi, -1, roadTangentNoise(G)), fwdRun = roadRunFrom(gPts, gvi, 1, roadTangentNoise(G));
+      const a = backRun.far, b = fwdRun.far;
+      const din = { x: P.x - a.x, y: P.y - a.y }, dout = { x: b.x - P.x, y: b.y - P.y };  // through tangents at the vertex
+      const li = Math.hypot(din.x, din.y) || 1, lo = Math.hypot(dout.x, dout.y) || 1;
+      // The BISECTOR is kept ONLY for the frame the building clamp and the stripe cut work in — see
+      // roadGeometry.js's nodeJunction header (B1011) for why the returns themselves are built per-arm.
+      const throughDir = { x: din.x / li + dout.x / lo, y: din.y / li + dout.y / lo };
+      const uT = { x: throughDir.x, y: throughDir.y };
+      const uTl = Math.hypot(uT.x, uT.y) || 1; uT.x /= uTl; uT.y /= uTl;
+      const nrmT = { x: -uT.y, y: uT.x };
+      const openSign = Math.sign(sideDir.x * nrmT.x + sideDir.y * nrmT.y) || 1;
+      const nOpenT = { x: nrmT.x * openSign, y: nrmT.y * openSign };
+      const clsS = roadClassOf(settings, S.roadClass);
+      const teeOverride = S.tee && S.tee.throughId === G.id ? S.tee : null;
+      const R = teeOverride && teeOverride.returnR > 0 ? teeOverride.returnR : classReturnRadius(clsS);
+      const flare = teeOverride && teeOverride.flare > 0 ? teeOverride.flare : 0;
+      const teeObstacle = buildingRunLimit(els, P, uT, nOpenT, R);
+      const halfG = roadOuterHalf(G), halfS = roadOuterHalf(S);
+      const nj = nodeJunction({
+        // The through road's own corner at this node is FLATTENED (roadJunctionVerticesOf →
+        // roadDenseCenterline's `sharpAt`) so its centerline passes through the node the branch is
+        // welded to — the junction has to round that corner too, so `roundOwnCorner` is always on here.
+        node: { x: P.x, y: P.y }, R, flatDeg: 178, roundOwnCorner: true,
+        arms: [
+          { dir: { x: a.x - P.x, y: a.y - P.y }, half: halfG, avail: Math.min(backRun.dist, teeObstacle.neg), road: G.id, deep: halfG > 0.01 ? Math.min(halfG * 0.5, 12) : 0 },
+          { dir: { x: b.x - P.x, y: b.y - P.y }, half: halfG, avail: Math.min(fwdRun.dist, teeObstacle.pos), road: G.id, deep: halfG > 0.01 ? Math.min(halfG * 0.5, 12) : 0 },
+          { dir: sideDir, half: halfS + Math.max(0, flare), avail: sideRun.dist, road: S.id, deep: Math.max(1, Math.min(halfS * 0.5, 12)) },
+        ],
+      });
+      if (!nj) continue;
+      // The THROAT on the through road — the span its near curb stripe must be interrupted across — is
+      // between the tangent points the two side-arm corners left on the two THROUGH arms.
+      const sideGaps = nj.gaps.filter((g) => g.a === 2 || g.b === 2);
+      const throughTangents = sideGaps.map((g) => (g.a === 2 ? g.tanB : g.tanA));
+      const geom = {
+        R: nj.R, wedges: nj.wedges, returns: nj.gaps.map((g) => g.arc), corners: nj.corners,
+        throughTangents, nTee: nOpenT, gaps: nj.gaps,
+        throatWidth: throughTangents.length === 2 ? Math.hypot(throughTangents[0].x - throughTangents[1].x, throughTangents[0].y - throughTangents[1].y) : 0,
+      };
+      out.push({ sideId: S.id, throughId: G.id, T: { x: P.x, y: P.y }, geom });
+    }
   }
   return out;
 }

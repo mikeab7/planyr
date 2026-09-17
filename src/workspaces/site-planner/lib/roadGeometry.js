@@ -1511,6 +1511,47 @@ export function polygonDepthBehind(points, at, inwardN) {
   return maxProj;
 }
 
+// NEW-1 (this round) — how far room the curb-return reach clamp is credited past a drive junction's
+// own edge before a REAL corner, walking through any interior vertex the target's boundary is still
+// effectively STRAIGHT through (within `tolDeg`) rather than stopping dead at every digitized vertex.
+// A road-drawn tool's own polyline gets exactly this treatment already (`roadRunFrom`'s "step over
+// sub-tolerance clutter", NEW-3 in this file's header) — a freehand-drawn PAD polygon needed the same
+// fix one level up. MEASURED: a paving pad's "one straight bottom edge" is routinely digitized as
+// several near- or exactly-collinear segments (mouse clicks tracing a property line, or a vertex
+// left by an edit), and `driveJunctionsOf` used to compute `throughAvailPos`/`throughAvailNeg` from
+// ONLY the single polygon edge nearest the connect point — so a connect point that happened to fall
+// near one of those digitizing vertices saw a few tens of feet of "room" instead of the true (much
+// longer) straight run, collapsing `teeGeometry`'s reach clamp (`tMax`) to ~0 on that side. The
+// result reads exactly as reported: one side of an oblique road-into-pad junction keeps its full
+// requested radius while the other silently degrades to `teeGeometry`'s own NEW-2/B1703665 sharp-
+// corner fallback — a real, un-rounded corner where a smooth curb return should be — even though the
+// enclosed-hole and simple-polygon measures (this family's existing regression suite) read clean,
+// because the fallback still closes the gore, just without any rounding. A genuine corner (the
+// boundary actually turns) still stops the walk exactly as before — this only recovers room that is
+// geometrically THERE, never bridges a real turn. `edges` is any `{dir, len}` edge-ring array in the
+// shape `rectEdges`/`polygonEdges` already produce (order = walking the ring); `edgeIdx` is the
+// junction edge's own index in that array. A RECT target's 4 edges meet at genuine 90° corners, so
+// the very first neighbour always fails the collinearity test and this degrades to exactly the old
+// direct-projection formula — verified byte-identical on every existing rect-target case (zero
+// blast radius there). `dir`: +1 walks toward the edge's `b` end, -1 toward `a`.
+export const PAD_EDGE_COLLINEAR_TOL_DEG = 3;
+export function polygonEdgeRunFrom(edges, edgeIdx, at, dir, tolDeg = PAD_EDGE_COLLINEAR_TOL_DEG) {
+  if (!Array.isArray(edges) || !edges.length || !(edgeIdx >= 0) || edgeIdx >= edges.length || !at) return 0;
+  const n = edges.length;
+  const base = edges[edgeIdx];
+  if (!base) return 0;
+  const cosTol = Math.cos((tolDeg * Math.PI) / 180);
+  let total = dir > 0 ? dot(sub(base.b, at), base.dir) : dot(sub(at, base.a), base.dir);
+  let i = edgeIdx;
+  for (let steps = 0; steps < n - 1; steps++) {
+    i = dir > 0 ? (i + 1) % n : (i - 1 + n) % n;
+    const e = edges[i];
+    if (!e || dot(e.dir, base.dir) < cosTol) break; // a real corner — the boundary genuinely turns here
+    total += e.len;
+  }
+  return Math.max(0, total);
+}
+
 /* B1611841 (NEW-2) — where a road's own drawn segment actually CROSSES a drive target's boundary,
  * as opposed to whichever edge happens to sit nearest the road's raw endpoint.
  *
@@ -1746,9 +1787,24 @@ export function nodeJunction(params) {
     // and the union outline showed a sub-foot STEP there. Running the flank a little further along the
     // arm, and a hair INSIDE the edge, tucks it under the strip: the two boundaries now CROSS instead of
     // one stopping, so the outline stays continuous. Everything inside the union is invisible, so the
-    // overshoot costs nothing; the inward bias is what guarantees it can never poke out past the edge.
-    const ovA = Math.min(Math.max(1, A.half * 0.25), Math.max(0, A.avail - alongA), 6);
-    const ovB = Math.min(Math.max(1, B.half * 0.25), Math.max(0, B.avail - alongB), 6);
+    // overshoot costs nothing IF the arm has room to spare past its own TANGENT point.
+    // ⛔ NEW-2 (this round) — "the inward bias is what guarantees it can never poke out past the edge"
+    // is false exactly on a REACH-CAPPED arm. `A.avail - alongA` is the room left past the CORNER, not
+    // past the tangent point the overshoot actually starts from — and a reach-capped fillet's own
+    // tangent run (`f.t`) already ate most or all of that room by construction (`tMax`, above, is
+    // DERIVED from this same `A.avail - alongA`). MEASURED: on a through road reach-capped a couple of
+    // feet short of its own physical end, the old formula still handed back its ordinary default
+    // overshoot (`A.half * 0.25`, unrelated to how little room is actually left), pushing the wedge's
+    // own tuck/lip corner PAST the road's real terminus — a small rectangular nub of pavement floating
+    // beyond where the road strip itself ends, stitched back to the strip's own flat end cap with a
+    // visible non-tangent kink (the reported "4-segment transition… one turn where it meets the
+    // road-end cap"). The fix subtracts the tangent run the fillet already spent: room past the
+    // TANGENT point is `A.avail - alongA - f.t`, never `A.avail - alongA` alone. On every case where the
+    // arm has plenty of room past its own tangent point (the ordinary, non-reach-capped junction), this
+    // is byte-identical to before (f.t is a few feet, `A.avail-alongA` is typically hundreds) — the
+    // clamp only ever binds when it should.
+    const ovA = Math.min(Math.max(1, A.half * 0.25), Math.max(0, A.avail - alongA - f.t), 6);
+    const ovB = Math.min(Math.max(1, B.half * 0.25), Math.max(0, B.avail - alongB - f.t), 6);
     const tuckA = Math.min(0.35, A.deep * 0.5), tuckB = Math.min(0.35, B.deep * 0.5);
     const lipA = add(add(f.tan1, mul(A.u, ovA)), mul(nA, -tuckA));
     const lipB = add(add(f.tan2, mul(B.u, ovB)), mul(nB, -tuckB));
