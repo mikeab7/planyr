@@ -2962,11 +2962,13 @@ const changedProjectIds = (before, after) => {
     const ap = (after && after.projects) || {};
     const out = [];
     new Set([...Object.keys(bp), ...Object.keys(ap)]).forEach(pid => {
-      const bt = {}; (bp[pid]?.tasks || []).forEach(t => { if (t) bt[t.id] = t; });
-      const at = {}; (ap[pid]?.tasks || []).forEach(t => { if (t) at[t.id] = t; });
+      const bTasks = bp[pid]?.tasks || [], aTasks = ap[pid]?.tasks || [];
+      const bSid = _taskSidMap(bTasks), aSid = _taskSidMap(aTasks);
+      const bt = {}; bTasks.forEach(t => { if (t) bt[_taskKey(t)] = t; });
+      const at = {}; aTasks.forEach(t => { if (t) at[_taskKey(t)] = t; });
       let changed = false;
-      new Set([...Object.keys(bt), ...Object.keys(at)]).forEach(id => {
-        if (!_mEq(bt[id], at[id])) changed = true;
+      new Set([...Object.keys(bt), ...Object.keys(at)]).forEach(key => {
+        if (!_mEq(_taskFingerprint(bt[key], bSid), _taskFingerprint(at[key], aSid))) changed = true;
       });
       if (changed) out.push(pid);
     });
@@ -4116,6 +4118,13 @@ const _mEq = (a, b) => { try { return JSON.stringify(a) === JSON.stringify(b); }
 const _mStripRev = o => { if (_mIsObj(o)) { const { __rev, ...rest } = o; return rest; } return o; };
 const _deepClone = o => { try { return JSON.parse(JSON.stringify(o)); } catch { return o; } };
 const _mIdArr = a => Array.isArray(a) && a.length > 0 && a.every(e => _mIsObj(e) && "id" in e);
+// NEW-1 — match an id-keyed array element by its permanent `_sid` when it carries one (a task,
+// once migrated — see renumberTasks/normalizeIds), falling back to the plain `id` for every other
+// id-keyed array (meetingBodies/contacts/notes/…, which never carry `_sid` and are matched exactly
+// as before). Without this, two snapshots taken across a renumber (an insert/delete/indent
+// elsewhere in the SAME schedule) match tasks by their now-shifted positional id — pairing up the
+// WRONG rows, or reading a merely-renumbered task as "deleted here, added there".
+const _mKeyOf = e => (_mIsObj(e) && e._sid != null) ? ("sid:" + e._sid) : (e && e.id);
 const mergeCloudDoc = (base, ours, theirs) => {
   if (_mEq(ours, theirs)) return theirs;
   if (_mEq(ours, base)) return theirs;
@@ -4124,19 +4133,21 @@ const mergeCloudDoc = (base, ours, theirs) => {
   if (Array.isArray(ours) && Array.isArray(theirs)) {
     if (!_mIdArr(ours) || !_mIdArr(theirs)) return ours;
     const bArr = Array.isArray(base) ? base : [];
-    const byId = arr => { const m = new Map(); arr.forEach(e => { if (!m.has(e.id)) m.set(e.id, e); }); return m; };
-    const bM = byId(bArr), tM = byId(theirs), oSeen = new Set();
+    const byKey = arr => { const m = new Map(); arr.forEach(e => { const k = _mKeyOf(e); if (!m.has(k)) m.set(k, e); }); return m; };
+    const bM = byKey(bArr), tM = byKey(theirs), oSeen = new Set();
     const out = [];
     for (const e of ours) {
-      if (oSeen.has(e.id)) continue; oSeen.add(e.id);
-      const inT = tM.has(e.id), inB = bM.has(e.id);
-      if (inT) out.push(mergeCloudDoc(inB ? bM.get(e.id) : undefined, e, tM.get(e.id)));
-      else if (!(inB && _mEq(e, bM.get(e.id)))) out.push(e);
+      const k = _mKeyOf(e);
+      if (oSeen.has(k)) continue; oSeen.add(k);
+      const inT = tM.has(k), inB = bM.has(k);
+      if (inT) out.push(mergeCloudDoc(inB ? bM.get(k) : undefined, e, tM.get(k)));
+      else if (!(inB && _mEq(e, bM.get(k)))) out.push(e);
     }
     for (const e of theirs) {
-      if (oSeen.has(e.id)) continue;
-      const inB = bM.has(e.id);
-      if (!(inB && _mEq(e, bM.get(e.id)))) out.push(e);
+      const k = _mKeyOf(e);
+      if (oSeen.has(k)) continue;
+      const inB = bM.has(k);
+      if (!(inB && _mEq(e, bM.get(k)))) out.push(e);
     }
     return out;
   }
@@ -4151,6 +4162,28 @@ const mergeCloudDoc = (base, ours, theirs) => {
   }
   return out;
 };
+// NEW-1 — for TASK content comparison only (countChangedTaskRows/changedProjectIds below): map this
+// array's own positional `id` → its permanent `_sid`, then rewrite a task's cross-reference fields
+// (parentId/predecessors[].id/deadlineForTaskId/minMeetingsAfter.taskId) from the renumbered id they
+// point at to that SAME stable sid before comparing two snapshots for equality. Without this, an
+// insert/delete/indent/outdent ANYWHERE in a schedule shifts the positional id of every task after
+// it, and every OTHER task that merely references one of those (as a parent or predecessor) reads
+// as "changed" too — a single insert can inflate the count to "every row below it". A lookup miss
+// (a dangling reference, or data with no `_sid` at all) falls back to the raw id unchanged, so a
+// genuine mismatch can never be turned into a false match.
+const _taskSidMap = tasks => { const m = new Map(); (tasks || []).forEach(t => { if (t && t._sid != null) m.set(t.id, t._sid); }); return m; };
+const _taskKey = t => (t && t._sid != null) ? ("sid:" + t._sid) : (t ? t.id : t);
+const _taskFingerprint = (t, sidOf) => {
+  if (!t || typeof t !== "object") return t;
+  const { id, _sid, focused, ...rest } = t;   // id/_sid: identity, compared separately; focused: view-only (B1107680-class), never content
+  if (rest.parentId != null) rest.parentId = sidOf.get(rest.parentId) ?? rest.parentId;
+  if (Array.isArray(rest.predecessors)) rest.predecessors = rest.predecessors.map(p => (p && p.id != null) ? { ...p, id: sidOf.get(p.id) ?? p.id } : p);
+  if (rest.deadlineForTaskId != null) rest.deadlineForTaskId = sidOf.get(rest.deadlineForTaskId) ?? rest.deadlineForTaskId;
+  if (rest.minMeetingsAfter && rest.minMeetingsAfter.taskId != null) {
+    rest.minMeetingsAfter = { ...rest.minMeetingsAfter, taskId: sidOf.get(rest.minMeetingsAfter.taskId) ?? rest.minMeetingsAfter.taskId };
+  }
+  return rest;
+};
 // NEW-3 (B1696642) — how many task rows a merge actually brought in from elsewhere, so the toast
 // can say WHAT changed instead of guessing WHERE it came from (the cloud row this merge reads carries
 // no tab/window/device identity — see the `planar:merged` listener). Compares this tab's own doc as
@@ -4164,10 +4197,12 @@ const countChangedTaskRows = (before, after) => {
     const ap = (after && after.projects) || {};
     let n = 0;
     new Set([...Object.keys(bp), ...Object.keys(ap)]).forEach(pid => {
-      const bt = {}; (bp[pid]?.tasks || []).forEach(t => { if (t) bt[t.id] = t; });
-      const at = {}; (ap[pid]?.tasks || []).forEach(t => { if (t) at[t.id] = t; });
-      new Set([...Object.keys(bt), ...Object.keys(at)]).forEach(id => {
-        if (!_mEq(bt[id], at[id])) n++;
+      const bTasks = bp[pid]?.tasks || [], aTasks = ap[pid]?.tasks || [];
+      const bSid = _taskSidMap(bTasks), aSid = _taskSidMap(aTasks);
+      const bt = {}; bTasks.forEach(t => { if (t) bt[_taskKey(t)] = t; });
+      const at = {}; aTasks.forEach(t => { if (t) at[_taskKey(t)] = t; });
+      new Set([...Object.keys(bt), ...Object.keys(at)]).forEach(key => {
+        if (!_mEq(_taskFingerprint(bt[key], bSid), _taskFingerprint(at[key], aSid))) n++;
       });
     });
     return n;
@@ -4706,6 +4741,16 @@ const defaultStartFor = (tasks, parentId, excludeId = null) => {
   return NOW;
 };
 
+// NEW-1 (false-conflict/merge-toast inflation, owner report 2026-09-17) — a permanent per-task
+// identity, independent of `id` (which renumberTasks reassigns by array position on every
+// structural edit — never a stable reference). Minted once, here, at task-creation time, so every
+// task built via mkt() — every live "add task"/"insert"/"deadline row" reducer, AND the built-in
+// SEED fixture — carries its own identity from the moment it exists. See renumberTasks for how an
+// EXISTING task (loaded from the cloud, already carrying one) keeps it untouched across renumbers,
+// and normalizeIds for how a task that predates this fix (no _sid at all) is backfilled.
+let _sidSeq = 0;
+const _mintTaskSid = () => "s" + Date.now().toString(36) + (_sidSeq++).toString(36) + Math.random().toString(36).slice(2, 7);
+
 // Fix #1e: guard mkt so a bad caller can never crash the app with an invalid date.
 // Also supports "blank" tasks: pass start="" AND dur="" (or null) → task is created with
 // no start, no end, no duration. Callers that want a real date keep passing valid args.
@@ -4716,7 +4761,7 @@ const mkt = (id, name, start, dur, parentId=null, health="gray", predecessors=[]
   // empty until the user types one — calcEnd("", 0) is "" by design.
   const safeDur   = isBlank ? 0 : dur;
   return {
-    id, name, start: safeStart, end: calcEnd(safeStart, safeDur), duration: safeDur, durUnit: "d", durValue: safeDur, predecessors, health,
+    id, _sid: _mintTaskSid(), name, start: safeStart, end: calcEnd(safeStart, safeDur), duration: safeDur, durUnit: "d", durValue: safeDur, predecessors, health,
     percentComplete: health==="green" ? 100 : health==="yellow" ? 40 : 0,
     parentId, responsibleParty: [], cost: "", notes: [], isExpanded: true,
     meetingBound: false,   // B816 — new tasks are unbound by default; a task binds to a body via its Meeting cell
@@ -4929,6 +4974,20 @@ const SEED = {
   },
 };
 
+// NEW-1 (false-conflict/merge-toast inflation, owner report 2026-09-17) — `id` below is reassigned
+// by ARRAY POSITION on every structural edit ("ids are reassigned to visual order every structural
+// edit" — see the comment just below), so it is NOT a stable identity: inserting or deleting one
+// task shifts the `id` of every task after it, even though none of THEM were touched. A diff/merge
+// keyed on `id` alone (mergeCloudDoc, countChangedTaskRows, changedProjectIds) reads that shift as
+// real content change — a single insert can read as "every row below it changed."
+//
+// `_sid` is a second, permanent id: minted ONCE per task, on a fresh random basis, and never
+// reassigned by renumberTasks or anything else — it rides along on every renumber exactly like any
+// other content field (survives the `{...t, ...}` spread below untouched unless explicitly ordered
+// otherwise). Diff/merge key on `_sid`; `id`/parentId/predecessors/etc. are UNCHANGED by this — the
+// display numbering and cross-reference scheme stay exactly as they were. (`_mintTaskSid` itself is
+// defined above, next to `mkt`, so the SEED fixture's own mkt() calls — evaluated at module load,
+// long before this function ever runs — can mint one too.)
 // Renumber all tasks by array position (1-based) and fix all ID references
 const renumberTasks = (tasks) => {
   const map = {};
@@ -4946,6 +5005,13 @@ const renumberTasks = (tasks) => {
   return tasks.map((t, i) => ({
     ...t,
     id: i + 1,
+    // NEW-1 — preserve an existing _sid untouched (this is the same task as before, just renumbered);
+    // mint a fresh one ONLY the first time this task is ever seen with none. A brand-new task created
+    // via mkt()/addTask/insertTask/etc. always lacks _sid at this point and gets a genuinely fresh one
+    // here — correct, since two tabs creating two DIFFERENT new tasks must never collide on identity.
+    // (A task predating this fix, loaded from the cloud with no _sid at all, is backfilled
+    // DETERMINISTICALLY by normalizeIds below, before it ever reaches this function — see _legacySid.)
+    _sid: t._sid || _mintTaskSid(),
     parentId: t.parentId !== null && t.parentId !== undefined ? (map[t.parentId] ?? null) : null,
     predecessors: normPreds(t.predecessors).map(p => ({...p, id: map[p.id]})).filter(p => p.id),
     ...(t.deadlineForTaskId != null ? { deadlineForTaskId: map[t.deadlineForTaskId] ?? null } : {}),
@@ -7638,13 +7704,40 @@ function coreChanged(prev, next) {
   return false;
 }
 
+// NEW-1 (false-conflict/merge-toast inflation, owner report 2026-09-17) — per-TASK view-only
+// fields that must never ride into the versioned document either, same reasoning as the top-level
+// VIEW_STATE_KEYS above, one level deeper. `focused` is a task's own "show me just what's still
+// open under this row" toggle — pure UI convenience, not data anyone expects synced across devices
+// — yet it lives inside the `task` object, which IS core data, so toggling it on an idle tab kept
+// bumping __rev and reading as a genuine edit to every other open tab (measured: an idle tab's
+// ENTIRE autosave diff, repeatedly, was one task's `focused: true → false`). Stripped here exactly
+// like the 13 top-level keys — never restored on load, so it just resets per session like those.
+const TASK_VIEW_FIELDS = ["focused"];
+function stripTaskViewFields(tasks) {
+  if (!Array.isArray(tasks)) return tasks;
+  return tasks.map(t => {
+    if (!t || typeof t !== "object") return t;
+    let changed = false;
+    const out = {...t};
+    TASK_VIEW_FIELDS.forEach(k => { if (k in out) { delete out[k]; changed = true; } });
+    return changed ? out : t;
+  });
+}
 // The payload actually written to the cloud (a routine autosave OR an explicit pre-X checkpoint
 // snapshot) never carries the 13 view-state keys — they are not versioned data and must never bump
-// __rev or freeze a stale value into a Version History snapshot.
+// __rev or freeze a stale value into a Version History snapshot. Same treatment for every project's
+// tasks' own view-only fields (TASK_VIEW_FIELDS, just above).
 function stripViewState(d) {
   if (!d || typeof d !== "object") return d;
   const out = {...d};
   VIEW_STATE_KEYS.forEach(k => { delete out[k]; });
+  if (out.projects && typeof out.projects === "object") {
+    const projects = {};
+    Object.entries(out.projects).forEach(([pid, proj]) => {
+      projects[pid] = (proj && Array.isArray(proj.tasks)) ? { ...proj, tasks: stripTaskViewFields(proj.tasks) } : proj;
+    });
+    out.projects = projects;
+  }
   return out;
 }
 
@@ -8085,7 +8178,15 @@ function App() {
             while (p != null && byId[p]) { if (seen.has(p)) return {...t, parentId: null}; seen.add(p); p = byId[p].parentId; }
             return t;
           });
-          projects[pid] = {...proj, tasks: renumberTasks(sortByVisualOrder(tasks))};
+          // NEW-1 — one-time backfill of _sid for a task that predates it (loaded with none at all).
+          // DETERMINISTIC on (pid, this task's own id AS STORED in the cloud row, before this pass's
+          // own renumbering runs) — never random here — so two tabs independently migrating the SAME
+          // still-unmigrated cloud doc derive the IDENTICAL _sid for the same pre-existing task,
+          // instead of each minting its own random one and reading the other's copy as a duplicate
+          // add on the first merge. A task that already carries _sid (any load after the first) is
+          // left untouched.
+          const tasksWithSid = tasks.map(t => (t._sid ? t : { ...t, _sid: `legacy:${pid}:${t.id}` }));
+          projects[pid] = {...proj, tasks: renumberTasks(sortByVisualOrder(tasksWithSid))};
         });
         // Resync the next-task-id counters: renumbering compacts ids to 1..n,
         // so the next safe id is always n+1. This heals counters that drifted
@@ -8321,13 +8422,20 @@ function App() {
   // via a one-click banner if you're looking at it. A tab with unsaved edits is
   // never auto-clobbered -- it just shows the banner. The storage-layer guard is
   // the hard backstop that blocks a stale save no matter what.
+  // NEW-1 (false-conflict/merge-toast inflation, owner report 2026-09-17) — this poll used to be
+  // the only thing that ever SET the banner, with nothing to CLEAR it: once true, staleNotice
+  // stayed true even after a later successful save/merge caught this tab up, so the banner could
+  // sit on screen telling him to reload long after there was nothing left to reload for (and could
+  // show at the same moment a "merged" toast just confirmed the opposite). Self-heals below: not
+  // newer any more → clear it, the same way it was set.
   useEffect(() => {
     let stopped = false;
     const check = async () => {
       if (stopped || !window.storage || !window.storage.checkRemote) return;
       try {
         const r = await window.storage.checkRemote("hs-v1");
-        if (!r || !r.ok || !r.newer) return;
+        if (!r || !r.ok) return;
+        if (!r.newer) { setStaleNotice(false); return; }
         if (saveStatusRef.current === "saved" && document.hidden) window.location.reload();
         else setStaleNotice(true);
       } catch (e) {}
@@ -8371,6 +8479,11 @@ function App() {
         if (!cur) return merged;
         try { return mergeCloudDoc(anc, cur, merged); } catch { return merged; }
       });
+      // NEW-1 — a successful merge means this tab is caught up (its own save just became the new
+      // top cloud version), so any "reload for the latest" banner is now stale advice — clear it
+      // rather than let a toast saying "merged" and a banner saying "reload" sit on screen together
+      // (the owner's report, verbatim: a banner "keeps appearing" alongside a green merge toast).
+      setStaleNotice(false);
       if (typeof showToast === "function") {
         const msg = changedRows > 0
           ? `Merged in changes saved elsewhere — ${changedRows} task${changedRows===1?"":"s"} updated${where ? " " + where : ""}.`
@@ -9400,7 +9513,11 @@ function App() {
       if (!src) return d;
       // Same collision guard as addTask — never trust a stale nTid
       const nid = Math.max(d.nTid[pid] ?? 1, Math.max(0, ...tasks.map(t=>t.id)) + 1);
-      const copy = {...src, id: nid, name: src.name + " (Copy)", notes: src.notes.map(n => ({...n}))};
+      // NEW-1 — a duplicate is a genuinely NEW task, not a continuation of `src`; give it its own
+      // _sid rather than inheriting src's (spreading `...src` would otherwise carry src's _sid
+      // straight onto the copy, and the diff/merge machinery would then see one identity claiming
+      // to be two different rows).
+      const copy = {...src, id: nid, _sid: _mintTaskSid(), name: src.name + " (Copy)", notes: src.notes.map(n => ({...n}))};
       const srcIdx = tasks.findIndex(t => t.id === taskId);
       let newTasks = [...tasks];
       newTasks.splice(srcIdx + 1, 0, copy);
@@ -9504,9 +9621,15 @@ function App() {
 
       const crossProject = cb.sourceProjId !== pid;
       const rootOldIds = new Set(cb.sourceRootIds || [cb.sourceRootId]); // sourceRootId: back-compat for a clipboard filled before this change
+      // NEW-1 — cut+paste is a MOVE (the same logical task, new position): keep its _sid so a
+      // diff/merge recognizes it as unchanged rather than "deleted here, added there". Copy+paste
+      // duplicates it into a genuinely new row and must never carry the source's _sid onto it (the
+      // clipboard's deep-copy in collectSubtreeFor preserves `_sid` from the live source, so this is
+      // the one place a copy-mode paste has to explicitly override it).
       const pasted = cb.tasks.map(t => ({
         ...t,
         id: idMap[t.id],
+        _sid: cb.mode === "cut" ? t._sid : _mintTaskSid(),
         // Each subtree's own root becomes a sibling of the target (same parent), in the SAME
         // relative order they were selected in; inner tasks keep their parent inside their own
         // subtree (remapped to the new IDs).
@@ -10271,7 +10394,22 @@ function App() {
               ? `Reload to load the latest version of ${crossScheduleLabel(data.projects?.[data.aPid])}.`
               : `You have unsaved changes in ${crossScheduleLabel(data.projects?.[data.aPid])} -- reloading replaces them with the newer version. Your copy is kept in Version History either way.`}
           </span>
-          <button onClick={()=>window.location.reload()}
+          <button onClick={async ()=>{
+              // NEW-1 (false-conflict/merge-toast inflation, owner report 2026-09-17) — this banner
+              // offers to reload over a tab that may hold edits which never reached the cloud
+              // (saveStatus !== "saved"), and a bare reload discards them with nothing saved
+              // anywhere — despite the copy above promising "kept in Version History either way",
+              // a promise the code never actually backed. Flush first, through the SAME auto-save
+              // path a real edit already takes: it merges this tab's edits onto the newer cloud via
+              // the existing guard, or — if a merge genuinely can't happen — snapshots this tab's
+              // copy as 'stale-block' (_rawSet's own existing fallback), so the edits are preserved
+              // one way or the other before the page goes away.
+              const d = latestData.current;
+              if (d && saveStatusRef.current !== "saved") {
+                try { await window.storage.set("hs-v1", JSON.stringify(stripViewState(d)), { label: "auto" }); } catch {}
+              }
+              window.location.reload();
+            }}
             style={{flexShrink:0,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,
               background:"#fff",border:"1px solid #fcd34d",color:"#92400e",borderRadius:5,padding:"4px 12px"}}>
             Reload
@@ -18273,6 +18411,24 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
               cloudRev = 0;
             }
           } catch (e) { /* read failed -- leave cloudRev null (fail open) */ }
+        }
+
+        // NEW-1 (false-conflict/merge-toast inflation, owner report 2026-09-17) — an autosave whose
+        // content is UNCHANGED from what's already on the cloud (ignoring __rev) must never write at
+        // all: no upsert, no rev bump, no history snapshot, no merge dance. Without this, a tab whose
+        // ONLY "edit" was view-state churn that leaked into core data (a per-task field the
+        // stripViewState pass above missed, the measured case being `focused`) still round-trips a
+        // save that bumps __rev — which every OTHER open tab then reads as a genuine conflict, purely
+        // from a tab that changed nothing a person would call an edit. This tab still converges:
+        // knownRev/baseByKey are updated from the read already done, so the next REAL edit compares
+        // against the true current cloud state. A miss here (key-order differences JSON.stringify is
+        // sensitive to) just falls through to a redundant-but-harmless write — the existing behavior
+        // — never the reverse: a genuine content difference can never be mistaken for a no-op.
+        if (isAuto && !skipSanity && oldParsed && cloudRev != null && _mEq(_mStripRev(parsed), _mStripRev(oldParsed))) {
+          knownRev[k] = cloudRev;
+          baseByKey[k] = _mStripRev(_deepClone(oldParsed));
+          staleSnapped[k] = false;
+          return { key: k, value: v };
         }
 
         // Layer 0: concurrency guard. Auto-saves only -- explicit actions
