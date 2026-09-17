@@ -410,6 +410,32 @@ Two more found since, each worth its own line because each returned a confident 
    `focusFromMat` (or anything else gating on "did the user click a real control") get bypassed by
    an input embedded IN the document rather than genuinely external to it.
 
+32. **⛔ ENTRY 31's OWN FIX DID NOT CLOSE THE WHOLE CLASS, AND CALIBRATE `page.mouse` AGAINST A KNOWN
+   CASE BEFORE TRUSTING IT ON AN UNKNOWN ONE (B1683296 ×2, 2026-09-17).** Entry 31's relocate fix
+   only reaches a press on bare canvas WHILE A BOX IS ALREADY OPEN — the far more common case, a
+   plain double-click when NOTHING is pending at all (the very first box on a page, or any box
+   after the last one was closed), had NO fallback whatsoever and depended 100% on the browser's
+   own `dblclick` recognition, with zero instrumentation proving that recognition actually happens.
+   Michael's own follow-up report was exactly this case, on a real page, and it was genuinely still
+   broken. **The fix is the identical shape as entry 31's, one gesture earlier:** reconstruct the
+   pair from two `pointerdown`s (`isSketchDoubleTap`, mirroring `site-planner/lib/doubleTap.js`'s
+   own `DBLTAP_MS`/`DBLTAP_PX` rather than importing them across workspaces), so creating the FIRST
+   box no longer needs native recognition either.
+   **⛔ AND THE CALIBRATION THAT MADE THE TEST HONEST, WHICH IS WORTH KEEPING FOR ANY FUTURE
+   DOUBLE-CLICK TEST IN THIS REPO:** `page.mouse.down()` + `.up()`, called TWICE, **never** forms a
+   native `dblclick` in this Chromium/CDP sandbox — measured at every gap from 150ms to 700ms, all
+   ten came back `false`. Only the single combined `page.mouse.dblclick()` call reliably produces
+   one. This matters two ways: **(a)** a harness proving "no native dblclick formed, and the fix
+   still works" does NOT need an artificially slow (900ms-class) gap to make that true here — any
+   ordinary two-press sequence already proves it, and a shorter gap is a STRONGER, more general
+   test (it stays within the fix's own intended time budget rather than testing an edge case
+   outside it); **(b)** conversely, a harness that wants to confirm the PRE-EXISTING fast native
+   path still works must use `page.mouse.dblclick()` specifically — two separate down/up calls,
+   however fast, will never exercise that path in this sandbox at all. Same species as
+   DRIVER-SCROLL-IS-NOT-APP-SCROLL §6: point the instrument at a case whose answer is already
+   knowable (does a two-press sequence raise `dblclick` here, yes or no) before trusting it on the
+   unknown one.
+
 See also `ui-audit/TRAPS.md`, and the named rules **FOREGROUND-OR-VOID** (a background tab cannot
 be measured — not its clock, not its pixels) and **COUNT-EVERY-KIND**.
 
@@ -1126,6 +1152,30 @@ position**.
    session ever finds a load-time (or any silent, no-user-intent) transaction that removes TEXT
    rather than just changing structure, that is the missing piece — and per this entry's own fix
    shape, gating it behind `hasUserInputRef` closes it the same way, no new mechanism needed.
+
+18. **⛔ A NUMBER THAT ALREADY INCLUDES A PART MUST NOT HAVE THAT SAME PART ADDED BACK IN WHEN IT IS
+   RE-DERIVED (B1740688, 2026-09-17, the left width grip).** The sheet's total rendered width is
+   `growLeft + padX + contentW`, and `contentW`'s own baseline (`pinnedPageWidth`) is derived from
+   whatever total width was last COMMITTED (`pinnedBase - padX`). That derivation is correct exactly
+   as long as nothing else in the sum is ALSO drawn from that same committed total — but the left
+   grip's own manual pad (`widthDragLeftPadRef`) genuinely is: the number the user released the
+   mouse at (670) already had the pad (90) baked into it, live, on screen, for the whole drag. Re-
+   deriving `pinnedPageWidth` from the raw committed total and then adding `growLeft` (which now
+   also carries that same 90) on top double-counted it the instant the drag committed — measured
+   directly: correctly held at 670 for the entire live gesture, then jumped to 760 (670 + 90) one
+   frame after mouseup, with nothing else changing. **The fix is to subtract the part that is about
+   to be added back before it is added:** `pinnedPageWidth` now nets the active pad out of the
+   committed total first (`pinnedBase - padX - widthDragLeftPadRef.current`), so the sum reconstructs
+   to exactly the number that was committed, with real content overflow still composing past it via
+   the pre-existing `Math.max`. **The general shape, worth checking anywhere a "how much of X is
+   attributable to Y" term is computed alongside a TOTAL that already includes Y:** re-deriving a
+   sub-total from a grand total and then adding the same contributor back in as if it were still
+   outside that total is silent, exact-once-then-wrong-forever double counting, and it will not show
+   up in a check that only samples the LIVE drag (which writes the correct number directly and never
+   goes through the re-derivation) — it only appears the moment the derived path takes over again,
+   which for a drag is the very next render after release. Caught here only because a headless
+   harness explicitly re-measured AFTER mouseup and after the intervening re-render, not just
+   mid-gesture.
 
 ---
 

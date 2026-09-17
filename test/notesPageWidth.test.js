@@ -10,7 +10,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   FULL_WIDTH_FLOOR, FULL_WIDTH_GUTTER, PAGE_WIDTH_MAX, PAGE_WIDTH_MIN, PAGE_WIDTH_PRESETS,
-  dragWidthFromDelta, pageWidthLabel, pageWidthPresetId, resolvePinnedBaseWidth, resolvePresetPx,
+  dragWidthFromDelta, leftWidthGripPad, pageWidthLabel, pageWidthPresetId, resolvePinnedBaseWidth,
+  resolvePresetPx,
 } from "../src/workspaces/notes/lib/notesPageWidth.js";
 
 describe("the presets", () => {
@@ -172,5 +173,48 @@ describe("dragWidthFromDelta — the live preview and the eventual commit share 
 
   it("rounds to a whole pixel — a stored width is never a fraction", () => {
     expect(Number.isInteger(dragWidthFromDelta(580.4, 12.6))).toBe(true);
+  });
+});
+
+describe("leftWidthGripPad — NEW-2, the left grip's own 'content doesn't move' rule", () => {
+  it("from a fresh page (0 pad), widening by D opens exactly D of new pad", () => {
+    expect(leftWidthGripPad(0, 120)).toEqual({ pad: 120, padDelta: 120 });
+  });
+
+  it("composes with an already-open pad from an earlier drag, rather than resetting it", () => {
+    expect(leftWidthGripPad(120, 40)).toEqual({ pad: 160, padDelta: 40 });
+  });
+
+  it("narrowing gives the pad back, one pixel at a time, as long as it has any to give", () => {
+    expect(leftWidthGripPad(120, -50)).toEqual({ pad: 70, padDelta: -50 });
+  });
+
+  it("floors at 0 — a pad can never go negative", () => {
+    expect(leftWidthGripPad(0, -50)).toEqual({ pad: 0, padDelta: 0 });
+  });
+
+  it("⛔ THE PROPERTY THAT MATTERS: past the floor, padDelta is NEVER the raw delta — it is only", () => {
+    // ever what the pad itself actually gave up. Asking for 200 back from a 120 pad may only ever
+    // hand back 120 (the pad's own maximum), never overshoot the scroll compensation past it.
+    const { pad, padDelta } = leftWidthGripPad(120, -200);
+    expect(pad).toBe(0);
+    expect(padDelta).toBe(-120);
+  });
+
+  it("a full shrink-then-regrow round trip lands exactly back where it started, composed correctly", () => {
+    const grown = leftWidthGripPad(0, 90);
+    const shrunk = leftWidthGripPad(grown.pad, -90);
+    expect(shrunk).toEqual({ pad: 0, padDelta: -90 });
+    const regrown = leftWidthGripPad(shrunk.pad, 90);
+    expect(regrown).toEqual({ pad: 90, padDelta: 90 });
+  });
+
+  it("a zero delta (no movement yet) is a no-op", () => {
+    expect(leftWidthGripPad(50, 0)).toEqual({ pad: 50, padDelta: 0 });
+  });
+
+  it("tolerates undefined/missing arguments rather than producing NaN", () => {
+    expect(leftWidthGripPad(undefined, undefined)).toEqual({ pad: 0, padDelta: 0 });
+    expect(leftWidthGripPad(null, 40)).toEqual({ pad: 40, padDelta: 40 });
   });
 });

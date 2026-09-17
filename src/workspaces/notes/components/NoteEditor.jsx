@@ -47,7 +47,7 @@ import { HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.
 import { PASTE_MODES } from "../lib/notesPastePlain.js";
 import { formFieldOwnsTheKey, UNGATED_KEYS } from "../lib/notesKeyScope.js";
 import { DEFAULT_DENSITY, densityFor } from "../lib/notesSpacing.js";
-import { PAGE_WIDTH_MIN, dragWidthFromDelta, resolvePinnedBaseWidth } from "../lib/notesPageWidth.js";
+import { PAGE_WIDTH_MIN, dragWidthFromDelta, leftWidthGripPad, resolvePinnedBaseWidth } from "../lib/notesPageWidth.js";
 import { dragHeightFromDelta, resolvePinnedBaseHeight, scrollToReach, topEdgeCompensation } from "../lib/notesPageHeight.js";
 import { indentCssRules, listMarkerCssRules } from "../lib/notesIndentLevel.js";
 import {
@@ -2698,6 +2698,32 @@ export default function NoteEditor({
    *  fresh by every real measurement run; see that effect's own comment for why a drag must
    *  floor against THIS, never against `sheetGrowWidth`. */
   const widthContentFloorRef = useRef(0);
+  /* ⛔ NEW-2 (owner report 2026-09-17) — THE LEFT WIDTH GRIP'S OWN "OTHER EDGE HOLDS" PAD, and it
+   * is a THIRD mechanism, not a rename of either existing one. `heightTopPadRef` moves content
+   * WITH the dragged edge (the top-height case: the owner asked for that). This is the opposite
+   * ask for THIS edge, verbatim: *"existing content... stays anchored in the exact same on-screen
+   * position; only the left boundary line moves outward, opening new blank space to the left of
+   * the content."* `beginWidthDrag`'s own header used to describe a scroll-only trick that held
+   * the RIGHT edge still while scrolling the LEFT edge (and everything painted inside the sheet,
+   * content included) left with it — which is exactly the bug: nothing distinguished "the sheet's
+   * own boundary" from "the words inside it," so both moved together. The fix reuses the
+   * ALREADY-BUILT, ALREADY-TESTED mechanism for opening blank space to the left of a page's
+   * content without moving it — `sheetGrowLeft` (NOTES-FREE-PLACEMENT's own left-padding growth
+   * + the `useLayoutEffect` a few screens down that scrolls to hold the body's SCREEN position
+   * fixed whenever `sheetGrowLeft` changes) — rather than inventing a fourth. This ref is the
+   * FLOOR a live drag writes and the measurement effect's own `growLeft` computation reads once
+   * the drag ends (see that effect's own comment), so the illusion survives past mouse-up instead
+   * of being recomputed away the instant real content's own `anchorExtentLeft` need is smaller.
+   * Kept after release, not cleared — same reasoning `heightTopPadRef`'s header gives: a reload,
+   * which restores neither scroll position nor this ref, shows the same stored width rendered
+   * from the app's ordinary right-grown rest position, which is a stated, accepted limitation
+   * rather than a surprise (see that ref's own header for the precedent). */
+  const widthDragLeftPadRef = useRef(0);
+  /** …and which committed page width this pad belongs to — the `heightPadOwnerRef` pattern,
+   *  transposed. A width change that did NOT come from this drag (a menu preset, undo/redo, a
+   *  sync from another device, Fit to content) drops the pad instead of carrying a stale
+   *  left-margin illusion into a page nobody just dragged. */
+  const widthPadOwnerRef = useRef(null);
   /* ⛔ SET A PAGE'S OWN HEIGHT BY HAND (NEW-1) — the vertical twin of the two refs above.
    * `heightDragRef` is non-null only for the duration of an edge-drag gesture (see
    * `beginHeightDrag` below); `heightContentFloorRef` is `need` alone (genuine anchored-box
@@ -3109,7 +3135,29 @@ export default function NoteEditor({
        * fix above — correctly sized around an already-too-wide frame — could only ever shrink
        * to zero, never close the last few pixels. */
       const pinnedBase = resolvePinnedBaseWidth(editor.state.doc.attrs?.pageWidth, { paneWidth: paneContentWidth });
-      const pinnedPageWidth = pinnedBase != null ? Math.max(1, pinnedBase - padX) : null;
+      /* ⛔ NEW-2 — THE LEFT WIDTH GRIP'S PAD IS DROPPED THE MOMENT A DIFFERENT WIDTH CHANGE LANDS,
+       * the `heightPadOwnerRef` pattern transposed (see `widthDragLeftPadRef`'s own header). A
+       * width that did not come from finishing a left-edge drag — Fit to content, a menu preset,
+       * undo/redo, a sync from another device — owns no such pad, so this drops it instead of
+       * carrying a stale left-margin illusion into a page nobody just dragged. Resolved HERE,
+       * before `pinnedPageWidth` reads the ref below, so that read is never one render stale. */
+      if (pinnedBase == null || pinnedBase !== widthPadOwnerRef.current) {
+        widthPadOwnerRef.current = pinnedBase;
+        if (widthDragLeftPadRef.current) widthDragLeftPadRef.current = 0;
+      }
+      /* ⛔ NEW-2 — A PAD ALREADY STAMPED AGAINST `pinnedBase` IS SPENT OUT OF IT, NEVER ADDED ON
+       * TOP OF IT. `pinnedBase` is the sheet's TOTAL committed width — the number the live drag
+       * rendered at the moment the pointer was released — and `widthDragLeftPadRef` is how much
+       * of that total is blank left margin rather than column. Leaving this subtraction out
+       * inflated the page by the pad a SECOND time the instant the drag committed: measured
+       * live, a 90px left-edge drag (580 → 670, held correctly for the whole gesture) jumped
+       * to 760 on release — `growLeft` (90) added on top of a `pinnedPageWidth` that had not
+       * given any of it back. Subtracting it here is what makes `growLeft + padX + contentW`
+       * below sum back to the exact number that was committed, with nothing left to reconcile —
+       * real content overflow (`anchorExtentLeft`) still composes past it via `growLeft`'s own
+       * `Math.max`, exactly as it already did for a pin with no pad at all. */
+      const pinnedPageWidth = pinnedBase != null
+        ? Math.max(1, pinnedBase - padX - (widthDragLeftPadRef.current || 0)) : null;
       /* ⛔ A WIDE TABLE GROWS THE SHEET THE SAME WAY A WIDE BOX DOES (NEW-1, owner report
        * 2026-09-11) — REUSING this path rather than building a second growth mechanism, per the
        * owner's own instruction. A table is in-flow content, not a positioned anchor, so it has
@@ -3170,7 +3218,7 @@ export default function NoteEditor({
        * not move. "Something placed level with the title" (NEW-5 / V993809) still works, and still
        * needs no coordinate migration — it now renders in the space the gap opens up below the
        * band instead of behind it, which is what makes it reachable rather than merely present. */
-      const growLeft = Math.max(0, anchorExtentLeft(blocks) - padSide);
+      const growLeft = Math.max(0, anchorExtentLeft(blocks) - padSide, widthDragLeftPadRef.current || 0);
       const growGap = Math.max(0, anchorExtentTop(blocks) - TITLE_BAND_GAP);
       /* ⛔ THE PIN IS THE BASELINE THE COLUMN STARTS FROM, AND REAL CONTENT IS STILL A FLOOR ON
        * TOP OF IT (NEW-1) — `pinnedPageWidth ?? naturalPageWidth` is the ONLY change from the
@@ -3428,22 +3476,43 @@ export default function NoteEditor({
    *   RIGHT edge  — just grow `sheetGrowWidth` toward the pointer. The left edge already does
    *                 not move for this (it never has), so "the opposite edge holds" is free.
    *   LEFT edge   — ALSO grow `sheetGrowWidth` (rightward, same as above — there is only ever
-   *                 one growth direction at rest), but additionally scroll the mat by the exact
-   *                 same amount the width grew. A page that is `W` wider and a viewport that is
-   *                 scrolled `W` further right show the RIGHT edge at the identical screen
-   *                 position it started at, and the LEFT edge — now `W` further from the
-   *                 viewport's own left edge in content-space, and the viewport shifted `W` to
-   *                 compensate — lands exactly `W` to the left of where it started on screen.
-   *                 That is the whole trick: two numbers moving together, not a second
-   *                 coordinate system. The manual scroll is deliberately LEFT IN PLACE on
-   *                 release, not reset to 0 — `matPadX` (the measurement effect's own gutter,
-   *                 which the commit below re-derives) never depends on the pin (see that
-   *                 effect's own comment on `pinnedPageWidth`), so nothing about the commit moves
-   *                 the sheet's content-space position and there is nothing to re-settle against.
-   *                 A reload, which does not restore scroll position, shows the same width
-   *                 rendered from the app's ordinary left-anchored rest position — identical to a
+   *                 one growth direction at rest), but the room this opens up is spent on a
+   *                 GAP between the sheet's own edge and the body (`sheetGrowLeft`'s own left
+   *                 padding — see `leftWidthGripPad`'s header in notesPageWidth.js), never on a
+   *                 bare scroll with nothing else changed.
+   *
+   *                 ⛔ CORRECTED (NEW-2, owner report 2026-09-17) — A PLAIN SCROLL WAS TRIED FIRST
+   *                 AND MOVED THE WRONG THING. The original version of this comment described
+   *                 exactly that: grow `sheetGrowWidth` and scroll the mat by the same amount, so
+   *                 a page `W` wider with the viewport scrolled `W` further right shows the RIGHT
+   *                 edge at its original screen position. That half was correct and is unchanged
+   *                 below. What it never named is that the SAME scroll moves EVERYTHING ELSE
+   *                 painted in the mat left by the identical `W`, content included — there was
+   *                 nothing distinguishing "the sheet's own boundary, which the pointer is
+   *                 dragging" from "the words inside it, which the owner said must not move."
+   *                 Verbatim: *"existing content... stays anchored in the exact same on-screen
+   *                 position; only the left boundary line moves outward, opening new blank space
+   *                 to the left of the content."*
+   *
+   *                 The fix grows the GAP (`sheetGrowLeft`) instead of leaving it fixed, by the
+   *                 same amount the width grows, and lets the layout effect a few screens down
+   *                 (already built for NOTES-FREE-PLACEMENT, already keyed on `sheetGrowLeft`)
+   *                 do the compensating scroll it already does for THAT feature — it measures the
+   *                 body's own on-screen position and scrolls to hold it, so it is now correcting
+   *                 for a real shift of the body caused by the wider gap, not papering over one.
+   *                 The sheet's own content-space left edge still never moves (unchanged
+   *                 architecture), so with the body held still by that scroll, the sheet's
+   *                 rendered left boundary is the one thing left to visibly track the pointer —
+   *                 which is exactly the boundary-moves-not-the-words picture that was asked for.
+   *                 `widthDragLeftPadRef` is what carries the pad's value from mid-drag through to
+   *                 the measurement effect's own `growLeft` floor once the drag ends and that
+   *                 effect resumes running — see that ref's own header for why, and for why it is
+   *                 deliberately LEFT IN PLACE on release rather than reset to 0: a reload, which
+   *                 restores neither scroll position nor this ref, shows the same stored width
+   *                 rendered from the app's ordinary right-grown rest position — identical to a
    *                 page widened from the right — which is stated here rather than left as a
-   *                 surprise.
+   *                 surprise (the same accepted trade-off `heightTopPadRef`'s own header states
+   *                 for the vertical twin of this problem).
    *
    * ⛔ WHY THIS DOES NOT FIGHT THE MEASUREMENT EFFECT ABOVE: that effect's `measure()` bails out
    * immediately while `widthDragRef.current` is set (see its own comment), so the
@@ -3472,6 +3541,11 @@ export default function NoteEditor({
       // pin is active and would floor a narrowing drag against its own starting point (see the
       // measurement effect's own comment on `widthContentFloorRef`).
       baseGrowWidth: widthContentFloorRef.current || 0,
+      // NEW-2 — whatever left-boundary pad an EARLIER left-edge drag already left open, so this
+      // one composes with it (shrink-then-regrow round trips exactly back to where it started)
+      // rather than resetting to 0 and silently discarding it. 0 for a right-edge drag or a
+      // fresh page — `leftWidthGripPad` never reads this for `edge === "right"`.
+      startLeftPad: widthDragLeftPadRef.current || 0,
     };
     widthDragRef.current = drag;
     setWidthDragEdge(edge);
@@ -3487,7 +3561,15 @@ export default function NoteEditor({
     const apply = () => {
       const w = liveWidthFor(drag.lastClientX);
       setSheetGrowWidth(w);
-      if (edge === "left") scroller.scrollLeft = drag.startScrollLeft + (w - drag.startWidth);
+      /* NEW-2 — the gap grows with the width (`leftWidthGripPad`), and the scroll moves by
+       * exactly the gap's OWN delta, never by `w - drag.startWidth` directly — the two only
+       * agree while the pad is above its own 0 floor; below it, the width keeps shrinking while
+       * the pad (and the scroll compensating for it) has nothing left to give back. */
+      if (edge === "left") {
+        const { pad, padDelta } = leftWidthGripPad(drag.startLeftPad, w - drag.startWidth);
+        setSheetGrowLeft(pad);
+        scroller.scrollLeft = drag.startScrollLeft + padDelta;
+      }
     };
     const onMove = (ev) => {
       drag.lastClientX = ev.clientX;
@@ -3528,7 +3610,18 @@ export default function NoteEditor({
       const moved = Math.abs(drag.lastClientX - drag.startClientX) >= 1;
       if (!moved) return;                              // a click that did not drag writes nothing
       const w = liveWidthFor(drag.lastClientX);
-      editor.commands.setNotePageWidth(Math.round(w));
+      const committed = Math.round(w);
+      /* NEW-2 — stamp the pad's FINAL value and the width it belongs to BEFORE committing, so
+       * the very next measurement-effect run (which the commit below triggers) reads a
+       * `pinnedBase` that already matches `widthPadOwnerRef.current` and keeps the pad instead
+       * of reading it as a stale illusion from a width nobody just dragged (see that ref's own
+       * header, and the measurement effect's own owner-check next to `growLeft`). */
+      if (edge === "left") {
+        const { pad } = leftWidthGripPad(drag.startLeftPad, w - drag.startWidth);
+        widthDragLeftPadRef.current = pad;
+        widthPadOwnerRef.current = committed;
+      }
+      editor.commands.setNotePageWidth(committed);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);

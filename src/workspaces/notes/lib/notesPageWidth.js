@@ -146,3 +146,32 @@ export function resolvePinnedBaseWidth(pageWidth, { paneWidth = 0 } = {}) {
 export function dragWidthFromDelta(startWidth, deltaPx) {
   return clampWidth(startWidth + deltaPx);
 }
+
+/** ⛔ THE LEFT WIDTH GRIP'S "CONTENT DOESN'T MOVE, ONLY THE BOUNDARY DOES" RULE (NEW-2, owner
+ *  report 2026-09-17, verbatim: "existing content... stays anchored in the exact same on-screen
+ *  position; only the left boundary line moves outward, opening new blank space to the left of
+ *  the content"). The sheet's own content-space left edge is architecturally pinned (it never
+ *  moves — see `beginWidthDrag`'s own header in NoteEditor.jsx), so opening real blank space to
+ *  its LEFT without moving the body's words is bought with left PADDING (growing the gap between
+ *  the sheet's own edge and where the body starts) rather than with a bare scroll — exactly the
+ *  mechanism NOTES-FREE-PLACEMENT's `sheetGrowLeft` already uses to hold a free-placed box's own
+ *  text still while the sheet grows around it, reused here rather than invented a second time.
+ *  The PREVIOUS mechanism (grow `sheetGrowWidth` and scroll the mat by the same amount, with the
+ *  gap between the sheet's edge and the body left untouched) held the sheet's RIGHT edge fixed on
+ *  screen — correctly — but the compensating scroll moved EVERYTHING ELSE painted in the mat
+ *  left by the identical amount, content included, because nothing distinguished "the sheet's own
+ *  boundary" from "the words inside it." Growing the pad instead means the SAME compensating
+ *  scroll (see NoteEditor.jsx's `sheetGrowLeft`-keyed layout effect) is now correcting for a real
+ *  layout shift of the body's own position, so it holds the body still — and the sheet's left
+ *  edge, whose content-space position never moved, is what is left to visibly track the pointer.
+ *  @param startPad  the pad already open — 0, or an earlier drag's carried-over amount (this
+ *                    module has no drag SESSION of its own; the caller reads/writes the ref).
+ *  @param delta     live width − width at drag start (+ widened, − narrowed).
+ *  @returns {{ pad: number, padDelta: number }} `pad` is the new absolute pad, floored at 0;
+ *  `padDelta` is exactly how much of it is NEW this call — the amount the scroll must move by to
+ *  hold the body's screen position, never the raw `delta`, so a pad already sitting at its own 0
+ *  floor cannot send the scroll further than the pad itself actually moved. */
+export function leftWidthGripPad(startPad, delta) {
+  const pad = Math.max(0, (startPad || 0) + (delta || 0));
+  return { pad, padDelta: pad - (startPad || 0) };
+}
