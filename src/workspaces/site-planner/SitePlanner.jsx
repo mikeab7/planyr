@@ -312,7 +312,7 @@ import OcrDeedTextarea from "./components/OcrDeedTextarea.jsx";
 import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES, POND_PURPOSE_TOOLTIP, POND_PURPOSE_DESCRIPTOR } from "./lib/pondInspectorCopy.js";
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
-import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, parcelSplitNames, lineageConflicts } from "./lib/siteModel.js";
+import { buildingNumbers, buildingNumberHolder, renumberBuilding, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, parcelSplitNames, lineageConflicts } from "./lib/siteModel.js";
 import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, rectContainsPoint, polygonEdges, polygonContainsPoint, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, cardinalTeePoint, roadBearingDeg } from "./lib/roadGeometry.js";
 import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, rectOutlineCutSegments, polygonOutlineCutSegments } from "./lib/roadNetwork.js";
 import { driveJunctionsOf, teeJunctionsOf } from "./lib/roadJunctions.js";
@@ -2448,6 +2448,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   const [typeMenu, setTypeMenu] = useState(null); // {id, x, y} screen coords for change-type popup
   const [layerMenu, setLayerMenu] = useState(null); // B495: which "Add layer ▾" chooser is open ("dock" | "nondock")
+  // NEW-1 — a typed building number that is already taken by another building, parked here
+  // until the user picks Swap / Shift / Cancel in the Properties panel. `{ id, n, holderId }`.
+  const [bldgNumConflict, setBldgNumConflict] = useState(null);
+  // NEW-1 — bumped only by an explicit Cancel, so the field's own draft snaps back to the real
+  // number (see BuildingNumberField's `resetToken`). Left alone on a fresh conflict — the field
+  // must keep showing what was TYPED while Swap/Shift/Cancel are offered, not the old number.
+  const [bldgNumResetSeq, setBldgNumResetSeq] = useState(0);
+  // NEW-1 — a pending conflict belongs to the building it was raised for; if the selection
+  // moves elsewhere before it's resolved, drop it so a stale Swap/Shift offer can't resurface
+  // (against a number that may no longer even be free) if that building is reselected later.
+  useEffect(() => {
+    if (bldgNumConflict && !(sel?.kind === "el" && sel.id === bldgNumConflict.id)) setBldgNumConflict(null);
+  }, [sel, bldgNumConflict]);
   const [splitNote, setSplitNote] = useState(null); // transient "couldn't explode that field" notice (B472) — loud, never a silent no-op
   const [ovMenu, setOvMenu] = useState(null);     // {id, x, y} site-plan overlay right-click menu (B461)
   const [ovAlignBase, setOvAlignBase] = useState(null); // overlay id armed for "Align to base edge" — next parcel-edge click sets its rotation (B462)
@@ -19356,6 +19369,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // those zones; tombstone them so they stay gone across a merge and the ≥2 drop doesn't false-conflict.
     if (stranded.length) tombstone(stranded);
   };
+  // NEW-1 — attempt to give a building an explicit display number (Properties panel only — see
+  // CLAUDE.md). A free number stamps directly; a number another building already holds is parked
+  // in `bldgNumConflict` for the panel's Swap/Shift/Cancel choice, never silently dropped or
+  // silently taken from its current holder.
+  const attemptBuildingNumber = (id, n) => {
+    if (!Number.isInteger(n) || n < 1) return;
+    const src = stateRef.current.els;
+    const cur = buildingNumbers(src).get(id);
+    if (n === cur) { setBldgNumConflict(null); return; } // already this number — nothing to do
+    const holderId = buildingNumberHolder(src, n, id);
+    if (!holderId) {
+      pushHistory();
+      setEls(src.map((e) => (e.id === id ? { ...e, buildingNumber: n } : e)));
+      setBldgNumConflict(null);
+    } else {
+      setBldgNumConflict({ id, n, holderId });
+    }
+  };
+  // NEW-1 — resolve a pending building-number conflict: "swap" trades the two buildings' numbers,
+  // "shift" gives `id` the number and moves every building numbered `n` or above up by one. Both
+  // are computed as one pass over the CURRENT numbers and applied in one `setEls`, so no two
+  // buildings are ever — even momentarily — shown holding the same number.
+  const resolveBuildingNumberConflict = (mode) => {
+    if (!bldgNumConflict) return;
+    const { id, n } = bldgNumConflict;
+    pushHistory();
+    setEls((a) => renumberBuilding(a, id, n, mode));
+    setBldgNumConflict(null);
+  };
   /* NEW-2 (B385041) — TURN THE DOCK FACE A QUARTER TURN, DELIBERATELY.
      A resize can no longer move the loaded walls by accident, so the app owes the owner a way to
      move them ON PURPOSE. Same shape as `changeBuildingDock` above: stamp the new orientation, then
@@ -26670,6 +26712,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     };
                     return (
                       <>
+                        {/* NEW-1 — the ONE place a building's assigned number can be changed
+                            without deleting and recreating it (CLAUDE.md — the on-canvas label
+                            stays display-only, no click-to-edit there). A free number commits on
+                            blur/Enter with no confirmation; a number another building already
+                            holds blocks the plain commit and offers Swap or Shift instead, so two
+                            buildings can never end up sharing a number, even for a moment. Gaps
+                            left behind by a Shift (or by typing a number well past the current
+                            count) are expected and are never auto-compacted. */}
+                        <Field label="Building number">
+                          <BuildingNumberField
+                            id={b.id}
+                            value={buildingNumbers(els).get(b.id)}
+                            style={numInput}
+                            resetToken={bldgNumResetSeq}
+                            onAttempt={(n) => attemptBuildingNumber(b.id, n)}
+                          />
+                        </Field>
+                        {bldgNumConflict && bldgNumConflict.id === b.id && els.some((e) => e.id === bldgNumConflict.holderId) && (() => {
+                          const holderLabel = `Building ${buildingNumbers(els).get(bldgNumConflict.holderId) ?? bldgNumConflict.n}`;
+                          return (
+                            <div style={{ fontSize: 11, lineHeight: 1.5, margin: "-2px 0 12px", padding: "8px 9px", borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED }}>
+                              <div style={{ color: PAL.ink, marginBottom: 6 }}>That number belongs to {holderLabel} — what should happen?</div>
+                              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                <button style={chip} onClick={() => resolveBuildingNumberConflict("swap")}>Swap with {holderLabel}</button>
+                                <button style={chip} onClick={() => resolveBuildingNumberConflict("shift")}>Shift {bldgNumConflict.n} and up by one</button>
+                                <button style={{ ...chip, background: "transparent", boxShadow: "none" }}
+                                  onClick={() => { setBldgNumConflict(null); setBldgNumResetSeq((s) => s + 1); }}>Cancel</button>
+                              </div>
+                            </div>
+                          );
+                        })()}
                         {grpHdr("Footprint")}
                         {b.points ? (
                           // NEW-1/B872 — an irregular building: Length/Depth become the read-only BOUNDING dims
@@ -30722,6 +30795,69 @@ function AlignIcon({ dir }) {
         return <line key={i} x1={x} y1={ys[i]} x2={x + len} y2={ys[i]} stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />;
       })}
     </svg>
+  );
+}
+// NEW-1 — the Properties panel's "Building number" field. Deliberately its OWN tiny control
+// rather than the shared `NumInput` below: a number another building already holds must not be
+// silently committed OR silently reverted — it has to reach the caller (`onAttempt`) so the
+// panel can offer Swap / Shift / Cancel, and keep showing what was typed while it does. Integer
+// only, no 0 or negative — enforced both by the keystroke filter and the caller's own guard.
+// Commits on Enter (in place, caret kept — never blur, matching every other inline editor here)
+// or on blur; Escape reverts an in-progress edit. `resetToken` is a way IN from the caller: bump
+// it to force the draft back to `value` (used when the panel's own Cancel is clicked, since at
+// that point `value` itself hasn't changed and the plain effect below would have nothing to react to).
+// `id` is the building this instance is currently bound to. It exists because the canvas's own
+// mousedown handler deliberately `preventDefault()`s outside a text field (so a canvas drag never
+// starts a text selection) — which also suppresses the browser's normal focus-shift-on-click-
+// elsewhere, so double-clicking a DIFFERENT building right after an Enter-commit (which leaves
+// this field focused, on purpose) never fires a blur. Without `id`, `editing` would stay latched
+// true forever and this field would keep showing the PREVIOUS building's number. Reset the latch
+// the instant the bound id changes, before deciding whether to resync the draft — never rely on a
+// blur that this app's own canvas can silently withhold.
+function BuildingNumberField({ id, value, onAttempt, style, ariaLabel, resetToken }) {
+  const [draft, setDraft] = useState(String(value));
+  const editing = useRef(false);
+  const boundId = useRef(id);
+  useEffect(() => {
+    if (boundId.current !== id) { boundId.current = id; editing.current = false; }
+    if (!editing.current) setDraft(String(value));
+  }, [id, value, resetToken]);
+  const commit = () => {
+    const n = Math.round(Number(draft));
+    if (draft.trim() === "" || !Number.isFinite(n) || n < 1) { setDraft(String(value)); return; }
+    setDraft(String(n));
+    if (n !== value) onAttempt(n);
+  };
+  return (
+    <input
+      style={style}
+      value={draft}
+      inputMode="numeric"
+      aria-label={ariaLabel || "Building number"}
+      onFocus={() => { editing.current = true; }}
+      onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ""))}
+      onBlur={() => { editing.current = false; commit(); }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commit();
+          editing.current = true; // stays focused — see the NumInput note on why Enter never blurs
+          const el = e.currentTarget;
+          requestAnimationFrame(() => { try { el.select(); } catch (_) {} });
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          // ⛔ Never blur() here — a synchronous blur fires `onBlur` before this `setDraft` has
+          // applied (React state updates are not synchronous), so `commit()` would read the
+          // STALE, about-to-be-reverted draft and commit it. Same reasoning as NumInput's own
+          // Escape: stay focused (`editing.current = true`) and let the plain revert stand; Escape
+          // is deliberately left to bubble (no stopPropagation), which is what lets it *also*
+          // trigger the inspector's own guaranteed escape hatch (B1125) — exactly like every other
+          // field in this panel.
+          setDraft(String(value));
+          editing.current = true;
+        }
+      }}
+    />
   );
 }
 // A numeric input you can edit freely (clear it, type partial values) — it only

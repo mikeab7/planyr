@@ -13,7 +13,8 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  jsonbGroupKeyOf, columnGroupKeyOf, groupKeyMismatch, nameMismatch, unstampedRow, scheduleNameDrift, auditRows,
+  jsonbGroupKeyOf, columnGroupKeyOf, groupKeyMismatch, nameMismatch, unstampedRow, scheduleNameDrift,
+  scheduleNameStaleAgainstLive, auditRows,
 } from "../src/workspaces/site-planner/lib/nameGroupIntegrity.js";
 
 // The real disagreeing row, verbatim (id/group_id/data.groupId/site/data.site), read from
@@ -144,6 +145,40 @@ describe("scheduleNameDrift — informational only, per its own header", () => {
   });
 });
 
+describe("scheduleNameStaleAgainstLive — B1768080, informational only, per its own header", () => {
+  // The real shape read from planyr_production 2026-09-18: schedule id 30 was renamed to
+  // "MUD v PID"; these four `sites` rows in group smqfy48tlk9j still carry the pre-rename hint.
+  const LIVE_NAMES = new Map([["30", "MUD v PID"], ["15", "Richfield"]]);
+
+  it("RED: the real production divergence (schedule 30 renamed, the site's stored hint did not follow)", () => {
+    const row = { id: "sms69x8rb2qk", data: { scheduleProjectId: "30", scheduleProjectName: "Goose Creek" } };
+    expect(scheduleNameStaleAgainstLive(row, LIVE_NAMES)).toEqual({
+      id: "sms69x8rb2qk", scheduleProjectId: "30", storedName: "Goose Creek", liveName: "MUD v PID",
+    });
+  });
+
+  it("GREEN: a hint that still agrees with its schedule's live name (Richfield, schedule 15)", () => {
+    const row = { id: "smt7q6ar8egz", data: { scheduleProjectId: "15", scheduleProjectName: "Richfield" } };
+    expect(scheduleNameStaleAgainstLive(row, LIVE_NAMES)).toBeNull();
+  });
+
+  it("GREEN: no schedule linked, no live map, or the schedule id isn't one the caller fetched (a\n" +
+     "     deleted schedule, or a schedule this run's fetch didn't include) — never guesses", () => {
+    expect(scheduleNameStaleAgainstLive({ id: "p1", data: {} }, LIVE_NAMES)).toBeNull();
+    expect(scheduleNameStaleAgainstLive({ id: "p2", data: { scheduleProjectId: "30", scheduleProjectName: "Goose Creek" } }, null)).toBeNull();
+    // schedule ids 21/23 — real production shape: linked on the site side, but no longer present
+    // in planar_data's projects at all (a deleted schedule).
+    expect(scheduleNameStaleAgainstLive({ id: "p3", data: { scheduleProjectId: "21", scheduleProjectName: "Goose Creek" } }, LIVE_NAMES)).toBeNull();
+  });
+
+  it("a live name of null is still a real answer and can itself disagree with a stored hint", () => {
+    const row = { id: "p1", data: { scheduleProjectId: "9", scheduleProjectName: "Old Name" } };
+    expect(scheduleNameStaleAgainstLive(row, new Map([["9", null]]))).toEqual({
+      id: "p1", scheduleProjectId: "9", storedName: "Old Name", liveName: null,
+    });
+  });
+});
+
 describe("auditRows — the whole-account pass", () => {
   it("catches the real production shape: one group-key mismatch, zero name mismatches", () => {
     const rows = [
@@ -205,5 +240,27 @@ describe("auditRows — the whole-account pass", () => {
     ];
     const { unstampedRows } = auditRows(rows);
     expect(unstampedRows).toEqual([]);
+  });
+
+  it("B1768080: with a live schedule-name map, surfaces the real production divergence (schedule\n" +
+     "     30 renamed to \"MUD v PID\") informationally, without touching the three blocking checks", () => {
+    const rows = [
+      HEALTHY_ROW({ id: "sms69x8rb2qk", group_id: "smqfy48tlk9j", site: "Goose Creek", data: { groupId: "smqfy48tlk9j", site: "Goose Creek", scheduleProjectId: "30", scheduleProjectName: "Goose Creek", siteRenamedAt: 1785525795307 } }),
+      { id: "smt7q6ar8egz", group_id: "smsdrvzr9gzx", site: "Richfield", data: { groupId: "smsdrvzr9gzx", site: "Richfield", scheduleProjectId: "15", scheduleProjectName: "Richfield", siteRenamedAt: 1785525795307 }, deleted_at: null },
+    ];
+    const liveScheduleNameById = new Map([["30", "MUD v PID"], ["15", "Richfield"]]);
+    const out = auditRows(rows, { liveScheduleNameById });
+    expect(out.nameMismatches).toEqual([]);
+    expect(out.groupKeyMismatches).toEqual([]);
+    expect(out.unstampedRows).toEqual([]);
+    expect(out.scheduleNameStaleVsLive).toEqual([
+      { id: "sms69x8rb2qk", scheduleProjectId: "30", storedName: "Goose Creek", liveName: "MUD v PID" },
+    ]);
+  });
+
+  it("omits scheduleNameStaleVsLive entirely (not just empty-but-computed) when no live map is given\n" +
+     "     — the seeded unit suite's own default shape, since it has no scheduler backend to fetch", () => {
+    const rows = [HEALTHY_ROW({ id: "s1" })];
+    expect(auditRows(rows).scheduleNameStaleVsLive).toEqual([]);
   });
 });
