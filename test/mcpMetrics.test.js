@@ -82,4 +82,28 @@ describe("summarizeSite", () => {
     expect(summarizeSite(null).parcels.siteAcres).toBe(0);
     expect(summarizeSite(undefined).elementTally).toEqual({});
   });
+
+  // B1768080 — the stored `scheduleProjectName` is a snapshot taken once, at link time (see this
+  // function's own header); it never learns of a LATER rename on either side. A caller that has
+  // already fetched the live scheduler backend passes its names in, and they must win over the
+  // stale stored copy — this is the exact defect: without `opts`, the assertion below would read
+  // "Old Site Name" (the stored snapshot), not "New Site Name LLC" (the current truth).
+  it("prefers a live schedule name over the stored (possibly stale) snapshot when given one", () => {
+    const data = { scheduleProjectId: 3, scheduleProjectName: "Old Site Name", els: [], parcels: [] };
+    const live = new Map([["3", "New Site Name LLC"]]);
+    expect(summarizeSite(data).schedule).toEqual({ id: 3, name: "Old Site Name" }); // no opts → falls back to the stale snapshot
+    expect(summarizeSite(data, { liveScheduleNames: live }).schedule).toEqual({ id: 3, name: "New Site Name LLC" });
+  });
+
+  it("falls back to the stored snapshot when the live map has no entry for this schedule id", () => {
+    const data = { scheduleProjectId: 3, scheduleProjectName: "Goose Creek", els: [], parcels: [] };
+    const live = new Map([["9", "Some Other Schedule"]]); // a different schedule id — not a match
+    expect(summarizeSite(data, { liveScheduleNames: live }).schedule).toEqual({ id: 3, name: "Goose Creek" });
+  });
+
+  it("a live name of null (a genuinely untitled schedule) still wins over a stale stored guess", () => {
+    const data = { scheduleProjectId: 3, scheduleProjectName: "Old Site Name", els: [], parcels: [] };
+    const live = new Map([["3", null]]);
+    expect(summarizeSite(data, { liveScheduleNames: live }).schedule).toEqual({ id: 3, name: null });
+  });
 });

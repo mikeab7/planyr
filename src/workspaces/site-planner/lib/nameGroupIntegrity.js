@@ -109,29 +109,63 @@ export function unstampedRow(row) {
 /* A row's `scheduleProjectName` hint disagreeing with its project's own current authoritative name.
  *
  * ⛔ DELIBERATELY INFORMATIONAL, NEVER BLOCKING — read this before wiring it into anything that
- * fails a build. The hint mirrors the LINKED SCHEDULE's own name (a fact that lives in a different
- * backend entirely — see storage.js's `setScheduleLink` header: "the pairing is stored on the
- * schedule project… a lightweight HINT is mirrored onto the site"), not the site's own name. The two
- * are allowed to be genuinely different names for two different things that simply happen to match
- * at creation, so forcing equality here would be a product-behaviour change, not a bug fix. What IS
- * a real, worth-reporting defect is a site rename leaving this hint stale with nothing that ever
- * notices — so this is surfaced for awareness (and is what the audit script counts separately from
- * the two blocking checks above), never failed on. Asked only when the hint is genuinely populated:
- * absent/empty means "no schedule linked" and votes on nothing. */
+ * fails a build. ⛔ CORRECTED B1768080 (2026-09-18): this hint is NOT the linked Schedule's own,
+ * separately-editable name — a prior version of this comment said so, but tracing the actual wire
+ * payload (`public/sequence/index.html`'s `emitLinkChanged`, fed by `Scheduler.jsx`'s own
+ * `siteName: routedSiteName`) shows it is a snapshot of the SITE's OWN name taken once, at the
+ * moment the link was created or changed, then never refreshed by any later rename on either side.
+ * So a disagreement here is exactly the staleness B1768080 fixed at the READ sites
+ * (`functions/api/mcp/_tools.js`/`_metrics.js` now prefer the scheduler backend's live name) — this
+ * check stays informational-only because the stored value is still a legitimate fallback for when
+ * that backend is unreachable, never because the two names are allowed to mean different things.
+ * Asked only when the hint is genuinely populated: absent/empty means "no schedule linked" and
+ * votes on nothing. */
 export function scheduleNameDrift(row, authoritativeName) {
   const hint = asName(row && row.data && typeof row.data === "object" ? row.data.scheduleProjectName : null);
   if (hint == null || authoritativeName == null || hint === authoritativeName) return null;
   return { id: row.id, scheduleProjectName: hint, authoritativeName };
 }
 
+/* B1768080 — a row's `scheduleProjectName` hint disagreeing with the schedule's OWN current live
+ * name (from `planar_data`), never asked before this item. `scheduleNameDrift` above compares the
+ * hint against the SITE's name — a different, and now largely harmless, question, since
+ * `functions/api/mcp/_tools.js`/`_metrics.js` no longer trust the stored hint when the live
+ * scheduler backend answers. THIS is the comparison that actually caught a real, live divergence
+ * on 2026-09-18: schedule id 30's stored hint on four `sites` rows read "Goose Creek" while the
+ * schedule itself had been renamed to "MUD v PID" in `planar_data` — a disagreement
+ * `scheduleNameDrift` could never see, because the site's own name ("Goose Creek") never changed.
+ * `liveNameById` is a Map<string, string|null> — see `functions/api/mcp/_tools.js`'s
+ * `liveScheduleNameMap` for the same shape read the same way (string-keyed, since PostgREST hands
+ * back `scheduleProjectId` as text). Silent (`null`) when the row names no schedule, or names one
+ * the live map has nothing for (a schedule the caller never fetched, or one since deleted — the
+ * live map only ever asserts what it actually saw). INFORMATIONAL for the same reason
+ * `scheduleNameDrift` is: this stored value is a legitimate fallback for when the live backend is
+ * unreachable, so a caller never trusting it standing alone is not itself a defect. */
+export function scheduleNameStaleAgainstLive(row, liveNameById) {
+  const hint = asName(row && row.data && typeof row.data === "object" ? row.data.scheduleProjectName : null);
+  if (hint == null || !liveNameById) return null;
+  const schedId = row.data && typeof row.data === "object" ? row.data.scheduleProjectId : null;
+  if (schedId == null) return null;
+  const key = String(schedId);
+  if (!liveNameById.has(key)) return null; // a schedule the caller never fetched, or since deleted
+  const live = liveNameById.get(key);
+  if (live === hint) return null;
+  return { id: row.id, scheduleProjectId: schedId, storedName: hint, liveName: live };
+}
+
 /* The whole-account pass. `rows` is the raw shape `select id, site, data, group_id, updated_at,
  * deleted_at` returns (live + deleted — every check here reasons per-row or per-live-group, never
  * needs a live-only filter the way projectName's split gate does).
  *
- * Returns { nameMismatches, groupKeyMismatches, unstampedRows, scheduleNameDrifts }: the first
- * three are BLOCKING — a caller (the audit script, a future CI gate) should fail loudly on any
- * being non-empty; the last is informational only, per scheduleNameDrift's own header. */
-export function auditRows(rows) {
+ * `opts.liveScheduleNameById` (optional) — see `scheduleNameStaleAgainstLive`'s header. Omitted by
+ * the seeded unit suite (it has no scheduler backend to fetch); the live audit script passes it.
+ *
+ * Returns { nameMismatches, groupKeyMismatches, unstampedRows, scheduleNameDrifts,
+ * scheduleNameStaleVsLive }: the first three are BLOCKING — a caller (the audit script, a future CI
+ * gate) should fail loudly on any being non-empty; the last two are informational only, per their
+ * own headers. */
+export function auditRows(rows, opts) {
+  const liveScheduleNameById = opts && opts.liveScheduleNameById;
   const list = (rows || []).filter(Boolean);
   const nameMismatches = list.map(nameMismatch).filter(Boolean);
   const groupKeyMismatches = list.map(groupKeyMismatch).filter(Boolean);
@@ -160,6 +194,9 @@ export function auditRows(rows) {
   const scheduleNameDrifts = list
     .map((row) => scheduleNameDrift(row, authorityByGroup.get(jsonbGroupKeyOf(row))))
     .filter(Boolean);
+  const scheduleNameStaleVsLive = liveScheduleNameById
+    ? list.map((row) => scheduleNameStaleAgainstLive(row, liveScheduleNameById)).filter(Boolean)
+    : [];
 
-  return { nameMismatches, groupKeyMismatches, unstampedRows, scheduleNameDrifts };
+  return { nameMismatches, groupKeyMismatches, unstampedRows, scheduleNameDrifts, scheduleNameStaleVsLive };
 }

@@ -36,6 +36,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { EditorContent, useEditor } from "@tiptap/react";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
 import { anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, anchorPosAtSelection, fitAnchorBox, placeAnchor } from "../lib/notesAnchorNode.js";
+import { isBlankDoublePress, pressPastLineEnd } from "../lib/notesBlankPaper.js";
 import {
   applyMarquee, boxesInMarquee, latchGesture, marqueeRect, moveSelection, nudgeDelta,
   panTarget, toggleSelection,
@@ -646,6 +647,45 @@ function pressIsBesideLine(editor, pos, clientY) {
   } catch (_) {
     // An unresolvable position is not evidence of a nearby line — treat it as open page.
     return false;
+  }
+}
+
+/**
+ * ⛔ WHERE THE WRITING ON THIS ROW ACTUALLY ENDS — ONE RECTANGLE PER *RENDERED* LINE (NEW-1).
+ *
+ * `pressIsBesideLine` above answers "is there a line at this height", which is all B1368 needed.
+ * It cannot answer "and does the writing reach this far across", because `coordsAtPos` describes
+ * one POSITION, not the extent of the line it sits on. A DOM `Range` over the block's contents
+ * does: `getClientRects()` returns one rect per rendered line, so a paragraph that wraps reports
+ * each of its own lines separately and the press's own `y` picks the right one.
+ *
+ * The block is found by climbing out of the text node until the element stops being inline —
+ * so a bullet's own paragraph is measured, never the whole list, and the right edge is the end of
+ * THAT line's words rather than of the widest sibling.
+ *
+ * Returns `null` when the shape cannot be read, which every caller must treat as "no evidence",
+ * never as "blank paper" — guessing here would place a box in the middle of somebody's sentence.
+ */
+function lineRectsAt(editor, pos) {
+  try {
+    const at = editor.view.domAtPos(pos);
+    let node = at?.node;
+    if (!node) return null;
+    if (node.nodeType === 3) node = node.parentNode;
+    if (!(node instanceof Element)) return null;
+    const dom = editor.view.dom;
+    let block = node;
+    // Climb out of <strong>/<em>/<a>/<span> runs to the element that actually owns the line box.
+    while (block && block !== dom && getComputedStyle(block).display === "inline") {
+      block = block.parentElement;
+    }
+    if (!block || block === dom || !dom.contains(block)) return null;
+    const range = document.createRange();
+    range.selectNodeContents(block);
+    const rects = [...range.getClientRects()].filter((r) => r.width > 0 && r.height > 0);
+    return rects.length ? rects : null;
+  } catch (_) {
+    return null;
   }
 }
 
@@ -2344,6 +2384,10 @@ export default function NoteEditor({
    * to put the caret at its end — working exactly as it always has.
    *
    * ⛔ A PRESS ON TEXT IS UNTOUCHED, and the double-click-to-select-a-word it carries with it. */
+  /* The previous press on blank paper inside the sheet, so the pair can be reconstructed when the
+   * browser does not raise a native double-click of its own (see `isBlankDoublePress`). */
+  const lastBlankPressRef = useRef(null);
+
   const focusFromMat = useCallback((e) => {
     if (!editor || editor.isDestroyed) return;
     const el = e.target;
@@ -2522,6 +2566,43 @@ export default function NoteEditor({
      * note there. Nothing invisible decides it, and there is no distance in it at all. */
     const onSheet = !!el.closest("[data-testid='note-sheet']");
     if (onSheet && hit && Number.isFinite(hit.pos) && pressIsBesideLine(editor, hit.pos, e.clientY)) {
+      /* ⛔ …UNLESS THE PRESS IS A LONG WAY PAST WHERE THAT LINE'S WRITING ACTUALLY ENDS, AND IT IS
+       * THE SECOND OF A PAIR (NEW-1, owner report 2026-09-18 — the FIFTH round on one symptom).
+       *
+       * ⛔ HIS WORDS: *"anything to the right of a line picks up that there's a line of text
+       * already… let's say the line is five inches long. Even if I click a spot 10 inches out, as
+       * long as it's horizontally aligned, it still goes to the original line. So it doesn't work
+       * at all."* Measured on this fixture before the fix: a double-click in open paper level with
+       * "Dustin O'Neal" turned that line into "Dustin O'NealALPHA" and created no box — the test
+       * above is vertical-only, so ten inches out is still "beside" the line.
+       *
+       * ⛔ WHY FOUR ROUNDS NEVER REACHED THIS LINE OF CODE. A project review recorded as settled
+       * fact that the create gesture *"only fires in the grey mat outside the sheet"*, so every
+       * previous fix went to the mat path. He has been pressing INSIDE the page the whole time.
+       *
+       * ⛔ AND WHY IT IS GATED ON A DOUBLE PRESS RATHER THAN SIMPLY WIDENING THE TEST. A SINGLE
+       * click level with a line must go on putting the caret at that line's end — that is B1368,
+       * he asked for it, and `verify-notes-left-margin-reachable` guards it. The two meanings do
+       * not compete once they are separated the way Word already separates them: one click says
+       * "put my caret somewhere sensible", two say "start something here". So this takes only the
+       * second press of a pair, and only well past the end of the words, and everything else
+       * below and above is reached by exactly the presses it always was. */
+      const press = { t: e.timeStamp || Date.now(), x: e.clientX, y: e.clientY };
+      const doublePress = e.detail >= 2 || isBlankDoublePress(lastBlankPressRef.current, press);
+      /* Computed only for a genuine double press, so an ordinary click costs not one extra
+       * measurement — `getClientRects` on every mousedown would be a real price for nothing. */
+      if (doublePress && pressPastLineEnd(lineRectsAt(editor, hit.pos), e.clientX, e.clientY)) {
+        lastBlankPressRef.current = null;           // consumed — a third press starts a fresh pair
+        e.preventDefault();                          // no native word-select, no caret move
+        e.stopPropagation();
+        /* ⛔ `placeBlockAt` DIRECTLY, NOT `beginBlankGesture`. The mat's gesture router also owns
+         * pan and the rubber band, and handing it a press that started on the PAGE would make a
+         * drag from blank paper into text pan the mat instead of selecting words. Arming the
+         * caret is the whole of what this press means. */
+        placeBlockAt(e.clientX, e.clientY);
+        return;
+      }
+      lastBlankPressRef.current = press;
       // Beside real writing. Inside the document the browser is already right and must stay
       // right, or double-click-to-select-a-word dies; outside it (left of the column, above
       // the first line) the sheet forwards the press, which is what B1368 was for.

@@ -21,12 +21,18 @@ _Last updated: 2026-09-18._
 > and that one draws roads as plain rectangles with no corner rounding whatsoever, so it can't be
 > showing you the corner problem. I tried to make it produce those blobs on purpose and couldn't.
 >
-> - [ ] **Two questions, and either answer gets me moving:** which page were you on, and is that
->       little drawing something Planyr drew, or a site plan / brochure you uploaded? (A "CAR
->       PARKS" label with a pointer line is the kind of thing that usually comes on somebody
->       else's flyer — if that's what it is, those blobs are part of the picture you uploaded and
->       there's nothing for me to fix.) A screenshot with a bit more of the page showing would
->       answer both at once.
+> **Update after you said Goose Creek:** I found it — the plan is "Phase II - TAS R1", and the
+> "CAR PARKS" labels are your own callouts, so that drawing is Planyr's, not something you
+> uploaded. That means the blobs are ours to fix. I checked the two most likely causes against
+> your actual plan, read-only, and ruled both out: every drive-into-pavement connection on it
+> meets square (none of them is the shallow-angle problem below), and the two wide roads with
+> tight corners all trace clean.
+>
+> - [ ] **So one question left: which page, and whereabouts on the drawing?** The Spreadsheet tab
+>       genuinely has no site plan in it, so I think you were on the Site Planner with the
+>       Spreadsheet tab just visible along the top — but I'd rather you tell me than guess again.
+>       A screenshot showing a bit more of the page, or just "top-left of the plan", gets me
+>       straight to it.
 
 ## ✅ CLOSED — "HW Review" on Grand Port's Master Schedule needs no repair, nothing on your end (B1701360)
 
@@ -132,10 +138,11 @@ _Last updated: 2026-09-18._
 >       "Confirm email."** That's the whole step; say the word once it's flipped and I'll clean up the "check
 >       your email" wording that would otherwise sit there unused.
 
-## 🔐 One small GitHub setting still open, and two closed hunts (B825232–B825234)
+## 🔐 One GitHub decision open, and three closed hunts (B825232–B825234, B897440, B1764688)
 
-> **Not urgent, and nothing is broken while it waits — it just means a session has to merge a green
-> PR by hand instead of GitHub queuing it automatically.**
+> **Not urgent, and nothing is broken while it waits.** Auto-merge already works fine, PR by PR — the
+> one open item below is only about extra protection against two merges landing on `main` at the exact
+> same moment, which isn't happening today.
 
 - **Authorizing `mikeab7/planyr` for the Cowork session type — closed, turned out unnecessary, not
   done (2026-09-04).** Nobody flipped a switch; the need went away from two directions at once. (a)
@@ -153,16 +160,36 @@ _Last updated: 2026-09-18._
   automation that needed one (`pr-auto-ready.yml`) is now deleted outright, not just silenced. Sessions
   mark their own PRs ready and arm auto-merge by hand now, permanently — full record in
   `docs/archive/BACKLOG-DONE.md` (B793696, B934400–B934402). Don't re-open this hunt.
-- [ ] **Check whether `main` has a branch-protection rule set** (`github.com/mikeab7/planyr/settings/branches`)
-      — a SEPARATE question from the note above (that one is about un-drafting a PR; this is about arming
-      auto-merge on one that's already ready). Found 2026-08-31 (`B897440`) while shipping PR #1245: even
-      after the Workflow-permissions flip and un-drafting the PR by hand, GitHub still refused to arm
-      auto-merge — first "Protected branch rules not configured for this branch," then (once the checks
-      themselves went green) "Pull request in unstable status." GitHub's auto-merge needs a protection rule
-      (at minimum, a required status check) on `main` before it will queue anything, so either there isn't
-      one, or it exists but doesn't name `build` as required. If there's no rule: add one requiring the
-      `build` check to pass before merging. **Nothing is broken while this waits** — a session just has to
-      merge each green PR by hand instead of it happening on its own, same as before this automation existed.
+- **Whether `main` has a branch-protection rule set — closed, answered (B897440).** It does: `main` is
+  protected by a **RULESET** (GitHub's newer mechanism, not the older "classic branch protection rule"
+  a session went looking for in 2026-08-31 and came up empty) named **"Protect Main,"** enforcement
+  Active, targeting the default branch. Its four active rules: restrict deletions, require a pull
+  request before merging, require status checks to pass, and block force pushes. So the 2026-08-31
+  worry — that there might be no rule at all, or one that doesn't name the `build` check — is retired:
+  auto-merge has been arming and completing normally on every PR through today (for example #1710 and
+  #1716). Don't re-open this hunt.
+- [ ] **Decide whether to move the `planyr` repo into a free GitHub organization — the only way to get
+      GitHub's "merge queue" (B1764688).** A merge queue is GitHub's mechanism for lining up several
+      ready-to-merge pull requests and re-testing/merging them one at a time, so two merges can never
+      land on `main` at the exact same instant and step on each other. It is genuinely unavailable
+      here today, and not because a setting got missed: GitHub only offers a merge queue on a public
+      repo owned by an **organization** (a shared GitHub account multiple people/bots belong to — the
+      free kind is what most open-source projects use), or on a private repo with a paid Enterprise
+      plan. `mikeab7/planyr` is public, which is fine, but it's owned by your personal account, not an
+      organization — that's the disqualifier. Confirmed three ways: the current "Protect Main" rule
+      screen offers 13 possible rules and "merge queue" isn't one of them; the older classic-protection
+      screen offers 16 checkboxes and doesn't have it either; and GitHub's own documentation states the
+      organization-ownership requirement outright. It isn't hidden — it just isn't offered.
+      - **What it would take:** create a free GitHub organization and move `mikeab7/planyr` into it.
+        GitHub automatically redirects the old web address, so old links keep working. The real cost is
+        that a few behind-the-scenes settings — Actions secrets, deploy keys, connected integrations —
+        need to be re-checked after the move, since a transfer can occasionally reset one of them.
+      - **What it would buy:** protection against two merges racing each other into `main` at the same
+        moment. Worth knowing this is **not** what would have prevented the earlier CI pileup that first
+        got a merge queue mentioned — that pileup already has its fix shipped (two automated jobs that
+        keep a couple of tracking files fresh without any branch touching them), and it isn't recurring.
+      - **Nothing is broken while this waits** — every pull request through today has gone through fine,
+        one at a time.
 
 ## 👀 One thing only you can check: does the app actually TELL you when it has stopped saving? (V273520 / B484337)
 

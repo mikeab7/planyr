@@ -10,8 +10,15 @@ const SITES_LIGHT = [
   { id: "s1", group_id: "g1", site: "Goose Creek", name: "Pad A", county: "Harris", updated_at: "2026-07-01T00:00:00Z", status: "active", lat: "29.7", lon: "-95.3", sched_id: "3", sched_name: "Goose Creek" },
   { id: "s2", group_id: "g1", site: "Goose Creek", name: "Pad B", county: "Chambers", updated_at: "2026-06-01T00:00:00Z", status: "active", lat: null, lon: null, sched_id: null, sched_name: null },
   { id: "s3", group_id: null, site: "Grandport", name: "Grandport", county: "Harris", updated_at: "2026-05-01T00:00:00Z", status: "pursuit", lat: null, lon: null, sched_id: null, sched_name: null },
+  // B1768080 — linked to the SAME live schedule (id 3, "Goose Creek") as g1, but its stored
+  // `scheduleProjectName` hint is a stale snapshot from whenever the link was created/last
+  // changed. Proves the read sites prefer the live scheduler backend's current name.
+  { id: "s4", group_id: "g4", site: "New Name LLC", name: "New Name LLC", county: "Harris", updated_at: "2026-08-01T00:00:00Z", status: "active", lat: null, lon: null, sched_id: "3", sched_name: "Old Stale Schedule Name" },
 ];
 const SITE_FULL = { id: "s1", site: "Goose Creek", name: "Pad A", county: "Harris", updated_at: "2026-07-01T00:00:00Z", data: { status: "active", parcels: [{ points: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }] }], els: [{ type: "building", w: 50, h: 40 }] } };
+// B1768080 — the full row behind s4/g4: carries the SAME stale `scheduleProjectName` hint
+// SITES_LIGHT's s4 row does, so get_project/get_site_layout can be proven to prefer the live name too.
+const SITE_FULL_S4 = { id: "s4", site: "New Name LLC", name: "New Name LLC", county: "Harris", updated_at: "2026-08-01T00:00:00Z", data: { status: "active", scheduleProjectId: 3, scheduleProjectName: "Old Stale Schedule Name", parcels: [], els: [] } };
 const FACTS = [
   { id: "f1", project_id: "g1", needs_filing: false, state: "filed", category: "Drawings", discipline: "Civil", sheet_number: "C-2.01", sheet_title: "Detention Pond Plan", revision: "B", doc_date: "2026-06-20", source_file: "gc-civil.pdf" },
   { id: "f2", project_id: "g1", needs_filing: false, state: "superseded", category: "Drawings", discipline: "Civil", sheet_number: "C-2.01", sheet_title: "Detention Pond Plan", revision: "A", doc_date: "2026-05-20", source_file: "gc-civil-old.pdf" },
@@ -39,6 +46,7 @@ function makeFetch(overrides = {}) {
     if (u.includes("planar_data")) return ok(SCHED);
     if (u.includes("/rest/v1/sites")) {
       // NB: match ?id= / &id= / group_id= precisely — a bare "id=eq." also hits "user_id=eq."
+      if (/[?&](group_)?id=eq\.(g4|s4)\b/.test(u)) return ok([SITE_FULL_S4]);
       if (/[?&](group_)?id=eq\./.test(u)) return ok([SITE_FULL]);
       return ok(SITES_LIGHT);
     }
@@ -60,7 +68,7 @@ describe("list_projects", () => {
   it("groups sites into projects with drawing counts and scheduler-only projects", async () => {
     vi.stubGlobal("fetch", makeFetch());
     const out = parse(await callTool(ENV, { name: "list_projects", arguments: {} }));
-    expect(out.projects).toHaveLength(2);
+    expect(out.projects).toHaveLength(3);
     const gc = out.projects.find((p) => p.id === "g1");
     expect(gc).toMatchObject({ name: "Goose Creek", status: "active", siteCount: 2, drawingCount: 1, schedule: { id: 3, name: "Goose Creek" } });
     expect(gc.counties.sort()).toEqual(["Chambers", "Harris"]);
@@ -69,12 +77,24 @@ describe("list_projects", () => {
     expect(out.unfiledDrawings).toBe(1);
   });
 
-  it("surfaces a scheduler outage loudly instead of failing the whole tool", async () => {
+  // B1768080 — g4's stored hint ("Old Stale Schedule Name") disagrees with schedule 3's live
+  // name ("Goose Creek"); the live scheduler backend must win.
+  it("prefers the linked schedule's LIVE name over a stale stored hint", async () => {
+    vi.stubGlobal("fetch", makeFetch());
+    const out = parse(await callTool(ENV, { name: "list_projects", arguments: {} }));
+    const renamed = out.projects.find((p) => p.id === "g4");
+    expect(renamed.schedule).toEqual({ id: 3, name: "Goose Creek" });
+  });
+
+  it("surfaces a scheduler outage loudly instead of failing the whole tool, and falls back to the stored hint", async () => {
     vi.stubGlobal("fetch", makeFetch({ planar_data: () => new Response("boom", { status: 500 }) }));
     const out = parse(await callTool(ENV, { name: "list_projects", arguments: {} }));
-    expect(out.projects).toHaveLength(2);
+    expect(out.projects).toHaveLength(3);
     expect(out.scheduleBackendError).toMatch(/500/);
     expect(out.schedulerOnlyProjects).toBeNull();
+    // B1768080 — with the live backend unreachable, the stored (possibly stale) hint is the only
+    // thing left to show — never nothing.
+    expect(out.projects.find((p) => p.id === "g4").schedule).toEqual({ id: 3, name: "Old Stale Schedule Name" });
   });
 });
 
@@ -96,7 +116,19 @@ describe("get_project", () => {
     vi.stubGlobal("fetch", makeFetch());
     const out = parse(await callTool(ENV, { name: "get_project", arguments: { project: "zzz" } }));
     expect(out.error).toMatch(/No project matched/);
-    expect(out.availableProjects.length).toBe(2);
+    expect(out.availableProjects.length).toBe(3);
+  });
+
+  // B1768080 — the live name must win at BOTH the top-level `schedule` field (already fed from a
+  // live fetch before this fix) AND the NESTED per-site `sites[].schedule` field (fed from the
+  // stored hint alone before this fix) — a response that disagreed with itself internally was
+  // the sharpest form of the bug: one call, two different names for the same schedule.
+  it("prefers the linked schedule's LIVE name at both the top level and inside each site summary", async () => {
+    vi.stubGlobal("fetch", makeFetch());
+    const out = parse(await callTool(ENV, { name: "get_project", arguments: { project: "New Name LLC" } }));
+    expect(out.id).toBe("g4");
+    expect(out.schedule.name).toBe("Goose Creek");
+    expect(out.sites[0].schedule).toEqual({ id: 3, name: "Goose Creek" });
   });
 });
 
@@ -106,6 +138,21 @@ describe("get_site_layout / get_schedule", () => {
     const out = parse(await callTool(ENV, { name: "get_site_layout", arguments: { site_id: "s1" } }));
     expect(out.siteId).toBe("s1");
     expect(out.parcels.siteSqft).toBe(10000);
+  });
+
+  // B1768080 — same live-name preference, reached this time without a project group at all.
+  it("prefers the linked schedule's LIVE name over its own stored stale hint", async () => {
+    vi.stubGlobal("fetch", makeFetch());
+    const out = parse(await callTool(ENV, { name: "get_site_layout", arguments: { site_id: "s4" } }));
+    expect(out.siteId).toBe("s4");
+    expect(out.schedule).toEqual({ id: 3, name: "Goose Creek" });
+  });
+
+  it("falls back to the stored hint when the scheduler backend is unreachable", async () => {
+    vi.stubGlobal("fetch", makeFetch({ planar_data: () => new Response("boom", { status: 500 }) }));
+    const out = parse(await callTool(ENV, { name: "get_site_layout", arguments: { site_id: "s4" } }));
+    expect(out.schedule).toEqual({ id: 3, name: "Old Stale Schedule Name" });
+    expect(out.scheduleBackendError).toMatch(/500/);
   });
 
   it("summarizes a schedule with overdue/upcoming and tolerates both predecessor shapes", async () => {

@@ -312,7 +312,7 @@ import OcrDeedTextarea from "./components/OcrDeedTextarea.jsx";
 import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES, POND_PURPOSE_TOOLTIP, POND_PURPOSE_DESCRIPTOR } from "./lib/pondInspectorCopy.js";
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
-import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, parcelSplitNames, lineageConflicts } from "./lib/siteModel.js";
+import { buildingNumbers, buildingNumberHolder, renumberBuilding, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, parcelSplitNames, lineageConflicts } from "./lib/siteModel.js";
 import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, rectContainsPoint, polygonEdges, polygonContainsPoint, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, cardinalTeePoint, roadBearingDeg } from "./lib/roadGeometry.js";
 import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, rectOutlineCutSegments, polygonOutlineCutSegments } from "./lib/roadNetwork.js";
 import { driveJunctionsOf, teeJunctionsOf } from "./lib/roadJunctions.js";
@@ -1898,7 +1898,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [easeMenu, setEaseMenu] = useState(false);        // Easement ▾ rail menu open
   const [easeTypeMenu, setEaseTypeMenu] = useState(false); // attributes-panel type popover open
   const [attachFor, setAttachFor] = useState(null);     // element id awaiting a "click a host" to attach to
-  const [alignFor, setAlignFor] = useState(null);       // element id awaiting a "click a target" to align rotation to
+  const [alignFor, setAlignFor] = useState(null);       // NEW-2 (B1765729) — {kind:"el"|"callout", id} awaiting a "click a target" (a parcel edge, an element, or a callout/text box) to align rotation to; was a bare element id before callouts/text boxes could source an align
   const [panning, setPanning] = useState(false);   // dragging empty canvas to pan
   const spaceRef = useRef(false);                  // Space held → temporary hand-pan over any tool (D4)
   const [spacePan, setSpacePan] = useState(false); // reflects spaceRef for the grab cursor
@@ -2448,6 +2448,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   const [typeMenu, setTypeMenu] = useState(null); // {id, x, y} screen coords for change-type popup
   const [layerMenu, setLayerMenu] = useState(null); // B495: which "Add layer ▾" chooser is open ("dock" | "nondock")
+  // NEW-1 — a typed building number that is already taken by another building, parked here
+  // until the user picks Swap / Shift / Cancel in the Properties panel. `{ id, n, holderId }`.
+  const [bldgNumConflict, setBldgNumConflict] = useState(null);
+  // NEW-1 — bumped only by an explicit Cancel, so the field's own draft snaps back to the real
+  // number (see BuildingNumberField's `resetToken`). Left alone on a fresh conflict — the field
+  // must keep showing what was TYPED while Swap/Shift/Cancel are offered, not the old number.
+  const [bldgNumResetSeq, setBldgNumResetSeq] = useState(0);
+  // NEW-1 — a pending conflict belongs to the building it was raised for; if the selection
+  // moves elsewhere before it's resolved, drop it so a stale Swap/Shift offer can't resurface
+  // (against a number that may no longer even be free) if that building is reselected later.
+  useEffect(() => {
+    if (bldgNumConflict && !(sel?.kind === "el" && sel.id === bldgNumConflict.id)) setBldgNumConflict(null);
+  }, [sel, bldgNumConflict]);
   const [splitNote, setSplitNote] = useState(null); // transient "couldn't explode that field" notice (B472) — loud, never a silent no-op
   const [ovMenu, setOvMenu] = useState(null);     // {id, x, y} site-plan overlay right-click menu (B461)
   const [ovAlignBase, setOvAlignBase] = useState(null); // overlay id armed for "Align to base edge" — next parcel-edge click sets its rotation (B462)
@@ -8453,6 +8466,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const startMoveCallout = (e, id, part, tipIndex = 0) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
+    // NEW-2 (B1765729) — align: this click picks THIS callout/text box as the align target (a
+    // building or another callout aligning its rotation to this one). Mirrors startMoveEl's own
+    // alignFor check and takes precedence over the double-tap/select flow below. Arming a callout
+    // as the align SOURCE happens from its own right-click menu's "Align rotation…" row.
+    if (alignFor) { alignToElement(callouts.find((x) => x.id === id), "callout"); return; }
     // NEW-2 — double-click a callout (box part): branch on WHERE the click landed, not on prior selection
     // (interior text region → edit; border band → Properties — see calloutDblAction). Pointer capture
     // eats the DOM dblclick, so we reconstruct the double-tap here; isDoubleTap only DETECTS the pair now.
@@ -9268,7 +9286,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (d.hostClamp) clampToHost(nb, d.hostClamp); // grow away from the host building
       // B1123 — a CORNER drag legitimately moves both axes, so no dragAxis hint: the exact
       // host-local along measurement decides whether a dock zone's length was really set.
-      setEls((a) => applySwShift(refitChildren(a, d.id, nb, d.kids, { userResize: true }), d.swShift, nb));
+      setEls((a) => applySwShift(refitChildren(a, d.id, nb, d.kids, { userResize: true, freeStackIds: d.freeStackIds }), d.swShift, nb));
       return;
     }
     if (d.mode === "edgeResize") {
@@ -9286,7 +9304,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (d.hostClamp) clampToHost(nb, d.hostClamp); // grow away from the host building
       // B1123 — an EDGE drag knows exactly which local dimension it moved, so a depth-only drag on a
       // dock zone can never be read as the owner setting that zone's length.
-      setEls((a) => applySwShift(refitChildren(a, d.id, nb, d.kids, { userResize: true, dragAxis: { w: nx !== 0, h: ny !== 0 } }), d.swShift, nb));
+      setEls((a) => applySwShift(refitChildren(a, d.id, nb, d.kids, { userResize: true, dragAxis: { w: nx !== 0, h: ny !== 0 }, freeStackIds: d.freeStackIds }), d.swShift, nb));
       return;
     }
     if (d.mode === "rotate") {
@@ -11499,16 +11517,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
          reads as "it snapped back to its old size" on release. `growFreeParkStack` (the "+"/"−"
          ladder) already re-lays the whole stack for this exact case (B1625728's freestanding
          remainder); a direct edge/corner drag on the canvas never got the same treatment. Re-lay
-         the stack (a fresh geometry read — `next` already carries this frame's resize) via the
-         shared pure helper (`relayoutFreeStack`), the freestanding twin of `relayoutWallKids` —
-         it propagates the gap/overlap that opened on whichever side of the dragged piece moved,
-         so undisturbed siblings on the OTHER side never move. */
-      const stack = freeParkStack(next.find((x) => x.id === resized.id) || resized, next);
-      if (stack.length > 1) {
-        const relaid = relayoutFreeStack(stack, resized.id);
-        if (relaid !== stack) {
-          const byId = new Map(relaid.map((p) => [p.id, p]));
-          next = next.map((x) => (byId.has(x.id) ? { ...x, ...byId.get(x.id) } : x));
+         the stack via the shared pure helper (`relayoutFreeStack`), the freestanding twin of
+         `relayoutWallKids` — it propagates the gap/overlap that opened on whichever side of the
+         dragged piece moved, so undisturbed siblings on the OTHER side never move.
+
+         ⛔ NEW-1 (dispatch: parking STILL snaps back on expand, reopening the above) — membership
+         is resolved from `opts.freeStackIds`, captured ONCE (by the caller, before any change —
+         see `freeStackIdsFor`) rather than re-derived here from `next`. Re-deriving it here from
+         `next` was the original (still-broken) shape: `next`'s resized piece already carries THIS
+         frame's new geometry, and a CORNER (or along-wall edge) drag moves `w` along with `h`, so
+         `freeParkStack`'s own width-match test — the thing that tells this stack's pieces apart
+         from an unrelated field sitting nearby — silently found a chain of ONE the instant width
+         diverged, and the depth relayout below never ran. A pure depth-edge drag (never touches
+         `w`) always looked fixed, which is exactly why B1754864's own tests never caught it. */
+      const ids = opts.freeStackIds && opts.freeStackIds.length > 1
+        ? opts.freeStackIds
+        : freeParkStack(next.find((x) => x.id === resized.id) || resized, next).map((p) => p.id); // no pre-captured membership — degrade to the old (width-sensitive) derivation rather than skip relayout outright
+      if (ids.length > 1) {
+        const byId = new Map(next.map((x) => [x.id, x]));
+        const stack = ids.map((pid) => byId.get(pid)).filter(Boolean);
+        if (stack.length > 1) {
+          const relaid = relayoutFreeStack(stack, resized.id);
+          if (relaid !== stack) {
+            const relaidById = new Map(relaid.map((p) => [p.id, p]));
+            next = next.map((x) => (relaidById.has(x.id) ? { ...x, ...relaidById.get(x.id) } : x));
+          }
         }
       }
     }
@@ -11950,12 +11983,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     return best;
   };
-  // Align the alignFor element's rotation to the nearest edge of a parcel (the one
-  // closest to the click), carrying its whole assembly.
-  const alignToParcelEdge = (fp, onlyParcel) => {
-    const el = els.find((x) => x.id === alignFor);
+  // NEW-2 (B1765729) — write a resolved parallel angle onto the alignFor SOURCE (an element's
+  // whole assembly, or a standalone text box/callout) and clear the pending align state. Shared
+  // by both align flows below so a text box/callout can source an align exactly like a building.
+  const commitAlignRotation = (ang) => {
+    if (alignFor && alignFor.kind === "callout") {
+      const c = callouts.find((x) => x.id === alignFor.id);
+      setAlignFor(null);
+      if (!c) return;
+      pushHistory();
+      setCallout(c.id, { rot: snapParallel(c.rot || 0, ang) });
+      return;
+    }
+    const el = els.find((x) => x.id === alignFor?.id);
     setAlignFor(null);
     if (!el || el.points) return;
+    rotateAssemblyTo(el, snapParallel(el.rot || 0, ang));
+  };
+  // Align the alignFor source's rotation to the nearest edge of a parcel (the one
+  // closest to the click), carrying its whole assembly.
+  const alignToParcelEdge = (fp, onlyParcel) => {
+    if (!alignFor) return;
     const list = onlyParcel ? [onlyParcel] : parcels;
     let best = null;
     list.forEach((pc) => pc.points.forEach((a, i) => {
@@ -11963,20 +12011,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const d = segDist(fp, a, b);
       if (!best || d < best.d) best = { d, a, b };
     }));
-    if (!best) return;
+    if (!best) { setAlignFor(null); return; }
     const ang = Math.atan2(best.b.y - best.a.y, best.b.x - best.a.x) * 180 / Math.PI;
-    rotateAssemblyTo(el, snapParallel(el.rot || 0, ang));
+    commitAlignRotation(ang);
   };
-  // Align to another element's rotation (its edges).
-  const alignToElement = (target) => {
-    const el = els.find((x) => x.id === alignFor);
-    setAlignFor(null);
+  // Align to another element's — or, NEW-2 (B1765729), a callout/text box's — rotation (its edges).
+  // `targetKind` defaults to "el" (an element, the original caller); pass "callout" when the click
+  // landed on a text box/callout instead, so it can be the align TARGET too.
+  const alignToElement = (target, targetKind = "el") => {
+    if (!alignFor) return;
     // A centerline road has no single rotation (it's a polyline), so "align parallel" doesn't apply
     // to it as either the source or the target — skip rather than spin its (unused) bbox rot.
-    if (!el || el.points || isCenterlineRoad(el) || !target || target.id === el.id || isCenterlineRoad(target)) return;
-    const ang = target.points ? null : (target.rot || 0);
-    if (ang == null) return; // polygon target has no single rotation
-    rotateAssemblyTo(el, snapParallel(el.rot || 0, ang));
+    if (alignFor.kind === "el" && isCenterlineRoad(els.find((x) => x.id === alignFor.id))) { setAlignFor(null); return; }
+    if (!target || (alignFor.kind === targetKind && target.id === alignFor.id) || (targetKind === "el" && (target.points || isCenterlineRoad(target)))) { setAlignFor(null); return; }
+    commitAlignRotation(target.rot || 0);
   };
   // When a rectangular element is bonded to a (rect) building, capture which of
   // the host's edges it hugs plus the gap, so a resize keeps that host-facing
@@ -12033,6 +12081,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const m = new Map(sw.siblings.map((s) => [s.id, s]));
     return arr.map((x) => m.has(x.id) ? { ...x, cx: m.get(x.id).cx0 + sw.out.x * delta, cy: m.get(x.id).cy0 + sw.out.y * delta } : x);
   };
+  /* NEW-1 (dispatch: parking resize still snaps back on expand, a reopen of B1754864) —
+     `freeParkStack`'s sibling test requires matching WIDTH, and a CORNER (or along-wall edge)
+     drag changes a piece's `w` in the very same frame `refitChildren` re-derives the stack from
+     `next` — so by the time relayoutFreeStack would run, the resized piece's own width has
+     already diverged from its still-untouched siblings and the chain silently drops to length 1.
+     No relayout fires, the untouched (opaque, later-painted) sibling keeps sitting where it was,
+     and the grown region disappears under it — the exact "it snapped back" symptom, just for a
+     handle the B1754864 fix's own tests never drove (they only ever grabbed a pure depth edge,
+     which never touches `w`). Resolve membership ONCE, from the clean, undragged geometry — the
+     same "capture at gesture start" shape `wallKids`/`hostClampOf` already use below — so a
+     resize that also moves `w` can never un-identify its own siblings mid-gesture. */
+  const freeStackIdsFor = (el) => (el && !el.attachedTo && (el.type === "parking" || el.type === "paving") && Number.isFinite(el.sideParkPiece))
+    ? freeParkStack(el, els).map((p) => p.id)
+    : null;
   const startResize = (e, id, sx, sy) => {
     if (tool !== "select" || e.button !== 0) return; // NEW-1 (B1253248): matches every sibling handle starter
     e.stopPropagation();
@@ -12040,7 +12102,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // fixed opposite corner in world feet
     const oppLocal = rot2(-sx * el.w / 2, -sy * el.h / 2, el.rot);
     const opp = { x: el.cx + oppLocal.x, y: el.cy + oppLocal.y };
-    drag.current = { mode: "resize", id, sx, sy, opp, kids: wallKids(el), hostClamp: hostClampOf(el), swShift: swShiftSnapshot(el), ...startGate(e) };
+    drag.current = { mode: "resize", id, sx, sy, opp, kids: wallKids(el), freeStackIds: freeStackIdsFor(el), hostClamp: hostClampOf(el), swShift: swShiftSnapshot(el), ...startGate(e) };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   // B146: a selected element's dimension callout is grab-and-drag to reposition (stored as a
@@ -12170,7 +12232,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // midpoint of the opposite edge stays fixed (world feet)
     const oppLocal = rot2(-nx * el.w / 2, -ny * el.h / 2, el.rot);
     const opp = { x: el.cx + oppLocal.x, y: el.cy + oppLocal.y };
-    drag.current = { mode: "edgeResize", id, nx, ny, opp, kids: wallKids(el), hostClamp: hostClampOf(el), swShift: swShiftSnapshot(el), ...startGate(e) };
+    drag.current = { mode: "edgeResize", id, nx, ny, opp, kids: wallKids(el), freeStackIds: freeStackIdsFor(el), hostClamp: hostClampOf(el), swShift: swShiftSnapshot(el), ...startGate(e) };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startRotate = (e, id) => {
@@ -19307,6 +19369,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // those zones; tombstone them so they stay gone across a merge and the ≥2 drop doesn't false-conflict.
     if (stranded.length) tombstone(stranded);
   };
+  // NEW-1 — attempt to give a building an explicit display number (Properties panel only — see
+  // CLAUDE.md). A free number stamps directly; a number another building already holds is parked
+  // in `bldgNumConflict` for the panel's Swap/Shift/Cancel choice, never silently dropped or
+  // silently taken from its current holder.
+  const attemptBuildingNumber = (id, n) => {
+    if (!Number.isInteger(n) || n < 1) return;
+    const src = stateRef.current.els;
+    const cur = buildingNumbers(src).get(id);
+    if (n === cur) { setBldgNumConflict(null); return; } // already this number — nothing to do
+    const holderId = buildingNumberHolder(src, n, id);
+    if (!holderId) {
+      pushHistory();
+      setEls(src.map((e) => (e.id === id ? { ...e, buildingNumber: n } : e)));
+      setBldgNumConflict(null);
+    } else {
+      setBldgNumConflict({ id, n, holderId });
+    }
+  };
+  // NEW-1 — resolve a pending building-number conflict: "swap" trades the two buildings' numbers,
+  // "shift" gives `id` the number and moves every building numbered `n` or above up by one. Both
+  // are computed as one pass over the CURRENT numbers and applied in one `setEls`, so no two
+  // buildings are ever — even momentarily — shown holding the same number.
+  const resolveBuildingNumberConflict = (mode) => {
+    if (!bldgNumConflict) return;
+    const { id, n } = bldgNumConflict;
+    pushHistory();
+    setEls((a) => renumberBuilding(a, id, n, mode));
+    setBldgNumConflict(null);
+  };
   /* NEW-2 (B385041) — TURN THE DOCK FACE A QUARTER TURN, DELIBERATELY.
      A resize can no longer move the loaded walls by accident, so the app owes the owner a way to
      move them ON PURPOSE. Same shape as `changeBuildingDock` above: stamp the new orientation, then
@@ -19411,7 +19502,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (hc) clampToHost(nb, hc);
     // B1123 — a typed W/H IS a deliberate resize of this element, so a dock zone may pin its length
     // from it; `patch` names the axis the owner typed, which is exactly the dragAxis hint.
-    setEls((a) => refitChildren(a, selEl.id, nb, kids, { userResize: true, dragAxis: { w: patch.w != null, h: patch.h != null } }));
+    // NEW-1 — captured BEFORE the edit, same reason as the drag handlers: a typed Width can move
+    // `w` in the same commit that would otherwise re-derive stack membership from it.
+    const freeStackIds = freeStackIdsFor(selEl);
+    setEls((a) => refitChildren(a, selEl.id, nb, kids, { userResize: true, dragAxis: { w: patch.w != null, h: patch.h != null }, freeStackIds }));
   };
   // B912 — resize a SPECIFIC element to a typed dimension (double-tap its on-canvas dimension label).
   // Mirrors resizeSelEl but targets `el` by value rather than the current selection, so it can be
@@ -19426,7 +19520,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const hc = hostClampOf(el);
     if (hc) clampToHost(nb, hc);
     // B1123 — a typed on-canvas dimension is a deliberate resize of ONE axis (`axisKey`).
-    setEls((a) => refitChildren(a, el.id, nb, kids, { userResize: true, dragAxis: { w: axisKey === "w", h: axisKey === "h" } }));
+    // NEW-1 — captured BEFORE the edit; see resizeSelEl's identical note.
+    const freeStackIds = freeStackIdsFor(el);
+    setEls((a) => refitChildren(a, el.id, nb, kids, { userResize: true, dragAxis: { w: axisKey === "w", h: axisKey === "h" }, freeStackIds }));
   };
   // B912 — open the inline numeric editor on an element's on-canvas dimension NUMBER (double-tap).
   // The geometry resizes to the typed feet: road = travel width; building = depth about its dock
@@ -26113,7 +26209,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // top, so a hardcoded surface colour blanked every colour chip in these panels: the
             // control you click to change a colour showed no colour. Leave it to ColorField.
             const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
-            const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : SURF_RAISED, color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "var(--border-default)" });
+            // NEW-3 (B1765730) — a small, fixed-size icon-button toggle (never flex:1 — see the
+            // Style field below, which used to stretch six of these across two full-width rows).
+            const segSm = (on) => ({ width: 26, height: 26, padding: 0, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: RADIUS.sm, border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : SURF_RAISED, color: on ? "#fff" : PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12 });
             // NEW-3 (B1652706) — the div-flexbox rows below (colour + Size in one row, B/I/U +
             // align in another, a hand-joined "Padding X / Y" field) were the one panel B-A3 never
             // converted to the shared row primitive (Field/PairedField/PairedFieldHead — see the
@@ -26129,19 +26227,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <Section title={selCallout.noLeader ? "Text box" : "Callout"}>
                 <StdSubLabel>Text</StdSubLabel>
                 <Field label="Colour"><ColorField value={toHex6(cs.color)} {...colorCtl((v) => liveCallout({ color: v }))} seed={COLOR_SEED} title="Text color" style={swatch} /></Field>
-                <Field label="Size"><NumInput style={numInput} value={cs.size} min={6} max={96} step={1} coarse={4} onCommit={(n) => setSelCallout({ size: n })} /></Field>
+                <Field label="Size"><NumInput style={numInput} value={cs.size} min={1} max={96} step={1} coarse={4} onCommit={(n) => setSelCallout({ size: n })} /></Field>
+                {/* NEW-3 (B1765730) — bold/italic/underline + align used to be two rows of six
+                    flex:1 buttons, each stretched to fill a third of the panel's width — far
+                    bigger than the glyph it held. One row of small fixed-size icon buttons
+                    (matching the compact controls elsewhere in this panel, e.g. the zoning-tier
+                    toggles) says the same thing in a fraction of the height. B681 — familiar
+                    Word-style alignment icons instead of the cryptic ⇤ ≣ ⇥ unicode. */}
                 <Field label="Style">
-                  <div style={{ display: "flex", gap: 5 }}>
-                    <button style={{ ...seg(cs.bold), fontWeight: 800 }} title="Bold" onClick={() => setSelCallout({ bold: !cs.bold })}>B</button>
-                    <button style={{ ...seg(cs.italic), fontStyle: "italic" }} title="Italic" onClick={() => setSelCallout({ italic: !cs.italic })}>I</button>
-                    <button style={{ ...seg(cs.underline), textDecoration: "underline" }} title="Underline" onClick={() => setSelCallout({ underline: !cs.underline })}>U</button>
-                  </div>
-                </Field>
-                {/* B681 — familiar Word-style alignment icons (stacked rows) instead of the cryptic ⇤ ≣ ⇥ unicode. */}
-                <Field label="Align">
-                  <div style={{ display: "flex", gap: 5 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <button style={{ ...segSm(cs.bold), fontWeight: 800 }} title="Bold" aria-label="Bold" onClick={() => setSelCallout({ bold: !cs.bold })}>B</button>
+                    <button style={{ ...segSm(cs.italic), fontStyle: "italic" }} title="Italic" aria-label="Italic" onClick={() => setSelCallout({ italic: !cs.italic })}>I</button>
+                    <button style={{ ...segSm(cs.underline), textDecoration: "underline" }} title="Underline" aria-label="Underline" onClick={() => setSelCallout({ underline: !cs.underline })}>U</button>
+                    <div style={{ width: 1, height: 18, background: PAL.panelLine, margin: "0 2px" }} />
                     {[["left", "Align left"], ["center", "Align center"], ["right", "Align right"]].map(([a, lbl]) => (
-                      <button key={a} style={{ ...seg(cs.align === a), display: "flex", alignItems: "center", justifyContent: "center" }} title={lbl} aria-label={lbl} onClick={() => setSelCallout({ align: a })}><AlignIcon dir={a} /></button>
+                      <button key={a} style={segSm(cs.align === a)} title={lbl} aria-label={lbl} onClick={() => setSelCallout({ align: a })}><AlignIcon dir={a} /></button>
                     ))}
                   </div>
                 </Field>
@@ -26611,6 +26711,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     };
                     return (
                       <>
+                        {/* NEW-1 — the ONE place a building's assigned number can be changed
+                            without deleting and recreating it (CLAUDE.md — the on-canvas label
+                            stays display-only, no click-to-edit there). A free number commits on
+                            blur/Enter with no confirmation; a number another building already
+                            holds blocks the plain commit and offers Swap or Shift instead, so two
+                            buildings can never end up sharing a number, even for a moment. Gaps
+                            left behind by a Shift (or by typing a number well past the current
+                            count) are expected and are never auto-compacted. */}
+                        <Field label="Building number">
+                          <BuildingNumberField
+                            id={b.id}
+                            value={buildingNumbers(els).get(b.id)}
+                            style={numInput}
+                            resetToken={bldgNumResetSeq}
+                            onAttempt={(n) => attemptBuildingNumber(b.id, n)}
+                          />
+                        </Field>
+                        {bldgNumConflict && bldgNumConflict.id === b.id && els.some((e) => e.id === bldgNumConflict.holderId) && (() => {
+                          const holderLabel = `Building ${buildingNumbers(els).get(bldgNumConflict.holderId) ?? bldgNumConflict.n}`;
+                          return (
+                            <div style={{ fontSize: 11, lineHeight: 1.5, margin: "-2px 0 12px", padding: "8px 9px", borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED }}>
+                              <div style={{ color: PAL.ink, marginBottom: 6 }}>That number belongs to {holderLabel} — what should happen?</div>
+                              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                <button style={chip} onClick={() => resolveBuildingNumberConflict("swap")}>Swap with {holderLabel}</button>
+                                <button style={chip} onClick={() => resolveBuildingNumberConflict("shift")}>Shift {bldgNumConflict.n} and up by one</button>
+                                <button style={{ ...chip, background: "transparent", boxShadow: "none" }}
+                                  onClick={() => { setBldgNumConflict(null); setBldgNumResetSeq((s) => s + 1); }}>Cancel</button>
+                              </div>
+                            </div>
+                          );
+                        })()}
                         {grpHdr("Footprint")}
                         {b.points ? (
                           // NEW-1/B872 — an irregular building: Length/Depth become the read-only BOUNDING dims
@@ -29276,6 +29407,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {row({ text: "Add Leader", dis: !!c.locked, title: c.locked ? "Unlock this note first" : "", on: () => { setAddLeaderFor(c.id); flashWarn("Add Leader: click where the new leader should point — Esc to cancel.", 0); close(); } })}
             {mapMenu.leaderIndex >= 0 && row({ text: "Delete Leader", danger: true, dis: !!c.locked, on: () => { removeLeaderFromCallout(c.id, mapMenu.leaderIndex); close(); } })}
             {row({ text: c.locked ? "Unlock" : "Lock", hint: c.locked ? "\ud83d\udd12" : "\ud83d\udd13", on: () => { toggleCalloutLock(c.id); close(); } })}
+            {/* NEW-2 (B1765729) \u2014 the SAME align-rotation mechanism a building's own right-click
+                menu offers (AlignRotationIcon/alignFor/alignToElement/alignToParcelEdge), extended
+                so a text box or callout can be the align SOURCE too: click a building, another
+                callout/text box, or a parcel edge next to match this one's angle to it. */}
+            {row({ text: "Align rotation\u2026", on: () => { setAlignFor({ kind: "callout", id: c.id }); close(); } })}
             {row({ text: "Copy", hint: `${MOD}C`, on: () => { copyRef({ kind: "callout", id: c.id }); close(); } })}
             {row({ text: "Duplicate", hint: `${MOD}D`, on: () => { duplicateRef({ kind: "callout", id: c.id }); close(); } })}
             {arrangeGroup({ kind: "callout", id: c.id }, { hdr: sep })}
@@ -29498,7 +29634,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {miRow({ icon: <CopyIcon />, text: "Copy", onClick: () => { copyRef({ kind: "el", id: typeMenu.id }); setTypeMenu(null); } })}
                   {miRow({ icon: <MenuDuplicateIcon />, text: "Duplicate", hint: `${MOD}D`, onClick: () => { duplicateEl(typeMenu.id); setTypeMenu(null); } })}
                   {miRow({ icon: <MenuLockIcon open={!t.locked} />, text: t.locked ? "Unlock" : "Lock", onClick: () => { toggleLock(typeMenu.id); setTypeMenu(null); } })}
-                  {!t.points && miRow({ icon: <AlignRotationIcon />, text: "Align rotation…", onClick: () => { setSel({ kind: "el", id: typeMenu.id }); setAlignFor(typeMenu.id); setTypeMenu(null); } })}
+                  {!t.points && miRow({ icon: <AlignRotationIcon />, text: "Align rotation…", onClick: () => { setSel({ kind: "el", id: typeMenu.id }); setAlignFor({ kind: "el", id: typeMenu.id }); setTypeMenu(null); } })}
                   {t.attachedTo
                     ? miRow({ icon: <DetachIcon />, text: "Detach", onClick: () => { detach(typeMenu.id); setTypeMenu(null); } })
                     : miRow({ icon: <AttachIcon />, text: "Attach to…", onClick: () => { setAttachFor(typeMenu.id); setTypeMenu(null); } })}
@@ -30658,6 +30794,69 @@ function AlignIcon({ dir }) {
         return <line key={i} x1={x} y1={ys[i]} x2={x + len} y2={ys[i]} stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />;
       })}
     </svg>
+  );
+}
+// NEW-1 — the Properties panel's "Building number" field. Deliberately its OWN tiny control
+// rather than the shared `NumInput` below: a number another building already holds must not be
+// silently committed OR silently reverted — it has to reach the caller (`onAttempt`) so the
+// panel can offer Swap / Shift / Cancel, and keep showing what was typed while it does. Integer
+// only, no 0 or negative — enforced both by the keystroke filter and the caller's own guard.
+// Commits on Enter (in place, caret kept — never blur, matching every other inline editor here)
+// or on blur; Escape reverts an in-progress edit. `resetToken` is a way IN from the caller: bump
+// it to force the draft back to `value` (used when the panel's own Cancel is clicked, since at
+// that point `value` itself hasn't changed and the plain effect below would have nothing to react to).
+// `id` is the building this instance is currently bound to. It exists because the canvas's own
+// mousedown handler deliberately `preventDefault()`s outside a text field (so a canvas drag never
+// starts a text selection) — which also suppresses the browser's normal focus-shift-on-click-
+// elsewhere, so double-clicking a DIFFERENT building right after an Enter-commit (which leaves
+// this field focused, on purpose) never fires a blur. Without `id`, `editing` would stay latched
+// true forever and this field would keep showing the PREVIOUS building's number. Reset the latch
+// the instant the bound id changes, before deciding whether to resync the draft — never rely on a
+// blur that this app's own canvas can silently withhold.
+function BuildingNumberField({ id, value, onAttempt, style, ariaLabel, resetToken }) {
+  const [draft, setDraft] = useState(String(value));
+  const editing = useRef(false);
+  const boundId = useRef(id);
+  useEffect(() => {
+    if (boundId.current !== id) { boundId.current = id; editing.current = false; }
+    if (!editing.current) setDraft(String(value));
+  }, [id, value, resetToken]);
+  const commit = () => {
+    const n = Math.round(Number(draft));
+    if (draft.trim() === "" || !Number.isFinite(n) || n < 1) { setDraft(String(value)); return; }
+    setDraft(String(n));
+    if (n !== value) onAttempt(n);
+  };
+  return (
+    <input
+      style={style}
+      value={draft}
+      inputMode="numeric"
+      aria-label={ariaLabel || "Building number"}
+      onFocus={() => { editing.current = true; }}
+      onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ""))}
+      onBlur={() => { editing.current = false; commit(); }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commit();
+          editing.current = true; // stays focused — see the NumInput note on why Enter never blurs
+          const el = e.currentTarget;
+          requestAnimationFrame(() => { try { el.select(); } catch (_) {} });
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          // ⛔ Never blur() here — a synchronous blur fires `onBlur` before this `setDraft` has
+          // applied (React state updates are not synchronous), so `commit()` would read the
+          // STALE, about-to-be-reverted draft and commit it. Same reasoning as NumInput's own
+          // Escape: stay focused (`editing.current = true`) and let the plain revert stand; Escape
+          // is deliberately left to bubble (no stopPropagation), which is what lets it *also*
+          // trigger the inspector's own guaranteed escape hatch (B1125) — exactly like every other
+          // field in this panel.
+          setDraft(String(value));
+          editing.current = true;
+        }
+      }}
+    />
   );
 }
 // A numeric input you can edit freely (clear it, type partial values) — it only

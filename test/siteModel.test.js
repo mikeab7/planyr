@@ -3,7 +3,7 @@ import {
   createSiteModel, migrate, SITE_MODEL_VERSION, STATUSES,
   statusOf, parcelsOf, activeParcelsOf, utilitiesOf, annotationsOf,
   constraintsOf, setbacksOf, developableArea, parcelDrawingsOf,
-  buildingNumbers, isBuilding, roadTravelWidth,
+  buildingNumbers, buildingNumberHolder, renumberBuilding, isBuilding, roadTravelWidth,
   parcelChildrenMap, parcelDescendants, parcelAncestors, lineageConflicts,
   parcelDisplayInfo, parcelOutline, parcelSplitNames,
   ROLES, roleOf,
@@ -246,6 +246,111 @@ describe("Site Model — schema, lifecycle status, selectors", () => {
     // a single building is still "Building 1"; bad input yields an empty map
     expect(buildingNumbers([{ id: "x", type: "building" }]).get("x")).toBe(1);
     expect(buildingNumbers(null).size).toBe(0);
+  });
+
+  // NEW-1 — a building may carry an explicit `buildingNumber` (set from the Properties panel).
+  // It is a RESERVATION: it is never reassigned to close a gap, and every other building fills in
+  // around it from the smallest number not already reserved. An untouched plan (no overrides)
+  // must render byte-identical to the plain placement-order case above.
+  describe("buildingNumbers / buildingNumberHolder / renumberBuilding — manual per-building numbering (NEW-1)", () => {
+    it("an explicit buildingNumber is reserved and everyone else fills in around it, leaving the gap", () => {
+      const els = [
+        { id: "e1", type: "building" },
+        { id: "e2", type: "building", buildingNumber: 4 },
+        { id: "e3", type: "building" },
+        { id: "e4", type: "building" },
+      ];
+      const n = buildingNumbers(els);
+      expect(n.get("e2")).toBe(4);       // the reservation holds
+      expect(n.get("e1")).toBe(1);       // placement order fills the free numbers
+      expect(n.get("e3")).toBe(2);
+      expect(n.get("e4")).toBe(3);       // 4 is skipped — never auto-compacted
+      expect(new Set(n.values()).size).toBe(4); // no two buildings ever share a number
+    });
+
+    it("ignores a non-integer, zero or negative override and falls back to placement order for it", () => {
+      const bad = (buildingNumber) => buildingNumbers([
+        { id: "e1", type: "building", buildingNumber },
+        { id: "e2", type: "building" },
+      ]);
+      for (const v of [0, -1, 1.5, "3", null, NaN]) {
+        const n = bad(v);
+        expect(n.get("e1")).toBe(1);
+        expect(n.get("e2")).toBe(2);
+      }
+    });
+
+    it("buildingNumberHolder finds who currently holds a number, excluding a given id, or null if free", () => {
+      const els = [
+        { id: "e1", type: "building" },        // → 1
+        { id: "e2", type: "building" },        // → 2
+        { id: "e3", type: "building", dogEar: { side: "n" }, attachedTo: "e1" },
+      ];
+      expect(buildingNumberHolder(els, 2)).toBe("e2");
+      expect(buildingNumberHolder(els, 2, "e2")).toBe(null); // excluding the holder itself
+      expect(buildingNumberHolder(els, 99)).toBe(null);      // free
+    });
+
+    it("renumberBuilding: a free number is a plain stamp, no other building touched", () => {
+      const els = [{ id: "e1", type: "building" }, { id: "e2", type: "building" }];
+      const next = renumberBuilding(els, "e1", 9);
+      expect(buildingNumbers(next).get("e1")).toBe(9);
+      expect(next.find((e) => e.id === "e2")).toEqual(els[1]); // untouched
+    });
+
+    it("renumberBuilding('swap'): the two buildings trade numbers, nobody else moves, no number is ever duplicated", () => {
+      const els = [
+        { id: "e1", type: "building" }, // 1
+        { id: "e2", type: "building" }, // 2
+        { id: "e3", type: "building" }, // 3
+      ];
+      const next = renumberBuilding(els, "e1", 2, "swap");
+      const n = buildingNumbers(next);
+      expect(n.get("e1")).toBe(2);
+      expect(n.get("e2")).toBe(1);
+      expect(n.get("e3")).toBe(3); // untouched
+      expect(new Set(n.values()).size).toBe(3);
+    });
+
+    it("renumberBuilding('shift'): every building numbered N and above moves up one, opening the slot", () => {
+      const els = [
+        { id: "e1", type: "building" }, // 1
+        { id: "e2", type: "building" }, // 2
+        { id: "e3", type: "building" }, // 3
+        { id: "e4", type: "building" }, // 4
+      ];
+      // e4 (currently 4) wants number 2 — 2 and 3 both shift up to make room.
+      const next = renumberBuilding(els, "e4", 2, "shift");
+      const n = buildingNumbers(next);
+      expect(n.get("e4")).toBe(2);
+      expect(n.get("e1")).toBe(1);  // below the shift point — untouched
+      expect(n.get("e2")).toBe(3);  // 2 → 3
+      expect(n.get("e3")).toBe(4);  // 3 → 4
+      expect(new Set(n.values()).size).toBe(4); // still no duplicate, even mid-resolution
+    });
+
+    it("renumberBuilding('shift') widens an existing gap rather than closing it — gaps are never auto-compacted", () => {
+      const els = [
+        { id: "e1", type: "building" },
+        { id: "e2", type: "building", buildingNumber: 5 },
+        { id: "e3", type: "building" },
+      ];
+      // e3 currently sits at 2 (1 and 5 are reserved/filled; e3 is the only one left → 2).
+      expect(buildingNumbers(els).get("e3")).toBe(2);
+      const next = renumberBuilding(els, "e3", 5, "shift");
+      const n = buildingNumbers(next);
+      expect(n.get("e3")).toBe(5);
+      expect(n.get("e2")).toBe(6); // shifted up rather than losing its reservation
+      expect(n.get("e1")).toBe(1);
+      expect(new Set(n.values()).size).toBe(3);
+    });
+
+    it("renumberBuilding rejects a non-integer, zero or negative target and returns the list unchanged", () => {
+      const els = [{ id: "e1", type: "building" }];
+      for (const bad of [0, -3, 1.2, NaN, undefined, null]) {
+        expect(renumberBuilding(els, "e1", bad)).toBe(els);
+      }
+    });
   });
 
   // A road's dimension is derived from live geometry (cross − 2 curbs), so it tracks a resize
