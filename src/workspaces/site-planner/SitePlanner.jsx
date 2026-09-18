@@ -48,7 +48,7 @@ import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
 import { createViewChangeRecorder, attachTimeline } from "./lib/viewChangeRecorder.js";
 import { createViewFramingGate } from "./lib/viewFramingGate.js";
 import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody, stackHoldsFeature, parseFeatureKey, stackAtPoint, nextPickIndex, ACTION_ATTR } from "./lib/featureTarget.js";
-import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving, freeParkStack } from "./lib/parking.js";
+import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving, freeParkStack, relayoutFreeStack } from "./lib/parking.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale, overlayRasterKey, HIRES_CACHE_PER_OVERLAY } from "./lib/overlayPdf.js";
 import { isDwgFile, convertDwgToDxf } from "./lib/convertClient.js";
 import { uploadOverlayFile, downloadOverlayBytes, downloadOverlayDataUrl, fetchOverlayBytes, fetchOverlayDataUrl, deleteOverlayObject, MAX_BYTES as OVERLAY_MAX_BYTES } from "./lib/overlayStorage.js";
@@ -326,7 +326,7 @@ import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classRe
 import {
   SQFT_PER_ACRE, rot2, elCorners, polyArea, ringOf, carStalls, trailerStalls, estStalls, estTrailers,
   CURB, CURB_6, CURB_12, curbWidthOf, curbEdgesOf, isCenterlineRoad, roadCurbWidth,
-  roadDefaultRadius, roadDenseCenterline, roadStripRing, roadStripArea,
+  roadDefaultRadius, roadDenseCenterline, roadStripRing, roadStripArea, roadCurbLines,
   TEE_COINCIDE_FT, roadJunctionVerticesOf, roundaboutsForSite,
 } from "./lib/siteGeometry.js";
 import { siteMetrics } from "./lib/siteMetrics.js";
@@ -1261,12 +1261,6 @@ const ROAD_FIX_MAX_EXTEND_FT = 25;
 // NEW-5 — below this zoom a radius flag folds to just its corner dot. A fixed-pixel label on a
 // whole-site view sprawls across the plan and reads as attached to nothing (owner, 2026-07-25).
 const ROAD_FLAG_LABEL_PPF = 0.5;
-// The two inner curb lines = the centerline offset by ±travelW/2 (face-of-curb edges).
-const roadCurbLines = (el, settings, sharpAt, trim) => {
-  const dense = roadDenseCenterline(el, settings, sharpAt, trim);
-  const hw = Math.max(0, (+el.travelW || 0) / 2);
-  return [offsetPolyline(dense, hw), offsetPolyline(dense, -hw)].filter(Boolean);
-};
 // B953/NEW-1 — detect road tees for the clean-intersection render. A tee = a centerline road's
 // ENDPOINT coincident with an INTERIOR vertex of another centerline road (the B945/B949 tee
 // topology, where planRoadConnect inserted a vertex on the through road at the weld point). Returns
@@ -11497,6 +11491,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const host = next.find((x) => x.id === resized.attachedTo);
       // NEW-1 — this gesture IS aimed at the row, so it (and only it) may pin an over-length run.
       if (host && host.type === "building" && !host.dogEar) next = relayoutWallKids(next, host, host, { pinFrom: resized.id });
+    } else if (resized && !resized.attachedTo && (resized.type === "parking" || resized.type === "paving") && Number.isFinite(resized.sideParkPiece)) {
+      /* NEW-1 (dispatch: parking snaps back once split) — a direct canvas resize of one piece of a
+         FREESTANDING split stack (no host wall to relay against) never moved its siblings, so
+         growing/shrinking one row/aisle overlapped the next piece instead of pushing it — the
+         paint order then buries the grown edge under an untouched, opaque sibling, which is what
+         reads as "it snapped back to its old size" on release. `growFreeParkStack` (the "+"/"−"
+         ladder) already re-lays the whole stack for this exact case (B1625728's freestanding
+         remainder); a direct edge/corner drag on the canvas never got the same treatment. Re-lay
+         the stack (a fresh geometry read — `next` already carries this frame's resize) via the
+         shared pure helper (`relayoutFreeStack`), the freestanding twin of `relayoutWallKids` —
+         it propagates the gap/overlap that opened on whichever side of the dragged piece moved,
+         so undisturbed siblings on the OTHER side never move. */
+      const stack = freeParkStack(next.find((x) => x.id === resized.id) || resized, next);
+      if (stack.length > 1) {
+        const relaid = relayoutFreeStack(stack, resized.id);
+        if (relaid !== stack) {
+          const byId = new Map(relaid.map((p) => [p.id, p]));
+          next = next.map((x) => (byId.has(x.id) ? { ...x, ...byId.get(x.id) } : x));
+        }
+      }
     }
     // Keep every bonded child's angle locked to the building's (B363) — closes the gap where a
     // strip kept a stale angle through a resize (fitKid preserves rot0, so drift would survive).
@@ -22488,7 +22502,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const hook = () => ({
       regions: roadNet.regions.map((r) => ({ ids: r.ids, outer: r.region.outer, holes: r.region.holes })),
       tees: teeJunctions.map((t) => ({ sideId: t.sideId, throughId: t.throughId, R: t.geom.R, wedges: t.geom.wedges.length, returns: t.geom.returns.map((a) => a.length) })),
-      drives: driveJunctions.map((d) => ({ sideId: d.sideId, kind: d.kind, R: d.geom.R, wedges: d.geom.wedges.length })),
+      // B<NEW-1> (2026-09-18) — the fillet's own CORNERS and TANGENT ARCS ride along too, so a live
+      // harness can measure whether a curb return SURVIVED the dissolve rather than only that one was
+      // requested. Six rounds of this item shipped green because every check read the requested arc
+      // (`returns`, below, which is always complete) and none read the finished boundary against it;
+      // the corner is what makes that comparison possible (a complete return of radius R across a
+      // wedge angle phi stands exactly R/sin(phi/2) - R off its own corner). Read-only, same
+      // `window.__PLANYR_E2E` gate as everything else in this hook, never in production.
+      drives: driveJunctions.map((d) => ({
+        sideId: d.sideId, targetId: d.targetId, kind: d.kind, R: d.geom.R, wedges: d.geom.wedges.length,
+        corners: d.geom.corners, throughTangents: d.geom.throughTangents, sideTangents: d.geom.sideTangents,
+        returns: d.geom.returns.map((a) => a.map((p) => ({ x: p.x, y: p.y }))),
+      })),
       // NEW-4 — the drive target's own PAVED ring, in world feet, for a flood-fill acceptance check
       // (ui-audit/verify-road-junction-paving.mjs): "is (pad ∪ every dissolved road region) free of
       // an enclosed unpaved cell" needs the pad's real geometry, not just the road network's.

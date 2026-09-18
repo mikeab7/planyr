@@ -94,7 +94,57 @@ function closePaths(paths, d) {
  * — carrying a turn this sharp on a segment this short. */
 export const RING_SPIKE_TURN_DEG = DEFAULT_TESS_DEG * 5;   // 30° — >5x the one real ceiling (see above); every
                                                             // legitimate sharp turn is excluded by LEN_FT instead
-export const RING_SPIKE_LEN_FT = 2.0;     // above every measured spurious segment, below the shortest real one
+export const RING_SPIKE_LEN_FT = 2.0;     // above every measured spurious segment (see DRIFT below —
+                                          // this LENGTH proxy is no longer the deciding condition)
+
+/* ⛔ B<NEW-1>/B<NEW-2> (2026-09-18) — THE LENGTH PROXY ABOVE IS NOT A TEST OF "SPURIOUS", AND SEVEN
+ * ROUNDS OF THE ACUTE-SIDE CURB-RETURN ITEM DIED ON THAT. Its own header (above) argues that every
+ * legitimate sharp turn in this geometry rides a segment at least a couple of feet long. MEASURED,
+ * that premise is FALSE, at both call sites, on REAL geometry:
+ *   • road-into-PAD — a curb return's arc runs TANGENT into the pad edge, so the dissolved ring has a
+ *     genuine ~177° CUSP there whose incoming leg is the arc's own last tessellation chord (1.52 ft).
+ *     The cusp exists because the PAD is not part of this dissolve (roads paint at Z_LAYER 0, the pad
+ *     at 1, so the pad covers it) — the shape is correct and invisible, and it is not junk.
+ *   • road-to-ROAD tee near a through road's own END — the leftover sliver of that road's flat end cap
+ *     between the return's clamped overshoot lip and the cap corner: a real 90° corner on a 1.11 ft leg.
+ * Both were convicted, and — because `collapseRingSpikes` re-measures after each removal — removing one
+ * exposed the NEXT arc vertex in the same cusp, so the pass CASCADED and ate the whole curb return one
+ * ~1.5 ft chord at a time. Measured on the road-into-pad case: a complete, correctly tessellated 21-point
+ * arc (fitted R 15.155, RMS 0.0002) entered the union intact and left it with 5 points and a straight
+ * 18 ft chord across the corner. That is the "fold" / "truncated return" this family has been chasing
+ * since B1645792 — the wedge builder was never wrong; the cleanup was eating its output.
+ *
+ * THE REAL TEST OF "SPURIOUS" IS NOT "a short segment" — it is "REMOVING IT BARELY MOVES THE BOUNDARY".
+ * A numerical detour is redundant by definition: the union already traces essentially the same line
+ * without it. A real corner is not, however short the segment it rides. So a vertex is only convicted
+ * when its own DRIFT — its distance from the straight segment joining its two neighbours, i.e. exactly
+ * how far the ring moves if it goes — is below `RING_SPIKE_DRIFT_FT`. This is strictly SUBTRACTIVE:
+ * every condition that applied before still applies, so nothing that survived the old pass can now be
+ * removed, and every artifact the old pass was built for is still removed (the B1611840 / B1690816 junk
+ * measured 0.04–0.05 ft apart — drift ≤ 0.05 ft, an order of magnitude inside the cap).
+ *
+ * THE CAP IS CHOSEN FROM THE TWO MEASURED POPULATIONS, BEFORE LOOKING AT ANY OUTCOME (PERCEPTUAL-PARITY
+ * §4): measured junk drift ≤ 0.05 ft; the shortest REAL segment adjoining a sharp corner measured here
+ * is 1.11 ft. 0.25 ft sits 5× above the first and 4.4× below the second, and is itself half the
+ * narrowest real feature this module ever draws (a 6 in curb). */
+export const RING_SPIKE_DRIFT_FT = 0.25;
+
+/* A BACKSTOP on the whole pass — a different question from the one above, with its own derivation.
+ * `RING_SPIKE_DRIFT_FT` is the load-bearing guard and asks "is this ONE vertex redundant?"; it alone
+ * is what stops the cascade, because every step of the cascade is itself a sharp turn on a full
+ * tessellation chord and so fails that test on its own merits. This one asks the blunter question
+ * "has the pass, in total, moved the drawn outline?" and exists so that no chain of individually
+ * redundant removals can ever add up to an edit, whatever future geometry feeds this.
+ * THE CEILING: the shortest REAL segment measured adjoining a sharp corner anywhere in this
+ * geometry is 1.11 ft (a road's own flat end cap beside a return's clamped overshoot lip), so a
+ * ceiling of 1 ft cannot walk over a genuine feature; and 1 ft of boundary on a site plan is far
+ * below anything visible at working zoom. MEASURED, the largest legitimate cluster found in a
+ * 7,200-case sweep is three tangent-point spurs totalling 0.68 ft, which clears it; the curb-return
+ * cusp that started this item needs 1.5 ft on its FIRST step and is refused by the per-vertex rule
+ * long before this one is consulted. A pass that hits this ceiling STOPS, leaving whatever it has
+ * not yet cleaned — always the safe direction: an un-cleaned sub-inch spur is invisible, and eating
+ * a curb return is not. */
+export const RING_SPIKE_PASS_DRIFT_FT = 1.0;
 
 /* A vertex-level spike rides on an otherwise-viable ring; `collapseRingSpikes` deliberately leaves a
  * ring alone once it is down to a triangle (removing a vertex from a triangle isn't a "collapse",
@@ -130,12 +180,52 @@ export function ringTurnAngles(ring) {
   return out;
 }
 
-// Every vertex that reads as a spurious spike (see the header above for why this pair of
-// conditions, together, can never convict real curvature or a real corner).
+// Distance from `p` to the straight segment a→b (ft). Used as a vertex's DRIFT: how far the ring
+// would move if that vertex were removed and its two neighbours joined directly.
+function segDist(p, a, b) {
+  const vx = b.x - a.x, vy = b.y - a.y;
+  const L2 = vx * vx + vy * vy;
+  if (!(L2 > 1e-12)) return Math.hypot(p.x - a.x, p.y - a.y);
+  let t = ((p.x - a.x) * vx + (p.y - a.y) * vy) / L2;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return Math.hypot(p.x - (a.x + vx * t), p.y - (a.y + vy * t));
+}
+
+// The worst distance any point of `orig` sits from the polyline/ring `ring` (ft) — the one-sided
+// Hausdorff distance used to bound how far a whole collapse pass may move the boundary from where
+// the union actually put it. Measured against the ORIGINAL ring, never the previous step, so a chain
+// of individually-tiny removals cannot accumulate into a visible edit (the same discipline
+// `simplifyRoadVertices` already uses in roadGeometry.js, and for the same reason).
+export function ringDrift(orig, ring) {
+  if (!Array.isArray(orig) || !Array.isArray(ring) || ring.length < 2) return 0;
+  let worst = 0;
+  for (const p of orig) {
+    let best = Infinity;
+    for (let i = 0; i < ring.length; i++) {
+      const d = segDist(p, ring[i], ring[(i + 1) % ring.length]);
+      if (d < best) best = d;
+      if (best <= worst) break;            // cannot raise the running worst — stop early
+    }
+    if (best > worst) worst = best;
+  }
+  return worst;
+}
+
+// Every vertex that reads as a spurious spike. THREE conditions, all necessary: a sharp turn, a short
+// adjoining segment, AND a DRIFT below `RING_SPIKE_DRIFT_FT` — see the header above `RING_SPIKE_DRIFT_FT`
+// for the measurements that make the third one load-bearing (without it this convicts a curb return's
+// own tangential cusp and a road's own end cap, and then cascades along the arc).
 export function ringSpikes(ring, opts = {}) {
   const turnDeg = Number.isFinite(opts.turnDeg) ? opts.turnDeg : RING_SPIKE_TURN_DEG;
   const lenFt = Number.isFinite(opts.lenFt) ? opts.lenFt : RING_SPIKE_LEN_FT;
-  return ringTurnAngles(ring).filter((v) => Math.abs(v.turnDeg) > turnDeg && (v.len1 < lenFt || v.len2 < lenFt));
+  const driftFt = Number.isFinite(opts.driftFt) ? opts.driftFt : RING_SPIKE_DRIFT_FT;
+  const n = ring && ring.length;
+  if (!n || n < 3) return [];
+  return ringTurnAngles(ring).filter((v) => {
+    if (!(Math.abs(v.turnDeg) > turnDeg)) return false;
+    if (!(v.len1 < lenFt || v.len2 < lenFt)) return false;
+    return segDist(ring[v.i], ring[(v.i - 1 + n) % n], ring[(v.i + 1) % n]) < driftFt;
+  });
 }
 
 /* Collapse spurious spike vertices out of a closed ring before it is emitted. Iteratively removes
@@ -146,12 +236,30 @@ export function ringSpikes(ring, opts = {}) {
  * (PERCEPTUAL-PARITY). A ring already at or below a triangle is returned unchanged. */
 export function collapseRingSpikes(ring, opts = {}) {
   if (!Array.isArray(ring) || ring.length < 4) return ring;
-  const pts = ring.slice();
+  const passDriftFt = Number.isFinite(opts.passDriftFt) ? opts.passDriftFt : RING_SPIKE_PASS_DRIFT_FT;
+  const orig = ring.map((p) => ({ x: p.x, y: p.y }));
+  let pts = ring.slice();
   let guard = ring.length + 8; // one removal per pass — this can never run long
   while (guard-- > 0 && pts.length > 3) {
     const spikes = ringSpikes(pts, opts);
     if (!spikes.length) break;
-    pts.splice(spikes[0].i, 1);
+    // ⛔ THE CUMULATIVE BOUND (B<NEW-1>/B<NEW-2>). Each removal is individually below `driftFt` by
+    // construction (`ringSpikes` checks exactly that), but this loop re-measures after every removal,
+    // so a chain of them can walk the boundary arbitrarily far from where the union put it — which is
+    // how a complete curb-return arc was eaten one tessellation chord at a time. The bound is measured
+    // against the ORIGINAL ring, so the whole pass can never move the boundary more than
+    // `RING_SPIKE_PASS_DRIFT_FT`,
+    // however many vertices come out. A candidate that would break it is skipped, not the whole pass:
+    // an unrelated genuine spike elsewhere on the same ring still goes.
+    let removed = false;
+    for (const s of spikes) {
+      const next = pts.slice();
+      next.splice(s.i, 1);
+      if (next.length < 3) continue;
+      if (ringDrift(orig, next) > passDriftFt) continue;
+      pts = next; removed = true; break;
+    }
+    if (!removed) break;
   }
   return pts;
 }
