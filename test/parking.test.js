@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parkDepthForRows, parkRowsForDepth, splitParkingPieces, explodeParkingBands, edgeAbutsPaving, freeParkStack } from "../src/workspaces/site-planner/lib/parking.js";
+import { parkDepthForRows, parkRowsForDepth, splitParkingPieces, explodeParkingBands, edgeAbutsPaving, freeParkStack, relayoutFreeStack } from "../src/workspaces/site-planner/lib/parking.js";
 
 const SD = 18, AI = 24, MOD = 2 * SD + AI; // 60' double-loaded module (18 + 24 + 18)
 
@@ -207,5 +207,134 @@ describe("freeParkStack — freestanding split-stack membership by geometry (NEW
   it("orders by geometry even when sideParkPiece is entirely absent (legacy/untagged data)", () => {
     const untagged = stack.map((e) => { const { sideParkPiece, ...rest } = e; return rest; });
     expect(freeParkStack(untagged[1], untagged).map((e) => e.id)).toEqual(["r0", "a0", "r1"]);
+  });
+});
+
+// NEW-1 (dispatch: "parking snaps back once split") — a direct canvas resize of one piece of a
+// FREESTANDING split stack never moved its siblings, so growing/shrinking one row/aisle overlapped
+// the next piece instead of pushing it out of the way; the untouched, opaque sibling then paints
+// over the grown region (array/z order), which is what reads on screen as "it snapped back to its
+// old size" on release. `relayoutFreeStack` is the freestanding twin of `relayoutWallKids` this
+// fixes with: it PROPAGATES the gap/overlap that opens on whichever side of the resized piece
+// (`resizedId`) actually moved, leaving the untouched side's chain exactly where it was — correct
+// regardless of which edge (or corner) of the resized piece the drag actually grabbed.
+describe("relayoutFreeStack — re-lay a freestanding split stack after one piece's resize (NEW-1)", () => {
+  // Same 2-row (18+24+18) stack as freeParkStack's own fixture above, rot 0, contiguous:
+  // r0 spans [-30,-12], a0 spans [-12,12], r1 spans [12,30].
+  const mk = () => ([
+    { id: "r0", type: "parking", cx: 0, cy: -21, w: 100, h: 18, rot: 0, sideParkPiece: 0 },
+    { id: "a0", type: "paving", cx: 0, cy: 0, w: 100, h: 24, rot: 0, sideParkPiece: 1 },
+    { id: "r1", type: "parking", cx: 0, cy: 21, w: 100, h: 18, rot: 0, sideParkPiece: 2 },
+  ]);
+  const nearFar = (p) => [p.cy - p.h / 2, p.cy + p.h / 2].sort((a, b) => a - b);
+
+  it("is a no-op (returns the SAME array) on an already-contiguous stack", () => {
+    const stack = mk();
+    expect(relayoutFreeStack(stack, "r0")).toBe(stack);
+  });
+
+  it("growing piece 0's depth from its FAR edge (near edge fixed at -30) pushes only the pieces beyond it", () => {
+    const stack = mk();
+    stack[0] = { ...stack[0], h: 68, cy: -30 + 68 / 2 };        // near edge (-30) stays fixed, as an edge drag would leave it
+    const laid = relayoutFreeStack(stack, "r0");
+    const [r0Near, r0Far] = nearFar(laid[0]);
+    const [a0Near, a0Far] = nearFar(laid[1]);
+    const [r1Near, r1Far] = nearFar(laid[2]);
+    expect(r0Near).toBeCloseTo(-30, 6);                         // the fixed (near) end never moves
+    expect(r0Far).toBeCloseTo(r0Near + 68, 6);
+    expect(a0Near).toBeCloseTo(r0Far, 6);                       // contiguous: no gap, no overlap
+    expect(a0Far).toBeCloseTo(a0Near + 24, 6);
+    expect(r1Near).toBeCloseTo(a0Far, 6);
+    expect(r1Far).toBeCloseTo(r1Near + 18, 6);
+  });
+
+  it("shrinking piece 0's depth from its FAR edge pulls the pieces beyond it inward, same invariant", () => {
+    const stack = mk();
+    stack[0] = { ...stack[0], h: 6, cy: -30 + 6 / 2 };
+    const laid = relayoutFreeStack(stack, "r0");
+    const [r0Near, r0Far] = nearFar(laid[0]);
+    const [a0Near] = nearFar(laid[1]);
+    expect(r0Near).toBeCloseTo(-30, 6);
+    expect(a0Near).toBeCloseTo(r0Far, 6);
+  });
+
+  it("growing piece 0's depth from its NEAR edge (far edge fixed at -12) is equally correct", () => {
+    const stack = mk();
+    stack[0] = { ...stack[0], h: 40, cy: -12 - 40 / 2 };        // far edge (-12) stays fixed this time
+    const laid = relayoutFreeStack(stack, "r0");
+    const [r0Near, r0Far] = nearFar(laid[0]);
+    const [a0Near] = nearFar(laid[1]);
+    expect(r0Far).toBeCloseTo(-12, 6);                          // the fixed (far) end never moves
+    expect(a0Near).toBeCloseTo(r0Far, 6);                       // aisle didn't need to move — already touching
+    expect(laid[1]).toBe(stack[1]);                             // identity-preserved: nothing on the far side moved
+  });
+
+  it("growing the MIDDLE piece (the aisle) from its far edge leaves piece 0 untouched and only pushes the outer row", () => {
+    const stack = mk();
+    const before0 = { ...stack[0] };
+    stack[1] = { ...stack[1], h: 60, cy: -12 + 60 / 2 };        // near edge (-12) fixed, far edge extends
+    const laid = relayoutFreeStack(stack, "a0");
+    expect(laid[0]).toBe(stack[0]);                              // identity-preserved: piece 0 didn't move
+    expect(laid[0].cx).toBeCloseTo(before0.cx, 6);
+    expect(laid[0].cy).toBeCloseTo(before0.cy, 6);
+    const [, r0Far] = nearFar(laid[0]);
+    const [a0Near, a0Far] = nearFar(laid[1]);
+    const [r1Near] = nearFar(laid[2]);
+    expect(a0Near).toBeCloseTo(r0Far, 6);
+    expect(r1Near).toBeCloseTo(a0Far, 6);
+  });
+
+  it("growing the OUTERMOST piece leaves the two inner pieces completely untouched", () => {
+    const stack = mk();
+    const before0 = { ...stack[0] }, before1 = { ...stack[1] };
+    stack[2] = { ...stack[2], h: 56, cy: 12 + 56 / 2 };         // near edge (12) fixed, far edge extends outward
+    const laid = relayoutFreeStack(stack, "r1");
+    expect(laid[0]).toBe(stack[0]);
+    expect(laid[1]).toBe(stack[1]);
+    expect(laid[0].cy).toBeCloseTo(before0.cy, 6);
+    expect(laid[1].cy).toBeCloseTo(before1.cy, 6);
+    const [, a0Far] = nearFar(laid[1]);
+    const [r1Near, r1Far] = nearFar(laid[2]);
+    expect(r1Near).toBeCloseTo(a0Far, 6);
+    expect(r1Far).toBeCloseTo(r1Near + 56, 6);
+  });
+
+  it("defaults the pivot to stack[0] when no resizedId is given", () => {
+    const stack = mk();
+    stack[0] = { ...stack[0], h: 68, cy: -30 + 68 / 2 };
+    const laid = relayoutFreeStack(stack);
+    const [, r0Far] = nearFar(laid[0]);
+    const [a0Near] = nearFar(laid[1]);
+    expect(a0Near).toBeCloseTo(r0Far, 6);
+  });
+
+  it("holds under rotation (a stack turned 37°) — the shared axis is derived from the pivot's own rot", () => {
+    const rot = 37;
+    const rad = (rot * Math.PI) / 180, c = Math.cos(rad), s = Math.sin(rad);
+    const world = (lx, ly) => ({ x: lx * c - ly * s, y: lx * s + ly * c });
+    const mkAt = (id, ly, h, sideParkPiece, type = "parking") => { const p = world(0, ly); return { id, type, cx: p.x, cy: p.y, w: 100, h, rot, sideParkPiece }; };
+    const stack = [mkAt("r0", -21, 18, 0), mkAt("a0", 0, 24, 1, "paving"), mkAt("r1", 21, 18, 2)];
+    // grow r0 from its far edge: near edge (world) stays fixed at ly=-30 in local terms.
+    const grown = world(0, -30 + 68 / 2);
+    stack[0] = { ...stack[0], h: 68, cx: grown.x, cy: grown.y };
+    const laid = relayoutFreeStack(stack, "r0");
+    const u = { x: -s, y: c };
+    const nearEdge = (p) => ({ x: p.cx - u.x * p.h / 2, y: p.cy - u.y * p.h / 2 });
+    const nearWorld0 = world(0, -30);
+    const n0After = nearEdge(laid[0]);
+    expect(n0After.x).toBeCloseTo(nearWorld0.x, 6);
+    expect(n0After.y).toBeCloseTo(nearWorld0.y, 6);
+    // contiguity: piece 1's near edge meets piece 0's far edge.
+    const farEdge = (p) => ({ x: p.cx + u.x * p.h / 2, y: p.cy + u.y * p.h / 2 });
+    const f0 = farEdge(laid[0]), n1 = nearEdge(laid[1]);
+    expect(n1.x).toBeCloseTo(f0.x, 6);
+    expect(n1.y).toBeCloseTo(f0.y, 6);
+  });
+
+  it("degrades to a no-op for a lone piece or an empty/invalid stack", () => {
+    const lone = [{ id: "f", type: "parking", cx: 0, cy: 0, w: 100, h: 60, rot: 0 }];
+    expect(relayoutFreeStack(lone)).toBe(lone);
+    expect(relayoutFreeStack([])).toEqual([]);
+    expect(relayoutFreeStack(null)).toBe(null);
   });
 });

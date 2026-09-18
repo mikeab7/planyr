@@ -48,7 +48,7 @@ import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
 import { createViewChangeRecorder, attachTimeline } from "./lib/viewChangeRecorder.js";
 import { createViewFramingGate } from "./lib/viewFramingGate.js";
 import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody, stackHoldsFeature, parseFeatureKey, stackAtPoint, nextPickIndex, ACTION_ATTR } from "./lib/featureTarget.js";
-import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving, freeParkStack } from "./lib/parking.js";
+import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving, freeParkStack, relayoutFreeStack } from "./lib/parking.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale, overlayRasterKey, HIRES_CACHE_PER_OVERLAY } from "./lib/overlayPdf.js";
 import { isDwgFile, convertDwgToDxf } from "./lib/convertClient.js";
 import { uploadOverlayFile, downloadOverlayBytes, downloadOverlayDataUrl, fetchOverlayBytes, fetchOverlayDataUrl, deleteOverlayObject, MAX_BYTES as OVERLAY_MAX_BYTES } from "./lib/overlayStorage.js";
@@ -11455,6 +11455,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const host = next.find((x) => x.id === resized.attachedTo);
       // NEW-1 — this gesture IS aimed at the row, so it (and only it) may pin an over-length run.
       if (host && host.type === "building" && !host.dogEar) next = relayoutWallKids(next, host, host, { pinFrom: resized.id });
+    } else if (resized && !resized.attachedTo && (resized.type === "parking" || resized.type === "paving") && Number.isFinite(resized.sideParkPiece)) {
+      /* NEW-1 (dispatch: parking snaps back once split) — a direct canvas resize of one piece of a
+         FREESTANDING split stack (no host wall to relay against) never moved its siblings, so
+         growing/shrinking one row/aisle overlapped the next piece instead of pushing it — the
+         paint order then buries the grown edge under an untouched, opaque sibling, which is what
+         reads as "it snapped back to its old size" on release. `growFreeParkStack` (the "+"/"−"
+         ladder) already re-lays the whole stack for this exact case (B1625728's freestanding
+         remainder); a direct edge/corner drag on the canvas never got the same treatment. Re-lay
+         the stack (a fresh geometry read — `next` already carries this frame's resize) via the
+         shared pure helper (`relayoutFreeStack`), the freestanding twin of `relayoutWallKids` —
+         it propagates the gap/overlap that opened on whichever side of the dragged piece moved,
+         so undisturbed siblings on the OTHER side never move. */
+      const stack = freeParkStack(next.find((x) => x.id === resized.id) || resized, next);
+      if (stack.length > 1) {
+        const relaid = relayoutFreeStack(stack, resized.id);
+        if (relaid !== stack) {
+          const byId = new Map(relaid.map((p) => [p.id, p]));
+          next = next.map((x) => (byId.has(x.id) ? { ...x, ...byId.get(x.id) } : x));
+        }
+      }
     }
     // Keep every bonded child's angle locked to the building's (B363) — closes the gap where a
     // strip kept a stale angle through a resize (fitKid preserves rot0, so drift would survive).

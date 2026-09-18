@@ -166,3 +166,52 @@ export function freeParkStack(el, all, eps = 0.5) {
     ? a.el.sideParkPiece - b.el.sideParkPiece : a.lo - b.lo);
   return chain.map((r) => r.el);
 }
+
+/* NEW-1 (B1749152 dispatch) — A DIRECT CANVAS RESIZE of one piece of a FREESTANDING split stack
+ * never moved its siblings, so growing/shrinking one row overlapped the next one instead of
+ * pushing it — the exact "resizing ONE piece of a bonded stack in place doesn't move its
+ * siblings" root cause `freeParkStack`'s own header describes, except that fix (B1625728,
+ * growFreeParkStack) only reached the "+"/"−" ladder, never a direct edge/corner drag on the
+ * canvas. `refitChildren` already re-lays a WALL-BONDED stack on every resize frame
+ * (relayoutWallKids); this closes the gap the freestanding remainder left open.
+ *
+ * The resized piece's own box (whichever edge the drag actually grabbed — a plain edge drag keeps
+ * the OPPOSITE edge fixed, a corner drag both axes at once) is trusted as-is; it is never
+ * re-derived from an assumed "always grows from this one fixed end" rule the way the wall-bonded
+ * case can (there, `wallKidBox`'s `gap` always measures from the WALL, so it doesn't matter which
+ * edge the user dragged — every resize reads as "grow away from the wall"). A freestanding stack
+ * has no such absolute reference, so the fix instead PROPAGATES: whichever of the resized piece's
+ * two neighbours (in `sideParkPiece` order) no longer touches it cleanly gets the whole chain on
+ * its side shifted by exactly the gap/overlap that opened, so contiguity is restored on BOTH sides
+ * independently — the side whose edge stayed put shows a zero gap and is left untouched, the side
+ * that moved gets shifted to meet it. `resizedId` names which piece in `stack` is the pivot;
+ * omitted, `stack[0]` is used (a caller relaying without a specific gesture in mind). Depth is
+ * each piece's own extent along the stack's shared axis (`h`, since every piece — split or
+ * appended — is built with its depth on the local-Y axis at a shared `rot`, per
+ * `splitParkingRows`/`growFreeParkStack`); `stack[0].rot` is assumed shared by every member,
+ * exactly as `freeParkStack`'s own width/angle membership test already requires.
+ * Identity-preserving (both the array and any untouched member) when nothing needs to move.
+ */
+export function relayoutFreeStack(stack, resizedId) {
+  if (!Array.isArray(stack) || stack.length < 2) return stack;
+  const idx = resizedId != null ? stack.findIndex((p) => p && p.id === resizedId) : 0;
+  const k = idx >= 0 ? idx : 0;
+  const rot = (stack[k] && stack[k].rot) || 0;
+  const u = rotPt(0, 1, rot);                                   // shared stacking axis, local +y in world
+  const along = (x, y) => x * u.x + y * u.y;                     // scalar coordinate along the stacking axis
+  const edgeAt = (p, sign) => along(p.cx + u.x * sign * p.h / 2, p.cy + u.y * sign * p.h / 2);
+  const shift = (arr, from, to, step, delta) => {
+    for (let i = from; i !== to; i += step) arr[i] = { ...arr[i], cx: arr[i].cx + u.x * delta, cy: arr[i].cy + u.y * delta };
+  };
+  const out = stack.slice();
+  let changed = false;
+  if (k > 0) {                                                  // close a gap/overlap toward the near (-u) side
+    const delta = edgeAt(out[k], -1) - edgeAt(out[k - 1], 1);
+    if (Math.abs(delta) > 1e-6) { shift(out, k - 1, -1, -1, delta); changed = true; }
+  }
+  if (k < out.length - 1) {                                     // close a gap/overlap toward the far (+u) side
+    const delta = edgeAt(out[k], 1) - edgeAt(out[k + 1], -1);
+    if (Math.abs(delta) > 1e-6) { shift(out, k + 1, out.length, 1, delta); changed = true; }
+  }
+  return changed ? out : stack;
+}
