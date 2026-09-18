@@ -326,7 +326,7 @@ import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classRe
 import {
   SQFT_PER_ACRE, rot2, elCorners, polyArea, ringOf, carStalls, trailerStalls, estStalls, estTrailers,
   CURB, CURB_6, CURB_12, curbWidthOf, curbEdgesOf, isCenterlineRoad, roadCurbWidth,
-  roadDefaultRadius, roadDenseCenterline, roadStripRing, roadStripArea,
+  roadDefaultRadius, roadDenseCenterline, roadStripRing, roadStripArea, roadCurbLines,
   TEE_COINCIDE_FT, roadJunctionVerticesOf, roundaboutsForSite,
 } from "./lib/siteGeometry.js";
 import { siteMetrics } from "./lib/siteMetrics.js";
@@ -1261,12 +1261,6 @@ const ROAD_FIX_MAX_EXTEND_FT = 25;
 // NEW-5 — below this zoom a radius flag folds to just its corner dot. A fixed-pixel label on a
 // whole-site view sprawls across the plan and reads as attached to nothing (owner, 2026-07-25).
 const ROAD_FLAG_LABEL_PPF = 0.5;
-// The two inner curb lines = the centerline offset by ±travelW/2 (face-of-curb edges).
-const roadCurbLines = (el, settings, sharpAt, trim) => {
-  const dense = roadDenseCenterline(el, settings, sharpAt, trim);
-  const hw = Math.max(0, (+el.travelW || 0) / 2);
-  return [offsetPolyline(dense, hw), offsetPolyline(dense, -hw)].filter(Boolean);
-};
 // B953/NEW-1 — detect road tees for the clean-intersection render. A tee = a centerline road's
 // ENDPOINT coincident with an INTERIOR vertex of another centerline road (the B945/B949 tee
 // topology, where planRoadConnect inserted a vertex on the through road at the weld point). Returns
