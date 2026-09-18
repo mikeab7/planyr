@@ -75,9 +75,17 @@
 -- and no server-side check at all — this was already the more dangerous of the two paths, just
 -- not the one an unattended timer could trigger. The refusal now surfaces exactly like any other
 -- purge failure (`cloudHardDelete`'s existing error handling → the UI's existing "couldn't be
--- permanently deleted" toast), loudly, not silently. If a way to intentionally purge one dead
--- plan out of a live project is wanted, that is a distinct, deliberate follow-up feature — not
--- built here, and not silently reopened by this fix either.
+-- permanently deleted" toast), loudly, not silently.
+--
+-- ⛔ B1767168 — THE FOLLOW-UP NAMED ABOVE NOW EXISTS: `db/purge_one_deleted_plan.sql`'s
+-- `purge_one_deleted_plan(p_id)` RPC is the ONE deliberate, server-checked way to purge exactly one
+-- dead plan out of an otherwise-live project. It re-proves ownership, that the row is really in the
+-- trash, and that a live sibling genuinely survives the delete — never a whole project — and then
+-- signals THIS trigger, transaction-locally, to stand down for that one row only
+-- (`planyr.single_plan_purge`, set via `set_config(..., true)`, so it can never leak past the RPC's
+-- own transaction or apply to any other row). Every other caller — the account-wide bin's
+-- "Delete forever", the 30-day expiry sweep, and a plain `DELETE` issued by any client vintage that
+-- doesn't know this RPC exists — gets EXACTLY the refusal this file always gave, unchanged.
 --
 -- ============================================================================================
 -- FAIL-SAFE
@@ -94,8 +102,8 @@
 -- 1) The guard. BEFORE DELETE, per row:
 --      (a) refuse if this row was never even soft-deleted (belt-and-suspenders — every real
 --          caller only ever hard-deletes an already-trashed row);
---      (b) refuse if another row sharing this row's group key still has deleted_at IS NULL
---          (i.e. is LIVE).
+--      (b) unless the transaction-local B1767168 bypass names exactly this row, refuse if another
+--          row sharing this row's group key still has deleted_at IS NULL (i.e. is LIVE).
 -- ---------------------------------------------------------------------------
 create or replace function public.sites_block_delete_live_group()
 returns trigger
@@ -105,10 +113,21 @@ as $$
 declare
   gkey    text := coalesce(old.data->>'groupId', old.id);
   live_id text;
+  -- B1767168 — `purge_one_deleted_plan()` sets this, transaction-locally, to the ONE row id it has
+  -- already independently proved is safe to purge out of an otherwise-live group (ownership
+  -- re-checked, genuinely soft-deleted, a live sibling confirmed to survive). `is_local => true`
+  -- means it can never outlive that RPC's own transaction or apply to a row other than the one it
+  -- names — an ordinary DELETE (or a DELETE from any other session) reads this as NULL and gets the
+  -- unconditional refusal exactly as before.
+  bypass  text := current_setting('planyr.single_plan_purge', true);
 begin
   if old.deleted_at is null then
     raise exception 'sites_block_delete_live_group: refusing to permanently delete % — it is not in the trash (deleted_at is null)', old.id
       using errcode = 'PLYR1';
+  end if;
+
+  if bypass is not null and bypass = old.id then
+    return old; -- purge_one_deleted_plan() already proved a live sibling survives this delete
   end if;
 
   select s.id into live_id
@@ -130,8 +149,10 @@ $$;
 comment on function public.sites_block_delete_live_group() is
   'BEFORE DELETE guard (B1517888): refuses to hard-delete a sites row while its project group '
   '(coalesce(data->>''groupId'', id)) still has a live (deleted_at is null) plan, or while the '
-  'row itself was never soft-deleted. See db/sites_block_delete_live_group.sql for the production '
-  'incident behind it.';
+  'row itself was never soft-deleted — except for the ONE row named by the transaction-local '
+  'planyr.single_plan_purge flag (B1767168), set only by public.purge_one_deleted_plan() after it '
+  'has independently re-proved the purge is safe. See db/sites_block_delete_live_group.sql for the '
+  'production incident behind the base guard and db/purge_one_deleted_plan.sql for the bypass.';
 
 -- ---------------------------------------------------------------------------
 -- 2) An expression index on the same group-key computation, so the guard's lookup (and any
@@ -149,4 +170,6 @@ create trigger sites_block_delete_live_group
   for each row execute function public.sites_block_delete_live_group();
 
 -- Verification (run after): db/test/sites_block_delete_live_group.test.sql — self-rolling-back,
--- proves a smshwnnijjfi-shaped delete is refused and a genuinely dead group still purges cleanly.
+-- proves a smshwnnijjfi-shaped delete is refused, a genuinely dead group still purges cleanly, and
+-- (B1767168) the purge_one_deleted_plan() bypass fires for exactly the row it names and refuses to
+-- destroy a whole project.
