@@ -19,19 +19,49 @@
  */
 import { describe, it, expect } from "vitest";
 import { rectEdges, polygonEdges, nearestRectEdge, teeGeometry, nodeJunction, roadEdgeCrossing, rectContainsPoint } from "../src/workspaces/site-planner/lib/roadGeometry.js";
-import { dissolveRings } from "../src/workspaces/site-planner/lib/roadNetwork.js";
+import { dissolveRings, collapseRingSpikes } from "../src/workspaces/site-planner/lib/roadNetwork.js";
 import { roadStripRing, roadCurbWidth } from "../src/workspaces/site-planner/lib/siteGeometry.js";
 
-// A "sane bound": no genuine corner in this geometry both turns this sharply AND rides a segment
-// this short. A smoothly tessellated fillet arc (DEFAULT_TESS_DEG per vertex) never turns anywhere
-// near this much per vertex, however short its chords get at a tight radius — so this can never
-// convict real curvature. Every genuine sharp corner here (a road's own flat end cap, the mouth
-// chord where two curb returns meet near-perpendicular) sits on a segment at least a couple of feet
-// long — well above SHORT_SEG_FT.
+/* ⛔ CORRECTED 2026-09-18 (B<NEW-1>/B<NEW-2>) — THIS SCANNER'S ORIGINAL PREMISE WAS FALSE, AND IT IS
+ * WHY THE ACUTE-SIDE CURB-RETURN ITEM SURVIVED SIX ROUNDS AND EIGHT PRs.
+ *
+ * The premise it shipped with, verbatim: "no genuine corner in this geometry both turns this sharply
+ * AND rides a segment this short." MEASURED on the real pipeline, that is wrong at BOTH junction
+ * families, on geometry that is entirely correct:
+ *   • road-into-PAD — a curb return's arc runs TANGENT into the pad edge, so the dissolved ring (which
+ *     holds the road network ALONE; the pad is a separate element painted over it, Z_LAYER 1 vs 0)
+ *     carries a genuine ~177 deg CUSP there. Its incoming leg is the arc's own last tessellation
+ *     chord — 1.1-1.9 ft, under SHORT_SEG_FT.
+ *   • road-to-ROAD tee near a through road's own END — the leftover sliver of that road's flat end cap
+ *     between the return's clamped overshoot lip and the cap corner: a real 90 deg corner on a 0.3-1.1 ft leg.
+ * Both were convicted as spikes, and production's `collapseRingSpikes` re-measures after each removal,
+ * so removing one exposed the next arc vertex in the same cusp and the pass CASCADED — eating a
+ * complete 21-point curb return down to 5 points and a straight chord across the corner. This suite
+ * then reported GREEN, because the cascade had removed the very vertex it was scanning for.
+ *
+ * THE CORRECTION: convict only a vertex that is also REDUNDANT — one whose removal barely moves the
+ * boundary. DRIFT (a vertex's distance from the straight segment joining its two neighbours) is
+ * exactly "how far the ring moves if this vertex goes". The artifacts this suite was built for
+ * (B1611840's near-duplicate tangent-point vertices, B1690816's 82-88 deg spurs) measured 0.04-0.05 ft
+ * apart, so their drift is an order of magnitude inside the cap and they are still convicted — proven
+ * directly by the teeth-proof case at the bottom of this file, which plants one and requires BOTH this
+ * scanner to see it AND production to remove it. A real corner's drift is its own leg length, which is
+ * why the two populations separate cleanly (0.05 ft against 1.1 ft+, with the cap at 0.25 ft between
+ * them). This mirrors production's own `RING_SPIKE_DRIFT_FT`, but is derived here independently — this
+ * instrument must still be able to convict the unfixed geometry on its own terms. */
 const TURN_BOUND_DEG = 100;
 const SHORT_SEG_FT = 2.0;
+const DRIFT_FT = 0.25;
 
-function ringTurnSpikes(ring, turnBoundDeg, shortSegFt) {
+function segDist(p, a, b) {
+  const vx = b.x - a.x, vy = b.y - a.y, L = vx * vx + vy * vy;
+  if (!(L > 1e-12)) return Math.hypot(p.x - a.x, p.y - a.y);
+  let t = ((p.x - a.x) * vx + (p.y - a.y) * vy) / L;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return Math.hypot(p.x - (a.x + vx * t), p.y - (a.y + vy * t));
+}
+
+function ringTurnSpikes(ring, turnBoundDeg, shortSegFt, driftFt = DRIFT_FT) {
   const n = ring.length;
   const out = [];
   for (let i = 0; i < n; i++) {
@@ -40,8 +70,9 @@ function ringTurnSpikes(ring, turnBoundDeg, shortSegFt) {
     const len1 = Math.hypot(v1.x, v1.y), len2 = Math.hypot(v2.x, v2.y);
     if (!(len1 > 1e-9) || !(len2 > 1e-9)) continue;
     const turnDeg = Math.abs(Math.atan2(v1.x * v2.y - v1.y * v2.x, v1.x * v2.x + v1.y * v2.y)) * 180 / Math.PI;
-    if (turnDeg > turnBoundDeg && (len1 < shortSegFt || len2 < shortSegFt)) {
-      out.push({ i, turnDeg: Math.round(turnDeg * 10) / 10, len1: Math.round(len1 * 1000) / 1000, len2: Math.round(len2 * 1000) / 1000 });
+    const drift = segDist(b, a, c);
+    if (turnDeg > turnBoundDeg && (len1 < shortSegFt || len2 < shortSegFt) && drift < driftFt) {
+      out.push({ i, turnDeg: Math.round(turnDeg * 10) / 10, len1: Math.round(len1 * 1000) / 1000, len2: Math.round(len2 * 1000) / 1000, drift: Math.round(drift * 1000) / 1000 });
     }
   }
   return out;
@@ -236,5 +267,67 @@ describe("NEW-1 (B1690816) — sub-100° tangent-point spurs collapseRingSpikes 
         assertNoTangentSpikes(deepInsidePadScenario(a, insideDist), `deep-inside angle=${a} dist=${insideDist}`, TIGHT_TURN_BOUND_DEG);
       }
     }
+  });
+});
+
+/* TEETH PROOF for the correction above — a scanner that can no longer convict anything is not a
+ * guard, it is a decoration. Plant exactly the artifact this suite was built for (a near-duplicate
+ * vertex a few hundredths of a foot off a straight run, turning sharply) and require BOTH halves to
+ * still work: this file's own independent scanner must SEE it, and production's `collapseRingSpikes`
+ * must REMOVE it. Then plant a real curb-return cusp (a tessellated arc running tangent into a long
+ * straight edge) and require the opposite of both: not convicted, not removed. */
+describe("B<NEW-1> — the corrected spike scanner still convicts the junk, and no longer convicts real geometry", () => {
+  // A 100 ft square with one spurious near-duplicate vertex 0.04 ft off the top edge — the B1611840 /
+  // B1690816 signature, reproduced at the measured magnitude.
+  const junkRing = () => [
+    { x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 },
+    { x: 50.02, y: 100.04 }, { x: 50, y: 100 },          // the spur: out 0.04 ft and straight back
+    { x: 0, y: 100 },
+  ];
+
+  it("a planted 0.04 ft spur is still convicted by this file's scanner AND removed by production", () => {
+    const ring = junkRing();
+    const seen = ringTurnSpikes(ring, TIGHT_TURN_BOUND_DEG, SHORT_SEG_FT);
+    expect(seen.length, `the scanner must still see the artifact it was built for: ${JSON.stringify(seen)}`).toBeGreaterThan(0);
+    const cleaned = collapseRingSpikes(ring);
+    expect(cleaned.length, "production must still remove it").toBeLessThan(ring.length);
+    expect(ringTurnSpikes(cleaned, TIGHT_TURN_BOUND_DEG, SHORT_SEG_FT)).toEqual([]);
+  });
+
+  it("a real curb-return cusp (arc tangent into a long straight edge) is NOT convicted and NOT removed", () => {
+    // A quarter arc of radius 15 ft tessellated at 6 deg (chords ~1.57 ft, under SHORT_SEG_FT) running
+    // tangent into a 40 ft straight edge that doubles back — the exact shape the road-into-pad dissolve
+    // produces, and the exact shape the old scanner convicted and the old cleanup then ate.
+    const cx = 0, cy = 0, R = 15, arc = [];
+    for (let d = 0; d <= 90; d += 6) {
+      const t = (d * Math.PI) / 180;
+      arc.push({ x: cx + R * Math.cos(t), y: cy + R * Math.sin(t) });
+    }
+    // close it: from the arc's last point (0, 15) straight out, and back under the arc's first point.
+    const ring = [...arc, { x: -40, y: 15 }, { x: -40, y: -6 }, { x: 15, y: -6 }];
+    const seen = ringTurnSpikes(ring, TIGHT_TURN_BOUND_DEG, SHORT_SEG_FT);
+    expect(seen, `a tessellated arc running tangent into a straight edge is real geometry: ${JSON.stringify(seen)}`).toEqual([]);
+    const cleaned = collapseRingSpikes(ring);
+    expect(cleaned.length, "production must leave every arc vertex in place").toBe(ring.length);
+  });
+
+  it("CASCADE GUARD: the whole cleanup pass can never move the boundary more than its own drift cap", () => {
+    // The mechanism that ate the returns: each removal is individually tiny, but the loop re-measures
+    // after every one, so a chain of them walks the boundary arbitrarily far. Build a ring that offers
+    // a long chain of individually-small removals and require the total movement to stay bounded.
+    const R = 6, arc = [];
+    for (let d = 0; d <= 180; d += 6) {
+      const t = (d * Math.PI) / 180;
+      arc.push({ x: R * Math.cos(t), y: R * Math.sin(t) });
+    }
+    const ring = [...arc, { x: -6, y: -30 }, { x: 6, y: -30 }];
+    const cleaned = collapseRingSpikes(ring);
+    let worst = 0;
+    for (const p of ring) {
+      let best = Infinity;
+      for (let i = 0; i < cleaned.length; i++) best = Math.min(best, segDist(p, cleaned[i], cleaned[(i + 1) % cleaned.length]));
+      worst = Math.max(worst, best);
+    }
+    expect(worst, `no original point may end up more than the drift cap off the cleaned ring (worst ${worst.toFixed(3)} ft)`).toBeLessThanOrEqual(0.25 + 1e-9);
   });
 });
