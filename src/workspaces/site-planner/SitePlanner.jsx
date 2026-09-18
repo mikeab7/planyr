@@ -48,7 +48,7 @@ import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
 import { createViewChangeRecorder, attachTimeline } from "./lib/viewChangeRecorder.js";
 import { createViewFramingGate } from "./lib/viewFramingGate.js";
 import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody, stackHoldsFeature, parseFeatureKey, stackAtPoint, nextPickIndex, ACTION_ATTR } from "./lib/featureTarget.js";
-import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving, freeParkStack } from "./lib/parking.js";
+import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving, freeParkStack, relayoutFreeStack } from "./lib/parking.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale, overlayRasterKey, HIRES_CACHE_PER_OVERLAY } from "./lib/overlayPdf.js";
 import { isDwgFile, convertDwgToDxf } from "./lib/convertClient.js";
 import { uploadOverlayFile, downloadOverlayBytes, downloadOverlayDataUrl, fetchOverlayBytes, fetchOverlayDataUrl, deleteOverlayObject, MAX_BYTES as OVERLAY_MAX_BYTES } from "./lib/overlayStorage.js";
@@ -326,7 +326,7 @@ import { roadClassesOf, roadClassOf, classMinRadius, classDefaultRadius, classRe
 import {
   SQFT_PER_ACRE, rot2, elCorners, polyArea, ringOf, carStalls, trailerStalls, estStalls, estTrailers,
   CURB, CURB_6, CURB_12, curbWidthOf, curbEdgesOf, isCenterlineRoad, roadCurbWidth,
-  roadDefaultRadius, roadDenseCenterline, roadStripRing, roadStripArea,
+  roadDefaultRadius, roadDenseCenterline, roadStripRing, roadStripArea, roadCurbLines,
   TEE_COINCIDE_FT, roadJunctionVerticesOf, roundaboutsForSite,
 } from "./lib/siteGeometry.js";
 import { siteMetrics } from "./lib/siteMetrics.js";
@@ -1261,12 +1261,6 @@ const ROAD_FIX_MAX_EXTEND_FT = 25;
 // NEW-5 — below this zoom a radius flag folds to just its corner dot. A fixed-pixel label on a
 // whole-site view sprawls across the plan and reads as attached to nothing (owner, 2026-07-25).
 const ROAD_FLAG_LABEL_PPF = 0.5;
-// The two inner curb lines = the centerline offset by ±travelW/2 (face-of-curb edges).
-const roadCurbLines = (el, settings, sharpAt, trim) => {
-  const dense = roadDenseCenterline(el, settings, sharpAt, trim);
-  const hw = Math.max(0, (+el.travelW || 0) / 2);
-  return [offsetPolyline(dense, hw), offsetPolyline(dense, -hw)].filter(Boolean);
-};
 // B953/NEW-1 — detect road tees for the clean-intersection render. A tee = a centerline road's
 // ENDPOINT coincident with an INTERIOR vertex of another centerline road (the B945/B949 tee
 // topology, where planRoadConnect inserted a vertex on the through road at the weld point). Returns
@@ -4887,7 +4881,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     move: "move", groupMove: "move", mkMove: "move", moveSheetOverlay: "move", callout: "move", measureMove: "move",
     resize: "resize", edgeResize: "resize", mkResize: "resize", ovScale: "resize", calloutResize: "resize",
     vertex: "resize", elVertex: "resize", measureVertex: "resize", mkVertex: "resize", roadEnd: "resize", roadVtx: "resize", easeVertex: "resize",
-    rotate: "rotate", mkRotate: "rotate", ovRotate: "rotate",
+    rotate: "rotate", mkRotate: "rotate", ovRotate: "rotate", calloutRotate: "rotate",
   };
   const pushHistory = (kind = "edit") => { opTrackerRef.current.beginOperation(kind); lastPushAtRef.current = Date.now(); histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
   /* ⛔ NEW-5 — "CAN I UNDO?" IS ASKED OF THE DOCUMENT, ONCE PER REAL CHANGE.
@@ -8160,7 +8154,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const { w, h } = calloutLayout(c, st, rppf);
     const bp = f2p(c.box);
     const clickPx = f2p(p2f(e.clientX, e.clientY)); // client → SVG px (identity round-trip; box is in SVG px)
-    const zone = calloutDblZone({ x: bp.x - w / 2, y: bp.y - h / 2, w, h }, clickPx, CALLOUT_BORDER_BAND_PX);
+    // NEW-2 (B1612641) — rotate the click into the box's local (unrotated) frame before testing
+    // interior-vs-border, mirroring renderCalloutNode's own toLocal(); rot===0 is the identity.
+    const clickLocal = rot2(clickPx.x - bp.x, clickPx.y - bp.y, -(c.rot || 0));
+    const zone = calloutDblZone({ x: -w / 2, y: -h / 2, w, h }, clickLocal, CALLOUT_BORDER_BAND_PX);
     if (zone === "interior") beginEditCallout(id);
     else openInspector();
   };
@@ -8474,10 +8471,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // tipIndex's elbow and the grab tracks the cursor exactly (the handle is drawn at this same point).
     const st0 = calloutStyle(c);
     const { w: w0, h: h0 } = calloutLayout(c, st0, view.ppf);
-    const boxRectFt = { x: c.box.x - (w0 / view.ppf) / 2, y: c.box.y - (h0 / view.ppf) / 2, w: w0 / view.ppf, h: h0 / view.ppf };
+    // NEW-2 (B1612641) — LOCAL (unrotated, box-centred) frame in feet; a never-bent elbow's default
+    // is the box's OWN nearest-edge point, so it has to follow the box's rotation the same way the
+    // committed render does (rot2 into/out of local, rot===0 is the exact byte-identical math this
+    // already computed).
+    const rot0 = c.rot || 0;
+    const boxRectFt = { x: -(w0 / view.ppf) / 2, y: -(h0 / view.ppf) / 2, w: w0 / view.ppf, h: h0 / view.ppf };
     const tips0 = calloutTips(c).map((p) => ({ ...p }));
     const elbows0raw = calloutElbows(c);
-    const elbows0 = tips0.map((tp, i) => (elbows0raw[i] ? { ...elbows0raw[i] } : nearestRectPerimeterPoint(boxRectFt, tp)));
+    const elbows0 = tips0.map((tp, i) => {
+      if (elbows0raw[i]) return { ...elbows0raw[i] };
+      const local = rot2(tp.x - c.box.x, tp.y - c.box.y, -rot0);
+      const near = nearestRectPerimeterPoint(boxRectFt, local);
+      const world = rot2(near.x, near.y, rot0);
+      return { x: c.box.x + world.x, y: c.box.y + world.y };
+    });
     drag.current = { mode: "callout", id, part, tipIndex, fx: fp.x, fy: fp.y, box0: { ...c.box }, tips0, elbows0, ...startGate(e) };
     svgRef.current.setPointerCapture(e.pointerId);
   };
@@ -8493,9 +8501,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const st = calloutStyle(c);
     const { w } = calloutLayout(c, st, view.ppf);
     const wFt = w / view.ppf;
-    const fixedX = c.box.x - hx * (wFt / 2);        // opposite edge, in feet
+    const rot = c.rot || 0;
+    // NEW-2 (B1612641) — the box resizes along its OWN (possibly rotated) local x-axis: the fixed
+    // opposite edge is a 2-D POINT in that rotated frame, not a bare world-X scalar. rot===0 makes
+    // `oppLocal` the same `{-hx*wFt/2, 0}` this always used, so `fixed` reduces to the exact
+    // byte-identical `{fixedX, c.box.y}` point the old unrotated code held.
+    const oppLocal = rot2(-hx * wFt / 2, 0, rot);
+    const fixed = { x: c.box.x + oppLocal.x, y: c.box.y + oppLocal.y };
     setSel({ kind: "callout", id });
-    drag.current = { mode: "calloutResize", id, hx, fixedX, cy: c.box.y, minWFt: minCalloutWidthFt(st, view.ppf), ...startGate(e) };
+    drag.current = { mode: "calloutResize", id, hx, rot, fixed, minWFt: minCalloutWidthFt(st, view.ppf), ...startGate(e) };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
+  const startCalloutRotate = (e, id) => {
+    if (tool !== "select" || e.button !== 0) return; // NEW-1 (B1253248) pattern: matches every sibling handle starter
+    e.stopPropagation();
+    const c = callouts.find((x) => x.id === id);
+    if (!c || c.locked) return;
+    const fp = p2f(e.clientX, e.clientY), pivot = { x: c.box.x, y: c.box.y };
+    // Same shape as startMarkupRotate/startRotate (the building) — one pivot, one starting pointer
+    // angle, a `rot0` to add the live delta onto; 15° snap when Snap is on (see the onMove branch).
+    drag.current = { mode: "calloutRotate", id, pivot, rot0: c.rot || 0, a0: Math.atan2(fp.y - pivot.y, fp.x - pivot.x), ...startGate(e) };
     svgRef.current.setPointerCapture(e.pointerId);
   };
 
@@ -8924,10 +8949,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     if (d.mode === "calloutResize") { // B913: drag a text-box / callout width handle → explicit boxW + text wrap
-      const signed = d.hx * (fp.x - d.fixedX);      // width toward the pointer along the handle's side
+      // NEW-2 (B1612641) — resize in the box's OWN (possibly rotated) local frame: project the
+      // pointer into that frame first (rot2 by -d.rot), same idiom mkResize uses for a rotated
+      // markup. rot===0 makes `local.x` the same `fp.x - d.fixedX` this always computed.
+      const local = rot2(fp.x - d.fixed.x, fp.y - d.fixed.y, -d.rot);
+      const signed = d.hx * local.x;      // width toward the pointer along the handle's side
       const newWFt = Math.max(d.minWFt, Math.min(MAX_DIM, signed));
-      const newCx = d.fixedX + d.hx * newWFt / 2;   // keep the opposite edge fixed
-      setCallouts((a) => a.map((c) => c.id === d.id ? { ...c, boxW: newWFt, box: { x: newCx, y: d.cy } } : c));
+      const halfLocal = rot2(d.hx * newWFt / 2, 0, d.rot);   // keep the opposite edge fixed
+      const newCenter = { x: d.fixed.x + halfLocal.x, y: d.fixed.y + halfLocal.y };
+      setCallouts((a) => a.map((c) => c.id === d.id ? { ...c, boxW: newWFt, box: newCenter } : c));
+      return;
+    }
+    if (d.mode === "calloutRotate") { // NEW-2 (B1612641) — rotate about the box's own centre (15° steps when Snap is on)
+      let rot = d.rot0 + (Math.atan2(fp.y - d.pivot.y, fp.x - d.pivot.x) - d.a0) * 180 / Math.PI;
+      rot = snapOn ? Math.round(rot / 15) * 15 : Math.round(rot);
+      setCallout(d.id, { rot: ((rot % 360) + 360) % 360 });
       return;
     }
     if (d.mode === "dimMove") { // B146/B592: slide a selected element's dimension callout along its length
@@ -11455,6 +11491,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const host = next.find((x) => x.id === resized.attachedTo);
       // NEW-1 — this gesture IS aimed at the row, so it (and only it) may pin an over-length run.
       if (host && host.type === "building" && !host.dogEar) next = relayoutWallKids(next, host, host, { pinFrom: resized.id });
+    } else if (resized && !resized.attachedTo && (resized.type === "parking" || resized.type === "paving") && Number.isFinite(resized.sideParkPiece)) {
+      /* NEW-1 (dispatch: parking snaps back once split) — a direct canvas resize of one piece of a
+         FREESTANDING split stack (no host wall to relay against) never moved its siblings, so
+         growing/shrinking one row/aisle overlapped the next piece instead of pushing it — the
+         paint order then buries the grown edge under an untouched, opaque sibling, which is what
+         reads as "it snapped back to its old size" on release. `growFreeParkStack` (the "+"/"−"
+         ladder) already re-lays the whole stack for this exact case (B1625728's freestanding
+         remainder); a direct edge/corner drag on the canvas never got the same treatment. Re-lay
+         the stack (a fresh geometry read — `next` already carries this frame's resize) via the
+         shared pure helper (`relayoutFreeStack`), the freestanding twin of `relayoutWallKids` —
+         it propagates the gap/overlap that opened on whichever side of the dragged piece moved,
+         so undisturbed siblings on the OTHER side never move. */
+      const stack = freeParkStack(next.find((x) => x.id === resized.id) || resized, next);
+      if (stack.length > 1) {
+        const relaid = relayoutFreeStack(stack, resized.id);
+        if (relaid !== stack) {
+          const byId = new Map(relaid.map((p) => [p.id, p]));
+          next = next.map((x) => (byId.has(x.id) ? { ...x, ...byId.get(x.id) } : x));
+        }
+      }
     }
     // Keep every bonded child's angle locked to the building's (B363) — closes the gap where a
     // strip kept a stale angle through a resize (fitKid preserves rot0, so drift would survive).
@@ -17273,7 +17329,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         <rect data-chip-bg x={c.x - boxW / 2} y={c.y - boxH / 2} width={boxW} height={boxH} rx={7 * ls}
           fill="rgba(17,24,39,0.62)"
           stroke={draggable ? SEL_BLUE : "rgba(255,255,255,0.14)"} strokeWidth={draggable ? 1.75 : 1} />
-        <text data-chip-text x={c.x} y={c.y - boxH / 2 + padY + fs * 0.82} textAnchor="middle" fontSize={fs}
+        {/* NEW-1 (B1612640) — dominantBaseline="middle" at the padded slot's own centre
+            (padY + fs/2), not the callout box's old `fs * 0.82` baseline-offset guess: same
+            defect, same fix (see the callout box render for the full mechanism note). */}
+        <text data-chip-text x={c.x} y={c.y - boxH / 2 + padY + fs / 2} textAnchor="middle" dominantBaseline="middle" fontSize={fs}
           fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill="#e9edf2" pointerEvents="none" style={{ fontWeight: 500, letterSpacing: "0.02em" }}>{txt}</text>
       </g>
     );
@@ -18159,22 +18218,47 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const { w, h } = calloutLayout(c, st, rppf);
     const bp = f2p(c.box);
     const cr = calloutCornerRadius(w, h);
-    const gx = bp.x - w / 2, gy = bp.y - h / 2;
-    // [x, y, hx] — hx (∈ {-1,+1}) is which vertical edge this handle drives (width only).
+    // NEW-2 (B1612641) — rotation. Every grip that belongs to the BOX (the outline, the width
+    // grips, the elbow's default nearest-edge point) is positioned via `at(lx,ly)`: a LOCAL
+    // (box-centred) px offset rotated by the callout's own `c.rot` and translated to `bp` — the
+    // exact idiom markupHandles already uses for a rotated rect/ellipse markup (`at` there is the
+    // same shape, in feet; here everything is already in screen px post-f2p, and rot2 commutes
+    // with f2p because it's a pure similarity transform, so working in px needs no extra
+    // conversion). A leader's TIP grip is deliberately excluded — it is a fixed world target and
+    // must never rotate with the box. rot===0 makes `at(lx,ly) === {bp.x+lx, bp.y+ly}`, the exact
+    // byte-identical positions every one of these grips already rendered at.
+    const rot = c.rot || 0;
+    const at = (lx, ly) => { const o = rot2(lx, ly, rot); return { x: bp.x + o.x, y: bp.y + o.y }; };
+    const boxRect = { x: -w / 2, y: -h / 2, w, h }; // local frame, for the elbow default below
+    // [lx, ly, hx] — hx (∈ {-1,+1}) is which vertical edge this handle drives (width only).
     const grips = [
-      [gx, gy, -1], [gx + w, gy, 1], [gx + w, gy + h, 1], [gx, gy + h, -1], // corners
-      [gx, gy + h / 2, -1], [gx + w, gy + h / 2, 1],                        // left / right mids (the width must-have)
+      [-w / 2, -h / 2, -1], [w / 2, -h / 2, 1], [w / 2, h / 2, 1], [-w / 2, h / 2, -1], // corners
+      [-w / 2, 0, -1], [w / 2, 0, 1],                                                    // left / right mids (the width must-have)
     ];
     const canResize = !c.locked;
+    // NEW-2 (B1612641) — the rotate handle. Same shape as the building's own (topMid → a unit
+    // vector out from the box centre → a fixed screen-px offset → the grab circle), so a text
+    // box/callout rotates through the identical mechanism a building already does, just keyed to
+    // this box's own centre/top-edge instead of an element's.
+    const topMid = at(0, -h / 2);
+    let ux = topMid.x - bp.x, uy = topMid.y - bp.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
+    const rotPos = { x: topMid.x + ux * 26, y: topMid.y + uy * 26 };
     return (
       <g data-export="skip">
-        <rect x={gx - 2} y={gy - 2} width={w + 4} height={h + 4} rx={cr + 2} ry={cr + 2} fill="none" stroke={SEL_BLUE} strokeWidth={1.25} pointerEvents="none" />
-        {grips.map(([hx, hy, dir], i) => (
-          <rect key={i} data-handle="callout-width" data-testid={`callout-handle-${dir > 0 ? "r" : "l"}`} x={hx - 4} y={hy - 4} width={8} height={8} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.25}
+        <g transform={rot ? `rotate(${rot} ${bp.x} ${bp.y})` : undefined}>
+          <rect x={bp.x - w / 2 - 2} y={bp.y - h / 2 - 2} width={w + 4} height={h + 4} rx={cr + 2} ry={cr + 2} fill="none" stroke={SEL_BLUE} strokeWidth={1.25} pointerEvents="none" />
+        </g>
+        {!c.locked && (<>
+          <line x1={topMid.x} y1={topMid.y} x2={rotPos.x} y2={rotPos.y} stroke={SEL_BLUE} strokeWidth={1.25} />
+          <circle data-handle="rotate" data-testid={`callout-handle-rotate-${c.id}`} cx={rotPos.x} cy={rotPos.y} r={6} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
+            style={{ cursor: "grab" }} onPointerDown={(e) => startCalloutRotate(e, c.id)} />
+        </>)}
+        {grips.map(([lx, ly, dir], i) => { const p = at(lx, ly); return (
+          <rect key={i} data-handle="callout-width" data-testid={`callout-handle-${dir > 0 ? "r" : "l"}`} x={p.x - 4} y={p.y - 4} width={8} height={8} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.25}
             pointerEvents={canResize ? "all" : "none"} style={canResize ? { cursor: "ew-resize" } : undefined}
             onPointerDown={canResize ? (e) => startCalloutResize(e, c.id, dir) : undefined}
             onContextMenu={(e) => onCalloutContext(e, c.id, -1)} />
-        ))}
+        ); })}
         {/* Per-leader re-aim grip. NEW-5 — no × delete badge (owner rule): a single leader is
             removed by right-clicking it → "Delete Leader"; Delete removes the whole callout.
             NEW-3 (B806082) — the grip sits exactly at the arrowhead, the single most obvious place
@@ -18182,7 +18266,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             selected (SVG paint order is hit-test order). Without its own onContextMenu the press
             fell all the way through to the empty-canvas map menu in total silence — the grip is
             chrome belonging to ITS leader and must forward the press, never swallow it
-            (CHROME-NEVER-EATS-A-PRESS). */}
+            (CHROME-NEVER-EATS-A-PRESS). NEW-2 — deliberately NOT rotated: a leader's tip is a
+            fixed world target regardless of the box's own angle. */}
         {calloutTips(c).map((tp0, i) => { const tp = f2p(tp0); return (
           <circle key={`ct${i}`} data-handle="callout-tip" cx={tp.x} cy={tp.y} r={5} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={2}
             style={{ cursor: "move" }} onPointerDown={(e) => startMoveCallout(e, c.id, "tip", i)}
@@ -18193,12 +18278,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             dragged, so it starts exactly where the (currently zero-length) stub already is —
             grabbable from the very first selection, not only after a bend has been created. A
             square (not a circle) so it reads as a distinct control from the round tip grip.
-            NEW-3 (B806082) — same chrome-forwards-the-press fix as the tip grip above. */}
+            NEW-3 (B806082) — same chrome-forwards-the-press fix as the tip grip above. NEW-2 — the
+            default (un-pinned) case rotates with the box, same rotate-into-local-frame idiom as
+            renderCalloutNode's own leader origin; a PINNED elbow (elbowW set) is a fixed world
+            point and is never rotated. */}
         {calloutTips(c).map((tp0, i) => {
           const tp = f2p(tp0);
-          const boxRectPx = { x: gx, y: gy, w, h };
           const elbowW = calloutElbows(c)[i] || null;
-          const ep = elbowW ? f2p(elbowW) : nearestRectPerimeterPoint(boxRectPx, tp);
+          const near = nearestRectPerimeterPoint(boxRect, rot2(tp.x - bp.x, tp.y - bp.y, -rot));
+          const ep = elbowW ? f2p(elbowW) : at(near.x, near.y);
           return (
             <rect key={`ce${i}`} data-handle="callout-elbow" data-testid={`callout-handle-elbow-${c.id}-${i}`}
               x={ep.x - 4} y={ep.y - 4} width={8} height={8} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.6}
@@ -22135,7 +22223,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const anchor = st.align === "left" ? "start" : st.align === "right" ? "end" : "middle";
                 const tx = st.align === "left" ? bp.x - w / 2 + padX : st.align === "right" ? bp.x + w / 2 - padX : bp.x;
                 const tips = calloutTips(c).map((p) => f2p(p));
-                const boxRect = { x: bp.x - w / 2, y: bp.y - h / 2, w, h };
+                // NEW-2 (B1612641) — rotation. `boxRect` is now the LOCAL (unrotated, box-centred)
+                // frame: a leader's target `tp` is a fixed screen point that must NEVER rotate with
+                // the box (it points at what it labels), so its nearest-edge ORIGIN is found by
+                // rotating `tp` into the box's local frame, running the existing axis-aligned
+                // nearestRectPerimeterPoint unchanged, then rotating the answer back out — the same
+                // rotate-into-local-frame idiom `startMarkupResize`/`mkResize` already use for a
+                // rotated markup (rot2 is a pure similarity transform, so it commutes with f2p; see
+                // that function's own header). `rot === 0` reduces this to the exact byte-identical
+                // math every callout ever saved already used.
+                const rot = c.rot || 0;
+                const toLocal = (p) => rot2(p.x - bp.x, p.y - bp.y, -rot);
+                const toWorld = (p) => { const r = rot2(p.x, p.y, rot); return { x: bp.x + r.x, y: bp.y + r.y }; };
+                const boxRect = { x: -w / 2, y: -h / 2, w, h };
                 const cr = calloutCornerRadius(w, h); // NEW-1 — zoom-invariant, low → rectangle at every zoom
                 // NEW-1 (B794960) — the 7px floor is a SCREEN legibility minimum (fontPx is feet-
                 // proportional via rppf, so absent the floor the arrowhead already exports at the
@@ -22151,7 +22251,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {/* N leaders — each anchored from its OWN nearest box edge/corner (not one shared
                         box-centre anchor) via the shared nearestRectPerimeterPoint geometry helper. */}
                     {tips.map((tp, i) => {
-                      const origin = nearestRectPerimeterPoint(boxRect, tp);
+                      const origin = toWorld(nearestRectPerimeterPoint(boxRect, toLocal(tp)));
                       // NEW-1 (two-segment leader, Bluebeam-style) — a stub off the box to the
                       // elbow, then the angled run from the elbow to the target. `elbowW` is the
                       // PINNED point (world feet) if the user has dragged this leader's elbow;
@@ -22188,9 +22288,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         </g>
                       );
                     })}
+                    {/* NEW-2 (B1612641) — the box + its text rotate together as ONE rigid unit
+                        about the box's own centre (`bp`); the leaders above deliberately sit
+                        OUTSIDE this group — a leader points at a fixed world target and must never
+                        swing with the box, only its box-edge ORIGIN (computed above) tracks the
+                        rotation. `rot === 0` renders no transform at all, so an unrotated callout
+                        (every one ever saved) is byte-identical to before this item. */}
+                    <g transform={rot ? `rotate(${rot} ${bp.x} ${bp.y})` : undefined}>
                     {/* B680 — hide the committed box + text while its editor is open so the textarea is the
                         ONLY box on screen (was drawing a second, offset box behind the editor overlay). */}
-                    {editCallout?.id !== c.id && <rect data-testid={`callout-box-${c.id}`} x={boxRect.x} y={boxRect.y} width={w} height={h} rx={cr} ry={cr}
+                    {editCallout?.id !== c.id && <rect data-testid={`callout-box-${c.id}`} x={bp.x - w / 2} y={bp.y - h / 2} width={w} height={h} rx={cr} ry={cr}
                       fill={st.fill} fillOpacity={st.fillOpacity} stroke={border} strokeWidth={st.weight} strokeDasharray={leaderDash} strokeOpacity={st.opacity}
                       pointerEvents="all" /* B142: select across the whole box even when the fill is none/transparent (was only the painted area / thin border) */
                       /* NEW-1 (B1253248) — was "default" outside Select: a plain arrow over a
@@ -22206,11 +22313,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         e.stopPropagation();
                         calloutDblAction(e, c.id);
                       }} />}
+                    {/* NEW-1 (B1612640) — each line is centred on its own slot (padY + i*lineH +
+                        lineH/2) via dominantBaseline="middle", not a hand-tuned baseline offset
+                        (was `fontPx * 0.82` off the default alphabetic baseline — a flat ratio
+                        tuned to look right on one test string, which put more space below the
+                        text than above it on every other string). Since h = lines.length*lineH +
+                        padY*2, the gap from box-top to the first slot's centre and from the last
+                        slot's centre to box-bottom are BOTH exactly padY + lineH/2 — symmetric by
+                        construction, the same dominantBaseline="middle" convention every other
+                        centred <text> in this file already uses (element labels, dimension
+                        numbers). See calloutStyle.js / minCalloutWidthFt callers. NEW-2 — this
+                        stays true under rotation too: the enclosing <g> above rotates the whole
+                        text block rigidly, so the per-line slot symmetry (a LOCAL, box-relative
+                        property) is untouched by the box's world-facing angle. */}
                     {editCallout?.id !== c.id && lines.map((ln, i) => (
-                      <text key={i} x={tx} y={bp.y - h / 2 + padY + fontPx * 0.82 + i * lineH} textAnchor={anchor}
+                      <text key={i} x={tx} y={bp.y - h / 2 + padY + lineH / 2 + i * lineH} textAnchor={anchor} dominantBaseline="middle"
                         fontSize={fontPx} fill={st.color} textDecoration={st.underline ? "underline" : undefined}
                         fontWeight={st.bold ? 700 : 500} fontStyle={st.italic ? "italic" : "normal"} pointerEvents="none">{ln}</text>
                     ))}
+                    </g>
                     {/* NEW-1 — the callout's selection outline, its B913 width grips and the
                         per-leader re-aim grips are no longer drawn here: they live in the
                         always-on-top handle layer (calloutHandles), so a grip can never end up
@@ -22381,7 +22502,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const hook = () => ({
       regions: roadNet.regions.map((r) => ({ ids: r.ids, outer: r.region.outer, holes: r.region.holes })),
       tees: teeJunctions.map((t) => ({ sideId: t.sideId, throughId: t.throughId, R: t.geom.R, wedges: t.geom.wedges.length, returns: t.geom.returns.map((a) => a.length) })),
-      drives: driveJunctions.map((d) => ({ sideId: d.sideId, kind: d.kind, R: d.geom.R, wedges: d.geom.wedges.length })),
+      // B<NEW-1> (2026-09-18) — the fillet's own CORNERS and TANGENT ARCS ride along too, so a live
+      // harness can measure whether a curb return SURVIVED the dissolve rather than only that one was
+      // requested. Six rounds of this item shipped green because every check read the requested arc
+      // (`returns`, below, which is always complete) and none read the finished boundary against it;
+      // the corner is what makes that comparison possible (a complete return of radius R across a
+      // wedge angle phi stands exactly R/sin(phi/2) - R off its own corner). Read-only, same
+      // `window.__PLANYR_E2E` gate as everything else in this hook, never in production.
+      drives: driveJunctions.map((d) => ({
+        sideId: d.sideId, targetId: d.targetId, kind: d.kind, R: d.geom.R, wedges: d.geom.wedges.length,
+        corners: d.geom.corners, throughTangents: d.geom.throughTangents, sideTangents: d.geom.sideTangents,
+        returns: d.geom.returns.map((a) => a.map((p) => ({ x: p.x, y: p.y }))),
+      })),
       // NEW-4 — the drive target's own PAVED ring, in world feet, for a flood-fill acceptance check
       // (ui-audit/verify-road-junction-paving.mjs): "is (pad ∪ every dissolved road region) free of
       // an enclosed unpaved cell" needs the pad's real geometry, not just the road network's.
@@ -22476,10 +22608,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {chip.lines.map((t, k) => {
                       const head = k === chip.hi;
                       const fs = head ? chip.fsHead : chip.fsSub;
-                      const y = chip.c.y - chip.boxH / 2 + chip.padY + chip.lh * k + fs * 0.82;
+                      // NEW-1 (B1612640) — same fix as the callout box / parcel chip: each row's
+                      // own `chip.lh`-tall slot is centred via dominantBaseline="middle", not a
+                      // `fs * 0.82` baseline guess (which also didn't account for the row's own
+                      // font size on the sub lines, since fs varies but lh doesn't).
+                      const y = chip.c.y - chip.boxH / 2 + chip.padY + chip.lh * k + chip.lh / 2;
                       return (
                         <text key={k} data-chip-text {...(head ? {} : { "data-chip-sub": "1" })}
-                          x={chip.c.x} y={y} textAnchor="middle" fontSize={fs}
+                          x={chip.c.x} y={y} textAnchor="middle" dominantBaseline="middle" fontSize={fs}
                           fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} pointerEvents="none"
                           fill={head ? "#f4f7fa" : "#c3ccd6"}
                           style={{ fontWeight: head ? 700 : 500, letterSpacing: head ? "0" : "0.02em" }}>
@@ -26032,6 +26168,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   left={<NumInput style={{ ...numInput, width: "100%" }} value={cs.padX} min={0} step={1} coarse={4} onCommit={(n) => setSelCallout({ padX: n })} />}
                   right={<NumInput style={{ ...numInput, width: "100%" }} value={cs.padY} min={0} step={1} coarse={4} onCommit={(n) => setSelCallout({ padY: n })} />}
                 />
+                {/* NEW-2 (B1612641) — same RotationStepper the markup/element/overlay inspectors
+                    already use, so a text box/callout rotates through the exact panel control the
+                    owner already knows from every other rotatable object, not a new one. */}
+                <Field label="Rotation°"><RotationStepper value={selCallout.rot || 0} disabled={!!selCallout.locked} disabledReason="Unlock this callout to rotate it"
+                  onCommit={(deg) => setSelCallout({ rot: deg })}
+                  onStep={(d) => setSelCallout({ rot: normalizeDeg((selCallout.rot || 0) + d) })} /></Field>
 
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                   <button style={{ ...chip, flex: 1 }} onClick={() => beginEditCallout(selCallout.id)}>✎ Edit text</button>

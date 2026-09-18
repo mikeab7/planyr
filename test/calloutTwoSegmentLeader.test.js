@@ -42,7 +42,10 @@ describe("NEW-1: the callout leader is a stub + elbow + run, defaulting to today
     expect(starterStart).toBeGreaterThan(-1);
     const region = SP.slice(starterStart, starterEnd);
     expect(region.includes("elbows0")).toBe(true);
-    expect(region.includes("nearestRectPerimeterPoint(boxRectFt, tp)")).toBe(true);
+    // NEW-2 (B1612641, rotation) — the default elbow now rotates `tp` into the box's local
+    // (unrotated) frame first (rot===0 is the identity, so this is byte-identical to the old
+    // straight `nearestRectPerimeterPoint(boxRectFt, tp)` call for every callout ever saved).
+    expect(region.includes("nearestRectPerimeterPoint(boxRectFt, local)")).toBe(true);
   });
 
   it("the apply-on-move dispatcher moves ONLY the dragged leader's elbow, collapsing singular/plural like tip/tips", () => {

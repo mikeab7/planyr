@@ -5,7 +5,28 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-09-16._
+_Last updated: 2026-09-18._
+
+## 🖼 Which page was that "Spreadsheet" screenshot? (B1756544)
+
+> **Short version: the curb-corner problem you reported is fixed. The third thing you sent — the
+> screenshot with the little site-plan picture and the "CAR PARKS" label — I can't place, and I'd
+> rather ask than guess.**
+>
+> You sent a screenshot of a page headed "Spreadsheet" with a small site plan drawn on it, and
+> where a drive meets a parking area the paving comes out as two grey comma-shaped blobs instead
+> of a clean drive with rounded corners. I went looking for that page and the Spreadsheet tab
+> doesn't draw site plans at all — there's nothing in it that could have produced that picture.
+> The only other place in Planyr that draws a small site plan is the plan card on your Dashboard,
+> and that one draws roads as plain rectangles with no corner rounding whatsoever, so it can't be
+> showing you the corner problem. I tried to make it produce those blobs on purpose and couldn't.
+>
+> - [ ] **Two questions, and either answer gets me moving:** which page were you on, and is that
+>       little drawing something Planyr drew, or a site plan / brochure you uploaded? (A "CAR
+>       PARKS" label with a pointer line is the kind of thing that usually comes on somebody
+>       else's flyer — if that's what it is, those blobs are part of the picture you uploaded and
+>       there's nothing for me to fix.) A screenshot with a bit more of the page showing would
+>       answer both at once.
 
 ## 📅 "HW Review" on Grand Port's Master Schedule — restore its old date, or leave it? (B1701360)
 

@@ -22,9 +22,11 @@
  * suite would have failed on pre-fix `main`, satisfied by construction rather than assumed.
  */
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { roadSurfaceRing, ROAD_JOIN_MITER_LIMIT } from "../src/workspaces/site-planner/lib/roadNetwork.js";
-import { bufferPolyline, offsetPolylineMiterLimit } from "../src/workspaces/site-planner/lib/metesAndBounds.js";
-import { roadStripRing, roadCurbLines } from "../src/workspaces/site-planner/lib/siteGeometry.js";
+import { bufferPolyline, offsetPolyline, offsetPolylineMiterLimit } from "../src/workspaces/site-planner/lib/metesAndBounds.js";
+import { roadStripRing, roadCurbLines, roadDenseCenterline } from "../src/workspaces/site-planner/lib/siteGeometry.js";
 
 // ---- shared geometry test helpers (self-contained — mirrors the pattern metesAndBounds.js's
 // own ringsOverlap / roadNetwork.js's dissolveRings tests already use for segment crossing) ----
@@ -283,4 +285,86 @@ describe("offsetPolylineMiterLimit — the proper mitered join, limited, falls b
     expect(offsetPolylineMiterLimit([{ x: 0, y: 0 }], 10)).toBeNull();
     expect(offsetPolylineMiterLimit(null, 10)).toBeNull();
   });
+});
+
+/* B1752240 (2026-09-18) — the B1612608 fix above landed ONLY in lib/siteGeometry.js. SitePlanner.jsx
+ * never imported it: it shadowed `roadCurbLines` with its own module-scope `const`, byte-for-byte
+ * the PRE-FIX body (raw `offsetPolyline`, no miter limit), and every render call site used that
+ * local copy. Every test above imports siteGeometry.js directly, so all of them passed while the
+ * live canvas kept calling the unpatched one — the wiring defect was invisible to this whole file.
+ *
+ * It stayed invisible in practice too, because a road that is a member of the dissolved network
+ * (`roadNet`, SitePlanner.jsx) never reaches `roadCurbLines` at all — the network computes its own
+ * trimmed stripes. The stale copy only fires for a road that LEAVES the network while it still
+ * carries a junction's sharp-vertex treatment: forced out via the Properties panel "Back"/"Front"
+ * band override ("Force underneath everything: draw this element under everything, even roads" —
+ * `setElBand`), or hidden, or bonded (`attachedTo`). That is what turned "send this to the very
+ * back" on a real plan into a curb line spiking tens of feet outside the pavement, through whatever
+ * sat beneath it — reported live on the owner's Goose Creek Commerce Center Phase II plan.
+ *
+ * Fix: delete the SitePlanner.jsx duplicate; import the shared, already-fixed, already-tested
+ * `roadCurbLines` from lib/siteGeometry.js instead (SitePlanner.jsx's own import list, alongside
+ * `roadStripRing`/`roadDenseCenterline`/etc.). No new geometry — this is a wiring fix only.
+ */
+describe("B1752240 — SitePlanner.jsx must call the SHARED, fixed roadCurbLines, never its own copy", () => {
+  it("SOURCE SWEEP — no local roadCurbLines definition, and it is imported from lib/siteGeometry.js", () => {
+    const src = readFileSync(
+      fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)),
+      "utf8",
+    );
+    // A re-introduced local shadow (const or function) is exactly the defect this guard exists for.
+    expect(src).not.toMatch(/\bconst\s+roadCurbLines\s*=/);
+    expect(src).not.toMatch(/\bfunction\s+roadCurbLines\s*\(/);
+    // It must be pulled in from the same shared module every test in this file exercises.
+    const importsFromSiteGeometry = /\{[^}]*\broadCurbLines\b[^}]*\}\s*from\s*"\.\/lib\/siteGeometry\.js"/s;
+    expect(src).toMatch(importsFromSiteGeometry);
+  });
+
+  // The exact pre-fix body that lived in SitePlanner.jsx before this fix (git history, b910efdc) —
+  // kept here ONLY as the mutation check's control, never imported anywhere live.
+  function OLD_roadCurbLines(el, settings, sharpAt, trim) {
+    const dense = roadDenseCenterline(el, settings, sharpAt, trim);
+    const hw = Math.max(0, (+el.travelW || 0) / 2);
+    return [offsetPolyline(dense, hw), offsetPolyline(dense, -hw)].filter(Boolean);
+  }
+
+  const sharpRoadEl = (thetaDeg, travelW = 36) => {
+    const { pts } = bentRoad(thetaDeg, 300);
+    return { type: "road", pts, vtx: [{}, { treatment: "sharp" }, {}], travelW, curb: 0.5, roadClass: "aisle" };
+  };
+
+  // Distance from a point to the nearest point ON a segment — how far a curb point strays from the
+  // road's own true edge, not just from its vertices.
+  const distToSeg = (p, a, b) => {
+    const vx = b.x - a.x, vy = b.y - a.y;
+    const wx = p.x - a.x, wy = p.y - a.y;
+    const len2 = vx * vx + vy * vy;
+    let t = len2 ? (wx * vx + wy * vy) / len2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    const cx = a.x + t * vx, cy = a.y + t * vy;
+    return Math.hypot(p.x - cx, p.y - cy);
+  };
+  // The worst curb-point deviation from whichever leg it should be tracking (measured, not guessed
+  // — see the module comment above): at 45°/30°/15° the pre-fix body puts a point 47–54 ft off a
+  // road whose own half-width is 18 ft, while the fixed body never exceeds that half-width itself.
+  const worstDeviation = (el, lines) => {
+    const [A, P, C] = el.pts;
+    return Math.max(...lines.flatMap((line) => line.map((p) => Math.min(distToSeg(p, A, P), distToSeg(p, P, C)))));
+  };
+
+  for (const theta of [45, 30, 15]) {
+    it(`at a real element's ${theta}° sharp junction vertex, the SHARED roadCurbLines stays on the road's own edge`, () => {
+      const el = sharpRoadEl(theta);
+      const hw = el.travelW / 2;
+      const lines = roadCurbLines(el, {}, new Set(), undefined);
+      expect(worstDeviation(el, lines)).toBeLessThanOrEqual(hw + 2);
+    });
+
+    it(`MUTATION CHECK — the pre-fix local copy spikes well past the road's own edge at ${theta}°`, () => {
+      const el = sharpRoadEl(theta);
+      const hw = el.travelW / 2;
+      const lines = OLD_roadCurbLines(el, {}, new Set(), undefined);
+      expect(worstDeviation(el, lines)).toBeGreaterThan(hw + 20);
+    });
+  }
 });
