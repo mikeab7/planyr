@@ -1647,17 +1647,79 @@ export const elementsOf = (m) => m.els || [];
 // B122 — a "building" element that is an actual standalone building, excluding the
 // attached dog-ear / bump-out pieces (stored as type "building" too, flagged `dogEar`).
 export const isBuilding = (el) => !!el && el.type === "building" && !el.dogEar;
-// B122 — map of building id → its sequential display number ("Building N"), assigned in
-// placement order (the order buildings appear in `els`). DERIVED from list position and
-// never stored: deleting a building renumbers the rest 1…N in one pass. Identity stays
-// `el.id` (what every cross-reference such as `attachedTo` binds to); the number is a
+// B122 — map of building id → its display number ("Building N"). Every building STILL
+// derives its number by placement order (the order buildings appear in `els`) unless it
+// carries an explicit `buildingNumber` (NEW-1 — set from the Properties panel; see
+// `renumberBuilding`/`buildingNumberHolder` below). An untouched plan (no building carries
+// an override) renders byte-for-byte the same as before this existed: 1…N in placement
+// order, renumbering on delete. Once a building IS given an explicit number, that number is
+// a RESERVATION — it is never reassigned to fill a gap, and every other building is numbered
+// around it (smallest number not already reserved, in placement order). Identity always
+// stays `el.id` (what every cross-reference such as `attachedTo` binds to); the number is a
 // display label only, so renumbering can never silently re-point a reference.
 export const buildingNumbers = (els) => {
+  const list = (els || []).filter(isBuilding);
+  const used = new Set();
   const m = new Map();
-  let n = 0;
-  (els || []).forEach((el) => { if (isBuilding(el)) m.set(el.id, ++n); });
+  // Reserve every explicit number first, in placement order (first claim wins in the
+  // pathological case of two buildings somehow carrying the same stamped number).
+  for (const el of list) {
+    const n = el.buildingNumber;
+    if (Number.isInteger(n) && n > 0 && !used.has(n)) { m.set(el.id, n); used.add(n); }
+  }
+  let next = 1;
+  for (const el of list) {
+    if (m.has(el.id)) continue;
+    while (used.has(next)) next++;
+    m.set(el.id, next);
+    used.add(next);
+  }
   return m;
 };
+// NEW-1 — which building (if any) currently holds display number `n`, other than `excludeId`.
+// Returns that building's id, or null when `n` is free. Built on `buildingNumbers` so it can
+// never disagree with what the panel/canvas actually shows.
+export function buildingNumberHolder(els, n, excludeId) {
+  const nums = buildingNumbers(els);
+  for (const el of (els || [])) {
+    if (!isBuilding(el) || el.id === excludeId) continue;
+    if (nums.get(el.id) === n) return el.id;
+  }
+  return null;
+}
+// NEW-1 — renumber ONE building to `n`. When `n` is free this is a plain stamp. When another
+// building already holds `n`, the caller must say how to resolve it:
+//   "swap"  — the two buildings trade numbers.
+//   "shift" — `id` takes `n`; every OTHER building currently numbered `n` or higher moves up
+//             by one, opening a slot. This can widen an existing gap further — gaps are never
+//             auto-compacted (see `buildingNumbers` above) — and it is computed as ONE pass
+//             over the CURRENT numbers, so no two buildings are ever mid-resolution holders of
+//             the same number.
+// Pure: returns the new `els` array. The caller pushes history and calls setEls.
+export function renumberBuilding(els, id, n, mode) {
+  const list = els || [];
+  if (!Number.isInteger(n) || n < 1) return list;
+  const nums = buildingNumbers(list);
+  const holderId = buildingNumberHolder(list, n, id);
+  if (!holderId) return list.map((e) => (e.id === id ? { ...e, buildingNumber: n } : e));
+  if (mode === "swap") {
+    const mine = nums.get(id);
+    return list.map((e) => {
+      if (e.id === id) return { ...e, buildingNumber: n };
+      if (e.id === holderId) return { ...e, buildingNumber: mine };
+      return e;
+    });
+  }
+  if (mode === "shift") {
+    return list.map((e) => {
+      if (e.id === id) return { ...e, buildingNumber: n };
+      if (!isBuilding(e)) return e;
+      const cur = nums.get(e.id);
+      return cur != null && cur >= n ? { ...e, buildingNumber: cur + 1 } : e;
+    });
+  }
+  return list;
+}
 // Road travel width (ft) from CURRENT geometry: the cross-width minus a curb each side.
 // Derived live from w/h so a road's dimension callout always tracks a resize — it used to
 // read a frozen `travelW` snapshot that went stale when the road was dragged bigger.
