@@ -9273,7 +9273,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (d.hostClamp) clampToHost(nb, d.hostClamp); // grow away from the host building
       // B1123 — a CORNER drag legitimately moves both axes, so no dragAxis hint: the exact
       // host-local along measurement decides whether a dock zone's length was really set.
-      setEls((a) => applySwShift(refitChildren(a, d.id, nb, d.kids, { userResize: true }), d.swShift, nb));
+      setEls((a) => applySwShift(refitChildren(a, d.id, nb, d.kids, { userResize: true, freeStackIds: d.freeStackIds }), d.swShift, nb));
       return;
     }
     if (d.mode === "edgeResize") {
@@ -9291,7 +9291,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (d.hostClamp) clampToHost(nb, d.hostClamp); // grow away from the host building
       // B1123 — an EDGE drag knows exactly which local dimension it moved, so a depth-only drag on a
       // dock zone can never be read as the owner setting that zone's length.
-      setEls((a) => applySwShift(refitChildren(a, d.id, nb, d.kids, { userResize: true, dragAxis: { w: nx !== 0, h: ny !== 0 } }), d.swShift, nb));
+      setEls((a) => applySwShift(refitChildren(a, d.id, nb, d.kids, { userResize: true, dragAxis: { w: nx !== 0, h: ny !== 0 }, freeStackIds: d.freeStackIds }), d.swShift, nb));
       return;
     }
     if (d.mode === "rotate") {
@@ -11504,16 +11504,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
          reads as "it snapped back to its old size" on release. `growFreeParkStack` (the "+"/"−"
          ladder) already re-lays the whole stack for this exact case (B1625728's freestanding
          remainder); a direct edge/corner drag on the canvas never got the same treatment. Re-lay
-         the stack (a fresh geometry read — `next` already carries this frame's resize) via the
-         shared pure helper (`relayoutFreeStack`), the freestanding twin of `relayoutWallKids` —
-         it propagates the gap/overlap that opened on whichever side of the dragged piece moved,
-         so undisturbed siblings on the OTHER side never move. */
-      const stack = freeParkStack(next.find((x) => x.id === resized.id) || resized, next);
-      if (stack.length > 1) {
-        const relaid = relayoutFreeStack(stack, resized.id);
-        if (relaid !== stack) {
-          const byId = new Map(relaid.map((p) => [p.id, p]));
-          next = next.map((x) => (byId.has(x.id) ? { ...x, ...byId.get(x.id) } : x));
+         the stack via the shared pure helper (`relayoutFreeStack`), the freestanding twin of
+         `relayoutWallKids` — it propagates the gap/overlap that opened on whichever side of the
+         dragged piece moved, so undisturbed siblings on the OTHER side never move.
+
+         ⛔ NEW-1 (dispatch: parking STILL snaps back on expand, reopening the above) — membership
+         is resolved from `opts.freeStackIds`, captured ONCE (by the caller, before any change —
+         see `freeStackIdsFor`) rather than re-derived here from `next`. Re-deriving it here from
+         `next` was the original (still-broken) shape: `next`'s resized piece already carries THIS
+         frame's new geometry, and a CORNER (or along-wall edge) drag moves `w` along with `h`, so
+         `freeParkStack`'s own width-match test — the thing that tells this stack's pieces apart
+         from an unrelated field sitting nearby — silently found a chain of ONE the instant width
+         diverged, and the depth relayout below never ran. A pure depth-edge drag (never touches
+         `w`) always looked fixed, which is exactly why B1754864's own tests never caught it. */
+      const ids = opts.freeStackIds && opts.freeStackIds.length > 1
+        ? opts.freeStackIds
+        : freeParkStack(next.find((x) => x.id === resized.id) || resized, next).map((p) => p.id); // no pre-captured membership — degrade to the old (width-sensitive) derivation rather than skip relayout outright
+      if (ids.length > 1) {
+        const byId = new Map(next.map((x) => [x.id, x]));
+        const stack = ids.map((pid) => byId.get(pid)).filter(Boolean);
+        if (stack.length > 1) {
+          const relaid = relayoutFreeStack(stack, resized.id);
+          if (relaid !== stack) {
+            const relaidById = new Map(relaid.map((p) => [p.id, p]));
+            next = next.map((x) => (relaidById.has(x.id) ? { ...x, ...relaidById.get(x.id) } : x));
+          }
         }
       }
     }
@@ -12053,6 +12068,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const m = new Map(sw.siblings.map((s) => [s.id, s]));
     return arr.map((x) => m.has(x.id) ? { ...x, cx: m.get(x.id).cx0 + sw.out.x * delta, cy: m.get(x.id).cy0 + sw.out.y * delta } : x);
   };
+  /* NEW-1 (dispatch: parking resize still snaps back on expand, a reopen of B1754864) —
+     `freeParkStack`'s sibling test requires matching WIDTH, and a CORNER (or along-wall edge)
+     drag changes a piece's `w` in the very same frame `refitChildren` re-derives the stack from
+     `next` — so by the time relayoutFreeStack would run, the resized piece's own width has
+     already diverged from its still-untouched siblings and the chain silently drops to length 1.
+     No relayout fires, the untouched (opaque, later-painted) sibling keeps sitting where it was,
+     and the grown region disappears under it — the exact "it snapped back" symptom, just for a
+     handle the B1754864 fix's own tests never drove (they only ever grabbed a pure depth edge,
+     which never touches `w`). Resolve membership ONCE, from the clean, undragged geometry — the
+     same "capture at gesture start" shape `wallKids`/`hostClampOf` already use below — so a
+     resize that also moves `w` can never un-identify its own siblings mid-gesture. */
+  const freeStackIdsFor = (el) => (el && !el.attachedTo && (el.type === "parking" || el.type === "paving") && Number.isFinite(el.sideParkPiece))
+    ? freeParkStack(el, els).map((p) => p.id)
+    : null;
   const startResize = (e, id, sx, sy) => {
     if (tool !== "select" || e.button !== 0) return; // NEW-1 (B1253248): matches every sibling handle starter
     e.stopPropagation();
@@ -12060,7 +12089,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // fixed opposite corner in world feet
     const oppLocal = rot2(-sx * el.w / 2, -sy * el.h / 2, el.rot);
     const opp = { x: el.cx + oppLocal.x, y: el.cy + oppLocal.y };
-    drag.current = { mode: "resize", id, sx, sy, opp, kids: wallKids(el), hostClamp: hostClampOf(el), swShift: swShiftSnapshot(el), ...startGate(e) };
+    drag.current = { mode: "resize", id, sx, sy, opp, kids: wallKids(el), freeStackIds: freeStackIdsFor(el), hostClamp: hostClampOf(el), swShift: swShiftSnapshot(el), ...startGate(e) };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   // B146: a selected element's dimension callout is grab-and-drag to reposition (stored as a
@@ -12190,7 +12219,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // midpoint of the opposite edge stays fixed (world feet)
     const oppLocal = rot2(-nx * el.w / 2, -ny * el.h / 2, el.rot);
     const opp = { x: el.cx + oppLocal.x, y: el.cy + oppLocal.y };
-    drag.current = { mode: "edgeResize", id, nx, ny, opp, kids: wallKids(el), hostClamp: hostClampOf(el), swShift: swShiftSnapshot(el), ...startGate(e) };
+    drag.current = { mode: "edgeResize", id, nx, ny, opp, kids: wallKids(el), freeStackIds: freeStackIdsFor(el), hostClamp: hostClampOf(el), swShift: swShiftSnapshot(el), ...startGate(e) };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startRotate = (e, id) => {
@@ -19431,7 +19460,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (hc) clampToHost(nb, hc);
     // B1123 — a typed W/H IS a deliberate resize of this element, so a dock zone may pin its length
     // from it; `patch` names the axis the owner typed, which is exactly the dragAxis hint.
-    setEls((a) => refitChildren(a, selEl.id, nb, kids, { userResize: true, dragAxis: { w: patch.w != null, h: patch.h != null } }));
+    // NEW-1 — captured BEFORE the edit, same reason as the drag handlers: a typed Width can move
+    // `w` in the same commit that would otherwise re-derive stack membership from it.
+    const freeStackIds = freeStackIdsFor(selEl);
+    setEls((a) => refitChildren(a, selEl.id, nb, kids, { userResize: true, dragAxis: { w: patch.w != null, h: patch.h != null }, freeStackIds }));
   };
   // B912 — resize a SPECIFIC element to a typed dimension (double-tap its on-canvas dimension label).
   // Mirrors resizeSelEl but targets `el` by value rather than the current selection, so it can be
@@ -19446,7 +19478,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const hc = hostClampOf(el);
     if (hc) clampToHost(nb, hc);
     // B1123 — a typed on-canvas dimension is a deliberate resize of ONE axis (`axisKey`).
-    setEls((a) => refitChildren(a, el.id, nb, kids, { userResize: true, dragAxis: { w: axisKey === "w", h: axisKey === "h" } }));
+    // NEW-1 — captured BEFORE the edit; see resizeSelEl's identical note.
+    const freeStackIds = freeStackIdsFor(el);
+    setEls((a) => refitChildren(a, el.id, nb, kids, { userResize: true, dragAxis: { w: axisKey === "w", h: axisKey === "h" }, freeStackIds }));
   };
   // B912 — open the inline numeric editor on an element's on-canvas dimension NUMBER (double-tap).
   // The geometry resizes to the typed feet: road = travel width; building = depth about its dock
