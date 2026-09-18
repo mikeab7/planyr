@@ -21,32 +21,40 @@ _Last updated: 2026-09-18._
 > and that one draws roads as plain rectangles with no corner rounding whatsoever, so it can't be
 > showing you the corner problem. I tried to make it produce those blobs on purpose and couldn't.
 >
-> - [ ] **Two questions, and either answer gets me moving:** which page were you on, and is that
->       little drawing something Planyr drew, or a site plan / brochure you uploaded? (A "CAR
->       PARKS" label with a pointer line is the kind of thing that usually comes on somebody
->       else's flyer — if that's what it is, those blobs are part of the picture you uploaded and
->       there's nothing for me to fix.) A screenshot with a bit more of the page showing would
->       answer both at once.
-
-## 📅 "HW Review" on Grand Port's Master Schedule — restore its old date, or leave it? (B1701360)
-
-> **Short version: the bug that kept pushing "HW Review," on Grand Port's Master Schedule, further
-> into the future every time you loaded the schedule is fixed — it can't happen again, to that task
-> or any other.** (Naming the project here because you've got a second, unrelated schedule also
-> called "Master Schedule" — this one's the Grand Port one, not Goose Creek's.) But fixing the
-> bug doesn't undo what it already did: right now that task's date is wherever the bug left it
-> (settling around late August 2026, driven by its one real link to "Begin Drafting Contract").
+> **Update after you said Goose Creek:** I found it — the plan is "Phase II - TAS R1", and the
+> "CAR PARKS" labels are your own callouts, so that drawing is Planyr's, not something you
+> uploaded. That means the blobs are ours to fix. I checked the two most likely causes against
+> your actual plan, read-only, and ruled both out: every drive-into-pavement connection on it
+> meets square (none of them is the shallow-angle problem below), and the two wide roads with
+> tight corners all trace clean.
 >
-> I dug through your account's own save history and found the date it was sitting on right before
-> the bug started: **October 1, 2026**, tied to a different, real task ("Provide Lender Consent").
-> It sat there safely, untouched, for over a day before something re-linked it — most likely while
-> you were setting up the "Contract" group that day — and that re-link is what planted the loop.
+> - [ ] **So one question left: which page, and whereabouts on the drawing?** The Spreadsheet tab
+>       genuinely has no site plan in it, so I think you were on the Site Planner with the
+>       Spreadsheet tab just visible along the top — but I'd rather you tell me than guess again.
+>       A screenshot showing a bit more of the page, or just "top-left of the plan", gets me
+>       straight to it.
+
+## ✅ CLOSED — "HW Review" on Grand Port's Master Schedule needs no repair, nothing on your end (B1701360)
+
+> **Correction to what this item used to say.** It previously told you to manually restore "HW
+> Review"'s dependency to fix a drift bug, and gave you a specific date to expect back. **Don't do
+> that — the repair already happened on its own, and the date it named was never actually confirmed.**
 >
-> I have not touched your actual schedule — only the code. Restoring the date is a one-click change
-> in the app: open "HW Review," set its "depends on" field back to just the one task ("Provide
-> Lender Consent"), and it'll land back on October 1, 2026 on its own.
-> - [ ] **Say the word and I'll do it, or just fix it yourself in the app whenever's convenient.**
->       Either way, nothing else is at risk — this was the only task actually caught in the loop.
+> **What's true now.** The drift bug (task 260/261's "HW Review," on Grand Port's Master Schedule —
+> naming the project because you've got a second, unrelated schedule also called "Master Schedule";
+> this one's the Grand Port one, not Goose Creek's) is fixed, and checking the app's own save history
+> shows the task has sat still, holding the **same date, currently 2026-08-24 → 2026-08-28**, across
+> every reload since the evening of 2026-09-16 — no drift, no leftover warning on the row. Nothing is
+> owed here; there is no click for you to make.
+>
+> **The "October 1, 2026" figure from the old version of this note was a guess, not a confirmed fact,
+> and I'm not replacing it with a different guess.** It came from reading one saved snapshot of your
+> history, and a second read turned up an equally plausible explanation: your schedule has a separate,
+> unrelated task ("Execute Contract," a same-day milestone in the same "Contract" group) that really is
+> dated October 1 — so the two may simply have been misread as one. I don't have enough to say which is
+> right, and guessing again would just repeat the original mistake. If you ever do want "HW Review" moved,
+> just tell a Claude session the date you want and it'll set it directly — no need for you to hunt down a
+> row number in the grid yourself.
 
 ## ✅ One old project record needs a small repair — say yes or no (B1496320)
 
@@ -130,10 +138,11 @@ _Last updated: 2026-09-18._
 >       "Confirm email."** That's the whole step; say the word once it's flipped and I'll clean up the "check
 >       your email" wording that would otherwise sit there unused.
 
-## 🔐 One small GitHub setting still open, and two closed hunts (B825232–B825234)
+## 🔐 One GitHub decision open, and three closed hunts (B825232–B825234, B897440, B1764688)
 
-> **Not urgent, and nothing is broken while it waits — it just means a session has to merge a green
-> PR by hand instead of GitHub queuing it automatically.**
+> **Not urgent, and nothing is broken while it waits.** Auto-merge already works fine, PR by PR — the
+> one open item below is only about extra protection against two merges landing on `main` at the exact
+> same moment, which isn't happening today.
 
 - **Authorizing `mikeab7/planyr` for the Cowork session type — closed, turned out unnecessary, not
   done (2026-09-04).** Nobody flipped a switch; the need went away from two directions at once. (a)
@@ -151,16 +160,36 @@ _Last updated: 2026-09-18._
   automation that needed one (`pr-auto-ready.yml`) is now deleted outright, not just silenced. Sessions
   mark their own PRs ready and arm auto-merge by hand now, permanently — full record in
   `docs/archive/BACKLOG-DONE.md` (B793696, B934400–B934402). Don't re-open this hunt.
-- [ ] **Check whether `main` has a branch-protection rule set** (`github.com/mikeab7/planyr/settings/branches`)
-      — a SEPARATE question from the note above (that one is about un-drafting a PR; this is about arming
-      auto-merge on one that's already ready). Found 2026-08-31 (`B897440`) while shipping PR #1245: even
-      after the Workflow-permissions flip and un-drafting the PR by hand, GitHub still refused to arm
-      auto-merge — first "Protected branch rules not configured for this branch," then (once the checks
-      themselves went green) "Pull request in unstable status." GitHub's auto-merge needs a protection rule
-      (at minimum, a required status check) on `main` before it will queue anything, so either there isn't
-      one, or it exists but doesn't name `build` as required. If there's no rule: add one requiring the
-      `build` check to pass before merging. **Nothing is broken while this waits** — a session just has to
-      merge each green PR by hand instead of it happening on its own, same as before this automation existed.
+- **Whether `main` has a branch-protection rule set — closed, answered (B897440).** It does: `main` is
+  protected by a **RULESET** (GitHub's newer mechanism, not the older "classic branch protection rule"
+  a session went looking for in 2026-08-31 and came up empty) named **"Protect Main,"** enforcement
+  Active, targeting the default branch. Its four active rules: restrict deletions, require a pull
+  request before merging, require status checks to pass, and block force pushes. So the 2026-08-31
+  worry — that there might be no rule at all, or one that doesn't name the `build` check — is retired:
+  auto-merge has been arming and completing normally on every PR through today (for example #1710 and
+  #1716). Don't re-open this hunt.
+- [ ] **Decide whether to move the `planyr` repo into a free GitHub organization — the only way to get
+      GitHub's "merge queue" (B1764688).** A merge queue is GitHub's mechanism for lining up several
+      ready-to-merge pull requests and re-testing/merging them one at a time, so two merges can never
+      land on `main` at the exact same instant and step on each other. It is genuinely unavailable
+      here today, and not because a setting got missed: GitHub only offers a merge queue on a public
+      repo owned by an **organization** (a shared GitHub account multiple people/bots belong to — the
+      free kind is what most open-source projects use), or on a private repo with a paid Enterprise
+      plan. `mikeab7/planyr` is public, which is fine, but it's owned by your personal account, not an
+      organization — that's the disqualifier. Confirmed three ways: the current "Protect Main" rule
+      screen offers 13 possible rules and "merge queue" isn't one of them; the older classic-protection
+      screen offers 16 checkboxes and doesn't have it either; and GitHub's own documentation states the
+      organization-ownership requirement outright. It isn't hidden — it just isn't offered.
+      - **What it would take:** create a free GitHub organization and move `mikeab7/planyr` into it.
+        GitHub automatically redirects the old web address, so old links keep working. The real cost is
+        that a few behind-the-scenes settings — Actions secrets, deploy keys, connected integrations —
+        need to be re-checked after the move, since a transfer can occasionally reset one of them.
+      - **What it would buy:** protection against two merges racing each other into `main` at the same
+        moment. Worth knowing this is **not** what would have prevented the earlier CI pileup that first
+        got a merge queue mentioned — that pileup already has its fix shipped (two automated jobs that
+        keep a couple of tracking files fresh without any branch touching them), and it isn't recurring.
+      - **Nothing is broken while this waits** — every pull request through today has gone through fine,
+        one at a time.
 
 ## 👀 One thing only you can check: does the app actually TELL you when it has stopped saving? (V273520 / B484337)
 
@@ -682,9 +711,12 @@ a look-ahead at what that study will produce, clearly labelled as screening and 
 
 ## 🗓 Optional — one Scheduler date to sanity-check on Grand Port (B835)
 - [ ] **Nothing broken; just a judgment call only you can make.** The task you flagged — Grand Port →
-      Site Development → **"AHJ Review #1 - Civil Revisions"** (task 81) — is now correct: it starts the
+      Site Development → **"AHJ Review #1 - Civil Revisions"** — is now correct: it starts the
       next working day after the AHJ approval before it (7/13/26), and the stray old date (8/3) and the
-      pin that was hiding it are gone. The only open question is your intent: **did you want a gap of
+      pin that was hiding it are gone. (It was row/task 81 at the time this was written — schedule row
+      numbers shift as tasks get inserted above them, so whoever acts on this should find it by its name
+      and project, in Grand Port → Site Development, rather than trust that number.) The only open
+      question is your intent: **did you want a gap of
       roughly three weeks between the AHJ approval and starting civil revisions?** If yes, tell a Claude
       session and it'll add that delay to the link. If not, it's already right — leave it. (The app now
       also pops up a yellow heads-up banner any time a saved date gets auto-corrected like this, so you'll
