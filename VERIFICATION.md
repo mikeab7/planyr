@@ -10435,6 +10435,19 @@ records its own live verify" mechanism) or a future sandbox with different egres
 
 **Result:** ⏳ pending — needs a real signed-in browser session against a throwaway duplicate of the owner's real plan; not reachable from this sandbox. `Cadence: once`.
 
+### V1256816 — B1771760: the approved seven-icon Site Planner rail set renders correctly on the real deployed build
+
+**Why this needs its own real pass, distinct from what was already proven headless.** Every structural/behavioral claim was already proven THIS session in a headless, logged-out sandbox browser (no sign-in, no external GIS needed — the rail is visible on the bare demo-plan canvas): all seven icons render the approved geometry (no fallback circle), computed SVG size 21×21 with `stroke-width` 1.75, the icon slot doesn't clip, no ancestor carries opacity below 1, the active icon color resolves to the theme's `--accent-site-text` token (green) while the inactive color stays the existing muted chrome token — and that color is scoped to the icon alone (the button's own label text color is unchanged), each of the seven tabs opens/closes the same panel it always did, and the repo's own `e2e/rail-focus-ring.spec.js` (keyboard focus ring) and `test/parcelActions.test.js` (Land naming/panel identity) both still pass. What that sandbox render CANNOT prove: `docs/VISUAL-REGRESSION.md`'s own measured finding is that this sandbox's locally-rendered pixels do not reliably byte-match what Cloudflare's real edge (built by GitHub Actions' pinned runner) actually serves — font hinting/antialiasing differ below what a local Chromium build can close. So the one thing left to confirm is the real, deployed picture.
+
+**Steps, each with a named expected result — logged out, no throwaway plan needed (the rail renders on the bare map-landing "Draw" canvas):**
+1. Open `https://planyr.io/` in a fresh, uncached tab/session. Click the map toolbar's **Draw** button to reach the blank Site Planner canvas.
+2. Look at the left icon rail (7 buttons, top to bottom: Land, Analysis, Drainage, Yield, Properties, Overlays, Standards). **Expect:** every icon renders the approved line-art shapes below — a pointed 5-sided parcel outline (Land), a magnifying glass (Analysis), a double wavy-line pair (Drainage), a right-pointing chevron/arrow (Yield), a two-pole/two-circle utility-pole shape (Properties), two overlapping squares with the rear one's corner interrupted (Overlays), an open-book/ledger shape with two short tick marks (Standards) — never a blank circle placeholder.
+3. Click each of the seven in turn. **Expect:** the icon's color shifts from a muted grey to a solid green on click (no fade/opacity change), the label text stays its own separate color (not tinted the same green), and the SAME panel opens/closes each time (Land → the parcel/Land panel, Yield → the Yield panel, etc.) — matching what a reload also shows for the same click.
+4. Toggle the theme (Settings gear → Light/Dark). **Expect:** both themes render cleanly — muted-grey inactive icon, green active icon, no clipped or oversized icon box, in both.
+5. Read the served chunk hash (`document.querySelectorAll('script[src]')` or the Network tab) in the SAME observation as steps 2–4, per this repo's own live-measurement rule, confirming the build postdates this item's merge.
+
+**Result:** ⏳ pending — this session can reach `https://planyr.io/` directly (no `Blocker: auth`/`Blocker: real-data` — the rail renders logged out) and intends to run this check itself once the merge has deployed; parking here rather than claiming it passed before that deploy is confirmed. `Cadence: once`.
+
 ## ✅ Verified / ❌ Failed — history
 
 > Passed/failed items are archived to **`VERIFICATION-DONE.md`** to keep this file fast.
