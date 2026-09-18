@@ -31,6 +31,19 @@
  * Every firing case also asserts the client_errors telemetry row this same item adds (NEW-1) —
  * module "scheduler", source "event:merge-toast", carrying the toast's own schedule list + count.
  *
+ * B1629618 (2026-09-18) added two more cases, both against a mock that now also mirrors
+ * planar_data_enforce_version_monotonic (src/workspaces/scheduler/db/
+ * planar_data_version_monotonic_guard.sql) at the HTTP layer -- a real database trigger cannot run
+ * inside a mocked Playwright backend, so this proves the CLIENT half (detect a refusal, re-read,
+ * merge/re-sequence, retry) using a mock that refuses a write the same way the real trigger does;
+ * the trigger itself is separately mutation-proven in a rolled-back SQL transaction against
+ * production (src/workspaces/scheduler/db/test/planar_data_version_monotonic_guard.test.sql):
+ *   6. a genuine stale-write race (server refuses)  -> refused write is DETECTED (not reported as
+ *                                                       success), re-merged, and retried -- both
+ *                                                       this tab's edit AND the racing edit survive
+ *   7. Reload while a cell editor is open, uncommitted -> the in-flight keystrokes are committed
+ *                                                       and saved before the reload, never dropped
+ *
  * Run:  npm run build && npx vite preview --port 4173 &   then   node ui-audit/verify-merge-toast.mjs
  */
 import { chromium } from "playwright";
@@ -64,7 +77,15 @@ function json(route, body, status = 200) {
 function makeBackend() {
   const rows = {};
   const upserts = [];
+  const refusals = [];
   const clientErrors = [];
+  // B1629618 — a one-shot hook that fires the NEXT time this tab reads planar_data's `value`
+  // (the pre-write check / a post-refusal re-read inside `_rawSet`), AFTER the response body is
+  // captured but effectively "in the gap" before the client's own subsequent write reaches this
+  // mock -- simulating a second writer landing in exactly the window the real database trigger
+  // (planar_data_version_monotonic_guard.sql) exists to guard. No second browser tab needed: the
+  // mock performs the race deterministically, once, on demand.
+  let raceArm = null;
   const handle = async (route) => {
     const req = route.request();
     const url = new URL(req.url());
@@ -83,12 +104,37 @@ function makeBackend() {
           const rev = row.value && typeof row.value === "object" ? row.value.__rev : null;
           return json(route, { rev: rev == null ? null : String(rev) });
         }
-        return json(route, { value: row.value });
+        // The `value`-only read (both `get()` at boot and `_rawSet`'s pre-write/post-refusal
+        // re-reads). Capture the response BEFORE firing an armed race, so the client reads the
+        // state as of NOW and only discovers the race on its subsequent write.
+        const responseValue = row.value;
+        if (raceArm) { const fn = raceArm; raceArm = null; fn(); }
+        return json(route, { value: responseValue });
       }
       if (req.method() === "POST") {
         let body; try { body = JSON.parse(req.postData() || "null"); } catch { body = null; }
         const rec = Array.isArray(body) ? body[0] : body;
-        if (rec && rec.key) { rows[rec.key] = { key: rec.key, value: rec.value }; upserts.push({ key: rec.key, rev: rec.value && rec.value.__rev }); }
+        const headers = await req.allHeaders();
+        const wantsRepresentation = /return=representation/i.test(headers["prefer"] || "");
+        if (rec && rec.key) {
+          // B1629618 — mirror planar_data_enforce_version_monotonic: an UPDATE (the key already
+          // exists) whose incoming __rev does not STRICTLY exceed the stored one is refused (0
+          // rows affected, nothing written); a first-ever INSERT for a key is always accepted.
+          // `.select("key")` on the real upsert requests `return=representation`, so a refusal is
+          // an EMPTY array with no error -- exactly what the client's own `attemptWrite` now checks
+          // for, matching the real trigger's "BEFORE UPDATE returns NULL -> 0 rows" behavior.
+          const existing = rows[rec.key];
+          const oldRev = existing && existing.value && typeof existing.value.__rev === "number" ? existing.value.__rev : 0;
+          const newRev = rec.value && typeof rec.value.__rev === "number" ? rec.value.__rev : 0;
+          const accepted = !existing || newRev > oldRev;
+          if (accepted) {
+            rows[rec.key] = { key: rec.key, value: rec.value };
+            upserts.push({ key: rec.key, rev: rec.value && rec.value.__rev });
+            return json(route, wantsRepresentation ? [{ key: rec.key }] : [], 201);
+          }
+          refusals.push({ key: rec.key, oldRev, newRev });
+          return json(route, [], 201);
+        }
         return json(route, [], 201);
       }
     }
@@ -103,8 +149,11 @@ function makeBackend() {
     return json(route, {});
   };
   return {
-    rows, upserts, clientErrors, handle,
+    rows, upserts, refusals, clientErrors, handle,
     setForeignRow(key, value) { rows[key] = { key, value }; },
+    // Arms a one-shot race: `mutate` runs against `rows` the next time this tab reads planar_data's
+    // `value` -- see the header comment above `raceArm` for why this simulates a second writer.
+    armRace(mutate) { raceArm = mutate; },
   };
 }
 
@@ -331,6 +380,118 @@ async function run() {
 
       check("no cloud write from toggling a view-only field alone", backend.upserts.length === upsertsBeforeToggle, `upserts=${backend.upserts.length}`);
       check("no toast from a view-only change", !toastAfterToggle);
+      check("no console/page errors", consoleErrs.length === 0, consoleErrs.slice(0, 3).join(" | "));
+    } finally {
+      await page.close();
+    }
+  }
+
+  // ── Case 6 — a genuine stale-write race: the server refuses the collision, the client detects
+  // it (never reports the refused write as success), re-merges onto whoever actually won, and
+  // retries -- both edits survive (B1629618, NEW-1) ────────────────────────────────────────────
+  console.log("\nCase 6 — a genuine stale-write race (B1629618): refused, detected, retried, both edits survive");
+  {
+    const backend = makeBackend();
+    backend.setForeignRow("hs-v1", seedDoc());
+    const { page, consoleErrs } = await newPage(browser, backend);
+    try {
+      await page.goto(new URL("sequence/", BASE).href, { waitUntil: "domcontentloaded", timeout: 45000 });
+      await page.waitForSelector("[data-task-row]", { timeout: 20000 });
+      await page.waitForTimeout(500);
+
+      await editTaskName(page, 1, "Task Alpha");
+      await waitForUpsertCount(backend, 1);
+
+      // Arm the race: the NEXT time this tab reads planar_data (edit #2's own pre-write check),
+      // right after it sees the current row, a "foreign" write lands in that exact gap -- bumping
+      // the stored row to the SAME rev this tab is about to compute and write. That is the exact
+      // TOCTOU collision the database trigger exists to refuse: both writers pass their own
+      // pre-write read-then-write check, and still race each other to the actual write.
+      let raceLanded = false;
+      backend.armRace(() => {
+        const cur = JSON.parse(JSON.stringify(backend.rows["hs-v1"].value));
+        cur.projects["2"].tasks[0].name = "Kickoff (raced in)";
+        cur.__rev = cur.__rev + 1;
+        backend.rows["hs-v1"] = { key: "hs-v1", value: cur };
+        raceLanded = true;
+      });
+
+      const upsertsBefore = backend.upserts.length;
+      await editTaskName(page, 2, "Task Beta (local)");
+      await waitForUpsertCount(backend, upsertsBefore + 1, 10000);
+      await page.waitForTimeout(400);
+
+      check("fixture reaches its precondition (the race actually landed)", raceLanded);
+      check("the mock's server-side guard actually refused the colliding write", backend.refusals.length >= 1, JSON.stringify(backend.refusals));
+      const finalDoc = backend.rows["hs-v1"].value;
+      check("the racing (foreign) edit survived", finalDoc.projects["2"].tasks[0].name === "Kickoff (raced in)", finalDoc.projects["2"].tasks[0].name);
+      check("this tab's own edit also survived (merged in, not silently dropped)", finalDoc.projects["1"].tasks[1].name === "Task Beta (local)", finalDoc.projects["1"].tasks[1].name);
+      const toast = await readToast(page);
+      const banner = await bannerVisible(page);
+      check("a merge toast fired for the recovered save", !!toast, JSON.stringify(toast));
+      check("no stale/false-conflict banner left showing", !banner);
+      check("no console/page errors", consoleErrs.length === 0, consoleErrs.slice(0, 3).join(" | "));
+    } finally {
+      await page.close();
+    }
+  }
+
+  // ── Case 7 — Reload commits an in-flight, uncommitted cell edit before flushing (B1629618 /
+  // NEW-2): a cell editor left OPEN (typed, not yet Enter/Tab/blurred) must not be treated as
+  // empty by the Reload flush ──────────────────────────────────────────────────────────────────
+  console.log("\nCase 7 — Reload commits an in-flight, uncommitted cell edit before flushing (NEW-2)");
+  {
+    const backend = makeBackend();
+    backend.setForeignRow("hs-v1", seedDoc());
+    const { page, consoleErrs } = await newPage(browser, backend);
+    try {
+      await page.goto(new URL("sequence/", BASE).href, { waitUntil: "domcontentloaded", timeout: 45000 });
+      await page.waitForSelector("[data-task-row]", { timeout: 20000 });
+      await page.waitForTimeout(500);
+
+      // Local edit #1 — establishes a NORMALIZED ancestor first (same reasoning as the injected-
+      // merge cases above): the raw hand-seeded doc lacks the client's own normalization (_sid
+      // etc.), so building the "foreign" row from it instead of from a real post-normalize save
+      // would make the merge see a mismatched identity for the SAME task and duplicate it --
+      // confounding this case with an artifact of the fixture, not the mechanism under test.
+      await editTaskName(page, 1, "Task Alpha");
+      await waitForUpsertCount(backend, 1);
+      const ancestor = JSON.parse(JSON.stringify(backend.rows["hs-v1"].value));
+
+      // Open task 3's name cell and type WITHOUT committing (no Enter / Tab / click-away) -- the
+      // keystrokes live only in the DOM input, never yet folded into `data`, so `saveStatus` alone
+      // cannot see this as "unsaved work" (EDITOR-EXIT-CONTRACT's "text" class).
+      const cell = page.locator('[data-task-row="3"] [data-col-key="name"]').first();
+      await cell.dblclick();
+      await page.waitForTimeout(150);
+      await page.keyboard.press("Control+A");
+      await page.keyboard.type("Task Gamma (typed, not yet committed)");
+
+      // Force the stale banner without waiting out the 20s poll: inject a newer foreign row (built
+      // from the real, normalized ancestor) and fire a focus event (one of checkRemote's listeners).
+      const foreign = JSON.parse(JSON.stringify(ancestor));
+      foreign.projects["2"].tasks[0].name = "Kickoff (from elsewhere)";
+      foreign.__rev = ancestor.__rev + 1;
+      backend.setForeignRow("hs-v1", foreign);
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await page.waitForTimeout(600);
+
+      const bannerShown = await bannerVisible(page);
+      check("fixture reaches its precondition (the stale banner is showing, editor still open)", bannerShown);
+
+      const upsertsBefore = backend.upserts.length;
+      await page.getByRole("button", { name: "Reload" }).first().click();
+      await waitForUpsertCount(backend, upsertsBefore + 1, 10000);
+      await page.waitForSelector("[data-task-row]", { timeout: 20000 });
+      await page.waitForTimeout(500);
+
+      const finalDoc = backend.rows["hs-v1"].value;
+      check("the typed-but-uncommitted edit was captured and saved, not discarded",
+        finalDoc.projects["1"].tasks[2].name === "Task Gamma (typed, not yet committed)", finalDoc.projects["1"].tasks[2].name);
+      check("the foreign edit is also present (a real merge, not an overwrite)",
+        finalDoc.projects["2"].tasks[0].name === "Kickoff (from elsewhere)", finalDoc.projects["2"].tasks[0].name);
+      const cellAfter = await page.locator('[data-task-row="3"] [data-col-key="name"]').first().innerText().catch(() => null);
+      check("the grid itself shows the recovered edit after reload", (cellAfter || "").includes("Task Gamma (typed, not yet committed)"), cellAfter);
       check("no console/page errors", consoleErrs.length === 0, consoleErrs.slice(0, 3).join(" | "));
     } finally {
       await page.close();

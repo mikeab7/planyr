@@ -10424,6 +10424,21 @@ function App() {
               // the existing guard, or — if a merge genuinely can't happen — snapshots this tab's
               // copy as 'stale-block' (_rawSet's own existing fallback), so the edits are preserved
               // one way or the other before the page goes away.
+              // NEW-2 (B1629619, 2026-09-18) — "unsaved changes" as read by `saveStatus` means the
+              // in-memory `data` object hasn't reached the cloud; it says nothing about a cell
+              // editor that's still open with typed-but-not-yet-committed text (name/date/cost/etc.
+              // -- the "text" editor class, EDITOR-EXIT-CONTRACT). That keystroke never made it into
+              // `data` at all -- every one of this grid's text cells commits on blur
+              // (onBlur={e=>commit(taskId,col,e.target.value)}, reading the DOM input's OWN current
+              // value, not a stale React closure) -- so blurring whatever's focused is both safe (a
+              // no-op if nothing's open) and sufficient (it reads the live keystrokes, not a copy).
+              // The wait lets that blur's setData/updateTask land in `data` (and from there into
+              // `latestData.current`, synced by its own effect) before this reads it.
+              const ae = document.activeElement;
+              if (ae && typeof ae.blur === "function" && ae !== document.body) {
+                ae.blur();
+                await new Promise(r => setTimeout(r, 50));
+              }
               const d = latestData.current;
               if (d && saveStatusRef.current !== "saved") {
                 try { await window.storage.set("hs-v1", JSON.stringify(stripViewState(d)), { label: "auto" }); } catch {}
@@ -18504,13 +18519,94 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
           }
         }
 
-        // Stamp the new version one above whatever the cloud holds (or our basis
-        // if the read failed), then write it.
-        if (parsed && typeof parsed === "object") parsed.__rev = (cloudRev != null ? cloudRev : (knownRev[k] || 0)) + 1;
+        // NEW-1 (B1629618, 2026-09-18) — the actual write is now ALSO guarded server-side, by
+        // planar_data_version_monotonic_guard.sql: a BEFORE UPDATE trigger on public.planar_data
+        // refuses any UPDATE whose value->>'__rev' does not strictly exceed the row's CURRENT
+        // stored rev. That closes the gap Layer 0 above cannot: Layer 0 is a read-then-write check,
+        // so two tabs can each pass it (each reading a cloudRev that really was current at the
+        // moment it read) and still race each other to the ACTUAL write below -- whichever commits
+        // SECOND must lose even though its own pre-write read looked clean. `.select("key")` is
+        // required to SEE that a refusal happened at all: a plain `.upsert()` with no `.select()`
+        // sends `Prefer: return=minimal`, so PostgREST reports success whether the trigger silently
+        // skipped the row (0 rows touched) or genuinely wrote it -- the exact "a refused save tells
+        // nobody" defect this repo already hit once for public.sites (B1693264). An empty `data`
+        // array with no `error` IS the refusal signal.
+        const attemptWrite = async (payload, baseRevForStamp) => {
+          const toWrite = _deepClone(payload);
+          if (toWrite && typeof toWrite === "object") toWrite.__rev = baseRevForStamp + 1;
+          const { data, error } = await sb.from(TABLE).upsert({ key: k, value: toWrite }, { onConflict: "key" }).select("key");
+          return { toWrite: toWrite, error: error, refused: !error && Array.isArray(data) && data.length === 0 };
+        };
+        // Re-derive a merge against whichever cloud row actually won the race, mirroring Layer 0's
+        // own merge shape (same base/preOurs/mergeCloudDoc), so a refusal converges the same honest
+        // way a pre-write staleness detection already does.
+        const mergeOnto = (theirsParsed) => {
+          const base = baseByKey[k];
+          const preOurs = _mStripRev(_deepClone(parsed));
+          if (base === undefined || !_mIsObj(parsed)) return null;
+          let merged;
+          try { merged = mergeCloudDoc(base, preOurs, _mStripRev(theirsParsed)); } catch (e) { merged = null; }
+          return (merged && _mIsObj(merged)) ? { merged: merged, preOurs: preOurs } : null;
+        };
 
-        // Main upsert
-        const { error } = await sb.from(TABLE).upsert({ key: k, value: parsed }, { onConflict: "key" });
-        if (error) { console.error("Supabase set error:", error); return null; }
+        let attempt = await attemptWrite(parsed, cloudRev != null ? cloudRev : (knownRev[k] || 0));
+        if (attempt.error) { console.error("Supabase set error:", attempt.error); return null; }
+
+        if (attempt.refused) {
+          let freshOld = null, freshRev = null;
+          try {
+            const cur2 = await sb.from(TABLE).select("value").eq("key", k).single();
+            if (cur2.data && cur2.data.value) {
+              freshOld = typeof cur2.data.value === "string" ? JSON.parse(cur2.data.value) : cur2.data.value;
+              freshRev = revOf(freshOld);
+            }
+          } catch (e) {}
+
+          if (freshOld == null || freshRev == null) {
+            if (!staleSnapped[k]) { staleSnapped[k] = true; await _snapshot(k, parsed, "stale-block", v.length); }
+            console.error("[planar guard] Write refused by the server and the current cloud row could not be re-read afterward. Your copy is saved as 'stale-block'.");
+            try { window.dispatchEvent(new CustomEvent("planar:stale", { detail: { key: k, cloudRev: freshRev, knownRev: knownRev[k] } })); } catch {}
+            return null;
+          } else if (skipSanity) {
+            // An explicit checkpoint (pre-delete/pre-import/pre-restore/pre-recascade) means "this
+            // exact version becomes newest" -- re-sequence it against whoever actually won the race
+            // and retry once. Never silently dropped: a second refusal is a LOUD failure, since these
+            // are exactly the moments (about to delete/import/restore) where losing it is worst.
+            attempt = await attemptWrite(parsed, freshRev);
+            if (attempt.error) { console.error("Supabase set error (explicit retry):", attempt.error); return null; }
+            if (attempt.refused) {
+              console.error("[planar guard] Explicit save ('" + label + "') was refused twice in a row -- a checkpoint could not be recorded.");
+              if (typeof showToast === "function") showToast("Couldn't save a checkpoint before this action -- please try again.", { type: "error", duration: 6000 });
+              await _snapshot(k, parsed, "stale-block", v.length);
+              return null;
+            }
+          } else {
+            const mergeResult = mergeOnto(freshOld);
+            if (!mergeResult) {
+              if (!staleSnapped[k]) { staleSnapped[k] = true; await _snapshot(k, parsed, "stale-block", v.length); }
+              console.error("[planar guard] Save blocked (merge unavailable after a refused write): cloud rev " + freshRev + " is ahead of this tab. Reload to get the latest; your copy is saved as 'stale-block'.");
+              try { window.dispatchEvent(new CustomEvent("planar:stale", { detail: { key: k, cloudRev: freshRev, knownRev: knownRev[k] } })); } catch {}
+              return null;
+            }
+            await _snapshot(k, parsed, "premerge-ours", v.length);
+            staleSnapped[k] = false;
+            parsed = mergeResult.merged;
+            attempt = await attemptWrite(parsed, freshRev);
+            if (attempt.error) { console.error("Supabase set error (merge retry):", attempt.error); return null; }
+            if (attempt.refused) {
+              // A third writer landed in the retry's own window too -- vanishingly rare in practice,
+              // but never loop or silently drop this tab's edits: block honestly instead.
+              if (!staleSnapped[k]) { staleSnapped[k] = true; await _snapshot(k, parsed, "stale-block", v.length); }
+              console.error("[planar guard] Save blocked: lost the race twice in a row. Reload to get the latest; your copy is saved as 'stale-block'.");
+              try { window.dispatchEvent(new CustomEvent("planar:stale", { detail: { key: k, cloudRev: freshRev, knownRev: knownRev[k] } })); } catch {}
+              return null;
+            }
+            console.info("[planar guard] Write was refused by the server (another save landed first); re-merged our edits onto it and saved (both copies in Version History).");
+            try { window.dispatchEvent(new CustomEvent("planar:merged", { detail: { key: k, cloudRev: freshRev, knownRev: knownRev[k], base: mergeResult.preOurs, value: _deepClone(mergeResult.merged) } })); } catch {}
+          }
+        }
+
+        parsed = attempt.toWrite;
         if (parsed && typeof parsed === "object") { knownRev[k] = parsed.__rev; baseByKey[k] = _mStripRev(_deepClone(parsed)); }   // B864(b): the just-written doc is the new merge ancestor
         staleSnapped[k] = false;
 
