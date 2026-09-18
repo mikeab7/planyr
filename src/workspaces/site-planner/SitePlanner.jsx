@@ -1898,7 +1898,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [easeMenu, setEaseMenu] = useState(false);        // Easement ▾ rail menu open
   const [easeTypeMenu, setEaseTypeMenu] = useState(false); // attributes-panel type popover open
   const [attachFor, setAttachFor] = useState(null);     // element id awaiting a "click a host" to attach to
-  const [alignFor, setAlignFor] = useState(null);       // element id awaiting a "click a target" to align rotation to
+  const [alignFor, setAlignFor] = useState(null);       // NEW-2 (B1765729) — {kind:"el"|"callout", id} awaiting a "click a target" (a parcel edge, an element, or a callout/text box) to align rotation to; was a bare element id before callouts/text boxes could source an align
   const [panning, setPanning] = useState(false);   // dragging empty canvas to pan
   const spaceRef = useRef(false);                  // Space held → temporary hand-pan over any tool (D4)
   const [spacePan, setSpacePan] = useState(false); // reflects spaceRef for the grab cursor
@@ -8453,6 +8453,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const startMoveCallout = (e, id, part, tipIndex = 0) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
+    // NEW-2 (B1765729) — align: this click picks THIS callout/text box as the align target (a
+    // building or another callout aligning its rotation to this one). Mirrors startMoveEl's own
+    // alignFor check and takes precedence over the double-tap/select flow below. Arming a callout
+    // as the align SOURCE happens from its own right-click menu's "Align rotation…" row.
+    if (alignFor) { alignToElement(callouts.find((x) => x.id === id), "callout"); return; }
     // NEW-2 — double-click a callout (box part): branch on WHERE the click landed, not on prior selection
     // (interior text region → edit; border band → Properties — see calloutDblAction). Pointer capture
     // eats the DOM dblclick, so we reconstruct the double-tap here; isDoubleTap only DETECTS the pair now.
@@ -11950,12 +11955,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     return best;
   };
-  // Align the alignFor element's rotation to the nearest edge of a parcel (the one
-  // closest to the click), carrying its whole assembly.
-  const alignToParcelEdge = (fp, onlyParcel) => {
-    const el = els.find((x) => x.id === alignFor);
+  // NEW-2 (B1765729) — write a resolved parallel angle onto the alignFor SOURCE (an element's
+  // whole assembly, or a standalone text box/callout) and clear the pending align state. Shared
+  // by both align flows below so a text box/callout can source an align exactly like a building.
+  const commitAlignRotation = (ang) => {
+    if (alignFor && alignFor.kind === "callout") {
+      const c = callouts.find((x) => x.id === alignFor.id);
+      setAlignFor(null);
+      if (!c) return;
+      pushHistory();
+      setCallout(c.id, { rot: snapParallel(c.rot || 0, ang) });
+      return;
+    }
+    const el = els.find((x) => x.id === alignFor?.id);
     setAlignFor(null);
     if (!el || el.points) return;
+    rotateAssemblyTo(el, snapParallel(el.rot || 0, ang));
+  };
+  // Align the alignFor source's rotation to the nearest edge of a parcel (the one
+  // closest to the click), carrying its whole assembly.
+  const alignToParcelEdge = (fp, onlyParcel) => {
+    if (!alignFor) return;
     const list = onlyParcel ? [onlyParcel] : parcels;
     let best = null;
     list.forEach((pc) => pc.points.forEach((a, i) => {
@@ -11963,20 +11983,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const d = segDist(fp, a, b);
       if (!best || d < best.d) best = { d, a, b };
     }));
-    if (!best) return;
+    if (!best) { setAlignFor(null); return; }
     const ang = Math.atan2(best.b.y - best.a.y, best.b.x - best.a.x) * 180 / Math.PI;
-    rotateAssemblyTo(el, snapParallel(el.rot || 0, ang));
+    commitAlignRotation(ang);
   };
-  // Align to another element's rotation (its edges).
-  const alignToElement = (target) => {
-    const el = els.find((x) => x.id === alignFor);
-    setAlignFor(null);
+  // Align to another element's — or, NEW-2 (B1765729), a callout/text box's — rotation (its edges).
+  // `targetKind` defaults to "el" (an element, the original caller); pass "callout" when the click
+  // landed on a text box/callout instead, so it can be the align TARGET too.
+  const alignToElement = (target, targetKind = "el") => {
+    if (!alignFor) return;
     // A centerline road has no single rotation (it's a polyline), so "align parallel" doesn't apply
     // to it as either the source or the target — skip rather than spin its (unused) bbox rot.
-    if (!el || el.points || isCenterlineRoad(el) || !target || target.id === el.id || isCenterlineRoad(target)) return;
-    const ang = target.points ? null : (target.rot || 0);
-    if (ang == null) return; // polygon target has no single rotation
-    rotateAssemblyTo(el, snapParallel(el.rot || 0, ang));
+    if (alignFor.kind === "el" && isCenterlineRoad(els.find((x) => x.id === alignFor.id))) { setAlignFor(null); return; }
+    if (!target || (alignFor.kind === targetKind && target.id === alignFor.id) || (targetKind === "el" && (target.points || isCenterlineRoad(target)))) { setAlignFor(null); return; }
+    commitAlignRotation(target.rot || 0);
   };
   // When a rectangular element is bonded to a (rect) building, capture which of
   // the host's edges it hugs plus the gap, so a resize keeps that host-facing
@@ -26114,7 +26134,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // top, so a hardcoded surface colour blanked every colour chip in these panels: the
             // control you click to change a colour showed no colour. Leave it to ColorField.
             const swatch = { width: 34, height: 26, padding: 0, border: BORDER_1, borderRadius: 6, cursor: "pointer" };
-            const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : SURF_RAISED, color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "var(--border-default)" });
+            // NEW-3 (B1765730) — a small, fixed-size icon-button toggle (never flex:1 — see the
+            // Style field below, which used to stretch six of these across two full-width rows).
+            const segSm = (on) => ({ width: 26, height: 26, padding: 0, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: RADIUS.sm, border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : SURF_RAISED, color: on ? "#fff" : PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12 });
             // NEW-3 (B1652706) — the div-flexbox rows below (colour + Size in one row, B/I/U +
             // align in another, a hand-joined "Padding X / Y" field) were the one panel B-A3 never
             // converted to the shared row primitive (Field/PairedField/PairedFieldHead — see the
@@ -26130,19 +26152,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <Section title={selCallout.noLeader ? "Text box" : "Callout"}>
                 <StdSubLabel>Text</StdSubLabel>
                 <Field label="Colour"><ColorField value={toHex6(cs.color)} {...colorCtl((v) => liveCallout({ color: v }))} seed={COLOR_SEED} title="Text color" style={swatch} /></Field>
-                <Field label="Size"><NumInput style={numInput} value={cs.size} min={6} max={96} step={1} coarse={4} onCommit={(n) => setSelCallout({ size: n })} /></Field>
+                <Field label="Size"><NumInput style={numInput} value={cs.size} min={1} max={96} step={1} coarse={4} onCommit={(n) => setSelCallout({ size: n })} /></Field>
+                {/* NEW-3 (B1765730) — bold/italic/underline + align used to be two rows of six
+                    flex:1 buttons, each stretched to fill a third of the panel's width — far
+                    bigger than the glyph it held. One row of small fixed-size icon buttons
+                    (matching the compact controls elsewhere in this panel, e.g. the zoning-tier
+                    toggles) says the same thing in a fraction of the height. B681 — familiar
+                    Word-style alignment icons instead of the cryptic ⇤ ≣ ⇥ unicode. */}
                 <Field label="Style">
-                  <div style={{ display: "flex", gap: 5 }}>
-                    <button style={{ ...seg(cs.bold), fontWeight: 800 }} title="Bold" onClick={() => setSelCallout({ bold: !cs.bold })}>B</button>
-                    <button style={{ ...seg(cs.italic), fontStyle: "italic" }} title="Italic" onClick={() => setSelCallout({ italic: !cs.italic })}>I</button>
-                    <button style={{ ...seg(cs.underline), textDecoration: "underline" }} title="Underline" onClick={() => setSelCallout({ underline: !cs.underline })}>U</button>
-                  </div>
-                </Field>
-                {/* B681 — familiar Word-style alignment icons (stacked rows) instead of the cryptic ⇤ ≣ ⇥ unicode. */}
-                <Field label="Align">
-                  <div style={{ display: "flex", gap: 5 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <button style={{ ...segSm(cs.bold), fontWeight: 800 }} title="Bold" aria-label="Bold" onClick={() => setSelCallout({ bold: !cs.bold })}>B</button>
+                    <button style={{ ...segSm(cs.italic), fontStyle: "italic" }} title="Italic" aria-label="Italic" onClick={() => setSelCallout({ italic: !cs.italic })}>I</button>
+                    <button style={{ ...segSm(cs.underline), textDecoration: "underline" }} title="Underline" aria-label="Underline" onClick={() => setSelCallout({ underline: !cs.underline })}>U</button>
+                    <div style={{ width: 1, height: 18, background: PAL.panelLine, margin: "0 2px" }} />
                     {[["left", "Align left"], ["center", "Align center"], ["right", "Align right"]].map(([a, lbl]) => (
-                      <button key={a} style={{ ...seg(cs.align === a), display: "flex", alignItems: "center", justifyContent: "center" }} title={lbl} aria-label={lbl} onClick={() => setSelCallout({ align: a })}><AlignIcon dir={a} /></button>
+                      <button key={a} style={segSm(cs.align === a)} title={lbl} aria-label={lbl} onClick={() => setSelCallout({ align: a })}><AlignIcon dir={a} /></button>
                     ))}
                   </div>
                 </Field>
@@ -29277,6 +29301,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {row({ text: "Add Leader", dis: !!c.locked, title: c.locked ? "Unlock this note first" : "", on: () => { setAddLeaderFor(c.id); flashWarn("Add Leader: click where the new leader should point — Esc to cancel.", 0); close(); } })}
             {mapMenu.leaderIndex >= 0 && row({ text: "Delete Leader", danger: true, dis: !!c.locked, on: () => { removeLeaderFromCallout(c.id, mapMenu.leaderIndex); close(); } })}
             {row({ text: c.locked ? "Unlock" : "Lock", hint: c.locked ? "\ud83d\udd12" : "\ud83d\udd13", on: () => { toggleCalloutLock(c.id); close(); } })}
+            {/* NEW-2 (B1765729) \u2014 the SAME align-rotation mechanism a building's own right-click
+                menu offers (AlignRotationIcon/alignFor/alignToElement/alignToParcelEdge), extended
+                so a text box or callout can be the align SOURCE too: click a building, another
+                callout/text box, or a parcel edge next to match this one's angle to it. */}
+            {row({ text: "Align rotation\u2026", on: () => { setAlignFor({ kind: "callout", id: c.id }); close(); } })}
             {row({ text: "Copy", hint: `${MOD}C`, on: () => { copyRef({ kind: "callout", id: c.id }); close(); } })}
             {row({ text: "Duplicate", hint: `${MOD}D`, on: () => { duplicateRef({ kind: "callout", id: c.id }); close(); } })}
             {arrangeGroup({ kind: "callout", id: c.id }, { hdr: sep })}
@@ -29499,7 +29528,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {miRow({ icon: <CopyIcon />, text: "Copy", onClick: () => { copyRef({ kind: "el", id: typeMenu.id }); setTypeMenu(null); } })}
                   {miRow({ icon: <MenuDuplicateIcon />, text: "Duplicate", hint: `${MOD}D`, onClick: () => { duplicateEl(typeMenu.id); setTypeMenu(null); } })}
                   {miRow({ icon: <MenuLockIcon open={!t.locked} />, text: t.locked ? "Unlock" : "Lock", onClick: () => { toggleLock(typeMenu.id); setTypeMenu(null); } })}
-                  {!t.points && miRow({ icon: <AlignRotationIcon />, text: "Align rotation…", onClick: () => { setSel({ kind: "el", id: typeMenu.id }); setAlignFor(typeMenu.id); setTypeMenu(null); } })}
+                  {!t.points && miRow({ icon: <AlignRotationIcon />, text: "Align rotation…", onClick: () => { setSel({ kind: "el", id: typeMenu.id }); setAlignFor({ kind: "el", id: typeMenu.id }); setTypeMenu(null); } })}
                   {t.attachedTo
                     ? miRow({ icon: <DetachIcon />, text: "Detach", onClick: () => { detach(typeMenu.id); setTypeMenu(null); } })
                     : miRow({ icon: <AttachIcon />, text: "Attach to…", onClick: () => { setAttachFor(typeMenu.id); setTypeMenu(null); } })}
