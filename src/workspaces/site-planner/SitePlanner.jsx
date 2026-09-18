@@ -654,30 +654,30 @@ const ToolIcon = ({ id, size = 15 }) => (
   </svg>
 );
 
-// B721 — left-rail workspace icons. The old text glyphs (∑ ⬡ ⚐ ▦ ⚙) render at
-// inconsistent weights with font fallback — worst on Windows (the owner's platform) —
-// so the rail looked ragged next to the right rail's real SVG ToolIcons. These inline
-// SVGs match the EyeIcon / ToolIcon family (currentColor, stroke 2, ~16px) so both rails
-// land on one visual system. Keys match the leftTabs ids.
+// NEW-1 (2026-09-18) — the approved seven-icon rail set (artwork swap only; no panel/routing
+// change). Geometry is exact/verbatim per the owner's design handoff — do not rescale, recenter,
+// or substitute a stock icon. Keys match the leftTabs ids (parcel="Land", references="Overlays").
 const RAIL_ICONS = {
-  // Parcel — a land-boundary polygon (same family as the parcel ToolIcon glyph)
-  parcel: <path d="M4 8 L12 4 L20 8.5 L18.5 19 L6 20 Z" />,
-  // Analysis — a flag on a staff (site constraint / context screen)
-  analysis: <><line x1="6" y1="3" x2="6" y2="21" /><path d="M6 4 H18 L15 8 L18 12 H6 Z" /></>,
-  // Yield — an ascending bar chart (the headline metrics)
-  yield: <><line x1="3.5" y1="20.5" x2="20.5" y2="20.5" /><rect x="5" y="12" width="3.2" height="8" rx="0.5" /><rect x="10.4" y="8" width="3.2" height="12" rx="0.5" /><rect x="15.8" y="4" width="3.2" height="16" rx="0.5" /></>,
-  // Properties — an inspector panel with attribute rows (home for the selected element's fields)
-  properties: <><rect x="4" y="4" width="16" height="16" rx="2" /><line x1="8" y1="9" x2="16" y2="9" /><line x1="8" y1="12.5" x2="16" y2="12.5" /><line x1="8" y1="16" x2="13" y2="16" /></>,
-  // References — two stacked backdrop sheets (aerial + plan overlays)
-  references: <><rect x="3" y="8" width="12.5" height="12.5" rx="1.5" /><path d="M8 8 V5 A2 2 0 0 1 10 3 H19 A2 2 0 0 1 21 5 V16 A2 2 0 0 1 19 18 H15.5" /></>,
-  // Standards — adjustment sliders (default settings for new elements). B721 first used a
-  // gear here, but at 17px the circle-plus-radial-spokes read as a SUN (owner report) — sliders
-  // are unambiguous "settings" and can't be mistaken for anything else.
-  standards: <><line x1="4" y1="7" x2="20" y2="7" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="17" x2="20" y2="17" /><circle cx="9" cy="7" r="2.4" fill="currentColor" stroke="none" /><circle cx="15" cy="12" r="2.4" fill="currentColor" stroke="none" /><circle cx="8" cy="17" r="2.4" fill="currentColor" stroke="none" /></>,
+  // Land
+  parcel: <path d="m4 6.5 10.5-3 5.5 6-3 10.5L4 17Z" />,
+  // Analysis
+  analysis: <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.2 15.2 4.8 4.8" /></>,
+  // Drainage
+  drainage: <path d="M3 7.5c3-6 6 6 9 0s6 6 9 0M3 16.5c3-6 6 6 9 0s6 6 9 0" />,
+  // Yield
+  yield: <path d="M19 4H5l7 8-7 8h14" />,
+  // Properties
+  properties: <><path d="M7 3.5v3m0 5v9M17 3.5v9m0 5v3" /><circle cx="7" cy="9" r="2.5" /><circle cx="17" cy="15" r="2.5" /></>,
+  // Overlays — the rear square is intentionally interrupted where the front square crosses it;
+  // do not close the rear outline or hide the overlap with a background-colored fill.
+  references: <><path d="M8 16H4V4h12v4" /><rect x="8" y="8" width="12" height="12" rx="0.75" /></>,
+  // Standards
+  standards: <><path d="M4 3.5v17h17Z" /><path d="M4 14h3M10.5 20.5v-3" /></>,
 };
-const RailIcon = ({ id, size = 17 }) => (
+const RailIcon = ({ id, size = 21 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
-    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flex: "none" }} aria-hidden="true">
+    strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"
+    style={{ display: "block", flex: "none" }} aria-hidden="true" focusable="false">
     {RAIL_ICONS[id] || <circle cx="12" cy="12" r="6" />}
   </svg>
 );
@@ -18533,6 +18533,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     background: on ? PAL.accentSoft : "transparent", color: on ? PAL.chromeInk : PAL.chromeMuted,
     cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 600, letterSpacing: "0.01em",
   });
+  // NEW-1 (2026-09-18, icon-set swap) — the rail icon's OWN currentColor scope, set on the icon's
+  // wrapping span rather than on the button itself, so the icon can carry a different color from
+  // the button's label text below it without restyling that label. Solid muted grey inactive
+  // (the same token the rest of the rail's inactive chrome already uses); the planner's existing
+  // module accent (--accent-site-text, the green already used for the Site Planner workspace tab)
+  // active — an existing theme token, never a new one. No opacity anywhere in either state.
+  const railIconColor = (on) => (on ? "var(--accent-site-text)" : PAL.chromeMuted);
   // primary buttons (inspector actions)
   const btn = (active) => ({
     padding: "7px 13px", fontSize: 12.5, borderRadius: 8, cursor: "pointer", // B657-5B: radius 8 = shared control scale
@@ -25566,12 +25573,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               // every other narrow case — a rail panel, or the sheet's older left-drawer form).
               transform: (mobileSections || leftPanel || (companionOpen && !phoneSheetSolo)) ? "none" : "translateX(-100%)", transition: "transform 0.2s ease",
               boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null) }}>
-            {leftTabs.map((tb) => (
+            {leftTabs.map((tb) => {
               // NEW-1 — `data-rail-tab` is the stable hook the click-contract guard reads: which panel
               // (if any) the left dock holds. Asserting on it is how the regression net proves that NO
               // pointer interaction with the canvas changes the panel's open/closed state.
-              <button key={tb.id} title={tb.label} className="dbtn" data-rail-tab={tb.id} style={railBtn(leftPanel === tb.id || isFloating(tb.id))}
-                aria-pressed={leftPanel === tb.id || isFloating(tb.id)}
+              const railOn = leftPanel === tb.id || isFloating(tb.id);
+              return (
+              <button key={tb.id} title={tb.label} className="dbtn" data-rail-tab={tb.id} style={railBtn(railOn)}
+                aria-pressed={railOn}
                 onClick={() => {
                   if (isFloating(tb.id)) { closeFloating(tb.id); return; } // re-clicking a floating panel's icon closes it
                   // B733/B750: opening the Properties tab expands the inspector (a prior collapse shouldn't
@@ -25595,11 +25604,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   if (narrow && tb.id === "properties") { setNarrowProps((p) => !p); return; }
                   setLeftPanel((p) => (p === tb.id ? null : tb.id));
                 }}>
-                <span style={{ display: "grid", placeItems: "center", height: 18, lineHeight: 1 }}><RailIcon id={tb.id} /></span>
+                <span style={{ display: "grid", placeItems: "center", height: 21, lineHeight: 1, color: railIconColor(railOn) }}><RailIcon id={tb.id} /></span>
                 {/* long labels ("Standards") overflow the 54px rail at 10.5px — shrink, never clip */}
                 <span style={tb.label.length > 8 ? { fontSize: 9, letterSpacing: 0 } : undefined}>{tb.label}</span>
               </button>
-            ))}
+              );
+            })}
           </div>
           {/* the open menu (collapsed by default) — drag its right edge to resize */}
           {(leftPanel || companionOpen) && (<>
