@@ -563,7 +563,10 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // stays select-only. The hit-zone is computed in screen px from the same box geometry the render uses.
     expect(src).toMatch(/const calloutDblAction = \(e, id\) => \{/);
     expect(src).toMatch(/if \(c\.locked\) return; \/\/ locked/);
-    expect(src).toMatch(/const zone = calloutDblZone\(\{ x: bp\.x - w \/ 2, y: bp\.y - h \/ 2, w, h \}, clickPx, CALLOUT_BORDER_BAND_PX\);/);
+    // NEW-2 (B1612641, rotation) — the hit-test box is now the LOCAL (unrotated) frame, and the
+    // click point is rotated into it first, so a rotated callout's interior/border zones stay
+    // correct; rot===0 makes this the exact byte-identical test the old axis-aligned version ran.
+    expect(src).toMatch(/const zone = calloutDblZone\(\{ x: -w \/ 2, y: -h \/ 2, w, h \}, clickLocal, CALLOUT_BORDER_BAND_PX\);/);
     expect(src).toMatch(/if \(zone === "interior"\) beginEditCallout\(id\);/);
     expect(src).toMatch(/else openInspector\(\);/);
     // B935 — a markup (line/polyline/easement) double-tap ALWAYS opens Properties, never an inline editor
@@ -620,7 +623,10 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
   it("B680: callout editor hides the committed box + chrome while editing (no doubling), keeps a typeable min", () => {
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
     // the committed box + selection chrome are hidden while THIS callout's editor is open → only ONE box
-    expect(src).toMatch(/editCallout\?\.id !== c\.id && <rect data-testid=\{`callout-box-\$\{c\.id\}`\} x=\{boxRect\.x\}/);
+    // NEW-2 (B1612641, rotation) — `x`/`y` are now the plain unrotated bp-relative coordinates
+    // (the enclosing <g rotate(...)> supplies the rotation), not a `boxRect` computed in world/
+    // screen space — `boxRect` itself is now the LOCAL frame used only for leader-anchor math.
+    expect(src).toMatch(/editCallout\?\.id !== c\.id && <rect data-testid=\{`callout-box-\$\{c\.id\}`\} x=\{bp\.x - w \/ 2\}/);
     // NEW-1 — the selection chrome moved OUT of the callout's content pass into the one
     // always-on-top handle layer (`calloutHandles`), so the "hide it while this callout's editor
     // is open" rule is now expressed as that const's early return. Same invariant, one place.
