@@ -3595,6 +3595,22 @@ export default function NoteEditor({
    *                 surprise (the same accepted trade-off `heightTopPadRef`'s own header states
    *                 for the vertical twin of this problem).
    *
+   *                 ⛔ CORRECTED AGAIN (B<PENDING>, owner report 2026-09-18) — NEW-2's OWN FIX WAS
+   *                 HALF RIGHT AND HALF A DUPLICATE. It correctly stopped scrolling the words —
+   *                 but `apply()` (below) ALSO kept writing `scroller.scrollLeft` directly, on the
+   *                 (unstated, and wrong) assumption that the layout effect needed help keeping up
+   *                 with a live drag. It does not: `setSheetGrowLeft` alone retriggers that effect,
+   *                 which measures the real committed shift and scrolls to cancel it in the SAME
+   *                 commit, before paint. Doing both meant every single pointermove applied the
+   *                 compensation TWICE — once as an absolute jump to the drag's target scroll
+   *                 position, right here, and once more as the layout effect's own incremental
+   *                 delta on top of it — an over-scroll immediately papered back over by the next
+   *                 pointermove's absolute write, then reintroduced by the render that followed
+   *                 it. That one-frame-late correct/wrong/correct cycle, repeated for the life of
+   *                 the gesture, is what read as the whole page shaking continuously in both
+   *                 directions. `apply()` no longer touches `scroller.scrollLeft` at all — see its
+   *                 own comment, below.
+   *
    * ⛔ WHY THIS DOES NOT FIGHT THE MEASUREMENT EFFECT ABOVE: that effect's `measure()` bails out
    * immediately while `widthDragRef.current` is set (see its own comment), so the
    * ResizeObserver it owns cannot see this function's live `setSheetGrowWidth` calls and
@@ -3642,14 +3658,23 @@ export default function NoteEditor({
     const apply = () => {
       const w = liveWidthFor(drag.lastClientX);
       setSheetGrowWidth(w);
-      /* NEW-2 — the gap grows with the width (`leftWidthGripPad`), and the scroll moves by
-       * exactly the gap's OWN delta, never by `w - drag.startWidth` directly — the two only
-       * agree while the pad is above its own 0 floor; below it, the width keeps shrinking while
-       * the pad (and the scroll compensating for it) has nothing left to give back. */
+      /* ⛔ NEW-1 (2026-09-18) — DO NOT ALSO WRITE `scroller.scrollLeft` HERE. An earlier version of
+       * this branch did, computing the FULL compensation since drag start (`padDelta`) and writing
+       * it directly, on the reasoning that the live preview needed it applied immediately. It does
+       * not: setting `sheetGrowLeft` already retriggers the "hold the body's screen position"
+       * layout effect a few screens down (keyed on `sheetGrowLeft`), which measures the real
+       * committed layout shift and scrolls to cancel it in the SAME commit, before paint — exactly
+       * the ALREADY-BUILT mechanism this comment block above says the fix "lets" do the scrolling.
+       * Doing BOTH double-applied the compensation every single frame: this line jumped straight to
+       * the correct ABSOLUTE scroll position (relative to drag start), and the layout effect's own
+       * commit then added the INCREMENTAL delta since ITS last reading ON TOP of that — an
+       * over-scroll that the next pointermove's absolute reassignment papered back over one frame
+       * later, only to reintroduce a fresh one. Repeated on every pointermove for the life of the
+       * gesture, that is exactly what read as the whole page shaking for the whole drag, both
+       * directions. One mechanism owns this scroll — the layout effect — so this branch only ever
+       * sets the state that feeds it. */
       if (edge === "left") {
-        const { pad, padDelta } = leftWidthGripPad(drag.startLeftPad, w - drag.startWidth);
-        setSheetGrowLeft(pad);
-        scroller.scrollLeft = drag.startScrollLeft + padDelta;
+        setSheetGrowLeft(leftWidthGripPad(drag.startLeftPad, w - drag.startWidth).pad);
       }
     };
     const onMove = (ev) => {
