@@ -10,7 +10,7 @@
  */
 import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs, countJunkEntries,
   shareMirrorOf, withShareMirror, normRole } from "./siteModel.js";
-import { cloudUpsert, cloudDelete, cloudDeleteGroup, cloudHardDelete, cloudRestore, cloudDeletedRows, cloudCheckDeleted, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile } from "./cloudSync.js";
+import { cloudUpsert, cloudDelete, cloudDeleteGroup, cloudHardDelete, cloudPurgeOnePlan, cloudRestore, cloudDeletedRows, cloudCheckDeleted, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile } from "./cloudSync.js";
 import { reconcileGroupNames, resolveNameFor, groupKeyOf, maxStampOf, nameAuthority, renameStamp } from "./projectName.js";
 import { idbGet, idbPut, idbAvailable, idbDelete, idbDeleteByPrefix } from "./localDb.js";
 import { idbKeysReleasableOnPlanDelete, idbKeysHeldByOtherPlans } from "./sharedAssetRefs.js";
@@ -1566,6 +1566,32 @@ export async function purgeDeletedProject(ids, groupId) {
   const purged = results.filter((r) => r && r.ok !== false).length;
   if (purged > 0) await purgeProjectFoldersFor(groupId || list[0]);
   return { ok: !failed, purged, error: failed ? failed.error : null };
+}
+
+// B1767168 (NEW-1) — permanently purge exactly ONE dead plan out of an otherwise-LIVE project: the
+// plan menu's per-project "Recently deleted" ✕ (`SitePlanner.jsx`'s `handlePurgeDeletedPlan`),
+// reachable ONLY while a live sibling in this exact group is the open plan. `purgeDeletedProject`
+// above always gets refused here — `sites_block_delete_live_group`'s BEFORE DELETE trigger
+// (B1517888) is unconditional for a row whose group still has a live sibling — see that file's own
+// header: "a distinct, deliberate follow-up feature — not built here." This is that feature.
+//
+// Deliberately NOT `purgeDeletedProject` with a flag: that function always runs
+// `purgeProjectFoldersFor(groupId)` once anything purges, and that cascade's whole job — tearing
+// down a project's shared Drive folder tree, its `project_folders` rows, and unfiling its Doc
+// Review documents — is correct only once the WHOLE group is gone. This path purges one dead
+// sibling out of a project that is, by construction, still open and in use, so none of that may
+// run; the folder tree, Drive root and filed documents belong to the live plans that are staying.
+//
+// The write itself goes through `cloudPurgeOnePlan` → the `purge_one_deleted_plan` RPC
+// (db/purge_one_deleted_plan.sql), which independently re-proves ownership, that the row is really
+// in the trash, and that a live sibling survives the delete, before signalling
+// `sites_block_delete_live_group` to stand down for this one row. A pre-migration DB has no such
+// function and degrades to the ordinary `cloudHardDelete` inside `cloudPurgeOnePlan` — i.e. the
+// SAME refusal this purge already gets today — so nothing regresses.
+export async function purgeOnePlanFromLiveGroup(id) {
+  if (!activeUid() || !id) return { ok: false, purged: 0, error: "not signed in" };
+  const res = await cloudPurgeOnePlan(activeUid(), id).catch((e) => ({ ok: false, error: (e && e.message) || "purge threw" }));
+  return { ok: !!(res && res.ok), purged: (res && res.ok) ? 1 : 0, error: (res && res.error) || null };
 }
 
 // Lazy 30-day purge — runs when the bin is listed. Anything that has sat past the retention window
