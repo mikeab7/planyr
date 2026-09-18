@@ -422,3 +422,34 @@ one whole gap (`comps`) and one partial gap (`planar_data`'s missing database-si
 which is a materially smaller finding than the dispatch's framing implied, and it is reported
 here plainly rather than the wider "four tables need fixing" the premise suggested.
 
+---
+
+## 9. NEW-1 (B1760240, 2026-09-18) — two standing traps in the Scheduler's on-disk shape
+
+Found while auditing a stale repair recipe left in `OWNER-TODO.md` (the B1701360 entry) that told
+a future reader to act on a live Scheduler document (`planar_data`, key `hs-v1`) by a bare numeric
+task id and an unconfirmed date. Both traps are about what a task id and a project *name* actually
+mean in this document, and both bite any future session or note that references one without
+re-checking it.
+
+1. **A Scheduler task id is a row position, not a stable identity.** Ids shift whenever a row is
+   inserted above them — measured directly: the task named "HW Review" on Grand Port's Master
+   Schedule was id 260, then 261, then 262, then 263 across three different days, purely from rows
+   being added above it, with no edit to the task itself. A recipe, backlog note, or owner-facing
+   message that says "task 261" or "set the Predecessors cell to `264`" has a shelf life measured in
+   days, not sessions — the moment another row is inserted anywhere above it, that number points at
+   a different task entirely, and following it silently wires the wrong dependency. **Any instruction
+   meant to be acted on later must identify a task by name + schedule name + linkedSiteName (below),
+   and say plainly that the id has to be re-resolved against the live document at the moment of the
+   edit** — never cached from when the instruction was written.
+2. **`doc.projects[pid].name` is the SCHEDULE's own name, not a project identity, and carries no
+   guarantee of uniqueness.** Two different schedules in the same account can be named identically
+   (this account has two schedules both named "Master Schedule," under two different Planyr
+   projects/sites) — `pid` and `.name` alone never tell you which one a fact belongs to.
+   `linkedSiteName` is the field that actually names the Planyr project/site a schedule is attached
+   to, and it must be **read in the same call as anything being attributed to a project** — reading
+   `.name` alone, or reading `linkedSiteName` in a separate later call after the document may have
+   moved on, risks mis-attributing a fact to the wrong project. (B1711952, Done, fixed exactly this
+   ambiguity in the drift/locked-finish banners themselves; this entry generalizes the same caution
+   to anything written about the Scheduler for a human or a future session to read later.)
+
