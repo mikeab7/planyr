@@ -28,25 +28,27 @@ _Last updated: 2026-09-18._
 >       there's nothing for me to fix.) A screenshot with a bit more of the page showing would
 >       answer both at once.
 
-## 📅 "HW Review" on Grand Port's Master Schedule — restore its old date, or leave it? (B1701360)
+## ✅ CLOSED — "HW Review" on Grand Port's Master Schedule needs no repair, nothing on your end (B1701360)
 
-> **Short version: the bug that kept pushing "HW Review," on Grand Port's Master Schedule, further
-> into the future every time you loaded the schedule is fixed — it can't happen again, to that task
-> or any other.** (Naming the project here because you've got a second, unrelated schedule also
-> called "Master Schedule" — this one's the Grand Port one, not Goose Creek's.) But fixing the
-> bug doesn't undo what it already did: right now that task's date is wherever the bug left it
-> (settling around late August 2026, driven by its one real link to "Begin Drafting Contract").
+> **Correction to what this item used to say.** It previously told you to manually restore "HW
+> Review"'s dependency to fix a drift bug, and gave you a specific date to expect back. **Don't do
+> that — the repair already happened on its own, and the date it named was never actually confirmed.**
 >
-> I dug through your account's own save history and found the date it was sitting on right before
-> the bug started: **October 1, 2026**, tied to a different, real task ("Provide Lender Consent").
-> It sat there safely, untouched, for over a day before something re-linked it — most likely while
-> you were setting up the "Contract" group that day — and that re-link is what planted the loop.
+> **What's true now.** The drift bug (task 260/261's "HW Review," on Grand Port's Master Schedule —
+> naming the project because you've got a second, unrelated schedule also called "Master Schedule";
+> this one's the Grand Port one, not Goose Creek's) is fixed, and checking the app's own save history
+> shows the task has sat still, holding the **same date, currently 2026-08-24 → 2026-08-28**, across
+> every reload since the evening of 2026-09-16 — no drift, no leftover warning on the row. Nothing is
+> owed here; there is no click for you to make.
 >
-> I have not touched your actual schedule — only the code. Restoring the date is a one-click change
-> in the app: open "HW Review," set its "depends on" field back to just the one task ("Provide
-> Lender Consent"), and it'll land back on October 1, 2026 on its own.
-> - [ ] **Say the word and I'll do it, or just fix it yourself in the app whenever's convenient.**
->       Either way, nothing else is at risk — this was the only task actually caught in the loop.
+> **The "October 1, 2026" figure from the old version of this note was a guess, not a confirmed fact,
+> and I'm not replacing it with a different guess.** It came from reading one saved snapshot of your
+> history, and a second read turned up an equally plausible explanation: your schedule has a separate,
+> unrelated task ("Execute Contract," a same-day milestone in the same "Contract" group) that really is
+> dated October 1 — so the two may simply have been misread as one. I don't have enough to say which is
+> right, and guessing again would just repeat the original mistake. If you ever do want "HW Review" moved,
+> just tell a Claude session the date you want and it'll set it directly — no need for you to hunt down a
+> row number in the grid yourself.
 
 ## ✅ One old project record needs a small repair — say yes or no (B1496320)
 
@@ -682,9 +684,12 @@ a look-ahead at what that study will produce, clearly labelled as screening and 
 
 ## 🗓 Optional — one Scheduler date to sanity-check on Grand Port (B835)
 - [ ] **Nothing broken; just a judgment call only you can make.** The task you flagged — Grand Port →
-      Site Development → **"AHJ Review #1 - Civil Revisions"** (task 81) — is now correct: it starts the
+      Site Development → **"AHJ Review #1 - Civil Revisions"** — is now correct: it starts the
       next working day after the AHJ approval before it (7/13/26), and the stray old date (8/3) and the
-      pin that was hiding it are gone. The only open question is your intent: **did you want a gap of
+      pin that was hiding it are gone. (It was row/task 81 at the time this was written — schedule row
+      numbers shift as tasks get inserted above them, so whoever acts on this should find it by its name
+      and project, in Grand Port → Site Development, rather than trust that number.) The only open
+      question is your intent: **did you want a gap of
       roughly three weeks between the AHJ approval and starting civil revisions?** If yes, tell a Claude
       session and it'll add that delay to the link. If not, it's already right — leave it. (The app now
       also pops up a yellow heads-up banner any time a saved date gets auto-corrected like this, so you'll
