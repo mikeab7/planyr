@@ -17,9 +17,15 @@
  *      this should never fire again — it exists to prove that, not to find the next one to fix by
  *      hand.
  *
- * Plus one INFORMATIONAL count (never blocking, see nameGroupIntegrity.scheduleNameDrift's own
- * header for why): a linked-Schedule name hint (`data.scheduleProjectName`) that has gone stale
- * against its project's current name.
+ * Plus two INFORMATIONAL counts (never blocking, see nameGroupIntegrity.scheduleNameDrift's and
+ * scheduleNameStaleAgainstLive's own headers for why): a linked-Schedule name hint
+ * (`data.scheduleProjectName`) that has gone stale against its project's OWN current name, and
+ * (B1768080, 2026-09-18) one that has gone stale against the linked SCHEDULE's own current live
+ * name (from `planar_data`) — a different, and the one that actually caught something: schedule id
+ * 30 was renamed to "MUD v PID" while four `sites` rows still carried the stale hint "Goose Creek",
+ * a divergence the site-name comparison alone could never see (the site's own name never changed).
+ * `functions/api/mcp/_tools.js`/`_metrics.js` no longer trust this stored hint over the live
+ * backend, so this is now purely a hygiene signal on the cached value, not a user-facing defect.
  *
  * MEASURED 2026-09-12 (not re-derived by this script — this is what it exists to keep true): 125
  * rows, 0 name-column disagreements, 1 group-key disagreement (the seeded e2e fixture row
@@ -70,9 +76,26 @@ async function fetchAllSites() {
   return rows;
 }
 
+// B1768080 — the scheduler's own record of every schedule project's CURRENT name, keyed the same
+// way `functions/api/mcp/_tools.js`'s `liveScheduleNameMap` builds it (string schedule id → name).
+// Best-effort: an unreachable/empty scheduler backend just means `scheduleNameStaleAgainstLive`
+// has nothing to compare against (silent per-row, per its own header), never a hard failure — this
+// script's exit code is about the three BLOCKING checks, not about the scheduler being reachable.
+async function fetchLiveScheduleNameById() {
+  const { data, error } = await sb.from("planar_data").select("value").eq("key", "hs-v1");
+  if (error) { console.warn(`(schedule-name-vs-live comparison skipped: ${error.message})`); return null; }
+  const projects = (data && data[0] && data[0].value && data[0].value.projects) || {};
+  const map = new Map();
+  for (const sp of Object.values(projects)) {
+    if (sp && sp.id != null) map.set(String(sp.id), sp.name ?? null);
+  }
+  return map;
+}
+
 async function main() {
-  const rows = await fetchAllSites();
-  const { nameMismatches, groupKeyMismatches, unstampedRows, scheduleNameDrifts } = auditRows(rows);
+  const [rows, liveScheduleNameById] = await Promise.all([fetchAllSites(), fetchLiveScheduleNameById()]);
+  const { nameMismatches, groupKeyMismatches, unstampedRows, scheduleNameDrifts, scheduleNameStaleVsLive } =
+    auditRows(rows, { liveScheduleNameById });
   console.log(`Scanned ${rows.length} site row(s) (live + deleted).`);
 
   const dirty = nameMismatches.length || groupKeyMismatches.length || unstampedRows.length;
@@ -93,8 +116,14 @@ async function main() {
     }
   }
   if (scheduleNameDrifts.length) {
-    console.log(`\n(informational, never blocking) ${scheduleNameDrifts.length} row(s) carry a stale scheduleProjectName hint:`);
+    console.log(`\n(informational, never blocking) ${scheduleNameDrifts.length} row(s) carry a scheduleProjectName hint that disagrees with their PROJECT's own current name:`);
     for (const d of scheduleNameDrifts) console.log(`  - ${d.id}: hint="${d.scheduleProjectName}" project is now "${d.authoritativeName}"`);
+  }
+  if (scheduleNameStaleVsLive.length) {
+    console.log(`\n(informational, never blocking) ${scheduleNameStaleVsLive.length} row(s) carry a scheduleProjectName hint that disagrees with the linked SCHEDULE's own current live name:`);
+    for (const d of scheduleNameStaleVsLive) console.log(`  - ${d.id}: hint="${d.storedName}" schedule ${d.scheduleProjectId} is now named "${d.liveName}"`);
+  } else if (liveScheduleNameById) {
+    console.log("\nNo row's scheduleProjectName hint disagrees with its linked schedule's own current live name.");
   }
 
   if (FIX) {
