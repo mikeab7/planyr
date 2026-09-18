@@ -3,7 +3,7 @@ import { flushSync, createPortal } from "react-dom";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { loadSite, saveSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, listDeletedPlansInGroup, restoreDeletedProject, purgeDeletedProject } from "./lib/storage.js";
+import { loadSite, saveSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
 import { relTime } from "../../shared/projects/projectModel.js";
 import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
@@ -16395,9 +16395,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }).catch(() => flashWarn(`“${p.name}” couldn't be restored — check your connection and try again.`))
       .finally(() => setDeletedPlansBusy(null));
   };
+  /* B1767168 — this row is a plan discarded from an otherwise-LIVE project (this exact group has a
+   * live sibling open right now, or this menu couldn't be showing it — see
+   * listDeletedPlansInGroup's header), so `purgeDeletedProject` would always be refused here by
+   * `sites_block_delete_live_group`'s BEFORE DELETE trigger (B1517888). `purgeOnePlanFromLiveGroup`
+   * is the deliberate, server-checked door through that guard for exactly this one row — and,
+   * unlike `purgeDeletedProject`, it must NEVER run the whole-project folder/Drive/Doc-Review
+   * cleanup, because the project it belongs to isn't gone. */
   const handlePurgeDeletedPlan = (p) => {
     setDeletedPlansBusy(p.id); setPlanPurgeArm(null);
-    Promise.resolve(purgeDeletedProject([p.id], groupId)).then((res) => {
+    Promise.resolve(purgeOnePlanFromLiveGroup(p.id)).then((res) => {
       if (!res || res.ok === false) flashWarn((res && res.error) || `“${p.name}” couldn't be permanently deleted — check your connection and try again.`);
       refreshDeletedPlansHere();
     }).catch(() => flashWarn(`“${p.name}” couldn't be permanently deleted — check your connection and try again.`))
@@ -20461,7 +20468,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {deletedPlansHere.map((p) => {
                 if (planPurgeArm === p.id) return (
                   <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", margin: "1px 0", borderRadius: 7, background: "rgba(179,54,27,0.08)" }}>
-                    <span style={{ flex: 1, fontSize: 12, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Delete “{p.name}” forever?</span>
+                    {/* B1767168 — this is a permanent, no-restore removal of the plan AND its elements
+                        (site_elements cascades) — say so plainly, never just "forever". */}
+                    <span style={{ flex: 1, fontSize: 12, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={`Permanently delete “${p.name}” and everything drawn on it? This can't be undone — there's no restoring it after this.`}>Permanently delete “{p.name}” and everything on it? No restore after this.</span>
                     <button style={{ ...chip, color: PAL.danger, padding: "2px 9px" }} disabled={deletedPlansBusy === p.id} onClick={() => handlePurgeDeletedPlan(p)}>Delete</button>
                     <button style={{ ...chip, padding: "2px 9px" }} onClick={() => setPlanPurgeArm(null)}>Cancel</button>
                   </div>
