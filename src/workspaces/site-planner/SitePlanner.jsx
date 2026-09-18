@@ -22381,7 +22381,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const hook = () => ({
       regions: roadNet.regions.map((r) => ({ ids: r.ids, outer: r.region.outer, holes: r.region.holes })),
       tees: teeJunctions.map((t) => ({ sideId: t.sideId, throughId: t.throughId, R: t.geom.R, wedges: t.geom.wedges.length, returns: t.geom.returns.map((a) => a.length) })),
-      drives: driveJunctions.map((d) => ({ sideId: d.sideId, kind: d.kind, R: d.geom.R, wedges: d.geom.wedges.length })),
+      // B<NEW-1> (2026-09-18) — the fillet's own CORNERS and TANGENT ARCS ride along too, so a live
+      // harness can measure whether a curb return SURVIVED the dissolve rather than only that one was
+      // requested. Six rounds of this item shipped green because every check read the requested arc
+      // (`returns`, below, which is always complete) and none read the finished boundary against it;
+      // the corner is what makes that comparison possible (a complete return of radius R across a
+      // wedge angle phi stands exactly R/sin(phi/2) - R off its own corner). Read-only, same
+      // `window.__PLANYR_E2E` gate as everything else in this hook, never in production.
+      drives: driveJunctions.map((d) => ({
+        sideId: d.sideId, targetId: d.targetId, kind: d.kind, R: d.geom.R, wedges: d.geom.wedges.length,
+        corners: d.geom.corners, throughTangents: d.geom.throughTangents, sideTangents: d.geom.sideTangents,
+        returns: d.geom.returns.map((a) => a.map((p) => ({ x: p.x, y: p.y }))),
+      })),
       // NEW-4 — the drive target's own PAVED ring, in world feet, for a flood-fill acceptance check
       // (ui-audit/verify-road-junction-paving.mjs): "is (pad ∪ every dissolved road region) free of
       // an enclosed unpaved cell" needs the pad's real geometry, not just the road network's.
