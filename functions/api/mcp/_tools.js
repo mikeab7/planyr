@@ -57,6 +57,22 @@ async function fetchScheduleData(env) {
   return (rows && rows[0] && rows[0].value && rows[0].value.projects) || {};
 }
 
+/* B1768080 — the CURRENT name of every schedule project, by id (string-keyed, since a site row's
+ * `data->>scheduleProjectId` comes back as text over PostgREST). `sites.data.scheduleProjectName`
+ * is a snapshot mirrored onto the site ONLY at the moment a link is created or changed
+ * (`Shell.jsx`'s `scheduleLinkChanged`, fed by the embedded schedule app's `siteName` at that
+ * instant — see that file's own header) — nothing re-mirrors it on a LATER rename of either the
+ * site or the schedule itself, so it silently goes stale. The scheduler backend (`planar_data`,
+ * fetched here) is the one place a schedule's name can never be stale, so every read site below
+ * prefers it and falls back to the stored snapshot only when the backend is unreachable. */
+function liveScheduleNameMap(scheduleProjects) {
+  const map = new Map();
+  for (const sp of Object.values(scheduleProjects || {})) {
+    if (sp && sp.id != null) map.set(String(sp.id), sp.name ?? null);
+  }
+  return map;
+}
+
 /* Light sites listing — JSON-extracted columns only, never the full data blob. */
 const SITES_LIGHT_SELECT =
   "id,group_id,site,name,county,updated_at," +
@@ -201,15 +217,23 @@ export const TOOLS = [
       let scheduleProjects = null, scheduleBackendError = null;
       try { scheduleProjects = await fetchScheduleData(env); }
       catch (e) { scheduleBackendError = e?.message || String(e); }
+      // B1768080 — prefer the schedule's own CURRENT name over the possibly-stale mirror stored
+      // on the site row (see liveScheduleNameMap's header). `scheduleProjects` is null only when
+      // the fetch above threw; an empty {} still means "reachable, nothing linked" and the
+      // fallback below is a no-op in that case since the map has no entries to match against.
+      const liveNames = scheduleProjects ? liveScheduleNameMap(scheduleProjects) : null;
 
       const out = projects.map((p) => {
         const facts = (factRows || []).filter((f) => f.project_id === p.id);
+        const schedule = p.schedule
+          ? { id: p.schedule.id, name: liveNames && liveNames.has(String(p.schedule.id)) ? liveNames.get(String(p.schedule.id)) : p.schedule.name }
+          : null;
         return {
           id: p.id, name: p.name, status: p.status, counties: p.counties,
           siteCount: p.siteCount, origin: p.origin,
           drawingCount: facts.filter((f) => f.state !== "superseded").length,
           needsFilingCount: facts.filter((f) => f.needs_filing || f.state === "needs_filing").length,
-          schedule: p.schedule, updatedAt: p.updatedAt,
+          schedule, updatedAt: p.updatedAt,
         };
       });
       const linkedIds = new Set(out.map((p) => p.schedule?.id).filter((v) => v != null));
@@ -252,16 +276,20 @@ export const TOOLS = [
       // A groupless site (project id = site id) has no group_id to match on.
       const rows = fullRows.length ? fullRows : await pgGet(env, "sites", [["select", "id,site,name,county,updated_at,data"], ["id", `eq.${p.id}`]]);
 
-      let schedule = null, scheduleBackendError = null;
+      let schedule = null, scheduleBackendError = null, liveNames = null;
       if (p.schedule) {
         try {
-          const sp = resolveScheduleProject(await fetchScheduleData(env), p.schedule.id);
+          const scheduleProjects = await fetchScheduleData(env);
+          liveNames = liveScheduleNameMap(scheduleProjects);
+          const sp = resolveScheduleProject(scheduleProjects, p.schedule.id);
           if (sp) schedule = summarizeScheduleProject(sp, new Date().toISOString().slice(0, 10));
         } catch (e) { scheduleBackendError = e?.message || String(e); }
       }
+      // B1768080 — thread the same live names into each site's own summary, so a site nested
+      // inside this response can't disagree with the `schedule` field right beside it.
       return {
         id: p.id, name: p.name, status: p.status, counties: p.counties, updatedAt: p.updatedAt,
-        sites: rows.map((r) => ({ siteId: r.id, updatedAt: r.updated_at, ...summarizeSite(r.data) })),
+        sites: rows.map((r) => ({ siteId: r.id, updatedAt: r.updated_at, ...summarizeSite(r.data, { liveScheduleNames: liveNames }) })),
         drawings: groupFacts(factRows),
         drawingCount: factRows.length,
         reviews: reviewRows,
@@ -282,7 +310,19 @@ export const TOOLS = [
     async handler(env, args) {
       const rows = await pgGet(env, "sites", [["select", "id,updated_at,data"], ["id", `eq.${args.site_id}`]]);
       if (!rows.length) return { error: `No site with id "${args.site_id}". Use list_projects / get_project to find site ids.` };
-      return { siteId: rows[0].id, updatedAt: rows[0].updated_at, ...summarizeSite(rows[0].data) };
+      // B1768080 — same live-name preference as list_projects/get_project (see
+      // liveScheduleNameMap's header); only worth the round trip when this site actually names a
+      // linked schedule.
+      let liveNames = null, scheduleBackendError = null;
+      if (rows[0].data && typeof rows[0].data === "object" && rows[0].data.scheduleProjectId != null) {
+        try { liveNames = liveScheduleNameMap(await fetchScheduleData(env)); }
+        catch (e) { scheduleBackendError = e?.message || String(e); }
+      }
+      return {
+        siteId: rows[0].id, updatedAt: rows[0].updated_at,
+        ...summarizeSite(rows[0].data, { liveScheduleNames: liveNames }),
+        ...(scheduleBackendError ? { scheduleBackendError } : {}),
+      };
     },
   },
   {

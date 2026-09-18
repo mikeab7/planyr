@@ -30,9 +30,22 @@ function elementArea(e) {
 
 const isCenterlineRoad = (e) => !!e && e.type === "road" && Array.isArray(e.pts) && e.pts.length >= 2 && !(Array.isArray(e.points) && e.points.length >= 3);
 
-/** Summarize one site model (the `sites.data` jsonb). Never throws on malformed input. */
-export function summarizeSite(data) {
+/** Summarize one site model (the `sites.data` jsonb). Never throws on malformed input.
+ *
+ * `opts.liveScheduleNames` (optional) is a Map<string, string|null> keyed by schedule id —
+ * see `_tools.js`'s `liveScheduleNameMap`. `data.scheduleProjectName` is a snapshot taken once,
+ * the moment a schedule was linked (or created) — it is never refreshed by a LATER rename on
+ * either side (the site's own name, or the schedule's), so it goes stale the moment either one
+ * changes (B1768080). When the caller has already fetched the schedule backend, its current
+ * `name` for this id is always fresher and wins; the stored snapshot is used only as a fallback
+ * when the caller has no live map (e.g. the scheduler backend was unreachable). */
+export function summarizeSite(data, opts) {
   const d = data && typeof data === "object" ? data : {};
+  const liveNames = opts && opts.liveScheduleNames;
+  let scheduleName = d.scheduleProjectName ?? null;
+  if (d.scheduleProjectId != null && liveNames && liveNames.has(String(d.scheduleProjectId))) {
+    scheduleName = liveNames.get(String(d.scheduleProjectId));
+  }
   const parcels = Array.isArray(d.parcels) ? d.parcels : [];
   const els = Array.isArray(d.els) ? d.els : [];
 
@@ -82,7 +95,7 @@ export function summarizeSite(data) {
     status: typeof d.status === "string" ? d.status : null,
     county: typeof d.county === "string" ? d.county : null,
     origin: d.origin && Number.isFinite(Number(d.origin.lat)) ? { lat: Number(d.origin.lat), lon: Number(d.origin.lon) } : null,
-    schedule: d.scheduleProjectId != null ? { id: d.scheduleProjectId, name: d.scheduleProjectName ?? null } : null,
+    schedule: d.scheduleProjectId != null ? { id: d.scheduleProjectId, name: scheduleName } : null,
     parcels: {
       activeCount: activeParcels.length,
       inactiveCount: parcels.length - activeParcels.length,
