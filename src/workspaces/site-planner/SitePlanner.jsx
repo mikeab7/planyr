@@ -327,7 +327,7 @@ import {
   SQFT_PER_ACRE, rot2, elCorners, polyArea, ringOf, carStalls, trailerStalls, estStalls, estTrailers,
   CURB, CURB_6, CURB_12, curbWidthOf, curbEdgesOf, isCenterlineRoad, roadCurbWidth,
   roadDefaultRadius, roadDenseCenterline, roadStripRing, roadStripArea, roadCurbLines,
-  TEE_COINCIDE_FT, roadJunctionVerticesOf, roundaboutsForSite,
+  TEE_COINCIDE_FT, roadJunctionVerticesOf, roundaboutsForSite, driveJunctionCurbStripes,
 } from "./lib/siteGeometry.js";
 import { siteMetrics } from "./lib/siteMetrics.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide,
@@ -22604,7 +22604,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         for (const oid of ids) { if (oid === id) continue; const s = strip.get(oid); if (s && s.length >= 3) others.push(s); }
         for (const oid of ids) others.push(...extra.get(oid));
         others.push(...stripeCut);
-        stripes.set(id, roadCurbLines(byId.get(id), settings, sharpFor(byId.get(id)), roundabouts.trims.get(id)).flatMap((cl) => clipPolylineOutside(cl, others)));
+        const clipped = roadCurbLines(byId.get(id), settings, sharpFor(byId.get(id)), roundabouts.trims.get(id)).flatMap((cl) => clipPolylineOutside(cl, others));
+        // NEW-1 — a road ending at a drive junction (a paving/parking pad edge) left its inner
+        // face-of-curb stripe clipped dead right at the fillet's own tangent point: the straight
+        // body carried its curb detail, the curb-return fillet carried none, so the two painted as
+        // visibly different treatments of what PR 1763 already proved is one continuous dissolved
+        // surface — a seam of decoration, not of geometry. `driveJunctionCurbStripes`
+        // (siteGeometry.js) continues the same line around the return; see its header.
+        const filletStripes = driveJunctionCurbStripes(driveJunctions.filter((dj) => dj.sideId === id), roadCurbWidth(byId.get(id)));
+        stripes.set(id, [...clipped, ...filletStripes]);
       }
     }
     regions.sort((a, b) => a.zKey - b.zKey);
