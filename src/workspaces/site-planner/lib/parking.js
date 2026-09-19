@@ -18,6 +18,19 @@ export function parkRowsForDepth(h, sd, ai) {
   return Math.max(1, 2 * m + (rem >= sd - 1e-6 ? 1 : 0));     // a leftover row is single-loaded
 }
 
+// B1790017 (NEW-2) — whether flipping cfg.flipDepth (mirroring the field's bands across its own
+// depth, `bands.forEach(b => b.y = h - b.y - b.depth)` in siteGeometry.js's carStalls) would move
+// any band. A field tiled by an EXACT whole number of double-loaded modules (row|aisle|row,
+// depth 2·sd+ai) is symmetric about its own midpoint — mirroring just relabels which end each row
+// sits at — so flipping paints byte-identical pavement. Any leftover depth (a lone single-loaded
+// row, or dead space short of one) breaks that symmetry and flipping visibly moves the layout.
+export function parkFlipIsNoOp(h, sd, ai) {
+  const mod = 2 * sd + ai;
+  if (!(mod > 0) || !(h > 0)) return false;
+  const m = Math.floor((h + 1e-6) / mod);
+  return Math.abs(h - m * mod) < 1e-6;
+}
+
 // Split a parking field of total depth `h` into independent pieces, each a
 // DOUBLE-LOADED module (two stall rows sharing one drive aisle, depth 2·sd+ai),
 // plus at most ONE trailing single-loaded row for a remainder that can't pair
