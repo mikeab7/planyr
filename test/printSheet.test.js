@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   pageSize,
+  pageSizeForFit,
   PAPER_SIZES,
   printSheetLayout,
   buildBuildingTableSvg,
@@ -12,6 +13,8 @@ import {
   sheetFileName,
 } from "../src/workspaces/site-planner/lib/printSheet.js";
 import { bulletBarLayout } from "../src/workspaces/site-planner/lib/yieldBar.js";
+import { sheetFitScale } from "../src/workspaces/site-planner/lib/exportStyle.js";
+import { pickScaleBar } from "../src/workspaces/site-planner/lib/sheetFurniture.js";
 
 const PAL = { ink: "#26231e", muted: "#8a8473", panelLine: "#cfc6af", paper: "#fff" };
 const ROWS = [
@@ -327,5 +330,74 @@ describe("B862 (chat NEW-3) — the Stormwater required-vs-provided bar strip (P
   });
   it("an empty stormwater array renders nothing (no strip)", () => {
     expect(buildStormwaterSvg({ x: 0, y: 0, w: 1000, bars: [], pal: PAL })).toBe("");
+  });
+});
+
+describe("pageSizeForFit — a page shaped to a frame's own aspect (NEW-1, B1783056)", () => {
+  it("a wide (3:1) frame gets a page whose long edge is the chosen paper's own long edge", () => {
+    const p = pageSizeForFit("letter", 3);
+    expect(p.wIn).toBeCloseTo(11, 6); // Letter's long edge
+    expect(p.hIn).toBeCloseTo(11 / 3, 6);
+    expect(p.w).toBe(Math.round(p.wIn * 100));
+    expect(p.h).toBe(Math.round(p.hIn * 100));
+  });
+  it("a tall (1:3) frame flips which edge is long, still at the chosen paper's size", () => {
+    const p = pageSizeForFit("tabloid", 1 / 3);
+    expect(p.hIn).toBeCloseTo(17, 6); // Tabloid's long edge
+    expect(p.wIn).toBeCloseTo(17 / 3, 6);
+  });
+  it("a square (1:1) frame gets a square page at the paper's long edge", () => {
+    const p = pageSizeForFit("archd", 1);
+    expect(p.wIn).toBeCloseTo(36, 6);
+    expect(p.hIn).toBeCloseTo(36, 6);
+  });
+  it("floors the short edge for an extreme aspect rather than crushing it to nothing", () => {
+    const p = pageSizeForFit("letter", 50);
+    expect(p.hIn).toBeGreaterThanOrEqual(3);
+    expect(p.wIn).toBeCloseTo(11, 6); // the long edge is never compromised by the floor
+  });
+});
+
+describe("printSheetLayout — the `page` override (NEW-1, B1783056)", () => {
+  // Red-proof: before this item, printSheetLayout's destructure had no `page` key at all, so
+  // passing one was silently ignored and this always came back byte-identical to the plain
+  // `letter`/`landscape` layout — that is the exact bug this test would have caught.
+  it("a custom page REPLACES the paper/orient lookup rather than being ignored", () => {
+    const custom = pageSizeForFit("letter", 3); // a 3:1 page, nothing like letter-landscape's 11x8.5
+    const withOverride = printSheetLayout({ paper: "letter", orient: "landscape", page: custom });
+    const withoutOverride = printSheetLayout({ paper: "letter", orient: "landscape" });
+    expect(withOverride.page).toEqual(custom);
+    expect(withOverride.page.w / withOverride.page.h).not.toBeCloseTo(withoutOverride.page.w / withoutOverride.page.h, 1);
+  });
+  it("a plan box built from the override keeps the frame's own aspect after margins/bands are removed", () => {
+    const wide = pageSizeForFit("letter", 3);
+    const layout = printSheetLayout({ page: wide, includeMetrics: false, buildingCount: 0 });
+    // No side table, no metrics band → the plan box aspect tracks the page aspect closely
+    // (only the fixed border margin differs it from the page's own ratio).
+    expect(layout.plan.w / layout.plan.h).toBeGreaterThan(2); // nowhere near letter-landscape's ~1.3
+  });
+});
+
+describe("PDF-PARITY generalizes to a free-aspect frame (confirmatory: sheetFitScale + the scale bar)", () => {
+  // These assertions were already true of sheetFitScale/pickScaleBar before NEW-1 (both are
+  // aspect-agnostic `min(sx,sy)` fits) — the UI simply never let anyone REACH a mismatched
+  // frame to exercise them. Recorded here so the claim in the item's acceptance criteria is
+  // checked rather than assumed, and clearly labeled confirmatory rather than red-proof.
+  it("the fit scale and the scale-bar figure stay well-formed for a wide (3:1) and a tall (1:3) frame", () => {
+    const plan = { w: 1000, h: 770 }; // a representative letter-landscape plan box, centi-inch
+    for (const [w, h] of [[3000, 1000], [1000, 3000], [1290, 1000]]) {
+      const scale = sheetFitScale(w, h, plan.w, plan.h); // centi-inch of paper per clone user-unit
+      expect(scale).toBeCloseTo(Math.min(plan.w / w, plan.h / h), 9);
+      // A scale bar picked in the clone's own units prints at a real physical length regardless
+      // of the frame's aspect: pick a bar sized off the frame width, in feet-per-unit terms.
+      const ftPerUnit = 1 / 10; // 10 clone-units per foot, arbitrary but fixed
+      const { feet, lengthU } = pickScaleBar({ frameW: w, ftPerUnit });
+      const printedLengthCentiInch = lengthU * scale;
+      // The bar always represents a whole, nameable number of feet, and its printed length is a
+      // strictly positive, finite physical size on the page — never zero, never off the page.
+      expect(feet).toBeGreaterThan(0);
+      expect(printedLengthCentiInch).toBeGreaterThan(0);
+      expect(printedLengthCentiInch).toBeLessThan(Math.max(plan.w, plan.h));
+    }
   });
 });

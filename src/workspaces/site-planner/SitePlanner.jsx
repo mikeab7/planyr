@@ -479,6 +479,9 @@ import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom } from "./
 // B765985 — pure, dependency-free (safe on the boot path): the explicit engineering-scale math
 // the compose screen's frame-locking and fit-check use.
 import { scaleLabel, frameFootprintForScale, checkScaleFits } from "./lib/printScale.js";
+// NEW-1 (B1783056) — pure, dependency-free (safe on the boot path, same reasoning as
+// printScale.js above): the free-aspect export-frame grip math the on-canvas drag reads.
+import { FRAME_GRIPS, frameGripAnchor, resizeFrame, orientationForAspect } from "./lib/printFrameDrag.js";
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab, addTier as addTierPure, removeTier as removeTierPure, moveTier as moveTierPure, maxFiniteUpTo } from "./lib/buildingProps.js";
 import { createHistoryStack } from "./lib/history.js";
 import { describeHistoryStep, historyRunLabel } from "./lib/historyLabel.js";
@@ -1692,11 +1695,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [composeMode, setComposeMode] = useState(false);
   const [printScale, setPrintScale] = useState(null);     // explicit feet-per-inch (e.g. 40), or null = "Fit to frame" (today's behavior)
   const [fitWarning, setFitWarning] = useState(null);      // set when an explicit scale can't show the picked area on the chosen sheet — never silently rescaled
+  // NEW-1 (B1783056) — the page itself takes the picked frame's own aspect (long edge at the
+  // chosen paper size) instead of a fixed sheet shape. Mutually exclusive with an explicit
+  // engineering scale (that mode already derives the frame FROM the sheet's plan box, which
+  // would be circular against a page shaped by the frame) — each setter below stands the other down.
+  const [printFitToFramePage, setPrintFitToFramePage] = useState(false);
+  const [composePageOverride, setComposePageOverride] = useState(null); // { w, h, wIn, hIn } from pageSizeForFit, or null for a standard sheet
   const [composeBoxIn, setComposeBoxIn] = useState(null);  // { planW, planH, pageW, pageH } inches, resolved through the lazy export chunk
   const [composePreviewUrl, setComposePreviewUrl] = useState(null);
   const [composePreviewLoading, setComposePreviewLoading] = useState(false);
   const [composeDownloading, setComposeDownloading] = useState(false);
   const pickedFrameRef = useRef(null); // the frame as last picked/repositioned on canvas — the fit-check compares against THIS, never the scale-locked effective frame
+  // NEW-1 (B1783056) — orientation AUTO-FLIPS to match the picked frame once, when compose is
+  // entered (a default, not a lock); this latches true the moment the owner touches the
+  // Landscape/Portrait control so that explicit choice sticks for the rest of THIS compose.
+  const orientTouchedRef = useRef(false);
   const composePreviewUrlRef = useRef(null);
   const preCanvasDisplayRef = useRef(null); // showDims/showAreas/showAerial as they were before entering print mode — restored when the whole print flow ends, so toggling them FOR A PRINT never leaves a lasting change on the editing view (Cancel's non-destructive contract, extended to a completed Download too)
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
@@ -9032,10 +9045,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     if (d.mode === "printMove") { setPrintFrame((f) => f ? { ...f, cx: d.cx + (fp.x - d.fx), cy: d.cy + (fp.y - d.fy) } : f); return; }
     if (d.mode === "printResize") {
-      const aspect = printAspect();
-      const wFt = Math.max(Math.abs(fp.x - d.opp.x), Math.abs(fp.y - d.opp.y) * aspect, 40);
-      const hFt = wFt / aspect;
-      setPrintFrame({ cx: d.opp.x + d.sx * wFt / 2, cy: d.opp.y + d.sy * hFt / 2, wFt, hFt });
+      // NEW-1 (B1783056) — free by default (each axis the grip drives sizes independently, no
+      // aspect coupling); holding Shift reproduces the OLD locked-aspect drag for whichever
+      // grip is held, so a full-bleed plan window is still one modifier away.
+      setPrintFrame(resizeFrame({ opp: d.opp, sx: d.sx, sy: d.sy, wFt0: d.wFt0, hFt0: d.hFt0, fp, aspect: printAspect(), snap: e.shiftKey }));
       return;
     }
     if (d.mode === "marquee") { setMarquee({ a: d.a, b: fp }); return; }
@@ -16450,8 +16463,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const exportKmz = (extrude = false) => withExportSheet((x) => x.exportKmz(extrude));
   const exportPNG = () => withExportSheet((x) => x.exportPNG());
-  const exportPDF = (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "") =>
-    withExportSheet((x) => x.exportPDF(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy));
+  // ⛔ B1783056 — `includeMetricsBand`/`pageOverride` used to be silently DROPPED here: this
+  // wrapper only ever forwarded its first six params to the lazy chunk's `exportPDF`, so
+  // `doPrint`'s 7th argument (the "Stats band" toggle) never reached the actual PDF even though
+  // the live compose PREVIEW (a separate, direct `buildComposedSheet` call) honored it — a real
+  // pre-existing bug, found and fixed incidentally while adding the 8th (Fit-to-frame page).
+  const exportPDF = (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null) =>
+    withExportSheet((x) => x.exportPDF(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride));
 
   /* ------------ export frame geometry (stays here — the print-frame drag reads it) ----
      devExtent also seeds the initial print crop, so it can't live in the lazy chunk. */
@@ -16639,8 +16657,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const startPrintResize = (e, sx, sy) => {
     e.stopPropagation();
-    const opp = { x: printFrame.cx - sx * printFrame.wFt / 2, y: printFrame.cy - sy * printFrame.hFt / 2 };
-    drag.current = { mode: "printResize", sx, sy, opp, ...startGate(e, { hist: false }) };
+    // NEW-1 (B1783056) — `wFt0`/`hFt0` (the frame's size at drag start) are what an edge grip's
+    // untouched axis holds onto for the whole gesture; frameGripAnchor/resizeFrame are the same
+    // generic pair a corner grip uses, so there's one drag formula for all eight grips.
+    drag.current = { mode: "printResize", sx, sy, opp: frameGripAnchor(printFrame, sx, sy), wFt0: printFrame.wFt, hFt0: printFrame.hFt, ...startGate(e, { hist: false }) };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   /* B765985 — THE COMPOSE SCREEN. Picking the frame (above) is unchanged; everything else —
@@ -16650,22 +16670,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * to a stated ratio (plan-box inches × ft-per-inch) around that same center, and if the
    * picked area doesn't fit at that ratio we say so — never silently rescale (`checkScaleFits`). */
   const recomputeCompose = async () => {
-    const { sheetLayoutBoxesIn } = await loadExportSheet();
+    const { sheetLayoutBoxesIn, pageSizeForFit } = await loadExportSheet();
+    const pf = pickedFrameRef.current;
+    // NEW-1 (B1783056) — Fit-to-frame page: the page itself is shaped to the PICKED frame's
+    // own aspect (long edge at the chosen paper size), computed ONCE here so every downstream
+    // consumer (this compose box, the live preview, the final PDF) reads the identical page.
+    const pageOverride = printFitToFramePage && pf ? pageSizeForFit(printPaper, pf.wFt / pf.hFt) : null;
+    setComposePageOverride(pageOverride);
     const box = sheetLayoutBoxesIn({
       paper: printPaper, orient: printOrient, buildingCount: nBuildings,
       metricsPairs: printMetricPairs(), stormwaterBars: printStormwaterBars().length,
       titleBlockExtra: !!printScale,
       includeMetrics: settings.printMetricsBand !== false,
+      page: pageOverride,
     });
     setComposeBoxIn(box);
-    const pf = pickedFrameRef.current;
+    // Keep the Shift-snap aspect current for whenever the owner returns to the canvas (◂
+    // Reposition) — a paper/orientation change made here must be what a shift-held drag out
+    // there snaps to, never a stale value from when print mode was first entered. Skipped for a
+    // fit-to-frame page (its aspect is circularly the frame's own — nothing meaningful to snap to).
+    if (!pageOverride) printAspectRef.current = box.planW / box.planH;
     if (!pf) return;
     if (printScale) {
       const effective = frameFootprintForScale(printScale, { w: box.planW, h: box.planH });
       setPrintFrame({ cx: pf.cx, cy: pf.cy, wFt: effective.wFt, hFt: effective.hFt });
       setFitWarning(checkScaleFits(printScale, pf, effective).message || null);
     } else {
-      setPrintFrame(fitFrame(pf.cx, pf.cy, pf.wFt, pf.hFt, box.planW / box.planH));
+      // NEW-1 — the frame KEEPS the exact shape the owner picked; the sheet's plan window fits
+      // IT (exportSheet.js nests the plan with preserveAspectRatio="meet", which already fits
+      // any aspect), never the other way around. Re-fitting the frame's aspect to the plan box
+      // here — what this branch used to do on every paper/orientation change — is the exact bug
+      // this item fixes: it silently undid a free-form drag the moment the sheet changed.
+      setPrintFrame(pf);
       setFitWarning(null);
     }
   };
@@ -16673,14 +16709,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!composeMode) return;
     recomputeCompose();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [composeMode, printPaper, printOrient, printScale, settings.printMetricsBand]);
+  }, [composeMode, printPaper, printOrient, printScale, printFitToFramePage, settings.printMetricsBand]);
   // The live sheet preview — debounced, and built through the SAME `buildComposedSheet` the
   // final PDF rasterizes (PDF-PARITY by construction, not by inspection). Re-runs on every
   // knob the sheet's CONTENTS depend on; paper/orient/scale changes reach here indirectly
   // through the printFrame update the effect above already made.
   const composeKey = composeMode && printFrame
     ? [printPaper, printOrient, printFrame.cx, printFrame.cy, printFrame.wFt, printFrame.hFt,
-      settings.showDims !== false, settings.showAreas !== false, showAerial, printOverlay, printMapLayers, settings.printPreparedBy || "", settings.printMetricsBand !== false].join("|")
+      settings.showDims !== false, settings.showAreas !== false, showAerial, printOverlay, printMapLayers, settings.printPreparedBy || "", settings.printMetricsBand !== false,
+      composePageOverride ? `${composePageOverride.w}x${composePageOverride.h}` : ""].join("|")
     : null;
   useEffect(() => {
     if (!composeKey) return;
@@ -16690,7 +16727,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       try {
         const scaleText = printScale ? scaleLabel(printScale) : "";
         const preparedBy = (settings.printPreparedBy || "").trim();
-        const composed = await withExportSheet((x) => x.buildComposedSheet(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false));
+        const composed = await withExportSheet((x) => x.buildComposedSheet(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride));
         if (cancelled) return;
         if (!composed) { setComposePreviewUrl(null); return; }
         const url = URL.createObjectURL(new Blob([composed.sheetSvg], { type: "image/svg+xml" }));
@@ -16711,7 +16748,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const d = new Date();
     return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}`;
   };
-  const enterCompose = () => { pickedFrameRef.current = printFrame; setComposeMode(true); };
+  // NEW-1 (B1783056) — orientation auto-flip: default the sheet to whichever orientation
+  // matches the picked frame (less wasted paper), but only as a DEFAULT — never re-applied
+  // once the owner has touched the Landscape/Portrait control this compose (orientTouchedRef).
+  const enterCompose = () => {
+    pickedFrameRef.current = printFrame;
+    orientTouchedRef.current = false;
+    if (printFrame) {
+      const wanted = orientationForAspect(printFrame.wFt / printFrame.hFt);
+      if (wanted !== printOrient) setPrintOrient(wanted);
+    }
+    setComposeMode(true);
+  };
+  const setPrintOrientTouched = (o) => { orientTouchedRef.current = true; setPrintOrient(o); };
+  const setPrintFitToFramePageTouched = (v) => { setPrintFitToFramePage(v); if (v) setPrintScale(null); };
+  const setPrintScaleTouched = (v) => { setPrintScale(v); if (v) setPrintFitToFramePage(false); };
   const exitToReposition = () => setComposeMode(false); // non-destructive: printFrame/paper/scale/toggles are all untouched
   const cancelPrint = () => {
     setComposeMode(false); setPrintMode(false); setPrintFrame(null); setFitWarning(null);
@@ -16734,7 +16785,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     try {
       const scaleText = printScale ? scaleLabel(printScale) : "";
       const preparedBy = (settings.printPreparedBy || "").trim();
-      await exportPDF(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false);
+      await exportPDF(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride);
       cancelPrint();
     } finally { setComposeDownloading(false); }
   };
@@ -24497,7 +24548,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               const b = f2pLive({ x: printFrame.cx + printFrame.wFt / 2, y: printFrame.cy + printFrame.hFt / 2 });
               const fx = Math.min(a.x, b.x), fy = Math.min(a.y, b.y), fw = Math.abs(b.x - a.x), fh = Math.abs(b.y - a.y);
               const HS = 9;
-              const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+              // A grip's own screen position: an axis at -1/1 sits on that edge, at 0 it sits at
+              // the midpoint — the same generic reading frameGripAnchor/resizeFrame use in feet.
+              const gripX = (sx) => (sx < 0 ? fx : sx > 0 ? fx + fw : fx + fw / 2) - HS / 2;
+              const gripY = (sy) => (sy < 0 ? fy : sy > 0 ? fy + fh : fy + fh / 2) - HS / 2;
               return (
                 <g data-export="skip">
                   {/* dim mask outside the frame (4 rects) */}
@@ -24507,13 +24561,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <rect x={fx + fw} y={fy} width={Math.max(0, size.w - fx - fw)} height={fh} fill="rgba(20,18,15,0.46)" pointerEvents="none" />
                   <rect data-testid="print-frame" x={fx} y={fy} width={fw} height={fh} fill="none" stroke={PAL.accent} strokeWidth={2}
                     pointerEvents="all" style={{ cursor: "move" }} onPointerDown={startPrintMove} />
-                  {/* B765985 — an explicit engineering scale locks the frame's SIZE (plan-box inches
-                      × ft/inch); resize handles would let a drag silently break that ratio, so they
-                      render only in "Fit to frame" mode. The frame can still be REPOSITIONED (the
-                      body drag above stays live either way). */}
-                  {!printScale && corners.map(([sx, sy], i) => (
-                    <rect key={i} x={(sx < 0 ? fx : fx + fw) - HS / 2} y={(sy < 0 ? fy : fy + fh) - HS / 2} width={HS} height={HS} rx={2}
-                      fill="#fff" stroke={PAL.accent} strokeWidth={2} style={{ cursor: (sx * sy > 0 ? "nwse-resize" : "nesw-resize") }}
+                  {/* NEW-1 (B1783056) — eight free-aspect grips (four corners + four mid-edges);
+                      hold Shift while dragging any of them to snap to the sheet's plan-window
+                      aspect (the OLD locked behavior), still one modifier away. An explicit
+                      engineering scale locks the frame's SIZE (plan-box inches × ft/inch) —
+                      resize handles would let a drag silently break that ratio, so they render
+                      only outside that mode. The frame can still be REPOSITIONED (the body drag
+                      above stays live either way). */}
+                  {!printScale && FRAME_GRIPS.map(({ sx, sy, cursor }, i) => (
+                    <rect key={i} x={gripX(sx)} y={gripY(sy)} width={HS} height={HS} rx={2}
+                      fill="#fff" stroke={PAL.accent} strokeWidth={2} style={{ cursor }}
                       onPointerDown={(e) => startPrintResize(e, sx, sy)} />
                   ))}
                 </g>
@@ -25160,8 +25217,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <LazyPanel name="Compose exhibit" minHeight={400} label="Loading…">
               <PrintCompose
                 paper={printPaper} onPaper={setPrintPaper}
-                orient={printOrient} onOrient={setPrintOrient}
-                scaleFtPerIn={printScale} onScale={setPrintScale} fitWarning={fitWarning}
+                orient={printOrient} onOrient={setPrintOrientTouched}
+                fitToFramePage={printFitToFramePage} onToggleFitToFramePage={setPrintFitToFramePageTouched}
+                scaleFtPerIn={printScale} onScale={setPrintScaleTouched} fitWarning={fitWarning}
                 previewSrc={composePreviewUrl} previewLoading={composePreviewLoading}
                 pageAspect={composeBoxIn ? composeBoxIn.pageW / composeBoxIn.pageH : (printOrient === "portrait" ? 8.5 / 11 : 11 / 8.5)}
                 siteLabel={siteLabel} planLabel={planLabel} dateStr={composeTodayStamp()}
