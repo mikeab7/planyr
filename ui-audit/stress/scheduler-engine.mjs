@@ -1311,3 +1311,61 @@ export const rebuildHealthMaps = (custom = [], labelOverrides = {}) => {
   });
   return { HEALTH, HK, HDARK };
 };
+
+// B1777120 — pure decomposition of the whole-account cloud document into the shape the
+// dual-write path upserts into public.schedules / public.schedule_account_index. Mirrors
+// schedules_decompose_from_planar_data() in
+// src/workspaces/scheduler/db/schedules_decompose_recompose.sql field-for-field; `data` per
+// schedule stays the COMPLETE untouched project object, matching that SQL function's own
+// documented shape decision. Pure — no Supabase calls — so dualWriteScheduleRows (index.html
+// only, not mirrored here: it's pure I/O over this) stays trivially thin.
+export const decomposeForDualWrite = doc => {
+  if (!doc || typeof doc !== "object") return null;
+  const projects = (doc.projects && typeof doc.projects === "object") ? doc.projects : {};
+  const schedules = Object.keys(projects).map(pid => {
+    const proj = projects[pid];
+    const id = Number(pid);
+    if (!Number.isFinite(id)) return null;
+    return {
+      id,
+      name: (proj && typeof proj.name === "string") ? proj.name : "",
+      linkedSiteId: (proj && proj.linkedSiteId != null) ? proj.linkedSiteId : null,
+      linkedSiteName: (proj && proj.linkedSiteName != null) ? proj.linkedSiteName : null,
+      data: proj,
+    };
+  }).filter(Boolean);
+  const { projects: _p, nPid, nTid, lastActiveBySite, settings, __rev, ...migrationFlags } = doc;
+  return {
+    index: {
+      nPid: typeof nPid === "number" ? nPid : 1,
+      nTid: (nTid && typeof nTid === "object") ? nTid : {},
+      lastActiveBySite: (lastActiveBySite && typeof lastActiveBySite === "object") ? lastActiveBySite : {},
+      settings: (settings && typeof settings === "object") ? settings : {},
+      migrationFlags,
+    },
+    schedules,
+  };
+};
+
+// B1777120 — pure reverse of decomposeForDualWrite: rebuilds the "hs-v1" document shape from
+// one account index row + its schedule rows. Mirrors schedules_recompose_to_planar_data()
+// field-for-field (see that SQL function's header for why __rev is never reconstructed here
+// either — a caller that needs one, e.g. the dual-read scaffold, attaches it itself from a
+// separate cheap read). Returns null when there's no index row to build from (the caller's
+// signal to fall back to the blob).
+export const recomposeFromRows = (indexRow, scheduleRows) => {
+  if (!indexRow || typeof indexRow !== "object") return null;
+  const projects = {};
+  (Array.isArray(scheduleRows) ? scheduleRows : []).forEach(row => {
+    if (!row || row.id == null) return;
+    projects[String(row.id)] = row.data;
+  });
+  return {
+    ...(indexRow.migration_flags && typeof indexRow.migration_flags === "object" ? indexRow.migration_flags : {}),
+    nPid: typeof indexRow.n_pid === "number" ? indexRow.n_pid : 1,
+    nTid: (indexRow.n_tid && typeof indexRow.n_tid === "object") ? indexRow.n_tid : {},
+    lastActiveBySite: (indexRow.last_active_by_site && typeof indexRow.last_active_by_site === "object") ? indexRow.last_active_by_site : {},
+    settings: (indexRow.settings && typeof indexRow.settings === "object") ? indexRow.settings : {},
+    projects,
+  };
+};
