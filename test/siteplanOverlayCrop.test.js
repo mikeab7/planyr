@@ -25,6 +25,24 @@ describe("site-plan overlay crop — round trip through the DB row shape", () =>
     expect(overlayToRow({ crop: { x: 1, y: 2, w: 3, h: 4 } }).crop).toEqual({ x: 1, y: 2, w: 3, h: 4 });
     expect(overlayToRow({}).crop).toBe(null);
   });
+
+  // NEW-1 (B1783328) — before this fix, `rowToOverlay` checked `r.crop.w`/`r.crop.h` directly,
+  // which a poly crop has no top-level version of — every polygon crop would have silently
+  // vanished on read, reproducing exactly the class of bug this test guards against.
+  it("rowToOverlay carries a polygon crop through unchanged — a poly has no top-level w/h", () => {
+    const pts = [[10, 10], [500, 10], [250, 700]];
+    const o = rowToOverlay({ id: "x", img_w: IMG_W, img_h: IMG_H, crop: { kind: "poly", pts } });
+    expect(o.crop).toEqual({ kind: "poly", pts });
+  });
+
+  it("rowToOverlay rejects a malformed polygon (fewer than 3 points) as no crop", () => {
+    expect(rowToOverlay({ id: "x", crop: { kind: "poly", pts: [[0, 0], [1, 1]] } }).crop).toBe(null);
+  });
+
+  it("overlayToRow writes a polygon crop verbatim", () => {
+    const pts = [[0, 0], [100, 0], [50, 100]];
+    expect(overlayToRow({ crop: { kind: "poly", pts } }).crop).toEqual({ kind: "poly", pts });
+  });
 });
 
 describe("site-plan overlay crop — THE geo invariant (task's own acceptance test)", () => {
