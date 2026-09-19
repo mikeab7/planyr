@@ -48,6 +48,23 @@ const PAGE = {
   "ansid:portrait": { w: 2200, h: 3400, wIn: 22, hIn: 34 },
 };
 export const pageSize = (paper, orient) => PAGE[`${paper}:${orient}`] || PAGE["letter:landscape"];
+
+// NEW-1 (B1783056) — a page shaped to MATCH a frame's own aspect ratio, instead of one of the
+// fixed sheet shapes above, so a hand-dragged exhibit publishes with no wasted paper. The
+// chosen paper KEY still picks the SIZE (its long edge, in inches — Letter's 11", Tabloid's
+// 17", ARCH D's 36", …); orientation is moot here, since the page always takes the frame's own
+// shape, wide or tall. A short edge is floored so an extreme aspect (a long, thin corridor
+// frame) still leaves room for the border/title-block margins rather than crushing them —
+// past that floor the plan simply keeps a little unused margin on its long edge, same as any
+// other mismatch this module's `preserveAspectRatio="meet"` nesting already tolerates.
+const FIT_MIN_SHORT_IN = 3;
+export function pageSizeForFit(paper, frameAspect) {
+  const longIn = pageSize(paper, "landscape").wIn;
+  const a = frameAspect > 0 ? frameAspect : 1;
+  const wIn = a >= 1 ? longIn : Math.max(longIn * a, FIT_MIN_SHORT_IN);
+  const hIn = a >= 1 ? Math.max(longIn / a, FIT_MIN_SHORT_IN) : longIn;
+  return { w: Math.round(wIn * 100), h: Math.round(hIn * 100), wIn, hIn };
+}
 // The paper picker's own list — one place naming every sheet the compose screen offers,
 // so a new size is added once (here) rather than at every call site that enumerates them.
 export const PAPER_SIZES = [
@@ -83,8 +100,11 @@ export function metricsRowsFor(pairsOrCount, bandW) {
   return Math.max(2, rows);
 }
 
-export function printSheetLayout({ paper = "letter", orient = "landscape", buildingCount = 0, metricsCount = 9, metricsPairs = null, stormwaterBars = 0, titleBlockExtra = false, includeMetrics = true } = {}) {
-  const page = pageSize(paper, orient);
+export function printSheetLayout({ paper = "letter", orient = "landscape", buildingCount = 0, metricsCount = 9, metricsPairs = null, stormwaterBars = 0, titleBlockExtra = false, includeMetrics = true, page: pageOverride = null } = {}) {
+  // NEW-1 (B1783056) — `pageOverride` (from pageSizeForFit) replaces the standard paper/orient
+  // lookup with a page shaped to the picked frame; everything below only ever reads `page.w/h`,
+  // so nothing else in this layout needs to know which source it came from.
+  const page = pageOverride || pageSize(paper, orient);
   const M = 28; // ≈0.28 in border inset
   const inner = { x: M, y: M, w: page.w - 2 * M, h: page.h - 2 * M };
   // B765985 — a third title-block row (scale + prepared-by) grows the band by one line;

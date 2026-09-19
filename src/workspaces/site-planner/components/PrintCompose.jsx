@@ -58,6 +58,7 @@ function ContentToggle({ label, title, checked, onChange }) {
 
 export default function PrintCompose({
   paper, onPaper, orient, onOrient,
+  fitToFramePage, onToggleFitToFramePage,
   scaleFtPerIn, onScale, fitWarning,
   previewSrc, previewLoading, pageAspect,
   siteLabel, planLabel, dateStr,
@@ -116,10 +117,14 @@ export default function PrintCompose({
                 </ToggleChip>
               ))}
             </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <ToggleChip active={orient === "landscape"} onClick={() => onOrient("landscape")} style={{ flex: 1, justifyContent: "center" }}>Landscape</ToggleChip>
-              <ToggleChip active={orient === "portrait"} onClick={() => onOrient("portrait")} style={{ flex: 1, justifyContent: "center" }}>Portrait</ToggleChip>
+            <div style={{ display: "flex", gap: 6, opacity: fitToFramePage ? 0.45 : 1 }}>
+              <ToggleChip active={orient === "landscape"} disabled={fitToFramePage} onClick={() => !fitToFramePage && onOrient("landscape")} style={{ flex: 1, justifyContent: "center" }} title={fitToFramePage ? "Orientation follows the frame while Fit to frame is on" : undefined}>Landscape</ToggleChip>
+              <ToggleChip active={orient === "portrait"} disabled={fitToFramePage} onClick={() => !fitToFramePage && onOrient("portrait")} style={{ flex: 1, justifyContent: "center" }} title={fitToFramePage ? "Orientation follows the frame while Fit to frame is on" : undefined}>Portrait</ToggleChip>
             </div>
+            <label style={{ ...checkRow, marginTop: 8 }} title="The page itself takes the shape of the frame you dragged (long edge at the size picked above), instead of a fixed sheet shape — nothing wasted, nothing to letterbox. Turns off an explicit engineering scale, since the two can't both decide the page.">
+              <input type="checkbox" checked={!!fitToFramePage} onChange={(e) => onToggleFitToFramePage(e.target.checked)} style={{ cursor: "pointer", margin: 0 }} />
+              Fit to frame — page takes the frame's shape
+            </label>
           </Section>
 
           <Section title="Scale" accent="var(--accent)">
