@@ -40,7 +40,8 @@ import {
 } from "./arcgis.js";
 import { siteToFeatures, buildKmz, kmzFilename, KMZ_MIME } from "./kmzExport.js";
 import { buildSheetFurnitureSvg } from "./sheetFurnitureLayout.js";
-import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp } from "./printSheet.js";
+import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp, pageSizeForFit } from "./printSheet.js";
+export { pageSizeForFit };
 import { printStrokeWidth, sheetFitScale } from "./exportStyle.js";
 import { sheetLabelPpf } from "./exportLabelScale.js";
 import { enforceMeasureValueOnSheet, droppedMeasureWarning } from "./measureSheet.js";
@@ -55,8 +56,8 @@ import { gridRequest } from "./demGrid.js";
  * canvas matches the printed plan area, not the raw paper (B200). Lives here because it is
  * the only other consumer of printSheetLayout; SitePlanner awaits it when entering print
  * mode and when paper/orientation changes. */
-export function sheetPlanAspect({ paper, orient, buildingCount, metricsPairs, stormwaterBars, includeMetrics = true }) {
-  const layout = printSheetLayout({ paper, orient, buildingCount, metricsPairs, stormwaterBars, includeMetrics });
+export function sheetPlanAspect({ paper, orient, buildingCount, metricsPairs, stormwaterBars, includeMetrics = true, page = null }) {
+  const layout = printSheetLayout({ paper, orient, buildingCount, metricsPairs, stormwaterBars, includeMetrics, page });
   return layout.plan.w / layout.plan.h;
 }
 
@@ -65,8 +66,8 @@ export function sheetPlanAspect({ paper, orient, buildingCount, metricsPairs, st
  * preview (which shows the WHOLE page, not just the plan box). Same lazy-chunk reasoning as
  * `sheetPlanAspect` above — SitePlanner awaits this through the export chunk, never a static
  * import of printSheetLayout. */
-export function sheetLayoutBoxesIn({ paper, orient, buildingCount, metricsPairs, stormwaterBars, titleBlockExtra, includeMetrics = true }) {
-  const layout = printSheetLayout({ paper, orient, buildingCount, metricsPairs, stormwaterBars, titleBlockExtra, includeMetrics });
+export function sheetLayoutBoxesIn({ paper, orient, buildingCount, metricsPairs, stormwaterBars, titleBlockExtra, includeMetrics = true, page = null }) {
+  const layout = printSheetLayout({ paper, orient, buildingCount, metricsPairs, stormwaterBars, titleBlockExtra, includeMetrics, page });
   return { planW: layout.plan.w / 100, planH: layout.plan.h / 100, pageW: layout.page.wIn, pageH: layout.page.hIn };
 }
 
@@ -153,7 +154,7 @@ export function createExportSheet(ctx) {
      taken at different zooms make identical label decisions. Falls back to the notional
      letter-landscape plan box the PNG path uses when no paper is named. Null → nothing to
      frame, and the label tier stays on the live view (the pre-NEW-1 behaviour). */
-  const sheetLabelPpfFor = (frame, paper, orient, includeMetrics = true) => {
+  const sheetLabelPpfFor = (frame, paper, orient, includeMetrics = true, page = null) => {
     const fe = exportFeetExtent(frame);
     if (!fe) return null;
     let plan;
@@ -161,7 +162,7 @@ export function createExportSheet(ctx) {
       plan = printSheetLayout({
         paper: paper || "letter", orient: orient || "landscape",
         buildingCount: buildingRows().length, metricsPairs: printMetricPairs(), stormwaterBars: printStormwaterBars().length,
-        includeMetrics,
+        includeMetrics, page,
       }).plan;
     } catch (_) { return null; } // a sheet-layout hiccup must never block the export itself
     return sheetLabelPpf({ extentWft: fe.maxX - fe.minX, extentHft: fe.maxY - fe.minY, planW: plan.w, planH: plan.h });
@@ -192,10 +193,10 @@ export function createExportSheet(ctx) {
   // `paper`/`orient` (the last two args) name the sheet the plan is headed for, so the label
   // tier can size itself to that paper. Omitted → the notional letter-landscape box (the PNG
   // case, and any caller that just wants the plan SVG).
-  const buildExportSvg = (frame, includeOverlay, paper, exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, sheetPaper, sheetOrient, includeMetrics = true) =>
+  const buildExportSvg = (frame, includeOverlay, paper, exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, sheetPaper, sheetOrient, includeMetrics = true, pageOverride = null) =>
     withFullRender(
       () => buildExportSvgRaw(frame, includeOverlay, paper, exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays),
-      sheetLabelPpfFor(frame, sheetPaper, sheetOrient, includeMetrics),
+      sheetLabelPpfFor(frame, sheetPaper, sheetOrient, includeMetrics, pageOverride),
     );
 
   const buildExportSvgRaw = (frame, includeOverlay = true, paper = PAL.paper, exportAerial = null, exportOverlays = null, includeMapLayers = true, exportVectorOverlays = null) => {
@@ -1024,12 +1025,15 @@ export function createExportSheet(ctx) {
    * reserves no height for the band at all — the plan reclaims the freed strip rather than
    * leaving a gap — and `buildPrintSheetSvg` omits the band (bars, metrics line AND the
    * disclaimer note, which is part of the band, not a separate thing being evaded). */
-  const buildComposedSheet = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true) => {
+  const buildComposedSheet = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null) => {
     const exportAerial = await exportAerialForFrame(printFrame); // B735/B839 — capture the live basemap (a Leaflet <div> the SVG can't clone) as a frame-exact image: stitched cached tiles, or the dynamic /export fallback
     const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS raster layers (floodplain, pipelines, …) for the print frame
     await warmTerrainForFrame(); // NEW-1 — the persistent cache tier is async now; make sure the frame's terrain tiles are resident before the SYNC capture below
     const exportVectorOverlays = exportVectorOverlaysForFrame(); // B745 — capture the live GIS vector layers (boundaries, transmission, contours, …)
-    const built = buildExportSvg(printFrame, includeOverlay, "#ffffff", exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, paper, orient, includeMetricsBand); // force WHITE paper for print/PDF; paper/orient size the label tier (NEW-1)
+    // NEW-1 (B1783056) — `pageOverride` (Fit-to-frame page) replaces the standard paper/orient
+    // page lookup everywhere below that would otherwise re-derive it, so the label tier and the
+    // final page geometry can never disagree about which page this sheet is actually printing to.
+    const built = buildExportSvg(printFrame, includeOverlay, "#ffffff", exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, paper, orient, includeMetricsBand, pageOverride); // force WHITE paper for print/PDF; paper/orient size the label tier (NEW-1)
     if (!built) return null;
     // Embed the aerial + GIS overlays (and any placed overlay) as data URLs; DROP any we can't
     // fetch so a cross-origin image can't taint the canvas and abort the whole export (B202). A
@@ -1042,7 +1046,7 @@ export function createExportSheet(ctx) {
     const rows = buildingRows();
     const metricPairs = printMetricPairs();
     const swBars = printStormwaterBars();
-    const layout = printSheetLayout({ paper, orient, buildingCount: rows.length, metricsPairs: metricPairs, stormwaterBars: swBars.length, titleBlockExtra: !!(scaleLabelText || preparedBy), includeMetrics: includeMetricsBand });
+    const layout = printSheetLayout({ paper, orient, buildingCount: rows.length, metricsPairs: metricPairs, stormwaterBars: swBars.length, titleBlockExtra: !!(scaleLabelText || preparedBy), includeMetrics: includeMetricsBand, page: pageOverride });
     // NEW-2 / NEW-3: thin line work + restyle labels to physical print weights, using
     // the real sheet-fit factor (centi-inches of paper per viewBox unit) so the result
     // is identical regardless of the zoom the user was at when they hit print.
@@ -1068,13 +1072,13 @@ export function createExportSheet(ctx) {
     return { sheetSvg, layout, aerialDropped, overlaysDropped };
   };
 
-  const exportPDF = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true) => {
+  const exportPDF = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null) => {
     const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
     const t0 = now();
     const mark = (label) => { try { console.debug(`[pdf] ${label}: ${Math.round(now() - t0)}ms`); } catch (_) {} };
     setExportingPDF(true);
     try {
-      const composed = await buildComposedSheet(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand);
+      const composed = await buildComposedSheet(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride);
       if (!composed) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
       const { sheetSvg, layout, aerialDropped, overlaysDropped } = composed;
       mark("composed sheet");

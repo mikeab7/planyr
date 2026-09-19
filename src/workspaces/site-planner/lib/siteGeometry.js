@@ -15,7 +15,7 @@ import { edgeAbutsPaving } from "./parking.js";
 import { classDefaultRadius, classReturnRadius, roadClassOf } from "./roadClasses.js";
 import { roadCenterline } from "./roadGeometry.js";
 import { trimPolylineEnds, roundaboutNodes, roundaboutGeometry, roundaboutDiameterFor, legTrimFor, roundaboutArea } from "./roundabout.js";
-import { bufferPolyline, offsetPolylineMiterLimit } from "./metesAndBounds.js";
+import { bufferPolyline, offsetPolyline, offsetPolylineMiterLimit } from "./metesAndBounds.js";
 import { roadSurfaceRing } from "./roadNetwork.js";
 import { imperviousCorrectionWidths } from "./roadCrossSection.js";
 
@@ -231,6 +231,81 @@ export const roadCurbLines = (el, settings, sharpAt, trim) => {
   const hw = Math.max(0, (+el.travelW || 0) / 2);
   return [offsetPolylineMiterLimit(dense, hw), offsetPolylineMiterLimit(dense, -hw)].filter(Boolean);
 };
+
+/* NEW-1 — a road ending at a drive junction (a paving/parking pad edge) left its inner
+ * face-of-curb stripe (roadCurbLines, above) clipped dead at the fillet's own tangent point: the
+ * straight body carried its curb detail, the curb-return fillet carried none, so the two painted
+ * as visibly different treatments of what PR 1763 already proved is one continuous dissolved
+ * surface — a seam of DECORATION, not of geometry (the dissolved fill/outline was already correct).
+ * A real curb face continues around the return, so these continue the SAME line: inset the
+ * junction's own already-tessellated fillet arc (untouched — this consumes teeGeometry's `returns`,
+ * never re-derives the curve) toward its own center by the road's curb width, the same offset
+ * `roadCurbLines` above already applies to the straight segment. Paint-only; roadGeometry.js's
+ * tessellation and roadNetwork.js's ring cleanup are untouched.
+ *
+ * `insetArcTowardCenter` reuses `offsetPolyline`, the same generic polyline-offset primitive every
+ * other road decoration in this file already applies to a centerline (ROW lines, lane markings).
+ * `offsetPolyline` doesn't know or care which of its two directions faces the arc's center
+ * (teeGeometry doesn't expose one), so this picks whichever of the two candidate offsets is
+ * SHORTER — a circular arc offset toward its own center always has less total length than the same
+ * arc offset away from it, at any radius or sweep, so this needs no knowledge of the arc's own
+ * winding direction. */
+function polylineLenFt(pts) {
+  let L = 0;
+  for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+  return L;
+}
+export function insetArcTowardCenter(arc, dist) {
+  if (!Array.isArray(arc) || arc.length < 2 || !(dist > 0)) return null;
+  const a = offsetPolyline(arc, dist), b = offsetPolyline(arc, -dist);
+  if (!a || a.length < 2) return (b && b.length >= 2) ? b : null;
+  if (!b || b.length < 2) return a;
+  return polylineLenFt(a) <= polylineLenFt(b) ? a : b;
+}
+/* The inset arc above is one independent polyline and the road's own straight-segment stripe
+ * (clipped by clipPolylineOutside against the whole wedge polygon, in roadNetwork.js's stripe
+ * loop) is another; the two are only APPROXIMATELY tangent-point-to-tangent-point (the clip lands
+ * wherever the straight line crosses the wedge's outline, which reaches past the bare arc by the
+ * wedge's own backing depth), so butting them exactly can leave a hairline gap or a small jog right
+ * at the junction — the very case this fix exists to remove. Extending the inset arc's SIDE-ROAD
+ * end (the one nearest the road's own tangent point, `sideTan`) a few feet further along its own
+ * local tangent guarantees the two lines overlap inside already-painted pavement regardless of
+ * exactly where the straight line's clip landed. The THROUGH end (against the pad/target edge) is
+ * left alone: there is no competing straight line there to misalign with, so nothing to bridge. */
+export const STRIPE_OVERLAP_FT = 3;
+export function extendInsetTowardSideTangent(pts, sideTan) {
+  if (!Array.isArray(pts) || pts.length < 2 || !sideTan) return pts;
+  const dStart = Math.hypot(pts[0].x - sideTan.x, pts[0].y - sideTan.y);
+  const dEnd = Math.hypot(pts[pts.length - 1].x - sideTan.x, pts[pts.length - 1].y - sideTan.y);
+  const out = pts.slice();
+  if (dStart <= dEnd) {
+    const [p0, p1] = out;
+    const L = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1;
+    out.unshift({ x: p0.x - (p1.x - p0.x) / L * STRIPE_OVERLAP_FT, y: p0.y - (p1.y - p0.y) / L * STRIPE_OVERLAP_FT });
+  } else {
+    const p0 = out[out.length - 2], p1 = out[out.length - 1];
+    const L = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1;
+    out.push({ x: p1.x + (p1.x - p0.x) / L * STRIPE_OVERLAP_FT, y: p1.y + (p1.y - p0.y) / L * STRIPE_OVERLAP_FT });
+  }
+  return out;
+}
+/* Every curb-stripe continuation for a road's drive junctions, ready to append to its stripe
+ * polyline list. One call site (roadNetwork stripe loop in SitePlanner.jsx); pure function so it
+ * can be driven and asserted directly in a unit test rather than only through the render. */
+export function driveJunctionCurbStripes(driveJunctionsForRoad, curbWidth) {
+  const out = [];
+  for (const dj of driveJunctionsForRoad || []) {
+    const sideTans = (dj.geom && dj.geom.sideTangents) || [];
+    const returns = (dj.geom && dj.geom.returns) || [];
+    for (let k = 0; k < returns.length; k++) {
+      const inset = insetArcTowardCenter(returns[k], curbWidth);
+      if (!inset) continue;
+      const extended = extendInsetTowardSideTangent(inset, sideTans[k]);
+      if (extended && extended.length >= 2) out.push(extended);
+    }
+  }
+  return out;
+}
 // Plan-view paved area (sf) of a centerline road = its generated strip polygon area
 // (replaces the old w×h — the curbs are included, matching the B70 three-way contract).
 // NEW-5 — plus the CIRCULATORY ROADWAY of any roundabout this road owns (`extraSf`), which is the
