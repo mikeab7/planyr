@@ -74,7 +74,7 @@ describe("NEW-1: the handle layer exists and is the LAST child of the feet-space
     const closeIdx = after.indexOf("{insHint &&");
     const tail = after.slice(closeIdx, after.indexOf("{/* print-frame crop overlay"));
     expect(tail).not.toMatch(/\.map\(render/);
-    expect(tail).not.toMatch(/drawElsZ|drawMarkupsZ|drawParcels|overlayBands/);
+    expect(tail).not.toMatch(/elPaintItems|drawMarkupsZ|drawParcels|overlayBands/);
   });
 });
 

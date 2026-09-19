@@ -1232,7 +1232,8 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   **verify-content-visibility** (47/47 on the owner's real Silvestri + Bain plans; mutation-proven —
   filtering `els` one seam earlier leaves the canvas PIXEL-IDENTICAL and takes Buildings from
   62.13 ac to 0.00 ac, which no visual test in this repo could see). Live-verify: **V237632**.
-- `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671).
+- `zOrder.js` — per-element `z` stacking key utilities (`nextZ`/`sortByZ`/`normalizeZ`/`ensureZ`, B671;
+  `withMissingZ`/`migrateBandForce`, B1788912 — see NEW-1 below).
   `arrange.js` — pure z-order "Arrange" (`reorderByZ`/`arrangeFlags`, B820): Bring-to-Front/Send-to-Back
   over a peer set. Wired via `arrangeSel` + `arrangePeers` + the right-click menus + the ⌘/Ctrl+]/[
   chords in `SitePlanner.jsx`.
@@ -1251,19 +1252,36 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   could reach. `arrangePeers` is now the ONE peer-set resolver for all four families — never re-derive one.
   The three menus that share a shape build their rows from ONE `arrangeGroup` helper; the element menu
   keeps its own `arrRow` (different menu component, different header style) and is asserted separately.
-  **⛔ B316864 — THE OWNER ANSWERED THE CROSS-BAND QUESTION, AND THE ANSWER IS BOTH HALVES.** It used
-  to be an `{ open: … }` cell on the capability table (*"paving over a building"*); it is now
-  `crossBand: yes` for all six element types. **The DEFAULT did not move** — `road → paving → pond →
-  parking → building` is still absolute for every untouched element, and ordinary Arrange still stops
-  at the band edge — but an explicit **"Force on top of everything"** row lifts ONE element across it,
-  reversibly. It resolves in **`planStyle.zOrder`** (`bandForceOf` / `EL_BANDS`), the single function
-  every band question already asks, so there is no second stacking mechanism and a forced element gets
-  its own Arrange peer group for free. The shape is BORROWED from the `behindEls` toggle markups /
-  measurements / callouts carry and from `overlayOrder.js`'s `aboveParcel` — do not invent a third.
-  Two things not to undo: a road forced out of its band is excluded from the DISSOLVED `roadNet` (it
-  would otherwise paint twice, once in the merged region and once as its own strip), and `bandForce`
-  is ignored unless it names a known band, because an unreadable override must never silently move a
-  building.
+  **⛔ B316864 — SUPERSEDED 2026-09-19 (B1788912, NEW-1). Kept as HISTORY below; it is not the live
+  rule.** Owner decision reversing it, verbatim, in `/CLAUDE.md`'s owner-constraints entry 10:
+  *"I mean I feel like whatever I draw should be at the top so I can never lose anything when I draw
+  it, I'm assuming that's how bluebeam works"* — told plainly the consequence (a parking field drawn
+  after a building paints over the building) and chose it anyway. **The type-layer rule described in
+  this paragraph is GONE**: elements now stack in plain creation order (their own `z`), resolved by
+  the SAME `planStyle.zOrder` seam this paragraph names, but that function no longer reads a type
+  table or `bandForce` at all — see planStyle.js's own SUPERSEDED Z_LAYER block for the current
+  `zOrder`/`byZ`. `bandForceOf`/`EL_BANDS` no longer exist; a legacy `bandForce` value is migrated to
+  an ordinary z on load (`zOrder.js`'s `migrateBandForce`, called from `siteModel.createSiteModel`).
+  An element's Arrange peer set is now the WHOLE plan (`arrangeSel`'s `peers = els`), so "Force on top
+  of everything" needed no separate mechanism to survive the reversal — it already IS ordinary Bring
+  to Front. The dissolved `roadNet` no longer excludes anything by `bandForce` (every centerline road
+  is a network member again); its composite now takes its cluster's NEWEST member's z as its own
+  paint position (`roadNet`'s own `zKey`, NO-ONE-OWNS-A-COMPOSITE) rather than always painting first.
+  A NEW rule travels with the reversal: while an element is selected (or a road-network cluster has a
+  selected member), it paints above every other element (`SitePlanner.jsx`'s `elPaintItems.lifted`) —
+  ephemeral render-order only, never a written `z`. Existing plans RE-STACK on next open (accepted).
+  History, for what the type-layer rule was and why it existed — **THE OWNER ANSWERED THE CROSS-BAND
+  QUESTION, AND THE ANSWER WAS BOTH HALVES.** It used to be an `{ open: … }` cell on the capability
+  table (*"paving over a building"*); it became `crossBand: yes` for all six element types. **The
+  DEFAULT did not move** — `road → paving → pond → parking → building` was absolute for every
+  untouched element, and ordinary Arrange stopped at the band edge — but an explicit **"Force on top
+  of everything"** row lifted ONE element across it, reversibly. It resolved in **`planStyle.zOrder`**
+  (`bandForceOf` / `EL_BANDS`), the single function every band question already asked, so there was no
+  second stacking mechanism and a forced element got its own Arrange peer group for free. The shape
+  was BORROWED from the `behindEls` toggle markups / measurements / callouts carry and from
+  `overlayOrder.js`'s `aboveParcel`. Two things this used to protect, now moot: a road forced out of
+  its band was excluded from the DISSOLVED `roadNet`, and `bandForce` was ignored unless it named a
+  known band.
   **⛔ B548064/B548065 — AND THE CASE FOUR FIXES NEVER DROVE: A MARKUP OVER A BUILDING. Read this before
   touching `arrange.js` or building a fixture for an ordering report.** The three ANNOTATION families
   (markups · callouts/text boxes · measurements) carry a `behindEls` band, and `arrangeSel` used to

@@ -11,8 +11,9 @@
  * `arrangeAcrossBands` (round 1's own mechanism, still correct for what it does) can only ever
  * reorder a callout against OTHER CALLOUTS — it reasons over one family's `items` array and has no
  * way to reach a measurement or a markup, which live in separate collections and separate render
- * passes. And PAINT_LADDER's own rung 10 ("a measurement outranks decoration", B548819, an owner
- * default) sits structurally ABOVE every callout rung a within-family reorder could ever produce.
+ * passes. And PAINT_LADDER's own measure-above rung ("a measurement outranks decoration", B548819,
+ * an owner default — rung 9 as of B1788912's renumber, was 10) sits structurally ABOVE every
+ * callout rung a within-family reorder could ever produce.
  * So `af.atTop` — true the instant a callout is the highest of the callout family alone — was
  * never the right fact to build the toast from, and IS the reason the toast lied.
  *
