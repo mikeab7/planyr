@@ -36,7 +36,7 @@ import { layoutZoneByKind, boxExtentAlong, zoneAlongExtent, zoneDepthExtent, alo
 import { roadCenterline, dedupeRoadVertices, repairBakedRadii, simplifyRoadVertices, ROAD_SIMPLIFY_TOL_FT, ROAD_VERTEX_COLLAPSE_FT } from "./roadGeometry.js";
 import { bufferPolyline } from "./metesAndBounds.js";
 import { DEFAULT_ROAD_CLASS, roadClassOf } from "./roadClasses.js";
-import { ensureZ } from "./zOrder.js";
+import { ensureZ, migrateBandForce } from "./zOrder.js";
 import { normCountyKey } from "../../../shared/gis/countyKeys.js";
 import { nameAuthority, renameStamp } from "./projectName.js";
 // B927105 — the schema-version + status constants live in siteStatus.js (dependency-free) so a
@@ -1267,7 +1267,7 @@ export function createSiteModel(p = {}, { onHeal } = {}) {
     // bonded-child heal — angle re-anchor (B363), dog-ears snapped to the host's current edge
     // (B487), wall kids re-flushed (B1038/B1039), assemblies torn across transactions re-fitted
     // (NEW-4). `normalizeBondedChildren` is the SAME function the rows read path runs.
-    els: ensureZ(normalizeBondedChildren(migrateRoads(objArr(Array.isArray(p.els) ? p.els : p.elements)), onHeal)),
+    els: ensureZ(migrateBandForce(normalizeBondedChildren(migrateRoads(objArr(Array.isArray(p.els) ? p.els : p.elements)), onHeal))),
     markups: ensureZ(objArr(p.markups)),
     measures: ensureZ(objArr(p.measures)),
     callouts: ensureZ(objArr(p.callouts)),

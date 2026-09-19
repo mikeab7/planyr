@@ -73,3 +73,58 @@ export function ensureZ(list) {
   if (!needsZ(arr)) return list;
   return normalizeZ(sortByZ(arr));
 }
+
+/* B1788912 (2026-09-19, NEW-1) — site elements now stack in CREATION ORDER (their own `z`), never
+ * by a fixed type layer (see planStyle.js's SUPERSEDED Z_LAYER block). That makes `z` load-bearing
+ * for every element the moment it is drawn, not just for Arrange's within-band tiebreak — so a
+ * freshly created element that has no `z` yet must not fall back to `zOrder`'s 0 default (the
+ * bottom of the whole drawing) even for the one render before a load-time `ensureZ` would catch it.
+ *
+ * `withMissingZ` is the gentle sibling of `ensureZ`: it NEVER touches an element that already
+ * carries a real numeric z (an Arrange'd 0, or a deliberate negative "sent to back" value, is real
+ * and must survive untouched — this is not a renormalize), and it stamps the elements that lack one
+ * in their OWN ARRAY ORDER rather than `ensureZ`'s id tie-break, so a batch built in a deliberate
+ * sequence (a truck court, then its trailer, then its buffer) keeps that sequence instead of being
+ * reshuffled by id. Every stamped element lands above the highest z already in the list — "what you
+ * just drew is on top," the whole point of the feature. Idempotent: once every element has a real
+ * z, this returns the SAME reference (a no-op `setEls` never fires from it). */
+export function withMissingZ(list) {
+  const arr = list || [];
+  if (!arr.some((el) => el && typeof el === "object" && !Number.isFinite(el.z))) return list;
+  let z = nextZ(arr);
+  return arr.map((el) => {
+    if (!el || typeof el !== "object" || Number.isFinite(el.z)) return el;
+    const out = { ...el, z };
+    z += Z_GAP;
+    return out;
+  });
+}
+
+/* B1788912 (2026-09-19, NEW-3/CONSTRAINT-CAPTURE) — a legacy element still carrying the retired
+ * `bandForce` field (see planStyle.js's SUPERSEDED Z_LAYER block) is folded into an ordinary z on
+ * load: "front" lands above every element that doesn't itself carry a forward `bandForce` (so it
+ * keeps reading as "on top of everything," now via creation-order z instead of a band), "back"
+ * lands below every element that doesn't carry a backward one. The field itself is STRIPPED —
+ * `planStyle.zOrder` no longer reads it, so leaving it in place would be dead, misleading data.
+ * Relative order among several forced elements is preserved (their own array order), same shape as
+ * `withMissingZ`. A record with no `bandForce` anywhere is returned UNCHANGED (same reference), so
+ * an already-migrated plan's reload churns nothing. */
+export function migrateBandForce(els) {
+  const arr = els || [];
+  if (!arr.some((el) => el && (el.bandForce === "front" || el.bandForce === "back"))) return els;
+  const plain = arr.filter((el) => !el || (el.bandForce !== "front" && el.bandForce !== "back"));
+  let maxZ = 0, minZ = 0, seen = false;
+  for (const el of plain) {
+    const z = el && Number.isFinite(el.z) ? el.z : 0;
+    if (!seen || z > maxZ) maxZ = z;
+    if (!seen || z < minZ) minZ = z;
+    seen = true;
+  }
+  let front = maxZ + Z_GAP, back = minZ - Z_GAP;
+  return arr.map((el) => {
+    if (!el || typeof el !== "object") return el;
+    if (el.bandForce === "front") { const { bandForce: _bandForce, ...rest } = el; const out = { ...rest, z: front }; front += Z_GAP; return out; }
+    if (el.bandForce === "back") { const { bandForce: _bandForce, ...rest } = el; const out = { ...rest, z: back }; back -= Z_GAP; return out; }
+    return el;
+  });
+}

@@ -137,9 +137,12 @@ describe("NEW-4 — five memos, each with a provably complete input set", () => 
     expect(src).toContain("const markupsZ = useMemo(() => [...markups].sort(byZAsc), [markups]);");
   });
 
-  it("(b) drawEls is copied and sorted ONCE, then split at the building band", () => {
-    expect(src).toContain("const drawElsZ = useMemo(() => {");
-    expect(src).toContain("}, [drawEls]);");
+  // B1788912 (NEW-1) — `drawElsZ` (copy+sort+split at the retired building band) is gone with that
+  // band; `elPaintItems` is its replacement — one unified z-sorted stack (elements + road-network
+  // composites, split into normal/lifted for NEW-2's selection lift), still copied and sorted ONCE.
+  it("(b) drawEls is copied and sorted ONCE, inside the unified paint-stack memo", () => {
+    expect(src).toContain("const elPaintItems = useMemo(() => {");
+    expect(src).toContain("[drawEls, roadRegionPaths, roadNet, liftedElIds]);");
     expect(src.match(/\[\.\.\.drawEls\]\.sort\(byZ\)/g).length).toBe(1); // once, inside the memo
   });
 

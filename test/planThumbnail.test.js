@@ -43,12 +43,17 @@ describe("planThumbnailSvg", () => {
     expect(svg).toContain('fill-opacity="0.4"');
   });
 
-  it("draws elements in z/type-band order (road under building)", () => {
-    const road = { id: "r1", type: "road", pts: [{ x: 0, y: 40 }, { x: 100, y: 40 }], travelW: 24, curb: 1 };
-    const svg = planThumbnailSvg({ id: "s1", parcels: [], els: [building, road] });
-    // road (Z_LAYER 0) must be painted before building (Z_LAYER 5)
-    expect(svg.indexOf("#b9b4a8")).toBeGreaterThan(-1); // TYPE.road.fill
-    expect(svg.indexOf("#b9b4a8")).toBeLessThan(svg.indexOf("#f3ece1"));
+  // B1788912 (NEW-1) — elements draw in plain creation order (their own `z`) now, never by type:
+  // a road drawn AFTER a building paints OVER it, matching the owner's Bluebeam-style "newest on
+  // top" model. The thumbnail shares `byZ`/`zOrder` with the live canvas (planStyle.js), so it must
+  // agree.
+  it("draws elements in z (creation) order, never by type", () => {
+    const roadLater = { id: "r1", type: "road", pts: [{ x: 0, y: 40 }, { x: 100, y: 40 }], travelW: 24, curb: 1, z: 10 };
+    const bldgEarlier = { ...building, z: 0 };
+    const svg = planThumbnailSvg({ id: "s1", parcels: [], els: [bldgEarlier, roadLater] });
+    // the road was drawn LAST (higher z), so it paints over the earlier building.
+    expect(svg.indexOf("#f3ece1")).toBeGreaterThan(-1); // TYPE.building.fill
+    expect(svg.indexOf("#f3ece1")).toBeLessThan(svg.indexOf("#b9b4a8")); // TYPE.road.fill, painted after
   });
 
   it("never throws on malformed element geometry", () => {

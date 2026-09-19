@@ -26,8 +26,16 @@ const LL = "src/workspaces/site-planner/lib/labelLayout.js";
 export const REGISTRY = [
   { file: SP, name: "drawEls",
     why: "the visible element set — a pan that stays inside the latched cull rect cannot change which elements draw" },
-  { file: SP, name: "drawElsZ",
-    why: "the z-split of the visible element set — a function of drawEls alone" },
+  /* B1788912 (NEW-1) — `drawElsZ` (the below/above split at the retired type-layer's building
+   * band) is gone with that band. `elPaintItems` is its replacement: the ONE unified z-sorted
+   * paint stack (every element + every road-network composite), split into `normal`/`lifted`
+   * (NEW-2's selection lift). Its deps are `drawEls` (already registered), `roadRegionPaths`
+   * (already registered, pan-anchor-pinned), `roadNet` (already registered, no view term) and
+   * `liftedElIds` (below — `sel`/`multi` only, never a view term either). */
+  { file: SP, name: "elPaintItems",
+    why: "the unified element+road-network paint stack — drawEls/roadRegionPaths/roadNet + the current selection, no raw view term" },
+  { file: SP, name: "liftedElIds",
+    why: "NEW-2's selection-lift set — sel/multi only, never recomputes on a pan or a zoom" },
   { file: SP, name: "drawParcels",
     why: "the visible parcel set" },
   { file: SP, name: "drawMarkupsZ",

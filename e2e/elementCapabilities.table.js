@@ -87,16 +87,17 @@ export const ELEMENT_CAPABILITIES = [
    * One family, one row shape: these all share the element inspector and the element right-click
    * menu, so the interesting declarations are the per-type ones (a road has no rectangle W/H).
    *
-   * ⛔ THE SIX `crossBand` CELLS BELOW WERE THE ONLY `{ open: … }` LEFT IN THIS TABLE, AND THE OWNER
-   * HAS NOW ANSWERED THEM (2026-08-09, NEW-1). Verbatim: *"for item one, paving over a building. I
-   * mean, I don't think that should be the default. But, like, if I try and force it and then I
-   * don't see why I shouldn't be able to do that."* — so the answer is BOTH halves, and they are
-   * recorded here as `yes` because the CAPABILITY exists, not because the behaviour changed by
-   * default. The type-layer rule (road → paving → pond → parking → building) is still absolute for
-   * every element nobody has touched, and ordinary Arrange still stops at the band edge; the
-   * capability is the explicit "Force on top of everything" row, which is the same single-toggle
-   * escape hatch markups, measurements, callouts and references already carry. See
-   * `site-planner/lib/planStyle.js` (`bandForceOf` / `EL_BANDS`) for the one place it resolves.
+   * ⛔ B1788912 (2026-09-19, NEW-1) — THE TYPE-LAYER RULE THIS SECTION USED TO DESCRIBE IS RETIRED.
+   * Owner decision, verbatim, reversing the 2026-08-09 quote this comment used to carry: *"I mean I
+   * feel like whatever I draw should be at the top so I can never lose anything when I draw it,
+   * I'm assuming that's how bluebeam works"* — told plainly that a parking field drawn after a
+   * building paints over the building, and chose it anyway. Elements now stack in plain creation
+   * order (`SitePlanner.jsx`'s `zOrder`/`byZ`, planStyle.js); there is no more type band to force an
+   * element out of, so `bandForceOf`/`EL_BANDS` are gone. `crossBand` still reads `yes` for every
+   * element row below — not because a separate escape hatch survived, but because ordinary Arrange
+   * (Bring to Front / Send to Back) is a real, wired command for every element, same as it always
+   * was; see `CROSS_BAND.element`'s own `divergentName` in paintOrder.js for why it is declared
+   * rather than `na`.
    *
    * The MECHANISM this table exists for is untouched: a new element type still cannot ship without
    * declaring `crossBand` — `yes`, or an `na` with a reason, or a fresh `open` for the owner. */

@@ -130,12 +130,15 @@ describe("NEW-2: EVERY interactive measurement surface opens Properties on doubl
     expect(SP).toMatch(/\{measureBands\.below\.map\(\(\{ m, i \}\) => renderMeasureNode\(m, i\)\)\}/);
     expect(SP).toMatch(/\{measureBands\.above\.map\(\(\{ m, i \}\) => renderMeasureNode\(m, i\)\)\}/);
     // …and the below pass really is emitted before the element bands, the above pass after them.
+    // B1788912 (NEW-1) — the element pass no longer splits below/above a building band; the anchor
+    // for "after every element" is now the LAST block of the unified `elPaintItems` stack (the
+    // lifted/selection tier, which always renders after the normal tier).
     const below = SP.indexOf("{measureBands.below.map(");
     const above = SP.indexOf("{measureBands.above.map(");
-    const elsAbove = SP.indexOf("{drawElsZ.above.map(");
+    const elsLifted = SP.indexOf("{elPaintItems.lifted.map(");
     expect(below).toBeGreaterThan(-1);
-    expect(below).toBeLessThan(elsAbove);
-    expect(above).toBeGreaterThan(elsAbove);
+    expect(below).toBeLessThan(elsLifted);
+    expect(above).toBeGreaterThan(elsLifted);
     // The DEFAULT must not move: only an explicit `=== true` sends a measurement down, so every
     // plan saved before this shipped renders exactly where it always did.
     expect(SP).toMatch(/below: idx\.filter\(\(\{ m \}\) => m\.behindEls === true\)/);
