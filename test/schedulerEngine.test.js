@@ -4135,3 +4135,149 @@ describe("NEW-1 — the cross-schedule label helpers are wired into every notice
     expect(src).toMatch(/You have unsaved changes in \$\{crossScheduleLabel\(data\.projects\?\.\[data\.aPid\]\)\} -- reloading replaces them/);
   });
 });
+
+// B1777120 — the schedule-normalization dual-write's pure decomposition step, mirrored in
+// ui-audit/stress/scheduler-engine.mjs. See src/workspaces/scheduler/db/schedules_normalization.sql
+// / schedules_decompose_recompose.sql for the SQL-side counterpart these fields must agree with.
+describe("decomposeForDualWrite — mirrored, source-checked", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+
+  it("decomposeForDualWrite is defined in both the app source and the engine mirror", () => {
+    expect(src, "decomposeForDualWrite missing from public/sequence/index.html").toMatch(/const decomposeForDualWrite = doc =>/);
+    expect(mjs, "decomposeForDualWrite missing from the engine mirror").toMatch(/export const decomposeForDualWrite = doc =>/);
+  });
+  it("dualWriteScheduleRows is wired into _rawSet's success path, fire-and-forget (never awaited)", () => {
+    expect(src).toMatch(/dualWriteScheduleRows\(k, parsed\);/);
+    expect(src).not.toMatch(/await dualWriteScheduleRows/);
+  });
+
+  it("null/junk input never throws", () => {
+    expect(() => E.decomposeForDualWrite(null)).not.toThrow();
+    expect(E.decomposeForDualWrite(null)).toBeNull();
+    expect(E.decomposeForDualWrite(undefined)).toBeNull();
+    expect(E.decomposeForDualWrite("garbage")).toBeNull();
+  });
+
+  it("a document with no projects decomposes to an empty schedules list and default index fields", () => {
+    const out = E.decomposeForDualWrite({ nPid: 1, __rev: 5 });
+    expect(out.schedules).toEqual([]);
+    expect(out.index).toEqual({ nPid: 1, nTid: {}, lastActiveBySite: {}, settings: {}, migrationFlags: {} });
+  });
+
+  it("one project per pid, `data` holds the COMPLETE untouched project object (id/name/linkedSiteId included)", () => {
+    const proj = { id: 2, name: "Master Schedule", tasks: [{ id: 1 }], colConfig: { visible: ["name"] }, linkedSiteId: "smqfy2r7pdec", linkedSiteName: "Grand Port" };
+    const out = E.decomposeForDualWrite({ projects: { 2: proj } });
+    expect(out.schedules).toHaveLength(1);
+    const s = out.schedules[0];
+    expect(s.id).toBe(2);
+    expect(s.name).toBe("Master Schedule");
+    expect(s.linkedSiteId).toBe("smqfy2r7pdec");
+    expect(s.linkedSiteName).toBe("Grand Port");
+    expect(s.data).toBe(proj);   // untouched, same reference — never stripped
+  });
+
+  it("a project with no linkedSiteId/linkedSiteName (an org-owned schedule) reads as null, not undefined/missing", () => {
+    const out = E.decomposeForDualWrite({ projects: { 5: { id: 5, name: "Pursuits", tasks: [] } } });
+    expect(out.schedules[0].linkedSiteId).toBeNull();
+    expect(out.schedules[0].linkedSiteName).toBeNull();
+  });
+
+  it("every non-schedule top-level key not otherwise named lands in migrationFlags — the _v6.._v9 (+ any future) carry-through", () => {
+    const out = E.decomposeForDualWrite({ projects: {}, _v6: true, _v7: true, _v8: true, _v9: true, _pinnedClean: true, __rev: 9, nPid: 3 });
+    expect(out.index.migrationFlags).toEqual({ _v6: true, _v7: true, _v8: true, _v9: true, _pinnedClean: true });
+    expect(out.index.migrationFlags).not.toHaveProperty("__rev");
+    expect(out.index.migrationFlags).not.toHaveProperty("nPid");
+  });
+
+  it("nPid/nTid/lastActiveBySite/settings carry through onto the index, defaulting when absent or malformed", () => {
+    const out = E.decomposeForDualWrite({ projects: {}, nPid: 7, nTid: { 1: 4 }, lastActiveBySite: { siteA: 1 }, settings: { rowHeight: 24 } });
+    expect(out.index).toEqual({ nPid: 7, nTid: { 1: 4 }, lastActiveBySite: { siteA: 1 }, settings: { rowHeight: 24 }, migrationFlags: {} });
+    const withJunk = E.decomposeForDualWrite({ projects: {}, nPid: "not a number", nTid: "junk", lastActiveBySite: null, settings: 5 });
+    expect(withJunk.index).toEqual({ nPid: 1, nTid: {}, lastActiveBySite: {}, settings: {}, migrationFlags: {} });
+  });
+
+  it("a non-numeric project key is skipped rather than minting a garbage schedule id", () => {
+    const out = E.decomposeForDualWrite({ projects: { "not-a-pid": { id: "not-a-pid", name: "junk" } } });
+    expect(out.schedules).toEqual([]);
+  });
+
+  it("matches the real production shape (10 schedules, ids as measured against lyeqzkuiwngunutlkkmi B1777120)", () => {
+    const doc = {
+      nPid: 31, nTid: { 1: 263, 2: 288 }, __rev: 42, _v6: true, _v7: true, _v8: true, _v9: true,
+      lastActiveBySite: {}, settings: {},
+      projects: {
+        1: { id: 1, name: "Master Schedule", tasks: new Array(262).fill(0), linkedSiteId: "smqfy48tlk9j", linkedSiteName: "Goose Creek" },
+        2: { id: 2, name: "Master Schedule", tasks: new Array(287).fill(0), linkedSiteId: "smqfy2r7pdec", linkedSiteName: "Grand Port" },
+        5: { id: 5, name: "Pursuits", tasks: new Array(15).fill(0) },
+        7: { id: 7, name: "Operations", tasks: new Array(8).fill(0) },
+      },
+    };
+    const out = E.decomposeForDualWrite(doc);
+    expect(out.schedules.map(s => s.id).sort((a, b) => a - b)).toEqual([1, 2, 5, 7]);
+    expect(out.schedules.find(s => s.id === 5).linkedSiteId).toBeNull();
+    expect(out.schedules.find(s => s.id === 1).data.tasks).toHaveLength(262);
+  });
+});
+
+// B1777120 — the dual-read scaffold's pure reverse step + the fact it stays wired OFF by
+// default. See src/workspaces/scheduler/db/schedules_decompose_recompose.sql's
+// schedules_recompose_to_planar_data() for the SQL-side counterpart.
+describe("recomposeFromRows — mirrored, source-checked, and gated OFF by default", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+
+  it("recomposeFromRows is defined in both the app source and the engine mirror", () => {
+    expect(src, "recomposeFromRows missing from public/sequence/index.html").toMatch(/const recomposeFromRows = \(indexRow, scheduleRows\) =>/);
+    expect(mjs, "recomposeFromRows missing from the engine mirror").toMatch(/export const recomposeFromRows = \(indexRow, scheduleRows\) =>/);
+  });
+  it("the dual-read path is gated behind a flag that is never set anywhere in this app (default OFF)", () => {
+    expect(src).toMatch(/const SCHEDULE_ROWS_READ_FLAG = "planar:scheduleRowsRead";/);
+    expect(src).toMatch(/scheduleRowsReadEnabled\(\)/);
+    // The ONLY write to this key in the whole app must be absent — nothing here ever turns
+    // itself on. (A person can still flip it by hand from devtools for local testing.)
+    expect(src).not.toMatch(/localStorage\.setItem\(SCHEDULE_ROWS_READ_FLAG/);
+  });
+  it("get() tries the rows first, but only when the flag is enabled, and always falls back to the blob read", () => {
+    expect(src).toMatch(/if \(k === "hs-v1" && scheduleRowsReadEnabled\(\)\) \{/);
+    expect(src).toMatch(/const \{ data, error \} = await sb\.from\(TABLE\)\.select\("value"\)\.eq\("key", k\)\.single\(\);/);
+  });
+
+  it("null/junk input never throws, and no index row means null (fall back to the blob)", () => {
+    expect(() => E.recomposeFromRows(null, null)).not.toThrow();
+    expect(E.recomposeFromRows(null, [])).toBeNull();
+    expect(E.recomposeFromRows(undefined, undefined)).toBeNull();
+  });
+
+  it("round-trips decomposeForDualWrite's own output back to the original document shape (minus __rev)", () => {
+    const doc = {
+      nPid: 31, nTid: { 1: 263, 2: 288 }, _v6: true, _v7: true, _v8: true, _v9: true, _pinnedClean: true,
+      lastActiveBySite: { siteA: 1 }, settings: { rowHeight: 24 },
+      projects: {
+        1: { id: 1, name: "Master Schedule", tasks: [{ id: 1, name: "t1" }], linkedSiteId: "s1", linkedSiteName: "Site One" },
+        5: { id: 5, name: "Pursuits", tasks: [] },
+      },
+    };
+    const decomposed = E.decomposeForDualWrite(doc);
+    const indexRow = {
+      n_pid: decomposed.index.nPid,
+      n_tid: decomposed.index.nTid,
+      last_active_by_site: decomposed.index.lastActiveBySite,
+      settings: decomposed.index.settings,
+      migration_flags: decomposed.index.migrationFlags,
+    };
+    const scheduleRows = decomposed.schedules.map(s => ({ id: s.id, data: s.data }));
+    const recomposed = E.recomposeFromRows(indexRow, scheduleRows);
+    expect(recomposed).toEqual(doc);
+  });
+
+  it("a schedule row's `data` becomes the project object verbatim, keyed by its string id", () => {
+    const out = E.recomposeFromRows({ n_pid: 1 }, [{ id: 7, data: { id: 7, name: "Ops", tasks: [] } } ]);
+    expect(out.projects).toEqual({ "7": { id: 7, name: "Ops", tasks: [] } });
+  });
+
+  it("a null/malformed schedule row is skipped rather than corrupting the projects object", () => {
+    const out = E.recomposeFromRows({ n_pid: 1 }, [null, { id: null, data: {} }, { id: 3, data: { id: 3 } }]);
+    expect(Object.keys(out.projects)).toEqual(["3"]);
+  });
+});

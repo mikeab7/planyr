@@ -4228,6 +4228,66 @@ const countChangedTaskRows = (before, after) => {
   } catch { return 0; }
 };
 
+// B1777120 — pure decomposition of the whole-account cloud document into the shape the
+// dual-write path upserts into public.schedules / public.schedule_account_index. Mirrors
+// schedules_decompose_from_planar_data() in
+// src/workspaces/scheduler/db/schedules_decompose_recompose.sql field-for-field; `data` per
+// schedule stays the COMPLETE untouched project object, matching that SQL function's own
+// documented shape decision. Pure — no Supabase calls — so dualWriteScheduleRows (defined in
+// the storage IIFE below, where `sb` is in scope) stays trivially thin. Mirrored verbatim in
+// ui-audit/stress/scheduler-engine.mjs — keep both in sync.
+const decomposeForDualWrite = doc => {
+  if (!doc || typeof doc !== "object") return null;
+  const projects = (doc.projects && typeof doc.projects === "object") ? doc.projects : {};
+  const schedules = Object.keys(projects).map(pid => {
+    const proj = projects[pid];
+    const id = Number(pid);
+    if (!Number.isFinite(id)) return null;
+    return {
+      id,
+      name: (proj && typeof proj.name === "string") ? proj.name : "",
+      linkedSiteId: (proj && proj.linkedSiteId != null) ? proj.linkedSiteId : null,
+      linkedSiteName: (proj && proj.linkedSiteName != null) ? proj.linkedSiteName : null,
+      data: proj,
+    };
+  }).filter(Boolean);
+  const { projects: _p, nPid, nTid, lastActiveBySite, settings, __rev, ...migrationFlags } = doc;
+  return {
+    index: {
+      nPid: typeof nPid === "number" ? nPid : 1,
+      nTid: (nTid && typeof nTid === "object") ? nTid : {},
+      lastActiveBySite: (lastActiveBySite && typeof lastActiveBySite === "object") ? lastActiveBySite : {},
+      settings: (settings && typeof settings === "object") ? settings : {},
+      migrationFlags,
+    },
+    schedules,
+  };
+};
+
+// B1777120 — pure reverse of decomposeForDualWrite: rebuilds the "hs-v1" document shape from
+// one account index row + its schedule rows. Mirrors schedules_recompose_to_planar_data()
+// field-for-field (see that SQL function's header for why __rev is never reconstructed here
+// either — a caller that needs one, e.g. the dual-read scaffold below, attaches it itself from
+// a separate cheap read). Returns null when there's no index row to build from (the caller's
+// signal to fall back to the blob). Pure — no Supabase calls. Mirrored in
+// ui-audit/stress/scheduler-engine.mjs.
+const recomposeFromRows = (indexRow, scheduleRows) => {
+  if (!indexRow || typeof indexRow !== "object") return null;
+  const projects = {};
+  (Array.isArray(scheduleRows) ? scheduleRows : []).forEach(row => {
+    if (!row || row.id == null) return;
+    projects[String(row.id)] = row.data;
+  });
+  return {
+    ...(indexRow.migration_flags && typeof indexRow.migration_flags === "object" ? indexRow.migration_flags : {}),
+    nPid: typeof indexRow.n_pid === "number" ? indexRow.n_pid : 1,
+    nTid: (indexRow.n_tid && typeof indexRow.n_tid === "object") ? indexRow.n_tid : {},
+    lastActiveBySite: (indexRow.last_active_by_site && typeof indexRow.last_active_by_site === "object") ? indexRow.last_active_by_site : {},
+    settings: (indexRow.settings && typeof indexRow.settings === "object") ? indexRow.settings : {},
+    projects,
+  };
+};
+
 // B836 — load-path glue: run the normal recompute (cascade → rollup) on a project's already-stripped
 // tasks AND record any drift it corrected into `driftSink`. Keeps the load sites DRY and identical.
 // NEW-1 (B1696640) — ALSO strips any ancestor-predecessor edge before the recompute ever runs (that
@@ -18348,6 +18408,44 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
   // mergeCloudDoc / _mStripRev / _deepClone are defined at module scope (B864(b)) so both this storage
   // layer AND the App's reconcile listener share one implementation.
 
+  // B1777120 — dual-read scaffold, OFF BY DEFAULT. planar_data stays the authoritative source
+  // for every real load; this only exists so the schedule-normalization read path is real,
+  // wired code that can be tested, not a described-but-unbuilt plan. Flipping this on in
+  // production (the actual authority flip) is explicitly NOT part of this change — see
+  // schedules_normalization.sql's header. Flag lives in localStorage (a per-browser dev/test
+  // toggle, same storage a person could set from devtools), never a query param that could be
+  // shared/bookmarked into accidentally-different behavior.
+  const SCHEDULE_ROWS_READ_FLAG = "planar:scheduleRowsRead";
+  const scheduleRowsReadEnabled = () => {
+    try { return localStorage.getItem(SCHEDULE_ROWS_READ_FLAG) === "1"; } catch { return false; }
+  };
+  // Reads schedule_account_index + schedules and recomposes the "hs-v1" shape from them.
+  // Returns null on ANY absence or failure (no index row, a thrown error, RLS denial) so the
+  // caller falls back to the blob unconditionally — never a partial or wrong document. Attaches
+  // the REAL current __rev (a cheap separate read, same shape as checkRemote below) so the
+  // existing knownRev/write-guard bookkeeping in `get` stays correct if this is ever enabled —
+  // recomposeFromRows itself never reconstructs __rev (it isn't an account-wide fact).
+  const readFromScheduleRows = async (k) => {
+    try {
+      if (k !== "hs-v1" || !scheduleRowsReadEnabled()) return null;
+      const { data: userRes } = await sb.auth.getUser();
+      const ownerUid = userRes && userRes.user && userRes.user.id;
+      if (!ownerUid) return null;
+      const [idxRes, schedRes, revRes] = await Promise.all([
+        sb.from("schedule_account_index").select("*").eq("user_id", ownerUid).maybeSingle(),
+        sb.from("schedules").select("*").eq("user_id", ownerUid).is("deleted_at", null),
+        sb.from(TABLE).select("rev:value->>__rev").eq("key", k).maybeSingle(),
+      ]);
+      if (idxRes.error || schedRes.error || !idxRes.data) return null;
+      const recomposed = recomposeFromRows(idxRes.data, schedRes.data);
+      if (!recomposed) return null;
+      const rev = (revRes.data && revRes.data.rev != null) ? (parseInt(revRes.data.rev, 10) || 0) : 0;
+      return { ...recomposed, __rev: rev };
+    } catch {
+      return null;
+    }
+  };
+
   const countTasks = (parsed) => {
     try {
       if (!parsed || !parsed.projects) return 0;
@@ -18404,9 +18502,76 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
     }
   };
 
+  // B1777120 — best-effort, non-blocking mirror of a successful "hs-v1" cloud save into the
+  // normalized public.schedules / public.schedule_account_index tables. planar_data stays
+  // authoritative — this NEVER blocks, retries, or surfaces an error into the primary save
+  // path (called fire-and-forget from _rawSet, never awaited); a failure here is reported
+  // (LOUD-FAILURE, via console.warn — there is no user-facing surface for a background mirror
+  // that changes nothing the user can see) and simply tried again on the next save.
+  // Deliberately does NOT tombstone a schedule that disappeared from this save's projects —
+  // that reconciliation is schedules_decompose_from_planar_data()'s job (re-run by hand via
+  // the Supabase MCP), kept out of the hot client save path on purpose. See
+  // schedules_normalization.sql's header for why this is scaffolding, not the authority flip:
+  // nothing anywhere in this app reads from these two tables yet except the opt-in dual-read
+  // path below, which defaults off.
+  const _dualWriteWarned = { flag: false };
+  const dualWriteScheduleRows = async (k, doc) => {
+    try {
+      if (k !== "hs-v1") return;   // only the one real document shape this decomposes
+      const decomposed = decomposeForDualWrite(doc);
+      if (!decomposed) return;
+      const { data: userRes } = await sb.auth.getUser();
+      const ownerUid = userRes && userRes.user && userRes.user.id;
+      if (!ownerUid) return;   // signed out — nothing to attribute rows to
+
+      await sb.from("schedule_account_index").upsert({
+        user_id: ownerUid,
+        n_pid: decomposed.index.nPid,
+        n_tid: decomposed.index.nTid,
+        last_active_by_site: decomposed.index.lastActiveBySite,
+        settings: decomposed.index.settings,
+        migration_flags: decomposed.index.migrationFlags,
+      }, { onConflict: "user_id" });
+
+      if (!decomposed.schedules.length) return;
+      const { data: existingRows } = await sb.from("schedules").select("id, rev").eq("user_id", ownerUid);
+      const revById = new Map((existingRows || []).map(r => [r.id, r.rev]));
+      const rows = decomposed.schedules.map(s => ({
+        id: s.id,
+        user_id: ownerUid,
+        linked_site_id: s.linkedSiteId,
+        linked_site_name: s.linkedSiteName,
+        name: s.name,
+        data: s.data,
+        // Strictly-increasing on every dual-write so schedules_enforce_version_monotonic never
+        // refuses it. A refusal here (a race with another concurrent dual-write) is harmless —
+        // the whole point of this mirror is that it's best-effort; the NEXT save fixes it.
+        rev: (revById.has(s.id) ? revById.get(s.id) : -1) + 1,
+        deleted_at: null,
+      }));
+      await sb.from("schedules").upsert(rows, { onConflict: "id" });
+    } catch (e) {
+      if (!_dualWriteWarned.flag) { _dualWriteWarned.flag = true; console.warn("[schedule dual-write] best-effort decompose failed (planar_data is unaffected):", e); }
+    }
+  };
+
   window.storage = {
     get: async (k) => {
       try {
+        // B1777120 — dual-read scaffold: OFF by default (scheduleRowsReadEnabled reads a
+        // localStorage flag nothing in this app ever sets), so this is a no-op read of a flag
+        // that is normally absent, falling straight through to the blob read below exactly as
+        // before. When explicitly enabled it tries the normalized rows FIRST and only falls
+        // back to the blob if they're absent or the read fails — never a partial document.
+        if (k === "hs-v1" && scheduleRowsReadEnabled()) {
+          const fromRows = await readFromScheduleRows(k);
+          if (fromRows) {
+            const val = JSON.stringify(fromRows);
+            knownRev[k] = revOf(fromRows);
+            baseByKey[k] = _mStripRev(_deepClone(fromRows));
+            return { key: k, value: val };
+          }
+        }
         const { data, error } = await sb.from(TABLE).select("value").eq("key", k).single();
         if (error || !data) {
           // PGRST116 = "no rows" — a clean empty table, not an outage.
@@ -18612,6 +18777,10 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
 
         // Tell the UI a cloud write landed -- drives the green save pulse in the header
         try { window.dispatchEvent(new CustomEvent("planar:cloud-saved", { detail: { key: k } })); } catch {}
+
+        // B1777120 — best-effort, fire-and-forget mirror into the normalized schedule rows.
+        // Never awaited: must add zero latency to this save and must never affect its outcome.
+        dualWriteScheduleRows(k, parsed);
 
         // Layer 1: write a history snapshot (throttled for auto)
         const now = Date.now();
