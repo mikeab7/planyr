@@ -1,7 +1,37 @@
 import { describe, it, expect } from "vitest";
-import { parkDepthForRows, parkRowsForDepth, splitParkingPieces, explodeParkingBands, edgeAbutsPaving, freeParkStack, relayoutFreeStack } from "../src/workspaces/site-planner/lib/parking.js";
+import { parkDepthForRows, parkRowsForDepth, parkFlipIsNoOp, splitParkingPieces, explodeParkingBands, edgeAbutsPaving, freeParkStack, relayoutFreeStack } from "../src/workspaces/site-planner/lib/parking.js";
+import { carStalls } from "../src/workspaces/site-planner/lib/siteGeometry.js";
 
 const SD = 18, AI = 24, MOD = 2 * SD + AI; // 60' double-loaded module (18 + 24 + 18)
+
+describe("parkFlipIsNoOp — B1790017 NEW-2: does flipDepth actually move any band? (proof against carStalls)", () => {
+  const bandSet = (h, flipDepth) => carStalls(1000, h, { stallW: 9, parkAngle: 90, stallDepth: SD, aisle: AI, flipDepth })
+    .bands.map((b) => `${b.y.toFixed(4)}:${b.depth.toFixed(4)}`).sort();
+
+  it("is true for a whole number of modules (2, 4, 6 rows) — and the bands are PROVABLY identical either way", () => {
+    for (const mods of [1, 2, 3]) {
+      const h = mods * MOD;
+      expect(parkFlipIsNoOp(h, SD, AI)).toBe(true);
+      expect(bandSet(h, false)).toEqual(bandSet(h, true));
+    }
+  });
+  it("is false for an odd leftover row (2m+1 rows) — and the bands DO move", () => {
+    for (const mods of [1, 2, 3]) {
+      const h = mods * MOD + SD; // one extra single-loaded row
+      expect(parkFlipIsNoOp(h, SD, AI)).toBe(false);
+      expect(bandSet(h, false)).not.toEqual(bandSet(h, true));
+    }
+  });
+  it("is false when there's dead space short of a full leftover row", () => {
+    const h = MOD + SD * 0.3; // more than one module, not enough for another row
+    expect(parkFlipIsNoOp(h, SD, AI)).toBe(false);
+    expect(bandSet(h, false)).not.toEqual(bandSet(h, true));
+  });
+  it("guards degenerate config without throwing", () => {
+    expect(parkFlipIsNoOp(0, SD, AI)).toBe(false);
+    expect(parkFlipIsNoOp(100, 0, 0)).toBe(false);
+  });
+});
 
 describe("parkDepthForRows / parkRowsForDepth — double-loaded stepping (B69)", () => {
   it("steps one row at a time, double-loading an aisle before adding a new one", () => {

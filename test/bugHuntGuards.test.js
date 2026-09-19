@@ -329,11 +329,15 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     //  section and the Measurement Line/Colour row each now branch on whether there's a real
     //  Fill side to pair against (PairedField) or not (plain Field), so the Outline/Line colour
     //  control's own `{...colorCtl(...)}` call — and its `<ColorField>` tag — appears once per
-    //  branch in source, same as any other duplicated-but-mutually-exclusive JSX branch.)
+    //  branch in source, same as any other duplicated-but-mutually-exclusive JSX branch.
+    //  B1790016 NEW-1 — the car-parking spec sheet gave parking its own "Display" group
+    //  (Outline + Fill), rather than sharing the generic Properties Section every other type uses,
+    //  adding one more Outline/Fill PairedField pair — two more `{...colorCtl(...)}` calls and two
+    //  more `<ColorField>` tags.)
     expect(src).toMatch(/const colorCtl = \(apply, hist = true, commit = null\) => \(\{\s*\n\s*pick: livePick\(apply, hist, commit\),/);
-    expect((src.match(/\{\.\.\.colorCtl\(\(v\) =>/g) || []).length).toBe(31);
+    expect((src.match(/\{\.\.\.colorCtl\(\(v\) =>/g) || []).length).toBe(33);
     expect((src.match(/pick=\{livePick\(\(v\) =>/g) || []).length).toBe(1);
-    expect((src.match(/<ColorField /g) || []).length).toBe(32);
+    expect((src.match(/<ColorField /g) || []).length).toBe(34);
     // A swatch click is a DISCRETE commit: exactly one undo frame, then the color is recorded.
     expect(src).toMatch(/onSwatch: \(v\) => \{ if \(hist\) pushHistory\(\); apply\(v\); pushRecent\(v\);/);
     // NEW-4 (bug) — the wheel picks LIVE, so `change` fires for EVERY shade the cursor crosses.

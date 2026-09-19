@@ -48,7 +48,7 @@ import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
 import { createViewChangeRecorder, attachTimeline } from "./lib/viewChangeRecorder.js";
 import { createViewFramingGate } from "./lib/viewFramingGate.js";
 import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody, stackHoldsFeature, parseFeatureKey, stackAtPoint, nextPickIndex, ACTION_ATTR } from "./lib/featureTarget.js";
-import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving, freeParkStack, relayoutFreeStack } from "./lib/parking.js";
+import { parkDepthForRows, parkRowsForDepth, parkFlipIsNoOp, explodeParkingBands, edgeAbutsPaving, freeParkStack, relayoutFreeStack } from "./lib/parking.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale, overlayRasterKey, HIRES_CACHE_PER_OVERLAY } from "./lib/overlayPdf.js";
 import { isDwgFile, convertDwgToDxf } from "./lib/convertClient.js";
 import { uploadOverlayFile, downloadOverlayBytes, downloadOverlayDataUrl, fetchOverlayBytes, fetchOverlayDataUrl, deleteOverlayObject, MAX_BYTES as OVERLAY_MAX_BYTES } from "./lib/overlayStorage.js";
@@ -26546,7 +26546,158 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   DRAWN irregular building (points, no dock frame) still gets the generic polygon inspector. */}
               {(!selEl.points || selEl.footEdit) ? (
                 <>
-                  {selEl.type === "road" ? (() => {
+                  {selEl.type === "parking" ? (() => {
+                    // B1790016/B1790017 (NEW-1/NEW-2) — the car-parking spec sheet. Replaces the generic
+                    // Width/Depth/Rotation fallback, the old Parking-layout group, the Footprint/Stalls
+                    // readout, Pad elevation, Grading/ADA, and the shared Properties/colors Section for
+                    // THIS type only — every other type still renders through the branches below.
+                    const pc = cfgOf(selEl);
+                    const area = selEl.w * selEl.h;
+                    const stallsInfo = carStalls(selEl.w, selEl.h, pc);
+                    const rows = parkRowsForDepth(selEl.h, pc.stallDepth, pc.aisle);
+                    const mod = 2 * pc.stallDepth + pc.aisle;
+                    const flipNoOp = parkFlipIsNoOp(selEl.h, pc.stallDepth, pc.aisle);
+                    const host = selEl.attachedTo ? els.find((x) => x.id === selEl.attachedTo && !x.points) : null;
+                    const hostBuilding = host && host.type === "building" ? host : null;
+                    const hostLabel = hostBuilding ? ((hostBuilding.name && hostBuilding.name.trim()) || `Building ${buildingNumbers(els).get(hostBuilding.id)}`) : null;
+                    const refCaption = hostBuilding && selEl.sideParkSide
+                      ? `Against ${hostLabel}'s ${selEl.sideParkSide} wall.`
+                      : hostBuilding
+                        ? `Against ${hostLabel}.`
+                        : "This field's own near edge — where the first stall row sits.";
+                    const setFlip = (v) => { pushHistory(); setEls((a) => a.map((x) => x.id === selEl.id ? { ...x, cfg: { ...(x.cfg || {}), flipDepth: v } } : x)); };
+
+                    const UNIT_W = 24;
+                    const specNum = { ...numInput, width: 56, textAlign: "right" };
+                    const specHead = (label, actions) => (
+                      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, margin: "16px 0 7px", paddingBottom: 4, borderBottom: `1px solid ${PAL.panelLine}` }}>
+                        <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: PAL.ink }}>{label}</span>
+                        {actions && <span style={{ display: "flex", gap: 10 }}>{actions}</span>}
+                      </div>
+                    );
+                    const specAction = (label, onClick, title) => <button key={label} style={linkBtn} title={title} onClick={onClick}>{label}</button>;
+                    const specRow = (label, node, unit, title) => (
+                      <div data-field-group="1" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }} title={title}>
+                        <span style={{ fontSize: 11.5, color: PAL.muted, flex: 1, minWidth: 0 }}>{label}</span>
+                        <span style={{ display: "flex", justifyContent: "flex-end", minWidth: 0 }}>{node}</span>
+                        <span style={{ width: UNIT_W, flex: "0 0 auto", fontSize: 10.5, color: PAL.muted, textAlign: "left" }}>{unit || ""}</span>
+                      </div>
+                    );
+                    const statCol = (label, value) => (
+                      <div style={{ flex: 1, textAlign: "center", minWidth: 0 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: PAL.muted, marginBottom: 3 }}>{label}</div>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: PAL.ink, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, lineHeight: 1.1 }}>{value}</div>
+                      </div>
+                    );
+                    const basisLine = `${f0(pc.stallW)}′×${f0(pc.stallDepth)}′ ${pc.parkAngle}°, ${f0(pc.aisle)}′ aisle · ${rows} row${rows === 1 ? "" : "s"}`;
+
+                    return (
+                      <>
+                        <div style={{ paddingTop: 2, marginBottom: 2 }}>
+                          <div style={{ display: "flex" }}>
+                            {statCol("Stalls", f0(stallsInfo.count))}
+                            {statCol("Footprint", `${f0(area)} SF`)}
+                            {statCol("Acres", f2(area / SQFT_PER_ACRE))}
+                          </div>
+                          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginTop: 6, fontSize: 10.5, color: PAL.muted }}>
+                            <span>{basisLine}</span>
+                            <button style={linkBtn} title="Plan standards for new parking — stall size, aisle, angle" onClick={() => jumpToStandards("parking")}>Standards ↗</button>
+                          </div>
+                        </div>
+
+                        {specHead("Geometry")}
+                        {specRow("Width", <NumInput style={specNum} value={Math.round(selEl.w)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ w: n })} />, "ft")}
+                        {specRow("Depth", <NumInput style={specNum} value={Math.round(selEl.h)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ h: n })} />, "ft")}
+                        {specRow("Rotation", <RotationStepper value={selEl.rot || 0} disabled={!!selEl.locked} disabledReason="Unlock this element to rotate it"
+                          onCommit={(deg) => rotateSelTo(deg)} onStep={(d) => rotateSelTo(normalizeDeg((selEl.rot || 0) + d))} style={{ justifyContent: "flex-end" }} />, "")}
+
+                        {specHead("Parking layout", [specAction("Set as standard", () => {
+                          setSettings((s) => ({ ...s, stallDepth: pc.stallDepth, aisle: pc.aisle }));
+                          flashWarn("Saved to Standards — new parking starts with this stall depth & aisle.", 4000);
+                        }, "Make this field's stall depth & drive aisle the plan standard for new parking")])}
+                        {specRow("Stall depth", <NumInput style={specNum} value={pc.stallDepth} min={8} onCommit={(n) => setParkCfg(selEl, { stallDepth: n })} />, "ft")}
+                        {specRow("Drive aisle", <NumInput style={specNum} value={pc.aisle} min={0} onCommit={(n) => setParkCfg(selEl, { aisle: n })} />, "ft")}
+                        {rows >= 2 && specRow("Module", <span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, fontSize: 12, color: PAL.ink, fontWeight: 600 }}>{f0(pc.stallDepth)}′+{f0(pc.aisle)}′+{f0(pc.stallDepth)}′={f0(mod)}′</span>, "",
+                          "Row + aisle + row — the double-loaded module this field's depth is built from")}
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+                          <span style={{ fontSize: 11.5, color: PAL.muted }}>Stall rows</span>
+                          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <button style={spinBtn} onClick={() => growParking(selEl, -1)} title="Remove one row">−</button>
+                            <span style={{ minWidth: 20, textAlign: "center", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, fontSize: 12, color: PAL.ink, fontWeight: 650 }}>{rows}</span>
+                            <button style={spinBtn} onClick={() => growParking(selEl, 1)} title="Add one row">＋</button>
+                          </span>
+                        </div>
+                        {explodePiecesOf(selEl).length >= 2 &&
+                          <button data-testid="split-parking" title="Explode this field into its individual stall rows + drive aisles" style={{ ...chip, width: "100%", marginTop: 2, marginBottom: 6 }} onClick={() => splitParkingRows(selEl)}>Split rows/aisles</button>}
+                        <div style={{ marginTop: 4, marginBottom: 2 }}>
+                          <div style={{ fontSize: 11.5, color: PAL.ink, marginBottom: 2 }}>Aisle side</div>
+                          <div style={{ fontSize: 10.5, color: PAL.muted, marginBottom: 6 }}>{refCaption}</div>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <AisleSideCard pal={PAL} flipped={false} active={!pc.flipDepth} disabled={flipNoOp} stallDepth={pc.stallDepth} aisle={pc.aisle}
+                              label="Stalls first" sub="Aisle outboard" onClick={() => setFlip(false)} />
+                            <AisleSideCard pal={PAL} flipped={true} active={!!pc.flipDepth} disabled={flipNoOp} stallDepth={pc.stallDepth} aisle={pc.aisle}
+                              label="Aisle first" sub="Stalls outboard" onClick={() => setFlip(true)} />
+                          </div>
+                          {flipNoOp && <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 5, lineHeight: 1.4 }}>This field's depth is a whole number of stall+aisle modules, so both outer edges are already stall rows — flipping wouldn't change anything.</div>}
+                        </div>
+
+                        {specHead("Grading and elevation")}
+                        {(() => {
+                          const fmS = settings.floodMitigation || {};
+                          const drop = Number.isFinite(fmS.dockDropFt) ? fmS.dockDropFt : 4;
+                          const auto = effectivePadElev({ ...selEl, padElevFt: null }, { padFfeFt: Number.isFinite(fmS.padFfeFt) ? fmS.padFfeFt : null, dockDropFt: drop });
+                          const g = selEl.grading || {};
+                          const clsId = classifyGradeElement({ type: "parking", dockStack: null, accessible: !!g.accessible });
+                          const rule = clsId ? GRADING_RULES[clsId] : null;
+                          return (
+                            <>
+                              <label style={{ display: "flex", gap: 6, fontSize: 11.5, color: PAL.ink, cursor: "pointer", marginBottom: 6 }}
+                                title="ADA/TAS §502.4 caps accessible stalls AND their access aisles at 2.0% (1:48) in every direction — a LEGAL requirement. Tagging this field grades and checks it at that cap.">
+                                <input type="checkbox" checked={!!g.accessible} onChange={(ev) => { pushHistory(); setSelEl({ grading: { ...g, accessible: ev.target.checked } }); }} /> Accessible (ADA) parking
+                              </label>
+                              {specRow("Pad elev.", <span style={ROW6}>
+                                <NumInput allowClear style={specNum} value={selEl.padElevFt ?? ""} placeholder={auto != null ? `auto ${f1(auto)}` : "auto"} onCommit={(n) => { pushHistory(); setSelEl({ padElevFt: Number.isFinite(n) ? n : null }); }} />
+                                {selEl.padElevFt != null && <button style={chipSm} title="Back to automatic (slab FF, dock zones minus the dock drop)" onClick={() => { pushHistory(); setSelEl({ padElevFt: null }); }}>Auto</button>}
+                              </span>, "ft NAVD88")}
+                              <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.4, marginTop: -2, marginBottom: 8 }}>Feeds the floodplain-mitigation fill screen; blank = the plan's pad FFE.</div>
+                              {specRow("Grading slope", <span style={ROW6}>
+                                <NumInput allowClear style={specNum} value={g.slopePct ?? ""} min={0}
+                                  placeholder={rule ? `auto ${gradingChipLabel(rule).split(" — ")[0]}` : "auto"}
+                                  onCommit={(n) => { pushHistory(); setSelEl({ grading: { ...g, slopePct: Number.isFinite(n) ? n : null } }); }} />
+                                {g.slopePct != null && <button style={chipSm} title="Back to automatic (the class band)" onClick={() => { pushHistory(); setSelEl({ grading: { ...g, slopePct: null } }); }}>Auto</button>}
+                              </span>, "%")}
+                              <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.4, marginTop: -2 }}>
+                                {rule ? `${rule.label}: ${gradingChipLabel(rule)}. ` : ""}Feeds the auto-graded surface (Yield → Earthwork).
+                              </div>
+                            </>
+                          );
+                        })()}
+
+                        {curStyle && (<>
+                          {specHead("Display", [
+                            specAction("Set as default", setStyleDefault, `Use these colors for every new ${TYPE[selEl.type].label}`),
+                            specAction("Reset", clearElStyle, "Revert this element to the type default"),
+                          ])}
+                          <PairedFieldHead left="Outline" right="Fill" />
+                          <PairedField label="Colour"
+                            left={<span style={ROW6}><ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" /></span>}
+                            right={<span style={ROW6}><ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" /></span>}
+                          />
+                          <PairedField label="Opacity"
+                            right={<PercentField value={curStyle.fillOpacity} min={10} onCommit={(v) => { pushHistory(); setSelEl({ fillOpacity: v }); }} inputStyle={numInput} ariaLabel="Fill opacity" />}
+                          />
+                          <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 6 }}>
+                            New parking elements start from <button style={linkBtn} onClick={() => jumpToStandards("colors")}>Standards → Colors ↗</button>
+                          </div>
+                        </>)}
+
+                        <div style={{ display: "flex", gap: 6, marginTop: 14, paddingTop: 10, borderTop: `1px solid ${PAL.panelLine}` }}>
+                          <button style={chip} onClick={() => toggleLock(selEl.id)} title="Pin in place: prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
+                          <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:element" })}>Delete element</button>
+                        </div>
+                      </>
+                    );
+                  })() : selEl.type === "road" ? (() => {
                     const cl = isCenterlineRoad(selEl);
                     const warn = cl ? roadRadiusStatus(selEl, settings) : null;
                     // B946/NEW-2 — dry-run the corrective fix so the panel can promise what a click will
@@ -27018,34 +27169,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   )}
                   {/* B549 — Clear height/Slab (now under Structure) and the dock-features build-out
                       (now under Loading) render inside the grouped building inspector above; only the
-                      dog-ear path keeps its standalone Docks control. */}
-                  {selEl.type === "parking" && (() => {
-                    const pc = cfgOf(selEl);
-                    return (
-                      <div style={{ marginTop: 4 }}>
-                        <div style={{ display: "flex", alignItems: "baseline", gap: 8, margin: "2px 0 6px" }}>
-                          <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", flex: 1 }}>Parking layout</span>
-                          <button title="Plan standards for new parking — stall size, aisle, angle" onClick={() => jumpToStandards("parking")} style={linkBtn}>Standards ↗</button>
-                        </div>
-                        <Field label="Stall depth (ft)"><NumInput style={numInput} value={pc.stallDepth} min={8} onCommit={(n) => setParkCfg(selEl, { stallDepth: n })} /></Field>
-                        <Field label="Drive aisle (ft)"><NumInput style={numInput} value={pc.aisle} min={0} onCommit={(n) => setParkCfg(selEl, { aisle: n })} /></Field>
-                        {/* B653 write-back: this field's stall depth + aisle become the plan standard, and say so. */}
-                        <button style={{ ...chip, width: "100%", marginTop: 6 }} title="Make this field's stall depth & drive aisle the plan standard for new parking"
-                          onClick={() => { setSettings((s) => ({ ...s, stallDepth: pc.stallDepth, aisle: pc.aisle })); flashWarn("Saved to Standards — new parking starts with this stall depth & aisle.", 4000); }}>
-                          Set as standard
-                        </button>
-                        <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-                          <button style={{ ...chip, flex: 1 }} onClick={() => growParking(selEl, 1)}>＋ Row</button>
-                          <button style={{ ...chip, flex: 1 }} onClick={() => growParking(selEl, -1)}>－ Row</button>
-                        </div>
-                        {explodePiecesOf(selEl).length >= 2 &&
-                          <button data-testid="split-parking" title="Explode this field into its individual stall rows + drive aisles" style={{ ...chip, width: "100%", marginTop: 6 }} onClick={() => splitParkingRows(selEl)}>Split rows/aisles</button>}
-                        <label style={{ display: "flex", gap: 8, fontSize: 11.5, color: PAL.muted, marginTop: 7, cursor: "pointer" }}>
-                          <input type="checkbox" checked={!(selEl.cfg && selEl.cfg.flipDepth)} onChange={(e) => { pushHistory(); setEls((a) => a.map((x) => x.id === selEl.id ? { ...x, cfg: { ...(x.cfg || {}), flipDepth: !e.target.checked } } : x)); }} /> Drive aisle on the far side
-                        </label>
-                      </div>
-                    );
-                  })()}
+                      dog-ear path keeps its standalone Docks control. Car parking's own "Parking layout"
+                      group (Stall depth / Drive aisle / Set as standard / rows / Split / Aisle side) now
+                      renders entirely inside the B1790016 spec-sheet branch above — see NEW-1/NEW-2. */}
                   {selEl.type === "road" && !selEl.points && (() => {
                     const ct = roadCurbType(selEl), sides = roadCurbedSides(selEl);
                     const hasPan = CURB_TYPE_META[ct].hasPan;
@@ -27130,7 +27256,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </>
                 );
               })()}
-              {selEl.type !== "pond" && (() => {
+              {/* Car parking's own Footprint/Stalls readout is now the spec-sheet's stat strip
+                  (B1790016 NEW-1) — excluded here so it isn't rendered twice. */}
+              {selEl.type !== "pond" && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (() => {
                 const poly = !!selEl.points;
                 const area = isCenterlineRoad(selEl) ? roadStripArea(selEl, settings, sharpFor(selEl), roundTrim(selEl), roundabouts.areaById.get(selEl.id)) : poly ? polyArea(selEl.points) : selEl.w * selEl.h;
                 return (
@@ -27167,8 +27295,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               })()}
               {/* B713 — per-element pad elevation for the floodplain-mitigation screen.
                   Blank = auto (dock-stack court/trailer strips price at slab FF − the
-                  dock drop; everything else at slab FF). Inline editor + Auto chip. */}
-              {FM_FILL_TYPES.has(selEl.type) && (() => {
+                  dock drop; everything else at slab FF). Inline editor + Auto chip.
+                  Car parking renders its own copy inside the Grading and elevation spec-sheet
+                  section above (B1790016 NEW-1) — excluded here so it isn't rendered twice. */}
+              {FM_FILL_TYPES.has(selEl.type) && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (() => {
                 const fmS = settings.floodMitigation || {};
                 const drop = Number.isFinite(fmS.dockDropFt) ? fmS.dockDropFt : 4;
                 const auto = effectivePadElev({ ...selEl, padElevFt: null }, { padFfeFt: Number.isFinite(fmS.padFfeFt) ? fmS.padFfeFt : null, dockDropFt: drop });
@@ -27191,8 +27321,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               })()}
               {/* B826 — per-element grading: the accessible (ADA) tag on parking + the
                   slope override (gradeOverride) the proposed-surface engine consumes.
-                  Buildings are pinned flat at FFE — no slope control there. */}
-              {FM_FILL_TYPES.has(selEl.type) && selEl.type !== "building" && (() => {
+                  Buildings are pinned flat at FFE — no slope control there. Car parking renders
+                  its own copy (incl. the ADA checkbox) inside the Grading and elevation spec-sheet
+                  section above (B1790016 NEW-1) — excluded here so it isn't rendered twice. */}
+              {FM_FILL_TYPES.has(selEl.type) && selEl.type !== "building" && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (() => {
                 const g = selEl.grading || {};
                 const clsId = classifyGradeElement({ type: selEl.type, dockStack: (selEl.truckCourt || selEl.forCourt) ? {} : null, accessible: !!g.accessible });
                 const rule = clsId ? GRADING_RULES[clsId] : null;
@@ -27224,7 +27356,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   out of. Reordering an element (including "on top of everything" / "underneath
                   everything") is ordinary Arrange now, from the right-click menu or the ⌘/Ctrl+]/[
                   chords — see arrangeSel/arrangePeers and /CLAUDE.md's owner-constraints entry 10. */}
-              {selEl.type !== "pond" && (
+              {/* Car parking carries its own Pin/Delete footer at the bottom of the spec sheet
+                  above (B1790016 NEW-1) — excluded here so it isn't rendered twice. */}
+              {selEl.type !== "pond" && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (
               <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
                 <button style={chip} onClick={() => toggleLock(selEl.id)} title="Pin in place: prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
                 <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:element" })}>Delete element</button>
@@ -28746,8 +28880,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* Bluebeam-style Properties — colors for the selected element + set defaults.
               Ponds render this inside their inspector's "Appearance" group (FINAL UI SPEC A1.6),
-              so the standalone Properties section is suppressed for them. */}
-          {!multiStyleable && selEl && curStyle && selEl.type !== "pond" && (
+              so the standalone Properties section is suppressed for them. Car parking renders its
+              own "Display" group inside the spec sheet above (B1790016 NEW-1), so it is suppressed
+              here too — same reasoning as the pond exception right above. */}
+          {!multiStyleable && selEl && curStyle && selEl.type !== "pond" && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (
             <Section title="Properties">
               <PairedFieldHead left="Outline" right="Fill" />
               <PairedField label="Colour"
@@ -30853,6 +30989,64 @@ function PercentField({ value, onCommit, ariaLabel, inputStyle, min = 0, max = 1
         ariaLabel={ariaLabel} onCommit={(n) => onCommit(Math.max(min, Math.min(max, Math.round(n))) / 100)} />
       <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", flex: "none" }}>%</span>
     </span>
+  );
+}
+// AisleSideCard — B1790017 NEW-2, the parking inspector's "Aisle side" picture control. A real
+// aria-pressed button (never a div) drawing a to-scale cross-section (wall → row → aisle, or
+// wall → aisle → row) from the field's LIVE stallDepth/aisle, so flipping cfg.flipDepth reads as
+// a picture rather than a bare "far side" checkbox. Module-scope per MODULE-SCOPE-COMPONENTS —
+// it takes the caller's live theme palette as an ordinary prop (`pal`) rather than closing over
+// the panel's own render-body `PAL`, which only exists inside that component.
+function AisleSideCard({ flipped, stallDepth, aisle, active, disabled, onClick, label, sub, pal }) {
+  const total = Math.max(1, (stallDepth || 0) + (aisle || 0));
+  const BANDS_H = 46, WALL_H = 7, GAP = 1, W = 78;
+  const stallH = Math.max(9, Math.round((stallDepth / total) * BANDS_H));
+  const aisleH = Math.max(9, BANDS_H - stallH);
+  const order = flipped ? ["aisle", "row"] : ["row", "aisle"]; // top-to-bottom, from the wall outward
+  let y = WALL_H + GAP;
+  const bands = order.map((kind) => {
+    const h = kind === "row" ? stallH : aisleH;
+    const b = { kind, h, y, val: kind === "row" ? stallDepth : aisle };
+    y += h + GAP;
+    return b;
+  });
+  const svgH = y;
+  const innerX = 2, innerW = W - 4;
+  return (
+    <button type="button" aria-pressed={active} disabled={disabled} onClick={onClick} title={sub ? `${label} — ${sub}` : label}
+      style={{
+        flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 5,
+        padding: "7px 6px 6px", borderRadius: RADIUS.md, fontFamily: "inherit",
+        border: `1px solid ${active ? pal.accent : pal.panelLine}`,
+        background: active ? pal.accentSoft : SURF_RAISED,
+        cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1,
+      }}>
+      <svg width={W} height={svgH} viewBox={`0 0 ${W} ${svgH}`} aria-hidden="true" focusable="false">
+        <rect x={innerX} y={0} width={innerW} height={WALL_H} fill={pal.muted} opacity={0.35} />
+        {Array.from({ length: 7 }).map((_, i) => {
+          const x = innerX + (i * innerW) / 6;
+          return <line key={i} x1={x} y1={WALL_H} x2={x - WALL_H} y2={0} stroke={pal.muted} strokeWidth={1} />;
+        })}
+        {bands.map((b, i) => b.kind === "row" ? (
+          <g key={i}>
+            <rect x={innerX} y={b.y} width={innerW} height={b.h} fill="none" stroke={pal.ink} strokeWidth={1} />
+            {Array.from({ length: 4 }).map((_, k) => {
+              const x = innerX + ((k + 1) * innerW) / 5;
+              return <line key={k} x1={x} y1={b.y} x2={x} y2={b.y + b.h} stroke={pal.ink} strokeWidth={1} />;
+            })}
+            <text x={innerX + innerW - 2} y={b.y + b.h / 2 + 3} textAnchor="end" fontSize="8" fontFamily={NUM_FONT} fill={pal.ink}>{f0(b.val)}′</text>
+          </g>
+        ) : (
+          <g key={i}>
+            <rect x={innerX} y={b.y} width={innerW} height={b.h} fill="none" stroke={pal.panelLine} strokeWidth={1} />
+            <line x1={innerX + 2} y1={b.y + b.h / 2} x2={innerX + innerW - 2} y2={b.y + b.h / 2} stroke={pal.muted} strokeWidth={1} strokeDasharray="3 3" />
+            <text x={innerX + innerW - 2} y={b.y + b.h / 2 + 3} textAnchor="end" fontSize="8" fontFamily={NUM_FONT} fill={pal.muted}>{f0(b.val)}′</text>
+          </g>
+        ))}
+      </svg>
+      <div style={{ fontSize: FONT_SIZE.label, fontWeight: 650, color: active ? pal.accent : pal.ink, textAlign: "center", lineHeight: 1.25 }}>{label}</div>
+      {sub && <div style={{ fontSize: 10, color: pal.muted, textAlign: "center" }}>{sub}</div>}
+    </button>
   );
 }
 /* NEW-1 — a sub-heading INSIDE a panel/section that styles more than one UNPAIRED thing (e.g. the
