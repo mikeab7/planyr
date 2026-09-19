@@ -1,0 +1,122 @@
+<!doctype html>
+<!-- NEW-2 (B1783329) — a bare page, no auth, no Leaflet map, that drives the REAL crop modules
+     (pdfRaster.js's actual PDF rasteriser, overlayCrop.js's actual poly/rect math) against the
+     four committed sample sheets, and applies the REAL clip-path CSS value the site-plan overlay
+     renderer (rotatedImageLayer.js) uses, on a REAL <img>, so the compositor's own hit-testing
+     proves the clip actually took effect — not just that the stored value looks right. There is
+     no logged-out/local path for `site_plan_overlays` itself (it's per-account, cloud-only data),
+     so this is the automatable half; ui-audit/verify-site-plan-crop-fixtures.mjs drives it. -->
+<html>
+<head><meta charset="utf-8" /><title>Site-plan crop fixtures</title></head>
+<body style="margin:0; background:#eee;">
+<div id="stage" style="position:absolute; left:0; top:0; width:1200px; height:900px; background:#eee;">
+  <img id="testImg" alt="" style="position:absolute; left:0; top:0;" />
+</div>
+<pre id="report" style="position:absolute; left:0; top:920px;"></pre>
+<script type="module">
+import { renderPdfPageToImageData, pdfPageCount } from "/src/shared/files/pdfRaster.js";
+import {
+  normalizePolyCrop, clipPathValueForCrop, rectToPolyPoints, polyPointsToRect, isUsablePoly,
+} from "/src/workspaces/site-planner/lib/overlayCrop.js";
+
+const FIXTURE_BASE = "/test/fixtures/site-plan-crop";
+
+async function fetchBytes(path) {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error(`fetch ${path} failed: ${res.status}`);
+  return await res.arrayBuffer();
+}
+function loadImg(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+window.runCropFixtureChecks = async function runCropFixtureChecks() {
+  const report = { pdf: {}, poly: {}, errors: [] };
+  try {
+    // ---- broker-flyer.pdf — one page, rasterizes without error ------------------------------
+    // NOTE: pdf.js's getDocument({data}) TRANSFERS the ArrayBuffer to its worker, detaching it —
+    // so every call gets its OWN fresh copy via .slice(0), never the same buffer reused.
+    const flyerBytes = await fetchBytes(`${FIXTURE_BASE}/broker-flyer.pdf`);
+    report.pdf.brokerFlyerPages = await pdfPageCount(flyerBytes.slice(0));
+    const flyerR = await renderPdfPageToImageData(flyerBytes.slice(0), 1, { targetDpi: 96 });
+    report.pdf.brokerFlyer = { w: flyerR.imageData.width, h: flyerR.imageData.height };
+
+    // ---- e-size-title-block.pdf — a big sheet, capped to a sane raster size -----------------
+    const eSizeBytes = await fetchBytes(`${FIXTURE_BASE}/e-size-title-block.pdf`);
+    const eSizeR = await renderPdfPageToImageData(eSizeBytes.slice(0), 1, { targetDpi: 36, maxLongEdgePx: 4000 });
+    report.pdf.eSize = { w: eSizeR.imageData.width, h: eSizeR.imageData.height };
+
+    // ---- rotated-landscape.pdf — THE /Rotate PROOF ------------------------------------------
+    // The page's MediaBox is stored PORTRAIT (24 x 36 in). pdfRaster.js's `page.getViewport({
+    // scale })` passes no explicit `rotation`, which makes pdfjs-dist default to the PAGE'S OWN
+    // /Rotate — so if (and only if) that default is honoured, the RASTER comes out LANDSCAPE
+    // (width > height). This is the app's real, already-shipped rasteriser; nothing here is a
+    // reimplementation of it.
+    const rotBytes = await fetchBytes(`${FIXTURE_BASE}/rotated-landscape.pdf`);
+    const rotR = await renderPdfPageToImageData(rotBytes.slice(0), 1, { targetDpi: 36 });
+    report.pdf.rotated = { w: rotR.imageData.width, h: rotR.imageData.height, isLandscape: rotR.imageData.width > rotR.imageData.height };
+
+    // ---- l-shaped-plan.png — genuinely non-rectangular plan artwork -------------------------
+    const img = await loadImg(`${FIXTURE_BASE}/l-shaped-plan.png`);
+    const w = img.naturalWidth, h = img.naturalHeight;
+    report.poly.imgSize = { w, h };
+    const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+    const ctx = cv.getContext("2d"); ctx.drawImage(img, 0, 0);
+    const px = (x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data.slice(0, 3));
+    report.poly.topRightCorner = px(w - 5, 5); // background — the notch a single rect can't avoid
+    report.poly.legAPixel = px(500, 200); // inside the horizontal leg
+    report.poly.legBPixel = px(200, 600); // inside the vertical leg
+    report.poly.notchPixel = px(700, 600); // inside the bounding box, background — the notch itself
+
+    // The exact L outline (mirrors scripts/gen-site-plan-crop-fixtures.mjs's own leg coordinates).
+    const pts = [[80, 80], [900, 80], [900, 380], [400, 380], [400, 780], [80, 780]];
+    report.poly.usable = isUsablePoly(pts, w, h);
+    const poly = normalizePolyCrop(pts, w, h);
+    report.poly.normalized = poly;
+    const clip = clipPathValueForCrop({ kind: "poly", pts: poly }, w, h);
+    report.poly.clipPathValue = clip;
+
+    // Apply the REAL clip-path value to a REAL <img> and let the compositor's own hit-testing
+    // prove the clip took effect — this is exactly the CSS property rotatedImageLayer.js sets on
+    // the placed overlay's <img>, applied here with no Leaflet pane and no map underneath it.
+    const testImg = document.getElementById("testImg");
+    testImg.style.width = w + "px"; testImg.style.height = h + "px";
+    testImg.src = `${FIXTURE_BASE}/l-shaped-plan.png`;
+    await new Promise((resolve) => { if (testImg.complete) resolve(); else testImg.onload = resolve; });
+    testImg.style.clipPath = clip;
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); // let the clip actually paint
+
+    const hitAt = (x, y) => document.elementFromPoint(x, y) === testImg;
+    report.poly.hitTest = {
+      legA: hitAt(500, 200), // must be true — inside the kept shape
+      legB: hitAt(200, 600), // must be true — inside the kept shape
+      notch: hitAt(700, 600), // must be FALSE — clipped away, the point this whole fixture exists to prove
+    };
+
+    // Reset (Reset to full page) — clearing the clip must recover the whole original image.
+    testImg.style.clipPath = "";
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    report.poly.resetHitTest = { notchAfterReset: hitAt(700, 600) }; // must be TRUE once reset
+
+    // Rect <-> poly is reversible in one step (NEW-1's own requirement) — round-trip this same
+    // crop through the rect conversion and confirm the bounding box + a second poly conversion
+    // are exactly what the pure functions already promise (proven fully in test/overlayCrop.test.js;
+    // this just confirms the SAME functions imported here behave identically in a real browser).
+    const asRect = polyPointsToRect(poly);
+    report.poly.bboxRect = asRect;
+    report.poly.backToPoly = rectToPolyPoints(asRect);
+  } catch (e) {
+    report.errors.push(String((e && e.stack) || e));
+  }
+  window.__cropFixtureReport = report;
+  document.getElementById("report").textContent = JSON.stringify(report, null, 2);
+  return report;
+};
+</script>
+</body>
+</html>
