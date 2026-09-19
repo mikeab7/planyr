@@ -1,3 +1,16 @@
+### V1259456 — B1780592: the seven Site Planner rail icons render the approved artwork at the right size, stroke and color on production ✅ **PASSED 2026-09-18 — Michael, signed-in account, production build `2abc532`**
+
+**Why this is filed straight to Done, not parked ⏳.** The live check was already run and passed on 2026-09-18, before this record was filed (2026-09-19) — see B1780592 (`docs/archive/BACKLOG-DONE.md`) for why the record itself is retroactive. Filing a new ⏳ Verify entry for a check that is already closed would be a re-park; the filing instruction for this item said explicitly not to do that.
+
+**What was verified — Michael's signed-in account, production build `2abc532` (the deployed build carrying PR #1777's merge commit `2abc5324`), 2026-09-18:**
+1. All seven rail buttons render the new artwork at 21×21 with stroke-width 1.75 in a 21px slot, with no ancestor opacity below 1.
+2. Inactive icon color: `rgb(53,59,73)`.
+3. Each of the seven was activated in turn: `aria-pressed` flips to `true` on exactly the one clicked, its icon turns `rgb(15,110,86)`, and the correct panel opens.
+4. Persisted panel keys are unchanged — parcel, analysis, drainage, yield, properties, references, standards — with `references` still driving the Overlays button.
+5. Dark theme was NOT separately eyeballed live — it was covered by the CI visual-regression gate on PR #1777 (`ui-audit/visual-baselines/manifest.json`, `docs/VISUAL-REGRESSION.md`), not by this live pass. Recorded at that level of strength and no stronger, per the filing instruction.
+
+**Result:** ✅ PASSED. See B1780592 (`docs/archive/BACKLOG-DONE.md`) for the shipped change.
+
 ### V1152112 — B1617217: the dashboard topo background's cursor highlight genuinely trails the cursor instead of tracking it in lockstep ✅ **PASSED 2026-09-17 — Claude, headless Chromium against a real built app (signed out, no external GIS, no real data — ATTEMPT-BEFORE-YOU-PARK)**
 
 **Why this could be run here, not deferred.** Same reasoning as this component's three prior live-verifies immediately below (V943808/V979696/V1010224): pure animation/interaction behaviour, fully signed-out, no external GIS dependency, no real project data — none of the three named `Blocker:` classes (`auth`/`live-GIS`/`real-data`) apply. The owner's own dispatch text asked this be "flagged for a live-verify item (V#) once merged" — read together with `CLAUDE.md`'s ATTEMPT-BEFORE-YOU-PARK standing rule ("a logged-out, no-external-GIS UI check … must NEVER be filed as needing a live pass"), the V# is minted and the check is run THIS session rather than parked pending a merge, exactly as the three prior items on this same file did.
