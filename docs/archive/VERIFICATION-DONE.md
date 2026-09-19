@@ -1,3 +1,20 @@
+### V1261920 — B1783056: a hand-dragged export frame's aspect survives to a downloaded PDF undistorted ✅ **PASSED 2026-09-19 — Cowork, signed-in account, production build `82032c7` (PR #1781's merge commit)**
+
+**Build confirmed the same change under test.** `planyr.io/version.json` returned `82032c7` on a cache-busted load — the exact merge commit of PR #1781 — so every measurement below is on this item's own shipped code, not a stale bundle (per `/CLAUDE.md`'s chunk-hash-in-the-same-observation rule).
+
+**What was touched on Michael's account.** A Duplicate of Goose Creek / Phase II - IAS R1, renamed "ZZ TEST - export frame aspect - safe to delete." The whole check ran on that copy; it was deleted afterward (in Recently deleted, restorable). No real plan was modified.
+
+**What was verified — measured from the live DOM and from the downloaded file, not eyeballed:**
+1. **X-axis free drag:** the print-frame rect (`data-testid="print-frame"`) measured 228×230 CSS px, then 424×230 after dragging the RIGHT-MIDDLE (mid-edge) grip. Height did not move — proves an edge grip drives only its own axis, the NEW capability this item added.
+2. **Y-axis free drag:** 424×230 before, 424×265 after dragging the TOP-MIDDLE grip; width did not move. Final frame aspect **1.602** — not the Letter-landscape plan-window aspect the OLD code would have forced it back to.
+3. **Standard-sheet path (Fit to frame off):** the compose preview page measured aspect 1.292 (Letter landscape), with the odd-aspect (1.602) frame letterboxed inside the plan window and the drawing undistorted on inspection.
+4. **"Fit to frame" control:** present, labeled "Fit to frame — page takes the frame's shape." With it on, the preview page box measured 581×363 = aspect 1.602, matching the dragged frame exactly. The Landscape/Portrait buttons correctly disabled while it was on.
+5. **The real downloaded file, not the preview:** the PDF's MediaBox is `[0 0 792 494.414]` pt = 11.000 in × 6.867 in, aspect 1.6020 — the frame's own aspect, long edge at Letter's long edge (11 in), exactly as `pageSizeForFit` is supposed to compute it. 1,270,844 bytes.
+
+**Residuals, named rather than glossed over — carried forward as V1264384, not silently claimed as covered here:** no explicit engineering-scale export was taken under a free-aspect frame (that path's own mutual-exclusion-with-Fit-to-frame behavior rests on this item's unit tests, not a live measurement); Shift-drag snap-to-sheet-aspect was not exercised live — the Chrome extension used for the check strips modifier keys from drags, exactly the limitation this item's own dispatch brief anticipated and accepted as unit-test-only coverage; PNG export under a free-aspect frame was not exercised live (confirmed only by code reading, that path is already frame-aspect-agnostic by construction — see V1264384). None of these three bear on the core reported symptom (the frame drags to any aspect, and the sheet fits it), which is what this V# was scoped to and what the evidence above conclusively proves, with real production file bytes.
+
+**Result:** ✅ PASSED. See B1783056 (`docs/archive/BACKLOG-DONE.md`) for the shipped change.
+
 ### V1259456 — B1780592: the seven Site Planner rail icons render the approved artwork at the right size, stroke and color on production ✅ **PASSED 2026-09-18 — Michael, signed-in account, production build `2abc532`**
 
 **Why this is filed straight to Done, not parked ⏳.** The live check was already run and passed on 2026-09-18, before this record was filed (2026-09-19) — see B1780592 (`docs/archive/BACKLOG-DONE.md`) for why the record itself is retroactive. Filing a new ⏳ Verify entry for a check that is already closed would be a re-park; the filing instruction for this item said explicitly not to do that.
