@@ -436,6 +436,9 @@ Two more found since, each worth its own line because each returned a confident 
    knowable (does a two-press sequence raise `dblclick` here, yes or no) before trusting it on the
    unknown one.
 
+33. **⛔ A “SETTLED FACT” IN A REVIEW DOCUMENT IS AN UNTESTED CLAIM WEARING A CONCLUSION'S CLOTHES, AND THIS ONE COST FOUR ROUNDS (B1393 ×4, 2026-09-18).** `REVIEW-2026-09-08`'s finding F5 stated: *“Double-clicking inside the page body selects a word, which is correct text behaviour. So the create gesture only fires in the grey mat outside the sheet.”* It reads as a boundary condition somebody established. **Nobody ever drove it.** Every subsequent round consequently fixed, reviewed and verified the grey-MAT path — correctly, and on a surface the owner was not pressing on — while he went on reporting *“it doesn't work, at all.”* The tell, and it generalises: **the report and the premise disagreed, and the premise won four times without once being measured.** When a symptom survives rounds of real fixes, stop re-reading the code and go and re-derive the SCOPE sentence everybody is standing on — the one phrased as background rather than as a finding, because that is the one with no test under it. (Sibling of WRONG-CASE, one level up: that rule is about testing the wrong CASE, this is about inheriting the wrong PREMISE about where the feature even lives.)
+34. **⛔ AND THE TRAP-18 INSTANCE THAT CAUGHT ITSELF THE SAME DAY, worth one line because it shows the guard working.** A brand-new harness's grey-mat known-good arm went red against code nothing had touched. Its press point was `sheetRight + 60` — **x=1554 in a 1500px viewport**, where `elementsFromPoint` returns an EMPTY ARRAY rather than erroring, so the click landed on nothing. On a WIDE page the sheet is pinned near the right edge (measured: mat 268→1500, sheet 594→1494), so “just outside the sheet on the right” is off the edge of the world while the real mat sits on the LEFT. **Because that arm's answer was known independently, the run declared itself VOID instead of printing a score** — which is the entire argument for known-good arms in one incident.
+
 See also `ui-audit/TRAPS.md`, and the named rules **FOREGROUND-OR-VOID** (a background tab cannot
 be measured — not its clock, not its pixels) and **COUNT-EVERY-KIND**.
 
@@ -1176,6 +1179,32 @@ position**.
    which for a drag is the very next render after release. Caught here only because a headless
    harness explicitly re-measured AFTER mouseup and after the intervening re-render, not just
    mid-gesture.
+
+19. **⛔ A PREDICATE THAT ANSWERS ONLY ONE AXIS OF A TWO-AXIS QUESTION IS RIGHT FOR THE CASE IT WAS WRITTEN FOR AND SILENTLY WRONG EVERYWHERE ELSE (B1393 ×4, 2026-09-18).** `pressIsBesideLine` asks *“is there a line of writing at this height”* — exactly what **B1368** needed (a press in the left or right margin, level with a short line, belongs to that line) and it is correct for it. It never looks at `clientX`. So the moment somebody presses a long way PAST where the writing ends, the same honest “yes” sends the caret into their sentence, and there is nothing in the function that looks wrong: it answers its own question perfectly. **The tell is a name that describes a RELATION (“beside”) while the body tests one COORDINATE.** Whenever a hit-test, a proximity check or a “is the pointer near X” predicate is reused by a second caller, re-read it against BOTH axes of what the new caller is actually asking — and note that this is the same shape as family **0** (a rule shipped on some of its edges and clamped on the rest) and **16** (a second representation invisible to code that knows only the first): a partial answer that is complete for its first caller. **The fix was NOT to widen the predicate** — that would have reopened B1368, since a single click level with a line must still take the caret. It was to separate the two gestures the way Word already does (one click places a caret, a double-click on blank paper starts something), so the two meanings stop competing at all. `lib/notesBlankPaper.js`; guard `ui-audit/verify-notes-in-sheet-placement.mjs` (a repo-root path, not a module one).
+
+20. **⛔ TWO MECHANISMS THAT ARE EACH INDEPENDENTLY CORRECT, BOTH COMPENSATING FOR THE SAME LAYOUT
+    SHIFT, DOUBLE THE COMPENSATION RATHER THAN AGREEING (B1740688 ×2, 2026-09-18 — the left width
+    grip, again; sibling of family 18 on the SAME feature, a different bug).** The left-grip drag's
+    `apply()` wrote `scroller.scrollLeft` directly, computing the FULL compensation needed since
+    drag START (an absolute jump) — while, in the SAME call, setting `sheetGrowLeft` ALSO
+    retriggered the general "hold the body's screen position" layout effect (built for
+    NOTES-FREE-PLACEMENT, keyed on `sheetGrowLeft`), which independently scrolls by the INCREMENTAL
+    delta since ITS OWN last reading. Each was correct in isolation — the first is exactly the
+    manual scroll VIEWPORT-STABLE's own precedents (`panelShiftRef`, `geoGhostRef`) use, the second
+    is exactly what that layout effect was built to do — and running both meant every pointermove
+    over-scrolled by that step's own delta, which the very next pointermove's absolute write then
+    corrected, only for the render right after it to reintroduce a fresh one. That one-frame-late
+    correct/wrong/correct cycle, once per pointermove for the whole gesture, is what read as the
+    whole page shaking continuously in both directions. **The tell: search for every OTHER writer of
+    the same scroll/offset a layout effect already owns, before adding a second live-preview write
+    "to keep up during the drag" — the effect already runs synchronously before paint, so a manual
+    write competing with it is never faster, only wrong.** The fix removed the manual write
+    entirely; the layout effect alone, run through its own natural incremental accumulation, lands
+    on the exact same absolute target with no double-count. **Caught only because a headless harness
+    sampled EVERY STEP of a slow real-mouse drag** (`ui-audit/verify-notes-page-width.mjs` Case 20)
+    rather than the drag's two endpoints — both endpoints were already correct before this fix,
+    exactly the shape ATTEMPT-BEFORE-YOU-PARK and this file's own §2 fixture-choice warn about:
+    sampling only the start and end of a gesture is blind to defects that live entirely in between.
 
 ---
 

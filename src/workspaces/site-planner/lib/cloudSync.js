@@ -393,6 +393,47 @@ export async function cloudHardDelete(uid, id) {
   }
 }
 
+// PostgREST reports an unknown RPC as PGRST202 ("Could not find the function … in the schema
+// cache") — mirrors cloudRename.js's own isMissingFunction, kept local rather than shared because
+// each caller's degrade path differs.
+const isMissingPurgeOneRpc = (e) =>
+  !!e && (e.code === "PGRST202" || /could not find the function|does not exist/i.test(e.message || ""));
+
+/* B1767168 — the ONE way to permanently purge a single plan out of an otherwise-LIVE project: the
+ * plan menu's per-project "Recently deleted" ✕ (`SitePlanner.jsx`'s `handlePurgeDeletedPlan`,
+ * reachable ONLY while a live sibling in this exact group is the open plan). `cloudHardDelete`
+ * above always gets refused here — `sites_block_delete_live_group`'s BEFORE DELETE trigger
+ * (B1517888) is unconditional for a row whose group still has a live sibling, by design (see that
+ * file's own header: "a distinct, deliberate follow-up feature — not built here"). This is that
+ * feature: it calls `db/purge_one_deleted_plan.sql`'s RPC, which independently re-proves ownership,
+ * that the row is really in the trash, and that a live sibling survives the delete, before
+ * signalling the trigger to stand down for this one row only.
+ *
+ * A pre-migration DB (the RPC not yet deployed) answers PGRST202 and degrades to the ordinary
+ * `cloudHardDelete` — i.e. the SAME refusal this purge already gets today. Nothing regresses; the
+ * capability simply isn't reachable until the migration lands. */
+export async function cloudPurgeOnePlan(uid, id) {
+  if (!supabase || !uid || !id) return { ok: true, removed: 0, skipped: true };
+  const { data, error } = await supabase.rpc("purge_one_deleted_plan", { p_id: id });
+  if (error) {
+    if (isMissingPurgeOneRpc(error)) return cloudHardDelete(uid, id);
+    if (error.code === "PLYR2") {
+      reportClientEvent("purge-one-plan-blocked", "single-plan purge refused server-side", { id, error: error.message || "" });
+      return { ok: false, removed: 0, error: "This plan couldn't be permanently deleted right now." };
+    }
+    reportClientEvent("cloud-write-failed", "single-plan purge failed (purge_one_deleted_plan)", { id, error: error.message || "" });
+    return { ok: false, removed: 0, error: error.message || "purge failed" };
+  }
+  delete siteVersions[id];
+  delete lastHeaderSig[id];
+  const rows = Array.isArray(data) ? data : [];
+  if (!rows.length) {
+    reportClientEvent("delete-zero-rows", "single-plan purge matched no rows (sites)", { id });
+    return { ok: false, removed: 0, error: "Nothing was permanently deleted." };
+  }
+  return { ok: true, removed: rows.length };
+}
+
 /* Lift a site out of Recently deleted. Rides the same UPDATE policy the soft delete does. Returns
  * { ok, restored } — restored:0 means nothing matched (already purged, or an RLS mismatch), which
  * the caller surfaces rather than reporting a phantom success. */

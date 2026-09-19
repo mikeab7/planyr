@@ -83,6 +83,12 @@ async function edgeHandles(page) {
     return { edge: r.getAttribute("data-edge"), x: b.x + b.width / 2, y: b.y + b.height / 2 };
   }));
 }
+async function cornerHandles(page) {
+  return page.evaluate(() => [...document.querySelectorAll('rect[data-handle="corner"]')].map((r) => {
+    const b = r.getBoundingClientRect();
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  }));
+}
 
 const freePads = (els) => els.filter((e) => !e.attachedTo && (e.type === "parking" || e.type === "paving"));
 const byPiece = (a) => a.slice().sort((x, y) => x.sideParkPiece - y.sideParkPiece);
@@ -240,6 +246,162 @@ test.describe("NEW-1 — a resize-handle DRAG on a split freestanding parking pi
     expect(p0.h).toBeCloseTo(before0.h, 6);
     expect(p1.w).toBeCloseTo(before1.w, 6);
     expect(p1.h).toBeCloseTo(before1.h, 6);
+    for (let i = 0; i < stack.length - 1; i++) {
+      const [, farI] = nearFar(stack[i]);
+      const [nearNext] = nearFar(stack[i + 1]);
+      expect(Math.abs(nearNext - farI), `piece ${i} and piece ${i + 1} touch with no gap/overlap`).toBeLessThan(0.01);
+    }
+
+    expect(errors, `page errors: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
+
+/* NEW-1 (dispatch, 2026-09-18, reopening B1754864) — the fix above was proven ONLY against a pure
+ * DEPTH-EDGE drag (nx=0), which never touches `w`. The owner's live repro used "one of the
+ * selection handles (the 6-8 small boxes shown around a selected element)" without specifying
+ * edge vs corner, and a CORNER handle drags BOTH `w` and `h` at once (`startResize`'s
+ * `nw = snapTo(Math.abs(local.x))`, `nh = snapTo(Math.abs(local.y))`, independently).
+ *
+ * ROOT CAUSE: `freeParkStack`'s sibling-membership test requires the candidate's `w` to match the
+ * anchor's `w` within `eps` (0.5 ft) — that is how it tells this stack's own pieces apart from an
+ * unrelated field sitting nearby. `refitChildren`'s freestanding-stack branch re-derived that
+ * anchor from `next`, which already carries THIS FRAME's dragged geometry — so the instant a
+ * corner drag grew the piece's width past the epsilon, its own untouched siblings (still at the
+ * original width) stopped matching, `freeParkStack` returned a chain of length 1, and the depth
+ * relayout silently never ran. The grown piece's depth really did change (proven directly below),
+ * but its now-unmoved, still-opaque, later-painted neighbour sat exactly where it always was and
+ * overlapped it — which is the same "snapped back" visual the original B1754864 fix was for, just
+ * produced by a handle its own tests never drove.
+ *
+ * Fix: membership is now resolved ONCE per gesture, from the clean pre-drag geometry (the same
+ * "capture at gesture start" shape `wallKids`/`hostClampOf` already use), and threaded through as
+ * `opts.freeStackIds` rather than re-derived from the mutating `next` array on every frame.
+ */
+test.describe("NEW-1 (reopen) — a CORNER drag on a split freestanding parking piece still relays its siblings", () => {
+  test("corner-dragging the AISLE (which also grows its width) still pushes the outer row, no overlap", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+
+    await startBlank(page);
+    const box = await canvas(page).boundingBox();
+    await drawFreestandingField(page, box);
+
+    let els = await readEls(page);
+    const fieldId = els.find((e) => e.type === "parking" && !e.attachedTo).id;
+    await selectAndOpenProperties(page, fieldId);
+    await fieldInput(page, "Width (ft)").fill("200");
+    await fieldInput(page, "Width (ft)").press("Enter");
+    await fieldInput(page, "Depth (ft)").fill("60"); // 2 rows: 2*18 + 24
+    await fieldInput(page, "Depth (ft)").press("Enter");
+    await page.waitForTimeout(150);
+
+    await selectAndOpenProperties(page, fieldId);
+    await page.getByTestId("split-parking").click();
+    await page.waitForTimeout(200);
+
+    els = await readEls(page);
+    let stack = byPiece(freePads(els));
+    const aisle = stack[1], row0 = stack[0], row1 = stack[2];
+    const beforeH = aisle.h, beforeW = aisle.w;
+
+    await page.evaluate((p) => window.__plannerView.centerOn(p.cx, p.cy, p.ppf), { cx: aisle.cx, cy: aisle.cy, ppf: 3 });
+    await page.waitForTimeout(150);
+    await selectAndOpenProperties(page, aisle.id);
+    const corners = await cornerHandles(page);
+    const cx = await page.locator(`[data-el-id="${aisle.id}"]`).first().boundingBox();
+    const center = { x: cx.x + cx.width / 2, y: cx.y + cx.height / 2 };
+    const row1Box = await page.locator(`[data-el-id="${row1.id}"]`).first().boundingBox();
+    const row1Y = row1Box.y + row1Box.height / 2;
+    // The corner on the side facing row1 (whichever quadrant that is) — dragging it further out
+    // grows the aisle toward row1 in depth AND changes its width in the same gesture.
+    const dySign = Math.sign(row1Y - center.y) || 1;
+    const corner = corners.filter((c) => Math.sign(c.y - center.y) === dySign)
+      .sort((a, b) => Math.abs(a.x - center.x) - Math.abs(b.x - center.x))[0];
+    expect(corner, "a corner handle on the aisle's row1-facing side was found").toBeTruthy();
+    const dxSign = Math.sign(corner.x - center.x) || 1;
+
+    await page.mouse.move(corner.x, corner.y);
+    await page.mouse.down();
+    for (let i = 1; i <= 8; i++) {
+      await page.mouse.move(corner.x + dxSign * 12 * i, corner.y + dySign * 15 * i, { steps: 1 });
+      await page.waitForTimeout(20);
+    }
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+
+    els = await readEls(page);
+    stack = byPiece(freePads(els));
+    const after = stack.find((e) => e.id === aisle.id);
+
+    expect(after.h, "the aisle's depth grew").toBeGreaterThan(beforeH + 10);
+    expect(after.w, "the corner drag also changed the aisle's width (the case that broke identification)").not.toBeCloseTo(beforeW, 0);
+
+    // THE REGRESSION, made concrete: every piece must still be CONTIGUOUS — no gap, no overlap —
+    // even though the resized piece's own width now differs from its siblings'.
+    for (let i = 0; i < stack.length - 1; i++) {
+      const [, farI] = nearFar(stack[i]);
+      const [nearNext] = nearFar(stack[i + 1]);
+      expect(Math.abs(nearNext - farI), `piece ${i} and piece ${i + 1} touch with no gap/overlap`).toBeLessThan(0.01);
+    }
+    expect(stack.find((e) => e.id === row0.id).h).toBeCloseTo(row0.h, 6); // the untouched row's own size is unaffected
+
+    expect(errors, `page errors: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("corner-dragging the INNERMOST row into the aisle still pushes the rest of the stack, no overlap", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+
+    await startBlank(page);
+    const box = await canvas(page).boundingBox();
+    await drawFreestandingField(page, box);
+
+    let els = await readEls(page);
+    const fieldId = els.find((e) => e.type === "parking" && !e.attachedTo).id;
+    await selectAndOpenProperties(page, fieldId);
+    await fieldInput(page, "Width (ft)").fill("200");
+    await fieldInput(page, "Width (ft)").press("Enter");
+    await fieldInput(page, "Depth (ft)").fill("60");
+    await fieldInput(page, "Depth (ft)").press("Enter");
+    await page.waitForTimeout(150);
+
+    await selectAndOpenProperties(page, fieldId);
+    await page.getByTestId("split-parking").click();
+    await page.waitForTimeout(200);
+
+    els = await readEls(page);
+    let stack = byPiece(freePads(els));
+    const row0 = stack[0], aisle = stack[1];
+    const beforeH = row0.h;
+
+    await page.evaluate((p) => window.__plannerView.centerOn(p.cx, p.cy, p.ppf), { cx: row0.cx, cy: row0.cy, ppf: 3 });
+    await page.waitForTimeout(150);
+    await selectAndOpenProperties(page, row0.id);
+    const corners = await cornerHandles(page);
+    const cx = await page.locator(`[data-el-id="${row0.id}"]`).first().boundingBox();
+    const center = { x: cx.x + cx.width / 2, y: cx.y + cx.height / 2 };
+    const aisleBox = await page.locator(`[data-el-id="${aisle.id}"]`).first().boundingBox();
+    const aisleY = aisleBox.y + aisleBox.height / 2;
+    const dySign = Math.sign(aisleY - center.y) || 1;
+    const corner = corners.filter((c) => Math.sign(c.y - center.y) === dySign)
+      .sort((a, b) => Math.abs(a.x - center.x) - Math.abs(b.x - center.x))[0];
+    expect(corner, "a corner handle on row0's aisle-facing side was found").toBeTruthy();
+    const dxSign = Math.sign(corner.x - center.x) || 1;
+
+    await page.mouse.move(corner.x, corner.y);
+    await page.mouse.down();
+    for (let i = 1; i <= 8; i++) {
+      await page.mouse.move(corner.x + dxSign * 12 * i, corner.y + dySign * 15 * i, { steps: 1 });
+      await page.waitForTimeout(20);
+    }
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+
+    els = await readEls(page);
+    stack = byPiece(freePads(els));
+    const after = stack.find((e) => e.id === row0.id);
+    expect(after.h, "row0's depth grew into the aisle").toBeGreaterThan(beforeH + 10);
+
     for (let i = 0; i < stack.length - 1; i++) {
       const [, farI] = nearFar(stack[i]);
       const [nearNext] = nearFar(stack[i + 1]);

@@ -21,12 +21,18 @@ _Last updated: 2026-09-18._
 > and that one draws roads as plain rectangles with no corner rounding whatsoever, so it can't be
 > showing you the corner problem. I tried to make it produce those blobs on purpose and couldn't.
 >
-> - [ ] **Two questions, and either answer gets me moving:** which page were you on, and is that
->       little drawing something Planyr drew, or a site plan / brochure you uploaded? (A "CAR
->       PARKS" label with a pointer line is the kind of thing that usually comes on somebody
->       else's flyer — if that's what it is, those blobs are part of the picture you uploaded and
->       there's nothing for me to fix.) A screenshot with a bit more of the page showing would
->       answer both at once.
+> **Update after you said Goose Creek:** I found it — the plan is "Phase II - TAS R1", and the
+> "CAR PARKS" labels are your own callouts, so that drawing is Planyr's, not something you
+> uploaded. That means the blobs are ours to fix. I checked the two most likely causes against
+> your actual plan, read-only, and ruled both out: every drive-into-pavement connection on it
+> meets square (none of them is the shallow-angle problem below), and the two wide roads with
+> tight corners all trace clean.
+>
+> - [ ] **So one question left: which page, and whereabouts on the drawing?** The Spreadsheet tab
+>       genuinely has no site plan in it, so I think you were on the Site Planner with the
+>       Spreadsheet tab just visible along the top — but I'd rather you tell me than guess again.
+>       A screenshot showing a bit more of the page, or just "top-left of the plan", gets me
+>       straight to it.
 
 ## ✅ CLOSED — "HW Review" on Grand Port's Master Schedule needs no repair, nothing on your end (B1701360)
 

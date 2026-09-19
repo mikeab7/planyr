@@ -130,6 +130,11 @@ const ALL_NOTES_FILES = [
   // NEW-1 (the per-paragraph merge, 2026-09-16) — the pure 3-way diff3-style block merge over
   // notesRedline.js's flattened blocks, used when two copies of a page have genuinely diverged.
   "lib/notesBlockMerge.js",
+  // B1393 (×4, 2026-09-18) — "is this press on blank paper, or on somebody's writing?". The pure
+  // half of the fix for a double-click far right of a short line landing the caret at that line's
+  // end instead of starting a box: pressIsBesideLine tests only the VERTICAL axis, so this
+  // answers the horizontal one from the row's own rendered rectangles.
+  "lib/notesBlankPaper.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 

@@ -14,6 +14,7 @@
  * table wider than even Full's own floor, and phone width. */
 import { chromium } from "playwright";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { pacedWait } from "./lib/tabTiming.mjs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173";
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
@@ -589,6 +590,215 @@ console.log("\n[19] Phone width — Full width still resolves to sane, bounded g
   const expectedOverflow = Math.max(0, 900 + 16 - geo.clientWidth);
   ok("overflow at phone width matches the expected floor formula (incl. the phone-only sheet margin), same shape as any other narrow window",
     Math.abs(geo.overflow - expectedOverflow) <= 10, JSON.stringify({ geo, expectedOverflow }));
+  await page.setViewportSize({ width: 1500, height: 950 });
+}
+
+/* ═══════ CASE 20 — B<PENDING>: body text is ROCK-STEADY for the WHOLE drag, both directions ═══
+ * Owner report 2026-09-18 (re-dispatch — the first session given this item died at startup and
+ * wrote nothing). Dragging the LEFT width grip outward then back inward made ALL page text judder
+ * continuously for the entire gesture, in both directions. Cases 6/7 above only ever compare the
+ * drag's START and END rects — exactly what this item's own acceptance bar says proves nothing,
+ * because the reported defect lives entirely IN BETWEEN those two points and both endpoints were
+ * already correct before this fix. This samples a real body-text element's rendered position on
+ * EVERY step of a slow, real-mouse drag (a real `page.mouse.move`, never a synthetic dispatched
+ * event — the "double-click needs a native event, not two dispatched ones" trap this module's own
+ * `verify-notes-in-sheet-placement.mjs` already names for a different gesture applies here too:
+ * a driver click is the only thing this app's `window`-bound pointer listeners ever see as real)
+ * and asserts it never leaves its starting position by more than a small, real-antialiasing
+ * tolerance — at three different starting widths (unpinned, an already-pinned preset, and a page
+ * already sitting at a custom DRAGGED width, per the acceptance bar's own "not just the edge he
+ * named" list), on both grips, plus the untouched menu-preset path as the adjacent case.
+ *
+ * ⛔ MECHANISM (confirmed by instrumenting the real running code with console-logged state, not
+ * assumed): the reported judder was the width drag's own `apply()` writing `scroller.scrollLeft`
+ * directly (an ABSOLUTE jump to the compensation needed since drag START) on every pointermove,
+ * WHILE ALSO setting `sheetGrowLeft` — which independently retriggers the layout effect that holds
+ * the body still by scrolling for the INCREMENTAL delta since ITS OWN last reading. Both were
+ * individually correct; running both doubled the compensation every single frame, over-scrolling by
+ * that frame's own delta, which the very next pointermove's absolute write then corrected — only
+ * for the render right after that to reintroduce a fresh one. That correct/wrong/correct cycle,
+ * once per pointermove for the whole gesture, is the shake. See NoteEditor.jsx's `apply()` (inside
+ * `beginWidthDrag`) for the fix.
+ *
+ * ⛔ TWO THINGS MASK THIS BUG, AND BOTH HAD TO BE DESIGNED AROUND OR THIS CASE WOULD HAVE SHIPPED A
+ * FALSE PASS ON THE UNFIXED CODE (caught by instrumenting the pre-fix build directly, not by
+ * inspection — the very trap FOREGROUND-OR-VOID's sibling rules warn about, an instrument that
+ * cannot see the thing it claims to check):
+ * 1. **A UNIFORM STEP SIZE CANCELS THE ERROR.** The double-counted term is a SECOND DIFFERENCE of
+ *    the padding sequence (this-step's pad delta minus last-step's), so a drag that moves the exact
+ *    same distance every single step (the first version of this case did — a constant `stepDx`
+ *    repeated) has that difference at zero on every step, and reports a perfect, false, rock-steady
+ *    reading despite the bug being fully present underneath. Only a VARYING step size — a real
+ *    hand's natural acceleration/deceleration, never perfectly even micro-steps — exposes it.
+ *    `sampleDrag` below drives a fixed, deliberately uneven step sequence for exactly this reason.
+ * 2. **ON A BRAND-NEW PAGE, THE FIRST EVER LEFT-DRAG HAS NO SCROLL TO CORRUPT YET.** The direct
+ *    `scroller.scrollLeft = …` write happens BEFORE React has committed the wider sheet, so at that
+ *    instant the scroller's own `scrollWidth` has not grown to accommodate it — the browser silently
+ *    CLAMPS the assignment back to the (still-zero) max scrollable extent, so the write is a total
+ *    no-op the very first time reach room does not already exist. The layout effect's own later
+ *    write is what actually succeeds, alone, correctly — so an "unpinned, freshly seeded page, never
+ *    touched before" starting width can pass HONESTLY while the very same bug still fires the moment
+ *    any real scroll reach already exists (a prior preset pick, an earlier completed drag — i.e.
+ *    ordinary continued use of the feature). This is exactly why this case's OWN acceptance bar
+ *    insists on more than one starting width, including one already at a custom dragged width — the
+ *    unpinned arm alone would have shipped a green suite over a live bug. */
+console.log("\n[20] Frame-by-frame: body text is rock-steady across the whole drag, both edges, from multiple starting widths:");
+{
+  // ⛔ A WIDE VIEWPORT, DELIBERATELY — NEW-7's window-edge auto-scroll (`beginEdgeAutoScroll`,
+  // triggered within 32px of the WINDOW's own edge) is a real, correct, unrelated feature, not
+  // the bug this case tests for. At this file's default 1500px viewport a Wide (900) pinned
+  // sheet's own right edge already renders past x=1490 — inside that 32px margin before the drag
+  // even starts — so a right-edge widen from that starting width legitimately auto-scrolls the
+  // whole pane, which correctly moves the body along with the camera pan and would read as a
+  // false failure here (measured: it did, on the first run of this case — max drift 374px,
+  // monotonic, not the reported oscillation, and traced to exactly this). A generously wide
+  // window keeps every drag in this case far from that margin regardless of starting width, so
+  // the only thing that can move the body here is the mechanism actually under test.
+  await page.setViewportSize({ width: 2200, height: 950 });
+  const LONG_DOC = { type: "doc", content: [p("The quick brown fox jumps over the lazy dog, over and over, to give this line real width to watch move.")] };
+
+  async function bodyTextRect() {
+    return page.evaluate(() => {
+      const el = document.querySelector('[data-testid="note-body"] p');
+      const r = el.getBoundingClientRect();
+      return { left: r.left, top: r.top };
+    });
+  }
+
+  // ⛔ DELIBERATELY UNEVEN — a real hand never moves in perfectly uniform micro-steps, and a
+  // uniform step size mathematically CANCELS this bug's own error term (see this case's header
+  // comment, point 1): the double-counted amount is a SECOND DIFFERENCE of the padding sequence
+  // (this step's pad delta minus the previous step's), which is identically zero when every step
+  // moves the same distance. Sums to 119px in either direction.
+  const UNEVEN_STEPS = [3, 8, 4, 10, 2, 9, 5, 7, 3, 11, 6, 4, 8, 2, 10, 5, 3, 9, 6, 4];
+
+  /* Drives a real, slow, trusted-input mouse drag ONE SMALL, UNEVEN STEP AT A TIME (never
+   * Playwright's own `steps:` interpolation, which only returns after the whole move completes and
+   * gives no chance to sample in between), pacing each step with the MessageChannel-based
+   * `pacedWait` (FOREGROUND-OR-VOID — never a raw `setTimeout`/`waitForTimeout` inside a section a
+   * verdict depends on) so React's commit + the compensating layout effect land before each
+   * reading. `direction` is +1 (pointer moves right) or -1 (pointer moves left). */
+  async function sampleDrag(gripSelector, direction) {
+    const grip = await page.evaluate((sel) => {
+      const g = document.querySelector(sel);
+      const r = g.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    }, gripSelector);
+    await page.mouse.move(grip.x, grip.y);
+    await page.mouse.down();
+    await pacedWait(page, 60);
+    const samples = [await bodyTextRect()];
+    let x = grip.x;
+    for (const stepMag of UNEVEN_STEPS) {
+      x += direction * stepMag;
+      await page.mouse.move(x, grip.y);
+      await pacedWait(page, 32);   // let the commit + compensating scroll land before reading
+      samples.push(await bodyTextRect());
+    }
+    await page.mouse.up();
+    await pacedWait(page, 250);
+    return samples;
+  }
+
+  function maxDrift(samples) {
+    const x0 = samples[0].left;
+    const y0 = samples[0].top;
+    let maxDx = 0;
+    let maxDy = 0;
+    for (const s of samples) {
+      maxDx = Math.max(maxDx, Math.abs(s.left - x0));
+      maxDy = Math.max(maxDy, Math.abs(s.top - y0));
+    }
+    return { maxDx: Math.round(maxDx * 100) / 100, maxDy: Math.round(maxDy * 100) / 100 };
+  }
+
+  // Real antialiasing/rounding noise across a live gesture, never a budget wide enough to hide
+  // the reported defect — the pre-fix double-compensation moved the body by a step's worth of
+  // pixels (single digits at minimum) on nearly every sampled step; this prints the real numbers.
+  const DRIFT_TOLERANCE = 1.5;
+  const assertSteady = (label, samples) => {
+    const drift = maxDrift(samples);
+    ok(`${label} — body text rock-steady (max drift ${JSON.stringify(drift)})`,
+      drift.maxDx <= DRIFT_TOLERANCE && drift.maxDy <= DRIFT_TOLERANCE,
+      JSON.stringify(samples.map((s) => Math.round(s.left * 10) / 10)));
+  };
+
+  async function dragToCustomWidth() {
+    // Reach a CUSTOM (non-preset) width the same way a real user would — one real right-edge
+    // drag first — so a later left-grip drag starts from "a page already at a custom width",
+    // the acceptance bar's own explicit third starting case.
+    const grip = await page.evaluate(() => {
+      const g = document.querySelector('[data-testid="note-page-width-grip-right"]');
+      const r = g.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    });
+    await page.mouse.move(grip.x, grip.y);
+    await page.mouse.down();
+    await page.mouse.move(grip.x + 137, grip.y, { steps: 6 });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+  }
+
+  // ⛔ "unpinned (Fit to content)" is a WEAK arm on its own, reported honestly rather than relied
+  // on: a completely fresh page has no horizontal scroll reach yet, so the direct scrollLeft write
+  // this bug depends on is silently clamped to zero and this arm alone can pass even on the
+  // UNFIXED code (see this case's header comment, point 2 — confirmed by instrumenting the real
+  // pre-fix build). The other two arms are the ones actually proving the fix: both start from a
+  // page that already has real scroll reach (a completed preset pick / a completed drag), which is
+  // also the ordinary, repeated-use shape a real session looks like.
+  const startingWidths = [
+    { label: "unpinned (Fit to content)", setup: null },
+    { label: "already pinned Wide (900)", setup: () => pickWidthMenu("900") },
+    { label: "already at a custom dragged width", setup: dragToCustomWidth },
+  ];
+
+  for (const { label, setup } of startingWidths) {
+    await seed(LONG_DOC, `Frame sample — ${label}`);
+    if (setup) await setup();
+    console.log(`  -- starting width: ${label} --`);
+
+    // The exact reported gesture: LEFT grip, widen then narrow. Widening the LEFT grip means the
+    // pointer moves LEFT (direction -1); narrowing moves it back right (+1).
+    assertSteady(`${label}: LEFT grip widen`, await sampleDrag('[data-testid="note-page-width-grip-left"]', -1));
+    assertSteady(`${label}: LEFT grip narrow`, await sampleDrag('[data-testid="note-page-width-grip-left"]', 1));
+
+    // The adjacent case named explicitly in the acceptance bar: the RIGHT grip too.
+    assertSteady(`${label}: RIGHT grip widen`, await sampleDrag('[data-testid="note-page-width-grip-right"]', 1));
+    assertSteady(`${label}: RIGHT grip narrow`, await sampleDrag('[data-testid="note-page-width-grip-right"]', -1));
+  }
+
+  // And the OTHER adjacent case: the page-width MENU presets. These never went through the
+  // width-drag's `apply()` at all (confirmed by reading the code — the measurement effect that
+  // backs a menu pick sets `sheetGrowLeft` with no manual `scrollLeft` write anywhere near it), so
+  // there is no mid-gesture to sample — a discrete click either lands the body in the same place
+  // or it does not. Checked here as the honest "was this ever broken, and does the fix leave it
+  // alone" adjacent-case answer, not as a new regression risk from the drag fix itself.
+  //
+  // ⛔ "full" IS DELIBERATELY EXCLUDED FROM THE STEADY-BODY ASSERTION — reading the measurement
+  // effect (NoteEditor.jsx, the `isFullWidthPin` branch a few screens up) shows the GUTTER
+  // (`matPadX`) itself is computed differently only for "full" (`fullGutter`, pane-relative)
+  // versus every numeric preset (`naturalGutter`, pin-independent, deliberately "must never move
+  // because of a pin"). Moving INTO or OUT OF "full" therefore legitimately re-bases the gutter —
+  // the layout effect's own documented rule, "a change in the gutter is a re-base, not a shift to
+  // hide" — and the body moving with it there is correct, existing, unrelated behaviour, not a
+  // defect this item is about. Narrow/Normal/Wide share the SAME gutter formula, so those three
+  // stay asserted steady, and full/fit are reported for visibility only.
+  console.log("  -- adjacent case: the page-width menu presets (a single commit, not a drag) --");
+  await seed(LONG_DOC, "Menu presets — body text steady");
+  const STEADY_GUTTER_OPTS = ["440", "580", "900"];
+  const REBASE_OPTS = ["full", "fit"];
+  for (const opt of [...STEADY_GUTTER_OPTS, ...REBASE_OPTS]) {
+    const before = await bodyTextRect();
+    await pickWidthMenu(opt);
+    const after = await bodyTextRect();
+    if (STEADY_GUTTER_OPTS.includes(opt)) {
+      ok(`menu preset "${opt}": body text does not jump on commit (same gutter formula)`,
+        Math.abs(after.left - before.left) <= DRIFT_TOLERANCE && Math.abs(after.top - before.top) <= DRIFT_TOLERANCE,
+        JSON.stringify({ opt, before, after }));
+    } else {
+      console.log(`    (reported, not asserted — "${opt}" legitimately re-bases the gutter): ${JSON.stringify({ opt, before, after })}`);
+    }
+  }
   await page.setViewportSize({ width: 1500, height: 950 });
 }
 
