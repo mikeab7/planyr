@@ -221,8 +221,8 @@ import { filterHealthyCandidates, recordSourceResult, suppressRedundantStatewide
 import { apprRows, apprAll, apprVal, findAttr, situsAddress, ownerName, parcelPanelRows } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
-import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, bandForceOf, setPreviewStyleDefaults, setbackLineStyle, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
-import { byZAsc, nextZ, sortByZ, Z_GAP } from "./lib/zOrder.js";
+import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackLineStyle, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
+import { byZAsc, nextZ, sortByZ, Z_GAP, withMissingZ } from "./lib/zOrder.js";
 import { reorderByZ, arrangeFlags, arrangeAcrossBands, arrangeBandFlags, calloutAtAbsoluteFront, calloutFrontForceZ } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
 import { bufferPolyline, offsetPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
@@ -327,7 +327,7 @@ import {
   SQFT_PER_ACRE, rot2, elCorners, polyArea, ringOf, carStalls, trailerStalls, estStalls, estTrailers,
   CURB, CURB_6, CURB_12, curbWidthOf, curbEdgesOf, isCenterlineRoad, roadCurbWidth,
   roadDefaultRadius, roadDenseCenterline, roadStripRing, roadStripArea, roadCurbLines,
-  TEE_COINCIDE_FT, roadJunctionVerticesOf, roundaboutsForSite,
+  TEE_COINCIDE_FT, roadJunctionVerticesOf, roundaboutsForSite, driveJunctionCurbStripes,
 } from "./lib/siteGeometry.js";
 import { siteMetrics } from "./lib/siteMetrics.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide,
@@ -1248,10 +1248,6 @@ function buildUtilRoute(source, b, opts, uid) {
  * isCenterlineRoad / roadCurbWidth / roadDefaultRadius / roadDenseCenterline / roadStripRing /
  * roadStripArea moved to ./lib/siteGeometry.js (site-metrics-extraction) — pure, shared with
  * lib/siteMetrics.js. */
-// The paint-layer of a building — the highest ground/structure band. The clean-intersection overlay
-// (road tee / drive / weld covers) renders BELOW this so a building ALWAYS paints over it: connection
-// pavement can never overlap a building (B959/NEW-1 hard rule, "building always wins").
-const BUILDING_Z = zOrder({ type: "building" });
 // Snap-and-connect (B945/NEW-1): a road endpoint magnet engages within ~12 screen px of a
 // candidate endpoint, but never welds across more than this in real-world feet (so it can't
 // bridge a large gap when zoomed out). ROAD_FIX_MAX_NUDGE_FT bounds NEW-2's tier-3 corner nudge.
@@ -2259,7 +2255,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      already hold for as long as the true viewport is still comfortably inside it, and only builds
      a new one when the view approaches its edge or the zoom changes (lib/viewCull.js explains why
      the containment test is what makes that safe). Holding the same OBJECT is half the fix — a
-     fresh object with the same numbers would still invalidate `drawEls` / `drawElsZ` /
+     fresh object with the same numbers would still invalidate `drawEls` / `elPaintItems` /
      `drawParcels` / `drawMarkupsZ` and everything memoised on them.
      ⛔ It is still genuinely view-derived, and must stay so: pan far enough, or zoom at all, and
      the whole chain recomputes — exactly once.
@@ -4261,6 +4257,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * shipping as fixed and kept coming back — the tear happened, a later load quietly repaired it,
    * and any verification that reloaded before it measured saw a clean plan. Every repair now names
    * the ids and the delta it corrected. */
+  /* B1788912 (NEW-1) — this is also THE choke point that gives every newly created element a real
+     `z` the moment it lands in `els`, however it got there. Since elements now stack in creation
+     order rather than by type (planStyle.js), a freshly drawn shape with no `z` yet would otherwise
+     render at the bottom of the whole plan for one frame (and forever, on a write path this guard
+     never sees) instead of on top. `withMissingZ` is piped through every return below — the same
+     multi-seam coverage (canvas / commit / flush-override / undo-redo) that already made this the
+     one place a torn assembly can't slip past also makes it the one place a z-less element can't. */
   const assemblyGuard = (list, seam) => {
     const res = assemblyIntegrity(list);
     /* NEW-4 — a bonded child with NO ROLE is a defect even when its coordinates are perfect, so it
@@ -4281,13 +4284,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         { id: siteId, seam, ...unhealablePayload(res.unhealable) });
     // Adopt for an orphan even with no tear — the re-tag is a zero-geometry repair, so it would
     // otherwise be thrown away here (this seam deliberately ignores sub-tolerance geometry churn).
-    if (!res.tears.length) return (res.orphans && res.orphans.length) ? res.els : list;
+    if (!res.tears.length) return withMissingZ((res.orphans && res.orphans.length) ? res.els : list);
     reportClientEvent("assembly-tear-detected",
       `bonded child ${res.tears.length > 1 ? "children" : ""} off host by up to ${Math.round(res.tears[0].dist)} ft (${seam})`,
       { id: siteId, seam, ...tearPayload(res.tears) });
     reportClientEvent("assembly-tear-healed", `re-derived ${res.repairs.length} bonded element(s) from their host (${seam})`,
       { id: siteId, seam, ...tearPayload(res.repairs) });
-    return res.els;
+    return withMissingZ(res.els);
   };
   // NEW-1 (B712224) — the pure half of applying one instruction to a collection, shared by the REAL
   // setState below and by reconcileElems' LOCAL post-drain patch (see the comment there for why the
@@ -4338,7 +4341,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // outright (React's basicStateReducer treats a non-function action as a replacement, not a
     // merge). Re-deriving from whatever `els` actually is when this dispatches — instead of trusting
     // the `guarded` snapshot computed from the closure's `els` — makes this immune to that race.
-    if (guarded !== els) setEls((cur) => (cur === els ? guarded : assemblyIntegrity(cur).els));
+    if (guarded !== els) setEls((cur) => (cur === els ? guarded : withMissingZ(assemblyIntegrity(cur).els)));
   }, [els]); // eslint-disable-line react-hooks/exhaustive-deps
   // B672 — the READ cutover: full refetch of the site's live rows + REPLACE local canonical state.
   // Runs on every channel join/rejoin and tab wake — never trust event gaps. Elements with a
@@ -4749,7 +4752,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // adoption) can queue in the SAME React batch as this write, and a bare `setEls(guarded)`
       // would discard it. Re-derive against whatever `els` actually is at apply time instead of
       // trusting the `guarded` snapshot computed from `preGuard`.
-      if (guarded !== preGuard) { els = guarded; setEls((cur) => (cur === preGuard ? guarded : assemblyIntegrity(cur).els)); }
+      if (guarded !== preGuard) { els = guarded; setEls((cur) => (cur === preGuard ? guarded : withMissingZ(assemblyIntegrity(cur).els))); }
     }
     try { e.reconcile({ els, markups, measures, callouts, parcels }, { busy }); } catch (_) {}
   };
@@ -5060,7 +5063,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       });
       return;
     }
-    if (s?.kind === "el") { const t = els.find((e) => e.id === s.id); if (!t) return; const band = zOrder(t); peers = els.filter((e) => zOrder(e) === band); }
+    /* ⛔ B1788912 (NEW-1) — ELEMENTS NO LONGER REORDER WITHIN A TYPE BAND; THE PEER SET IS THE
+       WHOLE DRAWING. The type-layer rule this used to enforce (`peers = els.filter(zOrder(e) ===
+       band)`) is retired (planStyle.js) — ordinary Arrange now reorders freely across every site
+       element, matching the owner's Bluebeam-style "newest on top" model. Bring to Front / Send to
+       Back are the whole plan's front/back, not a band's — which is also what "force on top of
+       everything" / "force underneath" now already are, so that escape hatch needed no separate
+       mechanism (bandForce retires with it). */
+    if (s?.kind === "el") { const t = els.find((e) => e.id === s.id); if (!t) return; peers = els; }
     else return;
     const patch = reorderByZ(peers, s.id, mode);
     if (!patch) {
@@ -5070,13 +5080,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const af = arrangeFlags(peers, s.id);
       const front = !(mode === "back" || mode === "backward");
       if (af && af.count > 1) flashWarn(`Already at the ${front ? "front" : "back"}.`, 2500);
-      /* NEW-2 — and the case that used to be pure silence, which is what "the ordering doesn't work
-         at all" actually looked like: the object is the only one in its band, so there is nothing
-         to reorder it against and the op is a no-op for a reason the user cannot see. Say it. */
-      /* NEW-1 — the parenthetical is now conditional: an element the user has FORCED in front of the
-         plan is deliberately NOT in its own type's layer, and telling it that it is would contradict
-         the state it is visibly in (and the row that put it there). */
-      else if (af) flashWarn(`Nothing to reorder — this is the only one on its layer${s.kind === "el" && !bandForceOf(els.find((e) => e.id === s.id)) ? " (a site element always draws in its own type's layer, unless you force it in front or underneath)" : ""}.`, 3500);
+      // NEW-2 — and the case that used to be pure silence, which is what "the ordering doesn't work
+      // at all" actually looked like: the object is the only one on the plan, so there is nothing
+      // to reorder it against and the op is a no-op for a reason the user cannot see. Say it.
+      else if (af) flashWarn("Nothing to reorder — this is the only element on the plan.", 3500);
       return;
     }
     pushHistory();
@@ -5089,18 +5096,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      whenever `count < 2`, so right-clicking the single pond on a real plan offered no ordering rows
      at all and no reason why. Returns { count, index, atTop, atBottom, band } or null. */
   const arrangePeers = (s) => {
-    /* NEW-1 — a FORCED element's band is no longer its type's, so neither is the name of it. Reading
-       the band off `zOrder` (which resolves the override) rather than off `t.type` is what keeps the
-       peer set, the greying and the label describing the same stack. */
+    // B1788912 (NEW-1) — an element's peer set is now the whole plan (see arrangeSel above), so
+    // there is no band name left to report; `alone` is true only when it is the ONLY element drawn.
     if (s?.kind === "el") {
       const t = els.find((e) => e.id === s.id); if (!t) return null;
-      const b = zOrder(t);
-      const peers = els.filter((e) => zOrder(e) === b);
-      const f = arrangeFlags(peers, s.id);
+      const f = arrangeFlags(els, s.id);
       if (!f) return null;
-      const forced = bandForceOf(t);
-      const bandName = forced === "front" ? "elements forced in front of the plan" : forced === "back" ? "elements forced underneath the plan" : `${TYPE[t.type]?.label || t.type} layer`;
-      return { flags: f, alone: f.count < 2, band: bandName };
+      return { flags: f, alone: f.count < 2, band: "plan" };
     }
     /* ⛔ NEW-1 — AND THIS IS WHERE THE GREYING STOPPED LYING. The three annotation families read
        band-aware flags, so a row is disabled only at a TRUE end of the whole stack. Two consequences
@@ -5181,27 +5183,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return a.map((m) => (m.id === id ? { ...m, behindEls: behind ? true : undefined, z } : m));
     });
   };
-  /* ⛔ NEW-1 — THE ELEMENT ESCAPE HATCH. Force ONE element across the type-layer rule, or put it back.
-     Owner's decision, verbatim: *"I don't think that should be the default. But, like, if I try and
-     force it … I don't see why I shouldn't be able to do that."* So the default is untouched and this
-     is the only way across — a deliberate, named action, never something Arrange can do by accident.
-
-     Shaped on `setMeasureBand` / `setCalloutBand` (and the reference band toggle) rather than as a
-     second mechanism: flip the band field, and re-stack on TOP of the band the element ARRIVES in
-     (`nextZ` over its new peers) so it is never dropped underneath whatever was already there — which
-     for a "force this in front" gesture would read as the feature doing nothing.
-     `force` is a band name ("front") or null to return the element to its own type layer. */
-  const setElBand = (id, force) => {
-    pushHistory();
-    setEls((a) => {
-      const target = a.find((e) => e.id === id);
-      if (!target) return a;
-      const next = { ...target, bandForce: force || undefined };
-      const band = zOrder(next);
-      const z = nextZ(a.filter((e) => e.id !== id && zOrder(e) === band));
-      return a.map((e) => (e.id === id ? { ...next, z } : e));
-    });
-  };
+  /* ⛔ B1788912 (NEW-1) — `setElBand` (the "force this element across the type-layer band" escape
+     hatch) is RETIRED along with `bandForce` — see planStyle.js's SUPERSEDED Z_LAYER block and
+     `/CLAUDE.md`'s owner-constraints entry 10. With no type bands, what that control did — draw one
+     element over everything, or under everything — is already ordinary Bring to Front / Send to
+     Back (`arrangeSel`, above), so it needed no separate mechanism to survive the reversal. */
   const applySnapshot = (s) => {
     // NEW-1 — the REVERT seam. An undo/redo restores a whole-canvas snapshot, so the restore itself
     // is assembly-whole; what it cannot fix is a snapshot that was ALREADY torn when it was pushed
@@ -7428,9 +7414,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * is the stack's own paint order (top-most first) — the SAME order an unmodified press already
    * resolves the first entry of. It is the general answer to a feature buried under another — the
    * owner's Richfield case, a road geometrically inside a pond, with both already at the bottom of
-   * their own type-layer band so Send-to-Back has nowhere left to send either one (see
-   * planStyle.js's EL_BANDS.back, the mirror escape hatch this same report named missing) — and now
-   * also the reported acreage-badge-over-a-building case: unmodified reaches the parcel (the
+   * their own type-layer band so Send-to-Back had nowhere left to send either one (fixed at the time
+   * by planStyle.js's now-retired `EL_BANDS.back` mirror escape hatch — B1788912 (NEW-1) removed the
+   * type-layer bands entirely, so ordinary Send-to-Back now reaches the true bottom of the whole
+   * plan on its own and this stack picker is no longer that case's only way out, just still the
+   * general one) — and now also the reported acreage-badge-over-a-building case: unmodified reaches the parcel (the
    * topmost painted thing there), Alt reaches the building behind it.
    *
    * `resolveAltPick` is the ONE decision, shared by both buttons, so a left-click pick and a
@@ -17394,7 +17382,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // matches the obstacle box the label-collision engine avoided; here we only render it.
   const parcelLabels = parcelChips.map(({ pc, c, txt, fs, padY, boxW, boxH }) => {
     /* NEW-1 — THE BADGE IS A HIT TARGET ONLY WHILE ITS OWN LOT IS SELECTED.
-       This group paints AFTER `drawElsZ.above`, and in SVG paint order IS hit-test order, so a
+       This group paints AFTER the unified element pass (`elPaintItems`, B1788912), and in SVG
+       paint order IS hit-test order, so a
        solid pill with `pointerEvents: auto` won every press inside it — over a building, over a
        road, over anything. `startAcChip` stops propagation, sets no selection and never calls
        `isDoubleTap`, so that press did nothing visible, could not pair as a double-tap (the
@@ -22291,14 +22280,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      element whose shape we can't bound is never culled; and during an EXPORT pass `cullRect`
      is null, so these are identity — `buildExportSvg`, the PDF and the aerial pipeline always
      see the complete model (asserted in test/viewCull.test.js). */
-  /* NEW-4(b) — the render body split the SAME array at the SAME z threshold in two places, and did
-     it by copying and sorting `drawEls` twice per render. One sort, one split, one memo; `zOrder`
-     and BUILDING_Z are module-level constants, so `drawEls` is the complete input set. Order within
-     each half is unchanged (a stable sort over the whole set, then partitioned). */
-  const drawElsZ = useMemo(() => {
-    const sorted = [...drawEls].sort(byZ);
-    return { below: sorted.filter((el) => zOrder(el) < BUILDING_Z), above: sorted.filter((el) => zOrder(el) >= BUILDING_Z) };
-  }, [drawEls]);
   /* B1352 — ONE identity-stable handler bundle for the element pass.
      The five element handlers are ordinary arrows redefined on every render of this 25k-line
      component, so passing them straight to a memoised child defeats the memo entirely — the
@@ -22326,7 +22307,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [markupsZ, cullRect, cullKeep, hiddenGroups]);
   /* NEW-2 — MEASUREMENTS JOIN THE STACKING MODEL. A measurement used to be structurally
      un-layerable: it lives in its own `measures` collection, never enters the `zOrder`/`byZ` system
-     (which reasons over `els`), and painted in ONE unconditional pass after `drawElsZ.above` — a
+     (which reasons over `els`), and painted in ONE unconditional pass after the element pass — a
      hard top layer with no ordering controls in its right-click menu at all. The owner had an area
      measurement he could not send behind his buildings.
      The model is the MARKUP model, deliberately reused rather than reinvented: an explicit `z`
@@ -22525,11 +22506,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // through the intersection, and no second translucent fill stacking on the first. See roadNetwork.js
   // for why every patch-based attempt (B953…B1006) had to fail on topologies it wasn't tuned for.
   const roadNet = useMemo(() => {
-    /* NEW-1 — a road the user has FORCED out of its type band leaves the dissolved network with it.
-       The network is one merged region painted in the road band; a forced road has to paint in the
-       forced band instead, so leaving it a member would draw it in BOTH places (the region below,
-       its own strip above). `bandForceOf` is null for every road on every untouched plan, so this
-       filter is an identity no-op there and the dissolve is byte-for-byte what it was. */
+    /* ⛔ B1788912 (NEW-1) — THE COMPOSITE'S ORDERING RULE, stated per NO-ONE-OWNS-A-COMPOSITE
+       (/CLAUDE.md): a dissolved road network is ONE painted region built from several roads that
+       may each carry a DIFFERENT creation-order `z` now that elements stack Bluebeam-style instead
+       of by type. One region needs one paint position, so a single scalar has to stand in for the
+       whole cluster — see `zKey` below for which one and why. (The old `bandForceOf` exclusion —
+       a road forced out of its type band painted its own strip instead of joining the dissolve —
+       is gone with the type-band rule itself; every centerline road is a network member again,
+       even a lone one, exactly as it was before that escape hatch existed.) */
     /* ⛔ NEW-1 — HIDDEN ROADS LEAVE THE DISSOLVED NETWORK, AND THIS ONE FILTER IS THE WHOLE DEFECT.
      *
      * The owner unchecked Roads in the View panel, the banner said "6 groups hidden", and the roads
@@ -22543,7 +22527,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * curb return of one that is on screen, so culling here would change the drawn geometry. HIDING
      * is a different statement — a hidden road contributes nothing at all, including its junctions —
      * so it is filtered, and the two filters stay distinct. */
-    const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo && !bandForceOf(x) && !elHidden(hiddenGroups, x));
+    const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo && !elHidden(hiddenGroups, x));
     if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), memberIds: new Set(), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
     const byId = new Map(roads.map((r) => [r.id, r]));
     const strip = new Map(roads.map((r) => [r.id, roadStripRing(r, settings, sharpFor(r), roundabouts.trims.get(r.id))]));
@@ -22592,10 +22576,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     for (const ids of groups.values()) {
       const parts = [];
       for (const id of ids) { const s = strip.get(id); if (s && s.length >= 3) parts.push(s); parts.push(...extra.get(id)); }
-      // Style + paint order from the WIDEST member (its surface reads as the merged pavement) — the
-      // same rule the weld cover already used. `zKey` keeps the cluster in the element z-sequence.
+      // Style from the WIDEST member (its surface reads as the merged pavement) — the same rule the
+      // weld cover already used.
       const styleEl = ids.map((id) => byId.get(id)).filter(Boolean).sort((a, b) => roadOuterHalf(b) - roadOuterHalf(a))[0];
-      const zKey = Math.min(...ids.map((id) => byId.get(id)?.z ?? 0));
+      /* ⛔ B1788912 (NEW-1) — THE COMPOSITE'S ORDERING RULE: a cluster paints at its NEWEST member's
+         `z` — the MAX, not the min. Stated and chosen, not incidental (a MIN reading was harmless
+         before this, since every road shared one type-band tier regardless of `zKey`; it stopped
+         being harmless the moment `zKey` became the cluster's actual paint position among every
+         other element). MAX matches the rest of the feature: "whatever you draw — or connect —
+         last is on top." Connecting a new road segment to an older one is itself a fresh act, and
+         the fused pavement should read as current with it, not sink to whichever member happens to
+         be oldest. The trade, named rather than hidden: welding a brand-new road onto an old one
+         can pull that old segment's ink up above something drawn in between (a network is one
+         region, so it cannot paint "part new, part old") — the general cost NO-ONE-OWNS-A-COMPOSITE
+         warns every composite carries, and no scalar choice here removes it. */
+      const zKey = Math.max(...ids.map((id) => byId.get(id)?.z ?? 0));
       for (const region of dissolveRings(parts)) regions.push({ region, styleEl, zKey, ids });
       // A road's inner curb stripes are trimmed against the OTHER pavement in its cluster, so a stripe
       // ends where it runs into the junction instead of drawing a curb straight through the intersection.
@@ -22604,7 +22599,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         for (const oid of ids) { if (oid === id) continue; const s = strip.get(oid); if (s && s.length >= 3) others.push(s); }
         for (const oid of ids) others.push(...extra.get(oid));
         others.push(...stripeCut);
-        stripes.set(id, roadCurbLines(byId.get(id), settings, sharpFor(byId.get(id)), roundabouts.trims.get(id)).flatMap((cl) => clipPolylineOutside(cl, others)));
+        const clipped = roadCurbLines(byId.get(id), settings, sharpFor(byId.get(id)), roundabouts.trims.get(id)).flatMap((cl) => clipPolylineOutside(cl, others));
+        // NEW-1 — a road ending at a drive junction (a paving/parking pad edge) left its inner
+        // face-of-curb stripe clipped dead right at the fillet's own tangent point: the straight
+        // body carried its curb detail, the curb-return fillet carried none, so the two painted as
+        // visibly different treatments of what PR 1763 already proved is one continuous dissolved
+        // surface — a seam of decoration, not of geometry. `driveJunctionCurbStripes`
+        // (siteGeometry.js) continues the same line around the return; see its header.
+        const filletStripes = driveJunctionCurbStripes(driveJunctions.filter((dj) => dj.sideId === id), roadCurbWidth(byId.get(id)));
+        stripes.set(id, [...clipped, ...filletStripes]);
       }
     }
     regions.sort((a, b) => a.zKey - b.zKey);
@@ -22638,6 +22641,62 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     })),
     [roadNet, f2p, settings],
   );
+  /* B1788912 (NEW-1) — the road-network composite's own JSX, factored out of the old fixed
+     `road-network-layer` block so each cluster can take its place in `elPaintItems`'s unified
+     z-sorted stack instead of always painting first. Same markup as before (a `pointerEvents:none`
+     fill + edge pair, per cluster) plus that cluster's own roundabout island(s) — matched by
+     `node.roadIds` against this region's member `ids`, so NEW-5's "the pavement carries the island
+     as a real hole, painted through with the region" still holds: the island has to ride with its
+     OWN region's position in the stack, not a separate fixed slot. */
+  const renderRoadRegion = (r, i) => {
+    if (!r.d) return null;
+    const region = roadNet.regions[i];
+    const styleEl = region?.styleEl;
+    const islands = (roadNet.roundabouts || []).filter(({ node }) => node.roadIds.some((id) => r.ids.includes(id)));
+    return (
+      <g key={`rn${i}-${r.ids[0]}`} data-road-cluster={r.ids.join(",")} pointerEvents="none">
+        <path data-testid="road-network-surface" data-export="road-network" d={r.d} fillRule="evenodd"
+          fill={r.st.fill} fillOpacity={r.st.fillOpacity ?? 1} stroke="none" />
+        <path data-testid="road-network-edge" d={r.d} fillRule="evenodd" fill="none"
+          stroke={r.st.stroke} strokeWidth={curbStrokePx(roadCurbWidth(styleEl || {}), r.ppf, CURB_STROKE_MIN_PX * labelK)}
+          strokeLinejoin="round" />
+        {/* NEW-5 — the CENTRAL ISLAND: a real hole in the dissolved region, not a disc drawn on
+            top, so the landscaped surface shows THROUGH it — painted with this region's own group. */}
+        {islands.map(({ node, geom }, gi) => (geom.island ? (
+          <path key={`ra${gi}-${node.key}`} data-testid="roundabout-island" data-export="road-network"
+            d={`M${geom.island.map((p) => { const c = f2p(p); return `${c.x},${c.y}`; }).join("L")}Z`}
+            fill={typeStyle("landscape", settings).fill} fillOpacity={typeStyle("landscape", settings).fillOpacity ?? 1}
+            stroke={typeStyle("landscape", settings).stroke} strokeWidth={1} pointerEvents="none" />
+        ) : null))}
+      </g>
+    );
+  };
+  /* ⛔ B1788912 (NEW-1/NEW-2) — THE UNIFIED PAINT STACK. Every drawn element AND every road-network
+     composite (one entry per cluster) share ONE z-sorted list now — see the render call sites for
+     the full rationale (planStyle.js's retired type-band rule; NO-ONE-OWNS-A-COMPOSITE for why a
+     cluster takes its own `zKey`). `liftedElIds` is NEW-2's selection lift, read only from
+     `sel`/`multi` — never a view term (VIEW-INDEPENDENT-ONCE: a pan or a zoom must never re-sort
+     this). `normal` and `lifted` are each independently z-sorted, so a multi-selection's members
+     keep their relative creation order among themselves once lifted, and deselecting drops an item
+     straight back into `normal` with no `z` ever written — the lift is a render-order choice only. */
+  const liftedElIds = useMemo(() => {
+    const s = new Set();
+    if (sel?.kind === "el") s.add(sel.id);
+    for (const r of multi) if (r && r.kind === "el") s.add(r.id);
+    return s;
+  }, [sel, multi]);
+  const elPaintItems = useMemo(() => {
+    const elItems = [...drawEls].sort(byZ).map((el) => ({ kind: "el", z: zOrder(el), el, lifted: liftedElIds.has(el.id) }));
+    const roadItems = roadRegionPaths.map((r, i) => ({
+      kind: "road", z: roadNet.regions[i] ? roadNet.regions[i].zKey : 0, i, r,
+      lifted: r.ids.some((id) => liftedElIds.has(id)),
+    }));
+    const merged = [...elItems, ...roadItems];
+    return {
+      normal: merged.filter((it) => !it.lifted).sort((a, b) => a.z - b.z),
+      lifted: merged.filter((it) => it.lifted).sort((a, b) => a.z - b.z),
+    };
+  }, [drawEls, roadRegionPaths, roadNet, liftedElIds]);
   // NEW-4 — corners the app had to draw TIGHTER than the road's own civil minimum. `arcCorner`
   // feasibility-clamps a corner's radius to half the shorter adjacent leg; that clamp is geometrically
   // necessary (without it two corners overrun each other and the strip self-intersects) but it used to
@@ -23683,43 +23742,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {measureBands.below.map(({ m, i }) => renderMeasureNode(m, i))}
               {/* The element pass is split at the building layer so a building always paints over ground
                   pavement (B959/NEW-1 — connection pavement can never overlap a building). */}
-              {/* NEW-1/NEW-2 — DISSOLVED ROAD NETWORK. Roads share the bottom paint layer (Z_LAYER.road = 0),
-                  so the whole network paints first, in cluster z order, as ONE region per connected cluster:
-                  one fill at one opacity, one continuous curb outline. Each member road then renders only its
-                  hit target, its trimmed inner curb stripes, and its labels (renderElPx). This replaces the
-                  strip-per-road + cover-patch + knockout-mask stack that B953…B1006 kept re-patching. */}
-              {roadNet.regions.length > 0 && (
-                <g data-testid="road-network-layer">
-                  {/* NEW-2 (VIEW-INDEPENDENT-ONCE) — `d`, `st` and `ppf` come from the
-                      `roadRegionPaths` memo above; this pass is now emission only. */}
-                  {roadRegionPaths.map(({ d, st, ppf, ids }, i) => {
-                    if (!d) return null;
-                    const styleEl = roadNet.regions[i]?.styleEl;
-                    return (
-                      <g key={`rn${i}-${ids[0]}`} data-road-cluster={ids.join(",")} pointerEvents="none">
-                        <path data-testid="road-network-surface" data-export="road-network" d={d} fillRule="evenodd"
-                          fill={st.fill} fillOpacity={st.fillOpacity ?? 1} stroke="none" />
-                        <path data-testid="road-network-edge" d={d} fillRule="evenodd" fill="none"
-                          stroke={st.stroke} strokeWidth={curbStrokePx(roadCurbWidth(styleEl || {}), ppf, CURB_STROKE_MIN_PX * labelK)}
-                          strokeLinejoin="round" />
-                      </g>
-                    );
-                  })}
-                  {/* NEW-5 — the CENTRAL ISLAND. The pavement above already carries the island as a
-                      real hole (it is a hole in the dissolved region, not a disc drawn on top), so
-                      this is the landscaped surface showing THROUGH that hole — which is why it is
-                      painted with the region group and not over the plan, and why it prints. */}
-                  {roadNet.roundabouts && roadNet.roundabouts.map(({ node, geom }, i) => (
-                    geom.island ? (
-                      <path key={`ra${i}-${node.key}`} data-testid="roundabout-island" data-export="road-network"
-                        d={`M${geom.island.map((p) => { const c = f2p(p); return `${c.x},${c.y}`; }).join("L")}Z`}
-                        fill={typeStyle("landscape", settings).fill} fillOpacity={typeStyle("landscape", settings).fillOpacity ?? 1}
-                        stroke={typeStyle("landscape", settings).stroke} strokeWidth={1} pointerEvents="none" />
-                    ) : null
-                  ))}
-                </g>
-              )}
-              {drawElsZ.below.map((el) => <ElNode key={el.id} el={el} f2p={f2p} isSel={sel?.kind === "el" && sel.id === el.id} tool={tool} settings={settings} H={elHandlers} nb={elNeighbors.get(el.id)} dimHidden={dimSuppressed?.has(el.id) || false} roadNet={roadNet} lf={labelFrame} editingCorners={editingCorners} />)}
+              {/* ⛔ B1788912 (NEW-1/NEW-2) — THE UNIFIED ELEMENT PAINT PASS. Elements used to split
+                  into a below-buildings / above-buildings pair so the dissolved road network (every
+                  road shared the bottom Z_LAYER tier) always painted first; that type-band rule is
+                  retired (planStyle.js) and elements now stack in plain creation order, so there is
+                  no fixed "bottom" for the road network to occupy any more. `elPaintItems` (below) is
+                  the one z-sorted stack every drawn element AND every road-network composite shares —
+                  a composite is one painted region and can't paint "half here, half there"
+                  (NO-ONE-OWNS-A-COMPOSITE), so it takes its cluster's own `zKey` (the newest member's
+                  z — see the `roadNet` memo). Split into `normal` (creation order) and `lifted`
+                  (NEW-2's selection lift, rendered last so whatever is selected always reads on top);
+                  this is the `normal` half. `renderRoadRegion` replaces the old fixed
+                  `road-network-layer` group — same markup, one region at a time now instead of all
+                  of them in one unconditional block. */}
+              {elPaintItems.normal.map((it) => it.kind === "el"
+                ? <ElNode key={`el-${it.el.id}`} el={it.el} f2p={f2p} isSel={sel?.kind === "el" && sel.id === it.el.id} tool={tool} settings={settings} H={elHandlers} nb={elNeighbors.get(it.el.id)} dimHidden={dimSuppressed?.has(it.el.id) || false} roadNet={roadNet} lf={labelFrame} editingCorners={editingCorners} />
+                : renderRoadRegion(it.r, it.i))}
+              {/* NEW-2 — the LIFTED tier: whatever is selected right now (an element, or a road
+                  cluster with a selected member) paints AFTER every unselected item, so it reads
+                  above the whole drawing while selected and drops back into `normal` the instant it
+                  is deselected. Purely a render-order choice — no `z` is written by selecting
+                  something, and this is keyed on `sel`/`multi` only (VIEW-INDEPENDENT-ONCE: it must
+                  never recompute on a pan or a zoom). */}
+              {elPaintItems.lifted.map((it) => it.kind === "el"
+                ? <ElNode key={`el-${it.el.id}`} el={it.el} f2p={f2p} isSel={sel?.kind === "el" && sel.id === it.el.id} tool={tool} settings={settings} H={elHandlers} nb={elNeighbors.get(it.el.id)} dimHidden={dimSuppressed?.has(it.el.id) || false} roadNet={roadNet} lf={labelFrame} editingCorners={editingCorners} />
+                : renderRoadRegion(it.r, it.i))}
               {/* NEW-4 — civil radius conflict flags. A corner the leg is too short to carry gets marked
                   ON THE PLAN, so a non-compliant turn can't hide until someone selects the road. Review
                   chrome: data-export="skip" keeps it out of the PDF a consultant receives. */}
@@ -23869,13 +23916,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* (Removed) B953/B955/B960 clean-intersection overlay — the cover patches, the curb-return
                   strokes and the tee-cover knockout mask are all superseded by the dissolved road network
                   painted above: a junction is now a boolean union of pavement, not a patch over a seam. */}
-              {/* buildings + any layer at/above the building band, painted OVER the overlay. */}
-              {/* NEW-1 — `roadNet` is handed to this pass too now. It used to be `null` because the
-                  band above buildings held nothing that reads it; a road FORCED across the band edge
-                  lands here, and it needs the same junction-sharpening + roundabout trims the road
-                  band gets. It is excluded from the dissolve (see the roadNet memo), so `inNetwork`
-                  is false and it paints its own strip here rather than twice. */}
-              {drawElsZ.above.map((el) => <ElNode key={el.id} el={el} f2p={f2p} isSel={sel?.kind === "el" && sel.id === el.id} tool={tool} settings={settings} H={elHandlers} nb={elNeighbors.get(el.id)} dimHidden={dimSuppressed?.has(el.id) || false} roadNet={roadNet} lf={labelFrame} editingCorners={editingCorners} />)}
               {/* NEW-1 (B806080) — element/dimension labels paint HERE, right after the element pass
                   and before every annotation-above rung (markup/reference/callout/measure). They used
                   to render dead last (after all four), which made "bring to front" on a callout inert
@@ -27179,39 +27219,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </div>
                 );
               })()}
-              {/* ⛔ B845584 — RELOCATED FROM THE RIGHT-CLICK MENU. "Force on top/underneath" is a
-                  PERSISTENT PROPERTY of the element (like Length/Depth above it), not a step in the
-                  z-order sequence — an override reachable only from a submenu left the owner able to
-                  end up stuck out of band with no visible way to see why or undo it. Always
-                  reachable now, never a right-click-only action. PANEL-BREVITY: one Field row by
-                  default; the explanatory note is the only thing that costs an extra line, and only
-                  while forced. */}
-              {(() => {
-                const forced = bandForceOf(selEl);
-                const segBtn = (active) => ({ flex: 1, padding: "3px 0", fontSize: FONT_SIZE.micro, fontWeight: active ? 700 : 500, borderRadius: RADIUS.sm, border: `1px solid ${active ? PAL.accent : PAL.panelLine}`, background: active ? PAL.accentSoft : SURF_RAISED, color: active ? PAL.accentText : PAL.ink, cursor: "pointer", fontFamily: "inherit" });
-                return (
-                  <div style={{ marginTop: 9 }}>
-                    <Field label="Draw order">
-                      <span style={{ display: "flex", gap: 4, width: 148 }}>
-                        <button style={segBtn(!forced)} data-testid="el-band-restore"
-                          title="Use the normal layer order — buildings over parking over pond over paving over roads"
-                          onClick={() => setElBand(selEl.id, null)}>Normal</button>
-                        <button style={segBtn(forced === "front")} data-testid="el-band-force"
-                          title="Force on top of everything: draw this element over everything, buildings included"
-                          onClick={() => setElBand(selEl.id, "front")}>Front</button>
-                        <button style={segBtn(forced === "back")} data-testid="el-band-force-back"
-                          title="Force underneath everything: draw this element under everything, even roads"
-                          onClick={() => setElBand(selEl.id, "back")}>Back</button>
-                      </span>
-                    </Field>
-                    {forced && (
-                      <div data-testid="el-band-forced-note" style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: -4, marginBottom: 4 }}>
-                        This {TYPE[selEl.type]?.label?.toLowerCase() || selEl.type} is drawing outside its type layer because you put it there.
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
+              {/* ⛔ B1788912 (NEW-1) — the "Draw order: Normal / Front / Back" panel control (B845584)
+                  is RETIRED along with `bandForce` — there is no more type layer to force an element
+                  out of. Reordering an element (including "on top of everything" / "underneath
+                  everything") is ordinary Arrange now, from the right-click menu or the ⌘/Ctrl+]/[
+                  chords — see arrangeSel/arrangePeers and /CLAUDE.md's owner-constraints entry 10. */}
               {selEl.type !== "pond" && (
               <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
                 <button style={chip} onClick={() => toggleLock(selEl.id)} title="Pin in place: prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
@@ -29364,16 +29376,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           if (!info) return null;
           const af = info.flags;
           const alone = info.alone;
-          const why = alone ? `This is the only one on the ${info.band} layer, so there is nothing to reorder it against.` : "";
-          /* NEW-1 — a disabled row now says what END it is at, in the terms the user is thinking in.
-             For an annotation that end is the WHOLE drawing ("behind everything on the plan"), not
-             the band's — because with cross-band Arrange there is nothing invisible left to do, and
-             a row that greys while something is still underneath is exactly the claim of completion
-             this item exists to kill. Elements keep the band-relative wording their band rule makes
-             true. */
+          // B1788912 (NEW-1) — an element's peer set is the whole plan now (no more type-band
+          // wording), same shape as the annotation families below.
+          const why = alone ? (ref.kind === "el" ? "This is the only element on the plan, so there is nothing to reorder it against."
+            : `This is the only one on the ${info.band} layer, so there is nothing to reorder it against.`) : "";
+          /* NEW-1 — a disabled row now says what END it is at, in the terms the user is thinking in:
+             the WHOLE drawing ("behind everything on the plan"), because with cross-band Arrange
+             (annotations) and the retired type layer (elements, B1788912) there is nothing invisible
+             left to do, and a row that greys while something is still underneath is exactly the
+             claim of completion this item exists to kill. */
           const endWord = (mode) => {
             const back = mode === "back" || mode === "backward";
-            if (ref.kind === "el") return `Already at the ${back ? "back" : "front"} of the ${info.band}.`;
+            if (ref.kind === "el") return `Already at the ${back ? "back" : "front"} of the plan.`;
             return `Already ${back ? "behind" : "in front of"} everything on the plan.`;
           };
           const r = (text, mode, dis, hint) => row({
@@ -29511,8 +29525,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {/* B845584 — the element context-menu rebuild. Skeleton is IDENTICAL for every element type:
           1) element-specific content (varies), 2) Arrange — exactly four rows, always, 3) common
           actions below one rule. Nothing here may rename itself with state (checked/disabled state
-          is fine — the LABEL never changes); "Force on top/underneath" moved to the Properties panel
-          (see the "Draw order" control below); the under-stack menu group was cut — NEW-2's Alt-hover stack
+          is fine — the LABEL never changes); B1788912 (NEW-1) retired the separate "Force on top/
+          underneath" Properties-panel control along with the type-layer band it escaped — Arrange's
+          front/back already reach the whole plan now, so there is nothing left for a second
+          mechanism to do; the under-stack menu group was cut — NEW-2's Alt-hover stack
           picker is the discoverability path now, and the selected-annotation priority rule in
           onElContext (unchanged) still lets you reach a behind-band annotation once it is selected. */}
       {typeMenu && (
@@ -29527,14 +29543,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               // role as Section's own title in controls.jsx (10.5/700/0.09em), so it now shares
               // that role's value (FONT_SIZE.label) instead of a smaller, independently-picked one.
               const hdr = () => ({ fontSize: FONT_SIZE.label, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", padding: "6px 10px 2px" });
-              // B820 — Arrange (z-order) within the element's TYPE-LAYER band, so the guardrail holds
-              // (a building can never drop under a road/parking).
-              const band = zOrder(t);
-              const af = arrangeFlags(els.filter((e) => zOrder(e) === band), t.id);
+              // B820 — Arrange (z-order). B1788912 (NEW-1): elements no longer reorder within a
+              // TYPE-LAYER band — the peer set is every element on the plan, Bluebeam-style.
+              const af = arrangeFlags(els, t.id);
               const MOD = (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "")) ? "⌘" : "Ctrl+";
               // A greyed row says WHY it is greyed — a disabled control with no explanation reads as broken.
               const arrWhy = (!af || af.count < 2)
-                ? `This is the only ${TYPE[t.type]?.label?.toLowerCase() || t.type} on the plan, so there is nothing to reorder it against. Site elements always draw in their own type's layer — a building over paving, paving over a road.`
+                ? "This is the only element on the plan, so there is nothing to reorder it against."
                 : "";
               // The ONE row shape for a plain action: a 14px icon in a 16px gutter, the label, an
               // optional right-aligned shortcut in tertiary colour. Matches the mockup's `.row`
@@ -30684,7 +30699,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
 
 /* ---- ElNode — the element pass's RECONCILIATION BOUNDARY (B1352) ----------------------------
  *
- * `renderElPx` was a plain function called from `drawElsZ.below.map(...)`, so React never saw a
+ * `renderElPx` was a plain function called from a flat `.map(...)` over the element pass, so React never saw a
  * component type it could bail out on: it received a flat array of host elements with fresh props
  * every render and diffed every one of them. There was no `React.memo` anywhere in `src/`.
  *

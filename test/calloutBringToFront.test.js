@@ -3,16 +3,17 @@
  * The owner's repro (production, read-only SELECT): a callout's z was already the highest in its
  * band after Bring to Front, and it still could not clear a nearby element's dimension label. The
  * cause is not the z value — it is structural. `test/paintOrder.test.js`'s PAINT_LADDER proves the
- * callout-above band (rung 9) paints over every element (rung 5/6), but element/dimension LABELS
- * (`labelEls`) are rendered in a SEPARATE pass, dead last before the handle layer — after every
- * annotation-above rung, callouts included. No z value a callout can hold changes that, because
- * paint order between the two passes is fixed by render position, not by z.
+ * callout-above band (rung 8 as of B1788912's renumber, was 9) paints over every element (rung 5),
+ * but element/dimension LABELS (`labelEls`) are rendered in a SEPARATE pass, dead last before the
+ * handle layer — after every annotation-above rung, callouts included. No z value a callout can
+ * hold changes that, because paint order between the two passes is fixed by render position, not by z.
  *
- * The fix moves `{labelEls}` to render immediately after the element pass (`drawElsZ.above`) and
- * before the annotation-above rungs begin, so a label is treated as belonging to its element's rung
- * rather than sitting above the whole annotation stack. This is a SOURCE guard (document order),
- * exactly like handleLayerOrder.test.js, because the property is about render position, which a
- * screenshot can't see and a re-render can silently change.
+ * The fix moves `{labelEls}` to render immediately after the element pass (B1788912: the unified
+ * `elPaintItems` normal+lifted pass, was `drawElsZ.above`) and before the annotation-above rungs
+ * begin, so a label is treated as belonging to its element's rung rather than sitting above the
+ * whole annotation stack. This is a SOURCE guard (document order), exactly like
+ * handleLayerOrder.test.js, because the property is about render position, which a screenshot
+ * can't see and a re-render can silently change.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -40,16 +41,18 @@ describe("NEW-1: element/dimension labels render at the ELEMENT rung, not above 
   });
 
   it("labelEls paints immediately after the element pass, so it is the element rung's own decoration", () => {
-    const iElsAbove = idx(/\{drawElsZ\.above\.map\(/);
+    // B1788912 — the element pass's LAST block is now the lifted (selected) tier of the unified
+    // `elPaintItems` stack, not `drawElsZ.above` (retired with the type-layer band).
+    const iElsLifted = idx(/\{elPaintItems\.lifted\.map\(/);
     const iLabels = idx(/\{labelEls\}/);
-    const between = SP.slice(iElsAbove, iLabels);
+    const between = SP.slice(iElsLifted, iLabels);
     // Nothing that belongs to a LATER rung (the annotation-above passes, or another content .map)
     // may sit between the element pass and its labels — otherwise a label could still end up above
     // an annotation the user explicitly brought forward, recreating the exact defect.
     expect(between).not.toMatch(/drawMarkupsZ|calloutBands\.above|measureBands\.above|overlayBands\.above/);
   });
 
-  it("a callout brought to front is therefore never structurally blocked by an element label — only rung 9 (callout-above) and rung 10 (measure-above) can still outrank it, both documented, not silent", () => {
+  it("a callout brought to front is therefore never structurally blocked by an element label — only rung 8 (callout-above) and rung 9 (measure-above) can still outrank it, both documented, not silent", () => {
     const iLabels = idx(/\{labelEls\}/);
     const iCalloutAbove = idx(/\{calloutBands\.above\.map\(/);
     // The callout-above rung must be reachable AFTER labels now — this is the whole fix.

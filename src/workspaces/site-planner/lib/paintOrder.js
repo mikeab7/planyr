@@ -23,16 +23,31 @@
  *   2. A PARCEL DEFAULTS TO BEHIND. It is the ground the plan is drawn on, so everything except a
  *      reference the user has not promoted paints over it.
  *
- * ⛔ RUNG 11 — B806080 ROUND 2, after the owner corrected his own brief: "Bring to front on a
- * callout must actually place it above everything else drawn on the plan" — no either/or, no
- * "the command tells the user what band it operates in." Measured on his live plan: a WETLANDS
- * callout at z=34816 (already the highest z of any callout) still painted UNDER an area
- * measurement at z=0, because rung 10's own default ("a measurement outranks decoration") is
- * exactly the wall the old default-relationship ladder was never meant to let a single explicit
- * command cross. `calloutFrontForceZ`/`calloutAtAbsoluteFront` (lib/arrange.js) are the ONLY
- * mechanism that writes/reads it. It does not change `defaultRelation` for anything — every
- * pairing above is still about UNTOUCHED objects — it adds ONE more rung an explicitly-forced
- * callout can reach, same shape as rung 6's element `bandForce` (B316864).
+ * ⛔ RUNG 10 (renumbered from 11 by B1788912, below) — B806080 ROUND 2, after the owner corrected
+ * his own brief: "Bring to front on a callout must actually place it above everything else drawn
+ * on the plan" — no either/or, no "the command tells the user what band it operates in." Measured
+ * on his live plan: a WETLANDS callout at z=34816 (already the highest z of any callout) still
+ * painted UNDER an area measurement at z=0, because the measure-above rung's own default ("a
+ * measurement outranks decoration") is exactly the wall the old default-relationship ladder was
+ * never meant to let a single explicit command cross. `calloutFrontForceZ`/`calloutAtAbsoluteFront`
+ * (lib/arrange.js) are the ONLY mechanism that writes/reads it. It does not change `defaultRelation`
+ * for anything — every pairing above is still about UNTOUCHED objects — it adds ONE more rung an
+ * explicitly-forced callout can reach.
+ *
+ * ⛔ B1788912 (2026-09-19, NEW-1) — THE ELEMENT-FORCED RUNG IS GONE, AND THE LADDER RENUMBERED.
+ * Elements no longer have a type-layer band to force themselves out of (planStyle.js's Z_LAYER is
+ * retired — see /CLAUDE.md's owner-constraints entry 10); "element" now has exactly ONE rung, same
+ * shape as every family that never had a forced escape hatch in the first place. The old rung 6
+ * ("element forced," `bandForce: "front"`) is deleted rather than left as a gap, and every rung from
+ * the old 7 onward shifted down by one (7→6, 8→7, 9→8, 10→9, 11→10) — `test/paintOrder.test.js`'s
+ * contiguous-rung check is what enforces that a future edit can't leave a hole. `CROSS_BAND.element`
+ * stays declared (not `null`, unlike the parcel row) because ordinary Arrange still gives an element
+ * a real, wired Bring-to-Front / Send-to-Back — it just no longer crosses anything, since there is
+ * nothing left on the other side of a band that doesn't exist. NEW-2's selection lift (a selected
+ * element or road-network cluster paints after everything else while selected) is deliberately NOT
+ * a rung here: it is ephemeral UI state, not a property stored on the object, and every OTHER rung
+ * in this ladder is about what an untouched or deliberately-flagged object does. See
+ * `SitePlanner.jsx`'s `elPaintItems` for where the lift actually happens.
  *
  * Pure data + pure predicates. No React, no DOM.
  */
@@ -59,7 +74,7 @@ export const CROSS_BAND_FRONT = "Bring in front of the plan";
  * `family` is the drawn class. `band` is which of that family's two positions this rung is:
  *   "only"   — the family has one position.
  *   "behind" / "above" — the two ends of a family's cross-band toggle.
- *   "forced" — a site element the user explicitly forced on top of everything (B316864).
+ *   "forced" — a callout the user explicitly forced to the absolute front (B806080 round 2).
  * `isDefault` marks the rung an untouched object of that family lands on.
  */
 export const PAINT_LADDER = [
@@ -68,13 +83,13 @@ export const PAINT_LADDER = [
   { rung: 2, family: "markup",    band: "behind", isDefault: false, note: null },
   { rung: 3, family: "callout",   band: "behind", isDefault: false, note: null },
   { rung: 4, family: "measure",   band: "behind", isDefault: false, note: null },
-  { rung: 5, family: "element",   band: "only",   isDefault: true,  note: "within its own type layer: road → paving → pond → parking → building" },
-  { rung: 6, family: "element",   band: "forced", isDefault: false, note: "the explicit, reversible 'Force on top of everything'" },
-  { rung: 7, family: "markup",    band: "above",  isDefault: true,  note: null },
-  { rung: 8, family: "reference", band: "above",  isDefault: false, note: null },
-  { rung: 9, family: "callout",   band: "above",  isDefault: true,  note: null },
-  { rung: 10, family: "measure",  band: "above",  isDefault: true,  note: "OWNER DEFAULT: a measurement outranks decoration" },
-  { rung: 11, family: "callout",  band: "forced", isDefault: false, note: "the explicit, reversible absolute-front escape hatch (B806080 round 2) — literally above every other family" },
+  // B1788912 (NEW-1) — elements stack in plain creation order now; there is no second, "forced" rung.
+  { rung: 5, family: "element",   band: "only",   isDefault: true,  note: "creation order — whatever was drawn or arranged last is on top (B1788912)" },
+  { rung: 6, family: "markup",    band: "above",  isDefault: true,  note: null },
+  { rung: 7, family: "reference", band: "above",  isDefault: false, note: null },
+  { rung: 8, family: "callout",   band: "above",  isDefault: true,  note: null },
+  { rung: 9, family: "measure",   band: "above",  isDefault: true,  note: "OWNER DEFAULT: a measurement outranks decoration" },
+  { rung: 10, family: "callout",  band: "forced", isDefault: false, note: "the explicit, reversible absolute-front escape hatch (B806080 round 2) — literally above every other family" },
 ];
 
 /** The five drawn families, in no particular order. */
@@ -97,14 +112,22 @@ export const CROSS_BAND = {
   callout:   { behind: CROSS_BAND_BEHIND, front: CROSS_BAND_FRONT },
   measure:   { behind: CROSS_BAND_BEHIND, front: CROSS_BAND_FRONT },
   reference: { behind: CROSS_BAND_BEHIND, front: CROSS_BAND_FRONT },
+  /* B1788912 (2026-09-19, NEW-1) — an element has no band left to cross at all: the type-layer rule
+   * it used to escape (B316864's `bandForce`) is retired, so "front"/"behind" here are ordinary
+   * Arrange — the same Bring to Front / Send to Back every element already uses to reorder against
+   * every OTHER element — never a second mechanism. Declared rather than `null` (unlike the parcel
+   * row) only so this table still names a real, wired command for the element side of every pair it
+   * appears in; it can never carry an element below the parcel ground plane, which no element
+   * mechanism has ever been able to do (arrangeEnds is capped at the "element" rung — see
+   * `SitePlanner.jsx`'s `arrangeSel`, whose peer set is every element, never anything outside it). */
   element:   {
-    behind: "Use the normal layer order",
-    front: "Force on top of everything",
+    behind: "Send to Back",
+    front: "Bring to Front",
     divergentName:
-      "An element IS the plan, so it has no behind-the-plan to go to and the canonical pair would " +
-      "be a lie on it. Its escape hatch goes the other way — UP past every annotation — and its " +
-      "'off' state returns it to the type-layer rule (B316864) rather than sending it anywhere. " +
-      "Different destination, different words, declared rather than drifted.",
+      "An element has no band left to cross (B1788912 retired the type-layer rule it used to " +
+      "escape). What crosses here is ordinary Arrange, not a special escape hatch — the same " +
+      "Bring to Front / Send to Back every element already uses to reorder against every other " +
+      "element, and it never reaches past the element rung itself.",
   },
   parcel: null, // the ground; nothing to cross
 };

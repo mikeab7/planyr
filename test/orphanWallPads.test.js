@@ -300,8 +300,10 @@ describe("NEW-4 — assembly integrity fails loud on a bonded pad with no wall r
     expect(guard).toMatch(/reportClientEvent\("assembly-orphan-pad"/);
     expect(guard).toMatch(/orphanPayload\(res\.orphans\)/);
     // A zero-geometry repair would otherwise be discarded here (this seam ignores sub-tolerance
-    // churn on purpose), so the orphan case adopts the healed list explicitly.
-    expect(guard).toMatch(/if \(!res\.tears\.length\) return \(res\.orphans && res\.orphans\.length\) \? res\.els : list;/);
+    // churn on purpose), so the orphan case adopts the healed list explicitly. B1788912 (NEW-1) —
+    // the return is now piped through `withMissingZ` too (the same seam also stamps a fresh z on
+    // any newly created element — see that function's own header).
+    expect(guard).toMatch(/if \(!res\.tears\.length\) return withMissingZ\(\(res\.orphans && res\.orphans\.length\) \? res\.els : list\);/);
   });
 });
 

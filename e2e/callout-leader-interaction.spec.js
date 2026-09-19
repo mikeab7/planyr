@@ -106,7 +106,7 @@ test.describe("NEW-1 (B806080) — a callout can clear an element's label, not j
 
     // ⛔ The label group is `pointerEvents:none` (only a pond label is hit-testable), so
     // `elementsFromPoint` skips right over it whether or not it visually covers anything — a
-    // hit-test check here would silently test the BUILDING's geometry (rung 5/6, never broken)
+    // hit-test check here would silently test the BUILDING's geometry (rung 5, never broken)
     // instead of its LABEL (the actual defect). PAINT ORDER is document order in SVG (same
     // reasoning as markup-behind-building.spec.js's `markupCoversBuilding`), so this reads it
     // directly: DOCUMENT_POSITION_FOLLOWING on the label from the callout means the callout is

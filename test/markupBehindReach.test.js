@@ -158,14 +158,18 @@ describe("wiring — NEW-1's cross-band Arrange is what the annotation families 
     expect(SRC.slice(at, at + 1800)).toContain("arrangeBandFlags(");
   });
 
-  it("ELEMENTS deliberately keep the band-bounded rule B316864 settled", () => {
+  // B1788912 (NEW-1) — B316864's band-bounded element rule is RETIRED (planStyle.js's SUPERSEDED
+  // block; /CLAUDE.md's owner-constraints entry 10): an element's peer set is now the WHOLE plan,
+  // same as every other family reorders across its own full stack. This test used to pin the OLD
+  // band-bounded shape; it now pins the replacement.
+  it("ELEMENTS now reorder across the WHOLE plan, not a band — B316864 reversed by B1788912", () => {
     const at = SRC.indexOf("const arrangeSel");
     // B806080 round 2 widened the annotation branch (the absolute-front escape hatch for
     // callouts) — the window has to grow with it or this test starts reading a truncated slice
     // rather than actually checking anything past the new code.
-    const body = SRC.slice(at, at + 6000);
-    // The element branch still resolves peers by zOrder band and still uses reorderByZ.
-    expect(body).toMatch(/s\?\.kind === "el".*zOrder\(e\) === band/s);
+    const body = SRC.slice(at, at + 6200);
+    // The element branch's peer set is every element on the plan, and it still uses reorderByZ.
+    expect(body).toContain("if (s?.kind === \"el\") { const t = els.find((e) => e.id === s.id); if (!t) return; peers = els; }");
     expect(body).toContain("reorderByZ(peers,");
     // ...and the annotation branch returns before it, so the two cannot be conflated.
     expect(body.indexOf("arrangeAcrossBands(")).toBeLessThan(body.indexOf("reorderByZ(peers,"));

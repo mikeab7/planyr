@@ -1,281 +1,153 @@
-/* THE ELEMENT BAND ESCAPE HATCH (NEW-1) — the type-layer rule, and the one deliberate way across it.
+/* THE ELEMENT BAND ESCAPE HATCH — RETIRED (B1788912, 2026-09-19, NEW-1).
  *
- * Owner decision 2026-08-09, answering the six `{ open: … }` cells B293072 parked on the capability
- * table, verbatim: *"for item one, paving over a building. I mean, I don't think that should be the
- * default. But, like, if I try and force it and then I don't see why I shouldn't be able to do
- * that."*
+ * This file used to prove the type-layer rule (road → paving → pond → parking → building) and its
+ * one deliberate `bandForce` escape hatch. Owner decision, 2026-09-19, verbatim, REVERSING the
+ * 2026-08-09 decision this file was originally written to guard: *"I mean I feel like whatever I
+ * draw should be at the top so I can never lose anything when I draw it, I'm assuming that's how
+ * bluebeam works"* — told plainly that a parking field drawn after a building would paint over the
+ * building, and a road drawn last would put pavement over everything, and, verbatim: *"Selection
+ * should lift and I'm good with bluebeams order with new items on top, you can disregard my
+ * previous rule."* See `/CLAUDE.md`'s owner-constraints entry 10 and planStyle.js's SUPERSEDED
+ * Z_LAYER block for the full history.
  *
- * So there are TWO properties here and shipping either alone is a wrong answer, which is why they
- * are asserted as two separate describes:
- *
- *   1. THE DEFAULT DOES NOT MOVE. Every plan that has never been touched must sort byte-for-byte as
- *      it did before this feature existed. The strongest form of that is a REPLAY: the pre-fix
- *      comparator is reproduced verbatim below (PRE_FIX_BY_Z / PRE_FIX_Z_ORDER) and the shipped one
- *      must agree with it, element for element, on plans with no override anywhere. If a later
- *      change makes the default drift, that replay is what goes red.
- *
- *   2. FORCING WORKS, AND ONLY DELIBERATELY. An element carrying `bandForce: "front"` leaves its
- *      type band and draws over everything, including a building; ordinary Arrange (reorderByZ)
- *      still cannot move anything across a band edge, because it only ever sees one band's peers.
- *
- * ⛔ PROVEN RED AGAINST THE PRE-FIX SOURCE. With `zOrder` restored to `Z_LAYER[el.type] ?? 4` the
- * "forcing works" describe fails (paving stays under the building, the peer set stays the type's,
- * `bandForceOf` does not exist); with the override made the DEFAULT rather than opt-in, the replay
- * describe fails. Both directions are covered on purpose — a guard that can only fail one way is
- * how a default silently changes.
+ * This file now proves the REPLACEMENT: `zOrder`/`byZ` are pure creation-order (no type table, no
+ * band), the retired mechanism (`bandForceOf` / `EL_BANDS` / the "Draw order" panel control /
+ * `setElBand`) is genuinely gone rather than merely unused, and the one-time migration
+ * (`migrateBandForce` in zOrder.js) folds a legacy `bandForce` value into an ordinary z instead of
+ * leaving dead, misleading data on an old plan.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { zOrder, byZ, bandForceOf, EL_BANDS } from "../src/workspaces/site-planner/lib/planStyle.js";
-import { reorderByZ, arrangeFlags } from "../src/workspaces/site-planner/lib/arrange.js";
+import { zOrder, byZ } from "../src/workspaces/site-planner/lib/planStyle.js";
+import * as PlanStyle from "../src/workspaces/site-planner/lib/planStyle.js";
+import { withMissingZ, migrateBandForce, Z_GAP, nextZ } from "../src/workspaces/site-planner/lib/zOrder.js";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const SP = read("../src/workspaces/site-planner/SitePlanner.jsx");
+const PS = read("../src/workspaces/site-planner/lib/planStyle.js");
 const stripComments = (src) => src
   .replace(/\/\*[\s\S]*?\*\//g, "")
   .split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
 const SP_CODE = stripComments(SP);
+// planStyle.js's SUPERSEDED block quotes the retired Z_LAYER/EL_BANDS/bandForceOf names on purpose
+// (history, kept rather than deleted) — strip comments here too so this checks the LIVE code only.
+const PS_CODE = stripComments(PS);
 
-/* ── The PRE-FIX rule, reproduced verbatim. This is the thing the default must still equal. ────── */
-const PRE_FIX_Z_LAYER = { road: 0, paving: 1, sidewalk: 1, landscape: 1, pond: 2, parking: 3, trailer: 3, building: 5 };
-const PRE_FIX_Z_ORDER = (el) => PRE_FIX_Z_LAYER[el.type] ?? 4;
-const PRE_FIX_BY_Z = (a, b) =>
-  PRE_FIX_Z_ORDER(a) - PRE_FIX_Z_ORDER(b) ||
-  (a.z || 0) - (b.z || 0) ||
-  (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
+const el = (id, type, z, extra = {}) => ({ id, type, z, ...extra });
 
-const el = (id, type, z = 0, extra = {}) => ({ id, type, z, ...extra });
-
-/* A plan holding one of every type twice, with ties, gaps and a missing z — the shapes a real saved
- * plan actually has, since the tiebreak ladder is where a comparator change hides. */
-const UNTOUCHED_PLAN = [
-  el("e9", "building", 2048), el("e1", "road", 0), el("e5", "pond", 1024),
-  el("e3", "paving", 1024), el("e2", "road", 1024), el("e7", "parking", 0),
-  el("e4", "paving", 1024), /* tie with e3 → id decides */
-  { id: "e6", type: "sidewalk" }, /* no z at all → 0 */
-  el("e8", "trailer", 512), el("e10", "building", 0), el("e11", "landscape", 3),
-  el("e12", "gizmo", 0), /* an unknown type → the ?? 4 fallback */
-];
-
-describe("THE DEFAULT DOES NOT MOVE — an untouched plan sorts exactly as it did pre-fix", () => {
-  it("zOrder agrees with the pre-fix type table for every type, including the unknown fallback", () => {
-    for (const type of ["road", "paving", "sidewalk", "landscape", "pond", "parking", "trailer", "building", "gizmo", undefined]) {
-      expect(zOrder({ type }), `zOrder changed for type ${String(type)}`).toBe(PRE_FIX_Z_ORDER({ type }));
+describe("zOrder/byZ are plain creation order — no type table, no band", () => {
+  it("zOrder reads the element's own z, never its type", () => {
+    for (const type of ["road", "paving", "sidewalk", "landscape", "pond", "parking", "trailer", "building", "gizmo"]) {
+      expect(zOrder({ type, z: 42 })).toBe(42);
     }
   });
-
-  it("byZ produces the IDENTICAL order to the pre-fix comparator on a plan with no override", () => {
-    const now = [...UNTOUCHED_PLAN].sort(byZ).map((e) => e.id);
-    const before = [...UNTOUCHED_PLAN].sort(PRE_FIX_BY_Z).map((e) => e.id);
-    expect(now).toEqual(before);
-  });
-
-  it("the type-layer rule still holds by default: paving cannot outrank a building", () => {
-    const order = [...UNTOUCHED_PLAN].sort(byZ).map((e) => e.id);
-    // Every paving id precedes (draws under) every building id, whatever their z says.
-    for (const p of ["e3", "e4"]) for (const b of ["e9", "e10"]) {
-      expect(order.indexOf(p), `${p} must draw under ${b}`).toBeLessThan(order.indexOf(b));
+  it("a missing or non-numeric z reads as 0", () => {
+    for (const bad of [undefined, null, NaN, "12", {}]) {
+      expect(zOrder({ type: "building", z: bad })).toBe(0);
     }
+    expect(zOrder({ type: "building" })).toBe(0);
   });
-
-  it("an element with NO bandForce reports no override, and neither do the odd values", () => {
-    for (const v of [undefined, null, "", "FRONT", "Back", 0, 1, true, {}, ["front"]]) {
-      expect(bandForceOf({ type: "paving", bandForce: v }), `bandForce ${JSON.stringify(v)} must be ignored`).toBe(null);
-      expect(zOrder({ type: "paving", bandForce: v })).toBe(PRE_FIX_Z_ORDER({ type: "paving" }));
-    }
-  });
-
-  /* An unreadable override must never silently move a building — LOUD-FAILURE's quiet twin: when we
-   * cannot honour an instruction, we do the DOCUMENTED thing (the type layer), not a third thing. */
-  it("an unknown band name falls back to the TYPE LAYER, never to some other band", () => {
-    const forged = { id: "x", type: "building", z: 0, bandForce: "somewhere-else" };
-    expect(zOrder(forged)).toBe(PRE_FIX_Z_ORDER(forged));
-  });
-});
-
-describe("FORCING WORKS — an explicit override crosses the band, and only it can", () => {
-  it("forced paving draws OVER a building; the same paving untouched draws under it", () => {
+  it("byZ sorts purely by (z, id) — a higher-z paving pad DOES outrank a lower-z building", () => {
     const bldg = el("b1", "building", 0);
-    const pav = el("p1", "paving", 0);
-    const before = [bldg, pav].sort(byZ).map((e) => e.id);
-    expect(before).toEqual(["p1", "b1"]);                                   // paving under building
-    const forced = { ...pav, bandForce: "front" };
-    const after = [bldg, forced].sort(byZ).map((e) => e.id);
-    expect(after).toEqual(["b1", "p1"]);                                    // …and over it once forced
+    const pav = el("p1", "paving", 1024);
+    expect([bldg, pav].sort(byZ).map((e) => e.id)).toEqual(["b1", "p1"]); // paving paints last (on top)
   });
-
-  it("the forced band sits above EVERY type band, not just the building one", () => {
-    for (const type of ["road", "paving", "sidewalk", "landscape", "pond", "parking", "trailer", "building", "gizmo"]) {
-      expect(zOrder({ type, bandForce: "front" })).toBeGreaterThan(PRE_FIX_Z_ORDER({ type }));
-    }
-    expect(zOrder({ type: "paving", bandForce: "front" })).toBe(EL_BANDS.front);
+  it("a real Arrange 'send to back' (z=0, or negative) is never treated as missing", () => {
+    const a = el("a", "building", 0), b = el("b", "paving", -50);
+    expect([a, b].sort(byZ).map((e) => e.id)).toEqual(["b", "a"]);
   });
-
-  it("forcing ONE element leaves every other element exactly where it was", () => {
-    const before = [...UNTOUCHED_PLAN].sort(byZ).map((e) => e.id);
-    const plan = UNTOUCHED_PLAN.map((e) => (e.id === "e3" ? { ...e, bandForce: "front" } : e));
-    const after = [...plan].sort(byZ).map((e) => e.id);
-    expect(after.filter((id) => id !== "e3")).toEqual(before.filter((id) => id !== "e3"));
-    expect(after[after.length - 1]).toBe("e3");                             // …and the forced one is on top
-  });
-
-  it("the override is REVERSIBLE: clearing it restores the pre-fix position exactly", () => {
-    const plan = UNTOUCHED_PLAN.map((e) => (e.id === "e3" ? { ...e, bandForce: "front" } : e));
-    const back = plan.map((e) => (e.id === "e3" ? { ...e, bandForce: undefined } : e));
-    expect([...back].sort(byZ).map((e) => e.id)).toEqual([...UNTOUCHED_PLAN].sort(PRE_FIX_BY_Z).map((e) => e.id));
-  });
-
-  /* ⛔ THE OTHER HALF OF THE OWNER'S ANSWER: an ORDINARY Bring to Front must still stop at the band
-   * edge. `reorderByZ` only ever sees the peers the caller hands it, and the caller (arrangeSel)
-   * builds that set by `zOrder` — so the guarantee is that a band-scoped peer set can never contain
-   * a member of another band, and that the patch only ever touches z. */
-  it("ordinary Arrange cannot cross a band: its peer set is band-scoped and it only writes z", () => {
-    const plan = [el("b1", "building", 0), el("b2", "building", 1024), el("p1", "paving", 0)];
-    const band = zOrder(plan[2]);
-    const peers = plan.filter((e) => zOrder(e) === band);
-    expect(peers.map((e) => e.id)).toEqual(["p1"]);                         // buildings are not peers
-    expect(reorderByZ(peers, "p1", "front")).toBe(null);                    // nothing to reorder against
-    // …and with two paving pads, Bring to Front moves it above the OTHER PAVING only.
-    const plan2 = [...plan, el("p2", "paving", 1024)];
-    const peers2 = plan2.filter((e) => zOrder(e) === band);
-    const patch = reorderByZ(peers2, "p1", "front");
-    expect(Object.keys(patch)).toEqual(["p1"]);
-    const moved = plan2.map((e) => (patch[e.id] != null ? { ...e, z: patch[e.id] } : e));
-    const order = [...moved].sort(byZ).map((e) => e.id);
-    expect(order.indexOf("p1")).toBeGreaterThan(order.indexOf("p2"));       // front of its own band…
-    expect(order.indexOf("p1")).toBeLessThan(order.indexOf("b1"));          // …still under the buildings
-  });
-
-  it("forced elements form their own Arrange peer group and can be ordered against each other", () => {
-    const plan = [
-      el("b1", "building", 0),
-      { ...el("p1", "paving", 0), bandForce: "front" },
-      { ...el("k1", "parking", 1024), bandForce: "front" },   // forced later, so it stacked on top
-    ];
-    const band = EL_BANDS.front;
-    const peers = plan.filter((e) => zOrder(e) === band);
-    expect(peers.map((e) => e.id).sort()).toEqual(["k1", "p1"]);
-    const af = arrangeFlags(peers, "p1");
-    expect(af.count).toBe(2);
-    const patch = reorderByZ(peers, "p1", "front");
-    expect(patch).toBeTruthy();
-    const moved = plan.map((e) => (patch[e.id] != null ? { ...e, z: patch[e.id] } : e));
-    const order = [...moved].sort(byZ).map((e) => e.id);
-    expect(order).toEqual(["b1", "k1", "p1"]);
+  it("id is the deterministic tiebreak for an exact z tie", () => {
+    const a = el("z-later", "pond", 5), b = el("a-earlier", "pond", 5);
+    expect([a, b].sort(byZ).map((e) => e.id)).toEqual(["a-earlier", "z-later"]);
   });
 });
 
-/* ── B548822 — THE MIRROR: "Force underneath everything" (`bandForce: "back"`), the escape hatch
- * the stack-picker report exposed as missing. Same shape as "front" throughout, on purpose — a
- * second mechanism here is the next bug. */
-describe("THE MIRROR — 'back' crosses the band the other way, below every type including road", () => {
-  it("forced pond draws UNDER a road; the same pond untouched draws over it", () => {
-    const road = el("r1", "road", 0);
-    const pond = el("d1", "pond", 0);
-    const before = [road, pond].sort(byZ).map((e) => e.id);
-    expect(before).toEqual(["r1", "d1"]);                                   // pond over road, normally
-    const forced = { ...pond, bandForce: "back" };
-    const after = [road, forced].sort(byZ).map((e) => e.id);
-    expect(after).toEqual(["d1", "r1"]);                                    // …and under it once forced back
+describe("the retired mechanism is genuinely GONE, not merely unused", () => {
+  it("planStyle.js exports neither bandForceOf nor EL_BANDS any more", () => {
+    expect(Object.prototype.hasOwnProperty.call(PlanStyle, "bandForceOf")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(PlanStyle, "EL_BANDS")).toBe(false);
   });
-
-  it("the back band sits below EVERY type band, including road", () => {
-    for (const type of ["road", "paving", "sidewalk", "landscape", "pond", "parking", "trailer", "building", "gizmo"]) {
-      expect(zOrder({ type, bandForce: "back" })).toBeLessThan(PRE_FIX_Z_ORDER({ type }));
+  it("no live code path reads Z_LAYER, BUILDING_Z, bandForce, or EL_BANDS", () => {
+    expect(PS_CODE).not.toMatch(/\bZ_LAYER\b/);
+    expect(PS_CODE).not.toMatch(/\bEL_BANDS\b/);
+    expect(PS_CODE).not.toMatch(/bandForceOf/);
+    expect(SP_CODE).not.toMatch(/\bBUILDING_Z\b/);
+    expect(SP_CODE).not.toMatch(/bandForceOf/);
+    expect(SP_CODE).not.toMatch(/\bsetElBand\b/);
+    expect(SP_CODE).not.toMatch(/drawElsZ/);
+  });
+  it("the retired panel control's testids and wording are gone from SitePlanner.jsx", () => {
+    for (const dead of ["el-band-restore", "el-band-force", "el-band-force-back", "el-band-forced-note",
+      "Force on top of everything", "Force underneath everything", "Use the normal layer order"]) {
+      expect(SP_CODE, `must not contain "${dead}"`).not.toContain(dead);
     }
-    expect(zOrder({ type: "pond", bandForce: "back" })).toBe(EL_BANDS.back);
   });
-
-  it("the Richfield case: a pond forced back stops covering a road it geometrically contains", () => {
-    // e1454052brxkkr (pond, z=-1024) sat over e1454053brxkkr (road, z=65536) — raw z never mattered,
-    // the type band did. Forcing the POND back (rather than lifting the road) is the other fix.
-    const pond = { id: "e1454052brxkkr", type: "pond", z: -1024 };
-    const road = { id: "e1454053brxkkr", type: "road", z: 65536 };
-    const order = [pond, road].sort(byZ).map((e) => e.id);
-    expect(order).toEqual(["e1454053brxkkr", "e1454052brxkkr"]);            // pond paints last (on top) today, despite its far lower z
-    const forcedPond = { ...pond, bandForce: "back" };
-    const orderFixed = [forcedPond, road].sort(byZ).map((e) => e.id);
-    expect(orderFixed).toEqual(["e1454052brxkkr", "e1454053brxkkr"]);       // road now paints last (on top)
+  it("an element's Arrange peer set is the WHOLE plan, not a type/band-filtered subset", () => {
+    expect(SP_CODE, "arrangeSel's element branch must not filter peers by zOrder")
+      .not.toMatch(/peers = els\.filter\(\(e\) => zOrder\(e\) === band\)/);
+    expect(SP_CODE).toMatch(/peers = els;/);
   });
-
-  it("forcing ONE element back leaves every other element exactly where it was", () => {
-    const before = [...UNTOUCHED_PLAN].sort(byZ).map((e) => e.id);
-    const plan = UNTOUCHED_PLAN.map((e) => (e.id === "e5" ? { ...e, bandForce: "back" } : e)); // e5 is a pond
-    const after = [...plan].sort(byZ).map((e) => e.id);
-    expect(after.filter((id) => id !== "e5")).toEqual(before.filter((id) => id !== "e5"));
-    expect(after[0]).toBe("e5");                                            // …and the forced one is on bottom
-  });
-
-  it("the override is REVERSIBLE the other direction too", () => {
-    const plan = UNTOUCHED_PLAN.map((e) => (e.id === "e5" ? { ...e, bandForce: "back" } : e));
-    const restored = plan.map((e) => (e.id === "e5" ? { ...e, bandForce: undefined } : e));
-    expect([...restored].sort(byZ).map((e) => e.id)).toEqual([...UNTOUCHED_PLAN].sort(PRE_FIX_BY_Z).map((e) => e.id));
-  });
-
-  it("front and back never collide, and each forms its own peer group", () => {
-    const plan = [
-      el("b1", "building", 0),
-      { ...el("p1", "paving", 0), bandForce: "front" },
-      { ...el("d1", "pond", 0), bandForce: "back" },
-    ];
-    const order = [...plan].sort(byZ).map((e) => e.id);
-    expect(order).toEqual(["d1", "b1", "p1"]);
-    expect(plan.filter((e) => zOrder(e) === EL_BANDS.back).map((e) => e.id)).toEqual(["d1"]);
-    expect(plan.filter((e) => zOrder(e) === EL_BANDS.front).map((e) => e.id)).toEqual(["p1"]);
+  it("the dissolved road network no longer excludes a band-forced road (there is no band to force out of)", () => {
+    expect(SP_CODE).not.toMatch(/isCenterlineRoad\(x\) && !x\.attachedTo && !bandForceOf\(x\)/);
+    expect(SP_CODE).toMatch(/isCenterlineRoad\(x\) && !x\.attachedTo && !elHidden\(hiddenGroups, x\)/);
   });
 });
 
-/* ── SOURCE GUARDS — the wiring, which no pure test can see. Each of these was RED pre-fix. ────── */
-describe("the escape hatch is wired, and it is the ONE mechanism", () => {
-  /* B845584 — relocated OUT of the right-click menu into the Properties panel's persistent "Draw
-   * order" control (a submenu-only override left the owner able to end up stuck out of band with
-   * no visible way to see why); the mutator + the two phrases stay, the call site's variable
-   * changed from the menu's local `t` to the panel's `selEl`. */
-  it("the element inspector's Draw order control carries BOTH cross-band actions — front and its mirror, back", () => {
-    expect(SP_CODE, 'the panel must offer the "Force on top of everything" escape hatch')
-      .toContain("Force on top of everything");
-    expect(SP_CODE, 'and its mirror — the missing "force underneath" the stack-picker report named')
-      .toContain("Force underneath everything");
-    expect(SP_CODE, "…and the way back out of either").toContain("Use the normal layer order");
-    expect(SP_CODE, "the front control must call the one mutator").toMatch(/setElBand\(selEl\.id,\s*"front"\)/);
-    expect(SP_CODE, "the back control must call the same mutator, the other direction").toMatch(/setElBand\(selEl\.id,\s*"back"\)/);
-    expect(SP_CODE, "the restore control must clear the override").toMatch(/setElBand\(selEl\.id,\s*null\)/);
+describe("migrateBandForce — the one-time load migration for a legacy plan", () => {
+  it("a plan with no bandForce anywhere is returned UNCHANGED (same reference)", () => {
+    const plan = [el("a", "building", 0), el("b", "paving", 10)];
+    expect(migrateBandForce(plan)).toBe(plan);
   });
-
-  it("the inspector shows a forced element as forced, with a restore control", () => {
-    expect(SP_CODE, "a forced element must be visibly forced in its inspector").toContain("el-band-forced-note");
-    expect(SP_CODE, "…and carry an obvious way back to the default order").toContain("el-band-restore");
+  it("'front' lands above every plain element and the field is stripped", () => {
+    const plan = [el("a", "building", 0), { ...el("b", "paving", 10), bandForce: "front" }, el("c", "road", 5)];
+    const out = migrateBandForce(plan);
+    const forced = out.find((e) => e.id === "b");
+    expect(forced.bandForce).toBeUndefined();
+    expect(forced.z).toBeGreaterThan(Math.max(...out.filter((e) => e.id !== "b").map((e) => e.z)));
   });
-
-  it("the control is NOT in the right-click menu any more — it is a persistent panel property", () => {
-    const at = SP_CODE.indexOf("const t = els.find((el) => el.id === typeMenu.id)");
-    expect(at, "the element menu's own IIFE must still exist to search within").toBeGreaterThan(0);
-    const menuBody = SP_CODE.slice(at, at + 9000);
-    expect(menuBody, "the menu must not call setElBand at all — Draw order lives in the panel now")
-      .not.toMatch(/setElBand\(/);
+  it("'back' lands below every plain element and the field is stripped", () => {
+    const plan = [el("a", "building", 0), { ...el("b", "pond", 10), bandForce: "back" }, el("c", "road", 5)];
+    const out = migrateBandForce(plan);
+    const forced = out.find((e) => e.id === "b");
+    expect(forced.bandForce).toBeUndefined();
+    expect(forced.z).toBeLessThan(Math.min(...out.filter((e) => e.id !== "b").map((e) => e.z)));
   });
-
-  /* The whole point of resolving the override inside `zOrder` is that the four places that ask a
-   * band question keep asking ONE function. A second copy of the rule is the next bug. */
-  it("nothing re-derives the band from el.type — the override resolves inside zOrder", () => {
-    expect(SP_CODE.match(/Z_LAYER\s*\[/), "SitePlanner.jsx must not read the type table directly").toBeFalsy();
-    expect(SP_CODE, "the peer set must be built from zOrder, which resolves the override")
-      .toMatch(/peers = els\.filter\(\(e\) => zOrder\(e\) === band\)/);
+  it("several forced elements keep their own relative (array) order among themselves", () => {
+    const plan = [
+      { ...el("first", "paving", 0), bandForce: "front" },
+      el("mid", "building", 5),
+      { ...el("second", "parking", 0), bandForce: "front" },
+    ];
+    const out = migrateBandForce(plan);
+    const firstZ = out.find((e) => e.id === "first").z;
+    const secondZ = out.find((e) => e.id === "second").z;
+    expect(firstZ).toBeLessThan(secondZ);
   });
-
-  /* A road that has been lifted out of the road band cannot stay in the dissolved road network, or
-   * it paints in both places at once. */
-  it("a forced road leaves the dissolved road network", () => {
-    expect(SP_CODE, "the roadNet memo must exclude band-forced roads")
-      .toMatch(/isCenterlineRoad\(x\) && !x\.attachedTo && !bandForceOf\(x\)/);
-    expect(SP_CODE.match(/drawElsZ\.above\.map\([^)]*roadNet=\{null\}/), "the above-band pass must receive roadNet now that a road can land in it").toBeFalsy();
+  it("an unforced element's z is left completely untouched", () => {
+    const plan = [el("a", "building", 777), { ...el("b", "paving", 0), bandForce: "front" }];
+    expect(migrateBandForce(plan).find((e) => e.id === "a").z).toBe(777);
   });
+});
 
-  it("the capability table has no open cells left on crossBand", async () => {
-    const { ELEMENT_CAPABILITIES, verdict } = await import("../e2e/elementCapabilities.table.js");
-    for (const row of ELEMENT_CAPABILITIES.filter((r) => r.family === "el")) {
-      expect(verdict(row.actions.crossBand), `${row.type} must have answered crossBand`).toBe("yes");
-    }
+describe("withMissingZ — every freshly created element lands on top, never at the bottom", () => {
+  it("an already-fully-z'd list is returned UNCHANGED (same reference)", () => {
+    const plan = [el("a", "building", 0), el("b", "paving", -50)];
+    expect(withMissingZ(plan)).toBe(plan);
+  });
+  it("a z-less element is stamped above the current max, real z's untouched", () => {
+    const plan = [el("a", "building", 100), { id: "b", type: "paving" }];
+    const out = withMissingZ(plan);
+    expect(out.find((e) => e.id === "a").z).toBe(100);
+    expect(out.find((e) => e.id === "b").z).toBe(100 + Z_GAP);
+  });
+  it("a batch of z-less elements keeps ITS OWN array order, never an id sort", () => {
+    const plan = [el("host", "building", 0), { id: "z-court", type: "paving" }, { id: "a-trailer", type: "trailer" }];
+    const out = withMissingZ(plan);
+    expect(out.find((e) => e.id === "z-court").z).toBeLessThan(out.find((e) => e.id === "a-trailer").z);
+  });
+  it("matches nextZ's own convention for where a fresh top lands", () => {
+    const plan = [el("a", "building", 500)];
+    expect(withMissingZ([...plan, { id: "b", type: "road" }]).find((e) => e.id === "b").z).toBe(nextZ(plan));
   });
 });

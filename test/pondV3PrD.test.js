@@ -48,19 +48,20 @@ describe("D3 — the berm ring is drawn INWARD, over the pond, inside the outlin
     expect(src).toContain("const annulus = [ringPath(toe), ...crestRings.map(ringPath)].join(\" \");");
     expect(src).toContain("berm {(Math.round(bermH * 10) / 10).toFixed(1)} ft");
   });
-  it("it renders AFTER the ground-surface elements pass (so it sits on top of the pond water, not under it)", () => {
-    // The element pass is split at the building layer (B959); the berm ring follows the ground pass.
-    // NEW-4(b) — the two passes read one memoised split (`drawElsZ`) instead of copying and
-    // sorting `drawEls` twice. The ORDER this guard exists to protect is unchanged.
-    // B1352 — the element pass now renders through the memoised `ElNode` boundary rather than
-    // calling `renderElPx` inline. The SPLIT and its ORDER are exactly what they were; only the
-    // call shape moved, so this guard follows the new anchor rather than being relaxed.
-    const groundPass = src.indexOf("drawElsZ.below.map((el) => <ElNode");
+  it("it renders AFTER the whole unified element pass (so it sits on top of the pond water, not under it)", () => {
+    // ⛔ B1788912 (NEW-1) — the element pass no longer splits at a building layer (that type-layer
+    // band is retired; see planStyle.js's SUPERSEDED block and /CLAUDE.md's owner-constraints
+    // entry 10). The berm ring now follows the WHOLE unified `elPaintItems` stack (normal AND
+    // lifted tiers) — it is per-pond decoration tied to the element pass, exactly like `labelEls`,
+    // which shares this same rung for the identical reason. It is no longer guaranteed to sit
+    // UNDER a building: an untouched plan re-stacks by creation order now, and a berm ring drawn
+    // after a building can legitimately paint over it, same as any other element.
+    const elsNormal = src.indexOf("elPaintItems.normal.map((it) =>");
+    const elsLifted = src.indexOf("elPaintItems.lifted.map((it) =>");
     const bermLayer = src.indexOf('data-testid="pond-berm-ring-layer"');
-    const buildingPass = src.indexOf("drawElsZ.above.map((el) => <ElNode");
-    expect(groundPass).toBeGreaterThan(-1);
-    expect(bermLayer).toBeGreaterThan(groundPass); // over the pond (a ground surface)
-    expect(buildingPass).toBeGreaterThan(bermLayer); // buildings still paint on top of it
+    expect(elsNormal).toBeGreaterThan(-1);
+    expect(elsLifted).toBeGreaterThan(elsNormal);
+    expect(bermLayer).toBeGreaterThan(elsLifted); // after the WHOLE element pass, both tiers
   });
 });
 

@@ -81,7 +81,11 @@ describe("every pair the user could care about is REVERSIBLE, and the table says
 describe("ONE NAME PER CONCEPT — the third-vocabulary problem", () => {
   /* Five different pairs of words were live for one idea. The drift is not cosmetic: it is why the
    * fifth report read as a different bug from the first four. */
-  const RETIRED = ["Send behind buildings", "Bring in front of buildings", "Bring above the plan", "Draw above the plan", "Draw below the plan"];
+  // B1788912 (NEW-1) — "Force on top/underneath everything" and "Use the normal layer order" are
+  // the retired `bandForce` panel control's own wording (SitePlanner.jsx's Draw-order segmented
+  // buttons, removed with the type-layer band they escaped).
+  const RETIRED = ["Send behind buildings", "Bring in front of buildings", "Bring above the plan", "Draw above the plan", "Draw below the plan",
+    "Force on top of everything", "Force underneath everything", "Use the normal layer order"];
   /* Comments are stripped: several explain the history and legitimately quote the old wording. */
   const CODE = SRC.split("\n").map((l) => (/^\s*(\/\/|\*|\/\*)/.test(l) ? "" : l.replace(/\/\/.*$/, ""))).join("\n");
   it("no retired synonym survives in the planner's menus", () => {
@@ -109,19 +113,23 @@ describe("ONE NAME PER CONCEPT — the third-vocabulary problem", () => {
 describe("the table matches what the canvas actually paints", () => {
   /* ⛔ A table maintained BESIDE the render is a table that drifts from it. These read the real
    * render order out of the source and require the ladder to be in the same sequence. */
+  // B1788912 (NEW-1) — the element rung is ONE marker now (`elPaintItems.normal`, the family's
+  // creation-order default position): the old two-marker below/above split existed only for the
+  // now-retired type-layer band. `elPaintItems.lifted` (NEW-2's selection lift) is deliberately
+  // untracked here — it is ephemeral UI state, not a property of an untouched or flagged object,
+  // so it is not part of this ladder (see paintOrder.js's own header).
   const MARKERS = [
     [0, /\{overlayBands\.below\.map\(/],
     [1, /\{drawParcels\.map\(/],
     [2, /\{drawMarkupsZ\.filter\(\(m\) => m\.behindEls\)\.map\(/],
     [3, /\{calloutBands\.below\.map\(/],
     [4, /\{measureBands\.below\.map\(/],
-    [5, /\{drawElsZ\.below\.map\(/],
-    [6, /\{drawElsZ\.above\.map\(/],
-    [7, /\{drawMarkupsZ\.filter\(\(m\) => !m\.behindEls\)\.map\(/],
-    [8, /\{overlayBands\.above\.map\(/],
-    [9, /\{calloutBands\.above\.map\(/],
-    [10, /\{measureBands\.above\.map\(/],
-    [11, /\{calloutBands\.forced\.map\(/],
+    [5, /\{elPaintItems\.normal\.map\(/],
+    [6, /\{drawMarkupsZ\.filter\(\(m\) => !m\.behindEls\)\.map\(/],
+    [7, /\{overlayBands\.above\.map\(/],
+    [8, /\{calloutBands\.above\.map\(/],
+    [9, /\{measureBands\.above\.map\(/],
+    [10, /\{calloutBands\.forced\.map\(/],
   ];
   it("each rung's render block is present exactly once", () => {
     for (const [rung, re] of MARKERS) {

@@ -499,6 +499,23 @@ were split out of this file.
    question — three real-device rejections of exactly that mechanism, the last verbatim: "Nothing
    happens, it stays or goes to gantt or grid." Phone Split must show the grid and the Gantt at
    once (stacked); never ship a phone Split that collapses to one pane. (See B1241745 (×3), V930736.)
+10. **(2026-09-19) Site elements stack in CREATION ORDER, newest on top — Bluebeam-style — and this
+    REVERSES the 2026-08-09 type-layer default recorded in `planStyle.js` (entry retired below,
+    kept as history, not deleted). Michael, verbatim, asking for it:** "I mean I feel like whatever
+    I draw should be at the top so I can never lose anything when I draw it, I'm assuming that's
+    how bluebeam works." **He was told plainly, in chat, the exact consequence — that newest-on-top
+    means a parking field drawn after a building paints over the building, and a road drawn last
+    puts pavement over everything — and chose it anyway, verbatim:** "Selection should lift and I'm
+    good with bluebeams order with new items on top, you can disregard my previous rule." Two
+    things travel with this reversal: **(a) a selected element always lifts above every other
+    element while selected**, dropping back to its normal creation-order position the moment it is
+    deselected; **(b)** he was told, and accepted, that **every existing plan re-stacks** the first
+    time it opens under this rule — an element's position in the new stack is no longer decided by
+    its type (road under paving under pond under parking under building) but by when it was drawn,
+    so a plan's on-screen layering can visibly change on its next open even though nothing on it was
+    edited. Do not relitigate either half and do not ask him again. See B1788912 (site-planner
+    `lib/planStyle.js` `zOrder`/`byZ`, `SitePlanner.jsx`'s element render pass) for the
+    implementation and the road-network composite's own stated ordering rule.
 
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
