@@ -535,9 +535,12 @@ function SitePlanAdjustPanel({
             title={placed && o.locked ? "Locked — unlock to move or resize" : (sizeFt || undefined)}>
             <MoveIcon />{isActive ? "Editing on map" : placed ? "Move / resize" : "Place on map"}
           </Button>
-          <ToggleChip active={hasCrop(o)} disabled={!o.rasterKey}
-            onClick={onStartCrop} style={{ ...ACTION_BTN_STYLE, opacity: !o.rasterKey ? 0.5 : 1, cursor: !o.rasterKey ? "not-allowed" : "pointer" }}
-            title={!o.rasterKey ? "This plan doesn't have an image yet" : hasCrop(o) ? "Already cropped — edit or reset it" : undefined}>
+          {/* NEW-1 (B1783328) — the lock never gated this control (B1154369 only closed the map
+              handles + the rotation field), so a locked overlay's crop was still editable. Same
+              disabled/title pattern as the Move/resize button above. */}
+          <ToggleChip active={hasCrop(o)} disabled={!o.rasterKey || (placed && o.locked)}
+            onClick={onStartCrop} style={{ ...ACTION_BTN_STYLE, opacity: !o.rasterKey || (placed && o.locked) ? 0.5 : 1, cursor: !o.rasterKey || (placed && o.locked) ? "not-allowed" : "pointer" }}
+            title={placed && o.locked ? "Locked — unlock to crop" : !o.rasterKey ? "This plan doesn't have an image yet" : hasCrop(o) ? "Already cropped — edit or reset it" : undefined}>
             <CropIcon />{hasCrop(o) ? "Edit crop" : "Crop…"}
           </ToggleChip>
         </div>
@@ -1069,8 +1072,14 @@ export default function SitePlansSection({
   // it commits through the plain patchAndReload path — never commitPlacement — and never
   // recomputes a pinned comp's position. (`cropTarget` state itself is declared near the top of
   // the component, above the `if (!open) return null` early return — see that declaration.)
+  // NEW-1 (B1783328) — B1154369 closed the map handles + the rotation field but never checked
+  // this control, so a locked overlay's crop stayed editable end to end. Refused at BOTH the
+  // entry point (the tool never opens on a locked overlay, matching the button's own `disabled`)
+  // and the commit (defense in depth, same shape as `commitPlacement`'s `existing.locked` guard —
+  // never trust a disabled control alone to keep every future caller honest).
   const startCrop = async (o) => {
     if (!o.rasterKey) return;
+    if (overlayPlaced(o) && o.locked) { console.warn("[sitePlanOverlays] startCrop refused — overlay is locked:", o.id); return; }
     setPanelError(null);
     const src = await downloadOverlayRasterUrl(o.rasterKey);
     if (!src) { setPanelError("Couldn't load this plan's image to crop it — reload and try again."); return; }
@@ -1078,6 +1087,7 @@ export default function SitePlansSection({
   };
   const commitCrop = async (crop) => {
     const o = cropTarget && cropTarget.overlay;
+    if (o && overlayPlaced(o) && o.locked) { console.warn("[sitePlanOverlays] commitCrop refused — overlay is locked:", o.id); setCropTarget(null); return; }
     setCropTarget(null);
     if (!o) return;
     await patchAndReload(o, { crop });

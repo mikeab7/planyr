@@ -9,6 +9,7 @@
  * lat/lon corners into pixels on screen; it holds no georeferencing logic of its own.
  */
 import L from "leaflet";
+import { clipPathValueForCrop } from "./overlayCrop.js";
 
 const PANE = "sitePlanOverlayPane";
 
@@ -123,17 +124,17 @@ export function createRotatedImageLayer(map) {
     img.style.transform = matrixFor((ll) => map._latLngToNewLayerPoint(ll, e.zoom, e.center));
   };
 
-  // B1134754 NEW-21 — non-destructive crop. `clip-path: inset(...)` is measured in the
-  // element's OWN local pixel box, i.e. BEFORE the CSS transform above is applied — so clipping
-  // in plain image-pixel coordinates and letting the SAME matrix transform carry both the image
-  // and its clip means the visible crop rotates/scales/moves exactly with the placement, with
-  // zero extra math here. This is display-only: it never touches `img.src`, so widening or
-  // clearing the crop later needs no re-fetch or re-decode.
+  // B1134754 NEW-21, extended NEW-1 (polygon crop) — non-destructive crop. `clip-path` is
+  // measured in the element's OWN local pixel box, i.e. BEFORE the CSS transform above is
+  // applied — so clipping in plain image-pixel coordinates and letting the SAME matrix
+  // transform carry both the image and its clip means the visible crop rotates/scales/moves
+  // exactly with the placement, with zero extra math here, for EITHER shape. This is
+  // display-only: it never touches `img.src`, so widening or clearing the crop later needs no
+  // re-fetch or re-decode. `clipPathValueForCrop` (overlayCrop.js) is the ONE place that turns
+  // either shape into a CSS clip-path value — a rect as `inset(...)`, a polygon as
+  // `polygon(evenodd, ...)` — so this stays the one and only clip mechanism for this overlay.
   const applyCrop = (crop) => {
-    if (!crop || !(imgW > 0) || !(imgH > 0)) { img.style.clipPath = ""; return; }
-    const top = Math.max(0, crop.y), left = Math.max(0, crop.x);
-    const right = Math.max(0, imgW - crop.x - crop.w), bottom = Math.max(0, imgH - crop.y - crop.h);
-    img.style.clipPath = `inset(${top}px ${right}px ${bottom}px ${left}px)`;
+    img.style.clipPath = clipPathValueForCrop(crop, imgW, imgH);
   };
   let pendingCrop = null;
 

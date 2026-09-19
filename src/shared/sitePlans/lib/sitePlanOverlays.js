@@ -11,6 +11,7 @@
  * 2026 flyer describe different buildings).
  */
 import { validPlacement } from "./overlayGeoref.js";
+import { isValidCropShape } from "../../../workspaces/site-planner/lib/overlayCrop.js";
 
 export function validOverlayUpload({ imgW, imgH } = {}) {
   return Number.isFinite(imgW) && imgW > 0 && Number.isFinite(imgH) && imgH > 0;
@@ -46,10 +47,13 @@ export function rowToOverlay(r) {
     centerLon: r.center_lon != null ? Number(r.center_lon) : null,
     ftPerPx: r.ft_per_px != null ? Number(r.ft_per_px) : null,
     rotationDeg: r.rotation_deg != null ? Number(r.rotation_deg) : 0,
-    // B1134754 NEW-21 — non-destructive crop, in SOURCE-IMAGE pixels; null = full image (the
-    // OVERWHELMING majority of rows). See overlayCrop.js (reused verbatim from the Site
-    // Planner's own reference-image crop) for the shape and every invariant it upholds.
-    crop: r.crop && Number.isFinite(r.crop.w) && Number.isFinite(r.crop.h) ? r.crop : null,
+    // B1134754 NEW-21, extended NEW-1 (polygon crop) — non-destructive crop, in SOURCE-IMAGE
+    // pixels; null = full image (the OVERWHELMING majority of rows). `isValidCropShape`
+    // (overlayCrop.js) is the ONE validator for both the legacy/explicit rect shape AND the new
+    // discriminated poly shape — a plain `r.crop.w`/`r.crop.h` check here would silently drop
+    // every polygon crop on read (a poly has no top-level w/h), which is exactly the bug this
+    // shared validator exists to close.
+    crop: (r.crop && isValidCropShape(r.crop)) ? r.crop : null,
     opacity: r.opacity != null ? Number(r.opacity) : 0.85,
     visible: r.visible !== false,
     locked: !!r.locked,

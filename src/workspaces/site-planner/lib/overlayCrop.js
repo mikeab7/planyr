@@ -99,3 +99,152 @@ export function cropFromTrimFeet(trim, o) {
   const right = clean(trim && trim.right), bottom = clean(trim && trim.bottom);
   return normalizeCrop({ x: left, y: top, w: imgW - left - right, h: imgH - top - bottom }, imgW, imgH);
 }
+
+/* ---- Polygon crop (NEW-1, B1783328) --------------------------------------------------------
+ * Discriminated union, additive to the rect shape above: `{kind:'rect', x,y,w,h}` |
+ * `{kind:'poly', pts:[[x,y],...]}`. A crop object with NO `kind` key is read as `rect` — every
+ * row written before this shipped (Michael's live overlay, version 208, included) has no `kind`
+ * key at all and must keep rendering byte-identically. That is why this is a MIGRATE-ON-READ
+ * rule (`cropKind`) rather than a data rewrite: nothing here ever back-fills `kind` onto an
+ * existing row.
+ *
+ * Points are in IMAGE-PIXEL space — the same frame the rect crop already uses — never lat/lon,
+ * so a polygon crop survives move/resize/rotate/re-anchor exactly like the rect one: the
+ * placement transform is applied to the SAME element the clip is drawn on, after the clip, so
+ * neither shape's math needs to know anything about where the overlay currently sits on the map.
+ */
+
+export const MIN_POLY_VERTICES = 3;
+// Same pixel floor MIN_CROP_PX guards the rect with, applied to the polygon's bounding box and
+// to its (unsigned) area — the same fat-fingered-sliver failure, one guard for both shapes.
+export const MIN_POLY_BBOX_PX = MIN_CROP_PX;
+
+// 'rect' for a legacy no-key crop (migrate-on-read) or an explicit {kind:'rect'}; 'poly' only
+// when the object explicitly says so. Never returns anything else.
+export function cropKind(crop) {
+  if (!crop) return null;
+  return crop.kind === "poly" ? "poly" : "rect";
+}
+
+function polygonBoundsPx(pts) {
+  if (!Array.isArray(pts) || !pts.length) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, any = false;
+  for (const p of pts) {
+    if (!Array.isArray(p) || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) continue;
+    any = true;
+    minX = Math.min(minX, p[0]); maxX = Math.max(maxX, p[0]);
+    minY = Math.min(minY, p[1]); maxY = Math.max(maxY, p[1]);
+  }
+  return any ? { minX, minY, maxX, maxY } : null;
+}
+
+// Unsigned polygon area (shoelace) — used only as a degenerate-shape guard, so winding
+// direction (which flips the sign) doesn't matter here.
+export function polygonAreaPx(pts) {
+  if (!Array.isArray(pts) || pts.length < 3) return 0;
+  let sum = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    if (!a || !b) return 0;
+    sum += a[0] * b[1] - b[0] * a[1];
+  }
+  return Math.abs(sum) / 2;
+}
+
+// Clamp every vertex into the image's bounds. Never mutates the input; returns null on bad input.
+export function clampPolyPoints(pts, imgW, imgH) {
+  if (!Array.isArray(pts) || !(imgW > 0) || !(imgH > 0)) return null;
+  return pts.map((p) => [
+    Math.min(Math.max(0, (p && Number(p[0])) || 0), imgW),
+    Math.min(Math.max(0, (p && Number(p[1])) || 0), imgH),
+  ]);
+}
+
+// Whether `pts` is a usable polygon crop: at least MIN_POLY_VERTICES real vertices, and a
+// bounding box + area that clear the same degenerate-sliver floor the rect crop uses — an
+// overlay can never be clipped down to nothing and lost, exactly like the rect side.
+export function isUsablePoly(pts, imgW, imgH) {
+  if (!Array.isArray(pts) || pts.length < MIN_POLY_VERTICES) return false;
+  if (!pts.every((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]))) return false;
+  const b = polygonBoundsPx(pts);
+  if (!b) return false;
+  if (b.maxX - b.minX < MIN_POLY_BBOX_PX || b.maxY - b.minY < MIN_POLY_BBOX_PX) return false;
+  if (imgW > 0 && imgH > 0 && polygonAreaPx(pts) < MIN_POLY_BBOX_PX * MIN_POLY_BBOX_PX) return false;
+  return true;
+}
+
+// The setter a poly-drawing caller runs through before persisting: clamps into the image, then
+// refuses (returns null) anything too small/degenerate to be a usable crop — the isUsablePoly
+// floor. Unlike the rect side, a poly never "normalizes away" to null just for covering the
+// whole image: there's no single natural full-image polygon to collapse to, so a genuinely
+// drawn (and usable) polygon is always kept as drawn.
+export function normalizePolyCrop(pts, imgW, imgH) {
+  const clamped = clampPolyPoints(pts, imgW, imgH);
+  if (!clamped || !isUsablePoly(clamped, imgW, imgH)) return null;
+  return clamped;
+}
+
+// Reversible, one-step conversions between the two shapes. Pure projections only — the CALLER
+// (ImageCropTool) is what keeps each shape's own last-drawn value alive across a mode toggle by
+// holding both drafts in state rather than deriving one from the other on every switch.
+export function rectToPolyPoints(rect) {
+  if (!rect) return null;
+  const { x, y, w, h } = rect;
+  return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+}
+export function polyPointsToRect(pts) {
+  const b = polygonBoundsPx(pts);
+  if (!b) return null;
+  return { x: b.minX, y: b.minY, w: b.maxX - b.minX, h: b.maxY - b.minY };
+}
+
+// The ONE crop-shape validator a DB row reader (or any future writer) runs through — accepts
+// null (full image), a legacy-or-explicit rect, or a poly; rejects anything else, so a malformed
+// value can never reach rendering as though it were a real crop. `overlayCrop.test.js` is the
+// unit proof; the Postgres CHECK constraint (site_plan_overlays_crop.sql) enforces the same
+// shape at the write boundary.
+export function isValidCropShape(crop) {
+  if (!crop) return true;
+  if (cropKind(crop) === "poly") {
+    return Array.isArray(crop.pts) && crop.pts.length >= MIN_POLY_VERTICES &&
+      crop.pts.every((p) => Array.isArray(p) && p.length === 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]));
+  }
+  return Number.isFinite(crop.x) && Number.isFinite(crop.y) && Number.isFinite(crop.w) && Number.isFinite(crop.h)
+    && crop.w > 0 && crop.h > 0;
+}
+
+// Dispatches normalizeCrop (rect) / normalizePolyCrop by kind, and stamps the discriminator
+// going forward — a NEW rect commit from the tool now writes `{kind:'rect', x,y,w,h}` explicitly
+// (only an old, already-persisted row is ever missing the key). Returns null for "no crop."
+export function normalizeCropShape(crop, imgW, imgH) {
+  if (!crop) return null;
+  if (cropKind(crop) === "poly") {
+    const pts = normalizePolyCrop(crop.pts, imgW, imgH);
+    return pts ? { kind: "poly", pts } : null;
+  }
+  const rect = normalizeCrop(crop, imgW, imgH);
+  return rect ? { kind: "rect", ...rect } : null;
+}
+
+// THE single clip-path value for either shape, in IMAGE-LOCAL pixel coordinates — exactly the
+// box an overlay's own <img>/<clipPath> already draws in, BEFORE the placement transform is
+// applied. One mechanism, not two: a rect renders as `inset(...)` (byte-identical to B1134754's
+// original), a polygon as `polygon(evenodd, ...)`. Because the placement transform is applied to
+// the SAME element afterward, the clip rotates/scales/moves with the placement for free either way.
+//
+// SELF-INTERSECTING POLYGON RULE — evenodd, chosen over refuse-to-close: refusing would strand a
+// user mid-draw with only Backspace/Escape to recover from one careless click, which is a worse
+// failure than rendering a well-defined (if unexpected) region. `evenodd` is what CSS computes
+// natively with no extra self-intersection detection on our part, so it costs nothing here and
+// is the SAME rule the crop tool's own live preview mask uses, so what you draw is what you get.
+export function clipPathValueForCrop(crop, imgW, imgH) {
+  if (!crop) return "";
+  if (cropKind(crop) === "poly") {
+    if (!Array.isArray(crop.pts) || crop.pts.length < MIN_POLY_VERTICES) return "";
+    return `polygon(evenodd, ${crop.pts.map(([x, y]) => `${x}px ${y}px`).join(", ")})`;
+  }
+  if (!(imgW > 0) || !(imgH > 0)) return "";
+  const top = Math.max(0, crop.y), left = Math.max(0, crop.x);
+  const right = Math.max(0, imgW - crop.x - crop.w), bottom = Math.max(0, imgH - crop.y - crop.h);
+  return `inset(${top}px ${right}px ${bottom}px ${left}px)`;
+}
