@@ -26633,9 +26633,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <div style={{ fontSize: 11.5, color: PAL.ink, marginBottom: 2 }}>Aisle side</div>
                           <div style={{ fontSize: 10.5, color: PAL.muted, marginBottom: 6 }}>{refCaption}</div>
                           <div style={{ display: "flex", gap: 8 }}>
-                            <AisleSideCard pal={PAL} flipped={false} active={!pc.flipDepth} disabled={flipNoOp} stallDepth={pc.stallDepth} aisle={pc.aisle}
+                            {/* NEW-2 (B1790017 amendment) — flipNoOp disables both cards; disabledReason
+                                puts the SAME reason on the cards' own hover title (LOUD-FAILURE was
+                                previously satisfied only by the paragraph below, never by the controls
+                                themselves — a mouse/keyboard user pointed straight at a dead control got
+                                no explanation from it). */}
+                            <AisleSideCard pal={PAL} flipped={false} active={!pc.flipDepth} disabled={flipNoOp} disabledReason="Stall rows on both edges — nothing to swap at this depth." stallDepth={pc.stallDepth} aisle={pc.aisle}
                               label="Stalls first" sub="Aisle outboard" onClick={() => setFlip(false)} />
-                            <AisleSideCard pal={PAL} flipped={true} active={!!pc.flipDepth} disabled={flipNoOp} stallDepth={pc.stallDepth} aisle={pc.aisle}
+                            <AisleSideCard pal={PAL} flipped={true} active={!!pc.flipDepth} disabled={flipNoOp} disabledReason="Stall rows on both edges — nothing to swap at this depth." stallDepth={pc.stallDepth} aisle={pc.aisle}
                               label="Aisle first" sub="Stalls outboard" onClick={() => setFlip(true)} />
                           </div>
                           {flipNoOp && <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 5, lineHeight: 1.4 }}>This field's depth is a whole number of stall+aisle modules, so both outer edges are already stall rows — flipping wouldn't change anything.</div>}
@@ -27149,7 +27154,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <Field label={selEl.type === "pond" ? "Length (ft)" : "Depth (ft)"}><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
                     </>
                   )}
-                  {!isDockZone(selEl) && !isBuilding(selEl) && !isCenterlineRoad(selEl) && (
+                  {/* B1790016 NEW-1 — car parking ("parking") now carries its own Rotation row inside
+                      the spec sheet's GEOMETRY section above; excluded here so it isn't rendered twice
+                      (was rendering as an orphaned second "Rotation (°)" row below Pin/Delete). */}
+                  {!isDockZone(selEl) && !isBuilding(selEl) && !isCenterlineRoad(selEl) && selEl.type !== "parking" && (
                   <Field label="Rotation (°)">
                     <RotationStepper value={selEl.rot || 0} disabled={!!selEl.locked} disabledReason="Unlock this element to rotate it"
                       onCommit={(deg) => rotateSelTo(deg)}
@@ -30997,7 +31005,11 @@ function PercentField({ value, onCommit, ariaLabel, inputStyle, min = 0, max = 1
 // a picture rather than a bare "far side" checkbox. Module-scope per MODULE-SCOPE-COMPONENTS —
 // it takes the caller's live theme palette as an ordinary prop (`pal`) rather than closing over
 // the panel's own render-body `PAL`, which only exists inside that component.
-function AisleSideCard({ flipped, stallDepth, aisle, active, disabled, onClick, label, sub, pal }) {
+// NEW-2 (B1790017 amendment) — `disabledReason` (same convention as RotationStepper's own prop)
+// replaces the button's ordinary hover title with the reason when `disabled`, so a mouse/keyboard
+// user gets the answer without hunting for the separate paragraph below the cards (LOUD-FAILURE:
+// the disabled state used to change nothing about the button itself, only a caption elsewhere).
+function AisleSideCard({ flipped, stallDepth, aisle, active, disabled, disabledReason, onClick, label, sub, pal }) {
   const total = Math.max(1, (stallDepth || 0) + (aisle || 0));
   const BANDS_H = 46, WALL_H = 7, GAP = 1, W = 78;
   const stallH = Math.max(9, Math.round((stallDepth / total) * BANDS_H));
@@ -31012,8 +31024,9 @@ function AisleSideCard({ flipped, stallDepth, aisle, active, disabled, onClick, 
   });
   const svgH = y;
   const innerX = 2, innerW = W - 4;
+  const title = disabled && disabledReason ? disabledReason : (sub ? `${label} — ${sub}` : label);
   return (
-    <button type="button" aria-pressed={active} disabled={disabled} onClick={onClick} title={sub ? `${label} — ${sub}` : label}
+    <button type="button" aria-pressed={active} disabled={disabled} onClick={onClick} title={title}
       style={{
         flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 5,
         padding: "7px 6px 6px", borderRadius: RADIUS.md, fontFamily: "inherit",
