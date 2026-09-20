@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mergePulledSites, groupCountDivergence, saveSite, loadSite, loadSitesList, loadPlansOfGroup, renameSiteGroup, setSiteGroupRole, deleteSite, repairSplitProjectNames, snapshotVersion, listVersions, getVersion, summarizeVersion, backupNow, pruneMigratedLegacy, isEmptySite, resolveOrCreateTrackedSiteForComp } from "../src/workspaces/site-planner/lib/storage.js";
+import { mergePulledSites, groupCountDivergence, saveSite, loadSite, loadSitesList, loadPlansOfGroup, renameSiteGroup, setSiteGroupRole, deleteSite, repairSplitProjectNames, snapshotVersion, listVersions, getVersion, summarizeVersion, backupNow, pruneMigratedLegacy, isEmptySite, resolveOrCreateTrackedSiteForComp, setScheduleLink, scheduleLinkOf } from "../src/workspaces/site-planner/lib/storage.js";
 import { mergeSiteContent, contentCount, createSiteModel } from "../src/workspaces/site-planner/lib/siteModel.js";
 import { idbAvailable } from "../src/workspaces/site-planner/lib/localDb.js";
 
@@ -779,6 +779,63 @@ describe("renameSiteGroup — renames the whole site by group id OR any plan id 
     expect(repairSplitProjectNames().changed).toBe(0);
     expect(loadSite("alpha").site).toBe("Alpha");
     expect(loadSite("beta").site).toBe("Beta");
+  });
+});
+
+// NEW-1 (B1793504, 2026-09-20) — scheduleLinkOf's `name` used to be the frozen
+// `scheduleProjectName` write-time snapshot, which rename_site_group() never re-mirrors on an
+// ordinary rename. Fixed to derive from the group's own current name instead — proving the fix
+// requires renaming the group AFTER a schedule link and checking scheduleLinkOf still answers
+// with the live name, not the pre-rename hint.
+describe("scheduleLinkOf — derives the current name, never the frozen scheduleProjectName snapshot", () => {
+  beforeEach(() => {
+    const store = {};
+    globalThis.localStorage = {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; },
+      clear: () => { for (const k of Object.keys(store)) delete store[k]; },
+      key: (i) => Object.keys(store)[i] ?? null,
+      get length() { return Object.keys(store).length; },
+    };
+  });
+
+  it("returns the link with the group's current name right after linking", () => {
+    saveSite({ id: "g1", groupId: "g1", site: "Goose Creek" });
+    setScheduleLink("g1", { scheduleProjectId: 30, name: "Goose Creek" });
+    expect(scheduleLinkOf("g1")).toEqual({ scheduleProjectId: 30, name: "Goose Creek" });
+  });
+
+  it("⛔ the real B1768080 shape: a rename AFTER the link is reflected immediately, never the\n" +
+     "     stale snapshot rename_site_group() never touches", async () => {
+    saveSite({ id: "g1", groupId: "g1", site: "Goose Creek" });
+    setScheduleLink("g1", { scheduleProjectId: 30, name: "Goose Creek" });
+    await renameSiteGroup("g1", "MUD v PID");
+    // the stored hint itself is untouched (rename_site_group only writes site/data.site/siteRenamedAt)…
+    expect(loadSite("g1").scheduleProjectName).toBe("Goose Creek");
+    // …but the accessor built for display never surfaces that stale copy.
+    expect(scheduleLinkOf("g1")).toEqual({ scheduleProjectId: 30, name: "MUD v PID" });
+  });
+
+  it("mutation control: reading the stored scheduleProjectName directly WOULD show the stale name\n" +
+     "     — proving this test can actually see the bug the fix closes", async () => {
+    saveSite({ id: "g1", groupId: "g1", site: "Goose Creek" });
+    setScheduleLink("g1", { scheduleProjectId: 30, name: "Goose Creek" });
+    await renameSiteGroup("g1", "MUD v PID");
+    expect(loadSite("g1").scheduleProjectName).not.toBe(scheduleLinkOf("g1").name);
+  });
+
+  it("returns null when the group has no linked schedule", () => {
+    saveSite({ id: "g1", groupId: "g1", site: "Woods Road" });
+    expect(scheduleLinkOf("g1")).toBeNull();
+  });
+
+  it("mirrors the link onto every plan in a multi-plan group", () => {
+    saveSite({ id: "g1", groupId: "g1", site: "Bain", name: "Concept A" });
+    saveSite({ id: "p2", groupId: "g1", site: "Bain", name: "Concept B" });
+    setScheduleLink("g1", { scheduleProjectId: 7, name: "Bain" });
+    expect(scheduleLinkOf("g1")).toEqual({ scheduleProjectId: 7, name: "Bain" });
+    expect(loadSite("p2").scheduleProjectId).toBe(7);
   });
 });
 
