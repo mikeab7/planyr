@@ -10560,7 +10560,9 @@ records its own live verify" mechanism) or a future sandbox with different egres
 9. Repeat step 4 once on the RIGHT grip, both directions. **Expect:** unchanged behaviour — the words never move for a right-edge drag either.
 10. Delete both duplicates and say exactly what was created and removed.
 
-**Result:** ⏳ pending — needs a signed-in browser on his own account with his own Custom-width page; not reachable from this sandbox (the proxy CORS-blocks the Supabase auth handshake). `Cadence: once`.
+**⛔ CONFIRMED LIVE ON planyr.io, LOGGED OUT, 2026-09-20 — MERGED *and* LIVE, which are different claims and are stated separately on purpose.** Driven with a real mouse against production **after** the merge deployed (served chunks `index-BU2A-wMo.js` + the Notes lazy chunk, read in the SAME session as the assertions per this repo's live-measurement rule — and production had redeployed between a check minutes earlier and this run, which is exactly the staleness that rule exists to catch). Every page width that drifted before the fix: **440 → 0 · 505 → 0 · 560 → 0 · unpinned → 0**, net, max and after release, with the page's own left border travelling the full drag distance on each (140 / 138 / 138 / 138) while the words held. No JS errors. **Non-vacuous:** the known-good arm reported its known value (a deliberate 40px scroll moved the body exactly −40), and the moving border is a second, independent liveness signal — a frozen sampler cannot report a travelling border beside stationary words.
+
+**Result:** ⏳ pending — the LOGGED-OUT half is done and passed live on production (above). What remains is the one thing no logged-out run can reach: **his own page's stored Custom width**, which decides whether the page he reported on was inside the affected band at all. Needs a signed-in browser on his own account; not reachable from this sandbox (the proxy CORS-blocks the Supabase auth handshake). `Cadence: once`.
 
 ## ✅ Verified / ❌ Failed — history
 
