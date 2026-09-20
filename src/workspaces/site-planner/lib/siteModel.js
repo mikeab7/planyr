@@ -1217,9 +1217,15 @@ export function createSiteModel(p = {}, { onHeal } = {}) {
     // (`linkedSiteId`). This is a lightweight MIRROR of that pairing kept on the site so the
     // Site Planner can answer "does this site have a schedule?" instantly — without booting the
     // hidden Schedule iframe. `scheduleProjectId` = the schedule's numeric project id;
-    // `scheduleProjectName` = its name cached for display. Both null = no linked schedule
-    // (every existing record). Never the source of truth — the Shell re-mirrors it whenever the
-    // schedule reports a link change, so a stale hint self-heals on the next visit.
+    // `scheduleProjectName` = a WRITE-ONCE SNAPSHOT (B1768080 traced it to the SITE's own name at
+    // the moment the link was made, never the schedule's own name). Both null = no linked schedule
+    // (every existing record). ⛔ Never the source of truth, and — corrected 2026-09-20 — it does
+    // NOT self-heal on an ordinary rename: `rename_site_group()` writes `site`/`data.site`/
+    // `siteRenamedAt` only, so this field goes stale the moment the site is renamed and stays
+    // stale until the Shell next mirrors a genuine link-change event. Never read this field
+    // directly for display — `storage.scheduleLinkOf()` is the safe accessor (derives the current
+    // name from the same group instead of trusting this snapshot); this field exists on the model
+    // purely so the model round-trips whatever is actually stored.
     scheduleProjectId: p.scheduleProjectId != null ? p.scheduleProjectId : null,
     scheduleProjectName: p.scheduleProjectName || null,
     // geo anchor + jurisdiction
