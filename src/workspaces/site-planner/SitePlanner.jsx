@@ -475,7 +475,7 @@ import {
 import { siteState as resolveSiteState } from "./lib/siteRegion.js";
 import { splitPolygonByCut, remapEdgeVector } from "./lib/polygonSplit.js";
 import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea } from "./lib/polyClip.js";
-import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom } from "./lib/sheetFurniture.js";
+import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom, mapChromeCardStyle } from "./lib/sheetFurniture.js";
 // B765985 — pure, dependency-free (safe on the boot path): the explicit engineering-scale math
 // the compose screen's frame-locking and fit-check use.
 import { scaleLabel, frameFootprintForScale, checkScaleFits } from "./lib/printScale.js";
@@ -24642,8 +24642,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
             return (
               <div data-export="skip" style={{ position: "absolute", left: 0, right: 0, bottom: 0, top: 0, pointerEvents: "none", zIndex: MAP_CHROME_Z.furniture }}>
-                <div style={{ position: "absolute", left: 14, bottom: FURNITURE_ROW }}>{plate(furn.north)}</div>
-                <div style={{ position: "absolute", right: 14, bottom: FURNITURE_ROW }}>{plate(furn.scaleBar)}</div>
+                <div data-testid="north-arrow-plate" style={{ position: "absolute", left: 14, bottom: FURNITURE_ROW }}>{plate(furn.north)}</div>
+                <div data-testid="scale-bar-plate" style={{ position: "absolute", right: 14, bottom: FURNITURE_ROW }}>{plate(furn.scaleBar)}</div>
               </div>
             );
           })()}
@@ -25027,11 +25027,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* calibration / accuracy badge (bottom-left; B609 removed the status bar so the badge now floats 40px above the canvas edge) */}
           {(() => {
+            // NEW-1 (B1795456, owner-reviewed mockup "option B") — SUPERSEDES B1610641 below. The
+            // badge used to paint the whole container in a solid state colour (green/amber/dark)
+            // and prefix the text with a "●"/"▲" glyph — a second, purely decorative dot echoing
+            // the colour-coded dot span right beside it, not a second piece of state (the same
+            // colour + the `warn` pulse already carries that distinction; nothing is dropped by
+            // removing it). That made this the one map-overlay control that didn't match the
+            // scale bar / compass / help / zoom chrome, and its label read heavier and larger than
+            // every other control on the map. The container now reads the SAME chrome surface the
+            // scale-bar card itself renders (`mapChromeCardStyle` — extracted off scaleBarPlate's
+            // own fill/line/radius so a DOM badge can't drift from the SVG plate beside it) in
+            // every state; state is carried entirely by the dot (untouched: size, colour, pulse)
+            // plus a two-tone label — primary in `PAL.ink`, a secondary clause a step lighter in
+            // `PAL.muted` across a hairline `PAL.panelLine` divider — never a raw hex.
             const cfg = {
-              georef: { bg: "rgba(22,101,52,0.92)", dot: "#4ade80", text: "● Scaled · county GIS", sub: null },
-              calibrated: { bg: "rgba(22,101,52,0.92)", dot: "#4ade80", text: "● Scaled · calibrated", sub: mapRef ? `1 px = ${f2(mapRef.ftPerPx)} ft` : null },
-              drawn: { bg: "rgba(40,37,33,0.92)", dot: "#cbd5e1", text: "● True scale · drawn in feet", sub: null },
-              uncalibrated: { bg: "rgba(180,83,9,0.95)", dot: "#fbbf24", text: "▲ Not calibrated", sub: "click to calibrate" },
+              georef: { dot: "#4ade80", label: "Scaled", detail: "county GIS" },
+              calibrated: { dot: "#4ade80", label: "Scaled", detail: "calibrated", sub: mapRef ? `1 px = ${f2(mapRef.ftPerPx)} ft` : null },
+              drawn: { dot: "#cbd5e1", label: "True scale", detail: "drawn in feet" },
+              uncalibrated: { dot: "#fbbf24", label: "Not calibrated", detail: "click to calibrate" },
             }[calibrationState];
             const warn = calibrationState === "uncalibrated";
             // NEW-1 (B881): when a docked left panel narrows the map pane, the badge (left:56)
@@ -25040,20 +25053,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // controls above, which start at bottom:100), and cap its width so it truncates with
             // an ellipsis instead of overflowing the pane. Wide panes keep the original layout.
             const badgeMaxW = calibPlace.maxWidth ?? undefined;
+            // ⛔ B1610641 — SUPERSEDED by B1795456 above; RADIUS.pill (a fully-rounded capsule) was
+            // itself the thing the owner flagged as wrong ("much tighter rounded-rectangle radius,
+            // this is the specific thing … get it exactly right"). `chrome.borderRadius` below is
+            // the scale-bar card's own rendered corner radius (`furnitureMetrics` at the SAME
+            // reference size the on-screen furniture already uses), not a second guess at a number.
+            const chrome = mapChromeCardStyle(PAL);
+            const dividerH = Math.round(chrome.fontSize + 2);
             return (
               <div onClick={warn && mapRef ? () => { setShowAerial(true); setLeftPanel("references"); setSelOverlay(mapRef.id); setOvCalib({ id: mapRef.id, kind: "trace", pts: [] }); } : undefined}
-                // B1610641 — was a bare `99`; RADIUS.pill (999, this file's own imported scale —
-                // "fully rounded — status dots, toggle chips, and any bar whose height IS its
-                // shape", radius.js's own words for exactly this element) is the token every other
-                // genuine pill in the app names explicitly. Both clamp to the identical rendered
-                // stadium shape at this badge's height (border-radius past half the box height is
-                // clamped by the browser either way — verified with a live render, byte-identical
-                // pixels), so this is a token-compliance fix, not a visual one; it stops this badge
-                // being the one pill in the app that names its own magic number instead of the scale.
-                style={{ position: "absolute", left: calibPlace.left, bottom: calibPlace.bottom, maxWidth: badgeMaxW, display: "flex", alignItems: "center", gap: 8, background: cfg.bg, color: "#fff", padding: "5px 11px", borderRadius: RADIUS.pill, fontSize: 11.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.22)", cursor: warn ? "pointer" : "default", zIndex: MAP_CHROME_Z.furniture, overflow: "hidden" }}>
+                data-testid="calibration-badge"
+                style={{
+                  position: "absolute", left: calibPlace.left, bottom: calibPlace.bottom, maxWidth: badgeMaxW,
+                  display: "flex", alignItems: "center", gap: 8,
+                  background: chrome.background, border: `${chrome.borderWidth}px solid ${chrome.borderColor}`, borderRadius: chrome.borderRadius,
+                  padding: "5px 11px", fontSize: chrome.fontSize,
+                  cursor: warn ? "pointer" : "default", zIndex: MAP_CHROME_Z.furniture, overflow: "hidden",
+                }}>
                 <span style={{ width: 7, height: 7, borderRadius: 99, background: cfg.dot, flex: "none", animation: warn ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
                 <span ref={calibBadgeRef} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {cfg.text}{cfg.sub && <span style={{ fontWeight: 400, opacity: 0.85, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>· {cfg.sub}</span>}
+                  <span style={{ color: PAL.ink, fontWeight: 600 }}>{cfg.label}</span>
+                  {cfg.detail && (
+                    <>
+                      <span aria-hidden="true" style={{ display: "inline-block", width: 1, height: dividerH, verticalAlign: "middle", margin: "0 7px", background: PAL.panelLine }} />
+                      <span style={{ color: PAL.muted, fontWeight: 500 }}>
+                        {cfg.detail}
+                        {cfg.sub && <span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}> · {cfg.sub}</span>}
+                      </span>
+                    </>
+                  )}
                 </span>
               </div>
             );

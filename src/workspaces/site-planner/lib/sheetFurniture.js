@@ -106,6 +106,16 @@ const fmtTick = (n, fmt) => (Number.isInteger(n) ? fmt(n) : String(n));
 // — the PDF/PNG export, deliberately, so a printed sheet never goes dark with the app — falls
 // back to this fixed light constant, same as `ink`/`muted`/`panelLine` already did.
 const PLATE_FILL = "rgba(249,248,244,0.84)";
+const PANEL_LINE_FALLBACK = "#cfc6af";
+
+// B1795456 (NEW-1) — the plate's fill/border colour, factored out of scaleBarPlate/
+// northArrowPlate (which used to duplicate this exact fallback pair) so a THIRD
+// consumer — a DOM chrome badge that can't draw an SVG rect — can read the same two
+// values instead of re-guessing them. Colour only; a plate's radius/stroke-width also
+// depend on its own `m` (refS-scaled), which is why those stay in `furnitureMetrics`.
+function chromeCardColors(pal = {}) {
+  return { fill: pal.plateFill || PLATE_FILL, line: pal.panelLine || PANEL_LINE_FALLBACK };
+}
 
 // Graphic scale bar drawn with its plate top-left at the local origin. Alternating
 // black/white segments, tick marks at 0 / midpoint / max with numbers centered
@@ -114,8 +124,7 @@ const PLATE_FILL = "rgba(249,248,244,0.84)";
 export function scaleBarPlate({ lengthU, feet, m, pal = {}, fmtFeet = (n) => String(Math.round(n)) }) {
   const ink = pal.ink || "#2c2a26";
   const muted = pal.muted || "#8a8473";
-  const line = pal.panelLine || "#cfc6af";
-  const plate = pal.plateFill || PLATE_FILL;
+  const { fill: plate, line } = chromeCardColors(pal);
   const seg = lengthU / 4;
   const padX = Math.max(m.pad, m.fs * 1.4); // room for the end labels to overhang the bar
   const barTop = m.pad, barBot = barTop + m.barTh;
@@ -152,8 +161,7 @@ export function scaleBarPlate({ lengthU, feet, m, pal = {}, fmtFeet = (n) => Str
 // Returns { markup, plateW, plateH }.
 export function northArrowPlate({ m, pal = {}, bearingDeg = 0 }) {
   const ink = pal.ink || "#2c2a26";
-  const line = pal.panelLine || "#cfc6af";
-  const plate = pal.plateFill || PLATE_FILL;
+  const { fill: plate, line } = chromeCardColors(pal);
   const contentW = Math.max(m.arrowW, m.nFs * 0.8);
   const plateW = contentW + 2 * m.pad;
   const nBase = m.pad + m.nFs; // "N" baseline
@@ -261,4 +269,25 @@ export function screenFurniturePlates({
   const sb = scaleBarPlate({ lengthU, feet, m, pal, fmtFeet });
   const na = northArrowPlate({ m, pal, bearingDeg });
   return { scaleBar: sb, north: na }; // each: { markup, plateW, plateH }
+}
+
+// ── The map-chrome CARD, in CSS terms (B1795456) ────────────────────────────
+// scaleBarPlate/northArrowPlate paint their "card" look as SVG fill+stroke+rx — fine
+// for content drawn INSIDE the furniture SVG, but a DOM overlay that isn't an SVG
+// plate (the calibration/accuracy badge; any future one) can't read an SVG attribute.
+// This is the one function such an overlay calls instead of re-picking its own
+// background/border/radius: same colours (`chromeCardColors`, above — the exact
+// fallback pair scaleBarPlate/northArrowPlate already read) and the same corner
+// radius the on-screen furniture actually renders at (`furnitureMetrics` at the
+// SAME reference size `screenFurniturePlates` itself defaults to — not a separate
+// guess), so a DOM badge can be proven to match the plate beside it rather than
+// merely resemble it. Border WIDTH is a plain CSS 1px — the plate's own hairline
+// stroke is an SVG-space value (`m.plateStroke`, sub-pixel by design) tuned for
+// vector rendering, not a CSS border-width; 1px is the width every OTHER DOM chrome
+// hairline in this file already renders at. Pure → unit-testable.
+export const MAP_CHROME_REF_S = 540; // == screenFurniturePlates' own default `refS`
+export function mapChromeCardStyle(pal = {}) {
+  const { fill, line } = chromeCardColors(pal);
+  const { rx, fs } = furnitureMetrics(MAP_CHROME_REF_S);
+  return { background: fill, borderColor: line, borderWidth: 1, borderRadius: r2(rx), fontSize: r2(fs) };
 }
