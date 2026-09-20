@@ -10536,6 +10536,24 @@ records its own live verify" mechanism) or a future sandbox with different egres
 
 **Result:** ⏳ pending — needs a real signed-in browser session against a throwaway duplicate of the owner's real plan; not reachable from this sandbox. `Cadence: once`.
 
+### V1279904 — B1801040: on HIS own Custom-width Notes page, widening from the left grip moves only the page's border — the words do not creep right `Blocker: real-data`
+
+**Why this needs a real pass even though the fix is red-then-green proven headless.** Everything a logged-out sandbox can prove is proven: the defect was reproduced at six starting widths × four grip/direction combinations, measured (a 138px left-grip widen drifted the body **+140px** on a 440 page, **+75** on 505, **+20** on 560, **0** at or above the natural card), fixed, and re-measured at **0.00** everywhere, with the harness going 213/27 → 240/0 across the change. What the sandbox cannot supply is **one fact about his own page: its stored width.** He reported this on a page at "Custom", and the stored number decides whether he was inside the affected band at all — a Custom width at or above the natural card was never affected by this defect, which would mean he is seeing something else and this fix does not reach him. STANDING RULE #2: an owner-reported symptom is not closed on a reproduction of *a* matching defect, only on his instance of it.
+
+**Steps, each with a named expected result — on a THROWAWAY DUPLICATE of a real Notes page, never one of his real pages, per the owner's own standing rule:**
+1. On his signed-in browser, open the page he reported this on. In the console, read its stored width and the pane width in the SAME observation: `document.querySelector('[data-testid="note-sheet"]').getBoundingClientRect().width` and `document.querySelector('[data-testid="note-mat"]').clientWidth`. **Expect:** two numbers. Record both verbatim — they are what a further round would start from, and they settle whether his page was inside the affected band (sheet width below roughly `paneWidth/2 + 290`) or not.
+2. Read the served chunk hash in the same observation (`[...document.querySelectorAll('script[src]')].map(s => s.src)`), per this repo's live-measurement rule, and confirm the build postdates this fix's merge. **Expect:** a hash that is not `27671fa`'s.
+3. Duplicate the page. On the duplicate, put the caret on a line of body text and note where a word sits relative to something fixed on screen (the toolbar, the window edge). **Expect:** a stable reference point.
+4. Drag the page's LEFT edge grip slowly outward (leftward), the way he did — a slow, hand-paced drag of a couple of hundred pixels, not one fast flick. **Expect:** the page's left border moves outward with the pointer and opens blank space; **every word stays exactly where it was**, with no rightward creep, no stepping, and no judder in either direction.
+5. Without releasing, drag slowly back inward and out again a few times. **Expect:** the words never move at any point in the gesture; only the border does.
+6. Release. **Expect:** nothing jumps on release — the words are where they were, and the page is the width the grip was left at.
+7. Reload the page. **Expect:** the words are still where they were relative to the page's own left border, and the page is still the width it was left at. (This is the half the previous mechanism could not do — it held the words with a scroll, which a reload does not restore.)
+8. Repeat steps 3–7 on a SECOND duplicate pinned to **Narrow** from the page-width menu, which is the widest instance of the old defect (it drifted 140px). **Expect:** identical — border moves, words do not.
+9. Repeat step 4 once on the RIGHT grip, both directions. **Expect:** unchanged behaviour — the words never move for a right-edge drag either.
+10. Delete both duplicates and say exactly what was created and removed.
+
+**Result:** ⏳ pending — needs a signed-in browser on his own account with his own Custom-width page; not reachable from this sandbox (the proxy CORS-blocks the Supabase auth handshake). `Cadence: once`.
+
 ## ✅ Verified / ❌ Failed — history
 
 > Passed/failed items are archived to **`VERIFICATION-DONE.md`** to keep this file fast.

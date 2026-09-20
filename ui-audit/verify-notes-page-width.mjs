@@ -802,6 +802,315 @@ console.log("\n[20] Frame-by-frame: body text is rock-steady across the whole dr
   await page.setViewportSize({ width: 1500, height: 950 });
 }
 
+
+/* ═══════ CASE 21 — B<PENDING>: the words do not move AT ALL over a LONG, MANY-SMALL-STEP drag,
+ * and they are still where they started once the pointer is released ═════════════════════════
+ * Owner report 2026-09-18, round TWO on the same grip. Round one (case 20 above) removed a real
+ * double-compensation and he confirmed the gross shaking is gone — but he still reported the page
+ * content creeping RIGHT, in small discrete steps, while widening from the LEFT grip, verbatim:
+ * *"it doesn't shake nearly as much anymore, but it does move ever so slightly to the right … in
+ * little intervals … when I expand the page to the left, it slides to the right."*
+ *
+ * ⛔ WHY CASE 20 WAS HONESTLY GREEN OVER IT, which is the whole reason this case exists and is the
+ * first thing to understand before changing either one. Case 20's instrument is not the problem —
+ * it samples every step of a real mouse drag with a deliberately uneven cadence and it is right to.
+ * Its hole is its FIXTURE: all three of its starting widths — unpinned (the natural 580 card),
+ * Wide (900), and a custom width reached by dragging 137px wider (717) — sit at or ABOVE the
+ * natural card width by construction. That is exactly the band in which this defect cannot occur,
+ * so every arm reported a truthful 0.00 while the defect was live one pixel below their floor.
+ * Not step count, not step size, not rounding, not device pixel ratio: all four were measured
+ * directly against the deployed build and all four came back clean (60 one-pixel steps, 120 steps,
+ * deviceScaleFactor 1 / 1.5 / 2.15 — every combination 0.00). The variable was WHICH PAGE.
+ *
+ * ⛔ THE MECHANISM, measured rather than reasoned. The left grip opens its blank margin INSIDE the
+ * sheet, so the body genuinely moves right inside the scroller's content, and the only thing
+ * holding the words still on screen is a compensating scroll. A scroll is a BOUNDED resource: when
+ * the mat's content is narrower than the pane there is no overflow at all, the write is clamped to
+ * zero, and the words slide right by exactly what could not be spent. Nothing notices, because the
+ * compensation compares CONTENT-space positions and never the achieved screen position — so the
+ * loss is permanent, and it is discrete, one bite per pointermove, which is what "in little
+ * intervals" describes. Instrumented on the pre-fix build, the mat's own `scrollLeft` setter
+ * recorded `{ before: 0, want: 140, got: 0, max: 0 }`: the browser silently refused the whole
+ * compensation. Drift measured on the pre-fix build, at this case's own 138px drag:
+ *     stored width 440 → +140px · 505 → +75px · 560 → +20px · 717 → 0 · 900 → 0 · unpinned → 0
+ * i.e. exactly `paneWidth − 2 × gutter − pageWidth`, the mat's own slack, and zero the moment the
+ * page is wide enough to have any horizontal overflow to scroll into. See `matSidePads`
+ * (workspaces/notes/lib/notesPageWidth.js) for the fix — the pad is spent out of the mat's own
+ * gutter first, so the body's content-space position never moves and there is nothing for a
+ * clamped scroll to lose.
+ *
+ * ⛔ WHAT THIS CASE ASSERTS THAT CASE 20 DOES NOT, per this item's own acceptance bar:
+ *   · a LONG drag in DOZENS of small hand-sized steps, not twenty large ones;
+ *   · the NET displacement first sample → last, as well as the max deviation, both printed for
+ *     every arm — a monotonic creep and an oscillation are different defects and a single
+ *     max-deviation number cannot tell you which one you are looking at;
+ *   · all FOUR directions (he reported one), so a fix cannot close his case and leave the others;
+ *   · starting widths BELOW the natural card as well as at and above it — including a page at a
+ *     genuinely CUSTOM stored width, which is what his repro page is;
+ *   · the drag committed the width the grip was actually dragged to (B1740688 — the pad must not
+ *     be counted twice on release), and the body did not move on release either (B1775312).
+ *
+ * ⛔ AND IT CARRIES A KNOWN-GOOD ARM, because a probe that reports "0.00, nothing moved" is
+ * indistinguishable from a probe that cannot see the body at all — DRIVER-SCROLL-IS-NOT-APP-SCROLL
+ * §6, and the exact asymmetry this repo keeps paying for: every discipline here proves a guard can
+ * go RED on broken code and nothing forces one to go GREEN on working code. `proveSamplerSees`
+ * scrolls the mat by a known amount and REQUIRES the sampler to report the body moving by exactly
+ * that much; `liveness` requires each drag to have actually changed the sheet's width by about the
+ * distance dragged. A run that fails either declares itself VOID rather than printing a score. */
+console.log("\n[21] Long many-small-step drags — NET displacement as well as max deviation, all four directions:");
+{
+  // Same deliberately wide window as case 20, for the same reason: NEW-7's window-edge auto-scroll
+  // is a real, correct, unrelated feature that moves the body along with the camera, and a narrow
+  // window puts the RIGHT grip inside its margin before the drag even starts (measured at 1191:
+  // a right-grip drag from a 700px page reported −291px of "drift" that was purely that pan).
+  await page.setViewportSize({ width: 2200, height: 950 });
+  const LINE = "The quick brown fox jumps over the lazy dog, over and over, to give this line real width to watch move.";
+
+  /* 60 steps, 1–4px each, 138px total — a real hand's cadence. Uneven for case 20's own reason
+   * (a uniform step size cancels the previous round's error term exactly), and SMALL because this
+   * item's brief named event count as the untested variable. It is not what exposed this defect —
+   * that was the fixture — but a long fine-grained drag is strictly the stronger instrument and it
+   * is what a slow real drag actually looks like. */
+  const LONG_STEPS = Array.from({ length: 60 }, (_, i) => [2, 3, 1, 4, 2, 3, 2, 1, 3, 2][i % 10]);
+  const LONG_TRAVEL = LONG_STEPS.reduce((a, b) => a + b, 0);
+
+  /* Re-queried every sample, never held as a handle: ProseMirror replaces the paragraph node on
+   * its own schedule and a detached node's rect reads as all zeros, which looks exactly like a
+   * body that slid to the far left (seen, on an earlier draft of this probe). `attached` is
+   * asserted so that can never be read as a measurement. */
+  async function bodyRect() {
+    return page.evaluate(() => {
+      const el = document.querySelector('[data-testid="note-body"] p');
+      if (!el || !el.isConnected) return { attached: false, left: NaN, top: NaN };
+      const r = el.getBoundingClientRect();
+      const sheet = document.querySelector('[data-testid="note-sheet"]').getBoundingClientRect();
+      const mat = document.querySelector('[data-testid="note-mat"]');
+      return {
+        attached: r.width > 0,
+        left: r.left, top: r.top,
+        sheetLeft: sheet.left, sheetRight: sheet.right, sheetWidth: sheet.width,
+        scrollLeft: mat.scrollLeft, maxScroll: mat.scrollWidth - mat.clientWidth,
+      };
+    });
+  }
+
+  /* KNOWN-GOOD ARM. Its answer is known independently of anything under test: scroll a scroller by
+   * N and whatever is inside it moves N the other way. If this does not report that, the sampler
+   * is blind and every 0.00 below is worthless. */
+  async function proveSamplerSees() {
+    const before = await bodyRect();
+    const moved = await page.evaluate(() => {
+      const mat = document.querySelector('[data-testid="note-mat"]');
+      const room = mat.scrollWidth - mat.clientWidth;
+      if (room < 40) return 0;                      // nothing to scroll: this arm cannot run here
+      mat.scrollLeft = 40;
+      return mat.scrollLeft;
+    });
+    if (!moved) return { ran: false };
+    await pacedWait(page, 80);
+    const after = await bodyRect();
+    await page.evaluate(() => { document.querySelector('[data-testid="note-mat"]').scrollLeft = 0; });
+    await pacedWait(page, 80);
+    return { ran: true, expected: -moved, observed: Math.round(after.left - before.left) };
+  }
+
+  /* One small, uneven, real-mouse step at a time — never Playwright's own `steps:` interpolation,
+   * which returns only after the whole move and gives nothing to sample in between. Paced with the
+   * MessageChannel `pacedWait` (FOREGROUND-OR-VOID), never a raw timeout inside a timed section. */
+  async function longDrag(gripSelector, direction) {
+    const grip = await page.evaluate((sel) => {
+      const g = document.querySelector(sel);
+      if (!g) return null;
+      const r = g.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    }, gripSelector);
+    if (!grip) return null;
+    await page.mouse.move(grip.x, grip.y);
+    await page.mouse.down();
+    await pacedWait(page, 60);
+    const samples = [await bodyRect()];
+    let x = grip.x;
+    for (const step of LONG_STEPS) {
+      x += direction * step;
+      await page.mouse.move(x, grip.y);
+      await pacedWait(page, 12);
+      samples.push(await bodyRect());
+    }
+    const lastHeld = samples[samples.length - 1];
+    await page.mouse.up();
+    await pacedWait(page, 900);            // past the 600ms autosave debounce, so the commit is readable
+    const released = await bodyRect();
+    const x0 = samples[0].left;
+    let maxDev = 0;
+    for (const s of samples) if (Math.abs(s.left - x0) > Math.abs(maxDev)) maxDev = s.left - x0;
+    return {
+      samples, released,
+      net: +(lastHeld.left - x0).toFixed(2),
+      max: +maxDev.toFixed(2),
+      onRelease: +(released.left - x0).toFixed(2),
+      startSheet: +samples[0].sheetWidth.toFixed(1),
+      endSheet: +lastHeld.sheetWidth.toFixed(1),
+      releasedSheet: +released.sheetWidth.toFixed(1),
+      startSheetLeft: +samples[0].sheetLeft.toFixed(1),
+      endSheetLeft: +lastHeld.sheetLeft.toFixed(1),
+      everyAttached: samples.every((s) => s.attached) && released.attached,
+    };
+  }
+
+  // 1px of real antialiasing/layout noise across a live gesture — never a budget wide enough to
+  // hide the reported defect, whose smallest measured instance on the pre-fix build was 20px.
+  const NET_TOLERANCE = 1.0;
+  const LEFT = '[data-testid="note-page-width-grip-left"]';
+  const RIGHT = '[data-testid="note-page-width-grip-right"]';
+
+  /* Starting widths chosen so the fixture spans BOTH sides of the boundary case 20's three arms
+   * all sat on. 505 and 560 are genuinely custom stored numbers — no preset resolves to either —
+   * which is the shape of his own repro page. */
+  const STARTS = [
+    { label: "Narrow preset (440) — below the natural card", width: 440 },
+    { label: "custom 505 — below the natural card", width: 505 },
+    { label: "custom 560 — just below the natural card", width: 560 },
+    { label: "unpinned (Fit to content) — at the natural card", width: null },
+    { label: "custom 717 — above the natural card", width: 717 },
+    { label: "Wide preset (900) — well above", width: 900 },
+  ];
+  const ARMS = [
+    { name: "LEFT widen", sel: LEFT, dir: -1, widens: true },
+    { name: "LEFT narrow", sel: LEFT, dir: 1, widens: false },
+    { name: "RIGHT widen", sel: RIGHT, dir: 1, widens: true },
+    { name: "RIGHT narrow", sel: RIGHT, dir: -1, widens: false },
+  ];
+
+  /* The natural card width at THIS window, measured off a real unpinned page rather than
+   * re-derived from the app's own constants — DRIVER-SCROLL-IS-NOT-APP-SCROLL §6: an instrument
+   * that reproduces the code's own arithmetic can only ever confirm the code agrees with itself.
+   * It is the content floor every drag is clamped against, and the boundary the whole fixture is
+   * chosen to straddle. */
+  await seed({ type: "doc", content: [p(LINE)] }, "Natural card width");
+  const naturalCard = Math.round((await bodyRect()).sheetWidth);
+  console.log(`  (natural card at this window, measured: ${naturalCard}px — the content floor every drag clamps against)`);
+
+  for (const start of STARTS) {
+    console.log(`  -- starting width: ${start.label} --`);
+    for (const arm of ARMS) {
+      const doc = { type: "doc", content: [p(LINE)] };
+      if (start.width != null) doc.attrs = { pageWidth: start.width };
+      await seed(doc, `Long drag — ${start.label}`);
+
+      const sees = await proveSamplerSees();
+      if (sees.ran && Math.abs(sees.observed - sees.expected) > 1) {
+        ok(`${start.label} / ${arm.name} — KNOWN-GOOD ARM: a known 40px scroll moves the body 40px`,
+          false, `VOID: expected ${sees.expected}, observed ${sees.observed} — the sampler is not seeing the body, every drift reading in this arm is worthless`);
+        continue;
+      }
+
+      const r = await longDrag(arm.sel, arm.dir);
+      if (!r) { ok(`${start.label} / ${arm.name} — grip exists`, false, "grip not rendered"); continue; }
+
+      const detail = `net ${r.net} · max ${r.max} · on release ${r.onRelease} · sheet ${r.startSheet}→${r.endSheet}→${r.releasedSheet} · sheet left ${r.startSheetLeft}→${r.endSheetLeft}`;
+
+      /* VACUITY GUARD — and it is a PREDICTION, not a "did anything happen at all" shrug. The
+       * page must land at `max(content floor, width at mousedown ± the distance actually
+       * travelled)`, where the floor is the natural card (`widthContentFloorRef`, documented, and
+       * measured independently above rather than re-derived from the app's own formula). That
+       * refuses three different worthless readings at once: a drag the grip never received (no
+       * change), a drag the harness under- or over-drove (wrong magnitude), and the one case a
+       * bare "it changed" test would wave through — a NARROWING drag on a page already sitting on
+       * its floor, which correctly cannot narrow and must be asserted as holding rather than
+       * skipped. `everyAttached` refuses a reading taken off a detached paragraph node, whose rect
+       * is all zeros and reads exactly like a body that slid to the far left. */
+      const expectedEnd = Math.max(naturalCard, r.startSheet + (arm.widens ? LONG_TRAVEL : -LONG_TRAVEL));
+      ok(`${start.label} / ${arm.name} — the page ended exactly where the drag put it (not a vacuous reading)`,
+        r.everyAttached && Math.abs(r.endSheet - expectedEnd) <= 2,
+        `${detail} · expected end ${expectedEnd} (floor ${naturalCard})`);
+
+      /* THE ASSERTION THIS CASE EXISTS FOR — the NET creep, first sample to last, which a max
+       * deviation alone cannot separate from an oscillation. */
+      ok(`${start.label} / ${arm.name} — words do not creep: NET displacement ≤ ${NET_TOLERANCE}px`,
+        Math.abs(r.net) <= NET_TOLERANCE, detail);
+
+      /* B1775312 — no judder: no sample anywhere in the gesture left the start position either. */
+      ok(`${start.label} / ${arm.name} — no judder: max deviation across all ${r.samples.length} samples ≤ ${NET_TOLERANCE}px`,
+        Math.abs(r.max) <= NET_TOLERANCE, detail);
+
+      /* B1740688 — releasing must not re-derive the width with the pad counted a second time, and
+       * must not move the words either. */
+      ok(`${start.label} / ${arm.name} — release does not jump the words (B1775312/B1740688)`,
+        Math.abs(r.onRelease) <= NET_TOLERANCE, detail);
+      ok(`${start.label} / ${arm.name} — release does not re-derive the sheet's width (B1740688)`,
+        Math.abs(r.releasedSheet - r.endSheet) <= 1, detail);
+
+      /* And the width really is the one the grip was dragged to. The floor at the natural card is
+       * a documented, deliberate minimum (`widthContentFloorRef`), so the expectation is the
+       * larger of "where the pointer went" and that floor. */
+      const stored = await storedPageWidth();
+      ok(`${start.label} / ${arm.name} — committed width matches where the grip was dragged to`,
+        typeof stored === "number" && Math.abs(stored - r.releasedSheet) <= 1,
+        `stored=${stored} rendered=${r.releasedSheet} travel=${arm.dir > 0 ? "+" : "-"}${LONG_TRAVEL}`);
+
+      /* The positive half of "only the border moves" — on a LEFT widen the sheet's own left
+       * boundary must visibly travel outward while the words hold. Reported for the other arms. */
+      if (arm.sel === LEFT && arm.widens) {
+        ok(`${start.label} / ${arm.name} — the page's LEFT boundary does move outward (the border is the only thing that moves)`,
+          r.startSheetLeft - r.endSheetLeft >= LONG_TRAVEL - 2, detail);
+      }
+    }
+  }
+
+  /* ⛔ AND THE ONE ARM THAT CANNOT RUN IN THE WIDE WINDOW: dragging the left grip PAST the mat's
+   * own gutter. At 2200px the gutter is hundreds of pixels wide, so an ordinary drag never spends
+   * it; at his real window it is small enough that a firm drag does, and that is the point past
+   * which the gutter can no longer absorb the margin and the compensating scroll has to take over.
+   * Measured on the pre-fix build this arm drifted the full slack; it is the arm that proves the
+   * fix closed the class rather than moving its boundary. LEFT grip only — the right grip at this
+   * window starts inside NEW-7's own window-edge auto-scroll margin (see this case's header). */
+  console.log("  -- past the mat's own gutter, at his real window width (LEFT grip only) --");
+  await page.setViewportSize({ width: 1191, height: 700 });
+  for (const width of [440, 505, null]) {
+    const doc = { type: "doc", content: [p(LINE)] };
+    if (width != null) doc.attrs = { pageWidth: width };
+    await seed(doc, `Past the gutter — ${width ?? "unpinned"}`);
+    const grip = await page.evaluate(() => {
+      const g = document.querySelector('[data-testid="note-page-width-grip-left"]');
+      const r = g.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    });
+    await page.mouse.move(grip.x, grip.y);
+    await page.mouse.down();
+    await pacedWait(page, 60);
+    const first = await bodyRect();
+    let x = grip.x; let maxDev = 0;
+    for (let i = 0; i < 125; i++) {          // 250px, still in 2px steps
+      x -= 2;
+      await page.mouse.move(x, grip.y);
+      await pacedWait(page, 10);
+      const s = await bodyRect();
+      if (Math.abs(s.left - first.left) > Math.abs(maxDev)) maxDev = s.left - first.left;
+    }
+    const last = await bodyRect();
+    await page.mouse.up();
+    await pacedWait(page, 900);
+    const after = await bodyRect();
+    const gutterSpent = await page.evaluate(() =>
+      parseFloat(getComputedStyle(document.querySelector('[data-testid="note-mat"]')).paddingLeft));
+    const detail = `net ${(last.left - first.left).toFixed(2)} · max ${maxDev.toFixed(2)} · on release ${(after.left - first.left).toFixed(2)} · sheet ${first.sheetWidth.toFixed(0)}→${after.sheetWidth.toFixed(0)} · mat padding-left now ${gutterSpent} · scroll ${after.scrollLeft}/${after.maxScroll}`;
+    /* VACUITY GUARD, on the PROPERTY rather than on the mechanism: this arm is only meaningful if
+     * the drag went far enough that the mat genuinely had to scroll — which is the bounded
+     * resource the whole defect lives in. Asserting the mat's own `padding-left` instead would
+     * pin the fix's implementation into the test, so that number is REPORTED (it reads 0 once the
+     * gutter has been spent, 171 on a build that never spends it) and never asserted. */
+    ok(`past the gutter (${width ?? "unpinned"}) — the drag really needed the compensating scroll (not a vacuous reading)`,
+      after.scrollLeft > 0 && after.sheetWidth - first.sheetWidth >= 200, detail);
+    ok(`past the gutter (${width ?? "unpinned"}) — words do not creep: NET ≤ ${NET_TOLERANCE}px`,
+      Math.abs(last.left - first.left) <= NET_TOLERANCE, detail);
+    ok(`past the gutter (${width ?? "unpinned"}) — no judder: max deviation ≤ ${NET_TOLERANCE}px`,
+      Math.abs(maxDev) <= NET_TOLERANCE, detail);
+    ok(`past the gutter (${width ?? "unpinned"}) — release does not jump the words`,
+      Math.abs(after.left - first.left) <= NET_TOLERANCE, detail);
+  }
+  await page.setViewportSize({ width: 1500, height: 950 });
+}
+
 console.log(`\n${pass} passed, ${fail} failed. JS errors: ${errs.length}`);
 if (errs.length) console.log(errs.slice(0, 8).join("\n"));
 await browser.close();
