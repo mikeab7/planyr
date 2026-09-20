@@ -10,8 +10,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   FULL_WIDTH_FLOOR, FULL_WIDTH_GUTTER, PAGE_WIDTH_MAX, PAGE_WIDTH_MIN, PAGE_WIDTH_PRESETS,
-  dragWidthFromDelta, leftWidthGripPad, pageWidthLabel, pageWidthPresetId, resolvePinnedBaseWidth,
-  resolvePresetPx,
+  dragWidthFromDelta, leftWidthGripPad, matSidePads, pageWidthLabel, pageWidthPresetId,
+  resolvePinnedBaseWidth, resolvePresetPx,
 } from "../src/workspaces/notes/lib/notesPageWidth.js";
 
 describe("the presets", () => {
@@ -216,5 +216,84 @@ describe("leftWidthGripPad — NEW-2, the left grip's own 'content doesn't move'
   it("tolerates undefined/missing arguments rather than producing NaN", () => {
     expect(leftWidthGripPad(undefined, undefined)).toEqual({ pad: 0, padDelta: 0 });
     expect(leftWidthGripPad(null, 40)).toEqual({ pad: 40, padDelta: 40 });
+  });
+});
+
+
+/* ⛔ WHERE THE PAGE'S BLANK LEFT MARGIN IS SPENT (B<PENDING>, owner report 2026-09-18 round 2).
+ *
+ * THE PROPERTY, stated once so every case below is a reading of the same sentence: after a
+ * left-grip widen the WORDS must sit at exactly the same place in the mat's own content as
+ * before, and the mat must have enough scrollable room for whatever the gutter could not absorb.
+ * The body's position inside the scroller's content is `padLeft + growLeft`, so the first half is
+ * literally "`padLeft + growLeft` is invariant" — which is what makes this testable without a
+ * browser at all, and it is the half that was broken: the shipped code held `padLeft` fixed, so
+ * the body moved by the whole margin and only a SCROLL was holding it still on screen. A scroll
+ * is bounded; when the mat had no overflow the browser clamped it to nothing and the words slid.
+ * Measured on the deployed build at the time: a 138px left-grip drag moved the body +140px on a
+ * 440 page, +75px on a 505 page, +20px on a 560 page, and 0 on anything at or above the natural
+ * card — exactly the mat's own slack. */
+describe("matSidePads — the mat's own side padding", () => {
+  const PANE = 923;          // the owner's real window, measured
+  const GUTTER = 171;        // floor((923 - 580) / 2)
+  const pads = (growLeft, sheetWidth) => matSidePads({ gutter: GUTTER, growLeft, sheetWidth, paneWidth: PANE });
+
+  it("changes nothing at all on a page with no left margin", () => {
+    expect(pads(0, 580)).toEqual({ padLeft: GUTTER, padRight: GUTTER });
+    expect(pads(0, 900)).toEqual({ padLeft: GUTTER, padRight: GUTTER });
+  });
+
+  it("THE PROPERTY: the words' place in the mat's content (padLeft + growLeft) never moves while the gutter lasts", () => {
+    const at = (growLeft) => pads(growLeft, 580 + growLeft).padLeft + growLeft;
+    const rest = at(0);
+    for (const growLeft of [1, 5, 40, 90, 140, 170, GUTTER]) expect(at(growLeft)).toBe(rest);
+  });
+
+  it("spends the gutter, never more, and never goes negative", () => {
+    expect(pads(90, 670).padLeft).toBe(81);
+    expect(pads(GUTTER, 751).padLeft).toBe(0);
+    expect(pads(GUTTER + 200, 951).padLeft).toBe(0);
+    expect(pads(10_000, 10_580).padLeft).toBe(0);
+  });
+
+  it("past the gutter, tops the right side up by exactly the scroll the compensation is about to need", () => {
+    /* Once `padLeft` is spent the remainder HAS to be a scroll, and a scroll only exists if the
+     * mat's content is wider than the pane. Required room is `growLeft − gutter`; available room
+     * is `padLeft + sheetWidth + padRight − pane`. This asserts the second is never less than the
+     * first — the exact shortfall that let the words slide. */
+    for (const [growLeft, unpadded] of [[250, 440], [250, 505], [250, 580], [250, 900], [600, 440], [172, 320]]) {
+      const sheetWidth = unpadded + growLeft;
+      const { padLeft, padRight } = pads(growLeft, sheetWidth);
+      const needed = Math.max(0, growLeft - GUTTER);
+      const available = padLeft + sheetWidth + padRight - PANE;
+      expect(available).toBeGreaterThanOrEqual(needed);
+    }
+  });
+
+  it("and never a pixel MORE room than that — no page gains scrollable grey it does not use", () => {
+    /* The standing objection that retired the always-on `MAT_EXTRA_RIGHT` (B1344625). A page at
+     * or above what the gutters leave room for gets no top-up at all. */
+    expect(pads(140, 580).padRight).toBe(GUTTER + 141);   // a 440 page carrying a 140px margin
+    expect(pads(140, 581).padRight).toBe(GUTTER + 140);   // one pixel wider, one pixel less owed
+    expect(pads(140, 720).padRight).toBe(GUTTER + 1);     // a 580 page: only the rounding residue
+    expect(pads(140, 1040).padRight).toBe(GUTTER);        // a 900 page: nothing owed at all
+  });
+
+  it("measures its slack against the PANE, not the natural card — the one-pixel case", () => {
+    /* `naturalGutter` is a `Math.floor`, deliberately spending one pixel less than the leftover
+     * allows, so `pane − 2 × gutter` is the natural card PLUS that residue. Topping up against
+     * 580 directly leaves the scroll exactly one pixel short, which is what a 250px drag on a
+     * 440 page measured before this was corrected. */
+    expect(PANE - GUTTER * 2).toBe(581);
+    expect(pads(250, 690).padRight).toBe(GUTTER + 141);   // 141, not 140
+  });
+
+  it("survives junk without producing a negative padding", () => {
+    for (const args of [{}, { gutter: -5, growLeft: -5, sheetWidth: -5, paneWidth: -5 },
+      { gutter: NaN, growLeft: NaN, sheetWidth: NaN, paneWidth: NaN }]) {
+      const { padLeft, padRight } = matSidePads(args);
+      expect(padLeft).toBeGreaterThanOrEqual(0);
+      expect(padRight).toBeGreaterThanOrEqual(0);
+    }
   });
 });

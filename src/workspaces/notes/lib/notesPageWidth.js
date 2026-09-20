@@ -175,3 +175,78 @@ export function leftWidthGripPad(startPad, delta) {
   const pad = Math.max(0, (startPad || 0) + (delta || 0));
   return { pad, padDelta: pad - (startPad || 0) };
 }
+
+/* ---- WHERE THE PAGE'S BLANK LEFT MARGIN IS SPENT (B<PENDING>, owner report 2026-09-18 round 2)
+ *
+ * ⛔ READ THIS BEFORE "SIMPLIFYING" EITHER NUMBER — it is the fix for a defect that survived a
+ * correct fix, and the reason it survived is the whole point.
+ *
+ * THE MECHANISM IT REPLACES. `leftWidthGripPad` above opens a blank margin INSIDE the sheet, so
+ * the body's position within the scroller's own content genuinely moves right by the pad, and the
+ * ONLY thing holding the words still on screen is the compensating scroll in NoteEditor.jsx's
+ * `sheetGrowLeft`-keyed layout effect. **A scroll is a BOUNDED resource.** `scrollLeft` can only
+ * move as far as `scrollWidth − clientWidth` allows, and when the mat's content is NARROWER than
+ * the pane there is no overflow at all — the write is silently clamped, the compensation
+ * under-delivers, and the words slide right by exactly the amount the scroll could not spend.
+ * Nothing notices: the effect compares CONTENT-space positions, never the achieved screen
+ * position, so the loss is permanent and never corrected on a later frame.
+ *
+ * MEASURED, on the deployed build, 2200×950, a 138px left-grip widen in 60 small uneven steps
+ * (`ui-audit/verify-notes-page-width.mjs` case 21). Body text displacement, which must be zero:
+ *      stored page width  440 → +140px   ·  505 → +75px  ·  560 → +20px
+ *      stored page width  717 →    0     ·  900 →   0    ·  unpinned →  0
+ * The drift is EXACTLY `naturalSheetWidth − storedWidth`, i.e. the mat's own slack: a page
+ * narrower than the natural card leaves the mat's content short of the pane by that much, and the
+ * gutter (`matPadX`) is deliberately pin-INDEPENDENT, so it does not shrink to take it up. Every
+ * page at or above the natural card already had overflow to scroll into, which is why every arm
+ * of the previous round's own every-frame harness was honestly green over a live defect: all
+ * three of its starting widths (unpinned 580, Wide 900, a custom 717) sit at or above that width
+ * by construction, so none of them could reach the slack.
+ *
+ * THE FIX IS GEOMETRIC, NOT A BIGGER SCROLL — the two quantities stop competing instead of
+ * trading (NOTES-CARRY-FORWARD §5 family -1). The pad is spent out of the mat's own LEFT GUTTER
+ * first: the sheet's left edge moves LEFT by the pad while its inner pad grows by the same
+ * amount, so the body's content-space position does not move AT ALL and there is nothing for a
+ * scroll to hold — a clamp cannot lose what was never asked for. It is also the picture the owner
+ * asked for, verbatim: *"only the left boundary line moves outward, opening new blank space to the
+ * left of the content."* And unlike the scroll, it SURVIVES A RELOAD, which the previous
+ * mechanism's own header admitted it did not.
+ *
+ * AND THE SECOND HALF, which closes the class rather than moving it: once the pad outruns the
+ * gutter the left padding floors at 0 and the remainder genuinely does need the scroll — so the
+ * mat's RIGHT padding is topped up by exactly the slack, and only then. For a page at or above the
+ * natural card `slack` is 0 and nothing changes at all; for a narrower one it adds precisely the
+ * overflow the scroll is about to need and not one pixel more, so no page ever gains scrollable
+ * grey it does not use (the standing objection that retired the always-on `MAT_EXTRA_RIGHT`,
+ * B1344625).
+ *
+ * ⛔ AND THE SLACK IS MEASURED AGAINST `paneWidth − 2 × gutter`, NEVER AGAINST THE NATURAL CARD
+ * WIDTH DIRECTLY — a one-pixel distinction that is a real, measured one-pixel defect. The gutter
+ * is `Math.floor((paneContentWidth − naturalSheetWidth) / 2)` and its own header says it spends
+ * one pixel LESS than the leftover allows on purpose (an odd leftover cannot split into two equal
+ * integer sides, and a stray pixel of grey is invisible while a stray pixel of forced scroll is
+ * not). So `pane − 2 × gutter` is the natural width plus that rounding residue, and topping up
+ * against the natural width alone leaves the compensating scroll exactly one pixel short of what
+ * it needs. Measured before this was corrected: a 250px left-grip drag on a 440 page at a 1191
+ * window held the words to within 1px instead of 0 — `scrollLeft` pinned at its own maximum of 78
+ * with 79 required. Reading the pane and the gutter the render already holds makes the two
+ * numbers incapable of disagreeing, whichever branch (`naturalGutter` / `fullGutter`) produced it.
+ *
+ * @param gutter     `matPadX` — the mat's own side gutter. Never modified; this reads it.
+ * @param growLeft   the blank left margin the page is carrying (`sheetGrowLeft`).
+ * @param sheetWidth the sheet's full rendered width, pad included (`sheetGrowWidth`).
+ * @param paneWidth  the mat's own visible content width (`paneContentWidth`), scrollbar-aware.
+ * @returns {{ padLeft: number, padRight: number }} what to render as the mat's side padding.
+ */
+export function matSidePads({ gutter, growLeft, sheetWidth, paneWidth }) {
+  const g = Math.max(0, gutter || 0);
+  const pad = Math.max(0, growLeft || 0);
+  const spend = Math.min(pad, g);
+  /* The sheet's own width with the blank margin taken back out — what the page would measure if
+   * it had never been widened from the left. A page narrower than what the gutters leave room for
+   * is the ONLY shape that leaves the mat short of the pane, and `slack` is exactly how short. */
+  const unpadded = Math.max(0, (sheetWidth || 0) - pad);
+  const room = Math.max(0, (paneWidth || 0) - g * 2);
+  const slack = pad > 0 ? Math.max(0, room - unpadded) : 0;
+  return { padLeft: g - spend, padRight: g + slack };
+}
