@@ -9930,21 +9930,51 @@ function App() {
     setSelectedColIdx(1);
   }, [data]);
 
-  const addProject = useCallback((opts) => {
+  const addProject = useCallback(async (opts) => {
     // opts (optional) = { name, ownerKind, linkedSiteId, linkedSiteName } — used by the
     // cross-module "create a schedule connected to this site" flow. Guard against a click event
     // being passed as the first arg (the in-app + dropdown buttons call addProject() bare).
     const o = (opts && typeof opts === "object" && !("nativeEvent" in opts)) ? opts : {};
+    // EVERY SCHEDULE HAS AN OWNER. A bare addProject() — the in-app "+" button, which the shell
+    // hides — used to mint a schedule owned by NOTHING; that unowned state is what this model
+    // removes, so a bare create now explicitly belongs to the ORGANIZATION (the container the
+    // owner asked for: "everything lives under something"), and the shell's own New-schedule
+    // flow always passes a real, chosen owner. `ownerKind` is written unconditionally so no
+    // path can leave it absent and fall back to inference.
+    const ownerKind = o.linkedSiteId != null ? OWNER_KIND_SITE : OWNER_KIND_ORG;
+
+    // B1777120 — once this account is flipped, a schedule's id is a real Postgres identity value,
+    // reserved by an actual INSERT before the project is ever added to local state — never a
+    // client-guessed `nPid` two tabs could independently mint the same value from (acceptance:
+    // "task and project ids cannot collide when two tabs create rows at the same moment"). The
+    // row is inserted with a placeholder `data` (no `id` yet — Postgres hasn't assigned one until
+    // the INSERT returns) and immediately patched with the real id embedded, so every row this
+    // account ever holds still carries `data.id === id`, matching every other read site's
+    // assumption. window.storage.insertSchedule seeds scheduleBase/scheduleKnownRev itself so the
+    // very next autosave for this schedule is an ordinary guarded UPDATE, not a second insert.
+    if (window.storage && window.storage.scheduleRowsAuthoritative) {
+      const id = await window.storage.insertSchedule({
+        name: o.name || null, ownerKind,
+        linkedSiteId: o.linkedSiteId ?? null, linkedSiteName: o.linkedSiteName ?? null,
+      });
+      if (id == null) {
+        if (typeof showToast === "function") showToast("Couldn't create a new schedule — please try again.", { type: "error", duration: 6000 });
+        return;
+      }
+      setData(d => {
+        if (!d) return d;
+        const proj = { id, name: o.name || `Project ${id}`, tasks: [], ownerKind };
+        if (o.linkedSiteId != null) { proj.linkedSiteId = o.linkedSiteId; proj.linkedSiteName = o.linkedSiteName || null; }
+        const nd = {...d, nPid: Math.max(d.nPid, id + 1), aPid: id, nTid: {...d.nTid, [id]: 1},
+          projects: {...d.projects, [id]: proj}};
+        return o.linkedSiteId != null ? withLastActiveSite(nd, o.linkedSiteId, id) : nd;
+      });
+      return;
+    }
+
     setData(d => {
       if (!d) return d; // B644 — pre-load call: data not loaded yet, nothing to add onto
       const id = d.nPid;
-      // EVERY SCHEDULE HAS AN OWNER. A bare addProject() — the in-app "+" button, which the shell
-      // hides — used to mint a schedule owned by NOTHING; that unowned state is what this model
-      // removes, so a bare create now explicitly belongs to the ORGANIZATION (the container the
-      // owner asked for: "everything lives under something"), and the shell's own New-schedule
-      // flow always passes a real, chosen owner. `ownerKind` is written unconditionally so no
-      // path can leave it absent and fall back to inference.
-      const ownerKind = o.linkedSiteId != null ? OWNER_KIND_SITE : OWNER_KIND_ORG;
       const proj = {id, name: o.name || `Project ${id}`, tasks: [], ownerKind};
       if (o.linkedSiteId != null) { proj.linkedSiteId = o.linkedSiteId; proj.linkedSiteName = o.linkedSiteName || null; }
       const nd = {...d, nPid: id+1, aPid: id, nTid: {...d.nTid, [id]: 1},
@@ -9961,44 +9991,79 @@ function App() {
     setData(d => (d && d.projects && d.projects[id]) ? {...d, editProjId: null, projects: {...d.projects, [id]: {...d.projects[id], name}}} : d);
   }, []);
 
-  const duplicateProject = useCallback((id) => {
+  // Pure: builds the new project object (a copy of `src`) for a chosen `newId`. Split out of
+  // duplicateProject so the id-allocation flow (B1777120 — an INSERT-first reservation once
+  // flipped) and the legacy client-counter flow can share the exact same copy logic.
+  const buildDuplicateProject = (src, newId) => {
+    // B816 — RE-ID the copied meeting bodies so the copy's bodies are globally unique. Same-id bodies
+    // in two projects would collapse in MEETING_BODY_INDEX → editing one would move the other's hearings.
+    const bodyIdMap = {};
+    const copiedBodies = Array.isArray(src.meetingBodies) ? src.meetingBodies.map((mb, i) => {
+      const nid = "mb_" + Date.now().toString(36) + i + Math.random().toString(36).slice(2, 6);
+      if (mb && mb.id) bodyIdMap[mb.id] = nid;
+      return {...mb, id: nid,
+        recurrence: (mb.recurrence||[]).map(r => ({...r, setpos: Array.isArray(r.setpos)?[...r.setpos]:r.setpos, months: Array.isArray(r.months)?[...r.months]:r.months})),
+        agendaLead: mb.agendaLead ? {...mb.agendaLead} : mb.agendaLead,
+        blackoutDates: [...(mb.blackoutDates||[])], extraDates: [...(mb.extraDates||[])]};
+    }) : undefined;
+    const newTasks = src.tasks.map(t => ({...t, notes: t.notes.map(n => ({...n})),
+      ...(t.meetingBodyId && bodyIdMap[t.meetingBodyId] ? {meetingBodyId: bodyIdMap[t.meetingBodyId]} : {})}));
+    // Spread ...src so the copy keeps the project's column layout (colConfig), label alignment, and
+    // user-defined Formula columns — the old literal dropped all of them. Deep-copy formulaCols so
+    // editing the copy can't mutate the original.
+    //
+    // ⛔ THE COPY KEEPS ITS OWNER (changed with the ownership model). It previously dropped
+    // `linkedSiteId`, because back then the link was a ONE-schedule-per-site pointer and a
+    // second schedule claiming the same site was ambiguous by construction. A project may now
+    // hold several schedules, so that reason is gone — and leaving the old behaviour in place
+    // would mean every "Duplicate" silently emigrated the copy to the ORGANIZATION, which is
+    // both surprising ("duplicate this project's schedule" plainly means another schedule for
+    // the same project) and the exact class of silent, unasked-for ownership change this work
+    // exists to remove. The copy is a sibling under the same owner.
+    return {...src, id: newId, name: src.name + " (Copy)", tasks: newTasks,
+      formulaCols: Array.isArray(src.formulaCols) ? src.formulaCols.map(fc => ({...fc})) : undefined,
+      meetingBodies: copiedBodies};               // B815/B816 — deep-copied AND re-ided (see above)
+  };
+
+  const duplicateProject = useCallback(async (id) => {
+    // B1777120 — same reasoning as addProject: once flipped, the copy's id is a real Postgres
+    // identity value reserved by an actual INSERT before it ever reaches local state, never a
+    // client-guessed `nPid` two tabs could collide on.
+    if (window.storage && window.storage.scheduleRowsAuthoritative) {
+      const src = dataRef.current && dataRef.current.projects && dataRef.current.projects[id];
+      if (!src) return;
+      const maxTid = src.tasks.length ? Math.max(...src.tasks.map(t => t.id)) + 1 : 1;
+      const newId = await window.storage.insertSchedule({
+        name: src.name + " (Copy)", ownerKind: src.ownerKind,
+        linkedSiteId: src.linkedSiteId ?? null, linkedSiteName: src.linkedSiteName ?? null,
+        projectData: buildDuplicateProject(src, null),   // id filled in by insertSchedule once known
+      });
+      if (newId == null) {
+        if (typeof showToast === "function") showToast("Couldn't duplicate this schedule — please try again.", { type: "error", duration: 6000 });
+        return;
+      }
+      setData(d => {
+        if (!d || !d.projects || !d.projects[id]) return d;
+        const copy = buildDuplicateProject(d.projects[id], newId);
+        const nd = {...d, nPid: Math.max(d.nPid, newId + 1), nTid: {...d.nTid, [newId]: maxTid}, aPid: newId,
+          projects: {...d.projects, [newId]: copy}};
+        rebuildMeetingBodyIndex(nd);
+        return copy.linkedSiteId != null ? withLastActiveSite(nd, copy.linkedSiteId, newId) : nd;
+      });
+      return;
+    }
+
     setData(d => {
       const src = d.projects[id];
       const newId = d.nPid;
-      // B816 — RE-ID the copied meeting bodies so the copy's bodies are globally unique. Same-id bodies
-      // in two projects would collapse in MEETING_BODY_INDEX → editing one would move the other's hearings.
-      const bodyIdMap = {};
-      const copiedBodies = Array.isArray(src.meetingBodies) ? src.meetingBodies.map((mb, i) => {
-        const nid = "mb_" + Date.now().toString(36) + i + Math.random().toString(36).slice(2, 6);
-        if (mb && mb.id) bodyIdMap[mb.id] = nid;
-        return {...mb, id: nid,
-          recurrence: (mb.recurrence||[]).map(r => ({...r, setpos: Array.isArray(r.setpos)?[...r.setpos]:r.setpos, months: Array.isArray(r.months)?[...r.months]:r.months})),
-          agendaLead: mb.agendaLead ? {...mb.agendaLead} : mb.agendaLead,
-          blackoutDates: [...(mb.blackoutDates||[])], extraDates: [...(mb.extraDates||[])]};
-      }) : undefined;
-      const newTasks = src.tasks.map(t => ({...t, notes: t.notes.map(n => ({...n})),
-        ...(t.meetingBodyId && bodyIdMap[t.meetingBodyId] ? {meetingBodyId: bodyIdMap[t.meetingBodyId]} : {})}));
-      const maxTid = newTasks.length ? Math.max(...newTasks.map(t => t.id)) + 1 : 1;
+      const copy = buildDuplicateProject(src, newId);
+      const maxTid = copy.tasks.length ? Math.max(...copy.tasks.map(t => t.id)) + 1 : 1;
       const nd = {
         ...d,
         nPid: newId + 1,
         nTid: {...d.nTid, [newId]: maxTid},
         aPid: newId,
-        // Spread ...src so the copy keeps the project's column layout (colConfig), label alignment, and
-        // user-defined Formula columns — the old literal dropped all of them. Deep-copy formulaCols so
-        // editing the copy can't mutate the original.
-        //
-        // ⛔ THE COPY KEEPS ITS OWNER (changed with the ownership model). It previously dropped
-        // `linkedSiteId`, because back then the link was a ONE-schedule-per-site pointer and a
-        // second schedule claiming the same site was ambiguous by construction. A project may now
-        // hold several schedules, so that reason is gone — and leaving the old behaviour in place
-        // would mean every "Duplicate" silently emigrated the copy to the ORGANIZATION, which is
-        // both surprising ("duplicate this project's schedule" plainly means another schedule for
-        // the same project) and the exact class of silent, unasked-for ownership change this work
-        // exists to remove. The copy is a sibling under the same owner.
-        projects: {...d.projects, [newId]: {...src, id: newId, name: src.name + " (Copy)", tasks: newTasks,
-          formulaCols: Array.isArray(src.formulaCols) ? src.formulaCols.map(fc => ({...fc})) : undefined,
-          meetingBodies: copiedBodies}},               // B815/B816 — deep-copied AND re-ided (see above)
+        projects: {...d.projects, [newId]: copy},
       };
       rebuildMeetingBodyIndex(nd);
       // The copy is now the one to come back to on this site — duplicateProject already switches
@@ -18595,43 +18660,77 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
   const baseByKey = {};   // B864(b) — the doc THIS tab last loaded or saved (the 3-way merge ancestor)
   const staleSnapped = {};
   const revOf = (p) => (p && typeof p.__rev === "number") ? p.__rev : 0;
+
+  // B1777120 — THE AUTHORITY FLIP: per-schedule-row primary write path. Parallel to
+  // knownRev/baseByKey/staleSnapped above, but keyed per SCHEDULE id (string), since each
+  // schedule is now its own CAS row once an account is flipped (schedule_account_index.
+  // rows_authoritative — see schedules_authority_flip.sql). indexKnownRev/indexBase play the
+  // same role for the one account-wide schedule_account_index row (settings/lastActiveBySite/
+  // nPid/nTid/migration flags). Seeded exactly once per load, by readFromScheduleRows below.
+  const scheduleKnownRev = {};
+  const scheduleBase = {};
+  const scheduleStaleSnapped = {};
+  let indexKnownRev = 0;
+  let indexBase = null;
+  let scheduleRowsAuthoritative = false;   // mirrored onto window.storage.scheduleRowsAuthoritative below
+  const scheduleLastAutoHistoryAt = {};    // per-schedule throttle, mirrors lastAutoHistoryAt but per id
+  const SCHEDULE_SANITY_MIN_TASKS = 20;
+  const SCHEDULE_SANITY_DROP_RATIO = 0.5;
   // mergeCloudDoc / _mStripRev / _deepClone are defined at module scope (B864(b)) so both this storage
   // layer AND the App's reconcile listener share one implementation.
 
-  // B1777120 — dual-read scaffold, OFF BY DEFAULT. planar_data stays the authoritative source
-  // for every real load; this only exists so the schedule-normalization read path is real,
-  // wired code that can be tested, not a described-but-unbuilt plan. Flipping this on in
-  // production (the actual authority flip) is explicitly NOT part of this change — see
-  // schedules_normalization.sql's header. Flag lives in localStorage (a per-browser dev/test
-  // toggle, same storage a person could set from devtools), never a query param that could be
-  // shared/bookmarked into accidentally-different behavior.
-  const SCHEDULE_ROWS_READ_FLAG = "planar:scheduleRowsRead";
-  const scheduleRowsReadEnabled = () => {
-    try { return localStorage.getItem(SCHEDULE_ROWS_READ_FLAG) === "1"; } catch { return false; }
-  };
-  // Reads schedule_account_index + schedules and recomposes the "hs-v1" shape from them.
-  // Returns null on ANY absence or failure (no index row, a thrown error, RLS denial) so the
-  // caller falls back to the blob unconditionally — never a partial or wrong document. Attaches
-  // the REAL current __rev (a cheap separate read, same shape as checkRemote below) so the
-  // existing knownRev/write-guard bookkeeping in `get` stays correct if this is ever enabled —
-  // recomposeFromRows itself never reconstructs __rev (it isn't an account-wide fact).
+  // B1777120 — THE AUTHORITY FLIP, read side. Authority is decided PER ACCOUNT by
+  // schedule_account_index.rows_authoritative, set by an operator only after a fresh decompose
+  // has been proven to reconstruct the live blob exactly (see schedules_authority_flip.sql) — an
+  // account that has never been flipped reads the blob exactly as before this item shipped; this
+  // is not a global switch. SCHEDULE_ROWS_FORCE_FLAG is a local dev/test override (force ON even
+  // if the account isn't flipped); SCHEDULE_ROWS_DISABLE_FLAG is an emergency kill-switch (force
+  // OFF even if flipped) an operator can hand a stuck browser without waiting on a deploy. Both
+  // live in localStorage, never a shareable query param.
+  const SCHEDULE_ROWS_FORCE_FLAG = "planar:scheduleRowsRead";
+  const SCHEDULE_ROWS_DISABLE_FLAG = "planar:scheduleRowsDisable";
+  const scheduleRowsForced = () => { try { return localStorage.getItem(SCHEDULE_ROWS_FORCE_FLAG) === "1"; } catch { return false; } };
+  const scheduleRowsDisabled = () => { try { return localStorage.getItem(SCHEDULE_ROWS_DISABLE_FLAG) === "1"; } catch { return false; } };
+  const setScheduleRowsAuthoritative = (v) => { scheduleRowsAuthoritative = v; try { window.storage.scheduleRowsAuthoritative = v; } catch {} };
+  // Reads schedule_account_index + schedules and recomposes the "hs-v1" shape from them. Returns
+  // null on ANY absence, disable-override, non-flipped account, or failure (RLS denial, a thrown
+  // error) so the caller falls back to the blob unconditionally — never a partial or wrong
+  // document. Attaches the REAL current __rev (a cheap separate read, same shape as checkRemote
+  // below) so the existing knownRev bookkeeping in `get` stays correct for the returned blob-
+  // shaped value. Also seeds the PER-SCHEDULE + index baselines (scheduleKnownRev/scheduleBase/
+  // indexKnownRev/indexBase) the write path below diffs every future save against — this is the
+  // ONLY place those are seeded, since a real page reads "hs-v1" exactly once per load.
   const readFromScheduleRows = async (k) => {
     try {
-      if (k !== "hs-v1" || !scheduleRowsReadEnabled()) return null;
+      if (k !== "hs-v1" || scheduleRowsDisabled()) { setScheduleRowsAuthoritative(false); return null; }
       const { data: userRes } = await sb.auth.getUser();
       const ownerUid = userRes && userRes.user && userRes.user.id;
-      if (!ownerUid) return null;
+      if (!ownerUid) { setScheduleRowsAuthoritative(false); return null; }
       const [idxRes, schedRes, revRes] = await Promise.all([
         sb.from("schedule_account_index").select("*").eq("user_id", ownerUid).maybeSingle(),
         sb.from("schedules").select("*").eq("user_id", ownerUid).is("deleted_at", null),
         sb.from(TABLE).select("rev:value->>__rev").eq("key", k).maybeSingle(),
       ]);
-      if (idxRes.error || schedRes.error || !idxRes.data) return null;
+      if (idxRes.error || schedRes.error || !idxRes.data) { setScheduleRowsAuthoritative(false); return null; }
+      const authoritative = !!idxRes.data.rows_authoritative || scheduleRowsForced();
+      setScheduleRowsAuthoritative(authoritative);
+      if (!authoritative) return null;
       const recomposed = recomposeFromRows(idxRes.data, schedRes.data);
       if (!recomposed) return null;
+      Object.keys(scheduleKnownRev).forEach(kk => delete scheduleKnownRev[kk]);
+      Object.keys(scheduleBase).forEach(kk => delete scheduleBase[kk]);
+      (Array.isArray(schedRes.data) ? schedRes.data : []).forEach(row => {
+        if (!row || row.id == null) return;
+        const rk = String(row.id);
+        scheduleKnownRev[rk] = typeof row.rev === "number" ? row.rev : 0;
+        scheduleBase[rk] = row.data;
+      });
+      indexKnownRev = typeof idxRes.data.rev === "number" ? idxRes.data.rev : 0;
+      indexBase = decomposeForDualWrite(recomposed).index;
       const rev = (revRes.data && revRes.data.rev != null) ? (parseInt(revRes.data.rev, 10) || 0) : 0;
       return { ...recomposed, __rev: rev };
     } catch {
+      setScheduleRowsAuthoritative(false);
       return null;
     }
   };
@@ -18745,15 +18844,239 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
     }
   };
 
+  // B1777120 — THE AUTHORITY FLIP, write side. Everything below is reached ONLY when
+  // scheduleRowsAuthoritative is true for the signed-in account (readFromScheduleRows already
+  // proved a real, migrated schedule_account_index row exists) — an account that has never been
+  // flipped never calls any of this and keeps writing the blob exactly as before.
+
+  // Per-schedule history: reuses planar_history (same table, schema, RLS, pruning) with a new
+  // key shape ("schedule:<id>") instead of the whole-account "hs-v1" — "write new [snapshots]
+  // per schedule" per this item's own acceptance text. Fire-and-forget, matching _snapshot's own
+  // non-blocking shape; task_count/project_count are computed for a SINGLE project object, not a
+  // whole doc, so this does not reuse _snapshot/countTasks/countProjects directly.
+  const writeScheduleHistorySnapshot = (scheduleId, projData, label) => {
+    try {
+      if ((label || "auto") === "auto") {
+        const now = Date.now();
+        const last = scheduleLastAutoHistoryAt[scheduleId] || 0;
+        if (now - last < AUTO_HISTORY_MS) return;
+        scheduleLastAutoHistoryAt[scheduleId] = now;
+      }
+      const taskCount = (projData && Array.isArray(projData.tasks)) ? projData.tasks.length : 0;
+      let byteSize = 0; try { byteSize = JSON.stringify(projData).length; } catch {}
+      sb.from(HISTORY_TABLE).insert({
+        key: "schedule:" + scheduleId, value: projData, label: label || "auto",
+        task_count: taskCount, project_count: 1, byte_size: byteSize,
+      }).then(({ error }) => {
+        if (error && !writeScheduleHistorySnapshot._warned) {
+          writeScheduleHistorySnapshot._warned = true;
+          console.warn("per-schedule history snapshot failed (run setup SQL?):", error.message);
+        }
+      });
+    } catch (e) {
+      if (!writeScheduleHistorySnapshot._warned) { writeScheduleHistorySnapshot._warned = true; console.warn("per-schedule history snapshot exception:", e); }
+    }
+  };
+
+  // The guarded write for ONE schedules row. `.select("id")` is required to SEE a refusal —
+  // same reasoning as _rawSet's own attemptWrite below (a bare `.update()` with no `.select()`
+  // sends `Prefer: return=minimal`, so PostgREST reports success whether
+  // schedules_enforce_version_monotonic silently skipped the row or genuinely wrote it).
+  const attemptScheduleWrite = async (id, data, baseRev) => {
+    const newRev = (typeof baseRev === "number" ? baseRev : 0) + 1;
+    const { data: rows, error } = await sb.from("schedules").update({
+      data, rev: newRev,
+      name: (data && typeof data.name === "string") ? data.name : "",
+      linked_site_id: (data && data.linkedSiteId != null) ? data.linkedSiteId : null,
+      linked_site_name: (data && data.linkedSiteName != null) ? data.linkedSiteName : null,
+    }).eq("id", id).select("id");
+    return { error, refused: !error && Array.isArray(rows) && rows.length === 0, newRev };
+  };
+
+  // Guarded write for ONE schedule — mirrors _rawSet's own Layer 0/2 + CAS-retry-once shape,
+  // scoped to a single row so a stale write to schedule A can never touch schedule B (B1777120
+  // acceptance: "a write to one schedule cannot modify another schedule's row").
+  const writeOneScheduleRow = async (ownerUid, id, newData, { skipSanity, label }) => {
+    const key = String(id);
+    const curRev = scheduleKnownRev[key];
+    const curData = scheduleBase[key];
+
+    if (curRev === undefined) {
+      // Unknown to this tab — a restore/import resurrecting an id (NEVER a race two tabs could
+      // hit for a genuinely NEW schedule: addProject/duplicateProject always insert the row
+      // FIRST and seed scheduleBase before that id can ever reach this path — see those
+      // functions). Try a fresh INSERT; a 23505 conflict means the row already existed (another
+      // tab's own insert, or this tab's cache was simply behind), so fall through to the
+      // ordinary guarded update below, which re-reads fresh regardless.
+      const { error: insErr } = await sb.from("schedules").insert({
+        id, user_id: ownerUid, name: (newData && newData.name) || "", data: newData, rev: 0,
+        linked_site_id: (newData && newData.linkedSiteId != null) ? newData.linkedSiteId : null,
+        linked_site_name: (newData && newData.linkedSiteName != null) ? newData.linkedSiteName : null,
+      });
+      if (!insErr) {
+        scheduleKnownRev[key] = 0; scheduleBase[key] = _deepClone(newData);
+        writeScheduleHistorySnapshot(id, newData, label);
+        return { merged: null };
+      }
+      if (insErr.code !== "23505") { console.error("[schedule rows] insert failed for schedule " + id + ":", insErr); return null; }
+    } else if (!skipSanity) {
+      const oldN = (curData && Array.isArray(curData.tasks)) ? curData.tasks.length : 0;
+      const newN = (newData && Array.isArray(newData.tasks)) ? newData.tasks.length : 0;
+      if (oldN > SCHEDULE_SANITY_MIN_TASKS && newN < oldN * SCHEDULE_SANITY_DROP_RATIO) {
+        writeScheduleHistorySnapshot(id, curData, "safety-block");
+        console.error("[schedule guard] Refused save for schedule " + id + ": tasks would drop " + oldN + " -> " + newN + ".");
+        if (typeof showToast === "function") showToast("Save blocked for one schedule -- tasks would drop " + oldN + "->" + newN + ". Old state backed up.", { type: "error", duration: 6000 });
+        return null;
+      }
+    }
+
+    const baseRev = scheduleKnownRev[key] || 0;
+    let attempt = await attemptScheduleWrite(id, newData, baseRev);
+    if (attempt.error) { console.error("[schedule rows] write error for schedule " + id + ":", attempt.error); return null; }
+
+    let payload = newData, mergedResult = null;
+    if (attempt.refused) {
+      const { data: row2, error: readErr } = await sb.from("schedules").select("data, rev").eq("id", id).maybeSingle();
+      if (readErr || !row2) {
+        if (!scheduleStaleSnapped[key]) { scheduleStaleSnapped[key] = true; writeScheduleHistorySnapshot(id, newData, "stale-block"); }
+        console.error("[schedule guard] Write refused for schedule " + id + " and the current row could not be re-read afterward.");
+        return null;
+      }
+      const base = scheduleBase[key];
+      let merged = null;
+      if (base !== undefined) { try { merged = mergeCloudDoc(base, newData, row2.data); } catch (e) { merged = null; } }
+      if (!merged || !_mIsObj(merged)) {
+        if (!scheduleStaleSnapped[key]) { scheduleStaleSnapped[key] = true; writeScheduleHistorySnapshot(id, newData, "stale-block"); }
+        console.error("[schedule guard] Save blocked for schedule " + id + " (merge unavailable): cloud rev " + row2.rev + " is ahead of this tab.");
+        return null;
+      }
+      writeScheduleHistorySnapshot(id, newData, "premerge-ours");
+      attempt = await attemptScheduleWrite(id, merged, row2.rev);
+      if (attempt.error || attempt.refused) {
+        if (!scheduleStaleSnapped[key]) { scheduleStaleSnapped[key] = true; writeScheduleHistorySnapshot(id, merged, "stale-block"); }
+        console.error("[schedule guard] Save blocked for schedule " + id + ": lost the race twice in a row.");
+        return null;
+      }
+      payload = merged; mergedResult = merged;
+    }
+
+    scheduleKnownRev[key] = attempt.newRev;
+    scheduleBase[key] = _deepClone(payload);
+    scheduleStaleSnapped[key] = false;
+    writeScheduleHistorySnapshot(id, payload, label);
+    return { merged: mergedResult };
+  };
+
+  // Guarded write for the ONE schedule_account_index row (settings/lastActiveBySite/nPid/nTid/
+  // migration flags) — same CAS-retry-once shape as writeOneScheduleRow, independent of every
+  // schedule row so a settings change never contends with a task edit in any schedule.
+  const writeIndexRow = async (ownerUid, newIndex) => {
+    const baseRev = indexKnownRev || 0;
+    const newRev = baseRev + 1;
+    const payload = {
+      n_pid: newIndex.nPid, n_tid: newIndex.nTid, last_active_by_site: newIndex.lastActiveBySite,
+      settings: newIndex.settings, migration_flags: newIndex.migrationFlags,
+      rows_authoritative: true, rev: newRev,
+    };
+    const { data: rows, error } = await sb.from("schedule_account_index").update(payload).eq("user_id", ownerUid).select("user_id");
+    if (error) { console.error("[schedule rows] index write error:", error); return null; }
+    if (!(Array.isArray(rows) && rows.length === 0)) {
+      indexKnownRev = newRev; indexBase = _deepClone(newIndex);
+      return { merged: null };
+    }
+    const { data: row2, error: readErr } = await sb.from("schedule_account_index").select("*").eq("user_id", ownerUid).maybeSingle();
+    if (readErr || !row2) { console.error("[schedule rows] index write refused and could not be re-read afterward"); return null; }
+    const rowIndex = { nPid: row2.n_pid, nTid: row2.n_tid || {}, lastActiveBySite: row2.last_active_by_site || {}, settings: row2.settings || {}, migrationFlags: row2.migration_flags || {} };
+    let merged = null;
+    if (indexBase !== null) { try { merged = mergeCloudDoc(indexBase, newIndex, rowIndex); } catch (e) { merged = null; } }
+    if (!merged) { console.error("[schedule rows] index write blocked -- merge unavailable"); return null; }
+    const { data: rows2, error: err2 } = await sb.from("schedule_account_index").update({
+      n_pid: merged.nPid, n_tid: merged.nTid, last_active_by_site: merged.lastActiveBySite,
+      settings: merged.settings, migration_flags: merged.migrationFlags,
+      rows_authoritative: true, rev: row2.rev + 1,
+    }).eq("user_id", ownerUid).select("user_id");
+    if (err2 || (Array.isArray(rows2) && rows2.length === 0)) { console.error("[schedule rows] index write blocked -- lost the race twice"); return null; }
+    indexKnownRev = row2.rev + 1; indexBase = _deepClone(merged);
+    return { merged };
+  };
+
+  // THE PRIMARY WRITE PATH for a flipped account — decomposes the whole "hs-v1"-shaped doc into
+  // ONLY the pieces that actually changed since this tab's own last-known-good baseline, and
+  // writes each independently: a write to one schedule can never modify another's row (B1777120
+  // acceptance criterion, proven by construction — each writeOneScheduleRow call targets exactly
+  // one `id`). Reassembles a whole-doc `planar:merged` event when anything merged so the App's
+  // existing reconcile listener (mergeCloudDoc(ancestor, current, merged)) needs no changes at
+  // all — it already treats "everything except a couple of fields is byte-identical to what I
+  // sent" as "only those fields changed elsewhere", which is exactly what happened.
+  const writeScheduleRowsPrimary = async (parsed, v, { skipSanity, label }) => {
+    const { data: userRes } = await sb.auth.getUser();
+    const ownerUid = userRes && userRes.user && userRes.user.id;
+    if (!ownerUid) { console.error("[schedule rows] no signed-in user -- cannot save"); return null; }
+
+    const decomposed = decomposeForDualWrite(parsed);
+    if (!decomposed) return null;
+
+    let mergedForApp = null;
+    let anythingMerged = false;
+    let anyFailure = false;
+    const ensureMergedForApp = () => { if (!mergedForApp) mergedForApp = _deepClone(parsed); return mergedForApp; };
+
+    if (indexBase === null || !_mEq(decomposed.index, indexBase)) {
+      const idxResult = await writeIndexRow(ownerUid, decomposed.index);
+      if (idxResult === null) {
+        anyFailure = true;
+      } else if (idxResult.merged) {
+        const m = ensureMergedForApp();
+        m.nPid = idxResult.merged.nPid; m.nTid = idxResult.merged.nTid;
+        m.lastActiveBySite = idxResult.merged.lastActiveBySite; m.settings = idxResult.merged.settings;
+        Object.assign(m, idxResult.merged.migrationFlags);
+        anythingMerged = true;
+      }
+    }
+
+    const currentIds = new Set(decomposed.schedules.map(s => String(s.id)));
+    for (const s of decomposed.schedules) {
+      const key = String(s.id);
+      const base = scheduleBase[key];
+      if (base !== undefined && _mEq(s.data, base)) continue;   // unchanged -- nothing to write
+      const result = await writeOneScheduleRow(ownerUid, s.id, s.data, { skipSanity, label });
+      if (result === null) { anyFailure = true; continue; }
+      if (result.merged) {
+        const m = ensureMergedForApp();
+        m.projects = { ...m.projects, [key]: result.merged };
+        anythingMerged = true;
+      }
+    }
+
+    for (const key of Object.keys(scheduleBase)) {
+      if (currentIds.has(key)) continue;   // still present -- nothing to tombstone
+      try { await sb.from("schedules").update({ deleted_at: new Date().toISOString() }).eq("id", Number(key)); }
+      catch (e) { console.error("[schedule rows] soft-delete failed for schedule " + key, e); }
+      delete scheduleBase[key]; delete scheduleKnownRev[key]; delete scheduleStaleSnapped[key];
+    }
+
+    if (anythingMerged) {
+      try { window.dispatchEvent(new CustomEvent("planar:merged", { detail: { key: "hs-v1", base: _deepClone(parsed), value: mergedForApp } })); } catch {}
+    }
+    try { window.dispatchEvent(new CustomEvent("planar:cloud-saved", { detail: { key: "hs-v1" } })); } catch {}
+
+    if (anyFailure && !anythingMerged) {
+      try { window.dispatchEvent(new CustomEvent("planar:stale", { detail: { key: "hs-v1" } })); } catch {}
+      return null;
+    }
+    return { key: "hs-v1", value: v };
+  };
+
   window.storage = {
+    scheduleRowsAuthoritative: false,   // B1777120 — live-updated by setScheduleRowsAuthoritative; read by addProject/duplicateProject
     get: async (k) => {
       try {
-        // B1777120 — dual-read scaffold: OFF by default (scheduleRowsReadEnabled reads a
-        // localStorage flag nothing in this app ever sets), so this is a no-op read of a flag
-        // that is normally absent, falling straight through to the blob read below exactly as
-        // before. When explicitly enabled it tries the normalized rows FIRST and only falls
-        // back to the blob if they're absent or the read fails — never a partial document.
-        if (k === "hs-v1" && scheduleRowsReadEnabled()) {
+        // B1777120 — THE AUTHORITY FLIP: readFromScheduleRows itself decides whether this
+        // account is flipped (schedule_account_index.rows_authoritative), the disable
+        // kill-switch, and the dev force-on override — this call is unconditional for "hs-v1"
+        // and returns null (falling straight through to the blob read below, exactly as before
+        // this item shipped) for every account that has not been deliberately flipped.
+        if (k === "hs-v1") {
           const fromRows = await readFromScheduleRows(k);
           if (fromRows) {
             const val = JSON.stringify(fromRows);
@@ -18786,6 +19109,15 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
         const label = opts.label || "auto";
         const isAuto = label === "auto";
         const skipSanity = !!opts.skipSanity;
+
+        // B1777120 — THE AUTHORITY FLIP, write side. Once this account is flipped, an "hs-v1"
+        // save no longer touches planar_data at all -- it decomposes into per-schedule/per-index
+        // CAS writes. planar_data_refuse_post_flip_write (schedules_authority_flip.sql) is the
+        // database-level backstop for a stale cached tab whose JS predates this branch and still
+        // reaches the code below anyway.
+        if (k === "hs-v1" && scheduleRowsAuthoritative && parsed && typeof parsed === "object" && parsed.projects) {
+          return await writeScheduleRowsPrimary(parsed, v, { skipSanity, label });
+        }
 
         // Read the current cloud row ONCE -- used for both the concurrency guard
         // (Layer 0) and the task-drop sanity check (Layer 2). If the read fails,
@@ -18982,6 +19314,38 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
         return { key: k, value: v };
       } catch { return null; }
     },
+    // B1777120 — collision-proof schedule creation for a flipped account. Reserves a real
+    // Postgres identity value via INSERT (never a client-guessed nPid two tabs could race on —
+    // acceptance criterion 5), then patches the row with its own id embedded in `data` (every
+    // other read site in this app assumes `proj.id === <its own key>`) and seeds
+    // scheduleBase/scheduleKnownRev so the very next autosave for this schedule is an ordinary
+    // guarded UPDATE, not a second insert attempt. Returns the new id, or null on any failure
+    // (LOUD-FAILURE — the caller must never add an unsaved project to local state on a null).
+    insertSchedule: async ({ name, ownerKind, linkedSiteId, linkedSiteName, projectData } = {}) => {
+      try {
+        const { data: userRes } = await sb.auth.getUser();
+        const ownerUid = userRes && userRes.user && userRes.user.id;
+        if (!ownerUid) return null;
+        const { data: row, error } = await sb.from("schedules").insert({
+          user_id: ownerUid,
+          linked_site_id: linkedSiteId ?? null,
+          linked_site_name: linkedSiteName ?? null,
+          name: name || "",
+          data: {},
+          rev: 0,
+        }).select("id").single();
+        if (error || !row) { console.error("[schedule rows] insertSchedule failed:", error); return null; }
+        const id = row.id;
+        const finalName = name || ("Project " + id);
+        const proj = projectData ? { ...projectData, id } : { id, name: finalName, tasks: [], ownerKind };
+        if (linkedSiteId != null) { proj.linkedSiteId = linkedSiteId; proj.linkedSiteName = linkedSiteName || null; }
+        const { error: updErr } = await sb.from("schedules").update({ name: proj.name || finalName, data: proj, rev: 1 }).eq("id", id);
+        if (updErr) { console.error("[schedule rows] insertSchedule: could not finalize row", id, updErr); return null; }
+        scheduleKnownRev[String(id)] = 1;
+        scheduleBase[String(id)] = _deepClone(proj);
+        return id;
+      } catch (e) { console.error("[schedule rows] insertSchedule exception:", e); return null; }
+    },
     // List history snapshots for a key, newest first.
     getHistory: async (k, limit = 100) => {
       try {
@@ -19020,8 +19384,28 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
     },
     // Cheap "has the cloud moved ahead?" check for the live-refresh poll --
     // pulls only the version stamp, not the whole dataset.
+    // B1777120 — once flipped, "hs-v1" no longer has a single moving __rev (planar_data is
+    // frozen at whatever it held at flip time), so "newer?" is answered by summing every known
+    // schedule's rev + the index row's rev and comparing against a fresh sum. Any real write
+    // anywhere increases SOME row's rev by >=1, so this can't miss a genuine change; it CAN miss
+    // the specific case of a schedule being soft-deleted elsewhere (its rev leaves the sum
+    // entirely rather than increasing it) -- a known, accepted gap in this early-warning UI poll
+    // only, never in the CAS-write path itself, which still merges/refuses correctly regardless.
     checkRemote: async (k) => {
       try {
+        if (k === "hs-v1" && scheduleRowsAuthoritative) {
+          const { data: userRes } = await sb.auth.getUser();
+          const ownerUid = userRes && userRes.user && userRes.user.id;
+          if (!ownerUid) return { ok: false };
+          const [schedAgg, idxRes] = await Promise.all([
+            sb.from("schedules").select("rev").eq("user_id", ownerUid).is("deleted_at", null),
+            sb.from("schedule_account_index").select("rev").eq("user_id", ownerUid).maybeSingle(),
+          ]);
+          if (schedAgg.error || idxRes.error) return { ok: false };
+          const cloudTotal = (schedAgg.data || []).reduce((n, r) => n + (r.rev || 0), 0) + ((idxRes.data && idxRes.data.rev) || 0);
+          const knownTotal = Object.values(scheduleKnownRev).reduce((n, r) => n + (r || 0), 0) + (indexKnownRev || 0);
+          return { ok: true, cloudRev: cloudTotal, knownRev: knownTotal, newer: cloudTotal > knownTotal };
+        }
         const { data, error } = await sb.from(TABLE).select("rev:value->>__rev").eq("key", k).single();
         if (error || !data) return { ok: false };
         const cloudRev = data.rev == null ? 0 : (parseInt(data.rev, 10) || 0);
