@@ -19432,7 +19432,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // NEW-1 — attempt to give a building an explicit display number (Properties panel only — see
   // CLAUDE.md). A free number stamps directly; a number another building already holds is parked
   // in `bldgNumConflict` for the panel's Swap/Shift/Cancel choice, never silently dropped or
-  // silently taken from its current holder.
+  // silently taken from its current holder. The free path routes through `renumberBuilding` (the
+  // ONE renumbering function — see its own header) rather than a second inline stamp, so it picks
+  // up the same "freeze every other implicitly-numbered building at its pre-edit number" guard
+  // that keeps renumbering the lowest-numbered building from silently cascading the rest down.
   const attemptBuildingNumber = (id, n) => {
     if (!Number.isInteger(n) || n < 1) return;
     const src = stateRef.current.els;
@@ -19441,7 +19444,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const holderId = buildingNumberHolder(src, n, id);
     if (!holderId) {
       pushHistory();
-      setEls(src.map((e) => (e.id === id ? { ...e, buildingNumber: n } : e)));
+      setEls((a) => renumberBuilding(a, id, n));
       setBldgNumConflict(null);
     } else {
       setBldgNumConflict({ id, n, holderId });
@@ -27031,6 +27034,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             style={numInput}
                             resetToken={bldgNumResetSeq}
                             onAttempt={(n) => attemptBuildingNumber(b.id, n)}
+                            onCancelConflict={() => setBldgNumConflict(null)}
                           />
                         </Field>
                         {bldgNumConflict && bldgNumConflict.id === b.id && els.some((e) => e.id === bldgNumConflict.holderId) && (() => {
@@ -31159,7 +31163,7 @@ function AlignIcon({ dir }) {
 // true forever and this field would keep showing the PREVIOUS building's number. Reset the latch
 // the instant the bound id changes, before deciding whether to resync the draft — never rely on a
 // blur that this app's own canvas can silently withhold.
-function BuildingNumberField({ id, value, onAttempt, style, ariaLabel, resetToken }) {
+function BuildingNumberField({ id, value, onAttempt, onCancelConflict, style, ariaLabel, resetToken }) {
   const [draft, setDraft] = useState(String(value));
   const editing = useRef(false);
   const boundId = useRef(id);
@@ -31200,6 +31204,14 @@ function BuildingNumberField({ id, value, onAttempt, style, ariaLabel, resetToke
           // field in this panel.
           setDraft(String(value));
           editing.current = true;
+          // NEW-2 (amends B1768384) — Escape must drop a PENDING conflict exactly like Cancel
+          // does, not just revert this field's own draft. Without this, `bldgNumConflict` in the
+          // parent survives the Escape (nothing else clears it unless `sel` actually moves to a
+          // DIFFERENT building first), so reselecting this same building — a single click that
+          // never deselects it, or a direct double-click — reopens the panel onto the stale
+          // Swap/Shift/Cancel prompt even though the number already reverted. A no-op when
+          // nothing is pending.
+          onCancelConflict?.();
         }
       }}
     />
