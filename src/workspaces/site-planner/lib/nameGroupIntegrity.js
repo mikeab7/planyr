@@ -108,18 +108,28 @@ export function unstampedRow(row) {
 
 /* A row's `scheduleProjectName` hint disagreeing with its project's own current authoritative name.
  *
- * ⛔ DELIBERATELY INFORMATIONAL, NEVER BLOCKING — read this before wiring it into anything that
- * fails a build. ⛔ CORRECTED B1768080 (2026-09-18): this hint is NOT the linked Schedule's own,
- * separately-editable name — a prior version of this comment said so, but tracing the actual wire
- * payload (`public/sequence/index.html`'s `emitLinkChanged`, fed by `Scheduler.jsx`'s own
+ * ⛔ SUPERSEDED (NEW-1, B1793504, 2026-09-20) — THIS IS NOW BLOCKING, not informational. Read
+ * this before treating a non-empty `scheduleNameDrifts` as a hygiene note again.
+ *
+ * ⛔ CORRECTED B1768080 (2026-09-18): this hint is NOT the linked Schedule's own, separately-
+ * editable name — a prior version of this comment said so, but tracing the actual wire payload
+ * (`public/sequence/index.html`'s `emitLinkChanged`, fed by `Scheduler.jsx`'s own
  * `siteName: routedSiteName`) shows it is a snapshot of the SITE's OWN name taken once, at the
  * moment the link was created or changed, then never refreshed by any later rename on either side.
- * So a disagreement here is exactly the staleness B1768080 fixed at the READ sites
- * (`functions/api/mcp/_tools.js`/`_metrics.js` now prefer the scheduler backend's live name) — this
- * check stays informational-only because the stored value is still a legitimate fallback for when
- * that backend is unreachable, never because the two names are allowed to mean different things.
- * Asked only when the hint is genuinely populated: absent/empty means "no schedule linked" and
- * votes on nothing. */
+ * `authoritativeName` here is exactly that SAME site's own current name — the one value this row
+ * (and every sibling in its group) already carries, no network round trip, no unreachable-backend
+ * case to fall back from. That is what changed: B1768080 correctly left this informational because
+ * the MCP read sites now prefer the scheduler backend's LIVE name and treat this stored snapshot as
+ * an offline-only fallback (a genuinely unreachable case) — but it never fixed the one accessor
+ * whose whole job is handing this snapshot to a caller as a display name, `storage.scheduleLinkOf()`.
+ * That accessor (NEW-1, same date) now derives its `name` from the group's own current name instead
+ * of this field, so a fresh caller can never surface the drift this check reports — meaning a
+ * non-empty `scheduleNameDrifts` no longer describes an "accepted, live" state, it describes the
+ * one thing this row-level snapshot still backs: the MCP connector's own last-resort fallback for
+ * when `planar_data` is unreachable. A drifted fallback is worth catching, exactly like this
+ * module's other three blocking checks (each fixed by a backfill/manual correction, never a code
+ * change), so it now rides `auditRows`' blocking bucket alongside them. Asked only when the hint is
+ * genuinely populated: absent/empty means "no schedule linked" and votes on nothing. */
 export function scheduleNameDrift(row, authoritativeName) {
   const hint = asName(row && row.data && typeof row.data === "object" ? row.data.scheduleProjectName : null);
   if (hint == null || authoritativeName == null || hint === authoritativeName) return null;
@@ -161,9 +171,10 @@ export function scheduleNameStaleAgainstLive(row, liveNameById) {
  * the seeded unit suite (it has no scheduler backend to fetch); the live audit script passes it.
  *
  * Returns { nameMismatches, groupKeyMismatches, unstampedRows, scheduleNameDrifts,
- * scheduleNameStaleVsLive }: the first three are BLOCKING — a caller (the audit script, a future CI
- * gate) should fail loudly on any being non-empty; the last two are informational only, per their
- * own headers. */
+ * scheduleNameStaleVsLive }: the first FOUR are BLOCKING — a caller (the audit script, a future CI
+ * gate) should fail loudly on any being non-empty; only `scheduleNameStaleVsLive` is informational,
+ * per its own header (`scheduleNameDrifts` was promoted to blocking NEW-1/B1793504, 2026-09-20 —
+ * see `scheduleNameDrift`'s own header for why). */
 export function auditRows(rows, opts) {
   const liveScheduleNameById = opts && opts.liveScheduleNameById;
   const list = (rows || []).filter(Boolean);

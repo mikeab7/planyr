@@ -12,6 +12,7 @@ import { stableStringify } from "./elementSync.js";
 import { normCountyKey } from "../../../shared/gis/countyKeys.js";
 import { normalizeRenameStampForWrite } from "./projectName.js";
 import { fetchParcelSummaries, fetchElementRecency } from "./elementApi.js";
+import { cloudSitesKey } from "./activeUser.js";
 
 // Per-tab memory of the `version` we last synced for each site, so a save can be a
 // compare-and-swap that REJECTS a stale write instead of silently clobbering (B314).
@@ -144,6 +145,50 @@ export function siteRowFor(m, { isNew = false, teamId = null } = {}) {
 // `siteVersions` (and the content baseline rememberContent() set) → the CAS + thin-clobber guard
 // both see fresh state. The genuine cross-device guard in casUpsert is untouched.
 const serializeSiteWrite = makeWriteSerializer();
+
+/* NEW-1 (2026-09-20) — a write this account can never make succeed is retired instead of retried
+ * forever. Measured on production: site `smqzpzi2b9pe` (owned by a different account entirely, no
+ * team_id) re-fired `event:cloud-conflict`/"stale write rejected twice (sites CAS)" on the owner's
+ * device across every deploy for 17 days straight, because this account's local site cache
+ * (`mergePulledSites` in storage.js) had somehow picked the id up and — with no ownerId recorded
+ * on the cached copy — `mine()` there treats a missing ownerId as "ours", so every pull re-queued
+ * the identical doomed push. Nothing ever un-queued it: `cloudList` (RLS-scoped) can never return
+ * a row this account doesn't own or share, so the id could never heal by the normal "cloud caught
+ * up" path, and cloudUpsertCore's own self-heal (fetchSiteForReconcile) is EQUALLY RLS-scoped, so
+ * it can't see the row either — it just reported the same conflict and gave up until the next
+ * autosave/pull tried the identical thing again.
+ *
+ * The distinguishing signal: this happens ONLY when (a) the reconcile fetch just came back with
+ * NOTHING (RLS says this row is invisible to us, full stop) and (b) this tab has never once held a
+ * confirmed version for the id (`siteVersions[id] == null`) — i.e. this account has NEVER
+ * successfully synced this row, on this pull or any prior one. That combination cannot happen for
+ * a genuinely-owned row: a brand-new local site inserts cleanly (no existing row to collide with);
+ * an own row that's merely mid-race is still visible to `fetchSiteForReconcile` (RLS lets the
+ * owner see it), which is the ordinary self-heal-and-retry path just below and is untouched. Access
+ * revoked mid-session (a team share pulled while `siteVersions[id]` was already set from earlier in
+ * this tab) is deliberately NOT covered here — that write already has a real synced history, so it
+ * is left as an ordinary `unresolved` conflict rather than risking a live-yet-inaccessible row.
+ *
+ * Retiring means: forget the version bookkeeping (already unset here, but cheap to be sure) and
+ * drop the id from this account's persisted local site cache, so `mergePulledSites`'s next run has
+ * nothing left to re-enqueue — the cloud never returns this id for this account either, so once
+ * dropped it cannot come back on its own. Reported once, by name, distinct from the generic
+ * "cloud-conflict" so a client_errors reader can tell "gave up, may retry later" apart from
+ * "retired, will never fire again for this id." */
+function abandonUnownedSiteWrite(uid, id) {
+  delete siteVersions[id];
+  delete lastHeaderSig[id];
+  try {
+    const key = cloudSitesKey(uid);
+    const raw = localStorage.getItem(key);
+    if (!raw) return;
+    const map = JSON.parse(raw) || {};
+    if (id in map) {
+      delete map[id];
+      localStorage.setItem(key, JSON.stringify(map));
+    }
+  } catch (_) { /* best-effort local cleanup; the retry-suppression above is what actually matters */ }
+}
 export function cloudUpsert(uid, model) {
   if (!model || !model.id) return cloudUpsertCore(uid, model); // no id → nothing to serialize on; core returns the error
   return serializeSiteWrite(model.id, () => cloudUpsertCore(uid, model));
@@ -177,9 +222,19 @@ async function cloudUpsertCore(uid, model, isRetry) {
     // is retired BY ARCHITECTURE — there is no whole-doc payload left to fight over.
     if (!isRetry) {
       const fresh = await fetchSiteForReconcile(uid, m.id); // refreshes siteVersions[m.id]
-      if (fresh !== null || siteVersions[m.id] != null) {
+      if (fresh !== null) {
         reportClientEvent("cloud-conflict-healed", "stale header CAS → refetched version, re-pushing (sites)", { id: m.id });
         return cloudUpsertCore(uid, model, true);
+      }
+      // NEW-1 (2026-09-20) — the reconcile fetch came back with NOTHING (RLS hides this row from
+      // this account entirely) AND this tab has never once held a confirmed version for it. This
+      // account never owned this row and never will — see abandonUnownedSiteWrite's header. Retire
+      // it instead of reporting the ordinary transient conflict, which the caller would otherwise
+      // retry into the ground on every future pull/save.
+      if (siteVersions[m.id] == null) {
+        abandonUnownedSiteWrite(uid, m.id);
+        reportClientEvent("site-write-abandoned-not-owned", "write retired — this account has no access to this site row, so retrying it can never succeed", { id: m.id });
+        return { ok: false, conflict: true, abandoned: true };
       }
     }
     // NEW-1 (2026-09-16) — the retry ALSO conflicted (or a live write race means we have nothing

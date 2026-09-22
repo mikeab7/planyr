@@ -1179,10 +1179,25 @@ export function setScheduleLink(groupId, { scheduleProjectId = null, name = null
 }
 // The schedule link recorded on a site group (reads the first plan; the hint is mirrored
 // identically across every plan in the group). Returns { scheduleProjectId, name } | null.
+//
+// NEW-1 (B1793504, 2026-09-20) — `name` is DERIVED from the group's own current name, never
+// read off the stored `scheduleProjectName` snapshot. B1768080 traced that snapshot to a
+// write-once copy of the SITE's own name taken at link time (`Shell.jsx`'s `scheduleLinkChanged`,
+// fed by the embedded schedule app's `siteName`) — it was never the linked schedule's own,
+// separately-editable name. `rename_site_group()` writes `site`/`data.site`/`siteRenamedAt` only,
+// so that copy goes stale the moment the site is renamed afterward (confirmed live in a rolled-
+// back transaction, 2026-09-20). The fix here needs no fallback and no new field on
+// `rename_site_group`: `plans` above already came through `loadSitesList()`'s name-authority
+// reconciliation, so `s.site`/`s.name` IS the group's live, current name at zero extra cost — the
+// same "derive, don't re-mirror" pattern `sites_mirror_site_column` uses for the site/jsonb pair.
+// (The MCP connector's OWN reads went through a different, legitimate fix — see
+// `functions/api/mcp/_tools.js`'s `liveScheduleNameMap` — because a server-side caller can reach
+// the SCHEDULE's own live name via `planar_data`; this client-side accessor never could, and never
+// needed to, once it stopped trusting the frozen snapshot for the one name it always already had.)
 export function scheduleLinkOf(groupId) {
   const plans = loadPlansOfGroup(groupId);
   for (const s of plans) {
-    if (s.scheduleProjectId != null) return { scheduleProjectId: s.scheduleProjectId, name: s.scheduleProjectName || null };
+    if (s.scheduleProjectId != null) return { scheduleProjectId: s.scheduleProjectId, name: s.site || s.name || null };
   }
   return null;
 }
