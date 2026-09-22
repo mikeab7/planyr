@@ -1048,8 +1048,10 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   keep in sync and nothing to arbitrate. **Double-clicking an empty spot makes a box right there
   and puts the caret in it** (it works while you are writing somewhere else — the press takes
   focus); the toolbar's **Box** button turns words you already wrote into a box; **dragging from a
-  box's dot onto another box draws an arrow** (no mode to turn on first, and an explicit ↗ Arrow
-  button is the keyboard route); boxes stay draggable; and **deleting a box takes every arrow that
+  box's dot onto another box draws an arrow** (no mode to turn on first), and **click-to-connect**
+  does the same without a drag — ↗ Arrow, click the source box (it highlights, a dashed line
+  follows the pointer), click the target, and the mode ends (B1834032; Escape, ↗ Arrow again, or
+  a press on bare canvas cancels; keyboard: focus a box + Enter, twice); boxes stay draggable; and **deleting a box takes every arrow that
   named it, at either end** (TOMBSTONE-DELETES — `removeBox` is the only way a box is destroyed and
   it reports what it took). A box is a short **label** plus an optional longer **body**, both
   authored IN the box and both always drawn — screen and paper carry the same thing. And it is a
