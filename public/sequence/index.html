@@ -3451,6 +3451,71 @@ const meetingBoundInfo = task => {
   const state = task.meetingInfeasible ? "danger" : (floatBD != null && floatBD <= 2) ? "warning" : "secondary";
   return { body, deadline, floatBD, state };
 };
+// ── Meeting-calendar cross-schedule import (B1824576) ──────────────────────
+// Reuse a meeting body's cadence from ANOTHER schedule instead of re-entering it — the owner's
+// ask: he went to bind a task to a governmental meeting body (city council, P&Z, MUD board) and
+// the body only existed in a different schedule, so his only path was re-entering the whole
+// cadence from scratch. Every function below COPIES a body, never links it — see
+// copyMeetingBodyWithNewId.
+//
+// mbRuleSignature / mbRecurrenceSignature: an order-independent, canonical fingerprint of a
+// body's cadence, used ONLY to detect "this body is already here" (same name + identical
+// recurrence). Deliberately ignores agendaLead / blackoutDates / extraDates / jurisdiction — two
+// bodies that meet on the same days but disagree on, say, the filing deadline still read as "the
+// same calendar" for this check, matching the item's spec.
+const mbRuleSignature = r => {
+  if (!r) return "";
+  const positions = r.positions === "every" ? "every" : (Array.isArray(r.positions) ? [...r.positions].sort((a, b) => a - b) : [r.positions]);
+  const months = (r.months === "all" || !Array.isArray(r.months)) ? "all" : [...r.months].sort((a, b) => a - b);
+  const anchor = (r.anchor && r.anchor.weekday != null && r.anchor.position != null) ? `${r.anchor.weekday}:${r.anchor.position}` : "";
+  return JSON.stringify([r.weekday, positions, months, anchor]);
+};
+const mbRecurrenceSignature = recurrence => (Array.isArray(recurrence) ? recurrence.filter(r => r && r.weekday != null).map(mbRuleSignature).sort() : []).join("|");
+const mbBodiesSameCadence = (a, b) => !!a && !!b && (a.name || "").trim() === (b.name || "").trim() && mbRecurrenceSignature(a.recurrence) === mbRecurrenceSignature(b.recurrence);
+// copyMeetingBodyWithNewId — re-ids ONE meeting body for a copy into another schedule. Body ids
+// are globally unique (mb_<time><rand>, B816) — two schedules must never share one, or editing
+// the copy would move the original's hearings (MEETING_BODY_INDEX collapses same-id bodies).
+// `salt` disambiguates several bodies copied in the same millisecond. Split out of
+// buildDuplicateProject's inline per-body mapper (Duplicate schedule, below) so this import
+// feature reuses the exact same re-id logic instead of growing a second copy of it.
+const copyMeetingBodyWithNewId = (mb, salt = 0) => {
+  const nid = "mb_" + Date.now().toString(36) + salt + Math.random().toString(36).slice(2, 6);
+  return {...mb, id: nid,
+    recurrence: (mb.recurrence || []).map(r => ({...r, setpos: Array.isArray(r.setpos) ? [...r.setpos] : r.setpos, months: Array.isArray(r.months) ? [...r.months] : r.months})),
+    agendaLead: mb.agendaLead ? {...mb.agendaLead} : mb.agendaLead,
+    blackoutDates: [...(mb.blackoutDates || [])], extraDates: [...(mb.extraDates || [])]};
+};
+// importMeetingBody — copies `sourceBody` into `targetBodies` UNLESS an identical-cadence body is
+// already there (mbBodiesSameCadence), in which case the EXISTING copy is reused instead of
+// minting a second one — no silent duplicates. Returns the (possibly unchanged) array plus the id
+// a task should bind to.
+const importMeetingBody = (targetBodies, sourceBody, salt = 0) => {
+  const list = targetBodies || [];
+  const existing = list.find(b => mbBodiesSameCadence(b, sourceBody));
+  if (existing) return { bodies: list, id: existing.id, created: false };
+  const copy = copyMeetingBodyWithNewId(sourceBody, salt);
+  return { bodies: [...list, copy], id: copy.id, created: true };
+};
+// importMeetingBodies — the multi-select "Import from another schedule…" batch: applies
+// importMeetingBody in sequence so a later pick dedupes against one already imported in the SAME
+// batch, not just against what was already on the schedule before the import started.
+const importMeetingBodies = (targetBodies, sourceBodies) => {
+  let bodies = targetBodies || [];
+  const ids = [];
+  (sourceBodies || []).forEach((sb, i) => {
+    const r = importMeetingBody(bodies, sb, i);
+    bodies = r.bodies;
+    ids.push(r.id);
+  });
+  return { bodies, ids };
+};
+// otherScheduleMeetingBodies — every meeting body on every OTHER schedule on the account, grouped
+// by schedule, for the import pickers (the modal's "Import from another schedule…" and the task
+// right-click "From other schedules" group). Read-only — never mutates a source schedule.
+const otherScheduleMeetingBodies = (data, excludePid) => Object.values((data && data.projects) || {})
+  .filter(p => p && p.id !== excludePid && Array.isArray(p.meetingBodies) && p.meetingBodies.length)
+  .map(p => ({ pid: p.id, schedName: p.name || `Project ${p.id}`, projName: p.linkedSiteName || null, bodies: p.meetingBodies }))
+  .sort((a, b) => a.schedName.localeCompare(b.schedName));
 // ── MS-Project predecessor helpers ────────────────────────
 // Normalise: plain int or {id,type,lag} → always {id,type,lag}
 const normPreds = arr => {
@@ -9999,12 +10064,9 @@ function App() {
     // in two projects would collapse in MEETING_BODY_INDEX → editing one would move the other's hearings.
     const bodyIdMap = {};
     const copiedBodies = Array.isArray(src.meetingBodies) ? src.meetingBodies.map((mb, i) => {
-      const nid = "mb_" + Date.now().toString(36) + i + Math.random().toString(36).slice(2, 6);
-      if (mb && mb.id) bodyIdMap[mb.id] = nid;
-      return {...mb, id: nid,
-        recurrence: (mb.recurrence||[]).map(r => ({...r, setpos: Array.isArray(r.setpos)?[...r.setpos]:r.setpos, months: Array.isArray(r.months)?[...r.months]:r.months})),
-        agendaLead: mb.agendaLead ? {...mb.agendaLead} : mb.agendaLead,
-        blackoutDates: [...(mb.blackoutDates||[])], extraDates: [...(mb.extraDates||[])]};
+      const copy = copyMeetingBodyWithNewId(mb, i);
+      if (mb && mb.id) bodyIdMap[mb.id] = copy.id;
+      return copy;
     }) : undefined;
     const newTasks = src.tasks.map(t => ({...t, notes: t.notes.map(n => ({...n})),
       ...(t.meetingBodyId && bodyIdMap[t.meetingBodyId] ? {meetingBodyId: bodyIdMap[t.meetingBodyId]} : {})}));
@@ -11100,6 +11162,7 @@ function App() {
       {meetingCalOpen  && <MeetingCalendarsModal
         projName={proj?.name}
         bodies={(data.projects && data.projects[data.aPid] && data.projects[data.aPid].meetingBodies) || []}
+        otherSchedules={otherScheduleMeetingBodies(data, data.aPid)}
         onChange={next => setData(d => {
           const p = d.projects && d.projects[d.aPid];
           if (!p) return d;
@@ -11181,6 +11244,7 @@ function App() {
             return targets.some(id => (byId.get(id)?.parentId ?? null) !== null);
           })()}
           meetingBodies={(data.projects[taskCtx.projId] || {}).meetingBodies || []}
+          otherBodies={otherScheduleMeetingBodies(data, taskCtx.projId).flatMap(g => g.bodies.map(b => ({ pid: g.pid, schedName: g.schedName, body: b })))}
           bindCount={(() => { const ids = fullRowSelIds(); return ids.length > 1 && ids.includes(taskCtx.task.id) ? ids.length : 1; })()}
           boundTasks={(() => {
             // Bound LEAF tasks this row could serve as the deadline row for (exclude self + parents).
@@ -11205,6 +11269,30 @@ function App() {
             const ids = fullRowSelIds();
             const targets = ids.length > 1 && ids.includes(taskCtx.task.id) ? ids : [taskCtx.task.id];
             targets.forEach(id => updateTask(id, {meetingBound:false, meetingBodyId:null, pinnedMeetingDate:undefined}, taskCtx.projId));
+            setTaskCtx(null);
+          }}
+          onImportBindMeeting={(srcPid, srcBodyId) => {
+            // NEW-1 (B1824576) — "reuse a meeting calendar from another schedule": copies the body
+            // into THIS schedule (deduping against an identical-cadence body already here) and
+            // binds the current selection to it, in one step. Mirrors onBindMeeting above, with
+            // the copy-in as an extra setData ahead of the per-task updateTask loop.
+            const ids = fullRowSelIds();
+            const targets = ids.length > 1 && ids.includes(taskCtx.task.id) ? ids : [taskCtx.task.id];
+            const projId = taskCtx.projId;
+            const srcBody = ((data.projects[srcPid] || {}).meetingBodies || []).find(b => b.id === srcBodyId);
+            if (!srcBody) { setTaskCtx(null); return; }
+            const destBodies = (data.projects[projId] || {}).meetingBodies || [];
+            const { bodies: nextBodies, id: newBodyId } = importMeetingBody(destBodies, srcBody);
+            if (nextBodies !== destBodies) {
+              setData(d => {
+                const p = d.projects[projId];
+                if (!p) return d;
+                const nd = {...d, projects: {...d.projects, [projId]: {...p, meetingBodies: nextBodies}}};
+                rebuildMeetingBodyIndex(nd);
+                return nd;
+              });
+            }
+            targets.forEach(id => updateTask(id, {meetingBound:true, meetingBodyId:newBodyId, deadlineForTaskId:null}, projId));
             setTaskCtx(null);
           }}
           onAddDeadlineRow={() => { addDeadlineTask(taskCtx.task.id, taskCtx.projId); setTaskCtx(null); }}
@@ -11640,7 +11728,7 @@ const FormatMiniToolbar = React.forwardRef(function FormatMiniToolbar(
 // the sibling FormatMiniToolbar above, which this component portals alongside itself and
 // shares open/close lifecycle with (Escape, click-away, scroll, or choosing any command
 // closes both as one unit).
-function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onMoveTo, canOutdent, meetingBodies = [], bindCount = 1, boundTasks = [], deadlineAnchorName = null, onBindMeeting, onUnbindMeeting, onAddDeadlineRow, onLinkAsDeadline, onUnlinkDeadline, onAddMeetingCalendar, onStepMeeting, onDelete, deleteCount = 1, onSetHealth, onSetRowColor, onSetBold, onSetItalic, onSetUnderline, onSetTextColor, onSetFontSize, onClearFormat, fmt, onClose}) {
+function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onMoveTo, canOutdent, meetingBodies = [], otherBodies = [], bindCount = 1, boundTasks = [], deadlineAnchorName = null, onBindMeeting, onUnbindMeeting, onImportBindMeeting, onAddDeadlineRow, onLinkAsDeadline, onUnlinkDeadline, onAddMeetingCalendar, onStepMeeting, onDelete, deleteCount = 1, onSetHealth, onSetRowColor, onSetBold, onSetItalic, onSetUnderline, onSetTextColor, onSetFontSize, onClearFormat, fmt, onClose}) {
   const menuRef = useRef(null);
   const toolbarRef = useRef(null);
 
@@ -11750,9 +11838,12 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
           <Item icon="ti-chevron-left"  label={prevMeetingIso ? `Previous meeting · ${fmtMeetingStep(prevMeetingIso)}` : "Previous meeting"} disabled={!prevMeetingIso} onClick={() => onStepMeeting(prevMeetingIso)} />
         </>)}
         {/* B844 — meeting-calendar flyout: the parent label reads the row's current state; the
-            flyout is one radio list (— none — + bodies) plus the deadline-row actions. */}
+            flyout is one radio list (— none — + bodies) plus the deadline-row actions.
+            NEW-1 (B1824576) — a schedule with zero bodies of its own but bodies available on
+            OTHER schedules still opens the flyout (not the flat "Add a meeting calendar…" row),
+            so "From other schedules" is reachable; a schedule with neither keeps the old flat row. */}
         <div style={{position:"relative"}} onMouseEnter={()=>setSubMeet(true)} onMouseLeave={()=>setSubMeet(false)}>
-          {meetingBodies.length === 0 && !isDeadlineRow ? (
+          {meetingBodies.length === 0 && otherBodies.length === 0 && !isDeadlineRow ? (
             <Item icon="ti-calendar-plus" label="Add a meeting calendar…" onClick={onAddMeetingCalendar} />
           ) : isDeadlineRow ? (
             <Item icon="ti-flag" label={`Deadline for: ${deadlineAnchorName || "(missing task)"}`} hint="▸" />
@@ -11761,7 +11852,7 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
           ) : (
             <Item icon="ti-calendar-event" label={bindCount > 1 ? `Bind ${bindCount} rows to meeting calendar` : "Bind to meeting calendar"} hint="▸" />
           )}
-          {subMeet && (meetingBodies.length > 0 || isDeadlineRow) && (
+          {subMeet && (meetingBodies.length > 0 || otherBodies.length > 0 || isDeadlineRow) && (
             <div style={{position:"absolute", top:-4, ...(subOpenLeft ? {right:"100%"} : {left:"100%"}), minWidth:200, maxHeight:320, overflow:"auto",
               background:"#fff", border:"1px solid var(--bd2)", borderRadius:6, boxShadow:"0 8px 24px rgba(0,0,0,0.18)", padding:"3px 0", zIndex:10000}}>
               {isDeadlineRow ? (<>
@@ -11774,6 +11865,15 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
                   const isCur = task.meetingBound && task.meetingBodyId === b.id;
                   return <Item key={b.id} icon={isCur ? "ti-check" : "ti-circle"} label={b.name || "Meeting body"} onClick={()=>onBindMeeting(b.id)} />;
                 })}
+                {otherBodies.length > 0 && (<>
+                  <Sep />
+                  <SubCaption>From other schedules</SubCaption>
+                  {otherBodies.map(ob => (
+                    <Item key={`${ob.pid}:${ob.body.id}`} icon="ti-calendar-event"
+                      label={`${ob.body.name || "Meeting body"} · ${ob.schedName}`}
+                      onClick={()=>onImportBindMeeting(ob.pid, ob.body.id)} />
+                  ))}
+                </>)}
                 {bindCount === 1 && task.meetingBound && !task.hasChildren && (<>
                   <Sep />
                   <Item icon="ti-flag" label="+ Add deadline row (call/file-by date)" onClick={onAddDeadlineRow} />
@@ -15155,7 +15255,68 @@ function MBMultiPick({ value, onChange, options, allValue, allRowLabel, allButto
     </>
   );
 }
-function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
+// MeetingImportPicker (NEW-1, B1824576) — "Import from another schedule…": every meeting body on
+// every OTHER schedule on the account, grouped by schedule, multi-select, each showing its cadence
+// sentence + next few dates so the owner can tell same-named bodies with different cadences apart.
+// A body whose name + recurrence already match one on THIS schedule is tagged "already here" —
+// still pickable (importMeetingBody dedupes it to the existing copy, never a second one).
+function MeetingImportPicker({ otherSchedules, existingBodies, onImport, onCancel }) {
+  const [picked, setPicked] = useState(() => new Set());
+  const toggle = key => setPicked(prev => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
+  const today = fdLocal(new Date());
+  const nextDates = b => meetingDatesInRange(b, today, addD(today, 366 * 2)).slice(0, 3);
+  const alreadyHere = b => (existingBodies || []).some(eb => mbBodiesSameCadence(eb, b));
+  const entries = otherSchedules.flatMap(g => g.bodies.map(b => ({ key: `${g.pid}:${b.id}`, g, b })));
+  const byKey = new Map(entries.map(e => [e.key, e.b]));
+  return (
+    <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+      <div style={{padding:"9px 18px",borderBottom:"1px solid var(--bd)",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+        <span onClick={onCancel} title="Back" style={{cursor:"pointer",color:"var(--mut)",fontSize:13,lineHeight:1}}>&larr;</span>
+        <span style={{fontSize:12.5,fontWeight:600,color:"var(--txt)"}}>Import meeting calendars</span>
+      </div>
+      <div style={{flex:1,overflowY:"auto",padding:"12px 18px"}}>
+        {otherSchedules.length === 0 && (
+          <div style={{fontSize:12,color:"var(--mut)",fontStyle:"italic"}}>No other schedules on this account have meeting calendars yet.</div>
+        )}
+        {otherSchedules.map(g => (
+          <div key={g.pid} style={{marginBottom:16}}>
+            <div style={{fontSize:10,fontWeight:700,color:"var(--mut)",textTransform:"uppercase",letterSpacing:".06em",marginBottom:6}}>
+              {g.schedName}{g.projName ? ` · ${g.projName}` : ""}
+            </div>
+            {g.bodies.map(b => {
+              const key = `${g.pid}:${b.id}`;
+              const on = picked.has(key);
+              const dup = alreadyHere(b);
+              const dates = nextDates(b);
+              return (
+                <label key={key} style={{display:"flex",alignItems:"flex-start",gap:8,padding:"7px 8px",borderRadius:6,cursor:"pointer",background:on?"var(--surf)":"transparent"}}>
+                  <input type="checkbox" checked={on} onChange={()=>toggle(key)} style={{marginTop:3,flexShrink:0}} />
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:600,color:"var(--txt)"}}>
+                      {b.name || <span style={{color:"var(--mut)",fontStyle:"italic",fontWeight:400}}>Untitled body</span>}
+                      {dup && <span style={{marginLeft:7,fontSize:9.5,fontWeight:700,color:"var(--mut)",textTransform:"uppercase",letterSpacing:".04em"}}>already here</span>}
+                    </div>
+                    <div style={{fontSize:10.5,color:"var(--mut)",marginTop:2}}>{cadenceSummary(b)}</div>
+                    <div style={{fontSize:10.5,color:"var(--mut)",marginTop:1}}>{dates.length ? dates.map(d=>mbFmt(d)).join(" · ") : "no dates resolve"}</div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+      <div style={{padding:"10px 16px",borderTop:"1px solid var(--bd)",display:"flex",justifyContent:"flex-end",gap:8,flexShrink:0}}>
+        <button className="btn" onClick={onCancel} style={{fontSize:12,padding:"6px 12px"}}>Cancel</button>
+        <button className="btn" disabled={picked.size===0}
+          onClick={()=>onImport([...picked].map(k=>byKey.get(k)).filter(Boolean))}
+          style={{fontSize:12,padding:"6px 14px",background:picked.size?"var(--amber)":"#eee",color:picked.size?"#fff":"var(--mut)",borderColor:picked.size?"var(--amber)":"var(--bd2)",cursor:picked.size?"pointer":"default"}}>
+          Import{picked.size ? ` ${picked.size}` : ""}
+        </button>
+      </div>
+    </div>
+  );
+}
+function MeetingCalendarsModal({ projName, bodies, otherSchedules = [], onChange, onClose }) {
   // Draft / Save model (owner ask, 2026-07-15): the window edits a WORKING COPY — nothing touches the
   // schedule until "Save changes", so it's unmistakable when the edits take effect. savedRef holds the
   // last-applied snapshot, driving the dirty flag + the unsaved-close guard. All edits are JSON-safe.
@@ -15195,6 +15356,16 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
   const patchLead = (id, lf) => setDraft(prev => prev.map(b => b.id === id ? { ...b, agendaLead: { ...(b.agendaLead||{}), ...lf } } : b));
   const add = () => { const b = newMeetingBody(); setDraft(prev => [...prev, b]); setSelId(b.id); };
   const remove = id => { const rest = list.filter(b => b.id !== id); setDraft(prev => prev.filter(b => b.id !== id)); if (selId === id) setSelId((rest[0] && rest[0].id) || null); };
+  // NEW-1 (B1824576) — "Import from another schedule…": pulls one or more bodies' cadence in
+  // from another of the owner's schedules instead of re-entering it. Imported bodies land in the
+  // DRAFT like any other edit — still gated behind Save changes, same as everything else here.
+  const [importOpen, setImportOpen] = useState(false);
+  const importBodies = sourceBodies => {
+    const { bodies: next, ids } = importMeetingBodies(draft, sourceBodies);
+    setDraft(next);
+    if (ids.length) setSelId(ids[ids.length - 1]);
+    setImportOpen(false);
+  };
   const inp = { fontSize:12, padding:"5px 8px", border:"1px solid var(--bd2)", borderRadius:5, background:"#fff", color:"var(--txt)", width:"100%", boxSizing:"border-box", fontFamily:"'Inter',system-ui,sans-serif" };
   const lbl = { fontSize:10, fontWeight:600, color:"var(--mut)", textTransform:"uppercase", letterSpacing:".05em", margin:"0 0 4px", display:"block" };
   const sect = { fontSize:10, fontWeight:700, color:"var(--mut)", textTransform:"uppercase", letterSpacing:".07em", margin:"18px 0 8px", paddingBottom:5, borderBottom:"1px solid var(--bd)" };
@@ -15391,6 +15562,9 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
             <span onClick={requestClose} title="Close (Esc)" style={{cursor:"pointer",color:"var(--mut)",fontSize:17,lineHeight:1,flexShrink:0}}>&#x2715;</span>
           </div>
         </div>
+        {importOpen ? (
+          <MeetingImportPicker otherSchedules={otherSchedules} existingBodies={draft} onCancel={()=>setImportOpen(false)} onImport={importBodies} />
+        ) : (
         <div style={{flex:1,display:"flex",overflow:"hidden"}}>
           <div style={{width:216,flexShrink:0,borderRight:"1px solid var(--bd)",display:"flex",flexDirection:"column",background:"var(--surf)"}}>
             <div style={{flex:1,overflowY:"auto",padding:"8px 0"}}>
@@ -15398,7 +15572,7 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
               {list.map(b => {
                 const isSel = b.id === selId;
                 return (
-                  <div key={b.id} onClick={()=>setSelId(b.id)}
+                  <div key={b.id} data-testid="meeting-body-row" onClick={()=>setSelId(b.id)}
                     style={{padding:"8px 12px 8px 13px",cursor:"pointer",borderLeft:`3px solid ${isSel?"var(--amber)":"transparent"}`,background:isSel?"#fff":"transparent"}}>
                     <div style={{fontSize:12,fontWeight:600,color:"var(--txt)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{b.name || <span style={{color:"var(--mut)",fontStyle:"italic",fontWeight:400}}>Untitled body</span>}</div>
                     <div style={{fontSize:10,color:"var(--mut)",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{cadenceSummary(b)}</div>
@@ -15406,8 +15580,13 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
                 );
               })}
             </div>
-            <div style={{padding:10,borderTop:"1px solid var(--bd)",flexShrink:0}}>
+            <div style={{padding:10,borderTop:"1px solid var(--bd)",flexShrink:0,display:"flex",flexDirection:"column",gap:6}}>
               <button className="btn" onClick={add} style={{width:"100%",fontSize:11.5,padding:"6px 10px"}}>+ Add meeting body</button>
+              {/* NEW-1 (B1824576) — hidden entirely with no OTHER schedule on the account (nothing
+                  to import); otherwise always enabled, even with zero bodies here. Never a dead button. */}
+              {otherSchedules.length > 0 && (
+                <button className="btn" onClick={()=>setImportOpen(true)} style={{width:"100%",fontSize:11.5,padding:"6px 10px"}}>Import from another schedule…</button>
+              )}
             </div>
           </div>
           <div style={{flex:1,overflowY:"auto",minWidth:0}}>
@@ -15422,11 +15601,17 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
                   Bind a task to it (right-click the task) and its hearing date snaps to the body's calendar,
                   with the agenda-filing deadline derived automatically.
                 </div>
-                <button className="btn" onClick={add} style={{fontSize:12,padding:"7px 14px",marginTop:4}}>+ Add meeting body</button>
+                <div style={{display:"flex",gap:8,marginTop:4}}>
+                  <button className="btn" onClick={add} style={{fontSize:12,padding:"7px 14px"}}>+ Add meeting body</button>
+                  {otherSchedules.length > 0 && (
+                    <button className="btn" onClick={()=>setImportOpen(true)} style={{fontSize:12,padding:"7px 14px"}}>Import from another schedule…</button>
+                  )}
+                </div>
               </div>
             )}
           </div>
         </div>
+        )}
         {/* Footer — the explicit apply gate. Nothing on the schedule moves until Save changes. */}
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"10px 16px",borderTop:"1px solid var(--bd)",flexShrink:0,background:"var(--surf)"}}>
           {confirmClose ? (<>

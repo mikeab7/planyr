@@ -265,6 +265,44 @@ export const meetingCostDays = (task, body) => {
   const next = meetingDatesInRange(body, addD(task.start, 1), addD(task.start, 366 * 2))[0];
   return next ? dif(task.start, next) : null;
 };
+// ── Meeting-calendar cross-schedule import (B1824576, VERBATIM copy of public/sequence/index.html) ──
+export const mbRuleSignature = r => {
+  if (!r) return "";
+  const positions = r.positions === "every" ? "every" : (Array.isArray(r.positions) ? [...r.positions].sort((a, b) => a - b) : [r.positions]);
+  const months = (r.months === "all" || !Array.isArray(r.months)) ? "all" : [...r.months].sort((a, b) => a - b);
+  const anchor = (r.anchor && r.anchor.weekday != null && r.anchor.position != null) ? `${r.anchor.weekday}:${r.anchor.position}` : "";
+  return JSON.stringify([r.weekday, positions, months, anchor]);
+};
+export const mbRecurrenceSignature = recurrence => (Array.isArray(recurrence) ? recurrence.filter(r => r && r.weekday != null).map(mbRuleSignature).sort() : []).join("|");
+export const mbBodiesSameCadence = (a, b) => !!a && !!b && (a.name || "").trim() === (b.name || "").trim() && mbRecurrenceSignature(a.recurrence) === mbRecurrenceSignature(b.recurrence);
+export const copyMeetingBodyWithNewId = (mb, salt = 0) => {
+  const nid = "mb_" + Date.now().toString(36) + salt + Math.random().toString(36).slice(2, 6);
+  return {...mb, id: nid,
+    recurrence: (mb.recurrence || []).map(r => ({...r, setpos: Array.isArray(r.setpos) ? [...r.setpos] : r.setpos, months: Array.isArray(r.months) ? [...r.months] : r.months})),
+    agendaLead: mb.agendaLead ? {...mb.agendaLead} : mb.agendaLead,
+    blackoutDates: [...(mb.blackoutDates || [])], extraDates: [...(mb.extraDates || [])]};
+};
+export const importMeetingBody = (targetBodies, sourceBody, salt = 0) => {
+  const list = targetBodies || [];
+  const existing = list.find(b => mbBodiesSameCadence(b, sourceBody));
+  if (existing) return { bodies: list, id: existing.id, created: false };
+  const copy = copyMeetingBodyWithNewId(sourceBody, salt);
+  return { bodies: [...list, copy], id: copy.id, created: true };
+};
+export const importMeetingBodies = (targetBodies, sourceBodies) => {
+  let bodies = targetBodies || [];
+  const ids = [];
+  (sourceBodies || []).forEach((sb, i) => {
+    const r = importMeetingBody(bodies, sb, i);
+    bodies = r.bodies;
+    ids.push(r.id);
+  });
+  return { bodies, ids };
+};
+export const otherScheduleMeetingBodies = (data, excludePid) => Object.values((data && data.projects) || {})
+  .filter(p => p && p.id !== excludePid && Array.isArray(p.meetingBodies) && p.meetingBodies.length)
+  .map(p => ({ pid: p.id, schedName: p.name || `Project ${p.id}`, projName: p.linkedSiteName || null, bodies: p.meetingBodies }))
+  .sort((a, b) => a.schedName.localeCompare(b.schedName));
 export const normPreds = arr => {
   if (!Array.isArray(arr)) return [];
   return arr.map(x => {
