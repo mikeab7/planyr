@@ -56,8 +56,8 @@ import { gridRequest } from "./demGrid.js";
  * canvas matches the printed plan area, not the raw paper (B200). Lives here because it is
  * the only other consumer of printSheetLayout; SitePlanner awaits it when entering print
  * mode and when paper/orientation changes. */
-export function sheetPlanAspect({ paper, orient, buildingCount, metricsPairs, stormwaterBars, includeMetrics = true, page = null }) {
-  const layout = printSheetLayout({ paper, orient, buildingCount, metricsPairs, stormwaterBars, includeMetrics, page });
+export function sheetPlanAspect({ paper, orient, metricsPairs, stormwaterBars, includeMetrics = true, page = null }) {
+  const layout = printSheetLayout({ paper, orient, metricsPairs, stormwaterBars, includeMetrics, page });
   return layout.plan.w / layout.plan.h;
 }
 
@@ -66,8 +66,8 @@ export function sheetPlanAspect({ paper, orient, buildingCount, metricsPairs, st
  * preview (which shows the WHOLE page, not just the plan box). Same lazy-chunk reasoning as
  * `sheetPlanAspect` above — SitePlanner awaits this through the export chunk, never a static
  * import of printSheetLayout. */
-export function sheetLayoutBoxesIn({ paper, orient, buildingCount, metricsPairs, stormwaterBars, titleBlockExtra, includeMetrics = true, page = null }) {
-  const layout = printSheetLayout({ paper, orient, buildingCount, metricsPairs, stormwaterBars, titleBlockExtra, includeMetrics, page });
+export function sheetLayoutBoxesIn({ paper, orient, metricsPairs, stormwaterBars, titleBlockExtra, includeMetrics = true, page = null }) {
+  const layout = printSheetLayout({ paper, orient, metricsPairs, stormwaterBars, titleBlockExtra, includeMetrics, page });
   return { planW: layout.plan.w / 100, planH: layout.plan.h / 100, pageW: layout.page.wIn, pageH: layout.page.hIn };
 }
 
@@ -83,7 +83,7 @@ export function createExportSheet(ctx) {
     // --- presentation -----------------------------------------------------------
     PAL, f0,
     // --- sheet content (built in SitePlanner so screen + sheet share one source) --
-    siteName, siteLabel, planLabel, printFrame, buildingRows,
+    siteName, siteLabel, planLabel, printFrame,
     printMetricPairs, printStormwaterBars, drainage,
     // --- render-pass + feedback controls ----------------------------------------
     cullActive, setExportPass, setExportingPDF, flashWarn,
@@ -161,7 +161,7 @@ export function createExportSheet(ctx) {
     try {
       plan = printSheetLayout({
         paper: paper || "letter", orient: orient || "landscape",
-        buildingCount: buildingRows().length, metricsPairs: printMetricPairs(), stormwaterBars: printStormwaterBars().length,
+        metricsPairs: printMetricPairs(), stormwaterBars: printStormwaterBars().length,
         includeMetrics, page,
       }).plan;
     } catch (_) { return null; } // a sheet-layout hiccup must never block the export itself
@@ -222,10 +222,34 @@ export function createExportSheet(ctx) {
     clone.setAttribute("width", Math.round(w));
     clone.setAttribute("height", Math.round(h));
     clone.removeAttribute("style");
-    const bg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    // NEW-1 (B1804992) — clip EVERY layer drawn on the sheet to this exact box, explicitly. The
+    // nested <svg>'s own viewBox already constrains layout, but the aerial's correctness never
+    // depended on that clip — it's fetched/stitched pixel-exact to this frame (exportAerialForFrame)
+    // — while every OTHER layer (the site plan's own parcels/elements/dimensions, every GIS raster
+    // and vector overlay, sheet furniture) is just drawn somewhere in this same coordinate space and
+    // relied on the viewBox clip alone. An explicit clip-path makes the crop a guarantee rather than
+    // an assumption. `root` (not `clone`) is the container every insertBefore/appendChild/
+    // querySelectorAll below targets, so nothing appended after this point — or already cloned in —
+    // can land outside the frame the owner dragged.
+    const NS = "http://www.w3.org/2000/svg";
+    const clipId = `exportFrameClip${Math.random().toString(36).slice(2)}`;
+    const clipDefs = document.createElementNS(NS, "defs");
+    const clipPathEl = document.createElementNS(NS, "clipPath");
+    clipPathEl.setAttribute("id", clipId);
+    const clipRect = document.createElementNS(NS, "rect");
+    clipRect.setAttribute("x", x); clipRect.setAttribute("y", y);
+    clipRect.setAttribute("width", w); clipRect.setAttribute("height", h);
+    clipPathEl.appendChild(clipRect);
+    clipDefs.appendChild(clipPathEl);
+    const root = document.createElementNS(NS, "g");
+    root.setAttribute("clip-path", `url(#${clipId})`);
+    while (clone.firstChild) root.appendChild(clone.firstChild); // reparent every cloned node (parcels, elements, dimensions, handles…) under the clip
+    clone.appendChild(clipDefs);
+    clone.appendChild(root);
+    const bg = document.createElementNS(NS, "rect");
     bg.setAttribute("x", x); bg.setAttribute("y", y); bg.setAttribute("width", w); bg.setAttribute("height", h);
     bg.setAttribute("fill", paper); // PDF export passes white (screen cream wastes ink); PNG keeps the screen page colour
-    clone.insertBefore(bg, clone.firstChild);
+    root.insertBefore(bg, root.firstChild);
     // Always include the aerial (even if it's hidden on screen), placed beneath everything
     // but the paper, so prints/exports keep the satellite. Two sources (B735): when the LIVE
     // basemap is on, the on-screen aerial is a Leaflet tile <div> the SVG clone can't capture
@@ -249,7 +273,7 @@ export function createExportSheet(ctx) {
     }
     let anchor = bg; // running insertion point; each new backdrop image goes right after the previous → bottom→top paint order
     if (aerials.length) {
-      clone.querySelectorAll('image:not([data-overlay-image]):not([data-export-overlay])').forEach((n) => n.remove()); // drop any live aerial copy — keep placed site-plan overlays + our GIS overlay images
+      root.querySelectorAll('image:not([data-overlay-image]):not([data-export-overlay])').forEach((n) => n.remove()); // drop any live aerial copy — keep placed site-plan overlays + our GIS overlay images
       for (const { a, tag } of aerials) {
         const tl = f2p({ x: a.x, y: a.y });
         const sy = a.ftPerPxY || a.ftPerPx;
@@ -268,7 +292,7 @@ export function createExportSheet(ctx) {
           // stitched data: URL (B839 fast path succeeded → no fetch, no fallback needed).
           if (a.fallbackSrc) im.setAttribute("data-fallback-href", a.fallbackSrc);
         }
-        clone.insertBefore(im, anchor.nextSibling);
+        root.insertBefore(im, anchor.nextSibling);
         anchor = im;
       }
     }
@@ -291,7 +315,7 @@ export function createExportSheet(ctx) {
      * an origin never renders one), a lifted layer falls back to `over` WITH a console warning
      * rather than silently printing underneath the plan it was lifted out of. */
     const overRaster = [], overVector = [];
-    const frontAnchor = clone.querySelector(`[${FRONT_BAND_ATTR}]`);
+    const frontAnchor = root.querySelector(`[${FRONT_BAND_ATTR}]`);
     const bandOf = (o) => {
       const want = o.band || (o.over ? "over" : "under");
       if (want !== "front") return want;
@@ -316,8 +340,8 @@ export function createExportSheet(ctx) {
         if (o.label) im.setAttribute("data-layer-label", o.label);
         if (o.fallbackSrc) im.setAttribute("data-fallback-href", o.fallbackSrc);
         if (append === "front") frontAnchor.appendChild(im);
-        else if (append) clone.appendChild(im);
-        else { clone.insertBefore(im, anchor.nextSibling); anchor = im; }
+        else if (append) root.appendChild(im);
+        else { root.insertBefore(im, anchor.nextSibling); anchor = im; }
       }
     };
     if (includeMapLayers && exportOverlays && exportOverlays.length) {
@@ -344,8 +368,8 @@ export function createExportSheet(ctx) {
         if (v.label) g.setAttribute("data-layer-label", v.label);
         g.innerHTML = svg; // inline SVG fragment — same innerHTML idiom as the sheet furniture below
         if (append === "front") frontAnchor.appendChild(g);
-        else if (append) clone.appendChild(g);
-        else { clone.insertBefore(g, anchor.nextSibling); anchor = g; }
+        else if (append) root.appendChild(g);
+        else { root.insertBefore(g, anchor.nextSibling); anchor = g; }
       }
     };
     if (includeMapLayers && exportVectorOverlays && exportVectorOverlays.length) {
@@ -359,7 +383,7 @@ export function createExportSheet(ctx) {
     // placeholder already left via data-export="skip"); on → the cloned <image>s keep
     // their exact on-screen transform — feet→pixel position, scale, rotation, opacity,
     // and the rasterized page — composited above the aerial backdrop in the same z-order.
-    if (!includeOverlay) clone.querySelectorAll('[data-overlay-image]').forEach((n) => n.remove());
+    if (!includeOverlay) root.querySelectorAll('[data-overlay-image]').forEach((n) => n.remove());
     // Sheet furniture for the export — a measurement-grade graphic scale bar
     // (bottom-right) and a north arrow (top-left), both on a translucent
     // legibility plate. Sized in OUTPUT units and anchored to the export FRAME
@@ -394,7 +418,7 @@ export function createExportSheet(ctx) {
     // on-screen bug this fixes. Passing no pal lets scaleBarPlate/northArrowPlate fall back to
     // their own fixed, print-safe ink/plate defaults (sheetFurniture.js), same as they always have.
     furn.innerHTML = buildSheetFurnitureSvg({ x, y, w, h, ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: {}, obstacles });
-    clone.appendChild(furn);
+    root.appendChild(furn);
     return { clone, w, h };
   };
   // Export-time presentation pass (NEW-2 / NEW-3, 2026-06-29). Operates on the CLONE
@@ -963,7 +987,7 @@ export function createExportSheet(ctx) {
     // Thin line work + restyle labels to the SAME physical weights the PDF uses, by
     // scaling against a notional letter-landscape plan box (PNG has no paper of its own),
     // so a downloaded PNG looks as crisp/professional as the PDF (NEW-2 / NEW-3).
-    const lp = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: buildingRows().length, metricsPairs: printMetricPairs(), stormwaterBars: printStormwaterBars().length });
+    const lp = printSheetLayout({ paper: "letter", orient: "landscape", metricsPairs: printMetricPairs(), stormwaterBars: printStormwaterBars().length });
     restyleExportClone(clone, sheetFitScale(w, h, lp.plan.w, lp.plan.h));
     const xml = new XMLSerializer().serializeToString(clone);
     const url = URL.createObjectURL(new Blob([xml], { type: "image/svg+xml" }));
@@ -1041,12 +1065,11 @@ export function createExportSheet(ctx) {
     // omission.
     const { aerialDropped, overlaysDropped } = await inlineImages(built.clone, true);
     // Compose the WHOLE sheet as ONE SVG (B200): nest the plan as an inner <svg> sized to
-    // the layout's plan box (it keeps its own viewBox); the title block, buildings table
-    // (B197) and metrics live in the SAME outer SVG coordinate system.
-    const rows = buildingRows();
+    // the layout's plan box (it keeps its own viewBox); the title block and metrics live in
+    // the SAME outer SVG coordinate system.
     const metricPairs = printMetricPairs();
     const swBars = printStormwaterBars();
-    const layout = printSheetLayout({ paper, orient, buildingCount: rows.length, metricsPairs: metricPairs, stormwaterBars: swBars.length, titleBlockExtra: !!(scaleLabelText || preparedBy), includeMetrics: includeMetricsBand, page: pageOverride });
+    const layout = printSheetLayout({ paper, orient, metricsPairs: metricPairs, stormwaterBars: swBars.length, titleBlockExtra: !!(scaleLabelText || preparedBy), includeMetrics: includeMetricsBand, page: pageOverride });
     // NEW-2 / NEW-3: thin line work + restyle labels to physical print weights, using
     // the real sheet-fit factor (centi-inches of paper per viewBox unit) so the result
     // is identical regardless of the zoom the user was at when they hit print.
@@ -1066,7 +1089,6 @@ export function createExportSheet(ctx) {
       note: drainage && drainage.mitigation && drainage.mitigation.intersectAcres > 0
         ? "Concept site plan — planning-level estimates, not a survey. Detention & floodplain-mitigation volumes are screening figures — confirm with your engineer and the reviewing authority."
         : "Concept site plan — planning-level estimates, not a survey.",
-      buildings: rows.map((r) => ({ name: r.name, sf: r.sf, clearHeight: r.clearHeight.value, slab: r.slab.value })),
       pal: { ...PAL, paper: "#ffffff" }, // white sheet — the cream PAL.paper is a screen-only page colour
     });
     return { sheetSvg, layout, aerialDropped, overlaysDropped };
