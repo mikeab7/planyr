@@ -166,6 +166,19 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1281296 — B1807200: the collapsed signed-in account trigger and the two-tabs "open tabs" badge, on a real signed-in account `Blocker: auth`
+
+**Why this needs a live pass, and what it is NOT.** B1807200 (the top-right toolbar cluster's Option B unification) is proven headless, logged out, against the real running app — `ui-audit/verify-toolbar-cluster-optionb.mjs`, 10/10 checks, incl. every icon-only control at 32×32, one shared 8px radius, and Undo's disabled opacity measurably distinct from Redo's enabled baseline. Two of the mockup's specific claims genuinely cannot be exercised logged out: the account trigger only reaches its "Cloud off"/"Sign in" states in this sandbox (each confirmed at the correct 32px height, but neither carries a name to collapse), and the "open tabs" badge (`PresenceChip`'s self-tabs case) only renders when a signed-in account has this same project open in more than one browser tab/window at once — the presence channel it reads is a Supabase Realtime feature, unreachable signed-out.
+
+**What was verified here (sandbox, this session).** Full suite: 881 files / 17,992 tests, zero regressions. `npm run build`: clean. `npx eslint` on every touched file: 0 errors. The headless harness above screenshotted both light and dark themes and confirmed every OTHER row-1/row-2 control (the sync-status icon incl. its new corner status dot, Full screen, Settings, File, Undo, Redo, Zoom-to-fit) at the spec'd 32×32/8px.
+
+**Steps, each with a named expected result:**
+1. Sign in on planyr.io with a real account. **Expect:** the row-1 account trigger shows only the round avatar + a small ▾ chevron — no name text inline — and is the same height as the sync-status icon and Full screen beside it.
+2. Hover the collapsed account trigger. **Expect:** the tooltip reads "Signed in as `<your name>` (`<your email>`)".
+3. Click the account trigger. **Expect:** the opened dropdown's own header still shows the avatar, full name, and email exactly as before this item — nothing about the dropdown itself changed.
+4. Open the same project in a second browser tab (same signed-in account). **Expect:** row 1 shows a 32×32 icon button (a "stacked windows" glyph) with a small numeric badge reading "2" in its top-right corner, replacing the old "2 tabs" text pill.
+- **Stopping rule:** closes when steps 1–4 confirm on Michael's real account, dated — or a step fails and is filed as a recurrence against B1807200, per STANDING RULE #2 (a null result is a FINDING, never a silent close).
+
 ### V1268880 — B1790016/B1790017: the rebuilt car-parking properties panel — the spec sheet, the aisle-side picture control's disable case, and a wall-bonded flip `Blocker: real-data`
 
 **Why this needs a live pass, and what it is NOT.** This is not asking anyone to re-diagnose whether the panel works — it does, measured directly in this session in a headless Chromium against a real signed-in-style plan-open flow (seeded `localStorage`, the actual Map Finder → Site Planner route, no mocking of the render): **23 of 24 automated checks passed**, the one failure being `ERR_TUNNEL_CONNECTION_FAILED` on external Esri/county-GIS tile requests this sandbox's egress proxy blocks — unrelated to this feature and expected here (same class of sandbox limitation `CLAUDE.md`'s known-issues section already documents for other GIS-dependent checks). What that headless pass could not do: drive Michael's own signed-in account or a real project's parking field, where a genuine per-field `cfg` override, a real bonded assembly, or a real building-wall geometry could differ from the synthetic fixture below.

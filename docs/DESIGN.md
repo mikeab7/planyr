@@ -421,6 +421,22 @@ flattened into one shared color.
 See the live `/design` gallery (NEW-4) for every one of these rendered in every state, both
 themes, side by side — use it to eyeball a new control against the existing set before writing one.
 
+### `MenuTrigger`'s `SIZE` bundle, and the `lg` (32) step (NEW-6, top-right toolbar cluster, Option B)
+
+`MenuTrigger` (the account/"Sign in"/"Cloud off" pill, controls.jsx) is a size-locked chrome chip
+whose `size` prop selects a whole `(height, padding, fontSize)` bundle from `SIZE` — `sm` (26) for
+dense chrome, `md` (30) for a standalone menu trigger. `SIZE.lg` (32) is a third, narrowly-scoped
+step added for the app header's row-1/row-2 right-zone cluster: the sync-status icon
+(`CloudSyncBadge`), the open-tabs badge (`PresenceChip`'s self-tabs case), `IconButton`s passed
+`size={32}` (`FullscreenButton`/`SettingsMenu`), and the account trigger all now share this one
+height, with `RADIUS.control` (8) unchanged across every one of them. 32 is deliberately not on
+`designTokens.js`'s `CONTROL_H` ladder — see `SIZE`'s own header in controls.jsx for why a fourth,
+scoped step (the same shape as `CONTROL_H.touch`) was the right call rather than stretching `md`.
+The account trigger also collapses to its `leading` avatar + caret only by default — `MenuTrigger`
+skips rendering the middle text span entirely when `children` is omitted, rather than reserving a
+phantom gap for it — so the signed-in name shows only in the trigger's `title` tooltip and in the
+opened dropdown's identity header, never inline.
+
 ## Floating notifications (NEW-5, B1000400, 2026-09-01)
 
 **Every FLOATING, APP-LEVEL notification — anything that overlays content to tell the user

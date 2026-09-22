@@ -147,6 +147,9 @@ function writeableDocumentOnScreen() {
 function FullscreenButton({ active, onToggle }) {
   return (
     <IconButton
+      // NEW-1 (top-right toolbar cluster, Option B) — 30 → 32, matching every other bordered
+      // control in this row's right zone (see SIZE.lg in controls.jsx).
+      size={32}
       onClick={onToggle}
       data-testid="toggle-fullscreen"
       aria-pressed={active}
@@ -218,8 +221,11 @@ function SettingsMenu() {
   const anchor = useRef(null);
   return (
     <>
-      {/* NEW-1 (B982400) — same IconButton convergence as FullscreenButton above (26→30 tall). */}
+      {/* NEW-1 (B982400) — same IconButton convergence as FullscreenButton above (26→30 tall).
+          NEW-2 (top-right toolbar cluster, Option B) — 30 → 32, matching FullscreenButton's own
+          bump beside it. */}
       <IconButton
+        size={32}
         ref={anchor}
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
@@ -1079,7 +1085,10 @@ export default function AppHeader({
           this is a pure position fix — the row's own content, mask and measurement refs are
           untouched. */}
       <div style={{ position: "relative" }}>
-      <div ref={rowRef} className={narrow ? "no-hscrollbar" : undefined} style={{ height: 30, display: "flex", alignItems: "center", position: "relative", ...rowScroll, WebkitMaskImage: row1Mask, maskImage: row1Mask }}>
+      {/* NEW-1 (top-right toolbar cluster, Option B) — 30 → 32, the one shared height every
+          bordered control in this row's right zone now uses (the sync badge, the open-tabs
+          chip, Full screen, and the account trigger — see SIZE.lg in controls.jsx). */}
+      <div ref={rowRef} className={narrow ? "no-hscrollbar" : undefined} style={{ height: 32, display: "flex", alignItems: "center", position: "relative", ...rowScroll, WebkitMaskImage: row1Mask, maskImage: row1Mask }}>
 
         {/* ⛔ NEW-2 — NAVIGATION WINS. Read this before changing any of the three zone flexes.
             The owner could not open the plan switcher on a laptop: "the unincorporated / city of
@@ -1398,9 +1407,18 @@ export default function AppHeader({
         // --control-h-md (CONTROL_H.md) with no separate padding math needed — verified against
         // the mockup's own derived number (6px padding + an 11.5px line ≈ 26) rather than typed
         // in blind.
+        // ⛔ NEW-1 (top-right toolbar cluster, Option B) — 26 → 32, so the File/Undo/Redo/
+        // Zoom-to-fit cluster (SitePlanner.jsx's `plannerToolbar`, now built on the same 32px
+        // `TB_H`/`TB_R` this row's right zone uses) has room without clipping against this row's
+        // own box — the exact "overhang" failure mode B958465 hit in the opposite direction (a
+        // control taller than a FIXED row height overflows it, since the toolbar zone's own
+        // `overflow:hidden` only clips a box that's already height-constrained, and this outer
+        // row carries none). The module tab strip on the left of this same row stretches to match
+        // (`height:"100%"` below), so it reads ~6px taller too — an accepted, disclosed
+        // consequence of one shared row rather than a second row-height system.
         // B1610640 — same non-scrolling wrapper as the branch above; see its comment.
         <div style={{ position: "relative" }}>
-        <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ height: 26, display: "flex", alignItems: "center", position: "relative", borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
+        <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ height: 32, display: "flex", alignItems: "center", position: "relative", borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
 
           {/* Module tabs — the planner's own workspace navigation. Omitted entirely on a
               standalone route (B651873, e.g. /food): the toolbar zone below is already

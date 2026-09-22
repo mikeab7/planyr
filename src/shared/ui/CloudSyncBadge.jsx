@@ -105,7 +105,7 @@ function Badge({ state, onRetry, detail }) {
       <button
         type="button"
         // NEW-1 (B1343200) — floors the tap area at 44x44 CSS px (index.css's `.tap-target`)
-        // without growing the visible 30x30 badge; harmless when `canPop` is false too (no
+        // without growing the visible badge; harmless when `canPop` is false too (no
         // handler is attached either way).
         className="tap-target"
         // Stable hook for the B278 Playwright harness to assert the cloud badge is present and
@@ -131,13 +131,19 @@ function Badge({ state, onRetry, detail }) {
           // radius fix above closed the SHAPE mismatch and left the SIZE one standing — this was
           // still docs/UI-INVENTORY.md's own flagged sibling finding ("Cloud sync: Saved on this
           // device sits 6px from Full screen — height 24px vs 30px"). FullscreenButton/SettingsMenu
-          // are IconButton's default 30×30 square; matching it exactly merges this icon-only badge
+          // were IconButton's default 30×30 square; matching it exactly merged this icon-only badge
           // into that one shared signature instead of carrying its own.
-          display: "grid", placeItems: "center", width: 30, height: 30, borderRadius: RADIUS.md, flex: "none",
-          background: "transparent", color: v.color, cursor: canPop ? "pointer" : "default",
+          // ⛔ NEW-2 (top-right toolbar cluster, Option B) — 30×30 → 32×32, and this control now
+          // carries a REST border+fill like every other bordered control in the cluster instead of
+          // a transparent background (the mockup's own reading: "icon-only 32×32 button", not a
+          // bare glyph floating on the chrome) — the loud-failure ring above still overrides the
+          // border color, unchanged.
+          display: "grid", placeItems: "center", width: 32, height: 32, borderRadius: RADIUS.md, flex: "none",
+          background: "var(--surface-raised)", color: v.color, cursor: canPop ? "pointer" : "default",
           // The loud failure state gets a hairline ring in its own color so it pops out of the
-          // quiet chrome at a glance — the rest carry no border.
-          border: v.loud ? "1px solid var(--danger)" : "1px solid transparent",
+          // quiet chrome at a glance — every other state gets the same neutral border as its
+          // bordered neighbours (Full screen, Settings) rather than none at all.
+          border: v.loud ? "1px solid var(--danger)" : "1px solid var(--border-default)",
           padding: 0, animation: v.pulse ? "pf-pulse 1.1s ease-in-out infinite" : "none",
           // NEW-2 (B915536) — inert (only CloudGlyph, an icon, renders inside); on-scale anyway.
           fontSize: CHROME_FONT_CONTROL,
@@ -145,6 +151,19 @@ function Badge({ state, onRetry, detail }) {
       >
         <CloudGlyph variant={v.variant} />
       </button>
+      {/* NEW-3 (top-right toolbar cluster, Option B) — a small circular status-color dot in the
+          button's own corner, so the state reads at a glance without a hover. Purely additional:
+          the button's own color/aria-label/tooltip already carry the same information; this is a
+          second, faster-to-read signal for the resting (non-hover) state. `aria-hidden` — the
+          button's aria-label already states the state in words. */}
+      <span
+        aria-hidden="true"
+        data-testid="cloud-sync-badge-dot"
+        style={{
+          position: "absolute", bottom: 2, right: 2, width: 7, height: 7, borderRadius: RADIUS.pill,
+          background: v.color, border: "1.5px solid var(--surface-raised)", pointerEvents: "none",
+        }}
+      />
       {canPop && open && (
         <>
           <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 69 }} />
@@ -200,7 +219,9 @@ export class CloudBadgeBoundary extends Component {
           // NEW-1 (signature-budget convergence, B1038016) — 30×30, matching the live badge's own
           // fix above, so the rare crash fallback doesn't reintroduce the 26×24 signature it exists
           // to prevent from ever wedging into this row.
-          style={{ display: "grid", placeItems: "center", width: 30, height: 30, borderRadius: RADIUS.md,
+          // NEW-2 (top-right toolbar cluster, Option B) — 30×30 → 32×32, matching the live badge's
+          // own NEW-2 bump above.
+          style={{ display: "grid", placeItems: "center", width: 32, height: 32, borderRadius: RADIUS.md,
             color: "var(--danger)", border: "1px solid var(--danger)" }}>
           <CloudGlyph variant="cloud-slash" />
         </span>

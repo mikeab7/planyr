@@ -143,6 +143,7 @@ export default function AccountControl({ user, authKnown = true, profileApi, onO
             text, which changes with copy edits and is what let this exact divergence ship
             undetected into docs/UI-INVENTORY.md (see ui-inventory.mjs's own auth-state gate). */}
         <MenuTrigger
+          size="lg"
           onClick={() => setCloudNote((o) => !o)}
           aria-haspopup="dialog"
           aria-expanded={cloudNote}
@@ -207,7 +208,7 @@ export default function AccountControl({ user, authKnown = true, profileApi, onO
     // (Only that one direction is closed by construction; a short resolved name can still shrink
     // the zone a little, releasing — not adding — pressure on the crumb next to it.)
     return (
-      <MenuTrigger aria-hidden="true" tabIndex={-1} caret leading={<span style={{ ...avatar(true), background: "var(--chrome-divider)" }} />} data-testid="account-auth-pending">
+      <MenuTrigger size="lg" aria-hidden="true" tabIndex={-1} caret leading={<span style={{ ...avatar(true), background: "var(--chrome-divider)" }} />} data-testid="account-auth-pending">
         <span style={{ display: "inline-block", width: 300, height: 10, borderRadius: RADIUS.sm, background: "var(--chrome-divider)" }} />
       </MenuTrigger>
     );
@@ -223,7 +224,7 @@ export default function AccountControl({ user, authKnown = true, profileApi, onO
     // branch that renders), but nobody is signed in. See that hook's own comment for why a
     // copy-independent marker matters here.
     return (
-      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out">
+      <MenuTrigger size="lg" onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out">
         Sign in
       </MenuTrigger>
     );
@@ -232,17 +233,22 @@ export default function AccountControl({ user, authKnown = true, profileApi, onO
   // Signed in — the pill shows the user's name and opens an account dropdown (B298).
   // NEW-1 (B982400) — was the hand-rolled `pill` shape; MenuTrigger draws the same border/
   // background/radius/font, with its own trailing ▾ caret replacing the inline one below.
+  // NEW-2 (top-right toolbar cluster, Option B) — collapses to the avatar + caret only by
+  // default (no `children`, so MenuTrigger's own NEW-2 skips the now-empty middle span rather
+  // than reserving room for it). The full name is still reachable two ways: this trigger's own
+  // `title` tooltip, and the identity header inside the opened dropdown below — never dropped,
+  // just not shown inline every time this row's width is at a premium.
   return (
     <>
       <MenuTrigger
+        size="lg"
         ref={acctAnchor}
         onClick={() => setAcctOpen((o) => !o)}
         open={acctOpen}
-        title={`Signed in as ${user?.email || "(no email)"}`}
+        title={`Signed in as ${who}${user?.email ? ` (${user.email})` : ""}`}
+        aria-label={`Account: ${who}`}
         leading={<span style={avatar(true)}>{profileApi.initial}</span>}
-      >
-        {who}
-      </MenuTrigger>
+      />
       <AnchoredMenu
         open={acctOpen}
         onClose={() => setAcctOpen(false)}
