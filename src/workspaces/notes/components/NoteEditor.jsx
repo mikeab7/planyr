@@ -48,7 +48,7 @@ import { HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.
 import { PASTE_MODES } from "../lib/notesPastePlain.js";
 import { formFieldOwnsTheKey, UNGATED_KEYS } from "../lib/notesKeyScope.js";
 import { DEFAULT_DENSITY, densityFor } from "../lib/notesSpacing.js";
-import { PAGE_WIDTH_MIN, dragWidthFromDelta, leftWidthGripPad, resolvePinnedBaseWidth } from "../lib/notesPageWidth.js";
+import { PAGE_WIDTH_MIN, dragWidthFromDelta, leftWidthGripPad, matSidePads, resolvePinnedBaseWidth } from "../lib/notesPageWidth.js";
 import { dragHeightFromDelta, resolvePinnedBaseHeight, scrollToReach, topEdgeCompensation } from "../lib/notesPageHeight.js";
 import { indentCssRules, listMarkerCssRules } from "../lib/notesIndentLevel.js";
 import {
@@ -2716,6 +2716,28 @@ export default function NoteEditor({
    * numbers, and it is a function of the PANE only, never of the sheet's grown width, which is
    * what makes the page's left edge unable to move. */
   const [matPadX, setMatPadX] = useState(0);
+  /* ⛔ THE MAT'S OWN VISIBLE CONTENT WIDTH, CARRIED OUT TO THE RENDER (B<PENDING>) —
+   * `matSidePads` needs it to tell a page that is NARROWER than what the two gutters leave room
+   * for (Narrow, or any hand-dragged width below it) from one at or above it, because only the
+   * first leaves the mat's own content short of the pane and therefore leaves the compensating
+   * scroll with nothing to spend. Read that function's header for the measured defect and for why
+   * this is the PANE rather than the natural card width. Set in the SAME pass as `matPadX`, from
+   * the same `paneContentWidth`, so the two can never disagree about the box they describe. */
+  const [matPaneWidth, setMatPaneWidth] = useState(0);
+  /* The mat's rendered side padding, derived — see `matSidePads` (lib/notesPageWidth.js) for the
+   * whole argument. Recomputed every render on purpose: during a live width drag the measurement
+   * effect deliberately bails (so a recompute cannot fight the drag), and `sheetGrowWidth` /
+   * `sheetGrowLeft` are the two values the drag DOES write live, so this is the only place the
+   * gutter spend can keep up with the pointer. */
+  const matPads = useMemo(
+    () => matSidePads({
+      gutter: matPadX,
+      growLeft: sheetGrowLeft,
+      sheetWidth: sheetGrowWidth ?? Math.max(0, matPaneWidth - matPadX * 2),
+      paneWidth: matPaneWidth,
+    }),
+    [matPadX, sheetGrowLeft, sheetGrowWidth, matPaneWidth],
+  );
   /* ⛔ HOW WIDE THE MAT'S SCROLLABLE CONTENT MUST BE TO GIVE THE SHEET SOME BREATHING ROOM PAST
    * ITS OWN RIGHT EDGE (B1550977/NEW-2) — the sheet's OWN rendered width plus `MAT_EXTRA_RIGHT`,
    * carried as a NORMAL-FLOW SPACER sibling rather than as padding on `note-mat` itself.
@@ -3391,6 +3413,7 @@ export default function NoteEditor({
       const naturalGutter = Math.max(MAT_GUTTER, Math.floor((paneContentWidth - naturalSheetWidth) / 2));
       const fullGutter = Math.max(0, Math.floor((paneContentWidth - (pinnedBase ?? naturalSheetWidth)) / 2));
       setMatPadX(isFullWidthPin ? fullGutter : naturalGutter);
+      setMatPaneWidth(paneContentWidth);
     };
     measure();
     /* Re-measured as the text inside a block reflows, which is the half that matters: the
@@ -4198,8 +4221,20 @@ export default function NoteEditor({
              page the two are pixel-for-pixel the same thing; the difference only shows once
              something grows, and the difference is that nothing moves. */
           alignItems: "flex-start", position: "relative",
-          paddingLeft: narrow ? undefined : matPadX,
-          paddingRight: narrow ? undefined : matPadX,
+          /* ⛔ THE PAGE'S BLANK LEFT MARGIN IS SPENT OUT OF THIS GUTTER FIRST, AND THAT IS WHAT
+             STOPS THE WORDS SLIDING (B<PENDING>, owner report 2026-09-18 round 2). `matPadX`
+             itself is untouched — it is still the pin-independent number every other reader
+             depends on, and the rule that the page's left edge "is not a function of the sheet's
+             width at all" is unchanged for the one edge it was ever about, the BODY's. What
+             changes is only where `sheetGrowLeft`'s blank margin comes from: taking it out of the
+             gutter moves the SHEET's own left boundary outward by exactly the margin while the
+             body's position inside the scroller's content does not move at all — so the
+             compensating layout effect below has nothing to hold, and a scroll that cannot be
+             spent (the mat has no overflow when the page is narrower than the pane) can no longer
+             silently lose it. `matSidePads`'s own header carries the measurement and the second
+             half, the right-side top-up for a page narrower than the natural card. */
+          paddingLeft: narrow ? undefined : matPads.padLeft,
+          paddingRight: narrow ? undefined : matPads.padRight,
           paddingBottom: matExtraBottom,
         }}
       >

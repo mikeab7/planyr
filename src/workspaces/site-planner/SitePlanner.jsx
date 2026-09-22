@@ -476,7 +476,7 @@ import {
 import { siteState as resolveSiteState } from "./lib/siteRegion.js";
 import { splitPolygonByCut, remapEdgeVector } from "./lib/polygonSplit.js";
 import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea } from "./lib/polyClip.js";
-import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom } from "./lib/sheetFurniture.js";
+import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom, mapChromeCardStyle } from "./lib/sheetFurniture.js";
 // B765985 — pure, dependency-free (safe on the boot path): the explicit engineering-scale math
 // the compose screen's frame-locking and fit-check use.
 import { scaleLabel, frameFootprintForScale, checkScaleFits } from "./lib/printScale.js";
@@ -24691,8 +24691,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
             return (
               <div data-export="skip" style={{ position: "absolute", left: 0, right: 0, bottom: 0, top: 0, pointerEvents: "none", zIndex: MAP_CHROME_Z.furniture }}>
-                <div style={{ position: "absolute", left: 14, bottom: FURNITURE_ROW }}>{plate(furn.north)}</div>
-                <div style={{ position: "absolute", right: 14, bottom: FURNITURE_ROW }}>{plate(furn.scaleBar)}</div>
+                <div data-testid="north-arrow-plate" style={{ position: "absolute", left: 14, bottom: FURNITURE_ROW }}>{plate(furn.north)}</div>
+                <div data-testid="scale-bar-plate" style={{ position: "absolute", right: 14, bottom: FURNITURE_ROW }}>{plate(furn.scaleBar)}</div>
               </div>
             );
           })()}
@@ -25076,11 +25076,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* calibration / accuracy badge (bottom-left; B609 removed the status bar so the badge now floats 40px above the canvas edge) */}
           {(() => {
+            // NEW-1 (B1795456, owner-reviewed mockup "option B") — SUPERSEDES B1610641 below. The
+            // badge used to paint the whole container in a solid state colour (green/amber/dark)
+            // and prefix the text with a "●"/"▲" glyph — a second, purely decorative dot echoing
+            // the colour-coded dot span right beside it, not a second piece of state (the same
+            // colour + the `warn` pulse already carries that distinction; nothing is dropped by
+            // removing it). That made this the one map-overlay control that didn't match the
+            // scale bar / compass / help / zoom chrome, and its label read heavier and larger than
+            // every other control on the map. The container now reads the SAME chrome surface the
+            // scale-bar card itself renders (`mapChromeCardStyle` — extracted off scaleBarPlate's
+            // own fill/line/radius so a DOM badge can't drift from the SVG plate beside it) in
+            // every state; state is carried entirely by the dot (untouched: size, colour, pulse)
+            // plus a two-tone label — primary in `PAL.ink`, a secondary clause a step lighter in
+            // `PAL.muted` across a hairline `PAL.panelLine` divider — never a raw hex.
             const cfg = {
-              georef: { bg: "rgba(22,101,52,0.92)", dot: "#4ade80", text: "● Scaled · county GIS", sub: null },
-              calibrated: { bg: "rgba(22,101,52,0.92)", dot: "#4ade80", text: "● Scaled · calibrated", sub: mapRef ? `1 px = ${f2(mapRef.ftPerPx)} ft` : null },
-              drawn: { bg: "rgba(40,37,33,0.92)", dot: "#cbd5e1", text: "● True scale · drawn in feet", sub: null },
-              uncalibrated: { bg: "rgba(180,83,9,0.95)", dot: "#fbbf24", text: "▲ Not calibrated", sub: "click to calibrate" },
+              georef: { dot: "#4ade80", label: "Scaled", detail: "county GIS" },
+              calibrated: { dot: "#4ade80", label: "Scaled", detail: "calibrated", sub: mapRef ? `1 px = ${f2(mapRef.ftPerPx)} ft` : null },
+              drawn: { dot: "#cbd5e1", label: "True scale", detail: "drawn in feet" },
+              uncalibrated: { dot: "#fbbf24", label: "Not calibrated", detail: "click to calibrate" },
             }[calibrationState];
             const warn = calibrationState === "uncalibrated";
             // NEW-1 (B881): when a docked left panel narrows the map pane, the badge (left:56)
@@ -25089,20 +25102,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // controls above, which start at bottom:100), and cap its width so it truncates with
             // an ellipsis instead of overflowing the pane. Wide panes keep the original layout.
             const badgeMaxW = calibPlace.maxWidth ?? undefined;
+            // ⛔ B1610641 — SUPERSEDED by B1795456 above; RADIUS.pill (a fully-rounded capsule) was
+            // itself the thing the owner flagged as wrong ("much tighter rounded-rectangle radius,
+            // this is the specific thing … get it exactly right"). `chrome.borderRadius` below is
+            // the scale-bar card's own rendered corner radius (`furnitureMetrics` at the SAME
+            // reference size the on-screen furniture already uses), not a second guess at a number.
+            const chrome = mapChromeCardStyle(PAL);
+            const dividerH = Math.round(chrome.fontSize + 2);
             return (
               <div onClick={warn && mapRef ? () => { setShowAerial(true); setLeftPanel("references"); setSelOverlay(mapRef.id); setOvCalib({ id: mapRef.id, kind: "trace", pts: [] }); } : undefined}
-                // B1610641 — was a bare `99`; RADIUS.pill (999, this file's own imported scale —
-                // "fully rounded — status dots, toggle chips, and any bar whose height IS its
-                // shape", radius.js's own words for exactly this element) is the token every other
-                // genuine pill in the app names explicitly. Both clamp to the identical rendered
-                // stadium shape at this badge's height (border-radius past half the box height is
-                // clamped by the browser either way — verified with a live render, byte-identical
-                // pixels), so this is a token-compliance fix, not a visual one; it stops this badge
-                // being the one pill in the app that names its own magic number instead of the scale.
-                style={{ position: "absolute", left: calibPlace.left, bottom: calibPlace.bottom, maxWidth: badgeMaxW, display: "flex", alignItems: "center", gap: 8, background: cfg.bg, color: "#fff", padding: "5px 11px", borderRadius: RADIUS.pill, fontSize: 11.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.22)", cursor: warn ? "pointer" : "default", zIndex: MAP_CHROME_Z.furniture, overflow: "hidden" }}>
+                data-testid="calibration-badge"
+                style={{
+                  position: "absolute", left: calibPlace.left, bottom: calibPlace.bottom, maxWidth: badgeMaxW,
+                  display: "flex", alignItems: "center", gap: 8,
+                  background: chrome.background, border: `${chrome.borderWidth}px solid ${chrome.borderColor}`, borderRadius: chrome.borderRadius,
+                  padding: "5px 11px", fontSize: chrome.fontSize,
+                  cursor: warn ? "pointer" : "default", zIndex: MAP_CHROME_Z.furniture, overflow: "hidden",
+                }}>
                 <span style={{ width: 7, height: 7, borderRadius: 99, background: cfg.dot, flex: "none", animation: warn ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
                 <span ref={calibBadgeRef} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {cfg.text}{cfg.sub && <span style={{ fontWeight: 400, opacity: 0.85, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>· {cfg.sub}</span>}
+                  <span style={{ color: PAL.ink, fontWeight: 600 }}>{cfg.label}</span>
+                  {cfg.detail && (
+                    <>
+                      <span aria-hidden="true" style={{ display: "inline-block", width: 1, height: dividerH, verticalAlign: "middle", margin: "0 7px", background: PAL.panelLine }} />
+                      <span style={{ color: PAL.muted, fontWeight: 500 }}>
+                        {cfg.detail}
+                        {cfg.sub && <span style={{ fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}> · {cfg.sub}</span>}
+                      </span>
+                    </>
+                  )}
                 </span>
               </div>
             );
@@ -26682,9 +26710,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <div style={{ fontSize: 11.5, color: PAL.ink, marginBottom: 2 }}>Aisle side</div>
                           <div style={{ fontSize: 10.5, color: PAL.muted, marginBottom: 6 }}>{refCaption}</div>
                           <div style={{ display: "flex", gap: 8 }}>
-                            <AisleSideCard pal={PAL} flipped={false} active={!pc.flipDepth} disabled={flipNoOp} stallDepth={pc.stallDepth} aisle={pc.aisle}
+                            {/* NEW-2 (B1790017 amendment) — flipNoOp disables both cards; disabledReason
+                                puts the SAME reason on the cards' own hover title (LOUD-FAILURE was
+                                previously satisfied only by the paragraph below, never by the controls
+                                themselves — a mouse/keyboard user pointed straight at a dead control got
+                                no explanation from it). */}
+                            <AisleSideCard pal={PAL} flipped={false} active={!pc.flipDepth} disabled={flipNoOp} disabledReason="Stall rows on both edges — nothing to swap at this depth." stallDepth={pc.stallDepth} aisle={pc.aisle}
                               label="Stalls first" sub="Aisle outboard" onClick={() => setFlip(false)} />
-                            <AisleSideCard pal={PAL} flipped={true} active={!!pc.flipDepth} disabled={flipNoOp} stallDepth={pc.stallDepth} aisle={pc.aisle}
+                            <AisleSideCard pal={PAL} flipped={true} active={!!pc.flipDepth} disabled={flipNoOp} disabledReason="Stall rows on both edges — nothing to swap at this depth." stallDepth={pc.stallDepth} aisle={pc.aisle}
                               label="Aisle first" sub="Stalls outboard" onClick={() => setFlip(true)} />
                           </div>
                           {flipNoOp && <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 5, lineHeight: 1.4 }}>This field's depth is a whole number of stall+aisle modules, so both outer edges are already stall rows — flipping wouldn't change anything.</div>}
@@ -27195,10 +27228,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   })() : (
                     <>
                       <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(selEl.w)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
-                      <Field label={selEl.type === "pond" ? "Length (ft)" : "Depth (ft)"}><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
+                      {/* B1805808 — a truck court / drive aisle drawn with the Paving tool (freestanding,
+                          or the auto-generated aisle a split parking lot lays down) shows Depth read-only
+                          here, matching the dock-zone truck court's own read-only Length (B1749154): Width
+                          is the dimension worth typing an exact number for (clearance / turning-radius
+                          driven); Depth is however far the pavement was drawn to extend, so it's adjusted
+                          by dragging the shape's edge on the canvas rather than by typing a new value.
+                          Every other type on this generic panel (pond, parking, trailer…) is unaffected. */}
+                      {selEl.type === "paving" ? (
+                        <Field label="Depth (ft)">
+                          <span style={{ fontSize: 12, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, color: PAL.muted }} title="Drag the shape's edge on the canvas to change this">
+                            {Math.round(selEl.h)}′
+                          </span>
+                        </Field>
+                      ) : (
+                        <Field label={selEl.type === "pond" ? "Length (ft)" : "Depth (ft)"}><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
+                      )}
                     </>
                   )}
-                  {!isDockZone(selEl) && !isBuilding(selEl) && !isCenterlineRoad(selEl) && (
+                  {/* B1790016 NEW-1 — car parking ("parking") now carries its own Rotation row inside
+                      the spec sheet's GEOMETRY section above; excluded here so it isn't rendered twice
+                      (was rendering as an orphaned second "Rotation (°)" row below Pin/Delete). */}
+                  {!isDockZone(selEl) && !isBuilding(selEl) && !isCenterlineRoad(selEl) && selEl.type !== "parking" && (
                   <Field label="Rotation (°)">
                     <RotationStepper value={selEl.rot || 0} disabled={!!selEl.locked} disabledReason="Unlock this element to rotate it"
                       onCommit={(deg) => rotateSelTo(deg)}
@@ -31046,7 +31097,11 @@ function PercentField({ value, onCommit, ariaLabel, inputStyle, min = 0, max = 1
 // a picture rather than a bare "far side" checkbox. Module-scope per MODULE-SCOPE-COMPONENTS —
 // it takes the caller's live theme palette as an ordinary prop (`pal`) rather than closing over
 // the panel's own render-body `PAL`, which only exists inside that component.
-function AisleSideCard({ flipped, stallDepth, aisle, active, disabled, onClick, label, sub, pal }) {
+// NEW-2 (B1790017 amendment) — `disabledReason` (same convention as RotationStepper's own prop)
+// replaces the button's ordinary hover title with the reason when `disabled`, so a mouse/keyboard
+// user gets the answer without hunting for the separate paragraph below the cards (LOUD-FAILURE:
+// the disabled state used to change nothing about the button itself, only a caption elsewhere).
+function AisleSideCard({ flipped, stallDepth, aisle, active, disabled, disabledReason, onClick, label, sub, pal }) {
   const total = Math.max(1, (stallDepth || 0) + (aisle || 0));
   const BANDS_H = 46, WALL_H = 7, GAP = 1, W = 78;
   const stallH = Math.max(9, Math.round((stallDepth / total) * BANDS_H));
@@ -31061,8 +31116,9 @@ function AisleSideCard({ flipped, stallDepth, aisle, active, disabled, onClick, 
   });
   const svgH = y;
   const innerX = 2, innerW = W - 4;
+  const title = disabled && disabledReason ? disabledReason : (sub ? `${label} — ${sub}` : label);
   return (
-    <button type="button" aria-pressed={active} disabled={disabled} onClick={onClick} title={sub ? `${label} — ${sub}` : label}
+    <button type="button" aria-pressed={active} disabled={disabled} onClick={onClick} title={title}
       style={{
         flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 5,
         padding: "7px 6px 6px", borderRadius: RADIUS.md, fontFamily: "inherit",

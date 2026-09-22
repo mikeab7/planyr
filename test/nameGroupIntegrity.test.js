@@ -131,7 +131,7 @@ describe("unstampedRow — a row with no valid rename stamp for sites_preserve_r
   });
 });
 
-describe("scheduleNameDrift — informational only, per its own header", () => {
+describe("scheduleNameDrift — BLOCKING (promoted NEW-1/B1793504, 2026-09-20; see its own header)", () => {
   it("flags a stale hint against the resolved authoritative name", () => {
     expect(scheduleNameDrift({ id: "p1", data: { scheduleProjectName: "Old Schedule Name" } }, "Woods Road"))
       .toEqual({ id: "p1", scheduleProjectName: "Old Schedule Name", authoritativeName: "Woods Road" });
@@ -204,7 +204,7 @@ describe("auditRows — the whole-account pass", () => {
     expect(scheduleNameDrifts).toEqual([]);
   });
 
-  it("surfaces a stale schedule-name hint informationally without failing the two blocking checks", () => {
+  it("surfaces a stale schedule-name hint in the BLOCKING bucket, without tripping the other three", () => {
     const rows = [
       HEALTHY_ROW({ id: "s1", site: "Woods Road", data: { groupId: null, site: "Woods Road" } }),
       { id: "s2", group_id: "s1", site: "Woods Road", data: { groupId: "s1", site: "Woods Road", scheduleProjectName: "Old Name" }, deleted_at: null },
@@ -243,7 +243,8 @@ describe("auditRows — the whole-account pass", () => {
   });
 
   it("B1768080: with a live schedule-name map, surfaces the real production divergence (schedule\n" +
-     "     30 renamed to \"MUD v PID\") informationally, without touching the three blocking checks", () => {
+     "     30 renamed to \"MUD v PID\") informationally, without touching the four blocking checks —\n" +
+     "     the site's OWN name never changed here, so scheduleNameDrift correctly stays silent", () => {
     const rows = [
       HEALTHY_ROW({ id: "sms69x8rb2qk", group_id: "smqfy48tlk9j", site: "Goose Creek", data: { groupId: "smqfy48tlk9j", site: "Goose Creek", scheduleProjectId: "30", scheduleProjectName: "Goose Creek", siteRenamedAt: 1785525795307 } }),
       { id: "smt7q6ar8egz", group_id: "smsdrvzr9gzx", site: "Richfield", data: { groupId: "smsdrvzr9gzx", site: "Richfield", scheduleProjectId: "15", scheduleProjectName: "Richfield", siteRenamedAt: 1785525795307 }, deleted_at: null },
@@ -253,8 +254,24 @@ describe("auditRows — the whole-account pass", () => {
     expect(out.nameMismatches).toEqual([]);
     expect(out.groupKeyMismatches).toEqual([]);
     expect(out.unstampedRows).toEqual([]);
+    expect(out.scheduleNameDrifts).toEqual([]);
     expect(out.scheduleNameStaleVsLive).toEqual([
       { id: "sms69x8rb2qk", scheduleProjectId: "30", storedName: "Goose Creek", liveName: "MUD v PID" },
+    ]);
+  });
+
+  it("NEW-1 (B1793504, 2026-09-20): a SITE rename that never re-mirrors scheduleProjectName is\n" +
+     "     caught in the BLOCKING bucket — the real bug this promotion exists to catch (a rename\n" +
+     "     that changes the group's authoritative name while the hint keeps its pre-rename value)", () => {
+    const rows = [
+      HEALTHY_ROW({ id: "g1", group_id: null, site: "MUD v PID", data: { groupId: null, site: "MUD v PID", scheduleProjectId: "30", scheduleProjectName: "Goose Creek", siteRenamedAt: 1785525795307 } }),
+    ];
+    const out = auditRows(rows);
+    expect(out.nameMismatches).toEqual([]);
+    expect(out.groupKeyMismatches).toEqual([]);
+    expect(out.unstampedRows).toEqual([]);
+    expect(out.scheduleNameDrifts).toEqual([
+      { id: "g1", scheduleProjectName: "Goose Creek", authoritativeName: "MUD v PID" },
     ]);
   });
 
