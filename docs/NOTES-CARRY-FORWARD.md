@@ -441,6 +441,62 @@ Two more found since, each worth its own line because each returned a confident 
 
 35. **⛔ A FIXTURE CAN STRADDLE ONLY ONE SIDE OF A BOUNDARY AND LOOK EXHAUSTIVE WHILE DOING IT (B1801040, 2026-09-19).** `verify-notes-page-width.mjs`'s Case 20 was written for the previous round of the SAME gesture and is a good instrument — every step of a slow real-mouse drag, deliberately uneven, both grips, both directions, three starting widths, every frame sampled. It was green while the owner was still watching his page slide, because its three starting widths — unpinned 580, Wide 900, a custom 717 — **all sit at or above the natural card width, and that is exactly the band in which the defect cannot occur.** Three arms, one side of the line. The give-away is that every arm reported a clean **0.00**, not a small noisy number: a real instrument pointed at a real surface usually reports *something*, and a column of identical zeros is worth one minute of "could this fixture reach the case at all?" before it is worth trusting. **The general form: when a defect's magnitude is a function of some quantity (here `paneWidth − 2 × gutter − pageWidth`, the mat's own slack), the fixture has to cross that quantity's zero, not merely vary on one side of it.** It is DRIVER-SCROLL-IS-NOT-APP-SCROLL §6 one level up — that clause is about a probe whose QUESTION was never about the thing; this is a probe whose question was right and whose SAMPLE never contained an instance. Cheapest counter, and it is what found this: map the defect against the variable (here, six stored widths from 440 to 900) before choosing which two or three to keep. The map also hands you the mechanism for free — the drift came out as exactly the slack, at every width, which named the cause before a line of the fix was written.
 
+36. **⛔ A GRIP THAT SPANS THE WHOLE SHEET HAS ITS CENTRE BELOW THE GLASS, AND THE VISIBLE BOX IS
+   THE **MAT'S**, NOT THE WINDOW'S (NEW-1/NEW-2, 2026-09-21).** The width grips run the full height
+   of the page, so on any note with real content in it `boundingBox()` returns a rect 2,000px tall
+   whose midpoint is off the bottom of a 950px window. Pressing there does nothing, in silence, and
+   **40 of 46 matrix rows came back red on the first run with "the drag committed nothing" — every
+   one of them the instrument.** Fixing the vertical half then exposed the horizontal one: a grip
+   panned to x=217 reads as comfortably on screen, and `elementsFromPoint` there answers
+   `#notes-tree`, because the Pages rail owns the left ~268px of the window and the grip had been
+   panned clean underneath it. **Intersect the target with the MAT on both axes and REFUSE if
+   nothing is left** (`gripBox` in `verify-notes-width-matrix.mjs` throws, naming how far outside
+   it sat). Trap 18 and DRIVER-SCROLL-IS-NOT-APP-SCROLL §4, arriving through a grip instead of a
+   row.
+
+37. **⛔ THE HARNESS'S OWN SETUP PAN, INSIDE THE RECORDING WINDOW, IS REPORTED AS THE APP MOVING
+   THE CONTENT (NEW-2, 2026-09-21).** Making room for a drag (panning so the grip is not against
+   the glass) is legitimate setup — but it moves everything painted on the canvas, which is
+   precisely what the recorder exists to notice. Called from inside the drag helper it produced
+   **240px of "content movement" at one window and 111.63px at another**, on three rows, about a
+   build that was correct. Setup happens BEFORE the recorder starts, always. The species is
+   DRIVER-SCROLL-IS-NOT-APP-SCROLL in its purest form, and it is worth noting that the harness
+   built to find "the page moved when it should not" failed by moving the page itself.
+
+38. **⛔ A PER-FRAME POINTER READING PAIRED WITH A PER-FRAME GEOMETRY READING STRADDLES A MOVE —
+   AND BUDGETING FOR THAT COSTS EXACTLY THE SENSITIVITY YOU NEED (NEW-2, 2026-09-21).** To ask
+   "did the page outrun the finger" you need both quantities on one clock. Recording the pointer in
+   the `pointermove` handler and the width on the next rAF does not give you that, and the obvious
+   patch — allow one frame's worth of pointer travel — **is not a loosened threshold but it is a
+   loss of sensitivity, and it is largest exactly where the gesture is fastest.** Measured: on a
+   three-step flick one frame carries ~100px of pointer, which hid a 140px jump completely, so
+   `origin/main`'s grab-jump was CAUGHT in the slow rows (~5px frames) and MISSED in the flick rows.
+   One defect, one instrument, invisible purely because of how fast the hand moved. **Read both in
+   the same handler, and offset the pointer series by ONE MOVE** — React's state update lands a
+   move later, so same-index pairs report a harmless lag that flips into a phantom LEAD the instant
+   the gesture reverses (a clean 4.67px "lead", exactly one step, on a build that tracked perfectly).
+
+39. **⛔ THREE FIXTURE TRAPS THAT EACH PRODUCED A FALSE FAILURE IN ONE SESSION, grouped because
+   they share a cause: the app's own SAVE DEBOUNCE outliving the assertion (NEW-2, 2026-09-21).**
+   (a) Reading `localStorage` immediately after a drag reports the PREVIOUS width — "the drag
+   committed nothing", for every row, on a build where the drag was fine. Poll until it changes.
+   (b) Resetting a fixture between arms by rewriting `localStorage` and reloading does not hold:
+   the debounce writes the previous arm's box back, so a second arm found TWO matching boxes and
+   `find` picked the older one — *"off by 185px"* about a correct placement. **A fresh page per
+   arm**, and assert on a page that has held exactly one box in its life. (c) A wheel zoom is
+   PROPORTIONAL, so "N notches" is not a level: 6, 12 and 24 notches of 240 all landed on the 10%
+   floor, and three arms printed "(10%)" while claiming 50%, 25% and 10%. Use the keyboard ladder
+   when you need an exact level.
+
+40. **⛔ AND THE ONE THAT IS NOT A TRAP BUT A LIMIT, NAMED SO IT IS NOT SCORED EITHER WAY: A TARGET
+   CAN BE TOO SMALL TO AIM AT (NEW-1, 2026-09-21).** The blank paper a double-click needs is the
+   sheet's own side padding, ~34 workspace px — which is 34 screen px at 100% and **3.4px at 10%
+   zoom**. An arm that clicks there and finds no box is reporting the ZOOM, not the placement, and
+   an arm that quietly skips it is hiding a gap. `verify-notes-canvas` computes the strip's width
+   at each level and either asserts it or prints it under **"NOT EXERCISED HERE"** with the
+   measured number. The same discipline covers a real touchscreen pinch, which a driver cannot
+   raise honestly at all.
+
 See also `ui-audit/TRAPS.md`, and the named rules **FOREGROUND-OR-VOID** (a background tab cannot
 be measured — not its clock, not its pixels) and **COUNT-EVERY-KIND**.
 
@@ -1207,6 +1263,26 @@ position**.
     rather than the drag's two endpoints — both endpoints were already correct before this fix,
     exactly the shape ATTEMPT-BEFORE-YOU-PARK and this file's own §2 fixture-choice warn about:
     sampling only the start and end of a gesture is blind to defects that live entirely in between.
+
+22. **⛔ THE FOURTH ROUND ENDED THE FAMILY BY DELETING THE MECHANISM, AND THE LESSON IS THE SHAPE
+   OF THE FIX RATHER THAN THE FIX (NEW-1/NEW-2, 2026-09-21). Read entries 20 and 21 first — this is
+   their conclusion.** Round 1 moved the content and held it with a scroll; round 2 applied that
+   scroll twice (judder); round 3 applied it once and watched it clamp at zero (creep). Every one
+   of those fixes was correct about its own instance and none could work, because **a bounded
+   resource cannot pay an unbounded debt** and `scrollLeft` is bounded by construction. The page
+   now sits on a transform workspace: a left-edge widen moves the sheet's own workspace origin OUT
+   by the same amount its inner padding grows IN, so the body's workspace position is
+   *arithmetically* unchanged and the view is neither read nor written. There is nothing to
+   compensate, so there is nothing to double-apply and nothing to clamp — the three defects are not
+   fixed so much as **made unrepresentable.** Matrix, one instrument, before and after:
+   `origin/main` 14/48, after 48/48.
+   ⛔ **AND THE NEW FAMILY IT OPENS, which will bite again: A THRESHOLD WRITTEN AS A DOCUMENT
+   DISTANCE AND COMPARED AGAINST SCREEN PIXELS.** The moment a canvas zoom exists, the two stop
+   being the same number. Found immediately: `pressPastLineEnd`'s `minSlack = 12` is a document
+   distance, and the line height it is maxed against is a client rect that scales — so a
+   double-click on unambiguous blank paper placed a box at 100%, 200% and 800% and created NOTHING
+   at 25% and 50%. Same spot, same paper, fewer screen pixels past the line. **Grep any fixed pixel
+   constant that meets a `getBoundingClientRect()` and ask which space it is written in.**
 
 21. **⛔ A COMPENSATION IMPLEMENTED AS A BOUNDED RESOURCE FAILS SILENTLY, PERMANENTLY, AND ONLY ON SOME PAGES (B1801040, 2026-09-19 — the left width grip, a THIRD time, and a third distinct mechanism).**
     **THE SHAPE.** VIEWPORT-STABLE says: when a reflow moves a surface, measure the delta and fold it

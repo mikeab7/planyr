@@ -147,106 +147,110 @@ export function dragWidthFromDelta(startWidth, deltaPx) {
   return clampWidth(startWidth + deltaPx);
 }
 
-/** ⛔ THE LEFT WIDTH GRIP'S "CONTENT DOESN'T MOVE, ONLY THE BOUNDARY DOES" RULE (NEW-2, owner
- *  report 2026-09-17, verbatim: "existing content... stays anchored in the exact same on-screen
- *  position; only the left boundary line moves outward, opening new blank space to the left of
- *  the content"). The sheet's own content-space left edge is architecturally pinned (it never
- *  moves — see `beginWidthDrag`'s own header in NoteEditor.jsx), so opening real blank space to
- *  its LEFT without moving the body's words is bought with left PADDING (growing the gap between
- *  the sheet's own edge and where the body starts) rather than with a bare scroll — exactly the
- *  mechanism NOTES-FREE-PLACEMENT's `sheetGrowLeft` already uses to hold a free-placed box's own
- *  text still while the sheet grows around it, reused here rather than invented a second time.
- *  The PREVIOUS mechanism (grow `sheetGrowWidth` and scroll the mat by the same amount, with the
- *  gap between the sheet's edge and the body left untouched) held the sheet's RIGHT edge fixed on
- *  screen — correctly — but the compensating scroll moved EVERYTHING ELSE painted in the mat
- *  left by the identical amount, content included, because nothing distinguished "the sheet's own
- *  boundary" from "the words inside it." Growing the pad instead means the SAME compensating
- *  scroll (see NoteEditor.jsx's `sheetGrowLeft`-keyed layout effect) is now correcting for a real
- *  layout shift of the body's own position, so it holds the body still — and the sheet's left
- *  edge, whose content-space position never moved, is what is left to visibly track the pointer.
- *  @param startPad  the pad already open — 0, or an earlier drag's carried-over amount (this
- *                    module has no drag SESSION of its own; the caller reads/writes the ref).
- *  @param delta     live width − width at drag start (+ widened, − narrowed).
- *  @returns {{ pad: number, padDelta: number }} `pad` is the new absolute pad, floored at 0;
- *  `padDelta` is exactly how much of it is NEW this call — the amount the scroll must move by to
- *  hold the body's screen position, never the raw `delta`, so a pad already sitting at its own 0
- *  floor cannot send the scroll further than the pad itself actually moved. */
-export function leftWidthGripPad(startPad, delta) {
-  const pad = Math.max(0, (startPad || 0) + (delta || 0));
-  return { pad, padDelta: pad - (startPad || 0) };
+
+/* ═══ THE TWO EDGE-DRAG DECISIONS (NEW-2, fourth round, 2026-09-21) ═══════════════════════════
+ *
+ * ⛔ THESE REPLACE `leftWidthGripPad` AND `matSidePads`, AND THE REPLACEMENT IS THE FIX — read
+ * `notesViewport.js`'s header before changing either of them.
+ *
+ * Both of those functions existed to answer one question: *how do we hold the words still while
+ * the sheet's own position inside a SCROLLER changes underneath them?* The answer was always a
+ * compensation — first a raw scroll (round 2, double-applied, read as judder), then a scroll plus
+ * a gutter raid plus a right-padding top-up (round 3, clamped at zero on a narrow page, read as
+ * creep). **On a transform workspace the question does not arise**: the sheet is absolutely
+ * positioned at a workspace coordinate, so moving its left edge and growing its left padding by
+ * the same amount leaves the body's workspace position *arithmetically unchanged*. There is
+ * nothing to compensate, so these two functions decide geometry only and never touch the view.
+ *
+ * ⛔ THE PAGE HAS TWO INDEPENDENT NUMBERS NOW, AND SEPARATING THEM IS WHAT MAKES THE LEFT EDGE
+ * EXPRESSIBLE AT ALL:
+ *   · `pageWidth`      — the COLUMN: how wide the writing area is. What every stored page already
+ *                        means by this attribute, unchanged, so nothing migrates.
+ *   · `pageMarginLeft` — the BLANK PAPER to the left of the column. New, defaults to 0, so a page
+ *                        written before it existed parses back byte-identical.
+ * The sheet's rendered width is their sum. A left-edge drag spends the margin; a right-edge drag
+ * spends the column. That is the whole model.
+ *
+ * ⛔ AND IT IS PERSISTED, WHICH THE OLD PAD WAS NOT. `widthDragLeftPadRef` was a React ref: the
+ * blank margin a drag opened vanished on reload and the page silently re-rendered narrower than
+ * the owner left it. As a doc attribute it rides storage, sync, print and export for free —
+ * `pageWidth`'s own reasoning, reused rather than re-argued.
+ */
+
+/** The narrowest the writing COLUMN may be squeezed to by a left-edge drag eating into it. Same
+ *  reasoning and same number as `PAGE_WIDTH_MIN`, named separately only so a reader of
+ *  `leftEdgeDrag` does not have to go and check that the two are meant to be the same thing. */
+export const PAGE_COL_MIN = PAGE_WIDTH_MIN;
+
+/** ⛔ THE LEFT BOUNDARY FOLLOWS THE POINTER, AND WHAT IT SPENDS DEPENDS ON WHAT IS THERE.
+ *
+ *  The owner's sentence, restated across all three prior rounds: *"only the left boundary line
+ *  moves outward, opening new blank space to the left of the content."* Widening therefore opens
+ *  BLANK PAPER and moves nothing else — not the words, not the boxes, not the right edge.
+ *
+ *  Narrowing is the same rule read backwards, and it has a second half the earlier rounds never
+ *  stated: once the blank paper is used up the boundary has nowhere left to go but INTO the
+ *  column, so the column narrows and the text goes with it. That is not a defect — it is what
+ *  dragging a margin marker into your own text does in every word processor — but it IS a
+ *  different promise from "nothing moves", so the amount is returned explicitly as
+ *  `contentShift` rather than left for a caller to infer.
+ *
+ *  ⛔ WHAT THE PREVIOUS BEHAVIOUR DID INSTEAD, so this is not read as a gratuitous change:
+ *  narrowing from the LEFT grip moved the RIGHT edge. Measured on `origin/main`, a 160px
+ *  left-grip narrow on a 900 page: left edge unmoved, right edge 160px in. You grabbed one
+ *  boundary and a different one moved — caught by the width matrix's own "the opposite edge
+ *  holds" row (3a/3b), which no previous harness asked.
+ *
+ *  @param marginLeft the blank paper already open to the left (0 on a fresh page).
+ *  @param colWidth   the writing column's current width.
+ *  @param delta      how far the left boundary moved OUTWARD (+ widens, − narrows).
+ *  @returns {{ marginLeft: number, colWidth: number, contentShift: number }} — `contentShift` is
+ *  how far the body's own left edge moves RIGHT as a result, and is 0 for every widening and for
+ *  every narrowing that still has blank paper to spend.
+ */
+export function leftEdgeDrag({ marginLeft = 0, colWidth = 0, delta = 0 } = {}) {
+  const m0 = Math.max(0, num(marginLeft));
+  const c0 = Math.max(0, num(colWidth));
+  const d = num(delta);
+  if (d >= 0) return { marginLeft: m0 + d, colWidth: c0, contentShift: 0 };
+  const want = -d;
+  const fromMargin = Math.min(want, m0);
+  const rest = want - fromMargin;
+  const col = Math.max(PAGE_COL_MIN, c0 - rest);
+  return { marginLeft: m0 - fromMargin, colWidth: col, contentShift: c0 - col };
 }
 
-/* ---- WHERE THE PAGE'S BLANK LEFT MARGIN IS SPENT (B<PENDING>, owner report 2026-09-18 round 2)
+/** ⛔ THE RIGHT BOUNDARY SPENDS THE COLUMN, and the left edge never moves for it.
  *
- * ⛔ READ THIS BEFORE "SIMPLIFYING" EITHER NUMBER — it is the fix for a defect that survived a
- * correct fix, and the reason it survived is the whole point.
+ *  Symmetric to `leftEdgeDrag` in the property that matters (the edge you did not grab does not
+ *  move) but deliberately NOT symmetric in what it spends: the page's blank paper is on the left,
+ *  because that is the side the owner asked for it on. Widening rightward makes the writing
+ *  column wider, which is what the width feature is for; it does not open blank paper on the
+ *  right that nothing can ever be put in.
  *
- * THE MECHANISM IT REPLACES. `leftWidthGripPad` above opens a blank margin INSIDE the sheet, so
- * the body's position within the scroller's own content genuinely moves right by the pad, and the
- * ONLY thing holding the words still on screen is the compensating scroll in NoteEditor.jsx's
- * `sheetGrowLeft`-keyed layout effect. **A scroll is a BOUNDED resource.** `scrollLeft` can only
- * move as far as `scrollWidth − clientWidth` allows, and when the mat's content is NARROWER than
- * the pane there is no overflow at all — the write is silently clamped, the compensation
- * under-delivers, and the words slide right by exactly the amount the scroll could not spend.
- * Nothing notices: the effect compares CONTENT-space positions, never the achieved screen
- * position, so the loss is permanent and never corrected on a later frame.
- *
- * MEASURED, on the deployed build, 2200×950, a 138px left-grip widen in 60 small uneven steps
- * (`ui-audit/verify-notes-page-width.mjs` case 21). Body text displacement, which must be zero:
- *      stored page width  440 → +140px   ·  505 → +75px  ·  560 → +20px
- *      stored page width  717 →    0     ·  900 →   0    ·  unpinned →  0
- * The drift is EXACTLY `naturalSheetWidth − storedWidth`, i.e. the mat's own slack: a page
- * narrower than the natural card leaves the mat's content short of the pane by that much, and the
- * gutter (`matPadX`) is deliberately pin-INDEPENDENT, so it does not shrink to take it up. Every
- * page at or above the natural card already had overflow to scroll into, which is why every arm
- * of the previous round's own every-frame harness was honestly green over a live defect: all
- * three of its starting widths (unpinned 580, Wide 900, a custom 717) sit at or above that width
- * by construction, so none of them could reach the slack.
- *
- * THE FIX IS GEOMETRIC, NOT A BIGGER SCROLL — the two quantities stop competing instead of
- * trading (NOTES-CARRY-FORWARD §5 family -1). The pad is spent out of the mat's own LEFT GUTTER
- * first: the sheet's left edge moves LEFT by the pad while its inner pad grows by the same
- * amount, so the body's content-space position does not move AT ALL and there is nothing for a
- * scroll to hold — a clamp cannot lose what was never asked for. It is also the picture the owner
- * asked for, verbatim: *"only the left boundary line moves outward, opening new blank space to the
- * left of the content."* And unlike the scroll, it SURVIVES A RELOAD, which the previous
- * mechanism's own header admitted it did not.
- *
- * AND THE SECOND HALF, which closes the class rather than moving it: once the pad outruns the
- * gutter the left padding floors at 0 and the remainder genuinely does need the scroll — so the
- * mat's RIGHT padding is topped up by exactly the slack, and only then. For a page at or above the
- * natural card `slack` is 0 and nothing changes at all; for a narrower one it adds precisely the
- * overflow the scroll is about to need and not one pixel more, so no page ever gains scrollable
- * grey it does not use (the standing objection that retired the always-on `MAT_EXTRA_RIGHT`,
- * B1344625).
- *
- * ⛔ AND THE SLACK IS MEASURED AGAINST `paneWidth − 2 × gutter`, NEVER AGAINST THE NATURAL CARD
- * WIDTH DIRECTLY — a one-pixel distinction that is a real, measured one-pixel defect. The gutter
- * is `Math.floor((paneContentWidth − naturalSheetWidth) / 2)` and its own header says it spends
- * one pixel LESS than the leftover allows on purpose (an odd leftover cannot split into two equal
- * integer sides, and a stray pixel of grey is invisible while a stray pixel of forced scroll is
- * not). So `pane − 2 × gutter` is the natural width plus that rounding residue, and topping up
- * against the natural width alone leaves the compensating scroll exactly one pixel short of what
- * it needs. Measured before this was corrected: a 250px left-grip drag on a 440 page at a 1191
- * window held the words to within 1px instead of 0 — `scrollLeft` pinned at its own maximum of 78
- * with 79 required. Reading the pane and the gutter the render already holds makes the two
- * numbers incapable of disagreeing, whichever branch (`naturalGutter` / `fullGutter`) produced it.
- *
- * @param gutter     `matPadX` — the mat's own side gutter. Never modified; this reads it.
- * @param growLeft   the blank left margin the page is carrying (`sheetGrowLeft`).
- * @param sheetWidth the sheet's full rendered width, pad included (`sheetGrowWidth`).
- * @param paneWidth  the mat's own visible content width (`paneContentWidth`), scrollbar-aware.
- * @returns {{ padLeft: number, padRight: number }} what to render as the mat's side padding.
+ *  @param delta how far the right boundary moved OUTWARD (+ widens, − narrows).
  */
-export function matSidePads({ gutter, growLeft, sheetWidth, paneWidth }) {
-  const g = Math.max(0, gutter || 0);
-  const pad = Math.max(0, growLeft || 0);
-  const spend = Math.min(pad, g);
-  /* The sheet's own width with the blank margin taken back out — what the page would measure if
-   * it had never been widened from the left. A page narrower than what the gutters leave room for
-   * is the ONLY shape that leaves the mat short of the pane, and `slack` is exactly how short. */
-  const unpadded = Math.max(0, (sheetWidth || 0) - pad);
-  const room = Math.max(0, (paneWidth || 0) - g * 2);
-  const slack = pad > 0 ? Math.max(0, room - unpadded) : 0;
-  return { padLeft: g - spend, padRight: g + slack };
+export function rightEdgeDrag({ colWidth = 0, delta = 0 } = {}) {
+  const c0 = Math.max(0, num(colWidth));
+  return { colWidth: clampWidth(c0 + num(delta)) };
+}
+
+/** The sheet's own rendered width, from the two numbers that decide it. One function so the
+ *  live drag, the measurement pass and the print serializer can never disagree (PDF-PARITY). */
+export function sheetWidthFor({ marginLeft = 0, colWidth = 0 } = {}) {
+  return Math.max(0, num(marginLeft)) + Math.max(0, num(colWidth));
+}
+
+/** A stored left margin, normalised. `null`/absent/corrupt all mean "no blank paper", which is
+ *  what every page written before this attribute existed has. Ceilinged so a corrupt value cannot
+ *  push the column off the workspace entirely. */
+export function normalizePageMargin(value) {
+  const n = num(value, 0);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.round(Math.min(PAGE_WIDTH_MAX, n));
+}
+
+function num(v, d = 0) {
+  const n = typeof v === "number" ? v : parseFloat(v);
+  return Number.isFinite(n) ? n : d;
 }

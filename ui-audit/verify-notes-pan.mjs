@@ -77,10 +77,16 @@ async function seed(page) {
   await pacedWait(page, 150);
 }
 
-/** The mat's own scroll offsets — the only place a pan can show up. */
+/** ⛔ THE VIEW, NOT A SCROLL OFFSET (NEW-1, 2026-09-21). The mat stopped being a scroller when the
+ *  page moved onto a transform workspace; `scrollLeft`/`scrollTop` are now permanently 0, so the
+ *  old reading reported every correct pan as "the canvas did not move". The view's `x`/`y` are the
+ *  same quantity with the same sign and the same units — a scroll offset WITHOUT the clamp — so
+ *  every assertion below keeps its arithmetic and only the source of the numbers changed. Kept
+ *  under the names `sl`/`st` deliberately: the fields mean exactly what they always meant. */
 const scrollNow = (page) => page.evaluate(() => {
-  const m = document.querySelector('[data-testid="note-mat"]');
-  return { sl: Math.round(m.scrollLeft), st: Math.round(m.scrollTop) };
+  const el = document.querySelector('[data-testid="note-workspace"]');
+  const m = /translate\(([-0-9.]+)px,\s*([-0-9.]+)px\)/.exec(el?.style.transform || "");
+  return { sl: m ? Math.round(-parseFloat(m[1])) : 0, st: m ? Math.round(-parseFloat(m[2])) : 0 };
 });
 
 /** What is actually painted at a client point, outermost-first. EMPTY means off-viewport. */
@@ -124,8 +130,12 @@ const geometry = (page) => page.evaluate(() => {
     mat: r('[data-testid="note-mat"]'),
     sheet: r('[data-testid="note-sheet"]'),
     body: r('[data-testid="note-body"]'),
-    slackX: m.scrollWidth - m.clientWidth,
-    slackY: m.scrollHeight - m.clientHeight,
+    /* ⛔ THE WORKSPACE IS UNBOUNDED, SO "SLACK" IS NO LONGER A PRECONDITION — it is infinite by
+     * construction on both axes. The vacuity question this used to answer is now asked directly,
+     * by the known-good arm below: does a real pan gesture actually move the picture. That is the
+     * better question anyway — a scroller with slack could still fail to pan. */
+    slackX: Infinity,
+    slackY: Infinity,
     matCursor: getComputedStyle(m).cursor,
   };
 });
@@ -170,10 +180,11 @@ console.log(`\nverify-notes-pan · ${VIEWPORT.width}×${VIEWPORT.height} · mat 
 
 /* ── 0 · VACUITY: a pan is unmeasurable on a surface with nowhere to go ───────────────────────── */
 console.log("\n0 · the surface can actually move");
-ok("the mat has real horizontal slack to pan into", g0.slackX >= 100, `${g0.slackX}px`);
-ok("the mat has real vertical slack to pan into", g0.slackY >= 100, `${g0.slackY}px`);
-const VACUOUS = g0.slackX < 100 || g0.slackY < 100;
-if (VACUOUS) console.log("  ⛔ VACUOUS RUN — the pan assertions below would pass on a build that pans nothing.");
+ok("the workspace is unbounded — a pan can always go somewhere", g0.slackX === Infinity && g0.slackY === Infinity,
+  "unbounded on both axes by construction");
+/* ⛔ THE VACUITY CHECK MOVED FROM "is there room" TO "did it actually move", and is answered by a
+ * real gesture a few lines down rather than by a property of the container. See `PAN_MOVED`. */
+let VACUOUS = false;
 
 /* The grey point every pan gesture starts from, hit-tested rather than assumed. */
 const GREY = { x: g0.mat.l + 142, y: 320 };
@@ -222,6 +233,12 @@ const midCursor = await drag(page, GREY, PAN, {
   }),
 });
 const s1 = await scrollNow(page);
+/* The known-good arm, in its new home: if this one gesture does not move the picture, nothing
+ * below means anything and the run says so rather than scoring. */
+if (Math.abs(s1.sl - s0.sl) < 10 && Math.abs(s1.st - s0.st) < 10) {
+  VACUOUS = true;
+  console.log("  ⛔ VACUOUS RUN — a real pan gesture moved the view by nothing.");
+}
 ok("dragging LEFT moves the canvas left — one-to-one with the pointer",
   Math.abs((s1.sl - s0.sl) - Math.abs(PAN.dx)) <= 6, `scrollLeft ${s0.sl} → ${s1.sl} (asked ${Math.abs(PAN.dx)})`);
 ok("dragging UP moves the canvas up — one-to-one with the pointer",
@@ -243,11 +260,20 @@ ok("dragging back RIGHT and DOWN returns the canvas where it came from",
   Math.abs(s2.sl - s0.sl) <= 6 && Math.abs(s2.st - s0.st) <= 6,
   `${JSON.stringify(s2before)} → ${JSON.stringify(s2)} (origin ${JSON.stringify(s0)})`);
 
-/* ⛔ THE EXTENTS. A pan must not invent room the scroller does not have. */
+/* ⛔ THE EXTENTS, AND THIS ASSERTION IS NOW THE OPPOSITE OF WHAT IT WAS — read the inversion
+ * before "fixing" it back. It used to require a pan past the top-left to CLAMP at zero, which was
+ * correct and load-bearing for a scroller: `scrollLeft` cannot go negative, so a runaway would
+ * have been a real defect.
+ *
+ * That clamp is exactly what made three rounds of the page-width bug unfixable (a bounded resource
+ * cannot pay an unbounded debt — see `lib/notesViewport.js`), and the owner asked for Bluebeam's
+ * behaviour explicitly: *"move it to wherever"*, with no hard stop at the page edge. A NEGATIVE
+ * view is how you look at the blank workspace above and to the left of the page. So the assertion
+ * is that the pan KEEPS GOING, and the old one would now be the bug. */
 await drag(page, GREY, { dx: 600, dy: 600 }, { steps: 12 });
-const sClamped = await scrollNow(page);
-ok("⛔ A PAN PAST THE EDGE STOPS AT THE EDGE, it does not run away",
-  sClamped.sl === 0 && sClamped.st === 0, JSON.stringify(sClamped));
+const sPast = await scrollNow(page);
+ok("⛔ A PAN PAST THE PAGE'S TOP-LEFT KEEPS GOING — the workspace is unbounded",
+  sPast.sl < -100 && sPast.st < -100, JSON.stringify(sPast));
 
 /* ── 3 · SHIFT-DRAG IS THE MARQUEE ────────────────────────────────────────────────────────────── */
 console.log("\n3 · shift and drag — the rubber band, and everything it touches");
@@ -350,14 +376,31 @@ const GRIPS = [
 for (const grip of GRIPS) {
   await seed(page);
   if (grip.scroll) {
-    await page.evaluate((s) => { document.querySelector('[data-testid="note-mat"]').scrollTop = s; }, grip.scroll);
+    /* ⛔ NOT `scrollTop` ANY MORE (NEW-1) — the mat does not scroll. Bring the grip into view with
+     * the app's own wheel, which now pans, and re-measure afterwards: a rect computed before a
+     * movement that was supposed to happen is worth nothing. */
+    const g = await geometry(page);
+    await page.mouse.move(g.mat.l + 120, g.mat.t + g.mat.h / 2);
+    for (let i = 0; i < 8; i += 1) await page.mouse.wheel(0, 60);
     await pacedWait(page, 250);
   }
+  /* ⛔ PRESS THE GRIP'S VISIBLE MIDDLE, NOT ITS GEOMETRIC ONE (trap 18, and
+   * DRIVER-SCROLL-IS-NOT-APP-SCROLL §4). A width grip spans the WHOLE height of the sheet, so on
+   * any page with real content its centre is below the glass — measured here at y=465 in a
+   * 465-tall window, where `elementsFromPoint` returns an EMPTY array rather than erroring and
+   * the row reads as "the press did not land on the grip" about a perfectly good grip. Intersect
+   * with the viewport AND the mat first. */
   const spot = await page.evaluate((id) => {
     const el = document.querySelector(`[data-testid="${id}"]`);
     if (!el) return null;
     const b = el.getBoundingClientRect();
-    return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) };
+    const mat = document.querySelector('[data-testid="note-mat"]').getBoundingClientRect();
+    const top = Math.max(b.top, mat.top, 0);
+    const bottom = Math.min(b.bottom, mat.bottom, innerHeight);
+    const left = Math.max(b.left, mat.left, 0);
+    const right = Math.min(b.right, mat.right, innerWidth);
+    if (bottom - top < 8 || right - left < 2) return null;
+    return { x: Math.round((left + right) / 2), y: Math.round((top + bottom) / 2) };
   }, grip.id);
   if (!spot) { ok(`${grip.id} exists`, false, "not rendered"); continue; }
   const gripHit = await hitAt(page, spot.x, spot.y);

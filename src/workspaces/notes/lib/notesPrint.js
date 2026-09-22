@@ -77,6 +77,19 @@ export function pageAnchorExtentTopPx(doc) {
   try { return anchorExtentTop(anchorBoxesInDoc(doc)); } catch (_) { return 0; }
 }
 
+/** ⛔ PDF-PARITY FOR THE PAGE'S OWN BLANK LEFT MARGIN (NEW-2, 2026-09-21). A left-edge drag now
+ *  stores `pageMarginLeft` — blank paper between the page's edge and the writing — and paper is
+ *  exactly where a margin belongs, so it prints. It joins the SAME `growLeftPx` an overhanging
+ *  box already contributes to, by `Math.max` rather than by addition: both answer the one
+ *  question "how much clear paper is there to the left of the writing", so the larger wins.
+ *  Adding them would double-count a page whose margin was opened precisely to hold that box. */
+export function pageMarginLeftPx(doc) {
+  try {
+    const m = doc?.attrs?.pageMarginLeft;
+    return typeof m === "number" && Number.isFinite(m) ? Math.max(0, m) : 0;
+  } catch (_) { return 0; }
+}
+
 /* ⛔ PDF-PARITY FOR NEW-1 (widening a table column grows the sheet, on paper too). Tables do not
  * nest in this schema, and a table is in-flow content rather than a positioned box — it has no
  * stored `x`, it always starts at the body's own left content edge — so the question here is
@@ -388,7 +401,7 @@ export function buildPrintDocument({ title, meta = "", pages = [], density = DEF
    * about where a box sits relative to the paper's own margin. The sheet's ordinary 10mm/8mm
    * padding is kept and the growth is ADDED to it, and the extra left padding is added to the
    * width too — otherwise growing left would simply squeeze the text column. */
-  const growLeftPx = pages.reduce((m, p) => Math.max(m, pageAnchorExtentLeftPx(p.doc)), 0);
+  const growLeftPx = pages.reduce((m, p) => Math.max(m, pageAnchorExtentLeftPx(p.doc), pageMarginLeftPx(p.doc)), 0);
   const growTopPx = pages.reduce((m, p) => Math.max(m, pageAnchorExtentTopPx(p.doc)), 0);
   /* ⛔ A NUMERIC HEIGHT PIN (NEW-1) — see `pageHeightPinExtentPx`'s own header. Aggregated across
    * pages the identical way the width pin already is: a combined notebook print is one

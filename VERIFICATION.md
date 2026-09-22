@@ -166,6 +166,36 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1289648 — B1815024/B1815025: the Notes page behaves like Bluebeam — zoom anywhere, pan anywhere, and a width drag moves only the boundary `Blocker: real-data`
+
+**Why this needs a live pass.** Three LIVE-VERIFY classes at once: **zoom-/data-density-dependent rendering** (the whole page is now drawn through a CSS transform at 10%–800%, and whether TEXT STAYS CRISP at each level is a rasterisation question a headless pixel diff cannot settle for a real panel), **PDF/export parity** (the page's new stored left margin prints), and **real-project-data** (his own long, table-heavy, box-heavy pages, at his own ~2.15 device pixel ratio and his own 1191-wide window). The sandbox proof below is strong and it is not a substitute for any of those.
+
+**What was verified here (sandbox, this session).** Full `npx vitest run` — 882 files, 18,012 tests green, including 33 new pure tests for the view maths and a rewritten page-geometry suite. `npm run ci-parity` PASS end to end (lint · mint gate · tests · build · bundle budget · signature budget · 16/16 visual-regression baselines identical), degraded only on dummy Supabase secrets, which this change does not touch. Four browser harnesses, all driven with real trusted input: **verify-notes-width-matrix** 24 rows × 2 window/DPR arms — `origin/main` **14/48**, this branch **48/48**, one instrument, with a known-good arm that voids the run and a mutation arm that reproduces B1801040's own measured drift (+140/+75/+20/0/0/0) on the pre-fix build and fails on this one; **verify-notes-canvas** 61 checks (cursor-anchored zoom at three anchors, wheel/middle/space pan, Ctrl+=/−/0/9, per-page persistence across reload, unbounded pan off all four edges, and B1393 placement at 25/50/100/200/800%); **verify-notes-pan** 43/43; **verify-notes-page-width** 45/45; **verify-notes-in-sheet-placement** all green.
+
+**What the sandbox could NOT settle, named rather than folded into the pass:** a real two-finger touchscreen pinch (a trackpad pinch arrives as the Ctrl+wheel that IS driven; a touchscreen pinch needs OS gesture recognition a driver cannot raise), trackpad momentum/inertia after the fingers lift, double-click placement at 10% zoom (the blank strip measures 3.4 screen px there — unaimable by anyone, so it is reported with its number instead of scored), and text sharpness on a real high-DPI panel.
+
+**Steps, each with a named expected result — on a THROWAWAY DUPLICATE of a real page, never one of Michael's real Notes pages:**
+1. Duplicate a long, real page (one with a table and at least one placed box) and open the copy. **Expect:** it opens at 100%, the page centred with grey workspace around it, exactly as before.
+2. Ctrl+scroll the wheel with the pointer over a specific WORD. **Expect:** that word stays under the pointer as the page grows and shrinks — it does not drift toward or away from the middle. Repeat with the pointer near the top-left corner and near the bottom-right.
+3. Zoom right in (Ctrl+9 then Ctrl+= repeatedly, or keep scrolling). **Expect:** the text is SHARP at every level — crisp letterforms, not a stretched blur — and the line breaks never change.
+4. Zoom right out until the page is a small card. **Expect:** still legible as a page, no clipping, and the grey workspace extends in every direction.
+5. Pan with a plain two-finger swipe, then with the middle mouse button held, then with Space held and the left button dragged. **Expect:** all three move the page one-to-one with the hand, from anywhere including on top of the page, and none of them creates a box or selects anything.
+6. With the caret in a sentence, press Space. **Expect:** a space is typed. (Space is a pan modifier only when you are not typing.)
+7. Push the page well off the right of the window, then off the left, top and bottom. **Expect:** it keeps going — no hard stop — and **Ctrl+0** brings it straight back to 100%, centred.
+8. **Ctrl+9.** **Expect:** the whole page, top to bottom, fits on screen.
+9. Reload the page. **Expect:** the zoom level AND the position you left it at both come back. Open a DIFFERENT note and come back. **Expect:** each page remembers its own view.
+10. Drag the LEFT width grip outward slowly, then again with a fast flick. **Expect:** every word, every table and every placed box stays exactly where it is on screen; only the left boundary moves, opening blank paper. No shake, no creep, no jump when you let go.
+11. Drag the LEFT grip inward past the blank paper you just opened. **Expect:** the blank paper closes first with nothing moving; once it is gone the column narrows and the text comes with the boundary — and **the right edge never moves**.
+12. Drag the RIGHT grip both ways. **Expect:** the left edge and the text's left margin never move.
+13. Repeat steps 10–12 at 50% and at 200% zoom. **Expect:** identical behaviour; the boundary tracks the pointer one-to-one at every level.
+14. Switch through every width preset (Fit to content / Narrow / Normal / Wide / Full width). **Expect:** the text does not jump for any of them — and **Full width** brings the page's full width on screen rather than running off the right-hand edge.
+15. Reload after a left-grip widen. **Expect:** the blank margin you opened is still there (it used to vanish).
+16. Ctrl+Z after a width drag. **Expect:** one press restores the previous width AND margin together.
+17. Print the page (toolbar Print) with a left margin open. **Expect:** the printed sheet carries the margin, and the view zoom does NOT affect the printed size.
+18. Double-click on blank paper inside the sheet at 50%, 100% and 200% and type. **Expect:** a box appears AT the point clicked, at every level.
+19. Read the served chunk hash in the SAME observation as each result, per this repo's own live-measurement rule.
+20. Delete the throwaway duplicate afterwards and say exactly what was created and removed.
+
 ### V1283856 — B1804992: the print/PDF export clips every overlay layer (parcels, ponds, easements, dimensions) to the dragged frame, not just the aerial `Blocker: real-data`
 
 **Why this needs a live pass.** The reported defect (Goose Creek, Phase II — TAS R1 print) cites real project data — a real multi-parcel, multi-pond plan with easements and TAS/HW SPEC dimension callouts — and PDF/export parity is a mandatory LIVE-VERIFY class regardless of how strong the sandbox proof is.
