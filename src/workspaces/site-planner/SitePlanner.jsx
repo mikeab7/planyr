@@ -347,7 +347,7 @@ import { calloutStyle } from "./lib/calloutStyle.js";
 import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference } from "./lib/overlayOrder.js";
 import { hasCrop, cropClipRectScreen, cropTrimFeet, cropFromTrimFeet } from "./lib/overlayCrop.js";
 import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerialVisibility.js";
-import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, dockAxisOf, healDockAxes, withDockAxis, rotateDockAxisPatch } from "./lib/dockZones.js";
+import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, dockAxisOf, healDockAxes, withDockAxis, rotateDockAxisPatch, dockSideCompassLabel } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors, gridLinesVisible } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
@@ -11069,6 +11069,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (z.forTrailer) { const t = arr.find((x) => x.id === z.forTrailer); const c = t && arr.find((x) => x.id === t.forCourt); return c && c.truckCourt ? c.truckCourt.side : null; }
     return null;
   };
+  // NEW-2 (B1818257) — a compass-suffixed display label for a dock-zone stack member, so a
+  // cross-dock building's two otherwise-identical truck courts (both type "paving") are
+  // distinguishable in the selection header and the Properties panel title. A single-dock
+  // building has only one side, so nothing to tell apart — the bare zone label is unchanged
+  // there and for every non-dock-zone element (which this returns null for, falling back to the
+  // generic TYPE label at the two call sites). The compass label is derived from the BUILDING's
+  // own rotation (dockSideCompassLabel), so an angled cross-dock building reads NE/SW rather than
+  // a hardcoded N/S.
+  const dockZoneDisplayLabel = (z) => {
+    if (!isDockZone(z)) return null;
+    const b = els.find((x) => x.id === z.attachedTo);
+    const side = b && zoneSideOf(els, z);
+    if (!b || !side) return null;
+    const i = zoneIndexOf(z);
+    const base = DOCK_ZONES[i] ? DOCK_ZONES[i].label : (TYPE[z.type]?.label || "").split(" / ")[0];
+    const { dockSides } = dockSidesOf(b);
+    return dockSides.length > 1 ? `${base} · ${dockSideCompassLabel(side, b.rot || 0)}` : base;
+  };
   // A zone's depth (feet): stored `zd` wins; else derive its extent along the side
   // normal (so a legacy court/trailer survives); else fall back to the configured default.
   const zoneDepthOf = (z, b, side, i) => {
@@ -11344,13 +11362,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return next;
     });
   };
+  // NEW-2 (B1818257) — the single-side sibling of setZoneDepthAll: a cross-dock building's two
+  // truck courts (one per dock side) are independent site elements bonded via `truckCourt.side`
+  // (they always have been — `findCourtIn` is already keyed on `side`), but every edit path used
+  // to force the SAME depth onto both. This is what the dock-zone element's OWN properties panel
+  // now calls, so editing the truck court you actually clicked never touches the other side's.
+  const setZoneDepthOnSide = (b, side, i, newDepth) => {
+    const nd = Math.max(1, Math.round(newDepth));
+    pushHistory();
+    setEls((a) => {
+      const z = findZoneIn(a, b, side, i);
+      let next = z ? a.map((x) => (x.id === z.id ? { ...x, zd: nd } : x)) : a;
+      next = relayoutSide(next, b, side);
+      return next;
+    });
+  };
   // The depth shown for zone index `i` (first dock side that has it).
   const zoneDepthShown = (b, i) => { const { dockSides } = dockSidesOf(b); for (const s of dockSides) { const z = findZoneIn(els, b, s, i); if (z) return Math.round(zoneDepthOf(z, b, s, i)); } return Math.round(zoneDepthDefaults(settings)[i]); };
-  // The truck-court length shown (the laid-out along-wall extent on the first dock side that has
-  // one) — NEW-3 (B1749154): read-only in the properties panel. It's the clear dock-face span
-  // between the corner bump-outs, not an independently editable dimension; `courtLengthShown`
-  // still computes it for display here and for the trailer/buffer "auto" length fallback below.
-  const courtLengthShown = (b) => { const { dockSides } = dockSidesOf(b); for (const s of dockSides) { const c = findCourtIn(els, b, s); if (c) return Math.round(s === "top" || s === "bottom" ? c.w : c.h); } return Math.round(b.w >= b.h ? b.w : b.h); };
   /* Inline LENGTH edit for an OUTWARD zone (trailer parking, buffer, an appended layer) — the same
    * control the truck court has had, now for the zones stacked beyond it. Stores the typed length
    * on that zone's `alongLen`; relayoutSide clamps it to the wall but never resets it, so the
@@ -11358,24 +11386,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * override and the zone goes back to tracking the court.
    * NEW-1 — a TYPED length KEEPS the current anchor (it does not silently re-centre), so a zone the
    * owner already pulled in from its north end keeps that end put when he then types a number.
-   * Clearing the override clears the anchor with it: intent withdrawn is intent gone. */
-  const setZoneLengthAll = (b, i, newLen) => {
-    const { dockSides } = dockSidesOf(b);
+   * Clearing the override clears the anchor with it: intent withdrawn is intent gone.
+   * NEW-2 (B1818257) — this now edits ONE side's zone only (findZoneIn(a, b, side, i), not a
+   * dockSides.forEach loop): a cross-dock building's two truck courts are independent site
+   * elements, and a typed length on one side's trailer/buffer must not pin the other side's to
+   * match. The truck court's OWN length (i===0) stays read-only regardless — B1749154, unaffected. */
+  const setZoneLengthOnSide = (b, side, i, newLen) => {
     const nl = newLen == null ? null : Math.max(1, Math.round(newLen));
     pushHistory();
     setEls((a) => {
-      let next = a;
-      dockSides.forEach((side) => {
-        const z = findZoneIn(next, b, side, i);
-        if (z) next = next.map((x) => (x.id === z.id ? (nl == null ? (() => { const { alongLen: _drop, alongAnchor: _dropA, alongOff: _dropO, ...rest } = x; return rest; })() : { ...x, alongLen: nl }) : x));
-      });
-      dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
+      const z = findZoneIn(a, b, side, i);
+      let next = z ? a.map((x) => (x.id === z.id ? (nl == null ? (() => { const { alongLen: _drop, alongAnchor: _dropA, alongOff: _dropO, ...rest } = x; return rest; })() : { ...x, alongLen: nl }) : x)) : a;
+      next = relayoutSide(next, b, side);
       return next;
     });
   };
-  // The laid-out along-wall extent of zone `i` (what the user sees), and whether it's been pinned.
-  const zoneLengthShown = (b, i) => { const { dockSides } = dockSidesOf(b); for (const s of dockSides) { const z = findZoneIn(els, b, s, i); if (z) return Math.round(s === "top" || s === "bottom" ? z.w : z.h); } return courtLengthShown(b); };
-  const zoneLengthPinned = (b, i) => { const { dockSides } = dockSidesOf(b); return dockSides.some((s) => { const z = findZoneIn(els, b, s, i); return !!(z && Number.isFinite(z.alongLen) && z.alongLen > 0); }); };
   // Per-side "+" used by the on-canvas add nodes — adds that side's next zone, stack-compatible.
   const addZoneOnSide = (b, side) => {
     pushHistory();
@@ -25921,7 +25946,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPropsCollapsed((c) => !c); } }}
             style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "2px 0 6px" }}>
             <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: PAL.muted, flex: 1 }}>
-              {multiStyleable ? `${multi.length} selected` : selMeasure ? "Measurement" : simpleClosedMarkup ? simpleClosedMarkupLabel : <>Element{(() => { const l = selEl ? (selEl.type === "pond" ? pondDisplayNameFor(detWithAuto(selEl.det), pondSplitOf(selEl)) : (TYPE[selEl.type]?.label || "").split(" / ")[0]) : selCallout ? "Callout" : selMarkup ? (selMarkup.kind === "easement" ? "Easement" : "Markup") : ""; return l ? ` · ${l}` : ""; })()}</>}
+              {multiStyleable ? `${multi.length} selected` : selMeasure ? "Measurement" : simpleClosedMarkup ? simpleClosedMarkupLabel : <>Element{(() => { const l = selEl ? (selEl.type === "pond" ? pondDisplayNameFor(detWithAuto(selEl.det), pondSplitOf(selEl)) : (dockZoneDisplayLabel(selEl) || (TYPE[selEl.type]?.label || "").split(" / ")[0])) : selCallout ? "Callout" : selMarkup ? (selMarkup.kind === "easement" ? "Easement" : "Markup") : ""; return l ? ` · ${l}` : ""; })()}</>}
             </span>
             {simpleClosedMarkup && <>
               <button type="button" style={{ ...chip, width: 30, height: 30, padding: 0 }}
@@ -26561,7 +26586,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               drop a type whose label carries a " / " qualifier (paving) — that text exists nowhere
               else, so suppressing it there would be a real information loss, not just tidying. */}
           {!multiStyleable && selEl && (
-            <Section title={selEl.type === "pond" || (phoneSheetSolo && !(TYPE[selEl.type]?.label || "").includes(" / ")) ? false : `Selected · ${TYPE[selEl.type].label}`}>
+            <Section title={selEl.type === "pond" || (phoneSheetSolo && !(TYPE[selEl.type]?.label || "").includes(" / ")) ? false : `Selected · ${dockZoneDisplayLabel(selEl) || TYPE[selEl.type].label}`}>
               {/* NEW-1/B872 — a RESHAPED building (footEdit: points + a dock frame) keeps the full building
                   inspector (Footprint reshape controls, dock zones, structure, column grid), routed through
                   the isBuilding branch below whose Footprint group handles the polygon case. A hand-CLICK-
@@ -26889,29 +26914,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             court…" with nothing left to tell them apart. */}
                         <Field label="Depth (ft)">
                           <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                            <NumInput style={numInput} value={zoneDepthShown(b || selEl, i)} min={1} onCommit={(n2) => b && side && setZoneDepthAll(b, i, n2)} />
+                            {/* NEW-2 (B1818257) — reads/writes THIS zone's own element, on THIS side
+                                only (zoneDepthOf(selEl, ...) / setZoneDepthOnSide), not the
+                                both-sides-mirrored zoneDepthShown/setZoneDepthAll pair below (still
+                                used by the building-level "set both at once" quick-edit). A cross-dock
+                                building's two truck courts are independent site elements — editing one
+                                no longer overwrites the other's depth. */}
+                            <NumInput style={numInput} value={b && side ? Math.round(zoneDepthOf(selEl, b, side, i)) : zoneDepthShown(selEl, i)} min={1} onCommit={(n2) => (b && side ? setZoneDepthOnSide(b, side, i, n2) : null)} />
                             <button title="Plan standard depths for new dock zones — edit in Standards" onClick={() => jumpToStandards("dockzones")} style={{ ...linkBtn, fontSize: 10 }}>↗</button>
                           </span>
                         </Field>
                         {/* NEW-3 (B1749154) — the truck court's own length is read-only: it's the
                             clear dock-face span between the corner bump-outs, not an independent
                             input (an outward zone's length still edits here — it can legitimately run
-                            shorter/longer than the court). `courtLengthShown` keeps computing it either
-                            way, since the trailer/buffer "auto" length and other displays read it. */}
+                            shorter/longer than the court). Reads THIS court's own geometry (not
+                            courtLengthShown's "first dock side that has one", which on a cross-dock
+                            building would show the wrong side's length here — NEW-2/B1818257). */}
                         {b && side && i === 0 && (
                           <Field label="Length (ft)">
                             <span style={{ fontSize: 12, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, color: PAL.muted }} title="Set by the dock wall's clear face between its corner bump-outs">
-                              {courtLengthShown(b)}′
+                              {Math.round(side === "top" || side === "bottom" ? selEl.w : selEl.h)}′
                             </span>
                           </Field>
                         )}
                         {b && side && i > 0 && (
                           <Field label="Length (ft)">
                             <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                              <NumInput style={numInput} value={zoneLengthShown(b, i)} min={1}
-                                onCommit={(n2) => setZoneLengthAll(b, i, n2)} />
-                              {zoneLengthPinned(b, i)
-                                ? <button title="Go back to matching the truck court's length" onClick={() => setZoneLengthAll(b, i, null)} style={{ ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent }}>set ↺</button>
+                              {/* NEW-2 (B1818257) — THIS zone's own laid-out extent + pin state, and
+                                  setZoneLengthOnSide so a typed length no longer pins the other side. */}
+                              <NumInput style={numInput} value={Math.round(side === "top" || side === "bottom" ? selEl.w : selEl.h)} min={1}
+                                onCommit={(n2) => setZoneLengthOnSide(b, side, i, n2)} />
+                              {Number.isFinite(selEl.alongLen) && selEl.alongLen > 0
+                                ? <button title="Go back to matching the truck court's length" onClick={() => setZoneLengthOnSide(b, side, i, null)} style={{ ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent }}>set ↺</button>
                                 : <span style={{ fontSize: 10, color: PAL.muted }} title="Matches the truck court until you set a length">auto</span>}
                             </span>
                           </Field>
@@ -26929,7 +26963,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           </div>
                         )}
                         <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginBottom: 4 }}>
-                          Dock zone {i + 1} of 3 (outward: truck court → trailer parking → buffer){dockSidesOf(b || selEl).dockSides.length > 1 ? "" : ""}. Or select the building to grow / shrink every dock side at once.
+                          Dock zone {i + 1} of 3 (outward: truck court → trailer parking → buffer){b && side && dockSidesOf(b).dockSides.length > 1 ? ` · ${dockSideCompassLabel(side, b.rot || 0)} dock face, set independently of the other side` : ""}. Or select the building to grow / shrink every dock side at once.
                         </div>
                       </>
                     );
@@ -27062,7 +27096,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             never does now, which is exactly why this button has to exist. One row,
                             stating the current face and offering the verb — no explanatory prose. */}
                         {(b.dock || "cross") !== "none" && (() => {
-                          const faces = dockSidesFor(b).dockSides.map((s) => s[0].toUpperCase() + s.slice(1));
+                          // NEW-2 (B1818257) — the compass suffix is what actually distinguishes the
+                          // two rows on an angled building; "Top / Bottom" alone is only true at rot=0.
+                          const faces = dockSidesFor(b).dockSides.map((s) => `${s[0].toUpperCase() + s.slice(1)} (${dockSideCompassLabel(s, b.rot || 0)})`);
                           return (
                             <Field label="Dock face">
                               <span style={ROW4}>
@@ -27174,22 +27210,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   })() : (
                     <>
                       <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(selEl.w)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
-                      {/* B1805808 — a truck court / drive aisle drawn with the Paving tool (freestanding,
-                          or the auto-generated aisle a split parking lot lays down) shows Depth read-only
-                          here, matching the dock-zone truck court's own read-only Length (B1749154): Width
-                          is the dimension worth typing an exact number for (clearance / turning-radius
-                          driven); Depth is however far the pavement was drawn to extend, so it's adjusted
-                          by dragging the shape's edge on the canvas rather than by typing a new value.
-                          Every other type on this generic panel (pond, parking, trailer…) is unaffected. */}
-                      {selEl.type === "paving" ? (
-                        <Field label="Depth (ft)">
-                          <span style={{ fontSize: 12, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, color: PAL.muted }} title="Drag the shape's edge on the canvas to change this">
-                            {Math.round(selEl.h)}′
-                          </span>
-                        </Field>
-                      ) : (
-                        <Field label={selEl.type === "pond" ? "Length (ft)" : "Depth (ft)"}><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
-                      )}
+                      {/* B1818256 — reverts B1805808: the owner types Depth by number regularly (truck
+                          apron/backup depth to a design standard like a WB-67 turning template) and
+                          essentially never types Width by number, the opposite of B1805808's guess.
+                          Depth is an ordinary editable NumInput again, matching Width, for both the
+                          freestanding Paving/Drive element and the auto-generated split-parking aisle. */}
+                      <Field label={selEl.type === "pond" ? "Length (ft)" : "Depth (ft)"}><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
                     </>
                   )}
                   {/* B1790016 NEW-1 — car parking ("parking") now carries its own Rotation row inside
@@ -29814,7 +29840,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         return (
                           <div key={side} style={rowBox}>
                             <span style={icoBox}><DockZonesIcon /></span>
-                            <span style={{ flex: 1, minWidth: 0, color: PAL.ink }}>{side[0].toUpperCase() + side.slice(1)}</span>
+                            {/* NEW-2 (B1818257) — the compass label (derived from the building's own
+                                rotation) is what actually tells a cross-dock building's two rows
+                                apart on the ground; "Top"/"Bottom" alone is only ever true at rot=0. */}
+                            <span style={{ flex: 1, minWidth: 0, color: PAL.ink }}>{side[0].toUpperCase() + side.slice(1)} · {dockSideCompassLabel(side, t.rot || 0)}</span>
                             <span style={{ display: "flex", gap: 3 }}>
                               {DOCK_ZONES.map((z, i) => {
                                 const checked = n > i;

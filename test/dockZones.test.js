@@ -4,6 +4,7 @@ import {
   layoutZone, layoutZoneByKind, layoutStack,
   usableCourtSpan, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones,
   zoneAlongSpan, boxExtentAlong, resizedAlongLen,
+  dockSideBearing, compassLabelForBearing, dockSideCompassLabel,
 } from "../src/workspaces/site-planner/lib/dockZones.js";
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
@@ -511,5 +512,34 @@ describe("boxExtentAlong — the projection both the resize capture and the layo
   });
   it("follows the box's rotation, so an angled building measures its own axes", () => {
     expect(boxExtentAlong({ w: 772, h: 50, rot: 90 }, { x: 0, y: 1 })).toBeCloseTo(772, 6);
+  });
+});
+
+describe("dockSideCompassLabel — NEW-2 (B1818257): compass label for a dock side, from the building's own rotation", () => {
+  it("at rot=0, top/bottom/left/right read N/S/W/E (top's outward normal is (0,-1) = north)", () => {
+    expect(dockSideBearing("top", 0)).toBe(0);
+    expect(dockSideBearing("right", 0)).toBe(90);
+    expect(dockSideBearing("bottom", 0)).toBe(180);
+    expect(dockSideBearing("left", 0)).toBe(270);
+    expect(dockSideCompassLabel("top", 0)).toBe("N");
+    expect(dockSideCompassLabel("bottom", 0)).toBe("S");
+    expect(dockSideCompassLabel("left", 0)).toBe("W");
+    expect(dockSideCompassLabel("right", 0)).toBe("E");
+  });
+  it("a 45°-rotated cross-dock building reads NE/SW — the ticket's own worked example", () => {
+    expect(dockSideCompassLabel("top", 45)).toBe("NE");
+    expect(dockSideCompassLabel("bottom", 45)).toBe("SW");
+  });
+  it("a 90° turn rotates the labels a quarter turn, matching rotateDockAxisPatch's own turn", () => {
+    expect(dockSideCompassLabel("top", 90)).toBe("E");
+    expect(dockSideCompassLabel("bottom", 90)).toBe("W");
+  });
+  it("wraps negative and >360° rotations the same as any other angle", () => {
+    expect(dockSideCompassLabel("top", -90)).toBe("W");
+    expect(dockSideCompassLabel("top", 405)).toBe("NE"); // 405 % 360 = 45°
+  });
+  it("compassLabelForBearing covers all 8 points", () => {
+    expect(["N", "NE", "E", "SE", "S", "SW", "W", "NW"].map((_, i) => compassLabelForBearing(i * 45)))
+      .toEqual(["N", "NE", "E", "SE", "S", "SW", "W", "NW"]);
   });
 });
