@@ -178,6 +178,26 @@ was never clicked" quietly ships broken.
 3. Click the account trigger. **Expect:** the opened dropdown's own header still shows the avatar, full name, and email exactly as before this item — nothing about the dropdown itself changed.
 4. Open the same project in a second browser tab (same signed-in account). **Expect:** row 1 shows a 32×32 icon button (a "stacked windows" glyph) with a small numeric badge reading "2" in its top-right corner, replacing the old "2 tabs" text pill.
 - **Stopping rule:** closes when steps 1–4 confirm on Michael's real account, dated — or a step fails and is filed as a recurrence against B1807200, per STANDING RULE #2 (a null result is a FINDING, never a silent close).
+### V1269920 — B1791056: the cas-409 retry loop against site `smqzpzi2b9pe` genuinely stops after deploy, and the abandon event fires on the owner's real device `Blocker: real-data`
+
+**Why this needs a live pass, and what it is NOT.** This is not asking anyone to re-diagnose whether the fix works — the mechanism is fully unit-tested (`test/siteWriteAbandonedUnowned.test.js`) against a mocked Supabase client reproducing the exact response shapes measured on production (an INSERT colliding with an existing row, a reconcile fetch RLS hides), and the RLS-independence half of the underlying question is separately proven live against production in a rolled-back transaction (B1791057, `db/test/sites_cas_ownership_independent.test.sql`). What sandbox genuinely cannot reach: the stale entry this bug depends on lives in ONE specific browser's localStorage — the owner's iPhone Safari — which nothing in this session can read, write, or force to reload early. The only way to confirm the fix actually reached that device and actually stopped the recurrence is to watch the real production `client_errors` table over the days following a real deploy.
+
+**What was verified here (sandbox, this session).** `test/siteWriteAbandonedUnowned.test.js` — 3 new tests: an INSERT colliding with a row this account has never synced AND that a reconcile fetch finds nothing for (RLS-invisible) retires the write (`abandoned:true`), drops the id from the account's persisted local cache, and clears version bookkeeping; a genuine INSERT-vs-INSERT (or later UPDATE-vs-UPDATE) race against a row this account DOES own is left as the ordinary, pre-existing `unresolved:true` conflict — proven by having the mock's reconcile fetch actually find the row, which the abandon path requires to NOT fire; an ordinary first-try INSERT success is unaffected. Full suite: 882 files / 17,974 tests, zero regressions, including the pre-existing `siteConflictUnresolved`/`cloudWriteRetryWiring`/`cloudConcurrency`/`storage` suites this change touches the same code path as. `npm run lint` 0 errors, `npm run build` clean.
+
+**Baseline recorded this session (before this fix was live anywhere), queried directly against `planyr_production` (`lyeqzkuiwngunutlkkmi`):**
+```sql
+select count(*), min(at), max(at), max(build)
+from public.client_errors
+where source = 'event:cloud-conflict' and message like '%smqzpzi2b9pe%';
+-- 100 rows · first 2026-09-03T01:52:29Z · last 2026-09-21T17:36:23Z · last build fa4bde3
+```
+
+**Steps, each with a named expected result:**
+1. Once this ships to `main` and deploys, wait for the owner's own next normal use of the app (his iPhone will pick up the new build on its own — no action needed from him, and nothing here can force it sooner).
+2. Re-run the baseline query above. **Expect:** no row whose `build` postdates the deploy that shipped this fix. A single straggler from a tab that hadn't reloaded yet is not a failure; a genuinely NEW recurrence on a build that postdates the fix is.
+3. Query `select count(*), max(at) as when, max(build) from public.client_errors where source='event:site-write-abandoned-not-owned' and message like '%smqzpzi2b9pe%'`. **Expect:** at least one row, dated after the deploy — direct proof the new abandon path fired on the owner's real device, not just in a mocked test.
+4. (Optional, confirms the local-cache repair rather than just inferring it.) If the owner is ever asked to check, `localStorage.getItem("planarfit:sites:cloud:b147d90d-b610-423d-af65-7e004f0ad72f")` on his device should no longer contain a `smqzpzi2b9pe` key after step 3's event fires. Not required to close this item — step 3 already proves the same fact server-side.
+- **Stopping rule:** closes when steps 2 and 3 both confirm on the real account, dated — or either fails and is filed as a recurrence against B1791056, per STANDING RULE #2 (a null result is a FINDING, never a silent close).
 
 ### V1268880 — B1790016/B1790017: the rebuilt car-parking properties panel — the spec sheet, the aisle-side picture control's disable case, and a wall-bonded flip `Blocker: real-data`
 
