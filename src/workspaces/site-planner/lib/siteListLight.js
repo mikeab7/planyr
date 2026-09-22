@@ -53,6 +53,11 @@ function projectSummaryOf(p) {
     // B843792 (NEW-1) — role passthrough (pursuit vs tracked); see siteStatus.js.
     role: normRole(p.role),
     scheduleProjectId: p.scheduleProjectId != null ? p.scheduleProjectId : null,
+    // ⛔ A write-once snapshot, not a live name (see siteModel.js's own field comment and
+    // B1768080) — passed through here only for byte-identical parity with loadSitesList(). Its
+    // ONE current consumer (`groupProjects` in projectModel.js) already drops it before anything
+    // renders; a future caller that wants a display name should go through
+    // `storage.scheduleLinkOf()`, which derives it from the group's own current name instead.
     scheduleProjectName: p.scheduleProjectName || null,
   };
 }

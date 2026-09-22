@@ -280,10 +280,10 @@ test.describe("NEW-1 — a FREE-STANDING (not attached to a building) split fiel
     expect(field, "a freestanding field was drawn").toBeTruthy();
     const fieldId = field.id;
     await selectAndOpenProperties(page, fieldId);
-    await fieldInput(page, "Width (ft)").fill("200");
-    await fieldInput(page, "Width (ft)").press("Enter");
-    await fieldInput(page, "Depth (ft)").fill("60"); // exactly 2 rows: 2·18 + 24
-    await fieldInput(page, "Depth (ft)").press("Enter");
+    await fieldInput(page, "Width").fill("200");
+    await fieldInput(page, "Width").press("Enter");
+    await fieldInput(page, "Depth").fill("60"); // exactly 2 rows: 2·18 + 24
+    await fieldInput(page, "Depth").press("Enter");
     await page.waitForTimeout(150);
     els = await readEls(page);
     field = els.find((e) => e.id === fieldId);
@@ -308,7 +308,7 @@ test.describe("NEW-1 — a FREE-STANDING (not attached to a building) split fiel
     // THE REPORTED OPERATION, via the Properties panel's "＋ Row" — select the FIRST piece (not
     // the outermost) to prove the fix finds the whole stack regardless of which piece was clicked.
     await selectAndOpenProperties(page, stack[0].id);
-    await page.getByRole("button", { name: "＋ Row", exact: true }).click();
+    await page.getByTitle("Add one row", { exact: true }).click();
     await page.waitForTimeout(200);
 
     els = await readEls(page);
@@ -361,7 +361,7 @@ test.describe("NEW-1 — a FREE-STANDING (not attached to a building) split fiel
     // mirroring the wall-bonded ladder's own LIFO exactly (a single click peels one piece, which
     // may leave a bare trailing aisle for one step, same as growEmployeeSide's ladder does).
     await selectAndOpenProperties(page, stack[0].id);
-    await page.getByRole("button", { name: "－ Row", exact: true }).click();
+    await page.getByTitle("Remove one row", { exact: true }).click();
     await page.waitForTimeout(200);
     els = await readEls(page);
     stack = byPiece(freePads(els));
@@ -371,7 +371,7 @@ test.describe("NEW-1 — a FREE-STANDING (not attached to a building) split fiel
     // A second "－ Row" removes the now-trailing bare aisle too, back to the original 3-piece
     // stack — a clean round trip.
     await selectAndOpenProperties(page, stack[0].id);
-    await page.getByRole("button", { name: "－ Row", exact: true }).click();
+    await page.getByTitle("Remove one row", { exact: true }).click();
     await page.waitForTimeout(200);
     els = await readEls(page);
     stack = byPiece(freePads(els));
@@ -392,8 +392,8 @@ test.describe("NEW-1 — a FREE-STANDING (not attached to a building) split fiel
     const fieldId = els.find((e) => e.type === "parking" && !e.attachedTo).id;
 
     await selectAndOpenProperties(page, fieldId);
-    await fieldInput(page, "Depth (ft)").fill("42"); // 1 row: 18 + 24
-    await fieldInput(page, "Depth (ft)").press("Enter");
+    await fieldInput(page, "Depth").fill("42"); // 1 row: 18 + 24
+    await fieldInput(page, "Depth").press("Enter");
     await page.waitForTimeout(150);
 
     await selectAndOpenProperties(page, fieldId);
@@ -405,7 +405,7 @@ test.describe("NEW-1 — a FREE-STANDING (not attached to a building) split fiel
     expect(stack.map((e) => e.type), "a single-loaded freestanding bay explodes to row + its own aisle").toEqual(["parking", "paving"]);
 
     await selectAndOpenProperties(page, stack[0].id);
-    await page.getByRole("button", { name: "＋ Row", exact: true }).click();
+    await page.getByTitle("Add one row", { exact: true }).click();
     await page.waitForTimeout(200);
 
     els = await readEls(page);

@@ -6,90 +6,90 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-09-18",
-        "approvedCommit": "aa038ef3",
-        "note": "B1771760: approved seven-icon Site Planner rail set (new geometry, 21px/1.75 stroke, active-state green accent) — third and final attempt (PR #1777), a minimal single-file branch off current main superseding #1772/#1776 — the rail renders in both the site-planner-header and site-planner-left-rail baseline surfaces [CI-authored by run 35402218122 on aa038ef3f02557560bc9f132643c9e5e12429cf5]"
+        "approvedAt": "2026-09-20",
+        "approvedCommit": "27671fa0",
+        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
       },
       "dark": {
-        "approvedAt": "2026-09-18",
-        "approvedCommit": "aa038ef3",
-        "note": "B1771760: approved seven-icon Site Planner rail set (new geometry, 21px/1.75 stroke, active-state green accent) — third and final attempt (PR #1777), a minimal single-file branch off current main superseding #1772/#1776 — the rail renders in both the site-planner-header and site-planner-left-rail baseline surfaces [CI-authored by run 35402218122 on aa038ef3f02557560bc9f132643c9e5e12429cf5]"
+        "approvedAt": "2026-09-20",
+        "approvedCommit": "27671fa0",
+        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
       },
       "light--phone": {
-        "approvedAt": "2026-09-18",
-        "approvedCommit": "aa038ef3",
-        "note": "B1771760: approved seven-icon Site Planner rail set (new geometry, 21px/1.75 stroke, active-state green accent) — third and final attempt (PR #1777), a minimal single-file branch off current main superseding #1772/#1776 — the rail renders in both the site-planner-header and site-planner-left-rail baseline surfaces [CI-authored by run 35402218122 on aa038ef3f02557560bc9f132643c9e5e12429cf5]"
+        "approvedAt": "2026-09-20",
+        "approvedCommit": "27671fa0",
+        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
       },
       "dark--phone": {
-        "approvedAt": "2026-09-18",
-        "approvedCommit": "aa038ef3",
-        "note": "B1771760: approved seven-icon Site Planner rail set (new geometry, 21px/1.75 stroke, active-state green accent) — third and final attempt (PR #1777), a minimal single-file branch off current main superseding #1772/#1776 — the rail renders in both the site-planner-header and site-planner-left-rail baseline surfaces [CI-authored by run 35402218122 on aa038ef3f02557560bc9f132643c9e5e12429cf5]"
+        "approvedAt": "2026-09-20",
+        "approvedCommit": "27671fa0",
+        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
       }
     },
     "site-planner-header": {
       "light": {
-        "approvedAt": "2026-09-18",
-        "approvedCommit": "aa038ef3",
-        "note": "B1771760: approved seven-icon Site Planner rail set (new geometry, 21px/1.75 stroke, active-state green accent) — third and final attempt (PR #1777), a minimal single-file branch off current main superseding #1772/#1776 — the rail renders in both the site-planner-header and site-planner-left-rail baseline surfaces [CI-authored by run 35402218122 on aa038ef3f02557560bc9f132643c9e5e12429cf5]"
+        "approvedAt": "2026-09-20",
+        "approvedCommit": "27671fa0",
+        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
       },
       "dark": {
-        "approvedAt": "2026-09-18",
-        "approvedCommit": "aa038ef3",
-        "note": "B1771760: approved seven-icon Site Planner rail set (new geometry, 21px/1.75 stroke, active-state green accent) — third and final attempt (PR #1777), a minimal single-file branch off current main superseding #1772/#1776 — the rail renders in both the site-planner-header and site-planner-left-rail baseline surfaces [CI-authored by run 35402218122 on aa038ef3f02557560bc9f132643c9e5e12429cf5]"
+        "approvedAt": "2026-09-20",
+        "approvedCommit": "27671fa0",
+        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
       },
       "light--phone": {
-        "approvedAt": "2026-09-18",
-        "approvedCommit": "aa038ef3",
-        "note": "B1771760: approved seven-icon Site Planner rail set (new geometry, 21px/1.75 stroke, active-state green accent) — third and final attempt (PR #1777), a minimal single-file branch off current main superseding #1772/#1776 — the rail renders in both the site-planner-header and site-planner-left-rail baseline surfaces [CI-authored by run 35402218122 on aa038ef3f02557560bc9f132643c9e5e12429cf5]"
+        "approvedAt": "2026-09-20",
+        "approvedCommit": "27671fa0",
+        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
       },
       "dark--phone": {
-        "approvedAt": "2026-09-18",
-        "approvedCommit": "aa038ef3",
-        "note": "B1771760: approved seven-icon Site Planner rail set (new geometry, 21px/1.75 stroke, active-state green accent) — third and final attempt (PR #1777), a minimal single-file branch off current main superseding #1772/#1776 — the rail renders in both the site-planner-header and site-planner-left-rail baseline surfaces [CI-authored by run 35402218122 on aa038ef3f02557560bc9f132643c9e5e12429cf5]"
+        "approvedAt": "2026-09-20",
+        "approvedCommit": "27671fa0",
+        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
       }
     },
     "site-planner-left-rail": {
       "light": {
-        "approvedAt": "2026-09-18",
-        "approvedCommit": "aa038ef3",
-        "note": "B1771760: approved seven-icon Site Planner rail set (new geometry, 21px/1.75 stroke, active-state green accent) — third and final attempt (PR #1777), a minimal single-file branch off current main superseding #1772/#1776 — the rail renders in both the site-planner-header and site-planner-left-rail baseline surfaces [CI-authored by run 35402218122 on aa038ef3f02557560bc9f132643c9e5e12429cf5]"
+        "approvedAt": "2026-09-20",
+        "approvedCommit": "27671fa0",
+        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
       },
       "dark": {
-        "approvedAt": "2026-09-18",
-        "approvedCommit": "aa038ef3",
-        "note": "B1771760: approved seven-icon Site Planner rail set (new geometry, 21px/1.75 stroke, active-state green accent) — third and final attempt (PR #1777), a minimal single-file branch off current main superseding #1772/#1776 — the rail renders in both the site-planner-header and site-planner-left-rail baseline surfaces [CI-authored by run 35402218122 on aa038ef3f02557560bc9f132643c9e5e12429cf5]"
+        "approvedAt": "2026-09-20",
+        "approvedCommit": "27671fa0",
+        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
       },
       "light--phone": {
-        "approvedAt": "2026-09-18",
-        "approvedCommit": "aa038ef3",
-        "note": "B1771760: approved seven-icon Site Planner rail set (new geometry, 21px/1.75 stroke, active-state green accent) — third and final attempt (PR #1777), a minimal single-file branch off current main superseding #1772/#1776 — the rail renders in both the site-planner-header and site-planner-left-rail baseline surfaces [CI-authored by run 35402218122 on aa038ef3f02557560bc9f132643c9e5e12429cf5]"
+        "approvedAt": "2026-09-20",
+        "approvedCommit": "27671fa0",
+        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
       },
       "dark--phone": {
-        "approvedAt": "2026-09-18",
-        "approvedCommit": "aa038ef3",
-        "note": "B1771760: approved seven-icon Site Planner rail set (new geometry, 21px/1.75 stroke, active-state green accent) — third and final attempt (PR #1777), a minimal single-file branch off current main superseding #1772/#1776 — the rail renders in both the site-planner-header and site-planner-left-rail baseline surfaces [CI-authored by run 35402218122 on aa038ef3f02557560bc9f132643c9e5e12429cf5]"
+        "approvedAt": "2026-09-20",
+        "approvedCommit": "27671fa0",
+        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
       }
     },
     "library": {
       "light": {
-        "approvedAt": "2026-09-18",
-        "approvedCommit": "aa038ef3",
-        "note": "B1771760: approved seven-icon Site Planner rail set (new geometry, 21px/1.75 stroke, active-state green accent) — third and final attempt (PR #1777), a minimal single-file branch off current main superseding #1772/#1776 — the rail renders in both the site-planner-header and site-planner-left-rail baseline surfaces [CI-authored by run 35402218122 on aa038ef3f02557560bc9f132643c9e5e12429cf5]"
+        "approvedAt": "2026-09-20",
+        "approvedCommit": "27671fa0",
+        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
       },
       "dark": {
-        "approvedAt": "2026-09-18",
-        "approvedCommit": "aa038ef3",
-        "note": "B1771760: approved seven-icon Site Planner rail set (new geometry, 21px/1.75 stroke, active-state green accent) — third and final attempt (PR #1777), a minimal single-file branch off current main superseding #1772/#1776 — the rail renders in both the site-planner-header and site-planner-left-rail baseline surfaces [CI-authored by run 35402218122 on aa038ef3f02557560bc9f132643c9e5e12429cf5]"
+        "approvedAt": "2026-09-20",
+        "approvedCommit": "27671fa0",
+        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
       },
       "light--phone": {
-        "approvedAt": "2026-09-18",
-        "approvedCommit": "aa038ef3",
-        "note": "B1771760: approved seven-icon Site Planner rail set (new geometry, 21px/1.75 stroke, active-state green accent) — third and final attempt (PR #1777), a minimal single-file branch off current main superseding #1772/#1776 — the rail renders in both the site-planner-header and site-planner-left-rail baseline surfaces [CI-authored by run 35402218122 on aa038ef3f02557560bc9f132643c9e5e12429cf5]"
+        "approvedAt": "2026-09-20",
+        "approvedCommit": "27671fa0",
+        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
       },
       "dark--phone": {
-        "approvedAt": "2026-09-18",
-        "approvedCommit": "aa038ef3",
-        "note": "B1771760: approved seven-icon Site Planner rail set (new geometry, 21px/1.75 stroke, active-state green accent) — third and final attempt (PR #1777), a minimal single-file branch off current main superseding #1772/#1776 — the rail renders in both the site-planner-header and site-planner-left-rail baseline surfaces [CI-authored by run 35402218122 on aa038ef3f02557560bc9f132643c9e5e12429cf5]"
+        "approvedAt": "2026-09-20",
+        "approvedCommit": "27671fa0",
+        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
       }
     }
   }

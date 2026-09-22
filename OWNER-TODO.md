@@ -37,6 +37,25 @@ _Last updated: 2026-09-22._
 > - **Nothing is broken or waiting on this today** — the actual hole is already closed. This is purely
 >   about catching the next one automatically instead of hoping someone notices by hand.
 
+## ✂️ One quick question on the new polygon crop tool (B1783328)
+
+> **Short version: you can now trim a placed site-plan overlay (a broker flyer, an engineer's
+> sheet) to any shape you click out with your mouse, not just a rectangle — that's built and
+> ready. One small design choice is yours to make: should it also be able to punch a hole in the
+> MIDDLE of a sheet?**
+>
+> Today the tool keeps whatever is **inside** the shape you draw and throws away everything
+> outside it — so you trace around your plan drawing and the logo band or title block around the
+> edges disappears. That covers the case you asked for.
+>
+> The question is the opposite case: a sheet where something you don't want (say, a stamp or a
+> title block) sits in the **middle** of the page, surrounded by plan content on all sides. Today
+> there's no way to cut just that piece out and keep everything around it. If you want that too,
+> say so and it's a small follow-up — the crop tool would get a "keep outside" option alongside
+> the one it has now.
+> - [ ] **Do you want a "cut a hole in the middle" option added, or is trace-and-keep-the-inside
+>       enough for now?** Either answer is fine — this isn't blocking anything.
+
 ## 🖼 Which page was that "Spreadsheet" screenshot? (B1756544)
 
 > **Short version: the curb-corner problem you reported is fixed. The third thing you sent — the
