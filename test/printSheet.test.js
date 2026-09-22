@@ -4,7 +4,6 @@ import {
   pageSizeForFit,
   PAPER_SIZES,
   printSheetLayout,
-  buildBuildingTableSvg,
   buildPrintSheetSvg,
   buildStormwaterSvg,
   stormwaterBandH,
@@ -17,10 +16,6 @@ import { sheetFitScale } from "../src/workspaces/site-planner/lib/exportStyle.js
 import { pickScaleBar } from "../src/workspaces/site-planner/lib/sheetFurniture.js";
 
 const PAL = { ink: "#26231e", muted: "#8a8473", panelLine: "#cfc6af", paper: "#fff" };
-const ROWS = [
-  { name: "Building 1", sf: 250000, clearHeight: 36, slab: 7 },
-  { name: "Cross Dock", sf: 620000, clearHeight: 40, slab: 7 },
-];
 
 describe("printSheetLayout — metrics band grows with pair count (B712)", () => {
   it("REAL pair widths size the band: wide detention/mitigation pairs get their row", () => {
@@ -87,55 +82,24 @@ describe("printSheetLayout — regions for the single-SVG sheet (B200)", () => {
       expect(pageSize(p.key, "landscape").wIn).not.toBe(fallback.wIn); // resolves to its OWN size, not the unknown-paper fallback
     }
   });
-  it("reserves a right-hand table column only when buildings exist", () => {
-    const withT = printSheetLayout({ buildingCount: 3 });
-    const without = printSheetLayout({ buildingCount: 0 });
-    expect(withT.table).toBeTruthy();
-    expect(without.table).toBe(null);
-    // the table column steals width from the plan
-    expect(withT.plan.w).toBeLessThan(without.plan.w);
+  it("NEW-2 (B1804993) — never reserves a right-hand table column; the plan always takes the full inner width", () => {
+    const L = printSheetLayout({});
+    expect(L.table).toBeUndefined();
+    expect(L.plan.w).toBe(L.inner.w);
   });
   it("every region sits inside the page bounds", () => {
-    const L = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: 2 });
-    for (const box of [L.title, L.plan, L.table, L.metrics]) {
+    const L = printSheetLayout({ paper: "letter", orient: "landscape" });
+    for (const box of [L.title, L.plan, L.metrics]) {
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.y).toBeGreaterThanOrEqual(0);
       expect(box.x + box.w).toBeLessThanOrEqual(L.page.w + 1e-6);
       expect(box.y + box.h).toBeLessThanOrEqual(L.page.h + 1e-6);
     }
   });
-  it("plan and table don't overlap (plan left, table right)", () => {
-    const L = printSheetLayout({ buildingCount: 2 });
-    expect(L.plan.x + L.plan.w).toBeLessThanOrEqual(L.table.x + 1e-6);
-  });
-});
-
-describe("buildBuildingTableSvg — one row per building (B197)", () => {
-  const box = printSheetLayout({ buildingCount: 2 }).table;
-  const svg = buildBuildingTableSvg({ ...box, rows: ROWS, pal: PAL });
-  it("titled BUILDINGS with the four column headers", () => {
-    expect(svg).toContain(">BUILDINGS<");
-    expect(svg).toContain(">BUILDING<");
-    expect(svg).toContain(">SF<");
-    expect(svg).toContain(">CLEAR<");
-    expect(svg).toContain(">SLAB<");
-  });
-  it("renders each building's name, comma-formatted sf, clear height (ft) and slab (in)", () => {
-    expect(svg).toContain(">Building 1<");
-    expect(svg).toContain(">Cross Dock<");
-    expect(svg).toContain(">250,000<");
-    expect(svg).toContain(">620,000<");
-    expect(svg).toContain(">36'<");
-    expect(svg).toContain(">40'<");
-    expect(svg).toContain(">7&quot;<"); // inch mark is XML-escaped in SVG text
-  });
-  it("handles an empty building set without throwing", () => {
-    expect(() => buildBuildingTableSvg({ ...box, rows: [], pal: PAL })).not.toThrow();
-  });
 });
 
 describe("buildPrintSheetSvg — ONE svg, ONE viewBox, all layers share it (B200)", () => {
-  const L = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: 2 });
+  const L = printSheetLayout({ paper: "letter", orient: "landscape" });
   const svg = buildPrintSheetSvg({
     layout: L,
     planSvg: '<svg id="PLAN" viewBox="0 0 10 10"></svg>',
@@ -144,7 +108,6 @@ describe("buildPrintSheetSvg — ONE svg, ONE viewBox, all layers share it (B200
     date: "2026.06.19",
     metrics: [["Site area", "42.0 AC"], ["Building", "870,000 SF"]],
     note: "Concept site plan — planning-level estimates, not a survey.",
-    buildings: ROWS,
     pal: PAL,
   });
   it("has exactly one root <svg> with one viewBox and a physical inch size (fills one page)", () => {
@@ -153,60 +116,57 @@ describe("buildPrintSheetSvg — ONE svg, ONE viewBox, all layers share it (B200
     expect(svg).toContain('width="11in"');
     expect(svg).toContain('height="8.5in"');
   });
-  it("embeds the (caller-positioned) plan svg and the title/date/table/metrics in the SAME document", () => {
+  it("embeds the (caller-positioned) plan svg and the title/date/metrics in the SAME document", () => {
     expect(svg).toContain('id="PLAN"');
     expect(svg).toContain(">Cypress Logistics<");
     expect(svg).toContain(">2026.06.19<");
-    expect(svg).toContain(">BUILDINGS<");
-    expect(svg).toContain(">Building 1<");
     expect(svg).toContain("Site area:");
     expect(svg).toContain("not a survey");
     expect(svg.trim().endsWith("</svg>")).toBe(true);
   });
-  it("omits the table region when there are no buildings", () => {
-    const noB = buildPrintSheetSvg({ layout: printSheetLayout({ buildingCount: 0 }), planSvg: "", buildings: [], pal: PAL });
-    expect(noB).not.toContain(">BUILDINGS<");
+  it("NEW-2 (B1804993) — never renders a buildings table", () => {
+    expect(svg).not.toContain(">BUILDINGS<");
   });
 });
 
 describe("B765985 — the compose screen's title-block row: scale + prepared-by", () => {
   it("titleBlockExtra grows the title band by one line and shrinks the plan area to match — omitted entirely by default (byte-identical to the pre-existing shape)", () => {
-    const plain = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: 0 });
-    const extra = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: 0, titleBlockExtra: true });
+    const plain = printSheetLayout({ paper: "letter", orient: "landscape" });
+    const extra = printSheetLayout({ paper: "letter", orient: "landscape", titleBlockExtra: true });
     expect(plain.title.h).toBe(56); // unchanged historical height
     expect(extra.title.h).toBeGreaterThan(plain.title.h);
     expect(extra.plan.h).toBeLessThan(plain.plan.h);
     expect(plain.plan.h - extra.plan.h).toBe(extra.title.h - plain.title.h); // the plan gives up exactly what the title band gains
   });
   it("renders the scale text and 'Prepared by' only when given — neither leaks into a sheet that has neither", () => {
-    const L = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: 0 });
-    const bare = buildPrintSheetSvg({ layout: L, planSvg: "", title: "T", buildings: [], pal: PAL });
+    const L = printSheetLayout({ paper: "letter", orient: "landscape" });
+    const bare = buildPrintSheetSvg({ layout: L, planSvg: "", title: "T", pal: PAL });
     expect(bare).not.toContain("Prepared by");
     expect(bare).not.toMatch(/1&quot; = \d/);
-    const withBoth = buildPrintSheetSvg({ layout: L, planSvg: "", title: "T", buildings: [], pal: PAL, scale: "1\" = 40'", preparedBy: "J. Smith, PE" });
+    const withBoth = buildPrintSheetSvg({ layout: L, planSvg: "", title: "T", pal: PAL, scale: "1\" = 40'", preparedBy: "J. Smith, PE" });
     expect(withBoth).toContain("Prepared by J. Smith, PE");
     expect(withBoth).toMatch(/1&quot; = 40'/); // XML-escaped inch mark
   });
   it("a scale with no prepared-by (or vice versa) renders only the half that was given", () => {
-    const L = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: 0 });
-    const scaleOnly = buildPrintSheetSvg({ layout: L, planSvg: "", title: "T", buildings: [], pal: PAL, scale: "Fit to frame" });
+    const L = printSheetLayout({ paper: "letter", orient: "landscape" });
+    const scaleOnly = buildPrintSheetSvg({ layout: L, planSvg: "", title: "T", pal: PAL, scale: "Fit to frame" });
     expect(scaleOnly).toContain("Fit to frame");
     expect(scaleOnly).not.toContain("Prepared by");
-    const preparedOnly = buildPrintSheetSvg({ layout: L, planSvg: "", title: "T", buildings: [], pal: PAL, preparedBy: "M. Owner" });
+    const preparedOnly = buildPrintSheetSvg({ layout: L, planSvg: "", title: "T", pal: PAL, preparedBy: "M. Owner" });
     expect(preparedOnly).toContain("Prepared by M. Owner");
   });
 });
 
 describe("NEW-2 — the print menu's 'Stats band' toggle: printSheetLayout({ includeMetrics: false })", () => {
   it("defaults to including the band — byte-identical to every pre-existing caller", () => {
-    const withDefault = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: 0, metricsCount: 9 });
-    const withExplicitTrue = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: 0, metricsCount: 9, includeMetrics: true });
+    const withDefault = printSheetLayout({ paper: "letter", orient: "landscape", metricsCount: 9 });
+    const withExplicitTrue = printSheetLayout({ paper: "letter", orient: "landscape", metricsCount: 9, includeMetrics: true });
     expect(withDefault).toEqual(withExplicitTrue);
     expect(withDefault.metrics).toBeTruthy();
   });
   it("off: reserves ZERO height for the band (metrics is null) and the plan reclaims the space, not a gap", () => {
-    const on = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: 0, metricsCount: 9 });
-    const off = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: 0, metricsCount: 9, includeMetrics: false });
+    const on = printSheetLayout({ paper: "letter", orient: "landscape", metricsCount: 9 });
+    const off = printSheetLayout({ paper: "letter", orient: "landscape", metricsCount: 9, includeMetrics: false });
     expect(off.metrics).toBe(null);
     expect(off.plan.h).toBeGreaterThan(on.plan.h);
     // the plan gains exactly what the band + its gap used to take, and its bottom edge
@@ -221,7 +181,7 @@ describe("NEW-2 — the print menu's 'Stats band' toggle: printSheetLayout({ inc
   it("off holds across every paper size and orientation — the sheet stays the same page (no overflow)", () => {
     for (const p of PAPER_SIZES) {
       for (const orient of ["landscape", "portrait"]) {
-        const L = printSheetLayout({ paper: p.key, orient, buildingCount: 1, metricsCount: 9, includeMetrics: false });
+        const L = printSheetLayout({ paper: p.key, orient, metricsCount: 9, includeMetrics: false });
         expect(L.metrics).toBe(null);
         expect(L.plan.h).toBeGreaterThan(0);
         expect(L.plan.y + L.plan.h).toBeLessThanOrEqual(L.page.h + 1e-6);
@@ -233,9 +193,9 @@ describe("NEW-2 — the print menu's 'Stats band' toggle: printSheetLayout({ inc
 describe("NEW-2 — buildPrintSheetSvg omits the band (bars, metrics line AND the disclaimer) together", () => {
   const bars = [{ label: "Detention", verdict: "+5.02 AC-FT", status: "covered", layout: bulletBarLayout({ provided: 15, required: 10 }), unit: "ac-ft" }];
   it("band on: metrics text, stormwater bars and the note all render", () => {
-    const L = printSheetLayout({ buildingCount: 0, stormwaterBars: bars.length });
+    const L = printSheetLayout({ stormwaterBars: bars.length });
     const svg = buildPrintSheetSvg({
-      layout: L, planSvg: "", title: "T", buildings: [], pal: PAL,
+      layout: L, planSvg: "", title: "T", pal: PAL,
       metrics: [["Site area", "10 AC"]], stormwater: bars,
       note: "Concept site plan — planning-level estimates, not a survey.",
     });
@@ -244,9 +204,9 @@ describe("NEW-2 — buildPrintSheetSvg omits the band (bars, metrics line AND th
     expect(svg).toContain("not a survey");
   });
   it("band off: none of it renders — not the metrics, not the bars, not the disclaimer — even though the same data was passed in", () => {
-    const L = printSheetLayout({ buildingCount: 0, stormwaterBars: bars.length, includeMetrics: false });
+    const L = printSheetLayout({ stormwaterBars: bars.length, includeMetrics: false });
     const svg = buildPrintSheetSvg({
-      layout: L, planSvg: "", title: "T", buildings: [], pal: PAL,
+      layout: L, planSvg: "", title: "T", pal: PAL,
       metrics: [["Site area", "10 AC"]], stormwater: bars,
       note: "Concept site plan — planning-level estimates, not a survey.",
     });
@@ -254,11 +214,10 @@ describe("NEW-2 — buildPrintSheetSvg omits the band (bars, metrics line AND th
     expect(svg).not.toMatch(/STORMWATER/);
     expect(svg).not.toContain("not a survey");
   });
-  it("band off never disturbs the title block or the plan/table content", () => {
-    const L = printSheetLayout({ buildingCount: 2, includeMetrics: false });
-    const svg = buildPrintSheetSvg({ layout: L, planSvg: '<svg id="PLAN"></svg>', title: "Cypress Logistics", buildings: ROWS, pal: PAL });
+  it("band off never disturbs the title block or the plan content", () => {
+    const L = printSheetLayout({ includeMetrics: false });
+    const svg = buildPrintSheetSvg({ layout: L, planSvg: '<svg id="PLAN"></svg>', title: "Cypress Logistics", pal: PAL });
     expect(svg).toContain(">Cypress Logistics<");
-    expect(svg).toContain(">BUILDINGS<");
     expect(svg).toContain('id="PLAN"');
   });
 });
@@ -321,7 +280,7 @@ describe("B862 (chat NEW-3) — the Stormwater required-vs-provided bar strip (P
   it("buildPrintSheetSvg embeds the stormwater bars when passed", () => {
     const L = printSheetLayout({ stormwaterBars: 1 });
     const svg = buildPrintSheetSvg({
-      layout: L, planSvg: "", title: "T", buildings: [], pal: PAL,
+      layout: L, planSvg: "", title: "T", pal: PAL,
       metrics: [["Site area", "10 AC"]],
       stormwater: [{ label: "Detention", verdict: "+5.02 AC-FT", status: "covered", layout: bulletBarLayout({ provided: 15, required: 10 }), unit: "ac-ft" }],
     });
@@ -371,7 +330,7 @@ describe("printSheetLayout — the `page` override (NEW-1, B1783056)", () => {
   });
   it("a plan box built from the override keeps the frame's own aspect after margins/bands are removed", () => {
     const wide = pageSizeForFit("letter", 3);
-    const layout = printSheetLayout({ page: wide, includeMetrics: false, buildingCount: 0 });
+    const layout = printSheetLayout({ page: wide, includeMetrics: false });
     // No side table, no metrics band → the plan box aspect tracks the page aspect closely
     // (only the fixed border margin differs it from the page's own ratio).
     expect(layout.plan.w / layout.plan.h).toBeGreaterThan(2); // nowhere near letter-landscape's ~1.3

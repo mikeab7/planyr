@@ -68,7 +68,6 @@ export default function PrintCompose({
   aerialAvailable, showAerial, onToggleAerial,
   overlayPrintable, printOverlay, onTogglePrintOverlay,
   mapLayersPrintable, printMapLayers, onToggleMapLayers,
-  buildingRulesPanel,
   showMetricsBand, onToggleMetricsBand,
   onReposition, onCancel, onDownload,
   downloading,
@@ -155,10 +154,6 @@ export default function PrintCompose({
             {overlayPrintable && <ContentToggle label="Placed reference overlay" title="The placed site-plan overlay — exactly as shown (scale, position, rotation, opacity)" checked={printOverlay} onChange={onTogglePrintOverlay} />}
             {mapLayersPrintable && <ContentToggle label="Map / GIS layers" title="The live map layers (floodplain, pipelines, utilities…), exactly as shown on the map" checked={printMapLayers} onChange={onToggleMapLayers} />}
             <ContentToggle label="Stats band" title="The stormwater required-vs-provided bars, the site-metrics line and the screening disclaimer printed below the plan. Off reclaims that space for the plan image." checked={showMetricsBand} onChange={onToggleMetricsBand} />
-          </Section>
-
-          <Section title="Buildings table" collapsed accent="var(--accent)">
-            {buildingRulesPanel}
           </Section>
         </div>
         <div style={panelFooter}>

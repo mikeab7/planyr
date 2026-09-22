@@ -291,11 +291,32 @@ describe("Site Model — schema, lifecycle status, selectors", () => {
       expect(buildingNumberHolder(els, 99)).toBe(null);      // free
     });
 
-    it("renumberBuilding: a free number is a plain stamp, no other building touched", () => {
+    it("renumberBuilding: a free number is a plain stamp, and no other building's DISPLAYED number moves", () => {
       const els = [{ id: "e1", type: "building" }, { id: "e2", type: "building" }];
       const next = renumberBuilding(els, "e1", 9);
       expect(buildingNumbers(next).get("e1")).toBe(9);
-      expect(next.find((e) => e.id === "e2")).toEqual(els[1]); // untouched
+      // e2 was implicitly "2" before the edit (placement order). Renumbering e1 away vacates
+      // slot 1, and the naive implicit-fill would silently pull e2 down to 1 — the NEW-1
+      // recurrence (amends B1768384). e2 must keep reading 2, even though that now requires an
+      // explicit stamp to freeze it.
+      expect(buildingNumbers(next).get("e2")).toBe(2);
+      expect(next.find((e) => e.id === "e2").buildingNumber).toBe(2);
+    });
+
+    it("renumberBuilding: renumbering the LOWEST-numbered building never cascades the rest down (NEW-1, amends B1768384)", () => {
+      const els = [
+        { id: "e1", type: "building" }, // 1
+        { id: "e2", type: "building" }, // 2
+        { id: "e3", type: "building" }, // 3
+      ];
+      // e1 (currently the lowest, "1") moves to a free number well clear of the others — a plain
+      // save, no conflict dialog. Only e1 may change; e2/e3 must hold their displayed numbers.
+      const next = renumberBuilding(els, "e1", 9);
+      const n = buildingNumbers(next);
+      expect(n.get("e1")).toBe(9);
+      expect(n.get("e2")).toBe(2);
+      expect(n.get("e3")).toBe(3);
+      expect(new Set(n.values()).size).toBe(3);
     });
 
     it("renumberBuilding('swap'): the two buildings trade numbers, nobody else moves, no number is ever duplicated", () => {
