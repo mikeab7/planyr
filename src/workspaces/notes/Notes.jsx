@@ -623,6 +623,7 @@ export default function Notes({
   useEffect(() => {
     if (!noteIntent?.pageId) return;
     if (!findPage(tree, noteIntent.pageId)) return;
+    setPeek(null);   // NEW-1: opening a real page always exits bin mode
     setActivePageId(noteIntent.pageId);
     setMobileShowList(false);
   }, [noteIntent, tree]);
@@ -882,6 +883,7 @@ export default function Notes({
     );
     if (!r.ok) return;
     persistTree(r.tree);
+    setPeek(null);   // NEW-1: a new page is a real page, so any bin peek exits
     setActivePageId(r.pageId);
     setQuery("");
     setMobileShowList(false);   // NEW-1: a new page opens straight into the editor, phone included
@@ -962,6 +964,7 @@ export default function Notes({
     const r = createPage(treeNow(), { parentId });
     if (!r.ok) return;
     persistTree(r.tree);
+    setPeek(null);   // NEW-1: a new page is a real page, so any bin peek exits
     setActivePageId(r.pageId);
     setMobileShowList(false);
   }, [persistTree, treeNow]);
@@ -1004,6 +1007,10 @@ export default function Notes({
     persistTree(r.tree);
     if (r.pageIds.length) markPagesRestored(r.pageIds);   // …and it reaches the other one back
     setDeleted((d) => (d && d.id === entryId ? null : d));
+    // NEW-1/NEW-2: restoring the entry you're currently reading from the bin takes it out of
+    // the bin entirely, so the read-only peek has nothing left to show — close it rather than
+    // leave it pointing at a page that is no longer binned.
+    setPeek((p) => (p && p.entryId === entryId ? null : p));
     if (r.restored && r.pageIds.length) setActivePageId(r.pageIds[0]);
   }, [persistTree, treeNow]);
 
@@ -1012,6 +1019,9 @@ export default function Notes({
     const r = purgeTrashEntry(treeNow(), entryId);
     persistTree(r.tree);
     setDeleted((d) => (d && d.id === entryId ? null : d));
+    // Same reasoning as handleRestore above — a purged entry's bytes are gone, so a peek open
+    // on it must close rather than keep rendering a body that no longer exists.
+    setPeek((p) => (p && p.entryId === entryId ? null : p));
     purgePages(r.pageIds);
   }, [persistTree, treeNow]);
 
@@ -1193,6 +1203,7 @@ export default function Notes({
       return;
     }
     if ((target.projectId ?? null) !== (projectId ?? null)) onNavigate?.({ projectId: target.projectId ?? null, cross: false, org: false });
+    setPeek(null);   // NEW-1: opening a real page always exits bin mode
     setActivePageId(target.pageId);
     setQuery("");
     setMobileShowList(false);
@@ -1478,10 +1489,13 @@ export default function Notes({
           query={query}
           results={results}
           onQueryChange={setQuery}
-          onSelectPage={(id) => { setActivePageId(id); setQuery(""); setHighlight(""); setMobileShowList(false); }}
+          /* NEW-1: the bin is a mode, and a page click always exits it — a binned page's
+             read-only peek must never survive a click on a real page, however it was
+             clicked. See handlePeekBin/peek's header above for the full defect. */
+          onSelectPage={(id) => { setPeek(null); setActivePageId(id); setQuery(""); setHighlight(""); setMobileShowList(false); }}
           /* Opening a SEARCH HIT carries the phrase into the page, so the editor can mark
              where it actually is — the thing search used to abandon you without. */
-          onSelectHit={(id) => { setActivePageId(id); setHighlight(query); setQuery(""); setMobileShowList(false); }}
+          onSelectHit={(id) => { setPeek(null); setActivePageId(id); setHighlight(query); setQuery(""); setMobileShowList(false); }}
           onAddPage={handleAddPage}
           onAddSubpage={handleAddSubpage}
           onSetPageProject={handleSetPageProject}
@@ -1508,8 +1522,11 @@ export default function Notes({
              new plumbing in the editor. */
           taskGroups={taskGroups}
           onToggleTask={handleToggleTask}
-          onOpenTask={(t) => { setActivePageId(t.pageId); setHighlight(t.text); setQuery(""); setMobileShowList(false); }}
-          onViewChange={(v) => { setTasksOpen(v === "tasks"); setBinOpen(v === "bin"); }}
+          onOpenTask={(t) => { setPeek(null); setActivePageId(t.pageId); setHighlight(t.text); setQuery(""); setMobileShowList(false); }}
+          /* Leaving the Bin tab for any other view is leaving bin mode — close whatever was
+             being read from it (NEW-1), the same as a page click does. */
+          onViewChange={(v) => { setTasksOpen(v === "tasks"); setBinOpen(v === "bin"); if (v !== "bin") setPeek(null); }}
+          peekEntryId={peek?.entryId || null}
           templates={templates}
           onManageTemplates={() => setTemplateManagerOpen(true)}
           onSaveAsTemplate={handleSaveAsTemplate}
@@ -1533,18 +1550,29 @@ export default function Notes({
               deleted note that looks exactly like a live one is its own trap. */}
           {peek ? (
             <div data-testid="notes-peek" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+              {/* ⛔ NEW-2: THIS ROW USED TO CARRY "Restore it"/"Close" INLINE AFTER THE BANNER
+                  TEXT, which pushed them around by however long the binned page's title was —
+                  mid-banner for a short title ("Notes"), off the right edge or wrapped for a
+                  long one. Restore / Delete forever / Back to pages now live in the sidebar's
+                  Bin list instead (NotesTree.jsx's `BinList`, the "viewing" action cluster
+                  stacked below the entries), in a fixed spot the editor's content can never
+                  move. This row is left as a SLIM, button-free indicator — the title's length
+                  no longer has anything to push. */}
               <div
                 role="status"
+                data-testid="notes-peek-readonly-bar"
                 style={{
-                  flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 14px",
+                  flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "6px 14px",
                   background: "var(--surface-raised)", borderBottom: "1px solid var(--border-default)",
-                  color: "var(--text-secondary)", fontSize: 12.5, fontWeight: 600,
+                  color: "var(--text-tertiary)", fontSize: 12, fontWeight: 600,
                 }}
               >
                 {/* The bin-peek reader has no formatting toolbar to pin a back link inside
                     (it renders one read-only NoteEditor per page in the cascade, so there can
                     be more than one), so this status row — already the top chrome of THIS
-                    view, already one row — is where NEW-1's merged back link lives here. */}
+                    view, already one row — is where NEW-1's merged back link lives here. Kept
+                    narrow-only: on a phone the sidebar (and its action cluster) is off-screen
+                    while peeking, so this is still the only way back. */}
                 {narrow ? (
                   <button
                     type="button"
@@ -1558,31 +1586,10 @@ export default function Notes({
                     }}
                   >‹ Notes</button>
                 ) : null}
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  Reading “{peek.title}” from the bin. Nothing you do here changes it.
+                <span aria-hidden="true" style={{ fontSize: 12.5 }}>🔒</span>
+                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  Read-only preview from the bin — nothing you do here changes it.
                 </span>
-                <button
-                  type="button"
-                  data-testid="notes-peek-restore"
-                  onClick={() => { handleRestore(peek.entryId); setPeek(null); }}
-                  style={{
-                    flex: "0 0 auto", border: "1px solid var(--accent-notes)", borderRadius: RADIUS.pill,
-                    background: "var(--accent-notes)", color: "var(--on-accent-notes)", font: "inherit",
-                    fontSize: 11.5, fontWeight: 700, padding: "2px 12px", cursor: "pointer",
-                    minHeight: narrow ? 44 : undefined,
-                  }}
-                >Restore it</button>
-                <button
-                  type="button"
-                  data-testid="notes-peek-close"
-                  onClick={() => setPeek(null)}
-                  style={{
-                    flex: "0 0 auto", border: "1px solid var(--border-default)", borderRadius: RADIUS.pill,
-                    background: "transparent", color: "var(--text-tertiary)", font: "inherit",
-                    fontSize: 11.5, fontWeight: 700, padding: "2px 10px", cursor: "pointer",
-                    minHeight: narrow ? 44 : undefined,
-                  }}
-                >Close</button>
               </div>
               {/* ⛔ IT READS THE WHOLE ENTRY, IN ORDER — every page in the binned subtree that
                   has words in it, which is exactly the set the row's preview and character
@@ -1680,6 +1687,7 @@ export default function Notes({
             onClose={closeQuickOpen}
             onPick={(hit) => {
               closeQuickOpen();
+              setPeek(null);   // NEW-1: opening a real page always exits bin mode
               setActivePageId(hit.pageId);
               setQuery("");
               // A BODY hit carries the phrase into the page, exactly as the rail's own
