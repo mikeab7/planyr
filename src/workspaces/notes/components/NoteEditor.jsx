@@ -503,6 +503,11 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
 .planyr-note .planyr-sketch-status { font-size: 11.5px; font-weight: 600; color: var(--text-secondary); }
 .planyr-note .planyr-sketch-draw { overflow-x: auto; }
 .planyr-note .planyr-sketch-draw.is-linking { cursor: crosshair; }
+.planyr-note .planyr-sketch-draw.is-connecting,
+.planyr-note .planyr-sketch-draw.is-connecting .planyr-sketch-surface { cursor: crosshair; }
+.planyr-note .planyr-sketch-draw.is-connecting .planyr-sketch-node { cursor: pointer; }
+.planyr-note .planyr-sketch-draw.is-connecting .planyr-sketch-node:hover .planyr-sketch-box { stroke: var(--accent-notes); stroke-width: 1.8; }
+.planyr-note .planyr-sketch-node.is-link-source .planyr-sketch-box { stroke: var(--accent-notes); stroke-width: 2.6; stroke-dasharray: 5 3; }
 .planyr-note .planyr-sketch-canvas { display: block; max-width: 100%; height: auto; touch-action: none; }
 .planyr-note .planyr-sketch-surface { fill: transparent; cursor: crosshair; }
 .planyr-note .planyr-sketch-box { fill: var(--surface-page); stroke: var(--border-strong); stroke-width: 1.2; }
