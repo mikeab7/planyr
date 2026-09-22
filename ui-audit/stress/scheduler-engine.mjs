@@ -86,22 +86,40 @@ export const difBD = (a, b) => {
 };
 // ── B815 (NEW-1) — Meeting-body cadence engine (VERBATIM copy of public/sequence/index.html) ──
 export const subBD = (s, n) => addBD(s, -n);
-export const nthWeekdayOfMonth = (y, m, weekday, setpos) => {
-  if (setpos === -1) return fdLocal(nthWeekday(y, m, -1, weekday));
-  const d = nthWeekday(y, m, setpos, weekday);
-  return (d.getMonth() === m - 1) ? fdLocal(d) : null;
-};
-// nthWeekdayOnOrAfter (B845): the nth `weekday` (0=Sun..6=Sat) of month m/year y whose day-of-month is
-// >= dom, as an ISO date. The "Tuesday after the first Monday" primitive — Election Day is the 1st Tuesday
-// on/after Nov 2 (NOT "1st Tuesday of November", which lands a week early whenever Nov 1 is a Tuesday,
-// e.g. 2033/2039). Same local-midnight idiom as nthWeekday (no UTC slip). Null when the nth such
-// occurrence overflows the month; dom<1/NaN clamps to day 1.
-export const nthWeekdayOnOrAfter = (y, m, weekday, dom, nth = 1) => {
-  const d = new Date(y, m - 1, Math.max(1, Math.trunc(dom) || 1));
+// occurrencesInMonth (NEW-1): every ISO date within month m (1-12) of year y matching `weekday`
+// (0=Sun..6=Sat), ascending. The one primitive nthWeekdayOfMonth/positionMissingReport/
+// meetingDatesInRange all build on — no second occurrence-walker anywhere in this file.
+export const occurrencesInMonth = (y, m, weekday) => {
+  const out = [];
+  const d = new Date(y, m - 1, 1);
   while (d.getDay() !== weekday) d.setDate(d.getDate() + 1);
-  if (nth > 1) d.setDate(d.getDate() + 7 * (nth - 1));
-  return (d.getMonth() === m - 1) ? fdLocal(d) : null;
+  while (d.getMonth() === m - 1) { out.push(fdLocal(d)); d.setDate(d.getDate() + 7); }
+  return out;
 };
+// pickOrdinal: the `pos`-th date from an ascending list — pos>0 counts from the start (1..5 =
+// 1st..5th), pos<0 counts from the end (-1 = last, -2 = 2nd-to-last). Null when the list is too
+// short (a 5th Tuesday in a 4-Tuesday month, or -2 in a month with only one occurrence).
+export const pickOrdinal = (dates, pos) => {
+  if (!Array.isArray(dates) || !dates.length || pos == null) return null;
+  const idx = pos > 0 ? pos - 1 : dates.length + pos;
+  return (idx >= 0 && idx < dates.length) ? dates[idx] : null;
+};
+// nthWeekdayOfMonth: the `pos`-th occurrence of `weekday` in month m/year y as an ISO date;
+// pos: 1..5 = nth from month start, -1 = last, -2 = 2nd-to-last. Null when it doesn't exist.
+// Reuses nthWeekday + fdLocal (no UTC one-day slip — B584 #19) via occurrencesInMonth.
+export const nthWeekdayOfMonth = (y, m, weekday, pos) => pickOrdinal(occurrencesInMonth(y, m, weekday), pos);
+// meetingDatesInRange: sorted unique ISO meeting dates for `body` within [from,to] inclusive.
+// NEW-1 (2026-09-22) — each recurrence rule is now { positions: 'every' | number[] (1..5, -1, -2),
+// weekday, months: 'all' | number[], anchor: null | {position, weekday} }. `anchor` generalizes the
+// old fixed "Tuesday after the 1st Monday" primitive to ANY weekday pair: positions are counted
+// among the occurrences of `weekday` STRICTLY AFTER the anchor date within the same month — the
+// anchor not existing that month (e.g. a "5th Monday" anchor) resolves to nothing for that month,
+// never a crash. Applies each rule over its effective window, then removes blackoutDates and adds
+// extraDates — EXPLICIT DATES ALWAYS BEAT THE RULE. `effectiveFrom`/`effectiveTo` bound a rule's
+// active window (still supported — a real fixture pins a body's first-ever meeting this way).
+// `interval` (bi-weekly / every-N-months) is a data-layer-only holdover from before this rewrite —
+// the UI has never exposed it — kept only so a hand-edited body with it still resolves as it always
+// did; the every-week week-stepped path below is its last user.
 export const meetingDatesInRange = (body, from, to) => {
   if (!body || !from || !to || from > to) return [];
   const set = new Set();
@@ -109,10 +127,11 @@ export const meetingDatesInRange = (body, from, to) => {
   const fromY = pd(from).getFullYear(), toY = pd(to).getFullYear();
   (Array.isArray(body.recurrence) ? body.recurrence : []).forEach(r => {
     if (!r || r.weekday == null) return;
-    if (r.freq === "weekly") {
-      const hasAnchor = !!r.effectiveFrom;
-      const interval = (r.interval > 1 && hasAnchor) ? Math.trunc(r.interval) : 1;
-      const cur = pd(hasAnchor ? r.effectiveFrom : from);
+    const isEvery = r.positions === "every";
+    const hasAnchor = !!r.effectiveFrom;
+    const interval = (r.interval > 1 && hasAnchor) ? Math.trunc(r.interval) : 1;
+    if (isEvery && interval > 1 && !(Array.isArray(r.months) && r.months.length)) {
+      const cur = pd(r.effectiveFrom);
       while (cur.getDay() !== r.weekday) cur.setDate(cur.getDate() + 1);
       const end = pd(to);
       let wk = 0;
@@ -121,26 +140,90 @@ export const meetingDatesInRange = (body, from, to) => {
         if (iso >= from && (wk % interval === 0) && inWin(iso, r)) set.add(iso);
         cur.setDate(cur.getDate() + 7); wk++;
       }
-    } else {   // monthly (default)
-      const setpos = Array.isArray(r.setpos) ? r.setpos : (r.setpos != null ? [r.setpos] : []);
-      const months = (Array.isArray(r.months) && r.months.length) ? r.months : null;
-      const anchorYM = r.effectiveFrom ? (pd(r.effectiveFrom).getFullYear() * 12 + pd(r.effectiveFrom).getMonth()) : null;
-      const interval = (r.interval > 1 && anchorYM != null) ? Math.trunc(r.interval) : 1;
-      for (let y = fromY; y <= toY; y++) for (let m = 1; m <= 12; m++) {
-        if (months && !months.includes(m)) continue;
-        if (interval > 1 && ((((y * 12 + (m - 1) - anchorYM) % interval) + interval) % interval) !== 0) continue;
-        setpos.forEach(sp => {
-          const iso = (r.onOrAfter != null)
-            ? nthWeekdayOnOrAfter(y, m, r.weekday, r.onOrAfter, sp > 0 ? sp : 1)
-            : nthWeekdayOfMonth(y, m, r.weekday, sp);
-          if (iso && iso >= from && iso <= to && inWin(iso, r)) set.add(iso);
-        });
+      return;
+    }
+    const months = (Array.isArray(r.months) && r.months.length) ? r.months : null;
+    const anchor = (!isEvery && r.anchor && r.anchor.weekday != null && r.anchor.position != null) ? r.anchor : null;
+    const positions = isEvery ? null : (Array.isArray(r.positions) ? r.positions : (r.positions != null ? [r.positions] : [1]));
+    const anchorYM = r.effectiveFrom ? (pd(r.effectiveFrom).getFullYear() * 12 + pd(r.effectiveFrom).getMonth()) : null;
+    const monthInterval = (r.interval > 1 && anchorYM != null) ? Math.trunc(r.interval) : 1;
+    for (let y = fromY; y <= toY; y++) for (let m = 1; m <= 12; m++) {
+      if (months && !months.includes(m)) continue;
+      if (monthInterval > 1 && ((((y * 12 + (m - 1) - anchorYM) % monthInterval) + monthInterval) % monthInterval) !== 0) continue;
+      let occ = occurrencesInMonth(y, m, r.weekday);
+      if (anchor) {
+        const anchorDate = nthWeekdayOfMonth(y, m, anchor.weekday, anchor.position);
+        if (!anchorDate) continue;   // the anchor itself doesn't exist this month — nothing, no crash
+        occ = occ.filter(iso => iso > anchorDate);
       }
+      const picked = isEvery ? occ : positions.map(p => pickOrdinal(occ, p)).filter(Boolean);
+      picked.forEach(iso => { if (iso >= from && iso <= to && inWin(iso, r)) set.add(iso); });
     }
   });
   (Array.isArray(body.blackoutDates) ? body.blackoutDates : []).forEach(d => set.delete(d));
   (Array.isArray(body.extraDates) ? body.extraDates : []).forEach(d => { if (d >= from && d <= to) set.add(d); });
   return [...set].sort();
+};
+// positionMissingReport: among the picked months (or all 12, if unrestricted), how many of the
+// next 12 such month-instances (starting `today`'s month) produce NO date for this pattern —
+// reuses meetingDatesInRange itself (never a second engine), so an anchor's own non-existence in a
+// month folds in for free. Null for "every week" (always exists) or a pattern with no weekday.
+export const positionMissingReport = (pattern, today) => {
+  if (!pattern || pattern.positions === "every" || pattern.weekday == null || !today) return null;
+  const wantedMonths = (Array.isArray(pattern.months) && pattern.months.length) ? pattern.months : [1,2,3,4,5,6,7,8,9,10,11,12];
+  const start = pd(today);
+  let y = start.getFullYear(), m = start.getMonth() + 1;
+  let checked = 0, missing = 0;
+  while (checked < 12) {
+    if (wantedMonths.includes(m)) {
+      const from = `${y}-${String(m).padStart(2,"0")}-01`;
+      const to = fdLocal(new Date(y, m, 0));
+      if (!meetingDatesInRange({ recurrence: [pattern] }, from, to).length) missing++;
+      checked++;
+    }
+    m++; if (m > 12) { m = 1; y++; }
+  }
+  return { checked, missing };
+};
+// B816 — plain-English descriptors for the civic-mark explainer (never render a hearing date without why).
+export const MB_WD_NAMES = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+export const MB_WD_FULL = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+export const MB_SETPOS_LABEL = {"1":"1st","2":"2nd","3":"3rd","4":"4th","5":"5th","-1":"last","-2":"2nd-to-last"};
+export const MB_MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+// joinWithAnd: ["a"] → "a" · ["a","b"] → "a and b" · ["a","b","c"] → "a, b and c" — the plain-
+// English list join the sentence UI and its summaries share (NEW-1).
+export const joinWithAnd = arr => {
+  if (!arr || !arr.length) return "";
+  if (arr.length === 1) return arr[0];
+  if (arr.length === 2) return arr.join(" and ");
+  return arr.slice(0, -1).join(", ") + " and " + arr[arr.length - 1];
+};
+export const mbPositionsPhrase = positions => joinWithAnd((Array.isArray(positions) ? positions : [positions]).map(p => MB_SETPOS_LABEL[String(p)] || String(p)));
+// mbMonthsPhrase: null means "every month"/"all year" (the caller supplies the right words for
+// its own sentence shape) — a restricted set becomes "Jan, Apr and Jul".
+export const mbMonthsPhrase = months => (months === "all" || !Array.isArray(months) || !months.length) ? null : joinWithAnd(months.map(m => MB_MONTH_NAMES[m - 1] || "?"));
+// mbRuleSummary (NEW-1, 2026-09-22 — replaces the Monthly/Weekly + Weeks/Months grid this mirrors):
+// one plain-English sentence for a single pattern — "the 2nd and 4th Thursday of every month",
+// "every Wednesday in Jun, Jul and Aug", "the 1st Tuesday of Nov, counting from after the 1st
+// Monday" (the generalized Election-Day primitive — ANY weekday pair, not just Tue-after-Mon).
+export const mbRuleSummary = r => {
+  if (!r || r.weekday == null) return "(no weekday set)";
+  const wd = MB_WD_FULL[r.weekday] || "?";
+  const isEvery = r.positions === "every";
+  const mo = mbMonthsPhrase(r.months);
+  let base = isEvery
+    ? (mo ? `every ${wd} in ${mo}` : `every ${wd}, all year`)
+    : `the ${mbPositionsPhrase(r.positions)} ${wd} of ${mo || "every month"}`;
+  if (!isEvery && r.anchor && r.anchor.weekday != null && r.anchor.position != null) {
+    base += `, counting from after the ${MB_SETPOS_LABEL[String(r.anchor.position)] || r.anchor.position} ${MB_WD_FULL[r.anchor.weekday] || "?"}`;
+  }
+  return base;
+};
+// cadenceSummary: joins every rule of a body (not just [0]) so the civic-mark tooltip / rail never lie.
+export const cadenceSummary = body => {
+  const rules = (body && Array.isArray(body.recurrence)) ? body.recurrence.filter(r => r && r.weekday != null) : [];
+  if (!rules.length) return "no cadence set";
+  return rules.map(mbRuleSummary).join(", and ");
 };
 export const agendaDeadline = (body, meetingDate) => {
   if (!body || !meetingDate) return meetingDate || null;
@@ -1289,8 +1372,52 @@ export const ensureContacts = d => {
   });
   return {...d, settings: {...d.settings, contacts: existing}};
 };
+// NEW-1 (2026-09-22) — one-time migration of every meetingBodies[].recurrence[] rule from the old
+// {freq,setpos,onOrAfter} shape to the new sentence-UI shape {positions,weekday,months,anchor}. A
+// DISTINCT flag (_mbv2, not _v9) — the retired normalizeToV9 already stamped `_v9:true` on every
+// real schedule loaded since 2026-08-25, so reusing that flag would silently skip this migration on
+// every one of them. Runs BEFORE normalizeToV8 rebuilds MEETING_BODY_INDEX, so the index always
+// reflects already-migrated rules. The only anchor shape the OLD UI could ever produce was
+// weekday:2 (Tue) + onOrAfter:2 (the "Tuesday after the 1st Monday" / Election Day primitive) —
+// that maps exactly to the new anchor {position:1, weekday:1 (Mon)}; anything else defensively
+// drops the (never-produced-by-UI) onOrAfter rather than guess, and says so loudly.
+export const migrateRecurrenceRule = r => {
+  if (!r || typeof r !== "object" || "positions" in r) return r;   // already new shape / not a rule
+  const months = (Array.isArray(r.months) && r.months.length) ? r.months.slice() : "all";
+  const passthrough = {};
+  if (r.effectiveFrom) passthrough.effectiveFrom = r.effectiveFrom;
+  if (r.effectiveTo) passthrough.effectiveTo = r.effectiveTo;
+  if (r.interval > 1) passthrough.interval = r.interval;
+  if (r.freq === "weekly") return { positions: "every", weekday: r.weekday, months, anchor: null, ...passthrough };
+  const rawSetpos = Array.isArray(r.setpos) ? r.setpos : (r.setpos != null ? [r.setpos] : []);
+  let positions = rawSetpos.length ? rawSetpos.slice() : [1];
+  let weekday = r.weekday, anchor = null;
+  if (r.onOrAfter != null) {
+    if (r.weekday === 2 && r.onOrAfter === 2) {
+      anchor = { position: 1, weekday: 1 };   // the 1st Monday
+      weekday = 2;                            // Tuesday, counted from after it
+      positions = [1];
+    } else {
+      console.warn("[migrateRecurrenceRule] unrecognized onOrAfter combination — the UI never produced this shape; dropping the anchor rather than guess:", r);
+    }
+  }
+  return { positions, weekday, months, anchor, ...passthrough };
+};
+export const normalizeMeetingCadence = d => {
+  if (!d || typeof d !== "object") return d;
+  if (d._mbv2) return d;
+  const projects = {};
+  const srcProjects = (d.projects && typeof d.projects === "object") ? d.projects : {};
+  Object.entries(srcProjects).forEach(([id, proj]) => {
+    if (!proj || typeof proj !== "object") { projects[id] = proj; return; }
+    if (!Array.isArray(proj.meetingBodies) || !proj.meetingBodies.length) { projects[id] = proj; return; }
+    projects[id] = {...proj, meetingBodies: proj.meetingBodies.map(b => (b && Array.isArray(b.recurrence))
+      ? { ...b, recurrence: b.recurrence.map(migrateRecurrenceRule) } : b)};
+  });
+  return { ...d, projects, _mbv2: true };
+};
 // The full load pipeline as index.html composes it.
-export const loadPipeline = d => ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(d))))));
+export const loadPipeline = d => ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(normalizeMeetingCadence(d)))))));
 
 // Faithful logic copy of rebuildHEALTH (index.html mutates module globals; this returns
 // the maps so it's testable). Builds the status color maps from settings.customHealth +

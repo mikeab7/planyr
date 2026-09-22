@@ -3232,29 +3232,40 @@ const difBD = (a, b) => {
 // ui-audit/stress/scheduler-engine.mjs (anti-drift guard in test/schedulerEngine.test.js).
 // subBD: subtract N business days — the exact inverse of addBD (skips Sat/Sun + HOLIDAY_SET).
 const subBD = (s, n) => addBD(s, -n);
-// nthWeekdayOfMonth: the setpos-th `weekday` (0=Sun..6=Sat) of month m (1-12) of year y as an
-// ISO date; setpos 1..4 = nth, -1 = last. Reuses nthWeekday + fdLocal (no UTC one-day slip —
-// B584 #19). Returns null when the nth occurrence overflows the month (a 5th in a 4-week month).
-const nthWeekdayOfMonth = (y, m, weekday, setpos) => {
-  if (setpos === -1) return fdLocal(nthWeekday(y, m, -1, weekday));
-  const d = nthWeekday(y, m, setpos, weekday);
-  return (d.getMonth() === m - 1) ? fdLocal(d) : null;
-};
-// nthWeekdayOnOrAfter (B845): the nth `weekday` (0=Sun..6=Sat) of month m/year y whose day-of-month is
-// >= dom, as an ISO date. The "Tuesday after the first Monday" primitive — Election Day is the 1st Tuesday
-// on/after Nov 2 (NOT "1st Tuesday of November", which lands a week early whenever Nov 1 is a Tuesday,
-// e.g. 2033/2039). Same local-midnight idiom as nthWeekday (no UTC slip). Null when the nth such
-// occurrence overflows the month; dom<1/NaN clamps to day 1.
-const nthWeekdayOnOrAfter = (y, m, weekday, dom, nth = 1) => {
-  const d = new Date(y, m - 1, Math.max(1, Math.trunc(dom) || 1));
+// occurrencesInMonth (NEW-1): every ISO date within month m (1-12) of year y matching `weekday`
+// (0=Sun..6=Sat), ascending. The one primitive nthWeekdayOfMonth/positionMissingReport/
+// meetingDatesInRange all build on — no second occurrence-walker anywhere in this file.
+const occurrencesInMonth = (y, m, weekday) => {
+  const out = [];
+  const d = new Date(y, m - 1, 1);
   while (d.getDay() !== weekday) d.setDate(d.getDate() + 1);
-  if (nth > 1) d.setDate(d.getDate() + 7 * (nth - 1));
-  return (d.getMonth() === m - 1) ? fdLocal(d) : null;
+  while (d.getMonth() === m - 1) { out.push(fdLocal(d)); d.setDate(d.getDate() + 7); }
+  return out;
 };
+// pickOrdinal: the `pos`-th date from an ascending list — pos>0 counts from the start (1..5 =
+// 1st..5th), pos<0 counts from the end (-1 = last, -2 = 2nd-to-last). Null when the list is too
+// short (a 5th Tuesday in a 4-Tuesday month, or -2 in a month with only one occurrence).
+const pickOrdinal = (dates, pos) => {
+  if (!Array.isArray(dates) || !dates.length || pos == null) return null;
+  const idx = pos > 0 ? pos - 1 : dates.length + pos;
+  return (idx >= 0 && idx < dates.length) ? dates[idx] : null;
+};
+// nthWeekdayOfMonth: the `pos`-th occurrence of `weekday` in month m/year y as an ISO date;
+// pos: 1..5 = nth from month start, -1 = last, -2 = 2nd-to-last. Null when it doesn't exist.
+// Reuses nthWeekday + fdLocal (no UTC one-day slip — B584 #19) via occurrencesInMonth.
+const nthWeekdayOfMonth = (y, m, weekday, pos) => pickOrdinal(occurrencesInMonth(y, m, weekday), pos);
 // meetingDatesInRange: sorted unique ISO meeting dates for `body` within [from,to] inclusive.
-// Applies each recurrence rule over its effective window, then removes blackoutDates and adds
-// extraDates — EXPLICIT DATES ALWAYS BEAT THE RULE. Interval>1 (bi-weekly / every-N-months)
-// anchors its phase to effectiveFrom; without one it degrades to interval 1 (deterministic).
+// NEW-1 (2026-09-22) — each recurrence rule is now { positions: 'every' | number[] (1..5, -1, -2),
+// weekday, months: 'all' | number[], anchor: null | {position, weekday} }. `anchor` generalizes the
+// old fixed "Tuesday after the 1st Monday" primitive to ANY weekday pair: positions are counted
+// among the occurrences of `weekday` STRICTLY AFTER the anchor date within the same month — the
+// anchor not existing that month (e.g. a "5th Monday" anchor) resolves to nothing for that month,
+// never a crash. Applies each rule over its effective window, then removes blackoutDates and adds
+// extraDates — EXPLICIT DATES ALWAYS BEAT THE RULE. `effectiveFrom`/`effectiveTo` bound a rule's
+// active window (still supported — a real fixture pins a body's first-ever meeting this way).
+// `interval` (bi-weekly / every-N-months) is a data-layer-only holdover from before this rewrite —
+// the UI has never exposed it — kept only so a hand-edited body with it still resolves as it always
+// did; the every-week week-stepped path below is its last user.
 const meetingDatesInRange = (body, from, to) => {
   if (!body || !from || !to || from > to) return [];
   const set = new Set();
@@ -3262,10 +3273,11 @@ const meetingDatesInRange = (body, from, to) => {
   const fromY = pd(from).getFullYear(), toY = pd(to).getFullYear();
   (Array.isArray(body.recurrence) ? body.recurrence : []).forEach(r => {
     if (!r || r.weekday == null) return;
-    if (r.freq === "weekly") {
-      const hasAnchor = !!r.effectiveFrom;
-      const interval = (r.interval > 1 && hasAnchor) ? Math.trunc(r.interval) : 1;
-      const cur = pd(hasAnchor ? r.effectiveFrom : from);
+    const isEvery = r.positions === "every";
+    const hasAnchor = !!r.effectiveFrom;
+    const interval = (r.interval > 1 && hasAnchor) ? Math.trunc(r.interval) : 1;
+    if (isEvery && interval > 1 && !(Array.isArray(r.months) && r.months.length)) {
+      const cur = pd(r.effectiveFrom);
       while (cur.getDay() !== r.weekday) cur.setDate(cur.getDate() + 1);
       const end = pd(to);
       let wk = 0;
@@ -3274,26 +3286,50 @@ const meetingDatesInRange = (body, from, to) => {
         if (iso >= from && (wk % interval === 0) && inWin(iso, r)) set.add(iso);
         cur.setDate(cur.getDate() + 7); wk++;
       }
-    } else {   // monthly (default)
-      const setpos = Array.isArray(r.setpos) ? r.setpos : (r.setpos != null ? [r.setpos] : []);
-      const months = (Array.isArray(r.months) && r.months.length) ? r.months : null;
-      const anchorYM = r.effectiveFrom ? (pd(r.effectiveFrom).getFullYear() * 12 + pd(r.effectiveFrom).getMonth()) : null;
-      const interval = (r.interval > 1 && anchorYM != null) ? Math.trunc(r.interval) : 1;
-      for (let y = fromY; y <= toY; y++) for (let m = 1; m <= 12; m++) {
-        if (months && !months.includes(m)) continue;
-        if (interval > 1 && ((((y * 12 + (m - 1) - anchorYM) % interval) + interval) % interval) !== 0) continue;
-        setpos.forEach(sp => {
-          const iso = (r.onOrAfter != null)
-            ? nthWeekdayOnOrAfter(y, m, r.weekday, r.onOrAfter, sp > 0 ? sp : 1)
-            : nthWeekdayOfMonth(y, m, r.weekday, sp);
-          if (iso && iso >= from && iso <= to && inWin(iso, r)) set.add(iso);
-        });
+      return;
+    }
+    const months = (Array.isArray(r.months) && r.months.length) ? r.months : null;
+    const anchor = (!isEvery && r.anchor && r.anchor.weekday != null && r.anchor.position != null) ? r.anchor : null;
+    const positions = isEvery ? null : (Array.isArray(r.positions) ? r.positions : (r.positions != null ? [r.positions] : [1]));
+    const anchorYM = r.effectiveFrom ? (pd(r.effectiveFrom).getFullYear() * 12 + pd(r.effectiveFrom).getMonth()) : null;
+    const monthInterval = (r.interval > 1 && anchorYM != null) ? Math.trunc(r.interval) : 1;
+    for (let y = fromY; y <= toY; y++) for (let m = 1; m <= 12; m++) {
+      if (months && !months.includes(m)) continue;
+      if (monthInterval > 1 && ((((y * 12 + (m - 1) - anchorYM) % monthInterval) + monthInterval) % monthInterval) !== 0) continue;
+      let occ = occurrencesInMonth(y, m, r.weekday);
+      if (anchor) {
+        const anchorDate = nthWeekdayOfMonth(y, m, anchor.weekday, anchor.position);
+        if (!anchorDate) continue;   // the anchor itself doesn't exist this month — nothing, no crash
+        occ = occ.filter(iso => iso > anchorDate);
       }
+      const picked = isEvery ? occ : positions.map(p => pickOrdinal(occ, p)).filter(Boolean);
+      picked.forEach(iso => { if (iso >= from && iso <= to && inWin(iso, r)) set.add(iso); });
     }
   });
   (Array.isArray(body.blackoutDates) ? body.blackoutDates : []).forEach(d => set.delete(d));
   (Array.isArray(body.extraDates) ? body.extraDates : []).forEach(d => { if (d >= from && d <= to) set.add(d); });
   return [...set].sort();
+};
+// positionMissingReport: among the picked months (or all 12, if unrestricted), how many of the
+// next 12 such month-instances (starting `today`'s month) produce NO date for this pattern —
+// reuses meetingDatesInRange itself (never a second engine), so an anchor's own non-existence in a
+// month folds in for free. Null for "every week" (always exists) or a pattern with no weekday.
+const positionMissingReport = (pattern, today) => {
+  if (!pattern || pattern.positions === "every" || pattern.weekday == null || !today) return null;
+  const wantedMonths = (Array.isArray(pattern.months) && pattern.months.length) ? pattern.months : [1,2,3,4,5,6,7,8,9,10,11,12];
+  const start = pd(today);
+  let y = start.getFullYear(), m = start.getMonth() + 1;
+  let checked = 0, missing = 0;
+  while (checked < 12) {
+    if (wantedMonths.includes(m)) {
+      const from = `${y}-${String(m).padStart(2,"0")}-01`;
+      const to = fdLocal(new Date(y, m, 0));
+      if (!meetingDatesInRange({ recurrence: [pattern] }, from, to).length) missing++;
+      checked++;
+    }
+    m++; if (m > 12) { m = 1; y++; }
+  }
+  return { checked, missing };
 };
 // agendaDeadline: the ISO agenda-submittal deadline for a meeting on `meetingDate`. agendaLead
 // union: {type:'offset',n,unit:'business'|'calendar'} (n days before; business = subBD) ·
@@ -3362,33 +3398,44 @@ const rebuildMeetingBodyIndex = d => {
 };
 // B816 — plain-English descriptors for the civic-mark explainer (never render a hearing date without why).
 const MB_WD_NAMES = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
-const MB_SETPOS_LABEL = {"1":"1st","2":"2nd","3":"3rd","4":"4th","-1":"last"};
+const MB_WD_FULL = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+const MB_SETPOS_LABEL = {"1":"1st","2":"2nd","3":"3rd","4":"4th","5":"5th","-1":"last","-2":"2nd-to-last"};
 const MB_MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const mbOrdinal = n => { const s = ["th","st","nd","rd"], v = n % 100; return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`; };
-// mbRuleSummary (B845/B849): plain-English descriptor of ONE recurrence rule — month restriction
-// (r.months) + the "on/after day" primitive (r.onOrAfter), with the civic "Tuesday after the first
-// Monday" construct spelled out by name (1st Tue on/after the 2nd = Election Day) so the input reads
-// the way the owner thinks about it. e.g. "Tue after the 1st Mon of Nov", "2nd & 4th Tue monthly".
+// joinWithAnd: ["a"] → "a" · ["a","b"] → "a and b" · ["a","b","c"] → "a, b and c" — the plain-
+// English list join the sentence UI and its summaries share (NEW-1).
+const joinWithAnd = arr => {
+  if (!arr || !arr.length) return "";
+  if (arr.length === 1) return arr[0];
+  if (arr.length === 2) return arr.join(" and ");
+  return arr.slice(0, -1).join(", ") + " and " + arr[arr.length - 1];
+};
+const mbPositionsPhrase = positions => joinWithAnd((Array.isArray(positions) ? positions : [positions]).map(p => MB_SETPOS_LABEL[String(p)] || String(p)));
+// mbMonthsPhrase: null means "every month"/"all year" (the caller supplies the right words for
+// its own sentence shape) — a restricted set becomes "Jan, Apr and Jul".
+const mbMonthsPhrase = months => (months === "all" || !Array.isArray(months) || !months.length) ? null : joinWithAnd(months.map(m => MB_MONTH_NAMES[m - 1] || "?"));
+// mbRuleSummary (NEW-1, 2026-09-22 — replaces the Monthly/Weekly + Weeks/Months grid this mirrors):
+// one plain-English sentence for a single pattern — "the 2nd and 4th Thursday of every month",
+// "every Wednesday in Jun, Jul and Aug", "the 1st Tuesday of Nov, counting from after the 1st
+// Monday" (the generalized Election-Day primitive — ANY weekday pair, not just Tue-after-Mon).
 const mbRuleSummary = r => {
   if (!r || r.weekday == null) return "(no weekday set)";
-  const wd = MB_WD_NAMES[r.weekday] || "?";
-  if (r.freq === "weekly") return `every ${wd}`;
-  const posArr = Array.isArray(r.setpos) ? r.setpos : (r.setpos != null ? [r.setpos] : []);
-  const sp = posArr.map(x => MB_SETPOS_LABEL[String(x)] || x).join(" & ") || "?";
-  const mo = (Array.isArray(r.months) && r.months.length) ? r.months.map(m => MB_MONTH_NAMES[m - 1] || "?").join("/") : null;
-  if (r.onOrAfter != null) {
-    // "first Tuesday on/after the 2nd" is exactly "the Tuesday after the first Monday" (Election Day).
-    const isFirst = posArr.length === 0 || (posArr.length === 1 && posArr[0] === 1);
-    if (r.weekday === 2 && r.onOrAfter === 2 && isFirst) return `Tue after the 1st Mon${mo ? " of " + mo : ""}`;
-    return `${sp} ${wd} on/after the ${mbOrdinal(r.onOrAfter)}${mo ? " of " + mo : ""}`;
+  const wd = MB_WD_FULL[r.weekday] || "?";
+  const isEvery = r.positions === "every";
+  const mo = mbMonthsPhrase(r.months);
+  let base = isEvery
+    ? (mo ? `every ${wd} in ${mo}` : `every ${wd}, all year`)
+    : `the ${mbPositionsPhrase(r.positions)} ${wd} of ${mo || "every month"}`;
+  if (!isEvery && r.anchor && r.anchor.weekday != null && r.anchor.position != null) {
+    base += `, counting from after the ${MB_SETPOS_LABEL[String(r.anchor.position)] || r.anchor.position} ${MB_WD_FULL[r.anchor.weekday] || "?"}`;
   }
-  return mo ? `${sp} ${wd} in ${mo}` : `${sp} ${wd} monthly`;
+  return base;
 };
 // cadenceSummary: joins every rule of a body (not just [0]) so the civic-mark tooltip / rail never lie.
 const cadenceSummary = body => {
   const rules = (body && Array.isArray(body.recurrence)) ? body.recurrence.filter(r => r && r.weekday != null) : [];
   if (!rules.length) return "no cadence set";
-  return rules.map(mbRuleSummary).join(" + ");
+  return rules.map(mbRuleSummary).join(", and ");
 };
 const agendaLeadSummary = body => {
   const l = body && body.agendaLead; if (!l) return "no agenda lead";
@@ -8217,6 +8264,51 @@ function App() {
     return {...d, _v8: true};
   };
 
+  // NEW-1 (2026-09-22) — one-time migration of every meetingBodies[].recurrence[] rule from the old
+  // {freq,setpos,onOrAfter} shape to the new sentence-UI shape {positions,weekday,months,anchor}. A
+  // DISTINCT flag (_mbv2, not _v9) — the retired normalizeToV9 below already stamped `_v9:true` on
+  // every real schedule loaded since 2026-08-25, so reusing that flag would silently skip this
+  // migration on every one of them. Runs BEFORE normalizeToV8 rebuilds MEETING_BODY_INDEX, so the
+  // index always reflects already-migrated rules. The only anchor shape the OLD UI could ever
+  // produce was weekday:2 (Tue) + onOrAfter:2 (the "Tuesday after the 1st Monday" / Election Day
+  // primitive) — that maps exactly to the new anchor {position:1, weekday:1 (Mon)}; anything else
+  // (never producible from the UI) defensively drops the anchor rather than guess, loudly.
+  const migrateRecurrenceRule = r => {
+    if (!r || typeof r !== "object" || "positions" in r) return r;   // already new shape / not a rule
+    const months = (Array.isArray(r.months) && r.months.length) ? r.months.slice() : "all";
+    const passthrough = {};
+    if (r.effectiveFrom) passthrough.effectiveFrom = r.effectiveFrom;
+    if (r.effectiveTo) passthrough.effectiveTo = r.effectiveTo;
+    if (r.interval > 1) passthrough.interval = r.interval;
+    if (r.freq === "weekly") return { positions: "every", weekday: r.weekday, months, anchor: null, ...passthrough };
+    const rawSetpos = Array.isArray(r.setpos) ? r.setpos : (r.setpos != null ? [r.setpos] : []);
+    let positions = rawSetpos.length ? rawSetpos.slice() : [1];
+    let weekday = r.weekday, anchor = null;
+    if (r.onOrAfter != null) {
+      if (r.weekday === 2 && r.onOrAfter === 2) {
+        anchor = { position: 1, weekday: 1 };   // the 1st Monday
+        weekday = 2;                            // Tuesday, counted from after it
+        positions = [1];
+      } else {
+        console.warn("[migrateRecurrenceRule] unrecognized onOrAfter combination — the UI never produced this shape; dropping the anchor rather than guess:", r);
+      }
+    }
+    return { positions, weekday, months, anchor, ...passthrough };
+  };
+  const normalizeMeetingCadence = d => {
+    if (!d || typeof d !== "object") return d;
+    if (d._mbv2) return d;
+    const projects = {};
+    const srcProjects = (d.projects && typeof d.projects === "object") ? d.projects : {};
+    Object.entries(srcProjects).forEach(([id, proj]) => {
+      if (!proj || typeof proj !== "object") { projects[id] = proj; return; }
+      if (!Array.isArray(proj.meetingBodies) || !proj.meetingBodies.length) { projects[id] = proj; return; }
+      projects[id] = {...proj, meetingBodies: proj.meetingBodies.map(b => (b && Array.isArray(b.recurrence))
+        ? { ...b, recurrence: b.recurrence.map(migrateRecurrenceRule) } : b)};
+    });
+    return { ...d, projects, _mbv2: true };
+  };
+
   // ⛔ RETIRED (2026-08-25, B752848 owner correction): normalizeToV9 used to seed the now-deleted
   // `healthOverride` flag on load (green/red/paused → override:true). The flag and everything that
   // read it are gone, so this migration has nothing left to do; removed rather than left as a no-op,
@@ -8299,7 +8391,7 @@ function App() {
       // can't call normalizeIds/ensureContacts directly — those are scoped to this effect). Set
       // synchronously on mount, before the first await, so it's ready before any user import/restore.
       applyLoadedDataRef.current = (parsed) => {
-        let d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(parsed))))))));
+        let d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(normalizeMeetingCadence(parsed)))))))));
         d._pinnedClean = true;
         HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
         const driftFound = [];   // B836 — same drift surfacing on import / version-restore
@@ -8321,7 +8413,7 @@ function App() {
         // __PLANAR_DATA__ is the seed used only when Supabase has no record yet.
         const r = await window.storage.get("hs-v1");
         if (r) {
-          const d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(JSON.parse(r.value)))))))));
+          const d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(normalizeMeetingCadence(JSON.parse(r.value))))))))));
           // NOTE: a narrow viewport forces the GRID layout at RENDER time (see the body switch),
           // never by mutating the persisted `view` — baking "grid" into saved data let one phone
           // session overwrite the desktop's saved split/gantt preference across every device.
@@ -8357,7 +8449,7 @@ function App() {
         }
         // First load (Supabase empty) — seed from inline data or SEED constant
         const seed = window.__PLANAR_DATA__ || SEED;
-        const d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(seed))))))));
+        const d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(normalizeMeetingCadence(seed)))))))));
           // Enforce predecessor relationships on load (seed data — no stale pins)
           HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
           d._pinnedClean = true;
@@ -8379,7 +8471,7 @@ function App() {
         else if (window.__planarAuthRequired) setAuthRequired(true);
         setData(resolveViewState(d));
       } catch {
-        const d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(window.__PLANAR_DATA__ || SEED))))))));
+        const d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(normalizeMeetingCadence(window.__PLANAR_DATA__ || SEED)))))))));
         setOfflineFallback(true);
         setData(resolveViewState(d));
       }
@@ -14925,17 +15017,79 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
 // (and MUST call rebuildMeetingBodyIndex, see the render site). Live-previews the next 6
 // resolved meeting dates + agenda deadlines so a wrong rule is visible immediately.
 const MB_WD = [{v:0,l:"Sun"},{v:1,l:"Mon"},{v:2,l:"Tue"},{v:3,l:"Wed"},{v:4,l:"Thu"},{v:5,l:"Fri"},{v:6,l:"Sat"}];
-const MB_SETPOS = [{v:1,l:"1st"},{v:2,l:"2nd"},{v:3,l:"3rd"},{v:4,l:"4th"},{v:-1,l:"Last"}];
+// NEW-1 — POSITION is a multi-pick: 1st..5th plus 2nd-to-last/Last, with "Every week" exclusive
+// (picking it clears everything else — the new home for the old separate Weekly mode).
+const MB_POSITIONS = [{v:1,l:"1st"},{v:2,l:"2nd"},{v:3,l:"3rd"},{v:4,l:"4th"},{v:5,l:"5th"},{v:-2,l:"2nd-to-last"},{v:-1,l:"Last"}];
 const MB_MONTHS = [{v:1,l:"Jan"},{v:2,l:"Feb"},{v:3,l:"Mar"},{v:4,l:"Apr"},{v:5,l:"May"},{v:6,l:"Jun"},{v:7,l:"Jul"},{v:8,l:"Aug"},{v:9,l:"Sep"},{v:10,l:"Oct"},{v:11,l:"Nov"},{v:12,l:"Dec"}];
+// One dot color per pattern (cycled), so the merged "next meetings" list can show which pattern
+// produced each date without repeating the whole sentence.
+const MB_PATTERN_COLORS = ["#2563eb","#d97706","#059669","#db2777","#7c3aed","#0891b2"];
 const newMeetingBody = () => ({
   id: "mb_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
   name: "", jurisdiction: "",
-  recurrence: [{ freq: "monthly", weekday: 2, setpos: [2, 4] }],
+  recurrence: [{ positions: [2, 4], weekday: 2, months: "all", anchor: null }],
   agendaLead: { type: "offset", n: 10, unit: "business" },
   cutoffTime: "12:00 PM", sameDayFilingAllowed: false,
   blackoutDates: [], extraDates: [], sourceUrl: "", verifiedOn: "",
 });
 const mbFmt = iso => { if(!iso) return ""; const d=new Date(iso+"T12:00:00"); return isNaN(d)?"":d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}); };
+// MB_ACTIVE_POPOVER_CLOSE — a single module-level slot naming the currently-open MBMultiPick's own
+// close function. MeetingCalendarsModal's Escape handler (a document-level CAPTURE listener) always
+// runs before any handler bound inside the modal, so a popover can't just listen for its own
+// Escape — the modal would close first. Routing through this slot lets the modal's own handler close
+// the popover INSTEAD of itself when one is open, satisfying "Escape closes the popover" without a
+// second competing capture listener.
+let MB_ACTIVE_POPOVER_CLOSE = null;
+// MBMultiPick (NEW-1) — the multi-select popover POSITION and MONTHS share: `value` is either
+// `allValue` (the exclusive "every"/"all" sentinel) or a non-empty array of picked option values.
+// Fully keyboard-operable: the trigger is a real <button> (native Enter/Space activation + focus),
+// every option is a real <button role="checkbox">, and Escape closes it via MB_ACTIVE_POPOVER_CLOSE.
+function MBMultiPick({ value, onChange, options, allValue, allRowLabel, allButtonLabel, formatSelected }) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef(null), popRef = useRef(null);
+  const [pos, setPos] = useState({top:0,left:0});
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    MB_ACTIVE_POPOVER_CLOSE = close;
+    const down = e => { if (!btnRef.current?.contains(e.target) && !popRef.current?.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", down);
+    return () => { document.removeEventListener("mousedown", down); if (MB_ACTIVE_POPOVER_CLOSE === close) MB_ACTIVE_POPOVER_CLOSE = null; };
+  }, [open]);
+  const isAll = value === allValue;
+  const picked = isAll ? [] : (Array.isArray(value) ? value : []);
+  const toggle = v => {
+    const has = picked.includes(v);
+    const next = has ? picked.filter(x => x !== v) : [...picked, v];
+    onChange(next.length ? next : allValue);
+  };
+  const openMenu = e => {
+    e.stopPropagation();
+    const r = btnRef.current.getBoundingClientRect();
+    setPos({top: r.bottom + 4, left: r.left});
+    setOpen(o => !o);
+  };
+  const chip = (on, extra) => ({padding:"4px 10px",fontSize:11.5,borderRadius:5,cursor:"pointer",border:"1px solid var(--bd2)",background:on?"var(--amber)":"#fff",color:on?"#fff":"var(--mut)",fontFamily:"inherit",...extra});
+  const label = isAll ? allButtonLabel : (formatSelected ? formatSelected(picked) : joinWithAnd(picked.map(v => (options.find(o=>o.v===v)||{}).l || String(v))));
+  return (
+    <>
+      <button type="button" ref={btnRef} onClick={openMenu}
+        style={{fontSize:12,padding:"3px 8px",border:"1px solid var(--bd2)",borderRadius:5,background:"#fff",color:"var(--txt)",cursor:"pointer",fontWeight:600,display:"inline-flex",alignItems:"center",gap:3,fontFamily:"inherit"}}>
+        {label} <span style={{fontSize:7,opacity:.7}}>▾</span>
+      </button>
+      {open && ReactDOM.createPortal(
+        <div ref={popRef} onMouseDown={e=>e.stopPropagation()}
+          style={{position:"fixed",top:pos.top,left:pos.left,minWidth:200,maxWidth:260,background:"#fff",border:"1px solid var(--bd2)",borderRadius:6,padding:6,zIndex:9999,boxShadow:"0 4px 16px rgba(0,0,0,.15)",display:"flex",flexWrap:"wrap",gap:4}}>
+          <button type="button" role="checkbox" aria-checked={isAll} onClick={()=>{ onChange(allValue); setOpen(false); }}
+            style={chip(isAll, {flexBasis:"100%",fontWeight:700})}>{allRowLabel}</button>
+          {options.map(o => {
+            const on = picked.includes(o.v);
+            return <button type="button" role="checkbox" aria-checked={on} key={String(o.v)} onClick={()=>toggle(o.v)} style={chip(on)}>{o.l}</button>;
+          })}
+        </div>, document.body)}
+    </>
+  );
+}
 function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
   // Draft / Save model (owner ask, 2026-07-15): the window edits a WORKING COPY — nothing touches the
   // schedule until "Save changes", so it's unmistakable when the edits take effect. savedRef holds the
@@ -14952,19 +15106,26 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
   const save = () => { onChange(JSON.parse(JSON.stringify(draft))); savedRef.current = JSON.stringify(draft); setSavedFlash(true); setTimeout(() => setSavedFlash(false), 1600); };
   const requestClose = () => { if (dirty) setConfirmClose(true); else onClose(); };
   // NotesModal-style close hardening: a text-selection drag ending on the backdrop must not dismiss;
-  // Escape backs out (the confirm bar first, then the close) via a capture-phase listener.
+  // Escape backs out (an open POSITION/MONTHS popover first, then the confirm bar, then the close)
+  // via a capture-phase listener — this always fires before any handler bound inside the modal, so a
+  // popover can't just listen for its own Escape (see MB_ACTIVE_POPOVER_CLOSE).
   const backdropRef = useRef(null);
   const downOnBackdropRef = useRef(false);
   useEffect(() => {
-    const onKey = e => { if (e.key === "Escape") { e.stopPropagation(); if (confirmClose) setConfirmClose(false); else requestClose(); } };
+    const onKey = e => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      if (MB_ACTIVE_POPOVER_CLOSE) { MB_ACTIVE_POPOVER_CLOSE(); MB_ACTIVE_POPOVER_CLOSE = null; return; }
+      if (confirmClose) setConfirmClose(false); else requestClose();
+    };
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
   });
   // All edits mutate the DRAFT only (setDraft) — the parent's onChange runs once, on Save.
   const patch = (id, fields) => setDraft(prev => prev.map(b => b.id === id ? { ...b, ...fields } : b));
-  const rulesOf = b => (Array.isArray(b.recurrence) && b.recurrence.length) ? b.recurrence : [{ freq:"monthly", weekday:2, setpos:[2,4] }];
+  const rulesOf = b => (Array.isArray(b.recurrence) && b.recurrence.length) ? b.recurrence : [{ positions:[2,4], weekday:2, months:"all", anchor:null }];
   const patchRuleAt = (id, idx, rf) => setDraft(prev => prev.map(b => b.id === id ? { ...b, recurrence: rulesOf(b).map((r, i) => i === idx ? { ...r, ...rf } : r) } : b));
-  const addRuleAt = id => setDraft(prev => prev.map(b => b.id === id ? { ...b, recurrence: [...rulesOf(b), { freq:"monthly", weekday:2, setpos:[1] }] } : b));
+  const addRuleAt = id => setDraft(prev => prev.map(b => b.id === id ? { ...b, recurrence: [...rulesOf(b), { positions:[1], weekday:2, months:"all", anchor:null }] } : b));
   const removeRuleAt = (id, idx) => setDraft(prev => prev.map(b => b.id === id ? { ...b, recurrence: rulesOf(b).filter((_, i) => i !== idx) } : b));
   const patchLead = (id, lf) => setDraft(prev => prev.map(b => b.id === id ? { ...b, agendaLead: { ...(b.agendaLead||{}), ...lf } } : b));
   const add = () => { const b = newMeetingBody(); setDraft(prev => [...prev, b]); setSelId(b.id); };
@@ -14978,7 +15139,18 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
     </div>
   );
   const today = fdLocal(new Date());
-  const preview = b => meetingDatesInRange(b, today, addD(today, 366*2)).slice(0, 6);
+  // preview: the next N merged, de-duplicated meeting dates, each tagged with the color of the
+  // FIRST pattern (in rule order) that produces it — N is 8 when any pattern is "every week"
+  // (matches the acceptance spec: an every-week body's dates come far more densely).
+  const preview = b => {
+    const rules = rulesOf(b);
+    const n = rules.some(r => r.positions === "every") ? 8 : 6;
+    const merged = meetingDatesInRange(b, today, addD(today, 366*2)).slice(0, n);
+    return merged.map(date => {
+      const idx = rules.findIndex(r => meetingDatesInRange({ recurrence:[r] }, date, date).length > 0);
+      return { date, dot: MB_PATTERN_COLORS[(idx >= 0 ? idx : 0) % MB_PATTERN_COLORS.length] };
+    });
+  };
   const detail = b => {
     const rules = rulesOf(b);
     const lead = b.agendaLead || { type:"offset", n:10, unit:"business" };
@@ -14999,51 +15171,61 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
 
         <div style={sect}>Meets</div>
         {rules.map((rule, ri) => {
-          const setpos = Array.isArray(rule.setpos) ? rule.setpos : (rule.setpos!=null ? [rule.setpos] : []);
-          const months = Array.isArray(rule.months) ? rule.months : [];
+          const isEvery = rule.positions === "every";
+          const months = (rule.months === "all" || !Array.isArray(rule.months) || !rule.months.length) ? "all" : rule.months;
+          const hasAnchor = !!(rule.anchor && rule.anchor.weekday != null && rule.anchor.position != null);
+          const missing = positionMissingReport(rule, today);
           const ruleDates = meetingDatesInRange({ recurrence:[rule] }, today, addD(today, 366*4)).slice(0, 3);
+          const dot = MB_PATTERN_COLORS[ri % MB_PATTERN_COLORS.length];
           return (
             <div key={ri} style={{border:"1px solid var(--bd)",borderRadius:6,padding:"10px 12px",marginBottom:8,background:"var(--surf)"}}>
-              <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                {seg([{v:"monthly",l:"Monthly"},{v:"weekly",l:"Weekly"}], rule.freq, v=>patchRuleAt(b.id,ri,{freq:v}))}
-                {!(rule.freq==="monthly" && rule.onOrAfter!=null) && (<>
-                  <span style={{fontSize:11,color:"var(--mut)"}}>on</span>
-                  <select value={rule.weekday} onChange={e=>patchRuleAt(b.id,ri,{weekday:+e.target.value})} style={{...inp,width:"auto"}}>
+              <div style={{display:"flex",alignItems:"flex-start",gap:6}}>
+                <span title="This pattern's color in the resolved-dates list below" style={{width:7,height:7,marginTop:6,borderRadius:"50%",background:dot,flexShrink:0}} />
+                <div style={{display:"flex",gap:6,rowGap:4,alignItems:"center",flexWrap:"wrap",flex:1,fontSize:12.5,color:"var(--txt)"}}>
+                  <span>Meets</span>
+                  {!isEvery && <span style={{color:"var(--mut)"}}>the</span>}
+                  <MBMultiPick
+                    value={isEvery ? "every" : (Array.isArray(rule.positions) ? rule.positions : [1])}
+                    onChange={v => patchRuleAt(b.id, ri, v === "every" ? {positions:"every", anchor:null} : {positions:v})}
+                    options={MB_POSITIONS} allValue="every" allRowLabel="Every week" allButtonLabel="every"
+                    formatSelected={arr=>joinWithAnd(arr.map(v=>(MB_POSITIONS.find(o=>o.v===v)||{}).l||String(v)))} />
+                  <select value={rule.weekday} onChange={e=>patchRuleAt(b.id,ri,{weekday:+e.target.value})} style={{...inp,width:"auto",display:"inline-block"}}>
                     {MB_WD.map(w=><option key={w.v} value={w.v}>{w.l}</option>)}
                   </select>
-                </>)}
-                {rule.freq==="monthly" && rule.onOrAfter!=null && (
-                  <span style={{fontSize:12,color:"var(--txt)"}}>— <span style={{fontWeight:600}}>the Tuesday after the first Monday</span></span>
-                )}
-                {rules.length>1 && <span onClick={()=>removeRuleAt(b.id,ri)} title="Remove this cadence rule" style={{marginLeft:"auto",cursor:"pointer",color:"var(--mut)",fontSize:14,padding:"0 2px",flexShrink:0}}>&#x2715;</span>}
-              </div>
-              {rule.freq==="monthly" && (<>
-                {rule.onOrAfter==null && (
-                  <div style={{display:"flex",gap:5,marginTop:10,alignItems:"center",flexWrap:"wrap"}}>
-                    <span style={{fontSize:11,color:"var(--mut)",width:52,flexShrink:0}}>Weeks</span>
-                    {MB_SETPOS.map(sp=>{
-                      const on = setpos.includes(sp.v);
-                      return <span key={sp.v} onClick={()=>{ const ns = on ? setpos.filter(x=>x!==sp.v) : [...setpos,sp.v].sort((a,z)=>(a<0?99:a)-(z<0?99:z)); patchRuleAt(b.id,ri,{setpos:ns.length?ns:[sp.v]}); }}
-                        style={{padding:"4px 11px",fontSize:11.5,borderRadius:5,cursor:"pointer",border:"1px solid var(--bd2)",background:on?"var(--amber)":"#fff",color:on?"#fff":"var(--mut)"}}>{sp.l}</span>;
-                    })}
-                  </div>
-                )}
-                <div style={{display:"flex",gap:5,marginTop:8,alignItems:"center",flexWrap:"wrap"}}>
-                  <span style={{fontSize:11,color:"var(--mut)",width:52,flexShrink:0}}>Months</span>
-                  {MB_MONTHS.map(mo=>{
-                    const on = months.includes(mo.v);
-                    return <span key={mo.v} onClick={()=>{ const ns = on ? months.filter(x=>x!==mo.v) : [...months,mo.v].sort((a,z)=>a-z); patchRuleAt(b.id,ri,{months: ns.length?ns:undefined}); }}
-                      style={{padding:"4px 8px",fontSize:11,borderRadius:5,cursor:"pointer",border:"1px solid var(--bd2)",background:on?"var(--amber)":"#fff",color:on?"#fff":"var(--mut)"}}>{mo.l}</span>;
-                  })}
-                  <span style={{fontSize:10,color:"var(--mut)",flexBasis:"100%",paddingLeft:57}}>Blank = every month · pick one month for a yearly cadence</span>
+                  <span style={{color:"var(--mut)"}}>{isEvery ? (months==="all" ? "," : "in") : "of"}</span>
+                  <MBMultiPick
+                    value={months}
+                    onChange={v => patchRuleAt(b.id, ri, {months:v})}
+                    options={MB_MONTHS} allValue="all" allRowLabel="Every month"
+                    allButtonLabel={isEvery ? "all year" : "every month"} />
                 </div>
-                <label style={{fontSize:11.5,color:"var(--txt)",display:"flex",alignItems:"flex-start",gap:6,cursor:"pointer",marginTop:10}}>
-                  <input type="checkbox" checked={rule.onOrAfter!=null} style={{marginTop:2,flexShrink:0}}
-                    onChange={e=>patchRuleAt(b.id,ri, e.target.checked ? {weekday:2, setpos:[1], onOrAfter:2, months:(months.length?months:[11])} : {onOrAfter:undefined})} />
-                  <span>Use the <span style={{fontWeight:600}}>“Tuesday after the first Monday”</span> rule <span style={{color:"var(--mut)"}}>— the U.S. / Texas Election Day pattern (defaults to November; the plain “1st Tuesday” is wrong when the 1st is a Tuesday)</span></span>
+                {rules.length>1 && <span onClick={()=>removeRuleAt(b.id,ri)} title="Remove this pattern" style={{cursor:"pointer",color:"var(--mut)",fontSize:14,padding:"0 2px",flexShrink:0}}>&#x2715;</span>}
+              </div>
+              {!isEvery && (
+                <label style={{fontSize:11.5,color:"var(--txt)",display:"flex",alignItems:"flex-start",gap:6,cursor:"pointer",marginTop:10,paddingLeft:13}}>
+                  <input type="checkbox" checked={hasAnchor} style={{marginTop:2,flexShrink:0}}
+                    onChange={e=>patchRuleAt(b.id,ri, e.target.checked
+                      ? {anchor:{position:1, weekday:(rule.weekday+6)%7}}
+                      : {anchor:null})} />
+                  <span style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                    <span>counting from after the</span>
+                    {hasAnchor ? (<>
+                      <select value={rule.anchor.position} onChange={e=>patchRuleAt(b.id,ri,{anchor:{...rule.anchor,position:+e.target.value}})} style={{...inp,width:"auto",display:"inline-block"}}>
+                        {MB_POSITIONS.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
+                      </select>
+                      <select value={rule.anchor.weekday} onChange={e=>patchRuleAt(b.id,ri,{anchor:{...rule.anchor,weekday:+e.target.value}})} style={{...inp,width:"auto",display:"inline-block"}}>
+                        {MB_WD.map(w=><option key={w.v} value={w.v}>{w.l}</option>)}
+                      </select>
+                    </>) : <span style={{color:"var(--mut)",fontStyle:"italic"}}>1st Monday (e.g. the U.S. Election Day pattern)</span>}
+                  </span>
                 </label>
-              </>)}
-              <div style={{marginTop:10,paddingTop:8,borderTop:"1px dashed var(--bd2)",fontSize:11.5,lineHeight:1.5}}>
+              )}
+              {!isEvery && missing && missing.missing > 0 && (
+                <div style={{marginTop:8,paddingLeft:13,fontSize:11,color:"var(--warn-text,#b45309)"}}>
+                  ⚠ {missing.missing} of the next {missing.checked} picked months have no such meeting.
+                </div>
+              )}
+              <div style={{marginTop:10,paddingTop:8,paddingLeft:13,borderTop:"1px dashed var(--bd2)",fontSize:11.5,lineHeight:1.5}}>
                 <span style={{color:"var(--mut)"}}>Resolves to </span>
                 <span style={{fontWeight:600,color:"var(--txt)"}}>{mbRuleSummary(rule)}</span>
                 {ruleDates.length
@@ -15053,7 +15235,7 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
             </div>
           );
         })}
-        <button className="btn" onClick={()=>addRuleAt(b.id)} style={{fontSize:11,padding:"4px 10px"}}>+ Add cadence rule</button>
+        <button className="btn" onClick={()=>addRuleAt(b.id)} style={{fontSize:11,padding:"4px 10px"}}>+ And also…</button>
 
         <div style={sect}>Deadline before each meeting <span style={{textTransform:"none",fontWeight:400,letterSpacing:0}}>— file the agenda / call the election by (e.g. 78 calendar days before an election)</span></div>
         <div style={{fontSize:10.5,color:"var(--mut)",margin:"0 0 8px",lineHeight:1.5}}>
@@ -15107,13 +15289,16 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
             <span style={{fontWeight:600,color:"var(--txt)"}}>{cadenceSummary(b)}</span>
           </div>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:4}}>
-            <span style={{fontSize:10,fontWeight:700,color:"var(--mut)",textTransform:"uppercase",letterSpacing:".06em"}}>Next 6 meetings → file by</span>
+            <span style={{fontSize:10,fontWeight:700,color:"var(--mut)",textTransform:"uppercase",letterSpacing:".06em"}}>Next {dates.length || (rules.some(r=>r.positions==="every")?8:6)} meetings → file by</span>
             <span style={{fontSize:10,color: b.verifiedOn ? "var(--mut)" : "var(--warn-text,#b45309)"}}>{b.verifiedOn ? `verified ${mbFmt(b.verifiedOn)}` : "rule-derived, unverified"}</span>
           </div>
           {dates.length===0 && <div style={{fontSize:12,color:"var(--mut)",fontStyle:"italic",marginTop:4}}>No dates resolve — check the recurrence rule.</div>}
-          {dates.map(m=>(
-            <div key={m} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0",color:"var(--txt)",gap:8,borderTop:"1px dashed var(--bd)"}}>
-              <span style={{fontWeight:500}}>{mbFmt(m)}</span>
+          {dates.map(({date:m, dot})=>(
+            <div key={m} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"3px 0",color:"var(--txt)",gap:8,borderTop:"1px dashed var(--bd)"}}>
+              <span style={{display:"flex",alignItems:"center",gap:6,fontWeight:500}}>
+                <span style={{width:6,height:6,borderRadius:"50%",background:dot,flexShrink:0}} />
+                {mbFmt(m)}
+              </span>
               <span style={{color:"var(--mut)"}}>file by {mbFmt(agendaDeadline(b,m))}{b.cutoffTime?` · ${b.cutoffTime}`:""}</span>
             </div>
           ))}
@@ -15187,12 +15372,17 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
               <button className="btn" onClick={()=>{ save(); onClose(); }} style={{fontSize:12,padding:"6px 12px",background:"var(--amber)",color:"#fff",borderColor:"var(--amber)"}}>Save &amp; close</button>
             </div>
           </>) : (<>
+            {/* NEW-2 (2026-09-22): this dialog does NOT autosave — edits live only in the draft until
+                Save changes is clicked. The footer used to show "All changes saved" beside a (merely
+                disabled) Save changes button at the same time, which read as self-contradictory even
+                though the two never disagreed about the real state. Fix: when there is nothing to
+                save, the Save button is gone entirely — only Close remains, matching what's true. */}
             <span style={{fontSize:11.5,fontWeight:600,color: dirty ? "var(--warn-text,#b45309)" : savedFlash ? "#15803d" : "var(--mut)"}}>
               {dirty ? "● Unsaved changes — nothing on the schedule has moved yet" : savedFlash ? "✓ Saved — the schedule updated" : "All changes saved"}
             </span>
             <div style={{display:"flex",gap:8}}>
               <button className="btn" onClick={requestClose} style={{fontSize:12,padding:"6px 12px"}}>{dirty ? "Cancel" : "Close"}</button>
-              <button className="btn" onClick={save} disabled={!dirty} style={{fontSize:12,padding:"6px 14px",...(dirty ? {background:"var(--amber)",color:"#fff",borderColor:"var(--amber)"} : {})}}>Save changes</button>
+              {dirty && <button className="btn" onClick={save} style={{fontSize:12,padding:"6px 14px",background:"var(--amber)",color:"#fff",borderColor:"var(--amber)"}}>Save changes</button>}
             </div>
           </>)}
         </div>
