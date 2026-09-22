@@ -1,0 +1,125 @@
+name: Site Planner DB guard tests
+
+# NEW-2 (B<PENDING>, 2026-09-20/22) — the gap this closes: src/workspaces/site-planner/db/test/*.sql
+# is a real, growing suite of self-rolling-back SQL guard proofs (12 files as of this writing,
+# see scripts/db-test-verdict.mjs's registry) — including the case that would have caught NEW-1's
+# unauthenticated purge_one_deleted_plan() hole — and NOTHING RUNS THEM. Before this workflow, the
+# only way any of these files were ever executed was a session manually pasting one into the
+# Supabase SQL editor. A deliberate, well-reviewed, well-commented change to the one function
+# guarding against permanent plan loss shipped with an unauthenticated hole and no gate caught it —
+# see purge_one_deleted_plan.sql's own header for the incident this file exists to stop recurring.
+#
+# ⛔ HOW THIS DIFFERS FROM EVERY OTHER GATE IN THIS REPO, AND WHY IT NEEDS A SECRET NOTHING ELSE
+# HERE NEEDS. Every other required check in .github/ci-gates.yml runs against the LOCAL build —
+# lint, unit tests, a Vite build. These SQL files are not unit tests: they exercise REAL Postgres
+# behaviour (RLS, SECURITY DEFINER, BEFORE DELETE triggers, auth.uid()) that no in-repo schema file
+# can reconstruct — public.sites itself has never been CREATE TABLE'd in this repo; every db/*.sql
+# file here is an incremental ALTER/CREATE FUNCTION layered onto a table this repo's history never
+# captured (confirmed by a full grep sweep, 2026-09-22). So this job runs the suite against a real
+# Supabase DATABASE BRANCH — a disposable, full-schema copy of production, created and destroyed
+# for this one PR run via Supabase's Management API / CLI. That needs a Supabase Personal Access
+# Token, which only the account owner can mint (Supabase Dashboard → Account → Access Tokens) —
+# no Claude Code session has a path to create or extract this credential; it is a genuine external
+# dependency, not a shortcut skipped for convenience. See OWNER-TODO.md.
+#
+# ⚠ THE BRANCH-LIFECYCLE COMMANDS BELOW ARE UNVERIFIED END-TO-END AS OF THIS COMMIT. This sandbox's
+# network egress is blocked to both api.supabase.com and supabase.com, so the exact Supabase CLI
+# flags / Management API JSON field names could not be confirmed against current docs from this
+# session — only recalled from training knowledge. scripts/run-db-tests.mjs and
+# scripts/db-test-verdict.mjs (the parts that do NOT depend on Supabase's branch API) ARE fully
+# verified: run against a real local Postgres 16, both the all-pass and mixed-pass/fail paths, plus
+# 19 unit tests proving the verdict parser against every real message format the 12 site-planner
+# test files actually raise. The branch-lifecycle steps below are written to FAIL LOUDLY and name
+# exactly what went wrong (never a silent false-green) if a CLI flag or JSON field has drifted —
+# the first real run after the secret is added should be watched, and this comment updated with
+# whatever the first real run reveals.
+#
+# NOT WIRED INTO THE REQUIRED `build` CHECK. This is a separate, path-scoped workflow reporting its
+# own check ("Site Planner DB guard tests"); marking it a REQUIRED status in branch protection is a
+# GitHub repo-settings change no tool available to a Claude Code session in this repo can make (no
+# branch-protection/ruleset API is in this session's GitHub toolset) — that one step is on the
+# owner, or a future session given that access, and only after the secret exists and a first run
+# has gone green for real. See CLAUDE.md's own history of what an untested/misconfigured required
+# check does to this repo (the 2026-08-06 livelock) before doing that step in a hurry.
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/workspaces/site-planner/db/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  db-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Refuse loudly if SUPABASE_ACCESS_TOKEN is not configured
+        if: ${{ secrets.SUPABASE_ACCESS_TOKEN == '' }}
+        run: |
+          echo "::error::SUPABASE_ACCESS_TOKEN repo secret is not set — this gate cannot create a database branch and cannot run. Add a Supabase personal access token (Dashboard → Account → Access Tokens) as a GitHub repo secret named SUPABASE_ACCESS_TOKEN to activate this workflow. See OWNER-TODO.md and this file's own header."
+          exit 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install postgresql-client (psql)
+        run: sudo apt-get update -y && sudo apt-get install -y postgresql-client
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Create a disposable database branch for this run
+        id: branch
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: lyeqzkuiwngunutlkkmi
+        run: |
+          set -euo pipefail
+          BRANCH_NAME="ci-site-planner-db-tests-${{ github.run_id }}-${{ github.run_attempt }}"
+          echo "Creating Supabase branch: $BRANCH_NAME"
+          CREATE_JSON="$(supabase branches create "$BRANCH_NAME" --project-ref "$SUPABASE_PROJECT_REF" -o json)"
+          echo "$CREATE_JSON"
+          BRANCH_ID="$(node -e 'const d=JSON.parse(process.argv[1]); const id=d.id||d.branch_id||(d.branch&&d.branch.id); if(!id){console.error("Could not find a branch id field in create output — update this workflow after inspecting the JSON above."); process.exit(1);} console.log(id);' "$CREATE_JSON")"
+          echo "branch_id=$BRANCH_ID" >> "$GITHUB_OUTPUT"
+
+          echo "Waiting for branch $BRANCH_ID to become ready..."
+          for i in $(seq 1 40); do
+            STATUS_JSON="$(supabase branches get "$BRANCH_ID" -o json || true)"
+            STATUS="$(node -e 'try{const d=JSON.parse(process.argv[1]); console.log(d.status||"");}catch(e){console.log("");}' "$STATUS_JSON" 2>/dev/null || true)"
+            echo "  [$i/40] status=$STATUS"
+            if echo "$STATUS" | grep -qiE "active|running_migrations_done|migrations_passed|ready|functions_deployed"; then
+              echo "$STATUS_JSON" > branch_status.json
+              break
+            fi
+            if [ "$i" = "40" ]; then
+              echo "::error::Branch $BRANCH_ID did not become ready within the wait budget. Last status JSON: $STATUS_JSON"
+              exit 1
+            fi
+            sleep 15
+          done
+
+          DB_URL="$(node -e 'const d=JSON.parse(require("fs").readFileSync("branch_status.json","utf8")); const url=d.db_connection_string||d.postgres_url||d.connection_string||(d.db&&(d.db.connection_string||d.db.url))||""; if(!url){console.error("::error::Could not find a connection-string field in the branch status JSON — inspect branch_status.json in the run log and update this workflow."); console.error(JSON.stringify(d,null,2)); process.exit(1);} console.log(url);')"
+          echo "::add-mask::$DB_URL"
+          echo "db_url=$DB_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Run the site-planner SQL guard test suite against the branch
+        env:
+          DATABASE_URL: ${{ steps.branch.outputs.db_url }}
+        run: node scripts/run-db-tests.mjs --dir src/workspaces/site-planner/db/test
+
+      - name: Delete the branch (always, even on failure)
+        if: always() && steps.branch.outputs.branch_id != ''
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase branches delete "${{ steps.branch.outputs.branch_id }}" --project-ref lyeqzkuiwngunutlkkmi -y || echo "::warning::Branch cleanup failed for ${{ steps.branch.outputs.branch_id }} — it may need manual deletion in the Supabase dashboard."
