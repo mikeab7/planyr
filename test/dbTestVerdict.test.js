@@ -128,8 +128,8 @@ describe("db-test-verdict — the CI parser for self-rolling-back SQL tests", ()
     expect(fail.failedCount).toBe(1);
   });
 
-  it("recognises sites_soft_delete_rls's and team_share_scope's shared 'N passed, M FAILED ----' shape", () => {
-    for (const file of ["sites_soft_delete_rls.test.sql", "team_share_scope.test.sql"]) {
+  it("recognises sites_soft_delete_rls's, team_share_scope's and sites_cas_ownership_independent's shared 'N passed, M FAILED ----' shape", () => {
+    for (const file of ["sites_soft_delete_rls.test.sql", "team_share_scope.test.sql", "sites_cas_ownership_independent.test.sql"]) {
       expect(
         classifyTestOutput(file, "ERROR:  P0001: \nreport\n---- 6 passed, 0 FAILED ----\n(this exception is deliberate...)\n").status
       ).toBe("pass");

@@ -1,7 +1,7 @@
 name: Site Planner DB guard tests
 
 # NEW-2 (B<PENDING>, 2026-09-20/22) — the gap this closes: src/workspaces/site-planner/db/test/*.sql
-# is a real, growing suite of self-rolling-back SQL guard proofs (12 files as of this writing,
+# is a real, growing suite of self-rolling-back SQL guard proofs (13 files as of this writing,
 # see scripts/db-test-verdict.mjs's registry) — including the case that would have caught NEW-1's
 # unauthenticated purge_one_deleted_plan() hole — and NOTHING RUNS THEM. Before this workflow, the
 # only way any of these files were ever executed was a session manually pasting one into the
@@ -28,7 +28,7 @@ name: Site Planner DB guard tests
 # session — only recalled from training knowledge. scripts/run-db-tests.mjs and
 # scripts/db-test-verdict.mjs (the parts that do NOT depend on Supabase's branch API) ARE fully
 # verified: run against a real local Postgres 16, both the all-pass and mixed-pass/fail paths, plus
-# 19 unit tests proving the verdict parser against every real message format the 12 site-planner
+# 19 unit tests proving the verdict parser against every real message format the 13 site-planner
 # test files actually raise. The branch-lifecycle steps below are written to FAIL LOUDLY and name
 # exactly what went wrong (never a silent false-green) if a CLI flag or JSON field has drifted —
 # the first real run after the secret is added should be watched, and this comment updated with

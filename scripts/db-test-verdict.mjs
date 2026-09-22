@@ -60,6 +60,7 @@ export const VERDICT_REGISTRY = {
   "parcel_active_deleted_invariant.test.sql": allPassedOrCountedFail,
   "reconcile_site_group_name.test.sql": proofPassedOrFailed,
   "sites_block_delete_live_group.test.sql": allPassedOrCountedFail,
+  "sites_cas_ownership_independent.test.sql": passedCommaFailed,
   "sites_rename_stamp_guard.test.sql": allPassedOrCountedFail,
   "sites_site_column_mirror.test.sql": allPassedOrCountedFail,
   "sites_soft_delete_rls.test.sql": passedCommaFailed,
