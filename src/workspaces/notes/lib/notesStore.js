@@ -167,7 +167,7 @@ import {
   addPage, allPageIds, countNodes, dropPages, migrate, purgeTrashEntry, searchTitles, pagesInScope,
   trashEntries, walkPages, withTombstones, SCOPE_ALL, SCOPE_PROJECT, SCOPE_ORG,
 } from "./notesModel.js";
-import { normalizeZoom, zoomKey, ZOOM_DEFAULT } from "./notesZoom.js";
+import { parseView, serializeView, viewKey } from "./notesViewport.js";
 import { IGNORED_DUPES_KEY_BASE, TEMPLATES_KEY_BASE } from "./notesKeys.js";
 import { seedTemplateRecords } from "./notesTemplates.js";
 import { countEmptyAnchors, pruneEmptyAnchors } from "./notesAnchorPrune.js";
@@ -296,20 +296,24 @@ export function writeTree(tree) {
  *
  * A device preference, so it rides the SAME seam as everything else here rather than a stray
  * `localStorage` call in a component — and it is scoped like every other notes key, so two
- * accounts on one machine do not inherit each other's eyesight. It deliberately does NOT
- * sync: a comfortable size is a property of the screen you are sitting at, not of the
- * account, and pushing a laptop's zoom onto a desktop would be a bug wearing a feature's
- * clothes. A failure to read or write it is a no-op at 100%, never an unreadable page. */
-export function readNotesZoom(s = scope) {
+ * accounts on one machine do not inherit each other's view. It deliberately does NOT sync: where
+ * you left a page on screen is a property of the screen you are sitting at, not of the account,
+ * and pushing a laptop's framing onto a desktop would be a bug wearing a feature's clothes.
+ *
+ * ⛔ PER PAGE, NOT PER ACCOUNT (NEW-1, 2026-09-21) — this replaces `readNotesZoom`/`writeNotesZoom`,
+ * which stored ONE zoom level for the whole workspace. On a canvas you can pan, the view is a
+ * place you left off in a particular document; see `notesViewport.js`'s own header. A failure to
+ * read or write it is a no-op at the default framing, never an unreadable page. */
+export function readNoteView(pageId, s = scope) {
   const st = store();
-  if (!st) return ZOOM_DEFAULT;
-  try { return normalizeZoom(st.getItem(zoomKey(s))); } catch (_) { return ZOOM_DEFAULT; /* a preference is not data — a refused read means 100%, never a banner */ }
+  if (!st) return null;
+  try { return parseView(st.getItem(viewKey(s, pageId))); } catch (_) { return null; /* a view is not data — a refused read means the default framing, never a banner */ }
 }
 
-export function writeNotesZoom(z, s = scope) {
+export function writeNoteView(pageId, view, s = scope) {
   const st = store();
   if (!st) return false;
-  try { st.setItem(zoomKey(s), String(normalizeZoom(z))); return true; } catch (_) { return false; /* a preference is not data — the level simply does not persist */ }
+  try { st.setItem(viewKey(s, pageId), JSON.stringify(serializeView(view))); return true; } catch (_) { return false; /* a view is not data — it simply does not persist */ }
 }
 
 /* ---- findings the person has settled (NEW-4) --------------------------------------------

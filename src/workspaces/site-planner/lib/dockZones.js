@@ -549,6 +549,37 @@ export function strandedZoneIds(els, building) {
   return [...kill];
 }
 
+/* ---- NEW-2 (B1818257) — compass label for a dock side, derived from the building's OWN rotation.
+ *
+ * `rot2` above (and `sitePlacement.rotPt`, the same formula) rotates CLOCKWISE on screen, which in
+ * this plan's frame (+y = south) is the same sense as a compass bearing — so a side's outward-face
+ * bearing is just its un-rotated bearing (top=0°/N, right=90°/E, bottom=180°/S, left=270°/W) plus
+ * the building's `rot`, wrapped to [0,360). An angled cross-dock building therefore gets an
+ * angle-appropriate label (NE/SW, not a hardcoded N/S) for free — no separate geometry needed. */
+const SIDE_BASE_BEARING = { top: 0, right: 90, bottom: 180, left: 270 };
+const COMPASS_8 = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+
+/** The compass bearing (0–360°, clockwise from north) a dock side's outward face points, at the
+ *  building's current rotation. */
+export function dockSideBearing(side, rot = 0) {
+  const base = SIDE_BASE_BEARING[side];
+  if (base == null) return 0;
+  return (((base + (Number(rot) || 0)) % 360) + 360) % 360;
+}
+
+/** An 8-point compass label (N/NE/E/SE/S/SW/W/NW) for a bearing. */
+export function compassLabelForBearing(deg) {
+  const b = ((Number(deg) || 0) % 360 + 360) % 360;
+  return COMPASS_8[Math.round(b / 45) % 8];
+}
+
+/** The compass label for a dock side on a building at rotation `rot` — e.g. "N", or "NE" on a
+ *  45°-rotated building. Pure; the single derivation the panel + selection header share, so the
+ *  two can't disagree. */
+export function dockSideCompassLabel(side, rot = 0) {
+  return compassLabelForBearing(dockSideBearing(side, rot));
+}
+
 // Heal a loaded element list: drop every stranded dock-zone stack from every building, so an
 // older plan reshaped before this guard existed cleans itself up the moment it's opened.
 export function pruneStrandedZones(els) {

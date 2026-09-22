@@ -5,7 +5,37 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-09-20._
+_Last updated: 2026-09-22._
+
+## 🔑 One Supabase key would turn on an automatic safety check for deleted plans (B1805153)
+
+> **Quick background: I found and fixed a serious bug today, and it's already fixed and live — nothing
+> needed from you on that part.** It was a hole that let anyone who knew a plan's ID permanently delete
+> it and everything drawn on it, with no login required at all. Nobody actually used it against you
+> (I checked the logs), but it was real and it's closed now.
+>
+> **What's still open is how to stop the NEXT one like it from slipping through unnoticed.** There's a
+> set of twelve automatic checks that test exactly this kind of thing — "can someone who isn't signed in
+> do something they shouldn't" — including the very check that would have caught today's bug. Until now,
+> nothing ever RAN them automatically; a person had to remember to paste them in by hand. I've built the
+> machinery to run them automatically on every future change to that part of the app, and proved the
+> machinery itself works — what's missing is one credential only you can create.
+>
+> - [ ] **Create a Supabase "personal access token" and get it into GitHub.** Think of this as a special
+>       password that lets an automated robot — not a person — spin up a disposable, throwaway copy of
+>       your database to test against (it never touches your real, live database). Go to
+>       [supabase.com/dashboard/account/tokens](https://supabase.com/dashboard/account/tokens) → Generate
+>       new token → any name is fine (e.g. "CI database tests") → copy the token (you only get to see it
+>       once). Then either tell a Claude session the token so it can add it for you, or add it yourself:
+>       this repo on github.com → Settings → Secrets and variables → Actions → New repository secret →
+>       name it exactly `SUPABASE_ACCESS_TOKEN` → paste the token → Save.
+> - **One more possible snag, separate from the token:** the "disposable copy of your database" feature
+>   (Supabase calls it database branching) wouldn't turn on when I tried to use it just now — it may need
+>   switching on in your Supabase project settings (Settings → Branching), possibly by linking the
+>   project to GitHub there. I couldn't get far enough from here to tell which. If adding the token above
+>   doesn't get the checks running, that's the next thing to look at together.
+> - **Nothing is broken or waiting on this today** — the actual hole is already closed. This is purely
+>   about catching the next one automatically instead of hoping someone notices by hand.
 
 ## ✂️ One quick question on the new polygon crop tool (B1783328)
 

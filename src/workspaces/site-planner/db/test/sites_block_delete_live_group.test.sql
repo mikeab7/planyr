@@ -5,7 +5,7 @@
 -- HAS A LIVE (deleted_at IS NULL) SIBLING PLAN — regardless of which client (or client vintage)
 -- issues the DELETE, because the guard is a BEFORE DELETE trigger, not client code.
 --
--- Ten cases:
+-- Eleven cases:
 --   0. KNOWN-GOOD ARM — an isolated, already soft-deleted plan with no siblings deletes cleanly.
 --      (Proves the instrument can see a delete SUCCEED before trusting it on a refusal —
 --      DRIVER-SCROLL-IS-NOT-APP-SCROLL §6.)
@@ -36,6 +36,14 @@
 --   9. purge_one_deleted_plan() refuses a row that was never soft-deleted, same as the base
 --      guard's own case 4.
 --
+-- B<PENDING> (the 2026-09-19/09-20 daily data-risk sweep) — case 10:
+--   10. RED-PROOF of the NULL-auth hole — an UNAUTHENTICATED (anon role, no request.jwt.claims at
+--       all, so auth.uid() is NULL) caller against a live-group row exactly like case 6's shape:
+--       purge_one_deleted_plan() must REFUSE, and the row must still exist afterward. Before the
+--       fix, `v_row.user_id = auth.uid()` evaluated to NULL rather than false, the disjunction's
+--       `not (...)` never ran, and the row was genuinely deleted with no error at all — this case
+--       is what catches that regressing.
+--
 -- HOW TO RUN: paste the whole file into the Supabase SQL editor and execute.
 --   SELF-ROLLING-BACK — ends by raising an exception carrying the report, so every fixture row
 --   (and every real delete performed by cases 0/3/5/6) is discarded. It writes NOTHING that
@@ -47,7 +55,9 @@
 --   itself is wrong). Restoring the trigger must turn them green again. For cases 6-9, comment out
 --   the `if bypass is not null and bypass = old.id then return old; end if;` block in
 --   sites_block_delete_live_group() and re-run — case 6 must FAIL (the RPC's accept is refused by
---   the trigger even though its own preconditions passed).
+--   the trigger even though its own preconditions passed). For case 10, comment out the
+--   `if v_uid is null then raise exception ... end if;` block in purge_one_deleted_plan() and
+--   re-run — case 10 must FAIL (an anon caller with no JWT purges the row with no error).
 -- ============================================================================
 do $$
 declare
@@ -70,6 +80,8 @@ declare
   p_rpc_b_sib text := 'zzbdlg-rpc-live-b';
   p_rpc_lone  text := 'zzbdlg-rpc-lonely';     -- case 8: RPC refuses — last member of its group
   p_rpc_never text := 'zzbdlg-rpc-never';      -- case 9: RPC refuses — never soft-deleted
+  p_rpc_c     text := 'zzbdlg-rpc-target-c';   -- case 10: RPC refuses — anon, no JWT at all
+  p_rpc_c_sib text := 'zzbdlg-rpc-live-c';
   rep        text := '';
   failed     int := 0;
   owner_uid  uuid;
@@ -188,7 +200,9 @@ begin
     (p_rpc_b,     owner_uid, 'RPC Co2', 'Concept A', jsonb_build_object('id', p_rpc_b,     'groupId', rpc_grp || '-b', 'site', 'RPC Co2'), now()),
     (p_rpc_b_sib, owner_uid, 'RPC Co2', 'Concept B', jsonb_build_object('id', p_rpc_b_sib, 'groupId', rpc_grp || '-b', 'site', 'RPC Co2'), null),
     (p_rpc_lone,  owner_uid, 'RPC Solo','Concept A', jsonb_build_object('id', p_rpc_lone,  'site', 'RPC Solo'), now()),
-    (p_rpc_never, owner_uid, 'RPC Co3', 'Concept A', jsonb_build_object('id', p_rpc_never, 'site', 'RPC Co3'), null);
+    (p_rpc_never, owner_uid, 'RPC Co3', 'Concept A', jsonb_build_object('id', p_rpc_never, 'site', 'RPC Co3'), null),
+    (p_rpc_c,     owner_uid, 'RPC Co4', 'Concept A', jsonb_build_object('id', p_rpc_c,     'groupId', rpc_grp || '-c', 'site', 'RPC Co4'), now()),
+    (p_rpc_c_sib, owner_uid, 'RPC Co4', 'Concept B', jsonb_build_object('id', p_rpc_c_sib, 'groupId', rpc_grp || '-c', 'site', 'RPC Co4'), null);
 
   -- ---- Case 6 — RED-PROOF: an ordinary DELETE is refused (case 1's shape restated on a fresh
   --      row), but purge_one_deleted_plan() ACCEPTS the SAME row, which is genuinely gone
@@ -274,8 +288,31 @@ begin
     rep := rep || format(E'\n  FAIL case 9: purge_one_deleted_plan() did NOT refuse a never-soft-deleted row — raised=%s err=%s still_here=%s', raised, coalesce(err, '<none>'), still_here);
   end if;
 
-  if failed > 0 then
-    raise exception E'sites_block_delete_live_group: % of 10 checks FAILED%\n(fixtures rolled back)', failed, rep;
+  -- ---- Case 10 — RED-PROOF: purge_one_deleted_plan() refuses an UNAUTHENTICATED caller (anon
+  --      role, no request.jwt.claims at all, so auth.uid() is NULL) — the NULL-auth hole this
+  --      session closes. Same live-group shape as case 6, fresh fixtures. ----------------------
+  execute 'set local role anon';
+  execute 'set local request.jwt.claims = default';
+  begin
+    perform id from public.purge_one_deleted_plan(p_rpc_c);
+    raised := false;
+  exception when others then
+    raised := true; err := sqlerrm;
+  end;
+  execute 'reset role'; execute 'set local request.jwt.claims = default';
+  select exists(select 1 from public.sites where id = p_rpc_c) into still_here;
+  if not raised or not still_here or err not like '%not signed in%' then
+    failed := failed + 1;
+    rep := rep || format(E'\n  FAIL case 10: purge_one_deleted_plan() did NOT refuse an anon (no-JWT) caller — raised=%s err=%s still_here=%s', raised, coalesce(err, '<none>'), still_here);
   end if;
-  raise exception E'sites_block_delete_live_group: ALL 10 CHECKS PASSED\n(fixtures rolled back)';
+  select exists(select 1 from public.sites where id = p_rpc_c_sib and deleted_at is null) into still_here;
+  if not still_here then
+    failed := failed + 1;
+    rep := rep || E'\n  FAIL case 10b: the live sibling was disturbed by the refused anon purge attempt';
+  end if;
+
+  if failed > 0 then
+    raise exception E'sites_block_delete_live_group: % of 11 checks FAILED%\n(fixtures rolled back)', failed, rep;
+  end if;
+  raise exception E'sites_block_delete_live_group: ALL 11 CHECKS PASSED\n(fixtures rolled back)';
 end $$;

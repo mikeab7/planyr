@@ -76,8 +76,8 @@ const ALL_NOTES_FILES = [
   // NEW-1/NEW-4 — a copy never changes project, and the machine that notices when one did.
   "lib/notesDuplicates.js", "lib/notesScan.js",
   "lib/notesKeys.js", "lib/notesProjectFiling.js", "lib/notesProjectLink.js",
-  // NEW-2/NEW-3 — a block that stays where you put it, and how big the writing is.
-  "lib/notesAnchorNode.js", "lib/notesZoom.js",
+  // NEW-2/NEW-3 — a block that stays where you put it, and the workspace the page sits on.
+  "lib/notesAnchorNode.js", "lib/notesViewport.js",
   // An abandoned press leaves nothing behind: the ONE definition of an empty block.
   "lib/notesAnchorPrune.js",
   // How far apart the lines are — a BLOCK property, never a text style.

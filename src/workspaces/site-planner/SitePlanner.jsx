@@ -45,6 +45,7 @@ import {
 import { EMPTY_TAP, tapTime, stepDoubleTap, pairsWithLastTap } from "./lib/doubleTap.js";
 import { DRAG_SLOP_PX, makeDragGate, stepDragGate, dragArmed } from "./lib/dragGate.js";
 import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
+import { noteEffectRun } from "../../app/renderLoopProbe.js";
 import { createViewChangeRecorder, attachTimeline } from "./lib/viewChangeRecorder.js";
 import { createViewFramingGate } from "./lib/viewFramingGate.js";
 import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody, stackHoldsFeature, parseFeatureKey, stackAtPoint, nextPickIndex, ACTION_ATTR } from "./lib/featureTarget.js";
@@ -313,8 +314,8 @@ import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES,
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, buildingNumberHolder, renumberBuilding, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, parcelSplitNames, lineageConflicts } from "./lib/siteModel.js";
-import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, rectContainsPoint, polygonEdges, polygonContainsPoint, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, cardinalTeePoint, roadBearingDeg } from "./lib/roadGeometry.js";
-import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, rectOutlineCutSegments, polygonOutlineCutSegments } from "./lib/roadNetwork.js";
+import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, rectContainsPoint, polygonEdges, polygonContainsPoint, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, cardinalTeePoint, roadBearingDeg, roadEdgeCrossing } from "./lib/roadGeometry.js";
+import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, regionEdgeSegments, polylinesPathD, rectOutlineCutSegments, polygonOutlineCutSegments } from "./lib/roadNetwork.js";
 import { driveJunctionsOf, teeJunctionsOf } from "./lib/roadJunctions.js";
 import {
   roundaboutDiameterFor, roundaboutBandFor,
@@ -346,7 +347,7 @@ import { calloutStyle } from "./lib/calloutStyle.js";
 import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference } from "./lib/overlayOrder.js";
 import { hasCrop, cropClipRectScreen, cropTrimFeet, cropFromTrimFeet } from "./lib/overlayCrop.js";
 import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerialVisibility.js";
-import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, dockAxisOf, healDockAxes, withDockAxis, rotateDockAxisPatch } from "./lib/dockZones.js";
+import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, dockAxisOf, healDockAxes, withDockAxis, rotateDockAxisPatch, dockSideCompassLabel } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors, gridLinesVisible } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
@@ -512,6 +513,16 @@ import {
   BringToFrontIcon, BringForwardIcon, SendBackwardIcon, SendToBackIcon,
   PondSettingsIcon, PondSizingIcon, RoadBranchIcon, SwapIcon,
 } from "./components/elementMenuIcons.jsx";
+
+/* NEW-1 — render-loop probe identities. Module-scope constants so naming a run costs no allocation
+ * (see src/app/renderLoopProbe.js for why this is recorded unconditionally). The dep NAMES are what
+ * make a report readable — "view=51i" is a diagnosis, "dep[0]=51i" is another character count. */
+const GEO_REG_EFFECT = "site-planner:geo-registration";
+const GEO_REG_DEPS = Object.freeze(["view.ppf", "view.offX", "view.offY", "size.w", "size.h", "origin", "geoOverscan"]);
+/* A frozen module-scope zero so the reset path cannot allocate a fresh object per call. */
+const ZERO_REG_SHIFT = Object.freeze({ dx: 0, dy: 0 });
+const PANEL_SHIFT_EFFECT = "site-planner:panel-shift";
+const PANEL_SHIFT_DEPS = Object.freeze(["leftPanel", "narrow", "companionSel", "narrowProps", "leftWidth", "size.w"]);
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
  * SVG (so every metric, setback and stall count is computed from true feet and
@@ -2711,6 +2722,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * commit is debounced) and, critically, for the whole window between the plan opening and its
    * opening view being framed. NEW-2 is that window; nothing was watching it. */
   const [geoZoom, setGeoZoom] = useState(null);
+  // NEW-1 — same dispatch authority for the basemap's published zoom; see `regShiftRef` above.
+  const geoZoomRef = useRef(null);
+  const commitGeoZoom = useCallback((zoom) => {
+    const z = geoZoomRef.current;
+    if (z != null && Math.abs(z - zoom) < 1e-4) return;
+    geoZoomRef.current = zoom;
+    setGeoZoom(zoom);
+  }, []);
   /* NEW-2 — has the plan's OPENING view been framed, and has the basemap committed to it?
    * Two facts, deliberately separate, because they land one render apart and only the pair
    * means "the zoom a layer's gate would be answered against is the zoom this plan is at".
@@ -2746,6 +2765,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * See lib/mapLock.js ("closing the whole-pixel floor") for the measurement and the two
    * contributors. Zero whenever there is no basemap frame to register against. */
   const [regShift, setRegShift] = useState({ dx: 0, dy: 0 });
+  /* NEW-1 — THE DISPATCH AUTHORITY for `regShift`, so the geo-registration effect can skip a
+   * `setRegShift` CALL rather than rely on its updater returning the same value. B1189 already
+   * established that a no-op updater is still a genuine dispatch (React only skips scheduling via
+   * the eager-bailout path, which needs the fiber to have no other pending work — during a gesture
+   * it always has some), and applied the guard at the `!origin` branch only. Every dispatch the
+   * effect makes is SYNC-lane work scheduled from inside a commit, which is exactly what React's
+   * nested-update counter counts, so an unconditional dispatch here is fuel for the error 185 breaker
+   * whether or not this effect is the thing pumping it.
+   *
+   * A REF rather than the render-time closure value, deliberately: `commit` is also reached from a
+   * 160 ms settle timer, by which point a closure read can be stale — and a stale read that says
+   * "already applied" would SKIP a shift that is genuinely needed, which is a registration bug
+   * (the drawing sliding off the imagery), not merely a wasted render. The ref is written in the
+   * same statement as the dispatch, so it can never disagree with what was last sent. */
+  const regShiftRef = useRef(regShift);
+  const commitRegShift = useCallback((next) => {
+    const cur = regShiftRef.current;
+    if (Math.abs(cur.dx - next.dx) < REG_EPS_PX && Math.abs(cur.dy - next.dy) < REG_EPS_PX) return;
+    regShiftRef.current = next;
+    setRegShift(next);
+  }, []);
   const geoWrapRef = useRef(null);
   /* NEW-1 — the MAP-TOP HOST. Leaflet keeps every pane inside its own `_mapPane`, which
    * carries the pan transform and therefore its own stacking context, so NO z-index on a
@@ -3124,6 +3164,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * origin-anchored scale changes here — only the frame in which an already-correct value is applied.
    */
   useLayoutEffect(() => {
+    // NEW-1 — record this run for the render-loop probe. This effect is the throw site of every
+    // Site-route error 185 in `client_errors` back to 2026-07-30 (the crash lands on the `setGeoZoom`
+    // dispatch inside `commit`), so it is the first place a diagnosis needs a run count and a
+    // per-dependency churn verdict. See src/app/renderLoopProbe.js.
+    noteEffectRun(GEO_REG_EFFECT, GEO_REG_DEPS, [view.ppf, view.offX, view.offY, size.w, size.h, origin, geoOverscan]);
     const map = geoMapRef.current;
     const wrap = geoWrapRef.current;
     /* NEW-1 — every write to the wrap's gesture transform is mirrored onto the map-top host
@@ -3149,7 +3194,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // to schedule a render on EVERY run of this effect, which is the pump half of the runaway
     // loop below. Reading `regShift` from the closure is safe (an effect always closes over the
     // current render's values) and the functional updater still guards the write itself.
-    if (!map || !wrap || !origin) { if (regShift.dx || regShift.dy) setRegShift({ dx: 0, dy: 0 }); return; }
+    if (!map || !wrap || !origin) { commitRegShift(ZERO_REG_SHIFT); return; }
     const fx = (size.w / 2 - view.offX) / view.ppf;
     const fy = (size.h / 2 - view.offY) / view.ppf;
     const center = feetToLatLng({ x: fx, y: fy }, origin.lat, origin.lon);
@@ -3243,7 +3288,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        * DELIBERATELY unshipped: `window.__plannerView.registration()` and the `data-reg-dx/dy`
        * attributes are read by the harnesses, and moving them is a separate, measurable change.
        * Ship the epsilon, measure, then decide. Do not do both blind. */
-      setRegShift((r) => (Math.abs(r.dx - next.dx) < REG_EPS_PX && Math.abs(r.dy - next.dy) < REG_EPS_PX ? r : next));
+      commitRegShift(next);
     };
     /* PREFERRED reference: a real TILE on screen. Its z/x/y (straight off the `src` our own
      * basemap registry builds) fixes its Mercator corner exactly, and its rendered rect is where
@@ -3336,7 +3381,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       /* NEW-2 — publish the zoom the basemap is being committed to. Guarded so a pure PAN (the
        * common case — same zoom, `panBy`) dispatches nothing: an unguarded setState here is the
        * B1189 pump, and this effect is exactly the one that produced that runaway. */
-      setGeoZoom((z) => (z != null && Math.abs(z - zoom) < 1e-4 ? z : zoom));
+      commitGeoZoom(zoom);
       const cur = map.getZoom();
       if (Math.abs(zoom - cur) < 1e-3) {
         setWrapTransform("");
@@ -3513,7 +3558,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * `size.w` would put a whole pixel of slop into the view maths that
      * `ui-audit/diagnose-pointer-accuracy.mjs` asserts to a quarter of a pixel.
      */
-  }, [view, size.w, size.h, origin, geoOverscan]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view.ppf, view.offX, view.offY, size.w, size.h, origin, geoOverscan]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => { clearTimeout(geoCommitTimer.current); if (geoGhostRef.current) { try { geoGhostRef.current.remove(); } catch (_) {} geoGhostRef.current = null; } }, []);
 
@@ -5782,7 +5827,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // it is unambiguously on the paved surface). A contained point is never relocated (the weld point
   // returned is the endpoint itself, exactly where it was placed — only a genuinely NEAR-edge match
   // snaps to the precise edge point, the same small nudge every other connect magnet already makes).
-  const findDriveConnect = (P, tolFt) => {
+  /* 2026-09-22 — `from` is the road vertex BEHIND the endpoint. An endpoint dropped INSIDE a court
+     used to stay exactly where it was clicked ("a contained point is never relocated", B1612608),
+     which left the road's end vertex — on the owner's Goose Creek plan, ~175 ft — inside the court,
+     with the whole tongue of pavement to it. A road ends at the court FACE: when the previous vertex
+     is outside the pad, the endpoint is welded to where the last leg crosses the face (the same
+     crossing `driveJunctionsOf` already resolves the junction at). A leg that lies wholly inside the
+     pad (or no `from`) keeps the old behaviour. */
+  const findDriveConnect = (P, tolFt, from) => {
     let best = null;
     for (const t of driveTargetsOf()) {
       // facingOnly:false — a road drawn TO the edge ends ON it (not strictly outside); the nearest edge
@@ -5794,17 +5846,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // concave ring too).
       const inside = hit.dist > tolFt && (t.points ? polygonContainsPoint(P, t.points) : rectContainsPoint(P, t.edges));
       if ((hit.dist <= tolFt || inside) && (!best || hit.dist < best.dist)) {
-        best = { kind: "drive", targetId: t.id, targetKind: t.kind, pt: inside ? { x: P.x, y: P.y } : hit.pt, dist: inside ? 0 : hit.dist };
+        let pt = inside ? { x: P.x, y: P.y } : hit.pt;
+        if (inside && from && Number.isFinite(from.x) && Number.isFinite(from.y)) {
+          const fromInside = t.points ? polygonContainsPoint(from, t.points) : rectContainsPoint(from, t.edges);
+          const x = fromInside ? null : roadEdgeCrossing(from, P, t.edges);
+          if (x && x.pt) pt = { x: x.pt.x, y: x.pt.y };
+        }
+        best = { kind: "drive", targetId: t.id, targetKind: t.kind, pt, dist: inside ? 0 : hit.dist };
       }
     }
     return best;
   };
   // The nearest of a ROAD connect (findRoadConnect) or a DRIVE-target connect, within tolerance.
   // Returns { kind:"road"|"drive", pt, road? , drive? } or null. Drive wins only when strictly closer.
-  const resolveEndpointConnect = (fp, exclude) => {
+  const resolveEndpointConnect = (fp, exclude, from) => {
     const tolFt = connectTolFt();
     const road = findRoadConnect(fp, exclude, connectableRoads(), { tolFt, allowInterior: true });
-    const drive = findDriveConnect(fp, tolFt);
+    const drive = findDriveConnect(fp, tolFt, from);
     if (drive && (!road || drive.dist < road.dist)) return { kind: "drive", pt: drive.pt, drive };
     if (road) return { kind: "road", pt: road.pt, road };
     return null;
@@ -6443,6 +6501,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // frame as the panel's reflow, so the drawing never skips sideways for a frame.
   const panelShiftRef = useRef(null); // last-compensated canvas left-edge (px); null until the first measure seeds the baseline
   useLayoutEffect(() => {
+    // NEW-1 — the other layout effect on the planner that both MEASURES the DOM and dispatches
+    // state, so it is the neighbouring suspect whenever the geo effect is running hot. Recorded so
+    // a report can rule it in or out rather than leaving it assumed innocent.
+    noteEffectRun(PANEL_SHIFT_EFFECT, PANEL_SHIFT_DEPS, [leftPanel, narrow, companionSel, narrowProps, leftWidth, size.w]);
     const el = wrapRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
@@ -7814,7 +7876,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // parking-drive / truck-court edge) welds it there so the drawn road connects cleanly.
         // finishRoad upgrades the FINAL point to a real merge/tee/drive. NOT Snap-gated (B949); Alt bypasses.
         if (!altSnapOffRef.current) {
-          const c = resolveEndpointConnect(fp, null);
+          const c = resolveEndpointConnect(fp, null, prev);
           if (c) pt = { x: c.pt.x, y: c.pt.y };
         }
         setDraftRoadPts((a) => [...(a || []), pt]);
@@ -9127,7 +9189,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       let connect = null;
       const isEnd = d.idx === 0 || d.idx === el.pts.length - 1;
       if (isEnd && !altSnapOffRef.current) {
-        const c = resolveEndpointConnect(fp, { id: el.id, index: d.idx });
+        const c = resolveEndpointConnect(fp, { id: el.id, index: d.idx }, ref);
         if (c) { connect = (e.shiftKey && cardinalTee(el, d.idx, c)) || c; P = { x: connect.pt.x, y: connect.pt.y }; }
       }
       d.connect = connect; // stash for release
@@ -9802,7 +9864,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // the only bypass is holding Alt on the final point.
     let plan = null, targetId = null, drive = null;
     if (!altSnapOffRef.current) {
-      const c = resolveEndpointConnect(raw[raw.length - 1], { id: el.id, index: raw.length - 1 });
+      const c = resolveEndpointConnect(raw[raw.length - 1], { id: el.id, index: raw.length - 1 }, raw[raw.length - 2]);
       if (c && c.kind === "road") { targetId = c.road.roadId; plan = planRoadConnect(el, raw.length - 1, els.find((x) => x.id === c.road.roadId), c.road, defR); }
       else if (c && c.kind === "drive") { drive = c.drive; }
     }
@@ -9815,7 +9877,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // limitation — see findDriveConnect's header for "both ends to two different targets").
     let startDrive = null;
     if (!altSnapOffRef.current && !plan && !drive) {
-      const c0 = resolveEndpointConnect(raw[0], { id: el.id, index: 0 });
+      const c0 = resolveEndpointConnect(raw[0], { id: el.id, index: 0 }, raw[1]);
       if (c0 && c0.kind === "drive") startDrive = c0.drive;
     }
     if (plan) {
@@ -11020,6 +11082,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (z.forTrailer) { const t = arr.find((x) => x.id === z.forTrailer); const c = t && arr.find((x) => x.id === t.forCourt); return c && c.truckCourt ? c.truckCourt.side : null; }
     return null;
   };
+  // NEW-2 (B1818257) — a compass-suffixed display label for a dock-zone stack member, so a
+  // cross-dock building's two otherwise-identical truck courts (both type "paving") are
+  // distinguishable in the selection header and the Properties panel title. A single-dock
+  // building has only one side, so nothing to tell apart — the bare zone label is unchanged
+  // there and for every non-dock-zone element (which this returns null for, falling back to the
+  // generic TYPE label at the two call sites). The compass label is derived from the BUILDING's
+  // own rotation (dockSideCompassLabel), so an angled cross-dock building reads NE/SW rather than
+  // a hardcoded N/S.
+  const dockZoneDisplayLabel = (z) => {
+    if (!isDockZone(z)) return null;
+    const b = els.find((x) => x.id === z.attachedTo);
+    const side = b && zoneSideOf(els, z);
+    if (!b || !side) return null;
+    const i = zoneIndexOf(z);
+    const base = DOCK_ZONES[i] ? DOCK_ZONES[i].label : (TYPE[z.type]?.label || "").split(" / ")[0];
+    const { dockSides } = dockSidesOf(b);
+    return dockSides.length > 1 ? `${base} · ${dockSideCompassLabel(side, b.rot || 0)}` : base;
+  };
   // A zone's depth (feet): stored `zd` wins; else derive its extent along the side
   // normal (so a legacy court/trailer survives); else fall back to the configured default.
   const zoneDepthOf = (z, b, side, i) => {
@@ -11295,13 +11375,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return next;
     });
   };
+  // NEW-2 (B1818257) — the single-side sibling of setZoneDepthAll: a cross-dock building's two
+  // truck courts (one per dock side) are independent site elements bonded via `truckCourt.side`
+  // (they always have been — `findCourtIn` is already keyed on `side`), but every edit path used
+  // to force the SAME depth onto both. This is what the dock-zone element's OWN properties panel
+  // now calls, so editing the truck court you actually clicked never touches the other side's.
+  const setZoneDepthOnSide = (b, side, i, newDepth) => {
+    const nd = Math.max(1, Math.round(newDepth));
+    pushHistory();
+    setEls((a) => {
+      const z = findZoneIn(a, b, side, i);
+      let next = z ? a.map((x) => (x.id === z.id ? { ...x, zd: nd } : x)) : a;
+      next = relayoutSide(next, b, side);
+      return next;
+    });
+  };
   // The depth shown for zone index `i` (first dock side that has it).
   const zoneDepthShown = (b, i) => { const { dockSides } = dockSidesOf(b); for (const s of dockSides) { const z = findZoneIn(els, b, s, i); if (z) return Math.round(zoneDepthOf(z, b, s, i)); } return Math.round(zoneDepthDefaults(settings)[i]); };
-  // The truck-court length shown (the laid-out along-wall extent on the first dock side that has
-  // one) — NEW-3 (B1749154): read-only in the properties panel. It's the clear dock-face span
-  // between the corner bump-outs, not an independently editable dimension; `courtLengthShown`
-  // still computes it for display here and for the trailer/buffer "auto" length fallback below.
-  const courtLengthShown = (b) => { const { dockSides } = dockSidesOf(b); for (const s of dockSides) { const c = findCourtIn(els, b, s); if (c) return Math.round(s === "top" || s === "bottom" ? c.w : c.h); } return Math.round(b.w >= b.h ? b.w : b.h); };
   /* Inline LENGTH edit for an OUTWARD zone (trailer parking, buffer, an appended layer) — the same
    * control the truck court has had, now for the zones stacked beyond it. Stores the typed length
    * on that zone's `alongLen`; relayoutSide clamps it to the wall but never resets it, so the
@@ -11309,24 +11399,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * override and the zone goes back to tracking the court.
    * NEW-1 — a TYPED length KEEPS the current anchor (it does not silently re-centre), so a zone the
    * owner already pulled in from its north end keeps that end put when he then types a number.
-   * Clearing the override clears the anchor with it: intent withdrawn is intent gone. */
-  const setZoneLengthAll = (b, i, newLen) => {
-    const { dockSides } = dockSidesOf(b);
+   * Clearing the override clears the anchor with it: intent withdrawn is intent gone.
+   * NEW-2 (B1818257) — this now edits ONE side's zone only (findZoneIn(a, b, side, i), not a
+   * dockSides.forEach loop): a cross-dock building's two truck courts are independent site
+   * elements, and a typed length on one side's trailer/buffer must not pin the other side's to
+   * match. The truck court's OWN length (i===0) stays read-only regardless — B1749154, unaffected. */
+  const setZoneLengthOnSide = (b, side, i, newLen) => {
     const nl = newLen == null ? null : Math.max(1, Math.round(newLen));
     pushHistory();
     setEls((a) => {
-      let next = a;
-      dockSides.forEach((side) => {
-        const z = findZoneIn(next, b, side, i);
-        if (z) next = next.map((x) => (x.id === z.id ? (nl == null ? (() => { const { alongLen: _drop, alongAnchor: _dropA, alongOff: _dropO, ...rest } = x; return rest; })() : { ...x, alongLen: nl }) : x));
-      });
-      dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
+      const z = findZoneIn(a, b, side, i);
+      let next = z ? a.map((x) => (x.id === z.id ? (nl == null ? (() => { const { alongLen: _drop, alongAnchor: _dropA, alongOff: _dropO, ...rest } = x; return rest; })() : { ...x, alongLen: nl }) : x)) : a;
+      next = relayoutSide(next, b, side);
       return next;
     });
   };
-  // The laid-out along-wall extent of zone `i` (what the user sees), and whether it's been pinned.
-  const zoneLengthShown = (b, i) => { const { dockSides } = dockSidesOf(b); for (const s of dockSides) { const z = findZoneIn(els, b, s, i); if (z) return Math.round(s === "top" || s === "bottom" ? z.w : z.h); } return courtLengthShown(b); };
-  const zoneLengthPinned = (b, i) => { const { dockSides } = dockSidesOf(b); return dockSides.some((s) => { const z = findZoneIn(els, b, s, i); return !!(z && Number.isFinite(z.alongLen) && z.alongLen > 0); }); };
   // Per-side "+" used by the on-canvas add nodes — adds that side's next zone, stack-compatible.
   const addZoneOnSide = (b, side) => {
     pushHistory();
@@ -22560,6 +22647,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (t1 && t2 && n && depth > 0) stripeCut.push([t1, t2, { x: t2.x - n.x * depth, y: t2.y - n.y * depth }, { x: t1.x - n.x * depth, y: t1.y - n.y * depth }]);
     }
     for (const dj of driveJunctions) addExtra(dj.sideId, dj.geom.wedges);   // target is a rect element, not a road
+    /* 2026-09-22 — the pad a road tees into is SUBTRACTED from that road's cluster (see
+       dissolveRings' `subtract`): the road's pavement ends at the court face instead of running
+       under (now: over) the court. Map<roadId, [pad rings]>, pad rings in world feet. */
+    const padRingOf = (T) => {
+      if (!T) return null;
+      if (Array.isArray(T.points) && T.points.length >= 3) return T.points;
+      if (typeof T.cx === "number" && T.w > 0 && T.h > 0) return rectEdges(T.cx, T.cy, T.w, T.h, T.rot || 0).map((e) => e.a);
+      return null;
+    };
+    const padCut = new Map();
+    for (const dj of driveJunctions) {
+      const ring = padRingOf((els || []).find((e) => e.id === dj.targetId));
+      if (!ring) continue;
+      if (!padCut.has(dj.sideId)) padCut.set(dj.sideId, []);
+      padCut.get(dj.sideId).push(ring);
+    }
     // NEW-5 — a roundabout's circulatory sectors + its curb returns are ADDITIVE pavement in exactly
     // the same sense a tee's wedges are, so they go through the SAME union: one region, one
     // continuous curb outline, and the central island falls out as a genuine PolyTree hole.
@@ -22579,6 +22682,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       groups.get(k).push(r.id);
     }
     const regions = [];
+    const fullRegions = [];
     const stripes = new Map();
     for (const ids of groups.values()) {
       const parts = [];
@@ -22598,7 +22702,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
          region, so it cannot paint "part new, part old") — the general cost NO-ONE-OWNS-A-COMPOSITE
          warns every composite carries, and no scalar choice here removes it. */
       const zKey = Math.max(...ids.map((id) => byId.get(id)?.z ?? 0));
-      for (const region of dissolveRings(parts)) regions.push({ region, styleEl, zKey, ids });
+      // The cluster's pads (drive targets of any member) are cut out of the painted region; the
+      // UNCUT dissolve is kept only to interrupt the pad's own outline across the mouth (below).
+      const subtract = ids.flatMap((id) => padCut.get(id) || []);
+      const full = dissolveRings(parts);
+      const painted = subtract.length ? dissolveRings(parts, { subtract }) : full;
+      for (const region of painted) regions.push({ region, styleEl, zKey, ids, edge: regionEdgeSegments(region, subtract) });
+      for (const region of full) fullRegions.push({ region, ids });
       // A road's inner curb stripes are trimmed against the OTHER pavement in its cluster, so a stripe
       // ends where it runs into the junction instead of drawing a curb straight through the intersection.
       for (const id of ids) {
@@ -22606,6 +22716,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         for (const oid of ids) { if (oid === id) continue; const s = strip.get(oid); if (s && s.length >= 3) others.push(s); }
         for (const oid of ids) others.push(...extra.get(oid));
         others.push(...stripeCut);
+        others.push(...(padCut.get(id) || []));   // a curb stripe stops at the court face too
         const clipped = roadCurbLines(byId.get(id), settings, sharpFor(byId.get(id)), roundabouts.trims.get(id)).flatMap((cl) => clipPolylineOutside(cl, others));
         // NEW-1 — a road ending at a drive junction (a paving/parking pad edge) left its inner
         // face-of-curb stripe clipped dead right at the fillet's own tangent point: the straight
@@ -22626,7 +22737,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // outline where the drive's pavement crosses it. Map<targetId, cutter rings>.
     const outlineCuts = new Map();
     for (const dj of driveJunctions) {
-      const cutters = regions.filter((r) => r.ids.includes(dj.sideId)).map((r) => r.region.outer).filter(Boolean);
+      const cutters = fullRegions.filter((r) => r.ids.includes(dj.sideId)).map((r) => r.region.outer).filter(Boolean);
       if (!cutters.length) continue;
       outlineCuts.set(dj.targetId, [...(outlineCuts.get(dj.targetId) || []), ...cutters]);
     }
@@ -22640,9 +22751,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      re-deriving it. Keyed on `f2p` rather than `view`: the paths ARE in pixels, and `f2p`'s
      identity is exactly "the view a coordinate is baked at", which is what they depend on. */
   const roadRegionPaths = useMemo(
-    () => roadNet.regions.map(({ region, styleEl, ids }) => ({
+    () => roadNet.regions.map(({ region, styleEl, ids, edge }) => ({
       ids,
       d: regionPathD(region, f2p),
+      edgeD: edge ? polylinesPathD(edge, f2p) : null,
       st: styleEl ? elStyle(styleEl, settings) : typeStyle("road", settings),
       ppf: f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x,
     })),
@@ -22664,7 +22776,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       <g key={`rn${i}-${r.ids[0]}`} data-road-cluster={r.ids.join(",")} pointerEvents="none">
         <path data-testid="road-network-surface" data-export="road-network" d={r.d} fillRule="evenodd"
           fill={r.st.fill} fillOpacity={r.st.fillOpacity ?? 1} stroke="none" />
-        <path data-testid="road-network-edge" d={r.d} fillRule="evenodd" fill="none"
+        <path data-testid="road-network-edge" d={r.edgeD || r.d} fillRule="evenodd" fill="none"
           stroke={r.st.stroke} strokeWidth={curbStrokePx(roadCurbWidth(styleEl || {}), r.ppf, CURB_STROKE_MIN_PX * labelK)}
           strokeLinejoin="round" />
         {/* NEW-5 — the CENTRAL ISLAND: a real hole in the dissolved region, not a disc drawn on
@@ -24399,7 +24511,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 let live = cursor ? snapPt(cursor) : null;
                 let magnet = null; // B945/NEW-1 — endpoint the live point will weld to on click (ungated, B949; B955 drive edges too)
                 if (live && cursor && !altSnapOffRef.current) {
-                  const c = resolveEndpointConnect(cursor, null);
+                  const c = resolveEndpointConnect(cursor, null, draftRoadPts[draftRoadPts.length - 1]);
                   if (c) { live = { x: c.pt.x, y: c.pt.y }; magnet = c.pt; }
                 }
                 const all = live ? [...draftRoadPts, live] : draftRoadPts;
@@ -25886,7 +25998,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPropsCollapsed((c) => !c); } }}
             style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "2px 0 6px" }}>
             <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: PAL.muted, flex: 1 }}>
-              {multiStyleable ? `${multi.length} selected` : selMeasure ? "Measurement" : simpleClosedMarkup ? simpleClosedMarkupLabel : <>Element{(() => { const l = selEl ? (selEl.type === "pond" ? pondDisplayNameFor(detWithAuto(selEl.det), pondSplitOf(selEl)) : (TYPE[selEl.type]?.label || "").split(" / ")[0]) : selCallout ? "Callout" : selMarkup ? (selMarkup.kind === "easement" ? "Easement" : "Markup") : ""; return l ? ` · ${l}` : ""; })()}</>}
+              {multiStyleable ? `${multi.length} selected` : selMeasure ? "Measurement" : simpleClosedMarkup ? simpleClosedMarkupLabel : <>Element{(() => { const l = selEl ? (selEl.type === "pond" ? pondDisplayNameFor(detWithAuto(selEl.det), pondSplitOf(selEl)) : (dockZoneDisplayLabel(selEl) || (TYPE[selEl.type]?.label || "").split(" / ")[0])) : selCallout ? "Callout" : selMarkup ? (selMarkup.kind === "easement" ? "Easement" : "Markup") : ""; return l ? ` · ${l}` : ""; })()}</>}
             </span>
             {simpleClosedMarkup && <>
               <button type="button" style={{ ...chip, width: 30, height: 30, padding: 0 }}
@@ -26526,7 +26638,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               drop a type whose label carries a " / " qualifier (paving) — that text exists nowhere
               else, so suppressing it there would be a real information loss, not just tidying. */}
           {!multiStyleable && selEl && (
-            <Section title={selEl.type === "pond" || (phoneSheetSolo && !(TYPE[selEl.type]?.label || "").includes(" / ")) ? false : `Selected · ${TYPE[selEl.type].label}`}>
+            <Section title={selEl.type === "pond" || (phoneSheetSolo && !(TYPE[selEl.type]?.label || "").includes(" / ")) ? false : `Selected · ${dockZoneDisplayLabel(selEl) || TYPE[selEl.type].label}`}>
               {/* NEW-1/B872 — a RESHAPED building (footEdit: points + a dock frame) keeps the full building
                   inspector (Footprint reshape controls, dock zones, structure, column grid), routed through
                   the isBuilding branch below whose Footprint group handles the polygon case. A hand-CLICK-
@@ -26854,29 +26966,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             court…" with nothing left to tell them apart. */}
                         <Field label="Depth (ft)">
                           <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                            <NumInput style={numInput} value={zoneDepthShown(b || selEl, i)} min={1} onCommit={(n2) => b && side && setZoneDepthAll(b, i, n2)} />
+                            {/* NEW-2 (B1818257) — reads/writes THIS zone's own element, on THIS side
+                                only (zoneDepthOf(selEl, ...) / setZoneDepthOnSide), not the
+                                both-sides-mirrored zoneDepthShown/setZoneDepthAll pair below (still
+                                used by the building-level "set both at once" quick-edit). A cross-dock
+                                building's two truck courts are independent site elements — editing one
+                                no longer overwrites the other's depth. */}
+                            <NumInput style={numInput} value={b && side ? Math.round(zoneDepthOf(selEl, b, side, i)) : zoneDepthShown(selEl, i)} min={1} onCommit={(n2) => (b && side ? setZoneDepthOnSide(b, side, i, n2) : null)} />
                             <button title="Plan standard depths for new dock zones — edit in Standards" onClick={() => jumpToStandards("dockzones")} style={{ ...linkBtn, fontSize: 10 }}>↗</button>
                           </span>
                         </Field>
                         {/* NEW-3 (B1749154) — the truck court's own length is read-only: it's the
                             clear dock-face span between the corner bump-outs, not an independent
                             input (an outward zone's length still edits here — it can legitimately run
-                            shorter/longer than the court). `courtLengthShown` keeps computing it either
-                            way, since the trailer/buffer "auto" length and other displays read it. */}
+                            shorter/longer than the court). Reads THIS court's own geometry (not
+                            courtLengthShown's "first dock side that has one", which on a cross-dock
+                            building would show the wrong side's length here — NEW-2/B1818257). */}
                         {b && side && i === 0 && (
                           <Field label="Length (ft)">
                             <span style={{ fontSize: 12, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, color: PAL.muted }} title="Set by the dock wall's clear face between its corner bump-outs">
-                              {courtLengthShown(b)}′
+                              {Math.round(side === "top" || side === "bottom" ? selEl.w : selEl.h)}′
                             </span>
                           </Field>
                         )}
                         {b && side && i > 0 && (
                           <Field label="Length (ft)">
                             <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                              <NumInput style={numInput} value={zoneLengthShown(b, i)} min={1}
-                                onCommit={(n2) => setZoneLengthAll(b, i, n2)} />
-                              {zoneLengthPinned(b, i)
-                                ? <button title="Go back to matching the truck court's length" onClick={() => setZoneLengthAll(b, i, null)} style={{ ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent }}>set ↺</button>
+                              {/* NEW-2 (B1818257) — THIS zone's own laid-out extent + pin state, and
+                                  setZoneLengthOnSide so a typed length no longer pins the other side. */}
+                              <NumInput style={numInput} value={Math.round(side === "top" || side === "bottom" ? selEl.w : selEl.h)} min={1}
+                                onCommit={(n2) => setZoneLengthOnSide(b, side, i, n2)} />
+                              {Number.isFinite(selEl.alongLen) && selEl.alongLen > 0
+                                ? <button title="Go back to matching the truck court's length" onClick={() => setZoneLengthOnSide(b, side, i, null)} style={{ ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent }}>set ↺</button>
                                 : <span style={{ fontSize: 10, color: PAL.muted }} title="Matches the truck court until you set a length">auto</span>}
                             </span>
                           </Field>
@@ -26894,7 +27015,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           </div>
                         )}
                         <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginBottom: 4 }}>
-                          Dock zone {i + 1} of 3 (outward: truck court → trailer parking → buffer){dockSidesOf(b || selEl).dockSides.length > 1 ? "" : ""}. Or select the building to grow / shrink every dock side at once.
+                          Dock zone {i + 1} of 3 (outward: truck court → trailer parking → buffer){b && side && dockSidesOf(b).dockSides.length > 1 ? ` · ${dockSideCompassLabel(side, b.rot || 0)} dock face, set independently of the other side` : ""}. Or select the building to grow / shrink every dock side at once.
                         </div>
                       </>
                     );
@@ -27027,7 +27148,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             never does now, which is exactly why this button has to exist. One row,
                             stating the current face and offering the verb — no explanatory prose. */}
                         {(b.dock || "cross") !== "none" && (() => {
-                          const faces = dockSidesFor(b).dockSides.map((s) => s[0].toUpperCase() + s.slice(1));
+                          // NEW-2 (B1818257) — the compass suffix is what actually distinguishes the
+                          // two rows on an angled building; "Top / Bottom" alone is only true at rot=0.
+                          const faces = dockSidesFor(b).dockSides.map((s) => `${s[0].toUpperCase() + s.slice(1)} (${dockSideCompassLabel(s, b.rot || 0)})`);
                           return (
                             <Field label="Dock face">
                               <span style={ROW4}>
@@ -27139,22 +27262,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   })() : (
                     <>
                       <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(selEl.w)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
-                      {/* B1805808 — a truck court / drive aisle drawn with the Paving tool (freestanding,
-                          or the auto-generated aisle a split parking lot lays down) shows Depth read-only
-                          here, matching the dock-zone truck court's own read-only Length (B1749154): Width
-                          is the dimension worth typing an exact number for (clearance / turning-radius
-                          driven); Depth is however far the pavement was drawn to extend, so it's adjusted
-                          by dragging the shape's edge on the canvas rather than by typing a new value.
-                          Every other type on this generic panel (pond, parking, trailer…) is unaffected. */}
-                      {selEl.type === "paving" ? (
-                        <Field label="Depth (ft)">
-                          <span style={{ fontSize: 12, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, color: PAL.muted }} title="Drag the shape's edge on the canvas to change this">
-                            {Math.round(selEl.h)}′
-                          </span>
-                        </Field>
-                      ) : (
-                        <Field label={selEl.type === "pond" ? "Length (ft)" : "Depth (ft)"}><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
-                      )}
+                      {/* B1818256 — reverts B1805808: the owner types Depth by number regularly (truck
+                          apron/backup depth to a design standard like a WB-67 turning template) and
+                          essentially never types Width by number, the opposite of B1805808's guess.
+                          Depth is an ordinary editable NumInput again, matching Width, for both the
+                          freestanding Paving/Drive element and the auto-generated split-parking aisle. */}
+                      <Field label={selEl.type === "pond" ? "Length (ft)" : "Depth (ft)"}><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
                     </>
                   )}
                   {/* B1790016 NEW-1 — car parking ("parking") now carries its own Rotation row inside
@@ -29779,7 +29892,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         return (
                           <div key={side} style={rowBox}>
                             <span style={icoBox}><DockZonesIcon /></span>
-                            <span style={{ flex: 1, minWidth: 0, color: PAL.ink }}>{side[0].toUpperCase() + side.slice(1)}</span>
+                            {/* NEW-2 (B1818257) — the compass label (derived from the building's own
+                                rotation) is what actually tells a cross-dock building's two rows
+                                apart on the ground; "Top"/"Bottom" alone is only ever true at rot=0. */}
+                            <span style={{ flex: 1, minWidth: 0, color: PAL.ink }}>{side[0].toUpperCase() + side.slice(1)} · {dockSideCompassLabel(side, t.rot || 0)}</span>
                             <span style={{ display: "flex", gap: 3 }}>
                               {DOCK_ZONES.map((z, i) => {
                                 const checked = n > i;

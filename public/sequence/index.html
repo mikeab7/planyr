@@ -3232,29 +3232,40 @@ const difBD = (a, b) => {
 // ui-audit/stress/scheduler-engine.mjs (anti-drift guard in test/schedulerEngine.test.js).
 // subBD: subtract N business days — the exact inverse of addBD (skips Sat/Sun + HOLIDAY_SET).
 const subBD = (s, n) => addBD(s, -n);
-// nthWeekdayOfMonth: the setpos-th `weekday` (0=Sun..6=Sat) of month m (1-12) of year y as an
-// ISO date; setpos 1..4 = nth, -1 = last. Reuses nthWeekday + fdLocal (no UTC one-day slip —
-// B584 #19). Returns null when the nth occurrence overflows the month (a 5th in a 4-week month).
-const nthWeekdayOfMonth = (y, m, weekday, setpos) => {
-  if (setpos === -1) return fdLocal(nthWeekday(y, m, -1, weekday));
-  const d = nthWeekday(y, m, setpos, weekday);
-  return (d.getMonth() === m - 1) ? fdLocal(d) : null;
-};
-// nthWeekdayOnOrAfter (B845): the nth `weekday` (0=Sun..6=Sat) of month m/year y whose day-of-month is
-// >= dom, as an ISO date. The "Tuesday after the first Monday" primitive — Election Day is the 1st Tuesday
-// on/after Nov 2 (NOT "1st Tuesday of November", which lands a week early whenever Nov 1 is a Tuesday,
-// e.g. 2033/2039). Same local-midnight idiom as nthWeekday (no UTC slip). Null when the nth such
-// occurrence overflows the month; dom<1/NaN clamps to day 1.
-const nthWeekdayOnOrAfter = (y, m, weekday, dom, nth = 1) => {
-  const d = new Date(y, m - 1, Math.max(1, Math.trunc(dom) || 1));
+// occurrencesInMonth (NEW-1): every ISO date within month m (1-12) of year y matching `weekday`
+// (0=Sun..6=Sat), ascending. The one primitive nthWeekdayOfMonth/positionMissingReport/
+// meetingDatesInRange all build on — no second occurrence-walker anywhere in this file.
+const occurrencesInMonth = (y, m, weekday) => {
+  const out = [];
+  const d = new Date(y, m - 1, 1);
   while (d.getDay() !== weekday) d.setDate(d.getDate() + 1);
-  if (nth > 1) d.setDate(d.getDate() + 7 * (nth - 1));
-  return (d.getMonth() === m - 1) ? fdLocal(d) : null;
+  while (d.getMonth() === m - 1) { out.push(fdLocal(d)); d.setDate(d.getDate() + 7); }
+  return out;
 };
+// pickOrdinal: the `pos`-th date from an ascending list — pos>0 counts from the start (1..5 =
+// 1st..5th), pos<0 counts from the end (-1 = last, -2 = 2nd-to-last). Null when the list is too
+// short (a 5th Tuesday in a 4-Tuesday month, or -2 in a month with only one occurrence).
+const pickOrdinal = (dates, pos) => {
+  if (!Array.isArray(dates) || !dates.length || pos == null) return null;
+  const idx = pos > 0 ? pos - 1 : dates.length + pos;
+  return (idx >= 0 && idx < dates.length) ? dates[idx] : null;
+};
+// nthWeekdayOfMonth: the `pos`-th occurrence of `weekday` in month m/year y as an ISO date;
+// pos: 1..5 = nth from month start, -1 = last, -2 = 2nd-to-last. Null when it doesn't exist.
+// Reuses nthWeekday + fdLocal (no UTC one-day slip — B584 #19) via occurrencesInMonth.
+const nthWeekdayOfMonth = (y, m, weekday, pos) => pickOrdinal(occurrencesInMonth(y, m, weekday), pos);
 // meetingDatesInRange: sorted unique ISO meeting dates for `body` within [from,to] inclusive.
-// Applies each recurrence rule over its effective window, then removes blackoutDates and adds
-// extraDates — EXPLICIT DATES ALWAYS BEAT THE RULE. Interval>1 (bi-weekly / every-N-months)
-// anchors its phase to effectiveFrom; without one it degrades to interval 1 (deterministic).
+// NEW-1 (2026-09-22) — each recurrence rule is now { positions: 'every' | number[] (1..5, -1, -2),
+// weekday, months: 'all' | number[], anchor: null | {position, weekday} }. `anchor` generalizes the
+// old fixed "Tuesday after the 1st Monday" primitive to ANY weekday pair: positions are counted
+// among the occurrences of `weekday` STRICTLY AFTER the anchor date within the same month — the
+// anchor not existing that month (e.g. a "5th Monday" anchor) resolves to nothing for that month,
+// never a crash. Applies each rule over its effective window, then removes blackoutDates and adds
+// extraDates — EXPLICIT DATES ALWAYS BEAT THE RULE. `effectiveFrom`/`effectiveTo` bound a rule's
+// active window (still supported — a real fixture pins a body's first-ever meeting this way).
+// `interval` (bi-weekly / every-N-months) is a data-layer-only holdover from before this rewrite —
+// the UI has never exposed it — kept only so a hand-edited body with it still resolves as it always
+// did; the every-week week-stepped path below is its last user.
 const meetingDatesInRange = (body, from, to) => {
   if (!body || !from || !to || from > to) return [];
   const set = new Set();
@@ -3262,10 +3273,11 @@ const meetingDatesInRange = (body, from, to) => {
   const fromY = pd(from).getFullYear(), toY = pd(to).getFullYear();
   (Array.isArray(body.recurrence) ? body.recurrence : []).forEach(r => {
     if (!r || r.weekday == null) return;
-    if (r.freq === "weekly") {
-      const hasAnchor = !!r.effectiveFrom;
-      const interval = (r.interval > 1 && hasAnchor) ? Math.trunc(r.interval) : 1;
-      const cur = pd(hasAnchor ? r.effectiveFrom : from);
+    const isEvery = r.positions === "every";
+    const hasAnchor = !!r.effectiveFrom;
+    const interval = (r.interval > 1 && hasAnchor) ? Math.trunc(r.interval) : 1;
+    if (isEvery && interval > 1 && !(Array.isArray(r.months) && r.months.length)) {
+      const cur = pd(r.effectiveFrom);
       while (cur.getDay() !== r.weekday) cur.setDate(cur.getDate() + 1);
       const end = pd(to);
       let wk = 0;
@@ -3274,26 +3286,50 @@ const meetingDatesInRange = (body, from, to) => {
         if (iso >= from && (wk % interval === 0) && inWin(iso, r)) set.add(iso);
         cur.setDate(cur.getDate() + 7); wk++;
       }
-    } else {   // monthly (default)
-      const setpos = Array.isArray(r.setpos) ? r.setpos : (r.setpos != null ? [r.setpos] : []);
-      const months = (Array.isArray(r.months) && r.months.length) ? r.months : null;
-      const anchorYM = r.effectiveFrom ? (pd(r.effectiveFrom).getFullYear() * 12 + pd(r.effectiveFrom).getMonth()) : null;
-      const interval = (r.interval > 1 && anchorYM != null) ? Math.trunc(r.interval) : 1;
-      for (let y = fromY; y <= toY; y++) for (let m = 1; m <= 12; m++) {
-        if (months && !months.includes(m)) continue;
-        if (interval > 1 && ((((y * 12 + (m - 1) - anchorYM) % interval) + interval) % interval) !== 0) continue;
-        setpos.forEach(sp => {
-          const iso = (r.onOrAfter != null)
-            ? nthWeekdayOnOrAfter(y, m, r.weekday, r.onOrAfter, sp > 0 ? sp : 1)
-            : nthWeekdayOfMonth(y, m, r.weekday, sp);
-          if (iso && iso >= from && iso <= to && inWin(iso, r)) set.add(iso);
-        });
+      return;
+    }
+    const months = (Array.isArray(r.months) && r.months.length) ? r.months : null;
+    const anchor = (!isEvery && r.anchor && r.anchor.weekday != null && r.anchor.position != null) ? r.anchor : null;
+    const positions = isEvery ? null : (Array.isArray(r.positions) ? r.positions : (r.positions != null ? [r.positions] : [1]));
+    const anchorYM = r.effectiveFrom ? (pd(r.effectiveFrom).getFullYear() * 12 + pd(r.effectiveFrom).getMonth()) : null;
+    const monthInterval = (r.interval > 1 && anchorYM != null) ? Math.trunc(r.interval) : 1;
+    for (let y = fromY; y <= toY; y++) for (let m = 1; m <= 12; m++) {
+      if (months && !months.includes(m)) continue;
+      if (monthInterval > 1 && ((((y * 12 + (m - 1) - anchorYM) % monthInterval) + monthInterval) % monthInterval) !== 0) continue;
+      let occ = occurrencesInMonth(y, m, r.weekday);
+      if (anchor) {
+        const anchorDate = nthWeekdayOfMonth(y, m, anchor.weekday, anchor.position);
+        if (!anchorDate) continue;   // the anchor itself doesn't exist this month — nothing, no crash
+        occ = occ.filter(iso => iso > anchorDate);
       }
+      const picked = isEvery ? occ : positions.map(p => pickOrdinal(occ, p)).filter(Boolean);
+      picked.forEach(iso => { if (iso >= from && iso <= to && inWin(iso, r)) set.add(iso); });
     }
   });
   (Array.isArray(body.blackoutDates) ? body.blackoutDates : []).forEach(d => set.delete(d));
   (Array.isArray(body.extraDates) ? body.extraDates : []).forEach(d => { if (d >= from && d <= to) set.add(d); });
   return [...set].sort();
+};
+// positionMissingReport: among the picked months (or all 12, if unrestricted), how many of the
+// next 12 such month-instances (starting `today`'s month) produce NO date for this pattern —
+// reuses meetingDatesInRange itself (never a second engine), so an anchor's own non-existence in a
+// month folds in for free. Null for "every week" (always exists) or a pattern with no weekday.
+const positionMissingReport = (pattern, today) => {
+  if (!pattern || pattern.positions === "every" || pattern.weekday == null || !today) return null;
+  const wantedMonths = (Array.isArray(pattern.months) && pattern.months.length) ? pattern.months : [1,2,3,4,5,6,7,8,9,10,11,12];
+  const start = pd(today);
+  let y = start.getFullYear(), m = start.getMonth() + 1;
+  let checked = 0, missing = 0;
+  while (checked < 12) {
+    if (wantedMonths.includes(m)) {
+      const from = `${y}-${String(m).padStart(2,"0")}-01`;
+      const to = fdLocal(new Date(y, m, 0));
+      if (!meetingDatesInRange({ recurrence: [pattern] }, from, to).length) missing++;
+      checked++;
+    }
+    m++; if (m > 12) { m = 1; y++; }
+  }
+  return { checked, missing };
 };
 // agendaDeadline: the ISO agenda-submittal deadline for a meeting on `meetingDate`. agendaLead
 // union: {type:'offset',n,unit:'business'|'calendar'} (n days before; business = subBD) ·
@@ -3362,33 +3398,44 @@ const rebuildMeetingBodyIndex = d => {
 };
 // B816 — plain-English descriptors for the civic-mark explainer (never render a hearing date without why).
 const MB_WD_NAMES = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
-const MB_SETPOS_LABEL = {"1":"1st","2":"2nd","3":"3rd","4":"4th","-1":"last"};
+const MB_WD_FULL = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+const MB_SETPOS_LABEL = {"1":"1st","2":"2nd","3":"3rd","4":"4th","5":"5th","-1":"last","-2":"2nd-to-last"};
 const MB_MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const mbOrdinal = n => { const s = ["th","st","nd","rd"], v = n % 100; return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`; };
-// mbRuleSummary (B845/B849): plain-English descriptor of ONE recurrence rule — month restriction
-// (r.months) + the "on/after day" primitive (r.onOrAfter), with the civic "Tuesday after the first
-// Monday" construct spelled out by name (1st Tue on/after the 2nd = Election Day) so the input reads
-// the way the owner thinks about it. e.g. "Tue after the 1st Mon of Nov", "2nd & 4th Tue monthly".
+// joinWithAnd: ["a"] → "a" · ["a","b"] → "a and b" · ["a","b","c"] → "a, b and c" — the plain-
+// English list join the sentence UI and its summaries share (NEW-1).
+const joinWithAnd = arr => {
+  if (!arr || !arr.length) return "";
+  if (arr.length === 1) return arr[0];
+  if (arr.length === 2) return arr.join(" and ");
+  return arr.slice(0, -1).join(", ") + " and " + arr[arr.length - 1];
+};
+const mbPositionsPhrase = positions => joinWithAnd((Array.isArray(positions) ? positions : [positions]).map(p => MB_SETPOS_LABEL[String(p)] || String(p)));
+// mbMonthsPhrase: null means "every month"/"all year" (the caller supplies the right words for
+// its own sentence shape) — a restricted set becomes "Jan, Apr and Jul".
+const mbMonthsPhrase = months => (months === "all" || !Array.isArray(months) || !months.length) ? null : joinWithAnd(months.map(m => MB_MONTH_NAMES[m - 1] || "?"));
+// mbRuleSummary (NEW-1, 2026-09-22 — replaces the Monthly/Weekly + Weeks/Months grid this mirrors):
+// one plain-English sentence for a single pattern — "the 2nd and 4th Thursday of every month",
+// "every Wednesday in Jun, Jul and Aug", "the 1st Tuesday of Nov, counting from after the 1st
+// Monday" (the generalized Election-Day primitive — ANY weekday pair, not just Tue-after-Mon).
 const mbRuleSummary = r => {
   if (!r || r.weekday == null) return "(no weekday set)";
-  const wd = MB_WD_NAMES[r.weekday] || "?";
-  if (r.freq === "weekly") return `every ${wd}`;
-  const posArr = Array.isArray(r.setpos) ? r.setpos : (r.setpos != null ? [r.setpos] : []);
-  const sp = posArr.map(x => MB_SETPOS_LABEL[String(x)] || x).join(" & ") || "?";
-  const mo = (Array.isArray(r.months) && r.months.length) ? r.months.map(m => MB_MONTH_NAMES[m - 1] || "?").join("/") : null;
-  if (r.onOrAfter != null) {
-    // "first Tuesday on/after the 2nd" is exactly "the Tuesday after the first Monday" (Election Day).
-    const isFirst = posArr.length === 0 || (posArr.length === 1 && posArr[0] === 1);
-    if (r.weekday === 2 && r.onOrAfter === 2 && isFirst) return `Tue after the 1st Mon${mo ? " of " + mo : ""}`;
-    return `${sp} ${wd} on/after the ${mbOrdinal(r.onOrAfter)}${mo ? " of " + mo : ""}`;
+  const wd = MB_WD_FULL[r.weekday] || "?";
+  const isEvery = r.positions === "every";
+  const mo = mbMonthsPhrase(r.months);
+  let base = isEvery
+    ? (mo ? `every ${wd} in ${mo}` : `every ${wd}, all year`)
+    : `the ${mbPositionsPhrase(r.positions)} ${wd} of ${mo || "every month"}`;
+  if (!isEvery && r.anchor && r.anchor.weekday != null && r.anchor.position != null) {
+    base += `, counting from after the ${MB_SETPOS_LABEL[String(r.anchor.position)] || r.anchor.position} ${MB_WD_FULL[r.anchor.weekday] || "?"}`;
   }
-  return mo ? `${sp} ${wd} in ${mo}` : `${sp} ${wd} monthly`;
+  return base;
 };
 // cadenceSummary: joins every rule of a body (not just [0]) so the civic-mark tooltip / rail never lie.
 const cadenceSummary = body => {
   const rules = (body && Array.isArray(body.recurrence)) ? body.recurrence.filter(r => r && r.weekday != null) : [];
   if (!rules.length) return "no cadence set";
-  return rules.map(mbRuleSummary).join(" + ");
+  return rules.map(mbRuleSummary).join(", and ");
 };
 const agendaLeadSummary = body => {
   const l = body && body.agendaLead; if (!l) return "no agenda lead";
@@ -3404,6 +3451,71 @@ const meetingBoundInfo = task => {
   const state = task.meetingInfeasible ? "danger" : (floatBD != null && floatBD <= 2) ? "warning" : "secondary";
   return { body, deadline, floatBD, state };
 };
+// ── Meeting-calendar cross-schedule import (B1824576) ──────────────────────
+// Reuse a meeting body's cadence from ANOTHER schedule instead of re-entering it — the owner's
+// ask: he went to bind a task to a governmental meeting body (city council, P&Z, MUD board) and
+// the body only existed in a different schedule, so his only path was re-entering the whole
+// cadence from scratch. Every function below COPIES a body, never links it — see
+// copyMeetingBodyWithNewId.
+//
+// mbRuleSignature / mbRecurrenceSignature: an order-independent, canonical fingerprint of a
+// body's cadence, used ONLY to detect "this body is already here" (same name + identical
+// recurrence). Deliberately ignores agendaLead / blackoutDates / extraDates / jurisdiction — two
+// bodies that meet on the same days but disagree on, say, the filing deadline still read as "the
+// same calendar" for this check, matching the item's spec.
+const mbRuleSignature = r => {
+  if (!r) return "";
+  const positions = r.positions === "every" ? "every" : (Array.isArray(r.positions) ? [...r.positions].sort((a, b) => a - b) : [r.positions]);
+  const months = (r.months === "all" || !Array.isArray(r.months)) ? "all" : [...r.months].sort((a, b) => a - b);
+  const anchor = (r.anchor && r.anchor.weekday != null && r.anchor.position != null) ? `${r.anchor.weekday}:${r.anchor.position}` : "";
+  return JSON.stringify([r.weekday, positions, months, anchor]);
+};
+const mbRecurrenceSignature = recurrence => (Array.isArray(recurrence) ? recurrence.filter(r => r && r.weekday != null).map(mbRuleSignature).sort() : []).join("|");
+const mbBodiesSameCadence = (a, b) => !!a && !!b && (a.name || "").trim() === (b.name || "").trim() && mbRecurrenceSignature(a.recurrence) === mbRecurrenceSignature(b.recurrence);
+// copyMeetingBodyWithNewId — re-ids ONE meeting body for a copy into another schedule. Body ids
+// are globally unique (mb_<time><rand>, B816) — two schedules must never share one, or editing
+// the copy would move the original's hearings (MEETING_BODY_INDEX collapses same-id bodies).
+// `salt` disambiguates several bodies copied in the same millisecond. Split out of
+// buildDuplicateProject's inline per-body mapper (Duplicate schedule, below) so this import
+// feature reuses the exact same re-id logic instead of growing a second copy of it.
+const copyMeetingBodyWithNewId = (mb, salt = 0) => {
+  const nid = "mb_" + Date.now().toString(36) + salt + Math.random().toString(36).slice(2, 6);
+  return {...mb, id: nid,
+    recurrence: (mb.recurrence || []).map(r => ({...r, setpos: Array.isArray(r.setpos) ? [...r.setpos] : r.setpos, months: Array.isArray(r.months) ? [...r.months] : r.months})),
+    agendaLead: mb.agendaLead ? {...mb.agendaLead} : mb.agendaLead,
+    blackoutDates: [...(mb.blackoutDates || [])], extraDates: [...(mb.extraDates || [])]};
+};
+// importMeetingBody — copies `sourceBody` into `targetBodies` UNLESS an identical-cadence body is
+// already there (mbBodiesSameCadence), in which case the EXISTING copy is reused instead of
+// minting a second one — no silent duplicates. Returns the (possibly unchanged) array plus the id
+// a task should bind to.
+const importMeetingBody = (targetBodies, sourceBody, salt = 0) => {
+  const list = targetBodies || [];
+  const existing = list.find(b => mbBodiesSameCadence(b, sourceBody));
+  if (existing) return { bodies: list, id: existing.id, created: false };
+  const copy = copyMeetingBodyWithNewId(sourceBody, salt);
+  return { bodies: [...list, copy], id: copy.id, created: true };
+};
+// importMeetingBodies — the multi-select "Import from another schedule…" batch: applies
+// importMeetingBody in sequence so a later pick dedupes against one already imported in the SAME
+// batch, not just against what was already on the schedule before the import started.
+const importMeetingBodies = (targetBodies, sourceBodies) => {
+  let bodies = targetBodies || [];
+  const ids = [];
+  (sourceBodies || []).forEach((sb, i) => {
+    const r = importMeetingBody(bodies, sb, i);
+    bodies = r.bodies;
+    ids.push(r.id);
+  });
+  return { bodies, ids };
+};
+// otherScheduleMeetingBodies — every meeting body on every OTHER schedule on the account, grouped
+// by schedule, for the import pickers (the modal's "Import from another schedule…" and the task
+// right-click "From other schedules" group). Read-only — never mutates a source schedule.
+const otherScheduleMeetingBodies = (data, excludePid) => Object.values((data && data.projects) || {})
+  .filter(p => p && p.id !== excludePid && Array.isArray(p.meetingBodies) && p.meetingBodies.length)
+  .map(p => ({ pid: p.id, schedName: p.name || `Project ${p.id}`, projName: p.linkedSiteName || null, bodies: p.meetingBodies }))
+  .sort((a, b) => a.schedName.localeCompare(b.schedName));
 // ── MS-Project predecessor helpers ────────────────────────
 // Normalise: plain int or {id,type,lag} → always {id,type,lag}
 const normPreds = arr => {
@@ -8217,6 +8329,51 @@ function App() {
     return {...d, _v8: true};
   };
 
+  // NEW-1 (2026-09-22) — one-time migration of every meetingBodies[].recurrence[] rule from the old
+  // {freq,setpos,onOrAfter} shape to the new sentence-UI shape {positions,weekday,months,anchor}. A
+  // DISTINCT flag (_mbv2, not _v9) — the retired normalizeToV9 below already stamped `_v9:true` on
+  // every real schedule loaded since 2026-08-25, so reusing that flag would silently skip this
+  // migration on every one of them. Runs BEFORE normalizeToV8 rebuilds MEETING_BODY_INDEX, so the
+  // index always reflects already-migrated rules. The only anchor shape the OLD UI could ever
+  // produce was weekday:2 (Tue) + onOrAfter:2 (the "Tuesday after the 1st Monday" / Election Day
+  // primitive) — that maps exactly to the new anchor {position:1, weekday:1 (Mon)}; anything else
+  // (never producible from the UI) defensively drops the anchor rather than guess, loudly.
+  const migrateRecurrenceRule = r => {
+    if (!r || typeof r !== "object" || "positions" in r) return r;   // already new shape / not a rule
+    const months = (Array.isArray(r.months) && r.months.length) ? r.months.slice() : "all";
+    const passthrough = {};
+    if (r.effectiveFrom) passthrough.effectiveFrom = r.effectiveFrom;
+    if (r.effectiveTo) passthrough.effectiveTo = r.effectiveTo;
+    if (r.interval > 1) passthrough.interval = r.interval;
+    if (r.freq === "weekly") return { positions: "every", weekday: r.weekday, months, anchor: null, ...passthrough };
+    const rawSetpos = Array.isArray(r.setpos) ? r.setpos : (r.setpos != null ? [r.setpos] : []);
+    let positions = rawSetpos.length ? rawSetpos.slice() : [1];
+    let weekday = r.weekday, anchor = null;
+    if (r.onOrAfter != null) {
+      if (r.weekday === 2 && r.onOrAfter === 2) {
+        anchor = { position: 1, weekday: 1 };   // the 1st Monday
+        weekday = 2;                            // Tuesday, counted from after it
+        positions = [1];
+      } else {
+        console.warn("[migrateRecurrenceRule] unrecognized onOrAfter combination — the UI never produced this shape; dropping the anchor rather than guess:", r);
+      }
+    }
+    return { positions, weekday, months, anchor, ...passthrough };
+  };
+  const normalizeMeetingCadence = d => {
+    if (!d || typeof d !== "object") return d;
+    if (d._mbv2) return d;
+    const projects = {};
+    const srcProjects = (d.projects && typeof d.projects === "object") ? d.projects : {};
+    Object.entries(srcProjects).forEach(([id, proj]) => {
+      if (!proj || typeof proj !== "object") { projects[id] = proj; return; }
+      if (!Array.isArray(proj.meetingBodies) || !proj.meetingBodies.length) { projects[id] = proj; return; }
+      projects[id] = {...proj, meetingBodies: proj.meetingBodies.map(b => (b && Array.isArray(b.recurrence))
+        ? { ...b, recurrence: b.recurrence.map(migrateRecurrenceRule) } : b)};
+    });
+    return { ...d, projects, _mbv2: true };
+  };
+
   // ⛔ RETIRED (2026-08-25, B752848 owner correction): normalizeToV9 used to seed the now-deleted
   // `healthOverride` flag on load (green/red/paused → override:true). The flag and everything that
   // read it are gone, so this migration has nothing left to do; removed rather than left as a no-op,
@@ -8299,7 +8456,7 @@ function App() {
       // can't call normalizeIds/ensureContacts directly — those are scoped to this effect). Set
       // synchronously on mount, before the first await, so it's ready before any user import/restore.
       applyLoadedDataRef.current = (parsed) => {
-        let d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(parsed))))))));
+        let d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(normalizeMeetingCadence(parsed)))))))));
         d._pinnedClean = true;
         HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
         const driftFound = [];   // B836 — same drift surfacing on import / version-restore
@@ -8321,7 +8478,7 @@ function App() {
         // __PLANAR_DATA__ is the seed used only when Supabase has no record yet.
         const r = await window.storage.get("hs-v1");
         if (r) {
-          const d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(JSON.parse(r.value)))))))));
+          const d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(normalizeMeetingCadence(JSON.parse(r.value))))))))));
           // NOTE: a narrow viewport forces the GRID layout at RENDER time (see the body switch),
           // never by mutating the persisted `view` — baking "grid" into saved data let one phone
           // session overwrite the desktop's saved split/gantt preference across every device.
@@ -8357,7 +8514,7 @@ function App() {
         }
         // First load (Supabase empty) — seed from inline data or SEED constant
         const seed = window.__PLANAR_DATA__ || SEED;
-        const d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(seed))))))));
+        const d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(normalizeMeetingCadence(seed)))))))));
           // Enforce predecessor relationships on load (seed data — no stale pins)
           HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
           d._pinnedClean = true;
@@ -8379,7 +8536,7 @@ function App() {
         else if (window.__planarAuthRequired) setAuthRequired(true);
         setData(resolveViewState(d));
       } catch {
-        const d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(window.__PLANAR_DATA__ || SEED))))))));
+        const d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(normalizeMeetingCadence(window.__PLANAR_DATA__ || SEED)))))))));
         setOfflineFallback(true);
         setData(resolveViewState(d));
       }
@@ -9838,21 +9995,51 @@ function App() {
     setSelectedColIdx(1);
   }, [data]);
 
-  const addProject = useCallback((opts) => {
+  const addProject = useCallback(async (opts) => {
     // opts (optional) = { name, ownerKind, linkedSiteId, linkedSiteName } — used by the
     // cross-module "create a schedule connected to this site" flow. Guard against a click event
     // being passed as the first arg (the in-app + dropdown buttons call addProject() bare).
     const o = (opts && typeof opts === "object" && !("nativeEvent" in opts)) ? opts : {};
+    // EVERY SCHEDULE HAS AN OWNER. A bare addProject() — the in-app "+" button, which the shell
+    // hides — used to mint a schedule owned by NOTHING; that unowned state is what this model
+    // removes, so a bare create now explicitly belongs to the ORGANIZATION (the container the
+    // owner asked for: "everything lives under something"), and the shell's own New-schedule
+    // flow always passes a real, chosen owner. `ownerKind` is written unconditionally so no
+    // path can leave it absent and fall back to inference.
+    const ownerKind = o.linkedSiteId != null ? OWNER_KIND_SITE : OWNER_KIND_ORG;
+
+    // B1777120 — once this account is flipped, a schedule's id is a real Postgres identity value,
+    // reserved by an actual INSERT before the project is ever added to local state — never a
+    // client-guessed `nPid` two tabs could independently mint the same value from (acceptance:
+    // "task and project ids cannot collide when two tabs create rows at the same moment"). The
+    // row is inserted with a placeholder `data` (no `id` yet — Postgres hasn't assigned one until
+    // the INSERT returns) and immediately patched with the real id embedded, so every row this
+    // account ever holds still carries `data.id === id`, matching every other read site's
+    // assumption. window.storage.insertSchedule seeds scheduleBase/scheduleKnownRev itself so the
+    // very next autosave for this schedule is an ordinary guarded UPDATE, not a second insert.
+    if (window.storage && window.storage.scheduleRowsAuthoritative) {
+      const id = await window.storage.insertSchedule({
+        name: o.name || null, ownerKind,
+        linkedSiteId: o.linkedSiteId ?? null, linkedSiteName: o.linkedSiteName ?? null,
+      });
+      if (id == null) {
+        if (typeof showToast === "function") showToast("Couldn't create a new schedule — please try again.", { type: "error", duration: 6000 });
+        return;
+      }
+      setData(d => {
+        if (!d) return d;
+        const proj = { id, name: o.name || `Project ${id}`, tasks: [], ownerKind };
+        if (o.linkedSiteId != null) { proj.linkedSiteId = o.linkedSiteId; proj.linkedSiteName = o.linkedSiteName || null; }
+        const nd = {...d, nPid: Math.max(d.nPid, id + 1), aPid: id, nTid: {...d.nTid, [id]: 1},
+          projects: {...d.projects, [id]: proj}};
+        return o.linkedSiteId != null ? withLastActiveSite(nd, o.linkedSiteId, id) : nd;
+      });
+      return;
+    }
+
     setData(d => {
       if (!d) return d; // B644 — pre-load call: data not loaded yet, nothing to add onto
       const id = d.nPid;
-      // EVERY SCHEDULE HAS AN OWNER. A bare addProject() — the in-app "+" button, which the shell
-      // hides — used to mint a schedule owned by NOTHING; that unowned state is what this model
-      // removes, so a bare create now explicitly belongs to the ORGANIZATION (the container the
-      // owner asked for: "everything lives under something"), and the shell's own New-schedule
-      // flow always passes a real, chosen owner. `ownerKind` is written unconditionally so no
-      // path can leave it absent and fall back to inference.
-      const ownerKind = o.linkedSiteId != null ? OWNER_KIND_SITE : OWNER_KIND_ORG;
       const proj = {id, name: o.name || `Project ${id}`, tasks: [], ownerKind};
       if (o.linkedSiteId != null) { proj.linkedSiteId = o.linkedSiteId; proj.linkedSiteName = o.linkedSiteName || null; }
       const nd = {...d, nPid: id+1, aPid: id, nTid: {...d.nTid, [id]: 1},
@@ -9869,44 +10056,76 @@ function App() {
     setData(d => (d && d.projects && d.projects[id]) ? {...d, editProjId: null, projects: {...d.projects, [id]: {...d.projects[id], name}}} : d);
   }, []);
 
-  const duplicateProject = useCallback((id) => {
+  // Pure: builds the new project object (a copy of `src`) for a chosen `newId`. Split out of
+  // duplicateProject so the id-allocation flow (B1777120 — an INSERT-first reservation once
+  // flipped) and the legacy client-counter flow can share the exact same copy logic.
+  const buildDuplicateProject = (src, newId) => {
+    // B816 — RE-ID the copied meeting bodies so the copy's bodies are globally unique. Same-id bodies
+    // in two projects would collapse in MEETING_BODY_INDEX → editing one would move the other's hearings.
+    const bodyIdMap = {};
+    const copiedBodies = Array.isArray(src.meetingBodies) ? src.meetingBodies.map((mb, i) => {
+      const copy = copyMeetingBodyWithNewId(mb, i);
+      if (mb && mb.id) bodyIdMap[mb.id] = copy.id;
+      return copy;
+    }) : undefined;
+    const newTasks = src.tasks.map(t => ({...t, notes: t.notes.map(n => ({...n})),
+      ...(t.meetingBodyId && bodyIdMap[t.meetingBodyId] ? {meetingBodyId: bodyIdMap[t.meetingBodyId]} : {})}));
+    // Spread ...src so the copy keeps the project's column layout (colConfig), label alignment, and
+    // user-defined Formula columns — the old literal dropped all of them. Deep-copy formulaCols so
+    // editing the copy can't mutate the original.
+    //
+    // ⛔ THE COPY KEEPS ITS OWNER (changed with the ownership model). It previously dropped
+    // `linkedSiteId`, because back then the link was a ONE-schedule-per-site pointer and a
+    // second schedule claiming the same site was ambiguous by construction. A project may now
+    // hold several schedules, so that reason is gone — and leaving the old behaviour in place
+    // would mean every "Duplicate" silently emigrated the copy to the ORGANIZATION, which is
+    // both surprising ("duplicate this project's schedule" plainly means another schedule for
+    // the same project) and the exact class of silent, unasked-for ownership change this work
+    // exists to remove. The copy is a sibling under the same owner.
+    return {...src, id: newId, name: src.name + " (Copy)", tasks: newTasks,
+      formulaCols: Array.isArray(src.formulaCols) ? src.formulaCols.map(fc => ({...fc})) : undefined,
+      meetingBodies: copiedBodies};               // B815/B816 — deep-copied AND re-ided (see above)
+  };
+
+  const duplicateProject = useCallback(async (id) => {
+    // B1777120 — same reasoning as addProject: once flipped, the copy's id is a real Postgres
+    // identity value reserved by an actual INSERT before it ever reaches local state, never a
+    // client-guessed `nPid` two tabs could collide on.
+    if (window.storage && window.storage.scheduleRowsAuthoritative) {
+      const src = dataRef.current && dataRef.current.projects && dataRef.current.projects[id];
+      if (!src) return;
+      const maxTid = src.tasks.length ? Math.max(...src.tasks.map(t => t.id)) + 1 : 1;
+      const newId = await window.storage.insertSchedule({
+        name: src.name + " (Copy)", ownerKind: src.ownerKind,
+        linkedSiteId: src.linkedSiteId ?? null, linkedSiteName: src.linkedSiteName ?? null,
+        projectData: buildDuplicateProject(src, null),   // id filled in by insertSchedule once known
+      });
+      if (newId == null) {
+        if (typeof showToast === "function") showToast("Couldn't duplicate this schedule — please try again.", { type: "error", duration: 6000 });
+        return;
+      }
+      setData(d => {
+        if (!d || !d.projects || !d.projects[id]) return d;
+        const copy = buildDuplicateProject(d.projects[id], newId);
+        const nd = {...d, nPid: Math.max(d.nPid, newId + 1), nTid: {...d.nTid, [newId]: maxTid}, aPid: newId,
+          projects: {...d.projects, [newId]: copy}};
+        rebuildMeetingBodyIndex(nd);
+        return copy.linkedSiteId != null ? withLastActiveSite(nd, copy.linkedSiteId, newId) : nd;
+      });
+      return;
+    }
+
     setData(d => {
       const src = d.projects[id];
       const newId = d.nPid;
-      // B816 — RE-ID the copied meeting bodies so the copy's bodies are globally unique. Same-id bodies
-      // in two projects would collapse in MEETING_BODY_INDEX → editing one would move the other's hearings.
-      const bodyIdMap = {};
-      const copiedBodies = Array.isArray(src.meetingBodies) ? src.meetingBodies.map((mb, i) => {
-        const nid = "mb_" + Date.now().toString(36) + i + Math.random().toString(36).slice(2, 6);
-        if (mb && mb.id) bodyIdMap[mb.id] = nid;
-        return {...mb, id: nid,
-          recurrence: (mb.recurrence||[]).map(r => ({...r, setpos: Array.isArray(r.setpos)?[...r.setpos]:r.setpos, months: Array.isArray(r.months)?[...r.months]:r.months})),
-          agendaLead: mb.agendaLead ? {...mb.agendaLead} : mb.agendaLead,
-          blackoutDates: [...(mb.blackoutDates||[])], extraDates: [...(mb.extraDates||[])]};
-      }) : undefined;
-      const newTasks = src.tasks.map(t => ({...t, notes: t.notes.map(n => ({...n})),
-        ...(t.meetingBodyId && bodyIdMap[t.meetingBodyId] ? {meetingBodyId: bodyIdMap[t.meetingBodyId]} : {})}));
-      const maxTid = newTasks.length ? Math.max(...newTasks.map(t => t.id)) + 1 : 1;
+      const copy = buildDuplicateProject(src, newId);
+      const maxTid = copy.tasks.length ? Math.max(...copy.tasks.map(t => t.id)) + 1 : 1;
       const nd = {
         ...d,
         nPid: newId + 1,
         nTid: {...d.nTid, [newId]: maxTid},
         aPid: newId,
-        // Spread ...src so the copy keeps the project's column layout (colConfig), label alignment, and
-        // user-defined Formula columns — the old literal dropped all of them. Deep-copy formulaCols so
-        // editing the copy can't mutate the original.
-        //
-        // ⛔ THE COPY KEEPS ITS OWNER (changed with the ownership model). It previously dropped
-        // `linkedSiteId`, because back then the link was a ONE-schedule-per-site pointer and a
-        // second schedule claiming the same site was ambiguous by construction. A project may now
-        // hold several schedules, so that reason is gone — and leaving the old behaviour in place
-        // would mean every "Duplicate" silently emigrated the copy to the ORGANIZATION, which is
-        // both surprising ("duplicate this project's schedule" plainly means another schedule for
-        // the same project) and the exact class of silent, unasked-for ownership change this work
-        // exists to remove. The copy is a sibling under the same owner.
-        projects: {...d.projects, [newId]: {...src, id: newId, name: src.name + " (Copy)", tasks: newTasks,
-          formulaCols: Array.isArray(src.formulaCols) ? src.formulaCols.map(fc => ({...fc})) : undefined,
-          meetingBodies: copiedBodies}},               // B815/B816 — deep-copied AND re-ided (see above)
+        projects: {...d.projects, [newId]: copy},
       };
       rebuildMeetingBodyIndex(nd);
       // The copy is now the one to come back to on this site — duplicateProject already switches
@@ -10943,6 +11162,7 @@ function App() {
       {meetingCalOpen  && <MeetingCalendarsModal
         projName={proj?.name}
         bodies={(data.projects && data.projects[data.aPid] && data.projects[data.aPid].meetingBodies) || []}
+        otherSchedules={otherScheduleMeetingBodies(data, data.aPid)}
         onChange={next => setData(d => {
           const p = d.projects && d.projects[d.aPid];
           if (!p) return d;
@@ -11024,6 +11244,7 @@ function App() {
             return targets.some(id => (byId.get(id)?.parentId ?? null) !== null);
           })()}
           meetingBodies={(data.projects[taskCtx.projId] || {}).meetingBodies || []}
+          otherBodies={otherScheduleMeetingBodies(data, taskCtx.projId).flatMap(g => g.bodies.map(b => ({ pid: g.pid, schedName: g.schedName, body: b })))}
           bindCount={(() => { const ids = fullRowSelIds(); return ids.length > 1 && ids.includes(taskCtx.task.id) ? ids.length : 1; })()}
           boundTasks={(() => {
             // Bound LEAF tasks this row could serve as the deadline row for (exclude self + parents).
@@ -11048,6 +11269,30 @@ function App() {
             const ids = fullRowSelIds();
             const targets = ids.length > 1 && ids.includes(taskCtx.task.id) ? ids : [taskCtx.task.id];
             targets.forEach(id => updateTask(id, {meetingBound:false, meetingBodyId:null, pinnedMeetingDate:undefined}, taskCtx.projId));
+            setTaskCtx(null);
+          }}
+          onImportBindMeeting={(srcPid, srcBodyId) => {
+            // NEW-1 (B1824576) — "reuse a meeting calendar from another schedule": copies the body
+            // into THIS schedule (deduping against an identical-cadence body already here) and
+            // binds the current selection to it, in one step. Mirrors onBindMeeting above, with
+            // the copy-in as an extra setData ahead of the per-task updateTask loop.
+            const ids = fullRowSelIds();
+            const targets = ids.length > 1 && ids.includes(taskCtx.task.id) ? ids : [taskCtx.task.id];
+            const projId = taskCtx.projId;
+            const srcBody = ((data.projects[srcPid] || {}).meetingBodies || []).find(b => b.id === srcBodyId);
+            if (!srcBody) { setTaskCtx(null); return; }
+            const destBodies = (data.projects[projId] || {}).meetingBodies || [];
+            const { bodies: nextBodies, id: newBodyId } = importMeetingBody(destBodies, srcBody);
+            if (nextBodies !== destBodies) {
+              setData(d => {
+                const p = d.projects[projId];
+                if (!p) return d;
+                const nd = {...d, projects: {...d.projects, [projId]: {...p, meetingBodies: nextBodies}}};
+                rebuildMeetingBodyIndex(nd);
+                return nd;
+              });
+            }
+            targets.forEach(id => updateTask(id, {meetingBound:true, meetingBodyId:newBodyId, deadlineForTaskId:null}, projId));
             setTaskCtx(null);
           }}
           onAddDeadlineRow={() => { addDeadlineTask(taskCtx.task.id, taskCtx.projId); setTaskCtx(null); }}
@@ -11483,7 +11728,7 @@ const FormatMiniToolbar = React.forwardRef(function FormatMiniToolbar(
 // the sibling FormatMiniToolbar above, which this component portals alongside itself and
 // shares open/close lifecycle with (Escape, click-away, scroll, or choosing any command
 // closes both as one unit).
-function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onMoveTo, canOutdent, meetingBodies = [], bindCount = 1, boundTasks = [], deadlineAnchorName = null, onBindMeeting, onUnbindMeeting, onAddDeadlineRow, onLinkAsDeadline, onUnlinkDeadline, onAddMeetingCalendar, onStepMeeting, onDelete, deleteCount = 1, onSetHealth, onSetRowColor, onSetBold, onSetItalic, onSetUnderline, onSetTextColor, onSetFontSize, onClearFormat, fmt, onClose}) {
+function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAddSubtask, onDuplicate, onCutTask, onCopyTaskFull, onPasteTask, hasClipboard, onIndent, onOutdent, onMoveTo, canOutdent, meetingBodies = [], otherBodies = [], bindCount = 1, boundTasks = [], deadlineAnchorName = null, onBindMeeting, onUnbindMeeting, onImportBindMeeting, onAddDeadlineRow, onLinkAsDeadline, onUnlinkDeadline, onAddMeetingCalendar, onStepMeeting, onDelete, deleteCount = 1, onSetHealth, onSetRowColor, onSetBold, onSetItalic, onSetUnderline, onSetTextColor, onSetFontSize, onClearFormat, fmt, onClose}) {
   const menuRef = useRef(null);
   const toolbarRef = useRef(null);
 
@@ -11593,9 +11838,12 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
           <Item icon="ti-chevron-left"  label={prevMeetingIso ? `Previous meeting · ${fmtMeetingStep(prevMeetingIso)}` : "Previous meeting"} disabled={!prevMeetingIso} onClick={() => onStepMeeting(prevMeetingIso)} />
         </>)}
         {/* B844 — meeting-calendar flyout: the parent label reads the row's current state; the
-            flyout is one radio list (— none — + bodies) plus the deadline-row actions. */}
+            flyout is one radio list (— none — + bodies) plus the deadline-row actions.
+            NEW-1 (B1824576) — a schedule with zero bodies of its own but bodies available on
+            OTHER schedules still opens the flyout (not the flat "Add a meeting calendar…" row),
+            so "From other schedules" is reachable; a schedule with neither keeps the old flat row. */}
         <div style={{position:"relative"}} onMouseEnter={()=>setSubMeet(true)} onMouseLeave={()=>setSubMeet(false)}>
-          {meetingBodies.length === 0 && !isDeadlineRow ? (
+          {meetingBodies.length === 0 && otherBodies.length === 0 && !isDeadlineRow ? (
             <Item icon="ti-calendar-plus" label="Add a meeting calendar…" onClick={onAddMeetingCalendar} />
           ) : isDeadlineRow ? (
             <Item icon="ti-flag" label={`Deadline for: ${deadlineAnchorName || "(missing task)"}`} hint="▸" />
@@ -11604,7 +11852,7 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
           ) : (
             <Item icon="ti-calendar-event" label={bindCount > 1 ? `Bind ${bindCount} rows to meeting calendar` : "Bind to meeting calendar"} hint="▸" />
           )}
-          {subMeet && (meetingBodies.length > 0 || isDeadlineRow) && (
+          {subMeet && (meetingBodies.length > 0 || otherBodies.length > 0 || isDeadlineRow) && (
             <div style={{position:"absolute", top:-4, ...(subOpenLeft ? {right:"100%"} : {left:"100%"}), minWidth:200, maxHeight:320, overflow:"auto",
               background:"#fff", border:"1px solid var(--bd2)", borderRadius:6, boxShadow:"0 8px 24px rgba(0,0,0,0.18)", padding:"3px 0", zIndex:10000}}>
               {isDeadlineRow ? (<>
@@ -11617,6 +11865,15 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
                   const isCur = task.meetingBound && task.meetingBodyId === b.id;
                   return <Item key={b.id} icon={isCur ? "ti-check" : "ti-circle"} label={b.name || "Meeting body"} onClick={()=>onBindMeeting(b.id)} />;
                 })}
+                {otherBodies.length > 0 && (<>
+                  <Sep />
+                  <SubCaption>From other schedules</SubCaption>
+                  {otherBodies.map(ob => (
+                    <Item key={`${ob.pid}:${ob.body.id}`} icon="ti-calendar-event"
+                      label={`${ob.body.name || "Meeting body"} · ${ob.schedName}`}
+                      onClick={()=>onImportBindMeeting(ob.pid, ob.body.id)} />
+                  ))}
+                </>)}
                 {bindCount === 1 && task.meetingBound && !task.hasChildren && (<>
                   <Sep />
                   <Item icon="ti-flag" label="+ Add deadline row (call/file-by date)" onClick={onAddDeadlineRow} />
@@ -14925,18 +15182,141 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
 // (and MUST call rebuildMeetingBodyIndex, see the render site). Live-previews the next 6
 // resolved meeting dates + agenda deadlines so a wrong rule is visible immediately.
 const MB_WD = [{v:0,l:"Sun"},{v:1,l:"Mon"},{v:2,l:"Tue"},{v:3,l:"Wed"},{v:4,l:"Thu"},{v:5,l:"Fri"},{v:6,l:"Sat"}];
-const MB_SETPOS = [{v:1,l:"1st"},{v:2,l:"2nd"},{v:3,l:"3rd"},{v:4,l:"4th"},{v:-1,l:"Last"}];
+// NEW-1 — POSITION is a multi-pick: 1st..5th plus 2nd-to-last/Last, with "Every week" exclusive
+// (picking it clears everything else — the new home for the old separate Weekly mode).
+const MB_POSITIONS = [{v:1,l:"1st"},{v:2,l:"2nd"},{v:3,l:"3rd"},{v:4,l:"4th"},{v:5,l:"5th"},{v:-2,l:"2nd-to-last"},{v:-1,l:"Last"}];
 const MB_MONTHS = [{v:1,l:"Jan"},{v:2,l:"Feb"},{v:3,l:"Mar"},{v:4,l:"Apr"},{v:5,l:"May"},{v:6,l:"Jun"},{v:7,l:"Jul"},{v:8,l:"Aug"},{v:9,l:"Sep"},{v:10,l:"Oct"},{v:11,l:"Nov"},{v:12,l:"Dec"}];
+// One dot color per pattern (cycled), so the merged "next meetings" list can show which pattern
+// produced each date without repeating the whole sentence.
+const MB_PATTERN_COLORS = ["#2563eb","#d97706","#059669","#db2777","#7c3aed","#0891b2"];
 const newMeetingBody = () => ({
   id: "mb_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
   name: "", jurisdiction: "",
-  recurrence: [{ freq: "monthly", weekday: 2, setpos: [2, 4] }],
+  recurrence: [{ positions: [2, 4], weekday: 2, months: "all", anchor: null }],
   agendaLead: { type: "offset", n: 10, unit: "business" },
   cutoffTime: "12:00 PM", sameDayFilingAllowed: false,
   blackoutDates: [], extraDates: [], sourceUrl: "", verifiedOn: "",
 });
 const mbFmt = iso => { if(!iso) return ""; const d=new Date(iso+"T12:00:00"); return isNaN(d)?"":d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}); };
-function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
+// MB_ACTIVE_POPOVER_CLOSE — a single module-level slot naming the currently-open MBMultiPick's own
+// close function. MeetingCalendarsModal's Escape handler (a document-level CAPTURE listener) always
+// runs before any handler bound inside the modal, so a popover can't just listen for its own
+// Escape — the modal would close first. Routing through this slot lets the modal's own handler close
+// the popover INSTEAD of itself when one is open, satisfying "Escape closes the popover" without a
+// second competing capture listener.
+let MB_ACTIVE_POPOVER_CLOSE = null;
+// MBMultiPick (NEW-1) — the multi-select popover POSITION and MONTHS share: `value` is either
+// `allValue` (the exclusive "every"/"all" sentinel) or a non-empty array of picked option values.
+// Fully keyboard-operable: the trigger is a real <button> (native Enter/Space activation + focus),
+// every option is a real <button role="checkbox">, and Escape closes it via MB_ACTIVE_POPOVER_CLOSE.
+function MBMultiPick({ value, onChange, options, allValue, allRowLabel, allButtonLabel, formatSelected }) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef(null), popRef = useRef(null);
+  const [pos, setPos] = useState({top:0,left:0});
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    MB_ACTIVE_POPOVER_CLOSE = close;
+    const down = e => { if (!btnRef.current?.contains(e.target) && !popRef.current?.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", down);
+    return () => { document.removeEventListener("mousedown", down); if (MB_ACTIVE_POPOVER_CLOSE === close) MB_ACTIVE_POPOVER_CLOSE = null; };
+  }, [open]);
+  const isAll = value === allValue;
+  const picked = isAll ? [] : (Array.isArray(value) ? value : []);
+  const toggle = v => {
+    const has = picked.includes(v);
+    const next = has ? picked.filter(x => x !== v) : [...picked, v];
+    onChange(next.length ? next : allValue);
+  };
+  const openMenu = e => {
+    e.stopPropagation();
+    const r = btnRef.current.getBoundingClientRect();
+    setPos({top: r.bottom + 4, left: r.left});
+    setOpen(o => !o);
+  };
+  const chip = (on, extra) => ({padding:"4px 10px",fontSize:11.5,borderRadius:5,cursor:"pointer",border:"1px solid var(--bd2)",background:on?"var(--amber)":"#fff",color:on?"#fff":"var(--mut)",fontFamily:"inherit",...extra});
+  const label = isAll ? allButtonLabel : (formatSelected ? formatSelected(picked) : joinWithAnd(picked.map(v => (options.find(o=>o.v===v)||{}).l || String(v))));
+  return (
+    <>
+      <button type="button" ref={btnRef} onClick={openMenu}
+        style={{fontSize:12,padding:"3px 8px",border:"1px solid var(--bd2)",borderRadius:5,background:"#fff",color:"var(--txt)",cursor:"pointer",fontWeight:600,display:"inline-flex",alignItems:"center",gap:3,fontFamily:"inherit"}}>
+        {label} <span style={{fontSize:7,opacity:.7}}>▾</span>
+      </button>
+      {open && ReactDOM.createPortal(
+        <div ref={popRef} onMouseDown={e=>e.stopPropagation()}
+          style={{position:"fixed",top:pos.top,left:pos.left,minWidth:200,maxWidth:260,background:"#fff",border:"1px solid var(--bd2)",borderRadius:6,padding:6,zIndex:9999,boxShadow:"0 4px 16px rgba(0,0,0,.15)",display:"flex",flexWrap:"wrap",gap:4}}>
+          <button type="button" role="checkbox" aria-checked={isAll} onClick={()=>{ onChange(allValue); setOpen(false); }}
+            style={chip(isAll, {flexBasis:"100%",fontWeight:700})}>{allRowLabel}</button>
+          {options.map(o => {
+            const on = picked.includes(o.v);
+            return <button type="button" role="checkbox" aria-checked={on} key={String(o.v)} onClick={()=>toggle(o.v)} style={chip(on)}>{o.l}</button>;
+          })}
+        </div>, document.body)}
+    </>
+  );
+}
+// MeetingImportPicker (NEW-1, B1824576) — "Import from another schedule…": every meeting body on
+// every OTHER schedule on the account, grouped by schedule, multi-select, each showing its cadence
+// sentence + next few dates so the owner can tell same-named bodies with different cadences apart.
+// A body whose name + recurrence already match one on THIS schedule is tagged "already here" —
+// still pickable (importMeetingBody dedupes it to the existing copy, never a second one).
+function MeetingImportPicker({ otherSchedules, existingBodies, onImport, onCancel }) {
+  const [picked, setPicked] = useState(() => new Set());
+  const toggle = key => setPicked(prev => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
+  const today = fdLocal(new Date());
+  const nextDates = b => meetingDatesInRange(b, today, addD(today, 366 * 2)).slice(0, 3);
+  const alreadyHere = b => (existingBodies || []).some(eb => mbBodiesSameCadence(eb, b));
+  const entries = otherSchedules.flatMap(g => g.bodies.map(b => ({ key: `${g.pid}:${b.id}`, g, b })));
+  const byKey = new Map(entries.map(e => [e.key, e.b]));
+  return (
+    <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+      <div style={{padding:"9px 18px",borderBottom:"1px solid var(--bd)",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+        <span onClick={onCancel} title="Back" style={{cursor:"pointer",color:"var(--mut)",fontSize:13,lineHeight:1}}>&larr;</span>
+        <span style={{fontSize:12.5,fontWeight:600,color:"var(--txt)"}}>Import meeting calendars</span>
+      </div>
+      <div style={{flex:1,overflowY:"auto",padding:"12px 18px"}}>
+        {otherSchedules.length === 0 && (
+          <div style={{fontSize:12,color:"var(--mut)",fontStyle:"italic"}}>No other schedules on this account have meeting calendars yet.</div>
+        )}
+        {otherSchedules.map(g => (
+          <div key={g.pid} style={{marginBottom:16}}>
+            <div style={{fontSize:10,fontWeight:700,color:"var(--mut)",textTransform:"uppercase",letterSpacing:".06em",marginBottom:6}}>
+              {g.schedName}{g.projName ? ` · ${g.projName}` : ""}
+            </div>
+            {g.bodies.map(b => {
+              const key = `${g.pid}:${b.id}`;
+              const on = picked.has(key);
+              const dup = alreadyHere(b);
+              const dates = nextDates(b);
+              return (
+                <label key={key} style={{display:"flex",alignItems:"flex-start",gap:8,padding:"7px 8px",borderRadius:6,cursor:"pointer",background:on?"var(--surf)":"transparent"}}>
+                  <input type="checkbox" checked={on} onChange={()=>toggle(key)} style={{marginTop:3,flexShrink:0}} />
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:600,color:"var(--txt)"}}>
+                      {b.name || <span style={{color:"var(--mut)",fontStyle:"italic",fontWeight:400}}>Untitled body</span>}
+                      {dup && <span style={{marginLeft:7,fontSize:9.5,fontWeight:700,color:"var(--mut)",textTransform:"uppercase",letterSpacing:".04em"}}>already here</span>}
+                    </div>
+                    <div style={{fontSize:10.5,color:"var(--mut)",marginTop:2}}>{cadenceSummary(b)}</div>
+                    <div style={{fontSize:10.5,color:"var(--mut)",marginTop:1}}>{dates.length ? dates.map(d=>mbFmt(d)).join(" · ") : "no dates resolve"}</div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+      <div style={{padding:"10px 16px",borderTop:"1px solid var(--bd)",display:"flex",justifyContent:"flex-end",gap:8,flexShrink:0}}>
+        <button className="btn" onClick={onCancel} style={{fontSize:12,padding:"6px 12px"}}>Cancel</button>
+        <button className="btn" disabled={picked.size===0}
+          onClick={()=>onImport([...picked].map(k=>byKey.get(k)).filter(Boolean))}
+          style={{fontSize:12,padding:"6px 14px",background:picked.size?"var(--amber)":"#eee",color:picked.size?"#fff":"var(--mut)",borderColor:picked.size?"var(--amber)":"var(--bd2)",cursor:picked.size?"pointer":"default"}}>
+          Import{picked.size ? ` ${picked.size}` : ""}
+        </button>
+      </div>
+    </div>
+  );
+}
+function MeetingCalendarsModal({ projName, bodies, otherSchedules = [], onChange, onClose }) {
   // Draft / Save model (owner ask, 2026-07-15): the window edits a WORKING COPY — nothing touches the
   // schedule until "Save changes", so it's unmistakable when the edits take effect. savedRef holds the
   // last-applied snapshot, driving the dirty flag + the unsaved-close guard. All edits are JSON-safe.
@@ -14952,23 +15332,40 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
   const save = () => { onChange(JSON.parse(JSON.stringify(draft))); savedRef.current = JSON.stringify(draft); setSavedFlash(true); setTimeout(() => setSavedFlash(false), 1600); };
   const requestClose = () => { if (dirty) setConfirmClose(true); else onClose(); };
   // NotesModal-style close hardening: a text-selection drag ending on the backdrop must not dismiss;
-  // Escape backs out (the confirm bar first, then the close) via a capture-phase listener.
+  // Escape backs out (an open POSITION/MONTHS popover first, then the confirm bar, then the close)
+  // via a capture-phase listener — this always fires before any handler bound inside the modal, so a
+  // popover can't just listen for its own Escape (see MB_ACTIVE_POPOVER_CLOSE).
   const backdropRef = useRef(null);
   const downOnBackdropRef = useRef(false);
   useEffect(() => {
-    const onKey = e => { if (e.key === "Escape") { e.stopPropagation(); if (confirmClose) setConfirmClose(false); else requestClose(); } };
+    const onKey = e => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      if (MB_ACTIVE_POPOVER_CLOSE) { MB_ACTIVE_POPOVER_CLOSE(); MB_ACTIVE_POPOVER_CLOSE = null; return; }
+      if (confirmClose) setConfirmClose(false); else requestClose();
+    };
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
   });
   // All edits mutate the DRAFT only (setDraft) — the parent's onChange runs once, on Save.
   const patch = (id, fields) => setDraft(prev => prev.map(b => b.id === id ? { ...b, ...fields } : b));
-  const rulesOf = b => (Array.isArray(b.recurrence) && b.recurrence.length) ? b.recurrence : [{ freq:"monthly", weekday:2, setpos:[2,4] }];
+  const rulesOf = b => (Array.isArray(b.recurrence) && b.recurrence.length) ? b.recurrence : [{ positions:[2,4], weekday:2, months:"all", anchor:null }];
   const patchRuleAt = (id, idx, rf) => setDraft(prev => prev.map(b => b.id === id ? { ...b, recurrence: rulesOf(b).map((r, i) => i === idx ? { ...r, ...rf } : r) } : b));
-  const addRuleAt = id => setDraft(prev => prev.map(b => b.id === id ? { ...b, recurrence: [...rulesOf(b), { freq:"monthly", weekday:2, setpos:[1] }] } : b));
+  const addRuleAt = id => setDraft(prev => prev.map(b => b.id === id ? { ...b, recurrence: [...rulesOf(b), { positions:[1], weekday:2, months:"all", anchor:null }] } : b));
   const removeRuleAt = (id, idx) => setDraft(prev => prev.map(b => b.id === id ? { ...b, recurrence: rulesOf(b).filter((_, i) => i !== idx) } : b));
   const patchLead = (id, lf) => setDraft(prev => prev.map(b => b.id === id ? { ...b, agendaLead: { ...(b.agendaLead||{}), ...lf } } : b));
   const add = () => { const b = newMeetingBody(); setDraft(prev => [...prev, b]); setSelId(b.id); };
   const remove = id => { const rest = list.filter(b => b.id !== id); setDraft(prev => prev.filter(b => b.id !== id)); if (selId === id) setSelId((rest[0] && rest[0].id) || null); };
+  // NEW-1 (B1824576) — "Import from another schedule…": pulls one or more bodies' cadence in
+  // from another of the owner's schedules instead of re-entering it. Imported bodies land in the
+  // DRAFT like any other edit — still gated behind Save changes, same as everything else here.
+  const [importOpen, setImportOpen] = useState(false);
+  const importBodies = sourceBodies => {
+    const { bodies: next, ids } = importMeetingBodies(draft, sourceBodies);
+    setDraft(next);
+    if (ids.length) setSelId(ids[ids.length - 1]);
+    setImportOpen(false);
+  };
   const inp = { fontSize:12, padding:"5px 8px", border:"1px solid var(--bd2)", borderRadius:5, background:"#fff", color:"var(--txt)", width:"100%", boxSizing:"border-box", fontFamily:"'Inter',system-ui,sans-serif" };
   const lbl = { fontSize:10, fontWeight:600, color:"var(--mut)", textTransform:"uppercase", letterSpacing:".05em", margin:"0 0 4px", display:"block" };
   const sect = { fontSize:10, fontWeight:700, color:"var(--mut)", textTransform:"uppercase", letterSpacing:".07em", margin:"18px 0 8px", paddingBottom:5, borderBottom:"1px solid var(--bd)" };
@@ -14978,7 +15375,18 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
     </div>
   );
   const today = fdLocal(new Date());
-  const preview = b => meetingDatesInRange(b, today, addD(today, 366*2)).slice(0, 6);
+  // preview: the next N merged, de-duplicated meeting dates, each tagged with the color of the
+  // FIRST pattern (in rule order) that produces it — N is 8 when any pattern is "every week"
+  // (matches the acceptance spec: an every-week body's dates come far more densely).
+  const preview = b => {
+    const rules = rulesOf(b);
+    const n = rules.some(r => r.positions === "every") ? 8 : 6;
+    const merged = meetingDatesInRange(b, today, addD(today, 366*2)).slice(0, n);
+    return merged.map(date => {
+      const idx = rules.findIndex(r => meetingDatesInRange({ recurrence:[r] }, date, date).length > 0);
+      return { date, dot: MB_PATTERN_COLORS[(idx >= 0 ? idx : 0) % MB_PATTERN_COLORS.length] };
+    });
+  };
   const detail = b => {
     const rules = rulesOf(b);
     const lead = b.agendaLead || { type:"offset", n:10, unit:"business" };
@@ -14999,51 +15407,61 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
 
         <div style={sect}>Meets</div>
         {rules.map((rule, ri) => {
-          const setpos = Array.isArray(rule.setpos) ? rule.setpos : (rule.setpos!=null ? [rule.setpos] : []);
-          const months = Array.isArray(rule.months) ? rule.months : [];
+          const isEvery = rule.positions === "every";
+          const months = (rule.months === "all" || !Array.isArray(rule.months) || !rule.months.length) ? "all" : rule.months;
+          const hasAnchor = !!(rule.anchor && rule.anchor.weekday != null && rule.anchor.position != null);
+          const missing = positionMissingReport(rule, today);
           const ruleDates = meetingDatesInRange({ recurrence:[rule] }, today, addD(today, 366*4)).slice(0, 3);
+          const dot = MB_PATTERN_COLORS[ri % MB_PATTERN_COLORS.length];
           return (
             <div key={ri} style={{border:"1px solid var(--bd)",borderRadius:6,padding:"10px 12px",marginBottom:8,background:"var(--surf)"}}>
-              <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                {seg([{v:"monthly",l:"Monthly"},{v:"weekly",l:"Weekly"}], rule.freq, v=>patchRuleAt(b.id,ri,{freq:v}))}
-                {!(rule.freq==="monthly" && rule.onOrAfter!=null) && (<>
-                  <span style={{fontSize:11,color:"var(--mut)"}}>on</span>
-                  <select value={rule.weekday} onChange={e=>patchRuleAt(b.id,ri,{weekday:+e.target.value})} style={{...inp,width:"auto"}}>
+              <div style={{display:"flex",alignItems:"flex-start",gap:6}}>
+                <span title="This pattern's color in the resolved-dates list below" style={{width:7,height:7,marginTop:6,borderRadius:"50%",background:dot,flexShrink:0}} />
+                <div style={{display:"flex",gap:6,rowGap:4,alignItems:"center",flexWrap:"wrap",flex:1,fontSize:12.5,color:"var(--txt)"}}>
+                  <span>Meets</span>
+                  {!isEvery && <span style={{color:"var(--mut)"}}>the</span>}
+                  <MBMultiPick
+                    value={isEvery ? "every" : (Array.isArray(rule.positions) ? rule.positions : [1])}
+                    onChange={v => patchRuleAt(b.id, ri, v === "every" ? {positions:"every", anchor:null} : {positions:v})}
+                    options={MB_POSITIONS} allValue="every" allRowLabel="Every week" allButtonLabel="every"
+                    formatSelected={arr=>joinWithAnd(arr.map(v=>(MB_POSITIONS.find(o=>o.v===v)||{}).l||String(v)))} />
+                  <select value={rule.weekday} onChange={e=>patchRuleAt(b.id,ri,{weekday:+e.target.value})} style={{...inp,width:"auto",display:"inline-block"}}>
                     {MB_WD.map(w=><option key={w.v} value={w.v}>{w.l}</option>)}
                   </select>
-                </>)}
-                {rule.freq==="monthly" && rule.onOrAfter!=null && (
-                  <span style={{fontSize:12,color:"var(--txt)"}}>— <span style={{fontWeight:600}}>the Tuesday after the first Monday</span></span>
-                )}
-                {rules.length>1 && <span onClick={()=>removeRuleAt(b.id,ri)} title="Remove this cadence rule" style={{marginLeft:"auto",cursor:"pointer",color:"var(--mut)",fontSize:14,padding:"0 2px",flexShrink:0}}>&#x2715;</span>}
-              </div>
-              {rule.freq==="monthly" && (<>
-                {rule.onOrAfter==null && (
-                  <div style={{display:"flex",gap:5,marginTop:10,alignItems:"center",flexWrap:"wrap"}}>
-                    <span style={{fontSize:11,color:"var(--mut)",width:52,flexShrink:0}}>Weeks</span>
-                    {MB_SETPOS.map(sp=>{
-                      const on = setpos.includes(sp.v);
-                      return <span key={sp.v} onClick={()=>{ const ns = on ? setpos.filter(x=>x!==sp.v) : [...setpos,sp.v].sort((a,z)=>(a<0?99:a)-(z<0?99:z)); patchRuleAt(b.id,ri,{setpos:ns.length?ns:[sp.v]}); }}
-                        style={{padding:"4px 11px",fontSize:11.5,borderRadius:5,cursor:"pointer",border:"1px solid var(--bd2)",background:on?"var(--amber)":"#fff",color:on?"#fff":"var(--mut)"}}>{sp.l}</span>;
-                    })}
-                  </div>
-                )}
-                <div style={{display:"flex",gap:5,marginTop:8,alignItems:"center",flexWrap:"wrap"}}>
-                  <span style={{fontSize:11,color:"var(--mut)",width:52,flexShrink:0}}>Months</span>
-                  {MB_MONTHS.map(mo=>{
-                    const on = months.includes(mo.v);
-                    return <span key={mo.v} onClick={()=>{ const ns = on ? months.filter(x=>x!==mo.v) : [...months,mo.v].sort((a,z)=>a-z); patchRuleAt(b.id,ri,{months: ns.length?ns:undefined}); }}
-                      style={{padding:"4px 8px",fontSize:11,borderRadius:5,cursor:"pointer",border:"1px solid var(--bd2)",background:on?"var(--amber)":"#fff",color:on?"#fff":"var(--mut)"}}>{mo.l}</span>;
-                  })}
-                  <span style={{fontSize:10,color:"var(--mut)",flexBasis:"100%",paddingLeft:57}}>Blank = every month · pick one month for a yearly cadence</span>
+                  <span style={{color:"var(--mut)"}}>{isEvery ? (months==="all" ? "," : "in") : "of"}</span>
+                  <MBMultiPick
+                    value={months}
+                    onChange={v => patchRuleAt(b.id, ri, {months:v})}
+                    options={MB_MONTHS} allValue="all" allRowLabel="Every month"
+                    allButtonLabel={isEvery ? "all year" : "every month"} />
                 </div>
-                <label style={{fontSize:11.5,color:"var(--txt)",display:"flex",alignItems:"flex-start",gap:6,cursor:"pointer",marginTop:10}}>
-                  <input type="checkbox" checked={rule.onOrAfter!=null} style={{marginTop:2,flexShrink:0}}
-                    onChange={e=>patchRuleAt(b.id,ri, e.target.checked ? {weekday:2, setpos:[1], onOrAfter:2, months:(months.length?months:[11])} : {onOrAfter:undefined})} />
-                  <span>Use the <span style={{fontWeight:600}}>“Tuesday after the first Monday”</span> rule <span style={{color:"var(--mut)"}}>— the U.S. / Texas Election Day pattern (defaults to November; the plain “1st Tuesday” is wrong when the 1st is a Tuesday)</span></span>
+                {rules.length>1 && <span onClick={()=>removeRuleAt(b.id,ri)} title="Remove this pattern" style={{cursor:"pointer",color:"var(--mut)",fontSize:14,padding:"0 2px",flexShrink:0}}>&#x2715;</span>}
+              </div>
+              {!isEvery && (
+                <label style={{fontSize:11.5,color:"var(--txt)",display:"flex",alignItems:"flex-start",gap:6,cursor:"pointer",marginTop:10,paddingLeft:13}}>
+                  <input type="checkbox" checked={hasAnchor} style={{marginTop:2,flexShrink:0}}
+                    onChange={e=>patchRuleAt(b.id,ri, e.target.checked
+                      ? {anchor:{position:1, weekday:(rule.weekday+6)%7}}
+                      : {anchor:null})} />
+                  <span style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                    <span>counting from after the</span>
+                    {hasAnchor ? (<>
+                      <select value={rule.anchor.position} onChange={e=>patchRuleAt(b.id,ri,{anchor:{...rule.anchor,position:+e.target.value}})} style={{...inp,width:"auto",display:"inline-block"}}>
+                        {MB_POSITIONS.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
+                      </select>
+                      <select value={rule.anchor.weekday} onChange={e=>patchRuleAt(b.id,ri,{anchor:{...rule.anchor,weekday:+e.target.value}})} style={{...inp,width:"auto",display:"inline-block"}}>
+                        {MB_WD.map(w=><option key={w.v} value={w.v}>{w.l}</option>)}
+                      </select>
+                    </>) : <span style={{color:"var(--mut)",fontStyle:"italic"}}>1st Monday (e.g. the U.S. Election Day pattern)</span>}
+                  </span>
                 </label>
-              </>)}
-              <div style={{marginTop:10,paddingTop:8,borderTop:"1px dashed var(--bd2)",fontSize:11.5,lineHeight:1.5}}>
+              )}
+              {!isEvery && missing && missing.missing > 0 && (
+                <div style={{marginTop:8,paddingLeft:13,fontSize:11,color:"var(--warn-text,#b45309)"}}>
+                  ⚠ {missing.missing} of the next {missing.checked} picked months have no such meeting.
+                </div>
+              )}
+              <div style={{marginTop:10,paddingTop:8,paddingLeft:13,borderTop:"1px dashed var(--bd2)",fontSize:11.5,lineHeight:1.5}}>
                 <span style={{color:"var(--mut)"}}>Resolves to </span>
                 <span style={{fontWeight:600,color:"var(--txt)"}}>{mbRuleSummary(rule)}</span>
                 {ruleDates.length
@@ -15053,7 +15471,7 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
             </div>
           );
         })}
-        <button className="btn" onClick={()=>addRuleAt(b.id)} style={{fontSize:11,padding:"4px 10px"}}>+ Add cadence rule</button>
+        <button className="btn" onClick={()=>addRuleAt(b.id)} style={{fontSize:11,padding:"4px 10px"}}>+ And also…</button>
 
         <div style={sect}>Deadline before each meeting <span style={{textTransform:"none",fontWeight:400,letterSpacing:0}}>— file the agenda / call the election by (e.g. 78 calendar days before an election)</span></div>
         <div style={{fontSize:10.5,color:"var(--mut)",margin:"0 0 8px",lineHeight:1.5}}>
@@ -15107,13 +15525,16 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
             <span style={{fontWeight:600,color:"var(--txt)"}}>{cadenceSummary(b)}</span>
           </div>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:4}}>
-            <span style={{fontSize:10,fontWeight:700,color:"var(--mut)",textTransform:"uppercase",letterSpacing:".06em"}}>Next 6 meetings → file by</span>
+            <span style={{fontSize:10,fontWeight:700,color:"var(--mut)",textTransform:"uppercase",letterSpacing:".06em"}}>Next {dates.length || (rules.some(r=>r.positions==="every")?8:6)} meetings → file by</span>
             <span style={{fontSize:10,color: b.verifiedOn ? "var(--mut)" : "var(--warn-text,#b45309)"}}>{b.verifiedOn ? `verified ${mbFmt(b.verifiedOn)}` : "rule-derived, unverified"}</span>
           </div>
           {dates.length===0 && <div style={{fontSize:12,color:"var(--mut)",fontStyle:"italic",marginTop:4}}>No dates resolve — check the recurrence rule.</div>}
-          {dates.map(m=>(
-            <div key={m} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0",color:"var(--txt)",gap:8,borderTop:"1px dashed var(--bd)"}}>
-              <span style={{fontWeight:500}}>{mbFmt(m)}</span>
+          {dates.map(({date:m, dot})=>(
+            <div key={m} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"3px 0",color:"var(--txt)",gap:8,borderTop:"1px dashed var(--bd)"}}>
+              <span style={{display:"flex",alignItems:"center",gap:6,fontWeight:500}}>
+                <span style={{width:6,height:6,borderRadius:"50%",background:dot,flexShrink:0}} />
+                {mbFmt(m)}
+              </span>
               <span style={{color:"var(--mut)"}}>file by {mbFmt(agendaDeadline(b,m))}{b.cutoffTime?` · ${b.cutoffTime}`:""}</span>
             </div>
           ))}
@@ -15141,6 +15562,9 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
             <span onClick={requestClose} title="Close (Esc)" style={{cursor:"pointer",color:"var(--mut)",fontSize:17,lineHeight:1,flexShrink:0}}>&#x2715;</span>
           </div>
         </div>
+        {importOpen ? (
+          <MeetingImportPicker otherSchedules={otherSchedules} existingBodies={draft} onCancel={()=>setImportOpen(false)} onImport={importBodies} />
+        ) : (
         <div style={{flex:1,display:"flex",overflow:"hidden"}}>
           <div style={{width:216,flexShrink:0,borderRight:"1px solid var(--bd)",display:"flex",flexDirection:"column",background:"var(--surf)"}}>
             <div style={{flex:1,overflowY:"auto",padding:"8px 0"}}>
@@ -15148,7 +15572,7 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
               {list.map(b => {
                 const isSel = b.id === selId;
                 return (
-                  <div key={b.id} onClick={()=>setSelId(b.id)}
+                  <div key={b.id} data-testid="meeting-body-row" onClick={()=>setSelId(b.id)}
                     style={{padding:"8px 12px 8px 13px",cursor:"pointer",borderLeft:`3px solid ${isSel?"var(--amber)":"transparent"}`,background:isSel?"#fff":"transparent"}}>
                     <div style={{fontSize:12,fontWeight:600,color:"var(--txt)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{b.name || <span style={{color:"var(--mut)",fontStyle:"italic",fontWeight:400}}>Untitled body</span>}</div>
                     <div style={{fontSize:10,color:"var(--mut)",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{cadenceSummary(b)}</div>
@@ -15156,8 +15580,13 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
                 );
               })}
             </div>
-            <div style={{padding:10,borderTop:"1px solid var(--bd)",flexShrink:0}}>
+            <div style={{padding:10,borderTop:"1px solid var(--bd)",flexShrink:0,display:"flex",flexDirection:"column",gap:6}}>
               <button className="btn" onClick={add} style={{width:"100%",fontSize:11.5,padding:"6px 10px"}}>+ Add meeting body</button>
+              {/* NEW-1 (B1824576) — hidden entirely with no OTHER schedule on the account (nothing
+                  to import); otherwise always enabled, even with zero bodies here. Never a dead button. */}
+              {otherSchedules.length > 0 && (
+                <button className="btn" onClick={()=>setImportOpen(true)} style={{width:"100%",fontSize:11.5,padding:"6px 10px"}}>Import from another schedule…</button>
+              )}
             </div>
           </div>
           <div style={{flex:1,overflowY:"auto",minWidth:0}}>
@@ -15172,11 +15601,17 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
                   Bind a task to it (right-click the task) and its hearing date snaps to the body's calendar,
                   with the agenda-filing deadline derived automatically.
                 </div>
-                <button className="btn" onClick={add} style={{fontSize:12,padding:"7px 14px",marginTop:4}}>+ Add meeting body</button>
+                <div style={{display:"flex",gap:8,marginTop:4}}>
+                  <button className="btn" onClick={add} style={{fontSize:12,padding:"7px 14px"}}>+ Add meeting body</button>
+                  {otherSchedules.length > 0 && (
+                    <button className="btn" onClick={()=>setImportOpen(true)} style={{fontSize:12,padding:"7px 14px"}}>Import from another schedule…</button>
+                  )}
+                </div>
               </div>
             )}
           </div>
         </div>
+        )}
         {/* Footer — the explicit apply gate. Nothing on the schedule moves until Save changes. */}
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"10px 16px",borderTop:"1px solid var(--bd)",flexShrink:0,background:"var(--surf)"}}>
           {confirmClose ? (<>
@@ -15187,12 +15622,17 @@ function MeetingCalendarsModal({ projName, bodies, onChange, onClose }) {
               <button className="btn" onClick={()=>{ save(); onClose(); }} style={{fontSize:12,padding:"6px 12px",background:"var(--amber)",color:"#fff",borderColor:"var(--amber)"}}>Save &amp; close</button>
             </div>
           </>) : (<>
+            {/* NEW-2 (2026-09-22): this dialog does NOT autosave — edits live only in the draft until
+                Save changes is clicked. The footer used to show "All changes saved" beside a (merely
+                disabled) Save changes button at the same time, which read as self-contradictory even
+                though the two never disagreed about the real state. Fix: when there is nothing to
+                save, the Save button is gone entirely — only Close remains, matching what's true. */}
             <span style={{fontSize:11.5,fontWeight:600,color: dirty ? "var(--warn-text,#b45309)" : savedFlash ? "#15803d" : "var(--mut)"}}>
               {dirty ? "● Unsaved changes — nothing on the schedule has moved yet" : savedFlash ? "✓ Saved — the schedule updated" : "All changes saved"}
             </span>
             <div style={{display:"flex",gap:8}}>
               <button className="btn" onClick={requestClose} style={{fontSize:12,padding:"6px 12px"}}>{dirty ? "Cancel" : "Close"}</button>
-              <button className="btn" onClick={save} disabled={!dirty} style={{fontSize:12,padding:"6px 14px",...(dirty ? {background:"var(--amber)",color:"#fff",borderColor:"var(--amber)"} : {})}}>Save changes</button>
+              {dirty && <button className="btn" onClick={save} style={{fontSize:12,padding:"6px 14px",background:"var(--amber)",color:"#fff",borderColor:"var(--amber)"}}>Save changes</button>}
             </div>
           </>)}
         </div>
@@ -18405,43 +18845,77 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
   const baseByKey = {};   // B864(b) — the doc THIS tab last loaded or saved (the 3-way merge ancestor)
   const staleSnapped = {};
   const revOf = (p) => (p && typeof p.__rev === "number") ? p.__rev : 0;
+
+  // B1777120 — THE AUTHORITY FLIP: per-schedule-row primary write path. Parallel to
+  // knownRev/baseByKey/staleSnapped above, but keyed per SCHEDULE id (string), since each
+  // schedule is now its own CAS row once an account is flipped (schedule_account_index.
+  // rows_authoritative — see schedules_authority_flip.sql). indexKnownRev/indexBase play the
+  // same role for the one account-wide schedule_account_index row (settings/lastActiveBySite/
+  // nPid/nTid/migration flags). Seeded exactly once per load, by readFromScheduleRows below.
+  const scheduleKnownRev = {};
+  const scheduleBase = {};
+  const scheduleStaleSnapped = {};
+  let indexKnownRev = 0;
+  let indexBase = null;
+  let scheduleRowsAuthoritative = false;   // mirrored onto window.storage.scheduleRowsAuthoritative below
+  const scheduleLastAutoHistoryAt = {};    // per-schedule throttle, mirrors lastAutoHistoryAt but per id
+  const SCHEDULE_SANITY_MIN_TASKS = 20;
+  const SCHEDULE_SANITY_DROP_RATIO = 0.5;
   // mergeCloudDoc / _mStripRev / _deepClone are defined at module scope (B864(b)) so both this storage
   // layer AND the App's reconcile listener share one implementation.
 
-  // B1777120 — dual-read scaffold, OFF BY DEFAULT. planar_data stays the authoritative source
-  // for every real load; this only exists so the schedule-normalization read path is real,
-  // wired code that can be tested, not a described-but-unbuilt plan. Flipping this on in
-  // production (the actual authority flip) is explicitly NOT part of this change — see
-  // schedules_normalization.sql's header. Flag lives in localStorage (a per-browser dev/test
-  // toggle, same storage a person could set from devtools), never a query param that could be
-  // shared/bookmarked into accidentally-different behavior.
-  const SCHEDULE_ROWS_READ_FLAG = "planar:scheduleRowsRead";
-  const scheduleRowsReadEnabled = () => {
-    try { return localStorage.getItem(SCHEDULE_ROWS_READ_FLAG) === "1"; } catch { return false; }
-  };
-  // Reads schedule_account_index + schedules and recomposes the "hs-v1" shape from them.
-  // Returns null on ANY absence or failure (no index row, a thrown error, RLS denial) so the
-  // caller falls back to the blob unconditionally — never a partial or wrong document. Attaches
-  // the REAL current __rev (a cheap separate read, same shape as checkRemote below) so the
-  // existing knownRev/write-guard bookkeeping in `get` stays correct if this is ever enabled —
-  // recomposeFromRows itself never reconstructs __rev (it isn't an account-wide fact).
+  // B1777120 — THE AUTHORITY FLIP, read side. Authority is decided PER ACCOUNT by
+  // schedule_account_index.rows_authoritative, set by an operator only after a fresh decompose
+  // has been proven to reconstruct the live blob exactly (see schedules_authority_flip.sql) — an
+  // account that has never been flipped reads the blob exactly as before this item shipped; this
+  // is not a global switch. SCHEDULE_ROWS_FORCE_FLAG is a local dev/test override (force ON even
+  // if the account isn't flipped); SCHEDULE_ROWS_DISABLE_FLAG is an emergency kill-switch (force
+  // OFF even if flipped) an operator can hand a stuck browser without waiting on a deploy. Both
+  // live in localStorage, never a shareable query param.
+  const SCHEDULE_ROWS_FORCE_FLAG = "planar:scheduleRowsRead";
+  const SCHEDULE_ROWS_DISABLE_FLAG = "planar:scheduleRowsDisable";
+  const scheduleRowsForced = () => { try { return localStorage.getItem(SCHEDULE_ROWS_FORCE_FLAG) === "1"; } catch { return false; } };
+  const scheduleRowsDisabled = () => { try { return localStorage.getItem(SCHEDULE_ROWS_DISABLE_FLAG) === "1"; } catch { return false; } };
+  const setScheduleRowsAuthoritative = (v) => { scheduleRowsAuthoritative = v; try { window.storage.scheduleRowsAuthoritative = v; } catch {} };
+  // Reads schedule_account_index + schedules and recomposes the "hs-v1" shape from them. Returns
+  // null on ANY absence, disable-override, non-flipped account, or failure (RLS denial, a thrown
+  // error) so the caller falls back to the blob unconditionally — never a partial or wrong
+  // document. Attaches the REAL current __rev (a cheap separate read, same shape as checkRemote
+  // below) so the existing knownRev bookkeeping in `get` stays correct for the returned blob-
+  // shaped value. Also seeds the PER-SCHEDULE + index baselines (scheduleKnownRev/scheduleBase/
+  // indexKnownRev/indexBase) the write path below diffs every future save against — this is the
+  // ONLY place those are seeded, since a real page reads "hs-v1" exactly once per load.
   const readFromScheduleRows = async (k) => {
     try {
-      if (k !== "hs-v1" || !scheduleRowsReadEnabled()) return null;
+      if (k !== "hs-v1" || scheduleRowsDisabled()) { setScheduleRowsAuthoritative(false); return null; }
       const { data: userRes } = await sb.auth.getUser();
       const ownerUid = userRes && userRes.user && userRes.user.id;
-      if (!ownerUid) return null;
+      if (!ownerUid) { setScheduleRowsAuthoritative(false); return null; }
       const [idxRes, schedRes, revRes] = await Promise.all([
         sb.from("schedule_account_index").select("*").eq("user_id", ownerUid).maybeSingle(),
         sb.from("schedules").select("*").eq("user_id", ownerUid).is("deleted_at", null),
         sb.from(TABLE).select("rev:value->>__rev").eq("key", k).maybeSingle(),
       ]);
-      if (idxRes.error || schedRes.error || !idxRes.data) return null;
+      if (idxRes.error || schedRes.error || !idxRes.data) { setScheduleRowsAuthoritative(false); return null; }
+      const authoritative = !!idxRes.data.rows_authoritative || scheduleRowsForced();
+      setScheduleRowsAuthoritative(authoritative);
+      if (!authoritative) return null;
       const recomposed = recomposeFromRows(idxRes.data, schedRes.data);
       if (!recomposed) return null;
+      Object.keys(scheduleKnownRev).forEach(kk => delete scheduleKnownRev[kk]);
+      Object.keys(scheduleBase).forEach(kk => delete scheduleBase[kk]);
+      (Array.isArray(schedRes.data) ? schedRes.data : []).forEach(row => {
+        if (!row || row.id == null) return;
+        const rk = String(row.id);
+        scheduleKnownRev[rk] = typeof row.rev === "number" ? row.rev : 0;
+        scheduleBase[rk] = row.data;
+      });
+      indexKnownRev = typeof idxRes.data.rev === "number" ? idxRes.data.rev : 0;
+      indexBase = decomposeForDualWrite(recomposed).index;
       const rev = (revRes.data && revRes.data.rev != null) ? (parseInt(revRes.data.rev, 10) || 0) : 0;
       return { ...recomposed, __rev: rev };
     } catch {
+      setScheduleRowsAuthoritative(false);
       return null;
     }
   };
@@ -18555,15 +19029,239 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
     }
   };
 
+  // B1777120 — THE AUTHORITY FLIP, write side. Everything below is reached ONLY when
+  // scheduleRowsAuthoritative is true for the signed-in account (readFromScheduleRows already
+  // proved a real, migrated schedule_account_index row exists) — an account that has never been
+  // flipped never calls any of this and keeps writing the blob exactly as before.
+
+  // Per-schedule history: reuses planar_history (same table, schema, RLS, pruning) with a new
+  // key shape ("schedule:<id>") instead of the whole-account "hs-v1" — "write new [snapshots]
+  // per schedule" per this item's own acceptance text. Fire-and-forget, matching _snapshot's own
+  // non-blocking shape; task_count/project_count are computed for a SINGLE project object, not a
+  // whole doc, so this does not reuse _snapshot/countTasks/countProjects directly.
+  const writeScheduleHistorySnapshot = (scheduleId, projData, label) => {
+    try {
+      if ((label || "auto") === "auto") {
+        const now = Date.now();
+        const last = scheduleLastAutoHistoryAt[scheduleId] || 0;
+        if (now - last < AUTO_HISTORY_MS) return;
+        scheduleLastAutoHistoryAt[scheduleId] = now;
+      }
+      const taskCount = (projData && Array.isArray(projData.tasks)) ? projData.tasks.length : 0;
+      let byteSize = 0; try { byteSize = JSON.stringify(projData).length; } catch {}
+      sb.from(HISTORY_TABLE).insert({
+        key: "schedule:" + scheduleId, value: projData, label: label || "auto",
+        task_count: taskCount, project_count: 1, byte_size: byteSize,
+      }).then(({ error }) => {
+        if (error && !writeScheduleHistorySnapshot._warned) {
+          writeScheduleHistorySnapshot._warned = true;
+          console.warn("per-schedule history snapshot failed (run setup SQL?):", error.message);
+        }
+      });
+    } catch (e) {
+      if (!writeScheduleHistorySnapshot._warned) { writeScheduleHistorySnapshot._warned = true; console.warn("per-schedule history snapshot exception:", e); }
+    }
+  };
+
+  // The guarded write for ONE schedules row. `.select("id")` is required to SEE a refusal —
+  // same reasoning as _rawSet's own attemptWrite below (a bare `.update()` with no `.select()`
+  // sends `Prefer: return=minimal`, so PostgREST reports success whether
+  // schedules_enforce_version_monotonic silently skipped the row or genuinely wrote it).
+  const attemptScheduleWrite = async (id, data, baseRev) => {
+    const newRev = (typeof baseRev === "number" ? baseRev : 0) + 1;
+    const { data: rows, error } = await sb.from("schedules").update({
+      data, rev: newRev,
+      name: (data && typeof data.name === "string") ? data.name : "",
+      linked_site_id: (data && data.linkedSiteId != null) ? data.linkedSiteId : null,
+      linked_site_name: (data && data.linkedSiteName != null) ? data.linkedSiteName : null,
+    }).eq("id", id).select("id");
+    return { error, refused: !error && Array.isArray(rows) && rows.length === 0, newRev };
+  };
+
+  // Guarded write for ONE schedule — mirrors _rawSet's own Layer 0/2 + CAS-retry-once shape,
+  // scoped to a single row so a stale write to schedule A can never touch schedule B (B1777120
+  // acceptance: "a write to one schedule cannot modify another schedule's row").
+  const writeOneScheduleRow = async (ownerUid, id, newData, { skipSanity, label }) => {
+    const key = String(id);
+    const curRev = scheduleKnownRev[key];
+    const curData = scheduleBase[key];
+
+    if (curRev === undefined) {
+      // Unknown to this tab — a restore/import resurrecting an id (NEVER a race two tabs could
+      // hit for a genuinely NEW schedule: addProject/duplicateProject always insert the row
+      // FIRST and seed scheduleBase before that id can ever reach this path — see those
+      // functions). Try a fresh INSERT; a 23505 conflict means the row already existed (another
+      // tab's own insert, or this tab's cache was simply behind), so fall through to the
+      // ordinary guarded update below, which re-reads fresh regardless.
+      const { error: insErr } = await sb.from("schedules").insert({
+        id, user_id: ownerUid, name: (newData && newData.name) || "", data: newData, rev: 0,
+        linked_site_id: (newData && newData.linkedSiteId != null) ? newData.linkedSiteId : null,
+        linked_site_name: (newData && newData.linkedSiteName != null) ? newData.linkedSiteName : null,
+      });
+      if (!insErr) {
+        scheduleKnownRev[key] = 0; scheduleBase[key] = _deepClone(newData);
+        writeScheduleHistorySnapshot(id, newData, label);
+        return { merged: null };
+      }
+      if (insErr.code !== "23505") { console.error("[schedule rows] insert failed for schedule " + id + ":", insErr); return null; }
+    } else if (!skipSanity) {
+      const oldN = (curData && Array.isArray(curData.tasks)) ? curData.tasks.length : 0;
+      const newN = (newData && Array.isArray(newData.tasks)) ? newData.tasks.length : 0;
+      if (oldN > SCHEDULE_SANITY_MIN_TASKS && newN < oldN * SCHEDULE_SANITY_DROP_RATIO) {
+        writeScheduleHistorySnapshot(id, curData, "safety-block");
+        console.error("[schedule guard] Refused save for schedule " + id + ": tasks would drop " + oldN + " -> " + newN + ".");
+        if (typeof showToast === "function") showToast("Save blocked for one schedule -- tasks would drop " + oldN + "->" + newN + ". Old state backed up.", { type: "error", duration: 6000 });
+        return null;
+      }
+    }
+
+    const baseRev = scheduleKnownRev[key] || 0;
+    let attempt = await attemptScheduleWrite(id, newData, baseRev);
+    if (attempt.error) { console.error("[schedule rows] write error for schedule " + id + ":", attempt.error); return null; }
+
+    let payload = newData, mergedResult = null;
+    if (attempt.refused) {
+      const { data: row2, error: readErr } = await sb.from("schedules").select("data, rev").eq("id", id).maybeSingle();
+      if (readErr || !row2) {
+        if (!scheduleStaleSnapped[key]) { scheduleStaleSnapped[key] = true; writeScheduleHistorySnapshot(id, newData, "stale-block"); }
+        console.error("[schedule guard] Write refused for schedule " + id + " and the current row could not be re-read afterward.");
+        return null;
+      }
+      const base = scheduleBase[key];
+      let merged = null;
+      if (base !== undefined) { try { merged = mergeCloudDoc(base, newData, row2.data); } catch (e) { merged = null; } }
+      if (!merged || !_mIsObj(merged)) {
+        if (!scheduleStaleSnapped[key]) { scheduleStaleSnapped[key] = true; writeScheduleHistorySnapshot(id, newData, "stale-block"); }
+        console.error("[schedule guard] Save blocked for schedule " + id + " (merge unavailable): cloud rev " + row2.rev + " is ahead of this tab.");
+        return null;
+      }
+      writeScheduleHistorySnapshot(id, newData, "premerge-ours");
+      attempt = await attemptScheduleWrite(id, merged, row2.rev);
+      if (attempt.error || attempt.refused) {
+        if (!scheduleStaleSnapped[key]) { scheduleStaleSnapped[key] = true; writeScheduleHistorySnapshot(id, merged, "stale-block"); }
+        console.error("[schedule guard] Save blocked for schedule " + id + ": lost the race twice in a row.");
+        return null;
+      }
+      payload = merged; mergedResult = merged;
+    }
+
+    scheduleKnownRev[key] = attempt.newRev;
+    scheduleBase[key] = _deepClone(payload);
+    scheduleStaleSnapped[key] = false;
+    writeScheduleHistorySnapshot(id, payload, label);
+    return { merged: mergedResult };
+  };
+
+  // Guarded write for the ONE schedule_account_index row (settings/lastActiveBySite/nPid/nTid/
+  // migration flags) — same CAS-retry-once shape as writeOneScheduleRow, independent of every
+  // schedule row so a settings change never contends with a task edit in any schedule.
+  const writeIndexRow = async (ownerUid, newIndex) => {
+    const baseRev = indexKnownRev || 0;
+    const newRev = baseRev + 1;
+    const payload = {
+      n_pid: newIndex.nPid, n_tid: newIndex.nTid, last_active_by_site: newIndex.lastActiveBySite,
+      settings: newIndex.settings, migration_flags: newIndex.migrationFlags,
+      rows_authoritative: true, rev: newRev,
+    };
+    const { data: rows, error } = await sb.from("schedule_account_index").update(payload).eq("user_id", ownerUid).select("user_id");
+    if (error) { console.error("[schedule rows] index write error:", error); return null; }
+    if (!(Array.isArray(rows) && rows.length === 0)) {
+      indexKnownRev = newRev; indexBase = _deepClone(newIndex);
+      return { merged: null };
+    }
+    const { data: row2, error: readErr } = await sb.from("schedule_account_index").select("*").eq("user_id", ownerUid).maybeSingle();
+    if (readErr || !row2) { console.error("[schedule rows] index write refused and could not be re-read afterward"); return null; }
+    const rowIndex = { nPid: row2.n_pid, nTid: row2.n_tid || {}, lastActiveBySite: row2.last_active_by_site || {}, settings: row2.settings || {}, migrationFlags: row2.migration_flags || {} };
+    let merged = null;
+    if (indexBase !== null) { try { merged = mergeCloudDoc(indexBase, newIndex, rowIndex); } catch (e) { merged = null; } }
+    if (!merged) { console.error("[schedule rows] index write blocked -- merge unavailable"); return null; }
+    const { data: rows2, error: err2 } = await sb.from("schedule_account_index").update({
+      n_pid: merged.nPid, n_tid: merged.nTid, last_active_by_site: merged.lastActiveBySite,
+      settings: merged.settings, migration_flags: merged.migrationFlags,
+      rows_authoritative: true, rev: row2.rev + 1,
+    }).eq("user_id", ownerUid).select("user_id");
+    if (err2 || (Array.isArray(rows2) && rows2.length === 0)) { console.error("[schedule rows] index write blocked -- lost the race twice"); return null; }
+    indexKnownRev = row2.rev + 1; indexBase = _deepClone(merged);
+    return { merged };
+  };
+
+  // THE PRIMARY WRITE PATH for a flipped account — decomposes the whole "hs-v1"-shaped doc into
+  // ONLY the pieces that actually changed since this tab's own last-known-good baseline, and
+  // writes each independently: a write to one schedule can never modify another's row (B1777120
+  // acceptance criterion, proven by construction — each writeOneScheduleRow call targets exactly
+  // one `id`). Reassembles a whole-doc `planar:merged` event when anything merged so the App's
+  // existing reconcile listener (mergeCloudDoc(ancestor, current, merged)) needs no changes at
+  // all — it already treats "everything except a couple of fields is byte-identical to what I
+  // sent" as "only those fields changed elsewhere", which is exactly what happened.
+  const writeScheduleRowsPrimary = async (parsed, v, { skipSanity, label }) => {
+    const { data: userRes } = await sb.auth.getUser();
+    const ownerUid = userRes && userRes.user && userRes.user.id;
+    if (!ownerUid) { console.error("[schedule rows] no signed-in user -- cannot save"); return null; }
+
+    const decomposed = decomposeForDualWrite(parsed);
+    if (!decomposed) return null;
+
+    let mergedForApp = null;
+    let anythingMerged = false;
+    let anyFailure = false;
+    const ensureMergedForApp = () => { if (!mergedForApp) mergedForApp = _deepClone(parsed); return mergedForApp; };
+
+    if (indexBase === null || !_mEq(decomposed.index, indexBase)) {
+      const idxResult = await writeIndexRow(ownerUid, decomposed.index);
+      if (idxResult === null) {
+        anyFailure = true;
+      } else if (idxResult.merged) {
+        const m = ensureMergedForApp();
+        m.nPid = idxResult.merged.nPid; m.nTid = idxResult.merged.nTid;
+        m.lastActiveBySite = idxResult.merged.lastActiveBySite; m.settings = idxResult.merged.settings;
+        Object.assign(m, idxResult.merged.migrationFlags);
+        anythingMerged = true;
+      }
+    }
+
+    const currentIds = new Set(decomposed.schedules.map(s => String(s.id)));
+    for (const s of decomposed.schedules) {
+      const key = String(s.id);
+      const base = scheduleBase[key];
+      if (base !== undefined && _mEq(s.data, base)) continue;   // unchanged -- nothing to write
+      const result = await writeOneScheduleRow(ownerUid, s.id, s.data, { skipSanity, label });
+      if (result === null) { anyFailure = true; continue; }
+      if (result.merged) {
+        const m = ensureMergedForApp();
+        m.projects = { ...m.projects, [key]: result.merged };
+        anythingMerged = true;
+      }
+    }
+
+    for (const key of Object.keys(scheduleBase)) {
+      if (currentIds.has(key)) continue;   // still present -- nothing to tombstone
+      try { await sb.from("schedules").update({ deleted_at: new Date().toISOString() }).eq("id", Number(key)); }
+      catch (e) { console.error("[schedule rows] soft-delete failed for schedule " + key, e); }
+      delete scheduleBase[key]; delete scheduleKnownRev[key]; delete scheduleStaleSnapped[key];
+    }
+
+    if (anythingMerged) {
+      try { window.dispatchEvent(new CustomEvent("planar:merged", { detail: { key: "hs-v1", base: _deepClone(parsed), value: mergedForApp } })); } catch {}
+    }
+    try { window.dispatchEvent(new CustomEvent("planar:cloud-saved", { detail: { key: "hs-v1" } })); } catch {}
+
+    if (anyFailure && !anythingMerged) {
+      try { window.dispatchEvent(new CustomEvent("planar:stale", { detail: { key: "hs-v1" } })); } catch {}
+      return null;
+    }
+    return { key: "hs-v1", value: v };
+  };
+
   window.storage = {
+    scheduleRowsAuthoritative: false,   // B1777120 — live-updated by setScheduleRowsAuthoritative; read by addProject/duplicateProject
     get: async (k) => {
       try {
-        // B1777120 — dual-read scaffold: OFF by default (scheduleRowsReadEnabled reads a
-        // localStorage flag nothing in this app ever sets), so this is a no-op read of a flag
-        // that is normally absent, falling straight through to the blob read below exactly as
-        // before. When explicitly enabled it tries the normalized rows FIRST and only falls
-        // back to the blob if they're absent or the read fails — never a partial document.
-        if (k === "hs-v1" && scheduleRowsReadEnabled()) {
+        // B1777120 — THE AUTHORITY FLIP: readFromScheduleRows itself decides whether this
+        // account is flipped (schedule_account_index.rows_authoritative), the disable
+        // kill-switch, and the dev force-on override — this call is unconditional for "hs-v1"
+        // and returns null (falling straight through to the blob read below, exactly as before
+        // this item shipped) for every account that has not been deliberately flipped.
+        if (k === "hs-v1") {
           const fromRows = await readFromScheduleRows(k);
           if (fromRows) {
             const val = JSON.stringify(fromRows);
@@ -18596,6 +19294,15 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
         const label = opts.label || "auto";
         const isAuto = label === "auto";
         const skipSanity = !!opts.skipSanity;
+
+        // B1777120 — THE AUTHORITY FLIP, write side. Once this account is flipped, an "hs-v1"
+        // save no longer touches planar_data at all -- it decomposes into per-schedule/per-index
+        // CAS writes. planar_data_refuse_post_flip_write (schedules_authority_flip.sql) is the
+        // database-level backstop for a stale cached tab whose JS predates this branch and still
+        // reaches the code below anyway.
+        if (k === "hs-v1" && scheduleRowsAuthoritative && parsed && typeof parsed === "object" && parsed.projects) {
+          return await writeScheduleRowsPrimary(parsed, v, { skipSanity, label });
+        }
 
         // Read the current cloud row ONCE -- used for both the concurrency guard
         // (Layer 0) and the task-drop sanity check (Layer 2). If the read fails,
@@ -18792,6 +19499,38 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
         return { key: k, value: v };
       } catch { return null; }
     },
+    // B1777120 — collision-proof schedule creation for a flipped account. Reserves a real
+    // Postgres identity value via INSERT (never a client-guessed nPid two tabs could race on —
+    // acceptance criterion 5), then patches the row with its own id embedded in `data` (every
+    // other read site in this app assumes `proj.id === <its own key>`) and seeds
+    // scheduleBase/scheduleKnownRev so the very next autosave for this schedule is an ordinary
+    // guarded UPDATE, not a second insert attempt. Returns the new id, or null on any failure
+    // (LOUD-FAILURE — the caller must never add an unsaved project to local state on a null).
+    insertSchedule: async ({ name, ownerKind, linkedSiteId, linkedSiteName, projectData } = {}) => {
+      try {
+        const { data: userRes } = await sb.auth.getUser();
+        const ownerUid = userRes && userRes.user && userRes.user.id;
+        if (!ownerUid) return null;
+        const { data: row, error } = await sb.from("schedules").insert({
+          user_id: ownerUid,
+          linked_site_id: linkedSiteId ?? null,
+          linked_site_name: linkedSiteName ?? null,
+          name: name || "",
+          data: {},
+          rev: 0,
+        }).select("id").single();
+        if (error || !row) { console.error("[schedule rows] insertSchedule failed:", error); return null; }
+        const id = row.id;
+        const finalName = name || ("Project " + id);
+        const proj = projectData ? { ...projectData, id } : { id, name: finalName, tasks: [], ownerKind };
+        if (linkedSiteId != null) { proj.linkedSiteId = linkedSiteId; proj.linkedSiteName = linkedSiteName || null; }
+        const { error: updErr } = await sb.from("schedules").update({ name: proj.name || finalName, data: proj, rev: 1 }).eq("id", id);
+        if (updErr) { console.error("[schedule rows] insertSchedule: could not finalize row", id, updErr); return null; }
+        scheduleKnownRev[String(id)] = 1;
+        scheduleBase[String(id)] = _deepClone(proj);
+        return id;
+      } catch (e) { console.error("[schedule rows] insertSchedule exception:", e); return null; }
+    },
     // List history snapshots for a key, newest first.
     getHistory: async (k, limit = 100) => {
       try {
@@ -18830,8 +19569,28 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
     },
     // Cheap "has the cloud moved ahead?" check for the live-refresh poll --
     // pulls only the version stamp, not the whole dataset.
+    // B1777120 — once flipped, "hs-v1" no longer has a single moving __rev (planar_data is
+    // frozen at whatever it held at flip time), so "newer?" is answered by summing every known
+    // schedule's rev + the index row's rev and comparing against a fresh sum. Any real write
+    // anywhere increases SOME row's rev by >=1, so this can't miss a genuine change; it CAN miss
+    // the specific case of a schedule being soft-deleted elsewhere (its rev leaves the sum
+    // entirely rather than increasing it) -- a known, accepted gap in this early-warning UI poll
+    // only, never in the CAS-write path itself, which still merges/refuses correctly regardless.
     checkRemote: async (k) => {
       try {
+        if (k === "hs-v1" && scheduleRowsAuthoritative) {
+          const { data: userRes } = await sb.auth.getUser();
+          const ownerUid = userRes && userRes.user && userRes.user.id;
+          if (!ownerUid) return { ok: false };
+          const [schedAgg, idxRes] = await Promise.all([
+            sb.from("schedules").select("rev").eq("user_id", ownerUid).is("deleted_at", null),
+            sb.from("schedule_account_index").select("rev").eq("user_id", ownerUid).maybeSingle(),
+          ]);
+          if (schedAgg.error || idxRes.error) return { ok: false };
+          const cloudTotal = (schedAgg.data || []).reduce((n, r) => n + (r.rev || 0), 0) + ((idxRes.data && idxRes.data.rev) || 0);
+          const knownTotal = Object.values(scheduleKnownRev).reduce((n, r) => n + (r || 0), 0) + (indexKnownRev || 0);
+          return { ok: true, cloudRev: cloudTotal, knownRev: knownTotal, newer: cloudTotal > knownTotal };
+        }
         const { data, error } = await sb.from(TABLE).select("rev:value->>__rev").eq("key", k).single();
         if (error || !data) return { ok: false };
         const cloudRev = data.rev == null ? 0 : (parseInt(data.rev, 10) || 0);

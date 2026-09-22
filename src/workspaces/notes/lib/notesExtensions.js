@@ -306,6 +306,20 @@ export const NOTE_EXTENSIONS = [
             parseHTML: () => null,
             renderHTML: () => ({}),
           },
+          /* ⛔ THE BLANK PAPER TO THE LEFT OF THE WRITING COLUMN (NEW-2, 2026-09-21). `0` on every
+           * page written before this existed, which renders byte-identically — nothing migrates.
+           *
+           * It is SEPARATE from `pageWidth` on purpose: that attribute is the COLUMN, this is the
+           * margin, and keeping them apart is what makes a left-edge drag expressible at all
+           * (`lib/notesPageWidth.js`'s `leftEdgeDrag`). It also replaces a React REF — the margin
+           * a left-grip drag opened used to be `widthDragLeftPadRef` and silently vanished on
+           * reload, so the page re-opened narrower than the owner left it. Never restored from
+           * pasted HTML, same reasoning as `pageWidth`/`density`. */
+          pageMarginLeft: {
+            default: 0,
+            parseHTML: () => 0,
+            renderHTML: () => ({}),
+          },
           /* ⛔ SET A PAGE'S OWN HEIGHT BY HAND (NEW-1, 2026-09-12 — "If the sides are draggable
            * the top and bottom should too."). `null` | a number — see lib/notesPageHeight.js's
            * own header for the full shape; it is deliberately SMALLER than `pageWidth` (no
@@ -390,6 +404,27 @@ export const NOTE_EXTENSIONS = [
           }
           if (state.doc.attrs.pageWidth === next) return false;
           if (dispatch) dispatch(tr.setDocAttribute("pageWidth", next));
+          return true;
+        },
+
+        /* ⛔ SET BOTH HALVES OF THE PAGE'S HORIZONTAL GEOMETRY IN ONE TRANSACTION (NEW-2,
+         * 2026-09-21) — the column and the blank left margin together.
+         *
+         * ⛔ IT IS ONE COMMAND RATHER THAN TWO CALLS FOR ONE REASON: UNDO. Two `setDocAttribute`
+         * dispatches are two history entries, so one Ctrl+Z would restore the column and leave
+         * the margin, i.e. a geometry the page was never in. A left-edge drag changes both (it
+         * spends the margin and, once that is gone, the column), so the pair has to move as a
+         * unit or undo can tear it. The width matrix's own "undo/redo of a width change is one
+         * step" row is what this exists to keep true. */
+        setNotePageGeometry: ({ pageWidth: w, pageMarginLeft: m } = {}) => ({ state, tr, dispatch }) => {
+          const col = typeof w === "number" && Number.isFinite(w)
+            ? Math.round(Math.max(PAGE_WIDTH_MIN, Math.min(PAGE_WIDTH_MAX, w)))
+            : state.doc.attrs.pageWidth;
+          const margin = typeof m === "number" && Number.isFinite(m)
+            ? Math.round(Math.max(0, Math.min(PAGE_WIDTH_MAX, m)))
+            : (state.doc.attrs.pageMarginLeft || 0);
+          if (state.doc.attrs.pageWidth === col && (state.doc.attrs.pageMarginLeft || 0) === margin) return false;
+          if (dispatch) dispatch(tr.setDocAttribute("pageWidth", col).setDocAttribute("pageMarginLeft", margin));
           return true;
         },
 

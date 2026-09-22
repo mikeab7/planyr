@@ -31,9 +31,9 @@
  * and it can only ever ADD a junction, never remove the explicit-connect path. */
 import {
   teeGeometry, rectEdges, nearestRectEdge, polygonEdges, polygonContainsPoint, polygonDepthBehind,
-  roadEdgeCrossing, polygonEdgeRunFrom, nodeJunction,
+  roadEdgeCrossing, polygonEdgeRunFrom, nodeJunction, roadCornerRadii,
 } from "./roadGeometry.js";
-import { isCenterlineRoad, roadCurbWidth, teeTargetPointOf } from "./siteGeometry.js";
+import { isCenterlineRoad, roadCurbWidth, teeTargetPointOf, roadDefaultRadius } from "./siteGeometry.js";
 import { roadClassOf, classReturnRadius } from "./roadClasses.js";
 
 // Same coincidence tolerance `driveJunctionsOf` has always used for "is this endpoint on that edge."
@@ -60,6 +60,27 @@ export function roadRunFrom(pts, i, step, noiseFt = VERTEX_NOISE_FT) {
 }
 // The tangent-read scale for a road: half its travel width, floored at the bare noise tolerance.
 export const roadTangentNoise = (el) => Math.max(VERTEX_NOISE_FT, (+(el && el.travelW) || 0) / 2);
+
+/* 2026-09-22 — how far a junction arm is STRAIGHT, not how far it is to the next vertex.
+ *
+ * Every junction here (a tee's through arms and side arm, a drive's side arm) used `roadRunFrom`'s
+ * polyline distance as the run a curb return may reach along. But a road's own corner starts
+ * curving a tangent length T = R·tan(θ/2) BEFORE its vertex, so a return built against a straight
+ * tangent for the whole leg runs out past where the pavement has already turned away. On the
+ * owner's Goose Creek Phase II plan: a 57° bend 26 ft from a tee node; the tee's return assumed 24 ft
+ * of straight arm, the bend began at ~12 ft, and the wedge left a spike of pavement outside the
+ * road. The arm's honest straight run ends at the neighbouring corner's arc ENTRY. `sharpAt` are
+ * this road's own junction nodes (rendered as hard corners, so they take no tangent). */
+export function armStraightRun(el, i, step, settings, sharpAt) {
+  const pts = el.pts || [];
+  const run = roadRunFrom(pts, i, step, roadTangentNoise(el));
+  const j = i + step;
+  if (j <= 0 || j >= pts.length - 1) return run;                    // the leg runs to a road END
+  const row = roadCornerRadii(pts, el.vtx, { defaultRadius: roadDefaultRadius(el, settings), sharpAt }).find((r) => r.i === j);
+  const T = row && Number.isFinite(row.rendered) && row.tanHalf > 0 ? row.rendered * row.tanHalf : 0;
+  const leg = Math.hypot(pts[j].x - pts[i].x, pts[j].y - pts[i].y);
+  return { ...run, dist: Math.max(0, Math.min(run.dist, leg - T)) };
+}
 
 export const DRIVE_RETURN_SEED = { parking: 15, truckcourt: 24 }; // B1005 — tidy default; teeGeometry caps the return REACH to R itself, so a small seed reads as a rounded corner. Editable up per-junction for a real WB-62 turn.
 // How far a junction's curb return may run along the through edge before it would reach a BUILDING.
@@ -129,6 +150,7 @@ export function driveJunctionsOf(els, settings) {
   const out = [];
   const byId = new Map((els || []).map((e) => [e.id, e]));
   const paveTargets = drivePaveTargets(els);
+  const nodes = teeNodeIndicesOf(els);
   for (const S of els || []) {
     if (!isCenterlineRoad(S) || S.attachedTo) continue;
     const stored = S.driveTee ? byId.get(S.driveTee.targetId) : null;
@@ -148,7 +170,7 @@ export function driveJunctionsOf(els, settings) {
     const P = S.pts[ei];                                            // the road's welded endpoint
     // NEW-1 — run ALONG the drive's polyline (skipping sub-tolerance vertex clutter) rather than
     // trusting the adjacent vertex; see roadRunFrom.
-    const sideRun = roadRunFrom(S.pts, ei, ei === 0 ? 1 : -1, roadTangentNoise(S));
+    const sideRun = armStraightRun(S, ei, ei === 0 ? 1 : -1, settings, nodes.get(S.id));
     const sideDir = { x: sideRun.far.x - P.x, y: sideRun.far.y - P.y };
     // B1611841 (NEW-2) — resolve the junction at the pad FACE the road actually crosses, never at
     // the raw endpoint (see roadGeometry.js's roadEdgeCrossing for why).
@@ -206,18 +228,36 @@ export function driveJunctionsOf(els, settings) {
  * SitePlanner.jsx, which is exactly the "test hand-copies the app's math" trap `driveJunctionsOf`'s
  * own header above describes (three B1645792 rounds shipped green while broken because of it); moving
  * this one out the same way means a test can drive the identical function the renderer calls. */
+/* Every road's own tee-node vertex indices (the vertices other roads tee onto) — rendered as hard
+ * corners, so `armStraightRun` must not charge them a tangent. Map<roadId, Set<index>>. */
+export function teeNodeIndicesOf(els) {
+  const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
+  const nodes = new Map();
+  for (const S of roads) {
+    for (const ei of [0, S.pts.length - 1]) {
+      const hit = teeTargetPointOf(roads, S, S.pts[ei]);
+      if (!hit) continue;
+      if (!nodes.has(hit.G.id)) nodes.set(hit.G.id, new Set());
+      nodes.get(hit.G.id).add(hit.gvi);
+    }
+  }
+  return nodes;
+}
+
 export function teeJunctionsOf(els, settings) {
   const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
   const out = [];
+  const nodes = teeNodeIndicesOf(els);
   for (const S of roads) {
     for (const ei of [0, S.pts.length - 1]) {
       const P = S.pts[ei];
       const hit = teeTargetPointOf(roads, S, P);
       if (!hit) continue;
       const { G, gvi, pts: gPts } = hit;
-      const sideRun = roadRunFrom(S.pts, ei, ei === 0 ? 1 : -1, roadTangentNoise(S));   // into the side road's body
+      const sideRun = armStraightRun(S, ei, ei === 0 ? 1 : -1, settings, nodes.get(S.id));   // into the side road's body
       const sideDir = { x: sideRun.far.x - P.x, y: sideRun.far.y - P.y };
-      const backRun = roadRunFrom(gPts, gvi, -1, roadTangentNoise(G)), fwdRun = roadRunFrom(gPts, gvi, 1, roadTangentNoise(G));
+      const Gel = gPts === G.pts ? G : { ...G, pts: gPts };
+      const backRun = armStraightRun(Gel, gvi, -1, settings, nodes.get(G.id)), fwdRun = armStraightRun(Gel, gvi, 1, settings, nodes.get(G.id));
       const a = backRun.far, b = fwdRun.far;
       const din = { x: P.x - a.x, y: P.y - a.y }, dout = { x: b.x - P.x, y: b.y - P.y };  // through tangents at the vertex
       const li = Math.hypot(din.x, din.y) || 1, lo = Math.hypot(dout.x, dout.y) || 1;

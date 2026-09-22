@@ -449,7 +449,11 @@ await tb("notes-peek").waitFor({ state: "visible", timeout: 10000 });
 await pacedWait(page, 700);
 const peekText = (await tb("notes-peek").innerText()).replace(/\s+/g, " ");
 ok("⛔ “READ IT” OPENS THE NOTE WITHOUT RESTORING IT", /Detention pond/.test(peekText), peekText.slice(0, 140));
-ok("…and says out loud that nothing here changes it", /Nothing you do here changes it/.test(peekText));
+/* NEW-2 (2026-09-22): the peek reader's status row used to spell out "Nothing you do here
+ * changes it" itself; that copy moved into a slim, button-free "read-only preview" indicator
+ * (see Notes.jsx's peek status bar and NotesTree.jsx's BinList "viewing" action cluster, which
+ * now carries Restore/Delete forever/Back to pages in a fixed spot instead). */
+ok("…and says out loud that this is read-only and nothing here changes it", /read-only.*nothing you do here changes it/i.test(peekText), peekText.slice(0, 140));
 ok("…and it is genuinely READ-ONLY, not merely labelled so",
   await page.evaluate(() => document.querySelector('[data-testid="note-body"]')?.getAttribute("contenteditable") === "false"));
 ok("⛔ AND THE TREE IS UNTOUCHED BY READING — the entry is still in the bin, still not live",
@@ -457,24 +461,22 @@ ok("⛔ AND THE TREE IS UNTOUCHED BY READING — the entry is still in the bin, 
     const t = JSON.parse(localStorage.getItem(k) || "null");
     return (t.trash || []).length === 4 && (t.pages || []).length === 1;
   }, TREE_KEY));
-await tb("notes-peek-close").click();
-await pacedWait(page, 400);
 
 /* ⛔ AND THE CONTAINER CASE, which is the one that failed on his account. The entry `tr2` is a
  * note whose OWN body is blank and whose words live in its subpage — exactly DEV
  * COORDINATION, which has no row in `notes_pages` at all. The row's preview came from the
  * child while the reader opened the parent, so the list showed 48 characters of real text and
- * Read it showed a heading and nothing else. */
+ * Read it showed a heading and nothing else.
+ * ⛔ NEW-1 (2026-09-22): clicking a DIFFERENT entry's "Read it" while one is already open must
+ * simply switch what is being read — no explicit close step is needed (or offered) first;
+ * see verify-notes-bin-mode-exit.mjs for the dedicated regression guard on that behaviour. */
 await tb("notes-bin-peek-tr2").click();
-await tb("notes-peek").waitFor({ state: "visible", timeout: 10000 });
 await pacedWait(page, 900);
 const containerText = (await tb("notes-peek").innerText()).replace(/\s+/g, " ");
 ok("⛔ READING A CONTAINER SHOWS ITS SUBPAGE'S WORDS — what the row promised, not a bare heading",
   /Truck turn exhibit/.test(containerText), containerText.slice(0, 160));
 ok("…and the row's own preview says the same thing, because one walk feeds both",
   /Truck turn exhibit/.test(await binText("tr2")));
-await tb("notes-peek-close").click();
-await pacedWait(page, 400);
 
 /* AND THE BULK CLEAR — sixteen of his rows were empty pages, and clearing them one at a time
  * is exactly why they were still there. */

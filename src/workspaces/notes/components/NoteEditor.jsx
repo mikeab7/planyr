@@ -39,22 +39,25 @@ import { anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, anchorP
 import { isBlankDoublePress, pressPastLineEnd } from "../lib/notesBlankPaper.js";
 import {
   applyMarquee, boxesInMarquee, latchGesture, marqueeRect, moveSelection, nudgeDelta,
-  panTarget, toggleSelection,
+  toggleSelection,
 } from "../lib/notesMarquee.js";
 import {
-  normalizeZoom, scrollTopAfterZoom, zoomForKey, zoomForWheel, zoomLabel, ZOOM_DEFAULT,
-} from "../lib/notesZoom.js";
+  fitView, frameView, normalizeView, panBy, stepZoom, toWorkspace,
+  VIEW_ZOOM_DEFAULT, zoomAbout, zoomForWheel, zoomKeyIntent, zoomLabel,
+} from "../lib/notesViewport.js";
 import { HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.js";
 import { PASTE_MODES } from "../lib/notesPastePlain.js";
 import { formFieldOwnsTheKey, UNGATED_KEYS } from "../lib/notesKeyScope.js";
 import { DEFAULT_DENSITY, densityFor } from "../lib/notesSpacing.js";
-import { PAGE_WIDTH_MIN, dragWidthFromDelta, leftWidthGripPad, matSidePads, resolvePinnedBaseWidth } from "../lib/notesPageWidth.js";
+import {
+  PAGE_WIDTH_MIN, leftEdgeDrag, normalizePageMargin, resolvePinnedBaseWidth, rightEdgeDrag,
+} from "../lib/notesPageWidth.js";
 import { dragHeightFromDelta, resolvePinnedBaseHeight, scrollToReach, topEdgeCompensation } from "../lib/notesPageHeight.js";
 import { indentCssRules, listMarkerCssRules } from "../lib/notesIndentLevel.js";
 import {
   readNoteFiles, readNoteImages, readPage, readPageVersions, registerOpenNoteDoc,
   restorePageVersion, snapshotPage, writePage,
-  readNotesZoom, writeNotesZoom,
+  readNoteView, writeNoteView,
 } from "../lib/notesStore.js";
 import {
   attachmentIdsInDoc, docToMarkdown, imageIdsInDoc, safeFileName, MD_INLINE_ATTACHMENT_MAX,
@@ -105,7 +108,6 @@ const TOP_EDGE_REACH_GAP = 10;
  * than a box's own grip and than the 4px slop that separates a press from a drag, and about the
  * width of the natural gutter on a small laptop, so a grown page still reads as a page on a desk
  * rather than as a different layout. */
-const MAT_GUTTER = 72;
 
 /* ⛔ THE MAT MUST HAVE SOMEWHERE TO SCROLL TO, WHETHER ANYTHING IS PARKED THERE YET OR NOT
  * (B1550977/NEW-2, owner report 2026-09-11: *"I'm not able to really scroll up or down... that
@@ -132,7 +134,7 @@ const MAT_GUTTER = 72;
  * there silently narrows the sheet itself (measured: a naturally-580px sheet rendered at its
  * 260px floor the instant this was tried as padding). The right-side reach is a normal-flow
  * SPACER SIBLING instead — see `matReachWidth`'s own comment, below, for the full mechanism.
- * (Growing left already has its own mechanism, `sheetGrowLeft` + the scroll-compensation layout
+ * (Growing left already has its own mechanism, `sheetPadLeft` + the scroll-compensation layout
  * effect below, which only spends real scroll room on a box that has actually earned it.) */
 /* ⛔ CORRECTED (B1344625/B1344626, owner report 2026-09-15) — BOTH NUMBERS ABOVE WERE
  * UNCONDITIONAL, AND THAT WAS ITSELF THE NEXT BUG. B1550977 fixed "nowhere to scroll to" by
@@ -154,9 +156,6 @@ const MAT_GUTTER = 72;
  *            moment B1550977's own report is actually about ("I'm not able to... expand into
  *            gray area" was written mid-drag, dragging a box he could not yet see). A note with
  *            no box in flight has nothing that needs the reach, and the spacer now says so. */
-const MAT_EXTRA_BOTTOM_MAX = 480;      // the old flat number, now a CEILING, not a constant
-const MAT_EXTRA_BOTTOM_FRACTION = 0.4; // …of the pane's own height, whichever is smaller
-const MAT_EXTRA_RIGHT = 320;   // breathing room past the sheet's own right edge, gesture-only now
 
 /* ⛔ THE PAGE TITLE IS A RATIO OF THE BODY, NOT A PIXEL NUMBER (NOTES-FREE-PLACEMENT / NEW-6,
  * owner report 2026-09-08: *"42px against 15px body, 2.8x, on a 580px column… it is the one
@@ -1392,6 +1391,34 @@ export default function NoteEditor({
      * the note instead of jumping to the browser's toolbar, so the way OUT has to be
      * announced rather than known: Escape releases the next Tab. */
     editorProps: {
+      /* ⛔ THE VIEWPORT NO LONGER SCROLLS, SO PROSEMIRROR'S OWN "KEEP THE CARET VISIBLE" CANNOT
+       * WORK — AND IF NOTHING REPLACED IT, TYPING PAST THE BOTTOM OF THE WINDOW WOULD WALK THE
+       * CARET STRAIGHT OFF THE GLASS (NEW-1, 2026-09-21).
+       *
+       * ProseMirror finds the nearest scrollable ancestor and adjusts its `scrollTop`; with the
+       * mat at `overflow: hidden` there isn't one, so it silently does nothing. This does the
+       * same job against the view instead: work out where the caret is in the viewport, and if it
+       * is outside the comfortable band, pan the LEAST amount that brings it back.
+       *
+       * ⛔ IT PANS, IT NEVER ZOOMS, AND IT ONLY EVER MOVES THE MINIMUM. The zoom is the person's
+       * choice and nothing typed may change it. Returning `true` tells ProseMirror this was
+       * handled so it does not also try. */
+      handleScrollToSelection: (view) => {
+        const sc = scrollerRef.current;
+        if (!sc) return true;
+        let caret;
+        try { caret = view.coordsAtPos(view.state.selection.head); } catch { return true; }
+        if (!caret) return true;
+        const box = sc.getBoundingClientRect();
+        const pad = 48;                                  // a comfortable band, not the bare edge
+        let dx = 0; let dy = 0;
+        if (caret.top < box.top + pad) dy = caret.top - (box.top + pad);
+        else if (caret.bottom > box.bottom - pad) dy = caret.bottom - (box.bottom - pad);
+        if (caret.left < box.left + pad) dx = caret.left - (box.left + pad);
+        else if (caret.left > box.right - pad) dx = caret.left - (box.right - pad);
+        if (dx || dy) setView({ x: viewRef.current.x + dx, y: viewRef.current.y + dy, z: viewRef.current.z });
+        return true;
+      },
       attributes: {
         /* ⛔ THE WRITING SURFACE IS A TEXTBOX, AND SAYING SO IS AN ACCESSIBILITY FIX RATHER THAN
          * A TIDY-UP (NEW-CARET-BOUNDS). The owner runs Windows 11's **Text cursor indicator** —
@@ -1984,6 +2011,185 @@ export default function NoteEditor({
   const selRef = useRef(selection);
   selRef.current = selection;
 
+  /* ---- THE PAGE SITS ON A BLUEBEAM-STYLE WORKSPACE (NEW-1, owner report 2026-09-21) --------
+   *
+   * ⛔ THIS REPLACES THE CSS-`zoom` TEXT-SIZE CONTROL (B342994, `lib/notesZoom.js`, now deleted),
+   * IT DOES NOT SIT BESIDE IT — and that is a deliberate product decision, not a refactor.
+   *
+   * The old control scaled the SHEET with CSS `zoom` while the sheet kept `width: 100%` of the
+   * pane, so zooming in made the letters bigger and the page stayed the same width on screen:
+   * the text RE-WRAPPED to fewer characters per line. That is a reading-size control, and it is
+   * a genuinely useful one — but it is the opposite of what was asked for here. Bluebeam's zoom
+   * makes the PAGE bigger and you move around it; line breaks never change, because the document
+   * is a fixed thing you are looking at from closer up. Keeping both would mean two things
+   * scaling on one gesture, which `notesZoom.js`'s own header already argued against for the
+   * browser's zoom. So: replaced, and Ctrl+wheel / Ctrl+= / Ctrl+− / Ctrl+0 all keep working —
+   * they now move the canvas rather than the type size, and Ctrl+9 fits the page.
+   *
+   * ⛔ THE VIEW IS A REF, NOT REACT STATE, AND THAT IS LOAD-BEARING TWICE OVER.
+   * (a) A pan writes one `transform` string and nothing re-renders — no memo recomputes, no
+   *     measurement effect runs, no reconciliation happens. That is VIEW-INDEPENDENT-ONCE
+   *     satisfied by construction rather than by a memo key a later edit can poison.
+   * (b) React never owns the workspace layer's `transform`, so a re-render from any other cause
+   *     cannot silently throw the view away. `applyView()` is the ONE writer, and a layout effect
+   *     re-asserts it after every render, before paint.
+   *
+   * ⛔ `view.x`/`view.y` ARE `scrollLeft`/`scrollTop` WITHOUT THE CLAMP — same sign, same units,
+   * same meaning. Every computation below that used to reason in scroll terms keeps its
+   * arithmetic; the only thing that disappears is the bound, which is exactly the bug family
+   * NEW-2 has been fighting for three rounds. See `lib/notesViewport.js`'s header. */
+  const viewRef = useRef(normalizeView({ x: 0, y: 0, z: VIEW_ZOOM_DEFAULT }));
+  const workspaceRef = useRef(null);
+  /* The level the indicator shows. The ONLY part of the view that is React state, so a pan
+   * re-renders nothing at all and a zoom re-renders exactly one label. */
+  const [zoomPct, setZoomPct] = useState(VIEW_ZOOM_DEFAULT);
+  const scrollerRef = useRef(null);
+  const noteRootRef = useRef(null);
+  const pageIdRef = useRef(pageId);
+  pageIdRef.current = pageId;
+  /* ---- THE ONE WRITER OF THE VIEW -----------------------------------------------------------
+   *
+   * ⛔ EVERY CHANGE TO THE VIEW GOES THROUGH `applyView`, and `applyView` is the only thing in
+   * this file that writes the workspace layer's `transform`. That is what makes the view
+   * impossible to lose: nothing else sets it, so nothing else can clear it, and the layout effect
+   * below re-asserts the current value after every React render, before paint.
+   *
+   * ⛔ `transform-origin: 0 0` AND THE TRANSLATE BEFORE THE SCALE. Written in this order the
+   * mapping is exactly `screen = workspace * z − view`, which is the one rule stated in
+   * `notesViewport.js`'s header and the only one any caller has to know. Reversing them (or
+   * moving the origin) silently changes what `view.x` means and every coordinate read in this
+   * file would have to be re-derived. */
+  const applyView = useCallback(() => {
+    const el = workspaceRef.current;
+    if (!el) return;
+    const v = viewRef.current;
+    el.style.transform = `translate(${-v.x}px, ${-v.y}px) scale(${v.z})`;
+  }, []);
+
+  /* Re-assert after every render — a React re-render rebuilds the inline style object and would
+   * otherwise drop a transform React does not know about. */
+  useLayoutEffect(applyView);
+
+  const viewPersistRef = useRef(null);
+  /** Persist the view, coalesced. A pan writes on every frame and storage is not a per-frame
+   *  resource; the view is a preference, so losing the last few pixels of it on a hard close
+   *  costs nothing. */
+  const persistView = useCallback(() => {
+    if (viewPersistRef.current) clearTimeout(viewPersistRef.current);
+    viewPersistRef.current = setTimeout(() => {
+      viewPersistRef.current = null;
+      if (pageIdRef.current) writeNoteView(pageIdRef.current, viewRef.current);
+    }, 400);
+  }, []);
+  useEffect(() => () => { if (viewPersistRef.current) clearTimeout(viewPersistRef.current); }, []);
+
+  /** Set the view. `next` is a whole view; the label state is updated only when the LEVEL
+   *  actually changed, so a pan re-renders nothing. */
+  /* ⛔ `byUser` IS WHAT STOPS THE OPENING FRAMING FIGHTING THE PERSON. Every route into this
+   * function except the first framing itself is something they did, and the moment one of them
+   * lands the page stops being re-framed for them — see `framedForRef` below. */
+  const viewTouchedRef = useRef(false);
+  const setView = useCallback((next, { persist = true, byUser = true } = {}) => {
+    const v = normalizeView(next);
+    const was = viewRef.current;
+    viewRef.current = v;
+    if (byUser) viewTouchedRef.current = true;
+    applyView();
+    if (v.z !== was.z) setZoomPct(v.z);
+    if (persist) persistView();
+  }, [applyView, persistView]);
+
+  /** The viewport's own box — the element the view is expressed relative to. */
+  const viewportRect = useCallback(() => scrollerRef.current?.getBoundingClientRect() || null, []);
+
+  /* ⛔ THE FIRST FRAMING, AND THE ONE STORED VIEW IT DEFERS TO (NEW-1, 2026-09-21).
+   *
+   * An unbounded workspace has no natural rest position, so a page opened with the identity view
+   * would sit flush in the viewport's top-left corner with no blank paper to its left — the exact
+   * "there is nowhere to double-click and nowhere to drop a box" complaint the mat's gutter used
+   * to exist to prevent (see B1385024's own history). The gutter is gone; this is what replaces
+   * it, and it is strictly better: it is a starting POSITION, not a permanent reserved margin, so
+   * the person can pan straight past it and it never has to be recomputed when the page's width
+   * changes.
+   *
+   * ⛔ IT RUNS ONCE PER PAGE AND NEVER AGAIN, which is the whole point. Re-framing on a width
+   * change (or on any later render) would be a view move the person did not ask for — and "the
+   * view itself stays exactly where it is" is a third of the owner's own sentence about what a
+   * width drag must not disturb. `framedForRef` holds the page id it has already framed. */
+  const framedForRef = useRef(null);
+  const framedSizeRef = useRef(null);
+  useLayoutEffect(() => {
+    const rect = viewportRect();
+    const sheet = noteRootRef.current?.querySelector('[data-testid="note-sheet"]');
+    if (!rect || !sheet || !rect.width) return;          // not measured yet — try again next render
+
+    /* A different page always gets a fresh framing. */
+    if (framedForRef.current !== pageId) {
+      framedForRef.current = pageId;
+      framedSizeRef.current = null;
+      viewTouchedRef.current = false;
+      /* A view this person already left on this page wins outright — including one panned far off
+       * the page, which is a place they chose. */
+      const stored = readNoteView(pageId);
+      if (stored) {
+        viewTouchedRef.current = true;                   // their view; never re-frame over it
+        setView(stored, { persist: false, byUser: false });
+        return;
+      }
+    }
+    /* ⛔ AND IT KEEPS RE-FRAMING UNTIL THE PAGE STOPS CHANGING SIZE — but only while the person
+     * has not touched the view. This is not belt-and-braces; the first render genuinely cannot
+     * frame correctly. Measured: the very first layout pass reports the sheet at the UNPINNED 580
+     * wide and 145 tall (the document has not laid out and the width pin has not been read yet),
+     * so a once-only framing centres the page against numbers that are about to change, and it
+     * opens visibly off-centre and too far down — 594 where 664 was correct.
+     *
+     * The moment they pan, zoom or type, `viewTouchedRef` latches and this never runs again: a
+     * view that keeps re-centring itself under somebody who is reading is far worse than one that
+     * opens a little late. */
+    if (viewTouchedRef.current) return;
+    /* ⛔ AND NEVER WHILE A GRIP DRAG IS IN FLIGHT. A width drag changes the sheet's size on every
+     * frame, which is exactly the signal this effect follows — so without this guard the framing
+     * re-centres the page under the pointer for the whole gesture. Measured before the guard
+     * existed: every widen moved the content by EXACTLY HALF the drag (a 150px left widen moved
+     * the body 75px), which is the unmistakable fingerprint of a re-centre rather than of any
+     * compensation bug. That is the mechanism the `viewTouchedRef` latch below closes for good;
+     * this is the belt to its braces, because a drag that somehow began before the latch would
+     * otherwise reproduce the whole defect class from a completely new door. */
+    if (widthDragRef.current || heightDragRef.current) return;
+    const r = sheet.getBoundingClientRect();
+    const z = viewRef.current.z || 1;
+    /* ⛔ THE PAGE'S OWN WORKSPACE ORIGIN, NOT (0, 0) — and assuming zero was a real defect. A page
+     * carrying a blank left margin sits at `sheetX = −margin`, so framing a box at the origin put
+     * it exactly one margin too far left: measured, a reloaded 780px page (200 of it margin)
+     * opened at screen x=294 where 494 was correct. Reading the sheet's real rect back through the
+     * live view is what makes this impossible to get wrong again — it is the DOM's answer, not a
+     * re-derivation of where the app meant to put it. */
+    const origin = toWorkspace(viewRef.current, { x: r.left - rect.left, y: r.top - rect.top });
+    const size = {
+      x: Math.round(origin.x),
+      y: Math.round(origin.y),
+      width: Math.round(r.width / z),
+      height: Math.round(r.height / z),
+    };
+    const last = framedSizeRef.current;
+    if (last && last.width === size.width && last.height === size.height
+      && last.x === size.x && last.y === size.y) {
+      /* ⛔ SETTLED — AND THIS IS WHERE THE FRAMING LATCHES OFF FOR GOOD. Two consecutive passes
+       * agreeing on the page's size means the document has laid out, so the opening framing has
+       * done its job. Everything after this is the person's view, and a page that re-centres
+       * itself later — on a width change, a preset pick, a box being placed — is the "the whole
+       * page jumped" complaint this module has already paid for twice (B1203504, NOTES-PAGE-GROWTH).
+       * Latching here is what makes "the view itself stays exactly where it is" true by
+       * construction rather than by each caller remembering not to disturb it. */
+      viewTouchedRef.current = true;
+      return;
+    }
+    framedSizeRef.current = size;
+    setView(frameView({ viewport: rect, page: size, zoom: VIEW_ZOOM_DEFAULT }),
+      { persist: false, byUser: false });
+  });
+
   /** The editor's live frame: where it is on screen, and the zoom, measured rather than assumed. */
   const frame = useCallback(() => {
     if (!editor || editor.isDestroyed) return null;
@@ -2148,10 +2354,12 @@ export default function NoteEditor({
     const startClient = { x: e.clientX, y: e.clientY };
     /* ⛔ READ ONCE, AT THE PRESS. See `gestureOutcome`'s own note on why this is never re-read. */
     const shift = e.shiftKey;
-    const scroller = scrollerRef.current;
-    const startScroll = scroller
-      ? { scrollLeft: scroller.scrollLeft, scrollTop: scroller.scrollTop }
-      : null;
+    /* ⛔ THE PAN BASELINE IS THE VIEW, NOT A SCROLL POSITION (NEW-1). Same shape, same sign, and
+     * the one difference is that it cannot run out: `panTarget`'s `maxLeft`/`maxTop` clamp is
+     * gone because there is no edge to clamp to on an unbounded workspace, and the 0 floor with
+     * it — panning to a NEGATIVE view is how you look at the blank paper above and to the left of
+     * the page, which is exactly what Bluebeam does and what the owner asked for. */
+    const startView = { ...viewRef.current };
     /* ⛔ THE SELECTION AS IT STOOD AT THE PRESS, frozen. Reading `selRef.current` on every move
      * instead — which is what the additive path used to do — makes the band STICKY: a box swept
      * up and then swept back out of a shrinking band stays selected, because the previous frame's
@@ -2181,13 +2389,11 @@ export default function NoteEditor({
       if (!latched) return;                          // still inside the slop — nothing has happened
       if (latched === "pan") {
         if (!was) setPanning(true);
-        if (!scroller || !startScroll) return;
-        const next = panTarget(startScroll, { dx: at.x - startClient.x, dy: at.y - startClient.y }, {
-          maxLeft: scroller.scrollWidth - scroller.clientWidth,
-          maxTop: scroller.scrollHeight - scroller.clientHeight,
+        setView({
+          x: startView.x - (at.x - startClient.x),
+          y: startView.y - (at.y - startClient.y),
+          z: startView.z,
         });
-        scroller.scrollLeft = next.scrollLeft;
-        scroller.scrollTop = next.scrollTop;
         return;
       }
       const to = toDoc(at.x, at.y);
@@ -2214,7 +2420,7 @@ export default function NoteEditor({
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
     return true;
-  }, [frame, toDoc, boxesNow, placeBlockAt, clearSelection]);
+  }, [frame, toDoc, boxesNow, placeBlockAt, clearSelection, setView]);
 
   /** Dragging any SELECTED box moves the whole set, by one delta, as one undo step. */
   const beginGroupDrag = useCallback((e, id) => {
@@ -2591,7 +2797,22 @@ export default function NoteEditor({
       const doublePress = e.detail >= 2 || isBlankDoublePress(lastBlankPressRef.current, press);
       /* Computed only for a genuine double press, so an ordinary click costs not one extra
        * measurement — `getClientRects` on every mousedown would be a real price for nothing. */
-      if (doublePress && pressPastLineEnd(lineRectsAt(editor, hit.pos), e.clientX, e.clientY)) {
+      /* ⛔ `minSlack` IS A DOCUMENT DISTANCE, SO IT HAS TO BE SCALED INTO SCREEN PIXELS (NEW-1,
+       * 2026-09-21). `pressPastLineEnd` compares a CLIENT x against a line's CLIENT rect, and the
+       * line's own height — the other half of its slack — is already a client measurement, so it
+       * scales with the canvas zoom for free. The 12px floor does not: it is written as a document
+       * distance and was being compared against screen pixels that shrink as you zoom out.
+       *
+       * ⛔ MEASURED, and it is a real defect the canvas introduced rather than a theoretical one:
+       * a double-click on unambiguous blank paper placed a box at 100%, 200% and 400% and created
+       * NOTHING at 25% and 50% — the same spot on the same paper, fewer screen pixels past the
+       * line, so the press read as "beside the line" and went to the caret instead. Found by
+       * `verify-notes-canvas`'s own zoom sweep; a three-point far-out/100%/far-in check would have
+       * missed it, because both of ITS far-out points were below the level where the target is
+       * aimable at all. */
+      const slackScale = viewRef.current.z || 1;
+      if (doublePress && pressPastLineEnd(lineRectsAt(editor, hit.pos), e.clientX, e.clientY,
+        { minSlack: 12 * slackScale })) {
         lastBlankPressRef.current = null;           // consumed — a third press starts a fresh pair
         e.preventDefault();                          // no native word-select, no caret move
         e.stopPropagation();
@@ -2663,34 +2884,16 @@ export default function NoteEditor({
     if (!beginBlankGesture(e)) placeBlockAt(e.clientX, e.clientY);
   }, [editor, placeBlockAt, beginBlankGesture, beginGroupDrag, clearSelection, cancelPendingPlace, focusEndOfSheet]);
 
-  /* ---- HOW BIG THE WRITING IS (NEW-3) ----------------------------------------------------
-   *
-   * ⛔ THE DOCUMENT ZOOMS, THE APP DOES NOT. The sheet scales; the rail, the toolbar and the
-   * header do not. The browser already has a control that scales everything together — what
-   * it does not have is "make the writing bigger and leave my navigation where it is", which
-   * is the one being asked for. Every rule (the steps, the wheel curve, what each key means,
-   * where the level is kept) is pure and unit-tested in lib/notesZoom.js; this is the wiring.
-   *
-   * ⛔ IT USES CSS `zoom`, NOT A TRANSFORM, AND THAT IS THE LOAD-BEARING CHOICE. A transform
-   * paints the same layout larger — the line breaks stay put and the caret drifts out of the
-   * glyphs. `zoom` RE-LAYS OUT at the new size, so text rewraps, the caret is the browser's
-   * own, and the anchored blocks of NEW-2 keep their geometry. It is also why `placeBlockAt`
-   * can recover the live scale by measuring rather than by being told. */
-  const [zoom, setZoom] = useState(() => normalizeZoom(readNotesZoom()));
-  const scrollerRef = useRef(null);
-  const noteRootRef = useRef(null);
-  /* ⛔ THE PAGE'S OWN GROWN WIDTH, AS STATE RATHER THAN AN IMPERATIVE DOM WRITE
-   * (NOTES-PAGE-GROWTH) — unlike `dom.style.minHeight`/`minWidth` below, `note-sheet` is a
-   * React-owned element, so writing its style from outside React risks exactly the kind of
-   * fight-with-the-reconciler bug this repo has hit before. React already bails out of a
-   * re-render when a state update carries the SAME value (`Object.is`), so setting this on
-   * every keystroke costs nothing on the overwhelmingly common case — nothing to grow — and
-   * only actually re-renders on the rare keystroke that changes it. */
-  const [sheetGrowWidth, setSheetGrowWidth] = useState(null);
+
+  /* ⛔ `sheetGrowWidth` IS GONE (NEW-2, 2026-09-21) — `sheetWidth` replaces it outright. The old
+   * name meant "an override for the sheet's `maxWidth`/`width`, or `null` for the unpinned 100%
+   * default", which only made sense while the sheet was a flex child sized as a percentage of a
+   * scroller's content box. A card absolutely positioned on a workspace always has one real
+   * width, so there is no null case and no override to distinguish from a default. */
   /* ⛔ AND THE OTHER TWO DIRECTIONS (NOTES-FREE-PLACEMENT / NEW-1, owner report 2026-09-08).
    * Growth right and down shipped; left and up were CLAMPED, so a box dragged 434px past the
    * page's left edge landed at `left: 4px` with the page still 580 wide, while the identical
-   * gesture rightward grew it 580 → 1212 and shrank it back. `sheetGrowLeft` is extra padding on
+   * gesture rightward grew it 580 → 1212 and shrank it back. `sheetPadLeft` is extra padding on
    * the card's LEFT edge, so the page grows outward and the content inside it keeps its
    * coordinates rather than every box being rewritten.
    *
@@ -2701,7 +2904,6 @@ export default function NoteEditor({
    * distance between them, which is exactly how a box "above the body's origin" ended up rendering
    * behind the band's own `<input>` instead of clear of it. Growing the GAP AFTER the band is the
    * one distance that separates them. `0` is the ordinary state and costs nothing, same as before. */
-  const [sheetGrowLeft, setSheetGrowLeft] = useState(0);
   const [sheetGrowGap, setSheetGrowGap] = useState(0);
   /* ⛔ AND THE PAGE'S OWN TOP EDGE MOVES FOR A TOP-EDGE SHRINK (B1605664 ×2) — the render mirror of
    * `heightTopPadRef` below, which carries the full reasoning. It is STATE and not an imperative
@@ -2711,87 +2913,43 @@ export default function NoteEditor({
    * closure over state would be stale); this is what actually renders. `0` in every ordinary
    * state, costing nothing. */
   const [sheetTopPad, setSheetTopPad] = useState(0);
-  /* How much grey sits to the LEFT of the page — the gutter a centred ungrown page would have,
-   * floored so it never disappears. Measured in the same pass as the growth, from the same
-   * numbers, and it is a function of the PANE only, never of the sheet's grown width, which is
-   * what makes the page's left edge unable to move. */
-  const [matPadX, setMatPadX] = useState(0);
-  /* ⛔ THE MAT'S OWN VISIBLE CONTENT WIDTH, CARRIED OUT TO THE RENDER (B<PENDING>) —
-   * `matSidePads` needs it to tell a page that is NARROWER than what the two gutters leave room
-   * for (Narrow, or any hand-dragged width below it) from one at or above it, because only the
-   * first leaves the mat's own content short of the pane and therefore leaves the compensating
-   * scroll with nothing to spend. Read that function's header for the measured defect and for why
-   * this is the PANE rather than the natural card width. Set in the SAME pass as `matPadX`, from
-   * the same `paneContentWidth`, so the two can never disagree about the box they describe. */
-  const [matPaneWidth, setMatPaneWidth] = useState(0);
-  /* The mat's rendered side padding, derived — see `matSidePads` (lib/notesPageWidth.js) for the
-   * whole argument. Recomputed every render on purpose: during a live width drag the measurement
-   * effect deliberately bails (so a recompute cannot fight the drag), and `sheetGrowWidth` /
-   * `sheetGrowLeft` are the two values the drag DOES write live, so this is the only place the
-   * gutter spend can keep up with the pointer. */
-  const matPads = useMemo(
-    () => matSidePads({
-      gutter: matPadX,
-      growLeft: sheetGrowLeft,
-      sheetWidth: sheetGrowWidth ?? Math.max(0, matPaneWidth - matPadX * 2),
-      paneWidth: matPaneWidth,
-    }),
-    [matPadX, sheetGrowLeft, sheetGrowWidth, matPaneWidth],
-  );
-  /* ⛔ HOW WIDE THE MAT'S SCROLLABLE CONTENT MUST BE TO GIVE THE SHEET SOME BREATHING ROOM PAST
-   * ITS OWN RIGHT EDGE (B1550977/NEW-2) — the sheet's OWN rendered width plus `MAT_EXTRA_RIGHT`,
-   * carried as a NORMAL-FLOW SPACER sibling rather than as padding on `note-mat` itself.
+  /* ⛔ THE PAGE'S LEFT BOUNDARY, IN WORKSPACE COORDINATES (NEW-1/NEW-2, 2026-09-21). This
+   * REPLACES `matPadX` (the mat's gutter), `matPaneWidth`, `matSidePads`, `matReachWidth` and
+   * `matExtraBottom` — five pieces of state that between them existed to manufacture reachable
+   * grey around a page inside a BOUNDED scroller, and to hold the words still while that grey
+   * changed size. An unbounded workspace has grey in every direction by construction and never
+   * moves the page to make more, so all five are gone rather than re-tuned.
    *
-   * ⛔ WHY NOT JUST PADDING, WHICH IS WHAT THE FIRST DRAFT OF THIS FIX DID AND WHICH BROKE THE
-   * SHEET'S OWN WIDTH. `note-sheet` sizes itself with `width: "100%"` when ungrown, which resolves
-   * against `note-mat`'s CONTENT box — and `matPadX` is chosen SPECIFICALLY so that
-   * `paneWidth - 2×matPadX ≈ naturalSheetWidth`, a closed-loop equation between the mat's own
-   * padding and the sheet's percentage width. Adding MORE padding-right to reach further past the
-   * sheet breaks that equation: it shrinks the content box the sheet's `100%` resolves against by
-   * the exact amount added, and the sheet renders that much NARROWER — measured: a naturally-580px
-   * sheet rendered at 260px (its own floor) the moment 320px of extra padding-right was tried,
-   * with zero drag on the box at all. A SIBLING spacer costs nothing here: `alignItems:
-   * "flex-start"` sizes each flex-column child independently, so a wider sibling extends the
-   * scroller's own `scrollWidth` without ever touching what "100%" means to `note-sheet`. */
-  const [matReachWidth, setMatReachWidth] = useState(0);
-  /* ⛔ B1344626 — the mat's own proportional bottom scroll room (see `MAT_EXTRA_BOTTOM_MAX`'s
-   * own header for why this replaced a flat constant). Kept fresh by the same measurement effect
-   * that computes `matReachWidth`, off the SAME `scrollerRef` observation that effect already
-   * added for B1344624 — no separate resize listener needed. */
-  const [matExtraBottom, setMatExtraBottom] = useState(MAT_EXTRA_BOTTOM_MAX);
-  /* ⛔ B1344625 — IS A BOX GESTURE (a move-drag or a resize-drag) CURRENTLY IN FLIGHT? The mat's
-   * horizontal reach (`MAT_EXTRA_RIGHT`) only ever needs to exist for the DURATION of such a
-   * gesture — see `MAT_EXTRA_RIGHT`'s own header for why B1550977's original "always reserve it"
-   * answer was itself the next bug. Driven by a capture-phase `pointerdown` listener below rather
-   * than by reaching into `notesAnchorNode.js`'s own drag internals (a node view with no access to
-   * this component's React state, and — per that file's own header — code that has cost multiple
-   * incident rounds; this stays purely additive and outside it). `.planyr-anchor` is the box's own
-   * root className (so a press anywhere on a box, its grip, or a resize handle — `.planyr-anchor-h`
-   * — matches), and this deliberately over-triggers on an ORDINARY click into a box that never
-   * becomes a drag: the cost is a few frames of extra (invisible, nothing is scrolled to the edge)
-   * scroll room, not a wrong picture, and far cheaper than threading a second signal through the
-   * node view for exactness a user can't see. */
-  const [boxGestureActive, setBoxGestureActive] = useState(false);
-  useEffect(() => {
-    const root = noteRootRef.current;
-    if (!root) return undefined;
-    const onDown = (e) => {
-      if (e.target?.closest?.(".planyr-anchor, .planyr-anchor-h")) setBoxGestureActive(true);
-    };
-    const onUp = () => setBoxGestureActive(false);
-    root.addEventListener("pointerdown", onDown, true);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-    return () => {
-      root.removeEventListener("pointerdown", onDown, true);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    };
-  }, []);
-  /** Where the body sat the last time the page's growth changed — see the compensation effect. */
-  const growAnchorRef = useRef(null);
-  /** …and the gutter that reading was taken under, so a gutter change re-bases rather than scrolls. */
-  const growPadRef = useRef(null);
+   * ⛔ THE INVARIANT, STATED ONCE: the BODY's workspace position is `sheetX + sheetPadLeft`, and
+   * every path that changes the page's width holds that sum constant unless the user is
+   * deliberately squeezing the column. That is why nothing needs a compensating scroll.
+   *
+   * `sheetX` starts at 0 and only a left-edge change moves it — negative once blank paper has
+   * been opened, which is perfectly legal on a workspace with no origin. */
+  const [sheetX, setSheetX] = useState(0);
+  /* The page's rendered width: the blank left margin plus the writing column. */
+  const [sheetWidth, setSheetWidth] = useState(SHEET_MAX_WIDTH);
+  /* The blank paper between the page's own left edge and where the writing starts — the thing a
+   * left-edge widen actually opens. Rendered as extra padding-left on the sheet. */
+  const [sheetPadLeft, setSheetPadLeft] = useState(0);
+  /* A ref mirror of `sheetWidth`, because a drag reads it SYNCHRONOUSLY at the moment of the
+   * press and a `useCallback` closure over state would be one render stale — the same reasoning
+   * `heightTopPadRef` already carries for its own render mirror. */
+  /* The blank left margin as the measurement effect last saw it, so it can apply the CHANGE
+   * rather than re-derive the page's position — see that effect for why the difference
+   * matters. `null` until the first pass, which is what "place it" means. */
+  const growLeftRef = useRef(null);
+  const sheetWidthRef = useRef(SHEET_MAX_WIDTH);
+  sheetWidthRef.current = sheetWidth;
+  const sheetXRef = useRef(0);
+  sheetXRef.current = sheetX;
+  const sheetPadLeftRef = useRef(0);
+  sheetPadLeftRef.current = sheetPadLeft;
+  /* ⛔ `boxGestureActive` IS GONE (NEW-1, 2026-09-21), along with `MAT_EXTRA_RIGHT` which it
+   * gated. Both existed so a bounded scroller had somewhere off the page's right edge to drag a
+   * box TO — reach that had to be manufactured, and then manufactured only during a gesture
+   * (B1344625) because a permanent version was its own bug. The workspace is unbounded: there is
+   * reach in every direction, permanently, at no cost and with nothing to switch on and off. */
   /* ⛔ SET A PAGE'S OWN WIDTH BY HAND (NEW-1). `widthDragRef` is non-null only for the duration
    * of an edge-drag gesture — see `beginWidthDrag` below for the full mechanism, and the
    * measurement effect's own comment on `pinnedPageWidth` for why a pin is folded into
@@ -2801,32 +2959,12 @@ export default function NoteEditor({
    *  fresh by every real measurement run; see that effect's own comment for why a drag must
    *  floor against THIS, never against `sheetGrowWidth`. */
   const widthContentFloorRef = useRef(0);
-  /* ⛔ NEW-2 (owner report 2026-09-17) — THE LEFT WIDTH GRIP'S OWN "OTHER EDGE HOLDS" PAD, and it
-   * is a THIRD mechanism, not a rename of either existing one. `heightTopPadRef` moves content
-   * WITH the dragged edge (the top-height case: the owner asked for that). This is the opposite
-   * ask for THIS edge, verbatim: *"existing content... stays anchored in the exact same on-screen
-   * position; only the left boundary line moves outward, opening new blank space to the left of
-   * the content."* `beginWidthDrag`'s own header used to describe a scroll-only trick that held
-   * the RIGHT edge still while scrolling the LEFT edge (and everything painted inside the sheet,
-   * content included) left with it — which is exactly the bug: nothing distinguished "the sheet's
-   * own boundary" from "the words inside it," so both moved together. The fix reuses the
-   * ALREADY-BUILT, ALREADY-TESTED mechanism for opening blank space to the left of a page's
-   * content without moving it — `sheetGrowLeft` (NOTES-FREE-PLACEMENT's own left-padding growth
-   * + the `useLayoutEffect` a few screens down that scrolls to hold the body's SCREEN position
-   * fixed whenever `sheetGrowLeft` changes) — rather than inventing a fourth. This ref is the
-   * FLOOR a live drag writes and the measurement effect's own `growLeft` computation reads once
-   * the drag ends (see that effect's own comment), so the illusion survives past mouse-up instead
-   * of being recomputed away the instant real content's own `anchorExtentLeft` need is smaller.
-   * Kept after release, not cleared — same reasoning `heightTopPadRef`'s header gives: a reload,
-   * which restores neither scroll position nor this ref, shows the same stored width rendered
-   * from the app's ordinary right-grown rest position, which is a stated, accepted limitation
-   * rather than a surprise (see that ref's own header for the precedent). */
-  const widthDragLeftPadRef = useRef(0);
-  /** …and which committed page width this pad belongs to — the `heightPadOwnerRef` pattern,
-   *  transposed. A width change that did NOT come from this drag (a menu preset, undo/redo, a
-   *  sync from another device, Fit to content) drops the pad instead of carrying a stale
-   *  left-margin illusion into a page nobody just dragged. */
-  const widthPadOwnerRef = useRef(null);
+  /* ⛔ `widthDragLeftPadRef` AND `widthPadOwnerRef` ARE GONE (NEW-2, 2026-09-21). The blank left
+   * margin is a stored document attribute now (`pageMarginLeft`), not a React ref plus a
+   * stamp recording which committed width the ref still belonged to. The ref did not survive a
+   * reload — a margin a drag opened silently vanished on the next open — and the owner-stamp
+   * existed only to notice when some OTHER route to a width (a preset, undo, a sync) had made the
+   * ref stale, which an attribute cannot be. See `notesExtensions.js`'s `pageMarginLeft`. */
   /* ⛔ SET A PAGE'S OWN HEIGHT BY HAND (NEW-1) — the vertical twin of the two refs above.
    * `heightDragRef` is non-null only for the duration of an edge-drag gesture (see
    * `beginHeightDrag` below); `heightContentFloorRef` is `need` alone (genuine anchored-box
@@ -2899,8 +3037,6 @@ export default function NoteEditor({
     heightTopPadRef.current = n;
     setSheetTopPad(n);
   }, []);
-  const zoomRef = useRef(zoom);
-  zoomRef.current = zoom;
 
   /* ⛔ VIEWPORT-STABLE — THE TABLE TOOLBAR GROUP MUST NOT JUMP THE SHEET UNDER THE POINTER
    * (NEW-1 / B649376, owner report: *"when I click and highlight stuff, it just jumps and
@@ -3020,63 +3156,222 @@ export default function NoteEditor({
     };
   }, [editor, applyToolbarDelta]);
 
-  /* ⛔ THE SAME WRITING STAYS UNDER THE EYE ACROSS A STEP (VIEWPORT-STABLE). Left alone, a
-   * zoom throws the reader somewhere else: the content above the viewport changes height, so
-   * the same scrollTop points at a different paragraph. The anchor's offset is measured
-   * BEFORE the change and the new scroll position is arithmetic, not a guess — and it is
-   * applied in a layout effect, before paint, so nothing is ever seen in the wrong place. */
-  const zoomFrom = useRef(zoom);
-  const applyZoom = useCallback((next) => {
-    const to = normalizeZoom(next);
-    setZoom((cur) => {
-      if (to === cur) return cur;
-      const sc = scrollerRef.current;
-      if (sc) zoomFrom.current = { from: cur, to, scrollTop: sc.scrollTop };
-      writeNotesZoom(to);
-      return to;
-    });
-  }, []);
 
-  useLayoutEffect(() => {
-    const rec = zoomFrom.current;
-    const sc = scrollerRef.current;
-    if (!rec || typeof rec !== "object" || !sc) return;
-    zoomFrom.current = null;
-    // The anchor is the top of the viewport, expressed in the document's OWN frame — which is
-    // what makes it comparable across two different zoom levels.
-    const anchorOffset = rec.scrollTop / rec.from;
-    const nextTop = scrollTopAfterZoom({ anchorOffset, viewportOffset: 0, from: rec.from, to: rec.to });
-    if (nextTop != null) sc.scrollTop = nextTop;
-  }, [zoom]);
 
-  /* Ctrl+wheel. Non-passive and `preventDefault`ed, because the whole point is that the
-   * BROWSER's zoom does not also fire — two things scaling on one gesture is worse than
-   * neither. Attached by hand for exactly that reason: React's onWheel is passive. */
+  /** Zoom, anchored at a client point (the pointer). Falls back to the middle of the viewport
+   *  when no point is given, which is what a keyboard step means. */
+  const zoomTo = useCallback((nextZoom, clientPoint) => {
+    const rect = viewportRect();
+    if (!rect) return;
+    const at = clientPoint
+      ? { x: clientPoint.x - rect.left, y: clientPoint.y - rect.top }
+      : { x: rect.width / 2, y: rect.height / 2 };
+    setView(zoomAbout(viewRef.current, at, nextZoom));
+  }, [setView, viewportRect]);
+
+  /** The sheet's own workspace box, read off the DOM — never re-derived from the app's own
+   *  formula, so a framing cannot silently agree with a wrong number (DRIVER-SCROLL §6). */
+  const sheetWorkspaceBox = useCallback(() => {
+    const sheet = noteRootRef.current?.querySelector('[data-testid="note-sheet"]');
+    const rect = viewportRect();
+    if (!sheet || !rect) return null;
+    const r = sheet.getBoundingClientRect();
+    const v = viewRef.current;
+    const tl = toWorkspace(v, { x: r.left - rect.left, y: r.top - rect.top });
+    return { x: tl.x, y: tl.y, width: r.width / v.z, height: r.height / v.z };
+  }, [viewportRect]);
+
+  /** Ctrl+0 — back to 100%, framed the way a freshly opened page is framed. */
+  const resetView = useCallback(() => {
+    const rect = viewportRect();
+    const page = sheetWorkspaceBox();
+    if (!rect || !page) return;
+    setView(frameView({ viewport: rect, page, zoom: VIEW_ZOOM_DEFAULT }));
+  }, [setView, viewportRect, sheetWorkspaceBox]);
+
+  /** ⛔ "FULL WIDTH" IS THE ONE PRESET WHOSE DEFINITION IS ABOUT THE PANE, so it is the one place
+   *  a width change is allowed to move the view (NEW-1, 2026-09-21).
+   *
+   *  Every other width change must leave the view exactly where it is — that is a third of the
+   *  owner's own sentence and the width matrix asserts it on every preset transition. "Full width"
+   *  is different in kind: it does not name a number, it names the PANE, and `resolvePresetPx`
+   *  resolves it against the pane's current size. On an unbounded canvas a page can sit anywhere,
+   *  so a page resolved to the pane's width and then left where it happened to be simply runs off
+   *  the right-hand edge — measured, a 907px frame overhanging a 923px pane by 156px. Honouring
+   *  the request means showing it, so picking it brings the page's full width into view.
+   *  Deliberately width-only: the zoom the person chose is theirs, and the vertical position is
+   *  where they were reading. */
+  const fitWidth = useCallback(() => {
+    const rect = viewportRect();
+    const page = sheetWorkspaceBox();
+    if (!rect || !page) return;
+    const framed = frameView({ viewport: rect, page, zoom: viewRef.current.z });
+    setView({ x: framed.x, y: viewRef.current.y, z: viewRef.current.z });
+  }, [setView, viewportRect, sheetWorkspaceBox]);
+
+  /* Fires only on the TRANSITION into "full", never on every render while it is active — a view
+   * that re-framed itself on each pass would be the "the page keeps jumping" defect, and it would
+   * also fight a deliberate pan. */
+  const wasFullRef = useRef(null);
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    const isFull = editor.state.doc.attrs?.pageWidth === "full";
+    const was = wasFullRef.current;
+    wasFullRef.current = isFull;
+    if (was === null || !isFull || was === isFull) return;
+    const id = requestAnimationFrame(fitWidth);     // after the new width has laid out
+    return () => cancelAnimationFrame(id);
+  }, [editor, sheetWidth, fitWidth]);
+
+  /** Ctrl+9 — show the whole page. */
+  const fitPage = useCallback(() => {
+    const rect = viewportRect();
+    const page = sheetWorkspaceBox();
+    if (!rect || !page) return;
+    setView(fitView({ viewport: rect, page }));
+  }, [setView, viewportRect, sheetWorkspaceBox]);
+
+  /* ---- GESTURES ------------------------------------------------------------------------------
+   *
+   * ⛔ THE WHEEL DOES TWO THINGS AND THE BROWSER'S OWN ZOOM DOES NEITHER. Ctrl/⌘+wheel zooms at
+   * the cursor; a plain wheel PANS, which is what the scroller used to do for free and now has to
+   * be done by hand because the viewport no longer scrolls. A trackpad's horizontal swipe arrives
+   * as `deltaX` on the same event, so two-finger panning in both axes falls out of it.
+   *
+   * ⛔ NON-PASSIVE AND `preventDefault`ED, deliberately — the whole point is that Chrome's own
+   * page zoom does not ALSO fire on Ctrl+wheel. Attached by hand for exactly that reason: React's
+   * `onWheel` is passive and cannot cancel. */
   useEffect(() => {
     const sc = scrollerRef.current;
     if (!sc) return undefined;
     const onWheel = (e) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
-      applyZoom(zoomForWheel(zoomRef.current, e.deltaY, { deltaMode: e.deltaMode }));
+      if (e.ctrlKey || e.metaKey) {
+        zoomTo(zoomForWheel(viewRef.current.z, e.deltaY, { deltaMode: e.deltaMode }), { x: e.clientX, y: e.clientY });
+        return;
+      }
+      /* A line/page delta is a different unit; normalise before spending it as pixels, the same
+       * way the zoom curve does. */
+      const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+      setView(panBy(viewRef.current, { dx: -e.deltaX * k, dy: -e.deltaY * k }));
     };
     sc.addEventListener("wheel", onWheel, { passive: false });
     return () => sc.removeEventListener("wheel", onWheel);
-  }, [applyZoom]);
+  }, [zoomTo, setView]);
 
-  /* Ctrl+= / Ctrl+- / Ctrl+0. On the WINDOW, because the caret is usually inside the document
-   * and a listener on the pane would miss half of them — and gated on this editor being
+  /* Ctrl+= / Ctrl+− / Ctrl+0 / Ctrl+9. On the WINDOW, because the caret is usually inside the
+   * document and a listener on the pane would miss half of them — and gated on this editor being
    * mounted, which it only is on the Notes route. */
   useEffect(() => {
     const onKey = (e) => {
-      const next = zoomForKey(zoomRef.current, e);
-      if (next == null) return;
+      const intent = zoomKeyIntent(e);
+      if (!intent) return;
       e.preventDefault();
-      applyZoom(next);
+      if (intent.kind === "reset") { resetView(); return; }
+      if (intent.kind === "fit") { fitPage(); return; }
+      zoomTo(stepZoom(viewRef.current.z, intent.direction));
     };
     window.addEventListener("keydown", onKey, { capture: true });
     return () => window.removeEventListener("keydown", onKey, { capture: true });
-  }, [applyZoom]);
+  }, [zoomTo, resetView, fitPage]);
+
+  /* ⛔ MIDDLE-MOUSE AND SPACE+DRAG PAN, matching Bluebeam and the Site planner so the two modules
+   * feel the same. A plain left-drag on blank workspace already pans (the mat's own gesture model
+   * — see docs/NOTES-CARRY-FORWARD.md §7); these two are the ones that pan from ANYWHERE,
+   * including from on top of the page, which is what you want once you are zoomed in far enough
+   * that there is no blank workspace on screen to grab. */
+  const spaceHeldRef = useRef(false);
+  useEffect(() => {
+    const sc = scrollerRef.current;
+    if (!sc) return undefined;
+    const onKeyDown = (e) => {
+      if (e.code !== "Space" || spaceHeldRef.current) return;
+      /* ⛔ NOT WHILE THE CARET IS IN TEXT — a space is a space when somebody is typing. This is
+       * the module's own standing rule (NOTES-KEY-SCOPE) and the guard is the shared predicate,
+       * never a bespoke copy. */
+      if (formFieldOwnsTheKey(document.activeElement)) return;
+      spaceHeldRef.current = true;
+      sc.setAttribute("data-space-pan", "1");
+    };
+    const onKeyUp = (e) => {
+      if (e.code !== "Space") return;
+      spaceHeldRef.current = false;
+      sc.removeAttribute("data-space-pan");
+    };
+    /* A window blur while the key is down would otherwise leave the mode latched on forever. */
+    const onBlur = () => { spaceHeldRef.current = false; sc.removeAttribute("data-space-pan"); };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
+
+  const beginViewPan = useCallback((e) => {
+    const start = { x: e.clientX, y: e.clientY };
+    const from = { ...viewRef.current };
+    const sc = scrollerRef.current;
+    if (sc) sc.setAttribute("data-panning", "1");
+    const prevCursor = document.body.style.cursor;
+    const prevSelect = document.body.style.userSelect;
+    document.body.style.cursor = "grabbing";
+    document.body.style.userSelect = "none";
+    const onMove = (ev) => {
+      setView({ x: from.x - (ev.clientX - start.x), y: from.y - (ev.clientY - start.y), z: from.z });
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      if (sc) sc.removeAttribute("data-panning");
+      document.body.style.cursor = prevCursor;
+      document.body.style.userSelect = prevSelect;
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  }, [setView]);
+
+  /* ⛔ PINCH. A trackpad pinch arrives as a Ctrl+wheel (handled above); a real touch pinch is two
+   * pointers, which nothing else here claims. Tracked on the viewport so it works over the page
+   * as well as over blank workspace. */
+  useEffect(() => {
+    const sc = scrollerRef.current;
+    if (!sc) return undefined;
+    const live = new Map();
+    let pinch = null;
+    const spread = () => {
+      const [a, b] = [...live.values()];
+      return { dist: Math.hypot(a.x - b.x, a.y - b.y), mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
+    };
+    const onDown = (e) => {
+      if (e.pointerType !== "touch") return;
+      live.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (live.size === 2) pinch = { ...spread(), z: viewRef.current.z };
+    };
+    const onMove = (e) => {
+      if (!live.has(e.pointerId)) return;
+      live.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (live.size !== 2 || !pinch || !pinch.dist) return;
+      e.preventDefault();
+      const now = spread();
+      zoomTo(pinch.z * (now.dist / pinch.dist), now.mid);
+    };
+    const onUp = (e) => { live.delete(e.pointerId); if (live.size < 2) pinch = null; };
+    sc.addEventListener("pointerdown", onDown);
+    sc.addEventListener("pointermove", onMove, { passive: false });
+    sc.addEventListener("pointerup", onUp);
+    sc.addEventListener("pointercancel", onUp);
+    return () => {
+      sc.removeEventListener("pointerdown", onDown);
+      sc.removeEventListener("pointermove", onMove);
+      sc.removeEventListener("pointerup", onUp);
+      sc.removeEventListener("pointercancel", onUp);
+    };
+  }, [zoomTo]);
 
   /* ⛔ THE PAGE GROWS TO HOLD THE BLOCKS — WHICH IS WHY THEY STOP MOVING (NEW-2, round 2).
    *
@@ -3115,7 +3410,7 @@ export default function NoteEditor({
     if (!editor || editor.isDestroyed) return undefined;
     const dom = editor.view.dom;
     const measure = () => {
-      /* ⛔ A LIVE WIDTH DRAG OWNS `sheetGrowWidth`/`sheetGrowLeft`/`sheetBaseWidth` FOR ITS OWN
+      /* ⛔ A LIVE WIDTH DRAG OWNS `sheetGrowWidth`/`sheetPadLeft`/`sheetBaseWidth` FOR ITS OWN
        * DURATION (NEW-1). Growing the sheet's rendered width also grows `dom`'s own rendered
        * width (it fills the sheet's content box), which is exactly what the ResizeObserver a few
        * lines down this effect watches — so without this guard, every frame of a manual drag
@@ -3238,29 +3533,23 @@ export default function NoteEditor({
        * fix above — correctly sized around an already-too-wide frame — could only ever shrink
        * to zero, never close the last few pixels. */
       const pinnedBase = resolvePinnedBaseWidth(editor.state.doc.attrs?.pageWidth, { paneWidth: paneContentWidth });
-      /* ⛔ NEW-2 — THE LEFT WIDTH GRIP'S PAD IS DROPPED THE MOMENT A DIFFERENT WIDTH CHANGE LANDS,
-       * the `heightPadOwnerRef` pattern transposed (see `widthDragLeftPadRef`'s own header). A
-       * width that did not come from finishing a left-edge drag — Fit to content, a menu preset,
-       * undo/redo, a sync from another device — owns no such pad, so this drops it instead of
-       * carrying a stale left-margin illusion into a page nobody just dragged. Resolved HERE,
-       * before `pinnedPageWidth` reads the ref below, so that read is never one render stale. */
-      if (pinnedBase == null || pinnedBase !== widthPadOwnerRef.current) {
-        widthPadOwnerRef.current = pinnedBase;
-        if (widthDragLeftPadRef.current) widthDragLeftPadRef.current = 0;
-      }
-      /* ⛔ NEW-2 — A PAD ALREADY STAMPED AGAINST `pinnedBase` IS SPENT OUT OF IT, NEVER ADDED ON
-       * TOP OF IT. `pinnedBase` is the sheet's TOTAL committed width — the number the live drag
-       * rendered at the moment the pointer was released — and `widthDragLeftPadRef` is how much
-       * of that total is blank left margin rather than column. Leaving this subtraction out
-       * inflated the page by the pad a SECOND time the instant the drag committed: measured
-       * live, a 90px left-edge drag (580 → 670, held correctly for the whole gesture) jumped
-       * to 760 on release — `growLeft` (90) added on top of a `pinnedPageWidth` that had not
-       * given any of it back. Subtracting it here is what makes `growLeft + padX + contentW`
-       * below sum back to the exact number that was committed, with nothing left to reconcile —
-       * real content overflow (`anchorExtentLeft`) still composes past it via `growLeft`'s own
-       * `Math.max`, exactly as it already did for a pin with no pad at all. */
-      const pinnedPageWidth = pinnedBase != null
-        ? Math.max(1, pinnedBase - padX - (widthDragLeftPadRef.current || 0)) : null;
+      /* ⛔ THE BLANK LEFT MARGIN IS A STORED DOC ATTRIBUTE NOW (NEW-2, 2026-09-21), NOT A REF.
+       *
+       * It used to be `widthDragLeftPadRef` — a React ref, plus `widthPadOwnerRef` to notice when
+       * some OTHER route to a width (a preset, undo, a sync) had made it stale, plus a
+       * subtraction here to stop the pad being counted twice inside `pinnedBase`. All three are
+       * gone. `pageMarginLeft` is an ordinary document attribute, so:
+       *   · it SURVIVES A RELOAD, which the ref did not — the blank paper a drag opened silently
+       *     vanished on the next open and the page re-rendered narrower than it was left;
+       *   · it rides storage, sync, print and export for free (`pageWidth`'s own reasoning);
+       *   · it is independent of `pageWidth`, so there is no double-count to subtract and no
+       *     owner-stamp to keep in step — a preset changes the column and leaves the margin alone,
+       *     which is exactly what it should do. */
+      const storedMarginLeft = normalizePageMargin(editor.state.doc.attrs?.pageMarginLeft);
+      /* The COLUMN's pinned width. `pinnedBase` is the stored `pageWidth`, which has always meant
+       * the writing column and still does — the margin is separate and is added on top in
+       * `totalSheetWidth` below. */
+      const pinnedPageWidth = pinnedBase != null ? Math.max(1, pinnedBase - padX) : null;
       /* ⛔ A WIDE TABLE GROWS THE SHEET THE SAME WAY A WIDE BOX DOES (NEW-1, owner report
        * 2026-09-11) — REUSING this path rather than building a second growth mechanism, per the
        * owner's own instruction. A table is in-flow content, not a positioned anchor, so it has
@@ -3321,7 +3610,12 @@ export default function NoteEditor({
        * not move. "Something placed level with the title" (NEW-5 / V993809) still works, and still
        * needs no coordinate migration — it now renders in the space the gap opens up below the
        * band instead of behind it, which is what makes it reachable rather than merely present. */
-      const growLeft = Math.max(0, anchorExtentLeft(blocks) - padSide, widthDragLeftPadRef.current || 0);
+      /* ⛔ THE BLANK LEFT MARGIN HAS TWO SOURCES AND THEY COMPOSE (NEW-2, 2026-09-21): the page's
+       * OWN stored margin (`pageMarginLeft`, what a left-grip drag committed) and whatever a
+       * free-placed box hanging past the left edge needs (`anchorExtentLeft`, NOTES-FREE-PLACEMENT).
+       * `Math.max`, not a sum — they are two answers to the same question ("how much blank paper
+       * is there to the left of the writing"), not two separate margins. */
+      const growLeft = Math.max(0, anchorExtentLeft(blocks) - padSide, storedMarginLeft);
       const growGap = Math.max(0, anchorExtentTop(blocks) - TITLE_BAND_GAP);
       /* ⛔ THE PIN IS THE BASELINE THE COLUMN STARTS FROM, AND REAL CONTENT IS STILL A FLOOR ON
        * TOP OF IT (NEW-1) — `pinnedPageWidth ?? naturalPageWidth` is the ONLY change from the
@@ -3331,12 +3625,40 @@ export default function NoteEditor({
        * with ordinary short content still renders at the pin rather than shrinking to fit it. */
       const effectivePageWidth = pinnedPageWidth ?? naturalPageWidth;
       const contentW = Math.max(effectivePageWidth, needX);
-      /* A pin always renders as an explicit, fixed sheet width (never the unpinned "100%, capped
-       * at 580" default) — that is what makes Normal (580) a REAL, persistent pin rather than a
-       * same-numbers no-op, and what makes Narrow genuinely narrower than the unpinned default. */
-      const grow = growLeft > 0 || needX > effectivePageWidth || pinnedPageWidth != null;
-      const totalSheetWidth = grow ? growLeft + padX + contentW : naturalSheetWidth;
-      setSheetGrowWidth(grow ? totalSheetWidth : null);
+      const columnWidth = padX + contentW;
+      const totalSheetWidth = growLeft + columnWidth;
+      /* ⛔ THE ONE PLACE THE PAGE'S GEOMETRY IS COMMITTED, AND THE ONE INVARIANT IT KEEPS.
+       *
+       * `sheetX = -growLeft` and `sheetPadLeft = growLeft` move together, always, so the BODY's
+       * workspace X — `sheetX + sheetPadLeft + SHEET_PAD_X` — is **identically `SHEET_PAD_X`, for
+       * every page, at every width, forever.** It is not held there by a compensation; it is not
+       * a function of the width at all. That is the whole of the NEW-2 fix, and it is why the
+       * three shipped rounds of scroll compensation could be deleted instead of tuned:
+       *   round 1 (B1740688) moved the content and had to hold it still with a scroll
+       *   round 2 (B1775312) applied that scroll twice per frame           → judder
+       *   round 3 (B1801040) applied it once but it clamped at zero        → creep
+       * There is nothing here for any of those to be a bug in. */
+      /* ⛔ `sheetX` MOVES BY A DELTA, IT IS NOT RE-DERIVED — and that is not a micro-optimisation,
+       * it is what lets the two edges keep DIFFERENT anchors.
+       *
+       * A left-edge gesture holds the page's RIGHT edge still; a right-edge gesture holds its LEFT
+       * edge still. Those are two different fixed points, so no single formula `sheetX = f(width)`
+       * can be correct for both — re-deriving it as `-growLeft` (which the first version of this
+       * did) silently makes the left edge the anchor for everything, and a left-grip NARROW then
+       * pulls the RIGHT edge in instead of pushing the left one out. Measured on exactly that
+       * version: a 160px left narrow held the body perfectly still and moved the right boundary
+       * 160px in — the same "you grabbed one boundary and a different one moved" defect this round
+       * found on `origin/main`, reintroduced through a new door.
+       *
+       * So this effect only ever applies the CHANGE in how much blank paper the page is carrying,
+       * which holds the body still while a box grows the page leftward (NOTES-FREE-PLACEMENT's
+       * own guarantee), and leaves the drags to move `sheetX` by their own rule. */
+      const prevGrow = growLeftRef.current;
+      growLeftRef.current = growLeft;
+      if (prevGrow == null) setSheetX(-growLeft);                    // first pass: place it
+      else if (prevGrow !== growLeft) setSheetX((x) => x - (growLeft - prevGrow));
+      setSheetPadLeft(growLeft);
+      setSheetWidth(totalSheetWidth);
       /* ⛔ AND THE DRAG'S OWN FLOOR IS THIS, NEVER `sheetGrowWidth` ITSELF (NEW-1). A live drag
        * (below) has to know how far it may narrow the page WITHOUT clipping real content — but
        * `sheetGrowWidth` already carries whatever PIN is currently active, so flooring a drag
@@ -3344,76 +3666,17 @@ export default function NoteEditor({
        * from an existing pin would silently do nothing (measured: dragged to 780, tried to drag
        * back to 630, stayed at 780 — the drag's own starting width was quietly re-asserted as a
        * floor on itself). This is the answer with the pin subtracted back out: what the sheet
-       * would need with NOTHING pinned, i.e. genuine box/table overflow only. */
-      widthContentFloorRef.current = growLeft + padX + Math.max(naturalPageWidth, needX);
-      setSheetGrowLeft(growLeft);
+       * would need with NOTHING pinned, i.e. genuine box/table overflow only.
+       *
+       * ⛔ CORRECTED (NEW-2, 2026-09-21) — IT IS THE COLUMN'S FLOOR, NOT THE SHEET'S, AND THAT
+       * ONE-WORD DIFFERENCE IS A DEFECT THE WIDTH MATRIX CAUGHT ON `origin/main`. It used to
+       * include `growLeft` AND the natural page width, so grabbing either grip on a page pinned
+       * NARROWER than the natural card snapped the page straight out to the natural width before
+       * the pointer had moved: measured at 440 → 580, a 140px jump against 5px of pointer travel.
+       * A drag's floor is what real CONTENT needs, which a deliberately narrow page is not
+       * violating. */
+      widthContentFloorRef.current = padX + needX;
       setSheetGrowGap(growGap);
-      /* ⛔ `totalSheetWidth` IS ALREADY THE SHEET'S OWN REAL RENDERED WIDTH IN BOTH BRANCHES —
-       * `naturalSheetWidth` ungrown (by the same equation `matPadX` is built on) or the full grown
-       * width otherwise — so this is the one number the reach spacer needs, no separate measurement
-       * of its own. See `matReachWidth`'s own comment for why it is a sibling, not more padding.
-       * ⛔ B1344625 — NO `+ MAT_EXTRA_RIGHT` HERE ANY MORE: this is the BASELINE, and the render
-       * adds the gesture-only extra (`boxGestureActive`) on top of it — see that state's own
-       * header. */
-      setMatReachWidth(totalSheetWidth);
-      /* ⛔ B1344626 — the pane's own real height, proportionally capped, replaces the flat
-       * `MAT_EXTRA_BOTTOM` constant. `scrollerRef` is already observed by this effect's own
-       * ResizeObserver (added for B1344624), so a window resize / Outline toggle / rail collapse
-       * that changes the pane's height re-derives this for free. */
-      setMatExtraBottom(Math.min(MAT_EXTRA_BOTTOM_MAX,
-        Math.round((scrollerRef.current?.offsetHeight || 0) * MAT_EXTRA_BOTTOM_FRACTION)));
-      /* ⛔ THE PAGE'S LEFT EDGE IS PINNED WHERE CENTRING WOULD HAVE PUT AN *UNGROWN* PAGE, AND
-       * GROWTH ONLY EVER EXTENDS RIGHTWARD FROM IT.
-       *
-       * This is the third rule this one line has carried, and the first two each fixed one defect
-       * by causing another, so both are named here.
-       *   round 1  centre until anything grows, then flush LEFT. Killed the jump; made the left
-       *            gutter ZERO on every grown page, so there was nothing to press in and nowhere
-       *            to drag to — the owner's "nothing is created at all".
-       *   round 2a centre whenever it fits. Restored the gutter; brought the jump straight back,
-       *            because centring splits the new width across BOTH edges — measured by his own
-       *            acceptance harness at 48px, a block rendering 48px left of the point pressed.
-       * The pin does both: the gutter is exactly the one a centred ungrown page has, so nothing
-       * looks different until something grows, and the left edge cannot move because it is not a
-       * function of the sheet's width at all. Growth is spent on the right, where there is nothing
-       * to disturb, and the scroller carries whatever does not fit.
-       *
-       * ⛔ "FULL WIDTH" COLLAPSES ITS OWN GUTTER TOO — THE ONE DELIBERATE EXCEPTION (B1344624 ×2,
-       * owner report 2026-09-15). Every NUMERIC pin (Narrow/Normal/Wide, or a completed drag)
-       * keeps this SAME natural-width gutter on purpose, which is the whole point of the rule just
-       * above — it is what stops the left edge jumping on an ordinary growth or preset pick, and a
-       * numeric pin overflowing a narrow pane is already correct, scrollable behaviour
-       * (`resolvePresetPx`'s own header: those "ignore the pane entirely, by design"). "Full
-       * width" is not like them: its entire point IS the pane, and `resolvePresetPx("full", …)`
-       * already promises the frame fits with only a small margin on each side — `pinnedBase`
-       * above is that promise. Leaving the gutter at the big natural size while the frame renders
-       * at that pane-filling width breaks the promise from the other end: the frame is sized
-       * correctly and the surrounding padding was never told to shrink to match, so the frame
-       * overhangs the pane by the difference — measured live, a 907px frame inside a 172px gutter
-       * overhanging the visible area by 156px, a sideways scroll on a page the menu calls "Full
-       * width." The fix derives the gutter from the SAME resolved width the frame itself just
-       * committed to, rather than a second, independent number that could drift out of sync with
-       * it: whatever room is left after the frame, split evenly, floored so it can never go
-       * negative and never rounds up into overflow — `Math.floor`, not `Math.round`; the natural
-       * gutter above can round up because a stray extra pixel of grey is invisible, but a stray
-       * extra pixel of FRAME is the whole bug this item is about. When `resolvePresetPx`'s own
-       * floor engages (a pane too narrow for even Wide), this correctly shrinks toward zero rather
-       * than manufacturing room that is not there — the same accepted "the floor wins, the pane
-       * scrolls" behaviour Wide already has at that width.
-       *
-       * ⛔ AND BOTH BRANCHES FLOOR, NEITHER ROUNDS — a leftover of ODD width (`paneContentWidth −
-       * frame`) cannot split into two EQUAL integer sides at all: `Math.round` on the half rounds
-       * one side up, and doubling that rounded-up half back out (both sides get the SAME value)
-       * overshoots the true leftover by exactly one pixel — measured live, the reported 924
-       * `scrollWidth` against a 923 `clientWidth` on an ordinary Fit-to-content page. `Math.floor`
-       * instead spends one pixel less than the leftover allows, so it can only ever UNDER-fill
-       * (one pixel of unused grey on one side, invisible) and never over- (one pixel of forced
-       * scroll on a page with nothing that needs it). */
-      const isFullWidthPin = editor.state.doc.attrs?.pageWidth === "full";
-      const naturalGutter = Math.max(MAT_GUTTER, Math.floor((paneContentWidth - naturalSheetWidth) / 2));
-      const fullGutter = Math.max(0, Math.floor((paneContentWidth - (pinnedBase ?? naturalSheetWidth)) / 2));
-      setMatPadX(isFullWidthPin ? fullGutter : naturalGutter);
-      setMatPaneWidth(paneContentWidth);
     };
     measure();
     /* Re-measured as the text inside a block reflows, which is the half that matters: the
@@ -3451,311 +3714,186 @@ export default function NoteEditor({
      * still-stale `narrow` from the render this effect was last registered under. */
   }, [editor, docTick, narrow, writeTopPad]);
 
-  /* ⛔ THE PAGE GROWS; THE WORDS DO NOT MOVE (NOTES-FREE-PLACEMENT, VIEWPORT-STABLE (a)).
+  /* ⛔ THE "HOLD THE WORDS STILL WHILE THE PAGE GROWS" LAYOUT EFFECT IS DELETED (NEW-2,
+   * 2026-09-21), AND ITS DELETION IS THE FIX RATHER THAN A SIMPLIFICATION.
    *
-   * Growing LEFT is the one direction that cannot be free: the card is left-aligned once anything
-   * has grown it, so extra padding on its left edge pushes the title and every line of text
-   * sideways under the reader. That is precisely the class VIEWPORT-STABLE forbids, and this
-   * repo has already paid for it once — NOTES-PAGE-GROWTH found centring shifting a grown page
-   * 48px left in the same gesture that widened it, invisible to the eye and caught only by
-   * re-measuring the real gesture.
+   * It measured the body's own position inside the scroller before and after a growth and folded
+   * the difference into `scrollLeft`/`scrollTop` in the same frame. That was a correct response to
+   * a real problem — growing the sheet leftward genuinely moved the words — and it was the shared
+   * mechanism behind all three reported rounds of this bug: round 2 double-applied it (judder),
+   * round 3 found it silently clamped at zero on a page narrower than the pane (creep). Every fix
+   * made it more elaborate and none of them could make a BOUNDED resource able to pay an
+   * UNBOUNDED debt.
    *
-   * So the reflow is compensated against the MEASURED delta, in a layout effect, before paint:
-   * the body's own `offsetLeft`/`offsetTop` are its position within the scroller's content and
-   * are unaffected by scrolling, so their change between two runs IS the layout shift and nothing
-   * else. Folding it into the scroll position in the same frame leaves the writing exactly where
-   * it was while the page extends outward around it. An ASSUMED width would not do — the sheet's
-   * alignment flips from centred to left the first time anything grows, which moves the body by
-   * an amount no constant knows. */
-  useLayoutEffect(() => {
-    const dom = editor && !editor.isDestroyed ? editor.view.dom : null;
-    const sc = scrollerRef.current;
-    if (!dom || !sc) return;
-    /* ⛔ THE POSITION IS READ IN THE SCROLLER'S OWN CONTENT SPACE, AND THE FIRST VERSION OF THIS
-     * READ `dom.offsetLeft` INSTEAD — WHICH IS ALWAYS 0 HERE, so the delta was always 0 and this
-     * effect never once fired (NOTES-FREE-PLACEMENT round 2). `offsetLeft` is measured against
-     * `offsetParent`, and the body's offsetParent is a wrapper inside the sheet, not the scroller
-     * — so it reads 0 no matter how far the sheet's own padding pushes the words sideways.
-     * Measured on the real gesture: the sheet's padding-left went 40px → 236px while `offsetLeft`
-     * stayed 0 both times, and the words moved 196px right under the reader.
-     * ⛔ THIS IS THE FAILURE MODE THE REPO KEEPS PAYING FOR — a guard that passes while the
-     * mechanism behind it is dead. It passed its own harness because every case there had the
-     * sheet CENTRED and growing rightward, where there is no shift to compensate; nothing pointed
-     * it at the one scene it exists for. Hence `verify-notes-left-margin-reachable`, which starts
-     * every case from an already-grown page.
-     * The rect-based form below is scroll-INDEPENDENT (the live `scrollLeft` is added back in), so
-     * two readings differ only by a real layout shift — never by the scrolling this then does. */
-    const scRect = sc.getBoundingClientRect();
-    const domRect = dom.getBoundingClientRect();
-    const at = {
-      left: Math.round(domRect.left - scRect.left + sc.scrollLeft),
-      top: Math.round(domRect.top - scRect.top + sc.scrollTop),
-    };
-    const was = growAnchorRef.current;
-    const lastPad = growPadRef.current;
-    growAnchorRef.current = at;
-    growPadRef.current = matPadX;
-    if (!was) return;                       // first measurement: nothing to hold steady against
-    /* ⛔ A CHANGE IN THE GUTTER IS A RE-BASE, NOT A SHIFT TO HIDE — and getting this wrong scrolled
-     * the page sideways on EVERY load. `matPadX` starts at 0 and the measurement effect sets it on
-     * the first pass, so the body legitimately moves by the whole gutter between this effect's
-     * first two runs; compensating for that scrolled the scroller by exactly the gutter, leaving
-     * the sheet flush against the pane again — the very defect the gutter exists to fix, restored
-     * one frame later, and invisible except on a reload. Measured: scrollLeft 0 → 276, sheet left
-     * 544 → 268. So a run where the gutter itself changed only re-records the baseline.
-     * Growth is the only thing this compensates, which is all it was ever for. */
-    if (lastPad !== matPadX) return;
-    const dx = at.left - was.left;
-    const dy = at.top - was.top;
-    if (dx) sc.scrollLeft += dx;
-    if (dy) sc.scrollTop += dy;
-  }, [editor, sheetGrowWidth, sheetGrowLeft, sheetGrowGap, matPadX]);
+   * There is no debt now. The page grows leftward by moving `sheetX` out and `sheetPadLeft` in by
+   * the same amount, so the body's workspace position is unchanged by construction and the view
+   * is never consulted. Nothing to measure, nothing to compensate, nothing to clamp. */
 
-  /* ---- AUTO-SCROLL WHILE A GRIP DRAG SITS AT THE PANE'S EDGE (NEW-7, B1344630, owner report
-   * 2026-09-15) ------------------------------------------------------------------------------
+  /* ⛔ THE GRIP-DRAG AUTO-SCROLL (NEW-7, B1344630) IS GONE, AND ITS REMOVAL IS A FIX RATHER THAN
+   * A LOSS (NEW-1, 2026-09-21).
    *
-   * ⛔ HIS OWN UNCERTAINTY, RESOLVED FIRST, BECAUSE IT DECIDED WHAT TO BUILD: *"I could NOT
-   * distinguish 'the app clamps the width to the pane' from 'I ran out of screen to move the
-   * mouse into.'"* `dragWidthFromDelta`/`dragHeightFromDelta` (lib/notesPageWidth.js /
-   * notesPageHeight.js) clamp only to `[PAGE_WIDTH_MIN, PAGE_WIDTH_MAX]` / `[PAGE_HEIGHT_MIN,
-   * PAGE_HEIGHT_MAX]` — generous ceilings meant to catch a corrupted value, nothing pane-relative
-   * at all. So it is the second: a real mouse cannot move past the browser window's own edge, and
-   * `onMove` below only ever grows the page as far as the pointer's own `clientX`/`clientY` says
-   * to — there was nothing auto-scrolling the view to let the drag continue past what the CURRENT
-   * window happens to show, the spreadsheet convention for dragging a selection to an edge.
+   * It existed because a bounded scroller ran out of room: the grip reached the pane's edge with
+   * the page still wanting to grow, so the view had to be scrolled to let the drag continue, and
+   * the owner's own report was that he could not tell "the app clamps the width" from "I ran out
+   * of screen to move the mouse into." On an unbounded workspace the boundary simply keeps
+   * moving — the page extends as far past the window as the pointer asks for — so the ambiguity
+   * he reported cannot arise and there is nothing to auto-scroll for.
    *
-   * `beginEdgeAutoScroll` runs a `requestAnimationFrame` loop for the life of a grip drag. While
-   * the pointer sits within `EDGE_AUTOSCROLL_MARGIN` of the WINDOW's own edge — never the
-   * scroller's — on the side the drag is growing toward, each frame nudges
-   * `drag.lastClientX`/`lastClientY` FURTHER in that direction — pretending the mouse kept
-   * moving, even though the browser stopped delivering real `pointermove` events once the cursor
-   * reached the screen's edge — and scrolls the scroller the same amount, so the growing edge
-   * stays visible under the pointer. Reusing the SAME `liveWidthFor`/`liveHeightFor` closures
-   * each caller already has (rather than a parallel mechanism) is what keeps this from becoming a
-   * second source of truth: a real `pointermove` and an auto-scroll tick both just update
-   * `drag.lastClientX` and re-run the identical formula.
-   *
-   * ⛔ THE WINDOW'S EDGE, NOT `scroller.getBoundingClientRect()` — this was the first draft's own
-   * bug, caught by `verify-notes-page-height.mjs` §16 going from 46/46 to 39/46 with nothing else
-   * changed. `note-mat` sits BELOW the toolbar (its own top edge measured ~126px down a ~700px
-   * window) and to the RIGHT of the Pages rail — real, draggable window space the pointer can
-   * still move INTO, not the edge of the screen. Keying the margin off the scroller's own (much
-   * smaller) box fired auto-scroll during perfectly ordinary, fully-intentional test drags that
-   * never came near a real screen boundary at all — measured: a 60px controlled drag reported
-   * "moved -82, asked -60", the auto-scroll tacking on 22 unasked extra pixels because the pointer
-   * had merely crossed INTO the toolbar's own row, nowhere near `window.innerHeight`'s true 0. The
-   * window's own edge is the only boundary a real mouse cannot cross, which is the one thing this
-   * mechanism exists to route around. */
-  const EDGE_AUTOSCROLL_MARGIN = 32;
-  const EDGE_AUTOSCROLL_MAX_PX_PER_FRAME = 22;
-  const beginEdgeAutoScroll = useCallback(({ axis, sign, getPointerPos, onTick }) => {
-    let raf = null;
-    const step = () => {
-      const pos = getPointerPos();
-      if (pos == null) { raf = null; return; }
-      const viewportEdge = axis === "x"
-        ? (sign > 0 ? window.innerWidth : 0)
-        : (sign > 0 ? window.innerHeight : 0);
-      const distanceToEdge = sign > 0 ? viewportEdge - pos : pos - viewportEdge;
-      if (distanceToEdge < EDGE_AUTOSCROLL_MARGIN) {
-        const depth = Math.max(0, EDGE_AUTOSCROLL_MARGIN - distanceToEdge);
-        const speed = Math.max(2, Math.min(EDGE_AUTOSCROLL_MAX_PX_PER_FRAME, depth));
-        onTick(sign * speed);
-      }
-      raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    return () => { if (raf != null) cancelAnimationFrame(raf); };
-  }, []);
+   * ⛔ AND IT CLOSES A CLASS RATHER THAN AN INSTANCE: it was the one path that could move the
+   * view mid-drag, and "the view itself stays exactly where it is" is a third of the owner's own
+   * sentence about what a width gesture must not disturb. (This item's own history already
+   * records the auto-scroll being REVERTED from the height grips for the same reason — it broke
+   * "the opposite edge holds" there. It is now gone from both.) */
 
-  /* ---- SET A PAGE'S OWN WIDTH BY HAND, THE DRAG HALF (NEW-1) -----------------------------
+  /* ---- SET A PAGE'S OWN WIDTH BY HAND, THE DRAG HALF (NEW-1, rewritten NEW-2 2026-09-21) ----
    *
-   * The menu (NoteToolbar's page-width control) commits a preset in one click; this is the
-   * other entry point into the SAME stored value — dragging either side edge of the sheet,
-   * Word/Docs-style. Both edges hold the OTHER edge visually still while you drag, which needs
-   * two different tricks for one reason: the page's own left edge is architecturally PINNED
-   * (NOTES-FREE-PLACEMENT round 9 — growth always extends rightward, on purpose, so a box
-   * placed mid-sentence never silently shifts the words under the reader) and this feature
-   * deliberately does not relitigate that. So:
-   *   RIGHT edge  — just grow `sheetGrowWidth` toward the pointer. The left edge already does
-   *                 not move for this (it never has), so "the opposite edge holds" is free.
-   *   LEFT edge   — ALSO grow `sheetGrowWidth` (rightward, same as above — there is only ever
-   *                 one growth direction at rest), but the room this opens up is spent on a
-   *                 GAP between the sheet's own edge and the body (`sheetGrowLeft`'s own left
-   *                 padding — see `leftWidthGripPad`'s header in notesPageWidth.js), never on a
-   *                 bare scroll with nothing else changed.
+   * ⛔ READ `lib/notesViewport.js`'s HEADER BEFORE CHANGING ANYTHING HERE. This function has been
+   * rewritten three times and every previous version was a variation on the same wrong idea:
+   * hold the words still by SCROLLING the mat to cancel a layout shift the drag itself caused.
+   *   round 1 (B1740688)  grow the sheet, scroll to compensate     → the words moved
+   *   round 2 (B1775312)  scroll here AND in a layout effect       → double-applied, judder
+   *   round 3 (B1801040)  spend the mat's gutter, top up the right → the scroll clamped, creep
+   * None of them is here any more, because the mechanism they all depended on is gone.
    *
-   *                 ⛔ CORRECTED (NEW-2, owner report 2026-09-17) — A PLAIN SCROLL WAS TRIED FIRST
-   *                 AND MOVED THE WRONG THING. The original version of this comment described
-   *                 exactly that: grow `sheetGrowWidth` and scroll the mat by the same amount, so
-   *                 a page `W` wider with the viewport scrolled `W` further right shows the RIGHT
-   *                 edge at its original screen position. That half was correct and is unchanged
-   *                 below. What it never named is that the SAME scroll moves EVERYTHING ELSE
-   *                 painted in the mat left by the identical `W`, content included — there was
-   *                 nothing distinguishing "the sheet's own boundary, which the pointer is
-   *                 dragging" from "the words inside it, which the owner said must not move."
-   *                 Verbatim: *"existing content... stays anchored in the exact same on-screen
-   *                 position; only the left boundary line moves outward, opening new blank space
-   *                 to the left of the content."*
+   * ⛔ WHAT IT DOES NOW, IN FULL — and it is short, which is the point:
+   *   RIGHT edge — the writing COLUMN follows the pointer. The page's left boundary is `sheetX`
+   *                and this does not touch it, so the left edge holds for free.
+   *   LEFT edge  — the page's BLANK LEFT MARGIN follows the pointer. `sheetX` moves out by the
+   *                same amount `sheetPadLeft` grows, so the body's workspace position does not
+   *                change AT ALL and the right edge does not move either.
+   * Neither branch reads or writes the view. There is no compensation, so there is nothing to
+   * double-apply and nothing to clamp.
    *
-   *                 The fix grows the GAP (`sheetGrowLeft`) instead of leaving it fixed, by the
-   *                 same amount the width grows, and lets the layout effect a few screens down
-   *                 (already built for NOTES-FREE-PLACEMENT, already keyed on `sheetGrowLeft`)
-   *                 do the compensating scroll it already does for THAT feature — it measures the
-   *                 body's own on-screen position and scrolls to hold it, so it is now correcting
-   *                 for a real shift of the body caused by the wider gap, not papering over one.
-   *                 The sheet's own content-space left edge still never moves (unchanged
-   *                 architecture), so with the body held still by that scroll, the sheet's
-   *                 rendered left boundary is the one thing left to visibly track the pointer —
-   *                 which is exactly the boundary-moves-not-the-words picture that was asked for.
-   *                 `widthDragLeftPadRef` is what carries the pad's value from mid-drag through to
-   *                 the measurement effect's own `growLeft` floor once the drag ends and that
-   *                 effect resumes running — see that ref's own header for why, and for why it is
-   *                 deliberately LEFT IN PLACE on release rather than reset to 0: a reload, which
-   *                 restores neither scroll position nor this ref, shows the same stored width
-   *                 rendered from the app's ordinary right-grown rest position — identical to a
-   *                 page widened from the right — which is stated here rather than left as a
-   *                 surprise (the same accepted trade-off `heightTopPadRef`'s own header states
-   *                 for the vertical twin of this problem).
+   * ⛔ AND A LEFT-EDGE NARROW PAST THE BLANK PAPER IS A REAL, DELIBERATE CONTENT SHIFT. Once the
+   * margin is spent the boundary has nowhere to go but into the column, so the column narrows and
+   * the words come with it — what dragging a margin marker into your own text does in every word
+   * processor. `leftEdgeDrag` returns that amount as `contentShift` rather than leaving a caller
+   * to infer it. What it must NEVER do is what `origin/main` did: move the RIGHT edge instead
+   * (measured — a 160px left-grip narrow on a 900 page moved the right boundary 160px in, and
+   * left the boundary under the pointer exactly where it was).
    *
-   *                 ⛔ CORRECTED AGAIN (B<PENDING>, owner report 2026-09-18) — NEW-2's OWN FIX WAS
-   *                 HALF RIGHT AND HALF A DUPLICATE. It correctly stopped scrolling the words —
-   *                 but `apply()` (below) ALSO kept writing `scroller.scrollLeft` directly, on the
-   *                 (unstated, and wrong) assumption that the layout effect needed help keeping up
-   *                 with a live drag. It does not: `setSheetGrowLeft` alone retriggers that effect,
-   *                 which measures the real committed shift and scrolls to cancel it in the SAME
-   *                 commit, before paint. Doing both meant every single pointermove applied the
-   *                 compensation TWICE — once as an absolute jump to the drag's target scroll
-   *                 position, right here, and once more as the layout effect's own incremental
-   *                 delta on top of it — an over-scroll immediately papered back over by the next
-   *                 pointermove's absolute write, then reintroduced by the render that followed
-   *                 it. That one-frame-late correct/wrong/correct cycle, repeated for the life of
-   *                 the gesture, is what read as the whole page shaking continuously in both
-   *                 directions. `apply()` no longer touches `scroller.scrollLeft` at all — see its
-   *                 own comment, below.
+   * ⛔ THE LIVE DRAG OWNS THE GEOMETRY FOR ITS OWN DURATION. `widthDragRef` makes the measurement
+   * effect stand down (see its own guard), because growing the sheet also grows the editor's own
+   * rendered width, which that effect's ResizeObserver watches — without the guard every frame of
+   * a manual drag is immediately overwritten by a recompute against the STILL-uncommitted
+   * attributes. The commit on release is ONE `setDocAttribute` step, so the whole drag is one
+   * undo entry however many pixels it covered, and a press that never moved commits nothing at
+   * all (B391073).
    *
-   * ⛔ WHY THIS DOES NOT FIGHT THE MEASUREMENT EFFECT ABOVE: that effect's `measure()` bails out
-   * immediately while `widthDragRef.current` is set (see its own comment), so the
-   * ResizeObserver it owns cannot see this function's live `setSheetGrowWidth` calls and
-   * overwrite them mid-drag with a recompute based on the STILL-uncommitted `pageWidth`
-   * attribute. The one real commit — `setNotePageWidth` on release — is what hands authority
-   * back, and it is a single `setDocAttribute` step, so the whole drag is ONE undo entry
-   * regardless of how many pixels it covered. A press with no real movement (a plain click on
-   * the grip) commits nothing, matching this module's own standing rule that a press which did
-   * not move writes nothing at all (B391073). */
+   * ⛔ AND THE DRAG'S FLOOR IS WHAT CONTENT NEEDS, NEVER THE NATURAL CARD WIDTH. That was a real
+   * defect on `origin/main`, caught by the width matrix's "the page may not outrun the pointer"
+   * row: `widthContentFloorRef` used to include the natural page width, so touching either grip
+   * on a page pinned narrower than the card snapped it out to 580 before the pointer had moved —
+   * 140px of page against 5px of finger. */
   const [widthDragEdge, setWidthDragEdge] = useState(null);
   const beginWidthDrag = useCallback((edge) => (e) => {
     if (!editor || editor.isDestroyed || e.button !== 0) return;
-    const sheetEl = noteRootRef.current?.querySelector('[data-testid="note-sheet"]');
-    const scroller = scrollerRef.current;
-    if (!sheetEl || !scroller) return;
     e.preventDefault();
-    const startWidth = sheetEl.getBoundingClientRect().width;
+    /* ⛔ THE GEOMETRY IS READ IN WORKSPACE UNITS, NOT SCREEN UNITS. The pointer moves in screen
+     * pixels and the page is measured in workspace pixels, and at any zoom but 100% those are
+     * different quantities — dividing by the live scale is what makes a drag track the pointer
+     * one-to-one at every zoom level instead of moving `z` times too far. `origin/main` did not
+     * do this (there was no canvas zoom to do it for), which is why the matrix's zoom rows
+     * measured the page outrunning the pointer by 410px at 150%. */
+    const z = viewRef.current.z || 1;
     const drag = {
       edge,
-      startWidth,
       startClientX: e.clientX,
       lastClientX: e.clientX,
-      startScrollLeft: scroller.scrollLeft,
-      // Genuine content overflow only — NEVER `sheetGrowWidth`, which already carries whatever
-      // pin is active and would floor a narrowing drag against its own starting point (see the
-      // measurement effect's own comment on `widthContentFloorRef`).
-      baseGrowWidth: widthContentFloorRef.current || 0,
-      // NEW-2 — whatever left-boundary pad an EARLIER left-edge drag already left open, so this
-      // one composes with it (shrink-then-regrow round trips exactly back to where it started)
-      // rather than resetting to 0 and silently discarding it. 0 for a right-edge drag or a
-      // fresh page — `leftWidthGripPad` never reads this for `edge === "right"`.
-      startLeftPad: widthDragLeftPadRef.current || 0,
+      /* ⛔ THE MARGIN THE PAGE IS ACTUALLY RENDERING, NEVER THE ONE IT HAS STORED — and the
+       * difference is a defect the width matrix caught (row 7, a page with a box hanging off its
+       * left edge). The rendered margin is `Math.max(stored, what a free-placed box needs)`, so on
+       * a page whose margin comes entirely from a box the stored value is 0 while the page is
+       * really carrying (measured) 96px of blank paper. Reading the stored value put that 96 into
+       * `startColumn` instead, and the drag then moved the page's left edge by the margin AND the
+       * column's phantom extra — the body slid 96px left on a gesture that must not move it at
+       * all. `sheetPadLeft` is the number on screen, so it is the only honest starting point. */
+      startMargin: sheetPadLeftRef.current,
+      startColumn: Math.max(0, sheetWidthRef.current - sheetPadLeftRef.current),
+      startSheetX: sheetXRef.current,
+      startWidth: sheetWidthRef.current,
+      scale: z,
     };
     widthDragRef.current = drag;
+    viewTouchedRef.current = true;          // the page is theirs now; never re-frame over a drag
     setWidthDragEdge(edge);
     const prevCursor = document.body.style.cursor;
     const prevSelect = document.body.style.userSelect;
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
 
-    const liveWidthFor = (clientX) => {
-      const rawDelta = edge === "right" ? clientX - drag.startClientX : drag.startClientX - clientX;
-      return Math.max(dragWidthFromDelta(drag.startWidth, rawDelta), drag.baseGrowWidth);
-    };
-    const apply = () => {
-      const w = liveWidthFor(drag.lastClientX);
-      setSheetGrowWidth(w);
-      /* ⛔ NEW-1 (2026-09-18) — DO NOT ALSO WRITE `scroller.scrollLeft` HERE. An earlier version of
-       * this branch did, computing the FULL compensation since drag start (`padDelta`) and writing
-       * it directly, on the reasoning that the live preview needed it applied immediately. It does
-       * not: setting `sheetGrowLeft` already retriggers the "hold the body's screen position"
-       * layout effect a few screens down (keyed on `sheetGrowLeft`), which measures the real
-       * committed layout shift and scrolls to cancel it in the SAME commit, before paint — exactly
-       * the ALREADY-BUILT mechanism this comment block above says the fix "lets" do the scrolling.
-       * Doing BOTH double-applied the compensation every single frame: this line jumped straight to
-       * the correct ABSOLUTE scroll position (relative to drag start), and the layout effect's own
-       * commit then added the INCREMENTAL delta since ITS last reading ON TOP of that — an
-       * over-scroll that the next pointermove's absolute reassignment papered back over one frame
-       * later, only to reintroduce a fresh one. Repeated on every pointermove for the life of the
-       * gesture, that is exactly what read as the whole page shaking for the whole drag, both
-       * directions. One mechanism owns this scroll — the layout effect — so this branch only ever
-       * sets the state that feeds it. */
+    /** What the geometry should be for a pointer at `clientX`. Pure apart from the two library
+     *  calls, so the live preview and the eventual commit cannot disagree about anything. */
+    const geometryFor = (clientX) => {
+      /* How far the grabbed BOUNDARY has moved OUTWARD, in workspace pixels. The left boundary
+       * moves outward by going left; the right boundary by going right. */
+      const delta = (edge === "left" ? drag.startClientX - clientX : clientX - drag.startClientX) / drag.scale;
       if (edge === "left") {
-        setSheetGrowLeft(leftWidthGripPad(drag.startLeftPad, w - drag.startWidth).pad);
+        const r = leftEdgeDrag({ marginLeft: drag.startMargin, colWidth: drag.startColumn, delta });
+        return { marginLeft: r.marginLeft, colWidth: Math.max(r.colWidth, widthContentFloorRef.current || 0) };
       }
+      const r = rightEdgeDrag({ colWidth: drag.startColumn, delta });
+      return { marginLeft: drag.startMargin, colWidth: Math.max(r.colWidth, widthContentFloorRef.current || 0) };
     };
-    const onMove = (ev) => {
-      drag.lastClientX = ev.clientX;
-      apply();
+
+    const apply = () => {
+      const g = geometryFor(drag.lastClientX);
+      const width = g.marginLeft + g.colWidth;
+      /* ⛔ THE EDGE YOU DID NOT GRAB DOES NOT MOVE, AND THIS ONE LINE IS THE WHOLE OF IT.
+       * A LEFT-edge gesture holds the page's RIGHT edge: the right edge is `sheetX + width`, so
+       * moving `sheetX` back by exactly the width gained keeps that sum constant, whether the
+       * gesture is opening blank paper (the body holds still, because `sheetPadLeft` grows by the
+       * same amount) or squeezing the column (the body moves right with the boundary, which is
+       * what dragging a margin into your own text means).
+       * A RIGHT-edge gesture holds the LEFT edge, which needs no arithmetic at all — `sheetX`
+       * simply does not change. */
+      if (edge === "left") setSheetX(drag.startSheetX - (width - drag.startWidth));
+      setSheetPadLeft(g.marginLeft);
+      setSheetWidth(width);
+      /* Keep the ref the measurement effect compares against in step with what the drag rendered,
+       * so the first pass after release applies a delta of zero instead of jerking the page by the
+       * whole margin. */
+      growLeftRef.current = g.marginLeft;
     };
-    // ⛔ NEW-7 — see `beginEdgeAutoScroll`'s own header. The right edge auto-scrolls the view
-    // RIGHTWARD as it grows (so the growing edge stays under the pointer, watching the WINDOW's
-    // own right edge); the left edge grows by moving further LEFT, watching the window's left.
-    const stopAutoScroll = beginEdgeAutoScroll({
-      axis: "x",
-      sign: edge === "right" ? 1 : -1,
-      getPointerPos: () => drag.lastClientX,
-      onTick: (deltaPx) => {
-        drag.lastClientX += deltaPx;
-        if (edge === "right") scroller.scrollLeft += deltaPx;
-        apply();
-      },
-    });
+    const onMove = (ev) => { drag.lastClientX = ev.clientX; apply(); };
+
+    /* ⛔ NO AUTO-SCROLL ANY MORE, AND ITS REMOVAL IS A FIX RATHER THAN A LOSS (NEW-7/B1344630 is
+     * retired by this). It existed because a bounded scroller ran out of room: the grip reached
+     * the pane's edge with the page still wanting to grow, so the view had to be scrolled to let
+     * the drag continue. On an unbounded workspace the boundary simply keeps moving — the page
+     * can extend as far past the window as the pointer asks for, and the view stays exactly where
+     * the person put it, which is what "the view itself does not move" in the owner's own
+     * sentence asks for. It also removes the one path that could move the view mid-drag, which is
+     * a class of judder rather than an instance of one. */
     const onUp = (ev) => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
-      stopAutoScroll();
       document.body.style.cursor = prevCursor;
       document.body.style.userSelect = prevSelect;
       widthDragRef.current = null;
       setWidthDragEdge(null);
       if (!editor || editor.isDestroyed) return;
-      /* ⛔ NEW-7 — NEVER OVERWRITE `drag.lastClientX` WITH `ev.clientX` HERE. Auto-scroll can push
-       * `lastClientX` PAST what the real, screen-bound pointer position can ever report (the
-       * pointer is pinned at the window's own edge while the page keeps growing under it) — a
-       * flat overwrite would snap the commit back to the edge and silently discard every pixel
-       * auto-scroll grew. Take whichever position represents MORE growth in this edge's own
-       * direction instead. */
-      drag.lastClientX = edge === "right"
-        ? Math.max(drag.lastClientX, ev.clientX)
-        : Math.min(drag.lastClientX, ev.clientX);
-      const moved = Math.abs(drag.lastClientX - drag.startClientX) >= 1;
-      if (!moved) return;                              // a click that did not drag writes nothing
-      const w = liveWidthFor(drag.lastClientX);
-      const committed = Math.round(w);
-      /* NEW-2 — stamp the pad's FINAL value and the width it belongs to BEFORE committing, so
-       * the very next measurement-effect run (which the commit below triggers) reads a
-       * `pinnedBase` that already matches `widthPadOwnerRef.current` and keeps the pad instead
-       * of reading it as a stale illusion from a width nobody just dragged (see that ref's own
-       * header, and the measurement effect's own owner-check next to `growLeft`). */
-      if (edge === "left") {
-        const { pad } = leftWidthGripPad(drag.startLeftPad, w - drag.startWidth);
-        widthDragLeftPadRef.current = pad;
-        widthPadOwnerRef.current = committed;
-      }
-      editor.commands.setNotePageWidth(committed);
+      /* ⛔ A RELEASE OUTSIDE THE WINDOW COMMITS WHAT WAS LAST SEEN. The browser stops reporting
+       * positions past the glass, so `ev.clientX` on the release can be the clamped edge value
+       * while `lastClientX` already holds the real one. Take whichever represents MORE travel in
+       * this edge's own outward direction rather than flatly overwriting. */
+      drag.lastClientX = edge === "left"
+        ? Math.min(drag.lastClientX, ev.clientX)
+        : Math.max(drag.lastClientX, ev.clientX);
+      if (Math.abs(drag.lastClientX - drag.startClientX) < 1) return;   // a click that did not drag writes nothing
+      const g = geometryFor(drag.lastClientX);
+      /* ⛔ ONE TRANSACTION, BOTH ATTRIBUTES — so the whole drag is a single undo step whichever
+       * edge it was, and an undo can never restore half the geometry. */
+      editor.commands.setNotePageGeometry({
+        pageWidth: Math.round(g.colWidth),
+        pageMarginLeft: Math.round(g.marginLeft),
+      });
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
-  }, [editor, beginEdgeAutoScroll]);
+  }, [editor]);
 
   /* ---- SET A PAGE'S OWN HEIGHT BY HAND, THE DRAG HALF (NEW-1, 2026-09-12) --------------------
    *
@@ -3824,7 +3962,12 @@ export default function NoteEditor({
       edge,
       startHeight,
       startClientY: e.clientY,
-      startScrollTop: scroller.scrollTop,
+      // ⛔ THE VIEW'S `y`, WHICH IS `scrollTop` WITHOUT THE CLAMP (NEW-1). `topEdgeCompensation`
+      // is unchanged and still pure — it is handed the same quantity it always was. What HAS
+      // changed is that the quantity can now go negative, so the case that function exists to
+      // work around (a browser silently clamping `scrollTop` at 0, which is why a top-edge
+      // SHRINK had to open a margin instead of scrolling up) simply cannot arise any more.
+      startScrollTop: viewRef.current.y,
       // Whatever margin-top the top edge has already grown, from an earlier gesture — this
       // drag ADDS to it (or gives it back) rather than starting over from 0, the same way a
       // width pin from one edge survives a later drag on the other (see `heightTopPadRef`'s own
@@ -3836,6 +3979,7 @@ export default function NoteEditor({
       baseGrowHeight: heightContentFloorRef.current || 0,
     };
     heightDragRef.current = drag;
+    viewTouchedRef.current = true;          // as for the width grips — see `framedForRef`
     setHeightDragEdge(edge);
     const prevCursor = document.body.style.cursor;
     const prevSelect = document.body.style.userSelect;
@@ -3859,7 +4003,7 @@ export default function NoteEditor({
         delta: h - drag.startHeight,                               // + grew · − shrank
       });
       writeTopPad(next.topPad);
-      scroller.scrollTop = next.scrollTop;
+      setView({ ...viewRef.current, y: next.scrollTop });
     };
     /* B1609184 — give back the least scroll that puts the grip just dragged fully back inside the
      * mat's visible box, and nothing when it is already there. The visible box is the INTERSECTION
@@ -3870,12 +4014,12 @@ export default function NoteEditor({
       const grip = noteRootRef.current?.querySelector('[data-testid="note-page-height-grip-top"]');
       if (!grip) return;
       const matRect = scroller.getBoundingClientRect();
-      scroller.scrollTop = scrollToReach({
-        scrollTop: scroller.scrollTop,
+      setView({ ...viewRef.current, y: scrollToReach({
+        scrollTop: viewRef.current.y,
         gripTop: grip.getBoundingClientRect().top,
         visibleTop: Math.max(matRect.top, 0),
         gap: TOP_EDGE_REACH_GAP,
-      });
+      }) });
     };
     /* ⛔ NEW-7 (B1344630) WAS SCOPED TO THIS TOO, AND REVERTED — READ BEFORE RE-ADDING IT. An
      * earlier draft auto-scrolled the mat as the BOTTOM edge grew, to keep the grip under the
@@ -3924,7 +4068,7 @@ export default function NoteEditor({
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
-  }, [editor, writeTopPad]);
+  }, [editor, writeTopPad, setView]);
 
   /* ---- PASTE JUST THE TEXT (B36051) ------------------------------------------------------
    *
@@ -4078,8 +4222,8 @@ export default function NoteEditor({
         /* ⛔ THE ZOOM INDICATOR NOW LIVES HERE (NEW-2) — see note-sheet's own comment for why.
            `null` when the level is 100% (PANEL-BREVITY: a chip that always reads "100%" is
            furniture), so the toolbar renders nothing rather than a dead control. */
-        zoomIndicator={zoom !== ZOOM_DEFAULT ? zoomLabel(zoom) : null}
-        onZoomReset={() => applyZoom(ZOOM_DEFAULT)}
+        zoomIndicator={zoomPct !== VIEW_ZOOM_DEFAULT ? zoomLabel(zoomPct) : null}
+        onZoomReset={resetView}
       />
       <FindBar term={find.term} count={find.count} index={find.index} onStep={stepFind} onClear={onClearSearch} />
 
@@ -4107,6 +4251,20 @@ export default function NoteEditor({
           press on content and puts the caret in it. One gesture, one rule. */}
       <div
         data-testid="note-mat"
+        /* ⛔ THE TWO PANS THAT WORK FROM ANYWHERE, INCLUDING ON TOP OF THE PAGE (NEW-1).
+         * A plain left-drag on blank workspace already pans (the mat's own four-way gesture model
+         * — docs/NOTES-CARRY-FORWARD.md §7, unchanged). These are the ones you need once you are
+         * zoomed in far enough that there is no blank workspace on screen left to grab: MIDDLE
+         * mouse, and SPACE held — Bluebeam's own two, and the Site planner's, so the two modules
+         * feel the same. Claimed here on `pointerdown` and stopped, so the mat's own press rule
+         * (which runs on the compat `mousedown`) never sees them and a pan can never place a
+         * caret or start a marquee. */
+        onPointerDown={(e) => {
+          if (!(e.button === 1 || (e.button === 0 && spaceHeldRef.current))) return;
+          e.preventDefault();
+          e.stopPropagation();
+          beginViewPan(e);
+        }}
         onMouseDown={focusFromMat}
         /* Ctrl/Cmd+Shift+V — the shortcut everyone already knows. Caught here rather than in
            the extension's keymap because the payload is the SYSTEM clipboard, which only the
@@ -4216,26 +4374,18 @@ export default function NoteEditor({
            centres whenever it FITS (grown or not) and only left-aligns once it genuinely outgrows
            the pane, and even then it keeps a real gutter to work in. */
         style={{
-          flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column",
-          /* Always left-aligned, with the gutter doing the work centring used to do. On an ungrown
-             page the two are pixel-for-pixel the same thing; the difference only shows once
-             something grows, and the difference is that nothing moves. */
-          alignItems: "flex-start", position: "relative",
-          /* ⛔ THE PAGE'S BLANK LEFT MARGIN IS SPENT OUT OF THIS GUTTER FIRST, AND THAT IS WHAT
-             STOPS THE WORDS SLIDING (B<PENDING>, owner report 2026-09-18 round 2). `matPadX`
-             itself is untouched — it is still the pin-independent number every other reader
-             depends on, and the rule that the page's left edge "is not a function of the sheet's
-             width at all" is unchanged for the one edge it was ever about, the BODY's. What
-             changes is only where `sheetGrowLeft`'s blank margin comes from: taking it out of the
-             gutter moves the SHEET's own left boundary outward by exactly the margin while the
-             body's position inside the scroller's content does not move at all — so the
-             compensating layout effect below has nothing to hold, and a scroll that cannot be
-             spent (the mat has no overflow when the page is narrower than the pane) can no longer
-             silently lose it. `matSidePads`'s own header carries the measurement and the second
-             half, the right-side top-up for a page narrower than the natural card. */
-          paddingLeft: narrow ? undefined : matPads.padLeft,
-          paddingRight: narrow ? undefined : matPads.padRight,
-          paddingBottom: matExtraBottom,
+          /* ⛔ THE VIEWPORT CLIPS; IT DOES NOT SCROLL (NEW-1). Everything inside it is placed by
+             ONE transform on the workspace layer below, which is unbounded — so there is no
+             `scrollWidth`, no `scrollLeft`, and nothing that can be clamped. That single fact is
+             what retires `matPadX`, `matSidePads`, `matReachWidth` and `MAT_EXTRA_BOTTOM`: all
+             four existed to manufacture reachable grey inside a bounded scroller, and an
+             unbounded workspace has grey everywhere by construction. */
+          flex: 1, minHeight: 0, overflow: "hidden", position: "relative",
+          /* Nothing here may become a scroll container again — a nested scroller would reintroduce
+             exactly the bounded resource this replaced. `overscrollBehavior` additionally stops a
+             trackpad pan at the workspace's (non-existent) edge from turning into a browser
+             back-swipe or a rubber-band on the page behind it. */
+          overscrollBehavior: "none", touchAction: "none",
         }}
       >
         <PasteOptions
@@ -4293,9 +4443,27 @@ export default function NoteEditor({
              visual lines it wraps across — holds a line safely under 75 characters (measured
              71–72), inside the 45–75 range and close to the 66 ideal, with the same discipline
              iA Writer is named for: the cap holds at ANY window width, it never grows past it. */}
+        {/* ⛔ THE WORKSPACE LAYER — THE ONE THING THE VIEW TRANSFORM IS APPLIED TO (NEW-1).
+            Everything the view moves lives inside it; everything that must NOT move with the view
+            (the paste chip, the slash menu, the placement caret) is a sibling ABOVE it, in the
+            viewport's own frame.
+            ⛔ REACT DELIBERATELY DOES NOT SET `transform` HERE. `applyView()` owns that property
+            outright and a layout effect re-asserts it after every render — see its own comment.
+            Putting it in this style object would make a re-render the second writer, and two
+            writers on one property is the exact shape of the judder round 2 shipped.
+            ⛔ NO `willChange: transform`. It promotes the layer and makes Chrome rasterise ONCE and
+            then STRETCH that bitmap for subsequent scales — which is precisely the "text goes
+            blurry when you zoom" failure this design has to avoid. Without it the text is
+            re-rastered at the composited scale and stays crisp at every level, which is the
+            brief's own requirement (real vector scaling, never a scaled bitmap). */}
+        <div
+          ref={workspaceRef}
+          data-testid="note-workspace"
+          style={{ position: "absolute", left: 0, top: 0, transformOrigin: "0 0" }}
+        >
         <div
           data-testid="note-sheet"
-          data-zoom={zoom}
+          data-zoom={zoomPct}
           style={{
             /* ⛔ THE PAGE GROWS PAST THIS WHEN AN ANCHOR NEEDS MORE ROOM (NOTES-PAGE-GROWTH) — see
              * `sheetGrowWidth`, computed by the page-growth measurement effect below. `580` is
@@ -4304,9 +4472,27 @@ export default function NoteEditor({
              * and is `null` — changing nothing here — the moment nothing needs the extra room.
              * A width PIN (NEW-1) also rides `sheetGrowWidth` — see the measurement effect's own
              * comment on `pinnedPageWidth` for why. */
-            maxWidth: sheetGrowWidth ?? SHEET_MAX_WIDTH,
-            width: sheetGrowWidth ? `${sheetGrowWidth}px` : "100%",
-            flex: "1 1 auto", minWidth: 260, zoom, position: "relative",
+            /* ⛔ THE SHEET IS PLACED IN WORKSPACE COORDINATES (NEW-1/NEW-2, 2026-09-21) — an
+             * absolutely positioned card at (`sheetX`, 0) inside the workspace layer, NOT a flex
+             * child of a scroller sized by `width: 100%` and a gutter.
+             *
+             * ⛔ AND THAT ONE CHANGE IS THE WHOLE OF THE NEW-2 FIX. `sheetX` is the page's LEFT
+             * BOUNDARY and `sheetPadLeft` is the blank paper inside it, and the left grip moves
+             * the two by the SAME amount in opposite directions — so the body's workspace
+             * position, `sheetX + sheetPadLeft + SHEET_PAD_X`, is arithmetically unchanged while
+             * the boundary visibly moves. The view is neither read nor written, so there is
+             * nothing to compensate and nothing that can be clamped. Three rounds of scroll
+             * compensation (B1740688, B1775312, B1801040) are deleted rather than tuned.
+             *
+             * ⛔ NO `zoom` HERE ANY MORE. The scale is the workspace layer's transform, applied
+             * once to everything on the canvas. A second scale on this element would compound
+             * with it and every coordinate read in this file would be measuring the product of
+             * two numbers instead of one. */
+            position: "absolute",
+            left: sheetX,
+            top: 0,
+            width: `${sheetWidth}px`,
+            minWidth: 260,
             /* ⛔ A REAL WRITING SURFACE, NOT A FIELD (B1203504) — his exact words, and defect #4
                of the review: the body painted transparent, sitting directly on the same grey
                the app chrome uses, so there was nothing on screen that said "this is a page."
@@ -4342,8 +4528,8 @@ export default function NoteEditor({
                `<input>` instead of clear of it. See the measurement effect's comment on `growGap`
                for the full reasoning. */
             padding: narrow
-              ? `${SHEET_PAD_TOP.narrow}px ${SHEET_PAD_X.narrow}px max(96px, calc(96px + env(safe-area-inset-bottom))) ${SHEET_PAD_X.narrow + sheetGrowLeft}px`
-              : `${SHEET_PAD_TOP.wide}px ${SHEET_PAD_X.wide}px 96px ${SHEET_PAD_X.wide + sheetGrowLeft}px`,
+              ? `${SHEET_PAD_TOP.narrow}px ${SHEET_PAD_X.narrow}px max(96px, calc(96px + env(safe-area-inset-bottom))) ${SHEET_PAD_X.narrow + sheetPadLeft}px`
+              : `${SHEET_PAD_TOP.wide}px ${SHEET_PAD_X.wide}px 96px ${SHEET_PAD_X.wide + sheetPadLeft}px`,
             /* ⛔ AND THE TOP MARGIN IS WHERE A TOP-EDGE SHRINK MOVES THE PAGE (B1605664 ×2) —
                `sheetTopPad` is 0 in every ordinary state, so this renders exactly as it always
                has. It is a MARGIN and not a transform because the page's own bottom edge must
@@ -4547,6 +4733,7 @@ export default function NoteEditor({
             ) : null}
           </div>
         </div>
+        </div>
         {/* ⛔ THE ARMED CARET (NEW-8). A press in the margin draws this and nothing else; the note
             itself does not exist until the first character. Positioned in the mat's own frame,
             which is why the mat is `position: relative`.
@@ -4566,19 +4753,10 @@ export default function NoteEditor({
             style={{ left: pendingPlace.caret.left, top: pendingPlace.caret.top, height: pendingPlace.caret.height }}
           />
         ) : null}
-        {/* ⛔ THE MAT'S OWN RIGHT-SIDE REACH (B1550977/NEW-2, narrowed by B1344625) — a
-            NORMAL-FLOW SPACER, not padding on the mat. See `matReachWidth`'s own comment for why
-            padding here silently narrows `note-sheet` itself. `alignItems: "flex-start"` sizes
-            each flex-column child on its own, so this sibling extends `note-mat`'s `scrollWidth`
-            without note-sheet ever knowing it exists. `matReachWidth` alone (the sheet's own real
-            width, no extra) is the REST state; `MAT_EXTRA_RIGHT` only rides along while a box
-            gesture is actually in flight (`boxGestureActive`) — see that state's own header for
-            why a permanent reach became its own bug. */}
-        <div aria-hidden="true" style={{
-          flex: "0 0 auto",
-          width: (matReachWidth || 0) + (boxGestureActive ? MAT_EXTRA_RIGHT : 0) || undefined,
-          height: 1,
-        }} />
+        {/* ⛔ THE RIGHT-SIDE REACH SPACER IS GONE (NEW-1, 2026-09-21) — and so is `MAT_EXTRA_RIGHT`
+            and `matReachWidth` with it. It existed to extend a bounded scroller's `scrollWidth` so
+            there was somewhere off the page's right edge to drag a box to. The workspace is
+            unbounded now: there is reach in every direction, always, with nothing to manufacture. */}
       </div>
 
         {/* ⛔ BOTH PANES SIT TO THE **RIGHT** OF THE SHEET, and that is what makes them free

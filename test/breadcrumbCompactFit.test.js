@@ -80,7 +80,40 @@ describe("the wiring, read off the real source", () => {
   });
 
   it("the budget never compacts off the phone breakpoint or with no row ref wired", () => {
-    expect(crumb).toContain('if (!narrow || !planSlot || !rowRef) { setCrumbCompact((c) => (c ? false : c)); return undefined; }');
+    expect(crumb).toContain('if (!narrow || !hasPlanSlot || !rowRef) { commitCrumbCompact(false); return undefined; }');
+  });
+
+  /* ⛔ NEW-2 — THE GUARD ABOVE CHANGED SHAPE, AND WHAT CHANGED MATTERS MORE THAN THAT IT DID.
+   *
+   * The property is identical: off the phone breakpoint, or with no trailing crumb, or with no row
+   * ref, this never compacts. Two things about HOW it is written are now load-bearing.
+   *
+   * (a) It reads `hasPlanSlot`, not `planSlot`. `planSlot` is a React ELEMENT, rebuilt by a bare
+   *     JSX expression in the planner's render body on every render — which during a pinch-zoom is
+   *     every frame. Carrying it in the dependency array re-ran this whole effect (four
+   *     ResizeObserver re-observations, four forced layout reads and a dispatch) 78 times a second,
+   *     67 of them for an answer that had not changed. MEASURED, on the real app at phone width
+   *     with real touch events: ui-audit/diagnose-render-loop.mjs, and the e2e spec
+   *     render-loop-touch-gesture, which is red on the old shape.
+   *
+   * (b) It COMMITS rather than dispatching an updater. A setState whose updater returns the same
+   *     value is still a genuine dispatch — React only skips scheduling it through the eager-bailout
+   *     path, which needs the fiber to have no other pending work, and during a gesture it always
+   *     has some. A dispatch raised from a LAYOUT effect is sync-lane work scheduled from inside a
+   *     commit, which is exactly what React's nested-update counter counts on its way to the #185
+   *     circuit breaker that took the planner down on the owner's phone. */
+  it("⛔ depends on WHETHER there is a plan crumb, never on the crumb element itself", () => {
+    expect(crumb).toContain("}, [narrow, hasPlanSlot, currentName, cross, org, rowRef, commitCrumbCompact]);");
+    expect(crumb).not.toContain("}, [narrow, planSlot, currentName, cross, org, rowRef]);");
+    // The plan crumb's WIDTH is what a re-measure actually needs, and it is watched properly —
+    // through the ResizeObserver, not through a dependency.
+    expect(crumb).toContain("ro.observe(plan)");
+  });
+
+  it("⛔ guards the dispatch instead of relying on a no-op updater", () => {
+    expect(crumb).toContain("const commitCrumbCompact = useCallback((next) => {");
+    expect(crumb).toContain("if (crumbCompactRef.current === next) return;");
+    expect(crumb).not.toContain("setCrumbCompact((prev)");
   });
 
   it("⛔ a child effect reading an ANCESTOR's ref cannot trust it on the very first call — found live, not reasoned about", () => {

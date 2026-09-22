@@ -600,11 +600,16 @@ function SearchResults({ results, onSelectHit, query }) {
  *
  * The row is also a BUTTON now: it opens the note READ-ONLY, so "let me just look at it"
  * costs nothing and touches nothing. */
-function BinList({ entries, onRestore, onPurge, onPurgeAll, onPeek, onPurgeEmpties }) {
+function BinList({ entries, onRestore, onPurge, onPurgeAll, onPeek, onPurgeEmpties, peekEntryId, onBackToPages }) {
   if (!entries.length) {
     return <p style={{ margin: "8px 10px", fontSize: 12, color: "var(--text-tertiary)" }}>The bin is empty.</p>;
   }
   const empties = entries.filter((e) => e.empty);
+  /* ⛔ NEW-2: THE ENTRY CURRENTLY BEING READ, so its row can say so and so the actions that
+   * act on it (Restore / Delete forever / Back to pages) can live in ONE fixed spot below the
+   * whole list — never inline after the row's own title, which is what let a long title push
+   * them around. See the header comment above this file's Bin section for the full defect. */
+  const peeked = peekEntryId ? entries.find((e) => e.id === peekEntryId) : null;
   return (
     <div data-testid="notes-bin" style={{ padding: "2px 6px 10px", display: "flex", flexDirection: "column", gap: 4 }}>
       {/* The count belongs HERE — where it answers a question you actually asked by opening
@@ -633,7 +638,15 @@ function BinList({ entries, onRestore, onPurge, onPurgeAll, onPeek, onPurgeEmpti
       ) : null}
 
       {entries.map((e) => (
-        <div key={e.id} data-testid={`notes-bin-${e.id}`} style={{ ...rowBase, flexDirection: "column", alignItems: "stretch", gap: 4, cursor: "default", border: "1px solid var(--border-default)" }}>
+        <div
+          key={e.id}
+          data-testid={`notes-bin-${e.id}`}
+          data-viewing={e.id === peekEntryId ? "true" : undefined}
+          style={{
+            ...rowBase, flexDirection: "column", alignItems: "stretch", gap: 4, cursor: "default",
+            border: e.id === peekEntryId ? "1.5px solid var(--accent-notes)" : "1px solid var(--border-default)",
+          }}
+        >
           <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
             <span style={{ flex: 1, minWidth: 0, fontWeight: 650, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.title || "Untitled"}</span>
             <span style={{ flex: "0 0 auto", fontSize: 10.5, fontWeight: 600, color: "var(--text-tertiary)" }}>{daysLeft(e.expiresAt)}</span>
@@ -699,6 +712,60 @@ function BinList({ entries, onRestore, onPurge, onPurgeAll, onPeek, onPurgeEmpti
           </span>
         </div>
       ))}
+
+      {/* ⛔ NEW-2: THE "VIEWING" ACTION CLUSTER — the one fixed spot Restore / Delete forever /
+          Back to pages live in while a binned page is open for reading, stacked below the bin
+          list rather than inline in the editor's banner (where a long title used to push them
+          off the right edge or wrap them to a new line). Same spot every time, whatever the
+          peeked page's title is — see Notes.jsx's peek status bar for the editor half of this
+          fix. */}
+      {peeked ? (
+        <div
+          data-testid="notes-bin-viewing-actions"
+          style={{
+            display: "flex", flexDirection: "column", gap: 4, padding: "8px 8px 6px",
+            borderRadius: RADIUS.control, border: "1px solid var(--accent-notes)",
+          }}
+        >
+          <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            Reading “{peeked.title || "Untitled"}”
+          </span>
+          <button
+            type="button"
+            data-testid="notes-bin-viewing-restore"
+            disabled={!peeked.restorable}
+            onMouseDown={(ev) => ev.preventDefault()}
+            onClick={() => onRestore(peeked.id)}
+            style={{
+              ...rowBase, width: "auto", padding: "4px 10px", fontSize: 12, fontWeight: 650,
+              border: "1px solid var(--accent-notes)", background: "var(--accent-notes)",
+              color: "var(--on-accent-notes)", opacity: peeked.restorable ? 1 : 0.45,
+              cursor: peeked.restorable ? "pointer" : "default",
+            }}
+          >↩ Restore to pages</button>
+          <button
+            type="button"
+            data-testid="notes-bin-viewing-purge"
+            onMouseDown={(ev) => ev.preventDefault()}
+            onClick={() => onPurge(peeked.id)}
+            style={{
+              ...rowBase, width: "auto", padding: "4px 10px", fontSize: 12, fontWeight: 650,
+              border: "1px solid var(--border-default)", color: "var(--danger-text)",
+            }}
+          >✕ Delete forever</button>
+          <button
+            type="button"
+            data-testid="notes-bin-viewing-back"
+            onMouseDown={(ev) => ev.preventDefault()}
+            onClick={onBackToPages}
+            style={{
+              ...rowBase, width: "auto", padding: "4px 10px", fontSize: 12, fontWeight: 650,
+              border: "1px solid var(--border-default)", color: "var(--text-secondary)",
+            }}
+          >← Back to pages</button>
+        </div>
+      ) : null}
+
       <button
         type="button"
         data-testid="notes-bin-empty"
@@ -891,6 +958,11 @@ export default function NotesTree({
   onQueryChange, onSelectPage, onSelectHit, onAddPage, onAddSubpage,
   onRename, onDelete, onExportPage, onPrintPage, onSetPageProject, onSetPageOrgScope,
   onMovePage, onRestore, onPurge, onPurgeAll, onPeekBin, onPurgeEmpties, binFacts, onAllNotes,
+  /* NEW-2 — the id of whatever binned entry the workspace is currently reading read-only
+   * (`peek` in Notes.jsx), so BinList can highlight that row and put its Restore/Delete
+   * forever/Back to pages actions in one fixed spot below the list. `null` when nothing is
+   * being read. */
+  peekEntryId = null,
   taskGroups = [], onToggleTask, onOpenTask, onViewChange,
   /* NEW-1 — templates are stored records now (Notes.jsx owns the storage), never a static
    * import here: this component only renders whatever list it is handed. `onManageTemplates`
@@ -1252,7 +1324,20 @@ export default function NotesTree({
         ) : view === "tasks" ? (
           <TaskList groups={taskGroups} onToggle={onToggleTask} onOpen={onOpenTask} />
         ) : view === "bin" ? (
-          <BinList entries={bin} onRestore={onRestore} onPurge={onPurge} onPurgeAll={onPurgeAll} onPeek={onPeekBin} onPurgeEmpties={onPurgeEmpties} />
+          <BinList
+            entries={bin}
+            onRestore={onRestore}
+            onPurge={onPurge}
+            onPurgeAll={onPurgeAll}
+            onPeek={onPeekBin}
+            onPurgeEmpties={onPurgeEmpties}
+            peekEntryId={peekEntryId}
+            /* "Back to pages" leaves bin mode via the SAME path the tab strip uses
+               (`changeView`), which already tells the workspace root to close the peek
+               (Notes.jsx's onViewChange clears it whenever the view isn't "bin") — one
+               mechanism, not a second way to dismiss the same state. */
+            onBackToPages={() => changeView("tree")}
+          />
         ) : view === "unfiled" ? (
           /* ⛔ UNFILED (NEW-1) — the holding row, not the Bin. Rendered through the SAME
            * `renderPage` every other root uses, at every depth, which is what gives an

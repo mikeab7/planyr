@@ -1,7 +1,8 @@
-/* Self-verification for B1805808 — a "paving" (truck court / drive aisle) element's properties
- * panel: Width (ft) stays an editable input, Depth (ft) becomes a read-only display. Checks BOTH
- * a freestanding Paving/Drive element and an auto-generated split-parking drive aisle (attachedTo
- * a building, sideParkSide set) — the two cases the bug named. */
+/* Self-verification for B1818256 — reverts B1805808. A "paving" (truck court / drive aisle)
+ * element's properties panel: Width (ft) AND Depth (ft) are both ordinary editable NumInputs —
+ * B1805808's read-only Depth span is gone. Checks BOTH a freestanding Paving/Drive element and
+ * an auto-generated split-parking drive aisle (attachedTo a building, sideParkSide set) — the two
+ * cases B1805808 touched and NEW-1 explicitly asked to confirm both accept typed Depth input. */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 const { chromium } = pw;
 import { assertMeasurable } from "./lib/tabTiming.mjs";
@@ -31,7 +32,7 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1.25, ignoreHTTPSErrors: true });
 await ctx.addInitScript(seed);
 const page = await ctx.newPage();
-await assertMeasurable(page, "verify-paving-depth-readonly");
+await assertMeasurable(page, "verify-paving-depth-editable");
 const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));
 // Resource-load noise (ERR_TUNNEL_CONNECTION_FAILED etc.) comes from this sandbox's egress
@@ -74,26 +75,41 @@ const readFields = async () => page.evaluate(() => {
   return out;
 });
 
+// Drive a real commit through the editable Depth input — proves it isn't just present but inert
+// (SYNTHETIC-KEYS-DONT-EDIT: a rendered <input> that never commits is not "editable").
+const commitDepth = async (n) => {
+  const field = page.locator('[data-field-group="1"]').filter({ hasText: "Depth (ft)" }).first();
+  const input = field.locator("input");
+  await input.click({ clickCount: 3 });
+  await input.fill(String(n));
+  await input.press("Enter");
+  await page.waitForTimeout(300);
+};
+
 const ALL_IDS = ["pav1", "pav2"];
 const results = {};
 for (const id of ALL_IDS) {
   const sel = await clickElementById(id);
   if (!sel) { results[id] = { error: "could not select element" }; continue; }
-  const fields = await readFields();
-  results[id] = { width: fields["Width (ft)"], depth: fields["Depth (ft)"] };
+  const before = await readFields();
+  await commitDepth(id === "pav1" ? 137 : 41);
+  const after = await readFields();
+  results[id] = { width: after["Width (ft)"], depthBefore: before["Depth (ft)"], depthAfter: after["Depth (ft)"] };
 }
 
 console.log(JSON.stringify({ results, errors }, null, 2));
 
 let pass = true;
-// pav1/pav2 (paving): Depth becomes read-only, Width stays editable.
+// pav1/pav2 (paving): Width AND Depth are both editable inputs, and typing into Depth commits.
+const expectDepth = { pav1: "137", pav2: "41" };
 for (const id of ["pav1", "pav2"]) {
   const r = results[id];
   if (!r || r.error) { console.error(`✗ ${id}: ${r?.error || "no result"}`); pass = false; continue; }
   const widthOk = r.width?.kind === "input" && !r.width.disabled && !r.width.readOnly;
-  const depthOk = r.depth?.kind === "span";
-  console.log(`${id}: Width ${widthOk ? "✓ editable input" : "✗ NOT editable input"} · Depth ${depthOk ? "✓ read-only span" : "✗ NOT read-only"}`);
-  if (!widthOk || !depthOk) pass = false;
+  const depthWasEditable = r.depthBefore?.kind === "input" && !r.depthBefore.disabled && !r.depthBefore.readOnly;
+  const depthCommitted = r.depthAfter?.kind === "input" && r.depthAfter.value === expectDepth[id];
+  console.log(`${id}: Width ${widthOk ? "✓ editable input" : "✗ NOT editable input"} · Depth ${depthWasEditable ? "✓ editable input" : "✗ NOT editable"} · Depth commit ${depthCommitted ? `✓ (${r.depthAfter.value})` : `✗ (got ${r.depthAfter?.value})`}`);
+  if (!widthOk || !depthWasEditable || !depthCommitted) pass = false;
 }
 if (errors.length) { console.error("Console/page errors:", errors); pass = false; }
 
