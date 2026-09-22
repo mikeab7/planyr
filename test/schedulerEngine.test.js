@@ -831,7 +831,7 @@ describe("B815 nthWeekdayOfMonth — nth vs last weekday of a month", () => {
 });
 
 describe("B815 meetingDatesInRange — recurrence + explicit-date precedence", () => {
-  const council = { recurrence: [{ freq: "monthly", weekday: 2, setpos: [2, 4] }] };
+  const council = { recurrence: [{ positions: [2, 4], weekday: 2, months: "all", anchor: null }] };
   it("2nd & 4th Tuesday across a two-month window", () => {
     expect(E.meetingDatesInRange(council, "2026-08-01", "2026-09-30"))
       .toEqual(["2026-08-11", "2026-08-25", "2026-09-08", "2026-09-22"]);
@@ -855,17 +855,17 @@ describe("B815 meetingDatesInRange — recurrence + explicit-date precedence", (
     expect(E.meetingDatesInRange(b, "2026-08-01", "2026-08-20")).toEqual(["2026-08-11"]);
   });
   it("monthly `months` filter — e.g. quarterly (Jan/Apr/Jul/Oct) 1st Monday", () => {
-    const q = { recurrence: [{ freq: "monthly", weekday: 1, setpos: [1], months: [1, 4, 7, 10] }] };
+    const q = { recurrence: [{ positions: [1], weekday: 1, months: [1, 4, 7, 10], anchor: null }] };
     expect(E.meetingDatesInRange(q, "2026-01-01", "2026-12-31"))
       .toEqual(["2026-01-05", "2026-04-06", "2026-07-06", "2026-10-05"]);
   });
   it("weekly cadence (every Wednesday)", () => {
-    const w = { recurrence: [{ freq: "weekly", weekday: 3 }] };
+    const w = { recurrence: [{ positions: "every", weekday: 3, months: "all", anchor: null }] };
     expect(E.meetingDatesInRange(w, "2026-08-01", "2026-08-31"))
       .toEqual(["2026-08-05", "2026-08-12", "2026-08-19", "2026-08-26"]);
   });
   it("effectiveFrom/effectiveTo bound a rule's active window", () => {
-    const c = { recurrence: [{ freq: "monthly", weekday: 2, setpos: [2, 4], effectiveFrom: "2026-09-01" }] };
+    const c = { recurrence: [{ positions: [2, 4], weekday: 2, months: "all", anchor: null, effectiveFrom: "2026-09-01" }] };
     expect(E.meetingDatesInRange(c, "2026-08-01", "2026-09-30")).toEqual(["2026-09-08", "2026-09-22"]);
   });
 });
@@ -893,7 +893,7 @@ describe("B815 agendaDeadline — offset (business/calendar) + weekdayAnchor", (
 });
 
 describe("B815 nextEligibleMeeting — the core snap rule (deadline, not meeting, gates)", () => {
-  const council = { recurrence: [{ freq: "monthly", weekday: 2, setpos: [2, 4] }],
+  const council = { recurrence: [{ positions: [2, 4], weekday: 2, months: "all", anchor: null }],
                     agendaLead: { type: "offset", n: 10, unit: "business" } };
   it("packet ready after an agenda closed snaps a full cycle forward", () => {
     // 8/11 meeting's agenda closed 7/28; ready 8/5 misses it → first eligible is 8/25.
@@ -915,7 +915,7 @@ describe("B815 nextEligibleMeeting — the core snap rule (deadline, not meeting
 
 // NEW-1 (chat, 2026-09-11) — the grid right-click "Next meeting" / "Previous meeting" primitive.
 describe("NEW-1 adjacentMeetingDate — step a bound row to the next/previous meeting", () => {
-  const council = { recurrence: [{ freq: "monthly", weekday: 2, setpos: [2, 4] }] };
+  const council = { recurrence: [{ positions: [2, 4], weekday: 2, months: "all", anchor: null }] };
   // council's 2026 Tue meetings: ... 07-14, 07-28, 08-11, 08-25, 09-08, 09-22 ...
   it("next: the first meeting strictly after a date that sits between two meetings", () => {
     expect(E.adjacentMeetingDate(council, "2026-08-05", "next")).toBe("2026-08-11");
@@ -941,7 +941,7 @@ describe("NEW-1 adjacentMeetingDate — step a bound row to the next/previous me
   });
   it("returns null (disabled, not a wrong date) when nothing resolves in the horizon", () => {
     // effectiveFrom bounds the rule's active window — nothing exists before it to step back to.
-    const bounded = { recurrence: [{ freq: "monthly", weekday: 2, setpos: [2, 4], effectiveFrom: "2026-09-01" }] };
+    const bounded = { recurrence: [{ positions: [2, 4], weekday: 2, months: "all", anchor: null, effectiveFrom: "2026-09-01" }] };
     expect(E.adjacentMeetingDate(bounded, "2026-09-08", "prev")).toBeNull();
     expect(E.adjacentMeetingDate({ recurrence: [] }, "2026-08-05", "next")).toBeNull();
   });
@@ -963,31 +963,45 @@ describe("anti-drift: NEW-1 adjacentMeetingDate exists VERBATIM in src + mirror"
   });
 });
 
-// ── B845 — government date patterns: the "Tuesday after the first Monday" primitive ─────────────
-describe("B845 nthWeekdayOnOrAfter — Election-Day primitive (Tue after the 1st Monday in Nov)", () => {
-  it("resolves the 1st Tuesday on/after Nov 2 across the acceptance years", () => {
-    expect(E.nthWeekdayOnOrAfter(2024, 11, 2, 2)).toBe("2024-11-05");
-    expect(E.nthWeekdayOnOrAfter(2026, 11, 2, 2)).toBe("2026-11-03");
-    expect(E.nthWeekdayOnOrAfter(2032, 11, 2, 2)).toBe("2032-11-02"); // Nov 2 itself IS a Tuesday
-    expect(E.nthWeekdayOnOrAfter(2033, 11, 2, 2)).toBe("2033-11-08"); // Nov 1 is a Tuesday → must NOT be week-early
-    expect(E.nthWeekdayOnOrAfter(2039, 11, 2, 2)).toBe("2039-11-08");
+// ── B845/NEW-1 — government date patterns: the GENERALIZED anchor primitive ─────────────────────
+// NEW-1 (2026-09-22) replaced the fixed day-of-month `onOrAfter` primitive (which only ever worked
+// for the Tuesday/Monday pair) with `anchor: {position, weekday}` — positions counted among a
+// rule's own weekday occurrences STRICTLY AFTER the anchor date, computed via occurrencesInMonth +
+// pickOrdinal (the same two primitives nthWeekdayOfMonth itself now uses). This is that primitive's
+// direct test, exercised through meetingDatesInRange (there is deliberately no second engine to
+// unit-test standalone — see meetingDatesInRange's own header).
+describe("B845/NEW-1 anchor primitive — Election-Day pattern (Tue after the 1st Monday in Nov), generalized", () => {
+  const electionOnly = (y) => {
+    const r = { recurrence: [{ positions: [1], weekday: 2, months: [11], anchor: { position: 1, weekday: 1 } }] };
+    return E.meetingDatesInRange(r, `${y}-01-01`, `${y}-12-31`)[0] || null;
+  };
+  it("resolves the 1st Tuesday after the 1st Monday across the acceptance years", () => {
+    expect(electionOnly(2024)).toBe("2024-11-05");
+    expect(electionOnly(2026)).toBe("2026-11-03");
+    expect(electionOnly(2032)).toBe("2032-11-02"); // Nov 2 2032 IS a Tuesday, and it's strictly after the 1st Monday (Nov 1)
+    expect(electionOnly(2033)).toBe("2033-11-08"); // Nov 1 2033 is a Tuesday → must NOT be week-early
+    expect(electionOnly(2039)).toBe("2039-11-08");
   });
   it("differs from the classic 1st-Tuesday primitive exactly when Nov 1 is a Tuesday", () => {
     expect(E.nthWeekdayOfMonth(2033, 11, 2, 1)).toBe("2033-11-01");        // the week-early bug the primitive avoids
-    expect(E.nthWeekdayOnOrAfter(2033, 11, 2, 2)).not.toBe("2033-11-01");
-    expect(E.nthWeekdayOnOrAfter(2026, 11, 2, 2)).toBe(E.nthWeekdayOfMonth(2026, 11, 2, 1)); // coincide when Nov 1 ≠ Tue
+    expect(electionOnly(2033)).not.toBe("2033-11-01");
+    expect(electionOnly(2026)).toBe(E.nthWeekdayOfMonth(2026, 11, 2, 1)); // coincide when Nov 1 ≠ Tue
   });
-  it("returns null when no such weekday exists on/after dom in the month", () => {
-    expect(E.nthWeekdayOnOrAfter(2026, 2, 1, 27)).toBeNull(); // no Monday on/after Feb 27 2026 stays in Feb
+  it("generalizes to ANY weekday pair, not just Tue-after-Mon — 1st Friday after the 1st Wednesday", () => {
+    const r = { recurrence: [{ positions: [1], weekday: 5, months: "all", anchor: { position: 1, weekday: 3 } }] };
+    // Jan 2027: Wednesdays 6,13,20,27 → 1st Wed = Jan 6 → 1st Friday after it = Jan 8.
+    expect(E.meetingDatesInRange(r, "2027-01-01", "2027-01-31")).toEqual(["2027-01-08"]);
   });
-  it("clamps dom<1 / non-integer down to day 1", () => {
-    expect(E.nthWeekdayOnOrAfter(2026, 11, 2, 0)).toBe(E.nthWeekdayOnOrAfter(2026, 11, 2, 1));
-    expect(E.nthWeekdayOnOrAfter(2026, 11, 2, 2.9)).toBe(E.nthWeekdayOnOrAfter(2026, 11, 2, 2));
+  it("the anchor not existing in a month resolves to nothing there, never a crash", () => {
+    // A "5th Monday" anchor doesn't exist in most months.
+    const r = { recurrence: [{ positions: [1], weekday: 2, months: "all", anchor: { position: 5, weekday: 1 } }] };
+    expect(() => E.meetingDatesInRange(r, "2026-01-01", "2026-04-30")).not.toThrow();
+    expect(E.meetingDatesInRange(r, "2026-02-01", "2026-02-28")).toEqual([]); // Feb 2026 has no 5th Monday
   });
 });
 
 describe("B845 meetingDatesInRange — Election Day + TX uniform-election-date preset", () => {
-  const election = { recurrence: [{ freq: "monthly", weekday: 2, setpos: [1], months: [11], onOrAfter: 2 }] };
+  const election = { recurrence: [{ positions: [1], weekday: 2, months: [11], anchor: { position: 1, weekday: 1 } }] };
   it("the November uniform-election rule resolves the correct hearing date each year", () => {
     expect(E.meetingDatesInRange(election, "2024-01-01", "2024-12-31")).toEqual(["2024-11-05"]);
     expect(E.meetingDatesInRange(election, "2026-01-01", "2026-12-31")).toEqual(["2026-11-03"]);
@@ -1005,13 +1019,207 @@ describe("B845 meetingDatesInRange — Election Day + TX uniform-election-date p
   });
   it("TX uniform election dates = 1st Sat in May + Election Day in Nov (two rules, unioned)", () => {
     const tx = { recurrence: [
-      { freq: "monthly", weekday: 6, setpos: [1], months: [5] },
-      { freq: "monthly", weekday: 2, setpos: [1], months: [11], onOrAfter: 2 } ] };
+      { positions: [1], weekday: 6, months: [5], anchor: null },
+      { positions: [1], weekday: 2, months: [11], anchor: { position: 1, weekday: 1 } } ] };
     expect(E.meetingDatesInRange(tx, "2026-01-01", "2026-12-31")).toEqual(["2026-05-02", "2026-11-03"]);
   });
   it("a plain 1st-Saturday-in-May rule uses the classic primitive (no onOrAfter)", () => {
-    const may = { recurrence: [{ freq: "monthly", weekday: 6, setpos: [1], months: [5] }] };
+    const may = { recurrence: [{ positions: [1], weekday: 6, months: [5], anchor: null }] };
     expect(E.meetingDatesInRange(may, "2026-01-01", "2027-12-31")).toEqual(["2026-05-02", "2027-05-01"]);
+  });
+});
+
+// ── NEW-1 (2026-09-22 chat block) — the sentence-model resolver's own acceptance table. Every row
+// below is a line from the PR's before/after table; each is a NEW capability (2nd-to-last, 5th,
+// generalized anchor, every-week + months, multi-pattern bodies) that FAILS on current main, which
+// has no `positions`/`anchor` fields at all — main's meetingDatesInRange silently treats every one
+// of these rules as "1st <weekday> of every month" (positions defaults to [1] when absent).
+describe("NEW-1 sentence-model resolver — acceptance table", () => {
+  it("3rd Tue monthly (P&Z today) — unchanged", () => {
+    const pz = { recurrence: [{ positions: [3], weekday: 2, months: "all", anchor: null }] };
+    expect(E.meetingDatesInRange(pz, "2026-09-01", "2026-12-31"))
+      .toEqual(["2026-09-15", "2026-10-20", "2026-11-17", "2026-12-15"]);
+  });
+  it("2nd & 4th Thu monthly (council) — unchanged, still resolves as ONE rule", () => {
+    const council = { recurrence: [{ positions: [2, 4], weekday: 4, months: "all", anchor: null }] };
+    expect(E.meetingDatesInRange(council, "2026-09-01", "2026-10-31"))
+      .toEqual(["2026-09-10", "2026-09-24", "2026-10-08", "2026-10-22"]);
+  });
+  it("the MUD body's two rules (1st Sat in May + Tue-after-1st-Mon in Nov) — unchanged", () => {
+    const mud = { recurrence: [
+      { positions: [1], weekday: 6, months: [5], anchor: null },
+      { positions: [1], weekday: 2, months: [11], anchor: { position: 1, weekday: 1 } },
+    ] };
+    expect(E.meetingDatesInRange(mud, "2026-01-01", "2028-12-31"))
+      .toEqual(["2026-05-02", "2026-11-03", "2027-05-01", "2027-11-02", "2028-05-06", "2028-11-07"]);
+  });
+  it("2nd-to-last Tue monthly (NEW position, -2) — includes Nov 17 2026 and Dec 22 2026", () => {
+    const r = { recurrence: [{ positions: [-2], weekday: 2, months: "all", anchor: null }] };
+    const dates = E.meetingDatesInRange(r, "2026-11-01", "2026-12-31");
+    expect(dates).toContain("2026-11-17");
+    expect(dates).toContain("2026-12-22");
+    // Dec 2026 has 5 Tuesdays (1,8,15,22,29): -2 is the 4th (22nd), never the plain 4th-position
+    // answer in a 5-Tuesday month if the count were miscounted from the end.
+    expect(dates).toEqual(["2026-11-17", "2026-12-22"]);
+  });
+  it("5th Tue (NEW position, 5) — Dec 29 2026, Mar 30 2027, Jun 29 2027, plus a real MISSING report", () => {
+    const r = { recurrence: [{ positions: [5], weekday: 2, months: "all", anchor: null }] };
+    const dates = E.meetingDatesInRange(r, "2026-09-22", "2027-12-31");
+    expect(dates.slice(0, 3)).toEqual(["2026-09-29", "2026-12-29", "2027-03-30"]);
+    expect(dates).toContain("2027-06-29");
+    const missing = E.positionMissingReport(r.recurrence[0], "2026-09-22");
+    expect(missing.checked).toBe(12);
+    expect(missing.missing).toBeGreaterThan(0);   // most months have no 5th Tuesday
+  });
+  it("1st Tue after the 1st Mon in November (generalized anchor) — Nov 3 2026", () => {
+    const r = { recurrence: [{ positions: [1], weekday: 2, months: [11], anchor: { position: 1, weekday: 1 } }] };
+    expect(E.meetingDatesInRange(r, "2026-01-01", "2026-12-31")).toEqual(["2026-11-03"]);
+  });
+  it("every Mon, all year", () => {
+    const r = { recurrence: [{ positions: "every", weekday: 1, months: "all", anchor: null }] };
+    expect(E.meetingDatesInRange(r, "2026-09-21", "2026-10-19"))
+      .toEqual(["2026-09-21", "2026-09-28", "2026-10-05", "2026-10-12", "2026-10-19"]);
+  });
+  it("every Wed in Jun/Jul/Aug (NEW — every-week WITH a month restriction)", () => {
+    const r = { recurrence: [{ positions: "every", weekday: 3, months: [6, 7, 8], anchor: null }] };
+    const dates = E.meetingDatesInRange(r, "2027-01-01", "2027-12-31");
+    expect(dates.every(d => ["06", "07", "08"].includes(d.slice(5, 7)))).toBe(true);
+    expect(dates).toContain("2027-06-02");
+    expect(dates).toContain("2027-08-25");
+    expect(dates).not.toContain("2027-09-01");
+  });
+  it("3rd Tue of Mar, Jun, Sep, Dec", () => {
+    const r = { recurrence: [{ positions: [3], weekday: 2, months: [3, 6, 9, 12], anchor: null }] };
+    expect(E.meetingDatesInRange(r, "2026-01-01", "2026-12-31"))
+      .toEqual(["2026-03-17", "2026-06-16", "2026-09-15", "2026-12-15"]);
+  });
+  it("three patterns on one body (1st & 3rd Mon; 2nd Wed; last Fri of December) — merged and sorted", () => {
+    const body = { recurrence: [
+      { positions: [1, 3], weekday: 1, months: "all", anchor: null },
+      { positions: [2], weekday: 3, months: "all", anchor: null },
+      { positions: [-1], weekday: 5, months: [12], anchor: null },
+    ] };
+    const dates = E.meetingDatesInRange(body, "2026-12-01", "2026-12-31");
+    expect(dates).toEqual(["2026-12-07", "2026-12-09", "2026-12-21", "2026-12-25"]);
+  });
+  it("an anchor that doesn't exist some month (a 5th-Monday anchor) produces nothing that month, never a crash", () => {
+    const r = { recurrence: [{ positions: [1], weekday: 2, months: "all", anchor: { position: 5, weekday: 1 } }] };
+    expect(() => E.meetingDatesInRange(r, "2026-01-01", "2026-12-31")).not.toThrow();
+    expect(E.meetingDatesInRange(r, "2026-02-01", "2026-02-28")).toEqual([]); // Feb 2026 has no 5th Monday
+    expect(E.meetingDatesInRange(r, "2026-03-01", "2026-03-31")).not.toEqual([]); // Mar 2026 DOES (30th)
+  });
+});
+
+describe("NEW-1 mbRuleSummary / cadenceSummary — plain-English sentences", () => {
+  it("renders every acceptance-table row as the expected sentence", () => {
+    expect(E.mbRuleSummary({ positions: [3], weekday: 2, months: "all", anchor: null }))
+      .toBe("the 3rd Tuesday of every month");
+    expect(E.mbRuleSummary({ positions: [2, 4], weekday: 4, months: "all", anchor: null }))
+      .toBe("the 2nd and 4th Thursday of every month");
+    expect(E.mbRuleSummary({ positions: [-2], weekday: 2, months: "all", anchor: null }))
+      .toBe("the 2nd-to-last Tuesday of every month");
+    expect(E.mbRuleSummary({ positions: [5], weekday: 2, months: "all", anchor: null }))
+      .toBe("the 5th Tuesday of every month");
+    expect(E.mbRuleSummary({ positions: [1], weekday: 2, months: [11], anchor: { position: 1, weekday: 1 } }))
+      .toBe("the 1st Tuesday of Nov, counting from after the 1st Monday");
+    expect(E.mbRuleSummary({ positions: "every", weekday: 1, months: "all", anchor: null }))
+      .toBe("every Monday, all year");
+    expect(E.mbRuleSummary({ positions: "every", weekday: 3, months: [6, 7, 8], anchor: null }))
+      .toBe("every Wednesday in Jun, Jul and Aug");
+    expect(E.mbRuleSummary({ positions: [3], weekday: 2, months: [3, 6, 9, 12], anchor: null }))
+      .toBe("the 3rd Tuesday of Mar, Jun, Sep and Dec");
+  });
+  it("cadenceSummary joins every pattern of a body, not just the first", () => {
+    const mud = { recurrence: [
+      { positions: [1], weekday: 6, months: [5], anchor: null },
+      { positions: [1], weekday: 2, months: [11], anchor: { position: 1, weekday: 1 } },
+    ] };
+    expect(E.cadenceSummary(mud)).toBe("the 1st Saturday of May, and the 1st Tuesday of Nov, counting from after the 1st Monday");
+  });
+  it("an empty/no-weekday body reads as no cadence set", () => {
+    expect(E.cadenceSummary({ recurrence: [] })).toBe("no cadence set");
+    expect(E.cadenceSummary({})).toBe("no cadence set");
+  });
+});
+
+describe("NEW-1 migrateRecurrenceRule / normalizeMeetingCadence — lossless migration off old main's shape", () => {
+  // Ground truth: what OLD MAIN's engine (freq/setpos/onOrAfter) actually resolved for the three
+  // real owner bodies over 2026-2032, computed once against that exact old shape and pinned here
+  // literally — this is the before/after the PR table promises, not a tautology against the new
+  // engine. (Baytown council uses Thursday in this repo's own fixtures — see verify-schedule-
+  // meeting-step.mjs's "council: 2nd & 4th Tuesday" note; the owner's real body is Thursday per the
+  // chat block, so this uses weekday:4 to match the chat block's own description.)
+  const FROM = "2026-01-01", TO = "2032-12-31";
+  const OLD_SHAPE = {
+    pz: { recurrence: [{ freq: "monthly", weekday: 2, setpos: [3] }] },
+    council: { recurrence: [{ freq: "monthly", weekday: 4, setpos: [2, 4] }] },
+    mud: { recurrence: [
+      { freq: "monthly", weekday: 6, setpos: [1], months: [5] },
+      { freq: "monthly", weekday: 2, setpos: [1], months: [11], onOrAfter: 2 },
+    ] },
+  };
+  it("P&Z Commission: migrated body resolves the SAME 84 dates the old shape did", () => {
+    const migrated = { recurrence: OLD_SHAPE.pz.recurrence.map(E.migrateRecurrenceRule) };
+    const dates = E.meetingDatesInRange(migrated, FROM, TO);
+    expect(dates.length).toBe(84);   // 12 dates/yr × 7 yrs
+    expect(dates[0]).toBe("2026-01-20");
+    expect(dates[dates.length - 1]).toBe("2032-12-21");
+    expect(dates).toContain("2026-09-15");   // the September 2026 date the owner reported (3rd Tue)
+  });
+  it("City Council: migrated body resolves the SAME 168 dates the old shape did", () => {
+    const migrated = { recurrence: OLD_SHAPE.council.recurrence.map(E.migrateRecurrenceRule) };
+    const dates = E.meetingDatesInRange(migrated, FROM, TO);
+    expect(dates.length).toBe(168);   // 24 dates/yr × 7 yrs
+    expect(dates[0]).toBe("2026-01-08");
+    expect(dates[dates.length - 1]).toBe("2032-12-23");
+  });
+  it("TCEQ MUD Creation: migrated body resolves the EXACT SAME 14 dates the old shape did", () => {
+    const migrated = { recurrence: OLD_SHAPE.mud.recurrence.map(E.migrateRecurrenceRule) };
+    const dates = E.meetingDatesInRange(migrated, FROM, TO);
+    expect(dates).toEqual([
+      "2026-05-02", "2026-11-03", "2027-05-01", "2027-11-02", "2028-05-06", "2028-11-07",
+      "2029-05-05", "2029-11-06", "2030-05-04", "2030-11-05", "2031-05-03", "2031-11-04",
+      "2032-05-01", "2032-11-02",
+    ]);
+  });
+  it("migrateRecurrenceRule: monthly setpos → positions array, months blank → 'all'", () => {
+    expect(E.migrateRecurrenceRule({ freq: "monthly", weekday: 2, setpos: [3] }))
+      .toEqual({ positions: [3], weekday: 2, months: "all", anchor: null });
+  });
+  it("migrateRecurrenceRule: weekly → positions 'every'", () => {
+    expect(E.migrateRecurrenceRule({ freq: "weekly", weekday: 3 }))
+      .toEqual({ positions: "every", weekday: 3, months: "all", anchor: null });
+  });
+  it("migrateRecurrenceRule: months blank stays 'all'; a restricted set is preserved", () => {
+    expect(E.migrateRecurrenceRule({ freq: "monthly", weekday: 1, setpos: [1], months: [1, 4, 7, 10] }))
+      .toEqual({ positions: [1], weekday: 1, months: [1, 4, 7, 10], anchor: null });
+  });
+  it("migrateRecurrenceRule: the Election-Day checkbox (weekday:2, onOrAfter:2) → anchor {1, Mon}", () => {
+    expect(E.migrateRecurrenceRule({ freq: "monthly", weekday: 2, setpos: [1], months: [11], onOrAfter: 2 }))
+      .toEqual({ positions: [1], weekday: 2, months: [11], anchor: { position: 1, weekday: 1 } });
+  });
+  it("migrateRecurrenceRule: effectiveFrom/effectiveTo/interval pass through untouched", () => {
+    expect(E.migrateRecurrenceRule({ freq: "monthly", weekday: 2, setpos: [2], effectiveFrom: "2026-09-01" }))
+      .toEqual({ positions: [2], weekday: 2, months: "all", anchor: null, effectiveFrom: "2026-09-01" });
+  });
+  it("migrateRecurrenceRule is idempotent — already-new-shape rules pass through unchanged", () => {
+    const already = { positions: [3], weekday: 2, months: "all", anchor: null };
+    expect(E.migrateRecurrenceRule(already)).toBe(already);
+  });
+  it("normalizeMeetingCadence migrates every body in every project, gated by _mbv2", () => {
+    const d = { projects: { 1: { meetingBodies: [
+      { id: "mb1", recurrence: [{ freq: "monthly", weekday: 2, setpos: [3] }] },
+    ] } } };
+    const migrated = E.normalizeMeetingCadence(d);
+    expect(migrated._mbv2).toBe(true);
+    expect(migrated.projects[1].meetingBodies[0].recurrence[0]).toEqual({ positions: [3], weekday: 2, months: "all", anchor: null });
+    // Idempotent: a second pass is a no-op (the _mbv2 flag short-circuits it).
+    expect(E.normalizeMeetingCadence(migrated)).toBe(migrated);
+  });
+  it("normalizeMeetingCadence tolerates a project with no meetingBodies / a corrupt project", () => {
+    const d = { projects: { 1: { name: "no bodies" }, 2: null } };
+    expect(() => E.normalizeMeetingCadence(d)).not.toThrow();
+    expect(E.normalizeMeetingCadence(d).projects[1]).toEqual({ name: "no bodies" });
   });
 });
 
@@ -1022,9 +1230,9 @@ describe("anti-drift: the B815 meeting-body engine exists VERBATIM in src + mirr
     expect(src).toMatch(/subBD = \(s, n\) => addBD\(s, -n\);/);
     expect(mjs).toMatch(/subBD = \(s, n\) => addBD\(s, -n\);/);
   });
-  it("nthWeekdayOfMonth guards month overflow (getMonth === m-1) in both", () => {
-    expect(src).toMatch(/return \(d\.getMonth\(\) === m - 1\) \? fdLocal\(d\) : null;/);
-    expect(mjs).toMatch(/return \(d\.getMonth\(\) === m - 1\) \? fdLocal\(d\) : null;/);
+  it("nthWeekdayOfMonth resolves via pickOrdinal(occurrencesInMonth(...)) in both — no second occurrence-walker", () => {
+    expect(src).toMatch(/const nthWeekdayOfMonth = \(y, m, weekday, pos\) => pickOrdinal\(occurrencesInMonth\(y, m, weekday\), pos\);/);
+    expect(mjs).toMatch(/const nthWeekdayOfMonth = \(y, m, weekday, pos\) => pickOrdinal\(occurrencesInMonth\(y, m, weekday\), pos\);/);
   });
   it("meetingDatesInRange applies extraDates AFTER blackoutDates (explicit-wins) in both", () => {
     expect(src).toMatch(/\.forEach\(d => \{ if \(d >= from && d <= to\) set\.add\(d\); \}\);/);
@@ -1036,23 +1244,50 @@ describe("anti-drift: the B815 meeting-body engine exists VERBATIM in src + mirr
   });
 });
 
-describe("anti-drift: the B845 on/after primitive exists VERBATIM in src + mirror", () => {
+describe("anti-drift: NEW-1 mbRuleSummary + the meeting-cadence migration exist VERBATIM in src + mirror", () => {
   const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
   const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
-  it("nthWeekdayOnOrAfter applies the nth-week shift in both", () => {
-    expect(src).toMatch(/if \(nth > 1\) d\.setDate\(d\.getDate\(\) \+ 7 \* \(nth - 1\)\);/);
-    expect(mjs).toMatch(/if \(nth > 1\) d\.setDate\(d\.getDate\(\) \+ 7 \* \(nth - 1\)\);/);
+  it("mbRuleSummary builds the anchor clause the same way in both", () => {
+    expect(src).toMatch(/base \+= `, counting from after the \$\{MB_SETPOS_LABEL\[String\(r\.anchor\.position\)\] \|\| r\.anchor\.position\} \$\{MB_WD_FULL\[r\.anchor\.weekday\] \|\| "\?"\}`;/);
+    expect(mjs).toMatch(/base \+= `, counting from after the \$\{MB_SETPOS_LABEL\[String\(r\.anchor\.position\)\] \|\| r\.anchor\.position\} \$\{MB_WD_FULL\[r\.anchor\.weekday\] \|\| "\?"\}`;/);
   });
-  it("meetingDatesInRange routes onOrAfter rules through the new primitive in both", () => {
-    expect(src).toMatch(/nthWeekdayOnOrAfter\(y, m, r\.weekday, r\.onOrAfter, sp > 0 \? sp : 1\)/);
-    expect(mjs).toMatch(/nthWeekdayOnOrAfter\(y, m, r\.weekday, r\.onOrAfter, sp > 0 \? sp : 1\)/);
+  it("cadenceSummary joins with \", and \" in both", () => {
+    expect(src).toMatch(/return rules\.map\(mbRuleSummary\)\.join\(", and "\);/);
+    expect(mjs).toMatch(/return rules\.map\(mbRuleSummary\)\.join\(", and "\);/);
+  });
+  it("migrateRecurrenceRule maps the ONE anchor shape the old UI could produce, in both", () => {
+    expect(src).toMatch(/if \(r\.weekday === 2 && r\.onOrAfter === 2\) \{/);
+    expect(mjs).toMatch(/if \(r\.weekday === 2 && r\.onOrAfter === 2\) \{/);
+    expect(src).toMatch(/anchor = \{ position: 1, weekday: 1 \};   \/\/ the 1st Monday/);
+    expect(mjs).toMatch(/anchor = \{ position: 1, weekday: 1 \};   \/\/ the 1st Monday/);
+  });
+  it("normalizeMeetingCadence gates on its OWN flag (_mbv2), never the retired _v9, in both", () => {
+    expect(src).toMatch(/if \(d\._mbv2\) return d;/);
+    expect(mjs).toMatch(/if \(d\._mbv2\) return d;/);
+  });
+});
+
+describe("anti-drift: the NEW-1 generalized anchor primitive exists VERBATIM in src + mirror", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  it("meetingDatesInRange computes the anchor date and filters occurrences strictly after it, in both", () => {
+    expect(src).toMatch(/const anchorDate = nthWeekdayOfMonth\(y, m, anchor\.weekday, anchor\.position\);/);
+    expect(mjs).toMatch(/const anchorDate = nthWeekdayOfMonth\(y, m, anchor\.weekday, anchor\.position\);/);
+    expect(src).toMatch(/if \(!anchorDate\) continue;   \/\/ the anchor itself doesn't exist this month — nothing, no crash/);
+    expect(mjs).toMatch(/if \(!anchorDate\) continue;   \/\/ the anchor itself doesn't exist this month — nothing, no crash/);
+    expect(src).toMatch(/occ = occ\.filter\(iso => iso > anchorDate\);/);
+    expect(mjs).toMatch(/occ = occ\.filter\(iso => iso > anchorDate\);/);
+  });
+  it("occurrencesInMonth walks the same weekly-stride primitive in both", () => {
+    expect(src).toMatch(/while \(d\.getMonth\(\) === m - 1\) \{ out\.push\(fdLocal\(d\)\); d\.setDate\(d\.getDate\(\) \+ 7\); \}/);
+    expect(mjs).toMatch(/while \(d\.getMonth\(\) === m - 1\) \{ out\.push\(fdLocal\(d\)\); d\.setDate\(d\.getDate\(\) \+ 7\); \}/);
   });
 });
 
 // ── B816 (NEW-2) — meeting-bound tasks in cascadeDates ──────────────────────────
 describe("B816 cascadeDates — meeting-bound snap + the interaction matrix", () => {
   const council = { id: "mb_bt", name: "Baytown council",
-    recurrence: [{ freq: "monthly", weekday: 2, setpos: [2, 4] }],
+    recurrence: [{ positions: [2, 4], weekday: 2, months: "all", anchor: null }],
     agendaLead: { type: "offset", n: 10, unit: "business" } };
   const bodies = [council];
   const mk = (id, o = {}) => ({ id, name: "t" + id, start: "", end: "", duration: 1, durValue: 1, durUnit: "d", predecessors: [], parentId: null, ...o });
@@ -1166,7 +1401,7 @@ describe("bound-task fixed point — a pred-less bound task must NOT ratchet a m
   // deadline always precedes the meeting, so the current meeting was never "eligible" from its own
   // date — every cascade rolled it one cycle forward (bind → edit → edit = 3 meetings of drift).
   const council = { id: "mb_bt", name: "Baytown council",
-    recurrence: [{ freq: "monthly", weekday: 2, setpos: [2, 4] }],
+    recurrence: [{ positions: [2, 4], weekday: 2, months: "all", anchor: null }],
     agendaLead: { type: "offset", n: 10, unit: "business" } };
   const mk = (id, o = {}) => ({ id, name: "t" + id, start: "", end: "", duration: 1, durValue: 1, durUnit: "d", predecessors: [], parentId: null, ...o });
   it("first cascade snaps from the stored start; repeat cascades are a FIXED POINT", () => {
@@ -1201,7 +1436,7 @@ describe("bound-task fixed point — a pred-less bound task must NOT ratchet a m
 // couple of cascades rather than requiring a monthly-cadence multi-year run.
 describe("bound-task fixed point — a minMeetingsAfter-only bound task must NOT ratchet either (NEW-1, 2026-09-16)", () => {
   const weekly = { id: "mb_wk", name: "Weekly review board",
-    recurrence: [{ freq: "weekly", weekday: 3 }],                       // every Wednesday
+    recurrence: [{ positions: "every", weekday: 3, months: "all", anchor: null }],                       // every Wednesday
     agendaLead: { type: "weekdayAnchor", weeksBefore: 1, weekday: 4 } }; // agenda due the Thu a week before
   const mk = (id, o = {}) => ({ id, name: "t" + id, start: "", end: "", duration: 1, durValue: 1, durUnit: "d", predecessors: [], parentId: null, ...o });
 
@@ -1315,11 +1550,11 @@ describe("cascade fixed point — a task naming its OWN ANCESTOR (summary row) a
 // ANY task, so this is the owner's exact repro shape: type a date directly into a meeting-bound
 // row's Start cell and it used to hold silently with meetingInfeasible reading false even when the
 // date is nowhere on the body's calendar. Owner repro: Goose Creek task 168, P&Z body recurrence
-// [{freq:"monthly", setpos:[3], weekday:2}] — the real September 2026 meeting is the 15th (3rd
+// [{ positions: [3], weekday: 2, months: "all", anchor: null }] — the real September 2026 meeting is the 15th (3rd
 // Tuesday), never the 30th.
 describe("NEW-1 — meetingDateOffCalendar: a pinned date must be checked against the body's real calendar, not just the agenda deadline", () => {
   const pz = { id: "mb_pz", name: "Baytown P&Z Commission",
-    recurrence: [{ freq: "monthly", setpos: [3], weekday: 2 }],
+    recurrence: [{ positions: [3], weekday: 2, months: "all", anchor: null }],
     extraDates: ["2026-08-04"], blackoutDates: ["2026-07-28"] };
   const mk = (id, o = {}) => ({ id, name: "t" + id, start: "", end: "", duration: 0, durValue: 0, durUnit: "d", predecessors: [], parentId: null, ...o });
 
@@ -1363,7 +1598,7 @@ describe("NEW-1 — meetingDateOffCalendar: a pinned date must be checked agains
 // meeting-eligibility). "The election must be CALLED ≥78 days before election day" as a row.
 describe("deadline rows — cascadeDates post-pass keeps the row on the anchor's call/file-by date", () => {
   const council = { id: "mb_bt", name: "Baytown council",
-    recurrence: [{ freq: "monthly", weekday: 2, setpos: [2, 4] }],
+    recurrence: [{ positions: [2, 4], weekday: 2, months: "all", anchor: null }],
     agendaLead: { type: "offset", n: 10, unit: "business" } };
   const bodies = [council];
   const mk = (id, o = {}) => ({ id, name: "t" + id, start: "", end: "", duration: 1, durValue: 1, durUnit: "d", predecessors: [], parentId: null, ...o });
@@ -1960,7 +2195,7 @@ describe("B624 rollForwardToWorkday — the input-guard primitive", () => {
 
 // ── B817 (NEW-3) — float-to-deadline, cost-of-miss, and the health rollup ───────
 describe("B817 meetingFloatBD / meetingCostDays — the two decision numbers", () => {
-  const council = { id: "mb_bt", recurrence: [{ freq: "monthly", weekday: 2, setpos: [2, 4] }],
+  const council = { id: "mb_bt", recurrence: [{ positions: [2, 4], weekday: 2, months: "all", anchor: null }],
     agendaLead: { type: "offset", n: 10, unit: "business" } };
   it("meetingFloatBD — working days from today to the agenda deadline", () => {
     const t = { meetingBound: true, meetingDeadline: "2026-08-25" };
@@ -2224,7 +2459,7 @@ describe("B835 (×2) — the touchesSchedule gate is wired into the real source 
 // instead of silently reverting it to a plain FS date, and flag it; detectCascadeDrift must exempt
 // meeting-bound + deadline rows (their dates are derived by a different mechanism, like pins).
 describe("B864 — orphaned meeting binding: preserve the date + flag it, never revert to FS", () => {
-  const body = { id: "mb_e", name: "Elections", recurrence: [{ freq: "monthly", weekday: 6, setpos: [1], months: [5] }], agendaLead: { type: "offset", n: 10, unit: "business" } };
+  const body = { id: "mb_e", name: "Elections", recurrence: [{ positions: [1], weekday: 6, months: [5], anchor: null }], agendaLead: { type: "offset", n: 10, unit: "business" } };
   const base = () => [
     T(1, { start: "2026-01-05", end: "2026-01-09", pinnedStart: true, durValue: 5, durUnit: "d" }),
     T(2, { start: "2027-05-01", duration: 0, durValue: 0, durUnit: "d", meetingBound: true, meetingBodyId: "mb_e", predecessors: [{ id: 1, type: "FS", lag: 0 }] }),
@@ -4220,10 +4455,12 @@ describe("decomposeForDualWrite — mirrored, source-checked", () => {
   });
 });
 
-// B1777120 — the dual-read scaffold's pure reverse step + the fact it stays wired OFF by
-// default. See src/workspaces/scheduler/db/schedules_decompose_recompose.sql's
-// schedules_recompose_to_planar_data() for the SQL-side counterpart.
-describe("recomposeFromRows — mirrored, source-checked, and gated OFF by default", () => {
+// B1777120 — the authority-flip's pure reverse step, and the fact that WHICH ACCOUNT reads from
+// rows is decided server-side (schedule_account_index.rows_authoritative), never a blanket
+// client toggle. See src/workspaces/scheduler/db/schedules_authority_flip.sql for the flip
+// itself and src/workspaces/scheduler/db/schedules_decompose_recompose.sql's
+// schedules_recompose_to_planar_data() for the SQL-side counterpart of this pure function.
+describe("recomposeFromRows — mirrored, source-checked, and gated per-account by the server", () => {
   const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
   const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
 
@@ -4231,15 +4468,17 @@ describe("recomposeFromRows — mirrored, source-checked, and gated OFF by defau
     expect(src, "recomposeFromRows missing from public/sequence/index.html").toMatch(/const recomposeFromRows = \(indexRow, scheduleRows\) =>/);
     expect(mjs, "recomposeFromRows missing from the engine mirror").toMatch(/export const recomposeFromRows = \(indexRow, scheduleRows\) =>/);
   });
-  it("the dual-read path is gated behind a flag that is never set anywhere in this app (default OFF)", () => {
-    expect(src).toMatch(/const SCHEDULE_ROWS_READ_FLAG = "planar:scheduleRowsRead";/);
-    expect(src).toMatch(/scheduleRowsReadEnabled\(\)/);
-    // The ONLY write to this key in the whole app must be absent — nothing here ever turns
-    // itself on. (A person can still flip it by hand from devtools for local testing.)
-    expect(src).not.toMatch(/localStorage\.setItem\(SCHEDULE_ROWS_READ_FLAG/);
+  it("authority is read from schedule_account_index.rows_authoritative per account, with a local force/disable override for testing", () => {
+    expect(src).toMatch(/idxRes\.data\.rows_authoritative/);
+    expect(src).toMatch(/const SCHEDULE_ROWS_FORCE_FLAG = "planar:scheduleRowsRead";/);
+    expect(src).toMatch(/const SCHEDULE_ROWS_DISABLE_FLAG = "planar:scheduleRowsDisable";/);
+    // Nothing in this app ever writes either override key for itself — a person can still flip
+    // one by hand from devtools for local testing, but the app never turns itself on/off.
+    expect(src).not.toMatch(/localStorage\.setItem\(SCHEDULE_ROWS_FORCE_FLAG/);
+    expect(src).not.toMatch(/localStorage\.setItem\(SCHEDULE_ROWS_DISABLE_FLAG/);
   });
-  it("get() tries the rows first, but only when the flag is enabled, and always falls back to the blob read", () => {
-    expect(src).toMatch(/if \(k === "hs-v1" && scheduleRowsReadEnabled\(\)\) \{/);
+  it("get() always tries the rows first for hs-v1; readFromScheduleRows itself falls back to null for a non-flipped account, and get() then reads the blob", () => {
+    expect(src).toMatch(/if \(k === "hs-v1"\) \{\s*\n\s*const fromRows = await readFromScheduleRows\(k\);/);
     expect(src).toMatch(/const \{ data, error \} = await sb\.from\(TABLE\)\.select\("value"\)\.eq\("key", k\)\.single\(\);/);
   });
 
