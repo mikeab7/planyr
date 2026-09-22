@@ -4220,10 +4220,12 @@ describe("decomposeForDualWrite — mirrored, source-checked", () => {
   });
 });
 
-// B1777120 — the dual-read scaffold's pure reverse step + the fact it stays wired OFF by
-// default. See src/workspaces/scheduler/db/schedules_decompose_recompose.sql's
-// schedules_recompose_to_planar_data() for the SQL-side counterpart.
-describe("recomposeFromRows — mirrored, source-checked, and gated OFF by default", () => {
+// B1777120 — the authority-flip's pure reverse step, and the fact that WHICH ACCOUNT reads from
+// rows is decided server-side (schedule_account_index.rows_authoritative), never a blanket
+// client toggle. See src/workspaces/scheduler/db/schedules_authority_flip.sql for the flip
+// itself and src/workspaces/scheduler/db/schedules_decompose_recompose.sql's
+// schedules_recompose_to_planar_data() for the SQL-side counterpart of this pure function.
+describe("recomposeFromRows — mirrored, source-checked, and gated per-account by the server", () => {
   const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
   const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
 
@@ -4231,15 +4233,17 @@ describe("recomposeFromRows — mirrored, source-checked, and gated OFF by defau
     expect(src, "recomposeFromRows missing from public/sequence/index.html").toMatch(/const recomposeFromRows = \(indexRow, scheduleRows\) =>/);
     expect(mjs, "recomposeFromRows missing from the engine mirror").toMatch(/export const recomposeFromRows = \(indexRow, scheduleRows\) =>/);
   });
-  it("the dual-read path is gated behind a flag that is never set anywhere in this app (default OFF)", () => {
-    expect(src).toMatch(/const SCHEDULE_ROWS_READ_FLAG = "planar:scheduleRowsRead";/);
-    expect(src).toMatch(/scheduleRowsReadEnabled\(\)/);
-    // The ONLY write to this key in the whole app must be absent — nothing here ever turns
-    // itself on. (A person can still flip it by hand from devtools for local testing.)
-    expect(src).not.toMatch(/localStorage\.setItem\(SCHEDULE_ROWS_READ_FLAG/);
+  it("authority is read from schedule_account_index.rows_authoritative per account, with a local force/disable override for testing", () => {
+    expect(src).toMatch(/idxRes\.data\.rows_authoritative/);
+    expect(src).toMatch(/const SCHEDULE_ROWS_FORCE_FLAG = "planar:scheduleRowsRead";/);
+    expect(src).toMatch(/const SCHEDULE_ROWS_DISABLE_FLAG = "planar:scheduleRowsDisable";/);
+    // Nothing in this app ever writes either override key for itself — a person can still flip
+    // one by hand from devtools for local testing, but the app never turns itself on/off.
+    expect(src).not.toMatch(/localStorage\.setItem\(SCHEDULE_ROWS_FORCE_FLAG/);
+    expect(src).not.toMatch(/localStorage\.setItem\(SCHEDULE_ROWS_DISABLE_FLAG/);
   });
-  it("get() tries the rows first, but only when the flag is enabled, and always falls back to the blob read", () => {
-    expect(src).toMatch(/if \(k === "hs-v1" && scheduleRowsReadEnabled\(\)\) \{/);
+  it("get() always tries the rows first for hs-v1; readFromScheduleRows itself falls back to null for a non-flipped account, and get() then reads the blob", () => {
+    expect(src).toMatch(/if \(k === "hs-v1"\) \{\s*\n\s*const fromRows = await readFromScheduleRows\(k\);/);
     expect(src).toMatch(/const \{ data, error \} = await sb\.from\(TABLE\)\.select\("value"\)\.eq\("key", k\)\.single\(\);/);
   });
 
