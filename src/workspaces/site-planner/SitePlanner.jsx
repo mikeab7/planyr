@@ -27179,7 +27179,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   })() : (
                     <>
                       <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(selEl.w)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
-                      <Field label={selEl.type === "pond" ? "Length (ft)" : "Depth (ft)"}><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
+                      {/* B1805808 — a truck court / drive aisle drawn with the Paving tool (freestanding,
+                          or the auto-generated aisle a split parking lot lays down) shows Depth read-only
+                          here, matching the dock-zone truck court's own read-only Length (B1749154): Width
+                          is the dimension worth typing an exact number for (clearance / turning-radius
+                          driven); Depth is however far the pavement was drawn to extend, so it's adjusted
+                          by dragging the shape's edge on the canvas rather than by typing a new value.
+                          Every other type on this generic panel (pond, parking, trailer…) is unaffected. */}
+                      {selEl.type === "paving" ? (
+                        <Field label="Depth (ft)">
+                          <span style={{ fontSize: 12, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, color: PAL.muted }} title="Drag the shape's edge on the canvas to change this">
+                            {Math.round(selEl.h)}′
+                          </span>
+                        </Field>
+                      ) : (
+                        <Field label={selEl.type === "pond" ? "Length (ft)" : "Depth (ft)"}><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
+                      )}
                     </>
                   )}
                   {/* B1790016 NEW-1 — car parking ("parking") now carries its own Rotation row inside
