@@ -955,7 +955,7 @@ function SidebarFooter({ unfiledCount, view, narrow = false, onOpenUnfiled, onOp
 export default function NotesTree({
   tree, projectId, orgScope = false, projects = [], projectsState = "ready", projectsError = "", onRetryProjects,
   activePageId, query, results,
-  onQueryChange, onSelectPage, onSelectHit, onAddPage, onAddSubpage,
+  onQueryChange, onSelectPage, onSelectHit, onAddPage, onAddSubpage, onCopyPage,
   onRename, onDelete, onExportPage, onPrintPage, onSetPageProject, onSetPageOrgScope,
   onMovePage, onRestore, onPurge, onPurgeAll, onPeekBin, onPurgeEmpties, binFacts, onAllNotes,
   /* NEW-2 — the id of whatever binned entry the workspace is currently reading read-only
@@ -1087,6 +1087,10 @@ export default function NotesTree({
         { id: `sub-${id}`, label: "New subpage", onPick: () => onAddSubpage(id) },
         { id: `rn-${id}`, label: "Rename", onPick: () => beginRename(id) },
         { id: `mv-${id}`, label: "Move…", onPick: () => beginMove(id) },
+        /* NEW-1 "Copy a notebook" — the page and everything under it, landing right below
+         * the original in the original's own project (never offered a destination: see
+         * `copyPageWithin`). */
+        ...(onCopyPage ? [{ id: `cp-${id}`, label: "Make a copy", onPick: () => onCopyPage(id) }] : []),
         ...(root ? [{ id: `bind-${id}`, label: "Belongs to…", onPick: () => beginBind(id) }] : []),
         { id: `md-${id}`, label: "Export to Markdown", onPick: () => onExportPage(id) },
         { id: `print-${id}`, label: "Print / save as PDF", onPick: () => onPrintPage(id) },

@@ -68,8 +68,8 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   (it lives inside the Bin view, where it is the point), and the per-row **timestamp column**
   (now the row's hover title; Recent is where recency is the point). The rail **opens the path
   to the current page and leaves the rest collapsed**, and never auto-collapses a branch you
-  opened. A row shows its **name and nothing else**: New subpage / Rename / Move / Belongs to /
-  Export / Print / Delete live on a **right-click menu** (B1367), reachable from the keyboard
+  opened. A row shows its **name and nothing else**: New subpage / Rename / Move / Make a copy /
+  Belongs to / Export / Print / Delete live on a **right-click menu** (B1367), reachable from the keyboard
   with the context-menu key or Shift+F10; **dragging a row onto another files it under that
   page**, and onto a project's group heading lifts it back to the top level. Rename is still an
   inline field (Enter commits, Esc cancels), delete still asks with an inline "Delete? ✓ ✕" row
@@ -796,7 +796,12 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   project argument at all** — the copy lands as the source's next sibling wearing the source
   root's project, or it is REFUSED and named. There is deliberately no way to say "put the copy
   over there", because a caller that could would eventually pass the project it happens to be
-  showing. The conflict park in `Notes.jsx` goes through it and **says so on screen at the moment
+  showing. **"Make a copy" on a row (B1832304, "copy a notebook") is `copyPageTree` — the
+  page's WHOLE SUBTREE, top node through `copyPageWithin` — plus `notesStore.js`'s
+  `duplicatePageTree`, which copies every body and re-keys every picture/file to NEW ids owned by
+  the copy (`remapAssetIds`): a copy that shared an asset id would lose it when the source is
+  purged. All-or-nothing; guards: the repo-root `test/` suite **notesCopyNotebook** and the headless
+  **verify-notes-copy-notebook** under `ui-audit/`.** The conflict park in `Notes.jsx` goes through it and **says so on screen at the moment
   it happens**. Guards: the repo-root `test/` suites **notesProjectIntegrity** (the decisions) and
   **notesTwoClientConflict** (two real store instances against an in-memory server that owns `rev`
   like the deployed trigger — the resulting store, the exact page count AND every page's project),
