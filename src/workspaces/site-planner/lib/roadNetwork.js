@@ -271,7 +271,7 @@ export function collapseRingSpikes(ring, opts = {}) {
 export function dissolveRings(rings, opts = {}) {
   const valid = (rings || []).filter(isRing);
   if (!valid.length) return [];
-  if (valid.length === 1) return [{ outer: collapseRingSpikes(valid[0].map((p) => ({ x: p.x, y: p.y }))), holes: [] }];
+  if (valid.length === 1 && !(opts.subtract && opts.subtract.length)) return [{ outer: collapseRingSpikes(valid[0].map((p) => ({ x: p.x, y: p.y }))), holes: [] }];
   const close = Number.isFinite(opts.close) ? opts.close : CLOSE_FT;
   try {
     const clip = new ClipperLib.Clipper();
@@ -292,8 +292,24 @@ export function dissolveRings(rings, opts = {}) {
     // Re-union the closed result so holes/outers come back as a proper PolyTree.
     const clip2 = new ClipperLib.Clipper();
     clip2.AddPaths(closePaths(merged, close), ClipperLib.PolyType.ptSubject, true);
+    /* 2026-09-22 — `opts.subtract`: rings the pavement must END AT rather than run into. A road that
+     * tees into a paving pad / truck court used to keep its strip (its overshoot past the face, its
+     * flat end cap, the wedge's tangent cusp) and rely on the PAD painting over all of it — which
+     * stopped being true the day elements began stacking in creation order (B1788912: a road drawn
+     * after its court paints above it). The geometry is now made right on its own: the target's
+     * polygon is subtracted after the union, so the road's pavement stops exactly at the court face
+     * whatever paints on top. The curb returns are untouched (they lie outside the pad). */
+    const subtract = (opts.subtract || []).filter(isRing);
+    if (subtract.length) {
+      for (const r of subtract) {
+        const path = ClipperLib.Clipper.CleanPolygon(toPath(r), CLEAN_DELTA);
+        if (path.length < 3) continue;
+        if (ClipperLib.Clipper.Area(path) < 0) path.reverse();
+        clip2.AddPath(path, ClipperLib.PolyType.ptClip, true);
+      }
+    }
     const tree = new ClipperLib.PolyTree();
-    clip2.Execute(ClipperLib.ClipType.ctUnion, tree, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+    clip2.Execute(subtract.length ? ClipperLib.ClipType.ctDifference : ClipperLib.ClipType.ctUnion, tree, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
     const out = [];
     // Walk the PolyTree so holes stay attached to the region that owns them (a road loop encircling
     // an island is a real case: the pond loop road). Depth 0/2/4… are outers, 1/3/5… are holes.
@@ -312,7 +328,9 @@ export function dissolveRings(rings, opts = {}) {
       }
     };
     walk(tree);
-    return out.length ? out : valid.map((r) => ({ outer: r, holes: [] }));
+    // An empty result is honest when a subtract was asked for (pavement wholly inside the pad);
+    // otherwise it is a clipper failure and the inputs are shown as-is rather than a blank canvas.
+    return out.length || subtract.length ? out : valid.map((r) => ({ outer: r, holes: [] }));
   } catch {
     return valid.map((r) => ({ outer: r.map((p) => ({ x: p.x, y: p.y })), holes: [] }));
   }
@@ -480,6 +498,55 @@ export function clusterIds(ids, pairs) {
     index.set(id, order.get(root));
   }
   return index;
+}
+
+/* 2026-09-22 — the region's OUTLINE as open polylines, with every segment that lies ALONG one of
+ * `cutters` (the pads the region was subtracted by) left out. After the subtraction above, the road's
+ * boundary runs along the court face between the two curb-return tangent points; stroking that
+ * segment would rule a curb line straight across the entrance — the exact defect `rectOutlineCutSegments`
+ * exists to prevent from the pad's side. A segment is "on" a cutter when both its ends and its
+ * midpoint sit within `tol` of that cutter's boundary. */
+export function regionEdgeSegments(region, cutters, tol = 0.15) {
+  if (!region || !isRing(region.outer)) return [];
+  const cut = (cutters || []).filter(isRing);
+  const onBoundary = (p) => cut.some((r) => { for (let i = 0; i < r.length; i++) if (segDist(p, r[i], r[(i + 1) % r.length]) <= tol) return true; return false; });
+  const out = [];
+  const walk = (ring) => {
+    const n = ring.length;
+    if (!cut.length) { out.push([...ring.map((p) => ({ x: p.x, y: p.y })), { x: ring[0].x, y: ring[0].y }]); return; }
+    const keep = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const a = ring[i], b = ring[(i + 1) % n];
+      const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      keep[i] = !(onBoundary(a) && onBoundary(b) && onBoundary(m));
+    }
+    if (keep.every(Boolean)) { out.push([...ring.map((p) => ({ x: p.x, y: p.y })), { x: ring[0].x, y: ring[0].y }]); return; }
+    // Start at a dropped segment so every kept run is contiguous and never wraps.
+    let s = keep.findIndex((k) => !k);
+    let cur = null;
+    for (let k = 1; k <= n; k++) {
+      const i = (s + k) % n;
+      if (keep[i]) {
+        const a = ring[i], b = ring[(i + 1) % n];
+        if (!cur) cur = [{ x: a.x, y: a.y }];
+        cur.push({ x: b.x, y: b.y });
+      } else if (cur) { out.push(cur); cur = null; }
+    }
+    if (cur) out.push(cur);
+  };
+  walk(region.outer);
+  for (const h of region.holes || []) if (isRing(h)) walk(h);
+  return out;
+}
+
+/* SVG path data for open polylines (world feet → screen via `f2p`). */
+export function polylinesPathD(lines, f2p) {
+  const parts = [];
+  for (const l of lines || []) {
+    if (!isLine(l)) continue;
+    parts.push(l.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" "));
+  }
+  return parts.length ? parts.join(" ") : null;
 }
 
 /* SVG path data (world feet → screen via `f2p`) for a dissolved region, holes punched with even-odd. */

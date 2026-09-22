@@ -314,8 +314,8 @@ import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES,
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, buildingNumberHolder, renumberBuilding, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, parcelSplitNames, lineageConflicts } from "./lib/siteModel.js";
-import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, rectContainsPoint, polygonEdges, polygonContainsPoint, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, cardinalTeePoint, roadBearingDeg } from "./lib/roadGeometry.js";
-import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, rectOutlineCutSegments, polygonOutlineCutSegments } from "./lib/roadNetwork.js";
+import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, rectContainsPoint, polygonEdges, polygonContainsPoint, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, cardinalTeePoint, roadBearingDeg, roadEdgeCrossing } from "./lib/roadGeometry.js";
+import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, regionEdgeSegments, polylinesPathD, rectOutlineCutSegments, polygonOutlineCutSegments } from "./lib/roadNetwork.js";
 import { driveJunctionsOf, teeJunctionsOf } from "./lib/roadJunctions.js";
 import {
   roundaboutDiameterFor, roundaboutBandFor,
@@ -5827,7 +5827,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // it is unambiguously on the paved surface). A contained point is never relocated (the weld point
   // returned is the endpoint itself, exactly where it was placed — only a genuinely NEAR-edge match
   // snaps to the precise edge point, the same small nudge every other connect magnet already makes).
-  const findDriveConnect = (P, tolFt) => {
+  /* 2026-09-22 — `from` is the road vertex BEHIND the endpoint. An endpoint dropped INSIDE a court
+     used to stay exactly where it was clicked ("a contained point is never relocated", B1612608),
+     which left the road's end vertex — on the owner's Goose Creek plan, ~175 ft — inside the court,
+     with the whole tongue of pavement to it. A road ends at the court FACE: when the previous vertex
+     is outside the pad, the endpoint is welded to where the last leg crosses the face (the same
+     crossing `driveJunctionsOf` already resolves the junction at). A leg that lies wholly inside the
+     pad (or no `from`) keeps the old behaviour. */
+  const findDriveConnect = (P, tolFt, from) => {
     let best = null;
     for (const t of driveTargetsOf()) {
       // facingOnly:false — a road drawn TO the edge ends ON it (not strictly outside); the nearest edge
@@ -5839,17 +5846,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // concave ring too).
       const inside = hit.dist > tolFt && (t.points ? polygonContainsPoint(P, t.points) : rectContainsPoint(P, t.edges));
       if ((hit.dist <= tolFt || inside) && (!best || hit.dist < best.dist)) {
-        best = { kind: "drive", targetId: t.id, targetKind: t.kind, pt: inside ? { x: P.x, y: P.y } : hit.pt, dist: inside ? 0 : hit.dist };
+        let pt = inside ? { x: P.x, y: P.y } : hit.pt;
+        if (inside && from && Number.isFinite(from.x) && Number.isFinite(from.y)) {
+          const fromInside = t.points ? polygonContainsPoint(from, t.points) : rectContainsPoint(from, t.edges);
+          const x = fromInside ? null : roadEdgeCrossing(from, P, t.edges);
+          if (x && x.pt) pt = { x: x.pt.x, y: x.pt.y };
+        }
+        best = { kind: "drive", targetId: t.id, targetKind: t.kind, pt, dist: inside ? 0 : hit.dist };
       }
     }
     return best;
   };
   // The nearest of a ROAD connect (findRoadConnect) or a DRIVE-target connect, within tolerance.
   // Returns { kind:"road"|"drive", pt, road? , drive? } or null. Drive wins only when strictly closer.
-  const resolveEndpointConnect = (fp, exclude) => {
+  const resolveEndpointConnect = (fp, exclude, from) => {
     const tolFt = connectTolFt();
     const road = findRoadConnect(fp, exclude, connectableRoads(), { tolFt, allowInterior: true });
-    const drive = findDriveConnect(fp, tolFt);
+    const drive = findDriveConnect(fp, tolFt, from);
     if (drive && (!road || drive.dist < road.dist)) return { kind: "drive", pt: drive.pt, drive };
     if (road) return { kind: "road", pt: road.pt, road };
     return null;
@@ -7863,7 +7876,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // parking-drive / truck-court edge) welds it there so the drawn road connects cleanly.
         // finishRoad upgrades the FINAL point to a real merge/tee/drive. NOT Snap-gated (B949); Alt bypasses.
         if (!altSnapOffRef.current) {
-          const c = resolveEndpointConnect(fp, null);
+          const c = resolveEndpointConnect(fp, null, prev);
           if (c) pt = { x: c.pt.x, y: c.pt.y };
         }
         setDraftRoadPts((a) => [...(a || []), pt]);
@@ -9176,7 +9189,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       let connect = null;
       const isEnd = d.idx === 0 || d.idx === el.pts.length - 1;
       if (isEnd && !altSnapOffRef.current) {
-        const c = resolveEndpointConnect(fp, { id: el.id, index: d.idx });
+        const c = resolveEndpointConnect(fp, { id: el.id, index: d.idx }, ref);
         if (c) { connect = (e.shiftKey && cardinalTee(el, d.idx, c)) || c; P = { x: connect.pt.x, y: connect.pt.y }; }
       }
       d.connect = connect; // stash for release
@@ -9851,7 +9864,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // the only bypass is holding Alt on the final point.
     let plan = null, targetId = null, drive = null;
     if (!altSnapOffRef.current) {
-      const c = resolveEndpointConnect(raw[raw.length - 1], { id: el.id, index: raw.length - 1 });
+      const c = resolveEndpointConnect(raw[raw.length - 1], { id: el.id, index: raw.length - 1 }, raw[raw.length - 2]);
       if (c && c.kind === "road") { targetId = c.road.roadId; plan = planRoadConnect(el, raw.length - 1, els.find((x) => x.id === c.road.roadId), c.road, defR); }
       else if (c && c.kind === "drive") { drive = c.drive; }
     }
@@ -9864,7 +9877,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // limitation — see findDriveConnect's header for "both ends to two different targets").
     let startDrive = null;
     if (!altSnapOffRef.current && !plan && !drive) {
-      const c0 = resolveEndpointConnect(raw[0], { id: el.id, index: 0 });
+      const c0 = resolveEndpointConnect(raw[0], { id: el.id, index: 0 }, raw[1]);
       if (c0 && c0.kind === "drive") startDrive = c0.drive;
     }
     if (plan) {
@@ -22620,6 +22633,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (t1 && t2 && n && depth > 0) stripeCut.push([t1, t2, { x: t2.x - n.x * depth, y: t2.y - n.y * depth }, { x: t1.x - n.x * depth, y: t1.y - n.y * depth }]);
     }
     for (const dj of driveJunctions) addExtra(dj.sideId, dj.geom.wedges);   // target is a rect element, not a road
+    /* 2026-09-22 — the pad a road tees into is SUBTRACTED from that road's cluster (see
+       dissolveRings' `subtract`): the road's pavement ends at the court face instead of running
+       under (now: over) the court. Map<roadId, [pad rings]>, pad rings in world feet. */
+    const padRingOf = (T) => {
+      if (!T) return null;
+      if (Array.isArray(T.points) && T.points.length >= 3) return T.points;
+      if (typeof T.cx === "number" && T.w > 0 && T.h > 0) return rectEdges(T.cx, T.cy, T.w, T.h, T.rot || 0).map((e) => e.a);
+      return null;
+    };
+    const padCut = new Map();
+    for (const dj of driveJunctions) {
+      const ring = padRingOf((els || []).find((e) => e.id === dj.targetId));
+      if (!ring) continue;
+      if (!padCut.has(dj.sideId)) padCut.set(dj.sideId, []);
+      padCut.get(dj.sideId).push(ring);
+    }
     // NEW-5 — a roundabout's circulatory sectors + its curb returns are ADDITIVE pavement in exactly
     // the same sense a tee's wedges are, so they go through the SAME union: one region, one
     // continuous curb outline, and the central island falls out as a genuine PolyTree hole.
@@ -22639,6 +22668,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       groups.get(k).push(r.id);
     }
     const regions = [];
+    const fullRegions = [];
     const stripes = new Map();
     for (const ids of groups.values()) {
       const parts = [];
@@ -22658,7 +22688,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
          region, so it cannot paint "part new, part old") — the general cost NO-ONE-OWNS-A-COMPOSITE
          warns every composite carries, and no scalar choice here removes it. */
       const zKey = Math.max(...ids.map((id) => byId.get(id)?.z ?? 0));
-      for (const region of dissolveRings(parts)) regions.push({ region, styleEl, zKey, ids });
+      // The cluster's pads (drive targets of any member) are cut out of the painted region; the
+      // UNCUT dissolve is kept only to interrupt the pad's own outline across the mouth (below).
+      const subtract = ids.flatMap((id) => padCut.get(id) || []);
+      const full = dissolveRings(parts);
+      const painted = subtract.length ? dissolveRings(parts, { subtract }) : full;
+      for (const region of painted) regions.push({ region, styleEl, zKey, ids, edge: regionEdgeSegments(region, subtract) });
+      for (const region of full) fullRegions.push({ region, ids });
       // A road's inner curb stripes are trimmed against the OTHER pavement in its cluster, so a stripe
       // ends where it runs into the junction instead of drawing a curb straight through the intersection.
       for (const id of ids) {
@@ -22666,6 +22702,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         for (const oid of ids) { if (oid === id) continue; const s = strip.get(oid); if (s && s.length >= 3) others.push(s); }
         for (const oid of ids) others.push(...extra.get(oid));
         others.push(...stripeCut);
+        others.push(...(padCut.get(id) || []));   // a curb stripe stops at the court face too
         const clipped = roadCurbLines(byId.get(id), settings, sharpFor(byId.get(id)), roundabouts.trims.get(id)).flatMap((cl) => clipPolylineOutside(cl, others));
         // NEW-1 — a road ending at a drive junction (a paving/parking pad edge) left its inner
         // face-of-curb stripe clipped dead right at the fillet's own tangent point: the straight
@@ -22686,7 +22723,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // outline where the drive's pavement crosses it. Map<targetId, cutter rings>.
     const outlineCuts = new Map();
     for (const dj of driveJunctions) {
-      const cutters = regions.filter((r) => r.ids.includes(dj.sideId)).map((r) => r.region.outer).filter(Boolean);
+      const cutters = fullRegions.filter((r) => r.ids.includes(dj.sideId)).map((r) => r.region.outer).filter(Boolean);
       if (!cutters.length) continue;
       outlineCuts.set(dj.targetId, [...(outlineCuts.get(dj.targetId) || []), ...cutters]);
     }
@@ -22700,9 +22737,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      re-deriving it. Keyed on `f2p` rather than `view`: the paths ARE in pixels, and `f2p`'s
      identity is exactly "the view a coordinate is baked at", which is what they depend on. */
   const roadRegionPaths = useMemo(
-    () => roadNet.regions.map(({ region, styleEl, ids }) => ({
+    () => roadNet.regions.map(({ region, styleEl, ids, edge }) => ({
       ids,
       d: regionPathD(region, f2p),
+      edgeD: edge ? polylinesPathD(edge, f2p) : null,
       st: styleEl ? elStyle(styleEl, settings) : typeStyle("road", settings),
       ppf: f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x,
     })),
@@ -22724,7 +22762,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       <g key={`rn${i}-${r.ids[0]}`} data-road-cluster={r.ids.join(",")} pointerEvents="none">
         <path data-testid="road-network-surface" data-export="road-network" d={r.d} fillRule="evenodd"
           fill={r.st.fill} fillOpacity={r.st.fillOpacity ?? 1} stroke="none" />
-        <path data-testid="road-network-edge" d={r.d} fillRule="evenodd" fill="none"
+        <path data-testid="road-network-edge" d={r.edgeD || r.d} fillRule="evenodd" fill="none"
           stroke={r.st.stroke} strokeWidth={curbStrokePx(roadCurbWidth(styleEl || {}), r.ppf, CURB_STROKE_MIN_PX * labelK)}
           strokeLinejoin="round" />
         {/* NEW-5 — the CENTRAL ISLAND: a real hole in the dissolved region, not a disc drawn on
@@ -24459,7 +24497,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 let live = cursor ? snapPt(cursor) : null;
                 let magnet = null; // B945/NEW-1 — endpoint the live point will weld to on click (ungated, B949; B955 drive edges too)
                 if (live && cursor && !altSnapOffRef.current) {
-                  const c = resolveEndpointConnect(cursor, null);
+                  const c = resolveEndpointConnect(cursor, null, draftRoadPts[draftRoadPts.length - 1]);
                   if (c) { live = { x: c.pt.x, y: c.pt.y }; magnet = c.pt; }
                 }
                 const all = live ? [...draftRoadPts, live] : draftRoadPts;
