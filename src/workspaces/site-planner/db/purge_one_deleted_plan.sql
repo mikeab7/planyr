@@ -53,6 +53,9 @@
 -- ============================================================================================
 -- THE THREE PRECONDITIONS — ALL MUST HOLD, CHECKED IN THIS ORDER, EACH NAMED IN ITS OWN RAISE
 -- ============================================================================================
+--   0. The caller is actually signed in (auth.uid() is not null) — see the
+--      "B<PENDING> — THE NULL-AUTH HOLE" section below. Checked before precondition 1, because
+--      precondition 1's own disjunction cannot detect this case by itself.
 --   1. The row exists and the caller owns it under the SAME rule the DELETE RLS policy uses.
 --   2. `deleted_at is not null` — this function purges from the trash, never a live row (the base
 --      trigger's own belt-and-suspenders case already asks this too; asking it here as well means
@@ -76,6 +79,44 @@
 -- statement rather than falling through to a destructive default.
 --
 -- ============================================================================================
+-- B<PENDING> — THE NULL-AUTH HOLE (found by the 2026-09-19 daily data-risk sweep, re-proved
+-- 2026-09-20; fixed same day). READ BEFORE TOUCHING PRECONDITION 1 AGAIN.
+-- ============================================================================================
+-- Precondition 1 originally read `auth.uid()` INLINE, three times, inside the disjunction:
+--   if not ( v_row.user_id = auth.uid() or (v_row.team_id is not null and is_team_admin(...)) )
+-- With no JWT, `auth.uid()` is NULL. `v_row.user_id = NULL` is SQL NULL, not false, and Postgres's
+-- three-valued logic makes the whole `or` chain NULL too (a null team_id path evaluates to NULL as
+-- well, so there is no way for the disjunction to land on a definite FALSE here). plpgsql's
+-- `if not (NULL) then` treats NULL as "don't run the body" — same as `if false` — so the refusal
+-- silently never fired. Nothing else here checks the caller's identity: this function is
+-- SECURITY DEFINER (runs as its owner, RLS does not apply — see this file's own SECURITY section
+-- above), so a request with no `Authorization` header at all sailed straight through precondition
+-- 1, straight past precondition 2 (a real soft-deleted row satisfies it) and precondition 3
+-- (a real live sibling satisfies it), into a genuine, permanent DELETE — and
+-- `site_elements_site_id_fkey` is `ON DELETE CASCADE`, so the plan's elements went with it.
+-- Measured against production 2026-09-19 (`lyeqzkuiwngunutlkkmi`), inside a `DO` block that
+-- re-raises so the statement rolls back: `set local role anon;` with no
+-- `request.jwt.claims` set, then `select id from public.purge_one_deleted_plan('smsdrvzr9gzx')`
+-- returned `PURGED` and deleted Richfield's anchor row plus its 243 `site_elements` rows before the
+-- rollback discarded it. A SIGNED-IN NON-OWNER is correctly refused (precondition 1's disjunction
+-- lands on a definite FALSE once `auth.uid()` is a real, non-matching uuid) — this is specifically
+-- the missing-JWT path, not a flaw in the ownership rule itself.
+-- Compounding it: the deployed grantees on this function were `PUBLIC, anon, authenticated,
+-- postgres, service_role` — wider than this file, which only ever granted `authenticated`
+-- (Supabase's default privileges hand EXECUTE to PUBLIC, hence anon, on a newly created function
+-- unless a migration explicitly revokes it — nothing here did until now).
+-- THE FIX, two independent layers (defense in depth — ship both, not either):
+--   (a) hoist `auth.uid()` into `v_uid` and refuse `v_uid is null` EXPLICITLY, before precondition
+--       1's ownership disjunction ever runs — the same shape `set_plan_lock` (team_share_default.sql),
+--       `soft_delete_site_plan_overlay` (comps_site_plan_overlay_delete_reverts_to_pin.sql) and
+--       every other owner-checking SECURITY DEFINER function in this codebase already uses;
+--   (b) `revoke execute ... from anon` below, so even a future regression of (a) is not
+--       anon-reachable at all.
+-- Guard: `src/workspaces/site-planner/db/test/sites_block_delete_live_group.test.sql` case 10
+-- (anon role, no `request.jwt.claims` at all, against a live-group row — must raise and the row
+-- must still exist afterward).
+--
+-- ============================================================================================
 -- WHAT THIS FUNCTION DELIBERATELY DOES NOT DO
 -- ============================================================================================
 -- It deletes exactly the ONE named `sites` row — `site_elements_site_id_fkey`'s ON DELETE CASCADE
@@ -94,12 +135,20 @@ security definer
 set search_path = public, pg_temp
 as $$
 declare
+  v_uid     uuid := auth.uid();
   v_row     public.sites%rowtype;
   v_gkey    text;
   v_live_id text;
 begin
   if p_id is null or p_id = '' then
     raise exception 'purge_one_deleted_plan: p_id is required' using errcode = 'PLYR2';
+  end if;
+
+  -- Precondition 0 — the caller must actually be signed in. See "THE NULL-AUTH HOLE" above: with
+  -- no JWT, auth.uid() is NULL, and NULL = anything is NULL rather than false, so precondition 1's
+  -- disjunction below could never land on a definite refusal without this explicit check first.
+  if v_uid is null then
+    raise exception 'purge_one_deleted_plan: not signed in' using errcode = 'PLYR2';
   end if;
 
   select * into v_row from public.sites s where s.id = p_id;
@@ -109,9 +158,9 @@ begin
 
   -- Precondition 1 — the SAME predicate team_sharing.sql's "delete own or team-admin sites" RLS
   -- policy enforces on an ordinary DELETE. Re-implemented explicitly because SECURITY DEFINER runs
-  -- exempt from RLS — see this file's header.
+  -- exempt from RLS — see this file's header. v_uid is guaranteed non-null here (precondition 0).
   if not (
-    v_row.user_id = auth.uid()
+    v_row.user_id = v_uid
     or (v_row.team_id is not null and public.is_team_admin(v_row.team_id))
   ) then
     raise exception 'purge_one_deleted_plan: not permitted to delete %', p_id using errcode = 'PLYR2';
@@ -149,19 +198,32 @@ $$;
 
 comment on function public.purge_one_deleted_plan(text) is
   'Permanently purge exactly ONE soft-deleted plan out of an otherwise-live project (B1767168). '
-  'SECURITY DEFINER — re-implements the "delete own or team-admin sites" RLS predicate by hand '
-  '(see header), then requires deleted_at is not null and that a live sibling survives in the same '
-  'group before signalling sites_block_delete_live_group to stand down for this one row. Raises '
-  'errcode PLYR2 on any precondition failure; never destroys a whole project.';
+  'SECURITY DEFINER — requires a signed-in caller, re-implements the "delete own or team-admin '
+  'sites" RLS predicate by hand (see header), then requires deleted_at is not null and that a live '
+  'sibling survives in the same group before signalling sites_block_delete_live_group to stand '
+  'down for this one row. Raises errcode PLYR2 on any precondition failure (incl. no auth.uid()); '
+  'never destroys a whole project.';
 
+-- B<PENDING> — defense in depth, independent of the NULL-auth fix above: even if precondition 0
+-- ever regresses, anon cannot reach this function at all. Supabase's default privileges grant
+-- EXECUTE to PUBLIC (and therefore anon) on a newly created function unless explicitly revoked —
+-- this is what left the deployed grantees as PUBLIC, anon, authenticated, postgres, service_role
+-- despite this file only ever granting `authenticated` below. Revoke first, then re-grant, so
+-- re-running this file is idempotent and always ends in the same state regardless of what a prior
+-- version left behind.
+revoke execute on function public.purge_one_deleted_plan(text) from public, anon;
 grant execute on function public.purge_one_deleted_plan(text) to authenticated;
 
 -- Verify (read-only; safe to run any time) ------------------------------------------------------
 --   select proname, prokind, provolatile, prosecdef from pg_proc where proname = 'purge_one_deleted_plan';
 --     -- expect 1 row, prokind='f' (function), prosecdef=true (SECURITY DEFINER)
 --   select pg_get_functiondef(oid) from pg_proc where proname = 'purge_one_deleted_plan';
---     -- expect `language plpgsql` and all three preconditions above
+--     -- expect `language plpgsql`, precondition 0 (v_uid is null) ahead of all three preconditions
+--   select grantee, privilege_type from information_schema.routine_privileges
+--     where routine_name = 'purge_one_deleted_plan';
+--     -- expect ONLY authenticated (plus the routine owner) — never anon or PUBLIC
 --
 -- Verification (run after): db/test/sites_block_delete_live_group.test.sql — self-rolling-back,
--- exercises this function against a real live-group fixture and a real last-member-of-its-group
--- fixture (B1767168 cases), alongside the base trigger's own six cases.
+-- exercises this function against a real live-group fixture, a real last-member-of-its-group
+-- fixture, a non-owner caller, and an anon (no-JWT) caller (cases 6-10), alongside the base
+-- trigger's own six cases.
