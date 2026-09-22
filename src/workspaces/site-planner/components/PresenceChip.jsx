@@ -45,14 +45,16 @@ const initialsBadge = {
 const overflowBadge = { ...initialsBadge, background: "var(--border-default)", color: "var(--text-secondary)" };
 
 // NEW-1 (top-right toolbar cluster, Option B) — the "self-tabs" chip is this row's "open tabs"
-// control (a text pill reading "N tabs"); Option B's spec is an icon-only 32×32 button with a
+// control (a text pill reading "N tabs"); Option B's spec is an icon-only bordered button with a
 // small numeric badge, matching every other bordered control in the cluster (the sync badge,
 // Full screen, the account trigger) rather than a differently-shaped text pill. Only the
 // "self-tabs" kind changes shape — the "people" kind (who's editing) is a distinct feature the
-// brief didn't ask to touch and keeps its existing variable-width chip below.
+// brief didn't ask to touch and keeps its existing variable-width chip below. 30×30 (not the
+// mockup's literal 32) — see SIZE's own header in controls.jsx for why 30 is the number that
+// actually unifies this cluster with the rest of the app.
 const selfTabsBtn = {
   position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center",
-  width: 32, height: 32, flex: "none", borderRadius: RADIUS.md,
+  width: 30, height: 30, flex: "none", borderRadius: RADIUS.md,
   border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-primary)",
 };
 const selfTabsCountBadge = {

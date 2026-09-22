@@ -133,12 +133,13 @@ function Badge({ state, onRetry, detail }) {
           // device sits 6px from Full screen — height 24px vs 30px"). FullscreenButton/SettingsMenu
           // were IconButton's default 30×30 square; matching it exactly merged this icon-only badge
           // into that one shared signature instead of carrying its own.
-          // ⛔ NEW-2 (top-right toolbar cluster, Option B) — 30×30 → 32×32, and this control now
-          // carries a REST border+fill like every other bordered control in the cluster instead of
-          // a transparent background (the mockup's own reading: "icon-only 32×32 button", not a
-          // bare glyph floating on the chrome) — the loud-failure ring above still overrides the
-          // border color, unchanged.
-          display: "grid", placeItems: "center", width: 32, height: 32, borderRadius: RADIUS.md, flex: "none",
+          // ⛔ NEW-2 (top-right toolbar cluster, Option B) — this control now carries a REST
+          // border+fill like every other bordered control in the cluster instead of a transparent
+          // background (the mockup's own reading: "icon-only 32×32 button", not a bare glyph
+          // floating on the chrome) — the loud-failure ring above still overrides the border color,
+          // unchanged. Stays 30×30 (not the mockup's literal 32) — see SIZE's own header in
+          // controls.jsx for why 30 is the number that actually unifies this cluster.
+          display: "grid", placeItems: "center", width: 30, height: 30, borderRadius: RADIUS.md, flex: "none",
           background: "var(--surface-raised)", color: v.color, cursor: canPop ? "pointer" : "default",
           // The loud failure state gets a hairline ring in its own color so it pops out of the
           // quiet chrome at a glance — every other state gets the same neutral border as its
@@ -219,9 +220,7 @@ export class CloudBadgeBoundary extends Component {
           // NEW-1 (signature-budget convergence, B1038016) — 30×30, matching the live badge's own
           // fix above, so the rare crash fallback doesn't reintroduce the 26×24 signature it exists
           // to prevent from ever wedging into this row.
-          // NEW-2 (top-right toolbar cluster, Option B) — 30×30 → 32×32, matching the live badge's
-          // own NEW-2 bump above.
-          style={{ display: "grid", placeItems: "center", width: 32, height: 32, borderRadius: RADIUS.md,
+          style={{ display: "grid", placeItems: "center", width: 30, height: 30, borderRadius: RADIUS.md,
             color: "var(--danger)", border: "1px solid var(--danger)" }}>
           <CloudGlyph variant="cloud-slash" />
         </span>

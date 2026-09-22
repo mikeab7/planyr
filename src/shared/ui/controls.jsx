@@ -57,31 +57,31 @@ const REST_SHADOW = "0 1px 2px rgba(0,0,0,0.05)"; // neutral, token-independent 
  * OWN row height — is built the same way: a fixed height, horizontal-only padding, and a single
  * font size, picked independently at each call site. That is FOUR separate decisions per control,
  * which is why seven different (radius, height, padding, font) combinations coexisted in one
- * screen with nobody having chosen that on purpose. SIZE collapses it to ONE decision: `sm`,
- * `md` or `lg`. Values are literal duplicates of `designTokens.js`'s CONTROL_H.md/lg and
+ * screen with nobody having chosen that on purpose. SIZE collapses it to ONE decision: `sm` or
+ * `md`. Values are literal duplicates of `designTokens.js`'s CONTROL_H.md/lg and
  * FONT_SIZE.control — not an import, for the same reason CONTROL_RADIUS/PAD/FONT above are
  * literal duplicates (see that block's header): this file is in the shared entry chunk. Change
  * one, change both.
  *   sm  height 26 (CONTROL_H.md) — dense/toolbar/map chrome. The nav tabs are the one deliberate
  *       exception (their own `Tab` primitive below, not this bundle — see its header).
- *   md  height 30 (CONTROL_H.lg) — primary standalone actions: an icon button (IconButton's own
- *       default size, unchanged, already agrees with this).
- *   lg  height 32 (NEW-1, the top-right toolbar cluster unification, Option B) — the one shared
- *       height every bordered control in the app header's row-1/row-2 cluster now uses (the
- *       sync-status icon, the open-tabs badge, Full screen, and the account/"Sign in"/"Cloud off"
- *       trigger). 32 is deliberately NOT on `designTokens.js`'s `CONTROL_H` ladder (sm 22 / md 26 /
- *       lg 30 / touch 44) — it is a fourth, narrowly-scoped step for this one cluster, the same way
- *       `CONTROL_H.touch` was added as its own tier rather than stretched from an existing one; see
- *       that constant's own header. Height is not part of the design-drift ratchet (only hex/
- *       radius/fontSize are), so this literal carries no CI exemption comment.
- * Radius is always `CONTROL_RADIUS.control` (8) for every step — a chip built from this bundle is
- * always a STANDALONE control per docs/DESIGN.md's shape rule, never nested, so it never takes
- * `sm`(6).
+ *   md  height 30 (CONTROL_H.lg) — primary standalone actions: the account pill, a menu trigger,
+ *       an icon button (IconButton's own default size, unchanged, already agrees with this).
+ * NEW-2 (top-right toolbar cluster, Option B) — this is also now the ONE shared height every
+ * bordered control in the app header's row-1/row-2 right-zone cluster uses (the sync-status icon,
+ * the open-tabs badge, Full screen, Settings, and the account/"Sign in"/"Cloud off" trigger — see
+ * AppHeader.jsx/CloudSyncBadge.jsx/PresenceChip.jsx/AccountControl.jsx). A fourth `lg` (32) step
+ * was tried first and reverted: `md` (30) is already the value every one of those controls (and
+ * several others already sharing their exact shape elsewhere on the same screen — the global
+ * help/report FAB, the project-breadcrumb triggers) had independently converged on before this
+ * item, so inventing a new number only fragmented an existing, wider convergence into two
+ * near-identical shapes instead of unifying one — caught by `ui-audit/ui-inventory.mjs`'s
+ * per-surface signature-budget CI gate on the Map landing page (26 vs. a 24 ceiling). Radius is
+ * always `CONTROL_RADIUS.control` (8) for both steps — a chip built from this bundle is always a
+ * STANDALONE control per docs/DESIGN.md's shape rule, never nested, so it never takes `sm`(6).
  */
 export const SIZE = {
   sm: { height: 26, padding: "0 10px", fontSize: 12 },
   md: { height: 30, padding: "0 12px", fontSize: 12 },
-  lg: { height: 32, padding: "0 10px", fontSize: 12 },
 };
 
 /* LOUD-FAILURE for a locked primitive's geometry escape hatch (B982400). Silently DROPPING a

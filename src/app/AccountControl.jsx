@@ -143,7 +143,6 @@ export default function AccountControl({ user, authKnown = true, profileApi, onO
             text, which changes with copy edits and is what let this exact divergence ship
             undetected into docs/UI-INVENTORY.md (see ui-inventory.mjs's own auth-state gate). */}
         <MenuTrigger
-          size="lg"
           onClick={() => setCloudNote((o) => !o)}
           aria-haspopup="dialog"
           aria-expanded={cloudNote}
@@ -208,7 +207,7 @@ export default function AccountControl({ user, authKnown = true, profileApi, onO
     // (Only that one direction is closed by construction; a short resolved name can still shrink
     // the zone a little, releasing — not adding — pressure on the crumb next to it.)
     return (
-      <MenuTrigger size="lg" aria-hidden="true" tabIndex={-1} caret leading={<span style={{ ...avatar(true), background: "var(--chrome-divider)" }} />} data-testid="account-auth-pending">
+      <MenuTrigger aria-hidden="true" tabIndex={-1} caret leading={<span style={{ ...avatar(true), background: "var(--chrome-divider)" }} />} data-testid="account-auth-pending">
         <span style={{ display: "inline-block", width: 300, height: 10, borderRadius: RADIUS.sm, background: "var(--chrome-divider)" }} />
       </MenuTrigger>
     );
@@ -224,7 +223,7 @@ export default function AccountControl({ user, authKnown = true, profileApi, onO
     // branch that renders), but nobody is signed in. See that hook's own comment for why a
     // copy-independent marker matters here.
     return (
-      <MenuTrigger size="lg" onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out">
+      <MenuTrigger onClick={onOpenAuth} title="Sign in or create an account" caret={false} leading={<span style={avatar(false)}>›</span>} data-testid="account-signed-out">
         Sign in
       </MenuTrigger>
     );
@@ -241,7 +240,6 @@ export default function AccountControl({ user, authKnown = true, profileApi, onO
   return (
     <>
       <MenuTrigger
-        size="lg"
         ref={acctAnchor}
         onClick={() => setAcctOpen((o) => !o)}
         open={acctOpen}

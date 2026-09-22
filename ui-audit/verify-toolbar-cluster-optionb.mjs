@@ -3,12 +3,12 @@
  * the REAL running app (logged out — no auth/GIS needed, per ATTEMPT-BEFORE-YOU-PARK).
  *
  * Checks, all read from `getComputedStyle`/`getBoundingClientRect` on the real rendered controls:
- *   1. Every icon-only control across BOTH rows renders at 32×32.
+ *   1. Every icon-only control across BOTH rows renders at 30×30 (CONTROL_H.lg/SIZE.md — the height already established across the rest of the app; a literal 32 was tried and reverted, see controls.jsx's SIZE header).
  *   2. Every bordered control across BOTH rows shares one border-radius (8px) — split-button
  *      halves (Undo/Redo's history-dropdown caret) are exempted the same way the pre-existing
  *      row-2-only harness already does, since a merged split control is one radius token applied
  *      per-corner, not a second radius.
- *   3. The signed-out "Sign in" account trigger renders at the same 32px height as its row-1
+ *   3. The signed-out "Sign in" account trigger renders at the same 30px height as its row-1
  *      neighbours (the fully signed-in collapsed-name case needs a real account — VERIFICATION.md
  *      Blocker: auth).
  *   4. Undo (disabled, nothing to undo on a blank canvas) reports a computed opacity/color
@@ -91,10 +91,10 @@ try {
 
   console.log(JSON.stringify(facts, null, 1));
 
-  // 1) every icon-only control across both rows is a true 32×32 square.
+  // 1) every icon-only control across both rows is a true 30×30 square.
   for (const [name, r] of Object.entries(facts.iconRects)) {
     if (!r) { ok(`${name} is present`, false); continue; }
-    ok(`${name} renders 32×32`, Math.abs(r.width - 32) < 0.5 && Math.abs(r.height - 32) < 0.5, `w=${r.width} h=${r.height}`);
+    ok(`${name} renders 30×30`, Math.abs(r.width - 30) < 0.5 && Math.abs(r.height - 30) < 0.5, `w=${r.width} h=${r.height}`);
   }
 
   // 2) shared 8px radius (full-corner controls only — Undo/Redo's own main button is a merged
@@ -103,9 +103,9 @@ try {
   ok("Full screen / cloud-sync badge / File / Zoom-to-fit share one border-radius (8px)",
     radii.every((r) => r === "8px"), `radii=${JSON.stringify(radii)}`);
 
-  // 3) the account trigger renders at the same 32px height as its row-1 neighbours.
-  ok("The account trigger renders at 32px tall, matching the rest of row 1's right zone",
-    Math.abs(facts.accountHeight - 32) < 0.5, `accountHeight=${facts.accountHeight}`);
+  // 3) the account trigger renders at the same 30px height as its row-1 neighbours.
+  ok("The account trigger renders at 30px tall, matching the rest of row 1's right zone",
+    Math.abs(facts.accountHeight - 30) < 0.5, `accountHeight=${facts.accountHeight}`);
   console.log(`  (account trigger seen: testid=${facts.accountTestId} text=${JSON.stringify(facts.accountText)} — a real name-collapse check needs a signed-in account, VERIFICATION.md Blocker: auth)`);
 
   // 4) Undo (disabled — nothing to undo on a blank canvas) is visually dimmer than a same-class
