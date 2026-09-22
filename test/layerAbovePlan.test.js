@@ -177,7 +177,7 @@ describe("NEW-1 — PDF-PARITY: the sheet prints the lift where the screen shows
   it("the sheet composes the front band into the plan's own anchor, not after the plan", () => {
     const ex = read("lib/exportSheet.js");
     expect(ex).toContain("FRONT_BAND_ATTR");
-    expect(ex).toMatch(/frontAnchor = clone\.querySelector/);
+    expect(ex).toMatch(/frontAnchor = root\.querySelector/);
     expect(ex).toMatch(/append === "front"/);
     // LOUD-FAILURE: a lifted layer with no anchor to print into must SAY so, not print underneath.
     expect(ex).toMatch(/console\.warn\([^)]*lifted above the plan/);

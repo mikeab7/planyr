@@ -1,20 +1,15 @@
-// Verifies the single-SVG print sheet composition (B200) + the buildings data table
-// (B197): renders the real `buildPrintSheetSvg` output (the exact markup the print
-// routine emits) to an HTML page and screenshots it. Confirms the title block, the
-// plan, the right-hand buildings table and the metrics band live in ONE cohesive SVG.
+// Verifies the single-SVG print sheet composition (B200): renders the real
+// `buildPrintSheetSvg` output (the exact markup the print routine emits) to an HTML page
+// and screenshots it. Confirms the title block, the plan and the metrics band live in ONE
+// cohesive SVG. (The right-hand buildings table this once also confirmed — B197 — was
+// removed in B1804993; the plan takes the full width that column used to reserve.)
 import { chromium } from "playwright";
 import { writeFileSync, mkdirSync } from "fs";
 import { buildPrintSheetSvg, printSheetLayout, sheetFileName } from "../src/workspaces/site-planner/lib/printSheet.js";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const PAL = { ink: "#26231e", muted: "#8a8473", panelLine: "#cfc6af", paper: "#ffffff" };
-const rows = [
-  { name: "Building 1", sf: 250000, clearHeight: 36, slab: 7 },
-  { name: "Cross Dock", sf: 620000, clearHeight: 40, slab: 7 },
-  { name: "Building 3", sf: 95000, clearHeight: 32, slab: 6 },
-  { name: "Building 4", sf: 145000, clearHeight: 36, slab: 7 },
-];
-const layout = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: rows.length });
+const layout = printSheetLayout({ paper: "letter", orient: "landscape" });
 const pb = layout.plan;
 // Synthetic "plan" — a nested <svg> sized to the plan box with its own viewBox, exactly
 // how the real plan clone is embedded.
@@ -32,7 +27,7 @@ const metrics = [
 ];
 const sheet = buildPrintSheetSvg({
   layout, planSvg, title: "Cypress Logistics", sub: "Plan 1", date: "2026.06.19",
-  metrics, note: "Concept site plan — planning-level estimates, not a survey.", buildings: rows, pal: PAL,
+  metrics, note: "Concept site plan — planning-level estimates, not a survey.", pal: PAL,
 });
 mkdirSync("ui-audit/screens", { recursive: true });
 const html = `<!doctype html><html><head><meta charset="utf-8"><style>
@@ -53,7 +48,7 @@ const page = await browser.newPage({ viewport: { width: 1240, height: 1040 }, de
 await assertMeasurable(page, "verify-print-sheet");
 await page.goto("file://" + process.cwd() + "/ui-audit/screens/print-sheet.html");
 await page.waitForTimeout(250);
-// Assert there is exactly ONE root sheet svg, and the table text rendered.
+// Assert there is exactly ONE root sheet svg, and no buildings table renders.
 const checks = await page.evaluate(() => {
   const root = document.querySelector("body > svg");
   const txt = root ? root.textContent : "";
@@ -61,8 +56,7 @@ const checks = await page.evaluate(() => {
   return {
     oneRootSvg: document.querySelectorAll("body > svg").length === 1,
     hasTitle: txt.includes("Cypress Logistics"),
-    hasTableTitle: txt.includes("BUILDINGS"),
-    hasCrossDock: txt.includes("Cross Dock"),
+    hasNoTableTitle: !txt.includes("BUILDINGS"), // NEW-2 (B1804993) — the table is gone
     hasMetrics: txt.includes("Site area"),
     nestedPlan,
     viewBox: root && root.getAttribute("viewBox"),
