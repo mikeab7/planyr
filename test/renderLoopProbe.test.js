@@ -182,7 +182,7 @@ describe("the two effects the #185 crashes threw from stay instrumented", () => 
   it("⛔ the crumb-fit effect depends on WHETHER there is a plan crumb, never on the element", () => {
     // The measured NEW-2 pump: `planSlot` is a React element rebuilt on every planner render, so
     // depending on it re-ran this effect 78×/s, 67 of them for nothing.
-    expect(crumb).toContain("}, [narrow, hasPlanSlot, currentName, cross, org, rowRef]);");
+    expect(crumb).toContain("}, [narrow, hasPlanSlot, currentName, cross, org, rowRef, commitCrumbCompact]);");
     expect(crumb).not.toContain("}, [narrow, planSlot, currentName, cross, org, rowRef]);");
   });
 

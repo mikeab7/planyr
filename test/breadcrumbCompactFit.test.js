@@ -103,7 +103,7 @@ describe("the wiring, read off the real source", () => {
    *     commit, which is exactly what React's nested-update counter counts on its way to the #185
    *     circuit breaker that took the planner down on the owner's phone. */
   it("⛔ depends on WHETHER there is a plan crumb, never on the crumb element itself", () => {
-    expect(crumb).toContain("}, [narrow, hasPlanSlot, currentName, cross, org, rowRef]);");
+    expect(crumb).toContain("}, [narrow, hasPlanSlot, currentName, cross, org, rowRef, commitCrumbCompact]);");
     expect(crumb).not.toContain("}, [narrow, planSlot, currentName, cross, org, rowRef]);");
     // The plan crumb's WIDTH is what a re-measure actually needs, and it is watched properly —
     // through the ResizeObserver, not through a dependency.

@@ -1135,7 +1135,7 @@ export default function ProjectBreadcrumb({
      * watched properly, by `ro.observe(plan)`: a real change to the plan crumb re-measures through
      * the observer rather than through a dependency. So the boolean is not a weakening of the
      * dependency — it is the whole of what this effect actually depends on. */
-  }, [narrow, hasPlanSlot, currentName, cross, org, rowRef]);
+  }, [narrow, hasPlanSlot, currentName, cross, org, rowRef, commitCrumbCompact]);
 
   return (
     /* NEW-2 — the crumb row may SHRINK (it used to be `flex: "none"`), so that when the header is
