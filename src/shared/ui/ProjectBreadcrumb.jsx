@@ -55,7 +55,7 @@
  * renamed/deleted as one — with the linked schedule carried along; only a schedule-only
  * pseudo-project (Pursuits / Operations, which no `sites` row describes) is bridge-only.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { RADIUS } from "./radius.js";
 import FloatingNotice from "./FloatingNotice.jsx";
 import AnchoredMenu from "./AnchoredMenu.jsx";
@@ -70,6 +70,7 @@ import {
 } from "../projects/projects.js";
 import { resolveCurrentName, withCurrentProject, unionProjectLists, resolveControlledId as resolveControlledIdPure, hasSavedProjectRecord, applyFrozenOrder, reorderWithCurrentAndPinned } from "../projects/projectModel.js";
 import { crumbNeedsCompact } from "./breadcrumbFit.js";
+import { noteEffectRun } from "../../app/renderLoopProbe.js";
 
 // Crumbs sit on the chrome bar, which now themes WITH the app (B318) — so these are
 // chrome tokens, not the retired warm-dark hexes (white-on-light was the B341 bug).
@@ -121,6 +122,11 @@ const OrgIcon = ({ size = 13 }) => (
  * crowd out the name entirely, and a chip too small to aim at is a different way to lose the same
  * click the owner lost to the jurisdiction pill. */
 export const CRUMB_MIN_W = 92;
+
+/* NEW-2 — render-loop probe identity for the phone-narrow crumb-fit measurement below. Module
+ * scope so naming a run costs no allocation. */
+const CRUMB_FIT_EFFECT = "app-header:breadcrumb-fit";
+const CRUMB_FIT_DEPS = Object.freeze(["narrow", "hasPlanSlot", "currentName", "cross", "org", "rowRef"]);
 /* NEW-3 — Rename / Delete get REAL icons, in this file's own idiom (stroke, currentColor, the
  * DashboardIcon shape above). What was there: a bare Unicode pencil `✎` and an emoji
  * wastebasket `🗑`. The owner's read — "they just look kinda like shit" — has a precise cause: `✎`
@@ -1046,10 +1052,30 @@ export default function ProjectBreadcrumb({
   const planSlotRef = useRef(null);
   const projectMeasureRef = useRef(null);
   const [crumbCompact, setCrumbCompact] = useState(false);
+  /* ⛔ NEW-2 — THE DISPATCH AUTHORITY. A `setState` whose updater returns the same value is still a
+   * genuine DISPATCH: React only skips scheduling it through the eager-bailout path, which requires
+   * the fiber to have no other pending work, and during a planner gesture there always is some. The
+   * dispatch below runs from a LAYOUT effect, so what it schedules is SYNC-lane work raised from
+   * inside a commit — precisely what React's nested-update counter counts on its way to the error 185
+   * circuit breaker. Guarding the CALL (the same rule B1189 applied to `setSize`/`setRegShift`) is
+   * what makes a measurement that found nothing cost nothing. */
+  const crumbCompactRef = useRef(false);
+  const commitCrumbCompact = useCallback((next) => {
+    if (crumbCompactRef.current === next) return;
+    crumbCompactRef.current = next;
+    setCrumbCompact(next);
+  }, []);
+  // Only the PRESENCE of a trailing crumb is a dependency — see the note on the effect's own
+  // dependency array below for why the element itself must never be one.
+  const hasPlanSlot = !!planSlot;
   useLayoutEffect(() => {
+    // NEW-2 — record this run for the render-loop probe. The 2026-09-19 13:31:08 crash threw on
+    // THIS effect's `setCrumbCompact` dispatch (de-minified from the deployed AppHeader chunk), so
+    // it is the one place a report needs to name. See src/app/renderLoopProbe.js.
+    noteEffectRun(CRUMB_FIT_EFFECT, CRUMB_FIT_DEPS, [narrow, hasPlanSlot, currentName, cross, org, rowRef]);
     // Only ever collapse the MIDDLE crumb: with no trailing `planSlot`, this crumb IS the last
     // one and must survive intact, same as Dashboard.
-    if (!narrow || !planSlot || !rowRef) { setCrumbCompact((c) => (c ? false : c)); return undefined; }
+    if (!narrow || !hasPlanSlot || !rowRef) { commitCrumbCompact(false); return undefined; }
     const wrap = wrapRef.current, dash = dashboardRef.current, plan = planSlotRef.current, full = projectMeasureRef.current;
     if (!wrap || !dash || !plan || !full) return undefined;
     const hasRO = typeof ResizeObserver === "function";
@@ -1077,9 +1103,9 @@ export default function ProjectBreadcrumb({
         dashboardWidth: dash.getBoundingClientRect().width,
         projectWidth: Math.max(CRUMB_MIN_W, full.getBoundingClientRect().width),
         planWidth: plan.getBoundingClientRect().width,
-        hasPlan: !!planSlot,
+        hasPlan: hasPlanSlot,
       });
-      setCrumbCompact((prev) => (prev === needsCompact ? prev : needsCompact));
+      commitCrumbCompact(needsCompact);
     };
     measure();
     if (!hasRO) { window.addEventListener("resize", measure); return () => window.removeEventListener("resize", measure); }
@@ -1088,7 +1114,28 @@ export default function ProjectBreadcrumb({
     ro.observe(wrap); ro.observe(dash); ro.observe(plan); ro.observe(full);
     if (rowRef.current) { ro.observe(rowRef.current); rowObserved = true; }
     return () => { cancelAnimationFrame(raf); ro.disconnect(); };
-  }, [narrow, planSlot, currentName, cross, org, rowRef]);
+    /* ⛔ NEW-2 — DEPEND ON WHETHER THERE IS A PLAN CRUMB, NEVER ON THE ELEMENT ITSELF.
+     *
+     * `planSlot` is a React ELEMENT, built by a bare JSX expression in the planner's render body
+     * (`SitePlanner.jsx`'s `plannerPlanCrumb`) and handed down through `AppHeader`. That is a brand
+     * new object on EVERY render of the planner — and the planner re-renders on every frame of a
+     * pinch-zoom or a control-point drag. `Object.is` is all React's dependency check is, so this
+     * effect tore itself down and rebuilt itself (disconnecting and re-observing four
+     * ResizeObservers, re-reading four `getBoundingClientRect`s — a forced synchronous layout — and
+     * dispatching `setCrumbCompact`) once per frame, for an answer that could not have changed.
+     *
+     * MEASURED, not reasoned (ui-audit/diagnose-render-loop.mjs, phone width, real touch pinch on a
+     * located plan with a real road): 78 runs per second, of which 67 were caused by `planSlot`
+     * changing IDENTITY ONLY — same component type, same key, same rendered crumb. Every one of
+     * those 67 was pure waste, and each raised sync-lane work from inside a commit, which is the
+     * fuel React's error 185 nested-update breaker counts.
+     *
+     * The body reads `planSlot` for exactly one thing — whether a trailing crumb EXISTS, which is
+     * what decides whether the middle crumb may collapse at all. Its WIDTH is already watched, and
+     * watched properly, by `ro.observe(plan)`: a real change to the plan crumb re-measures through
+     * the observer rather than through a dependency. So the boolean is not a weakening of the
+     * dependency — it is the whole of what this effect actually depends on. */
+  }, [narrow, hasPlanSlot, currentName, cross, org, rowRef]);
 
   return (
     /* NEW-2 — the crumb row may SHRINK (it used to be `flex: "none"`), so that when the header is

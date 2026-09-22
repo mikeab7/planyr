@@ -3007,7 +3007,47 @@ RED-PROVEN throughout: every new case reproduces the correct-behavior claim only
 2. Signed in on `planyr.io`, open six or more DIFFERENT real projects' Site routes back to back (a hard reload or a fresh deep link for each, not just switching within one open tab) — the exact access pattern that produced the July 30 burst. **Expect:** no crash card, no "Redrawing…" flash (B1189's auto-recovery placeholder) on any of them.
 3. If a NEW occurrence of this exact signature does appear post-merge, capture the project id and whether the session was freshly signed in (cloud pull in flight) or already warm — that is the ONE variable every reproduction attempt in this item could not control for, and it is the next thing to try.
 
+**⛔ AMENDED 2026-09-22 — B1225296 (×2). The crash recurred on build `27671fa` (owner's iPhone, 2026-09-19, two rows 58 s apart), so this check is still the right one and is NOT re-minted.** What the recurrence pass added, and what it refutes:
+
+- **The 2026-09-05 fix is holding and is not the residual.** `viewValuesEqual` works: measured on the real app during a touch pinch (`ui-audit/diagnose-render-loop.mjs`), the basemap-registration effect's `view` dependency changed by VALUE 13× and **identity-only ZERO times**. Do not re-open the `view`-identity lead.
+- **What changed instead:** that effect dispatched `setGeoZoom`/`setRegShift` on EVERY run behind guarded updaters. A no-op updater is still a dispatch, and a dispatch from a layout effect is sync-lane work raised inside a commit — what React's nested-update counter counts. Both are now guarded at the CALL (`commitGeoZoom` / `commitRegShift`), and the dependency array finally carries `view`'s numbers, completing the rule this repo has stated since B1189 and had only ever half-applied.
+- **⛔ A SECOND THROW SITE, in a different chunk, filed as B1802592** — `ProjectBreadcrumb`'s crumb-fit layout effect, measured re-running **78×/s with 67 of those caused by nothing at all**. That is a real pump and it is fixed; whether it is THE pump behind these two rows is not established, because the breaker was never tripped in the sandbox.
+- **⛔ THE HONEST LIMIT, so step 1 below is read correctly:** the defect never exceeded **3 effect runs inside a single animation frame**, against the ~50 nested commits React's breaker needs. Neither fix can be shown to stop the CRASH from here — only to remove its fuel. Step 1 is therefore still the only thing that can close this.
+- **The instrument that makes the next occurrence cheap (B1802593):** every boundary decision now emits `boundary-recovery-attempted` / `-succeeded` / `boundary-budget-exhausted`, each carrying the crashing subtree AND the render-loop probe's verdict (which effect was hot, which dependency fed it). A recurrence will name its own cause in `client_errors` rather than needing another de-minification pass.
+
 **Result:** ⏳ pending — needs real production traffic to elapse post-deploy. `Cadence: once` (a recurrence re-opens B1225296, not a new item).
+
+---
+
+### V1281456 — B1802592: the header's crumb-fit loop is gone on a real phone, and a header crash is no longer filed as a planner crash `Blocker: real-device`
+
+**Why this needs a real pass.** The LOOP is fixed and proven here: `e2e/render-loop-touch-gesture.spec.js` drives a real CDP multi-touch pinch-zoom and a road control-point drag at phone width on a located plan with a real road, and it went from four red rows (`planSlot changed identity-only 67× across 78 runs in 1000 ms`) to clean. What this sandbox cannot show is the thing he actually saw — React's nested-update breaker firing — because it needs ~50 nested commits in one frame and the defect here never exceeded 3. Chromium with 6× CPU throttling did not close that gap; his iPhone, a heavy real plan and concurrent cloud-write retries are the conditions that do.
+
+**What was verified here (this session, sandbox).** Both throw sites de-minified against the DEPLOYED bytes of build `27671fa` (chunks pulled from `planyr.io`, so the offsets are exact). The crumb-fit effect's run count and per-dependency churn measured in a real browser before and after. Full repo suite green (883 files / 18,008 tests). Design drift exactly at the recorded ceiling. Bundle budgets within ceiling.
+
+**Steps, each with a named expected result:**
+1. Signed in on `planyr.io` on his iPhone, open a located plan with a basemap and at least one road (his own `smqfy48tlk9j` / `smu6yb822ox1` is the reported case), then pinch-zoom in and out repeatedly for a full minute and drag a road's control points. **Expect:** the plan stays on screen throughout — no blank, no "Redrawing…" flash, no dead-end card.
+2. In the SAME session, read the deployed chunk hash in the same observation as the behaviour (`document.querySelectorAll('script[src]')`), so the pass is known to be against this build and not a cached one. **Expect:** a hash from this deploy, not `AppHeader-BYdR8Qaf.js`.
+3. Query `public.client_errors` for `source='react'` rows after this merge. **Expect:** none. If one appears, read its new `crashedIn` field. **Expect:** it names the subtree that threw (e.g. `AppHeader`), not just `module='site-planner'` — that alone closes the labelling half of B1802592 even if a crash recurs.
+4. At phone width, confirm the breadcrumb still does its job: with a project AND a plan open and a long project name, the middle crumb still collapses to its compact form so the plan crumb and its caret stay reachable without sideways scrolling. **Expect:** unchanged behaviour — the fix removed a wasted re-measure, not the measurement.
+
+**Result:** ⏳ pending.
+
+---
+
+### V1281457 — B1802593: an auto-recovery announces itself, and every boundary decision lands in `client_errors` `Blocker: real-data`
+
+**Why this needs a real pass.** The events can only be emitted by a real crash, and the only device that has produced one is his. The wiring is guarded by source assertions (`test/boundaryTelemetry.test.js`) because this repo's unit environment is Node with no jsdom, so a full mount test is not available here — which makes a live read the confirmation.
+
+**What was verified here (this session, sandbox).** `crashSubtree` asserted against the owner's two REAL component stacks verbatim (CRASH 1 → `SitePlannerApp`, CRASH 2 → `AppHeader`, and it must not be confused by the planner frames further down that same stack), plus dev-build stacks, host-tag-only stacks and every malformed input. The three event names, their payload fields, the settle-timer semantics and the non-blocking notice are all source-guarded.
+
+**Steps, each with a named expected result:**
+1. The next time the workspace blinks and comes back on his phone: **expect** a brief pill near the bottom of the screen reading *"This view redrew itself after a display hiccup. Your work is saved."*, which does NOT block anything he taps and clears itself after a few seconds.
+2. Query `public.client_errors` for `source` in (`event:boundary-recovery-attempted`, `event:boundary-recovery-succeeded`, `event:boundary-budget-exhausted`). **Expect:** at least one attempted row per incident, carrying `reason`, `attempt`, `budgetLeft`, `module`, `crashedIn` and `loop`; and either a matching `-succeeded` row ~3 s later, or a `budget-exhausted` row if the card was shown.
+3. Read the `loop` field on any such row. **Expect:** it names an effect and a dependency (e.g. `site-planner:geo-registration x24 view=13v`). If it is empty, the probe saw nothing hot — which is itself the finding, and means the next pass looks outside the two instrumented effects.
+4. If he sees the dead-end card again, read its headline. **Expect:** *"Planyr hit a display problem"* — never *"Site Planyr hit an error and couldn't load"*, which is what a display loop is not.
+
+**Result:** ⏳ pending.
 ### V883904 — B1168128 (×2): panning the Site Planner's map on a real iPhone pans ONLY the map — the rest of the app never moves, at any zoom or edge `Blocker: real-device`
 
 **Why this needs its own real pass.** The owner's reported symptom (dragging on the map drags the whole page/app off to the side) is Apple-WebKit-specific native gesture handling — B1168128's own first arc proved this across four passes (real touch-emulated Chromium AND a real Linux WebKit build, four widths, two orientations, eight panel states) and this session reconfirmed it a second time, on a second independent instrument, by red/green-proving the fix itself (see below): every dynamic touch-drag behavioural check passed on BOTH the pre-fix and the fixed build, in every browser this sandbox has. No browser available here can produce the defect at all, so only a real iPhone can confirm it is actually gone.
