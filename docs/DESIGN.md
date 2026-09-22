@@ -421,6 +421,27 @@ flattened into one shared color.
 See the live `/design` gallery (NEW-4) for every one of these rendered in every state, both
 themes, side by side — use it to eyeball a new control against the existing set before writing one.
 
+### The top-right toolbar cluster unification (NEW-6, Option B) — converge onto `md` (30), not a new step
+
+The app header's row-1/row-2 right-zone cluster (the sync-status icon `CloudSyncBadge`, the
+open-tabs badge `PresenceChip`'s self-tabs case, `FullscreenButton`/`SettingsMenu`, the account
+trigger, and — in row 2 — `SitePlanner.jsx`'s File/Undo/Redo/Zoom-to-fit bar) now share ONE height
+and radius: `CONTROL_H.lg` / `SIZE.md` (30) and `RADIUS.control` (8). A first cut invented a
+fourth, narrower `SIZE.lg` (32) step for this cluster alone, matching the approved mockup's literal
+pixel reading — and reverted it: `ui-audit/ui-inventory.mjs`'s per-surface signature-budget CI gate
+caught it failing on the Map landing page, because `md`/30 was already the height several OTHER
+controls on that same screen had independently converged on before this item (the global
+help/report FAB, the project-breadcrumb triggers, the account/"Sign in" trigger itself) — inventing
+32 didn't unify the cluster, it fragmented an existing, wider convergence into two near-identical
+shapes instead of one. `SIZE.md` was already the number; the fix was to reuse it everywhere in the
+cluster (`IconButton`s pass no `size` override at all, `MenuTrigger` calls pass no `size` prop) and
+grow Row 2's own container 26→30 to match Row 1, which was already 30 and needed no change. See
+`SIZE`'s own header in controls.jsx for the full account. The account trigger also collapses to its
+`leading` avatar + caret only by default — `MenuTrigger` skips rendering the middle text span
+entirely when `children` is omitted, rather than reserving a phantom gap for it — so the signed-in
+name shows only in the trigger's `title` tooltip and in the opened dropdown's identity header,
+never inline.
+
 ## Floating notifications (NEW-5, B1000400, 2026-09-01)
 
 **Every FLOATING, APP-LEVEL notification — anything that overlays content to tell the user

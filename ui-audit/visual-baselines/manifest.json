@@ -6,90 +6,90 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-09-20",
-        "approvedCommit": "27671fa0",
-        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
+        "approvedAt": "2026-09-22",
+        "approvedCommit": "32ba1a06",
+        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
       },
       "dark": {
-        "approvedAt": "2026-09-20",
-        "approvedCommit": "27671fa0",
-        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
+        "approvedAt": "2026-09-22",
+        "approvedCommit": "32ba1a06",
+        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
       },
       "light--phone": {
-        "approvedAt": "2026-09-20",
-        "approvedCommit": "27671fa0",
-        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
+        "approvedAt": "2026-09-22",
+        "approvedCommit": "32ba1a06",
+        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-20",
-        "approvedCommit": "27671fa0",
-        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
+        "approvedAt": "2026-09-22",
+        "approvedCommit": "32ba1a06",
+        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
       }
     },
     "site-planner-header": {
       "light": {
-        "approvedAt": "2026-09-20",
-        "approvedCommit": "27671fa0",
-        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
+        "approvedAt": "2026-09-22",
+        "approvedCommit": "32ba1a06",
+        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
       },
       "dark": {
-        "approvedAt": "2026-09-20",
-        "approvedCommit": "27671fa0",
-        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
+        "approvedAt": "2026-09-22",
+        "approvedCommit": "32ba1a06",
+        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
       },
       "light--phone": {
-        "approvedAt": "2026-09-20",
-        "approvedCommit": "27671fa0",
-        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
+        "approvedAt": "2026-09-22",
+        "approvedCommit": "32ba1a06",
+        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-20",
-        "approvedCommit": "27671fa0",
-        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
+        "approvedAt": "2026-09-22",
+        "approvedCommit": "32ba1a06",
+        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
       }
     },
     "site-planner-left-rail": {
       "light": {
-        "approvedAt": "2026-09-20",
-        "approvedCommit": "27671fa0",
-        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
+        "approvedAt": "2026-09-22",
+        "approvedCommit": "32ba1a06",
+        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
       },
       "dark": {
-        "approvedAt": "2026-09-20",
-        "approvedCommit": "27671fa0",
-        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
+        "approvedAt": "2026-09-22",
+        "approvedCommit": "32ba1a06",
+        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
       },
       "light--phone": {
-        "approvedAt": "2026-09-20",
-        "approvedCommit": "27671fa0",
-        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
+        "approvedAt": "2026-09-22",
+        "approvedCommit": "32ba1a06",
+        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-20",
-        "approvedCommit": "27671fa0",
-        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
+        "approvedAt": "2026-09-22",
+        "approvedCommit": "32ba1a06",
+        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
       }
     },
     "library": {
       "light": {
-        "approvedAt": "2026-09-20",
-        "approvedCommit": "27671fa0",
-        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
+        "approvedAt": "2026-09-22",
+        "approvedCommit": "32ba1a06",
+        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
       },
       "dark": {
-        "approvedAt": "2026-09-20",
-        "approvedCommit": "27671fa0",
-        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
+        "approvedAt": "2026-09-22",
+        "approvedCommit": "32ba1a06",
+        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
       },
       "light--phone": {
-        "approvedAt": "2026-09-20",
-        "approvedCommit": "27671fa0",
-        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
+        "approvedAt": "2026-09-22",
+        "approvedCommit": "32ba1a06",
+        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-20",
-        "approvedCommit": "27671fa0",
-        "note": "B1795456: calibration badge restyled to match the scale-bar/compass/help/zoom map chrome (background/border/radius) instead of a solid per-state fill, and reads as one dot + a two-tone label instead of two dots; the site-planner-header/left-rail baselines' only changed region is this badge at bottom-left, confirmed by the diff crop."
+        "approvedAt": "2026-09-22",
+        "approvedCommit": "32ba1a06",
+        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
       }
     }
   }

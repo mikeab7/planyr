@@ -18767,7 +18767,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // SVG icon at its own explicit size prop (UndoIcon/RedoIcon/ZoomFitIcon never read em units), so
   // the override was inert scaffolding sized off the pre-retrofit scale (15, now off-scale). It
   // inherits dGhost's fontSize instead — zero visual change, one fewer off-scale literal.
-  const dIcon = { ...dGhost, width: 30, height: CONTROL_H.md, padding: 0, display: "grid", placeItems: "center" };
+  const dIcon = { ...dGhost, width: 30, height: 30, padding: 0, display: "grid", placeItems: "center" };
   /* ⛔ B755808 — THE ONE CHROME SYSTEM for the top-right planner toolbar (File / History / View).
      Every control on this bar — text-labelled or icon-only — shares ONE height (`TB_H`, = dIcon's
      height) and ONE corner radius (`TB_R`, = dGhost's existing 8px, already the app-wide
@@ -18786,8 +18786,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      `alignItems:center`, ~1.5-2.5px above and below its box on a live build). `CONTROL_H.md` is the
      row's real height, not a fifth number — this is a token-scale drift fix, not a redesign, and it
      also brings these controls to the exact same 26px height as row 1's own icon buttons
-     (`FullscreenButton`/`SettingsMenu` in AppHeader.jsx are already 30×26). */
-  const TB_H = dIcon.height; // CONTROL_H.md (26) — shared height for every top-right toolbar control, matching the row it renders in
+     (`FullscreenButton`/`SettingsMenu` in AppHeader.jsx are already 30×26).
+     ⛔ NEW-1 (top-right toolbar cluster, Option B, 2026-09-22) — 26 → 30, superseding B958465's
+     26px convergence: that fix matched this row to its OWN then-fixed 26px box; Option B instead
+     unifies this bar with Row 1's right-zone controls (the sync badge, Full screen, the account
+     trigger — all already 30×30/CONTROL_H.lg, see `SIZE` in controls.jsx), which meant growing
+     this row's own container to match rather than shrinking Row 1 — see AppHeader.jsx's row-2
+     container comment for why (its own `overflow:hidden` zone has no fixed height of its own to
+     clip against; the constraint was the ROW's box, and B958465 already established that growing
+     the row rather than clipping the controls is the right side to move). A first cut tried a new
+     32px step for the whole cluster instead of 30 and reverted it — see `SIZE`'s own header for
+     why. `width` also moves off `dGhost`'s inherited value onto a matching 30, so every icon-only
+     control on this bar is a true square, not a 30-wide rectangle. */
+  const TB_H = dIcon.height; // 30 — shared height for every top-right toolbar control, matching the row it renders in
   const TB_R = dGhost.borderRadius; // 8 — shared corner radius for every top-right toolbar control
   // NEW-2 (B648353) — the small history-dropdown caret riding beside Undo/Redo, split-button style:
   // same height as its main button, half the width, flat inner corner where the two meet (so the
@@ -18907,9 +18918,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // light theme's near-white row-2 background that line is functionally invisible — measured:
   // white-on-white, not merely low-contrast. Now the SAME divider row 1 already uses (AppHeader.jsx's
   // wordmark/breadcrumb + account-chip dividers): the theme-aware `--chrome-divider` token via
-  // `PAL.chromeLine`, at `height:14` inside this row's own 26px box (a 6px inset top and bottom,
-  // docs/DESIGN.md's now-documented divider rule) rather than an invented 18px.
-  const vSep = <span style={{ width: 1, height: 14, background: PAL.chromeLine, margin: "0 6px" }} />;
+  // `PAL.chromeLine`, inset 6px top and bottom inside this row's own control height
+  // (docs/DESIGN.md's divider rule: "height = the row's own control height minus 12px") rather
+  // than an invented number. NEW-1 (top-right toolbar cluster, Option B) — derived from `TB_H`
+  // (now 30) instead of the literal `14` it used to compute to for the old 26px height, so the
+  // divider can't silently drift out of step with the controls it separates again.
+  const vSep = <span style={{ width: 1, height: TB_H - 12, background: PAL.chromeLine, margin: "0 6px" }} />;
   // Switch tools and reset any in-progress drafting; also closes the Parcel menu.
   const selectTool = (id) => {
     // NEW-1 (B900416) — the Pan tool is retired from the rail (Select already pans on empty

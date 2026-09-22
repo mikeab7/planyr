@@ -1398,9 +1398,22 @@ export default function AppHeader({
         // --control-h-md (CONTROL_H.md) with no separate padding math needed — verified against
         // the mockup's own derived number (6px padding + an 11.5px line ≈ 26) rather than typed
         // in blind.
+        // ⛔ NEW-1 (top-right toolbar cluster, Option B) — 26 → 30, so the File/Undo/Redo/
+        // Zoom-to-fit cluster (SitePlanner.jsx's `plannerToolbar`, now built on the same 30px
+        // `TB_H`/`TB_R` this row's right zone uses) has room without clipping against this row's
+        // own box — the exact "overhang" failure mode B958465 hit in the opposite direction (a
+        // control taller than a FIXED row height overflows it, since the toolbar zone's own
+        // `overflow:hidden` only clips a box that's already height-constrained, and this outer
+        // row carries none). 30 (not a new number — CONTROL_H.lg/SIZE.md, already Row 1's own
+        // height above) is deliberate: a first cut tried a new 32px step and it fragmented an
+        // existing cross-surface convergence (several row-1 controls already independently agreed
+        // on 30, caught by the signature-budget CI gate on the Map landing page) — see SIZE's own
+        // header in controls.jsx. The module tab strip on the left of this same row stretches to
+        // match (`height:"100%"` below), so it reads ~4px taller too — an accepted, disclosed
+        // consequence of one shared row rather than a second row-height system.
         // B1610640 — same non-scrolling wrapper as the branch above; see its comment.
         <div style={{ position: "relative" }}>
-        <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ height: 26, display: "flex", alignItems: "center", position: "relative", borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
+        <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ height: 30, display: "flex", alignItems: "center", position: "relative", borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
 
           {/* Module tabs — the planner's own workspace navigation. Omitted entirely on a
               standalone route (B651873, e.g. /food): the toolbar zone below is already

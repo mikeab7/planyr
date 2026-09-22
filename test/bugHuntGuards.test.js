@@ -209,7 +209,13 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
 
   it("B557: account email renders are null-guarded (no 'undefined' in the pill/profile)", () => {
     // The account pill moved out of Shell into AccountControl (B734); the null-guard rode with it.
-    expect(read("../src/app/AccountControl.jsx")).toMatch(/Signed in as \$\{user\?\.email \|\| "\(no email\)"\}/);
+    // NEW-1 (top-right toolbar cluster, Option B) — the trigger's `title` now leads with the display
+    // name (the collapsed avatar+caret button's only tooltip route to the name) and only appends the
+    // email when one exists; a bare `|| "(no email)"` fallback no longer fits grammatically ("Signed
+    // in as Jane Doe (no email)" reads as a name, not a missing-email note), so the guard is now on
+    // the ternary that replaced it — still never interpolates `user.email` unless it's truthy, which
+    // is the property this test exists to protect.
+    expect(read("../src/app/AccountControl.jsx")).toMatch(/Signed in as \$\{who\}\$\{user\?\.email \? ` \(\$\{user\.email\}\)` : ""\}/);
     expect(read("../src/workspaces/site-planner/components/AuthPanel.jsx")).toMatch(/\{user\?\.email \|\| "\(no email\)"\}/);
   });
 
