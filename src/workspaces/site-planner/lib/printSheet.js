@@ -4,10 +4,12 @@
 // title block and metrics in HTML flow around it. Those are two different layout
 // systems, so the browser's print "scale" slider (≈25%–500%) could scale the
 // HTML chrome while the plan held a fixed size — the output wasn't one cohesive
-// sheet (B200). Composing the title block, the plan, the buildings table (B197)
-// and the metrics into a SINGLE <svg> with ONE viewBox gives them ONE coordinate
-// system and ONE scaling transform, so every layer scales together at any zoom
-// and prints as one cohesive PDF.
+// sheet (B200). Composing the title block, the plan and the metrics into a
+// SINGLE <svg> with ONE viewBox gives them ONE coordinate system and ONE
+// scaling transform, so every layer scales together at any zoom and prints as
+// one cohesive PDF. (The buildings table this once carried — B197 — was
+// removed in B1804993; the plan now takes the full width that column used to
+// reserve.)
 //
 // Units: "centi-inches" (1 user unit = 1/100 in), so a letter-landscape sheet is
 // 1100×850 and font sizes read directly as hundredths of an inch (e.g. 22 ≈ 16pt).
@@ -27,9 +29,6 @@ const r2 = (n) => Number(Number(n).toFixed(2));
 // reservation + the renderer so the reserved height always fits what's drawn). PDF-PARITY.
 const SW_ROW_H = 30, SW_HEAD_H = 16;
 export const stormwaterBandH = (barCount) => (barCount > 0 ? SW_HEAD_H + barCount * SW_ROW_H : 0);
-// Integer with thousands separators, locale-independent (e.g. 250000 → "250,000").
-const commas = (n) => String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-
 // ---- page geometry -------------------------------------------------------
 const PAGE = {
   "letter:landscape": { w: 1100, h: 850, wIn: 11, hIn: 8.5 },
@@ -76,9 +75,9 @@ export const PAPER_SIZES = [
   { key: "ansid", label: "ANSI D", note: "22×34″" },
 ];
 
-// Lay the sheet out for the given paper/orientation and whether a buildings table
-// is present. Returns boxes (in centi-inch units) for every region so the caller
-// can position the nested plan SVG and so composition is deterministic + testable.
+// Lay the sheet out for the given paper/orientation. Returns boxes (in centi-inch
+// units) for every region so the caller can position the nested plan SVG and so
+// composition is deterministic + testable.
 /* How many rows the metrics band needs for these pairs at this width — the SAME
  * width/flow math buildMetricsSvg uses (fs 12.5 × 0.54 char estimate + 26 gap), so
  * the band the layout reserves always fits what the renderer draws. Pure; exported
@@ -100,7 +99,7 @@ export function metricsRowsFor(pairsOrCount, bandW) {
   return Math.max(2, rows);
 }
 
-export function printSheetLayout({ paper = "letter", orient = "landscape", buildingCount = 0, metricsCount = 9, metricsPairs = null, stormwaterBars = 0, titleBlockExtra = false, includeMetrics = true, page: pageOverride = null } = {}) {
+export function printSheetLayout({ paper = "letter", orient = "landscape", metricsCount = 9, metricsPairs = null, stormwaterBars = 0, titleBlockExtra = false, includeMetrics = true, page: pageOverride = null } = {}) {
   // NEW-1 (B1783056) — `pageOverride` (from pageSizeForFit) replaces the standard paper/orient
   // lookup with a page shaped to the picked frame; everything below only ever reads `page.w/h`,
   // so nothing else in this layout needs to know which source it came from.
@@ -127,67 +126,16 @@ export function printSheetLayout({ paper = "letter", orient = "landscape", build
   const contentTop = inner.y + titleH + gap;
   const contentBot = includeMetrics ? inner.y + inner.h - metricsH - gap : inner.y + inner.h;
   const contentH = Math.max(0, contentBot - contentTop);
-  const hasTable = buildingCount > 0;
-  // Right-hand data column near the title block; clamped so it never starves the plan.
-  const tableW = hasTable ? Math.max(230, Math.min(360, Math.round(inner.w * 0.3))) : 0;
-  const planW = inner.w - (hasTable ? tableW + gap : 0);
+  // NEW-2 (B1804993) — the right-hand buildings table is gone; the plan always takes the
+  // full inner width instead of giving up a column for it.
   return {
     unit: "centi-inch",
     page,
     inner,
     title: { x: inner.x, y: inner.y, w: inner.w, h: titleH },
-    plan: { x: inner.x, y: contentTop, w: planW, h: contentH },
-    table: hasTable ? { x: inner.x + planW + gap, y: contentTop, w: tableW, h: contentH } : null,
+    plan: { x: inner.x, y: contentTop, w: inner.w, h: contentH },
     metrics: includeMetrics ? { x: inner.x, y: contentBot + gap, w: inner.w, h: metricsH } : null,
   };
-}
-
-// ---- buildings data table (B197) ----------------------------------------
-// `rows`: [{ name, sf, clearHeight, slab }] — values already resolved (effective,
-// from buildingProps). Columns: BUILDING | SF | CLEAR | SLAB; numeric columns
-// right-aligned. Returns an SVG markup string anchored at the box's top-left.
-export function buildBuildingTableSvg({ x, y, w, h, rows = [], pal = {} } = {}) {
-  const ink = pal.ink || "#26231e";
-  const muted = pal.muted || "#8a8473";
-  const line = pal.panelLine || "#cfc6af";
-  const padX = 11;
-  const titleH = 26, headerH = 22, rowH = 21;
-  const colSlab = 56, colClear = 60, colSf = 92; // right-side fixed columns
-  const right = x + w - padX;
-  const xSlab = right; // right edges (text-anchor=end)
-  const xClear = right - colSlab;
-  const xSf = right - colSlab - colClear;
-  const xName = x + padX; // left edge (text-anchor=start)
-  const nameMax = (xSf - colSf) - xName - 6; // px room for the name before SF column
-  // Truncate an over-long name to fit its column (rough char-width estimate).
-  const fitName = (s, fs) => {
-    const str = String(s || "");
-    const max = Math.max(4, Math.floor(nameMax / (fs * 0.56)));
-    return str.length > max ? str.slice(0, max - 1) + "…" : str;
-  };
-  let s = `<rect x="${r2(x)}" y="${r2(y)}" width="${r2(w)}" height="${r2(h)}" rx="6" fill="#ffffff" stroke="${line}" stroke-width="1"/>`;
-  // title
-  s += `<text x="${r2(xName)}" y="${r2(y + 18)}" font-size="14" font-weight="700" letter-spacing="0.6" fill="${ink}">BUILDINGS</text>`;
-  s += `<line x1="${r2(x)}" y1="${r2(y + titleH)}" x2="${r2(x + w)}" y2="${r2(y + titleH)}" stroke="${line}" stroke-width="1"/>`;
-  // header row
-  const hy = y + titleH + 15;
-  const hdr = (tx, anchor, label) => `<text x="${r2(tx)}" y="${r2(hy)}" text-anchor="${anchor}" font-size="10.5" font-weight="700" letter-spacing="0.5" fill="${muted}">${esc(label)}</text>`;
-  s += hdr(xName, "start", "BUILDING") + hdr(xSf, "end", "SF") + hdr(xClear, "end", "CLEAR") + hdr(xSlab, "end", "SLAB");
-  s += `<line x1="${r2(x)}" y1="${r2(y + titleH + headerH)}" x2="${r2(x + w)}" y2="${r2(y + titleH + headerH)}" stroke="${line}" stroke-width="0.75"/>`;
-  // body rows (clip to the box height)
-  let ry = y + titleH + headerH + 15;
-  const maxY = y + h - 6;
-  const rowFs = 12.5;
-  rows.forEach((row, i) => {
-    if (ry > maxY) return; // overflow guard (plan area is tall; this is rarely hit)
-    if (i % 2 === 1) s += `<rect x="${r2(x + 1)}" y="${r2(ry - 14)}" width="${r2(w - 2)}" height="${r2(rowH)}" fill="#faf8f3"/>`;
-    s += `<text x="${r2(xName)}" y="${r2(ry)}" font-size="${rowFs}" fill="${ink}">${esc(fitName(row.name, rowFs))}</text>`;
-    s += `<text x="${r2(xSf)}" y="${r2(ry)}" text-anchor="end" font-size="${rowFs}" fill="${ink}" font-variant-numeric="tabular-nums slashed-zero">${esc(commas(row.sf))}</text>`;
-    s += `<text x="${r2(xClear)}" y="${r2(ry)}" text-anchor="end" font-size="${rowFs}" fill="${ink}" font-variant-numeric="tabular-nums slashed-zero">${esc(row.clearHeight == null ? "—" : row.clearHeight + "'")}</text>`;
-    s += `<text x="${r2(xSlab)}" y="${r2(ry)}" text-anchor="end" font-size="${rowFs}" fill="${ink}" font-variant-numeric="tabular-nums slashed-zero">${esc(row.slab == null ? "—" : row.slab + '"')}</text>`;
-    ry += rowH;
-  });
-  return s;
 }
 
 // ---- stormwater required-vs-provided bar strip (B862, chat NEW-3) --------
@@ -264,7 +212,6 @@ export function buildPrintSheetSvg({
   metrics = [],
   stormwater = [],
   note = "",
-  buildings = [],
   pal = {},
 } = {}) {
   const L = layout || printSheetLayout({});
@@ -294,8 +241,6 @@ export function buildPrintSheetSvg({
   // plan frame + the nested plan SVG (caller-positioned)
   s += `<rect x="${r2(L.plan.x)}" y="${r2(L.plan.y)}" width="${r2(L.plan.w)}" height="${r2(L.plan.h)}" fill="none" stroke="${line}" stroke-width="0.75"/>`;
   s += planSvg;
-  // buildings table (right column)
-  if (L.table && buildings.length) s += buildBuildingTableSvg({ ...L.table, rows: buildings, pal });
   // metrics band (+ the B862 stormwater required-vs-provided bar strip) — NEW-2: `L.metrics`
   // is null when the print menu's "Stats band" toggle is off, and the disclaimer note goes
   // with it (it is part of the band, not a separate thing the owner is trying to evade).

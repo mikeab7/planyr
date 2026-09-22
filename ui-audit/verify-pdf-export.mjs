@@ -12,17 +12,12 @@ import { jpegToPdf } from "../src/workspaces/site-planner/lib/imagePdf.js";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const PAL = { ink: "#26231e", muted: "#8a8473", panelLine: "#cfc6af", paper: "#ffffff" };
-const rows = [
-  { name: "Building 1", sf: 250000, clearHeight: 36, slab: 7 },
-  { name: "Cross Dock", sf: 620000, clearHeight: 40, slab: 7 },
-  { name: "Building 3", sf: 95000, clearHeight: 32, slab: 6 },
-];
 // 1x1 green PNG stretched to fill — stands in for the aerial underlay (proves the raster
 // embeds <image> hrefs).
 const AERIAL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
 function sheetFor(paper, orient) {
-  const layout = printSheetLayout({ paper, orient, buildingCount: rows.length });
+  const layout = printSheetLayout({ paper, orient });
   const pb = layout.plan;
   // Synthetic plan: aerial image + a building rect WITH a drop-shadow filter + a label.
   const planSvg =
@@ -41,7 +36,7 @@ function sheetFor(paper, orient) {
     layout,
     svg: buildPrintSheetSvg({
       layout, planSvg, title: "Mesa Logistics", sub: "Plan 1", date: "2026.06.20",
-      metrics, note: "Concept site plan — planning-level estimates, not a survey.", buildings: rows, pal: PAL,
+      metrics, note: "Concept site plan — planning-level estimates, not a survey.", pal: PAL,
     }),
   };
 }

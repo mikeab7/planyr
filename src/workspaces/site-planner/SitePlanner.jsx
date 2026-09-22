@@ -15710,33 +15710,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Building properties (B198): clear height + slab thickness, auto-assigned from each
   // building's footprint sf via an editable per-plan rule (`settings.buildingRules`),
   // with optional manual overrides stored on the element (clearHeightOverride /
-  // slabThicknessOverride). Surfaced in the selected-building panel, the Standards panel's
-  // "Buildings — program" section (NEW-1) and the printed buildings table (B197) — one
-  // source, never recomputed ad hoc in the print routine.
+  // slabThicknessOverride). Surfaced in the selected-building panel (effectiveBuildingProps,
+  // read directly per-building there) and the Standards panel's "Buildings — program"
+  // section (NEW-1) — one source, never recomputed ad hoc.
+  // (Also fed the printed buildings table, B197, and this panel's now-removed per-building
+  // overrides list, until both were removed — B1804993.)
   // NEW-1 — this plan's own copy first, then the account default ("Save for all projects"),
   // exactly the ladder `committedParcelStd`/`committedMeasureStd` already use — so promoting
   // the tier table to the account actually reaches a brand-new project, which starts with no
   // `settings.buildingRules` of its own. `userPrefs` (the account-prefs state) isn't declared
   // until further down this component, so this starts WITHOUT the account fallback and is
   // reassigned right after `userPrefs` exists (search "buildingRules = normalize" below) —
-  // every actual reader of this binding (buildingRows(), the building inspector) only runs
-  // later, inside this render's JSX, so it always sees the reassigned, account-aware value.
+  // every actual reader of this binding only runs later, inside this render's JSX, so it
+  // always sees the reassigned, account-aware value.
   let buildingRules = normalizeRules(settings.buildingRules);
   const buildingSqft = (el) => {
     const base = el.points ? polyArea(el.points) : el.w * el.h;
     const ba = els.reduce((s, x) => s + (x.attachedTo === el.id && x.dogEar ? x.w * x.h : 0), 0);
     return base + ba; // include attached dog-ear bump-outs, matching the on-plan sf label
-  };
-  const buildingList = els.filter(isBuilding);
-  const nBuildings = buildingList.length;
-  // Rich rows (effective values + auto/overridden state) for the options + selected panels.
-  const buildingRows = () => {
-    const nums = buildingNumbers(els);
-    return buildingList.map((el) => {
-      const sf = buildingSqft(el);
-      const p = effectiveBuildingProps(el, sf, buildingRules);
-      return { id: el.id, n: nums.get(el.id), name: (el.name && el.name.trim()) || `Building ${nums.get(el.id)}`, sf, clearHeight: p.clearHeight, slab: p.slab, el };
-    });
   };
   // Edit the global default rules (B199): change one tier's threshold (`upTo`) or value.
   const setRuleTier = (key, idx, field, val) => setSettings((s) => {
@@ -15760,8 +15751,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return { ...s, buildingRules: { ...r, [key]: moveTierPure(r[key], idx, dir) } };
   });
   const resetBuildingRules = () => setSettings((s) => { const { buildingRules, ...rest } = s; return rest; }); // drop → defaults
-  // Set/clear a per-building override (B199). `val == null` reverts that property to auto.
-  const setBuildingProp = (id, field, val) => { pushHistory(); setEls((a) => a.map((e) => (e.id === id ? { ...e, [field]: val } : e))); };
 
   // Site (location) vs Plan (layout) labels — editable from the header.
   const groupId = restored?.groupId || siteId;
@@ -16437,7 +16426,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     svgRef, stateRef, overlayRefs, geoMapRef,
     basemapOn, basemapSrc, overlays, layerStatus,
     PAL, f0,
-    siteName, siteLabel, planLabel, printFrame, buildingRows,
+    siteName, siteLabel, planLabel, printFrame,
     printMetricPairs, printStormwaterBars,
     // NEW-3 — resolved HERE, at export time. `exportCtx()` is rebuilt on every call, so this
     // reads the current render's facts; the sheet keeps its drainage content whether or not a
@@ -16597,10 +16586,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   /* ------------ print-frame placement ------------ */
   // The on-canvas crop matches the PRINTED PLAN BOX (B200), not the raw paper: the plan
-  // box is the sheet minus the title block, the metrics band, and — when buildings
-  // exist — the right-hand buildings-table column. So the frame the owner draws is
-  // exactly what fills the printed plan area (WYSIWYG), computed from the same layout
-  // the print routine uses.
+  // box is the sheet minus the title block and the metrics band. So the frame the owner
+  // draws is exactly what fills the printed plan area (WYSIWYG), computed from the same
+  // layout the print routine uses.
   // B1042 — the layout that yields this aspect now lives in the lazy export chunk, but the
   // frame-resize DRAG reads the aspect on every pointermove, which can never await. So the
   // value is RESOLVED once per (paper · orientation · content) key and cached in a ref;
@@ -16612,7 +16600,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const refreshPrintAspect = async () => {
     const { sheetPlanAspect } = await loadExportSheet();
     printAspectRef.current = sheetPlanAspect({
-      paper: printPaper, orient: printOrient, buildingCount: nBuildings,
+      paper: printPaper, orient: printOrient,
       metricsPairs: printMetricPairs(), stormwaterBars: printStormwaterBars().length,
       includeMetrics: settings.printMetricsBand !== false,
     });
@@ -16666,7 +16654,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pageOverride = printFitToFramePage && pf ? pageSizeForFit(printPaper, pf.wFt / pf.hFt) : null;
     setComposePageOverride(pageOverride);
     const box = sheetLayoutBoxesIn({
-      paper: printPaper, orient: printOrient, buildingCount: nBuildings,
+      paper: printPaper, orient: printOrient,
       metricsPairs: printMetricPairs(), stormwaterBars: printStormwaterBars().length,
       titleBlockExtra: !!printScale,
       includeMetrics: settings.printMetricsBand !== false,
@@ -22078,9 +22066,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </div>
 
           {/* NEW-1 — BUILDINGS: PROGRAM. Clear height & slab thickness by building size — the
-              printed buildings table's CLEAR/SLAB columns (buildingRows(), read by printSheet.js)
-              come from this tier table, exactly the way the column-grid math above reads the
-              structural-grid fields. Same direct-commit model as that sibling section (an edit
+              selected-building panel's CLEAR/SLAB fields (effectiveBuildingProps) come from this
+              tier table, exactly the way the column-grid math above reads the structural-grid
+              fields. (Also fed the printed buildings table, B197, and its per-building overrides
+              list on the compose screen, until both were removed — B1804993.)
+              Same direct-commit model as that sibling section (an edit
               here IS saved to this plan immediately — there is nothing to "Apply", since a
               building resolves its clear height/slab live, same as the grid); "Save for all
               projects" below additionally promotes it to the account, same button that already
@@ -25210,8 +25200,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           )}
 
           {/* print-frame picking bar (B765985) — ONLY the frame lives here now; paper, orientation,
-              scale, overlay/layer toggles and the buildings-table options all moved to the compose
-              screen (below). Bottom-center via canvasPillBottom, the same collision-aware placement
+              scale and the overlay/layer toggles all moved to the compose screen (below).
+              Bottom-center via canvasPillBottom, the same collision-aware placement
               B750096/B748960 use, so this can never repeat the measured defect where the old
               top-center bar's Cancel sat partly under the View pill. */}
           {printMode && !composeMode && (
@@ -25230,58 +25220,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           )}
 
           {/* The compose screen (B765985) — a full-screen surface, not an overlay: nothing of the
-              canvas is visible or reachable while this is up. See PrintCompose.jsx.
-              `buildingRulesPanelNode` carries the per-building CLEAR/SLAB overrides that drive
-              the printed buildings table — a genuinely print-specific convenience (review/adjust
-              just the two printed columns right before printing). NEW-1 moved the SIZE-TIER
-              TABLE ITSELF (the "Defaults by building size" editor this panel used to own,
-              B199) into the Standards panel's "Buildings — program" section — one editable
-              home, not two copies of the same tier table (both would read/write the identical
-              `settings.buildingRules`, so it was never a correctness risk, just a needless
-              second way to do the same edit); this panel now only SUMMARIZES it. */}
-          {composeMode && (() => {
-            const rules = buildingRules;
-            const rows = buildingRows();
-            const valNum = { ...numInput, width: 46, padding: "4px 7px", fontSize: 11.5 };
-            const buildingRulesPanelNode = (
-              <div style={{ padding: "2px 2px 4px" }}>
-                <div style={{ fontSize: 12.5, fontWeight: 700, color: PAL.ink, padding: "2px 4px" }}>Defaults by building size</div>
-                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, padding: "0 4px 6px" }}>
-                  Clear height {rules.clearHeight.length} tier{rules.clearHeight.length === 1 ? "" : "s"} · slab {rules.slab.length} tier{rules.slab.length === 1 ? "" : "s"} — edit in Standards → Buildings.
-                </div>
-                <div style={{ height: 1, background: PAL.panelLine, margin: "2px 2px 4px" }} />
-                <div style={{ fontSize: 12.5, fontWeight: 700, color: PAL.ink, padding: "2px 4px" }}>Per-building overrides</div>
-                {rows.length === 0 ? (
-                  <div style={{ fontSize: 11.5, color: PAL.muted, padding: "6px 4px" }}>No buildings yet — draw a building to set its clear height & slab.</div>
-                ) : rows.map((r) => (
-                  <div key={r.id} style={{ borderTop: `1px solid ${PAL.panelLine}`, padding: "6px 4px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
-                      <input value={r.el.name || ""} placeholder={`Building ${r.n}`} onChange={(e) => setBuildingProp(r.id, "name", e.target.value)}
-                        style={{ ...numInput, flex: 1, width: "auto", fontFamily: "inherit", fontSize: 12, padding: "4px 8px" }} />
-                      <span style={{ fontSize: 11, color: PAL.muted, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap" }}>{f0(r.sf)} SF</span>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                      <span style={ROW4}>
-                        <span style={{ fontSize: 11, color: PAL.muted }}>Clear</span>
-                        <NumInput style={valNum} value={r.clearHeight.value} min={1} onCommit={(n) => setBuildingProp(r.id, "clearHeightOverride", n)} /><span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
-                        {r.clearHeight.overridden
-                          ? <button title="Revert to auto" onClick={() => setBuildingProp(r.id, "clearHeightOverride", null)} style={{ ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent }}>set ↺</button>
-                          : <span style={{ fontSize: 10, color: PAL.muted }}>auto</span>}
-                      </span>
-                      <span style={ROW4}>
-                        <span style={{ fontSize: 11, color: PAL.muted }}>Slab</span>
-                        <NumInput style={valNum} value={r.slab.value} min={1} onCommit={(n) => setBuildingProp(r.id, "slabThicknessOverride", n)} /><span style={{ fontSize: 11, color: PAL.muted }}>in</span>
-                        {r.slab.overridden
-                          ? <button title="Revert to auto" onClick={() => setBuildingProp(r.id, "slabThicknessOverride", null)} style={{ ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent }}>set ↺</button>
-                          : <span style={{ fontSize: 10, color: PAL.muted }}>auto</span>}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 8, padding: "0 4px" }}>Auto values come from Standards → Buildings; an override pins a value until you revert it. These print in the buildings table.</div>
-              </div>
-            );
-            return (
+              canvas is visible or reachable while this is up. See PrintCompose.jsx. The printed
+              buildings table (B197) — and this screen's "Buildings table" section that reviewed
+              its CLEAR/SLAB values before printing — were removed in B1804993; per-building
+              overrides are still set on the building itself (Properties → Structure) or from
+              Standards → Buildings' "Defaults by building size" tier table. */}
+          {composeMode && (
             <LazyPanel name="Compose exhibit" minHeight={400} label="Loading…">
               <PrintCompose
                 paper={printPaper} onPaper={setPrintPaper}
@@ -25298,13 +25242,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 overlayPrintable={overlayPrintable} printOverlay={printOverlay} onTogglePrintOverlay={setPrintOverlay}
                 mapLayersPrintable={mapLayersPrintable} printMapLayers={printMapLayers} onToggleMapLayers={setPrintMapLayers}
                 showMetricsBand={settings.printMetricsBand !== false} onToggleMetricsBand={(v) => setSettings((s) => ({ ...s, printMetricsBand: v }))}
-                buildingRulesPanel={buildingRulesPanelNode}
                 onReposition={exitToReposition} onCancel={cancelPrint} onDownload={doPrint}
                 downloading={composeDownloading}
               />
             </LazyPanel>
-            );
-          })()}
+          )}
 
           {/* Split cut banner (NEW-3) — Merge/easement/the Parcel tool all show a persistent banner
               with an explicit Done exit while their gesture is in progress; Split alone had none, so

@@ -166,6 +166,35 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1283856 — B1804992: the print/PDF export clips every overlay layer (parcels, ponds, easements, dimensions) to the dragged frame, not just the aerial `Blocker: real-data`
+
+**Why this needs a live pass.** The reported defect (Goose Creek, Phase II — TAS R1 print) cites real project data — a real multi-parcel, multi-pond plan with easements and TAS/HW SPEC dimension callouts — and PDF/export parity is a mandatory LIVE-VERIFY class regardless of how strong the sandbox proof is.
+
+**What was verified here (sandbox, this session).** Full `npx vitest run` — 881 files, 17,988 tests green, including the dead-store ratchet and the source-guard tests touched by this change. Two headless-Chromium reproductions built the REAL `printSheetLayout`/`buildPrintSheetSvg` composition shape (a nested plan `<svg>` inside the composed page sheet, exactly as `buildComposedSheet` builds it) with content deliberately placed outside the frame's declared box, and confirmed zero bleed onto the page margin both before this fix (implicit clip alone) and after (the new explicit `<clipPath>`). A new e2e spec, `e2e/print-frame-crop-clip.spec.js`, drives the real app logged out (no GIS, no auth needed): draws a building spanning most of the canvas, builds the real export sheet via the `window.__plannerExportSvg` E2E hook with a frame a quarter the drawn building's size, and asserts the clip-path exists, the drawn building is structurally inside the clip group, and rendering the sheet nested inside a page-sized canvas paints nothing in the surrounding margin.
+
+**Steps, each with a named expected result — on a THROWAWAY duplicate of a real multi-parcel/pond plan, never one of Michael's real plans:**
+1. Open the duplicate plan, enter Print/Export, and drag the aerial crop frame to a box clearly smaller than the full drawn extent (so at least one parcel line, one pond outline, and one dimension callout fall outside it).
+2. Continue to the compose screen and check the live preview. **Expect:** every parcel line, pond outline, easement dash, building, dimension/TAS/HW-SPEC label, and the scale bar/north arrow are visible ONLY inside the framed area — nothing renders in the white margin around it.
+3. Download the PDF. **Expect:** the same — open the PDF and confirm no overlay content sits outside the aerial photo's boundary anywhere on the page.
+4. Download the PNG too (a separate export path with its own composition). **Expect:** same result — the PNG's own bounds match the frame, no overlay content clipped incorrectly or bleeding.
+5. Repeat with the frame positioned so it excludes content on a DIFFERENT side (e.g. cropping off the top-left instead of the bottom-right), to rule out a directional/off-by-one error in the clip rect.
+6. Read the served chunk hash in the same observation as each result, per this repo's own live-measurement rule. Discard the throwaway plan afterward and say exactly what was created/removed.
+- **Stopping rule:** closes when steps 1–6 confirm on a real signed-in account, dated — or a step fails and is filed as a recurrence against B1804992, per STANDING RULE #2 (a null result is a FINDING, never a silent close).
+
+### V1283857 — B1804993: the buildings table is gone from PDF/print export, and the map reflows into the freed width with nothing else visibly disturbed `Blocker: real-data`
+
+**Why this needs a live pass.** PDF/export parity is a mandatory LIVE-VERIFY class. The sandbox proof shows the layout math is correct (`plan.w === inner.w`, no table region emitted, 39/39 `printSheet.test.js`) but not what a real multi-building sheet actually LOOKS like once printed — whether the extra width reads as a natural, uncluttered exhibit rather than obviously "something used to be here."
+
+**What was verified here (sandbox, this session).** Full `npx vitest run` — 881 files, 17,988 tests green. `test/printSheet.test.js` (39 tests) updated and passing, including explicit assertions the table region is `undefined` and the plan box takes the full inner width. `ui-audit/verify-print-sheet.mjs` and `ui-audit/verify-pdf-export.mjs` updated to stop passing/asserting building rows and to assert the "BUILDINGS" table title text is absent from the rendered sheet.
+
+**Steps, each with a named expected result — on a THROWAWAY duplicate of a real plan with several buildings (so the table, pre-fix, would have had real rows to show):**
+1. Open the duplicate plan, enter Print/Export, reach the compose screen. **Expect:** no "Buildings table" section anywhere in the Exhibit settings panel (it's gone, not just collapsed).
+2. Download the PDF. **Expect:** no BUILDINGS table on the page; the plan graphic fills the width the table column used to occupy, with no leftover blank strip on the right where it used to sit.
+3. Compare against the metrics band at the bottom of the same sheet (unaffected by this change) — confirm it still renders correctly and nothing about its layout shifted.
+4. Confirm the selected-building Properties panel and the Standards → Buildings "Defaults by building size" tier table still show/edit clear height and slab thickness correctly (the removed compose-screen editor was a convenience duplicate of these, not their only home).
+5. Read the served chunk hash in the same observation as each result. Discard the throwaway plan afterward and say exactly what was created/removed.
+- **Stopping rule:** closes when steps 1–5 confirm on a real signed-in account, dated — or a step fails and is filed as a recurrence against B1804993, per STANDING RULE #2.
+
 ### V1268880 — B1790016/B1790017: the rebuilt car-parking properties panel — the spec sheet, the aisle-side picture control's disable case, and a wall-bonded flip `Blocker: real-data`
 
 **Why this needs a live pass, and what it is NOT.** This is not asking anyone to re-diagnose whether the panel works — it does, measured directly in this session in a headless Chromium against a real signed-in-style plan-open flow (seeded `localStorage`, the actual Map Finder → Site Planner route, no mocking of the render): **23 of 24 automated checks passed**, the one failure being `ERR_TUNNEL_CONNECTION_FAILED` on external Esri/county-GIS tile requests this sandbox's egress proxy blocks — unrelated to this feature and expected here (same class of sandbox limitation `CLAUDE.md`'s known-issues section already documents for other GIS-dependent checks). What that headless pass could not do: drive Michael's own signed-in account or a real project's parking field, where a genuine per-field `cfg` override, a real bonded assembly, or a real building-wall geometry could differ from the synthetic fixture below.
