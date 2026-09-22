@@ -104,6 +104,57 @@ export function cornerShares(i, n) {
   return { a: i - 1 <= 0 ? 1 : 0.5, c: i + 1 >= n - 1 ? 1 : 0.5 };
 }
 
+/* NEED-BASED leg shares (2026-09-22, road-into-court geometry pass).
+ *
+ * `cornerShares` halves every interior leg unconditionally, which starves a corner that sits next to
+ * a vertex taking NO tangent at all: a flattened tee node (a road another road tees into passes
+ * straight THROUGH the node — `sharpAt`), a deliberate sharp corner, or a near-collinear vertex.
+ * Measured on the owner's Goose Creek Phase II plan: a 57° bend 26 ft from a tee node was clamped
+ * to half of that leg (13 ft) although the node wanted none of it, drew below its class minimum,
+ * and was flagged "needs 2′ more approach" — and the tee's curb return, built against a straight
+ * tangent that assumed the full 26 ft, ran out past the bend as a spike of pavement.
+ *
+ * The invariant that matters is "neighbouring fillets never overlap", and it is kept by splitting
+ * a leg by what each end actually NEEDS (its unclamped tangent run T = R·tan(θ/2); 0 for a sharp or
+ * straight-through vertex; the old half for a `smooth` vertex, whose anchor sits at the midpoint by
+ * construction). If both needs fit, each corner may take everything its neighbour does not need;
+ * if they don't, the leg is split pro rata. End legs stay wholly available, as before. Returned as
+ * a per-vertex array of { a, c } in the same units `cornerShares` used (fraction of the leg). */
+export function legShares(pts, vtx, defaultRadius, sharpAt) {
+  const P = pts || [];
+  const N = P.length;
+  const sharp = sharpAt instanceof Set ? sharpAt : new Set(Array.isArray(sharpAt) ? sharpAt : []);
+  const defR = defaultRadius > 0 ? defaultRadius : DEFAULT_ARC_RADIUS;
+  const need = new Array(N).fill(0);     // unclamped tangent run each interior vertex wants
+  const half = new Array(N).fill(false); // `smooth` — keeps the legacy midpoint split
+  for (let i = 1; i < N - 1; i++) {
+    const t = sharp.has(i) ? "sharp" : treatmentAt(vtx, i);
+    if (t === "smooth") { half[i] = true; continue; }
+    if (t !== "arc") continue;
+    const vA = sub(P[i - 1], P[i]), vC = sub(P[i + 1], P[i]);
+    const lA = len(vA), lC = len(vC);
+    if (lA < EPS || lC < EPS) continue;
+    const c = Math.max(-1, Math.min(1, dot(mul(vA, 1 / lA), mul(vC, 1 / lC))));
+    const theta = Math.PI - Math.acos(c);
+    if (theta < 1e-4 || theta > Math.PI - 1e-4) continue;
+    need[i] = radiusAt(vtx, i, defR) * Math.tan(theta / 2);
+  }
+  const out = new Array(N).fill(null);
+  for (let i = 1; i < N - 1; i++) {
+    const shareOn = (j) => {                       // share of the leg between i and j that i may take
+      if (j <= 0 || j >= N - 1) return 1;          // end leg — no neighbouring corner
+      const L = len(sub(P[j], P[i]));
+      if (!(L > EPS)) return 0.5;
+      if (half[i] || half[j]) return 0.5;          // legacy midpoint rule for a smooth neighbour
+      const Ti = need[i], Tj = need[j];
+      if (Ti + Tj <= L) return Math.max(0, Math.min(1, 1 - Tj / L));
+      return Ti + Tj > EPS ? Ti / (Ti + Tj) : 0.5;
+    };
+    out[i] = { a: shareOn(i - 1), c: shareOn(i + 1) };
+  }
+  return out;
+}
+
 function arcCorner(A, P, C, radius, tessDeg, shareA = 0.5, shareC = 0.5) {
   const vA = sub(A, P), vC = sub(C, P);
   const lA = len(vA), lC = len(vC);
@@ -263,7 +314,10 @@ function roadCenterlineTaggedUncached(pts, vtx, opts = {}) {
   const N = clean.length;
   // Per interior vertex, compute its corner geometry (entry anchor, dense pts, exit anchor).
   const corners = [];
-  const shareAt = typeof opts.shareAt === "function" ? opts.shareAt : (i) => cornerShares(i, N);
+  // Need-based shares (see legShares): the sharp set is re-keyed to CLEAN indices here.
+  const sharpClean = new Set(); keep.forEach((orig, j) => { if (sharp.has(orig)) sharpClean.add(j); });
+  const needSh = legShares(clean, vtx, defR, sharpClean);
+  const shareAt = typeof opts.shareAt === "function" ? opts.shareAt : (i) => needSh[i] || cornerShares(i, N);
   for (let i = 1; i < N - 1; i++) {
     const A = clean[i - 1], P = clean[i], C = clean[i + 1];
     const t = sharp.has(keep[i]) ? "sharp" : treatmentAt(vtx, i);
@@ -812,7 +866,7 @@ export function fixRoadRadii(pts, vtx, threshold, opts = {}) {
     if (treatmentAt(wvtx, i) === "sharp") return Infinity;
     // Measure the triple with THIS road's real leg shares (NEW-2) — a 3-point probe would
     // otherwise grant both legs in full and over-report a corner in the middle of a long road.
-    const sh = cornerShares(i, N);
+    const sh = legShares(work, wvtx, target)[i] || cornerShares(i, N);
     const local = roadCenterline([work[i - 1], work[i], work[i + 1]], [{}, wvtx[i], {}], { defaultRadius: target, tessDeg, shareAt: () => sh });
     return minRadiusOfCurvature(local);
   };
@@ -825,7 +879,7 @@ export function fixRoadRadii(pts, vtx, threshold, opts = {}) {
     const cosPhi = Math.max(-1, Math.min(1, dot(mul(vA, 1 / lA), mul(vC, 1 / lC))));
     const theta = Math.PI - Math.acos(cosPhi);
     if (theta < 1e-4) return Infinity;                     // ~straight → no corner
-    const sh = cornerShares(i, N);
+    const sh = legShares(work, wvtx, target)[i] || cornerShares(i, N);
     return Math.min(sh.a * lA, sh.c * lC) / Math.tan(theta / 2);
   };
   // Foot of the perpendicular from P onto the infinite line A→C (the nudge target direction).
@@ -928,9 +982,11 @@ export function roadCornerRadii(pts, vtx, opts = {}) {
   if (P.length < 3) return [];
   const fallback = opts.defaultRadius > 0 ? opts.defaultRadius : DEFAULT_ARC_RADIUS;
   const P_LEN = P.length;
+  const sharp = opts.sharpAt instanceof Set ? opts.sharpAt : new Set(Array.isArray(opts.sharpAt) ? opts.sharpAt : []);
+  const needSh = legShares(P, vtx, fallback, sharp);
   const out = [];
   for (let i = 1; i < P.length - 1; i++) {
-    const treatment = treatmentAt(vtx, i);
+    const treatment = sharp.has(i) ? "sharp" : treatmentAt(vtx, i);
     const requested = radiusAt(vtx, i, fallback);
     if (treatment !== "arc") { out.push({ i, treatment, requested, rendered: null, limited: false }); continue; }
     const vA = sub(P[i - 1], P[i]), vC = sub(P[i + 1], P[i]);
@@ -940,7 +996,7 @@ export function roadCornerRadii(pts, vtx, opts = {}) {
     const theta = Math.PI - Math.acos(c);                 // deflection / turn angle
     if (theta < 1e-4 || theta > Math.PI - 1e-4) { out.push({ i, treatment, requested, rendered: Infinity, limited: false }); continue; }
     const tanHalf = Math.tan(theta / 2);
-    const sh = cornerShares(i, P_LEN);                    // same leg-share rule arcCorner applies
+    const sh = needSh[i] || cornerShares(i, P_LEN);       // same leg-share rule arcCorner applies
     const maxT = Math.min(sh.a * lA, sh.c * lC);
     const T = Math.min(requested * tanHalf, maxT);
     const rendered = tanHalf > EPS ? T / tanHalf : Infinity;

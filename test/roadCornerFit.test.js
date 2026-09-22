@@ -33,11 +33,23 @@ describe("terminal legs are no longer halved", () => {
     expect(c.rendered).toBeCloseTo(60, 6);
     expect(c.limited).toBe(false);
   });
-  it("still halves that leg when a further corner shares it", () => {
+  it("splits a shared leg by NEED, not in half (2026-09-22 legShares)", () => {
+    // Corner 1 wants T=60 (R60, 90°); corner 2 wants T=10 (R10, 90°). Together they want 70 on a
+    // 60 ft leg, so the leg is split pro rata: 60/70 × 60 = 51.43 for corner 1, 8.57 for corner 2.
+    // The old flat half rule gave corner 1 only 30 and left 20 ft of the leg unused.
     const p2 = [...pts, { x: 200, y: 60 }];
     const v2 = [{}, { treatment: "arc", radius: 60 }, { treatment: "arc", radius: 10 }, {}];
-    const [c] = roadCornerRadii(p2, v2);
-    expect(c.rendered).toBeCloseTo(30, 6);                   // 0.5 × 60
+    const [c, d] = roadCornerRadii(p2, v2);
+    expect(c.rendered).toBeCloseTo(60 * 60 / 70, 6);
+    expect(d.rendered).toBeCloseTo(10 * 60 / 70, 6);
+    expect(c.rendered * c.tanHalf + d.rendered * d.tanHalf).toBeLessThanOrEqual(60 + 1e-9); // never overlap
+  });
+  it("a corner next to a vertex that takes no tangent gets the whole leg", () => {
+    // 0-1-2-3 where vertex 2 is a flattened tee node (sharpAt): corner 1 may use all 60 ft.
+    const p2 = [...pts, { x: 100, y: 200 }];
+    const v2 = [{}, { treatment: "arc", radius: 60 }, {}, {}];
+    const [c] = roadCornerRadii(p2, v2, { sharpAt: [2] });
+    expect(c.rendered).toBeCloseTo(60, 6);
   });
   it("the RENDERED centerline agrees with what roadCornerRadii reports", () => {
     const dense = roadCenterline(pts, vtx);
