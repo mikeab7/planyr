@@ -9,9 +9,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  FULL_WIDTH_FLOOR, FULL_WIDTH_GUTTER, PAGE_WIDTH_MAX, PAGE_WIDTH_MIN, PAGE_WIDTH_PRESETS,
-  dragWidthFromDelta, leftWidthGripPad, matSidePads, pageWidthLabel, pageWidthPresetId,
-  resolvePinnedBaseWidth, resolvePresetPx,
+  FULL_WIDTH_FLOOR, FULL_WIDTH_GUTTER, PAGE_COL_MIN, PAGE_WIDTH_MAX, PAGE_WIDTH_MIN,
+  PAGE_WIDTH_PRESETS, dragWidthFromDelta, leftEdgeDrag, normalizePageMargin, pageWidthLabel,
+  pageWidthPresetId, resolvePinnedBaseWidth, resolvePresetPx, rightEdgeDrag, sheetWidthFor,
 } from "../src/workspaces/notes/lib/notesPageWidth.js";
 
 describe("the presets", () => {
@@ -176,124 +176,116 @@ describe("dragWidthFromDelta — the live preview and the eventual commit share 
   });
 });
 
-describe("leftWidthGripPad — NEW-2, the left grip's own 'content doesn't move' rule", () => {
-  it("from a fresh page (0 pad), widening by D opens exactly D of new pad", () => {
-    expect(leftWidthGripPad(0, 120)).toEqual({ pad: 120, padDelta: 120 });
+/* ═══ THE TWO EDGE-DRAG DECISIONS (NEW-2, fourth round, 2026-09-21) ═══════════════════════════
+ *
+ * ⛔ THESE REPLACE THE `leftWidthGripPad` AND `matSidePads` SUITES THAT USED TO BE HERE, AND THE
+ * REPLACEMENT IS THE POINT — read `lib/notesViewport.js`'s header before restoring either.
+ *
+ * Both of those functions, and every test that used to sit here, were about ONE question: how do
+ * we hold the words still while the sheet's own position inside a SCROLLER changes underneath
+ * them? The answer was always a compensation, and the tests proved the compensation was computed
+ * correctly. They were right and they went green while the feature was broken in the field three
+ * times running, because the thing that fails is not the arithmetic — it is that `scrollLeft` is a
+ * BOUNDED resource and the debt is unbounded. The last suite here even asserted "the mat has
+ * enough scrollable room for whatever the gutter could not absorb", which is exactly the right
+ * property for the wrong mechanism.
+ *
+ * On a transform workspace the page is placed at a workspace coordinate and the view is never
+ * consulted, so there is no compensation to compute and nothing here left to assert about one.
+ * What IS asserted below is the geometry itself: where each boundary goes, which boundary holds,
+ * and how much the content is allowed to move (which is zero, except for the one case where the
+ * boundary is deliberately being pushed into it).
+ */
+describe("leftEdgeDrag — the left boundary follows the pointer", () => {
+  it("widening from a fresh page opens exactly that much blank paper and touches nothing else", () => {
+    expect(leftEdgeDrag({ marginLeft: 0, colWidth: 580, delta: 120 }))
+      .toEqual({ marginLeft: 120, colWidth: 580, contentShift: 0 });
   });
 
-  it("composes with an already-open pad from an earlier drag, rather than resetting it", () => {
-    expect(leftWidthGripPad(120, 40)).toEqual({ pad: 160, padDelta: 40 });
+  it("composes with paper an earlier drag already opened, rather than starting over", () => {
+    expect(leftEdgeDrag({ marginLeft: 120, colWidth: 580, delta: 40 }))
+      .toEqual({ marginLeft: 160, colWidth: 580, contentShift: 0 });
   });
 
-  it("narrowing gives the pad back, one pixel at a time, as long as it has any to give", () => {
-    expect(leftWidthGripPad(120, -50)).toEqual({ pad: 70, padDelta: -50 });
+  it("narrowing spends the blank paper first, and the column is untouched while any remains", () => {
+    expect(leftEdgeDrag({ marginLeft: 120, colWidth: 580, delta: -50 }))
+      .toEqual({ marginLeft: 70, colWidth: 580, contentShift: 0 });
   });
 
-  it("floors at 0 — a pad can never go negative", () => {
-    expect(leftWidthGripPad(0, -50)).toEqual({ pad: 0, padDelta: 0 });
+  it("⛔ THE PROPERTY THAT MATTERS: while there is blank paper, the content does not move AT ALL", () => {
+    for (const delta of [1, 5, 40, 90, 120, -1, -40, -119, -120]) {
+      expect(leftEdgeDrag({ marginLeft: 120, colWidth: 580, delta }).contentShift).toBe(0);
+    }
   });
 
-  it("⛔ THE PROPERTY THAT MATTERS: past the floor, padDelta is NEVER the raw delta — it is only", () => {
-    // ever what the pad itself actually gave up. Asking for 200 back from a 120 pad may only ever
-    // hand back 120 (the pad's own maximum), never overshoot the scroll compensation past it.
-    const { pad, padDelta } = leftWidthGripPad(120, -200);
-    expect(pad).toBe(0);
-    expect(padDelta).toBe(-120);
+  it("past the paper the column narrows, and the content moves by EXACTLY the overshoot", () => {
+    /* The one case where content legitimately moves — the boundary is being pushed into it, which
+     * is what dragging a margin marker into your own text means. It is returned explicitly rather
+     * than left for a caller to infer, because a caller that has to infer it will get it wrong. */
+    const r = leftEdgeDrag({ marginLeft: 120, colWidth: 580, delta: -200 });
+    expect(r.marginLeft).toBe(0);
+    expect(r.colWidth).toBe(500);
+    expect(r.contentShift).toBe(80);
   });
 
-  it("a full shrink-then-regrow round trip lands exactly back where it started, composed correctly", () => {
-    const grown = leftWidthGripPad(0, 90);
-    const shrunk = leftWidthGripPad(grown.pad, -90);
-    expect(shrunk).toEqual({ pad: 0, padDelta: -90 });
-    const regrown = leftWidthGripPad(shrunk.pad, 90);
-    expect(regrown).toEqual({ pad: 90, padDelta: 90 });
+  it("the column has a floor, and the content never moves further than the column actually gave", () => {
+    const r = leftEdgeDrag({ marginLeft: 0, colWidth: 400, delta: -5000 });
+    expect(r.colWidth).toBe(PAGE_COL_MIN);
+    expect(r.contentShift).toBe(400 - PAGE_COL_MIN);
   });
 
-  it("a zero delta (no movement yet) is a no-op", () => {
-    expect(leftWidthGripPad(50, 0)).toEqual({ pad: 50, padDelta: 0 });
+  it("a shrink-then-regrow round trip lands exactly back where it started", () => {
+    const grown = leftEdgeDrag({ marginLeft: 0, colWidth: 580, delta: 90 });
+    const shrunk = leftEdgeDrag({ marginLeft: grown.marginLeft, colWidth: grown.colWidth, delta: -90 });
+    expect(shrunk).toEqual({ marginLeft: 0, colWidth: 580, contentShift: 0 });
   });
 
-  it("tolerates undefined/missing arguments rather than producing NaN", () => {
-    expect(leftWidthGripPad(undefined, undefined)).toEqual({ pad: 0, padDelta: 0 });
-    expect(leftWidthGripPad(null, 40)).toEqual({ pad: 40, padDelta: 40 });
+  it("a zero delta is a no-op", () => {
+    expect(leftEdgeDrag({ marginLeft: 50, colWidth: 580, delta: 0 }))
+      .toEqual({ marginLeft: 50, colWidth: 580, contentShift: 0 });
+  });
+
+  it("tolerates missing arguments rather than producing NaN", () => {
+    const r = leftEdgeDrag({});
+    expect(Number.isFinite(r.marginLeft)).toBe(true);
+    expect(Number.isFinite(r.colWidth)).toBe(true);
+    expect(Number.isFinite(r.contentShift)).toBe(true);
   });
 });
 
-
-/* ⛔ WHERE THE PAGE'S BLANK LEFT MARGIN IS SPENT (B<PENDING>, owner report 2026-09-18 round 2).
- *
- * THE PROPERTY, stated once so every case below is a reading of the same sentence: after a
- * left-grip widen the WORDS must sit at exactly the same place in the mat's own content as
- * before, and the mat must have enough scrollable room for whatever the gutter could not absorb.
- * The body's position inside the scroller's content is `padLeft + growLeft`, so the first half is
- * literally "`padLeft + growLeft` is invariant" — which is what makes this testable without a
- * browser at all, and it is the half that was broken: the shipped code held `padLeft` fixed, so
- * the body moved by the whole margin and only a SCROLL was holding it still on screen. A scroll
- * is bounded; when the mat had no overflow the browser clamped it to nothing and the words slid.
- * Measured on the deployed build at the time: a 138px left-grip drag moved the body +140px on a
- * 440 page, +75px on a 505 page, +20px on a 560 page, and 0 on anything at or above the natural
- * card — exactly the mat's own slack. */
-describe("matSidePads — the mat's own side padding", () => {
-  const PANE = 923;          // the owner's real window, measured
-  const GUTTER = 171;        // floor((923 - 580) / 2)
-  const pads = (growLeft, sheetWidth) => matSidePads({ gutter: GUTTER, growLeft, sheetWidth, paneWidth: PANE });
-
-  it("changes nothing at all on a page with no left margin", () => {
-    expect(pads(0, 580)).toEqual({ padLeft: GUTTER, padRight: GUTTER });
-    expect(pads(0, 900)).toEqual({ padLeft: GUTTER, padRight: GUTTER });
+describe("rightEdgeDrag — the right boundary spends the column, and the left edge never moves", () => {
+  it("widening grows the writing column", () => {
+    expect(rightEdgeDrag({ colWidth: 580, delta: 180 })).toEqual({ colWidth: 760 });
   });
 
-  it("THE PROPERTY: the words' place in the mat's content (padLeft + growLeft) never moves while the gutter lasts", () => {
-    const at = (growLeft) => pads(growLeft, 580 + growLeft).padLeft + growLeft;
-    const rest = at(0);
-    for (const growLeft of [1, 5, 40, 90, 140, 170, GUTTER]) expect(at(growLeft)).toBe(rest);
+  it("narrowing shrinks it, down to the module's own floor", () => {
+    expect(rightEdgeDrag({ colWidth: 580, delta: -180 })).toEqual({ colWidth: 400 });
+    expect(rightEdgeDrag({ colWidth: 580, delta: -5000 })).toEqual({ colWidth: PAGE_WIDTH_MIN });
   });
 
-  it("spends the gutter, never more, and never goes negative", () => {
-    expect(pads(90, 670).padLeft).toBe(81);
-    expect(pads(GUTTER, 751).padLeft).toBe(0);
-    expect(pads(GUTTER + 200, 951).padLeft).toBe(0);
-    expect(pads(10_000, 10_580).padLeft).toBe(0);
+  it("and it is ceilinged the same way every other width is", () => {
+    expect(rightEdgeDrag({ colWidth: 580, delta: 99_999 })).toEqual({ colWidth: PAGE_WIDTH_MAX });
   });
 
-  it("past the gutter, tops the right side up by exactly the scroll the compensation is about to need", () => {
-    /* Once `padLeft` is spent the remainder HAS to be a scroll, and a scroll only exists if the
-     * mat's content is wider than the pane. Required room is `growLeft − gutter`; available room
-     * is `padLeft + sheetWidth + padRight − pane`. This asserts the second is never less than the
-     * first — the exact shortfall that let the words slide. */
-    for (const [growLeft, unpadded] of [[250, 440], [250, 505], [250, 580], [250, 900], [600, 440], [172, 320]]) {
-      const sheetWidth = unpadded + growLeft;
-      const { padLeft, padRight } = pads(growLeft, sheetWidth);
-      const needed = Math.max(0, growLeft - GUTTER);
-      const available = padLeft + sheetWidth + padRight - PANE;
-      expect(available).toBeGreaterThanOrEqual(needed);
+  it("⛔ IT NEVER TOUCHES THE MARGIN, which is what keeps the page's LEFT edge still", () => {
+    expect(rightEdgeDrag({ colWidth: 580, delta: 180 })).not.toHaveProperty("marginLeft");
+  });
+});
+
+describe("sheetWidthFor / normalizePageMargin", () => {
+  it("the page is its margin plus its column, and nothing else", () => {
+    expect(sheetWidthFor({ marginLeft: 120, colWidth: 580 })).toBe(700);
+    expect(sheetWidthFor({ marginLeft: 0, colWidth: 580 })).toBe(580);
+  });
+
+  it("⛔ A PAGE WRITTEN BEFORE THE MARGIN EXISTED READS BACK AS ZERO, so nothing migrates", () => {
+    for (const v of [undefined, null, 0, "", NaN, -40, "nonsense"]) {
+      expect(normalizePageMargin(v)).toBe(0);
     }
   });
 
-  it("and never a pixel MORE room than that — no page gains scrollable grey it does not use", () => {
-    /* The standing objection that retired the always-on `MAT_EXTRA_RIGHT` (B1344625). A page at
-     * or above what the gutters leave room for gets no top-up at all. */
-    expect(pads(140, 580).padRight).toBe(GUTTER + 141);   // a 440 page carrying a 140px margin
-    expect(pads(140, 581).padRight).toBe(GUTTER + 140);   // one pixel wider, one pixel less owed
-    expect(pads(140, 720).padRight).toBe(GUTTER + 1);     // a 580 page: only the rounding residue
-    expect(pads(140, 1040).padRight).toBe(GUTTER);        // a 900 page: nothing owed at all
-  });
-
-  it("measures its slack against the PANE, not the natural card — the one-pixel case", () => {
-    /* `naturalGutter` is a `Math.floor`, deliberately spending one pixel less than the leftover
-     * allows, so `pane − 2 × gutter` is the natural card PLUS that residue. Topping up against
-     * 580 directly leaves the scroll exactly one pixel short, which is what a 250px drag on a
-     * 440 page measured before this was corrected. */
-    expect(PANE - GUTTER * 2).toBe(581);
-    expect(pads(250, 690).padRight).toBe(GUTTER + 141);   // 141, not 140
-  });
-
-  it("survives junk without producing a negative padding", () => {
-    for (const args of [{}, { gutter: -5, growLeft: -5, sheetWidth: -5, paneWidth: -5 },
-      { gutter: NaN, growLeft: NaN, sheetWidth: NaN, paneWidth: NaN }]) {
-      const { padLeft, padRight } = matSidePads(args);
-      expect(padLeft).toBeGreaterThanOrEqual(0);
-      expect(padRight).toBeGreaterThanOrEqual(0);
-    }
+  it("a real stored margin survives, rounded and ceilinged", () => {
+    expect(normalizePageMargin(120.4)).toBe(120);
+    expect(normalizePageMargin(99_999)).toBe(PAGE_WIDTH_MAX);
   });
 });

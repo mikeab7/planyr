@@ -723,18 +723,72 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
     **verify-notes-pending-caret** (the whole model, red-proofed at 24 assertions) and
     **verify-notes-left-margin-reachable** (every case starts from an ALREADY-GROWN page — the
     variable the round-2 harness never wrote down).
-- **HOW BIG THE WRITING IS (B342994, `lib/notesZoom.js`).** Ctrl+wheel and Ctrl+=/−/0 scale the
-  **document**, never the app; the browser's own zoom is suppressed for those gestures so the two
-  cannot fight; the level is per-scope, persisted, and does not sync (a comfortable size belongs to
-  the screen you are at). CSS `zoom`, not a transform — the text must RE-WRAP and the caret must
-  stay the browser's own.
-  - **⛔ THE INDICATOR IS IN THE TOOLBAR, NOT ON THE PAGE (B1273297, owner report 2026-09-06:
-    "the zoom shouldn't be shown on the page").** It used to render as a real `<button>` inside
-    `note-sheet`'s own metadata row — a control sitting on the document it controls. Moved into
-    `NoteToolbar.jsx`, beside History/Print/Markdown ("things you do TO the page," that group's
-    own stated reason), same `data-testid="note-zoom-level"`, same PANEL-BREVITY behaviour
-    (absent at 100%, resets on click). Zoom itself is unchanged — only where its indicator is
-    rooted moved.
+- **⛔ THE PAGE SITS ON A BLUEBEAM-STYLE WORKSPACE — `lib/notesViewport.js` (NEW-1/NEW-2,
+  2026-09-21). THIS REPLACES THE OLD CSS-`zoom` TEXT-SIZE LIB, WHICH IS DELETED.** Owner: *"the canvas should
+  act like bluebeam where I can zoom far in and out, and move it to wherever via zoom."* The
+  sheet is an absolutely-positioned card on an UNBOUNDED workspace, and ONE transform on the
+  `note-workspace` layer places everything: `translate(−x, −y) scale(z)`, `transform-origin: 0 0`,
+  so `screen = workspace × z − view`. **`view.x` is `scrollLeft` without the clamp** — same sign,
+  same units — which is why every computation that used to reason in scroll terms kept its
+  arithmetic when `note-mat` went to `overflow: hidden`.
+  **Zoom is ANCHORED AT THE CURSOR** (10%–800%; the site planner's own rule, reused not
+  reinvented): wheel zooms at the pointer, plain wheel/trackpad pans, middle-mouse and space+drag
+  pan from anywhere, pinch zooms, Ctrl+= / Ctrl+− / Ctrl+0 (100%) / Ctrl+9 (fit the page) — and
+  the browser's own zoom is `preventDefault`ed for all of them. The view is a **ref**, written
+  straight onto the layer's `transform` by `applyView()` and re-asserted in a layout effect, so a
+  pan re-renders NOTHING (VIEW-INDEPENDENT-ONCE by construction) and no other render can drop it.
+  It persists **per page** (`planyr:notes:view:v1:<scope>:<pageId>`), and the opening framing
+  follows the page only until the first size-stable pass or the first thing the person does,
+  whichever comes first — a page that re-centres itself later is "the whole page jumped."
+  - **⛔ WHAT WENT, AND WHY IT IS A REPLACEMENT RATHER THAN AN ADDITION.** That module scaled
+    the sheet with CSS `zoom` while the sheet kept `width: 100%` of the pane, so zooming made the
+    letters bigger and the page stayed the same width on screen: **the text RE-WRAPPED.** That is
+    a reading-size control and a useful one, but it is the opposite of Bluebeam, where the PAGE
+    gets bigger, the line breaks never change and you move around it. Two zooms on one gesture is
+    what that file's own header already argued against for the browser's zoom, so it was replaced,
+    not stacked. Ctrl+wheel/=/−/0 all still work; they move the canvas now.
+  - **⛔ AND THE ZOOM WAS NEVER THE POINT — IT IS THE COORDINATE SYSTEM THE WIDTH FEATURE NEEDED.**
+    See the page-width entry below.
+- **⛔ SET A PAGE'S OWN WIDTH BY HAND — FOURTH ROUND, AND THE MECHANISM IS DELETED RATHER THAN
+  TUNED (NEW-2, 2026-09-21).** Reported buggy four times (B1740688 content shift · B1775312 judder
+  · B1801040 left-grip creep · this round, *"the notebook expansion is still so buggy also, try
+  ten different ways of expanding"*). Every previous fix worked the same way: the sheet lived in a
+  SCROLLER, so its on-screen position was `gutter − scrollLeft` and BOTH terms moved when its
+  width changed, which meant holding the words still required actively COMPENSATING — writing
+  `scrollLeft` by the measured layout shift every frame. **A scroll is a BOUNDED resource**; when
+  the content is narrower than the pane there is no overflow, the write is silently clamped, and
+  the words slide by exactly what could not be spent. Round 2 double-applied that compensation
+  (judder); round 3 found it clamped at zero (creep). Same mechanism, two directions —
+  NOTES-CARRY-FORWARD §5 family −1's *"a fix whose justification is the defect the previous fix
+  caused"* exactly.
+  **The page has TWO stored numbers now**: `pageWidth` (the writing COLUMN — what that attribute
+  has always meant, so nothing migrates) and **`pageMarginLeft`** (the blank paper to its left,
+  new, default 0, and it SURVIVES A RELOAD, which the React ref it replaces did not). A left-edge
+  drag moves `sheetX` out and `sheetPadLeft` in by the same amount, so the body's workspace
+  position `sheetX + sheetPadLeft` is **arithmetically invariant** and the view is neither read
+  nor written. There is nothing to compensate, so there is nothing to double-apply or clamp — the
+  three shipped defects are not fixed so much as made unrepresentable. Pure decisions:
+  `leftEdgeDrag` / `rightEdgeDrag` / `sheetWidthFor` in `lib/notesPageWidth.js` (`matSidePads` and
+  `leftWidthGripPad`, the two compensation functions, are **deleted**). **The edge you did not
+  grab never moves**, and a left-edge NARROW past the blank paper squeezes the column and takes
+  the words with it — returned explicitly as `contentShift`, because a caller that has to infer it
+  gets it wrong. Gone with the scroller: `matPadX`, `matSidePads`, `matReachWidth`,
+  `MAT_EXTRA_RIGHT`/`MAT_EXTRA_BOTTOM`, `boxGestureActive`, the grip auto-scroll, and the
+  growth-compensation layout effect.
+  - **⛔ THE GUARD IS **verify-notes-width-matrix** under `ui-audit/`, AND WHAT MAKES IT DIFFERENT FROM
+    THE THREE HARNESSES THAT WENT GREEN OVER A LIVE DEFECT IS COVERAGE, NOT ASSERTIONS.** Every
+    previous arm started from a page at or above the natural card width, where the mat has no
+    slack by construction — so none of them could reach the variable that fails. This one starts
+    below it (440 / 505 / 560), at a device pixel ratio of 2.15, at 67% and 150% zoom, scrolled
+    and panned, with boxes either side of the column, and with the gesture shape varied (many
+    small moves · a flick · a reversal · a release off-window). It samples EVERY FRAME (judder and
+    creep are both invisible to a before/after pair), asserts max deviation AND net displacement
+    AND no jump on release AND that the page never outruns the pointer AND that the opposite edge
+    holds, and it carries both arms DRIVER-SCROLL-IS-NOT-APP-SCROLL §6 asks for: a **known-good**
+    arm that VOIDS the run if a deliberate pan does not register, and a **mutation** arm
+    (`--baseline=<url>`) that reproduces B1801040's own measured numbers (+140px at a 440 page,
+    +75 at 505) on the pre-fix build. Measured with ONE instrument: `origin/main` **16/46**, this
+    round **46/46**.
 - **A COPY NEVER CHANGES PROJECT — four files, one rule.** A note was copied into an unrelated
   pursuit and nobody was told; it was found by hand a week later under a "from a project you
   deleted" heading. **A page's `projectId` is a property of the PAGE, never of whoever happens to
