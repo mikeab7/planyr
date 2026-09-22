@@ -159,12 +159,12 @@
  * actually true, with a reason when it failed. There is no swallowed catch in here, and
  * there is no state in which the footer claims a sync that did not happen.
  */
-import { assetIdsInDoc, docToText, imageIdsInDoc } from "./notesMarkdown.js";
+import { assetIdsInDoc, docToText, imageIdsInDoc, remapAssetIds } from "./notesMarkdown.js";
 import { openTasksInDoc, rollUpOpenTasks, setTaskCheckedInDoc } from "./notesTasks.js";
 import { MAX_VERSIONS_PER_PAGE, planRestore, planRetention, shouldSnapshot } from "./notesVersions.js";
 import { safeAttachmentName } from "./notesFileMeta.js";
 import {
-  addPage, allPageIds, countNodes, dropPages, migrate, purgeTrashEntry, searchTitles, pagesInScope,
+  addPage, allPageIds, copyPageTree, countNodes, dropPages, findPage, migrate, newId, subtreePageIds, purgeTrashEntry, searchTitles, pagesInScope,
   trashEntries, walkPages, withTombstones, SCOPE_ALL, SCOPE_PROJECT, SCOPE_ORG,
 } from "./notesModel.js";
 import { parseView, serializeView, viewKey } from "./notesViewport.js";
@@ -457,6 +457,58 @@ export function createPage(baseTree, opts, seedDoc = BLANK_DOC) {
   if (!r.pageId) return { ok: false, tree: baseTree, pageId: null };
   const ok = writePage(r.pageId, seedDoc);
   return { ok, tree: r.tree, pageId: r.pageId };
+}
+
+/** ⛔ COPY A NOTEBOOK — a page and every subpage under it, bodies, pictures and files included
+ *  (NEW-1, "Copy a notebook"). All-or-nothing, in the same order `createPage` uses and for the
+ *  same reason (B1405008): every byte the copy needs is written FIRST, and only then is the
+ *  tree handed back for the caller to persist — so a half-made copy can never appear in the
+ *  rail with nothing behind a row.
+ *
+ *    1. `copyPageTree` places the copy (next sibling, the SOURCE's own project, "(copy)").
+ *    2. Every picture/file the source bodies own is copied to a NEW id owned by the copy's
+ *       page (`remapAssetIds` explains why a copy may never share one with its source).
+ *    3. Every body is written under its new page id, re-pointed at the new asset ids.
+ *
+ *  Any failure rolls back what this call already wrote (bodies and bytes) and returns
+ *  `{ ok:false, error }` naming what went wrong (LOUD-FAILURE) — the caller must NOT persist
+ *  `tree` then. A picture whose bytes were ALREADY gone from the source is not a failure: the
+ *  copy shows the same broken-picture state the source does, under its own id, and
+ *  `missing` counts them so the caller can say so. */
+export async function duplicatePageTree(baseTree, sourcePageId, { at = Date.now() } = {}) {
+  const r = copyPageTree(baseTree, sourcePageId, { at });
+  if (r.refused || !r.pageId) {
+    return { ok: false, tree: baseTree, pageId: null, error: "That page is not in this window’s list, so it could not be copied. Reload and try again." };
+  }
+  // Read every source body first, and plan the asset copies from them.
+  const bodies = [];
+  const assetPlan = [];
+  const assetMap = new Map();
+  for (const [from, to] of r.idMap) {
+    const doc = readPage(from) || BLANK_DOC;
+    bodies.push({ to, doc });
+    for (const id of assetIdsInDoc(doc)) {
+      if (assetMap.has(id)) continue;   // one picture used twice keeps being ONE picture in the copy
+      const fresh = newId(id.startsWith("file") ? "file" : "img");
+      assetMap.set(id, fresh);
+      assetPlan.push({ from: id, to: fresh, pageId: to });
+    }
+  }
+  // Pictures/files first: the notebook ceiling is measured against the root the copy lands in.
+  const landed = findPage(r.tree, r.pageId);
+  const ceilingIds = landed?.parent ? subtreePageIds(landed.root).filter((id) => ![...r.idMap.values()].includes(id)) : null;
+  const assets = await copyNoteAssets(assetPlan, { notebookPageIds: ceilingIds });
+  if (!assets.ok) return { ok: false, tree: baseTree, pageId: null, error: assets.error };
+  const written = [];
+  for (const { to, doc } of bodies) {
+    if (!writePage(to, remapAssetIds(doc, assetMap))) {
+      deletePages(written);
+      await deleteNoteImages(assets.written);
+      return { ok: false, tree: baseTree, pageId: null, error: "The copy could not be saved on this device (storage may be full), so nothing was copied." };
+    }
+    written.push(to);
+  }
+  return { ok: true, tree: r.tree, pageId: r.pageId, pages: written.length, assets: assets.written.length, missing: assets.missing, error: null };
 }
 
 /** The housekeeping twin of `writePage` — same write, same "the cleaned copy still owes the
@@ -813,6 +865,47 @@ export async function deleteNoteImages(imageIds) {
   const r = await (await imageDb()).idbDeleteImages(ids.map((id) => imageKey(id)));
   if (!r.ok) failImage("Some pictures could not be removed from this browser's storage, so they may still be taking up space.", r.error);
   return r;
+}
+
+/** Copy stored blobs (pictures and attached files) to NEW ids, each owned by a named page —
+ *  the byte half of "Copy a notebook" (see `duplicatePageTree`). `plan` is
+ *  `[{ from, to, pageId }]`. A source whose bytes are gone on this device AND in the account
+ *  is counted in `missing` and simply not written (the copy shows the same broken state the
+ *  source does). Any refused write deletes what this call already wrote and returns
+ *  `{ ok:false, error }`; the notebook picture ceiling is honoured exactly as `putNoteImage`
+ *  honours it, when `notebookPageIds` names the notebook being written into. */
+export async function copyNoteAssets(plan, { notebookPageIds = null } = {}) {
+  const list = (plan || []).filter((p) => p?.from && p?.to);
+  if (!list.length) return { ok: true, written: [], missing: 0 };
+  const db = await imageDb();
+  const records = [];
+  let missing = 0;
+  for (const p of list) {
+    let rec = await db.idbGetImage(imageKey(p.from));
+    if (!rec?.dataUrl && (await readNoteImage(p.from))) rec = await db.idbGetImage(imageKey(p.from));   // the cloud fallback caches it
+    if (!rec?.dataUrl) { missing += 1; continue; }
+    records.push({ ...rec, key: imageKey(p.to), scope, id: p.to, pageId: p.pageId || null, createdAt: Date.now() });
+  }
+  if (Array.isArray(notebookPageIds) && records.length) {
+    const adding = records.reduce((n, rec) => n + (rec.bytes || 0), 0);
+    const used = await noteImageUsage(notebookPageIds);
+    if (used + adding > MAX_NOTEBOOK_IMAGE_BYTES) {
+      return { ok: false, written: [], missing, error: failImage(`Copying this would take the notebook past its picture limit (${mb(used + adding)} of ${mb(MAX_NOTEBOOK_IMAGE_BYTES)}), so nothing was copied.`).message };
+    }
+  }
+  const written = [];
+  for (const rec of records) {
+    const w = await db.idbPutImage(rec);
+    if (!w.ok) {
+      await deleteNoteImages(written);
+      return { ok: false, written: [], missing, error: failImage("A picture or file in that page could NOT be copied (this browser's storage may be full), so nothing was copied.", w.error).message };
+    }
+    written.push(rec.id);
+  }
+  if (syncOn()) {
+    for (const rec of records) uploadImage({ id: rec.id, pageId: rec.pageId, dataUrl: rec.dataUrl, mime: rec.mime || "", w: rec.w || 0, h: rec.h || 0, bytes: rec.bytes || 0, kind: rec.kind || "image", name: rec.name || "" });
+  }
+  return { ok: true, written, missing };
 }
 
 /** THE PURGE — the ONE place a note's bytes are actually destroyed (TOMBSTONE-DELETES).

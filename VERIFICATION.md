@@ -166,6 +166,21 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1303696 — B1832304: "Make a copy" on a Notes page copies the page, its subpages and their pictures, and the copy arrives complete on a second signed-in computer `Blocker: auth`
+
+**Why this needs a live pass.** Everything device-local is proven headless and logged out: `ui-audit/verify-notes-copy-notebook.mjs` **16/16** against the real built app (placement, nesting, fresh ids, source project, bodies, a re-keyed picture with its own bytes that renders, reload survival, original byte-identical), plus `test/notesCopyNotebook.test.js` 9/9 (incl. the copy's picture surviving a forever-purge of the original, and the all-or-nothing rollback). What the sandbox cannot reach is the CLOUD leg: the copied bodies are marked dirty through the ordinary `writePage` path and the copied pictures/files upload through the ordinary `uploadImage` path, but no signed-in session can run here (the proxy CORS-blocks Supabase sign-in).
+
+**What was verified here (sandbox, this session).** Notes suites 46 files / 1,555 tests green; `npm run build` clean; eslint 0 errors on every touched file; the headless harness above.
+
+**Steps, each with a named expected result** (on a throwaway page you create for this — never one of Michael's real notes, constraint 7):
+1. Signed in on planyr.io → Notes, create a page "Copy test" with one subpage "Child", paste a picture into "Child", wait for the save indicator to read saved. **Expect:** saved state in the header badge.
+2. Right-click "Copy test" in the rail → **Make a copy**. **Expect:** "Copy test (copy)" appears directly under the original with "Child" under it, opens, and a notice reads "Copied the page and its 1 subpage."
+3. Open "Child" under the copy. **Expect:** the picture renders.
+4. On a second computer/browser signed in to the same account, open Notes (reload if already open). **Expect:** "Copy test (copy)" › "Child" is present, and the copied "Child" shows the picture (not the broken-picture state).
+5. Delete the ORIGINAL "Copy test" and empty it from the Bin ("Delete forever"). Reload both browsers. **Expect:** the copy and its picture are still present and intact on both.
+6. Clean up: bin and purge the copy too.
+- **Stopping rule:** closes when steps 2–5 confirm on a real signed-in account, dated — or a step fails and is filed as a recurrence against B1832304, per STANDING RULE #2 (a null result is a FINDING, never a silent close).
+
 ### V1281296 — B1807200: the collapsed signed-in account trigger and the two-tabs "open tabs" badge, on a real signed-in account `Blocker: auth`
 
 **Why this needs a live pass, and what it is NOT.** B1807200 (the top-right toolbar cluster's Option B unification) is proven headless, logged out, against the real running app — `ui-audit/verify-toolbar-cluster-optionb.mjs`, 10/10 checks, incl. every icon-only control at 30×30 (see this item's own note below on why the shipped number is 30, not the mockup's literal 32), one shared 8px radius, and Undo's disabled opacity measurably distinct from Redo's enabled baseline. Two of the mockup's specific claims genuinely cannot be exercised logged out: the account trigger only reaches its "Cloud off"/"Sign in" states in this sandbox (each confirmed at the correct 30px height, but neither carries a name to collapse), and the "open tabs" badge (`PresenceChip`'s self-tabs case) only renders when a signed-in account has this same project open in more than one browser tab/window at once — the presence channel it reads is a Supabase Realtime feature, unreachable signed-out.
