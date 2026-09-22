@@ -45,6 +45,7 @@ import {
 import { EMPTY_TAP, tapTime, stepDoubleTap, pairsWithLastTap } from "./lib/doubleTap.js";
 import { DRAG_SLOP_PX, makeDragGate, stepDragGate, dragArmed } from "./lib/dragGate.js";
 import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
+import { noteEffectRun } from "../../app/renderLoopProbe.js";
 import { createViewChangeRecorder, attachTimeline } from "./lib/viewChangeRecorder.js";
 import { createViewFramingGate } from "./lib/viewFramingGate.js";
 import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody, stackHoldsFeature, parseFeatureKey, stackAtPoint, nextPickIndex, ACTION_ATTR } from "./lib/featureTarget.js";
@@ -512,6 +513,16 @@ import {
   BringToFrontIcon, BringForwardIcon, SendBackwardIcon, SendToBackIcon,
   PondSettingsIcon, PondSizingIcon, RoadBranchIcon, SwapIcon,
 } from "./components/elementMenuIcons.jsx";
+
+/* NEW-1 — render-loop probe identities. Module-scope constants so naming a run costs no allocation
+ * (see src/app/renderLoopProbe.js for why this is recorded unconditionally). The dep NAMES are what
+ * make a report readable — "view=51i" is a diagnosis, "dep[0]=51i" is another character count. */
+const GEO_REG_EFFECT = "site-planner:geo-registration";
+const GEO_REG_DEPS = Object.freeze(["view.ppf", "view.offX", "view.offY", "size.w", "size.h", "origin", "geoOverscan"]);
+/* A frozen module-scope zero so the reset path cannot allocate a fresh object per call. */
+const ZERO_REG_SHIFT = Object.freeze({ dx: 0, dy: 0 });
+const PANEL_SHIFT_EFFECT = "site-planner:panel-shift";
+const PANEL_SHIFT_DEPS = Object.freeze(["leftPanel", "narrow", "companionSel", "narrowProps", "leftWidth", "size.w"]);
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
  * SVG (so every metric, setback and stall count is computed from true feet and
@@ -2711,6 +2722,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * commit is debounced) and, critically, for the whole window between the plan opening and its
    * opening view being framed. NEW-2 is that window; nothing was watching it. */
   const [geoZoom, setGeoZoom] = useState(null);
+  // NEW-1 — same dispatch authority for the basemap's published zoom; see `regShiftRef` above.
+  const geoZoomRef = useRef(null);
+  const commitGeoZoom = useCallback((zoom) => {
+    const z = geoZoomRef.current;
+    if (z != null && Math.abs(z - zoom) < 1e-4) return;
+    geoZoomRef.current = zoom;
+    setGeoZoom(zoom);
+  }, []);
   /* NEW-2 — has the plan's OPENING view been framed, and has the basemap committed to it?
    * Two facts, deliberately separate, because they land one render apart and only the pair
    * means "the zoom a layer's gate would be answered against is the zoom this plan is at".
@@ -2746,6 +2765,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * See lib/mapLock.js ("closing the whole-pixel floor") for the measurement and the two
    * contributors. Zero whenever there is no basemap frame to register against. */
   const [regShift, setRegShift] = useState({ dx: 0, dy: 0 });
+  /* NEW-1 — THE DISPATCH AUTHORITY for `regShift`, so the geo-registration effect can skip a
+   * `setRegShift` CALL rather than rely on its updater returning the same value. B1189 already
+   * established that a no-op updater is still a genuine dispatch (React only skips scheduling via
+   * the eager-bailout path, which needs the fiber to have no other pending work — during a gesture
+   * it always has some), and applied the guard at the `!origin` branch only. Every dispatch the
+   * effect makes is SYNC-lane work scheduled from inside a commit, which is exactly what React's
+   * nested-update counter counts, so an unconditional dispatch here is fuel for the error 185 breaker
+   * whether or not this effect is the thing pumping it.
+   *
+   * A REF rather than the render-time closure value, deliberately: `commit` is also reached from a
+   * 160 ms settle timer, by which point a closure read can be stale — and a stale read that says
+   * "already applied" would SKIP a shift that is genuinely needed, which is a registration bug
+   * (the drawing sliding off the imagery), not merely a wasted render. The ref is written in the
+   * same statement as the dispatch, so it can never disagree with what was last sent. */
+  const regShiftRef = useRef(regShift);
+  const commitRegShift = useCallback((next) => {
+    const cur = regShiftRef.current;
+    if (Math.abs(cur.dx - next.dx) < REG_EPS_PX && Math.abs(cur.dy - next.dy) < REG_EPS_PX) return;
+    regShiftRef.current = next;
+    setRegShift(next);
+  }, []);
   const geoWrapRef = useRef(null);
   /* NEW-1 — the MAP-TOP HOST. Leaflet keeps every pane inside its own `_mapPane`, which
    * carries the pan transform and therefore its own stacking context, so NO z-index on a
@@ -3124,6 +3164,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * origin-anchored scale changes here — only the frame in which an already-correct value is applied.
    */
   useLayoutEffect(() => {
+    // NEW-1 — record this run for the render-loop probe. This effect is the throw site of every
+    // Site-route error 185 in `client_errors` back to 2026-07-30 (the crash lands on the `setGeoZoom`
+    // dispatch inside `commit`), so it is the first place a diagnosis needs a run count and a
+    // per-dependency churn verdict. See src/app/renderLoopProbe.js.
+    noteEffectRun(GEO_REG_EFFECT, GEO_REG_DEPS, [view.ppf, view.offX, view.offY, size.w, size.h, origin, geoOverscan]);
     const map = geoMapRef.current;
     const wrap = geoWrapRef.current;
     /* NEW-1 — every write to the wrap's gesture transform is mirrored onto the map-top host
@@ -3149,7 +3194,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // to schedule a render on EVERY run of this effect, which is the pump half of the runaway
     // loop below. Reading `regShift` from the closure is safe (an effect always closes over the
     // current render's values) and the functional updater still guards the write itself.
-    if (!map || !wrap || !origin) { if (regShift.dx || regShift.dy) setRegShift({ dx: 0, dy: 0 }); return; }
+    if (!map || !wrap || !origin) { commitRegShift(ZERO_REG_SHIFT); return; }
     const fx = (size.w / 2 - view.offX) / view.ppf;
     const fy = (size.h / 2 - view.offY) / view.ppf;
     const center = feetToLatLng({ x: fx, y: fy }, origin.lat, origin.lon);
@@ -3243,7 +3288,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        * DELIBERATELY unshipped: `window.__plannerView.registration()` and the `data-reg-dx/dy`
        * attributes are read by the harnesses, and moving them is a separate, measurable change.
        * Ship the epsilon, measure, then decide. Do not do both blind. */
-      setRegShift((r) => (Math.abs(r.dx - next.dx) < REG_EPS_PX && Math.abs(r.dy - next.dy) < REG_EPS_PX ? r : next));
+      commitRegShift(next);
     };
     /* PREFERRED reference: a real TILE on screen. Its z/x/y (straight off the `src` our own
      * basemap registry builds) fixes its Mercator corner exactly, and its rendered rect is where
@@ -3336,7 +3381,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       /* NEW-2 — publish the zoom the basemap is being committed to. Guarded so a pure PAN (the
        * common case — same zoom, `panBy`) dispatches nothing: an unguarded setState here is the
        * B1189 pump, and this effect is exactly the one that produced that runaway. */
-      setGeoZoom((z) => (z != null && Math.abs(z - zoom) < 1e-4 ? z : zoom));
+      commitGeoZoom(zoom);
       const cur = map.getZoom();
       if (Math.abs(zoom - cur) < 1e-3) {
         setWrapTransform("");
@@ -3513,7 +3558,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * `size.w` would put a whole pixel of slop into the view maths that
      * `ui-audit/diagnose-pointer-accuracy.mjs` asserts to a quarter of a pixel.
      */
-  }, [view, size.w, size.h, origin, geoOverscan]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view.ppf, view.offX, view.offY, size.w, size.h, origin, geoOverscan]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => { clearTimeout(geoCommitTimer.current); if (geoGhostRef.current) { try { geoGhostRef.current.remove(); } catch (_) {} geoGhostRef.current = null; } }, []);
 
@@ -6443,6 +6488,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // frame as the panel's reflow, so the drawing never skips sideways for a frame.
   const panelShiftRef = useRef(null); // last-compensated canvas left-edge (px); null until the first measure seeds the baseline
   useLayoutEffect(() => {
+    // NEW-1 — the other layout effect on the planner that both MEASURES the DOM and dispatches
+    // state, so it is the neighbouring suspect whenever the geo effect is running hot. Recorded so
+    // a report can rule it in or out rather than leaving it assumed innocent.
+    noteEffectRun(PANEL_SHIFT_EFFECT, PANEL_SHIFT_DEPS, [leftPanel, narrow, companionSel, narrowProps, leftWidth, size.w]);
     const el = wrapRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
