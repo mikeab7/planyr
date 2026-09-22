@@ -352,3 +352,92 @@ describe("the Standards Apply toast is anchored to the canvas, not the viewport"
     expect(block).not.toContain('position: "fixed"');
   });
 });
+
+/* ------------------------------------------ the calibration badge matches the scale-bar card (B1795456)
+ *
+ * "The green 'Scaled · county GIS' badge … is the only map-overlay control that does not match the
+ * rest of the chrome." Option B: the badge's container reuses the scale-bar card's OWN background,
+ * border and radius — not a resemblance, a shared derivation. `mapChromeCardStyle` is that shared
+ * function; these tests prove its output is literally what `scaleBarPlate`/`northArrowPlate` paint
+ * into their SVG `<rect>` (a computed-style assertion's SVG-side equivalent — an inline `fill`/
+ * `stroke`/`rx` attribute IS that element's rendered/"computed" style, there being no separate CSS
+ * cascade to resolve for an SVG presentation attribute set inline).
+ */
+import { mapChromeCardStyle, MAP_CHROME_REF_S, furnitureMetrics } from "../src/workspaces/site-planner/lib/sheetFurniture.js";
+
+function firstRectAttrs(markup) {
+  const m = markup.match(/^<rect[^>]*\brx="([^"]+)"[^>]*\bfill="([^"]+)"[^>]*\bstroke="([^"]+)"/);
+  if (!m) throw new Error("no plate <rect> found in markup");
+  return { rx: Number(m[1]), fill: m[2], stroke: m[3] };
+}
+
+describe("mapChromeCardStyle — the badge's chrome literally equals the scale-bar card's, both themes", () => {
+  const themes = [
+    { name: "light", pal: { plateFill: "rgb(249, 248, 244)", panelLine: "#dcd5c4", ink: "#2c2a26", muted: "#8a8473" } },
+    { name: "dark", pal: { plateFill: "rgb(24, 27, 33)", panelLine: "#3a3f4a", ink: "#e7e5df", muted: "#9a9890" } },
+  ];
+
+  for (const { name, pal } of themes) {
+    it(`${name} theme: background + border colour + radius match the scale-bar card's rendered <rect>`, () => {
+      const m = furnitureMetrics(MAP_CHROME_REF_S);
+      const sb = scaleBarPlate({ lengthU: 100, feet: 100, m, pal });
+      const rect = firstRectAttrs(sb.markup);
+      const chrome = mapChromeCardStyle(pal);
+      expect(chrome.background).toBe(rect.fill);
+      expect(chrome.borderColor).toBe(rect.stroke);
+      expect(chrome.borderRadius).toBeCloseTo(rect.rx, 6);
+    });
+
+    it(`${name} theme: the compass (north arrow) plate uses the SAME background + border colour as the badge`, () => {
+      const m = furnitureMetrics(MAP_CHROME_REF_S);
+      const na = northArrowPlate({ m, pal });
+      const rect = firstRectAttrs(na.markup);
+      const chrome = mapChromeCardStyle(pal);
+      expect(chrome.background).toBe(rect.fill);
+      expect(chrome.borderColor).toBe(rect.stroke);
+    });
+  }
+
+  it("uses the SAME refS the on-screen furniture itself defaults to (not a second, independent guess)", () => {
+    expect(MAP_CHROME_REF_S).toBe(540); // screenFurniturePlates' own default `refS`
+  });
+
+  it("falls back to the same plate-fill / panel-line constants scaleBarPlate falls back to (no pal supplied)", () => {
+    const withoutPal = mapChromeCardStyle();
+    const m = furnitureMetrics(MAP_CHROME_REF_S);
+    const sb = scaleBarPlate({ lengthU: 100, feet: 100, m });
+    const rect = firstRectAttrs(sb.markup);
+    expect(withoutPal.background).toBe(rect.fill);
+    expect(withoutPal.borderColor).toBe(rect.stroke);
+  });
+});
+
+describe("the calibration badge — one dot, chrome container, no stray literals (source guard)", () => {
+  it("the badge's JSX block uses mapChromeCardStyle for its container, not a hardcoded fill/RADIUS.pill", async () => {
+    const fs = await import("node:fs");
+    const src = fs.readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const commentStart = src.indexOf("calibration / accuracy badge");
+    expect(commentStart).toBeGreaterThan(-1);
+    // Scope the CODE checks below to the `cfg`/JSX body only — the preceding explanatory
+    // comment legitimately names the retired "●"/"▲" glyph and "RADIUS.pill" in prose.
+    const start = src.indexOf("const cfg = {", commentStart);
+    expect(start).toBeGreaterThan(commentStart);
+    // The badge's own IIFE ends at the first "})()}" after its opening comment.
+    const end = src.indexOf("})()}", start);
+    expect(end).toBeGreaterThan(start);
+    const block = src.slice(start, end);
+    expect(block).toContain("mapChromeCardStyle(PAL)");
+    expect(block).not.toMatch(/borderRadius:\s*RADIUS\.pill/); // the old fully-rounded capsule
+    expect(block).not.toMatch(/rgba\(22,\s*101,\s*52/); // the old solid-green fill
+    expect(block).not.toMatch(/rgba\(180,\s*83,\s*9/); // the old solid-amber fill
+    // exactly one literal circular "dot" (width/height + borderRadius: 99) — the coloured
+    // status dot — never a second one reintroduced alongside it.
+    const dotMatches = block.match(/width:\s*7,\s*height:\s*7,\s*borderRadius:\s*99/g) || [];
+    expect(dotMatches.length).toBe(1);
+    // the decorative "●"/"▲" glyph that used to double the dot is gone from the badge's own
+    // cfg/JSX (it may still be named in the explanatory comment above `start`, which this
+    // slice deliberately excludes).
+    expect(block).not.toContain("●");
+    expect(block).not.toContain("▲");
+  });
+});

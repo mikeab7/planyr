@@ -439,6 +439,8 @@ Two more found since, each worth its own line because each returned a confident 
 33. **⛔ A “SETTLED FACT” IN A REVIEW DOCUMENT IS AN UNTESTED CLAIM WEARING A CONCLUSION'S CLOTHES, AND THIS ONE COST FOUR ROUNDS (B1393 ×4, 2026-09-18).** `REVIEW-2026-09-08`'s finding F5 stated: *“Double-clicking inside the page body selects a word, which is correct text behaviour. So the create gesture only fires in the grey mat outside the sheet.”* It reads as a boundary condition somebody established. **Nobody ever drove it.** Every subsequent round consequently fixed, reviewed and verified the grey-MAT path — correctly, and on a surface the owner was not pressing on — while he went on reporting *“it doesn't work, at all.”* The tell, and it generalises: **the report and the premise disagreed, and the premise won four times without once being measured.** When a symptom survives rounds of real fixes, stop re-reading the code and go and re-derive the SCOPE sentence everybody is standing on — the one phrased as background rather than as a finding, because that is the one with no test under it. (Sibling of WRONG-CASE, one level up: that rule is about testing the wrong CASE, this is about inheriting the wrong PREMISE about where the feature even lives.)
 34. **⛔ AND THE TRAP-18 INSTANCE THAT CAUGHT ITSELF THE SAME DAY, worth one line because it shows the guard working.** A brand-new harness's grey-mat known-good arm went red against code nothing had touched. Its press point was `sheetRight + 60` — **x=1554 in a 1500px viewport**, where `elementsFromPoint` returns an EMPTY ARRAY rather than erroring, so the click landed on nothing. On a WIDE page the sheet is pinned near the right edge (measured: mat 268→1500, sheet 594→1494), so “just outside the sheet on the right” is off the edge of the world while the real mat sits on the LEFT. **Because that arm's answer was known independently, the run declared itself VOID instead of printing a score** — which is the entire argument for known-good arms in one incident.
 
+35. **⛔ A FIXTURE CAN STRADDLE ONLY ONE SIDE OF A BOUNDARY AND LOOK EXHAUSTIVE WHILE DOING IT (B1801040, 2026-09-19).** `verify-notes-page-width.mjs`'s Case 20 was written for the previous round of the SAME gesture and is a good instrument — every step of a slow real-mouse drag, deliberately uneven, both grips, both directions, three starting widths, every frame sampled. It was green while the owner was still watching his page slide, because its three starting widths — unpinned 580, Wide 900, a custom 717 — **all sit at or above the natural card width, and that is exactly the band in which the defect cannot occur.** Three arms, one side of the line. The give-away is that every arm reported a clean **0.00**, not a small noisy number: a real instrument pointed at a real surface usually reports *something*, and a column of identical zeros is worth one minute of "could this fixture reach the case at all?" before it is worth trusting. **The general form: when a defect's magnitude is a function of some quantity (here `paneWidth − 2 × gutter − pageWidth`, the mat's own slack), the fixture has to cross that quantity's zero, not merely vary on one side of it.** It is DRIVER-SCROLL-IS-NOT-APP-SCROLL §6 one level up — that clause is about a probe whose QUESTION was never about the thing; this is a probe whose question was right and whose SAMPLE never contained an instance. Cheapest counter, and it is what found this: map the defect against the variable (here, six stored widths from 440 to 900) before choosing which two or three to keep. The map also hands you the mechanism for free — the drift came out as exactly the slack, at every width, which named the cause before a line of the fix was written.
+
 See also `ui-audit/TRAPS.md`, and the named rules **FOREGROUND-OR-VOID** (a background tab cannot
 be measured — not its clock, not its pixels) and **COUNT-EVERY-KIND**.
 
@@ -1205,6 +1207,47 @@ position**.
     rather than the drag's two endpoints — both endpoints were already correct before this fix,
     exactly the shape ATTEMPT-BEFORE-YOU-PARK and this file's own §2 fixture-choice warn about:
     sampling only the start and end of a gesture is blind to defects that live entirely in between.
+
+21. **⛔ A COMPENSATION IMPLEMENTED AS A BOUNDED RESOURCE FAILS SILENTLY, PERMANENTLY, AND ONLY ON SOME PAGES (B1801040, 2026-09-19 — the left width grip, a THIRD time, and a third distinct mechanism).**
+    **THE SHAPE.** VIEWPORT-STABLE says: when a reflow moves a surface, measure the delta and fold it
+    back in the same frame. This module does that with a **scroll** — the `sheetGrowLeft`-keyed layout
+    effect measures the body's position in the scroller's own content and scrolls to cancel any change.
+    That is correct, it is what the named rule's own precedents do, and it is also the whole bug:
+    **`scrollLeft` cannot move further than `scrollWidth − clientWidth` allows.** When the mat's content
+    is narrower than the pane there is no overflow at all, the browser clamps the write to nothing, and
+    the compensation simply does not happen. Instrumenting the setter said so in one line:
+    `{ before: 0, want: 140, got: 0, max: 0 }`.
+    **AND IT NEVER RECOVERS, which is what makes it a class rather than a glitch.** The effect compares
+    CONTENT-space positions between runs; it never re-reads where the body actually ENDED UP on screen.
+    So a frame whose scroll was refused leaves a permanent offset that no later frame can see, let alone
+    correct. One bite per `pointermove`, monotonic, discrete — the owner's own words were *"it slides to
+    the right … in little intervals."*
+    **WHY IT ONLY BIT SOME PAGES, and this is the part to carry forward.** `matPadX` is deliberately
+    **pin-independent** — sized against the natural card, never against the page's own width, because
+    NOTES-PAGE-GROWTH round 2a proved a gutter that moves with the width makes the left edge jump. Correct,
+    and unchanged. The consequence nobody had followed through: a page NARROWER than that card leaves the
+    mat's content short of the pane by exactly `paneWidth − 2 × gutter − pageWidth`, and that slack is
+    precisely how far the words slide before any scroll becomes possible. Measured, 138px left-grip widen:
+    440 → **+140** · 505 → **+75** · 560 → **+20** · 580/717/900 → **0**.
+    **THE FIX SHAPE, and it is family -1's prescription applied literally:** stop trading, and find the
+    formulation where the two quantities are not competing. The blank margin is spent out of the mat's own
+    **gutter** first (`matSidePads`, lib/notesPageWidth.js), so the body's content-space position does not
+    move at all and there is nothing for a scroll to hold — a clamp cannot lose what was never asked for.
+    Only past the gutter does the scroll take over, and the mat's right padding is topped up by exactly the
+    slack at that point, so the room always exists. `matPadX` itself is NOT written to (that variable is
+    family -1's own named trap); only the mat's RENDERED padding derives from `sheetGrowLeft`.
+    **THE GENERALISABLE QUESTION, worth asking of any VIEWPORT-STABLE compensation in this repo:** the
+    mechanism holding the surface still — is it BOUNDED, and does anything check that it delivered? A
+    scroll, a clamp, a `min`/`max`, a floored padding, a capped translate all are. If the answer is yes and
+    nothing re-reads the achieved result, the compensation has a silent-failure band, and the fixture that
+    would find it has to cross that band's edge (instrument trap 35). The vertical twin
+    (`heightTopPadRef`'s scroll trick) has the identical shape and has not been audited for it.
+    **AND THE HONEST NOTE ON THE TWO ROUNDS BEFORE THIS ONE:** B1740688 (the pad double-counted on commit)
+    and B1775312 (two mechanisms both compensating, every frame) were each real, each correctly fixed, and
+    each confirmed working — the owner said so himself about the second. Neither is a recurrence. **Three
+    different defects, one feature, one symptom the user reports the same way every time.** When a symptom
+    survives a fix the user agrees worked, look for the mechanism the previous one was MASKING, not for a
+    mistake in the previous fix.
 
 ---
 

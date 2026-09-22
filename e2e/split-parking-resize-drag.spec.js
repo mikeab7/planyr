@@ -107,10 +107,10 @@ test.describe("NEW-1 — a resize-handle DRAG on a split freestanding parking pi
     let els = await readEls(page);
     const fieldId = els.find((e) => e.type === "parking" && !e.attachedTo).id;
     await selectAndOpenProperties(page, fieldId);
-    await fieldInput(page, "Width (ft)").fill("200");
-    await fieldInput(page, "Width (ft)").press("Enter");
-    await fieldInput(page, "Depth (ft)").fill("60"); // 2 rows: 2*18 + 24
-    await fieldInput(page, "Depth (ft)").press("Enter");
+    await fieldInput(page, "Width").fill("200");
+    await fieldInput(page, "Width").press("Enter");
+    await fieldInput(page, "Depth").fill("60"); // 2 rows: 2*18 + 24
+    await fieldInput(page, "Depth").press("Enter");
     await page.waitForTimeout(150);
 
     await selectAndOpenProperties(page, fieldId);
@@ -197,10 +197,10 @@ test.describe("NEW-1 — a resize-handle DRAG on a split freestanding parking pi
     let els = await readEls(page);
     const fieldId = els.find((e) => e.type === "parking" && !e.attachedTo).id;
     await selectAndOpenProperties(page, fieldId);
-    await fieldInput(page, "Width (ft)").fill("200");
-    await fieldInput(page, "Width (ft)").press("Enter");
-    await fieldInput(page, "Depth (ft)").fill("60");
-    await fieldInput(page, "Depth (ft)").press("Enter");
+    await fieldInput(page, "Width").fill("200");
+    await fieldInput(page, "Width").press("Enter");
+    await fieldInput(page, "Depth").fill("60");
+    await fieldInput(page, "Depth").press("Enter");
     await page.waitForTimeout(150);
 
     await selectAndOpenProperties(page, fieldId);
@@ -289,10 +289,10 @@ test.describe("NEW-1 (reopen) — a CORNER drag on a split freestanding parking 
     let els = await readEls(page);
     const fieldId = els.find((e) => e.type === "parking" && !e.attachedTo).id;
     await selectAndOpenProperties(page, fieldId);
-    await fieldInput(page, "Width (ft)").fill("200");
-    await fieldInput(page, "Width (ft)").press("Enter");
-    await fieldInput(page, "Depth (ft)").fill("60"); // 2 rows: 2*18 + 24
-    await fieldInput(page, "Depth (ft)").press("Enter");
+    await fieldInput(page, "Width").fill("200");
+    await fieldInput(page, "Width").press("Enter");
+    await fieldInput(page, "Depth").fill("60"); // 2 rows: 2*18 + 24
+    await fieldInput(page, "Depth").press("Enter");
     await page.waitForTimeout(150);
 
     await selectAndOpenProperties(page, fieldId);
@@ -359,10 +359,10 @@ test.describe("NEW-1 (reopen) — a CORNER drag on a split freestanding parking 
     let els = await readEls(page);
     const fieldId = els.find((e) => e.type === "parking" && !e.attachedTo).id;
     await selectAndOpenProperties(page, fieldId);
-    await fieldInput(page, "Width (ft)").fill("200");
-    await fieldInput(page, "Width (ft)").press("Enter");
-    await fieldInput(page, "Depth (ft)").fill("60");
-    await fieldInput(page, "Depth (ft)").press("Enter");
+    await fieldInput(page, "Width").fill("200");
+    await fieldInput(page, "Width").press("Enter");
+    await fieldInput(page, "Depth").fill("60");
+    await fieldInput(page, "Depth").press("Enter");
     await page.waitForTimeout(150);
 
     await selectAndOpenProperties(page, fieldId);
