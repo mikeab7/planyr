@@ -281,6 +281,11 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   issuing a request and the whole path dies silently; its `pdfDeliveryFault` refuses such a run.
   (Storage backup) + `dxf/` (worker parse via `dxf-parser` + entity→SVG render + true-units auto-scale)
   + `convertClient.js` (DWG→DXF through the B238 convert service, gated on `VITE_CONVERT_URL`).
+  **`overlayCrop.js` is the ONE crop model for BOTH overlay systems** (rect | poly, image px);
+  the Site tab's "Crop…" (`components/OverlayCropDialog.jsx`, B1838704) reuses the shared
+  `ImageCropTool`, clips via `cropClipShapeScreen` → an SVG `<clipPath>` (what the export clone
+  carries), and every write goes through `setOverlayCrop` (lock enforced at the write). `crop` is in
+  the history signature — without it a crop edit is silently not undoable.
   **`overlayOrder.js` (NEW-2) is the ONE draw-order model for placed references** — a two-BAND
   split (`below` the plan, the unchanged default, vs an explicitly promoted `above`), the
   band-grouped array that IS the draw order bottom→top, the panel's front-first listing, and the

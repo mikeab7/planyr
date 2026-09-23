@@ -241,7 +241,12 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
 
       <div ref={boxRef} style={{
         position: "relative", width: dispW, height: dispH, userSelect: "none",
-        border: "1px solid var(--border-default)", borderRadius: RADIUS.sm, overflow: "hidden", background: CROP_BG,
+        // NEW-1 (B1838704) — overflow VISIBLE, not hidden: a fresh crop starts at the full image,
+        // so every grip sits ON the box edge, and "hidden" clipped each corner grip to a quarter and
+        // each edge grip to a half — measured, the bottom-right grip's grabbable area was a few pixels
+        // wide. Nothing else here draws outside the box (scrims, the rect and the poly SVG are all
+        // bounded by it), so the grips are the only thing this lets out.
+        border: "1px solid var(--border-default)", borderRadius: RADIUS.sm, overflow: "visible", background: CROP_BG,
       }}>
         <img src={src} alt="" draggable={false} style={{ display: "block", width: dispW, height: dispH, pointerEvents: "none" }} />
 

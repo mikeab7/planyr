@@ -61,7 +61,13 @@ export function normalizeCrop(crop, imgW, imgH) {
 export const hasCrop = (o) => !!(o && o.crop);
 
 // The box actually visible/interactive, in image px — the crop rect, or the full image when unset.
+// A polygon crop answers with its bounding box (never the raw `{kind:'poly'}` object, whose
+// missing x/y/w/h would read as NaN in every rect consumer).
 export function effectiveCropRect(o) {
+  if (o && o.crop && cropKind(o.crop) === "poly") {
+    const r = polyPointsToRect(o.crop.pts);
+    if (r) return r;
+  }
   if (o && o.crop) return o.crop;
   return { x: 0, y: 0, w: (o && o.imgW) || 0, h: (o && o.imgH) || 0 };
 }
@@ -247,4 +253,51 @@ export function clipPathValueForCrop(crop, imgW, imgH) {
   const top = Math.max(0, crop.y), left = Math.max(0, crop.x);
   const right = Math.max(0, imgW - crop.x - crop.w), bottom = Math.max(0, imgH - crop.y - crop.h);
   return `inset(${top}px ${right}px ${bottom}px ${left}px)`;
+}
+
+/* ---- The Site-tab (sheetOverlays) canvas clip, either shape (NEW-1, B1838704) -----------
+ * The SitePlanner canvas draws a placed reference as an SVG `<image>` in SCREEN px, and clips it
+ * with an SVG `<clipPath>` rather than a CSS `clip-path` — that is deliberate, not a second
+ * mechanism: the PDF/PNG export clones this live SVG wholesale (`buildExportSvg`) and an SVG
+ * `<clipPath>` is what every SVG consumer honours, so the printed sheet crops exactly as the
+ * screen does with no separate compositing code (PDF-PARITY). This function is the ONE place the
+ * crop's IMAGE-px geometry is projected into that screen frame, for BOTH shapes — the rect branch
+ * is numerically identical to `cropClipRectScreen`, and a polygon is the same per-vertex
+ * projection. The placement ROTATION is applied by the parent `<g>` afterwards, never baked in,
+ * so the clip stays welded to the image through move / scale / Rotate / Align to map.
+ *
+ * Returns null for "draw the whole image" — no crop, or a stored value that fails
+ * `isValidCropShape` (a malformed record must never clip a sheet to nothing and lose it). */
+export function cropClipShapeScreen(o, tl, ftPerPx, ftPerPxY, rppf) {
+  const crop = o && o.crop;
+  if (!crop || !isValidCropShape(crop)) return null;
+  const kx = ftPerPx * rppf, ky = (ftPerPxY || ftPerPx) * rppf;
+  if (!(kx > 0) || !(ky > 0) || !tl) return null;
+  if (cropKind(crop) === "poly") {
+    const pts = crop.pts.map(([x, y]) => [tl.x + x * kx, tl.y + y * ky]);
+    return { kind: "poly", pts, points: pts.map(([x, y]) => `${x},${y}`).join(" ") };
+  }
+  return { kind: "rect", x: tl.x + crop.x * kx, y: tl.y + crop.y * ky, width: crop.w * kx, height: crop.h * ky };
+}
+
+// Whether the Site-tab panel may edit this overlay's crop, and if not, the plain reason — the ONE
+// predicate the panel button, the trim fields and the commit itself all ask, so a locked overlay
+// refuses the edit at the write, not only by greying a button (B1154369: a lock that only greyed
+// its control failed to stop movement). The pinned map capture is excluded because it exports
+// through its own synthesized aerial path, not the cloned `<image>`, so a crop there would draw
+// on screen and silently not print (PDF-PARITY).
+export function cropEditBlock(o) {
+  if (!o) return "This overlay is no longer on the plan";
+  if (o.fromMap) return "The map capture can't be cropped";
+  if (o.locked) return "Unlock this overlay to crop it";
+  if (!o.src || !(o.imgW > 0) || !(o.imgH > 0)) return "Load the drawing first to crop it";
+  return null;
+}
+
+// A crop carried across a raster change (a PDF page switch re-rasterizes at that page's own size):
+// re-validated against the NEW pixel box, so a crop that no longer fits is clamped into it — or
+// dropped to the full image if nothing usable is left — instead of clipping off-sheet.
+export function recropForRaster(crop, imgW, imgH) {
+  if (!crop) return null;
+  return normalizeCropShape(crop, imgW, imgH);
 }
