@@ -14,12 +14,24 @@
  */
 import { createClient } from "@supabase/supabase-js";
 
-const RAW_URL = ((import.meta.env && import.meta.env.VITE_SUPABASE_URL) || "").trim();
+/* B1843888 — vitest must NEVER build a client that can reach a real project, regardless of
+ * what VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY are set to in the process. CI's required
+ * `build` check runs every gate — including `npm test` — inside ONE step that carries the
+ * real production secrets as env (needed by the later `vite build`/bundle-budget gates in the
+ * same step; see .github/ci-gates.yml), so the vitest suite was inheriting them too and
+ * writing live telemetry + one destructive `project_folders` DELETE to production on every CI
+ * run (measured: 44 `project-folder-purge-failed` events on 2026-09-19 alone, all carrying
+ * build:"dev", the test suite's signature). Vitest itself sets import.meta.env.VITEST, which a
+ * test can't spoof away by re-stubbing the Supabase URL, so this refuses to read the real env
+ * at all rather than trusting the two var values. */
+const UNDER_VITEST = !!(import.meta.env && import.meta.env.VITEST);
+
+const RAW_URL = UNDER_VITEST ? "" : ((import.meta.env && import.meta.env.VITE_SUPABASE_URL) || "").trim();
 // Normalize to the bare origin so a pasted "/rest/v1" suffix or trailing slash
 // (a common copy-the-wrong-field mistake) doesn't double up the path.
 let SUPABASE_URL = RAW_URL.replace(/\/+$/, "");
 try { if (RAW_URL) SUPABASE_URL = new URL(RAW_URL).origin; } catch (_) {}
-const SUPABASE_ANON = ((import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) || "").trim();
+const SUPABASE_ANON = UNDER_VITEST ? "" : ((import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) || "").trim();
 
 export const supabaseConfigured = () => !!(SUPABASE_URL && SUPABASE_ANON);
 
