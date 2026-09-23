@@ -265,6 +265,42 @@ export const meetingCostDays = (task, body) => {
   const next = meetingDatesInRange(body, addD(task.start, 1), addD(task.start, 366 * 2))[0];
   return next ? dif(task.start, next) : null;
 };
+// NEW-2 (VERBATIM copy of public/sequence/index.html).
+export const meetingDoubleLagFlag = (task, body) => {
+  if (!task || !task.meetingBound || !body || !body.agendaLead) return null;
+  const lead = body.agendaLead;
+  if (lead.type !== "offset" || !(Number(lead.n) > 0)) return null;
+  const leadUnit = lead.unit === "calendar" ? "calendar" : "business";
+  const hit = normPreds(task.predecessors).find(p => {
+    const lagN = Math.abs(Number(p.lag) || 0);
+    if (!lagN) return false;
+    const lagUnit = p.lagUnit === "calendar" ? "calendar" : "business";
+    return lagUnit === leadUnit && Math.abs(lagN - Number(lead.n)) <= 1;
+  });
+  return hit ? { predId: hit.id, lagN: Math.abs(Number(hit.lag) || 0), leadN: Number(lead.n), unit: leadUnit } : null;
+};
+export const dropDuplicateLagPatch = (task, flag) => {
+  if (!flag || flag.predId == null) return null;
+  return normPreds(task.predecessors).map(p => p.id === flag.predId ? { ...p, lag: 0 } : p);
+};
+export const meetingBindingTrace = (task, findTask, body) => {
+  if (!task || !task.meetingBound || !body) return null;
+  const preds = normPreds(task.predecessors)
+    .map(dep => ({ dep, predTask: findTask(dep.id) }))
+    .filter(x => x.predTask && (x.predTask.end || x.predTask.start));
+  if (!preds.length) return { driver: null, earliestDate: "", skipped: [], landed: task.start || "", deadline: task.meetingDeadline || "" };
+  let driver = null, earliestDate = "";
+  preds.forEach(({ dep, predTask }) => {
+    const d = constrainedStartFrom(predTask, dep, Math.max(1, task.duration || 1));
+    if (d && (!earliestDate || d > earliestDate)) { earliestDate = d; driver = { dep, predTask }; }
+  });
+  const landed = task.start || "";
+  const skipped = [];
+  if (earliestDate && landed && earliestDate < landed) {
+    meetingDatesInRange(body, earliestDate, addD(landed, -1)).forEach(m => skipped.push({ meetingDate: m, deadline: agendaDeadline(body, m) }));
+  }
+  return { driver, earliestDate, skipped, landed, deadline: task.meetingDeadline || "" };
+};
 // ── Meeting-calendar cross-schedule import (B1824576, VERBATIM copy of public/sequence/index.html) ──
 export const mbRuleSignature = r => {
   if (!r) return "";
@@ -303,6 +339,16 @@ export const otherScheduleMeetingBodies = (data, excludePid) => Object.values((d
   .filter(p => p && p.id !== excludePid && Array.isArray(p.meetingBodies) && p.meetingBodies.length)
   .map(p => ({ pid: p.id, schedName: p.name || `Project ${p.id}`, projName: p.linkedSiteName || null, bodies: p.meetingBodies }))
   .sort((a, b) => a.schedName.localeCompare(b.schedName));
+// NEW-1 (VERBATIM copy of public/sequence/index.html).
+export const findMeetingBodyElsewhere = (data, excludePid, bodyId) => {
+  if (!bodyId) return null;
+  for (const p of Object.values((data && data.projects) || {})) {
+    if (!p || p.id === excludePid || !Array.isArray(p.meetingBodies)) continue;
+    const b = p.meetingBodies.find(b => b.id === bodyId);
+    if (b) return { body: b, schedName: p.name || `Project ${p.id}`, pid: p.id };
+  }
+  return null;
+};
 export const normPreds = arr => {
   if (!Array.isArray(arr)) return [];
   return arr.map(x => {
