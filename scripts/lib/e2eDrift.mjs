@@ -24,7 +24,21 @@
  *      pond-outlet-clear.spec.js › Pond outlet fields …`. Skip a suite that names its own file.
  *
  * `test/e2eDriftGate.test.js` now pins both against a fixture captured from a REAL run, not a
- * hand-written one. A fixture you invented can only ever confirm what you already believed. */
+ * hand-written one. A fixture you invented can only ever confirm what you already believed.
+ *
+ * ⛔ A THIRD SHAPE FACT, B1857904 — `spec.ok` DOES NOT ESTABLISH THAT A TEST RAN. Playwright never
+ * counts a skip as a failure, so a genuinely SKIPPED case (e.g. `e2e/auth.setup.js`'s "authenticate
+ * once" step, skipped whenever E2E_EMAIL/E2E_PASSWORD are absent — see playwright.config.js) reports
+ * `spec.ok: true` with `tests[0].status: "skipped"`, exactly like a real pass. The code below used to
+ * branch on `spec.ok` and "flaky" only, so it silently classified that skip as "passed" — proven
+ * against the REAL committed fixture (`test/fixtures/playwright-report.sample.json`'s own
+ * "authenticate once" row) and independently against a fresh capture from the locked
+ * @playwright/test 1.61.1, both before this fix landed. The cost is not cosmetic: `nextLedger`'s
+ * `--update` drops a ledger row the instant its case reads "passed", so a required case that merely
+ * failed to RUN (a missing secret, a filtered project) could have silently discharged a real
+ * known-red row with no case ever having executed. `tests[].status` is the reporter's own explicit
+ * verdict per attempt and is checked FIRST, before the `spec.ok` fallback, so a skip can never be
+ * mistaken for a pass again. */
 export function collectCases(report, { root = null } = {}) {
   const rootDir = report?.config?.rootDir || "";
   // The testDir's path relative to the repo, e.g. "e2e". With no repo root to measure against,
@@ -45,9 +59,15 @@ export function collectCases(report, { root = null } = {}) {
     const here = suite.title && !isFileSuite ? [...trail, suite.title] : trail;
     for (const spec of suite.specs || []) {
       const ran = (spec.tests || []).flatMap((t) => t.results || []);
-      const status = spec.ok
-        ? ((spec.tests || []).some((t) => t.status === "flaky") ? "flaky" : "passed")
-        : ran.length ? "failed" : "skipped";
+      const testStatuses = (spec.tests || []).map((t) => t.status);
+      // A spec is genuinely skipped only when EVERY test entry says so — a mixed multi-project
+      // result (skipped on one project, run on another) falls through to the ok/flaky/failed
+      // logic below exactly as it always has; this collector does not track project identity.
+      const status = testStatuses.length && testStatuses.every((s) => s === "skipped")
+        ? "skipped"
+        : spec.ok
+          ? (testStatuses.some((s) => s === "flaky") ? "flaky" : "passed")
+          : ran.length ? "failed" : "skipped";
       const file = withPrefix(spec.file);
       out.push({ id: `${file}:${spec.line} › ${[...here, spec.title].filter(Boolean).join(" › ")}`, file, status });
     }
@@ -55,6 +75,46 @@ export function collectCases(report, { root = null } = {}) {
   };
   for (const s of report?.suites || []) walk(s, []);
   return out;
+}
+
+/** Whether a report reflects a FULL run, never a filtered/diagnostic one silently wearing a
+ * release-complete report's clothes (B1857904, reliability programme R1 — see
+ * docs/RELIABILITY-PROGRAMME.md). Neither the pass/fail diff nor a raw case count can tell a
+ * genuinely full suite from one narrowed by `--grep`, `--project` or `--shard`: fewer cases run,
+ * but nothing about WHICH ones is visibly wrong from the diff alone.
+ *
+ * Two signals, both real fields on a Playwright JSON report and both measured directly against
+ * the locked @playwright/test 1.61.1 before this was written:
+ *   - `config.shard` is `null` unless `--shard` narrowed the run, in which case it is the
+ *     structured `{ current, total }` Playwright itself resolved.
+ *   - `config.argv` is the LITERAL command line Playwright ran, so a `--grep` / `--grep-invert` /
+ *     `--project` flag shows up verbatim. `config.grep` / `config.grepInvert` do NOT work for this:
+ *     Playwright serializes the parsed RegExp to `{}` in the JSON report REGARDLESS of whether a
+ *     filter was passed — confirmed by running the same suite with and without `--grep` and diffing
+ *     the two reports; both read `"grep": {}`. Only `argv` carries the fact.
+ *
+ * Deliberately narrow: this reports the signal, it does not itself fail a run. `e2e-drift-gate.mjs`
+ * decides whether that matters for the lane it was asked about — today's `ci`/`local` lanes are
+ * genuinely never filtered, so wiring this in as fatal-by-default would change no existing verdict,
+ * but that wiring is left for the critical-interaction lane (R2) rather than assumed here. */
+export function assessCompleteness(report) {
+  const cfg = report?.config || {};
+  const reasons = [];
+
+  const shard = cfg.shard;
+  if (shard && Number.isInteger(shard.total) && shard.total > 1) {
+    reasons.push(`sharded (${shard.current}/${shard.total}) — only one slice of the suite ran`);
+  }
+
+  const argv = Array.isArray(cfg.argv) ? cfg.argv.join(" ") : "";
+  if (/(^|\s)(--grep(-invert)?(=|\s)|-g\s)/.test(argv)) {
+    reasons.push(`invoked with a --grep filter: ${argv}`);
+  }
+  if (/(^|\s)--project(=|\s)/.test(argv)) {
+    reasons.push(`invoked with a --project filter: ${argv}`);
+  }
+
+  return { full: reasons.length === 0, reasons };
 }
 
 /**
@@ -91,9 +151,14 @@ export function compare({ cases, entries, lane }) {
   const stale = passing.filter((e) => !e.intermittent);
   const staleIntermittent = passing.filter((e) => e.intermittent);
   const absent = mine.filter((e) => !passed.has(e.id) && !failed.has(e.id));
+  // B1857904 — visible, never fatal here. A genuinely skipped required case used to be
+  // misreported as "passed" (see collectCases' header); now that it reads "skipped" it must not
+  // become INVISIBLE instead. Surfacing the count is the narrow fix for THIS lane; whether a skip
+  // should fail a lane is a release-contract question left to the critical-interaction lane (R2).
+  const skipped = cases.filter((c) => c.status === "skipped").length;
 
   return {
-    lane, ran: cases.length, failed: failed.size, knownRed: known.size,
+    lane, ran: cases.length, failed: failed.size, knownRed: known.size, skipped,
     novel, stale, staleIntermittent, absent,
     ok: novel.length === 0 && stale.length === 0,
   };

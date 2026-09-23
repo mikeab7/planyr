@@ -10,9 +10,16 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { collectCases, compare, nextLedger, validateLedger } from "../scripts/lib/e2eDrift.mjs";
+import { collectCases, compare, nextLedger, validateLedger, assessCompleteness } from "../scripts/lib/e2eDrift.mjs";
 
-/** A minimal Playwright JSON report, shaped exactly as the real reporter emits it. */
+/** A minimal Playwright JSON report, shaped exactly as the real reporter emits it.
+ *
+ * B1857904 — the skip shape below was fixed to match a REAL capture (@playwright/test 1.61.1, the
+ * locked version): a genuinely skipped spec reads `ok: true`, `tests[0].status: "skipped"`, and
+ * ONE result of status "skipped" — never `ok: false` and never an empty `results` array, which is
+ * what this helper wrongly assumed before. The `report()` helper is hand-written and therefore
+ * cannot be trusted on its own for this shape (B266086's whole point); the "REAL Playwright
+ * reporter shape" describe block below pins the same fact against an actually-captured fixture. */
 const report = (specs) => ({
   suites: [{
     title: "",
@@ -20,7 +27,10 @@ const report = (specs) => ({
       title: "a describe block",
       specs: specs.map(([file, line, title, ok, opts = {}]) => ({
         file, line, title, ok,
-        tests: [{ status: opts.flaky ? "flaky" : ok ? "expected" : "unexpected", results: opts.skipped ? [] : [{ status: ok ? "passed" : "failed" }] }],
+        tests: [{
+          status: opts.skipped ? "skipped" : opts.flaky ? "flaky" : ok ? "expected" : "unexpected",
+          results: opts.skipped ? [{ status: "skipped" }] : [{ status: ok ? "passed" : "failed" }],
+        }],
       })),
     }],
   }],
@@ -42,8 +52,20 @@ describe("collectCases", () => {
   });
 
   it("distinguishes a skipped case from a failed one", () => {
-    const cases = collectCases(report([["e2e/a.spec.js", 10, "gated on secrets", false, { skipped: true }]]));
+    // Real skip shape (B1857904): `ok: true`, never `ok: false` — Playwright never counts a skip
+    // as a failure. Passing `ok: false` here (as this test did before the fix) exercised a shape
+    // that does not occur in a real report, which is exactly how the underlying bug went unnoticed.
+    const cases = collectCases(report([["e2e/a.spec.js", 10, "gated on secrets", true, { skipped: true }]]));
     expect(cases[0].status).toBe("skipped");
+  });
+
+  it("B1857904 — does NOT classify a real skip as passed just because spec.ok is true", () => {
+    // The exact defect: the old logic branched only on `spec.ok` and "flaky", so `ok: true` +
+    // `tests[0].status: "skipped"` fell through to "passed". A mutation back to that logic —
+    // `spec.ok ? (flaky ? "flaky" : "passed") : (ran.length ? "failed" : "skipped")` — makes this
+    // assertion fail, which is the point: it is the guard against regressing the fix.
+    const cases = collectCases(report([["e2e/a.spec.js", 10, "gated on secrets", true, { skipped: true }]]));
+    expect(cases[0].status).not.toBe("passed");
   });
 
   it("returns nothing for an empty report rather than inventing a green run", () => {
@@ -218,6 +240,20 @@ describe("the REAL Playwright reporter shape (captured fixture)", () => {
     );
   });
 
+  /* B1857904 — THE REPRODUCTION. This fixture already carries a REAL skipped case (auth.setup.js's
+   * "authenticate once", skipped whenever E2E_EMAIL/E2E_PASSWORD are absent — see
+   * playwright.config.js's own comment) and nothing in this file had ever asserted on its status.
+   * Before the fix, `collectCases` reported it as "passed": `spec.ok: true` and the code branched
+   * only on `ok` and "flaky", never on `tests[].status === "skipped"`. Confirmed independently
+   * against a fresh capture from the locked @playwright/test 1.61.1 (three isolated cases: a
+   * control pass, a `test.skip()`, and a fail-then-retry-pass) — same result. Full account in
+   * docs/RELIABILITY-PROGRAMME.md's R1 section. */
+  it("B1857904 — a genuinely skipped case in this REAL captured report reads 'skipped', never 'passed'", () => {
+    const authSetup = cases.find((c) => c.id.includes("authenticate once"));
+    expect(authSetup).toBeDefined();
+    expect(authSetup.status).toBe("skipped");
+  });
+
   /* B267537 — SHRINK-PROOF. The check below it is the end-to-end one and is the stronger of the
    * two, but it can only hold while the fixture's failures are still on the ledger. This one
    * catches B266086's ACTUAL defect — both structural errors produced ids that could never match
@@ -317,5 +353,85 @@ describe("intermittent rows: reported, never an amnesty", () => {
   it("the COMMITTED ledger is sound by those rules", () => {
     const led = JSON.parse(readFileSync(new URL("../e2e/known-red.json", import.meta.url), "utf8"));
     expect(validateLedger(led.entries)).toEqual([]);
+  });
+});
+
+/* ---- B1857904 — a skipped ledger row is AMBIGUOUS ("absent"), never a false "fixed" ------------
+ *
+ * Before the collectCases fix, a known-red case that stopped RUNNING (a missing secret, a filtered
+ * project) — rather than starting to genuinely pass — was misread as "passed", which made it
+ * `stale` here: the gate would have reported the ledger row as fixed and (under --update) silently
+ * dropped it, with the underlying case never having executed even once. This pins the corrected
+ * behaviour: a case that is skipped, not passed, is `absent` (reported, not fatal, not treated as
+ * a fix) — the same bucket a renamed-away case already lands in.
+ */
+describe("a skipped required case is AMBIGUOUS, never a false pass (B1857904)", () => {
+  const ledger = [{ id: "gated", lane: "ci", item: "B1", firstSeen: "2026-08-08" }];
+
+  it("lands in `absent`, not `stale` — the gate does not claim the case was fixed", () => {
+    const cases = [{ id: "gated", status: "skipped" }];
+    const v = compare({ cases, entries: ledger, lane: "ci" });
+    expect(v.stale).toHaveLength(0);
+    expect(v.absent.map((e) => e.id)).toEqual(["gated"]);
+    expect(v.ok).toBe(true); // ambiguous, not a regression — same treatment as a renamed-away case
+  });
+
+  it("is counted in the run's skip total, so it is never simply invisible", () => {
+    const cases = [{ id: "gated", status: "skipped" }, { id: "other", status: "passed" }];
+    expect(compare({ cases, entries: ledger, lane: "ci" }).skipped).toBe(1);
+  });
+
+  it("nextLedger KEEPS a skipped case's row — only a genuine pass may drop it", () => {
+    const cases = [{ id: "gated", status: "skipped" }];
+    const next = nextLedger({ entries: ledger, cases, lane: "ci", novel: [], today: "2026-08-08", item: null });
+    expect(next.map((e) => e.id)).toEqual(["gated"]);
+  });
+});
+
+/* ---- B1857904 — assessCompleteness: a filtered run must never pass itself off as a full one ---- */
+describe("assessCompleteness — a filtered/diagnostic run says so, honestly", () => {
+  const fullConfig = { shard: null, argv: ["node", "cli.js", "test", "--reporter=json"] };
+
+  it("reports a plain, unfiltered run as full", () => {
+    expect(assessCompleteness({ config: fullConfig })).toEqual({ full: true, reasons: [] });
+  });
+
+  it("flags a sharded run — only one slice of the suite ran", () => {
+    const v = assessCompleteness({ config: { ...fullConfig, shard: { current: 1, total: 2 } } });
+    expect(v.full).toBe(false);
+    expect(v.reasons[0]).toMatch(/sharded/);
+  });
+
+  it("does not flag a single-shard config ({current:1,total:1} is the unsharded default)", () => {
+    const v = assessCompleteness({ config: { ...fullConfig, shard: { current: 1, total: 1 } } });
+    expect(v.full).toBe(true);
+  });
+
+  it("flags a --grep-filtered invocation, read from the real argv (config.grep itself is useless)", () => {
+    // Measured directly: Playwright serializes the parsed grep RegExp to `{}` in the JSON report
+    // whether or not --grep was passed, so config.grep/config.grepInvert cannot answer this — only
+    // the literal command line (config.argv) carries the fact. See this function's own header.
+    const v = assessCompleteness({ config: { ...fullConfig, argv: [...fullConfig.argv, "--grep=control-pass"] } });
+    expect(v.full).toBe(false);
+    expect(v.reasons[0]).toMatch(/--grep filter/);
+  });
+
+  it("flags a --project-filtered invocation", () => {
+    const v = assessCompleteness({ config: { ...fullConfig, argv: [...fullConfig.argv, "--project=chromium"] } });
+    expect(v.full).toBe(false);
+    expect(v.reasons[0]).toMatch(/--project filter/);
+  });
+
+  it("never throws on a report with no config at all", () => {
+    expect(assessCompleteness({})).toEqual({ full: true, reasons: [] });
+    expect(assessCompleteness(null)).toEqual({ full: true, reasons: [] });
+  });
+
+  it("the real e2e.yml invocation (no --grep/--project/--shard) reads as full", () => {
+    // e2e.yml runs `npm run e2e -- --reporter=list,json,html` with no filter flag — pin that this
+    // stays "full" so wiring --require-complete into that workflow later would change nothing about
+    // today's runs.
+    const v = assessCompleteness({ config: { shard: null, argv: ["node", "cli.js", "test", "--reporter=list,json,html"] } });
+    expect(v.full).toBe(true);
   });
 });
