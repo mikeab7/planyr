@@ -34,7 +34,9 @@ const CELL = (t) => ({ type: "tableCell", content: [P(t)] });
 const ROW = (...c) => ({ type: "tableRow", content: c });
 const TABLE = (...r) => ({ type: "table", content: r });
 const IMG = () => ({ type: "noteImage", attrs: { imageId: "probe", alt: "" } });
-const SKETCH = () => ({ type: "noteSketch", attrs: { boxes: [], links: [] } });
+// Any other atomic, selectable node stands in for "a non-text block node" here — the sketch
+// canvas this used to be (`noteSketch`) is retired (NEW-2); an attachment is equally atomic.
+const OTHERNODE = () => ({ type: "noteAttachment", attrs: { fileId: "probe", name: "f.pdf", mime: "application/pdf", size: 1 } });
 const doc = (...content) => ({ type: "doc", content });
 
 /** The absolute position just inside the node reached by a path of child indexes — the same
@@ -225,9 +227,9 @@ describe("blockStartAction — which single step a Backspace at position zero ta
   });
 
   /* ── the boundaries where the wrong answer destroys content ───────────────────────────── */
-  it("⛔ a paragraph after a PICTURE or a SKETCH SELECTS it — it must never delete it", () => {
+  it("⛔ a paragraph after a PICTURE or any other atomic node SELECTS it — it must never delete it", () => {
     expect(actionAt(doc(IMG(), P("after")), [1])).toBe("select-node-before");
-    expect(actionAt(doc(SKETCH(), P("after")), [1])).toBe("select-node-before");
+    expect(actionAt(doc(OTHERNODE(), P("after")), [1])).toBe("select-node-before");
     expect(actionAt(doc(IMG(), P("")), [1])).toBe("select-node-before");
     // …and at the picture's own start position, so the second press is the deliberate one.
     expect(verdictAt(doc(P("x"), IMG(), P("after")), [2]).pos).toBe(startOf(schema.nodeFromJSON(doc(P("x"), IMG(), P("after"))), [1]) - 1);
@@ -275,7 +277,7 @@ describe("blockStartAction — which single step a Backspace at position zero ta
       [doc(TABLE(ROW(CELL("a"))), P("b")), [1]],
       [doc(P("a"), TABLE(ROW(CELL("b")))), [1, 0, 0, 0]],
       [doc(IMG(), P("b")), [1]],
-      [doc(SKETCH(), P("b")), [1]],
+      [doc(OTHERNODE(), P("b")), [1]],
       [doc(P("a"), P("b", { textAlign: "right" })), [1]],
       [doc(P("a")), [0]],
     ];

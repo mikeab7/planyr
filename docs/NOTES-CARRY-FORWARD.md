@@ -520,6 +520,36 @@ Two more found since, each worth its own line because each returned a confident 
    `dblclick()` — it exercises the identical app behaviour with no timing assumption baked into
    the assertion.
 
+43. **⛔ A CHROME ELEMENT'S OWN `getBoundingClientRect()` PROVES NOTHING ABOUT WHETHER A REAL
+   PRESS CAN REACH IT (NEW-2, 2026-09-22) — `pointer-events:none` STILL RETURNS REAL GEOMETRY.**
+   Two boxes' worth of "on-hover/on-select" chrome (the resize handles, the arrow connect dot)
+   share the pattern CHROME-NEVER-EATS-A-PRESS already names: invisible and `pointer-events:none`
+   until the box is selected, then flipped to visible/`auto`. A harness that queries the element
+   and reads its rect gets a real, populated rectangle EITHER WAY — `getBoundingClientRect()`
+   does not consult `opacity` or `pointer-events` at all. So "the element exists, with a sane
+   rect" is not evidence a synthetic drag starting there will do anything. The arrow connect dot
+   and the box's own east resize handle were shipped at the IDENTICAL position
+   (`right:-6px; top:50%`, both) — the handle paints after the dot and silently won every press,
+   so drag-from-the-dot was unreachable on any text box, and nothing in a rect-only check could
+   have seen it. The fix: DRIVE the gesture (`page.mouse.move/down/move…/up`) and assert the
+   OUTCOME (an arrow drawn, a preview line growing), never assert on element presence alone —
+   `ui-audit/verify-notes-in-sheet-placement.mjs` §14 does this and would have failed loudly had
+   the collision not been fixed first.
+44. **⛔ A `Set` IS NOT AN `Array`, AND A PURE FUNCTION'S OWN `.map()` ON THE WRONG SHAPE THROWS
+   SILENTLY INSIDE A PROSEMIRROR COMMAND (NEW-2, 2026-09-22).** `removeNoteAnchors(ids)` (the
+   marquee/multi-select delete path, `notesAnchorNode.js`) built a `Set` for its own duplicate-
+   proofing and then passed that SAME Set straight to `cascadeRemoveArrows`, whose one-line
+   normaliser is `(removedIds || []).map(String)` — correct for the array every OTHER call site
+   passes, and a `TypeError` for a Set. Because this runs inside a Tiptap command, the throw
+   aborts before `dispatch(tr)` is ever reached: the already-staged node deletions in the
+   transaction are silently discarded too, so the box does not disappear, no arrow is removed,
+   and the only visible symptom is a page-level JS error with no relation in its stack trace to
+   "arrows." Caught only by a harness that select-and-Deletes a REAL connected box and re-reads
+   the DOM afterward (§17) — a unit test of `cascadeRemoveArrows` alone, called with the array
+   shape its OTHER two call sites already use correctly, would stay green forever. When a pure
+   function is called from more than one site, check EVERY call site's actual argument shape,
+   not just the ones that were tested.
+
 See also `ui-audit/TRAPS.md`, and the named rules **FOREGROUND-OR-VOID** (a background tab cannot
 be measured — not its clock, not its pixels) and **COUNT-EVERY-KIND**.
 

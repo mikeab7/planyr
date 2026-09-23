@@ -9,7 +9,7 @@
  * ⛔ THE RECURRENCE, and the word that matters: *"the tab doesn't always work correctly."*
  * ALWAYS. B1392 fixed the contexts that existed when it was written and left the rest
  * undefined — and three of the surfaces it never saw (a selected node, the last cell of a
- * table, the page title, a sketch box's two fields) arrived afterwards. "Usually" is not a
+ * table, the page title) arrived afterwards. "Usually" is not a
  * specification, so this file now states what Tab does in EVERY context and the harness
  * drives every one of them.
  *
@@ -27,15 +27,13 @@
  *   LAST cell of a table          ⛔ NEW — adds a ROW and lands in its first cell, which is
  *                                 what Word and Google Docs do. It used to fall through to
  *                                 this fallback and wedge a tab character into the last cell.
- *   ⛔ A SELECTED NODE            ⛔ NEW, and this one was DESTRUCTIVE. With an image or a
- *   (image, sketch)               sketch selected, `insertContent` REPLACED THE SELECTION —
- *                                 pressing Tab deleted the picture and left a tab character
- *                                 where it had been. Tab now moves the caret to just after
- *                                 the node and changes nothing.
+ *   ⛔ A SELECTED NODE            ⛔ NEW, and this one was DESTRUCTIVE. With an image (or any
+ *   (image, attachment, box)      other atomic node) selected, `insertContent` REPLACED THE
+ *                                 SELECTION — pressing Tab deleted the picture and left a tab
+ *                                 character where it had been. Tab now moves the caret to just
+ *                                 after the node and changes nothing.
  *   page TITLE field              moves the caret INTO the document body (Shift+Tab goes
  *                                 back out to the toolbar) — handled in NoteEditor.jsx
- *   sketch box LABEL field        moves to that box's detail field        — notesSketchEditor
- *   sketch box DETAIL field       closes the box and returns to the document — same file
  *
  * ⛔ THE ONE CONTEXT THAT USED TO DO NOTHING: THE FIRST ITEM OF A LIST (B454480, settled by
  * the owner 2026-08-13).

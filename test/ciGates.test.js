@@ -110,7 +110,7 @@ describe("jobSteps() against .github/ci-gates.yml — the actual gate list", () 
   it("keeps the same order build.yml's gates ran in before the migration (npm ci → lint → … → visual regression → notes placement — NEW-1)", () => {
     const names = jobSteps(readGates(), "build").steps.map((s) => s.name);
     expect(names[0]).toBe("Generated-index touch guard (branches must never touch MAP.md / BACKLOG_OPEN.md / docs/UI-INVENTORY.md — NEW-1)");
-    expect(names.at(-1)).toBe("Notes placement surface (double-click-anywhere creates a box, migration, reading order — NEW-1)");
+    expect(names.at(-1)).toBe("Notes placement surface (double-click-anywhere creates a box, migration, reading order, arrows between boxes — NEW-1/NEW-2)");
     const idx = (n) => names.findIndex((x) => x.startsWith(n));
     expect(idx("Lint")).toBeLessThan(idx("Mint gate"));
     expect(idx("Mint gate")).toBeLessThan(idx("Test ("));

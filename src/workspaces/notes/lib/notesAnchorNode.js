@@ -47,6 +47,7 @@ import { Node, mergeAttributes } from "@tiptap/core";
 
 import { anchorIsEmpty } from "./notesAnchorPrune.js";
 import { moveSelection } from "./notesMarquee.js";
+import { cascadeRemoveArrows } from "./notesArrows.js";
 import {
   ANCHOR_EDGE_PAD, ANCHOR_MIN_HEIGHT, ANCHOR_MIN_WIDTH, ANCHOR_WIDTH,
   HANDLES, HANDLE_CURSOR, anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, handlesFor, hasFixedHeight,
@@ -341,6 +342,10 @@ export const NoteAnchor = Node.create({
         if (dispatch) {
           // Back to front, so an earlier delete cannot move a later one's position.
           for (let i = targets.length - 1; i >= 0; i -= 1) tr.delete(targets[i].pos, targets[i].pos + targets[i].size);
+          /* ⛔ ARROWS TAKE THE CASCADE TOO (NEW-2) — a pruned provisional box could in principle
+           * still be named by an arrow; never leave a dangling reference behind. */
+          const { arrows } = cascadeRemoveArrows(state.doc.attrs.arrows, targets.map((t) => t.attrs?.aid).filter(Boolean));
+          if (arrows.length !== (state.doc.attrs.arrows || []).length) tr.setDocAttribute("arrows", arrows);
           tr.setMeta("addToHistory", false);
           dispatch(tr);
           if (typeof onDropped === "function") {
@@ -356,10 +361,17 @@ export const NoteAnchor = Node.create({
        *  were emptying it and clicking away (which is a discard, not a delete, and does not
        *  work on a box with words in it) or backspacing through its text. One transaction, so
        *  Ctrl+Z brings it back whole. */
-      removeNoteAnchor: (pos) => ({ tr, dispatch }) => {
+      removeNoteAnchor: (pos) => ({ tr, dispatch, state }) => {
         const node = tr.doc.nodeAt(pos);
         if (!node || node.type.name !== "noteAnchor") return false;
-        if (dispatch) dispatch(tr.delete(pos, pos + node.nodeSize));
+        if (dispatch) {
+          tr.delete(pos, pos + node.nodeSize);
+          /* ⛔ AND EVERY ARROW THAT NAMED IT, IN THE SAME TRANSACTION (NEW-2, TOMBSTONE-DELETES)
+           * — one undo step restores the box AND its arrows together. */
+          const { arrows } = cascadeRemoveArrows(state.doc.attrs.arrows, [node.attrs.aid]);
+          if (arrows.length !== (state.doc.attrs.arrows || []).length) tr.setDocAttribute("arrows", arrows);
+          dispatch(tr);
+        }
         return true;
       },
 
@@ -483,6 +495,9 @@ export const NoteAnchor = Node.create({
         if (!hits.length) return false;
         if (dispatch) {
           for (const { pos, size } of hits.sort((a, b) => b.pos - a.pos)) tr.delete(pos, pos + size);
+          /* ⛔ THE CASCADE, SAME TRANSACTION (NEW-2, TOMBSTONE-DELETES). */
+          const { arrows } = cascadeRemoveArrows(state.doc.attrs.arrows, [...want]);
+          if (arrows.length !== (state.doc.attrs.arrows || []).length) tr.setDocAttribute("arrows", arrows);
           dispatch(tr);
         }
         return true;
@@ -548,6 +563,72 @@ export const NoteAnchor = Node.create({
 
       dom.appendChild(grip);
       dom.appendChild(content);
+
+      /* ═══ DRAG-FROM-THE-DOT — ONE OF THE TWO WAYS TO CONNECT TWO BOXES (NEW-2) ═════════════
+       *
+       * ⛔ THE OTHER WAY, CLICK-TO-CONNECT, LIVES IN `NoteEditor.jsx` (the "+ Arrow" toolbar
+       * mode) — it needs React state (armed / first-box-picked) and the mat's own click router,
+       * neither of which a node view has. This one needs neither: press the dot, drag to
+       * another box, release — the whole gesture is local to two DOM elements and one command
+       * dispatch, exactly like the resize handles above.
+       *
+       * ⛔ VISIBLE ONLY WHEN SELECTED, same reasoning as the resize handles: an affordance on
+       * every box, all the time, is noise on a page with many boxes — CHROME-NEVER-EATS-A-PRESS's
+       * own family of defects starts with chrome nobody asked to see. */
+      const connectDot = document.createElement("div");
+      connectDot.className = "planyr-anchor-connect";
+      connectDot.setAttribute("contenteditable", "false");
+      connectDot.setAttribute("title", "Drag to another box to draw an arrow");
+      connectDot.setAttribute("data-testid", "note-anchor-connect");
+      dom.appendChild(connectDot);
+
+      let connecting = null;   // { line: SVGLineElement, svg: SVGSVGElement } while dragging
+      const clearArrowTarget = () => {
+        const marked = document.querySelector('.planyr-anchor[data-arrow-target="1"]');
+        if (marked) marked.removeAttribute("data-arrow-target");
+      };
+      connectDot.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("class", "planyr-arrow-drag-preview");
+        svg.style.cssText = "position:fixed;left:0;top:0;width:100vw;height:100vh;pointer-events:none;z-index:80;";
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        const r0 = dom.getBoundingClientRect();
+        line.setAttribute("x1", String(r0.left + r0.width / 2));
+        line.setAttribute("y1", String(r0.top + r0.height / 2));
+        line.setAttribute("x2", String(e.clientX));
+        line.setAttribute("y2", String(e.clientY));
+        line.setAttribute("stroke", "var(--accent-notes)");
+        line.setAttribute("stroke-width", "2");
+        line.setAttribute("stroke-dasharray", "5 4");
+        svg.appendChild(line);
+        document.body.appendChild(svg);
+        connecting = { svg, line };
+        try { connectDot.setPointerCapture(e.pointerId); } catch (_) { /* not capturable */ }
+      });
+      connectDot.addEventListener("pointermove", (e) => {
+        if (!connecting) return;
+        connecting.line.setAttribute("x2", String(e.clientX));
+        connecting.line.setAttribute("y2", String(e.clientY));
+        clearArrowTarget();
+        const under = document.elementFromPoint(e.clientX, e.clientY)?.closest(".planyr-anchor");
+        if (under && under !== dom) under.setAttribute("data-arrow-target", "1");
+      });
+      const endConnectDrag = (e) => {
+        if (!connecting) return;
+        const { svg } = connecting;
+        connecting = null;
+        try { connectDot.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ }
+        svg.remove();
+        clearArrowTarget();
+        const under = document.elementFromPoint(e.clientX, e.clientY)?.closest(".planyr-anchor");
+        const myId = dom.getAttribute("data-anchor-id");
+        const targetId = under?.getAttribute("data-anchor-id");
+        if (under && under !== dom && myId && targetId) editor.commands.addNoteArrow(myId, targetId);
+      };
+      connectDot.addEventListener("pointerup", endConnectDrag);
+      connectDot.addEventListener("pointercancel", endConnectDrag);
 
       /* ⛔ THE LIVE NODE, TRACKED EXPLICITLY — never the closure's `node` (B400177, generalised).
        * That rule was written about `node.attrs` and the reason is broader than attributes: a node

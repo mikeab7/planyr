@@ -1,78 +1,51 @@
-/* notesSketchModel — PURE decisions for Sketch mode. No DOM, no engine, no storage.
+/* notesSketchModel — PURE geometry for the RETIRED Sketch mode. No DOM, no engine, no storage.
  *
- * ═══ THE RULE THIS WHOLE FEATURE IS SHAPED AROUND ══════════════════════════════════════
+ * ⛔ SKETCH MODE ITSELF IS GONE (NEW-2, 2026-09-22, owner direction: "I don't care for the
+ * sketch boxes at all... it'd be better if I just had a free canvas to play with"). This file
+ * is kept, trimmed to exactly what two callers still need, for ONE reason:
+ * `lib/notesFlowMigration.js`'s `migrateSketchesToBoxes` has to read an OLD page's stored
+ * `noteSketch` JSON (boxes, links, and the even older outline/positions shape `legacySource`
+ * migrates first) and convert it to real `noteAnchor` boxes + document-level arrows, on read,
+ * so no stored document can still contain a `noteSketch` node by the time it reaches the schema
+ * (which no longer declares that node type at all). `normalizeSketch`/`layoutSketch` are the two
+ * functions that migration calls; `edgePoint` is re-exported from `lib/notesArrows.js` for the
+ * new box-to-box arrows, unchanged, because the geometry question — where a ray from centre to
+ * centre crosses a rectangle's border — is identical for a sketch's own box and a `noteAnchor`.
+ * `notesSketchNode.js` (the schema node + interactive node view), `notesSketchEditor.js`
+ * (double-click/drag/connect inside a sketch's own canvas) and `notesSketchRender.js` (the SVG
+ * drawing of that canvas) are DELETED, not kept dormant — nothing reaches them any more.
  *
- * THE CANVAS OWNS EVERYTHING. Each box owns its OWN TEXT and its OWN POSITION; the arrows
- * are an explicit list of `{ from, to }` box references. There is no second representation,
- * so there is nothing to keep in sync and nothing to arbitrate. Concretely:
- *
- *   1. A box is created BY DOUBLE-CLICKING AN EMPTY SPOT ON THE CANVAS, right where the
- *      press landed, and it takes the caret immediately. That is the authoring surface.
- *      Selected text in the note can also be turned into a box in one click (the toolbar's
- *      Box button) — the same act reached from the keyboard.
- *   2. A box's text is edited IN THE BOX: a short LABEL and an optional longer BODY, two
- *      real fields in place over the box. No syntax, no prefix character, no pane.
- *   3. An arrow is drawn BY DRAGGING FROM ONE BOX TO ANOTHER. It is stored as an explicit
- *      `{ from, to }` — never inferred from a layout, never implied by an indent.
- *   4. Deleting a box takes EVERY ARROW THAT NAMED IT with it, at either end, in the same
- *      operation (`removeBox` is the only way a box is destroyed and it returns the arrows
- *      it took). A dangling arrow is the bug this rule exists to prevent — the
- *      TOMBSTONE-DELETES discipline this repo already applies to notebooks, applied here.
- *
- * ═══ ⛔ SUPERSEDED: "THE OUTLINE OWNS CONTENT, THE CANVAS OWNS ONLY POSITION" ═══════════
- *
- * The rule above REPLACES the rule this file shipped with on 2026-08-03 (B1400, PR #910;
- * project doc `claude/decision-2026-08-03-notes-sketch-mode-outline-owns-content-canvas-owns-
- * position.md`), which said the OUTLINE was the single source of truth and the canvas stored
- * nothing but position. That rule is DEAD, and the history is kept here rather than deleted
- * so nobody re-derives it: the outline was an indent-and-caret SYNTAX typed into a textarea,
- * and a person had to learn it before a single box appeared. Nobody sketches by writing a
- * structured list first. The owner used it and rejected it in one sentence — "if I could just
- * double click anywhere, even if I'm already writing text, that'd be better." So the outline
- * is no longer an authoring surface at all, and with it gone there is no second copy of the
- * content for the canvas to disagree with. An ordering is still DERIVED from the arrows
- * (`outlineFromSketch`) for the Markdown export and the accessible name — derived, on demand,
- * owned by nobody.
- *
- * ═══ A BOX HAS A SHORT LABEL AND AN OPTIONAL LONGER BODY ═══════════════════════════════
- *
- * Both live on the box and both are authored in the box. The body always DRAWS — on screen
- * and on paper alike — because now that the box is the authoring surface, hiding what you
- * just typed inside it would be absurd. That also removes the one place the screen and the
- * printed sheet used to differ (a chevron on screen, a detail list on paper): there is now a
- * single drawing, so PDF-PARITY costs nothing at all.
+ * Every EDIT function that used to live here (`addBox`/`updateBox`/`moveBox`/`removeBox`/
+ * `addLink`/`removeLink`/`boxAt`/`nextSpot`/`outlineFromSketch`/`defaultMint`) is deleted with
+ * them — migration only ever READS a sketch, once, and never authors or arranges one — per house
+ * style: code nothing calls is deleted, not hidden. See `docs/NOTES-CARRY-FORWARD.md` and this
+ * repo's git history for the full mechanism if a past decision needs re-deriving.
  */
 
-/* Layout constants. Kept here (not in the renderer) because layout is a pure decision and
- * the renderer is a pure translation of it — a test can assert a box moved without a DOM. */
+/* Layout constants. Kept here (not in the renderer, which is also gone) because layout is a
+ * pure decision — `migrateSketchesToBoxes` needs the same box sizes the old canvas drew. */
 export const BOX_W = 178;
 export const BOX_MIN_H = 38;
-export const PAD_X = 11;
 export const PAD_Y = 9;
 export const LINE_H = 16;
 export const BODY_LINE_H = 14;
 export const LABEL_WRAP = 23;      // characters per label line at the box's font size
 export const BODY_WRAP = 27;
 export const MARGIN = 10;
-export const GRIP_R = 6;
 
-/* The canvas is deliberately BIGGER than the boxes on it, and never smaller than this.
- * Double-clicking an empty spot is how a box is made, so a canvas that shrink-wrapped its
- * boxes would leave nowhere to double-click — the feature would run out of surface. */
+/* The canvas is deliberately BIGGER than the boxes on it, and never smaller than this — still
+ * needed so a migrated group's `layoutSketch(...).height` (used to stack multiple sketches
+ * vertically) matches what the old canvas would have reported. */
 export const SLACK_X = 130;
 export const SLACK_Y = 90;
 export const MIN_CANVAS_W = 560;
 export const MIN_CANVAS_H = 230;
 
-/** An empty sketch. */
-export const EMPTY_SKETCH = { boxes: [], links: [] };
-
 /* ---- defensive normalisation ---------------------------------------------------------
  *
- * Attributes arrive from a stored document, a paste, or another device's sync, so nothing
- * here trusts its shape. Anything unreadable is DROPPED rather than thrown on: one corrupt
- * sketch must not take a note's whole document with it. What is never silently dropped is a
- * VALID construct — a removal is always a consequence of the user deleting the box.
+ * Attributes arrive from a stored document, so nothing here trusts its shape. Anything
+ * unreadable is DROPPED rather than thrown on: one corrupt sketch must not take a note's whole
+ * document with it.
  */
 
 const str = (v) => (typeof v === "string" ? v : v == null ? "" : String(v));
@@ -83,9 +56,7 @@ const int = (v, d = 0) => (Number.isFinite(Number(v)) ? Math.trunc(Number(v)) : 
  *  It also MIGRATES a sketch stored under the superseded outline rule (B1400): an
  *  `outline` + `positions` pair becomes boxes that carry their own text at the coordinates
  *  the old automatic layout put them at, and the parent→child arrows that used to be
- *  implied by the indentation become real, explicit arrows. Nothing is lost and nothing
- *  moves on screen. The migration happens on READ, so opening a note does not rewrite it;
- *  the new shape is written the first time the sketch is genuinely edited. */
+ *  implied by the indentation become real, explicit arrows. */
 export function normalizeSketch(attrs) {
   const legacy = legacySource(attrs);
   const rawBoxes = legacy ? legacy.boxes : Array.isArray(attrs?.boxes) ? attrs.boxes : [];
@@ -123,15 +94,11 @@ export function normalizeSketch(attrs) {
   return { boxes, links };
 }
 
-/** True when a sketch carries nothing at all — used for the canvas's empty state. */
-export const isEmptySketch = (model) => !normalizeSketch(model).boxes.length;
-
 /* ---- the one-time migration off the superseded outline shape --------------------------
  *
  * Deliberately self-contained and used from nowhere else: the tree walk below is the ONLY
  * surviving piece of the outline-owns-content design, and it exists so that a sketch the
- * owner already drew opens looking exactly as it did. Do not grow it back into a layout
- * engine — new boxes are placed where the user put them, full stop.
+ * owner already drew opens looking exactly as it did.
  */
 function legacySource(attrs) {
   const outline = Array.isArray(attrs?.outline) ? attrs.outline : null;
@@ -202,99 +169,12 @@ function legacySource(attrs) {
   return { boxes, links };
 }
 
-/* ---- minting -------------------------------------------------------------------------- */
-
-let counter = 0;
-/** Default id minter. Injectable so a test can assert on ids without stubbing globals. */
-export function defaultMint() {
-  counter += 1;
-  const rand = Math.random().toString(36).slice(2, 8);
-  return `sk_${Date.now().toString(36)}_${counter.toString(36)}_${rand}`;
-}
-
-/* ---- the edits. There are five, and this is all of them -------------------------------- */
-
-/** Rule (1): a box arrives at a point, with whatever text it was given (usually none).
- *  `x`/`y` are the box's TOP-LEFT in canvas units. Returns the new model AND the new id,
- *  because the caller's very next act is to put the caret in it. */
-export function addBox(model, { x = MARGIN, y = MARGIN, label = "", body = "" } = {}, mint = defaultMint) {
-  const m = normalizeSketch(model);
-  const box = {
-    id: mint(),
-    label: str(label),
-    body: str(body),
-    x: Math.max(0, Math.round(Number(x) || 0)),
-    y: Math.max(0, Math.round(Number(y) || 0)),
-  };
-  return { model: { boxes: [...m.boxes, box], links: m.links }, id: box.id };
-}
-
-/** Rule (2): the text of ONE box changes and nothing else does. */
-export function updateBox(model, id, { label, body } = {}) {
-  const m = normalizeSketch(model);
-  if (!m.boxes.some((b) => b.id === id)) return m;
-  return {
-    boxes: m.boxes.map((b) => (b.id === id
-      ? { ...b, label: label === undefined ? b.label : str(label), body: body === undefined ? b.body : str(body) }
-      : b)),
-    links: m.links,
-  };
-}
-
-/** A drag: one box's coordinates change and nothing else does. The other boxes come back as
- *  THE SAME OBJECTS — a test can assert identity, which is stronger than "the text looks
- *  the same". */
-export function moveBox(model, id, x, y) {
-  const m = normalizeSketch(model);
-  if (!m.boxes.some((b) => b.id === id)) return m;
-  const nx = Math.max(0, Math.round(x));
-  const ny = Math.max(0, Math.round(y));
-  return { boxes: m.boxes.map((b) => (b.id === id ? { ...b, x: nx, y: ny } : b)), links: m.links };
-}
-
-/** Rule (4), in one function: THE CASCADE. A box takes every arrow that named it — at
- *  either end — in the same operation, and says how many it took, so the caller can say so
- *  out loud (LOUD-FAILURE's quiet cousin: a consequence the user did not ask for is stated).
- *
- *  This is the ONLY way a box is destroyed. Filtering the arrows at draw time instead would
- *  leave the dangling reference in the document, where it still syncs to the other device
- *  and comes back the moment a box with that id reappears. */
-export function removeBox(model, id) {
-  const m = normalizeSketch(model);
-  if (!m.boxes.some((b) => b.id === id)) return { model: m, removedLinks: [] };
-  const removedLinks = m.links.filter((l) => l.from === id || l.to === id);
-  return {
-    model: {
-      boxes: m.boxes.filter((b) => b.id !== id),
-      links: m.links.filter((l) => l.from !== id && l.to !== id),
-    },
-    removedLinks,
-  };
-}
-
-/** Rule (3): an arrow is EXPLICIT. Refused rather than silently ignored, with a reason. */
-export function addLink(model, from, to) {
-  const m = normalizeSketch(model);
-  const ids = new Set(m.boxes.map((b) => b.id));
-  if (!ids.has(from) || !ids.has(to)) return { model: m, added: false, reason: "an arrow needs two boxes" };
-  if (from === to) return { model: m, added: false, reason: "a box cannot point at itself" };
-  if (m.links.some((l) => l.from === from && l.to === to)) return { model: m, added: false, reason: "that arrow is already there" };
-  return { model: { boxes: m.boxes, links: [...m.links, { from, to }] }, added: true, reason: "" };
-}
-
-/** Remove one arrow by its ends. */
-export function removeLink(model, from, to) {
-  const m = normalizeSketch(model);
-  return { boxes: m.boxes, links: m.links.filter((l) => !(l.from === from && l.to === to)) };
-}
-
 /* ---- text measurement + layout --------------------------------------------------------- */
 
 /** Wrap a string to lines of at most `width` characters, breaking on spaces where it can.
  *  Deliberately a CHARACTER estimate rather than a real text measurement: layout has to be
- *  computable in a pure function, in a unit test, and identically on paper — a DOM-measured
- *  box would make the printed sheet disagree with the screen, which is the whole thing
- *  PDF-PARITY forbids. The box is drawn with the same estimate, so the text fits it. */
+ *  computable in a pure function, in a unit test — a DOM-measured box would make the migrated
+ *  layout disagree with what the old canvas actually drew. */
 export function wrapText(text, width) {
   const words = str(text).split(/\s+/).filter(Boolean);
   if (!words.length) return [];
@@ -311,7 +191,7 @@ export function wrapText(text, width) {
   return lines;
 }
 
-/** One box's size. The body is ALWAYS counted: it always draws, on both surfaces. */
+/** One box's size. The body is ALWAYS counted: it always drew, on both surfaces, before. */
 export function boxSize(box) {
   const labelLines = wrapText(box.label, LABEL_WRAP);
   const bodyLines = box.body ? wrapText(box.body, BODY_WRAP) : [];
@@ -321,7 +201,8 @@ export function boxSize(box) {
 
 /** Where the arrow from one box to another crosses the SOURCE box's border.
  *  A ray from centre to centre, clipped to the rectangle — which is what makes an arrow
- *  land correctly no matter where the user dragged the two boxes relative to each other. */
+ *  land correctly no matter where the two boxes sit relative to each other. Re-exported by
+ *  `notesArrows.js` for the new box-to-box arrows; the geometry is identical either way. */
 export function edgePoint(box, towardX, towardY) {
   const cx = box.x + box.w / 2;
   const cy = box.y + box.h / 2;
@@ -335,7 +216,8 @@ export function edgePoint(box, towardX, towardY) {
 }
 
 /** THE layout: the model → boxes with real sizes, arrows with real endpoints, and a canvas
- *  that is always roomier than its contents so there is somewhere to double-click. */
+ *  that is always roomier than its contents — `migrateSketchesToBoxes` uses `.height` to stack
+ *  multiple converted sketch groups without overlap. */
 export function layoutSketch(model) {
   const m = normalizeSketch(model);
   const boxes = m.boxes.map((b) => {
@@ -369,78 +251,4 @@ export function layoutSketch(model) {
   const width = Math.max(MIN_CANVAS_W, ...boxes.map((b) => b.x + b.w + MARGIN + SLACK_X));
   const height = Math.max(MIN_CANVAS_H, ...boxes.map((b) => b.y + b.h + MARGIN + SLACK_Y));
   return { boxes, edges, width: Math.round(width), height: Math.round(height) };
-}
-
-/** Which box a canvas point is over — topmost last-drawn wins, same as the SVG paints. */
-export function boxAt(layout, x, y) {
-  for (let i = layout.boxes.length - 1; i >= 0; i -= 1) {
-    const b = layout.boxes[i];
-    if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b;
-  }
-  return null;
-}
-
-/** Where a box added from the KEYBOARD goes: under the lowest one, at the left margin.
- *  A double-click says where; a button press has to be told, and "below what is there" is
- *  the answer that never lands on top of something. */
-export function nextSpot(model) {
-  const m = normalizeSketch(model);
-  if (!m.boxes.length) return { x: MARGIN, y: MARGIN };
-  let bottom = MARGIN;
-  for (const b of m.boxes) bottom = Math.max(bottom, b.y + boxSize(b).h);
-  return { x: MARGIN, y: Math.round(bottom + 24) };
-}
-
-/* ---- the DERIVED ordering (export + the accessible name) -------------------------------
- *
- * Nobody owns this. It is computed on demand from the arrows so a sketch can be written
- * down as a nested list — for the Markdown export and for the sentence a screen reader is
- * given. It is emphatically NOT an authoring surface, and there is no way back from it into
- * the model: that was the superseded design.
- */
-
-/** `{ lines: [{ id, depth, label, body }], extra: [{from,to}] }` — every box exactly once,
- *  nested under the first arrow that can act as its parent without making a cycle; every
- *  arrow the nesting could not express reported in `extra` so the caller can write it out. */
-export function outlineFromSketch(model) {
-  const m = normalizeSketch(model);
-  const order = new Map(m.boxes.map((b, i) => [b.id, i]));
-  const parentOf = new Map();
-  const used = new Set();
-
-  for (const l of m.links) {
-    if (parentOf.has(l.to)) continue;                 // one nesting parent per box
-    let walker = l.from;
-    let cyclic = false;
-    for (let guard = 0; walker && guard <= m.boxes.length; guard += 1) {
-      if (walker === l.to) { cyclic = true; break; }
-      walker = parentOf.get(walker);
-    }
-    if (cyclic) continue;
-    parentOf.set(l.to, l.from);
-    used.add(`${l.from} ${l.to}`);
-  }
-
-  const kids = new Map();
-  for (const [child, parent] of parentOf) {
-    if (!kids.has(parent)) kids.set(parent, []);
-    kids.get(parent).push(child);
-  }
-  for (const list of kids.values()) list.sort((a, b) => order.get(a) - order.get(b));
-
-  const byId = new Map(m.boxes.map((b) => [b.id, b]));
-  const lines = [];
-  const emitted = new Set();
-  const emit = (id, depth) => {
-    if (emitted.has(id)) return;
-    emitted.add(id);
-    const b = byId.get(id);
-    lines.push({ id, depth, label: b.label, body: b.body });
-    for (const child of kids.get(id) || []) emit(child, depth + 1);
-  };
-  for (const b of m.boxes) if (!parentOf.has(b.id)) emit(b.id, 0);
-  for (const b of m.boxes) emit(b.id, 0);            // anything left is inside a cycle
-
-  const extra = m.links.filter((l) => !used.has(`${l.from} ${l.to}`));
-  return { lines, extra };
 }

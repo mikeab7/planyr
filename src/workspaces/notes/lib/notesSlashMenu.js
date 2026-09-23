@@ -50,7 +50,6 @@ export const SLASH_COMMANDS = [
   { id: "table", label: "Table", hint: "Rows and columns", keywords: ["table", "grid"] },
   { id: "image", label: "Image", hint: "Pick a picture", keywords: ["image", "picture", "photo"] },
   { id: "attachment", label: "Attachment", hint: "Any file — PDF, XLSX, DWG", keywords: ["file", "attach", "pdf", "xlsx", "dwg", "upload"] },
-  { id: "sketch", label: "Sketch", hint: "Boxes and arrows", keywords: ["sketch", "diagram", "box", "chart", "flow"] },
   { id: "divider", label: "Divider", hint: "A horizontal rule", keywords: ["divider", "rule", "hr", "line", "separator"] },
   { id: "callout", label: "Callout", hint: "A coloured note block", keywords: ["callout", "note", "info", "warning", "admonition"] },
   { id: "toggle", label: "Toggle", hint: "A section that folds away", keywords: ["toggle", "collapse", "fold", "details", "accordion"] },
@@ -142,7 +141,6 @@ export function applySlashCommand(editor, id, range, { onPickFile } = {}) {
     case "taskList": return chain().toggleTaskList().run();
     case "table": return chain().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
     case "divider": return chain().setHorizontalRule().run();
-    case "sketch": return chain().boxSelection().run();
     case "callout": return chain().setNoteCallout().run();
     case "toggle": return chain().setNoteToggle().run();
     case "image": case "attachment":

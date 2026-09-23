@@ -1049,43 +1049,55 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
     computation the width pin's `pageWidthPinExtentPx` already contributes to (`min-height` on
     `.sheet`), never a second mechanism. `NoteToolbar.jsx`'s "Page height" `FormatMenu` sits
     beside "Page width"; its one option is "Fit to content" — the pin's own way back.
-- **SKETCH MODE — four files, and ONE rule that makes them make sense.** *The **CANVAS** owns
-  everything: each **box owns its own text AND its own position**, and the arrows are an explicit
-  list of `{from,to}` box references.* There is no second representation, so there is nothing to
-  keep in sync and nothing to arbitrate. **Double-clicking an empty spot makes a box right there
-  and puts the caret in it** (it works while you are writing somewhere else — the press takes
-  focus); the toolbar's **Box** button turns words you already wrote into a box; **dragging from a
-  box's dot onto another box draws an arrow** (no mode to turn on first), and **click-to-connect**
-  does the same without a drag — ↗ Arrow, click the source box (it highlights, a dashed line
-  follows the pointer), click the target, and the mode ends (B1834032; Escape, ↗ Arrow again, or
-  a press on bare canvas cancels; keyboard: focus a box + Enter, twice); boxes stay draggable; and **deleting a box takes every arrow that
-  named it, at either end** (TOMBSTONE-DELETES — `removeBox` is the only way a box is destroyed and
-  it reports what it took). A box is a short **label** plus an optional longer **body**, both
-  authored IN the box and both always drawn — screen and paper carry the same thing. And it is a
-  **node in the ProseMirror schema**, not a store beside it — which is what makes it persist, sync,
-  print and export with no new plumbing. If a change starts wanting a second store, that is the
-  wrong branch.
-  - **⛔ SUPERSEDED, and the history is kept rather than deleted:** the rule above REPLACES *"the
-    OUTLINE owns content, the CANVAS owns only position"* (B1400 as first shipped, 2026-08-03;
-    project doc `claude/decision-2026-08-03-notes-sketch-mode-outline-owns-content-canvas-owns-position.md`).
-    That design made you type an indented outline into a textarea — an indent-and-caret **syntax**
-    you had to learn before a single box appeared. The owner used it and rejected it. **The outline
-    pane is gone and must not come back** (two authoring paths is the accumulation PANEL-BREVITY
-    forbids). An ordering is still *derived* from the arrows for the Markdown export and the
-    accessible name — derived, on demand, owned by nobody. A sketch **saved** under the old shape
-    (`outline` + `positions`) still opens: `normalizeSketch` migrates it on read, arrows and all.
-  - `lib/notesSketchModel.js` — PURE: the five edits (add · edit · move · connect · delete-with-
-    cascade), the layout, the derived ordering, and the one-time migration off the old shape.
-  - `lib/notesSketchRender.js` — the ONE drawing builder, used by `renderHTML` **and** the node
-    view. **No colours at all** — class names only, so the same drawing themes on screen and
-    prints black on white. PDF-PARITY by construction; the only screen/paper difference is the
-    grip you drag an arrow out of, which carries no content.
-  - `lib/notesSketchNode.js` — the `noteSketch` schema node + the node-view shell + the `boxSelection`
-    command behind the toolbar's Box button.
-  - `lib/notesSketchEditor.js` — the interactive half (double-click to create, in-box fields, drag,
-    arrow drag), behind a **cached dynamic import** for the same bundle reason as `notesCloud.js`: a
-    note with no sketch never downloads it. A sketch paints from the pure spec first and becomes
-    interactive after.
+- **⛔ SKETCH MODE IS RETIRED (NEW-2, 2026-09-22) — READ THIS BEFORE `lib/notesSketchModel.js`
+  OR `lib/notesArrows.js`.** The owner, the same day NEW-1 shipped: *"I don't care for the sketch
+  boxes at all... it'd be better if I just had a free canvas to play with."* The interactive
+  sketch canvas — its own schema node, its own node view, its own double-click/drag surface —
+  is GONE, deleted rather than hidden: the old sketch node view, its interactive editor and its
+  SVG drawing builder no longer exist as files, and the schema no longer declares a `noteSketch`
+  node at all. There is now **one canvas and one box model**: every placed thing is a
+  `noteAnchor` (see `lib/notesAnchorNode.js` below), and an arrow connects two of THEM directly.
+  - `lib/notesSketchModel.js` — kept, TRIMMED to only what one caller still needs:
+    `migrateSketchesToBoxes` (`lib/notesFlowMigration.js`) has to read an old page's stored
+    `noteSketch` JSON — including the even-older `outline`+`positions` shape — and convert it to
+    real boxes + arrows, on read, so no stored document can reach the (now sketch-less) schema
+    still carrying one. `normalizeSketch` (with its legacy-outline migration) and `layoutSketch`
+    are what migration calls; `edgePoint` is re-exported by `lib/notesArrows.js` for the new
+    arrows, unchanged, because the geometry (where a ray from centre to centre crosses a
+    rectangle's border) is identical for a sketch's own box and a `noteAnchor`. Every EDIT
+    function the interactive canvas used (`addBox`/`updateBox`/`moveBox`/`removeBox`/`addLink`/
+    `removeLink`/`boxAt`/`nextSpot`/`outlineFromSketch`) is deleted with it — migration only ever
+    READS a sketch, once, never authors or arranges one.
+  - `lib/notesArrows.js` — **arrows between rich-text boxes, on the DOCUMENT** (a doc attribute,
+    `doc.attrs.arrows`, the same mechanism `density`/`pageWidth` already use — so an arrow
+    persists, syncs, prints and exports with no new plumbing). `normalizeArrows` is the ONE
+    reader (drops a dangling/self/duplicate arrow, same defensiveness `normalizeSketch` always
+    had); `addArrow`/`removeArrow` are the pure edits, `addArrow` REFUSED WITH A REASON
+    (LOUD-FAILURE) rather than silently doing nothing; `cascadeRemoveArrows` is
+    TOMBSTONE-DELETES for arrows — called from `lib/notesAnchorNode.js`'s own box-delete paths
+    (`dropEmptyAnchors`/`removeNoteAnchor`/`removeNoteAnchors`) so no caller can delete a box
+    around it. Two ways to connect two boxes, both wired in `components/NoteEditor.jsx` /
+    `lib/notesAnchorNode.js`: **drag from a box's own connect-dot onto another box** (the node
+    view — a direct command dispatch, no React round trip needed since it is local to two DOM
+    elements), and **click-to-connect** (`NoteToolbar.jsx`'s ↗ Arrow button — click the source
+    box, click the destination, arrow created, mode exits; Escape or a press on bare canvas
+    cancels — carried over from PR #1812/B1834032, now pointed at `noteAnchor` boxes directly
+    instead of boxes inside a sketch).
+  - **Non-destructive migration, in `lib/notesFlowMigration.js`'s `migrateSketchesToBoxes`:** a
+    page holding one or more `noteSketch` nodes opens with each sketch's boxes converted to real
+    `noteAnchor` boxes at the SAME relative layout (`layoutSketch`'s own geometry), the same
+    text, placed clear of the flow-migration bundle and stacked vertically if there is more than
+    one sketch; sketch links become `{from,to}` arrows on the SAME converted ids
+    (`mig_<sketch-box-id>`, minted deterministically since arrows need real ids before any later
+    `ensureNoteAnchorIds` backfill could run). Nothing is rewritten in storage until the user
+    edits (the same `hasUserInputRef` gate NEW-1's flow migration already relies on).
+  - **⛔ SUPERSEDED, and the history is kept rather than deleted:** the interactive-canvas rule
+    that used to stand here — *"the CANVAS owns everything: each box owns its own text and its
+    own position, and the arrows are an explicit list of `{from,to}` box references"* — itself
+    replaced an even older *"the OUTLINE owns content, the CANVAS owns only position"* rule
+    (B1400 as first shipped, 2026-08-03; project doc `claude/decision-2026-08-03-notes-sketch-
+    mode-outline-owns-content-canvas-owns-position.md`). Both are gone as authoring surfaces;
+    `normalizeSketch` still migrates either shape, once, on read.
 - `lib/notesBlockKeys.js` — **Backspace at the START of a block takes ONE predictable step, at
   EVERY block boundary** (B36051, then B291536 which made it true everywhere rather than in one
   place — **its header carries the full table of what the key does at each boundary; read that

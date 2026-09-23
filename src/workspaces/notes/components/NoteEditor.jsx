@@ -35,9 +35,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
-import { anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, anchorPosAtSelection, fitAnchorBox, placeAnchor } from "../lib/notesAnchorNode.js";
+import { ANCHOR_MIN_HEIGHT, anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, anchorPosAtSelection, fitAnchorBox, placeAnchor } from "../lib/notesAnchorNode.js";
+import { edgePoint as arrowEdgePoint } from "../lib/notesArrows.js";
 import { isBlankDoublePress } from "../lib/notesBlankPaper.js";
-import { migrateFlowBody } from "../lib/notesFlowMigration.js";
+import { migrateFlowBody, migrateSketchesToBoxes } from "../lib/notesFlowMigration.js";
 import {
   applyMarquee, boxesInMarquee, latchGesture, marqueeRect, moveSelection, nudgeDelta,
   toggleSelection,
@@ -377,6 +378,23 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
    sides reversed — the content ate the chrome. The rule the z-index encodes: a control drawn ON the
    box belongs to the box's chrome layer. */
 .planyr-note .ProseMirror .planyr-anchor-grip, .planyr-note .ProseMirror .planyr-anchor-h { z-index: 1; }
+/* ⛔ THE CONNECT DOT — DRAG-FROM-THE-DOT, ONE OF THE TWO WAYS TO DRAW AN ARROW (NEW-2). Visible
+   only once selected (same rule as the resize handles above: an affordance shown on every box
+   all the time is noise). A box marked as the live drop target while a connect-drag is in
+   flight gets its own ring so the drop is unambiguous before release.
+   ⛔ PARKED PAST THE SE CORNER, NOT ON THE RIGHT EDGE (CHROME-NEVER-EATS-A-PRESS) — its first
+   position, right:-6px top:50%, was IDENTICAL to the east resize handle's own position below,
+   and handles paint after this element, so on a text box (east+west handles) the resize handle
+   silently won every press and the dot was unreachable by any pointer — caught only by a
+   harness that actually drove the drag rather than asserting the element existed. Sitting
+   further out than the se handle (right:-6px bottom:-6px) clears every one of the eight handle
+   positions above, for a text box or a picture box alike. */
+.planyr-note .ProseMirror .planyr-anchor-connect { position: absolute; right: -16px; bottom: -16px; width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--accent-notes); background: var(--surface-raised); cursor: crosshair; opacity: 0; pointer-events: none; z-index: 1; }
+.planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-connect { opacity: 1; pointer-events: auto; }
+.planyr-note .ProseMirror .planyr-anchor[data-arrow-target="1"] { outline: 2px solid var(--accent-notes); outline-offset: 2px; }
+/* Click-to-connect's own source highlight — a box waiting to be the arrow's start point. */
+.planyr-note .ProseMirror .planyr-anchor[data-arrow-source="1"] { border-color: var(--accent-notes); border-style: dashed; }
+.planyr-note [data-testid="note-mat"][data-arrow-mode="1"] { cursor: crosshair; }
 /* ⛔ EIGHT HANDLES, PAINTED FROM ONE RULE PLUS EIGHT POSITIONS (NEW-PICTURE-CANVAS / NEW-2).
    Bluebeam's and Office's convention: small square grips on every corner and every edge, visible
    only while the box is SELECTED — never on hover, which B434418 removed for good reasons. The
@@ -492,64 +510,6 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
 .planyr-note .planyr-note-file-size { flex: 0 0 auto; font-size: 11.5px; font-weight: 600; color: var(--text-tertiary); }
 .planyr-note .planyr-note-file-get { flex: 0 0 auto; height: 22px; padding: 0 10px; border-radius: ${RADIUS.pill}px; border: 1px solid var(--accent-notes); background: transparent; color: var(--accent-notes-text); font: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer; }
 .planyr-note .planyr-note-file-get:disabled { border-color: var(--danger-text); color: var(--danger-text); cursor: default; }
-
-/* SKETCH MODE (lib/notesSketchNode.js). The drawing carries CLASS NAMES and no colours at
-   all, so the ink is entirely here — which is what lets the same drawing theme with the app
-   on screen and print black-on-white on paper. PDF-PARITY: lib/notesPrint.js mirrors every
-   rule below at paper weight; change one, change both. */
-.planyr-note .planyr-sketch-host { position: relative; border: 1px solid var(--border-default); border-radius: ${RADIUS.control}px; background: var(--surface-raised); padding: 8px; }
-.planyr-note .planyr-sketch-host.ProseMirror-selectednode { outline: 2px solid var(--accent-notes); outline-offset: 1px; }
-/* ⛔ THE PANEL NEVER SPILLS OUT OF ITS OWN CONTAINER, however narrow that container is. Its
-   three buttons are ~190px of content, so in anything narrower they used to overflow to the
-   LEFT and paint on top of whatever was beside them — his "the labels overlap their own
-   buttons". A zero min-width lets the flex row shrink instead of pushing, and the row scrolls
-   sideways at the point where wrapping stops helping. Belt to the brace of not putting a
-   sketch inside a text box in the first place (see boxSelection). */
-.planyr-note .planyr-sketch-host { min-width: 0; overflow: hidden; }
-.planyr-note .planyr-sketch-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 7px; min-width: 0; max-width: 100%; overflow-x: auto; }
-.planyr-note .planyr-sketch-btn { flex: 0 0 auto; }
-.planyr-note .planyr-sketch-kind { font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-tertiary); }
-.planyr-note .planyr-sketch-btn { height: 24px; padding: 0 9px; border: 1px solid var(--border-default); border-radius: ${RADIUS.pill}px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 11.5px; font-weight: 650; cursor: pointer; }
-.planyr-note .planyr-sketch-btn.is-on { background: var(--accent-notes); border-color: var(--accent-notes); color: var(--on-accent-notes); }
-.planyr-note .planyr-sketch-btn:disabled { opacity: 0.45; cursor: default; }
-.planyr-note .planyr-sketch-status { font-size: 11.5px; font-weight: 600; color: var(--text-secondary); }
-.planyr-note .planyr-sketch-draw { overflow-x: auto; }
-.planyr-note .planyr-sketch-draw.is-linking { cursor: crosshair; }
-.planyr-note .planyr-sketch-draw.is-connecting,
-.planyr-note .planyr-sketch-draw.is-connecting .planyr-sketch-surface { cursor: crosshair; }
-.planyr-note .planyr-sketch-draw.is-connecting .planyr-sketch-node { cursor: pointer; }
-.planyr-note .planyr-sketch-draw.is-connecting .planyr-sketch-node:hover .planyr-sketch-box { stroke: var(--accent-notes); stroke-width: 1.8; }
-.planyr-note .planyr-sketch-node.is-link-source .planyr-sketch-box { stroke: var(--accent-notes); stroke-width: 2.6; stroke-dasharray: 5 3; }
-.planyr-note .planyr-sketch-canvas { display: block; max-width: 100%; height: auto; touch-action: none; }
-.planyr-note .planyr-sketch-surface { fill: transparent; cursor: crosshair; }
-.planyr-note .planyr-sketch-box { fill: var(--surface-page); stroke: var(--border-strong); stroke-width: 1.2; }
-.planyr-note .planyr-sketch-node { cursor: grab; }
-.planyr-note .planyr-sketch-node:focus { outline: none; }
-.planyr-note .planyr-sketch-node:focus .planyr-sketch-box,
-.planyr-note .planyr-sketch-node.is-selected .planyr-sketch-box { stroke: var(--accent-notes); stroke-width: 2.2; }
-.planyr-note .planyr-sketch-label { fill: var(--text-primary); font-size: 12.5px; font-weight: 650; }
-.planyr-note .planyr-sketch-body { fill: var(--text-secondary); font-size: 11px; font-weight: 500; }
-.planyr-note .planyr-sketch-grip { cursor: crosshair; }
-.planyr-note .planyr-sketch-grip-hit { fill: transparent; }
-.planyr-note .planyr-sketch-grip-dot { fill: var(--surface-raised); stroke: var(--accent-notes); stroke-width: 1.6; }
-.planyr-note .planyr-sketch-edge { stroke: var(--border-strong); stroke-width: 1.4; fill: none; }
-.planyr-note .planyr-sketch-edge-hit { stroke: transparent; stroke-width: 12; fill: none; cursor: pointer; }
-.planyr-note .planyr-sketch-edge-g.is-selected .planyr-sketch-edge { stroke: var(--accent-notes); stroke-width: 2.4; }
-.planyr-note .planyr-sketch-edge-g.is-selected .planyr-sketch-head { fill: var(--accent-notes); }
-.planyr-note .planyr-sketch-head { fill: var(--border-strong); stroke: none; }
-.planyr-note .planyr-sketch-pending { stroke: var(--accent-notes); stroke-width: 1.6; stroke-dasharray: 5 3; fill: none; pointer-events: none; }
-.planyr-note .planyr-sketch-empty { margin: 0; padding: 12px 2px; color: var(--text-tertiary); font-size: 12.5px; font-style: italic; }
-.planyr-note .planyr-sketch-offline { margin: 6px 0 0; color: var(--danger-text); font-size: 12px; font-weight: 600; }
-.planyr-note .planyr-sketch-hint { margin: 5px 0 0; color: var(--text-tertiary); font-size: 11.5px; }
-/* The words are edited IN the box: two plain fields laid exactly over it (no dialog boxes —
-   house rule). It is positioned against the host, which is why the host is relative. */
-.planyr-note .planyr-sketch-edit { position: absolute; z-index: 3; box-sizing: border-box; display: flex; flex-direction: column; gap: 3px; padding: 5px; border: 2px solid var(--accent-notes); border-radius: 8px; background: var(--surface-page); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18); }
-.planyr-note .planyr-sketch-edit-label,
-.planyr-note .planyr-sketch-edit-body { width: 100%; box-sizing: border-box; border: none; background: transparent; color: var(--text-primary); font: inherit; padding: 1px 3px; }
-.planyr-note .planyr-sketch-edit-label { font-size: 12.5px; font-weight: 650; }
-.planyr-note .planyr-sketch-edit-body { font-size: 11px; font-weight: 500; color: var(--text-secondary); resize: vertical; line-height: 1.28; }
-.planyr-note .planyr-sketch-edit-label:focus,
-.planyr-note .planyr-sketch-edit-body:focus { outline: none; }
 
 /* Search marking is a decoration, never a mark — it is not in the document. */
 .planyr-note .note-search-hit { background: var(--warn-bg); box-shadow: 0 0 0 1px var(--warn-text) inset; border-radius: 2px; }
@@ -1220,12 +1180,16 @@ export default function NoteEditor({
 }) {
   /* Initial content read ONCE, here. Not in an effect — see fix (2) in the header.
    *
-   * ⛔ MIGRATED ON THE WAY IN, NEVER ON THE WAY OUT (NEW-1). `migrateFlowBody` bundles any real
-   * flow content an old page still carries at its top level into one box before the editor
-   * ever sees it — see that file's own header. Because this runs here, before `useEditor`, the
-   * migrated shape is simply what the editor STARTS with; it is not a transaction, so
-   * `hasUserInputRef` below still gates the first save on a real, trusted user action. */
-  const [initialDoc] = useState(() => migrateFlowBody((typeof loadDoc === "function" ? loadDoc() : readPage(pageId)) || EMPTY_DOC));
+   * ⛔ MIGRATED ON THE WAY IN, NEVER ON THE WAY OUT (NEW-1, then NEW-2). `migrateSketchesToBoxes`
+   * converts any retired sketch into real boxes + arrows FIRST, then `migrateFlowBody` bundles
+   * any real flow content an old page still carries at its top level into one box — see that
+   * file's own header for why the order is load-bearing. Because both run here, before
+   * `useEditor`, the migrated shape is simply what the editor STARTS with; neither is a
+   * transaction, so `hasUserInputRef` below still gates the first save on a real, trusted user
+   * action. */
+  const [initialDoc] = useState(() => migrateFlowBody(migrateSketchesToBoxes(
+    (typeof loadDoc === "function" ? loadDoc() : readPage(pageId)) || EMPTY_DOC,
+  )));
   const [find, setFind] = useState({ term: "", count: 0, index: 0 });
 
   /* The pending snapshot is PLAIN JSON captured at edit time, so the flush never has to
@@ -1965,6 +1929,31 @@ export default function NoteEditor({
   const selRef = useRef(selection);
   selRef.current = selection;
 
+  /* ═══ CLICK-TO-CONNECT — THE OTHER WAY TO DRAW AN ARROW (NEW-2) ═══════════════════════════
+   *
+   * ⛔ THREE STATES, THE SAME SHAPE SKETCH MODE'S OWN `connecting` USED: `null` (off) ·
+   * `{ from: null }` (armed — the "+ Arrow" button was pressed, waiting for the box the arrow
+   * starts from) · `{ from: id }` (waiting for the box it points to). Kept as its OWN piece of
+   * state rather than folded into `selection`/`editingId` — connecting two boxes is not the
+   * same act as selecting one, and conflating them is exactly the mistake B434416 already
+   * un-did once for select-vs-edit. */
+  const [arrowConnect, setArrowConnect] = useState(null);
+  const arrowConnectRef = useRef(null);
+  arrowConnectRef.current = arrowConnect;
+
+  const toggleArrowMode = useCallback(() => {
+    setArrowConnect((prev) => (prev ? null : { from: null }));
+  }, []);
+
+  /* Escape cancels click-to-connect, from anywhere — the same standing exemption Escape
+   * already has everywhere else in this module (`UNGATED_KEYS`, notesKeyScope.js). */
+  useEffect(() => {
+    if (!arrowConnect) return undefined;
+    const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); setArrowConnect(null); } };
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
+  }, [arrowConnect]);
+
   /* ---- THE PAGE SITS ON A BLUEBEAM-STYLE WORKSPACE (NEW-1, owner report 2026-09-21) --------
    *
    * ⛔ THIS REPLACES THE CSS-`zoom` TEXT-SIZE CONTROL (B342994, `lib/notesZoom.js`, now deleted),
@@ -2243,6 +2232,11 @@ export default function NoteEditor({
          * paint also runs from the editor's own transaction handler, outside React's render. */
         if (String(editingRef.current || "") === id) el.setAttribute("data-editing", "1");
         else el.removeAttribute("data-editing");
+        /* ⛔ THE ARROW'S SOURCE BOX, HIGHLIGHTED WHILE CLICK-TO-CONNECT IS WAITING FOR THE
+         * SECOND CLICK (NEW-2) — the visual feedback the acceptance bar asks for, painted the
+         * same way and for the same reason as `data-selected`/`data-editing` above. */
+        if (arrowConnectRef.current?.from === id) el.setAttribute("data-arrow-source", "1");
+        else el.removeAttribute("data-arrow-source");
       }
       const curPos = editor.state.selection.from;
       const moved = lastCaretPosRef.current !== null && curPos !== lastCaretPosRef.current;
@@ -2267,7 +2261,7 @@ export default function NoteEditor({
     editor.on("focus", paint);
     editor.on("blur", paint);
     return () => { editor.off("transaction", paint); editor.off("focus", paint); editor.off("blur", paint); };
-  }, [editor, selection, editingId, docTick]);
+  }, [editor, selection, editingId, docTick, arrowConnect]);
 
   const clearSelection = useCallback(() => {
     setSelection((s) => (s.size ? new Set() : s));
@@ -2580,11 +2574,11 @@ export default function NoteEditor({
      * browser to put a caret on, so the press did nothing at all — indistinguishable from a
      * broken feature, and the exact spot somebody had just tried to use. So we put the caret
      * in it ourselves rather than assume the browser will. */
-    /* ⛔ A NODE THAT OWNS ITS OWN GESTURES KEEPS THEM. A sketch canvas has its own
-     * double-click ("make a box right here"), and a picture and an attachment are objects you
-     * select rather than page you write on. The mat claiming those presses would put an
-     * anchored block ON TOP of a drawing — caught by the sketch rows of `verify-notes`, which
-     * is why this list exists rather than being assumed. */
+    /* ⛔ A NODE THAT OWNS ITS OWN GESTURES KEEPS THEM. A picture and an attachment are objects
+     * you select rather than page you write on. The mat claiming those presses would put an
+     * anchored block ON TOP of one. ⛔ SKETCH MODE'S OWN VERSION OF THIS GUARD IS GONE (NEW-2,
+     * 2026-09-22) — there is no longer a second kind of node with its own double-click to
+     * protect; a box is the only thing on the page besides plain content now. */
     const inBlock = el.closest(".planyr-anchor");
     /* ⛔ …BUT NOT WHEN THAT OBJECT IS ITSELF INSIDE A POSITIONED BOX (NEW-PICTURE-CANVAS), AND
      * THIS IS THE PAIR OF LINES THAT MADE THE WHOLE FEATURE INERT. The rule above was written when a
@@ -2599,14 +2593,29 @@ export default function NoteEditor({
      * ids and the right cursors, and `handlesFor` returned all eight — every static reading of
      * this feature said it worked. What said otherwise was eight rows of "400×200 → 400×200".
      * This is CHROME-NEVER-EATS-A-PRESS's mirror image: not chrome swallowing a press, but a
-     * guard clause swallowing it before the chrome could ever be armed.
-     *
-     * The sketch keeps its unconditional bail — it owns its own double-click, and B391075 already
-     * establishes that a sketch never goes inside a box, so the case cannot arise. */
+     * guard clause swallowing it before the chrome could ever be armed. */
     if (!inBlock && el.closest(".planyr-note-image, .planyr-note-file")) return;
-    if (el.closest(".planyr-sketch-host")) return;
 
     if (inBlock) {
+      /* ⛔ CLICK-TO-CONNECT TAKES THE PRESS FIRST, BEFORE ANY OF THE ORDINARY BOX LOGIC BELOW
+       * (NEW-2). While armed, a press on a box is never about selecting or editing it — it is
+       * naming an arrow endpoint. First box clicked becomes the source; a second, DIFFERENT box
+       * completes the arrow and exits the mode; clicking the source again is a no-op reminder
+       * (matching sketch mode's own "That is the box the arrow starts from" behaviour) rather
+       * than a silent do-nothing. */
+      if (arrowConnectRef.current) {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = inBlock.getAttribute("data-anchor-id");
+        if (!id) return;
+        if (arrowConnectRef.current.from == null) {
+          setArrowConnect({ from: id });
+        } else if (arrowConnectRef.current.from !== id) {
+          editor.commands.addNoteArrow(arrowConnectRef.current.from, id);
+          setArrowConnect(null);
+        }
+        return;
+      }
       /* ⛔ A PRESS ON A BOX THAT IS PART OF A SELECTION MOVES THE WHOLE SELECTION (B421494), and
        * a press on any other box CLEARS it — anything else leaves somebody dragging one box
        * while nine still look selected. Shift toggles that box in or out instead. */
@@ -2719,6 +2728,15 @@ export default function NoteEditor({
      * two real down/up pairs do not always raise a native `dblclick`; see carry-forward trap
      * 32) — creates anything. `beginBlankGesture` is told which of the two a stationary press
      * should become. */
+    /* ⛔ A PRESS ON BARE CANVAS CANCELS CLICK-TO-CONNECT (NEW-2), matching sketch mode's own
+     * rule. Armed-but-nothing-picked or source-already-picked, either way a press that is not
+     * on a box means "never mind". */
+    if (arrowConnectRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      setArrowConnect(null);
+      return;
+    }
     const press = { t: e.timeStamp || Date.now(), x: e.clientX, y: e.clientY };
     const doublePress = e.detail >= 2 || isBlankDoublePress(lastBlankPressRef.current, press);
     lastBlankPressRef.current = doublePress ? null : press;   // consumed, or the new "previous"
@@ -4055,8 +4073,35 @@ export default function NoteEditor({
    * matters — content nested inside a box is not "the page is empty" by definition. */
   const pageEmpty = !!editor && !editor.isDestroyed && (() => {
     let has = false;
-    editor.state.doc.forEach((n) => { if (n.type.name === "noteAnchor" || n.type.name === "noteSketch") has = true; });
+    editor.state.doc.forEach((n) => { if (n.type.name === "noteAnchor") has = true; });
     return !has;
+  })();
+
+  /* ⛔ ARROWS BETWEEN BOXES (NEW-2) — the on-screen edges, recomputed at render time from the
+   * live document rather than kept as a second piece of state. `shouldRerenderOnTransaction`
+   * already re-renders this component on every transaction, including a box's move/resize
+   * commit, so this stays current with no separate wiring — and it means an arrow tracks its
+   * boxes once a drag COMMITS, not smoothly mid-drag (a stated, deliberate simplification: the
+   * live-drag preview only ever mattered for the box being dragged, and it already moves). */
+  const arrowEdges = !editor || editor.isDestroyed ? [] : (() => {
+    const boxes = new Map();
+    editor.state.doc.forEach((n) => {
+      if (n.type.name === "noteAnchor" && n.attrs.aid) {
+        boxes.set(String(n.attrs.aid), { x: n.attrs.x, y: n.attrs.y, w: n.attrs.w, h: n.attrs.h || ANCHOR_MIN_HEIGHT });
+      }
+    });
+    const out = [];
+    for (const a of editor.state.doc.attrs.arrows || []) {
+      const from = boxes.get(String(a.from));
+      const to = boxes.get(String(a.to));
+      if (!from || !to) continue;
+      const fromCentre = { x: from.x + from.w / 2, y: from.y + from.h / 2 };
+      const toCentre = { x: to.x + to.w / 2, y: to.y + to.h / 2 };
+      const p1 = arrowEdgePoint(from, toCentre.x, toCentre.y);
+      const p2 = arrowEdgePoint(to, fromCentre.x, fromCentre.y);
+      out.push({ key: `${a.from}→${a.to}`, x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y });
+    }
+    return out;
   })();
 
   return (
@@ -4084,6 +4129,8 @@ export default function NoteEditor({
            furniture), so the toolbar renders nothing rather than a dead control. */
         zoomIndicator={zoomPct !== VIEW_ZOOM_DEFAULT ? zoomLabel(zoomPct) : null}
         onZoomReset={resetView}
+        arrowMode={!!arrowConnect}
+        onToggleArrow={toggleArrowMode}
       />
       <FindBar term={find.term} count={find.count} index={find.index} onStep={stepFind} onClear={onClearSearch} />
 
@@ -4185,6 +4232,7 @@ export default function NoteEditor({
           const inTable = !!e.target.closest("table");
           setDocMenu({ x: e.clientX, y: e.clientY, boxId: box?.getAttribute("data-anchor-id") || null, inTable });
         }}
+        data-arrow-mode={arrowConnect ? "1" : undefined}
         ref={scrollerRef}
         /* ⛔ B1203504 — `alignItems: "center"` is the WHOLE of how the sheet is centred: it is
            still `width: "100%"` capped by `maxWidth` below, so on a narrow pane it still fills
@@ -4578,6 +4626,35 @@ export default function NoteEditor({
               is this module's most-repeated defect. */}
           <div style={{ position: "relative" }}>
             <EditorContent editor={editor} />
+            {/* ⛔ ARROWS BETWEEN BOXES (NEW-2) — same frame as `note-marquee` below ("the
+                editor's own frame", i.e. document/note-body-relative pixels), so an arrow needs
+                no coordinate conversion of its own: a box's stored `x`/`y`/`w`/`h` are already
+                in this frame. `overflow: visible` because an arrow between two boxes can run
+                past this element's own box on either axis; `pointerEvents: "none"` so it never
+                steals a press meant for the page underneath it. Painted BELOW the boxes
+                (lower z-index than `.planyr-anchor`'s 2) so a line never draws over a box's own
+                words. */}
+            {arrowEdges.length ? (
+              <svg
+                data-testid="note-arrows"
+                aria-hidden="true"
+                style={{ position: "absolute", left: 0, top: 0, width: 1, height: 1, overflow: "visible", pointerEvents: "none", zIndex: 1 }}
+              >
+                <defs>
+                  <marker id="planyr-arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M0 0L10 5L0 10z" fill="var(--accent-notes)" />
+                  </marker>
+                </defs>
+                {arrowEdges.map((e) => (
+                  <line
+                    key={e.key}
+                    x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2}
+                    stroke="var(--accent-notes)" strokeWidth={2}
+                    markerEnd="url(#planyr-arrowhead)"
+                  />
+                ))}
+              </svg>
+            ) : null}
             {/* ⛔ "Double-click anywhere to start a note." (NEW-1) — the sheet's own empty
                 state, replacing the per-paragraph placeholder that used to sit on the flow
                 body's first line. `pointerEvents: "none"` is load-bearing: this sits ON TOP of
@@ -4629,6 +4706,21 @@ export default function NoteEditor({
             className="planyr-pending-caret"
             style={{ left: pendingPlace.caret.left, top: pendingPlace.caret.top, height: pendingPlace.caret.height }}
           />
+        ) : null}
+        {/* ⛔ CLICK-TO-CONNECT'S OWN STATUS LINE (NEW-2) — the "visual feedback during the flow"
+            the acceptance bar asks for, matching sketch mode's own status strip in spirit. */}
+        {arrowConnect ? (
+          <div
+            data-testid="note-arrow-status"
+            aria-live="polite"
+            style={{
+              position: "absolute", left: 16, top: 8, zIndex: 70, pointerEvents: "none",
+              background: "var(--accent-notes)", color: "var(--on-accent)", fontSize: 12, fontWeight: 700,
+              padding: "4px 10px", borderRadius: RADIUS.pill,
+            }}
+          >
+            {arrowConnect.from == null ? "Click the box the arrow starts from." : "Click the box the arrow points to."}
+          </div>
         ) : null}
         {/* ⛔ THE RIGHT-SIDE REACH SPACER IS GONE (NEW-1, 2026-09-21) — and so is `MAT_EXTRA_RIGHT`
             and `matReachWidth` with it. It existed to extend a bounded scroller's `scrollWidth` so
