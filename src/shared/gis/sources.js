@@ -127,6 +127,13 @@ export const GIS_SOURCES = {
     coverage: "national",
     tier: "monitored-exception",
     lastVerified: "2026-06-21",
+    // NEW-1 (2026-09-23) — re-checked live: the endpoint is reachable, CORS is fine, and it
+    // returns real polygons at the owner's own Goose Creek coordinates (confirmed by direct
+    // query at 29.8122/-95.0026, both sublayers). No code defect, and still no production
+    // alternative (B209505 stands). This is a `/Test/` staging host with no mirror to fall
+    // back to, so it gets the same generous timeout FEMA (`flood`) already has — the default
+    // 9 s cap is tuned for burst-503 recovery, not for a lesser-resourced staging host.
+    timeoutMs: 20000,
   },
 
   oilgas: {

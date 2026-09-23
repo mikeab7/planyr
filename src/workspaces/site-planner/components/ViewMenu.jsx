@@ -99,7 +99,18 @@ function GridNumInput({ value, min = 1, max = 1000, style, onCommit }) {
   );
 }
 
-export default function ViewMenu({ open, onToggle, settings, setSnap, patchSettings, pal, counts, elementsReady = true }) {
+export default function ViewMenu({
+  open, onToggle, settings, setSnap, patchSettings, pal, counts, elementsReady = true,
+  // NEW-4 (2026-09-23) — placed reference overlays (PDF/DXF/image, incl. the pinned map
+  // capture), so the same show/hide the Overlays rail tab already offers is reachable here
+  // too. `overlays` is the site model's `sheetOverlays` array; `showAerial`/`onToggleAerial`
+  // mirror the rail tab's special-cased pinned map-reference row (it toggles the plan-level
+  // `showAerial` flag, never its own `visible` field — see SitePlanner.jsx's own References
+  // panel row for why); `onToggleOverlay(id, nextVisible)` patches an ordinary overlay's
+  // `visible` field. Optional so a caller that doesn't have overlay state yet (a test, or a
+  // future host) renders exactly as before — the section is simply absent.
+  overlays = [], showAerial = true, onToggleAerial, onToggleOverlay,
+}) {
   const row = { display: "flex", gap: 7, alignItems: "center", cursor: "pointer", fontSize: FONT_SIZE.control, color: pal.ink, padding: "3px 0" };
   const numInput = { width: 52, padding: "4px 6px", fontSize: 12, fontFamily: "inherit", color: pal.ink, background: "var(--surface-raised)", border: `1px solid ${pal.panelLine}`, borderRadius: RADIUS.sm };
   const sectionHead = { fontSize: 9.5, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: pal.muted, margin: "9px 0 3px" };
@@ -123,7 +134,12 @@ export default function ViewMenu({ open, onToggle, settings, setSnap, patchSetti
   );
 
   return (
-    <div data-wheelscroll="1" style={{ width: open ? 232 : "auto", background: "var(--surface-overlay)", border: `1px solid ${pal.panelLine}`, borderRadius: RADIUS.md, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden" }}>
+    // NEW-3 (2026-09-23) — same fix as the Layers card beside it (SitePlanner.jsx's own
+    // "NEW-1" note on that card): `flexDirection:"column"` + `maxHeight:"100%"` here, paired
+    // with `overflowY:"auto"`/`flex:1`/`minHeight:0` on the body below, is what lets the BODY
+    // scroll instead of the card silently growing past the bottom of the window with no way
+    // to reach the last rows.
+    <div data-wheelscroll="1" style={{ width: open ? 232 : "auto", background: "var(--surface-overlay)", border: `1px solid ${pal.panelLine}`, borderRadius: RADIUS.md, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "100%", minHeight: 0 }}>
       <button data-testid="view-menu-btn" onClick={onToggle} aria-expanded={open}
         title="What's shown on this drawing — hide groups temporarily, plus grid & snap"
         style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 11px", border: "none", background: "transparent", color: pal.ink, cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 700 }}>
@@ -149,7 +165,7 @@ export default function ViewMenu({ open, onToggle, settings, setSnap, patchSetti
         <span style={{ flex: 1 }} /> <span style={{ color: pal.muted, fontWeight: 500 }}>{open ? "▾" : "▸"}</span>
       </button>
       {open && (
-        <div style={{ padding: "2px 11px 10px" }}>
+        <div style={{ padding: "2px 11px 10px", overflowY: "auto", flex: 1, minHeight: 0 }}>
           {/* The same fact again with the card open, where the collapsed chip is not visible —
               and here it carries the one-click way back, so "I hid something and I want it all
               back" never requires remembering which rows were ticked. */}
@@ -201,6 +217,29 @@ export default function ViewMenu({ open, onToggle, settings, setSnap, patchSetti
                 </>
               )}
               {groups.otherRows.map((r) => groupRow(r))}
+            </>
+          )}
+
+          {/* NEW-4 (2026-09-23) — one show/hide row per placed reference overlay (PDF/DXF/
+              image, plus the pinned map capture), the same set + the same visibility the
+              Overlays rail tab already controls. A name that doesn't fit truncates with an
+              ellipsis (the row's own title carries the full name); this never duplicates the
+              rail tab's opacity/rotation/lock controls, only the one toggle asked for here. */}
+          {overlays.length > 0 && (
+            <>
+              <div style={sectionHead}>Overlays</div>
+              {overlays.map((o) => {
+                const isAerialRow = !!o.fromMap;
+                const on = isAerialRow ? showAerial : o.visible !== false;
+                const toggle = (checked) => (isAerialRow ? onToggleAerial && onToggleAerial(checked) : onToggleOverlay && onToggleOverlay(o.id, checked));
+                return (
+                  <label key={o.id} style={row} title={o.name}>
+                    <input type="checkbox" data-testid={`view-overlay-${o.id}`} checked={on}
+                      onChange={(e) => toggle(e.target.checked)} />
+                    <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.name}</span>
+                  </label>
+                );
+              })}
             </>
           )}
 
