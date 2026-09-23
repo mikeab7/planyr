@@ -550,6 +550,30 @@ Two more found since, each worth its own line because each returned a confident 
    function is called from more than one site, check EVERY call site's actual argument shape,
    not just the ones that were tested.
 
+45. **⛔ `schedulePush` IS A SILENT NO-OP UNTIL `cloudClient` IS SET, AND FAKE TIMERS DO NOT
+   RELIABLY DRIVE FAKE-INDEXEDDB'S OWN ASYNC CHAIN (B1865408, 2026-09-23) — TWO TRAPS THAT COST
+   A FIRST DRAFT OF THE SAME TEST TWICE OVER.** Building a store-level reproduction of a
+   same-window sync race:
+   (a) A first draft called `writePage(...)` (to arm the debounce timer for "trigger 2") BEFORE
+   `startNotesSync()`. `commitPageWrite`'s `schedulePush()` checks `syncOn()`, which requires
+   `cloudClient` — a module-level variable set only PARTWAY THROUGH `startNotesSync`, not by
+   `setNotesScope` alone. So that early write armed no timer at all; "trigger 2" never existed,
+   and the test passed for the wrong reason (there was only ever one trigger). **Write the page
+   AFTER an initial `startNotesSync()` on an empty tree has resolved** (fast, nothing to push) —
+   it establishes `cloudClient` and matches the real report anyway: the workspace is already
+   mounted and syncing before a person creates a page and starts typing.
+   (b) `vi.useFakeTimers()` + `vi.advanceTimersByTimeAsync(0)` did not reach a gated write at
+   all — measured directly (a debug run with real timers): the path from a sync call to the
+   actual `notes_pages` write crosses **~18 real macrotask ticks** inside `fake-indexeddb`'s own
+   async simulation (this module's merge-base cache reads/writes IndexedDB on the same path), and
+   fake timers do not drive those unless every one of them happens to be a zero-delay `setTimeout`
+   the fake clock is told to advance past — which is not knowable in advance and was not the
+   case here. **Real timers throughout, with a real polling wait (`waitUntil`), closed it** — the
+   cost is a few real seconds per test, accepted for a deterministic reproduction over a flaky
+   fake-timer guess. Same species as trap 39's save-debounce-outliving-the-assertion, one layer
+   down: it is not the APP's debounce that outlives the check here, it is a DEPENDENCY's internal
+   async simulation.
+
 See also `ui-audit/TRAPS.md`, and the named rules **FOREGROUND-OR-VOID** (a background tab cannot
 be measured — not its clock, not its pixels) and **COUNT-EVERY-KIND**.
 

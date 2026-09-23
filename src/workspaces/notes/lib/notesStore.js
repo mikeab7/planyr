@@ -1001,6 +1001,10 @@ let busy = false;
 let pushTimer = 0;
 let pollTimer = 0;
 let listening = false;
+// PUSH-SELF-RACE (NEW-1, see `pushPending`'s own header): only one push may be in flight at
+// once; `pushQueued` remembers that more was owed while the lock was held.
+let pushRunning = false;
+let pushQueued = false;
 let onTreeChanged = null;
 
 const PUSH_DEBOUNCE_MS = 1200;
@@ -1795,10 +1799,56 @@ async function seed({ full }) {
  * and well below what a genuinely-stale device reconnecting after days away would produce. */
 const BULK_PUSH_ALERT_THRESHOLD = 5;
 
-/** Push everything this device owes, each write guarded on the revision it was based on.
- *  A refusal is a CONFLICT, never a retry that clobbers. */
+/* ⛔ PUSH-SELF-RACE (NEW-1, 2026-09-23) — ONLY ONE PUSH MAY BE IN FLIGHT AT ONCE, IN ONE WINDOW.
+ *
+ * THE FALSE CONFLICT THIS CLOSES, reported directly: create a new note, type a few bullet
+ * points, and the whole-document "also changed in another of your windows" banner fires —
+ * one user, one window, a note created moments ago. There is no realtime echo to suppress here
+ * (unlike the Site Planner's `elementSync.js`, Notes has no per-keystroke wire at all — see
+ * `notesCloud.js`'s own header); `judgeConflict`'s semantic-equality suppression (identical /
+ * litter-only) is unchanged and still runs on every settle. The actual mechanism is narrower
+ * and specific to Notes' poll-and-push architecture:
+ *
+ * `pushPending` is reached from TWO triggers that share no lock — `schedulePush`'s own debounce
+ * timer, called directly, and `seed`'s own tail call, reached the instant `busy` is cleared
+ * (BEFORE that call, not after it resolves — see `seed`'s own body). `busy` only ever serialises
+ * `seed()` against itself: `refreshNotesSync` checks it, but the debounce timer does not go
+ * through `refreshNotesSync` at all. So a page created and typed into the moment the workspace
+ * mounts — while `startNotesSync`'s own initial full seed is still a real network round trip in
+ * flight — can have BOTH triggers land while the OTHER is mid-push: two concurrent pushes for
+ * the SAME page, guarded on the SAME base revision each read before either had written back. For
+ * an existing page the loser is simply refused; for a page's first-ever push (`baseRev == null`)
+ * the loser's INSERT collides on the primary key. Either way the loser then asks whether the two
+ * copies genuinely disagree — and for a page's very first push, no merge base has been recorded
+ * yet to narrow that per-paragraph (`resolveDivergence` needs one), so it fell straight through
+ * to the whole-document banner over content a single window wrote to itself.
+ *
+ * THE FIX IS A LOCK, NOT A RETRY. A call that arrives while a push is already running does not
+ * start a second network round trip against a `sync` ledger the first one has not finished
+ * updating — it records that more is owed (`pushQueued`) and returns; the in-flight pass, once
+ * done, drains that by running once more, which is what lets a page typed into WHILE the lock
+ * was held still reach the cloud without racing anything. */
 async function pushPending() {
   if (!syncOn()) return true;
+  if (pushRunning) { pushQueued = true; return true; }
+  pushRunning = true;
+  let ok;
+  try {
+    ok = await pushOnce();
+  } finally {
+    pushRunning = false;
+  }
+  if (pushQueued) {
+    pushQueued = false;
+    return (await pushPending()) && ok;
+  }
+  return ok;
+}
+
+/** The actual push pass — everything this device owes, each write guarded on the revision it
+ *  was based on. A refusal is a CONFLICT, never a retry that clobbers. Never call this
+ *  directly; `pushPending` above is the reentrancy-safe entry point every caller must use. */
+async function pushOnce() {
   const c = await cloud();
   let ok = true;
 
@@ -1816,8 +1866,21 @@ async function pushPending() {
     if (doc == null) { sync.pages[id] = { ...sync.pages[id], dirty: false, auto: false }; continue; }
     const r = await c.pushPage(client(), id, doc, sync.pages[id].rev);
     if (r.ok) {
-      sync.pages[id] = { rev: r.rev, dirty: false, purged: false, auto: false };
-      await recordMergeBase(id, doc, r.rev);   // NEW-1: this device and the server just agreed
+      /* ⛔ THE DOC JUST PUSHED IS A SNAPSHOT, NOT NECESSARILY WHAT IS ON DISK RIGHT NOW (NEW-1,
+       * found while closing the push-self-race above). `doc` was read BEFORE the awaited
+       * network call — if this SAME page was written again while that request was in flight
+       * (an edit landing mid-push, or the reentrancy-guard's own drained follow-up racing this
+       * exact page), unconditionally clearing `dirty` here would mark a page fully synced when
+       * local storage already holds MORE than the server just received: the newer content
+       * would sit on this device, believed synced, and never reach the cloud until another
+       * edit happened to touch the page again. Comparing against a FRESH read is what tells
+       * "nothing changed since" from "something did" — `recordMergeBase` always uses the doc
+       * that is actually now on the server (this call's own `doc`), which is correct either
+       * way; only the dirty flag and whether another push is owed depend on the comparison. */
+      const stillCurrent = c.sameDoc(doc, readPage(id));
+      sync.pages[id] = { rev: r.rev, dirty: !stillCurrent, purged: false, auto: stillCurrent ? false : wasAuto };
+      await recordMergeBase(id, doc, r.rev);   // NEW-1: this device and the server just agreed on `doc`
+      if (!stillCurrent) schedulePush();       // more local content is owed — make sure it lands
       continue;
     }
     if (r.conflict) {
