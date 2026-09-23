@@ -27,6 +27,7 @@ import { gisCache as defaultCache } from "./gisCache.js";
 import { identifyJurisdiction, identifyRoadAuthority } from "./jurisdiction.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { fetchArcgisJson, gisErrorMessage, pLimit, GIS_MAX_GET_URL } from "./gisFetch.js";
+import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { classifyCcn } from "./ccnClassify.js";
 import { isSfhaZone, isShadedXSubtype } from "./floodZone.js";
 import { screenProximity, fmtDistFt } from "./proximityScreen.js";
@@ -489,15 +490,31 @@ function countLayer(source, layer, rings, fetchJson) {
 // Log the REAL failure (status / url / ArcGIS code) so an opaque failure is debuggable
 // from the console; the UI still shows a clean message. Only fires for real endpoint
 // errors (a `diag` was attached) — test fakes throw plain Errors.
+//
+// NEW-1 (2026-09-23) — also reports a structured telemetry event (client_errors), never
+// just the console. A hard "couldn't reach the GIS source" the owner hits in production
+// used to leave NOTHING durable behind — only a console.warn nobody was watching — so a
+// prior report of this exact symptom (Goose Creek wetlands, B209505) could only be
+// closed on a live re-check, not on what actually happened at the moment he saw it. This
+// is STANDING RULE #2's "instrument it so it captures itself" disposition: the next
+// occurrence, of any source, leaves a queryable row (source id, http status, arcgis code,
+// url) instead of another unreproducible report.
 function logQueryFailure(sourceId, err) {
   const diag = err && err.diag;
-  if (!diag || typeof console === "undefined" || !console.warn) return;
-  console.warn(
-    `[siteAnalysis] "${sourceId}" query failed: ${err.message}` +
-    (diag.httpStatus ? `\n  http: ${diag.httpStatus}` : "") +
-    (diag.arcgisCode != null ? `\n  arcgis code: ${diag.arcgisCode}` : "") +
-    (diag.url ? `\n  url: ${diag.url}` : "")
-  );
+  if (!diag) return;
+  if (typeof console !== "undefined" && console.warn) {
+    console.warn(
+      `[siteAnalysis] "${sourceId}" query failed: ${err.message}` +
+      (diag.httpStatus ? `\n  http: ${diag.httpStatus}` : "") +
+      (diag.arcgisCode != null ? `\n  arcgis code: ${diag.arcgisCode}` : "") +
+      (diag.url ? `\n  url: ${diag.url}` : "")
+    );
+  }
+  try {
+    reportClientEvent("gis-query-failed", `"${sourceId}" query failed: ${err.message || ""}`, {
+      source: sourceId, httpStatus: diag.httpStatus, arcgisCode: diag.arcgisCode, url: diag.url,
+    });
+  } catch (_) { /* never let telemetry throw into the app */ }
 }
 
 function pendingFinding(source) {
@@ -886,7 +903,9 @@ const CO_ZONING_CAVEAT =
 // Orchestrator
 // ---------------------------------------------------------------------------
 // Display order for the assembled findings.
-const CATEGORY_ORDER = ["flood", "wetlands", "pipelines", "oilgas", "lpst", "epaCleanups", "growthFaults", "transmission", "substations", "jurisdiction", "road", "aadt", "rail", "airports", "zoning", "ccnWater", "ccnSewer"];
+// NEW-2 (2026-09-23, owner request) — Jurisdiction and Road authority lead the panel;
+// everything else keeps its prior relative order below them.
+const CATEGORY_ORDER = ["jurisdiction", "road", "flood", "wetlands", "pipelines", "oilgas", "lpst", "epaCleanups", "growthFaults", "transmission", "substations", "aadt", "rail", "airports", "zoning", "ccnWater", "ccnSewer"];
 
 /* Run the full screen against the active-parcel rings ([[ [lng,lat], ... ], ...]).
  * Returns { findings, generatedAt }. Findings are presence-first and each carries its

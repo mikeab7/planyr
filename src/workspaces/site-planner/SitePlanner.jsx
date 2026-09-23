@@ -24997,7 +24997,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <ViewMenu open={viewMenuOpen} onToggle={() => setViewMenuOpen((o) => !o)} settings={settings}
               setSnap={setSnap} patchSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} pal={PAL}
               counts={{ els, parcels: parcels.length, markups: markups.length, measures: measures.length, callouts: callouts.length }}
-              elementsReady={elementsReady} />
+              elementsReady={elementsReady}
+              // NEW-4 — the same overlay set + visibility the Overlays rail tab controls
+              // (References panel), reachable here too.
+              overlays={sheetOverlays} showAerial={showAerial} onToggleAerial={setShowAerial}
+              onToggleOverlay={(id, checked) => patchOverlay(id, { visible: checked })} />
           </div>
           {/* Layers control — same shared layers as the map finder. ALWAYS rendered
               (B693): an unlocated plan gets the control DISABLED with the plain reason
