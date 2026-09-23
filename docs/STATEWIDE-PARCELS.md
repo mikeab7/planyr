@@ -574,3 +574,83 @@ egress policy blocks**, so a Claude Code session can find the candidate but usua
 it. Verification comes from Michael's own browser or a Cowork session. (`gis.nola.gov` was
 re-probed from this sandbox while wiring `la_orleans` and returned HTTP 403 at the CONNECT tunnel —
 the block is live, not historical.)
+
+### Georgia — 24-county dispatch, 2026-09-23 (NEW-1)
+
+An owner chat block named 24 GA counties, most with a "confirmed" URL to probe and a handful as
+"Hub endpoints" (an ArcGIS Online item id to resolve). **11 wired, 13 not** — see `counties.js`'s
+own NEW-1 comment block (right after `ga_chatham`) and the matching `COUNTY_VERIFICATION` rows in
+`countiesProvenance.js` for the per-county evidence. This section is the fuller record.
+
+**Two of the dispatch's own "confirmed" answers were a WRONG SOURCE, caught only by checking real
+sampled attribute values against Georgia's own geography rather than trusting a title, a field
+name, or a plausible-looking hostname:**
+- **`ga_walton`'s given URL** (`services1.arcgis.com/TaXHPwWfIMuzJ7Ov/.../WaltonCountyPropeties`)
+  is Walton County, **FLORIDA** — sampled features read `OWN_CITY: "DEFUNIAK SPRINGS"`,
+  `OWN_STATE: "FL"` (DeFuniak Springs is Walton County FL's own county seat), and its own sibling
+  layers are named `Walton_County_Parcels_South_Walton...` — "South Walton" is the well-known
+  Florida Gulf Coast beach community, not anything in Georgia. An AGOL search for the REAL Georgia
+  Walton County turned up exactly one candidate, `Parcels_Walton_2019` under the Atlanta Regional
+  Commission's org — but the service is now dead (`FeatureServer?f=json` itself returns ArcGIS's
+  "Invalid URL" error, not just the layer), and it would have been stale (2019, >5yr) even if live.
+  **No live or reachable GA Walton parcel source could be found from this sandbox — not wired, not
+  even as a candidate.** A future session with open egress to `*.co.walton.ga.us`-style hosts, or
+  Michael's own browser, is the next step.
+- **`ga_paulding`'s Hub discovery hint** (`paulding-county-geospatial-hub-pcaud.hub.arcgis.com`) is
+  Paulding County, **OHIO** — its Parcels layer's native spatial reference is NAD83/Ohio South
+  (ftUS), and a sampled feature reads owner `WEST OHIO GAS COMPANY`. "pcaud" is Paulding County
+  Ohio's own Auditor (Ohio counties call their assessor-equivalent office the "County Auditor" —
+  a state-specific title). A DIFFERENT, genuinely-Georgia source was found instead and wired (see
+  `ga_paulding` in `counties.js` — a third-party nationwide-parcel-schema republication, not the
+  county's own GIS, recorded as such).
+
+**11 wired, all re-derived from this sandbox rather than copied from the dispatch's own URLs**
+(method: `ui-audit/discover-county-parcels.mjs`'s Hub-dataset and AGOL-item-search routes, both
+reachable here, plus direct ArcGIS-item/web-app-config resolution for two cases; every candidate
+was then independently confirmed — real feature count, `outSR=4326` extent checked against
+Georgia's own bbox, and for the two ambiguous near-duplicate cases below, sampled attribute values):
+DeKalb, Clarke (Athens), Columbia, Lowndes, Jackson, Bibb (Macon), Dougherty (Albany), Rockdale,
+Paulding, Bulloch (Statesboro), Camden. Two extra corrections beyond the wrong-state pair above:
+- **Rockdale** has TWO near-identical services on one AGOL org — a commercial real-estate broker's
+  personal mirror (`rbell@nationalland.com_CCIM`, National Land Realty) and the county's own GIS
+  staff account (`gary.morris_RockdaleGA`). Wired to the county's own copy.
+- **Bulloch**'s first AGOL hit, titled "Bulloch County Parcels" on the county's own GIS-atlas
+  service, holds only 136 features — the title-is-never-the-measurement trap (B1551616's own named
+  trap #3) applied to a genuinely county-published service, not just a third party's. The real
+  34,014-feature layer sits on a DIFFERENT service (`Parcelswithparcelno`) under the same account.
+- **Camden**'s dispatch-given MapServer path advertises `capabilities:"Map"` only (no Query — every
+  `/query` call 400s "Invalid URL"); the identical dataset is also published as a FeatureServer at
+  the same path with Query enabled, wired to that instead.
+
+**13 NOT wired — every one resolves to a real, county-owned host that this build environment's
+egress policy blocks, with no live response from THIS sandbox to confirm the schema (unlike
+`il_cook`/`pa_allegheny`/etc. elsewhere in this file, which carry a PRIOR live-browser measurement
+to lean on).** Georgia has no statewide composite to park an unpromoted county on (unlike
+Colorado's `CO_STATEWIDE_LAYER`), so — per this dispatch's own explicit validation rule ("if an
+endpoint is unreachable... do NOT wire broken endpoints") — none of these are in `COUNTIES_MAP` at
+all, not even as a `candidateUrl` row (there is nothing to promote FROM at that granularity without
+a fallback). Recorded here so a future session with open egress does not have to re-derive the URL:
+
+| County | Best-known host (found this session, not the dispatch's guess where they differ) | Note |
+|---|---|---|
+| Forsyth | `geo.forsythco.com/gis2/rest/services/Public/Tax_Parcel/FeatureServer/0` | ArcGIS-registry-confirmed path is `/gis2/`, not the dispatch's `/gis/` — likely a server migration since the dispatch's own info was gathered. |
+| Henry | `arcgis.co.henry.ga.us/server/rest/services/Parcels/MapServer/12` | Dispatch's own URL; no better candidate found. Also unreached from Michael's own browser 2026-09-11 (B1583297, as `gis.co.henry.ga.us`). |
+| Cherokee | `gis.cherokeecountyga.gov/arcgis/rest/services/MainLayers/MapServer/1` | "Cherokee County Parcels Live Layer", published by the City of Canton, GA's own GIS org — a more specific, higher-confidence source than the dispatch's own guess. |
+| Clayton | `weba.co.clayton.ga.us:5443/server/rest/services/TaxAssessor/Parcels/MapServer/0` | ArcGIS-registry-confirmed (differs from the dispatch's `gis.claytoncountyga.gov` guess). ⛔ A reachable AGOL candidate, "Find Locations in Clayton County Public Schools Owned Tax Parcels", was REJECTED — only 99 features, a schools-owned subset, not the county's fabric. |
+| Coweta | `cccjcgiswa.coweta.ga.us/arcgis/rest/services/Parcels/FeatureServer/0` | ArcGIS-registry-confirmed (differs from the dispatch's `coweta-gis-web.coweta.ga.us` guess). |
+| Glynn | `webadaptor.glynncounty-ga.gov/webadaptor/rest/services/Parcels/Parcels/FeatureServer/0` | ArcGIS-registry-confirmed (differs from the dispatch's `gis-web.glynncounty-ga.gov` guess — a different hostname). |
+| Liberty | `gis.libertycountyga.com/arcgis/rest/services/ParcelsCache/MapServer/0` | ArcGIS-registry-confirmed path is `ParcelsCache`, not the dispatch's guessed `Parcels`. |
+| Bryan | `bryangis.bryan-county.org/arcgis/rest/services/PropertyDetails/MapServer/0` | ArcGIS-registry-confirmed path is `PropertyDetails`, not the dispatch's guessed `Parcels`. |
+| Long | `maps.crc.ga.gov/crcarcgis/rest/services/Long/LongParcels/MapServer/0` | Matches the dispatch's own URL exactly; independently confirmed via the ArcGIS registry (Coastal Regional Commission). |
+| Screven | `maps.crc.ga.gov/crcarcgis/rest/services/Screven/ScrevenParcels/MapServer/0` | Matches the dispatch's own URL. A reachable AGOL alternate ("Parcels - GA - Screven County", `services.arcgis.com/ISpzx3B5ZsVA6e1Z/...`) exists but its own service root 400s "Invalid URL" — dead, not usable. |
+| Cobb | `gis.cobbcounty.gov/gisserver/rest/services/tax/taxassessorsdaily/mapserver/0` | Resolved by walking the county's own public "Cobb County Parcel Viewer" Web AppBuilder app (item `e22d8c597b4e4762bcd2caa6127696e4`) → its webmap (`b4fc89d1ace44027b37036d874a1f727`) → its "Parcels" operational layer. Also unreached from Michael's own browser 2026-09-11 (B1583297). A reachable AGOL candidate, "Cobb_Parcels" (owner `Smyrna_GA`), was REJECTED — its extent covers only the Smyrna area, not the whole county (17,572 features against a county with several hundred thousand). |
+| Bartow | `www.bartowgis.org/arcgis/rest/services/AGOServices/BartowLand/FeatureServer/2` | Resolved by walking the dispatch's own web-app id (`baef84e2cf524176aee5491f187b2b5a`, "BartowPublicMap") → its webmap (`0a183eb91a47498dbbb5b6eb5d24e320`) → its "Tax Parcels" operational layer. |
+| Walton | *(none found — see the wrong-state correction above)* | The dispatch's own URL is Florida's Walton County; the one AGOL hit for the real Georgia county is a dead, stale (2019) service. |
+
+Every host above returned `CONNECT tunnel failed, response 403` when probed directly from this
+sandbox (confirmed live while compiling this table, 2026-09-23) — the same egress-allowlist wall
+this file documents everywhere else. None of the four hostname-discovery corrections above
+(Forsyth/Clayton/Coweta/Glynn/Liberty/Bryan differing from the dispatch's own guess) could be
+independently re-verified for the same reason; they are recorded because the ArcGIS Online item
+registry that names them is itself a more current, checkable source than the dispatch's own guess,
+not because either was fetched and read.

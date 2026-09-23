@@ -148,6 +148,56 @@ export const COUNTY_VERIFICATION = {
     verifiedOn: "2026-09-10",
     verifiedNote: "VERIFIED LIVE from this sandbox: 309,658 parcel polygons, count query 304ms, 16 populated fields, esriGeometryPolygon. Also independently surfaced in this repo's own statewide-parcel probe (docs/STATEWIDE-PARCELS.md, 'unlinked hits' table) as a real county publisher, corroborating the county provenance.",
   },
+  /* ═══ NEW-1 (2026-09-23) — 11 more Georgia counties, all re-derived and verified live from THIS
+   * sandbox (metadata + a real feature count + an outSR=4326 extent check against Georgia's own
+   * bbox — never trusted from a title or field name alone). Full session record, including the 13
+   * counties this dispatch named that could NOT be verified and the two wrong-source catches
+   * (Walton = Florida, the dispatch's Paulding hint = Ohio), is in
+   * docs/STATEWIDE-PARCELS.md's dated 2026-09-23 section. ═══ */
+  ga_dekalb: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 245,688 parcel polygons, esriGeometryPolygon, extent -84.35..-84.02 / 33.62..33.97 (matches DeKalb County around Decatur). Published by the county's own GIS org (AGOL owner DeKalbGISAdmin).",
+  },
+  ga_clarke: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 41,989 parcel polygons, esriGeometryPolygon, extent -83.54..-83.24 / 33.85..34.04 (matches Athens). Published by the Athens-Clarke unified government's own GIS staff account (accgov.com).",
+  },
+  ga_columbia: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 66,097 parcel polygons, esriGeometryPolygon, extent -82.44..-82.03 / 33.35..33.70 (matches Evans/Martinez, near Augusta). Published by the county's own GIS org (AGOL owner ColumbiaCountyGA_publisher) — a materially better source than the dispatch's own self-hosted URL (mapsonline.columbiacountyga.gov, blocked by this build environment's egress policy).",
+  },
+  ga_lowndes: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 52,558 parcel polygons, esriGeometryPolygon, extent -83.49..-83.02 / 30.62..31.03 (matches Valdosta). Published under a Southwest Georgia Regional Commission GIS account whose owner name references the county's own CAMA vendor (valorgis.com, the host the dispatch itself named as blocked).",
+  },
+  ga_jackson: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 45,046 parcel polygons, esriGeometryPolygon, extent -83.82..-83.35 / 33.97..34.30 (matches Jefferson, GA — Jackson County's own seat). Resolved via the ArcGIS Online item the dispatch's own Hub item id (cb6bbe781e324c3abf6e135ed1bc0a32) pointed at; the real polygon layer is id 9 on that service, not 0.",
+  },
+  ga_bibb: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 68,899 parcel polygons, esriGeometryPolygon, extent -83.89..-83.49 / 32.66..32.95 (matches Macon-Bibb). Resolved via the dispatch's own Hub item id (23ef5481f8f24e6aa6e22e7367a4cf32).",
+  },
+  ga_dougherty: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 38,007 parcel polygons, esriGeometryPolygon, extent -84.46..-83.98 / 31.44..31.65 (matches Albany). Resolved via the dispatch's own Hub item id (9729f520dfab47fab85484908994ef1f).",
+  },
+  ga_rockdale: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 36,856 parcel polygons, esriGeometryPolygon, extent -84.18..-83.91 / 33.53..33.79 (matches Conyers). ⛔ Two near-identical Rockdale services exist on the same AGOL org — a commercial real-estate broker's personal mirror (rbell@nationalland.com_CCIM) and this one, the county's own GIS staff account (gary.morris_RockdaleGA); wired to the county's own copy, not the broker's.",
+  },
+  ga_paulding: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "⛔ CORRECTS the dispatch's own discovery hint — the Hub host it named (paulding-county-geospatial-hub-pcaud.hub.arcgis.com) is Paulding County, OHIO (native SR NAD83/Ohio South (ftUS); a sampled feature reads owner 'WEST OHIO GAS COMPANY'), confirmed live from this sandbox. VERIFIED LIVE instead: 68,018 parcel polygons, esriGeometryPolygon, extent -85.05..-84.72 / 33.77..34.08 (matches Dallas, GA); sampled features read county='paulding', state2='ga'. This is a third-party nationwide-parcel-schema republication (AGOL owner mhackman_UofMD, a University of Maryland researcher account — field prefixes match the Regrid/Loveland national parcel schema), not the county's own GIS; recorded honestly rather than presented as an official source. Vintage 2022 (editingInfo), within this repo's 5-year staleness bar.",
+  },
+  ga_bulloch: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 34,014 parcel polygons, esriGeometryPolygon, extent -82.03..-81.43 / 32.15..32.65 (matches Statesboro). ⛔ REJECTED CANDIDATE on the same AGOL org (xxKKavhytNgFUeV5): a layer named 'Bulloch_County_GA_Atlas_WFL1' / 'Bulloch County Parcels' holds only 136 features — the B1551616 'title is never the measurement' trap, a stale/partial extract rather than the county's fabric.",
+  },
+  ga_camden: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 31,649 parcel polygons, esriGeometryPolygon, extent -81.94..-81.40 / 30.71..31.17 (matches Kingsland/St. Marys). ⛔ CORRECTS the dispatch's own URL: that MapServer path advertises capabilities:\"Map\" only (no Query — /query 400s 'Invalid URL'); the identical dataset is also published as a FeatureServer at the same path with Query enabled, wired here instead.",
+  },
   mi_oakland: {
     verifiedOn: "2026-09-10",
     verifiedNote: "The dispatch's own URL was truncated ('gisservices.oakgov.com... my capture truncated it'). Re-RESOLVED via the allowlisted arcgis.com search API (which reaches ArcGIS Online item metadata even for a host whose ORIGIN is blocked): item 'OC Tax Parcels (Public)', owner OCAGOAdmin (Oakland County's own GIS org) — layer 1 of EnterpriseOpenParcelDataMapService, distinct from layer 0 (Site Address), layer 2 (Right of Way) and layer 3 (Parcel History) on the same service; that resolution IS a live confirmation of the correct endpoint, even though gisservices.oakgov.com's own /query cannot be independently re-probed from this sandbox (blocked by egress policy). PIN/SITESTREETADDRESS come from the dispatch's own live-browser measurement (540ms/12 populated fields).",

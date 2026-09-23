@@ -722,6 +722,155 @@ const COUNTIES_RAW = {
     idField: "PIN", addrField: "PropAddres",
     help: "Chatham County (Savannah) parcels (county GIS, Esri-hosted). Search by PIN or a site address.",
   },
+
+  /* ═══ NEW-1 (2026-09-23) — 11 MORE GEORGIA COUNTIES WIRED, 13 DELIBERATELY NOT ═══════════════
+   * Dispatch: wire 24 named GA counties. Every county below was independently re-derived from
+   * this sandbox — not copied from the dispatch's own URLs — because two of the dispatch's own
+   * "confirmed" endpoints turned out to be a WRONG SOURCE that a naive wire would have shipped
+   * silently (the exact class of trap PERCEPTUAL-PARITY's sibling rules exist for):
+   *   - The dispatch's `ga_walton` URL (services1.arcgis.com/.../WaltonCountyPropeties) is
+   *     Walton County, FLORIDA — sampled features return OWN_CITY "DEFUNIAK SPRINGS", OWN_STATE
+   *     "FL" (DeFuniak Springs is Walton County FL's own seat). NOT Walton County, Georgia.
+   *   - The dispatch's `ga_paulding` discovery hint (paulding-county-geospatial-hub-pcaud.hub.
+   *     arcgis.com) is Paulding County, OHIO — its Parcels layer's native SR is NAD83/Ohio South
+   *     (ftUS) and a sample feature reads owner "WEST OHIO GAS COMPANY". A DIFFERENT, real GA
+   *     Paulding source was found instead (see ga_paulding below).
+   * Method: every WIRED row below was queried directly from THIS sandbox — metadata read, a real
+   * feature count, and `outSR=4326` extent bounds checked against Georgia's own bbox (never
+   * trusted from a title or a field name alone) — using `ui-audit/discover-county-parcels.mjs`
+   * (Hub dataset API + ArcGIS Online item search routes, both reachable here) plus direct
+   * ArcGIS-item/web-app-config resolution for two Hub-listed "web app" cases (Cobb, Bartow;
+   * see the `Verify: live` block on this item's `B#` in BACKLOG.md for exactly which route found
+   * which row). The 13 NOT wired (Forsyth, Henry, Cherokee, Clayton, Coweta, Glynn, Liberty,
+   * Bryan, Long, Screven, Cobb, Bartow, Walton) all resolve to a real, county-owned host that
+   * this build environment's egress policy blocks (the same wall documented at the top of this
+   * file for `il_cook`/`pa_allegheny`/etc.) — with NO live response of any kind from THIS sandbox
+   * to confirm the schema, unlike those rows (which carry a prior LIVE-BROWSER measurement to
+   * lean on). Georgia also has no statewide composite to park an unpromoted county on (unlike
+   * Colorado's `CO_STATEWIDE_LAYER`), so there is no honest way to ship a "candidate" row here —
+   * per this dispatch's own validation rule ("if an endpoint is unreachable... do NOT wire broken
+   * endpoints"), those 13 are recorded in `docs/STATEWIDE-PARCELS.md`'s dated 2026-09-23 section
+   * (candidate URL + how it was found) and left OUT of both `COUNTIES_RAW` and `COUNTIES_MAP_RAW`
+   * — a future session with open egress to a `*.gov`/`*.org` county host, or Michael's own
+   * browser, promotes them from that record. */
+  ga_dekalb: {
+    // VERIFIED LIVE 2026-09-23 from this sandbox: 245,688 parcel polygons, esriGeometryPolygon,
+    // extent -84.35..-84.02 / 33.62..33.97 (Decatur/DeKalb). Published by the county's own GIS
+    // org (AGOL owner DeKalbGISAdmin). No situs-address field on this layer (assessment schema
+    // only — ParcelID, ZONING, LANDUSE, valuation columns; no ADDRESS/SITEADDRESS column at all).
+    state: "GA", label: "DeKalb County, GA",
+    layerUrl: "https://services2.arcgis.com/IxVN2oUE9EYLSnPE/arcgis/rest/services/Tax_Parcels_2023/FeatureServer/2",
+    idField: "ParcelID",
+    help: "DeKalb County tax parcels (county GIS, Esri-hosted). Search by parcel ID or a site address.",
+  },
+  ga_clarke: {
+    // VERIFIED LIVE 2026-09-23 from this sandbox: 41,989 parcel polygons, esriGeometryPolygon,
+    // extent -83.54..-83.24 / 33.85..34.04 (Athens). Published by the Athens-Clarke unified
+    // government's own GIS staff account (AGOL owner joanne.dejausserand@accgov.com_AthensClarke,
+    // accgov.com = Athens-Clarke County Government).
+    state: "GA", label: "Clarke County (Athens), GA",
+    layerUrl: "https://services2.arcgis.com/xSEULKvB31odt3XQ/arcgis/rest/services/Parcel/FeatureServer/0",
+    idField: "PARCEL_NO", addrField: "PAR_ADD",
+    help: "Athens-Clarke County parcels (unified government GIS, Esri-hosted). Search by parcel number or a site address.",
+  },
+  ga_columbia: {
+    // VERIFIED LIVE 2026-09-23 from this sandbox: 66,097 parcel polygons, esriGeometryPolygon,
+    // extent -82.44..-82.03 / 33.35..33.70 (Evans/Martinez, near Augusta). Published by the
+    // county's own GIS org (AGOL owner ColumbiaCountyGA_publisher). Attribute-light by design —
+    // PIN + calculated acreage only, no situs-address column on this layer.
+    state: "GA", label: "Columbia County, GA",
+    layerUrl: "https://services3.arcgis.com/XqCfDEcWKHtcTHsa/arcgis/rest/services/Parcels_Columbia_County_GA/FeatureServer/0",
+    idField: "PIN",
+    help: "Columbia County parcels (county GIS, Esri-hosted). Search by PIN or a site address.",
+  },
+  ga_lowndes: {
+    // VERIFIED LIVE 2026-09-23 from this sandbox: 52,558 parcel polygons, esriGeometryPolygon,
+    // extent -83.49..-83.02 / 30.62..31.03 (Valdosta). Published under a Southwest Georgia
+    // Regional Commission GIS account (AGOL owner sgrcgis_valor1 — "Valor" matches the county's
+    // own CAMA vendor, valorgis.com, that the dispatch itself named as blocked). Situs is split
+    // across HOUSE_NO/STREET_NAM with no combined column — addrField left unset.
+    state: "GA", label: "Lowndes County, GA",
+    layerUrl: "https://services3.arcgis.com/fYt1jp3hqamxgSvI/arcgis/rest/services/TaxParcel/FeatureServer/0",
+    idField: "PARCEL_NO",
+    help: "Lowndes County (Valdosta) tax parcels (Esri-hosted). Search by parcel number or a site address.",
+  },
+  ga_jackson: {
+    // VERIFIED LIVE 2026-09-23 from this sandbox: 45,046 parcel polygons, esriGeometryPolygon,
+    // extent -83.82..-83.35 / 33.97..34.30 (Jefferson, GA). Note the layer ID is 9, not 0 — this
+    // service's only polygon layer is at that index. Situs is split across HOUSE_NO/STREET_NAM
+    // with no combined column — addrField left unset.
+    state: "GA", label: "Jackson County, GA",
+    layerUrl: "https://services8.arcgis.com/bcbi4lYRFOsss0F5/arcgis/rest/services/Tax_Parcels/FeatureServer/9",
+    idField: "PARCEL_NO",
+    help: "Jackson County tax parcels (Esri-hosted). Search by parcel number or a site address.",
+  },
+  ga_bibb: {
+    // VERIFIED LIVE 2026-09-23 from this sandbox: 68,899 parcel polygons, esriGeometryPolygon,
+    // extent -83.89..-83.49 / 32.66..32.95 (Macon-Bibb).
+    state: "GA", label: "Bibb County (Macon), GA",
+    layerUrl: "https://services2.arcgis.com/zPFLSOZ5HzUzzTQb/arcgis/rest/services/TaxParcels/FeatureServer/0",
+    idField: "PARCELID", addrField: "SITEADDRESS",
+    help: "Macon-Bibb County tax parcels (Esri-hosted). Search by parcel ID or a site address.",
+  },
+  ga_dougherty: {
+    // VERIFIED LIVE 2026-09-23 from this sandbox: 38,007 parcel polygons, esriGeometryPolygon,
+    // extent -84.46..-83.98 / 31.44..31.65 (Albany). Situs is split across StNumber/StName with
+    // no combined column — addrField left unset.
+    state: "GA", label: "Dougherty County (Albany), GA",
+    layerUrl: "https://services6.arcgis.com/VKHi8CC6pMIyYUIs/arcgis/rest/services/Parcels_Public_View/FeatureServer/0",
+    idField: "ParcelNum",
+    help: "Dougherty County land parcels (Esri-hosted). Search by parcel number or a site address.",
+  },
+  ga_rockdale: {
+    // VERIFIED LIVE 2026-09-23 from this sandbox: 36,856 parcel polygons, esriGeometryPolygon,
+    // extent -84.18..-83.91 / 33.53..33.79 (Conyers). ⛔ TWO services publish near-identical
+    // Rockdale parcel counts under the same AGOL org (Tbke9ca9DhtF4VIx) — `Rockdale_Parcels`
+    // (owner rbell@nationalland.com_CCIM, a commercial real-estate broker's personal account) and
+    // THIS one, `Rockdale_County_Parcels` (owner gary.morris_RockdaleGA — the county's own GIS
+    // staff account). Deliberately wired to the county's own copy, not the broker's mirror.
+    state: "GA", label: "Rockdale County, GA",
+    layerUrl: "https://services.arcgis.com/Tbke9ca9DhtF4VIx/arcgis/rest/services/Rockdale_County_Parcels/FeatureServer/38",
+    idField: "PARCEL_NO", addrField: "Address",
+    help: "Rockdale County parcels (county GIS, Esri-hosted). Search by parcel number or a site address.",
+  },
+  ga_paulding: {
+    // ⛔ CORRECTS the dispatch's own Paulding discovery hint — see this section's header: the
+    // Hub host it named is Paulding County, OHIO, not Georgia. VERIFIED LIVE 2026-09-23 from this
+    // sandbox instead: 68,018 parcel polygons, esriGeometryPolygon, extent -85.05..-84.72 /
+    // 33.77..34.08 (Dallas, GA) — sampled features read county="paulding", state2="ga". This is a
+    // third-party nationwide-parcel-schema republication (AGOL owner mhackman_UofMD, a University
+    // of Maryland researcher account; field prefixes match the Regrid/Loveland national parcel
+    // schema — "ll_gisacre", "ll_uuid"), not the county's own GIS — recorded honestly rather than
+    // silently presented as the county's own service. Vintage 2022 (editingInfo), within this
+    // repo's own 5-year staleness bar.
+    state: "GA", label: "Paulding County, GA",
+    layerUrl: "https://services1.arcgis.com/qTQ6qYkHpxlu0G82/arcgis/rest/services/ga_paulding_shp/FeatureServer/0",
+    idField: "parcelnumb", addrField: "address",
+    help: "Paulding County parcels (third-party nationwide-parcel-schema republication, Esri-hosted). Search by parcel number or a site address.",
+  },
+  ga_bulloch: {
+    // VERIFIED LIVE 2026-09-23 from this sandbox: 34,014 parcel polygons, esriGeometryPolygon,
+    // extent -82.03..-81.43 / 32.15..32.65 (Statesboro). ⛔ REJECTED CANDIDATE on the SAME AGOL
+    // org (xxKKavhytNgFUeV5): `Bulloch_County_GA_Atlas_WFL1` layer 4 claims to be "Bulloch County
+    // Parcels" but holds only 136 features — a stale/partial extract, not the county's fabric
+    // (the B1551616 "title is never the measurement" trap) — this layer is the county's real one.
+    state: "GA", label: "Bulloch County (Statesboro), GA",
+    layerUrl: "https://services6.arcgis.com/XxfLDid4CNOqpdhy/arcgis/rest/services/Parcelswithparcelno/FeatureServer/0",
+    idField: "PARCEL_NO",
+    help: "Bulloch County parcels (Esri-hosted). Search by parcel number or a site address.",
+  },
+  ga_camden: {
+    // VERIFIED LIVE 2026-09-23 from this sandbox: 31,649 parcel polygons, esriGeometryPolygon,
+    // extent -81.94..-81.40 / 30.71..31.17 (Kingsland/St. Marys). ⛔ The dispatch's own MapServer
+    // URL advertises `capabilities: "Map"` only (no Query) — `/query` 400s on it. The SAME data
+    // is also published as a FeatureServer (`capabilities: "Query,ChangeTracking"`) at the
+    // identical path; wired to that instead so search/identify actually work.
+    state: "GA", label: "Camden County, GA",
+    layerUrl: "https://services2.arcgis.com/PYn6bWCjT6bhw1z3/arcgis/rest/services/Camden_County_Parcels/FeatureServer/0",
+    idField: "PARCEL_NO",
+    help: "Camden County parcels (Esri-hosted). Search by parcel number or a site address.",
+  },
+
   /* ⛔ B1339920 (2026-09-12) — THIS ENTRY WAS PREVIOUSLY THE ONLY AZ ROW, AND ITS BBOX REACHES
    * PHOENIX. `az_pinal`'s bbox is Pinal's own measured data extent (32.5–33.47 lat), which overlaps
    * the southern edge of Maricopa County — Phoenix (33.4484, -112.0740) falls inside it, so with no
@@ -1728,6 +1877,19 @@ const COUNTIES_MAP_RAW = {
   // hand-typed.
   ga_fulton: { state: "GA", center: [33.8453, -84.4772], zoom: 10, bbox: [33.50, -84.84, 34.19, -84.12], mapServer: null, layerUrl: COUNTIES.ga_fulton.layerUrl },
   ga_chatham: { state: "GA", center: [31.9823, -81.1400], zoom: 10, bbox: [31.73, -81.39, 32.24, -80.89], mapServer: null, layerUrl: COUNTIES.ga_chatham.layerUrl },
+  // NEW-1 (2026-09-23) — center/bbox derived from each county's own measured `outSR=4326` extent
+  // (queried live from this sandbox alongside the layer probe above), not hand-guessed.
+  ga_dekalb: { state: "GA", center: [33.79, -84.19], zoom: 10, bbox: [33.60, -84.37, 33.99, -84.00], mapServer: null, layerUrl: COUNTIES.ga_dekalb.layerUrl },
+  ga_clarke: { state: "GA", center: [33.94, -83.39], zoom: 10, bbox: [33.83, -83.56, 34.06, -83.22], mapServer: null, layerUrl: COUNTIES.ga_clarke.layerUrl },
+  ga_columbia: { state: "GA", center: [33.53, -82.24], zoom: 10, bbox: [33.33, -82.46, 33.72, -82.01], mapServer: null, layerUrl: COUNTIES.ga_columbia.layerUrl },
+  ga_lowndes: { state: "GA", center: [30.83, -83.25], zoom: 10, bbox: [30.60, -83.51, 31.05, -83.00], mapServer: null, layerUrl: COUNTIES.ga_lowndes.layerUrl },
+  ga_jackson: { state: "GA", center: [34.13, -83.59], zoom: 10, bbox: [33.95, -83.84, 34.31, -83.34], mapServer: null, layerUrl: COUNTIES.ga_jackson.layerUrl },
+  ga_bibb: { state: "GA", center: [32.81, -83.69], zoom: 10, bbox: [32.65, -83.91, 32.97, -83.47], mapServer: null, layerUrl: COUNTIES.ga_bibb.layerUrl },
+  ga_dougherty: { state: "GA", center: [31.54, -84.22], zoom: 10, bbox: [31.42, -84.48, 31.67, -83.96], mapServer: null, layerUrl: COUNTIES.ga_dougherty.layerUrl },
+  ga_rockdale: { state: "GA", center: [33.66, -84.05], zoom: 10, bbox: [33.51, -84.20, 33.80, -83.89], mapServer: null, layerUrl: COUNTIES.ga_rockdale.layerUrl },
+  ga_paulding: { state: "GA", center: [33.93, -84.89], zoom: 10, bbox: [33.76, -85.07, 34.10, -84.71], mapServer: null, layerUrl: COUNTIES.ga_paulding.layerUrl },
+  ga_bulloch: { state: "GA", center: [32.40, -81.73], zoom: 10, bbox: [32.13, -82.05, 32.67, -81.41], mapServer: null, layerUrl: COUNTIES.ga_bulloch.layerUrl },
+  ga_camden: { state: "GA", center: [30.94, -81.67], zoom: 10, bbox: [30.69, -81.96, 31.19, -81.38], mapServer: null, layerUrl: COUNTIES.ga_camden.layerUrl },
   az_pinal: { state: "AZ", center: [32.9940, -111.3275], zoom: 9, bbox: [32.51, -112.21, 33.48, -110.45], mapServer: null, layerUrl: COUNTIES.az_pinal.layerUrl },
   // B1339920 — bbox/center read directly from public/geo/county-polygons.json (same convention as
   // the B1551617 Tier 1 rows above), never hand-typed: [-226663,65023,-222085,68098] / scale 2000.
