@@ -3451,6 +3451,67 @@ const meetingBoundInfo = task => {
   const state = task.meetingInfeasible ? "danger" : (floatBD != null && floatBD <= 2) ? "warning" : "secondary";
   return { body, deadline, floatBD, state };
 };
+// meetingDoubleLagFlag (NEW-2, 2026-09-23) — true when a meeting-bound task's OWN predecessor lag
+// looks like it is counting the SAME wait the bound body's own filing lead already counts. The two
+// combine ADDITIVELY (applyMeetingBinding folds the lag into `predEarly`, then agendaDeadline
+// subtracts the lead from each candidate meeting), so a link lag that duplicates the body's lead can
+// silently push the task out to the meeting AFTER the one it would otherwise land on — with nothing
+// on the row saying so. PURE — never reads or changes anything stored; a caller decides whether/how
+// to show it. Only compares the plain day-offset lead shape (agendaLead.type==="offset"); the
+// weekdayAnchor lead has no single day-count to compare against a link lag, so it never flags.
+// Mirrored VERBATIM into ui-audit/stress/scheduler-engine.mjs (anti-drift guard in
+// test/schedulerEngine.test.js).
+const meetingDoubleLagFlag = (task, body) => {
+  if (!task || !task.meetingBound || !body || !body.agendaLead) return null;
+  const lead = body.agendaLead;
+  if (lead.type !== "offset" || !(Number(lead.n) > 0)) return null;
+  const leadUnit = lead.unit === "calendar" ? "calendar" : "business";
+  const hit = normPreds(task.predecessors).find(p => {
+    const lagN = Math.abs(Number(p.lag) || 0);
+    if (!lagN) return false;
+    const lagUnit = p.lagUnit === "calendar" ? "calendar" : "business";
+    return lagUnit === leadUnit && Math.abs(lagN - Number(lead.n)) <= 1;
+  });
+  return hit ? { predId: hit.id, lagN: Math.abs(Number(hit.lag) || 0), leadN: Number(lead.n), unit: leadUnit } : null;
+};
+// dropDuplicateLagPatch (NEW-2) — the exact patch the row's one-click fix applies: zeroes ONLY the
+// flagged predecessor edge's lag, keeping the edge itself (target + type) and the meeting binding
+// untouched. Pure so a fixture test can assert the resulting cascade without driving the UI; the
+// caller writes it back via the normal updateTask path, so it rides the app's existing undo history
+// like any other edit — never a bespoke undo mechanism.
+const dropDuplicateLagPatch = (task, flag) => {
+  if (!flag || flag.predId == null) return null;
+  return normPreds(task.predecessors).map(p => p.id === flag.predId ? { ...p, lag: 0 } : p);
+};
+// meetingBindingTrace (NEW-2) — a READ-ONLY narration of how a meeting-bound task's date was
+// actually reached: which predecessor drives it (the one whose constrained start is latest — the
+// same comparison cascadeDates itself makes when it computes `predEarly`), what lag that edge adds,
+// the earliest date that produces, which of the body's own meetings were too early to make (their
+// agenda deadline fell before that earliest date, so nextEligibleMeeting skipped them) and so were
+// skipped, and the meeting the engine actually landed on. Reuses constrainedStartFrom / agendaDeadline
+// / meetingDatesInRange VERBATIM — it recomputes nothing the engine doesn't already compute the same
+// way, and writes nothing back: task.start/task.meetingDeadline (the engine's own stored answer) are
+// read as-is for the "landed" half. NEVER changes the cascade. `findTask` is `id => Task|undefined`
+// so callers can pass a cheap linear lookup (matches this file's existing predecessor-name pattern)
+// or a Map in a test.
+const meetingBindingTrace = (task, findTask, body) => {
+  if (!task || !task.meetingBound || !body) return null;
+  const preds = normPreds(task.predecessors)
+    .map(dep => ({ dep, predTask: findTask(dep.id) }))
+    .filter(x => x.predTask && (x.predTask.end || x.predTask.start));
+  if (!preds.length) return { driver: null, earliestDate: "", skipped: [], landed: task.start || "", deadline: task.meetingDeadline || "" };
+  let driver = null, earliestDate = "";
+  preds.forEach(({ dep, predTask }) => {
+    const d = constrainedStartFrom(predTask, dep, Math.max(1, task.duration || 1));
+    if (d && (!earliestDate || d > earliestDate)) { earliestDate = d; driver = { dep, predTask }; }
+  });
+  const landed = task.start || "";
+  const skipped = [];
+  if (earliestDate && landed && earliestDate < landed) {
+    meetingDatesInRange(body, earliestDate, addD(landed, -1)).forEach(m => skipped.push({ meetingDate: m, deadline: agendaDeadline(body, m) }));
+  }
+  return { driver, earliestDate, skipped, landed, deadline: task.meetingDeadline || "" };
+};
 // ── Meeting-calendar cross-schedule import (B1824576) ──────────────────────
 // Reuse a meeting body's cadence from ANOTHER schedule instead of re-entering it — the owner's
 // ask: he went to bind a task to a governmental meeting body (city council, P&Z, MUD board) and
@@ -3516,6 +3577,22 @@ const otherScheduleMeetingBodies = (data, excludePid) => Object.values((data && 
   .filter(p => p && p.id !== excludePid && Array.isArray(p.meetingBodies) && p.meetingBodies.length)
   .map(p => ({ pid: p.id, schedName: p.name || `Project ${p.id}`, projName: p.linkedSiteName || null, bodies: p.meetingBodies }))
   .sort((a, b) => a.schedName.localeCompare(b.schedName));
+// findMeetingBodyElsewhere (NEW-1, 2026-09-23) — a task can be bound to a body that lives on a
+// DIFFERENT schedule (the id is globally unique, B816 — cascadeDates/meetingBoundInfo already
+// resolve the OBJECT for date math via MEETING_BODY_INDEX). This additionally names WHICH schedule
+// owns it, which the date math never needed to know but every UI surface that NAMES a bound body
+// does — without it, a foreign binding read as unbound ("set up…") or as the literal fallback
+// string "Meeting body" instead of the real name. Returns null only when the id belongs to no
+// schedule on the account at all (a genuinely deleted body — task.meetingBodyMissing covers that).
+const findMeetingBodyElsewhere = (data, excludePid, bodyId) => {
+  if (!bodyId) return null;
+  for (const p of Object.values((data && data.projects) || {})) {
+    if (!p || p.id === excludePid || !Array.isArray(p.meetingBodies)) continue;
+    const b = p.meetingBodies.find(b => b.id === bodyId);
+    if (b) return { body: b, schedName: p.name || `Project ${p.id}`, pid: p.id };
+  }
+  return null;
+};
 // ── MS-Project predecessor helpers ────────────────────────
 // Normalise: plain int or {id,type,lag} → always {id,type,lag}
 const normPreds = arr => {
@@ -5463,9 +5540,16 @@ const readGridCfg = (proj, data) => {
   // B817/B844 — meeting columns default ON (unless the user set an explicit column config). The Meeting
   // column appears once the project DEFINES ≥1 meeting body (so right-click binding is discoverable via the
   // column too — B844); Float / Cost appear once any task is actually BOUND. All render blank on unbound rows.
+  // NEW-1 (B<PENDING>, 2026-09-23) — a schedule with ZERO meeting bodies of its own can still have tasks
+  // bound to a body imported/borrowed from ANOTHER schedule (B816's ids are globally unique). The old
+  // "the project DEFINES ≥1 body" gate missed exactly that case — a schedule like this stayed on the
+  // OLD default column set forever, so the Meeting column (now correctly naming the foreign body/its
+  // schedule, see Cell()'s "meetingBody" case) never appeared for anyone to see it. Same OR as the
+  // Float/Cost line below: a body defined here, OR a task actually bound (however the body got there).
+  const anyBound = Array.isArray(proj?.tasks) && proj.tasks.some(t => t.meetingBound);
   if (!(cfg && Array.isArray(cfg.visible) && cfg.visible.length)) {
-    if (Array.isArray(proj?.meetingBodies) && proj.meetingBodies.length && !visible.includes("meetingBody")) visible.push("meetingBody");
-    if (Array.isArray(proj?.tasks) && proj.tasks.some(t => t.meetingBound)) {
+    if ((Array.isArray(proj?.meetingBodies) && proj.meetingBodies.length || anyBound) && !visible.includes("meetingBody")) visible.push("meetingBody");
+    if (anyBound) {
       ["floatToDeadline","costIfMissed"].forEach(k => { if (!visible.includes(k)) visible.push(k); });
     }
   }
@@ -11801,8 +11885,18 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
   // deadline link / unbound); the flyout is one radio list ("— none —" + bodies, ✓ on the current
   // choice) plus the deadline-row actions. Opens leftward when the menu is near the right edge.
   const [subMeet, setSubMeet] = useState(false);
-  const meetingBody = task.meetingBound ? meetingBodies.find(b => b.id === task.meetingBodyId) : null;
-  const curBodyName = meetingBody ? (meetingBody.name || "Meeting body") : (task.meetingBound ? "Meeting body" : "");
+  // NEW-1 (B<PENDING>, 2026-09-23) — a bound body can live on ANOTHER schedule (its id is globally
+  // unique — B816; the date math already resolves it via MEETING_BODY_INDEX regardless of which
+  // schedule it lives on). `meetingBodies` is only THIS schedule's own list, so a foreign binding
+  // used to read as `null` here and fall through to the literal string "Meeting body". `otherBodies`
+  // (every OTHER schedule's bodies, already schedule-tagged) is searched as the fallback before
+  // giving up — genuinely nowhere (task.meetingBodyMissing) is the only case left unresolved.
+  const localBody = task.meetingBound ? meetingBodies.find(b => b.id === task.meetingBodyId) : null;
+  const foreignMatch = (task.meetingBound && !localBody) ? otherBodies.find(ob => ob.body.id === task.meetingBodyId) : null;
+  const meetingBody = localBody || (foreignMatch ? foreignMatch.body : null);
+  const curBodyName = !task.meetingBound ? ""
+    : meetingBody ? (meetingBody.name || "Meeting body")
+    : "⚠ calendar missing";
   const isDeadlineRow = task.deadlineForTaskId != null;
   const subOpenLeft = left + mw + 210 > vw;
   // "step this bound row to the next/previous meeting" reads off the SAME resolver
@@ -11848,7 +11942,7 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
           ) : isDeadlineRow ? (
             <Item icon="ti-flag" label={`Deadline for: ${deadlineAnchorName || "(missing task)"}`} hint="▸" />
           ) : task.meetingBound ? (
-            <Item icon="ti-calendar-event" label={`Meeting: ${curBodyName}`} hint="▸" />
+            <Item icon="ti-calendar-event" label={`Meeting: ${curBodyName}${foreignMatch ? ` — from ${foreignMatch.schedName}` : ""}`} hint="▸" />
           ) : (
             <Item icon="ti-calendar-event" label={bindCount > 1 ? `Bind ${bindCount} rows to meeting calendar` : "Bind to meeting calendar"} hint="▸" />
           )}
@@ -11868,11 +11962,18 @@ function TaskContextMenu({x, y, task, projId, onInsertAbove, onInsertBelow, onAd
                 {otherBodies.length > 0 && (<>
                   <Sep />
                   <SubCaption>From other schedules</SubCaption>
-                  {otherBodies.map(ob => (
-                    <Item key={`${ob.pid}:${ob.body.id}`} icon="ti-calendar-event"
-                      label={`${ob.body.name || "Meeting body"} · ${ob.schedName}`}
-                      onClick={()=>onImportBindMeeting(ob.pid, ob.body.id)} />
-                  ))}
+                  {otherBodies.map(ob => {
+                    // NEW-1 — the row currently bound to a FOREIGN body (foreignMatch) is checked here,
+                    // same as a local body is checked in the list above, and its label makes the click's
+                    // effect explicit: it copies that calendar's cadence into THIS schedule (B1824576's
+                    // import path) and rebinds to the copy — the binding itself is untouched until he does.
+                    const isCur = task.meetingBound && !localBody && task.meetingBodyId === ob.body.id;
+                    return (
+                      <Item key={`${ob.pid}:${ob.body.id}`} icon={isCur ? "ti-check" : "ti-calendar-event"}
+                        label={`${ob.body.name || "Meeting body"} · ${ob.schedName}${isCur ? " — copy into this schedule" : ""}`}
+                        onClick={()=>onImportBindMeeting(ob.pid, ob.body.id)} />
+                    );
+                  })}
                 </>)}
                 {bindCount === 1 && task.meetingBound && !task.hasChildren && (<>
                   <Sep />
@@ -13498,7 +13599,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                       </span>
                     )}
                     <Cell task={task} col={{...c, w:colWidths[c.k]}} colMasterIdxs={colMasterIdxs} edit={edit} setEdit={setEdit} commit={commit} commitAndAdvance={commitAndAdvance} applyCommit={applyCommit}
-                      proj={proj} succMap={succMap} getTaskName={getTaskName}
+                      proj={proj} succMap={succMap} getTaskName={getTaskName} data={data}
                       setNotesCtx={setNotesCtx} projId={proj?.id} updateTask={updateTask}
                       editStartChar={edit?.taskId===task.id && edit?.col===c.k ? editStartChar : null}
                       contacts={data?.settings?.contacts||[]}
@@ -13986,7 +14087,7 @@ function PredEditor({ seedVal, taskId, colKey, commit, commitAndAdvance, setEdit
 }
 
 // ── Cell ─────────────────────────────────────────────────
-function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance, applyCommit, proj, succMap, getTaskName, setNotesCtx, projId, updateTask, editStartChar, isExpandedParent, dispHealth, setSelectedColIdx, contacts, addContact, formulaCell, expandAnchorRef}) {
+function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance, applyCommit, proj, succMap, getTaskName, setNotesCtx, projId, updateTask, editStartChar, isExpandedParent, dispHealth, setSelectedColIdx, contacts, addContact, formulaCell, expandAnchorRef, data}) {
   // B212 — Tab/Shift+Tab while editing advance only through VISIBLE columns (display order),
   // skipping hidden ones, via the shared stepVisibleColIdx helper.
   const tabStep = back => setSelectedColIdx(i => stepVisibleColIdx(colMasterIdxs, i, back ? -1 : +1));
@@ -14275,24 +14376,55 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
             const info = meetingBoundInfo(task);
             const color = info?.state === "danger" ? "var(--danger,#d83a3a)" : info?.state === "warning" ? "var(--warn-text,#b45309)" : "var(--mut)";
             const b = info?.body || {};
+            // NEW-2 (B<PENDING>, 2026-09-23) — "how was this date reached": names the driving predecessor,
+            // the lag it adds, the earliest-ready date that produces, and any of the body's own meetings
+            // that were too early to make (skipped because their agenda deadline fell before that earliest
+            // date) — READ-ONLY narration via meetingBindingTrace, never a second engine.
+            const trace = meetingBindingTrace(task, id => (proj?.tasks || []).find(t => t.id === id), b);
+            const traceLines = [];
+            if (trace && trace.driver) {
+              const { dep, predTask } = trace.driver;
+              const typeWord = {FS:"finish-to-start", SS:"start-to-start", FF:"finish-to-finish", SF:"start-to-finish"}[(dep.type||"FS").toUpperCase()] || "finish-to-start";
+              const lagPhrase = dep.lag ? `, plus a ${Math.abs(dep.lag)}-${dep.lagUnit === "calendar" ? "calendar" : "working"}-day lag (${typeWord}),` : ` (${typeWord}, no lag)`;
+              traceLines.push(`Driven by "${predTask.name || "task " + predTask.id}", finishing ${fmtD(predTask.end || predTask.start)}${lagPhrase} ready no earlier than ${fmtD(trace.earliestDate)}.`);
+              if (trace.skipped.length) traceLines.push(`Skipped ${trace.skipped.length === 1 ? "meeting" : "meetings"}: ${trace.skipped.map(sk => `${fmtD(sk.meetingDate)} (agenda closed ${fmtD(sk.deadline)}, before the packet was ready)`).join("; ")}.`);
+            }
+            const dupFlag = meetingDoubleLagFlag(task, b);
             const title = [
               `${b.name || "Meeting body"}${b.jurisdiction ? " · " + b.jurisdiction : ""}`,
               `Meets ${cadenceSummary(b)}; ${agendaLeadSummary(b)}.`,
               task.start ? `Hearing ${fmtD(task.start)} — file the agenda by ${fmtD(info?.deadline)}${b.cutoffTime ? " (" + b.cutoffTime + ")" : ""}.` : "No eligible meeting yet — waiting on a predecessor date.",
+              ...traceLines,
+              dupFlag ? "⚠ Possible double count: this task's own link lag and this calendar's filing lead look like they're counting the same wait — see the ⚠×2 mark on this row." : null,
               info?.state === "danger" ? (task.meetingDateOffCalendar
                 ? "⚠ INFEASIBLE: this date isn't a scheduled meeting day for this body at all — roll to the next meeting or unpin."
                 : "⚠ INFEASIBLE: this date is pinned but the agenda has already closed — roll to the next meeting or unpin.") :
                 info?.state === "warning" ? `⚠ Only ${info.floatBD} working day(s) of float before the agenda deadline.` :
                 "This is a meeting-calendar date: it can't be freely typed, has no duration, and slips by a full cycle if the deadline is missed.",
               b.verifiedOn ? `Calendar verified ${fmtD(b.verifiedOn)}.` : "Calendar is rule-derived (unverified).",
-            ].join("\n");
-            return (
+            ].filter(Boolean).join("\n");
+            return (<>
               <span title={title} style={{display:"inline-flex",alignItems:"center",marginRight:3,color,flexShrink:0,cursor:"help"}}>
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M3 21h18"/><path d="M5 21V10M9 21V10M15 21V10M19 21V10"/><path d="M4 10h16"/><path d="M12 3 3 8h18L12 3Z"/>
                 </svg>
               </span>
-            );
+              {dupFlag && (() => {
+                // NEW-2 — the one-click fix: drops ONLY the flagged predecessor edge's lag (keeps the
+                // edge + the binding), reversible with Ctrl+Z like any other edit, and never fires on
+                // its own — it's a plain click handler on a visible, clearly-labelled mark.
+                const fixTitle = `⚠ Possible double count: the ${dupFlag.lagN}-${dupFlag.unit}-day link lag and "${b.name || "this calendar"}"'s own ${dupFlag.leadN}-${dupFlag.unit}-day filing lead may both be counting the same wait, pushing this task out an extra meeting cycle.\nClick to drop the duplicate lag (keeps the predecessor link and the meeting binding). Undo with Ctrl+Z.`;
+                return (
+                  <span title={fixTitle}
+                    onClick={e => { e.stopPropagation(); const patch = dropDuplicateLagPatch(task, dupFlag); if (patch) updateTask(task.id, {predecessors: patch}, projId); }}
+                    style={{display:"inline-flex",alignItems:"center",marginRight:3,color:"var(--warn-text,#b45309)",flexShrink:0,cursor:"pointer"}}>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L14.71 3.86a2 2 0 0 0-3.42 0Z"/>
+                    </svg>
+                  </span>
+                );
+              })()}
+            </>);
           })()}
           {isStart && !task.hasChildren && task.meetingBound && !MEETING_BODY_INDEX[task.meetingBodyId] && (() => {
             // B864 — the binding points at a meeting calendar that no longer exists (a lost meeting body).
@@ -14348,6 +14480,30 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
       }
       const bodies = Array.isArray(proj?.meetingBodies) ? proj.meetingBodies : [];
       const cur = task.meetingBound ? (task.meetingBodyId || "") : "";
+      const localMatch = cur ? bodies.find(b => b.id === cur) : null;
+      // NEW-1 (B<PENDING>, 2026-09-23) — a task can be bound to a body that lives on a DIFFERENT
+      // schedule (its id is globally unique — B816). The local `bodies` array can't name it, which
+      // used to read as "set up…" (unbound) when this schedule has none of its own, or a blank
+      // native <select> (no matching <option>) when it has some but not this one — either way an
+      // actually-bound task read as unbound here. Resolve against every other schedule before
+      // falling back to the old empty-state / select paths.
+      const foreign = (task.meetingBound && cur && !localMatch) ? findMeetingBodyElsewhere(data, projId, cur) : null;
+      if (task.meetingBound && !localMatch && foreign) {
+        return (
+          <span style={{...s,fontSize:10,color:"var(--txt)"}}
+            title={`Bound to "${foreign.body.name || "Meeting body"}" from ${foreign.schedName} — right-click → Meeting binding to change it or copy it into this schedule.`}>
+            {foreign.body.name || "Meeting body"} · {foreign.schedName}
+          </span>
+        );
+      }
+      if (task.meetingBound && !localMatch && !foreign) {
+        return (
+          <span style={{...s,fontSize:10,color:"var(--danger,#d83a3a)"}}
+            title="Bound to a meeting calendar that no longer exists anywhere on the account — right-click → Meeting binding to unbind it.">
+            ⚠ calendar missing
+          </span>
+        );
+      }
       if (!bodies.length) return (
         <span style={{...s,justifyContent:"center",color:"var(--amber)",fontSize:10,cursor:"pointer",textDecoration:"underline",textUnderlineOffset:2}}
           title="Click to set up meeting calendars"

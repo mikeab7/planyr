@@ -4520,3 +4520,204 @@ describe("recomposeFromRows — mirrored, source-checked, and gated per-account 
     expect(Object.keys(out.projects)).toEqual(["3"]);
   });
 });
+
+// ── NEW-1 (chat, 2026-09-23) — a task bound to a meeting body in ANOTHER schedule must be named
+// correctly everywhere, not read as unbound / fall back to the literal string "Meeting body". ──────
+describe("NEW-1 — findMeetingBodyElsewhere: naming a bound body that lives on another schedule", () => {
+  const baytown = { id: "mb_mrml6q2vmi8m", name: "Baytown City Council", recurrence: [{ positions: [3], weekday: 2, months: "all" }] };
+  const tceq = { id: "mb_mrmdy43mlhjr", name: "TCEQ MUD Creation", recurrence: [{ positions: [1], weekday: 6, months: [5] }] };
+  const data = {
+    projects: {
+      1: { id: 1, name: "Master Schedule", meetingBodies: [baytown, tceq], tasks: [] },
+      30: { id: 30, name: "MUD v PID", meetingBodies: [], tasks: [] },
+      // A second schedule bound to the SAME body as project 1 — the "second schedule bound to the
+      // same body" adjacent case from the item's acceptance table.
+      7: { id: 7, name: "Another District", meetingBodies: [tceq], tasks: [] },
+    },
+  };
+  it("a body that lives on another schedule is found and named, with its schedule", () => {
+    const r = E.findMeetingBodyElsewhere(data, 30, "mb_mrmdy43mlhjr");
+    expect(r).toEqual({ body: tceq, schedName: "Master Schedule", pid: 1 });
+  });
+  it("a body genuinely absent from every schedule resolves to null (task.meetingBodyMissing covers this case)", () => {
+    expect(E.findMeetingBodyElsewhere(data, 30, "mb_does_not_exist_anywhere")).toBeNull();
+  });
+  it("never returns a body from the excluded (own) schedule — that's the caller's LOCAL lookup, not this one", () => {
+    // Baytown lives ONLY on project 1 — asking with excludePid=1 must not hand it back from itself.
+    expect(E.findMeetingBodyElsewhere(data, 1, "mb_mrml6q2vmi8m")).toBeNull();
+  });
+  it("a body bound on TWO other schedules resolves to whichever is checked first — still names A schedule, never blank", () => {
+    // From project 30's point of view, mb_mrmdy43mlhjr exists on both project 1 and project 7.
+    const r = E.findMeetingBodyElsewhere(data, 30, "mb_mrmdy43mlhjr");
+    expect(r).not.toBeNull();
+    expect([1, 7]).toContain(r.pid);
+    expect(r.body).toBe(tceq);
+  });
+  it("no bodyId → null (an unbound task never resolves to something)", () => {
+    expect(E.findMeetingBodyElsewhere(data, 30, null)).toBeNull();
+    expect(E.findMeetingBodyElsewhere(data, 30, "")).toBeNull();
+  });
+});
+
+// ── NEW-2 (chat, 2026-09-23) — a meeting-bound task's own predecessor lag can silently count the
+// SAME wait the bound body's filing lead already counts. Fixture reproduces the real Goose Creek
+// "MUD v PID" task 49 numbers measured live on the owner's account (__rev 5026, build 4681016):
+// predecessor lag 78 calendar days (FS) + body TCEQ MUD Creation's own 78-calendar-day agenda lead,
+// landing on 2028-05-06 (deadline 2028-02-18) with 2027-11-02 (deadline 2027-08-16) skipped — and
+// dropping the duplicate lag moves it to 2027-11-02, exactly as the item's acceptance requires. ────
+describe("NEW-2 — meetingDoubleLagFlag / dropDuplicateLagPatch / meetingBindingTrace", () => {
+  // TCEQ MUD Creation: Texas's two uniform election dates — 1st Saturday of May, and the Tuesday
+  // after the 1st Monday of November (the generalized Election-Day anchor primitive).
+  const tceq = {
+    id: "mb_mrmdy43mlhjr", name: "TCEQ MUD Creation",
+    agendaLead: { n: 78, type: "offset", unit: "calendar" },
+    recurrence: [
+      { positions: [1], weekday: 6, months: [5] },
+      { positions: [1], weekday: 2, months: [11], anchor: { position: 1, weekday: 1 } },
+    ],
+    blackoutDates: [], extraDates: [],
+  };
+  const mkTask48 = (o = {}) => ({ id: 48, name: "Task 48", start: "2027-07-01", end: "2027-07-01", duration: 0, predecessors: [], parentId: null, ...o });
+  const mkTask49 = (preds, o = {}) => ({
+    id: 49, name: "Conduct Confirmation Election", start: "", end: "", duration: 0, parentId: null,
+    meetingBound: true, meetingBodyId: "mb_mrmdy43mlhjr", predecessors: preds, ...o,
+  });
+
+  describe("the live fixture (task 49): flag appears, and the offered fix moves 2028-05-06 → 2027-11-02", () => {
+    it("BEFORE the fix — lands on 2028-05-06 (deadline 2028-02-18), skipping 2027-11-02 (deadline 2027-08-16)", () => {
+      const t49 = mkTask49([{ id: 48, lag: 78, lagUnit: "calendar", type: "FS" }]);
+      const tasks = E.cascadeDates([mkTask48(), t49], [tceq]);
+      const out = tasks.find(t => t.id === 49);
+      expect(out.start).toBe("2028-05-06");
+      expect(out.meetingDeadline).toBe("2028-02-18");
+      expect(out.meetingBodyMissing).toBe(false);   // the id resolves — this is NOT the "lost calendar" case
+    });
+    it("the double-count flag appears on task 49 (link lag 78 calendar == body's own 78-calendar-day lead)", () => {
+      const t49 = mkTask49([{ id: 48, lag: 78, lagUnit: "calendar", type: "FS" }]);
+      const flag = E.meetingDoubleLagFlag(t49, tceq);
+      expect(flag).toEqual({ predId: 48, lagN: 78, leadN: 78, unit: "calendar" });
+    });
+    it("the trace names the driving predecessor, the earliest-ready date, and the skipped 2027-11-02 meeting with its real deadline", () => {
+      const t48 = mkTask48();
+      const t49 = mkTask49([{ id: 48, lag: 78, lagUnit: "calendar", type: "FS" }]);
+      const tasks = E.cascadeDates([t48, t49], [tceq]);
+      const out = tasks.find(t => t.id === 49);
+      const trace = E.meetingBindingTrace(out, id => tasks.find(t => t.id === id), tceq);
+      expect(trace.driver.predTask.id).toBe(48);
+      expect(trace.driver.dep).toEqual({ id: 48, type: "FS", lag: 78, lagUnit: "calendar" });
+      expect(trace.landed).toBe("2028-05-06");
+      expect(trace.deadline).toBe("2028-02-18");
+      expect(trace.skipped).toEqual([{ meetingDate: "2027-11-02", deadline: "2027-08-16" }]);
+    });
+    it("AFTER taking the fix — dropDuplicateLagPatch zeroes only the flagged lag, re-cascading lands on 2027-11-02", () => {
+      const t48 = mkTask48();
+      const t49 = mkTask49([{ id: 48, lag: 78, lagUnit: "calendar", type: "FS" }]);
+      const before = E.cascadeDates([t48, t49], [tceq]).find(t => t.id === 49);
+      const flag = E.meetingDoubleLagFlag(before, tceq);
+      const patch = E.dropDuplicateLagPatch(before, flag);
+      expect(patch).toEqual([{ id: 48, type: "FS", lag: 0, lagUnit: "calendar" }]);
+      // The predecessor EDGE survives (still points at 48, still FS) — only the lag is dropped; the
+      // meeting binding is untouched (meetingBound/meetingBodyId carried through unchanged).
+      const fixed = { ...before, predecessors: patch };
+      expect(fixed.meetingBound).toBe(true);
+      expect(fixed.meetingBodyId).toBe("mb_mrmdy43mlhjr");
+      const after = E.cascadeDates([mkTask48(), fixed], [tceq]).find(t => t.id === 49);
+      expect(after.start).toBe("2027-11-02");
+      expect(after.meetingDeadline).toBe("2027-08-16");
+    });
+    it("a plain FS successor of task 49 re-derives off the NEW (earlier) date once the duplicate lag is dropped", () => {
+      const t48 = mkTask48();
+      const t49 = mkTask49([{ id: 48, lag: 78, lagUnit: "calendar", type: "FS" }]);
+      const succ = { id: 50, name: "Post-election filing", start: "", end: "", duration: 5, durValue: 5, durUnit: "d", parentId: null, predecessors: [{ id: 49, type: "FS" }] };
+      const beforeFix = E.cascadeDates([t48, t49, succ], [tceq]);
+      const t49before = beforeFix.find(t => t.id === 49);
+      const flag = E.meetingDoubleLagFlag(t49before, tceq);
+      const patch = E.dropDuplicateLagPatch(t49before, flag);
+      const afterFix = E.cascadeDates([mkTask48(), { ...t49before, predecessors: patch }, succ], [tceq]);
+      const succBefore = beforeFix.find(t => t.id === 50);
+      const succAfter = afterFix.find(t => t.id === 50);
+      expect(succAfter.start < succBefore.start).toBe(true);   // the whole downstream chain pulls in, not just task 49
+    });
+  });
+
+  describe("adjacent cases (acceptance table)", () => {
+    it("a lag equal to the lead but NO binding → never flags (meetingBound false)", () => {
+      const t = { id: 49, meetingBound: false, meetingBodyId: null, predecessors: [{ id: 48, lag: 78, lagUnit: "calendar", type: "FS" }] };
+      expect(E.meetingDoubleLagFlag(t, tceq)).toBeNull();
+    });
+    it("a binding but NO lag → never flags", () => {
+      const t = mkTask49([{ id: 48, lag: 0, type: "FS" }]);
+      expect(E.meetingDoubleLagFlag(t, tceq)).toBeNull();
+    });
+    it("lag ≠ lead (off by more than a day) → never flags", () => {
+      const t = mkTask49([{ id: 48, lag: 30, lagUnit: "calendar", type: "FS" }]);
+      expect(E.meetingDoubleLagFlag(t, tceq)).toBeNull();
+    });
+    it("lag within ONE day of the lead still flags (a real-world 'close enough to be the same wait')", () => {
+      const t = mkTask49([{ id: 48, lag: 77, lagUnit: "calendar", type: "FS" }]);
+      expect(E.meetingDoubleLagFlag(t, tceq)).toEqual({ predId: 48, lagN: 77, leadN: 78, unit: "calendar" });
+    });
+    it("a lead of zero never flags (nothing to double-count)", () => {
+      const zeroLead = { ...tceq, agendaLead: { n: 0, type: "offset", unit: "calendar" } };
+      const t = mkTask49([{ id: 48, lag: 78, lagUnit: "calendar", type: "FS" }]);
+      expect(E.meetingDoubleLagFlag(t, zeroLead)).toBeNull();
+    });
+    it("lag counted in a DIFFERENT unit than the lead (calendar vs. business) → never flags", () => {
+      const t = mkTask49([{ id: 48, lag: 78, type: "FS" }]);   // no lagUnit:"calendar" → working days
+      expect(E.meetingDoubleLagFlag(t, tceq)).toBeNull();
+    });
+    it("sameDayFilingAllowed on the body doesn't change flag detection (lag-vs-lead is independent of it)", () => {
+      const t = mkTask49([{ id: 48, lag: 78, lagUnit: "calendar", type: "FS" }]);
+      expect(E.meetingDoubleLagFlag(t, { ...tceq, sameDayFilingAllowed: true })).toEqual({ predId: 48, lagN: 78, leadN: 78, unit: "calendar" });
+    });
+    it("a body with two recurrence rules (May + November) still resolves correctly — the flag/fix never touch the cadence", () => {
+      expect(tceq.recurrence.length).toBe(2);
+      const t48 = mkTask48();
+      const t49 = mkTask49([{ id: 48, lag: 78, lagUnit: "calendar", type: "FS" }]);
+      const after = E.cascadeDates([t48, t49], [tceq]);
+      expect(after.find(t => t.id === 49).start).toBe("2028-05-06");   // still the May reading, both rules intact
+    });
+    it("an infeasible PINNED meeting date still never flags on its own (pin wins — no lag/lead comparison applies to a pin)", () => {
+      const t = mkTask49([{ id: 48, lag: 78, lagUnit: "calendar", type: "FS" }], { pinnedMeetingDate: "2027-11-02" });
+      // Flag detection itself is unaffected by pinning (it only compares lag vs lead) — it can still
+      // surface on a pinned row; dropping the lag on a pinned task is a no-op for its OWN date (the
+      // pin wins) but still cleans up the misleading duplicate on the link for any future unpin.
+      expect(E.meetingDoubleLagFlag(t, tceq)).toEqual({ predId: 48, lagN: 78, leadN: 78, unit: "calendar" });
+    });
+    it("weekdayAnchor lead shape (no plain day count) → never flags — nothing comparable to a link lag", () => {
+      const anchorBody = { ...tceq, agendaLead: { type: "weekdayAnchor", weeksBefore: 2, weekday: 1 } };
+      const t = mkTask49([{ id: 48, lag: 78, lagUnit: "calendar", type: "FS" }]);
+      expect(E.meetingDoubleLagFlag(t, anchorBody)).toBeNull();
+    });
+    it("no live predecessor row (id not found) → meetingBindingTrace reports no driver, never throws", () => {
+      const t49 = mkTask49([{ id: 999, lag: 78, lagUnit: "calendar", type: "FS" }], { start: "2028-05-06", meetingDeadline: "2028-02-18" });
+      const trace = E.meetingBindingTrace(t49, () => undefined, tceq);
+      expect(trace.driver).toBeNull();
+      expect(trace.landed).toBe("2028-05-06");
+    });
+    it("dropDuplicateLagPatch is a no-op (null) when there's no flag to act on", () => {
+      expect(E.dropDuplicateLagPatch(mkTask49([{ id: 48, lag: 5, type: "FS" }]), null)).toBeNull();
+    });
+  });
+});
+
+describe("anti-drift: NEW-1 findMeetingBodyElsewhere + NEW-2 double-lag helpers exist VERBATIM in src + mirror", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const mjs = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+  it("findMeetingBodyElsewhere walks every OTHER project's meetingBodies in both", () => {
+    expect(src).toMatch(/if \(!p \|\| p\.id === excludePid \|\| !Array\.isArray\(p\.meetingBodies\)\) continue;/);
+    expect(mjs).toMatch(/if \(!p \|\| p\.id === excludePid \|\| !Array\.isArray\(p\.meetingBodies\)\) continue;/);
+  });
+  it("meetingDoubleLagFlag requires the SAME unit and within-one-day match in both", () => {
+    expect(src).toMatch(/return lagUnit === leadUnit && Math\.abs\(lagN - Number\(lead\.n\)\) <= 1;/);
+    expect(mjs).toMatch(/return lagUnit === leadUnit && Math\.abs\(lagN - Number\(lead\.n\)\) <= 1;/);
+  });
+  it("dropDuplicateLagPatch zeroes only the flagged predecessor's lag in both", () => {
+    expect(src).toMatch(/return normPreds\(task\.predecessors\)\.map\(p => p\.id === flag\.predId \? \{ \.\.\.p, lag: 0 \} : p\);/);
+    expect(mjs).toMatch(/return normPreds\(task\.predecessors\)\.map\(p => p\.id === flag\.predId \? \{ \.\.\.p, lag: 0 \} : p\);/);
+  });
+  it("meetingBindingTrace picks the driver by the LATEST constrained start, same as cascadeDates' own predEarly reduce, in both", () => {
+    expect(src).toMatch(/if \(d && \(!earliestDate \|\| d > earliestDate\)\) \{ earliestDate = d; driver = \{ dep, predTask \}; \}/);
+    expect(mjs).toMatch(/if \(d && \(!earliestDate \|\| d > earliestDate\)\) \{ earliestDate = d; driver = \{ dep, predTask \}; \}/);
+  });
+});
