@@ -1,42 +1,38 @@
-/* verify-notes-in-sheet-placement — DOUBLE-CLICKING BLANK PAPER *INSIDE* THE SHEET STARTS A BOX
- * THERE (NEW-1, owner report 2026-09-18, fifth round on one symptom).
+/* verify-notes-in-sheet-placement — THE NOTES PAGE IS A PLACEMENT SURFACE, NOTHING ELSE (NEW-1,
+ * owner direction 2026-09-22, superseding the whole B1393 lineage this file used to guard).
  *
- * ⛔ HIS WORDS: *"It's like anything to the right of a line picks up that there's a line of text
- * already. So even if — and I'm just going to use measurements so it makes sense — let's say the
- * line is five inches long. Even if I click a spot 10 inches out, as long as it's horizontally
- * aligned, it still goes to the original line. So it doesn't work at all."*
+ * ⛔ HIS WORDS: *"It looks like there's basically two elements. One is just a regular paragraph
+ * and one is the double-click thing... I don't want anything regular paragraph because I feel
+ * like that's what's fucking us up here. I just want the double-click thing. I don't need it to
+ * tell me where to put my paragraph."*
  *
- * ⛔ WHY FOUR PRIOR ROUNDS MISSED IT, AND IT IS THE WHOLE REASON THIS FILE EXISTS. Every one of
- * them verified the GREY MAT create path — outside the sheet — because a project review had
- * recorded as settled fact that *"double-clicking inside the page body selects a word, which is
- * correct text behaviour, so the create gesture only fires in the grey mat outside the sheet."*
- * That premise was never challenged, and it is the bug. He has been clicking INSIDE the sheet the
- * whole time. So every case below is driven INSIDE the white page, and the grey mat appears only
- * as a must-not-regress arm.
+ * ⛔ THIS FILE USED TO TEST "IS THIS PRESS BESIDE A LINE OF FLOW TEXT" (five rounds, B1393 ×5).
+ * There is no flow text left on the page — the sheet holds nothing but positioned boxes — so
+ * that whole class of question is gone, not answered differently. What survives from the old
+ * file: the reload-persistence checks, the F4 (armed-caret, nothing-typed-nothing-lost) checks,
+ * and the double-click-on-a-word-selects-it known-good arm. Everything about "beside a line" is
+ * replaced by "double-click ANYWHERE that is not an existing box creates one there."
  *
- * ⛔ THE MECHANISM, MEASURED not reasoned: `pressIsBesideLine` (NoteEditor.jsx) tests ONLY the
- * vertical axis — it asks whether the press sits within one line-height of the nearest text
- * position and never looks at `clientX` at all. A press ten inches right of a five-inch line is
- * therefore "beside" that line, is forwarded to the caret at its end, and the next character
- * lands in his sentence instead of in a new box. That is his geometry exactly.
- *
- * ⛔ WHAT IS *NOT* ACCEPTANCE HERE, because each has already produced a false pass on this item:
- * the absence of the old padding-paragraph/text-align hack · the alignment value of the new
- * block · "text appeared" · text landing left-aligned at the end of the document (that IS the
- * bug). The only thing that counts is the RENDERED POSITION of the new box against the
- * coordinates that were actually clicked, plus the flow text being left alone.
+ * ⛔ MEASURED AGAINST CURRENT MAIN BEFORE THIS REWRITE, HONESTLY REPORTED: the OLD version of
+ * this file (testing the old "beside a line" mechanism) was GREEN against origin/main —
+ * `82f846f`, the commit this branch forked from. That is not a refutation of the owner's fresh
+ * production report (a double-click doing nothing at three separate points on his real page,
+ * build 4681016) — it means the old harness's specific fixture never happened to hit whatever
+ * production gap produced his symptom, which is exactly the kind of sandbox/production
+ * discrepancy this repo's own FOREGROUND-OR-VOID family already has open, unresolved instances
+ * of (see docs/NOTES-CARRY-FORWARD.md, the B831600 toolbar-shift saga). The redesign in this PR
+ * does not depend on ever finding that gap: it deletes the ENTIRE "beside a line" mechanism the
+ * gap could have lived in, root and branch, per the owner's own instruction.
  *
  * Traps honoured, from docs/NOTES-CARRY-FORWARD.md §1: a REAL mouse, and specifically
- * `page.mouse.dblclick()` — two separate down/up pairs NEVER form a native double-click in this
- * sandbox (trap 32) · reads after the 600ms save debounce · `assertMeasurable` before any
- * measurement (FOREGROUND-OR-VOID) · a flow-text lookup by its own TEXT, never by DOM position
- * (trap 21) · every section closes its own context (trap 29) · computed click points are checked
- * against the viewport before being clicked (trap 18).
+ * `page.mouse.dblclick()` — two separate down/up pairs never reliably form a native double-click
+ * in this sandbox (trap 32) · reads after the 600ms save debounce · `assertMeasurable` before any
+ * measurement (FOREGROUND-OR-VOID) · every section closes its own context (trap 29) · computed
+ * click points are checked against the viewport before being clicked (trap 18).
  *
- * ⛔ AND IT CARRIES KNOWN-GOOD ARMS (DRIVER-SCROLL-IS-NOT-APP-SCROLL §6): double-click-on-a-word
- * and the grey-mat press both have answers known INDEPENDENTLY of the change under test. If
- * either fails to report its known value the run declares itself VOID rather than printing a
- * score — a probe that cannot see the thing it is pointed at cannot vouch for anything else.
+ * ⛔ KNOWN-GOOD ARMS (DRIVER-SCROLL-IS-NOT-APP-SCROLL §6): double-click-on-a-word-selects-it has
+ * an answer known independently of this change. If it fails to report its known value the run
+ * declares itself VOID rather than printing a score.
  *
  *   npm run build && npx vite preview --port 4173 &
  *   node ui-audit/verify-notes-in-sheet-placement.mjs
@@ -44,16 +40,22 @@
 import { chromium } from "playwright";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { pacedWait } from "./lib/tabTiming.mjs";
+import { docToMarkdown } from "../src/workspaces/notes/lib/notesMarkdown.js";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173";
-const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+/* ⛔ NO HARDCODED SANDBOX PATH (NEW-1, 2026-09-22) — this harness is now wired into the required
+ * `build` CI check (see .github/ci-gates.yml), and CI's Chromium is whatever `npx playwright
+ * install --with-deps chromium` resolves, not this repo's local sandbox revision. Default to
+ * `undefined` so `chromium.launch()` resolves the SAME browser CI's other Playwright-driven gates
+ * (visual-regression.mjs, ui-inventory.mjs) use; `PW_CHROME` still overrides for local runs. See
+ * visual-regression.mjs's own header for the mismatch this convention exists to prevent. */
+const EXEC = process.env.PW_CHROME || undefined;
 const TREE_KEY = "planyr:notes:tree:v1:local";
 const PAGE_KEY = "planyr:notes:page:v1:local:p1";
 
 /* The box's top-left is placed at the press point (`placeAnchor` keeps the chosen point exactly
  * and spends the WIDTH instead — see its own header), so the tolerance here is for rounding and
- * the anchor's own border, not for a policy. Anything looser would stop being an assertion about
- * WHERE the box went, which is the only thing this file is allowed to accept. */
+ * the anchor's own border, not for a policy. */
 const POS_TOL = 6;
 
 const failures = [];
@@ -67,37 +69,17 @@ const known = (label, cond, detail) => {
   if (!cond) voids.push(label);
 };
 
-const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
+const browser = await chromium.launch({ ...(EXEC ? { executablePath: EXEC } : {}), args: ["--no-sandbox"] });
 
-/* ⛔ A WIDE PAGE, DELIBERATELY. On a narrow sheet there is barely any blank paper to the right of
- * a line, which is exactly how four rounds managed to miss this — his own pages are wide. The
- * lines are short and sit in the left third, reproducing the contact-list shape he described. */
-const LINES = [
-  "MUD 377",
-  "Engineer - Pape Dawson",
-  "Dustin O'Neal",
-  "P: 713-428-2400",
-  "Water Authority: NWRWA",
-];
-const PARAGRAPH = "This paragraph is deliberately long enough that it wraps onto more than one "
-  + "rendered line inside the column, so a press can land between two of its own lines rather "
-  + "than in blank paper beside a short one.";
+const EMPTY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
 
-const FIXTURE = {
-  type: "doc",
-  attrs: { pageWidth: 900 },
-  content: [
-    ...LINES.map((text) => ({ type: "paragraph", content: [{ type: "text", text }] })),
-    { type: "paragraph", content: [{ type: "text", text: PARAGRAPH }] },
-    { type: "paragraph", content: [] },
-  ],
-};
-
-async function openPage({ viewport = { width: 1500, height: 950 } } = {}) {
-  const page = await (await browser.newContext({ viewport })).newPage();
+async function openPage({ viewport = { width: 1500, height: 950 }, doc = EMPTY_DOC } = {}) {
+  const ctx = await browser.newContext({ viewport });
+  const page = await ctx.newPage();
   const errs = [];
   page.on("pageerror", (e) => errs.push(e.message));
   await assertMeasurable(page, "verify-notes-in-sheet-placement");
+  await page.addInitScript(() => { window.__PLANYR_E2E = true; });
   await page.goto(`${BASE}#/notes`, { waitUntil: "domcontentloaded" });
   await pacedWait(page, 250);
   await page.evaluate(([tk, pk, d]) => {
@@ -107,35 +89,13 @@ async function openPage({ viewport = { width: 1500, height: 950 } } = {}) {
       pages: [{ id: "p1", title: "In-sheet placement", createdAt: 1, updatedAt: 1, projectId: null, pages: [] }],
     }));
     localStorage.setItem(pk, JSON.stringify(d));
-  }, [TREE_KEY, PAGE_KEY, FIXTURE]);
+  }, [TREE_KEY, PAGE_KEY, doc]);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForSelector('[data-testid="note-body"]', { timeout: 20000 });
   await pacedWait(page, 800);
   page.__errs = errs;
   return page;
 }
-
-/** Where one of the fixture's own lines actually renders, found by its TEXT (trap 21). */
-const lineRect = (page, text) => page.evaluate((t) => {
-  const body = document.querySelector('[data-testid="note-body"]');
-  const p = [...(body?.querySelectorAll("p") || [])].find((n) => n.textContent.trim() === t);
-  if (!p) return null;
-  const r = new Range();
-  r.selectNodeContents(p);
-  const rects = [...r.getClientRects()].filter((k) => k.width > 0 || k.height > 0);
-  if (!rects.length) return null;
-  const first = rects[0];
-  const sheet = document.querySelector('[data-testid="note-sheet"]')?.getBoundingClientRect();
-  return {
-    left: first.left, right: first.right, top: first.top, bottom: first.bottom,
-    midY: first.top + first.height / 2,
-    lines: rects.length,
-    lastBottom: rects[rects.length - 1].bottom,
-    sheetRight: sheet ? sheet.right : null,
-    sheetLeft: sheet ? sheet.left : null,
-    sheetBottom: sheet ? sheet.bottom : null,
-  };
-}, text);
 
 /** Every anchor on screen, with its rendered top-left in CLIENT coordinates. */
 const anchors = (page) => page.evaluate(() => [...document.querySelectorAll(".planyr-anchor")].map((el) => {
@@ -150,15 +110,26 @@ const anchors = (page) => page.evaluate(() => [...document.querySelectorAll(".pl
   };
 }));
 
-/** The flow text, as one string, so "did the caret land in his sentence" is answerable exactly. */
-const flowText = (page) => page.evaluate(() => {
-  const body = document.querySelector('[data-testid="note-body"]');
-  return [...(body?.children || [])]
-    .filter((n) => !n.classList.contains("planyr-anchor"))
-    .map((n) => n.textContent.trim()).filter(Boolean).join(" | ");
+const sheetRect = (page) => page.evaluate(() => {
+  const r = document.querySelector('[data-testid="note-sheet"]').getBoundingClientRect();
+  return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
 });
 
-/** A real double-click. `page.mouse.dblclick` is the ONLY call that raises a native one here. */
+/** ⛔ THE PLACEMENT SURFACE IS `note-body`, NOT THE WHOLE `note-sheet` CARD. The sheet also
+ *  carries the title band (input + project/edited row) ABOVE the editable body — on a fresh
+ *  page that gap measures ~117px. A point "near the sheet's top edge" is, in real geometry,
+ *  a point on the TITLE, and `placeBlockAt`'s coordinate math is relative to `note-body`'s own
+ *  box, so a click above it stores a NEGATIVE y and the page's own "grow up to hold it" logic
+ *  then has to run before anything settles where a naive same-frame read expects. Every point
+ *  in this file that means "blank paper" is chosen relative to THIS rect. */
+const bodyRect = (page) => page.evaluate(() => {
+  const r = document.querySelector('[data-testid="note-body"]').getBoundingClientRect();
+  return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
+});
+
+/** A real double-click. `page.mouse.dblclick` is the ONLY call that raises a native one here
+ *  (carry-forward trap 32); the app's own `isBlankDoublePress` also reconstructs the pair for
+ *  when a browser genuinely does not, so either recognition path is exercised. */
 async function dbl(page, x, y, label) {
   const vp = page.viewportSize();
   if (y >= vp.height || x >= vp.width || x < 0 || y < 0) {
@@ -167,7 +138,7 @@ async function dbl(page, x, y, label) {
   }
   await page.mouse.move(x, y);
   await page.mouse.dblclick(x, y);
-  await pacedWait(page, 120);
+  await pacedWait(page, 150);
 }
 
 async function section(name, fn) {
@@ -181,200 +152,326 @@ async function section(name, fn) {
   }
 }
 
-/* ═══ 1 · THE FIXTURE IS ACTUALLY THE REPORTED SHAPE (vacuity guard) ═══════════════════════════
- * A run on a page with no blank paper to the right of a short line proves nothing at all, and a
- * narrow sheet is precisely how this was missed four times. Refuse to score one. */
-await section("1 · the fixture really has blank paper inside the sheet", async (page) => {
-  const line = await lineRect(page, "Dustin O'Neal");
-  if (!line) throw new Error("fixture line not found — the harness cannot vouch for a scene it cannot see");
-  const blank = line.sheetRight - line.right;
-  ok("there is real blank paper right of the short line, inside the sheet", blank > 200,
-    `${Math.round(blank)}px between the line's end and the sheet's right edge`);
-  ok("the short line really is short (left third of the sheet)", line.right - line.sheetLeft < (line.sheetRight - line.sheetLeft) / 2,
-    `line ends ${Math.round(line.right - line.sheetLeft)}px into a ${Math.round(line.sheetRight - line.sheetLeft)}px sheet`);
-});
-
-/* ═══ 2 · THE REPORTED CASE — blank paper right of a short line, same row ══════════════════════ */
-await section("2 · double-click right of a short line, same row, still inside the sheet", async (page) => {
-  const before = await flowText(page);
-  const line = await lineRect(page, "Dustin O'Neal");
-  // Well past the end of the line — his "ten inches out" — but comfortably inside the sheet.
-  const x = Math.round(line.right + (line.sheetRight - line.right) * 0.6);
-  const y = Math.round(line.midY);
-  await dbl(page, x, y, "case 2");
-  await page.keyboard.type("ALPHA");
+/* ═══ 1 · THE EMPTY-PAGE PLACEHOLDER ══════════════════════════════════════════════════════════ */
+await section("1 · a fresh page shows the placeholder, and it vanishes the moment a box exists", async (page) => {
+  const before = await page.evaluate(() => document.querySelector('[data-testid="note-empty-placeholder"]')?.textContent || null);
+  ok("the empty state names the gesture", before === "Double-click anywhere to start a note.", `read: ${JSON.stringify(before)}`);
+  const body = await bodyRect(page);
+  await dbl(page, Math.round(body.left + 100), Math.round(body.top + 40), "case 1");
+  await page.keyboard.type("FIRST");
   await pacedWait(page, 900);
-
-  const found = (await anchors(page)).filter((a) => a.text.includes("ALPHA"));
-  ok("a box was created", found.length === 1, `${found.length} box(es) holding ALPHA`);
-  if (found.length === 1) {
-    const dx = Math.abs(found[0].left - x);
-    const dy = Math.abs(found[0].top - y);
-    ok(`the box renders where it was clicked (±${POS_TOL}px)`, dx <= POS_TOL && dy <= POS_TOL,
-      `clicked (${x}, ${y}), box top-left (${found[0].left}, ${found[0].top}) → off by (${dx}, ${dy})`);
-  }
-  const after = await flowText(page);
-  ok("the existing line of text was NOT edited", after === before,
-    after === before ? "flow text byte-identical" : `"${before}" → "${after}"`);
+  const after = await page.evaluate(() => document.querySelector('[data-testid="note-empty-placeholder"]'));
+  ok("the placeholder is gone once a box exists", after === null);
 });
 
-/* ═══ 3 · BLANK PAPER FAR BELOW THE LAST LINE ════════════════════════════════════════════════ */
-await section("3 · double-click far below the last line, still inside the sheet", async (page) => {
-  const before = await flowText(page);
-  const para = await lineRect(page, PARAGRAPH);
-  const x = Math.round(para.left + 160);
-  const y = Math.round(para.lastBottom + 120);
-  await dbl(page, x, y, "case 3");
-  await page.keyboard.type("BRAVO");
-  await pacedWait(page, 900);
-
-  const found = (await anchors(page)).filter((a) => a.text.includes("BRAVO"));
-  ok("a box was created below the last line", found.length === 1, `${found.length} box(es) holding BRAVO`);
-  if (found.length === 1) {
-    const dx = Math.abs(found[0].left - x);
-    const dy = Math.abs(found[0].top - y);
-    ok(`the box renders where it was clicked (±${POS_TOL}px)`, dx <= POS_TOL && dy <= POS_TOL,
-      `clicked (${x}, ${y}), box top-left (${found[0].left}, ${found[0].top}) → off by (${dx}, ${dy})`);
-  }
-  ok("the existing text was NOT edited", (await flowText(page)) === before);
-});
-
-/* ═══ 4 · KNOWN-GOOD — a double-click ON a word still selects that word ══════════════════════ */
-await section("4 · double-click on a word still selects the word", async (page) => {
-  const line = await lineRect(page, "Water Authority: NWRWA");
-  const x = Math.round(line.left + 20);           // inside the first word
-  const y = Math.round(line.midY);
-  await dbl(page, x, y, "case 4");
-  await pacedWait(page, 150);
-  const sel = await page.evaluate(() => document.getSelection()?.toString() || "");
-  known("the word under the pointer is selected", sel.trim() === "Water", `selection = "${sel.trim()}"`);
-  known("no box was created by a press on real text", (await anchors(page)).length === 0,
-    `${(await anchors(page)).length} anchors`);
-});
-
-/* ═══ 5 · KNOWN-GOOD — between two lines of a wrapped paragraph is TEXT, not blank paper ═════ */
-await section("5 · double-click between two rendered lines of a paragraph creates nothing", async (page) => {
-  const seam = await page.evaluate((t) => {
-    const body = document.querySelector('[data-testid="note-body"]');
-    const p = [...(body?.querySelectorAll("p") || [])].find((n) => n.textContent.trim() === t);
-    const r = new Range();
-    r.selectNodeContents(p);
-    const rects = [...r.getClientRects()].filter((k) => k.width > 0);
-    if (rects.length < 2) return null;
-    return { x: Math.round(rects[0].left + 40), y: Math.round(rects[0].bottom), lines: rects.length };
-  }, PARAGRAPH);
-  if (!seam) { known("the paragraph wrapped onto 2+ lines", false, "it did not wrap — case is vacuous"); return; }
-  known("the paragraph wrapped onto 2+ lines", seam.lines >= 2, `${seam.lines} rendered lines`);
-  await dbl(page, seam.x, seam.y, "case 5");
-  await page.keyboard.type("X");
-  await pacedWait(page, 900);
-  known("no box was created between two lines of text", (await anchors(page)).length === 0,
-    `${(await anchors(page)).length} anchors`);
-});
-
-/* ═══ 6 · KNOWN-GOOD — the grey mat outside the sheet still places on a single press ═════════
- * ⛔ THE MAT ON THE **LEFT**, MEASURED, NOT THE RIGHT. The first draft of this section pressed at
- * `sheetRight + 60`, which on a wide page at this viewport is x=1554 in a 1500px window — past
- * the edge of the world, where `elementsFromPoint` returns an EMPTY ARRAY rather than erroring
- * (carry-forward trap 18) and the press lands on nothing at all. It reported as "the grey-mat
- * path is broken", about code nothing had touched. The sheet is pinned near the right edge here,
- * so the real grey mat is the band to its LEFT (measured: mat 268→1500, sheet 594→1494). */
-await section("6 · the grey-mat path outside the sheet is unchanged", async (page) => {
-  const line = await lineRect(page, "MUD 377");
-  const x = Math.round(line.sheetLeft - 40);
-  const y = Math.round(line.midY + 40);
-  const inMat = await page.evaluate(([px, py]) => document
-    .elementsFromPoint(px, py).some((el) => el.dataset?.testid === "note-mat"), [x, y]);
-  known("the mat press point really resolves to the grey mat", inMat, `(${x}, ${y})`);
+/* ═══ 2 · SINGLE CLICK ON BLANK SHEET DESELECTS — IT DOES NOT PLACE ═══════════════════════════ */
+await section("2 · a single click on blank sheet creates nothing and only deselects", async (page) => {
+  const body = await bodyRect(page);
+  const x = Math.round(body.left + 200);
+  const y = Math.round(body.top + 200);
   await page.mouse.move(x, y);
   await page.mouse.down();
   await page.mouse.up();
-  await pacedWait(page, 120);
-  await page.keyboard.type("MAT");
-  await pacedWait(page, 900);
-  const found = (await anchors(page)).filter((a) => a.text.includes("MAT"));
-  known("a single press in the grey mat still places a box", found.length === 1,
-    `${found.length} box(es) holding MAT`);
-  if (found.length === 1) {
-    const dx = Math.abs(found[0].left - x);
-    const dy = Math.abs(found[0].top - y);
-    known(`the mat box renders where it was pressed (±${POS_TOL}px)`, dx <= POS_TOL && dy <= POS_TOL,
-      `pressed (${x}, ${y}), box top-left (${found[0].left}, ${found[0].top}) → off by (${dx}, ${dy})`);
-  }
-});
-
-/* ═══ 7 · PERSISTENCE — every created box survives a reload where it was put ═════════════════ */
-await section("7 · a box placed in blank paper survives a reload", async (page) => {
-  const line = await lineRect(page, "Engineer - Pape Dawson");
-  const x = Math.round(line.right + (line.sheetRight - line.right) * 0.5);
-  const y = Math.round(line.midY);
-  await dbl(page, x, y, "case 7");
-  await page.keyboard.type("CHARLIE");
-  await pacedWait(page, 1000);                       // past the 600ms save debounce
-  const beforeReload = (await anchors(page)).find((a) => a.text.includes("CHARLIE"));
-  ok("the box exists before the reload", !!beforeReload);
-
-  await page.reload({ waitUntil: "domcontentloaded" });
-  await page.waitForSelector('[data-testid="note-body"]', { timeout: 20000 });
-  await pacedWait(page, 900);
-  const afterReload = (await anchors(page)).find((a) => a.text.includes("CHARLIE"));
-  ok("the box is still there after a reload", !!afterReload);
-  if (beforeReload && afterReload) {
-    ok("it kept its stored position across the reload",
-      Math.abs(afterReload.storedX - beforeReload.storedX) <= 1
-        && Math.abs(afterReload.storedY - beforeReload.storedY) <= 1,
-      `stored (${beforeReload.storedX}, ${beforeReload.storedY}) → (${afterReload.storedX}, ${afterReload.storedY})`);
-  }
-});
-
-/* ═══ 8 · F4 — AN EMPTY PLACED NOTE IS NOT DESTROYED BEHIND HIS BACK ════════════════════════
- * A correct fix to everything above STILL reads as "nothing happened" if a box he creates and
- * looks away from is silently binned. Under the armed-caret model nothing is created until the
- * first character, so the honest question is the one a person would actually ask: after typing,
- * does clicking away keep it? */
-await section("8 · a box kept after clicking away (F4)", async (page) => {
-  const line = await lineRect(page, "P: 713-428-2400");
-  const x = Math.round(line.right + (line.sheetRight - line.right) * 0.5);
-  const y = Math.round(line.midY);
-  await dbl(page, x, y, "case 8");
-  await page.keyboard.type("DELTA");
   await pacedWait(page, 400);
-  ok("the box exists straight after typing", (await anchors(page)).some((a) => a.text.includes("DELTA")));
-  // Click away onto plain text elsewhere, then let every debounce and sweep run.
-  const other = await lineRect(page, "MUD 377");
-  await page.mouse.click(Math.round(other.left + 10), Math.round(other.midY));
-  await pacedWait(page, 1200);
-  ok("it is still there after clicking away", (await anchors(page)).some((a) => a.text.includes("DELTA")));
+  await page.keyboard.type("SHOULDNOTAPPEAR");
+  await pacedWait(page, 400);
+  ok("a lone single click places nothing, even after typing", (await anchors(page)).length === 0,
+    `${(await anchors(page)).length} anchors`);
+  /* And it deselects: select a box, then a single click elsewhere clears the ring. */
+  await dbl(page, x, y, "case 2 seed");
+  await page.keyboard.type("BOX");
+  await pacedWait(page, 900);
+  const box = (await anchors(page))[0];
+  /* ⛔ NOT THE TOP-LEFT CORNER (carry-forward trap 9) — that is the drag grip's own 12px-wide
+   * strip, which stops propagation on its own pointerdown and never reaches this handler at
+   * all. Click well into the content, past the grip and the box's own left padding. */
+  await page.mouse.click(box.left + 60, box.top + 12);   // stage 1: select
+  await pacedWait(page, 150);
+  const selectedBefore = await page.evaluate(() => document.querySelector('.planyr-anchor[data-selected="1"]') !== null);
+  ok("stage 1 selects the box", selectedBefore);
+  const away = { x: Math.round(body.left + 20), y: Math.round(body.top + 20) };
+  await page.mouse.move(away.x, away.y);
+  await page.mouse.down();
+  await page.mouse.up();
+  await pacedWait(page, 150);
+  const selectedAfter = await page.evaluate(() => document.querySelector('.planyr-anchor[data-selected="1"]') !== null);
+  ok("a single click elsewhere deselects it", !selectedAfter);
+  ok("and still created no second box", (await anchors(page)).length === 1);
+});
+
+/* ═══ 3 · DOUBLE-CLICK AT FIVE SPREAD POINTS, INCLUDING WITHIN 20PX OF EVERY BODY EDGE ═══════ */
+await section("3 · double-click anywhere on the sheet creates a box there", async (page) => {
+  const body = await bodyRect(page);
+  const points = [
+    ["near the top-left corner of the writing area", body.left + 15, body.top + 15],
+    ["near the top-right corner", body.right - 15, body.top + 15],
+    ["near the bottom-left corner", body.left + 15, body.top + 250],
+    ["dead centre", Math.round((body.left + body.right) / 2), Math.round(body.top + 150)],
+    ["off-centre, an ordinary spot", body.left + 80, body.top + 300],
+  ];
+  let i = 0;
+  for (const [label, x, y] of points) {
+    i += 1;
+    const tag = `PT${i}`;
+    await dbl(page, Math.round(x), Math.round(y), label);
+    await page.keyboard.type(tag);
+    await pacedWait(page, 900);
+    const found = (await anchors(page)).find((a) => a.text.includes(tag));
+    ok(`${label}: a box was created`, !!found, `clicked (${Math.round(x)}, ${Math.round(y)})`);
+    if (found) {
+      const dx = Math.abs(found.left - Math.round(x));
+      const dy = Math.abs(found.top - Math.round(y));
+      ok(`${label}: the box renders where it was clicked (±${POS_TOL}px)`, dx <= POS_TOL && dy <= POS_TOL,
+        `box top-left (${found.left}, ${found.top}) → off by (${dx}, ${dy})`);
+    }
+  }
+  ok("all five boxes exist at once", (await anchors(page)).length === 5, `${(await anchors(page)).length} anchors`);
+});
+
+/* ═══ 4 · RIGHT OF AN EXISTING BOX, ON ITS OWN ROW ═════════════════════════════════════════════ */
+await section("4 · double-click right of an existing box, same row, creates a SECOND box", async (page) => {
+  const body = await bodyRect(page);
+  const firstAt = { x: body.left + 30, y: body.top + 120 };
+  await dbl(page, firstAt.x, firstAt.y, "seed box");
+  await page.keyboard.type("LEFT");
+  await pacedWait(page, 900);
+  const seed = (await anchors(page))[0];
+  const rightAt = { x: seed.left + 260, y: seed.top + 10 };
+  await dbl(page, rightAt.x, rightAt.y, "case 4");
+  await page.keyboard.type("RIGHT");
+  await pacedWait(page, 900);
+  const list = await anchors(page);
+  ok("two distinct boxes exist", list.length === 2, `${list.length} anchors`);
+  ok("the first box's text was not touched", list.some((a) => a.text === "LEFT"));
+  const right = list.find((a) => a.text.includes("RIGHT"));
+  ok("the new box sits where it was clicked", !!right && Math.abs(right.left - rightAt.x) <= POS_TOL
+    && Math.abs(right.top - rightAt.y) <= POS_TOL);
+});
+
+/* ═══ 5 · BELOW ALL EXISTING BOXES ═════════════════════════════════════════════════════════════ */
+await section("5 · double-click below every existing box creates one there", async (page) => {
+  const body = await bodyRect(page);
+  await dbl(page, body.left + 40, body.top + 40, "seed");
+  await page.keyboard.type("ABOVE");
+  await pacedWait(page, 900);
+  const below = { x: body.left + 60, y: body.top + 400 };
+  await dbl(page, below.x, below.y, "case 5");
+  await page.keyboard.type("BELOW");
+  await pacedWait(page, 900);
+  const found = (await anchors(page)).find((a) => a.text.includes("BELOW"));
+  ok("a box appeared below everything already there", !!found
+    && Math.abs(found.left - below.x) <= POS_TOL && Math.abs(found.top - below.y) <= POS_TOL);
+});
+
+/* ═══ 6 · BETWEEN TWO EXISTING BOXES ═══════════════════════════════════════════════════════════ */
+await section("6 · double-click between two existing boxes creates one there, touching neither", async (page) => {
+  const body = await bodyRect(page);
+  await dbl(page, body.left + 30, body.top + 20, "top box");
+  await page.keyboard.type("TOP");
+  await pacedWait(page, 900);
+  await dbl(page, body.left + 30, body.top + 380, "bottom box");
+  await page.keyboard.type("BOTTOM");
+  await pacedWait(page, 900);
+  const between = { x: body.left + 30, y: body.top + 200 };
+  await dbl(page, between.x, between.y, "case 6");
+  await page.keyboard.type("MIDDLE");
+  await pacedWait(page, 900);
+  const list = await anchors(page);
+  ok("three distinct boxes, TOP and BOTTOM untouched", list.length === 3
+    && list.some((a) => a.text === "TOP") && list.some((a) => a.text === "BOTTOM"));
+  const mid = list.find((a) => a.text.includes("MIDDLE"));
+  ok("the middle box sits where it was clicked", !!mid
+    && Math.abs(mid.left - between.x) <= POS_TOL && Math.abs(mid.top - between.y) <= POS_TOL);
+});
+
+/* ═══ 7 · KNOWN-GOOD — double-click ON A WORD inside a box still selects that word ═════════════ */
+await section("7 · double-click on a word inside a box selects the word, not a new box", async (page) => {
+  const body = await bodyRect(page);
+  await dbl(page, body.left + 30, body.top + 30, "seed box");
+  await page.keyboard.type("Water Authority NWRWA");
+  await pacedWait(page, 900);
+  const box = (await anchors(page))[0];
+  /* Re-select then re-enter (the two-stage model) so the caret genuinely leaves before this
+   * gesture is asked to prove anything about it. NOT the top-left corner (trap 9) — that is
+   * the drag grip, not the box's content. */
+  await page.mouse.click(box.left + 60, box.top + 12);
+  await pacedWait(page, 100);
+  await page.mouse.dblclick(box.left + 60, box.top + 12);
+  await pacedWait(page, 100);
+  // Now genuinely double-click a word inside the entered box.
+  const wordPoint = await page.evaluate(() => {
+    const el = document.querySelector(".planyr-anchor-content p");
+    const r = new Range();
+    r.selectNodeContents(el);
+    const rect = r.getClientRects()[0];
+    return { x: rect.left + 15, y: rect.top + rect.height / 2 };
+  });
+  await page.mouse.move(wordPoint.x, wordPoint.y);
+  await page.mouse.dblclick(wordPoint.x, wordPoint.y);
+  await pacedWait(page, 150);
+  const sel = await page.evaluate(() => document.getSelection()?.toString() || "");
+  known("the word under the pointer is selected", sel.trim() === "Water", `selection = "${sel.trim()}"`);
+  known("no second box was created by a press on real text", (await anchors(page)).length === 1,
+    `${(await anchors(page)).length} anchors`);
+});
+
+/* ═══ 8 · DOUBLE-CLICK ON AN EXISTING BOX OPENS IT FOR EDITING, NEVER A SECOND BOX ═════════════ */
+await section("8 · double-click on an already-selected box enters it, no duplicate", async (page) => {
+  const body = await bodyRect(page);
+  await dbl(page, body.left + 40, body.top + 40, "seed");
+  await page.keyboard.type("ORIGINAL");
+  await pacedWait(page, 900);
+  const box = (await anchors(page))[0];
+  // Escape backs fully out (editing → selected → deselected), matching real usage.
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await pacedWait(page, 100);
+  /* ⛔ A REAL, NOT A SIMULTANEOUS, DOUBLE CLICK. The two-stage model (select, then enter) has NO
+   * timing dependency at all — any second press on an already-selected box enters it, whatever
+   * the gap — but `page.mouse.dblclick()` delivers its two presses close enough together that
+   * React's state update from press 1 (`setSelection`) is not guaranteed to have committed
+   * before press 2's handler reads `selRef.current`, which a genuine human double-click (tens of
+   * ms apart) never races. Two ordinary clicks with a real gap is the more honest drive of the
+   * SAME app behaviour, not a different one. */
+  await page.mouse.click(box.left + 60, box.top + 12);
+  await pacedWait(page, 120);
+  await page.mouse.click(box.left + 60, box.top + 12);
+  await pacedWait(page, 200);
+  ok("still exactly one box after re-opening it", (await anchors(page)).length === 1,
+    `${(await anchors(page)).length} anchors`);
+  const inEditor = await page.evaluate(() => {
+    const anchor = document.querySelector(".planyr-anchor");
+    return !!(document.activeElement && anchor?.contains(document.activeElement))
+      || document.activeElement?.classList?.contains("ProseMirror");
+  });
+  ok("the caret is live inside the box (editable, not merely selected)", inEditor);
+});
+
+/* ═══ 9 · PERSISTENCE — a box placed anywhere survives a reload where it was put ═══════════════ */
+await section("9 · a box placed on the sheet survives a reload", async (page) => {
+  const body = await bodyRect(page);
+  const at = { x: body.left + 120, y: body.top + 80 };
+  await dbl(page, at.x, at.y, "case 9");
+  await page.keyboard.type("CHARLIE");
+  await pacedWait(page, 1000);                        // past the 600ms save debounce
+  const before = (await anchors(page)).find((a) => a.text.includes("CHARLIE"));
+  ok("the box exists before the reload", !!before);
+
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForSelector('[data-testid="note-body"]', { timeout: 20000 });
   await pacedWait(page, 900);
-  ok("it is still there after a reload", (await anchors(page)).some((a) => a.text.includes("DELTA")));
+  const after = (await anchors(page)).find((a) => a.text.includes("CHARLIE"));
+  ok("the box is still there after a reload", !!after);
+  if (before && after) {
+    ok("it kept its stored position across the reload",
+      Math.abs(after.storedX - before.storedX) <= 1 && Math.abs(after.storedY - before.storedY) <= 1,
+      `stored (${before.storedX}, ${before.storedY}) → (${after.storedX}, ${after.storedY})`);
+  }
 });
 
-/* ═══ 9 · F4, THE OTHER HALF — PRESSING AND TYPING NOTHING LEAVES THE PAGE ALONE ════════════
- * The brief asks whether an empty placed note is still silently destroyed on click-away. Under
- * the armed-caret model (NEW-8, the owner's own rule: *"just because I click outside of the page,
- * it shouldn't automatically open the page up to it. Only once I actually type something"*) there
- * is nothing to destroy — a press remembers a point and creates NOTHING until the first
- * character. So the honest check is that the press is genuinely free: a caret is offered, and
- * walking away from it leaves the document byte-identical, with no box to lose and no notice. */
-await section("9 · a press that types nothing creates nothing, and loses nothing (F4)", async (page) => {
+/* ═══ 10 · F4 — AN ARMED CARET THAT NEVER GOT A CHARACTER LEAVES NOTHING (unchanged from B1393) */
+await section("10 · a double-click that types nothing creates nothing, and loses nothing", async (page) => {
+  const body = await bodyRect(page);
   const before = await page.evaluate((k) => localStorage.getItem(k), PAGE_KEY);
-  const line = await lineRect(page, "Dustin O'Neal");
-  const x = Math.round(line.right + (line.sheetRight - line.right) * 0.6);
-  const y = Math.round(line.midY);
-  await dbl(page, x, y, "case 9");
+  const at = { x: body.left + 150, y: body.top + 150 };
+  await dbl(page, at.x, at.y, "case 10");
   await pacedWait(page, 200);
   ok("a caret is offered at the point pressed", await page.evaluate(() =>
-    !!document.querySelector('[data-pending-place="1"], [data-testid="note-body"][data-pending-place]')));
-  // Look away without typing a thing.
-  const other = await lineRect(page, "MUD 377");
-  await page.mouse.click(Math.round(other.left + 10), Math.round(other.midY));
+    !!document.querySelector('[data-testid="note-body"][data-pending-place]')));
+  await page.mouse.click(body.left + 10, body.top + 10);
   await pacedWait(page, 1200);
   ok("nothing was created", (await anchors(page)).length === 0, `${(await anchors(page)).length} anchors`);
   ok("the stored page is byte-identical", (await page.evaluate((k) => localStorage.getItem(k), PAGE_KEY)) === before);
+  /* ⛔ F4 (REVIEW-2026-09-08) — an abandoned box is discarded SILENTLY; the masker that used to
+   * pop a "we removed an empty box" toast must stay gone. */
   ok("no 'we removed an empty box' notice appeared", !(await page.evaluate(() =>
     /empty|removed|discard/i.test(document.body.innerText))));
+});
+
+/* ═══ 11 · KNOWN-GOOD — the grey mat outside the sheet uses the identical mechanism ════════════ */
+await section("11 · the grey mat outside the sheet double-clicks the same way", async (page) => {
+  const sheet = await sheetRect(page);
+  const x = Math.max(10, Math.round(sheet.left - 40));
+  const y = Math.round(sheet.top + 40);
+  const inMat = await page.evaluate(([px, py]) => document
+    .elementsFromPoint(px, py).some((el) => el.dataset?.testid === "note-mat"), [x, y]);
+  known("the mat press point really resolves to the grey mat", inMat, `(${x}, ${y})`);
+  await dbl(page, x, y, "case 11");
+  await page.keyboard.type("MAT");
+  await pacedWait(page, 900);
+  const found = (await anchors(page)).filter((a) => a.text.includes("MAT"));
+  known("a double-click in the grey mat places a box", found.length === 1, `${found.length} box(es)`);
+});
+
+/* ═══ 12 · MIGRATION — AN OLD FLOW-BODY PAGE BECOMES ONE BOX, ON READ, LOSSLESSLY ══════════════ */
+await section("12 · a page with headings/list/link/picture in flow body migrates into one box", async (page) => {
+  const FIXTURE = {
+    type: "doc",
+    content: [
+      { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "Utilities" }] },
+      { type: "bulletList", content: [
+        { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "MUD 377" }] }] },
+        { type: "listItem", content: [{ type: "paragraph", content: [
+          { type: "text", text: "Engineer contact", marks: [{ type: "link", attrs: { href: "mailto:x@y.com", target: "_blank", rel: "noopener noreferrer" } }] },
+        ] }] },
+      ] },
+      { type: "noteImage", attrs: { imageId: "img_notreal", alt: "site photo", mime: "image/png", w: 400, h: 300 } },
+      { type: "paragraph" },
+    ],
+  };
+  const before = docToMarkdown(FIXTURE, { title: "" }).markdown;
+
+  const ctx = await browser.newContext({ viewport: { width: 1500, height: 950 } });
+  const p = await ctx.newPage();
+  await assertMeasurable(p, "verify-notes-in-sheet-placement (migration)");
+  await p.addInitScript(() => { window.__PLANYR_E2E = true; });
+  await p.goto(`${BASE}#/notes`, { waitUntil: "domcontentloaded" });
+  await pacedWait(p, 250);
+  await p.evaluate(([tk, pk, d]) => {
+    localStorage.clear();
+    localStorage.setItem(tk, JSON.stringify({
+      v: 3, tombs: [], trash: [],
+      pages: [{ id: "p1", title: "Old flow page", createdAt: 1, updatedAt: 1, projectId: null, pages: [] }],
+    }));
+    localStorage.setItem(pk, JSON.stringify(d));
+  }, [TREE_KEY, PAGE_KEY, FIXTURE]);
+  await p.reload({ waitUntil: "domcontentloaded" });
+  await p.waitForSelector('[data-testid="note-body"]', { timeout: 20000 });
+  await pacedWait(p, 900);
+
+  const list = await p.evaluate(() => [...document.querySelectorAll(".planyr-anchor")].map((el) => ({
+    left: Math.round(el.getBoundingClientRect().left), top: Math.round(el.getBoundingClientRect().top),
+    hasHeading: !!el.querySelector("h1"), hasList: !!el.querySelector("ul"),
+    /* The fixture's imageId is deliberately fake (no bytes in IndexedDB), so the node view
+     * correctly replaces its own <img> with a named "missing" block (LOUD-FAILURE) — either
+     * one proves the picture's own NODE survived migration, which is the only thing this
+     * section is testing (bytes loading is a separate, already-covered concern). */
+    hasImage: !!el.querySelector('[data-testid="note-image"]'),
+  })));
+  ok("exactly one migrated box exists", list.length === 1, `${list.length} anchors`);
+  if (list.length === 1) {
+    /* The box's stored (x, y) is (0, 0) — the document's OWN frame, relative to note-body's
+     * top-left, not to the sheet's (which also carries the title band above note-body). */
+    const body = await bodyRect(p);
+    ok("it sits at the sheet's top-left content corner",
+      Math.abs(list[0].left - body.left) < 40 && Math.abs(list[0].top - body.top) < 40,
+      `box at (${list[0].left}, ${list[0].top}), writing area at (${Math.round(body.left)}, ${Math.round(body.top)})`);
+    ok("the heading survived", list[0].hasHeading);
+    ok("the list survived", list[0].hasList);
+    ok("the picture survived", list[0].hasImage);
+  }
+
+  ok("the stored page was NOT rewritten by opening it — migration is in-memory only",
+    (await p.evaluate((k) => localStorage.getItem(k), PAGE_KEY)) === JSON.stringify(FIXTURE));
+
+  const liveJson = await p.evaluate(() => window.__noteEditor?.json?.() ?? null);
+  ok("the E2E hook returned the live (migrated) document", !!liveJson);
+  if (liveJson) {
+    const after = docToMarkdown(liveJson, { title: "" }).markdown;
+    ok("the migrated page's Markdown export is byte-identical to its pre-migration export",
+      after === before, after === before ? "identical" : `before:\n${before}\n----\nafter:\n${after}`);
+  }
+  await ctx.close();
 });
 
 await browser.close();

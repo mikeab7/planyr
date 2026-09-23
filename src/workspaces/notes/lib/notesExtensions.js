@@ -37,11 +37,6 @@ import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import { Highlight } from "@tiptap/extension-highlight";
 import { TextAlign } from "@tiptap/extension-text-align";
-// `@tiptap/extensions` is now an EXPLICIT dependency rather than a transitive one: this file
-// imports from it directly, and a direct import of a package you have not declared is a
-// version you do not control (per the repo's dependency rule). It adds no new bytes — it was
-// already installed as StarterKit's own dependency, and it rides the lazy editor chunk.
-import { Placeholder } from "@tiptap/extensions";
 import NoteImage from "./notesImageNode.js";
 import NoteAttachment from "./notesAttachNode.js";
 import NoteCallout from "./notesCalloutNode.js";
@@ -63,13 +58,13 @@ import { TABLE_COL_MIN_WIDTH } from "./notesTableWidth.js";
  *  from body text at reading size and only add choices to the block-style menu. */
 export const HEADING_LEVELS = [1, 2, 3, 4];
 
-/** What an empty page says (B1313). A new page used to be a blank white void with no
- *  starting cue at all. AUDIT-FIRST correction to the report that raised this: the CSS rule
- *  for `p.is-editor-empty::before` was NOT already present either — neither half of the
- *  placeholder existed, so this landed as the extension AND its style rule (in
- *  components/NoteEditor.jsx's EDITOR_CSS), together, in one commit. One short line: a
- *  prompt is a nudge, not an instruction manual. */
-export const NOTE_PLACEHOLDER = "Start typing — or paste a picture straight in.";
+/* ⛔ THE PER-PARAGRAPH "Start typing" PLACEHOLDER (B1313) IS GONE (NEW-1, 2026-09-22) — there
+ * is no longer a flow paragraph at the top level for it to sit on; the one trailing
+ * paragraph every doc ends with is structural only and is never shown. The page-level empty
+ * state ("Double-click anywhere to start a note.") is now rendered by NoteEditor.jsx itself,
+ * directly, whenever the document holds no `noteAnchor`/`noteSketch` — see its own note. A
+ * box's OWN empty-state cue ("Type here") is unrelated and unchanged: EDITOR_CSS's
+ * `.planyr-anchor[data-empty="1"]:focus-within` rule never went through this extension. */
 
 /** ⛔ WRITE EACH BLOCK'S OWN SIZE FROM ITS RUNS (NEW-SPACING-2). Returns whether anything
  *  changed, which is what makes it safe to run on every transaction — see the plugin below.
@@ -529,8 +524,6 @@ export const NOTE_EXTENSIONS = [
   // splitting the paragraph — and it fires on a NARROW trigger by design, so `and/or` and
   // a pasted URL are untouched. See lib/notesSlashMenu.js.
   NoteSlashMenu,
-
-  Placeholder.configure({ placeholder: NOTE_PLACEHOLDER }),
 ];
 
 /** The extension list for ONE live editor. Same set as `NOTE_EXTENSIONS` (which stays the

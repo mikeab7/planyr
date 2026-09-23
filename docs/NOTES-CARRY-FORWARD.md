@@ -497,6 +497,29 @@ Two more found since, each worth its own line because each returned a confident 
    measured number. The same discipline covers a real touchscreen pinch, which a driver cannot
    raise honestly at all.
 
+41. **⛔ `note-sheet`'S OWN TOP EDGE IS NOT THE PLACEMENT SURFACE'S TOP EDGE — THE TITLE BAND SITS
+   BETWEEN THEM, AND IT MEASURES ~117px ON A FRESH PAGE (NEW-1, 2026-09-22).** A harness that
+   computes "20px from the sheet's own top edge" as a double-click target is aiming at the TITLE
+   INPUT's own area, not blank paper. It is not caught by `focusFromMat`'s
+   `el.closest("input, ...")` guard either — the point can land in the sheet's own padding
+   around the title, which is not the input element itself, so the press still reaches the
+   blank-space placement path and creates a box, just at a wildly different position than
+   clicked (measured: 102px off, on a fresh page). **Measure from `[data-testid="note-body"]`'s
+   own rect for any "blank paper" point, never from `[data-testid="note-sheet"]`'s** — the sheet
+   is the whole card (title band included); the body is the actual placement surface
+   `placeBlockAt`'s coordinate math is relative to. `ui-audit/verify-notes-in-sheet-placement.mjs`
+   uses `bodyRect()` for exactly this reason.
+42. **⛔ A BOX'S TOP-LEFT CORNER IS STILL THE DRAG GRIP (trap 9, RE-CONFIRMED HERE) — AND A
+   SINGLE `page.mouse.dblclick()` ON AN UNSELECTED BOX CAN RACE REACT'S OWN STATE FLUSH BETWEEN
+   ITS TWO PRESSES (NEW-1, 2026-09-22).** The two-stage select/enter model has no timing
+   requirement at all — ANY second press on an already-selected box enters it — but
+   `page.mouse.dblclick()`'s two presses can land close enough together that press 2's handler
+   reads `selRef.current` before press 1's `setSelection` has committed, which a real human's
+   naturally-spaced double-click never races. Drive "select, then enter an UNSELECTED box" as
+   two ordinary `page.mouse.click()` calls with a real gap (~100ms) between them, not one
+   `dblclick()` — it exercises the identical app behaviour with no timing assumption baked into
+   the assertion.
+
 See also `ui-audit/TRAPS.md`, and the named rules **FOREGROUND-OR-VOID** (a background tab cannot
 be measured — not its clock, not its pixels) and **COUNT-EVERY-KIND**.
 

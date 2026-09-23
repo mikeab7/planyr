@@ -166,6 +166,24 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1310672 — B1393 (×5): the Notes page is a pure double-click placement surface, and an old flow-body page migrates into one box `Blocker: real-data`
+
+**Why this needs a live pass, and not just another sandbox round.** This item's own prior rounds (×1–×4) each shipped a real, headless-proven fix to "is this press beside a line of flow text" and the owner kept reporting the symptom live on production. Re-running the OLD `verify-notes-in-sheet-placement.mjs` against a clean build of `origin/main` (before this fix) came back fully green — it does not reproduce his fresh production report (a double-click at three specific points on his real page adding nothing, build `4681016`). That gap between a green sandbox and a red production page is exactly what a sandbox pass cannot settle; only his own browser on his own page can.
+
+**What was verified here (sandbox, logged out).** `node ui-audit/verify-notes-in-sheet-placement.mjs` — rewritten for the new model, all sections green: double-click at five spread points (including within 20px of the writing area's own edges), right of / below / between existing boxes, on a word inside a box (still selects it), on a selected box (enters it, no duplicate), reload persistence, F4 (armed caret / nothing typed / nothing lost), the grey mat (identical mechanism), the empty-page placeholder, and the flow-body migration fixture (heading + list + link + picture → one box, Markdown export byte-identical before/after). Wired into the required `build` CI check. Full unit suite green; lint 0 errors; build green.
+
+**Steps, each with a named expected result — on a THROWAWAY duplicate of a real page with an old-style flow body (owner constraint 7), never one of Michael's real notes:**
+1. Signed in, duplicate a page that still has ordinary typed paragraphs/headings (not yet using boxes) — "Make a copy." On the duplicate, reload. **Expect:** all of that text now lives inside one box, anchored at the top-left of the page, with its formatting intact (headings still headings, lists still lists, links still links).
+2. On the same duplicate, double-click a blank spot to the right of that box, well inside the page, and type a short line. **Expect:** a new box appears exactly where you double-clicked, holding what you typed; the migrated box's text is untouched.
+3. Double-click a blank spot below everything. **Expect:** a third box appears there.
+4. Double-click on an existing box once (it becomes selected — a border/ring appears, no caret), then double-click it again. **Expect:** the caret is now live inside it and you can type; no fourth box was created.
+5. Single-click on blank paper once. **Expect:** nothing is created, and if a box was selected it becomes unselected.
+6. Paste a screenshot after double-clicking a blank spot (before typing). **Expect:** a box appears there holding the picture.
+7. Reload. **Expect:** every box from steps 1–4 and 6 is still there, in the same place.
+8. Export this page to Markdown. **Expect:** the migrated box's text (the heading, list and link from step 1) appears in the exported file.
+9. Read the served chunk hash in the same observation as each result; delete the duplicate afterwards and say what was created/removed.
+- **Stopping rule:** closes when steps 1–8 pass on a real signed-in account, dated — or a failing step re-opens B1393 with a `Recurrence:` line and `(×6)`, per STANDING RULE #2 (a sandbox pass is never the disposition for an owner-reported symptom).
+
 ### V1308368 — B1838704: a polygon crop made from the Site tab OVERLAYS panel survives a signed-in cloud save, a reload on a second device, and prints clipped `Blocker: auth`
 
 **What was verified here (sandbox, logged out).** `node ui-audit/verify-site-tab-overlay-crop.mjs` — 39/39 on the built app: poly + rect crop via the panel, pixels in/out, undo/redo, Rotate, Opacity, Bring in front of the plan, lock refusal, export-sheet raster parity, reload (on-device storage), DXF and PDF (+ Knock out white paper). Unit suites green; lint 0 errors; build green; `OverlayCropDialog` is its own lazy chunk.

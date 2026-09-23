@@ -163,3 +163,15 @@ jobs:
         env:
           BASE_URL: "http://localhost:4173/"
         run: node ui-audit/visual-regression.mjs --check
+      # Notes placement surface gate (NEW-1, 2026-09-22). A prior editor rewrite (PR #1805) went
+      # green through this whole job while silently regressing the double-click-to-place gesture
+      # the owner had reported broken on production — nothing here would have caught it, because
+      # this harness did not exist as a CI gate. Reuses the same preview server and Chromium
+      # install the two Playwright gates just above already paid for; no second server, no second
+      # browser download. `PW_CHROME` is deliberately unset so `chromium.launch()` resolves the
+      # SAME revision `npx playwright install --with-deps chromium` fetched above — see
+      # visual-regression.mjs's own header for the mismatch that convention exists to prevent.
+      - name: Notes placement surface (double-click-anywhere creates a box, migration, reading order — NEW-1)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-in-sheet-placement.mjs

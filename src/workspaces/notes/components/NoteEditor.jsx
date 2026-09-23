@@ -36,7 +36,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { EditorContent, useEditor } from "@tiptap/react";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
 import { anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, anchorPosAtSelection, fitAnchorBox, placeAnchor } from "../lib/notesAnchorNode.js";
-import { isBlankDoublePress, pressPastLineEnd } from "../lib/notesBlankPaper.js";
+import { isBlankDoublePress } from "../lib/notesBlankPaper.js";
+import { migrateFlowBody } from "../lib/notesFlowMigration.js";
 import {
   applyMarquee, boxesInMarquee, latchGesture, marqueeRect, moveSelection, nudgeDelta,
   toggleSelection,
@@ -423,9 +424,20 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
    than relying on the page behind it. */
 .planyr-note .ProseMirror .planyr-anchor[data-anchor-kind="image"] .planyr-anchor-grip { left: 2px; top: 2px; padding: 0 1px; border-radius: 3px; background-color: color-mix(in srgb, var(--surface-raised) 82%, transparent); }
 
-/* An empty page says what to do. Both halves — the extension and this rule — landed
-   together; a rule with no extension matches nothing, which is what a blank page was. */
-.planyr-note .ProseMirror p.is-editor-empty:first-child::before { content: attr(data-placeholder); float: left; height: 0; pointer-events: none; color: var(--text-tertiary); font-style: italic; }
+/* ⛔ THE ONE STRUCTURAL TRAILING PARAGRAPH IS NEVER SHOWN (NEW-1, 2026-09-22). ProseMirror
+   restores a real textblock at the end of the document whenever the last child would
+   otherwise be isolating (a box or a sketch), so there is always one — see
+   notesAnchorNode.js's own header on why addNoteAnchorAt inserts before it rather than
+   after. It is infrastructure, not content: zero size, no pointer events, so it neither
+   looks like a line of text nor swallows a press meant for the sheet under it. It is the
+   ONLY direct-child <p> a migrated (or new, boxes-only) document ever has, which is what
+   makes the last-child selector right rather than a special class to maintain. The old
+   per-paragraph "Start typing" placeholder that used to live here is gone with it — the
+   page-level empty state is rendered by NoteEditor.jsx itself now (search for the
+   double-click placeholder text below). ⛔ NO BACKTICKS IN THIS COMMENT — EDITOR_CSS is a
+   template literal and one backtick ends the string early (repeat offense, see PRINT_CSS's
+   own header in notesPrint.js). */
+.planyr-note .ProseMirror > p:last-child { height: 0; margin: 0 !important; padding: 0; overflow: hidden; pointer-events: none; }
 
 /* A picture. The BROKEN state is styled as loudly as the good one on purpose: an image
    whose bytes are gone must read as a stated problem, never as a blank gap. */
@@ -623,75 +635,13 @@ function FindBar({ term, count, index, onStep, onClear }) {
   );
 }
 
-/**
- * ⛔ WAS THIS PRESS BESIDE A LINE OF WRITING, OR IN OPEN PAGE?
- *
- * This is the whole of the "single click flings the caret across the page" fix, and it is a
- * MEASUREMENT rather than a threshold pulled out of the air. ProseMirror will always hand back
- * SOME nearest text position for a press — that is its job — and on a mostly-empty page the
- * nearest position to a press low on the sheet is the end of a paragraph far above, or the end
- * of the document. Taking it produces exactly what he reported: *"it goes still goes all the
- * way to the left."*
- *
- * So the answer is checked against the page: ask where that position actually IS, and accept
- * it only if the press landed within one line of it vertically. A press in the white space to
- * the right of a short line is beside that line and still puts the caret at its end, which is
- * what every editor does and what B1368 was for. A press two inches below the writing is not
- * beside anything, and is open page.
- *
- * The tolerance is the LINE'S OWN HEIGHT, read from the browser, so it is right at any zoom
- * and at any font size without a number to keep in step.
- */
-function pressIsBesideLine(editor, pos, clientY) {
-  try {
-    const c = editor.view.coordsAtPos(pos);
-    if (!c || !Number.isFinite(c.top)) return false;
-    const line = Math.max(12, c.bottom - c.top);
-    return clientY > c.top - line && clientY < c.bottom + line;
-  } catch (_) {
-    // An unresolvable position is not evidence of a nearby line — treat it as open page.
-    return false;
-  }
-}
-
-/**
- * ⛔ WHERE THE WRITING ON THIS ROW ACTUALLY ENDS — ONE RECTANGLE PER *RENDERED* LINE (NEW-1).
- *
- * `pressIsBesideLine` above answers "is there a line at this height", which is all B1368 needed.
- * It cannot answer "and does the writing reach this far across", because `coordsAtPos` describes
- * one POSITION, not the extent of the line it sits on. A DOM `Range` over the block's contents
- * does: `getClientRects()` returns one rect per rendered line, so a paragraph that wraps reports
- * each of its own lines separately and the press's own `y` picks the right one.
- *
- * The block is found by climbing out of the text node until the element stops being inline —
- * so a bullet's own paragraph is measured, never the whole list, and the right edge is the end of
- * THAT line's words rather than of the widest sibling.
- *
- * Returns `null` when the shape cannot be read, which every caller must treat as "no evidence",
- * never as "blank paper" — guessing here would place a box in the middle of somebody's sentence.
- */
-function lineRectsAt(editor, pos) {
-  try {
-    const at = editor.view.domAtPos(pos);
-    let node = at?.node;
-    if (!node) return null;
-    if (node.nodeType === 3) node = node.parentNode;
-    if (!(node instanceof Element)) return null;
-    const dom = editor.view.dom;
-    let block = node;
-    // Climb out of <strong>/<em>/<a>/<span> runs to the element that actually owns the line box.
-    while (block && block !== dom && getComputedStyle(block).display === "inline") {
-      block = block.parentElement;
-    }
-    if (!block || block === dom || !dom.contains(block)) return null;
-    const range = document.createRange();
-    range.selectNodeContents(block);
-    const rects = [...range.getClientRects()].filter((r) => r.width > 0 && r.height > 0);
-    return rects.length ? rects : null;
-  } catch (_) {
-    return null;
-  }
-}
+/* ⛔ `pressIsBesideLine` AND `lineRectsAt` ARE GONE (NEW-1, 2026-09-22) — DELETED RATHER THAN
+ * ROUTED AROUND, on the owner's own instruction. Both existed to answer "is this press beside
+ * a line of FLOW TEXT", and there is no flow text left on the page for a press to be beside:
+ * the sheet holds nothing but positioned boxes. Six rounds (B1393 ×5, NEW-1) were spent making
+ * that question answer correctly; the seventh round removes the question. See
+ * `docs/NOTES-CARRY-FORWARD.md` §5 family 19 and trap 33 for the history — kept there as
+ * a record, not as a design this file still has to honour. */
 
 /* ⛔ OUR OWN GLYPHS, WORD'S SILHOUETTE LANGUAGE (B36051, amendment 3). The owner asked for
  * "the same little insignias… it doesn't have to be the exact same one if that's a copyright
@@ -1268,8 +1218,14 @@ export default function NoteEditor({
    * knows nor cares which. */
   loadDoc, saveDoc,
 }) {
-  /* Initial content read ONCE, here. Not in an effect — see fix (2) in the header. */
-  const [initialDoc] = useState(() => (typeof loadDoc === "function" ? loadDoc() : readPage(pageId)) || EMPTY_DOC);
+  /* Initial content read ONCE, here. Not in an effect — see fix (2) in the header.
+   *
+   * ⛔ MIGRATED ON THE WAY IN, NEVER ON THE WAY OUT (NEW-1). `migrateFlowBody` bundles any real
+   * flow content an old page still carries at its top level into one box before the editor
+   * ever sees it — see that file's own header. Because this runs here, before `useEditor`, the
+   * migrated shape is simply what the editor STARTS with; it is not a transaction, so
+   * `hasUserInputRef` below still gates the first save on a real, trusted user action. */
+  const [initialDoc] = useState(() => migrateFlowBody((typeof loadDoc === "function" ? loadDoc() : readPage(pageId)) || EMPTY_DOC));
   const [find, setFind] = useState({ term: "", count: 0, index: 0 });
 
   /* The pending snapshot is PLAIN JSON captured at edit time, so the flush never has to
@@ -1858,7 +1814,22 @@ export default function NoteEditor({
         cancelPendingPlace();
       }
     };
+    /* ⛔ A PICTURE PASTED ON THE EMPTY SHEET CREATES A BOX HOLDING IT, AT THE ARMED POINT
+     * (NEW-1). Before this, "paste a picture straight in" meant pasting into flow text; with
+     * no flow text left, the equivalent gesture is: double-click blank paper to arm a caret
+     * (same as for typed text), then paste an image instead of typing. `insertNoteImages`
+     * already builds exactly this shape for a DROP (`notesImageNode.js`'s `insertFiles`, given
+     * a point) — this reuses it rather than writing a second image-placement path. */
     const onPaste = (e) => {
+      const files = [...(e.clipboardData?.files || [])].filter((f) => f.type?.startsWith("image/"));
+      if (files.length) {
+        const at = pendingRef2.current;
+        setPendingPlace(null);
+        e.preventDefault();
+        e.stopPropagation();
+        if (at) editor.commands.insertNoteImages(files, at);
+        return;
+      }
       const text = e.clipboardData?.getData("text/plain") || "";
       if (!text) { cancelPendingPlace(); return; }
       e.preventDefault();
@@ -1966,32 +1937,10 @@ export default function NoteEditor({
      * too. */
   }, [editor]);
 
-  /** ⛔ CLICKING BELOW THE LAST LINE, STILL ON THE WHITE PAGE, GOES TO THE END OF THE DOCUMENT
-   * — THE WAY EVERY DOCUMENT EDITOR BEHAVES (B1550976/NEW-1, owner report 2026-09-11: *"I'm
-   * trying to double click at the bottom of the page. However, it's just automatically taking
-   * it to near the geotechnical engineer where you can see a cursor."*). It was not jumping the
-   * caret — it was refusing to move it, because the sheet's own bottom PADDING (real white page,
-   * there so the document has breathing room) sits OUTSIDE `note-body`'s rendered box, and a
-   * press there fell all the way through to the grey mat's "place a note" gesture, built for the
-   * page OUTSIDE the sheet rather than blank paper still inside it. See `focusFromMat`'s own
-   * comment on `box.bottom` for the hit-test this answers.
-   *
-   * Reuses an already-empty trailing paragraph rather than piling up a second one; otherwise
-   * appends a fresh paragraph so there is always somewhere to keep typing — `addNoteAnchorAt`'s
-   * own manual `at + 2` is the precedent for computing the interior position by hand rather than
-   * trusting `insertContentAt`'s default selection (a bare paragraph's interior is one past its
-   * own insertion point, not an anchor's two). */
-  const focusEndOfSheet = useCallback(() => {
-    if (!editor || editor.isDestroyed) return;
-    const { doc } = editor.state;
-    const last = doc.lastChild;
-    if (last && last.type.name === "paragraph" && last.content.size === 0) {
-      editor.chain().focus(doc.content.size - 1, { scrollIntoView: false }).run();
-      return;
-    }
-    const at = doc.content.size;
-    editor.chain().insertContentAt(at, { type: "paragraph" }).focus(at + 1, { scrollIntoView: false }).run();
-  }, [editor]);
+  /* ⛔ `focusEndOfSheet` IS GONE (NEW-1, 2026-09-22) — it answered "where does the flow
+   * document end", and there is no flow document to end. Clicking below whatever is on the
+   * sheet is now ordinary blank space, exactly like clicking beside it: see `focusFromMat`'s
+   * blank-space branch below, which is the one path every such press now reaches. */
 
   /* ═══ SELECT SEVERAL BOXES AND MOVE THEM TOGETHER (B421494) ══════════════════════════════
    *
@@ -2352,7 +2301,7 @@ export default function NoteEditor({
    * deadzone delays the start; it does not offset the canvas from the hand for the rest of the
    * gesture. (Leaflet does the same, for the same reason.)
    */
-  const beginBlankGesture = useCallback((e) => {
+  const beginBlankGesture = useCallback((e, { place = true } = {}) => {
     const f = frame();
     const from = toDoc(e.clientX, e.clientY);
     if (!f || !from) return false;
@@ -2417,9 +2366,13 @@ export default function NoteEditor({
        * zero travel, and asking the distance again here would call that a press and leave a note
        * behind at the end of every round trip. See `latchGesture`. */
       if (latched) return;                           // panned or selected; place nothing
-      /* ⛔ BELOW THE THRESHOLD THIS IS A PLACE, AND IT IS THE UNCHANGED PLACE. */
+      /* ⛔ BELOW THE THRESHOLD THIS IS A CLICK. It always clears the selection (NEW-1: "single
+       * click on empty sheet deselects"); it places a box only when `place` says this stationary
+       * press was the SECOND of a genuine double click — `focusFromMat` decides that from the
+       * press itself, before the gesture even starts, since a travelling press never reaches
+       * here at all. */
       clearSelection();
-      placeBlockAt(ev.clientX, ev.clientY);
+      if (place) placeBlockAt(ev.clientX, ev.clientY);
     };
 
     window.addEventListener("mousemove", onMove);
@@ -2752,142 +2705,32 @@ export default function NoteEditor({
       return;
     }
 
-    const dom = editor.view.dom;
-    const box = dom.getBoundingClientRect();
-    const hit = editor.view.posAtCoords({
-      left: Math.min(Math.max(e.clientX, box.left + 1), box.right - 1),
-      top: Math.min(Math.max(e.clientY, box.top + 1), box.bottom - 1),
-    });
-
-    /* ⛔ ON THE PAPER → CARET. OFF THE PAPER → PLACE A NOTE (NOTES-FREE-PLACEMENT / NEW-4, owner
-     * report 2026-09-08: *"a double-click ~140px out in the right mat creates nothing; closer in
-     * it works. Unmarked reach limit."*).
+    /* ⛔ BLANK SPACE — THE WHOLE SHEET AND THE WHOLE MAT ARE ONE PLACEMENT SURFACE NOW (NEW-1,
+     * 2026-09-22, owner direction: "I just want the double-click thing. I don't need it to
+     * tell me where to put my paragraph."). There is no flow text left to be "beside", so
+     * there is nothing left to hit-test against and nowhere this press can mean anything but
+     * "the box, if any, under it" (handled above) or "open page, right here".
      *
-     * ⛔ AND IT IS NOT A REACH LIMIT — MEASURED, ON A LOCAL BUILD, BEFORE ANYTHING WAS CHANGED.
-     * A fresh page accepts the gesture at 20, 60, 100, 140, 180, 260 and 400px out into the right
-     * mat; every one of those created a box and grew the page. What actually decides it is the
-     * press's HEIGHT: at a y level with ANY line of body text the press is "beside a line" and is
-     * forwarded to the caret instead, at 40px out exactly as at 140px out. His page's text ran
-     * down to where he was clicking, so the failure tracked how far right he went only by
-     * coincidence — which is why it read as a horizontal wall with no marking on it.
-     *
-     * The rule is now one sentence somebody can hold: a press ON the white page goes to the text
-     * (that is what B1368 was for, and it keeps click-beside-a-short-line working, including in
-     * the page's own left and right margins); a press on the grey mat AROUND the page places a
-     * note there. Nothing invisible decides it, and there is no distance in it at all. */
-    const onSheet = !!el.closest("[data-testid='note-sheet']");
-    if (onSheet && hit && Number.isFinite(hit.pos) && pressIsBesideLine(editor, hit.pos, e.clientY)) {
-      /* ⛔ …UNLESS THE PRESS IS A LONG WAY PAST WHERE THAT LINE'S WRITING ACTUALLY ENDS, AND IT IS
-       * THE SECOND OF A PAIR (NEW-1, owner report 2026-09-18 — the FIFTH round on one symptom).
-       *
-       * ⛔ HIS WORDS: *"anything to the right of a line picks up that there's a line of text
-       * already… let's say the line is five inches long. Even if I click a spot 10 inches out, as
-       * long as it's horizontally aligned, it still goes to the original line. So it doesn't work
-       * at all."* Measured on this fixture before the fix: a double-click in open paper level with
-       * "Dustin O'Neal" turned that line into "Dustin O'NealALPHA" and created no box — the test
-       * above is vertical-only, so ten inches out is still "beside" the line.
-       *
-       * ⛔ WHY FOUR ROUNDS NEVER REACHED THIS LINE OF CODE. A project review recorded as settled
-       * fact that the create gesture *"only fires in the grey mat outside the sheet"*, so every
-       * previous fix went to the mat path. He has been pressing INSIDE the page the whole time.
-       *
-       * ⛔ AND WHY IT IS GATED ON A DOUBLE PRESS RATHER THAN SIMPLY WIDENING THE TEST. A SINGLE
-       * click level with a line must go on putting the caret at that line's end — that is B1368,
-       * he asked for it, and `verify-notes-left-margin-reachable` guards it. The two meanings do
-       * not compete once they are separated the way Word already separates them: one click says
-       * "put my caret somewhere sensible", two say "start something here". So this takes only the
-       * second press of a pair, and only well past the end of the words, and everything else
-       * below and above is reached by exactly the presses it always was. */
-      const press = { t: e.timeStamp || Date.now(), x: e.clientX, y: e.clientY };
-      const doublePress = e.detail >= 2 || isBlankDoublePress(lastBlankPressRef.current, press);
-      /* Computed only for a genuine double press, so an ordinary click costs not one extra
-       * measurement — `getClientRects` on every mousedown would be a real price for nothing. */
-      /* ⛔ `minSlack` IS A DOCUMENT DISTANCE, SO IT HAS TO BE SCALED INTO SCREEN PIXELS (NEW-1,
-       * 2026-09-21). `pressPastLineEnd` compares a CLIENT x against a line's CLIENT rect, and the
-       * line's own height — the other half of its slack — is already a client measurement, so it
-       * scales with the canvas zoom for free. The 12px floor does not: it is written as a document
-       * distance and was being compared against screen pixels that shrink as you zoom out.
-       *
-       * ⛔ MEASURED, and it is a real defect the canvas introduced rather than a theoretical one:
-       * a double-click on unambiguous blank paper placed a box at 100%, 200% and 400% and created
-       * NOTHING at 25% and 50% — the same spot on the same paper, fewer screen pixels past the
-       * line, so the press read as "beside the line" and went to the caret instead. Found by
-       * `verify-notes-canvas`'s own zoom sweep; a three-point far-out/100%/far-in check would have
-       * missed it, because both of ITS far-out points were below the level where the target is
-       * aimable at all. */
-      const slackScale = viewRef.current.z || 1;
-      if (doublePress && pressPastLineEnd(lineRectsAt(editor, hit.pos), e.clientX, e.clientY,
-        { minSlack: 12 * slackScale })) {
-        lastBlankPressRef.current = null;           // consumed — a third press starts a fresh pair
-        e.preventDefault();                          // no native word-select, no caret move
-        e.stopPropagation();
-        /* ⛔ `placeBlockAt` DIRECTLY, NOT `beginBlankGesture`. The mat's gesture router also owns
-         * pan and the rubber band, and handing it a press that started on the PAGE would make a
-         * drag from blank paper into text pan the mat instead of selecting words. Arming the
-         * caret is the whole of what this press means. */
-        placeBlockAt(e.clientX, e.clientY);
-        return;
-      }
-      lastBlankPressRef.current = press;
-      // Beside real writing. Inside the document the browser is already right and must stay
-      // right, or double-click-to-select-a-word dies; outside it (left of the column, above
-      // the first line) the sheet forwards the press, which is what B1368 was for.
-      if (el.closest(".ProseMirror") || el.closest("[contenteditable]")) return;
-      e.preventDefault();
-      // …and the same here — see the note above. This is the press that lands beside a line.
-      editor.chain().focus(null, { scrollIntoView: false }).setTextSelection(hit.pos).run();
-      return;
-    }
-
-    /* ⛔ AND BELOW THAT, STILL ON THE SHEET, IS NOT BLANK PAGE (B1550976/NEW-1). `hit` above is
-     * computed against coordinates already CLAMPED to `box` (note-body's own rendered rect), so
-     * a press in the sheet's own bottom padding — real white page, a whole padding's worth below
-     * the last line rather than one line-height beyond it — resolves a `hit` that
-     * `pressIsBesideLine` correctly refuses, and used to fall through to the grey mat's
-     * "place a note" gesture below, which is for the page OUTSIDE the sheet. A real hit-test:
-     * still `onSheet`, and below the document's own real end (not `box.bottom` — see below)
-     * rather than the sheet's bottom edge, so the side padding at a line's own height (the case
-     * B1368 already covers, above) is untouched.
-     *
-     * ⛔ AND A HEIGHT PIN NEEDS A SECOND, NARROWER VERSION OF THIS SAME CHECK (NEW-1, "drag the
-     * top and bottom edges the same way the sides already drag") — NOT a wholesale replacement
-     * of `box.bottom`, which was the FIRST DRAFT of this fix and broke a real, pre-existing,
-     * tested behaviour: the unpinned "max(46vh, need)" floor already leaves ordinary blank canvas
-     * *inside* `dom`'s own box below a short paragraph, and double-clicking THERE is the
-     * established "open page, place a new block" gesture (`verify-notes-anchor-zoom.mjs`'s whole
-     * first section) — replacing `box.bottom` with the document's real end for every case routed
-     * every one of those clicks to "caret at the end of the document" instead, and the anchor
-     * never appeared. A height PIN is different in kind: it is the OWNER asking for a taller
-     * PAGE, not for more room to place things, so the space it adds is genuinely "past the
-     * document," and a native click there does not reliably place a caret either (measured:
-     * `document.activeElement` stays untouched). So this second boundary — `contentBottom`, where
-     * the document's LAST position actually renders, always a real textblock because
-     * NOTES-PAGE-GROWTH's own anchor-placement rule inserts every anchor BEFORE the document's
-     * last block, never after — governs `e.clientY >= contentBottom` ONLY while a height pin is
-     * active, leaving every unpinned page's existing behaviour (including the
-     * `.closest(".ProseMirror")` early return below it, still relevant there) untouched. */
-    const heightPinned = editor.state.doc.attrs?.pageHeight != null;
-    let belowContent = box.bottom;
-    if (heightPinned) {
-      try {
-        const endCoords = editor.view.coordsAtPos(editor.state.doc.content.size);
-        if (endCoords && Number.isFinite(endCoords.bottom)) belowContent = endCoords.bottom;
-      } catch (_) { /* an unresolvable end position falls back to the DOM's own box */ }
-    }
-    if (onSheet && e.clientY >= belowContent) {
-      if (!heightPinned && (el.closest(".ProseMirror") || el.closest("[contenteditable]"))) return;
-      e.preventDefault();
-      focusEndOfSheet();
-      return;
-    }
-
-    /* Blank space. ⛔ WHAT HAPPENS NEXT IS NOT DECIDED YET — a press that travels is a marquee
-     * and a press that does not is the unchanged placement. `beginBlankGesture` owns both, and
-     * the decision is made at mouse-UP against a measured distance. */
+     * ⛔ A SINGLE CLICK DESELECTS; ONLY A GENUINE DOUBLE CLICK PLACES. A press that TRAVELS is
+     * still a marquee or a pan — `beginBlankGesture` owns that, unchanged, and is not gated on
+     * the double-click test below, because a rubber-band drag is a single, ordinary gesture in
+     * every other canvas tool. A press that does NOT travel is a click, and only the SECOND
+     * click of a pair — native (`e.detail >= 2`) or reconstructed (`isBlankDoublePress`, since
+     * two real down/up pairs do not always raise a native `dblclick`; see carry-forward trap
+     * 32) — creates anything. `beginBlankGesture` is told which of the two a stationary press
+     * should become. */
+    const press = { t: e.timeStamp || Date.now(), x: e.clientX, y: e.clientY };
+    const doublePress = e.detail >= 2 || isBlankDoublePress(lastBlankPressRef.current, press);
+    lastBlankPressRef.current = doublePress ? null : press;   // consumed, or the new "previous"
     e.preventDefault();
     e.stopPropagation();
-    if (!beginBlankGesture(e)) placeBlockAt(e.clientX, e.clientY);
-  }, [editor, placeBlockAt, beginBlankGesture, beginGroupDrag, clearSelection, cancelPendingPlace, focusEndOfSheet]);
+    /* `beginBlankGesture` owns the travel-vs-click decision (unchanged, and independent of
+     * `doublePress`); `place` tells its own click branch whether a stationary press should
+     * place a box or merely clear the selection. A `false` return means the gesture's own
+     * geometry could not be measured at all — the same defensive fallback the placement path
+     * has always had, now equally gated on this being a genuine double click. */
+    if (!beginBlankGesture(e, { place: doublePress }) && doublePress) placeBlockAt(e.clientX, e.clientY);
+  }, [editor, placeBlockAt, beginBlankGesture, beginGroupDrag, clearSelection, cancelPendingPlace]);
 
 
   /* ⛔ `sheetGrowWidth` IS GONE (NEW-2, 2026-09-21) — `sheetWidth` replaces it outright. The old
@@ -4204,6 +4047,18 @@ export default function NoteEditor({
 
   const edited = editedLabel(updatedAt);
 
+  /* ⛔ THE PAGE-LEVEL EMPTY STATE (NEW-1). True only while the document holds NOTHING that
+   * paints — no box, no sketch. Computed inline off the live editor state rather than kept in
+   * React state: `shouldRerenderOnTransaction: true` already re-renders this component on
+   * every transaction, so a second piece of state here would just be a second thing that can
+   * go stale. `doc.forEach` walks direct (TOP-LEVEL) children only, which is exactly what
+   * matters — content nested inside a box is not "the page is empty" by definition. */
+  const pageEmpty = !!editor && !editor.isDestroyed && (() => {
+    let has = false;
+    editor.state.doc.forEach((n) => { if (n.type.name === "noteAnchor" || n.type.name === "noteSketch") has = true; });
+    return !has;
+  })();
+
   return (
     /* ⛔ THE DENSITY IS SET AS TWO CUSTOM PROPERTIES ON THE WRAPPER (NEW-SPACING-3), so ONE
        document attribute drives the line height and the gap between list items together — which
@@ -4723,6 +4578,23 @@ export default function NoteEditor({
               is this module's most-repeated defect. */}
           <div style={{ position: "relative" }}>
             <EditorContent editor={editor} />
+            {/* ⛔ "Double-click anywhere to start a note." (NEW-1) — the sheet's own empty
+                state, replacing the per-paragraph placeholder that used to sit on the flow
+                body's first line. `pointerEvents: "none"` is load-bearing: this sits ON TOP of
+                the sheet, and a placeholder that ate the double-click meant to dismiss it
+                would be the whole feature failing on its own first gesture. */}
+            {pageEmpty ? (
+              <div
+                data-testid="note-empty-placeholder"
+                aria-hidden="true"
+                style={{
+                  position: "absolute", left: 16, top: 3, pointerEvents: "none",
+                  color: "var(--text-tertiary)", fontStyle: "italic", fontSize: "inherit",
+                }}
+              >
+                Double-click anywhere to start a note.
+              </div>
+            ) : null}
             {band ? (
               <div
                 data-testid="note-marquee"
