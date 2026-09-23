@@ -190,6 +190,38 @@ export function normalizePolyCrop(pts, imgW, imgH) {
   return clamped;
 }
 
+// Generous ceiling on manual vertex count (NEW-1, 2026-09-23 hardening) — the crop tool's own
+// insert-on-edge/placement guards refuse past this. It exists only to stop a runaway accidental
+// multi-click session from building an unusable multi-thousand-point ring; no real hand-traced
+// boundary (even a fussy L-shaped site plan) comes anywhere close to it.
+export const MAX_POLY_VERTICES = 200;
+
+// Snap `point` to the nearest of 8 compass directions (horizontal / vertical / 45°) measured from
+// `anchor`, preserving the drag distance — the crop tool's Shift-constrain while placing a new
+// polygon vertex (constrains the edge about to be drawn, anchor = the previous vertex) or dragging
+// an existing one (anchor = where the drag started, so the constraint is on the drag's own vector,
+// not on either adjacent edge — the ambiguous case where a vertex has two edges touching it).
+// Pure so the snap angle is unit-tested independent of any pointer/DOM plumbing.
+export function constrainOctant(anchor, point) {
+  const dx = point[0] - anchor[0], dy = point[1] - anchor[1];
+  if (dx === 0 && dy === 0) return [anchor[0], anchor[1]];
+  const len = Math.hypot(dx, dy);
+  const angle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+  return [anchor[0] + len * Math.cos(angle), anchor[1] + len * Math.sin(angle)];
+}
+
+// The closest point to `p` lying ON the segment a->b (clamped to the segment, never the infinite
+// line) — the crop tool's "click an edge to insert a vertex there" (NEW-1). All three points are
+// in the same space (image px here); pure geometry, no DOM.
+export function nearestOnSegment(p, a, b) {
+  const abx = b[0] - a[0], aby = b[1] - a[1];
+  const lenSq = abx * abx + aby * aby;
+  if (!(lenSq > 0)) return { x: a[0], y: a[1], t: 0 };
+  let t = ((p[0] - a[0]) * abx + (p[1] - a[1]) * aby) / lenSq;
+  t = Math.min(1, Math.max(0, t));
+  return { x: a[0] + abx * t, y: a[1] + aby * t, t };
+}
+
 // Reversible, one-step conversions between the two shapes. Pure projections only — the CALLER
 // (ImageCropTool) is what keeps each shape's own last-drawn value alive across a mode toggle by
 // holding both drafts in state rather than deriving one from the other on every switch.
