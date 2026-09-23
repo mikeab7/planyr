@@ -52,6 +52,37 @@ async function openReview(page) {
   await page.waitForSelector('[data-testid="notes-conflict-review"]');
 }
 
+/* ---- 0) NEW-2: the COMPACT NOTICE must never squeeze the page width, even with a page title
+ * that has no spaces at all. The message is `"<title>" also changed…` — an unbroken title is a
+ * single "word" with no natural wrap point, and this bar (unlike the full-screen review) sits
+ * ABOVE the two-pane layout as a plain in-flow row with no cross-axis clipping, so a flex item
+ * with no min-width override can force the whole workspace to scroll sideways, not just itself.
+ * Checked BEFORE ever opening the full review — this is about the small bar alone. */
+for (const [label, viewport] of [["desktop", { width: 1200, height: 800 }], ["narrow-phone", { width: 390, height: 800 }]]) {
+  const ctx = await browser.newContext({ viewport });
+  const page = await ctx.newPage();
+  await assertMeasurable(page, `verify-notes-conflict-review:longtitle:${label}`);
+  await page.goto(`${HARNESS}?fixture=longtitle`, { waitUntil: "load" });
+  await page.waitForSelector('[data-testid="notes-conflict-bar"]');
+
+  const vw = viewport.width;
+  const barBox = await page.locator('[data-testid="notes-conflict-bar"]').boundingBox();
+  ok(`[${label}] the compact notice itself stays within the viewport width with an unbroken title`,
+    barBox && barBox.x >= -1 && barBox.x + barBox.width <= vw + 1, JSON.stringify(barBox));
+
+  const reviewBtnBox = await page.locator('[data-testid="notes-conflict-review-open"]').boundingBox();
+  ok(`[${label}] "Review changes →" stays reachable within the viewport`,
+    reviewBtnBox && reviewBtnBox.x >= 0 && reviewBtnBox.x + reviewBtnBox.width <= vw + 1, JSON.stringify(reviewBtnBox));
+
+  const pageOverflowsX = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
+  ok(`[${label}] the page does not scroll sideways because of the unbroken title`, !pageOverflowsX);
+
+  const barText = await page.locator('[data-testid="notes-conflict-bar"]').innerText();
+  ok(`[${label}] the notice still names the real title rather than hiding it`, barText.includes("UtilityRelocationExhibit"));
+
+  await ctx.close();
+}
+
 /* ---- 1) main fixture: functional correctness (direction, labels, key, close) -------------- */
 {
   const ctx = await browser.newContext({ viewport: { width: 1200, height: 900 } });
