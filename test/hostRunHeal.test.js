@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { normalizeBondedChildren, normalizeHostRuns } from "../src/workspaces/site-planner/lib/siteModel.js";
-import { sideParkAlongRun, wallKidAlong, sidewalkSpanForBumps } from "../src/workspaces/site-planner/lib/dogEar.js";
+import {
+  sideParkAlongRun, wallKidAlong, sidewalkSpanForBumps, dogEarGeom, bumpsOfHost,
+  sideParkStack, wallKidBox, hostAxisExtents, ownExtents, localToWorld,
+} from "../src/workspaces/site-planner/lib/dogEar.js";
 import { zoneAlongExtent, resizedZoneAlongLen } from "../src/workspaces/site-planner/lib/dockZones.js";
 import { collectClipboard, pasteClipboard } from "../src/workspaces/site-planner/lib/planClipboard.js";
 
@@ -215,8 +218,64 @@ describe("a stored along length is never stamped by a duplicate or a host resize
   it("sideParkAlongRun: only a gesture aimed AT THE FIELD may pin an over-length run", () => {
     const args = { cur: { run: 800, alongShift: 0 }, span: { run: 514, alongShift: 0 } };
     expect(sideParkAlongRun({ ...args, pinAllowed: false }).stamp).toBeUndefined();
-    expect(sideParkAlongRun({ ...args, pinAllowed: true }).stamp).toEqual({ run: 800, alongShift: 0 });
-    expect(sideParkAlongRun({ ...args, pinAllowed: true }).run, "the render is still clamped").toBe(514);
+    // NEW-3 (B1843901) — the render used to clamp back to the span even for the gesture aimed at
+    // this exact field ("the render is still clamped"), which IS the bug this rule now fixes: an
+    // end-grip drag past a bump-out visibly extended the piece and snapped back on release. The
+    // gesture's own drag is honoured as-is, and the stamp records that it went past the wall.
+    expect(sideParkAlongRun({ ...args, pinAllowed: true }).stamp).toEqual({ run: 800, alongShift: 0, beyond: true });
+    expect(sideParkAlongRun({ ...args, pinAllowed: true }).run, "the render honours the full drag, unclamped").toBe(800);
+  });
+
+  /* ⛔ NEW-3 (2026-09-22, B1843901) — an end-grip drag past the wall (or past a bump-out that
+   * lengthens it) is now real, permanent intent: `beyond` marks it, and once marked it survives
+   * every later refit and the load-time heal untouched — the over-length branch above must never
+   * fire on it. A stamp with NO `beyond` marker (every stamp already on disk, the Weld one
+   * included) is completely unaffected: it still re-clamps to the current span and drops the
+   * instant it goes over, exactly as before. */
+  it("sideParkAlongRun: a `beyond` stamp is honoured as-is by a later refit, never re-clamped", () => {
+    const span = { run: 540, alongShift: 10 };
+    // The gesture that created it: dragging the south end 100 ft past a 540 ft span.
+    const pinned = sideParkAlongRun({ cur: { run: 640, alongShift: 60 }, span, pinAllowed: true });
+    expect(pinned.stamp).toEqual({ run: 640, alongShift: 60, beyond: true });
+    // A later refit aimed at nothing in particular (pinFrom null) — the shape `relayoutWallKids`
+    // and the load-time heal both call.
+    const refit = sideParkAlongRun({ cur: { run: 640, alongShift: 60 }, span, stamp: pinned.stamp });
+    expect(refit.run).toBe(640);
+    expect(refit.alongShift).toBe(60);
+    expect(refit.stale).toBe(false);
+    expect(refit.stamp).toBeUndefined();               // "leave whatever is there" — the stamp is kept
+    // It survives even when the host has since changed (a sidewalk width, a bump-out, the building
+    // itself) and the span it hugs is now smaller than the pinned run — the whole point of the fix.
+    const shrunkSpan = { run: 300, alongShift: 0 };
+    const afterHostShrink = sideParkAlongRun({ cur: { run: 640, alongShift: 60 }, span: shrunkSpan, stamp: pinned.stamp });
+    expect(afterHostShrink.run).toBe(640);
+    expect(afterHostShrink.stale).toBe(false);
+    expect(afterHostShrink.stamp).toBeUndefined();
+    // …and even LARGER than the span has since grown to.
+    const grownSpan = { run: 900, alongShift: 0 };
+    const afterHostGrow = sideParkAlongRun({ cur: { run: 640, alongShift: 60 }, span: grownSpan, stamp: pinned.stamp });
+    expect(afterHostGrow.run).toBe(640);
+    expect(afterHostGrow.stale).toBe(false);
+  });
+
+  it("sideParkAlongRun: a LEGACY over-length stamp with no `beyond` marker still heals (the Weld shape)", () => {
+    const span = { run: 577, alongShift: 0 };
+    // Exactly the Weld fixture's shape: a stamp naming a different, longer building's length, no
+    // `beyond` marker because it predates this fix — dropped, never honoured.
+    const legacy = { run: 708.58, alongShift: 3.79 };
+    const res = sideParkAlongRun({ cur: { run: 577, alongShift: 0 }, span, stamp: legacy });
+    expect(res.run).toBe(577);
+    expect(res.stale).toBe(true);
+    expect(res.stamp).toBeNull();
+  });
+
+  it("sideParkAlongRun: dragging a `beyond` field back onto the span default withdraws it completely", () => {
+    const span = { run: 540, alongShift: 10 };
+    const pinned = sideParkAlongRun({ cur: { run: 640, alongShift: 60 }, span, pinAllowed: true });
+    expect(pinned.stamp.beyond).toBe(true);
+    const withdrawn = sideParkAlongRun({ cur: { run: 540, alongShift: 10 }, span, stamp: pinned.stamp, pinAllowed: true });
+    expect(withdrawn.stamp).toBeNull();
+    expect(withdrawn.run).toBe(540);
   });
 
   it("sideParkAlongRun: an existing IMPOSSIBLE stamp is dropped, a possible one is honoured", () => {
@@ -351,5 +410,152 @@ describe("the along-run rule agrees with what the canvas measures", () => {
     expect(cur.run).toBeCloseTo(FOREIGN_LEN, 2);
     expect(span.run).toBe(B3_LEN);
     expect(cur.run - span.run).toBeCloseTo(194.58, 2);   // the owner's overhang, to the foot
+  });
+});
+
+/* ⛔ B1843901 (NEW-1) — an end-grip drag past a corner bump-out, driven through the exact same pure
+ * geometry `relayoutWallKids` (SitePlanner.jsx) and the load-time heal (`normalizeBondedChildren`)
+ * both call, on a SYNTHETIC building shaped like the owner's report: a long dock building with two
+ * corner bump-outs lengthening one end wall, and its side parking EXPLODED into a row | aisle | row
+ * stack. `relayoutWallKids` itself is a closure inside the SitePlanner component and can't be
+ * imported, but every piece of arithmetic it does is these exported `dogEar.js` functions — so
+ * driving them in the same order it does IS driving the real mechanism, not a re-implementation of
+ * it (the same relationship `test/wallKidDrift.test.js` and the rest of this file already have to
+ * the canvas). The three checkpoints below are the three the bug report names: the LIVE drag
+ * (`sideParkAlongRun` with `pinAllowed`), an ordinary REFIT with no gesture (`pinFrom` null — a
+ * sidewalk/bump-out/host change elsewhere), and a HARD RELOAD (`normalizeBondedChildren`) — and the
+ * numbers must agree all three times. A known-good arm (the untouched siblings + the unstamped
+ * fields in the earlier describe blocks above) sits beside every assertion here, and reverting the
+ * `dogEar.js` fix under test makes every "unclamped"/"beyond" assertion in this block fail — that
+ * IS the mutation check this class of bug needs (there is no separate "run it broken" step). */
+describe("an end-grip drag past the wall span survives every refit and a hard reload (B1843901, NEW-1)", () => {
+  const SIDE_PARK_ANGLE = { top: 180, bottom: 0, left: 90, right: 270 };
+  const ROW_D = 60, AISLE_D = 24;
+  const northAlong = (c) => c.alongShift - c.run / 2;
+  const southAlong = (c) => c.alongShift + c.run / 2;
+
+  // A 1122 × 420 dock building with a 55 × 60 bump-out at each of its two WEST-wall corners (NW/SW)
+  // — Building 4 from the report — and its west-wall side parking exploded into row | aisle | row.
+  function buildFixture() {
+    const host = { id: "hostB", type: "building", cx: 0, cy: 0, w: 1122, h: 420, rot: 0 };
+    const bumpDe = (side, sign) => ({ side, sign, along: 55, proj: 60 });
+    const bumpNW = { id: "bumpNW", type: "building", attachedTo: host.id, dogEar: bumpDe("top", -1), ...dogEarGeom(host, bumpDe("top", -1)) };
+    const bumpSW = { id: "bumpSW", type: "building", attachedTo: host.id, dogEar: bumpDe("bottom", -1), ...dogEarGeom(host, bumpDe("bottom", -1)) };
+    const bumps = bumpsOfHost([bumpNW, bumpSW], host);
+    const span = sidewalkSpanForBumps(host, "left", bumps);          // 420 + 60 + 60 = 540, centred
+    const kidRot = ((host.rot || 0) + SIDE_PARK_ANGLE.left) % 360;
+    const { cross } = hostAxisExtents(host, { rot: kidRot, w: 0, h: 0 });
+    const place = (id, type, piece, depth, gap, run, alongShift) => {
+      const box = wallKidBox(host, "left", { depth, gap, run, alongShift });
+      const c = localToWorld(host, box.lx, box.ly);
+      return { id, type, attachedTo: host.id, sideParkSide: "left", sideParkPiece: piece, rot: kidRot,
+        cx: c.x, cy: c.y, ...ownExtents(cross, box.dimBX, box.dimBY) };
+    };
+    const stubPad = (id, i, depth) => ({ id, sideParkSide: "left", sideParkPiece: i, rot: kidRot, w: 1, h: depth });
+    const gapById = new Map(sideParkStack(host, "left", [stubPad("row1", 0, ROW_D), stubPad("aisle", 1, AISLE_D), stubPad("row2", 2, ROW_D)], 0)
+      .map((r) => [r.el.id, r.gap]));
+    const row1 = place("row1", "parking", 0, ROW_D, gapById.get("row1"), span.run, span.alongShift);
+    const aisle = place("aisle", "paving", 1, AISLE_D, gapById.get("aisle"), span.run, span.alongShift);
+    const row2 = place("row2", "parking", 2, ROW_D, gapById.get("row2"), span.run, span.alongShift);
+    return { host, bumpNW, bumpSW, bumps, span, row1, aisle, row2, place, gapById };
+  }
+
+  it("dragging the SOUTH end 100 ft past the bump-out: live, refit, and reload agree", () => {
+    const { host, bumpNW, bumpSW, span, row1, aisle, row2, place, gapById } = buildFixture();
+    const cur = wallKidAlong(host, "left", aisle);
+    expect(cur.run).toBeCloseTo(540, 2);                              // the full extended side
+    // The gesture: drag the south (+) end 100 ft further out, the north (−) end held.
+    const dragged = sideParkAlongRun({ cur: { run: cur.run + 100, alongShift: cur.alongShift + 50 }, span, pinAllowed: true });
+    expect(dragged.stale).toBe(false);
+    expect(dragged.stamp).toEqual({ run: 640, alongShift: 50, beyond: true });
+    expect(dragged.run, "the live drag is honoured, not clamped").toBe(640);
+    const draggedAisle = { ...place("aisle", "paving", 1, AISLE_D, gapById.get("aisle"), dragged.run, dragged.alongShift), sideParkFit: dragged.stamp };
+    const afterDrag = wallKidAlong(host, "left", draggedAisle);
+    expect(northAlong(afterDrag), "the north end never moved").toBeCloseTo(northAlong(cur), 1);
+    expect(southAlong(afterDrag), "the south end landed exactly where it was dropped").toBeCloseTo(southAlong(cur) + 100, 1);
+    // Sibling rows are untouched by this gesture — he drags each himself.
+    expect(wallKidAlong(host, "left", row1)).toEqual(wallKidAlong(host, "left", row1));
+    expect(wallKidAlong(host, "left", row2).run).toBeCloseTo(540, 2);
+
+    // An ordinary refit aimed at NOTHING (pinFrom null) — the shape a sidewalk add/delete/width, a
+    // bump-out add/delete/resize, or a host resize elsewhere all trigger.
+    const refit = sideParkAlongRun({ cur: wallKidAlong(host, "left", draggedAisle), span, stamp: draggedAisle.sideParkFit, pinAllowed: false });
+    expect(refit.stale, "the over-length branch must not fire on a stamped field").toBe(false);
+    expect(refit.run).toBe(640);
+    const refitAisle = { ...place("aisle", "paving", 1, AISLE_D, gapById.get("aisle"), refit.run, refit.alongShift), sideParkFit: draggedAisle.sideParkFit };
+    const afterRefit = wallKidAlong(host, "left", refitAisle);
+    expect(northAlong(afterRefit)).toBeCloseTo(northAlong(afterDrag), 1);
+    expect(southAlong(afterRefit)).toBeCloseTo(southAlong(afterDrag), 1);
+
+    // A hard reload: the real load-time heal, over the whole assembly.
+    const heals = [];
+    const healed = normalizeBondedChildren([host, bumpNW, bumpSW, row1, draggedAisle, row2], (h) => heals.push(h));
+    expect(heals.filter((h) => h.id === "aisle"), "assembly-tear-detected must not report the beyond field").toEqual([]);
+    const healedAisle = healed.find((e) => e.id === "aisle");
+    expect(healedAisle, "byte-identical — nothing needed to change").toBe(draggedAisle);
+    const afterReload = wallKidAlong(host, "left", healedAisle);
+    expect(northAlong(afterReload)).toBeCloseTo(northAlong(afterDrag), 1);
+    expect(southAlong(afterReload)).toBeCloseTo(southAlong(afterDrag), 1);
+    // Siblings never moved, through the whole reload.
+    expect(healed.find((e) => e.id === "row1")).toBe(row1);
+    expect(healed.find((e) => e.id === "row2")).toBe(row2);
+  });
+
+  it("dragging the NORTH end 80 ft past the bump-out: the south end holds, the heal agrees", () => {
+    const { host, bumpNW, bumpSW, span, row1, aisle, row2, place, gapById } = buildFixture();
+    const cur = wallKidAlong(host, "left", aisle);
+    const dragged = sideParkAlongRun({ cur: { run: cur.run + 80, alongShift: cur.alongShift - 40 }, span, pinAllowed: true });
+    expect(dragged.run).toBe(620);
+    expect(dragged.stamp.beyond).toBe(true);
+    const draggedAisle = { ...place("aisle", "paving", 1, AISLE_D, gapById.get("aisle"), dragged.run, dragged.alongShift), sideParkFit: dragged.stamp };
+    const afterDrag = wallKidAlong(host, "left", draggedAisle);
+    expect(southAlong(afterDrag), "the south end never moved").toBeCloseTo(southAlong(cur), 1);
+    expect(northAlong(afterDrag), "the north end landed exactly where it was dropped").toBeCloseTo(northAlong(cur) - 80, 1);
+
+    const healed = normalizeBondedChildren([host, bumpNW, bumpSW, row1, draggedAisle, row2], () => {});
+    const healedAisle = healed.find((e) => e.id === "aisle");
+    expect(healedAisle).toBe(draggedAisle);
+    const afterReload = wallKidAlong(host, "left", healedAisle);
+    expect(southAlong(afterReload)).toBeCloseTo(southAlong(afterDrag), 1);
+    expect(northAlong(afterReload)).toBeCloseTo(northAlong(afterDrag), 1);
+  });
+
+  it("the same gesture on a LONG-WALL (top) field extends east/west past its span, and survives reload", () => {
+    const { host, bumpNW, bumpSW, bumps } = buildFixture();
+    const span = sidewalkSpanForBumps(host, "top", bumps);            // no bump-out lengthens this wall
+    expect(span.run).toBe(1122);
+    const kidRot = ((host.rot || 0) + SIDE_PARK_ANGLE.top) % 360;
+    const { cross } = hostAxisExtents(host, { rot: kidRot, w: 0, h: 0 });
+    const place = (run, alongShift) => {
+      const box = wallKidBox(host, "top", { depth: 60, gap: 0, run, alongShift });
+      const c = localToWorld(host, box.lx, box.ly);
+      return { id: "topField", type: "parking", attachedTo: host.id, sideParkSide: "top", rot: kidRot,
+        cx: c.x, cy: c.y, ...ownExtents(cross, box.dimBX, box.dimBY) };
+    };
+    const field = place(span.run, span.alongShift);
+    const cur = wallKidAlong(host, "top", field);
+    // Drag the east (+) end 120 ft past the building's own end wall.
+    const dragged = sideParkAlongRun({ cur: { run: cur.run + 120, alongShift: cur.alongShift + 60 }, span, pinAllowed: true });
+    expect(dragged.run).toBe(1242);
+    expect(dragged.stamp.beyond).toBe(true);
+    const draggedField = { ...place(dragged.run, dragged.alongShift), sideParkFit: dragged.stamp };
+    const afterDrag = wallKidAlong(host, "top", draggedField);
+    expect(afterDrag.alongShift - afterDrag.run / 2, "the west end never moved").toBeCloseTo(cur.alongShift - cur.run / 2, 1);
+    expect(afterDrag.alongShift + afterDrag.run / 2, "the east end landed exactly where it was dropped")
+      .toBeCloseTo(cur.alongShift + cur.run / 2 + 120, 1);
+
+    const healed = normalizeBondedChildren([host, bumpNW, bumpSW, draggedField], () => {});
+    const healedField = healed.find((e) => e.id === "topField");
+    expect(healedField).toBe(draggedField);
+    expect(wallKidAlong(host, "top", healedField).run).toBe(1242);
+  });
+
+  it("a field dragged back onto the span default is not left 'beyond' anything", () => {
+    const { aisle, host, span } = buildFixture();
+    const cur = wallKidAlong(host, "left", aisle);
+    const dragged = sideParkAlongRun({ cur: { run: cur.run + 100, alongShift: cur.alongShift + 50 }, span, pinAllowed: true });
+    const back = sideParkAlongRun({ cur: { run: span.run, alongShift: span.alongShift }, span, stamp: dragged.stamp, pinAllowed: true });
+    expect(back.stamp).toBeNull();
+    expect(back.run).toBe(span.run);
   });
 });

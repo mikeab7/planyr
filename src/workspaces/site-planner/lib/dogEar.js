@@ -233,6 +233,31 @@ export function wallKidAlong(b, side, kid) {
  * matching its wall is the right default — is re-derived to its wall on the next open, LOUDLY
  * (`assembly-tear-detected`, span half).
  *
+ * ⛔ NEW-3 (2026-09-22) — A GESTURE MAY NOW PIN A RUN *LONGER* THAN THE WALL TOO, AND THE RENDER
+ * MUST STOP CLAMPING IT THE MOMENT IT DOES. The owner expands side parking past a corner bump-out
+ * constantly — grab the end grip, pull past the wall, that's the whole gesture — and NEW-2's own
+ * render still called `Math.min(curRun, spanRun)` even inside the `pinAllowed` branch, so the piece
+ * visibly extended for exactly as long as the pointer was down and sprang back to the span the
+ * instant `pinFrom` next read null (the very next non-gesture refit, including the reload heal).
+ * `sideParkAlongRun` stopped being able to tell "the wall shrank under an old short stamp" (the
+ * Weld defect NEW-2 exists to catch — still caught below) apart from "the owner just chose to run
+ * past the CURRENT wall" (this one) — both present as `want.run > spanRun`.
+ *
+ * The fix is a marker, not a new rule: a stamp written by THIS gesture, when the drag itself went
+ * past the span, carries `beyond: true`. From then on:
+ *   · A `beyond` stamp is honoured EXACTLY as recorded, by every refit and by the load-time heal —
+ *     the over-length branch never fires on it and it is never re-clamped to whatever span the wall
+ *     happens to have now. Every host relayout named in the bug report (a sidewalk added/removed/
+ *     resized, a bump-out added/removed/resized, the host itself resized) leaves it alone.
+ *   · A stamp with NO `beyond` marker — every stamp on disk before this shipped, the Weld one
+ *     included — is unaffected: it still re-clamps to the current span and drops the moment it goes
+ *     over, exactly as NEW-2 left it. There is no way to retroactively "upgrade" an old stamp into a
+ *     `beyond` one short of dragging that field's end again, which is the correct reading of it —
+ *     an old stamp never expressed "run past the wall", so it never gets treated as though it had.
+ *   · Dragging the field back onto the span default still withdraws the override completely,
+ *     `beyond` included — there is only ever the one stamp per field, never a second field for "how
+ *     far past".
+ *
  * PURE, so the rule is unit-testable apart from the React canvas.
  */
 export const SIDE_PARK_PIN_TOL_FT = 0.5; // below this a field still counts as sitting on the default
@@ -249,14 +274,8 @@ export function sideParkAlongRun({ cur, span, stamp = null, pinAllowed = false, 
   const spanRun = Math.max(0, Number(span && span.run) || 0);
   const curRun = Math.max(0, Number(cur && cur.run) || 0);
   const curShift = Number(cur && cur.alongShift) || 0;
-  const want = stamp && Number.isFinite(stamp.run) && stamp.run > 0 ? stamp : null;
-  // Over-length: the field, or the intent stored for it, claims more wall than the host has.
-  const overRun = (want ? want.run : curRun) > spanRun + tol;
-  if (overRun && !pinAllowed) {
-    // Stale on both axes → back onto the span default, and the impossible stamp goes with it.
-    return { run: spanRun, alongShift: Number(span && span.alongShift) || 0, stamp: want ? null : undefined, stale: true };
-  }
   const spanShift = Number(span && span.alongShift) || 0;
+  const want = stamp && Number.isFinite(stamp.run) && stamp.run > 0 ? stamp : null;
   const offDefault = Math.abs(curRun - spanRun) > tol || Math.abs(curShift - spanShift) > tol;
   /* NEW-2 — a gesture aimed at THIS field is the only thing that can create intent, and it now
    * RECORDS that intent instead of leaving it implicit in the geometry. Recording is what makes the
@@ -264,7 +283,27 @@ export function sideParkAlongRun({ cur, span, stamp = null, pinAllowed = false, 
   if (pinAllowed) {
     // Dragged back onto the span default → the override is withdrawn, not merely satisfied.
     if (!offDefault) return { run: spanRun, alongShift: spanShift, stamp: null, stale: false };
-    return { run: Math.min(curRun, spanRun), alongShift: curShift, stamp: { run: curRun, alongShift: curShift }, stale: false };
+    /* NEW-3 — the render used to clamp here too (`Math.min(curRun, spanRun)`), which is the bug: a
+     * gesture aimed at this field is a statement of exactly how long it should be, over-length
+     * included, so it is honoured AS-IS. `beyond` marks a stamp that was deliberately pinned past
+     * the wall's own span, so a LATER refit or the load-time heal (below) can tell it apart from an
+     * old stamp that merely outlived a host that shrank under it — the Weld defect, which never set
+     * this marker and must keep healing exactly as before. */
+    const stampOut = { run: curRun, alongShift: curShift };
+    if (curRun > spanRun + tol) stampOut.beyond = true;
+    return { run: curRun, alongShift: curShift, stamp: stampOut, stale: false };
+  }
+  // NEW-3 — an explicit "run past the wall" stamp is honoured exactly as recorded, by every refit
+  // and by the load-time heal: it is never treated as stale for being over-length, and it is never
+  // re-clamped to whatever span the wall happens to have now.
+  if (want && want.beyond) return { run: want.run, alongShift: Number(want.alongShift) || 0, stamp: undefined, stale: false };
+  // Over-length, and not a recorded "beyond" override: the field, or the intent stored for it,
+  // claims more wall than the host has, and every gesture that CAN set a run clamps it to the span
+  // — so this can only be a longer host's number (the Weld defect).
+  const overRun = (want ? want.run : curRun) > spanRun + tol;
+  if (overRun) {
+    // Stale on both axes → back onto the span default, and the impossible stamp goes with it.
+    return { run: spanRun, alongShift: spanShift, stamp: want ? null : undefined, stale: true };
   }
   /* NEW-2 — no gesture, so the ONLY intent that counts is a RECORDED one. An unstamped divergence is
    * staleness in either direction (the Sylvestri case was SHORT, the Weld case was LONG) and goes

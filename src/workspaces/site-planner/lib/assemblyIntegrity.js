@@ -35,10 +35,13 @@
  *     host box and the depths inboard of it. There is NO user freedom on that axis, so any
  *     disagreement past tolerance is a tear.
  *   • ALONG the wall there IS user freedom (sliding or shortening a parking field to line up a
- *     curb return — B1039) — but as of NEW-2 that freedom must be RECORDED to count. An unstamped
- *     along-wall run or centre that disagrees with the span is staleness, not intent, and is
- *     re-derived; a `sideParkFit` stamp (written only by a gesture aimed at that field) is honoured
- *     and re-clamped to the host's current wall on every host change. The removed clause —
+ *     curb return — B1039, or lengthening one PAST the wall to add more — NEW-3/B1843901) — but as
+ *     of NEW-2 that freedom must be RECORDED to count. An unstamped along-wall run or centre that
+ *     disagrees with the span is staleness, not intent, and is re-derived; a `sideParkFit` stamp
+ *     (written only by a gesture aimed at that field) is honoured and re-clamped to the host's
+ *     current wall on every host change — UNLESS it carries `beyond: true` (an end-grip drag that
+ *     deliberately ran past the wall), in which case it is honoured exactly as recorded, never
+ *     clamped (`dogEar.sideParkAlongRun`'s own header has the full history). The removed clause —
  *     "preserve once touched", which read any geometric difference as intent forever — is what
  *     survived B1340 and put a 205 ft field on a 260 ft wall.
  *   • A wall strip and a corner bump-out are fully derived on BOTH axes.

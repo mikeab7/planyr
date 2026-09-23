@@ -152,19 +152,10 @@ function Badge({ state, onRetry, detail }) {
       >
         <CloudGlyph variant={v.variant} />
       </button>
-      {/* NEW-3 (top-right toolbar cluster, Option B) — a small circular status-color dot in the
-          button's own corner, so the state reads at a glance without a hover. Purely additional:
-          the button's own color/aria-label/tooltip already carry the same information; this is a
-          second, faster-to-read signal for the resting (non-hover) state. `aria-hidden` — the
-          button's aria-label already states the state in words. */}
-      <span
-        aria-hidden="true"
-        data-testid="cloud-sync-badge-dot"
-        style={{
-          position: "absolute", bottom: 2, right: 2, width: 7, height: 7, borderRadius: RADIUS.pill,
-          background: v.color, border: "1.5px solid var(--surface-raised)", pointerEvents: "none",
-        }}
-      />
+      {/* ⛔ B1807200 AMENDMENT (2026-09-23) — NEW-3's corner status-color dot is REMOVED. Owner:
+          "the cloud already tells us that it's saved" — the icon shape + its color already carry
+          the state, so the dot was a redundant second signal. Everything else about this button
+          (icon, color-on-state, aria-label, the loud-failure ring) is unchanged. */}
       {canPop && open && (
         <>
           <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 69 }} />

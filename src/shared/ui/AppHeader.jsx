@@ -74,6 +74,21 @@ import FloatingNotice from "./FloatingNotice.jsx";
 const CHROME = "var(--chrome-bg-elev)";
 const LINE   = "var(--chrome-divider)";
 
+// ⛔ B1807200 AMENDMENT (NEW-2, 2026-09-23) — HEADER_ROW_H is the ONE height for both header rows,
+// so they can't drift apart the way this file's own row-1/row-2 heights independently did before.
+// Owner report, on the LIVE site after B1807200's box-treatment round: "all the chips are too big
+// for the header. They touch the header." Measured headless (both rows, both themes): each row
+// was `height: 30` holding a 30×30 (border-box) control centered via `alignItems:"center"` — a
+// bare `getBoundingClientRect()` diff showed 0px of clearance top AND bottom, in every case.
+// Owner-approved mockup ("Option B — revised") specs 40 — a 30×30 control centered in a 40px row
+// via the same unchanged `alignItems:"center"` gives 5px of clearance top and bottom. Grows the
+// ROW only (not the control — the 30×30 size is the shared token this whole item exists to
+// converge on); nothing about control size, radius or border changes. Row 2's module-tab strip
+// stretches to `height:"100%"` of this row (documented at its own render site) and grows the
+// identical 10px as a disclosed, mechanical consequence — the same trade-off this file already
+// accepted when Option B grew this row 26→30.
+const HEADER_ROW_H = 40;
+
 // NEW-2 (B915536) — a LITERAL duplicate of designTokens.js's FONT_SIZE.control, not an import:
 // this file is in the shared ENTRY chunk (every route downloads it, per this file's own B1429
 // note above), and importing designTokens.js for the sake of one small object measurably ate the
@@ -1055,15 +1070,20 @@ export default function AppHeader({
       style={{ flex: "none", background: CHROME, borderBottom: `1px solid ${LINE}`, position: "relative", zIndex: 60 }}
       data-fullscreen={fullscreen ? "on" : undefined}
     >
-      {/* ── Row 1 — 30px (B885137/NEW-2, owner-approved "Headers" artboard, 2026-08-30/31;
+      {/* ── Row 1 — HEADER_ROW_H (B885137/NEW-2, owner-approved "Headers" artboard, 2026-08-30/31;
            was 35px per B169). ⛔ AUDIT-FIRST: the artboard's "today" baseline (15px type, 13px
            padding, 96px total) does NOT match what this row actually measured live — 35px tall
            already, with the crumb/"Map" text already at 11.5–12.5px, not 15px. The one real
            violation of "nothing above --font-display" was the WORDMARK (14.8px, BrandMark
-           size=20) — fixed below (size=19 → ~14px). 30px is not a bare padding shrink: the
-           real floor is the 26px-tall FullscreenButton/SettingsMenu icon buttons already living
-           in this row (untouched — out of this item's scope), so 30 is the smallest height that
-           doesn't clip them; contents stay vertically centered. */}
+           size=20) — fixed below (size=19 → ~14px). 30px was not a bare padding shrink: the
+           real floor was the 26px-tall FullscreenButton/SettingsMenu icon buttons then living
+           in this row, so 30 was the smallest height that didn't clip them.
+           ⛔ B1807200 AMENDMENT (2026-09-23) — 30 → HEADER_ROW_H (40, owner-approved mockup).
+           Once Option B grew every row-1 control to a true 30×30 (see
+           CloudSyncBadge.jsx/PresenceChip.jsx), a 30px row gave them ZERO clearance top/bottom —
+           measured live, an owner-reported "chips touch the header." HEADER_ROW_H's own header
+           (top of this file) has the numbers; contents stay vertically centered via the
+           unchanged `alignItems:"center"`. */}
       {/* B1610640 — a chevron rendered as a DIRECT CHILD of the scrolling+positioned `rowRef` (the
           old shape) is laid out relative to the row's own padding box, but because that box IS
           what scrolls, the chevron's rendered position scrolled along with the row's content — it
@@ -1079,7 +1099,7 @@ export default function AppHeader({
           this is a pure position fix — the row's own content, mask and measurement refs are
           untouched. */}
       <div style={{ position: "relative" }}>
-      <div ref={rowRef} className={narrow ? "no-hscrollbar" : undefined} style={{ height: 30, display: "flex", alignItems: "center", position: "relative", ...rowScroll, WebkitMaskImage: row1Mask, maskImage: row1Mask }}>
+      <div ref={rowRef} className={narrow ? "no-hscrollbar" : undefined} style={{ height: HEADER_ROW_H, display: "flex", alignItems: "center", position: "relative", ...rowScroll, WebkitMaskImage: row1Mask, maskImage: row1Mask }}>
 
         {/* ⛔ NEW-2 — NAVIGATION WINS. Read this before changing any of the three zone flexes.
             The owner could not open the plan switcher on a laptop: "the unincorporated / city of
@@ -1335,7 +1355,7 @@ export default function AppHeader({
         // non-scrolling `position:relative` wrapper around `row2Ref` so they stop scrolling with
         // the row's own content.
         <div style={{ position: "relative" }}>
-        <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ minHeight: 30, display: "flex", alignItems: "center", position: "relative", flexWrap: narrow ? "nowrap" : "wrap", justifyContent: "flex-end", rowGap: 2, borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
+        <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ minHeight: HEADER_ROW_H, display: "flex", alignItems: "center", position: "relative", flexWrap: narrow ? "nowrap" : "wrap", justifyContent: "flex-end", rowGap: 2, borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
           {/* Left zone — module tabs. B1012560: content-sized (`"none"` = `0 0 auto`) and
               never shrinks, same as the 2-zone layout's tabs zone below — primary navigation
               is the last thing to lose space. Omitted entirely when showModuleTabs is false
@@ -1411,9 +1431,14 @@ export default function AppHeader({
         // header in controls.jsx. The module tab strip on the left of this same row stretches to
         // match (`height:"100%"` below), so it reads ~4px taller too — an accepted, disclosed
         // consequence of one shared row rather than a second row-height system.
+        // ⛔ B1807200 AMENDMENT (2026-09-23) — 30 → HEADER_ROW_H (40, owner-approved mockup), same
+        // reason and same number as Row 1's identical amendment above: zero measured clearance
+        // between the File/Undo/Redo/Zoom-to-fit cluster's own 30×30 boxes and this row's edges.
+        // The module tab strip stretches the same additional 10px — the same disclosed trade-off
+        // the 26→30 move already made, just one more step of it.
         // B1610640 — same non-scrolling wrapper as the branch above; see its comment.
         <div style={{ position: "relative" }}>
-        <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ height: 30, display: "flex", alignItems: "center", position: "relative", borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
+        <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ height: HEADER_ROW_H, display: "flex", alignItems: "center", position: "relative", borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
 
           {/* Module tabs — the planner's own workspace navigation. Omitted entirely on a
               standalone route (B651873, e.g. /food): the toolbar zone below is already

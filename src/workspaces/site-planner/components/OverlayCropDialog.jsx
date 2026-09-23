@@ -36,15 +36,19 @@ export default function OverlayCropDialog({ overlay, onCommit, onCancel }) {
       <div ref={shellRef} style={{
         background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: RADIUS.lg, padding: 14,
         boxShadow: "0 8px 32px rgba(0,0,0,0.35)", // design-exempt: no shadow-color token yet repo-wide (matches SitePlansSection's crop modal)
-        maxWidth: "96vw",
+        maxWidth: "96vw", maxHeight: "94vh", overflowY: "auto",
       }}>
         <div style={{ fontSize: FONT_SIZE.control, fontWeight: 600, marginBottom: 8, color: "var(--text-primary)", overflowWrap: "anywhere" }}>
           Crop “{overlay.name || "this overlay"}”
         </div>
+        {/* NEW-2 (2026-09-23, owner: "the size of it doesn't make a ton of sense, I can't zoom in
+            to get the little piece that I want") — use the window it actually has rather than a
+            small fixed box; the crop tool's own zoom/pan makes a big viewport worth having on a
+            full-size real sheet. Floors keep a usable dialog on a short/narrow viewport. */}
         <ImageCropTool
           src={overlay.src} imgW={overlay.imgW} imgH={overlay.imgH} crop={overlay.crop || null}
-          maxWidth={Math.min(900, typeof window !== "undefined" ? window.innerWidth - 60 : 900)}
-          maxHeight={Math.min(640, typeof window !== "undefined" ? window.innerHeight - 160 : 640)}
+          maxWidth={Math.max(420, typeof window !== "undefined" ? window.innerWidth - 80 : 900)}
+          maxHeight={Math.max(320, typeof window !== "undefined" ? window.innerHeight - 220 : 640)}
           onCommit={onCommit} onCancel={onCancel}
         />
       </div>
