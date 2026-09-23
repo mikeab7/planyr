@@ -7,8 +7,9 @@ import { describe, it, expect } from "vitest";
 import {
   MIN_CROP_PX, clampCropRect, isFullCrop, normalizeCrop, hasCrop, effectiveCropRect,
   cropClipRectScreen, cropTrimFeet, cropFromTrimFeet,
-  MIN_POLY_VERTICES, cropKind, polygonAreaPx, clampPolyPoints, isUsablePoly, normalizePolyCrop,
+  MIN_POLY_VERTICES, MAX_POLY_VERTICES, cropKind, polygonAreaPx, clampPolyPoints, isUsablePoly, normalizePolyCrop,
   rectToPolyPoints, polyPointsToRect, isValidCropShape, normalizeCropShape, clipPathValueForCrop,
+  constrainOctant, nearestOnSegment,
 } from "../src/workspaces/site-planner/lib/overlayCrop.js";
 
 describe("clampCropRect", () => {
@@ -264,6 +265,65 @@ describe("clipPathValueForCrop — the ONE clip mechanism for either shape, in i
  * there is no path by which a polygon crop COULD move a surviving pixel's ground position, exactly
  * as already proven for the rect shape in test/siteplanOverlayCrop.test.js. Proven here at the
  * SOURCE level (the function's own arity), the same technique that file already uses. */
+/* 2026-09-23 hardening (owner live-use report — "it only gives me four control points to mess
+ * with", "I can't zoom in to get the little piece that I want"): the crop tool's own polygon
+ * editing (insert-on-edge, Shift-constrain) and pan/zoom lean on these two pure helpers. */
+describe("constrainOctant — Shift-constrain a polygon edge to 0/45/90°", () => {
+  it("snaps a near-horizontal drag flat (magnitude preserved, not just the dx component)", () => {
+    const [x, y] = constrainOctant([0, 0], [100, 3]);
+    expect(y).toBe(0);
+    expect(x).toBeCloseTo(Math.hypot(100, 3), 5);
+  });
+  it("snaps a near-vertical drag plumb", () => {
+    const [x, y] = constrainOctant([0, 0], [2, 100]);
+    expect(x).toBeCloseTo(0, 9);
+    expect(y).toBeCloseTo(Math.hypot(2, 100), 5);
+  });
+  it("snaps a roughly-diagonal drag to exactly 45°", () => {
+    const [x, y] = constrainOctant([0, 0], [95, 105]);
+    expect(x).toBeCloseTo(y, 5); // 45° means equal legs
+    expect(Math.hypot(x, y)).toBeCloseTo(Math.hypot(95, 105), 5); // distance preserved
+  });
+  it("preserves distance for every snap, and works from a non-origin anchor", () => {
+    const anchor = [400, 250];
+    const [x, y] = constrainOctant(anchor, [401, 320]);
+    const dist = Math.hypot(401 - 400, 320 - 250);
+    expect(Math.hypot(x - anchor[0], y - anchor[1])).toBeCloseTo(dist, 5);
+  });
+  it("a point exactly on the anchor snaps to the anchor (no NaN from a zero-length drag)", () => {
+    expect(constrainOctant([10, 10], [10, 10])).toEqual([10, 10]);
+  });
+});
+
+describe("nearestOnSegment — insert-a-vertex-on-an-edge hit math", () => {
+  it("a perpendicular point projects straight onto the segment", () => {
+    const n = nearestOnSegment([50, 40], [0, 0], [100, 0]);
+    expect(n.x).toBeCloseTo(50, 5);
+    expect(n.y).toBeCloseTo(0, 5);
+    expect(n.t).toBeCloseTo(0.5, 5);
+  });
+  it("clamps to the near endpoint when the point projects before the segment start", () => {
+    const n = nearestOnSegment([-30, 5], [0, 0], [100, 0]);
+    expect(n).toEqual({ x: 0, y: 0, t: 0 });
+  });
+  it("clamps to the far endpoint when the point projects past the segment end", () => {
+    const n = nearestOnSegment([130, 5], [0, 0], [100, 0]);
+    expect(n.x).toBe(100);
+    expect(n.t).toBe(1);
+  });
+  it("a zero-length segment (degenerate edge) returns its one point rather than dividing by zero", () => {
+    const n = nearestOnSegment([5, 5], [20, 20], [20, 20]);
+    expect(n).toEqual({ x: 20, y: 20, t: 0 });
+  });
+});
+
+describe("MAX_POLY_VERTICES — the stated ceiling", () => {
+  it("is a generous, explicitly-named cap, not an accident of some other constant", () => {
+    expect(MAX_POLY_VERTICES).toBe(200);
+    expect(MAX_POLY_VERTICES).toBeGreaterThan(MIN_POLY_VERTICES * 10);
+  });
+});
+
 describe("geo invariant — a crop (rect OR poly) cannot move a surviving pixel's ground position", () => {
   it("imagePointToLatLon's signature carries no crop parameter", async () => {
     const mod = await import("../src/shared/sitePlans/lib/overlayGeoref.js");
