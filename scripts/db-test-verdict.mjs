@@ -59,6 +59,7 @@ export const VERDICT_REGISTRY = {
   "overlay_object_release_guard.test.sql": passedCommaFailed,
   "parcel_active_deleted_invariant.test.sql": allPassedOrCountedFail,
   "reconcile_site_group_name.test.sql": proofPassedOrFailed,
+  "security_definer_ownership_audit.test.sql": passedCommaFailed,
   "sites_block_delete_live_group.test.sql": allPassedOrCountedFail,
   "sites_cas_ownership_independent.test.sql": passedCommaFailed,
   "sites_rename_stamp_guard.test.sql": allPassedOrCountedFail,
