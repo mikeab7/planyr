@@ -24,7 +24,7 @@
 /** Every node in the notes schema whose size is 1 because it has no content of its own.
  *  Asserted against the real schema in test/notesOutline.test.js — a new atom that is not
  *  listed here fails that test rather than silently shifting every position after it. */
-export const LEAF_NODES = new Set(["hardBreak", "horizontalRule", "noteImage", "noteSketch", "noteAttachment"]);
+export const LEAF_NODES = new Set(["hardBreak", "horizontalRule", "noteImage", "noteAttachment"]);
 
 /** ProseMirror's `nodeSize`, computed from JSON. */
 export function nodeSize(node) {

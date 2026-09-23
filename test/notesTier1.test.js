@@ -113,7 +113,7 @@ describe("NEW-1 · the catalogue and its filter", () => {
     const labels = SLASH_COMMANDS.map((c) => c.label);
     for (const want of ["Heading 1", "Heading 2", "Heading 3", "Heading 4", "Body text",
       "Bulleted list", "Numbered list", "Checklist", "Table", "Image", "Attachment",
-      "Sketch", "Divider", "Callout", "Toggle"]) {
+      "Divider", "Callout", "Toggle"]) {
       expect(labels).toContain(want);
     }
   });
@@ -140,7 +140,7 @@ describe("NEW-1 · the catalogue and its filter", () => {
   it("every command id the catalogue offers is one the applier can actually run", () => {
     // A row that inserts nothing is worse than a row that is absent.
     const RUNNABLE = new Set(["h1", "h2", "h3", "h4", "paragraph", "bulletList", "orderedList",
-      "taskList", "table", "divider", "sketch", "callout", "toggle", "image", "attachment"]);
+      "taskList", "table", "divider", "callout", "toggle", "image", "attachment"]);
     for (const c of SLASH_COMMANDS) expect(RUNNABLE, c.id).toContain(c.id);
   });
 });

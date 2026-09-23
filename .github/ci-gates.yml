@@ -171,7 +171,7 @@ jobs:
       # browser download. `PW_CHROME` is deliberately unset so `chromium.launch()` resolves the
       # SAME revision `npx playwright install --with-deps chromium` fetched above — see
       # visual-regression.mjs's own header for the mismatch that convention exists to prevent.
-      - name: Notes placement surface (double-click-anywhere creates a box, migration, reading order — NEW-1)
+      - name: Notes placement surface (double-click-anywhere creates a box, migration, reading order, arrows between boxes — NEW-1/NEW-2)
         env:
           BASE_URL: "http://localhost:4173/"
         run: node ui-audit/verify-notes-in-sheet-placement.mjs

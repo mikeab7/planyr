@@ -32,6 +32,7 @@ import { DEFAULT_DENSITY, blockFontSize, densityFor, spacingFromElement, spacing
 import { PAGE_WIDTH_MAX, PAGE_WIDTH_MIN } from "./notesPageWidth.js";
 import { PAGE_HEIGHT_MAX, PAGE_HEIGHT_MIN } from "./notesPageHeight.js";
 import { inheritedStyle } from "./notesPasteInherit.js";
+import { addArrow, removeArrow } from "./notesArrows.js";
 import { FontFamily, FontSize, TextStyleKit } from "@tiptap/extension-text-style";
 import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
@@ -43,7 +44,6 @@ import NoteCallout from "./notesCalloutNode.js";
 import NoteToggle, { NoteToggleTitle } from "./notesToggleNode.js";
 import NoteAnchor from "./notesAnchorNode.js";
 import NoteSlashMenu from "./notesSlashMenu.js";
-import NoteSketch from "./notesSketchNode.js";
 import NoteTabKey from "./notesTabKey.js";
 import NoteListIndent from "./notesListIndent.js";
 import { enterInheritHandler } from "./notesEnterInherit.js";
@@ -325,6 +325,15 @@ export const NOTE_EXTENSIONS = [
             parseHTML: () => null,
             renderHTML: () => ({}),
           },
+          /* ⛔ ARROWS BETWEEN BOXES (NEW-2, 2026-09-22) — `[{ from, to }]`, `aid` pairs, never
+           * derived from layout. Rides the document the same way `pageWidth`/`density` do:
+           * saved, synced, printed and exported with no second store. See
+           * lib/notesArrows.js's own header for the cascade-delete rule this depends on. */
+          arrows: {
+            default: [],
+            parseHTML: () => [],
+            renderHTML: () => ({}),
+          },
         },
       }, {
         types: ["paragraph", "heading"],
@@ -443,6 +452,25 @@ export const NOTE_EXTENSIONS = [
           if (touched && dispatch) dispatch(tr);
           return touched;
         },
+
+        /* ⛔ ARROWS BETWEEN BOXES (NEW-2). Every `noteAnchor` currently in the document is a
+         * valid endpoint; `addArrow`/`removeArrow` (lib/notesArrows.js) do the validation and
+         * refuse with a reason rather than silently no-op. A real `setDocAttribute` step, so
+         * this is one undoable action. */
+        addNoteArrow: (from, to) => ({ state, tr, dispatch }) => {
+          const ids = new Set();
+          state.doc.descendants((node) => { if (node.type.name === "noteAnchor" && node.attrs.aid) ids.add(String(node.attrs.aid)); });
+          const { arrows, added } = addArrow(state.doc.attrs.arrows, from, to, ids);
+          if (!added) return false;
+          if (dispatch) dispatch(tr.setDocAttribute("arrows", arrows));
+          return true;
+        },
+        removeNoteArrow: (from, to) => ({ state, tr, dispatch }) => {
+          const next = removeArrow(state.doc.attrs.arrows, from, to);
+          if (next.length === (state.doc.attrs.arrows || []).length) return false;
+          if (dispatch) dispatch(tr.setDocAttribute("arrows", next));
+          return true;
+        },
       };
     },
   }),
@@ -495,10 +523,14 @@ export const NOTE_EXTENSIONS = [
   // survive a reload, a sync and the PDF without a second store to keep in step.
   NoteAnchor,
 
-  // SKETCH MODE: a chart drawn from an indented outline. It is a NODE IN THIS SCHEMA rather
-  // than a canvas store bolted alongside, and that is what makes it persist, sync, print and
-  // export with no new plumbing anywhere — see lib/notesSketchNode.js for the full argument.
-  NoteSketch,
+  /* ⛔ SKETCH MODE IS GONE (NEW-2, 2026-09-22, owner direction: "I don't care for the sketch
+   * boxes at all... it'd be better if I just had a free canvas to play with"). Its whole
+   * schema node (`notesSketchNode.js`, its own mini-canvas of label/body boxes with their own
+   * arrows) is deleted, not hidden — arrows now connect the RICH-TEXT `noteAnchor` box above
+   * directly (`doc.attrs.arrows`, see lib/notesArrows.js). A page that still has a stored
+   * sketch is migrated to real boxes + arrows ON READ — see notesFlowMigration.js's
+   * `migrateSketchesToBoxes` — so no stored document can still contain a `noteSketch` node by
+   * the time it reaches this schema; the node type is safe to remove outright. */
 
   // Presentation-only search marking. It writes nothing into the document.
   NoteSearchHighlight,

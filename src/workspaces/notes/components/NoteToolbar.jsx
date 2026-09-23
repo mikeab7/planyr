@@ -802,15 +802,12 @@ const TableIcon = () => (
 const ImageIcon = () => (
   <Icon><rect x="2" y="3" width="12" height="10" rx="1.5" /><circle cx="5.75" cy="6.25" r="1.1" /><path d="M2.5 11.5l3.2-3 2.6 2.4 2-1.8 3.2 2.9" /></Icon>
 );
-/* Sketch mode: two boxes and an arrow between them — the thing it makes, not a metaphor
- * (ICON-3). The metaphor was always right; the first drawing was not — four thin diagonal
- * elements (two small rects, an elbow, a separate arrowhead) inside a 16-unit viewBox
- * collapse into an indistinct blob once rendered at this bar's actual 15px, which is the only
- * size that matters. Side-by-side boxes with a straight horizontal arrow between them read at
- * a glance instead; the arrowhead is the same vertex-plus-two-wings chevron this file already
- * draws for the history-step icons at the start of the row, just pointing the other way,
- * rather than a new shape to get wrong. */
-const SketchIcon = () => (
+/* Connect two boxes: two boxes and an arrow between them — the thing it makes, not a metaphor
+ * (ICON-3, carried over unchanged from the retired sketch-mode "Box" button — NEW-2). Side-by-side
+ * boxes with a straight horizontal arrow between them read at a glance at this bar's actual 15px;
+ * the arrowhead is the same vertex-plus-two-wings chevron this file already draws for the
+ * history-step icons at the start of the row, just pointing the other way. */
+const ArrowConnectIcon = () => (
   <Icon><rect x="0.5" y="5.2" width="5.4" height="5.6" rx="1.2" /><rect x="10.1" y="5.2" width="5.4" height="5.6" rx="1.2" /><path d="M6.3 8H9.5M7.5 6.1L9.5 8L7.5 9.9" /></Icon>
 );
 const PrintIcon = () => (
@@ -854,6 +851,10 @@ const HEADING_OPTIONS = [
 export default function NoteToolbar({
   editor, onExport, onPrint, onAttach, onHistory, historyOpen, onBack, narrow = false,
   zoomIndicator = null, onZoomReset,
+  /* ⛔ ARROWS BETWEEN BOXES (NEW-2) — click-to-connect. `arrowMode` is truthy while armed
+     (whether or not a source box has been picked yet — NoteEditor.jsx owns that distinction);
+     the toolbar only needs to know whether to show the button as "on". */
+  arrowMode = false, onToggleArrow,
 }) {
   const fileRef = useRef(null);
   /* ⛔ WHAT AN UNSTYLED RUN IS ACTUALLY RENDERED IN (NEW-7). "Default" is not a font, and the
@@ -1230,12 +1231,13 @@ export default function NoteToolbar({
   const imageBtn = (
     <TBButton title="Insert a picture" testid="nt-image" big={narrow} onClick={() => fileRef.current?.click()}><ImageIcon /></TBButton>
   );
-  /* SKETCH MODE — and it is the BOX button, not an "insert a sketch" button. Select some
-     words, press it, and they become a box you can drag and connect; press it with nothing
-     selected and you get a box with the caret already in it. */
-  const boxBtn = (
-    <TBButton title="Box this — put a box around the selected words, then drag arrows between boxes"
-      testid="nt-box" big={narrow} onClick={() => editor.commands.boxSelection()}><SketchIcon /></TBButton>
+  /* ⛔ ARROWS BETWEEN BOXES (NEW-2, replacing sketch mode's own "Box" button). Click-to-connect:
+     press this, click the box the arrow starts from, click the box it points to — arrow drawn,
+     mode exits. The other way to draw one, drag-from-the-dot on a selected box, needs no button
+     at all (notesAnchorNode.js's own node view). */
+  const arrowBtn = (
+    <TBButton title="Connect two boxes with an arrow — click this, then click the box it starts from, then the box it points to"
+      testid="nt-arrow" active={arrowMode} big={narrow} onClick={onToggleArrow}><ArrowConnectIcon /></TBButton>
   );
   const attachBtn = (
     <TBButton title="Attach a file — a PDF, a spreadsheet, a drawing" testid="nt-attach" big={narrow} onClick={onAttach}>
@@ -1452,7 +1454,7 @@ export default function NoteToolbar({
         onChange={pickImages}
         style={{ display: "none" }}
       />
-      {!narrow && boxBtn}
+      {!narrow && arrowBtn}
       {!narrow && attachBtn}
 
       <Sep />
@@ -1514,7 +1516,7 @@ export default function NoteToolbar({
           <MenuGroup label="Insert">
             {tableInsertControl}
             {imageBtn}
-            {boxBtn}
+            {arrowBtn}
             {attachBtn}
           </MenuGroup>
         )}

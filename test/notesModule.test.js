@@ -68,7 +68,12 @@ const ALL_NOTES_FILES = [
   "lib/notesModel.js", "lib/notesStore.js", "lib/notesCloud.js", "lib/notesMarkdown.js", "lib/notesExtensions.js",
   "lib/notesTime.js", "lib/notesPrint.js", "lib/notesImageDb.js", "lib/notesImageIntake.js",
   "lib/notesImageNode.js", "lib/notesSearchHighlight.js", "lib/notesDocHtml.js", "lib/notesTabKey.js",
-  "lib/notesSketchModel.js", "lib/notesSketchRender.js", "lib/notesSketchNode.js", "lib/notesSketchEditor.js",
+  // Kept, trimmed to what migrateSketchesToBoxes still needs — the interactive sketch canvas
+  // itself (notesSketchNode/notesSketchEditor/notesSketchRender) is deleted (NEW-2).
+  "lib/notesSketchModel.js",
+  // NEW-2 (2026-09-22) — arrows between rich-text boxes, on the document, replacing the
+  // retired sketch canvas's own boxes-and-arrows model.
+  "lib/notesArrows.js",
   "lib/notesPastePlain.js", "lib/notesBlockKeys.js",
   "lib/notesSlashMenu.js", "lib/notesQuickOpen.js", "lib/notesVersions.js", "lib/notesTasks.js",
   "lib/notesOutline.js", "lib/notesFileMeta.js", "lib/notesAttachNode.js", "lib/notesCalloutNode.js",
@@ -143,7 +148,6 @@ const ALL_NOTES_FILES = [
   // to right), for the Markdown exporter and the print sheet's HTML source order.
   "lib/notesReadingOrder.js",
 ];
-const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
 /* ════════════════════════════════════════════════════════════════════════════════════════
  * 1. THE EIGHT-PLACE REGISTRATION CHECKLIST
@@ -1234,14 +1238,15 @@ describe("the project a notebook belongs to", () => {
     expect(ed).toMatch(/inBlock\.getAttribute\("data-empty"\) !== "1"\)/);
   });
 
-  it("⛔ AN OLD FLOW-BODY PAGE IS MIGRATED INTO ONE BOX ON READ, NEVER ON WRITE (NEW-1)", () => {
+  it("⛔ AN OLD FLOW-BODY PAGE IS MIGRATED INTO ONE BOX ON READ, NEVER ON WRITE (NEW-1, then NEW-2)", () => {
     const ed = code("components/NoteEditor.jsx");
-    expect(ed, "the migration runs on the doc handed to useEditor, not inside a transaction")
-      .toMatch(/migrateFlowBody\(\(typeof loadDoc === "function" \? loadDoc\(\) : readPage\(pageId\)\) \|\| EMPTY_DOC\)/);
+    expect(ed, "sketches migrate FIRST, then the flow body, on the doc handed to useEditor — never inside a transaction")
+      .toMatch(/migrateFlowBody\(migrateSketchesToBoxes\(\s*\(typeof loadDoc === "function" \? loadDoc\(\) : readPage\(pageId\)\) \|\| EMPTY_DOC,?\s*\)\)/);
     const mig = read(NOTES, "lib", "notesFlowMigration.js");
     expect(mig, "existing anchors and sketches are left exactly where they are")
       .toMatch(/node\.type === "noteAnchor" \|\| node\.type === "noteSketch"/);
     expect(mig, "a boxes-only document is a no-op, same reference").toMatch(/return doc;/);
+    expect(mig, "migrateSketchesToBoxes is exported for the same composition").toMatch(/export function migrateSketchesToBoxes/);
   });
 
   /* ⛔ A BACKTICK INSIDE THE CSS TEMPLATE LITERALS ENDS THEM, and it has broken the build three
@@ -1480,9 +1485,9 @@ describe("the project a notebook belongs to", () => {
 
   it("⛔ TAB HAS A DEFINED ANSWER IN EVERY CONTEXT, and none of them destroys content (B1392 ×2)", () => {
     const tab = code("lib/notesTabKey.js");
-    /* The destructive one: with a picture or a sketch SELECTED, `insertContent` replaced it.
-     * And the guard must be an `instanceof` — a `constructor.name` test is correct in dev and
-     * MEANINGLESS in the shipped bundle, because the minifier renames the class. */
+    /* The destructive one: with a picture SELECTED, `insertContent` replaced it. And the guard
+     * must be an `instanceof` — a `constructor.name` test is correct in dev and MEANINGLESS in
+     * the shipped bundle, because the minifier renames the class. */
     expect(tab, "a node selection must be detected by instanceof, never by class name")
       .toMatch(/selection instanceof NodeSelection/);
     expect(tab).not.toMatch(/constructor\.name/);
@@ -1490,11 +1495,9 @@ describe("the project a notebook belongs to", () => {
       .toMatch(/addRowAfter\(\)/);
     // The escape hatch is not optional and must survive every rewrite.
     expect(tab).toMatch(/Escape: \(\) => \{ this\.storage\.released = true/);
-    // The two surfaces that are NOT the document, each with its own defined answer.
+    // The one surface that is NOT the document, with its own defined answer.
     expect(code("components/NoteEditor.jsx"), "Tab out of the page title goes into the body")
       .toMatch(/e\.key !== "Tab" \|\| e\.shiftKey[\s\S]{0,200}focus\("start"\)/);
-    expect(code("lib/notesSketchEditor.js"), "Tab has a defined meaning in a sketch box's fields")
-      .toMatch(/if \(e\.key === "Tab"\)/);
   });
 
   it("⛔ PASTE: three modes, the default untouched, and sanitisation in ALL of them (B36051)", () => {
@@ -1636,151 +1639,75 @@ describe("the conflict surface", () => {
 });
 
 /* ════════════════════════════════════════════════════════════════════════════════════════
- * 9. SKETCH MODE LIVES IN THE SCHEMA — NOT IN A SECOND STORE
+ * 9. SKETCH MODE IS RETIRED — ONE CANVAS, ONE BOX MODEL, ARROWS ON THE DOCUMENT (NEW-2)
  *
- * The load-bearing claim of the whole feature is that a sketch is a NODE IN THE PROSEMIRROR
- * SCHEMA, so it persists, syncs, prints and exports through plumbing that already exists.
- * That claim is only true while nobody adds a second store or a second persistence path
- * beside it — which is exactly the kind of thing that gets added later, in good faith, by
- * someone who has not read the header. So it is asserted here, structurally.
+ * The interactive sketch canvas (its own schema node, node view and double-click/drag
+ * surface) is gone: "I don't care for the sketch boxes at all... it'd be better if I just
+ * had a free canvas to play with." A box is now always a `noteAnchor`, and an arrow is a
+ * document-level `{from,to}` pair (`lib/notesArrows.js`) connecting two of them — reusing
+ * `notesSketchModel.js`'s geometry rather than a third implementation. This section asserts
+ * the retirement is real (no schema node, no dead files reachable) and that the new arrow
+ * mechanism carries the cascade-delete guarantee the old sketch canvas had.
  * ═══════════════════════════════════════════════════════════════════════════════════════ */
-describe("sketch mode is a schema node, and there is no second store", () => {
-  it("the schema really admits it — read off the REAL schema, not the extension list", () => {
+describe("sketch mode is retired — one canvas, arrows on the document", () => {
+  it("the schema no longer admits a noteSketch node", () => {
     const schema = getSchema(NOTE_EXTENSIONS);
-    expect(schema.nodes.noteSketch, "noteSketch is not in the schema").toBeTruthy();
-    const attrs = schema.nodes.noteSketch.spec.attrs;
-    /* `boxes` + `links` are the live shape — THE CANVAS OWNS EVERYTHING. `outline` and
-     * `positions` are the SUPERSEDED shape (B1400), kept declared and defaulting to null for
-     * one reason only: a note already in storage may carry one, and normalizeSketch migrates
-     * it on read. Removing them would silently blank those sketches. */
-    expect(Object.keys(attrs).sort()).toEqual(["boxes", "links", "outline", "positions"]);
-    expect(attrs.outline.default).toBeNull();
-    expect(attrs.positions.default).toBeNull();
+    expect(schema.nodes.noteSketch, "noteSketch is still in the schema").toBeUndefined();
   });
 
-  it("⛔ NOT ONE sketch file touches storage — no localStorage, no IndexedDB, no Supabase", () => {
-    for (const f of SKETCH_FILES) {
+  it("the interactive sketch files are gone, not merely unreferenced", () => {
+    for (const f of ["lib/notesSketchNode.js", "lib/notesSketchEditor.js", "lib/notesSketchRender.js"]) {
+      expect(() => src(f), `${f} should have been deleted`).toThrow();
+    }
+  });
+
+  it("nothing on the route still imports the deleted sketch files", () => {
+    for (const f of ALL_NOTES_FILES) {
       const text = code(f);
-      for (const forbidden of ["localStorage", "sessionStorage", "indexedDB", "supabase", "createClient", "fetch("]) {
-        expect(text, `${f} reaches for ${forbidden} — a sketch persists as part of the DOCUMENT, nowhere else`)
-          .not.toContain(forbidden);
-      }
-      expect(text, `${f} imports the store — the document IS the storage`).not.toMatch(/notesStore|notesCloud|notesImageDb/);
+      expect(text, `${f} still imports notesSketchNode`).not.toMatch(/notesSketchNode/);
+      expect(text, `${f} still imports notesSketchEditor`).not.toMatch(/notesSketchEditor/);
+      expect(text, `${f} still imports notesSketchRender`).not.toMatch(/notesSketchRender/);
     }
   });
 
-  it("⛔ THE ARROW CASCADE IS ENFORCED BY THE MODEL, so no caller can skip it", () => {
+  it("the toolbar's old Box button and the slash menu's Sketch entry are gone", () => {
+    expect(code("components/NoteToolbar.jsx")).not.toMatch(/boxSelection\(\)/);
+    expect(code("lib/notesSlashMenu.js")).not.toMatch(/case "sketch"/);
+    expect(code("lib/notesSlashMenu.js"), "the catalogue still lists Sketch").not.toMatch(/id: "sketch"/);
+  });
+
+  it("⛔ ARROWS ARE A DOC ATTRIBUTE, normalised through ONE function, never assembled by hand", () => {
+    const arrows = code("lib/notesArrows.js");
+    expect(arrows).toMatch(/export function normalizeArrows/);
+    expect(arrows).toMatch(/export function addArrow/);
+    expect(arrows).toMatch(/export function cascadeRemoveArrows/);
+    const ext = code("lib/notesExtensions.js");
+    expect(ext, "arrows must live on the doc, alongside density/pageWidth").toMatch(/arrows:\s*\{/);
+    expect(ext).toMatch(/addNoteArrow/);
+    expect(ext).toMatch(/removeNoteArrow/);
+  });
+
+  it("⛔ THE ARROW CASCADE IS ENFORCED AT THE ANCHOR NODE — no caller can delete a box around it", () => {
+    const anchor = code("lib/notesAnchorNode.js");
+    expect(anchor, "notesAnchorNode must route deletes through cascadeRemoveArrows")
+      .toMatch(/cascadeRemoveArrows/);
+  });
+
+  it("geometry is reused, not reinvented — notesArrows re-exports edgePoint rather than copying it", () => {
+    const arrows = src("lib/notesArrows.js");
+    expect(arrows).toMatch(/export \{ edgePoint \} from "\.\/notesSketchModel\.js"/);
+  });
+
+  it("notesSketchModel.js keeps ONLY what migration still calls — the interactive edits are gone", () => {
     const model = code("lib/notesSketchModel.js");
-    // removeBox is the ONLY place a box is destroyed, and it reports the arrows it took.
-    expect(model).toMatch(/export function removeBox/);
-    expect(model).toMatch(/removedLinks/);
-    // …and the editor never splices a box out by hand.
-    const editor = code("lib/notesSketchEditor.js");
-    expect(editor).toMatch(/removeBox\(/);
-    expect(editor, "boxes must never be filtered out around the cascade").not.toMatch(/boxes\.filter\(/);
-    expect(editor, "the editor must not assemble a box list of its own").not.toMatch(/boxes:\s*\[/);
-  });
-
-  it("the canvas owns the text AND the position — and each edit goes through its own function", () => {
-    const editor = code("lib/notesSketchEditor.js");
-    for (const fn of ["addBox(", "updateBox(", "moveBox(", "addLink(", "removeLink("]) {
-      expect(editor, `the editor does not reach the model's ${fn} — an edit is being hand-rolled`).toContain(fn);
+    for (const dead of ["export function addBox", "export function updateBox", "export function moveBox",
+      "export function removeBox", "export function addLink", "export function removeLink",
+      "export function boxAt", "export function nextSpot", "export function outlineFromSketch"]) {
+      expect(model, `${dead} should have been deleted with the interactive canvas`).not.toContain(dead);
     }
-    expect(editor, "a position is written through the model, never spliced in place").not.toMatch(/\.x\s*=\s*/);
-    /* ⛔ THE SUPERSEDED OUTLINE PANE IS GONE AND MUST NOT COME BACK — two authoring paths is
-     * the accumulation PANEL-BREVITY forbids, and the outline half is the one the owner
-     * rejected. There is no outline text anywhere in the interactive layer. */
-    expect(editor, "an outline authoring surface is back").not.toMatch(/outlineToText|parseOutlineText|applyOutlineText/);
-    expect(editor, "an outline textarea is back").not.toMatch(/sketch-outline/);
-  });
-
-  it("ONE builder draws the screen and the paper — PDF-PARITY by construction", () => {
-    expect(code("lib/notesSketchNode.js"), "renderHTML must use the shared spec").toMatch(/renderHTML[\s\S]{0,160}sketchSpec\(/);
-    expect(code("lib/notesSketchNode.js"), "the node view must draw from the SAME spec").toMatch(/specToDom\(sketchSpec\(/);
-    /* …and the ONLY difference between them carries no content: the screen gets the
-     * affordances (`interactive`), paper gets the same boxes, words and arrows. */
-    expect(code("lib/notesSketchNode.js")).toMatch(/interactive: editor\.isEditable/);
-    expect(code("lib/notesSketchRender.js")).toMatch(/if \(interactive\)/);
-  });
-
-  it("the drawing carries CLASS NAMES and no colours — the ink is in the two CSS mirrors", () => {
-    const render = code("lib/notesSketchRender.js");
-    expect(render, "a literal colour here would print the screen's theme onto paper").not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
-    expect(render).not.toMatch(/rgba?\(|var\(--/);
-  });
-
-  it("every sketch class the drawing emits is styled on BOTH surfaces", () => {
-    const render = src("lib/notesSketchRender.js");
-    const screen = src("components/NoteEditor.jsx");
-    const paper = src("lib/notesPrint.js");
-    const classes = new Set([...render.matchAll(/planyr-sketch[\w-]*/g)].map((m) => m[0]));
-    /* One set is deliberately one-sided, and it is the same decision seen from its own end:
-     * the AFFORDANCES (the grip you drag an arrow out of, the drag group's own cursor) cannot
-     * be pressed on paper, so the spec does not draw them there. Everything that is CONTENT —
-     * box, label, body, arrow, head — is styled on both, because both surfaces draw it. */
-    const screenOnly = /grip|tools|kind|btn|status|offline|host|draw|pending|hint|edit|sketch-node/;
-    for (const cls of classes) {
-      expect(screen, `${cls} has no on-screen style`).toContain(cls);
-      if (!screenOnly.test(cls)) expect(paper, `${cls} is drawn but has no PRINT style — the sheet will not match the screen`).toContain(cls);
+    for (const kept of ["export function normalizeSketch", "export function layoutSketch", "export function edgePoint"]) {
+      expect(model, `${kept} is still needed by migrateSketchesToBoxes`).toContain(kept);
     }
-  });
-
-  it("the INTERACTIVE half is behind a cached dynamic import, like notesCloud and the image DB", () => {
-    const node = code("lib/notesSketchNode.js");
-    expect(node, "a static import puts the whole editor on every note that has no sketch")
-      .not.toMatch(/^\s*import\s+.*notesSketchEditor/m);
-    expect(node).toMatch(/import\("\.\/notesSketchEditor\.js"\)/);
-    expect(node, "the promise is cached, so a second sketch does not re-fetch").toMatch(/editorChunk/);
-    // Nothing else may reach it either.
-    for (const f of ALL_NOTES_FILES.filter((x) => x !== "lib/notesSketchNode.js")) {
-      expect(code(f), `${f} imports the sketch editor directly`).not.toMatch(/^\s*import\s+.*notesSketchEditor/m);
-    }
-  });
-
-  it("sketch code stays OFF the Notes route's static path — including out of the exporter", () => {
-    expect(code("lib/notesMarkdown.js"), "the exporter is on the static path; importing the sketch model puts sketch bytes on every notebook's first paint")
-      .not.toMatch(/notesSketch/);
-    for (const f of ["Notes.jsx", "components/NotesTree.jsx", "lib/notesModel.js", "lib/notesStore.js"]) {
-      expect(code(f), `${f} is on the static path and reaches sketch code`).not.toMatch(/notesSketch/);
-    }
-  });
-
-  it("no dialog boxes in the sketch either (house rule) — every edit is in place", () => {
-    for (const f of SKETCH_FILES) {
-      expect(code(f), `${f} uses a browser dialog`).not.toMatch(/window\.(prompt|confirm|alert)|[^.\w](prompt|confirm|alert)\(/);
-    }
-    // A box's words are edited IN the box: two real fields laid over it.
-    const editor = code("lib/notesSketchEditor.js");
-    expect(editor).toMatch(/el\("input", "planyr-sketch-edit-label"/);
-    expect(editor).toMatch(/el\("textarea", "planyr-sketch-edit-body"/);
-  });
-
-  it("⛔ DOUBLE-CLICKING EMPTY CANVAS IS THE AUTHORING SURFACE, and a drag between boxes is the arrow", () => {
-    const editor = code("lib/notesSketchEditor.js");
-    expect(editor, "nothing listens for a double-click on the canvas").toMatch(/addEventListener\("dblclick"/);
-    expect(editor, "a double-click on empty canvas must make a box right there").toMatch(/beginBox\(pt\.x/);
-    // The arrow is dragged off the box itself — not turned on with a mode button first.
-    expect(editor).toMatch(/data-sketch-grip/);
-    expect(editor, "an arrow MODE is back").not.toMatch(/linkMode/);
-    // The surface the press has to land on is drawn, or an empty spot would swallow it.
-    expect(code("lib/notesSketchRender.js")).toMatch(/planyr-sketch-surface/);
-  });
-
-  it("a refused act SAYS SO (LOUD-FAILURE) — addLink returns a reason and the editor shows it", () => {
-    expect(code("lib/notesSketchModel.js")).toMatch(/added: false, reason:/);
-    expect(code("lib/notesSketchEditor.js")).toMatch(/say\(`No arrow — \$\{reason\}/);
-    // …and a deleted box states the arrows it took with it, rather than removing them quietly.
-    expect(code("lib/notesSketchEditor.js")).toMatch(/removedLinks\.length/);
-    // …and a failed chunk load leaves a named message rather than a dead-looking drawing.
-    expect(src("lib/notesSketchNode.js")).toMatch(/Sketch editing could not load/);
-  });
-
-  it("the toolbar's BOX button is the one way in, and it makes a real box", () => {
-    expect(code("components/NoteToolbar.jsx")).toMatch(/boxSelection\(\)/);
-    expect(code("lib/notesSketchNode.js")).toMatch(/boxSelection:/);
-    // The superseded "insert an empty sketch and go type an outline" command is gone.
-    expect(code("components/NoteToolbar.jsx")).not.toMatch(/insertNoteSketch/);
-    expect(code("lib/notesSketchNode.js")).not.toMatch(/insertNoteSketch/);
   });
 });
 

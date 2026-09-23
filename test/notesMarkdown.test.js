@@ -471,4 +471,55 @@ describe("the handled-construct manifest", () => {
     expect(new Set(NOTE_MD_HANDLED.nodes).size).toBe(NOTE_MD_HANDLED.nodes.length);
     expect(new Set(NOTE_MD_HANDLED.marks).size).toBe(NOTE_MD_HANDLED.marks.length);
   });
+
+  it("no longer claims noteSketch — the sketch canvas is retired (NEW-2)", () => {
+    expect(NOTE_MD_HANDLED.nodes).not.toContain("noteSketch");
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
+ * ARROWS BETWEEN BOXES (NEW-2) — doc.attrs.arrows has no drawing surface in Markdown, so it
+ * is written out as a "Connected boxes:" list, the same "content never vanishes" contract
+ * the old sketch export gave its own nesting-that-could-not-be-expressed.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+describe("arrows export as a named list — nothing a Markdown list cannot draw is dropped", () => {
+  const box = (aid, text) => ({ type: "noteAnchor", attrs: { aid, x: 0, y: 0, w: 180, h: null }, content: [p(t(text))] });
+
+  it("a document with no arrows exports exactly as it always did", () => {
+    const d = doc(box("a1", "Acquisition"));
+    expect(md(d)).not.toContain("Connected");
+  });
+
+  it("an arrow between two top-level boxes is written out by their own text", () => {
+    const d = { ...doc(box("a1", "Acquisition"), box("a2", "Title review")), attrs: { arrows: [{ from: "a1", to: "a2" }] } };
+    const out = md(d);
+    expect(out).toContain("Connected boxes:");
+    expect(out).toContain("Acquisition → Title review");
+  });
+
+  it("an empty box still reports something, rather than vanishing from the list", () => {
+    const d = { ...doc(box("a1", ""), box("a2", "Title")), attrs: { arrows: [{ from: "a1", to: "a2" }] } };
+    expect(md(d)).toContain("(empty box) → Title");
+  });
+
+  it("an arrow to/from an id with no matching box is silently dropped from the list, not thrown on", () => {
+    const d = { ...doc(box("a1", "Acquisition")), attrs: { arrows: [{ from: "a1", to: "ghost" }] } };
+    expect(() => md(d)).not.toThrow();
+    expect(md(d)).not.toContain("Connected");
+  });
+
+  it("pageToMarkdown carries a page's own arrows the same way", () => {
+    const page = { id: "p1", title: "Root", pages: [] };
+    const bodies = { p1: { ...doc(box("a1", "Acquisition"), box("a2", "Title")), attrs: { arrows: [{ from: "a1", to: "a2" }] } } };
+    const out = pageToMarkdown(page, bodies).markdown;
+    expect(out).toContain("Acquisition → Title");
+  });
+
+  it("a long box's text is truncated for the reference, never the box's own content elsewhere", () => {
+    const long = "x".repeat(80);
+    const d = { ...doc(box("a1", long), box("a2", "Title")), attrs: { arrows: [{ from: "a1", to: "a2" }] } };
+    const out = md(d);
+    expect(out).toContain(long);               // the box's OWN paragraph is untouched
+    expect(out).toMatch(/x{40}…/);              // the REFERENCE in the arrow list is short
+  });
 });

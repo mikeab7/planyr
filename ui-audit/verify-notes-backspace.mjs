@@ -58,7 +58,9 @@ const CELL = (t) => ({ type: "tableCell", content: [P(t)] });
 const ROW = (...cells) => ({ type: "tableRow", content: cells });
 const TABLE = (...rows) => ({ type: "table", content: rows });
 const IMG = () => ({ type: "noteImage", attrs: { imageId: "probe-image", alt: "probe" } });
-const SKETCH = () => ({ type: "noteSketch", attrs: { boxes: [{ id: "b1", label: "Box", body: "", x: 40, y: 30 }], links: [] } });
+// Any other atomic, selectable node stands in for "a non-text block node" — the sketch canvas
+// this used to be (noteSketch) is retired (NEW-2); an attachment is equally atomic.
+const OTHERNODE = () => ({ type: "noteAttachment", attrs: { fileId: "probe-file", name: "f.pdf", mime: "application/pdf", size: 1 } });
 const doc = (...content) => ({ type: "doc", content });
 
 /* ---- structural printing / comparison -------------------------------------------------- */
@@ -482,13 +484,13 @@ const CASES = [
     nodeSelected: "noteImage",
   },
   {
-    id: "paragraph after a SKETCH",
+    id: "paragraph after another atomic node",
     defect: true,
-    why: "same rule as the picture — a sketch is a drawing somebody made, and one stray press must not take it",
-    before: doc(SKETCH(), P("after")),
+    why: "same rule as the picture — any atomic node is content somebody added, and one stray press must not take it",
+    before: doc(OTHERNODE(), P("after")),
     at: [1],
-    after: doc(SKETCH(), P("after")),
-    nodeSelected: "noteSketch",
+    after: doc(OTHERNODE(), P("after")),
+    nodeSelected: "noteAttachment",
   },
   {
     id: "EMPTY paragraph after a picture",
