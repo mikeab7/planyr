@@ -6,90 +6,90 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-09-22",
-        "approvedCommit": "32ba1a06",
-        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
+        "approvedAt": "2026-09-23",
+        "approvedCommit": "787fb33e",
+        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
       },
       "dark": {
-        "approvedAt": "2026-09-22",
-        "approvedCommit": "32ba1a06",
-        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
+        "approvedAt": "2026-09-23",
+        "approvedCommit": "787fb33e",
+        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
       },
       "light--phone": {
-        "approvedAt": "2026-09-22",
-        "approvedCommit": "32ba1a06",
-        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
+        "approvedAt": "2026-09-23",
+        "approvedCommit": "787fb33e",
+        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-22",
-        "approvedCommit": "32ba1a06",
-        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
+        "approvedAt": "2026-09-23",
+        "approvedCommit": "787fb33e",
+        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
       }
     },
     "site-planner-header": {
       "light": {
-        "approvedAt": "2026-09-22",
-        "approvedCommit": "32ba1a06",
-        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
+        "approvedAt": "2026-09-23",
+        "approvedCommit": "787fb33e",
+        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
       },
       "dark": {
-        "approvedAt": "2026-09-22",
-        "approvedCommit": "32ba1a06",
-        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
+        "approvedAt": "2026-09-23",
+        "approvedCommit": "787fb33e",
+        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
       },
       "light--phone": {
-        "approvedAt": "2026-09-22",
-        "approvedCommit": "32ba1a06",
-        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
+        "approvedAt": "2026-09-23",
+        "approvedCommit": "787fb33e",
+        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-22",
-        "approvedCommit": "32ba1a06",
-        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
+        "approvedAt": "2026-09-23",
+        "approvedCommit": "787fb33e",
+        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
       }
     },
     "site-planner-left-rail": {
       "light": {
-        "approvedAt": "2026-09-22",
-        "approvedCommit": "32ba1a06",
-        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
+        "approvedAt": "2026-09-23",
+        "approvedCommit": "787fb33e",
+        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
       },
       "dark": {
-        "approvedAt": "2026-09-22",
-        "approvedCommit": "32ba1a06",
-        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
+        "approvedAt": "2026-09-23",
+        "approvedCommit": "787fb33e",
+        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
       },
       "light--phone": {
-        "approvedAt": "2026-09-22",
-        "approvedCommit": "32ba1a06",
-        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
+        "approvedAt": "2026-09-23",
+        "approvedCommit": "787fb33e",
+        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-22",
-        "approvedCommit": "32ba1a06",
-        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
+        "approvedAt": "2026-09-23",
+        "approvedCommit": "787fb33e",
+        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
       }
     },
     "library": {
       "light": {
-        "approvedAt": "2026-09-22",
-        "approvedCommit": "32ba1a06",
-        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
+        "approvedAt": "2026-09-23",
+        "approvedCommit": "787fb33e",
+        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
       },
       "dark": {
-        "approvedAt": "2026-09-22",
-        "approvedCommit": "32ba1a06",
-        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
+        "approvedAt": "2026-09-23",
+        "approvedCommit": "787fb33e",
+        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
       },
       "light--phone": {
-        "approvedAt": "2026-09-22",
-        "approvedCommit": "32ba1a06",
-        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
+        "approvedAt": "2026-09-23",
+        "approvedCommit": "787fb33e",
+        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-22",
-        "approvedCommit": "32ba1a06",
-        "note": "B1807200: top-right toolbar cluster unification (Option B) grows the shared row-2 header container 26px to 30px to fit the unified controls, which shifts every surface's content below the header down by 4px (map tiles, Site Planner canvas, Library list) plus the toolbar/rail's own control restyle. Disclosed and expected, per the PR description. [CI-authored by run 35723858469 on 32ba1a06373106b5cfa4d27640bb38e0621cb569]"
+        "approvedAt": "2026-09-23",
+        "approvedCommit": "787fb33e",
+        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
       }
     }
   }

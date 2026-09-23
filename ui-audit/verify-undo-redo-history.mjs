@@ -84,10 +84,22 @@ for (const theme of ["light", "dark"]) {
     u.fill === "none" && u.stroke === "currentColor" && r.fill === "none" && r.stroke === "currentColor", JSON.stringify({ u, r }));
   ok(`[${theme}] rendered at the ~15px neighbour size (was 20px)`, u.w === "15" && r.w === "15", `undo=${u.w} redo=${r.w}`);
   ok(`[${theme}] round cap/join, matching the app's line-icon idiom`, u.linecap === "round" && u.linejoin === "round");
-  ok(`[${theme}] Undo's disabled opacity is the app's own .45 fade, not Material's .38`,
-    (await undoBtn.evaluate((b) => getComputedStyle(b).opacity)) === "0.45");
-  ok(`[${theme}] Undo/Redo no longer carry the tb-icon-btn (Material) class`,
-    !/tb-icon-btn/.test((await undoBtn.getAttribute("class")) || "") && !/tb-icon-btn/.test((await redoBtn.getAttribute("class")) || ""));
+  // ⛔ B1807200 AMENDMENT (2026-09-23) — Undo/Redo now carry a resting bordered box (Option B), and
+  // the disabled treatment moved from "fade the whole button" to "keep the box, fade only the
+  // glyph" (see .tb-icon-btn's header in index.css) so a disabled control still reads as a full
+  // white/bordered square, matching the approved mockup, rather than a washed-out box. So the
+  // BUTTON's own opacity must stay 1 (box undimmed) and its child <svg> carries the .45 fade.
+  ok(`[${theme}] Undo's own box (background/border) stays at full opacity when disabled — only the glyph dims`,
+    (await undoBtn.evaluate((b) => getComputedStyle(b).opacity)) === "1");
+  ok(`[${theme}] Undo's disabled opacity is the app's own .45 fade, not Material's .38 — read off the glyph, not the button`,
+    (await undoBtn.evaluate((b) => getComputedStyle(b.querySelector("svg")).opacity)) === "0.45");
+  ok(`[${theme}] Undo/Redo carry the tb-icon-btn class again (Option B: box stays, only the glyph dims when disabled)`,
+    /tb-icon-btn/.test((await undoBtn.getAttribute("class")) || "") && /tb-icon-btn/.test((await redoBtn.getAttribute("class")) || ""));
+  ok(`[${theme}] Undo renders a real resting box (background+border), not a bare transparent glyph`,
+    await undoBtn.evaluate((b) => {
+      const cs = getComputedStyle(b);
+      return cs.borderWidth !== "0px" && cs.backgroundColor !== "rgba(0, 0, 0, 0)" && cs.backgroundColor !== "transparent";
+    }));
 
   const zf = await page.locator('button[aria-label="Zoom to fit"]').first().evaluate((btn) => {
     const svg = btn.querySelector("svg");

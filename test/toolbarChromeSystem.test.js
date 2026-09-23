@@ -43,6 +43,28 @@ describe("B654240 — the top-right planner toolbar shares one chrome system", (
     expect(fileBtn).not.toMatch(/borderRadius:\s*3\b/);
   });
 
+  it("B1807200 AMENDMENT — dGhost/dIcon carry a resting bordered box, not a transparent ghost fill", () => {
+    // File/Undo/Redo/Zoom-to-fit inherit this from dGhost, matching CloudSyncBadge/PresenceChip/the
+    // account trigger's own resting box; a regression back to `border: "1px solid transparent"` /
+    // `background: "transparent"` here is exactly the bug this amendment fixed (owner: "the cloud
+    // and the other people here thing are showing... the file undo redo, none of that went through").
+    const dGhostDecl = SRC.slice(SRC.indexOf("const dGhost = {"), SRC.indexOf("\n", SRC.indexOf("const dGhost = {")));
+    expect(dGhostDecl).toMatch(/border:\s*"1px solid var\(--border-default\)"/);
+    expect(dGhostDecl).toMatch(/background:\s*"var\(--surface-raised\)"/);
+    expect(dGhostDecl).not.toMatch(/border:\s*"1px solid transparent"/);
+    expect(dGhostDecl).not.toMatch(/background:\s*"transparent"/);
+  });
+
+  it("B1807200 AMENDMENT — the File button's resting (menu-closed) border/background use the shared tokens, not hardcoded chrome/transparent", () => {
+    const fileBtn = TOOLBAR.slice(TOOLBAR.indexOf('title="File'), TOOLBAR.indexOf("</button>", TOOLBAR.indexOf('title="File')));
+    expect(fileBtn).toMatch(/"var\(--border-default\)"/);
+    expect(fileBtn).toMatch(/"var\(--surface-raised\)"/);
+  });
+
+  it("B1807200 AMENDMENT — Undo/Redo icon halves suppress their own right border so the split-button seam shows one hairline, not two", () => {
+    expect(TOOLBAR).toMatch(/borderRadius:\s*`\$\{TB_R\}px 0 0 \$\{TB_R\}px`,\s*borderRight:\s*"none"/);
+  });
+
   it("the History (Undo/Redo) group is NOT wrapped in a filled container", () => {
     const undoIdx = TOOLBAR.indexOf('aria-label="Undo"');
     expect(undoIdx).toBeGreaterThan(-1);
@@ -56,14 +78,20 @@ describe("B654240 — the top-right planner toolbar shares one chrome system", (
     expect(TOOLBAR).not.toMatch(/background:\s*"var\(--hover-chrome\)",\s*borderRadius:\s*10,\s*padding:\s*2/);
   });
 
-  it("disabled toolbar icon buttons dim only the glyph (currentColor + opacity), never a container fill", () => {
-    // .tb-icon-btn is the shared Undo/Redo/Zoom-to-fit/Layers icon-button class; its disabled rule
-    // must stay opacity-on-currentColor, never a hardcoded/token background swap.
+  it("disabled toolbar icon buttons keep their resting box and dim only the glyph, never a container fade", () => {
+    // .tb-icon-btn is the shared Undo/Redo/Zoom-to-fit icon-button class. B1807200 AMENDMENT:
+    // now that dGhost/dIcon carry a real background+border, the disabled rule must CANCEL the
+    // app-wide button:disabled fade on the button itself (opacity:1) and dim only its direct-child
+    // glyph — never fade the button (which would fade its box along with the glyph) and never swap
+    // in a hardcoded/token background.
     const css = readFileSync(fileURLToPath(new URL("../src/index.css", import.meta.url)), "utf8");
-    const rule = css.match(/\.tb-icon-btn:disabled\s*\{[^}]*\}/);
-    expect(rule).not.toBeNull();
-    expect(rule[0]).toMatch(/opacity:/);
-    expect(rule[0]).not.toMatch(/background/);
+    const boxRule = css.match(/\.tb-icon-btn:disabled\s*\{[^}]*\}/);
+    expect(boxRule).not.toBeNull();
+    expect(boxRule[0]).toMatch(/opacity:\s*1\b/);
+    expect(boxRule[0]).not.toMatch(/background/);
+    const glyphRule = css.match(/\.tb-icon-btn:disabled\s*>\s*\*\s*\{[^}]*\}/);
+    expect(glyphRule).not.toBeNull();
+    expect(glyphRule[0]).toMatch(/opacity:\s*\.45\b/);
   });
 
   it("File, Undo, Redo and Zoom-to-fit are still grouped only by the shared vSep divider", () => {
