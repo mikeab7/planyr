@@ -49,7 +49,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { collectCases, compare, nextLedger, validateLedger } from "./lib/e2eDrift.mjs";
+import { collectCases, compare, nextLedger, validateLedger, assessCompleteness } from "./lib/e2eDrift.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -62,6 +62,10 @@ const LANE = argOf("--lane") || "ci";
 const UPDATE = has("--update");
 const ALLOW_GROW = has("--allow-grow");
 const ITEM = argOf("--item") || null;
+// B1857904 — opt-in only. Today's `ci`/`local` lanes are never filtered, so this changes nothing
+// about them by default; it exists so a future required lane (the critical-interaction lane, R2 —
+// see docs/RELIABILITY-PROGRAMME.md) can demand a full run without a second script.
+const REQUIRE_COMPLETE = has("--require-complete");
 
 const die = (msg, extra = []) => { console.error(`✗ ${msg}`); for (const l of extra) console.error(`  ${l}`); process.exit(2); };
 
@@ -77,15 +81,27 @@ if (!existsSync(REPORT)) die(`no report at ${REPORT} — NOT OBSERVING.`, [
 ]);
 
 /* ---- Read the run --------------------------------------------------------------------- */
-let cases;
+let report, cases;
 try {
-  cases = collectCases(JSON.parse(readFileSync(REPORT, "utf8")), { root: ROOT });
+  report = JSON.parse(readFileSync(REPORT, "utf8"));
+  cases = collectCases(report, { root: ROOT });
 } catch (e) {
   die(`could not read ${REPORT} as a Playwright JSON report (${e.message}) — NOT OBSERVING.`);
 }
 if (!cases.length) die(`${REPORT} contains no test cases at all — NOT OBSERVING.`, [
   "An empty run is not a green run. Something stopped the suite before it executed anything.",
 ]);
+
+// B1857904 — a filtered run (`--grep`/`--project`/`--shard`) can look identical to a full one in
+// the pass/fail diff alone. Reported always; fatal only under --require-complete (opt-in, unused
+// by today's ci/local lanes — see docs/RELIABILITY-PROGRAMME.md).
+const completeness = assessCompleteness(report);
+if (!completeness.full && REQUIRE_COMPLETE) {
+  die("this run is a filtered/diagnostic run, not a full required run — refusing a release-complete verdict.", [
+    ...completeness.reasons.map((r) => `  - ${r}`),
+    "Run the full suite with no --grep/--project/--shard, or drop --require-complete for a diagnostic run.",
+  ]);
+}
 
 /* ---- Read the ledger ------------------------------------------------------------------ */
 const ledger = existsSync(LEDGER)
@@ -95,7 +111,7 @@ const ledger = existsSync(LEDGER)
 const bad = validateLedger(ledger.entries);
 if (bad.length) die(`e2e/known-red.json is malformed — refusing to judge a run against a ledger that is not sound.`, bad.slice(0, 10));
 
-const { novel, stale, staleIntermittent, absent, failed, knownRed, ran } = compare({ cases, entries: ledger.entries, lane: LANE });
+const { novel, stale, staleIntermittent, absent, failed, knownRed, ran, skipped } = compare({ cases, entries: ledger.entries, lane: LANE });
 
 /* ---- --update: the ledger may SHRINK freely and GROW only deliberately ----------------- */
 if (UPDATE) {
@@ -118,7 +134,10 @@ if (UPDATE) {
 
 /* ---- Report --------------------------------------------------------------------------- */
 console.log(`e2e drift gate (B266080) — lane "${LANE}"\n`);
-console.log(`  ${ran} case(s) ran · ${failed} failed · ${knownRed} on the known-red ledger\n`);
+console.log(`  ${ran} case(s) ran · ${failed} failed · ${skipped} skipped · ${knownRed} on the known-red ledger`);
+console.log(completeness.full
+  ? "  full run (no --grep/--project/--shard filter detected)\n"
+  : `  ⚠ FILTERED/DIAGNOSTIC RUN — not release-complete: ${completeness.reasons.join("; ")}\n`);
 
 for (const id of novel) console.log(`  ✗ NEW FAILURE (not on the ledger): ${id}`);
 for (const e of stale) console.log(`  ✗ STALE LEDGER ENTRY (this case PASSED): ${e.id}${e.item ? `  [${e.item}]` : ""}`);
