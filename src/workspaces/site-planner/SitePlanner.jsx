@@ -18781,8 +18781,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // "louder = more important, never fade" rule). On an active row (ember fill) it rides --on-accent
   // so it stays legible; the label's heavier weight keeps the hierarchy.
   const railHint = (active) => ({ marginLeft: "auto", flex: "none", fontSize: 10.5, fontWeight: 500, letterSpacing: "0.02em", color: active ? PAL.onAccent : PAL.chromeMuted });
-  // ghost buttons on the DARK top bar
-  const dGhost = { padding: "6px 11px", fontSize: FONT_SIZE.control, borderRadius: 8, border: "1px solid transparent", background: "transparent", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, whiteSpace: "nowrap" };
+  // ⛔ B1807200 AMENDMENT (NEW-1, 2026-09-23) — dGhost/dIcon now carry Option B's RESTING bordered
+  // box (background: var(--surface-raised), border: 1px solid var(--border-default)) instead of a
+  // transparent "ghost" fill. The original B1807200 round only converged HEIGHT (26→30) across File/
+  // Undo/Redo/Zoom-to-fit; it never gave them the box CloudSyncBadge/PresenceChip/the account
+  // trigger already carry (background+border at rest), which is why they still read as bare glyphs
+  // on transparent chrome after that item shipped. Every control built from dGhost/dIcon (File,
+  // Undo/Redo + their carets, Zoom-to-fit, Group/Ungroup) inherits this automatically — ONE chrome
+  // system, per B755808's own rule, rather than a second override at each call site. Theme tokens,
+  // not raw hex, so dark mode isn't hardcoded wrong (KEY DECISIONS → theming).
+  const dGhost = { padding: "6px 11px", fontSize: FONT_SIZE.control, borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, whiteSpace: "nowrap" };
   // NEW-2 (B915536) — dIcon's own fontSize override is GONE: Undo/Redo/Zoom-to-fit render only an
   // SVG icon at its own explicit size prop (UndoIcon/RedoIcon/ZoomFitIcon never read em units), so
   // the override was inert scaffolding sized off the pre-retrofit scale (15, now off-scale). It
@@ -18796,9 +18804,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      two silently different systems (owner: "this is horrendous UI"). A NEW control on this bar must
      reuse `TB_H`/`TB_R` (or, for an icon button, `dIcon` outright) rather than inventing a fourth.
      Related rules enforced the same way here: a container may NEVER carry the disabled treatment —
-     only the glyph dims (`.tb-icon-btn:disabled`, fill="currentColor" + opacity) — so a related group
-     of icon buttons is never wrapped in a filled tray; group them with `vSep`, a plain 1px divider,
-     exactly like every other pair of groups on this bar. See `test/toolbarChromeSystem.test.js`.
+     only the glyph dims — so a related group of icon buttons is never wrapped in a filled tray;
+     group them with `vSep`, a plain 1px divider, exactly like every other pair of groups on this bar.
+     ⛔ B1807200 AMENDMENT — now that dGhost/dIcon carry a real resting box (background+border), the
+     "container never carries disabled" rule needed a real mechanism instead of an accident: fading
+     the whole button (the app-wide `button:disabled{opacity:.45}`, or the old `.tb-icon-btn:disabled`
+     which also opacitized the WHOLE element) used to be invisible only because the box itself was
+     transparent. `.tb-icon-btn:disabled` now sets `opacity:1` on the button (cancelling that fade)
+     and dims only its direct child glyph (`> *`, covering both an svg icon and the caret's `▾` span)
+     — so a disabled Undo still renders its full bordered box, exactly like the approved mockup's own
+     disabled state, with only the glyph reading as dimmed/inactive. See `test/toolbarChromeSystem.test.js`.
      ⛔ B958465 (toolbar-row overhang audit) — was a bare 30, i.e. `CONTROL_H.lg`. B885137
      (2026-08-30/31) shrunk THIS ROW's own height 44px→26px (`CONTROL_H.md`) but never touched this
      constant, so every control on the bar — File, Undo, Redo, both carets, Zoom-to-fit — rendered
@@ -18824,6 +18839,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // same height as its main button, half the width, flat inner corner where the two meet (so the
   // pair reads as one control), a hairline divider, and the caret glyph muted exactly like every
   // other disclosure caret on this bar (File's own "▾", `railHint`).
+  // ⛔ B1807200 AMENDMENT — dGhost's own `border` is no longer transparent, so the icon half of the
+  // pair (dIcon spread at the Undo/Redo call sites) explicitly drops ITS right border
+  // (`borderRight: "none"`) rather than let two adjacent 1px borders (the icon's own + this caret's
+  // `borderLeft`) double up at the seam. This caret's `borderLeft` stays the ONE visible divider.
   const dCaret = { ...dGhost, width: 15, height: TB_H, padding: 0, display: "grid", placeItems: "center",
     borderRadius: `0 ${TB_R}px ${TB_R}px 0`, borderLeft: `1px solid ${PAL.chromeLine}` };
   // NEW-1 — the bottom-center canvas toast chrome. The pill geometry and its two button
@@ -20732,8 +20751,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <button className="dbtn" aria-haspopup="menu" aria-expanded={exportMenu}
             title="File — export a PNG or print a PDF"
             style={{ ...dGhost, fontWeight: 600, display: "flex", alignItems: "center", gap: 6, height: TB_H, borderRadius: TB_R,
-              border: `1px solid ${exportMenu ? PAL.accent : PAL.chromeLine}`,
-              background: exportMenu ? "var(--hover-chrome)" : "transparent" }}
+              // ⛔ B1807200 AMENDMENT — resting border/background now match dGhost's own new box
+              // (var(--border-default)/var(--surface-raised)) instead of hardcoding PAL.chromeLine
+              // over a transparent fill; the open-menu accent border + hover-chrome tint still
+              // layers ON TOP of that box rather than replacing it.
+              border: `1px solid ${exportMenu ? PAL.accent : "var(--border-default)"}`,
+              background: exportMenu ? "var(--hover-chrome)" : "var(--surface-raised)" }}
             onClick={() => setExportMenu((o) => { if (!o) warmExportSheet(); return !o; })}>
             File <span style={{ fontSize: 10.5, lineHeight: 1, fontWeight: 500, color: PAL.chromeMuted }}>▾</span>
           </button>
@@ -20776,8 +20799,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             and it cost a real investigation. The caret beside each mirrors the same `disabled` so
             the button and its caret grey out together, never independently. */}
         <div ref={undoAnchor} style={{ display: "flex" }}>
-          <button className="dbtn" style={{ ...dIcon, borderRadius: `${TB_R}px 0 0 ${TB_R}px` }} onClick={undo} disabled={!canUndoNow} aria-disabled={!canUndoNow} aria-label="Undo" title="Undo (Ctrl+Z)"><UndoIcon /></button>
-          <button className="dbtn" style={dCaret} onClick={() => (undoMenuOpen ? setUndoMenuOpen(false) : openUndoMenu())}
+          <button className="dbtn tb-icon-btn" style={{ ...dIcon, borderRadius: `${TB_R}px 0 0 ${TB_R}px`, borderRight: "none" }} onClick={undo} disabled={!canUndoNow} aria-disabled={!canUndoNow} aria-label="Undo" title="Undo (Ctrl+Z)"><UndoIcon /></button>
+          <button className="dbtn tb-icon-btn" style={dCaret} onClick={() => (undoMenuOpen ? setUndoMenuOpen(false) : openUndoMenu())}
             disabled={!canUndoNow} aria-disabled={!canUndoNow} aria-haspopup="menu" aria-expanded={undoMenuOpen}
             aria-label="Recent actions to undo" title="Recent actions to undo">
             <span aria-hidden="true" style={{ fontSize: 9, lineHeight: 1 }}>▾</span>
@@ -20792,8 +20815,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </div>
         </AnchoredMenu>
         <div ref={redoAnchor} style={{ display: "flex" }}>
-          <button className="dbtn" style={{ ...dIcon, borderRadius: `${TB_R}px 0 0 ${TB_R}px` }} onClick={redo} disabled={!histRef.current.canRedo()} aria-disabled={!histRef.current.canRedo()} aria-label="Redo" title="Redo (Ctrl+Shift+Z)"><RedoIcon /></button>
-          <button className="dbtn" style={dCaret} onClick={() => (redoMenuOpen ? setRedoMenuOpen(false) : openRedoMenu())}
+          <button className="dbtn tb-icon-btn" style={{ ...dIcon, borderRadius: `${TB_R}px 0 0 ${TB_R}px`, borderRight: "none" }} onClick={redo} disabled={!histRef.current.canRedo()} aria-disabled={!histRef.current.canRedo()} aria-label="Redo" title="Redo (Ctrl+Shift+Z)"><RedoIcon /></button>
+          <button className="dbtn tb-icon-btn" style={dCaret} onClick={() => (redoMenuOpen ? setRedoMenuOpen(false) : openRedoMenu())}
             disabled={!histRef.current.canRedo()} aria-disabled={!histRef.current.canRedo()} aria-haspopup="menu" aria-expanded={redoMenuOpen}
             aria-label="Recent actions to redo" title="Recent actions to redo">
             <span aria-hidden="true" style={{ fontSize: 9, lineHeight: 1 }}>▾</span>

@@ -632,8 +632,19 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
    break in dark mode; opacity against `currentColor` doesn't.
    ⛔ B648352 — Undo/Redo no longer carry this class. They moved back to the app's own stroke icon
    idiom and now use the plain `button:disabled` fade above (opacity .45) like every other control —
-   the Material .38 alpha was a mismatch once they stopped being filled Material glyphs. */
-.tb-icon-btn:disabled { opacity: .38; pointer-events: none; }
+   the Material .38 alpha was a mismatch once they stopped being filled Material glyphs.
+   ⛔ B1807200 AMENDMENT (NEW-1, 2026-09-23) — Undo/Redo (icon + caret) carry this class again, and
+   its RULE changed shape rather than its membership. dGhost/dIcon now render a resting bordered box
+   (background+border) for the whole top-right toolbar cluster; fading the whole element — what this
+   rule and the plain `button:disabled` fade above both did — would fade that box right along with
+   the glyph, which the approved Option B mockup does not: its disabled Undo is still a full white,
+   bordered square with only a lighter-grey glyph. So `opacity:1` here CANCELS the app-wide fade for
+   this control family, and a sibling rule dims only the glyph — the button's one direct child,
+   whether an `<svg>` (Zoom to fit / Undo / Redo) or the caret's `▾` `<span>`. Kept at .45 (not the
+   old Material .38) to match the visual weight Undo/Redo already had before this item, since B648352
+   above already judged .38 a mismatch for this icon idiom. */
+.tb-icon-btn:disabled { opacity: 1; pointer-events: none; }
+.tb-icon-btn:disabled > * { opacity: .45; }
 
 /* tool-rail buttons — idle hover; active state styled inline */
 .rbtn:hover:not(:disabled):not(.on) { background: var(--hover-chrome) !important; color: var(--chrome-text) !important; filter: none; }
