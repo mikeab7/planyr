@@ -516,6 +516,19 @@ were split out of this file.
     edited. Do not relitigate either half and do not ask him again. See B1788912 (site-planner
     `lib/planStyle.js` `zOrder`/`byZ`, `SitePlanner.jsx`'s element render pass) for the
     implementation and the road-network composite's own stated ordering rule.
+11. **(2026-09-23) The two overlay systems converge in CODE ONLY — never in storage.** The Site
+    tab's `sheetOverlays` (in the site model) and the Map/Comps `site_plan_overlays` table stay
+    exactly as they are: do NOT merge the stores, and do NOT propose or build any data migration,
+    ownership or sharing change. Michael does not care where the data lives; what he does not
+    want is the same FEATURE written twice. So crop, georeference, scale and rasterising each have
+    ONE shared engine used by both surfaces — no second copy of the logic, no forked crop model.
+    Crop is already shared (`overlayCrop.js` + `ImageCropTool`); the rest is B1838705. Also
+    measured the same day, so nobody re-hunts it: nothing is double-saved (the Goose Creek master
+    site plan on four plans points at ONE stored object), and canvas overlays with a null
+    `storageKey` naming a real PDF are the old local-only-overlay problem, NOT duplication — keep
+    them out of this work.
+12. **(2026-09-22) Overlay crop is KEEP-INSIDE only.** No keep-outside / hole-punch inverse, on
+    either overlay surface. (B1783328.)
 
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by

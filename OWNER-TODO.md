@@ -65,8 +65,10 @@ _Last updated: 2026-09-22._
 > features** that look alike — the drawings you place on a plan in the **Site tab** (Overlays
 > panel), and the site-plan pictures you pin to a comp on the **Map** (Comps → Adjust). They are
 > saved in different places and don't know about each other. Crop now works on both.
-> - [ ] **Should these two become ONE overlay feature, or stay separate with crop simply on both?**
->       Nothing is blocked either way — crop already works in both places today.
+> - [x] **Should these two become ONE overlay feature, or stay separate with crop simply on both?**
+>       **ANSWERED 2026-09-23:** keep the two stores exactly as they are (no data migration); share
+>       the CODE — one engine for crop, map placement, scale and rendering the PDF, used by both.
+>       Recorded as owner constraint 11 in `CLAUDE.md`; the code work is B1838705.
 
 ## 🖼 Which page was that "Spreadsheet" screenshot? (B1756544)
 
