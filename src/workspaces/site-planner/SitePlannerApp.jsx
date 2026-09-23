@@ -69,6 +69,11 @@ const groupForPlan = (id, mode) => (mode === "plan" && id) ? (loadSite(id)?.grou
 // "New project" click (after navigating here), so a per-mount ref would miss it.
 let lastConsumedNewProject = 0;
 
+// B1865936 — sentinel for `pendingRouteWriteRef`, distinct from every real value the ref can
+// hold (a group id string, or `null` for "no project"), so "no write pending" can never be
+// confused with "we last wrote null".
+const NO_PENDING_ROUTE_WRITE = Symbol("no-pending-route-write");
+
 /* Two surfaces: a map to find/select parcels, and the planner to design on a
  * site. Every site autosaves to its own record, so the map can list them and
  * starting/opening another never loses the one you were on. */
@@ -148,6 +153,11 @@ export default function App({
    * meant to authorise has already been skipped. `routeMissing` is the honest answer when the
    * URL names a project this device genuinely does not have. */
   const userLeftProjectRef = useRef(false);
+  // B1865936 — what effect (2) below last asked the URL to become, or `NO_PENDING_ROUTE_WRITE`
+  // once that write has round-tripped back as a fresh `projectId` prop. Lets effect (1) tell its
+  // own not-yet-landed write apart from the URL genuinely naming something else. See effect (1)'s
+  // own comment for the race this closes (the Map-crumb bounce).
+  const pendingRouteWriteRef = useRef(NO_PENDING_ROUTE_WRITE);
   /* B1202176 — ids THIS MOUNT minted locally (newBlankSite / newSiteFromMap), so effect (2)'s
    * `onProjectChange` call can tell Shell.jsx's route-level deletion gate "not saved YET" apart
    * from "never existed at all" — both otherwise answer the identical cloud `{exists:false}`.
@@ -791,6 +801,31 @@ export default function App({
   useEffect(() => {
     const prev = prevPidRef.current; prevPidRef.current = projectId;
     routeChangedThisPassRef.current = routeProjectJustChanged(prev, projectId);
+    // B1865936 — the Map-crumb bounce: `goMap`/`leaveProject` set `userLeftProjectRef` and
+    // leave `activeSiteId` alone (the Leaflet keep-alive optimization), so the URL still names
+    // the just-left project until effect (2) below writes the clear. If THIS effect runs before
+    // that write lands (`projectId` is still the pre-clear value), it would see `projectId !==
+    // curGroup` and re-open the very project the user just navigated away from.
+    //
+    // Two DIFFERENT interleavings produce that stale read, and closing only one reopened the
+    // bug live (measured with an artificially delayed hashchange delivery, matching real
+    // production timing variance): (a) this effect runs in the SAME commit as effect (2), before
+    // effect (2) has had a chance to spend `userLeftProjectRef` — guarded by the check right
+    // below; (b) THIS effect re-runs LATER, on its own, because an UNRELATED dependency changed
+    // (`sites`, via the "refresh the map's site list 80ms after landing on it" effect below) —
+    // by then effect (2) has ALREADY run once and cleared `userLeftProjectRef`, so guard (a)
+    // is spent and does nothing, while the browser's real hashchange (which is what actually
+    // updates the `projectId` prop) still hasn't delivered. `pendingRouteWriteRef` closes (b):
+    // it remembers what effect (2) last asked the URL to become, and this effect stands down
+    // whenever `projectId` hasn't yet caught up to it — the prop isn't authoritative yet, so
+    // nothing may be derived from it. The moment `projectId` catches up, the pending marker
+    // clears and this effect resumes reconciling normally (including a genuinely NEW external
+    // navigation that lands after the catch-up, which this guard never touches).
+    if (pendingRouteWriteRef.current !== NO_PENDING_ROUTE_WRITE) {
+      if (projectId === pendingRouteWriteRef.current) pendingRouteWriteRef.current = NO_PENDING_ROUTE_WRITE;
+      else return;
+    }
+    if (userLeftProjectRef.current) return;
     if (projectId) {
       const curGroup = groupForPlan(activeSiteId, mode);
       if (projectId !== curGroup) {
@@ -856,6 +891,11 @@ export default function App({
     });
     if (!allowed) return;
     userLeftProjectRef.current = false; // the intent is spent once it has been written
+    // B1865936 — record what we just asked the URL to become, BEFORE the write, so effect (1)
+    // can tell "the incoming `projectId` prop is stale, my own write hasn't round-tripped back
+    // through the async hashchange yet" apart from a genuinely new external navigation. See
+    // effect (1)'s own comment on `pendingRouteWriteRef` for the race this closes.
+    pendingRouteWriteRef.current = effGroup || null;
     // B1202176 — tell Shell.jsx's deletion gate whether THIS group is one we just minted locally
     // (see `locallyMintedGroupsRef`'s header), so it never asks the cloud about it cold.
     onProjectChange?.(effGroup, { freshlyCreated: locallyMintedGroupsRef.current.has(effGroup) });
