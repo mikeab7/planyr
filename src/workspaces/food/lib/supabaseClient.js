@@ -11,10 +11,15 @@
  */
 import { createClient } from "@supabase/supabase-js";
 
-const RAW_URL = ((import.meta.env && import.meta.env.VITE_SUPABASE_URL) || "").trim();
+// B1843888 — same vitest-must-never-configure-a-real-client guard as the site-planner copy of
+// this file (see that file's header for why); duplicated rather than imported, per this
+// module's own BUNDLE ISOLATION rule above.
+const UNDER_VITEST = !!(import.meta.env && import.meta.env.VITEST);
+
+const RAW_URL = UNDER_VITEST ? "" : ((import.meta.env && import.meta.env.VITE_SUPABASE_URL) || "").trim();
 let SUPABASE_URL = RAW_URL.replace(/\/+$/, "");
 try { if (RAW_URL) SUPABASE_URL = new URL(RAW_URL).origin; } catch (_) {}
-const SUPABASE_ANON = ((import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) || "").trim();
+const SUPABASE_ANON = UNDER_VITEST ? "" : ((import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) || "").trim();
 
 export const supabaseConfigured = () => !!(SUPABASE_URL && SUPABASE_ANON);
 
