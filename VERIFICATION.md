@@ -179,6 +179,33 @@ was never clicked" quietly ships broken.
 6. Read the served chunk hash in the same observation as each result; delete the duplicate afterwards and say what was created/removed.
 - **Stopping rule:** closes when steps 1–6 pass on a real signed-in account, dated — or a failing step is filed as a recurrence against B1838704 (STANDING RULE #2).
 
+### V1303696 — B1832304: "Make a copy" on a Notes page copies the page, its subpages and their pictures, and the copy arrives complete on a second signed-in computer `Blocker: auth`
+
+**Why this needs a live pass.** Everything device-local is proven headless and logged out: `ui-audit/verify-notes-copy-notebook.mjs` **16/16** against the real built app (placement, nesting, fresh ids, source project, bodies, a re-keyed picture with its own bytes that renders, reload survival, original byte-identical), plus `test/notesCopyNotebook.test.js` 9/9 (incl. the copy's picture surviving a forever-purge of the original, and the all-or-nothing rollback). What the sandbox cannot reach is the CLOUD leg: the copied bodies are marked dirty through the ordinary `writePage` path and the copied pictures/files upload through the ordinary `uploadImage` path, but no signed-in session can run here (the proxy CORS-blocks Supabase sign-in).
+
+**What was verified here (sandbox, this session).** Notes suites 46 files / 1,555 tests green; `npm run build` clean; eslint 0 errors on every touched file; the headless harness above.
+
+**Steps, each with a named expected result** (on a throwaway page you create for this — never one of Michael's real notes, constraint 7):
+1. Signed in on planyr.io → Notes, create a page "Copy test" with one subpage "Child", paste a picture into "Child", wait for the save indicator to read saved. **Expect:** saved state in the header badge.
+2. Right-click "Copy test" in the rail → **Make a copy**. **Expect:** "Copy test (copy)" appears directly under the original with "Child" under it, opens, and a notice reads "Copied the page and its 1 subpage."
+3. Open "Child" under the copy. **Expect:** the picture renders.
+4. On a second computer/browser signed in to the same account, open Notes (reload if already open). **Expect:** "Copy test (copy)" › "Child" is present, and the copied "Child" shows the picture (not the broken-picture state).
+5. Delete the ORIGINAL "Copy test" and empty it from the Bin ("Delete forever"). Reload both browsers. **Expect:** the copy and its picture are still present and intact on both.
+6. Clean up: bin and purge the copy too.
+- **Stopping rule:** closes when steps 2–5 confirm on a real signed-in account, dated — or a step fails and is filed as a recurrence against B1832304, per STANDING RULE #2 (a null result is a FINDING, never a silent close).
+
+### V1281296 — B1807200: the collapsed signed-in account trigger and the two-tabs "open tabs" badge, on a real signed-in account `Blocker: auth`
+
+**Why this needs a live pass, and what it is NOT.** B1807200 (the top-right toolbar cluster's Option B unification) is proven headless, logged out, against the real running app — `ui-audit/verify-toolbar-cluster-optionb.mjs`, 10/10 checks, incl. every icon-only control at 30×30 (see this item's own note below on why the shipped number is 30, not the mockup's literal 32), one shared 8px radius, and Undo's disabled opacity measurably distinct from Redo's enabled baseline. Two of the mockup's specific claims genuinely cannot be exercised logged out: the account trigger only reaches its "Cloud off"/"Sign in" states in this sandbox (each confirmed at the correct 30px height, but neither carries a name to collapse), and the "open tabs" badge (`PresenceChip`'s self-tabs case) only renders when a signed-in account has this same project open in more than one browser tab/window at once — the presence channel it reads is a Supabase Realtime feature, unreachable signed-out.
+
+**What was verified here (sandbox, this session).** Full suite: 882 files / 17,994 tests, zero regressions. `npm run build`: clean. `npx eslint` on every touched file: 0 errors. The headless harness above screenshotted both light and dark themes and confirmed every OTHER row-1/row-2 control (the sync-status icon incl. its new corner status dot, Full screen, Settings, File, Undo, Redo, Zoom-to-fit) at 30×30/8px — the ui-inventory signature-budget CI gate caught a first attempt at the mockup's literal 32px as a real regression (it fragmented an existing cross-surface convergence on 30px used by several unrelated controls), so the shipped number converges onto the app's own pre-existing 30px control height instead; see the item's BACKLOG entry for the full root-cause.
+
+**Steps, each with a named expected result:**
+1. Sign in on planyr.io with a real account. **Expect:** the row-1 account trigger shows only the round avatar + a small ▾ chevron — no name text inline — and is the same height as the sync-status icon and Full screen beside it.
+2. Hover the collapsed account trigger. **Expect:** the tooltip reads "Signed in as `<your name>` (`<your email>`)".
+3. Click the account trigger. **Expect:** the opened dropdown's own header still shows the avatar, full name, and email exactly as before this item — nothing about the dropdown itself changed.
+4. Open the same project in a second browser tab (same signed-in account). **Expect:** row 1 shows a 30×30 icon button (a "stacked windows" glyph) with a small numeric badge reading "2" in its top-right corner, replacing the old "2 tabs" text pill.
+- **Stopping rule:** closes when steps 1–4 confirm on Michael's real account, dated — or a step fails and is filed as a recurrence against B1807200, per STANDING RULE #2 (a null result is a FINDING, never a silent close).
 ### V1303600 — B1832208/B1832209/B1832210: a road tee-ing into a truck court paints no pavement inside it, the endpoint lands on the face, and a junction arm's curb return stops at the neighbouring corner's own arc `Blocker: real-data`
 
 **Why this needs a live pass.** Two mandatory LIVE-VERIFY classes at once: **zoom-/data-density-dependent rendering** (curb-return geometry, arc tangent lengths, and Clipper polygon-difference results are exactly the class of thing a static code read can get wrong at one scale and right at another) and **real-project-data** (the reported defect cites the owner's actual Goose Creek Phase II - TAS R2 plan, with real drive-junction angles and radii the sandbox's synthetic fixtures can only approximate).

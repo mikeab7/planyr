@@ -66,9 +66,18 @@ const REST_SHADOW = "0 1px 2px rgba(0,0,0,0.05)"; // neutral, token-independent 
  *       exception (their own `Tab` primitive below, not this bundle — see its header).
  *   md  height 30 (CONTROL_H.lg) — primary standalone actions: the account pill, a menu trigger,
  *       an icon button (IconButton's own default size, unchanged, already agrees with this).
- * Radius is always `CONTROL_RADIUS.control` (8) for both steps — a chip built from this bundle is
- * always a STANDALONE control per docs/DESIGN.md's shape rule, never nested, so it never takes
- * `sm`(6).
+ * NEW-2 (top-right toolbar cluster, Option B) — this is also now the ONE shared height every
+ * bordered control in the app header's row-1/row-2 right-zone cluster uses (the sync-status icon,
+ * the open-tabs badge, Full screen, Settings, and the account/"Sign in"/"Cloud off" trigger — see
+ * AppHeader.jsx/CloudSyncBadge.jsx/PresenceChip.jsx/AccountControl.jsx). A fourth `lg` (32) step
+ * was tried first and reverted: `md` (30) is already the value every one of those controls (and
+ * several others already sharing their exact shape elsewhere on the same screen — the global
+ * help/report FAB, the project-breadcrumb triggers) had independently converged on before this
+ * item, so inventing a new number only fragmented an existing, wider convergence into two
+ * near-identical shapes instead of unifying one — caught by `ui-audit/ui-inventory.mjs`'s
+ * per-surface signature-budget CI gate on the Map landing page (26 vs. a 24 ceiling). Radius is
+ * always `CONTROL_RADIUS.control` (8) for both steps — a chip built from this bundle is always a
+ * STANDALONE control per docs/DESIGN.md's shape rule, never nested, so it never takes `sm`(6).
  */
 export const SIZE = {
   sm: { height: 26, padding: "0 10px", fontSize: 12 },
@@ -261,7 +270,12 @@ export function Tab({
  * it sets one CSS color property, nothing a caller could use to relitigate the locked geometry.
  * NEW-1: does not accept `style`, `borderRadius`, `height`, `padding` or `fontSize` — if a caller
  * needs a different geometry, that is a signal to add a size step here, never to override one
- * call site. Layout spacing (margin, flex) belongs on a wrapping element. */
+ * call site. Layout spacing (margin, flex) belongs on a wrapping element.
+ * NEW-2 (top-right toolbar cluster, Option B) — `children` is now OPTIONAL. A caller with nothing
+ * to say beside its `leading` icon (the collapsed account avatar-only trigger) omits `children`
+ * entirely; the middle text span is skipped rather than rendered empty, so the row's `gap` doesn't
+ * insert a phantom double-space between `leading` and the caret. Every existing caller passes real
+ * text and is unaffected. */
 export const MenuTrigger = forwardRef(function MenuTrigger({
   size = "md", open, caret = true, leading, textColor = "var(--chrome-text)", children, className,
   style: _style, borderRadius: _borderRadius, height: _height, padding: _padding, fontSize: _fontSize,
@@ -286,7 +300,9 @@ export const MenuTrigger = forwardRef(function MenuTrigger({
       {...rest}
     >
       {leading}
-      <span style={{ overflow: "hidden", textOverflow: "ellipsis", flex: "1 1 auto", minWidth: 0, textAlign: "left" }}>{children}</span>
+      {children != null && children !== "" && (
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", flex: "1 1 auto", minWidth: 0, textAlign: "left" }}>{children}</span>
+      )}
       {caret && <span aria-hidden="true" style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>}
     </button>
   );

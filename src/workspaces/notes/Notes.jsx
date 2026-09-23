@@ -42,7 +42,7 @@ import { isQuickOpenChord, quickOpenResults, rankQuickOpen } from "./lib/notesQu
 import { groupTasksByProject } from "./lib/notesTasks.js";
 import { listProjects, warmProjects, onProjectsChanged, ensureProjectExists } from "../../shared/projects/projects.js";
 import {
-  clearNotesStorageError, collectOpenTasks, createPage, knownBinnedPages, markPagesBinned, markPagesRestored, notesConflictFor, notesConflictLine,
+  clearNotesStorageError, collectOpenTasks, createPage, duplicatePageTree, knownBinnedPages, markPagesBinned, markPagesRestored, notesConflictFor, notesConflictLine,
   notesScopeLabel, notesStorageLine, onNotesConflict, onNotesStorageError, onNotesSyncState,
   collectBinFacts, ignoreDuplicate, onNotesPagesChanged, purgePages, readIgnoredDuplicates, readNoteFiles,
   readNoteImages, readNoteTemplates, readPage, readTreeRaw,
@@ -969,6 +969,24 @@ export default function Notes({
     setMobileShowList(false);
   }, [persistTree, treeNow]);
 
+  /** COPY A NOTEBOOK (NEW-1) — the page AND every subpage under it, with their writing,
+   *  pictures and files. The copy lands right under the original, in the ORIGINAL's project
+   *  (never the one on screen — `copyPageWithin`'s rule, which `duplicatePageTree` goes
+   *  through), reads "(copy)", and opens. All-or-nothing: a refusal is named and nothing is
+   *  written, so the rail never shows a copy with nothing behind it (LOUD-FAILURE). */
+  const handleCopyPage = useCallback(async (pageId) => {
+    const r = await duplicatePageTree(treeNow(), pageId);
+    if (!r.ok) { setExportNote(r.error); return; }
+    persistTree(r.tree);
+    setPeek(null);
+    setActivePageId(r.pageId);
+    setMobileShowList(false);
+    const what = r.pages > 1 ? `the page and its ${r.pages - 1} subpage${r.pages === 2 ? "" : "s"}` : "the page";
+    setExportNote(r.missing
+      ? `Copied ${what}. ${r.missing} picture${r.missing === 1 ? " was" : "s were"} already missing from the original, so ${r.missing === 1 ? "it shows" : "they show"} as missing in the copy too.`
+      : `Copied ${what}.`);
+  }, [persistTree, treeNow]);
+
   /** Re-file a TOP-LEVEL page into a project, or out of every project (B1374, B1420). */
   const handleSetPageProject = useCallback((pageId, pid) => {
     persistTree(setPageProject(treeNow(), pageId, pid));
@@ -1498,6 +1516,7 @@ export default function Notes({
           onSelectHit={(id) => { setPeek(null); setActivePageId(id); setHighlight(query); setQuery(""); setMobileShowList(false); }}
           onAddPage={handleAddPage}
           onAddSubpage={handleAddSubpage}
+          onCopyPage={handleCopyPage}
           onSetPageProject={handleSetPageProject}
           onSetPageOrgScope={handleSetPageOrgScope}
           onRename={handleRename}

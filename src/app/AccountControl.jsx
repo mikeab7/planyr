@@ -232,17 +232,21 @@ export default function AccountControl({ user, authKnown = true, profileApi, onO
   // Signed in — the pill shows the user's name and opens an account dropdown (B298).
   // NEW-1 (B982400) — was the hand-rolled `pill` shape; MenuTrigger draws the same border/
   // background/radius/font, with its own trailing ▾ caret replacing the inline one below.
+  // NEW-2 (top-right toolbar cluster, Option B) — collapses to the avatar + caret only by
+  // default (no `children`, so MenuTrigger's own NEW-2 skips the now-empty middle span rather
+  // than reserving room for it). The full name is still reachable two ways: this trigger's own
+  // `title` tooltip, and the identity header inside the opened dropdown below — never dropped,
+  // just not shown inline every time this row's width is at a premium.
   return (
     <>
       <MenuTrigger
         ref={acctAnchor}
         onClick={() => setAcctOpen((o) => !o)}
         open={acctOpen}
-        title={`Signed in as ${user?.email || "(no email)"}`}
+        title={`Signed in as ${who}${user?.email ? ` (${user.email})` : ""}`}
+        aria-label={`Account: ${who}`}
         leading={<span style={avatar(true)}>{profileApi.initial}</span>}
-      >
-        {who}
-      </MenuTrigger>
+      />
       <AnchoredMenu
         open={acctOpen}
         onClose={() => setAcctOpen(false)}

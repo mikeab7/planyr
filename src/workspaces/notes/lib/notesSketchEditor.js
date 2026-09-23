@@ -23,7 +23,10 @@
  *   double-click empty canvas → a box appears there, caret already in it
  *   double-click a box        → edit its words         (keyboard: focus it, Enter)
  *   drag a box                → move it
- *   drag from a box's dot     → an arrow to the box you drop on   (keyboard: ↗ Arrow)
+ *   drag from a box's dot     → an arrow to the box you drop on
+ *   ↗ Arrow, click, click     → CLICK-TO-CONNECT: the first box clicked is where the arrow
+ *                               starts, the second is where it points, then the mode ends
+ *                               (keyboard: ↗ Arrow, then Tab to a box + Enter, twice)
  *   click an arrow            → select it; Delete removes it
  *   Delete with a box picked  → the box AND every arrow that named it (TOMBSTONE-DELETES)
  *
@@ -47,6 +50,7 @@ import {
   addBox, addLink, boxAt, BOX_MIN_H, BOX_W, layoutSketch, moveBox, nextSpot, normalizeSketch,
   removeBox, removeLink, updateBox,
 } from "./notesSketchModel.js";
+import { bindingShouldDecline } from "./notesKeyScope.js";
 
 /* ⛔ NEW-1 (owner report 2026-09-17, recurrence of B1683296–B1683298) — DOUBLE-CLICKING TRULY
  * EMPTY CANVAS (nothing pending, nothing being edited) STILL DEPENDED 100% ON THE BROWSER'S OWN
@@ -113,14 +117,20 @@ export function attachSketchEditor(handle) {
   let editing = null;           // { id, model, committed } — model may hold an uncommitted box
   let dragging = null;          // moving a box
   let linking = null;           // dragging an arrow out of a grip
-  let pendingFrom = null;       // the keyboard route: ↗ Arrow, then pick the second box
+  /* CLICK-TO-CONNECT (NEW-1, 2026-09-22 — owner: dragging from the dot "is finicky").
+   * null = off. { from: null } = ↗ Arrow pressed, waiting for the box the arrow starts from.
+   * { from: id } = source picked (highlighted), a dashed line follows the pointer, and the
+   * next box clicked is the target. Exits after one arrow, on Escape, on ↗ Arrow again, or on
+   * a press on bare canvas. See `pickForConnect` for the whole state machine. */
+  let connecting = null;        // null | { from: string|null, line: SVGLineElement|null, px, py }
+  let connectPressAt = -Infinity; // timeStamp of the last press that connect mode consumed
   let destroyed = false;
   let lastBlankTap = null;      // NEW-1: { t, x, y } | null — the last press on bare canvas while idle
 
   /* ---- the tool bar ------------------------------------------------------------------ */
 
   const addBtn = toolButton("＋ Box", "Add a box (or just double-click the canvas)", "sketch-add-box");
-  const arrowBtn = toolButton("↗ Arrow", "Draw an arrow from the selected box to another (or drag from the box's dot)", "sketch-arrow");
+  const arrowBtn = toolButton("↗ Arrow", "Connect two boxes: press this, then click the box the arrow starts from, then the box it points to", "sketch-arrow");
   const delBtn = toolButton("Delete", "Delete what is selected — a box takes its arrows with it", "sketch-delete");
   const status = el("span", "planyr-sketch-status", { "data-testid": "sketch-status", role: "status", "aria-live": "polite" });
 
@@ -132,7 +142,7 @@ export function attachSketchEditor(handle) {
   /* The one line of instruction, and it shows ONLY while the canvas is empty — after the
    * first box it has taught what it had to teach and gets out of the way (PANEL-BREVITY). */
   const hint = el("p", "planyr-sketch-hint", { "data-testid": "sketch-hint" });
-  hint.textContent = "Double-click anywhere to add a box · drag from a box’s dot onto another box to connect them.";
+  hint.textContent = "Double-click anywhere to add a box · ↗ Arrow, then click two boxes to connect them.";
   paneSlot.append(hint);
 
   /* ---- painting ---------------------------------------------------------------------- */
@@ -144,7 +154,66 @@ export function attachSketchEditor(handle) {
   function paint(model = painted()) {
     handle.setSelected(selected);
     handle.draw(model);
+    markConnect();
     syncTools(model);
+  }
+
+  /** Connect mode's visual state — a crosshair over the canvas, the SOURCE box highlighted,
+   *  and the dashed line from it to the pointer. Re-applied after every redraw, because a
+   *  redraw replaces the `<svg>` and everything in it (the line included). */
+  function markConnect() {
+    drawSlot.classList.toggle("is-connecting", !!connecting);
+    for (const g of drawSlot.querySelectorAll("[data-sketch-node]")) {
+      g.classList.toggle("is-link-source", !!connecting?.from && g.getAttribute("data-sketch-node") === connecting.from);
+    }
+    if (!connecting) return;
+    if (connecting.line && !connecting.line.isConnected) connecting.line = null;
+    if (connecting.from && !connecting.line) {
+      const svg = canvasEl();
+      const box = svg && layoutSketch(painted()).boxes.find((b) => b.id === connecting.from);
+      if (!box) return;
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("class", "planyr-sketch-pending");
+      line.setAttribute("data-testid", "sketch-connect-line");
+      const x1 = box.x + box.w / 2;
+      const y1 = box.y + box.h / 2;
+      line.setAttribute("x1", String(x1));
+      line.setAttribute("y1", String(y1));
+      line.setAttribute("x2", String(connecting.px ?? x1));
+      line.setAttribute("y2", String(connecting.py ?? y1));
+      /* Behind the boxes, so the line runs out from under the source rather than across it. */
+      const firstNode = svg.querySelector("[data-sketch-node]");
+      if (firstNode && firstNode.parentNode) firstNode.parentNode.insertBefore(line, firstNode);
+      else svg.appendChild(line);
+      connecting.line = line;
+    }
+  }
+
+  /* Escape must cancel wherever focus happens to be: a pick is a press that takes no focus
+   * (it must not start a drag or open a box), so the canvas's own keydown may never see it.
+   * Listened for on the window ONLY while the mode is on, and removed the moment it ends. */
+  function onConnectEscape(e) {
+    if (e.key !== "Escape" || !connecting) return;
+    if (bindingShouldDecline(e, document)) return;   // Escape is ungated there — asked anyway (house rule)
+    e.preventDefault();
+    e.stopPropagation();
+    endConnect("Arrow cancelled.");
+    select(null);                  // the same as Escape on the canvas: nothing left picked
+  }
+
+  function startConnect() {
+    connecting = { from: null, line: null, px: null, py: null };
+    window.addEventListener("keydown", onConnectEscape, true);
+  }
+
+  function endConnect(msg) {
+    if (!connecting) return;
+    window.removeEventListener("keydown", onConnectEscape, true);
+    connecting.line?.remove();
+    connecting = null;
+    markConnect();
+    syncTools();
+    if (msg != null) say(msg);
   }
 
   /** Selection without a redraw — a redraw would destroy the element that has DOM focus,
@@ -158,16 +227,18 @@ export function attachSketchEditor(handle) {
       const [from, to] = (g.getAttribute("data-sketch-edge") || "").split(" ");
       g.classList.toggle("is-selected", selected?.kind === "edge" && selected.from === from && selected.to === to);
     }
+    markConnect();
     syncTools();
   }
 
   function syncTools(model = painted()) {
-    const empty = !normalizeSketch(model).boxes.length;
-    hint.style.display = empty ? "" : "none";
-    arrowBtn.disabled = !(selected?.kind === "box");
+    const n = normalizeSketch(model).boxes.length;
+    hint.style.display = n ? "none" : "";
+    /* Enabled whenever there are two boxes to connect — no box has to be selected first. */
+    arrowBtn.disabled = n < 2 && !connecting;
     delBtn.disabled = !selected;
-    arrowBtn.classList.toggle("is-on", !!pendingFrom);
-    arrowBtn.setAttribute("aria-pressed", pendingFrom ? "true" : "false");
+    arrowBtn.classList.toggle("is-on", !!connecting);
+    arrowBtn.setAttribute("aria-pressed", connecting ? "true" : "false");
   }
 
   const select = (sel) => { selected = sel; paintSelection(); };
@@ -381,6 +452,8 @@ export function attachSketchEditor(handle) {
 
   function onDoubleClick(e) {
     if (destroyed || !handle.isEditable()) return;
+    /* Two quick clicks in connect mode are two PICKS, not a request to edit or make a box. */
+    if (connecting || e.timeStamp - connectPressAt < 600) { e.preventDefault(); return; }
     const svg = canvasEl();
     if (!svg) return;
     e.preventDefault();
@@ -414,6 +487,18 @@ export function attachSketchEditor(handle) {
     const gripId = target?.closest("[data-sketch-grip]")?.getAttribute("data-sketch-grip") || null;
     const nodeId = target?.closest("[data-sketch-node]")?.getAttribute("data-sketch-node") || null;
     const edgeEnds = target?.closest("[data-sketch-edge]")?.getAttribute("data-sketch-edge") || null;
+
+    /* CLICK-TO-CONNECT outranks every other reading of a press: while it is on, a press on a
+     * box (or its dot) is a PICK, and a press anywhere else cancels it. Nothing is dragged,
+     * nothing is created, and no pointer capture is taken — so the line can follow the
+     * pointer freely between the two clicks. */
+    if (connecting) {
+      e.preventDefault();
+      lastBlankTap = null;
+      connectPressAt = e.timeStamp || 0;
+      pickForConnect(nodeId || gripId);
+      return;
+    }
 
     /* ⛔ B1683296 — a press on the BARE canvas while an untouched box is open (label AND
      * body both still empty — committed to the document already, or not) relocates it (via
@@ -487,17 +572,7 @@ export function attachSketchEditor(handle) {
         say("Arrow selected — press Delete to remove it.");
         return;
       }
-      if (pendingFrom) { pendingFrom = null; say("Arrow cancelled."); }
       select(null);
-      return;
-    }
-
-    /* The keyboard route's second half: ↗ Arrow was pressed with a box selected, and this
-     * is the box it points at. */
-    if (pendingFrom) {
-      e.preventDefault();
-      connect(pendingFrom, id);
-      pendingFrom = null;
       return;
     }
 
@@ -520,6 +595,17 @@ export function attachSketchEditor(handle) {
   }
 
   function onPointerMove(e) {
+    if (connecting?.from) {
+      const svg = canvasEl();
+      if (!svg) return;
+      const pt = canvasPoint(svg, e);
+      connecting.px = Math.round(pt.x);
+      connecting.py = Math.round(pt.y);
+      if (!connecting.line) markConnect();
+      connecting.line?.setAttribute("x2", String(connecting.px));
+      connecting.line?.setAttribute("y2", String(connecting.py));
+      return;
+    }
     if (linking) {
       const svg = canvasEl();
       if (!svg || !linking.line) return;
@@ -576,11 +662,40 @@ export function attachSketchEditor(handle) {
     syncTools();
   }
 
+  /** The one state machine behind click-to-connect. `id` is the box that was picked, or
+   *  null for a press on anything that is not a box (which cancels). */
+  function pickForConnect(id) {
+    if (!connecting) return;
+    if (!id) { endConnect("Arrow cancelled."); return; }
+    if (!connecting.from) {
+      connecting.from = id;
+      selected = { kind: "box", id };
+      paintSelection();
+      say("Now click the box the arrow points to.");
+      return;
+    }
+    if (id === connecting.from) { say("That is the box the arrow starts from — click a different one."); return; }
+    const from = connecting.from;
+    endConnect(null);
+    connect(from, id);
+  }
+
+  /* ↗ Arrow toggles connect mode. A box that is already selected is taken as the source, so
+   * "select, ↗ Arrow, click the target" (the old keyboard route) still takes one click fewer. */
   arrowBtn.addEventListener("click", () => {
-    if (selected?.kind !== "box") { say("Pick the box the arrow starts from first."); return; }
-    pendingFrom = selected.id;
-    say("Now click the box the arrow points to.");
-    syncTools();
+    if (!handle.isEditable()) return;
+    if (connecting) { endConnect("Arrow cancelled."); return; }
+    if (editing) closeEditor(true);
+    const boxes = normalizeSketch(handle.attrs).boxes;
+    if (boxes.length < 2) { say("Add a second box first — an arrow needs two."); return; }
+    const from = selected?.kind === "box" && boxes.some((b) => b.id === selected.id) ? selected.id : null;
+    startConnect();
+    if (from) pickForConnect(from);
+    else {
+      selected = null;
+      paintSelection();
+      say("Click the box the arrow starts from.");
+    }
   });
 
   /* ---- deleting, and THE CASCADE ------------------------------------------------------- */
@@ -613,17 +728,24 @@ export function attachSketchEditor(handle) {
       deleteSelection();
       return;
     }
+    if (connecting && (e.key === "Enter" || e.key === " ") && selected?.kind === "box") {
+      e.preventDefault();
+      e.stopPropagation();
+      pickForConnect(selected.id);
+      return;
+    }
     if ((e.key === "Enter" || e.key === "F2") && selected?.kind === "box") {
       e.preventDefault();
       e.stopPropagation();
       openEditor(selected.id);
       return;
     }
-    if (e.key === "Escape" && (selected || pendingFrom)) {
+    if (e.key === "Escape" && (selected || connecting)) {
       e.stopPropagation();
-      pendingFrom = null;
+      const was = !!connecting;
+      endConnect(null);
       select(null);
-      say("");
+      say(was ? "Arrow cancelled." : "");
     }
   }
 
@@ -663,6 +785,10 @@ export function attachSketchEditor(handle) {
         editing.model = live;
       }
     }
+    /* The source box was deleted underneath connect mode (another window, an undo). */
+    if (connecting?.from && !normalizeSketch(handle.attrs).boxes.some((b) => b.id === connecting.from)) {
+      endConnect("Arrow cancelled — its first box is gone.");
+    }
     paint();
     positionEditor();
   }
@@ -682,6 +808,7 @@ export function attachSketchEditor(handle) {
     destroy() {
       destroyed = true;
       editing = null;
+      endConnect(null);
       editor.remove();
       drawSlot.removeEventListener("pointerdown", onPointerDown);
       drawSlot.removeEventListener("pointermove", onPointerMove);

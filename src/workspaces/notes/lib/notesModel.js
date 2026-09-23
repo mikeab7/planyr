@@ -636,6 +636,42 @@ export function copyPageWithin(tree, sourcePageId, { title, id, at = Date.now() 
   return { tree: next, pageId: pg.id, projectId, orgScope, refused: null };
 }
 
+/** COPY A NOTEBOOK — a page AND EVERYTHING UNDER IT, at every depth (NEW-1, "Copy a notebook").
+ *
+ *  Since B1420 there is no notebook species: "a notebook" is simply a page with pages under
+ *  it, so copying one is copying a SUBTREE. The top of the copy goes through
+ *  `copyPageWithin` — the one way a page is copied — so it inherits that function's whole
+ *  contract unchanged: it lands as the source's NEXT SIBLING, wears the source root's own
+ *  project (never a viewer's), reads "(copy)", and an unknown source is REFUSED by name. The
+ *  subpages under it keep their own titles (only the top needs to read as a copy; "Bonding
+ *  (copy)" under "Entitlements (copy)" would be noise) and carry no project of their own —
+ *  their root's is the only answer, exactly as for any subpage.
+ *
+ *  Pure: the tree only. Every copied page gets a FRESH id — sharing an id with its source
+ *  would make one delete take both — and `idMap` (source id → copy id, in reading order) is
+ *  what the store uses to copy each body and to re-key every picture and file the bodies
+ *  own. The copy is born now (`at`), not at the source's dates: it is a new note. */
+export function copyPageTree(tree, sourcePageId, { title, at = Date.now(), makeId = () => newId("pg") } = {}) {
+  const base = tree || emptyTree();
+  const src = findPage(base, sourcePageId);
+  if (!src) return { tree: base, pageId: null, idMap: new Map(), projectId: null, orgScope: false, refused: "unknown-source" };
+  const idMap = new Map();
+  const topId = makeId();
+  idMap.set(src.page.id, topId);
+  const r = copyPageWithin(base, sourcePageId, { title, id: topId, at });
+  if (r.refused) return { tree: base, pageId: null, idMap: new Map(), projectId: null, orgScope: false, refused: r.refused };
+  const copyKids = (kids) => kids.map((k) => {
+    const id = makeId();
+    idMap.set(k.id, id);
+    const node = makePage({ id, title: k.title, at });
+    node.pages = copyKids(kidsOf(k));
+    return node;
+  });
+  const top = findPage(r.tree, topId);
+  top.page.pages = copyKids(kidsOf(src.page));
+  return { tree: r.tree, pageId: topId, idMap, projectId: r.projectId, orgScope: r.orgScope, refused: null };
+}
+
 /* ---- nothing may exist without a home (NEW-1) -------------------------------------------
  *
  * ⛔ THE GUARANTEE THIS MODULE OWES, STATED AS A PROPERTY: **every stored page body has a node

@@ -117,6 +117,31 @@ export function assetIdsInDoc(doc) {
   return [...imageIdsInDoc(doc), ...attachmentIdsInDoc(doc)];
 }
 
+/** The same document with every stored-blob reference re-pointed through `idMap`
+ *  (old asset id → new asset id) — the pictures AND the attached files, i.e. exactly the set
+ *  `assetIdsInDoc` reports. A new copy, never an edit in place; an id with no entry in the
+ *  map is left as it was.
+ *
+ *  ⛔ WHY A COPIED PAGE MAY NEVER SHARE A PICTURE WITH ITS SOURCE ("Copy a notebook", NEW-1).
+ *  The purge clears every asset its page's body references, and the orphan sweep clears an
+ *  asset whose OWNING page is gone. Two pages pointing at one id means deleting either one
+ *  forever silently breaks the picture in the other. So a copy owns its own bytes, under its
+ *  own ids — and a new kind of stored blob added to `assetIdsInDoc` must be added HERE too. */
+export function remapAssetIds(doc, idMap) {
+  const map = idMap instanceof Map ? idMap : new Map(Object.entries(idMap || {}));
+  const walk = (n) => {
+    if (!n || typeof n !== "object") return n;
+    let out = n;
+    const key = n.type === "noteImage" ? "imageId" : n.type === "noteAttachment" ? "fileId" : null;
+    if (key && n.attrs?.[key] && map.has(n.attrs[key])) {
+      out = { ...n, attrs: { ...n.attrs, [key]: map.get(n.attrs[key]) } };
+    }
+    if (Array.isArray(n.content)) out = { ...out, content: n.content.map(walk) };
+    return out;
+  };
+  return walk(doc);
+}
+
 /** Every image id across a whole map of `pageId → doc`. */
 export function imageIdsInDocs(bodies) {
   const seen = new Set();

@@ -44,6 +44,26 @@ const initialsBadge = {
 
 const overflowBadge = { ...initialsBadge, background: "var(--border-default)", color: "var(--text-secondary)" };
 
+// NEW-1 (top-right toolbar cluster, Option B) — the "self-tabs" chip is this row's "open tabs"
+// control (a text pill reading "N tabs"); Option B's spec is an icon-only bordered button with a
+// small numeric badge, matching every other bordered control in the cluster (the sync badge,
+// Full screen, the account trigger) rather than a differently-shaped text pill. Only the
+// "self-tabs" kind changes shape — the "people" kind (who's editing) is a distinct feature the
+// brief didn't ask to touch and keeps its existing variable-width chip below. 30×30 (not the
+// mockup's literal 32) — see SIZE's own header in controls.jsx for why 30 is the number that
+// actually unifies this cluster with the rest of the app.
+const selfTabsBtn = {
+  position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center",
+  width: 30, height: 30, flex: "none", borderRadius: RADIUS.md,
+  border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-primary)",
+};
+const selfTabsCountBadge = {
+  position: "absolute", top: -2, right: -2, minWidth: 14, height: 14, padding: "0 3px",
+  borderRadius: RADIUS.pill, background: "var(--accent)", color: "var(--on-accent)",
+  fontSize: FONT_SIZE.micro, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center",
+  boxSizing: "border-box", border: "1.5px solid var(--surface-raised)",
+};
+
 export default function PresenceChip({ data }) {
   const content = presenceChipContent(data);
   const ref = useRef(null);
@@ -59,9 +79,13 @@ export default function PresenceChip({ data }) {
     // Alone, several tabs: a static fact, nothing to disclose further — no hover target, no
     // silhouette (there is no one else here to draw one for).
     return (
-      <span data-testid="presence-chip" data-presence-kind="self-tabs" title={content.tooltip} style={chipBase}>
-        <DuplicateIcon size={12} />
-        {content.selfWindows} tabs
+      <span
+        data-testid="presence-chip" data-presence-kind="self-tabs"
+        title={content.tooltip} aria-label={content.tooltip}
+        style={selfTabsBtn}
+      >
+        <DuplicateIcon size={15} />
+        <span aria-hidden="true" data-testid="presence-self-tabs-count" style={selfTabsCountBadge}>{content.selfWindows}</span>
       </span>
     );
   }
