@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import {
-  candidateCountiesForPoint, COUNTIES_MAP, countyKeyForName, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote,
+  candidateCountiesForPoint, COUNTIES, COUNTIES_MAP, countyKeyForName, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote,
   STATEWIDE_PARCEL_LAYER, statewideFallbackFor, countyForView, countyBboxIntersectsView,
-  isIdentifyOnlyLayerUrl, isStatewideLayerUrl,
+  isIdentifyOnlyLayerUrl, isStatewideLayerUrl, sharedLayerUrlConflicts,
 } from "../src/workspaces/site-planner/lib/counties.js";
 
 // candidateCountiesForPoint routes a map click to the CAD service(s) that could
@@ -539,5 +539,92 @@ describe("B1574257 — the county-designation strip introduces no new key collis
 
   it("no designation strips a name to nothing — an empty slug would key every such row alike", () => {
     expect(roster.filter((r) => !slug(r.name, WIDE))).toEqual([]);
+  });
+});
+
+/* NEW-1 (2026-09-23) — 11 more Georgia counties, wired after re-deriving every endpoint from this
+ * sandbox rather than trusting the dispatch's own URLs (two of which were a wrong-state source —
+ * see counties.js's own NEW-1 comment block and docs/STATEWIDE-PARCELS.md's dated section). */
+describe("NEW-1 (2026-09-23) — 11 more Georgia counties are registered and shaped correctly", () => {
+  const GA_NEW_KEYS = [
+    "ga_dekalb", "ga_clarke", "ga_columbia", "ga_lowndes", "ga_jackson",
+    "ga_bibb", "ga_dougherty", "ga_rockdale", "ga_paulding", "ga_bulloch", "ga_camden",
+  ];
+
+  it("registers each county in both the search and map registries, state GA, with a real https URL", () => {
+    for (const k of GA_NEW_KEYS) {
+      expect(COUNTIES[k], k).toBeTruthy();
+      expect(COUNTIES_MAP[k], k).toBeTruthy();
+      expect(COUNTIES[k].state, k).toBe("GA");
+      expect(COUNTIES_MAP[k].state, k).toBe("GA");
+      expect(COUNTIES[k].layerUrl, k).toMatch(/^https:\/\//);
+      expect(COUNTIES_MAP[k].layerUrl, k).toBe(COUNTIES[k].layerUrl);
+    }
+  });
+
+  it("gives every county a plausible Georgia bbox/center (never a 0,0 placeholder or a bbox outside the state)", () => {
+    // Georgia's own generous bbox: lat 30.3-35.0, lng -85.6 to -80.8 (the same floor the dispatch's
+    // own validation rule named).
+    for (const k of GA_NEW_KEYS) {
+      const c = COUNTIES_MAP[k];
+      const [south, west, north, east] = c.bbox;
+      expect(south, k).toBeGreaterThan(29.5);
+      expect(north, k).toBeLessThan(35.5);
+      expect(west, k).toBeGreaterThan(-86.0);
+      expect(east, k).toBeLessThan(-80.0);
+      expect(c.center[0], k).toBeGreaterThan(south);
+      expect(c.center[0], k).toBeLessThan(north);
+      expect(c.center[1], k).toBeGreaterThan(west);
+      expect(c.center[1], k).toBeLessThan(east);
+    }
+  });
+
+  it("countyKeyForName resolves each county's real display name to its key, scoped to GA", () => {
+    expect(countyKeyForName("DeKalb", "GA")).toBe("ga_dekalb");
+    expect(countyKeyForName("Clarke County", "GA")).toBe("ga_clarke");
+    expect(countyKeyForName("Columbia", "GA")).toBe("ga_columbia");
+    expect(countyKeyForName("Lowndes County", "GA")).toBe("ga_lowndes");
+    expect(countyKeyForName("Jackson", "GA")).toBe("ga_jackson");
+    expect(countyKeyForName("Bibb", "GA")).toBe("ga_bibb");
+    expect(countyKeyForName("Dougherty County", "GA")).toBe("ga_dougherty");
+    expect(countyKeyForName("Rockdale", "GA")).toBe("ga_rockdale");
+    expect(countyKeyForName("Paulding", "GA")).toBe("ga_paulding");
+    expect(countyKeyForName("Bulloch County", "GA")).toBe("ga_bulloch");
+    expect(countyKeyForName("Camden", "GA")).toBe("ga_camden");
+  });
+
+  it("a point inside each county routes to it via candidateCountiesForPoint", () => {
+    const POINTS = {
+      ga_dekalb: [33.7712, -84.2966],       // Decatur
+      ga_clarke: [33.9519, -83.3576],       // Athens
+      ga_columbia: [33.5440, -82.2247],     // Evans
+      ga_lowndes: [30.8327, -83.2785],      // Valdosta
+      ga_jackson: [34.1187, -83.5719],      // Jefferson, GA
+      ga_bibb: [32.8407, -83.6324],         // Macon
+      ga_dougherty: [31.5785, -84.1557],    // Albany
+      ga_rockdale: [33.6698, -84.0177],     // Conyers
+      ga_paulding: [33.9282, -84.8752],     // Dallas, GA
+      ga_bulloch: [32.4488, -81.7832],      // Statesboro
+      ga_camden: [30.8027, -81.6104],       // Kingsland
+    };
+    for (const [k, [lat, lng]] of Object.entries(POINTS)) {
+      expect(candidateCountiesForPoint(lat, lng), k).toContain(k);
+    }
+  });
+
+  it("adds no shared-URL conflict — each new county's layer is queried and health-checked once", () => {
+    expect(sharedLayerUrlConflicts()).toEqual([]);
+  });
+
+  it("⛔ the two dispatch wrong-source traps stay closed: no ga_walton key, and ga_paulding never resolves to the Ohio Hub host", () => {
+    expect(COUNTIES_MAP.ga_walton).toBeUndefined();
+    expect(COUNTIES_MAP.ga_paulding.layerUrl).not.toMatch(/pcaud/i);
+    expect(COUNTIES_MAP.ga_paulding.layerUrl).not.toMatch(/WaltonCountyPropeties/i);
+  });
+
+  it("never returns a Georgia county for a point in another state (Athens GA vs. a same-named location elsewhere)", () => {
+    // A point solidly in downtown Houston, TX must never pick up a Georgia key.
+    const houston = candidateCountiesForPoint(29.76, -95.37);
+    for (const k of GA_NEW_KEYS) expect(houston, k).not.toContain(k);
   });
 });
