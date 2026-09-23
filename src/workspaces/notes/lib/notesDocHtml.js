@@ -20,6 +20,7 @@
 import { getSchema } from "@tiptap/core";
 import { DOMSerializer, Node as PMNode } from "@tiptap/pm/model";
 import { NOTE_EXTENSIONS } from "./notesExtensions.js";
+import { sortTopLevelForReading } from "./notesReadingOrder.js";
 
 let cached = null;
 const noteSchema = () => (cached || (cached = getSchema(NOTE_EXTENSIONS)));
@@ -30,7 +31,11 @@ export function docToHtml(doc, images = null) {
   if (!doc || typeof doc !== "object") return "";
   const schema = noteSchema();
   let node;
-  try { node = PMNode.fromJSON(schema, doc); } catch (_) { return ""; }
+  /* ⛔ READING ORDER, TOP LEVEL ONLY (NEW-1) — the printed sheet's boxes still paint at their
+   * own absolute CSS position (PDF-PARITY, unchanged), but the underlying HTML source order
+   * follows the page top-to-bottom rather than box creation order. See notesReadingOrder.js. */
+  const ordered = { ...doc, content: sortTopLevelForReading(doc.content) };
+  try { node = PMNode.fromJSON(schema, ordered); } catch (_) { return ""; }
 
   const box = document.createElement("div");
   try { box.appendChild(DOMSerializer.fromSchema(schema).serializeFragment(node.content)); }

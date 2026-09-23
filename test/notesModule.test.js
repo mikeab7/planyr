@@ -130,11 +130,18 @@ const ALL_NOTES_FILES = [
   // NEW-1 (the per-paragraph merge, 2026-09-16) — the pure 3-way diff3-style block merge over
   // notesRedline.js's flattened blocks, used when two copies of a page have genuinely diverged.
   "lib/notesBlockMerge.js",
-  // B1393 (×4, 2026-09-18) — "is this press on blank paper, or on somebody's writing?". The pure
-  // half of the fix for a double-click far right of a short line landing the caret at that line's
-  // end instead of starting a box: pressIsBesideLine tests only the VERTICAL axis, so this
-  // answers the horizontal one from the row's own rendered rectangles.
+  // NEW-1 (2026-09-22) — "is this the second press of a genuine double-click on blank paper?"
+  // pressIsBesideLine/pressPastLineEnd (the flow-text "beside a line" mechanism B1393's five
+  // rounds built) are gone with the flow body they existed to test against; this file's one
+  // survivor, isBlankDoublePress, reconstructs a double-click pair without depending on a
+  // native dblclick alone.
   "lib/notesBlankPaper.js",
+  // NEW-1 (2026-09-22) — the one-way migration of an old page's top-level flow content into a
+  // single rich-text box, run on read, never on write.
+  "lib/notesFlowMigration.js",
+  // NEW-1 (2026-09-22) — top-level boxes/sketches, in reading order (top to bottom, then left
+  // to right), for the Markdown exporter and the print sheet's HTML source order.
+  "lib/notesReadingOrder.js",
 ];
 const SKETCH_FILES = ALL_NOTES_FILES.filter((f) => f.includes("Sketch"));
 
@@ -1195,35 +1202,46 @@ describe("the project a notebook belongs to", () => {
     expect(rail).toMatch(/notes-projects-retry/);
   });
 
-  it("⛔ A press in blank space places the caret and does NOTHING ELSE (B1393 ×3)", () => {
-    /* ⛔ REWRITTEN TWICE. B1393's guard asserted focus; B1393 ×2's asserted the padding
-     * machinery that reached the pressed height. The owner tested that shipped build and
-     * rejected it — the centring made the line crawl left as he typed, the alignment was
-     * inherited on Enter, and six empty paragraphs were permanent in his document. So these
-     * assert what must NOT be there. */
+  it("⛔ THE SHEET IS A PLACEMENT SURFACE — NO FLOW-TEXT HIT-TESTING SURVIVES (NEW-1, superseding B1393)", () => {
+    /* ⛔ B1393's whole lineage (five rounds, all quoted and superseded in earlier revisions of
+     * this test) was spent making "is this press beside a line of flow text" answer correctly.
+     * The owner removed the question instead of asking for a sixth answer to it — "I don't want
+     * anything regular paragraph... I just want the double-click thing." So this test now
+     * asserts the MECHANISM IS GONE, not that it answers correctly. */
     const ed = code("components/NoteEditor.jsx");
+    /* Matches an actual CALL or DEFINITION, not the historical-record comments that (correctly)
+     * still name these functions to explain why they are gone. */
+    expect(ed, "no flow-text hit-testing left to fling a caret across the page")
+      .not.toMatch(/(function |const )(pressIsBesideLine|pressPastLineEnd|lineRectsAt)|pressIsBesideLine\(|pressPastLineEnd\(|lineRectsAt\(/);
+    expect(ed, "no more forwarding a press to the end of the flow document")
+      .not.toMatch(/focusEndOfSheet\(\)|const focusEndOfSheet/);
     expect(ed, "Click and Type must not set alignment from where you pressed").not.toMatch(/setTextAlign/);
     expect(ed, "and it must not pad the document to reach the press").not.toMatch(/MAX_CLICK_PARAGRAPHS|paragraphStep|gap \/ step/);
     expect(ed, "the padding's clean-up bookkeeping went with the padding").not.toMatch(/claimRef|dropClaim/);
-    /* ⛔ AND THE RULE ITSELF CHANGED AGAIN, on his measurement: *"If I do a single click, it
-     * goes still goes all the way to the left."* B1393 ×3's "nearest real text position" is a
-     * LONG JUMP on a page that looks empty — the caret flies to the end of a paragraph far
-     * above, or to the end of the document. So the nearest position is now CHECKED against the
-     * page before it is taken, and a press that is not beside a line places at the press point
-     * instead. Two things must therefore be true of this file, and both are properties rather
-     * than spellings: */
-    expect(ed, "the nearest position is checked, not trusted").toMatch(/pressIsBesideLine\(editor, hit\.pos, e\.clientY\)/);
-    expect(ed, "and the tolerance is the LINE'S OWN height, read from the browser")
-      .toMatch(/coordsAtPos\(pos\)[\s\S]{0,300}c\.bottom - c\.top/);
-    // ⛔ THE END OF THE DOCUMENT IS NEVER WHERE A PRESS GOES ANY MORE — that WAS the fling.
     expect(ed, "no press may send the caret to the end of the document").not.toMatch(/focus\("end"\)/);
     expect(ed, "and the padding paragraph it used to add is gone with it")
       .not.toMatch(/insertContentAt\(doc\.content\.size, \{ type: "paragraph" \}\)/);
     expect(ed, "…along with the bookkeeping that took those paragraphs back").not.toMatch(/matInsertsRef/);
     // ⛔ ONE GESTURE, ONE RULE: there is no separate double-click handler to disagree with it.
     expect(ed, "a double-click must not be a second, different gesture").not.toMatch(/onDoubleClick=/);
-    // …and a press ON text is still the browser's business, or word-select dies.
-    expect(ed).toMatch(/if \(el\.closest\("\.ProseMirror"\)/);
+    /* ⛔ AND THE NEW RULE: a single click on blank paper only clears the selection; only the
+     * SECOND press of a genuine pair (native or reconstructed) places anything. */
+    expect(ed, "beginBlankGesture is told whether a stationary press should place")
+      .toMatch(/beginBlankGesture\(e, \{ place: doublePress \}\)/);
+    expect(ed, "the pairing is reconstructed, not trusted to native dblclick alone")
+      .toMatch(/isBlankDoublePress\(lastBlankPressRef\.current, press\)/);
+    // …and a press ON a box's content is still the browser's business inside the two-stage model.
+    expect(ed).toMatch(/inBlock\.getAttribute\("data-empty"\) !== "1"\)/);
+  });
+
+  it("⛔ AN OLD FLOW-BODY PAGE IS MIGRATED INTO ONE BOX ON READ, NEVER ON WRITE (NEW-1)", () => {
+    const ed = code("components/NoteEditor.jsx");
+    expect(ed, "the migration runs on the doc handed to useEditor, not inside a transaction")
+      .toMatch(/migrateFlowBody\(\(typeof loadDoc === "function" \? loadDoc\(\) : readPage\(pageId\)\) \|\| EMPTY_DOC\)/);
+    const mig = read(NOTES, "lib", "notesFlowMigration.js");
+    expect(mig, "existing anchors and sketches are left exactly where they are")
+      .toMatch(/node\.type === "noteAnchor" \|\| node\.type === "noteSketch"/);
+    expect(mig, "a boxes-only document is a no-op, same reference").toMatch(/return doc;/);
   });
 
   /* ⛔ A BACKTICK INSIDE THE CSS TEMPLATE LITERALS ENDS THEM, and it has broken the build three

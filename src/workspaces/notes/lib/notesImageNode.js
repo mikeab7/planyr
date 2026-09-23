@@ -223,11 +223,14 @@ export const NoteImage = Node.create({
 
   addCommands() {
     return {
-      // Used by the toolbar's picture button; paste and drop go through the plugin below.
-      insertNoteImages: (files) => ({ view }) => {
+      /* Used by the toolbar's picture button (no `at`, inserts at the caret) and — NEW-1 — by
+       * an ARMED PLACEMENT CARET pasting a picture with nothing focused (`at` is the point the
+       * caret was armed at, same frame `placeBlockAt` already converts client coordinates
+       * into). Paste-into-a-focused-box and drop go through the plugin below, unaffected. */
+      insertNoteImages: (files, at = null) => ({ view }) => {
         const list = (Array.isArray(files) ? files : Array.from(files || [])).filter(isImageFile);
         if (!list.length) return false;
-        insertFiles(this, view, list);
+        insertFiles(this, view, list, at);
         return true;
       },
     };

@@ -26,6 +26,7 @@
  * lib/notesAttachNode.js, which imports the editor engine. */
 import { attachmentLabel } from "./notesFileMeta.js";
 import { readIndent } from "./notesIndentLevel.js";
+import { sortTopLevelForReading } from "./notesReadingOrder.js";
 
 /* The node and mark names this exporter handles. test/notesModule.test.js asserts this
  * covers everything lib/notesExtensions.js lets into a document — so adding an extension
@@ -607,7 +608,10 @@ function blocks(nodes, lossy, depth = 0, images = null) {
  *  after an export so the gap is stated, not discovered later in another app. */
 export function docToMarkdown(doc, { title = "", images = null } = {}) {
   const lossy = new Set();
-  const body = blocks(doc?.content, lossy, 0, images);
+  /* ⛔ READING ORDER, TOP LEVEL ONLY (NEW-1) — see notesReadingOrder.js's own header. A
+   * one-box document (the common case, and every migrated flow-body page) sorts to itself
+   * unchanged, which is what keeps a migration's Markdown export byte-identical. */
+  const body = blocks(sortTopLevelForReading(doc?.content), lossy, 0, images);
   const head = title ? `# ${escapeText(title)}\n\n` : "";
   return { markdown: `${head}${body}`.replace(/\n{3,}/g, "\n\n").trimEnd() + "\n", lossy: [...lossy] };
 }
@@ -638,7 +642,7 @@ export function pageToMarkdown(page, bodies = {}, { images = null } = {}) {
       parts.push(`*${escapeText([...trail, node?.title || "Page"].join(" › "))}*`);
       lossy.add("how deeply a subpage is nested");
     }
-    const body = blocks(bodies[node?.id]?.content, lossy, 0, images);
+    const body = blocks(sortTopLevelForReading(bodies[node?.id]?.content), lossy, 0, images);
     if (body) parts.push(body);
     for (const kid of Array.isArray(node?.pages) ? node.pages : []) {
       walk(kid, depth + 1, [...trail, node?.title || "Page"]);
