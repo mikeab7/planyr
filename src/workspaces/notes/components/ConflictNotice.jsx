@@ -37,13 +37,28 @@ export default function ConflictNotice({
         style={{
           flex: "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
           flexWrap: "wrap", padding: "6px 14px", background: "var(--warn-bg)", borderBottom: "1px solid var(--border-default)",
+          minWidth: 0,
         }}
       >
         {/* Wraps onto a second line on a narrow phone rather than truncating — a notice this
          * short can afford two lines; it cannot afford hiding its own message (round 2 of the
          * critique loop: at a phone width this used to ellipsis down to "…also cha…", which
-         * is worse than a slightly taller bar). */}
-        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--warn-text)", flex: "1 1 220px" }}>{copy.text}</span>
+         * is worse than a slightly taller bar).
+         *
+         * ⛔ `minWidth: 0` + `overflowWrap: "break-word"` (NEW-2) — WITHOUT THEM, THE PAGE
+         * ITSELF CAN BE SQUEEZED. This span's title comes straight from the note ("${name}"
+         * also changed…"), and a flex item's default min-width is its content's min-content
+         * size — for a title with no spaces (a long compound word, a pasted URL, a filename)
+         * that is the whole title, unbreakable. This row lives ABOVE the two-pane layout
+         * (`Notes.jsx`), inside a flex COLUMN with no cross-axis clipping, so a wide-enough
+         * min-content here does not stay contained to the banner — it widens the row past the
+         * viewport and takes the rest of the workspace with it. `flexWrap: "wrap"` alone does
+         * not help: wrapping moves this span to its OWN line but does not shrink it, so the one
+         * unbroken word can still force a horizontal scrollbar over the whole page. Overriding
+         * the floor to 0 and allowing a mid-word break is what actually lets it wrap — the
+         * header's own "wraps rather than truncates" promise, kept for a title with no spaces,
+         * not just one with them. */}
+        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--warn-text)", flex: "1 1 220px", minWidth: 0, overflowWrap: "break-word", wordBreak: "break-word" }}>{copy.text}</span>
         <button
           type="button"
           data-testid="notes-conflict-review-open"

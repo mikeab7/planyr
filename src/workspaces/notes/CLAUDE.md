@@ -890,6 +890,28 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   litter cleanup today), so an automatic rewrite adopts a moved server row in silence instead of
   naming a conflict over content nobody touched; route any FUTURE automatic body rewrite through
   the same `auto` path, never straight through `writePage`.
+  ⛔ **AND `pushPending` (`notesStore.js`) COULD RACE ITSELF, IN ONE WINDOW, WITH NO SIBLING
+  ANYWHERE (B1865408, 2026-09-23).** It is reached from two triggers with no lock between them —
+  `schedulePush`'s own debounce timer, and `seed`'s own tail call, reached the instant `busy` is
+  cleared (BEFORE that call resolves, not after). A page created and typed into while the
+  workspace's own initial full seed is still a real network round trip in flight could have both
+  land while the other is mid-push: for a page's FIRST-EVER push that is a duplicate-key race on
+  the INSERT, and the loser could fall through to the whole-document banner over a note this SAME
+  window wrote to itself — one user, one window, "created moments ago," exactly as reported.
+  `pushPending` is now a reentrancy-safe wrapper (the real work moved to `pushOnce`): a call
+  arriving while one is already running defers (`pushQueued`) instead of reaching the network,
+  and the in-flight call drains any deferred work once it finishes. **A second, narrower gap
+  found in the same pass:** a push's success handler used to clear `dirty` off the `doc` it
+  captured BEFORE its own awaited network call — so a local edit landing on the SAME page while
+  that push was in flight got marked "synced" even though local storage already held more than
+  the server had just received, and would sit there un-pushed until an unrelated later edit
+  happened to touch the page again. Fixed by comparing against a FRESH `readPage(id)` (`notesCloud.js`'s
+  `sameDoc`) before clearing dirty. Red-proven against unmodified code by a dedicated repo-root
+  test spec (`notesPushReentrancy`, under `test/`), which drives the real store through a
+  manually-gated fake network so the interleaving is deterministic rather than a matter of luck —
+  see `docs/NOTES-CARRY-FORWARD.md` §1 entry 45 for the two instrument traps building that test
+  cost (a debounce timer armed before `cloudClient` exists is a silent no-op; fake timers do not
+  reliably drive fake-indexeddb's own internal async chain).
 - **`lib/notesBlockMerge.js` — THE PER-PARAGRAPH MERGE (NEW-1, "like we do on the site planner…
   both the edits go in").** PURE 3-way diff3-style merge over `flattenBlocks`' output
   (`notesRedline.js` — the SAME flattener the redline view uses, extended for this: every leaf

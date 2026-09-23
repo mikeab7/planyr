@@ -12,7 +12,16 @@ import { createRoot } from "react-dom/client";
 import ConflictNotice from "../src/workspaces/notes/components/ConflictNotice.jsx";
 
 const DAY = 24 * 60 * 60 * 1000;
-const NOW = new Date("2026-09-02T12:00:00Z").getTime();
+/* ⛔ ALWAYS THE MOMENT THE HARNESS RUNS, NEVER A FIXED PAST DATE (NEW-1 fix, found running this
+ * harness for the width-squeeze check below). A hardcoded `NOW` drifts: `stampLabel` rounds to
+ * whole weeks once a timestamp is old enough, so "4 days before a fixed September 2026 date"
+ * and "1 day before" it both round to the SAME "Nd ago"/weeks bucket by the time real wall-clock
+ * time has moved a few weeks past that fixed point — two checks in this file's own "main
+ * fixture" block (`legend states the old→new direction`, `the older copy's day-count is
+ * genuinely larger`) started failing for exactly that reason, on unmodified code, with nothing
+ * about the conflict UI itself broken. Deriving `NOW` from the real clock keeps the fixture's
+ * 4-day/1-day gap meaningfully distinct forever. */
+const NOW = Date.now();
 
 const p = (text) => ({ type: "paragraph", content: text ? [{ type: "text", text }] : [] });
 const tableRow = (text) => ({ type: "tableRow", content: [{ type: "tableCell", content: [p(text)] }] });
@@ -47,6 +56,14 @@ const gridTable = { type: "table", content: [
 const MULTITABLE_OLDER = { type: "doc", content: [p("Open items"), gridTable] };
 const MULTITABLE_NEWER = { type: "doc", content: [p("Open items"), p("See attached schedule.")] };
 
+/* NEW-2's own stress case — a page TITLE with no spaces at all (a compound filename, a pasted
+ * URL, a long unbroken project code). The compact notice interpolates the title straight into
+ * its one-line message ("<title>" also changed…), and unlike LONG_LINE above (which lives deep
+ * inside the review's own scroll pane) this string sits in the notice's flex row, which is
+ * rendered ABOVE the two-pane layout with nothing to clip a cross-axis overflow — exactly the
+ * shape that can squeeze the whole page sideways rather than just its own card. */
+const LONG_TITLE = "UtilityRelocationExhibitRevisionDraftForBaytownCivilSubmittalPackageFinalApprovedVersion";
+
 const FIXTURES = {
   main: { localUpdatedAt: NOW - 4 * DAY, serverUpdatedAt: NOW - 1 * DAY },     // local(mine) = OLDER, server(theirs) = NEWER
   mineNewer: { localUpdatedAt: NOW - 1 * DAY, serverUpdatedAt: NOW - 4 * DAY }, // mirror: local = NEWER
@@ -54,6 +71,7 @@ const FIXTURES = {
   tie: { localUpdatedAt: NOW - DAY, serverUpdatedAt: NOW - DAY },
   longtext: { localUpdatedAt: NOW - 4 * DAY, serverUpdatedAt: NOW - 1 * DAY, docs: [LONGTEXT_OLDER, LONGTEXT_NEWER] },
   multitable: { localUpdatedAt: NOW - 4 * DAY, serverUpdatedAt: NOW - 1 * DAY, docs: [MULTITABLE_OLDER, MULTITABLE_NEWER] },
+  longtitle: { localUpdatedAt: NOW - 4 * DAY, serverUpdatedAt: NOW - 1 * DAY, title: LONG_TITLE },
 };
 
 const params = new URLSearchParams(window.location.search);
@@ -69,7 +87,7 @@ function App() {
         <p>Harness content behind the conflict UI (fixture: {fixtureName}).</p>
       </div>
       <ConflictNotice
-        title="Utility"
+        title={times.title || "Utility"}
         localDoc={fixtureOlder}
         serverDoc={fixtureNewer}
         localUpdatedAt={times.localUpdatedAt}

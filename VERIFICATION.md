@@ -10821,6 +10821,22 @@ records its own live verify" mechanism) or a future sandbox with different egres
 
 **Result:** ⏳ pending — the LOGGED-OUT half is done and passed live on production (above). What remains is the one thing no logged-out run can reach: **his own page's stored Custom width**, which decides whether the page he reported on was inside the affected band at all. Needs a signed-in browser on his own account; not reachable from this sandbox (the proxy CORS-blocks the Supabase auth handshake). `Cadence: once`.
 
+### V1330832 — B1865408: creating a new note and typing right away never shows a false "also changed in another window" conflict `Blocker:` none named (timing/race, mandatory live class)
+
+**Why this needs a real pass even though the fix is red-then-green proven headless.** The defect is a race between this module's own two push triggers (`schedulePush`'s debounce timer and `seed`'s own tail call) — reproduced deterministically this session with a manually-gated fake network, which proves the STRUCTURE (only one push may ever be in flight per page now) but cannot prove that Michael's own real network latency and browser scheduling produce the SAME timing his report described. STANDING RULE #2: a sandbox reproduction of *a* matching defect is not the same as confirming his instance of it is gone.
+
+**Already confirmed headless, sandbox-only, this session.** `test/notesPushReentrancy.test.js` (2/2) drives the real store through a manually-gated fake Supabase client: a brand-new page's debounce firing while a concurrent sync pass is mid-push for the same page reaches the network exactly once (was twice, pre-fix, confirmed via `git stash` round-trip — the exact duplicate-attempt shape the report described); a real edit landing mid-push still reaches the cloud once the lock drains, with no conflict either way. Full repo suite green (898 files / 18,265 tests), lint clean, build clean, `npm run ci-parity` all 21 gates PASS.
+
+**Steps, each with a named expected result — on a THROWAWAY note, never a real one, per the owner's own standing rule:**
+1. Read the served chunk hash in the console (`[...document.querySelectorAll('script[src]')].map(s => s.src)`), per this repo's live-measurement rule, and confirm the build postdates this fix's merge.
+2. Sign in, open the Notes workspace fresh (a new tab or a hard reload, so `startNotesSync`'s own initial full seed is genuinely starting from scratch), and IMMEDIATELY create a new page at Organization scope (the reported scope) — no pause.
+3. As fast as comfortable, type several bullet points into the new page (the reported repro: "type a few bullet points"). **Expect:** no conflict banner appears at any point during or shortly after typing.
+4. Wait a few seconds for sync to settle, then reload the page. **Expect:** the full typed content is present, unchanged, and still no conflict banner.
+5. Repeat steps 2–4 two more times (a race is timing-dependent — one clean pass is weaker evidence than three). **Expect:** the same clean result every time.
+6. Delete the throwaway note(s) created for this check and say so.
+
+**Result:** ⏳ pending — sandbox proof (above) is done. Needs a real signed-in pass; not reachable from this sandbox (the proxy CORS-blocks the Supabase auth handshake). `Cadence: once`.
+
 ## ✅ Verified / ❌ Failed — history
 
 > Passed/failed items are archived to **`VERIFICATION-DONE.md`** to keep this file fast.
