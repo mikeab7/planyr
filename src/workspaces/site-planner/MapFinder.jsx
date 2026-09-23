@@ -2,7 +2,7 @@ import { Fragment, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, 
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, countyBboxIntersectsView } from "./lib/counties.js";
-import { landingView, milesBetween, CLUSTER_RADIUS_MI } from "./lib/landingView.js";
+import { landingView, milesBetween, CLUSTER_RADIUS_MI, locatedPoints } from "./lib/landingView.js";
 import { decideTargetOf, orderVerbs, verbLabel } from "./lib/decideBar.js";
 import {
   shouldShowAccuracyCircle, formatAccuracyFt, locateErrorMessage,
@@ -2132,19 +2132,36 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
    * Layers-panel jurisdiction off the resulting position, so a Colorado landing reads Colorado.
    *
    * Blank-planner sites carry no `origin` and are filtered out inside `landingView`, so an
-   * account whose only records are un-located plans still gets the honest country view. */
+   * account whose only records are un-located plans still gets the honest country view.
+   *
+   * B1871472 — a session that boots straight into a project (`bootResume.js`'s resume) never
+   * shows the Map view until the user clicks the "Map" breadcrumb from INSIDE that project, so
+   * THIS is the first time this landing runs — and `activeSiteId` (the project just left; `goMap`
+   * deliberately keeps it set, the Leaflet keep-alive optimization) is still live at that moment.
+   * Landing on the DENSEST CLUSTER then means "click Map to go back" fits the owner's WHOLE
+   * portfolio, not the project he was just looking at — on a 30+ site account that reads as
+   * "zoomed out way too far, my sites are tiny or invisible" (the reported repro: from inside a
+   * plan, click Map). Measured against the owner's own production site list: his ~35-site pursuit
+   * portfolio spans Katy to Baytown and Sugar Land to Spring — an honest fit to ALL of it lands
+   * 2-3 zoom levels wider than fitting just the ONE project, which is what "returning to the map"
+   * actually means. So when a project is still active, frame just THAT one — the same "exactly
+   * one site" case `landingView` already implements for a single-site account — falling back to
+   * the whole-portfolio fit only if that project itself has no location yet. A cold, no-project
+   * open (`activeSiteId` null — from the Dashboard, or a signed-out landing) is untouched. */
   useEffect(() => {
     const map = mapRef.current;
     if (!map || landedRef.current || userMovedRef.current) return;
     const vp = viewportOf(elRef.current);
-    const view = landingView(sites, vp);
+    const returningSite = activeSiteId ? sites.find((s) => s && s.id === activeSiteId) : null;
+    const framingSites = returningSite && locatedPoints([returningSite]).length ? [returningSite] : sites;
+    const view = landingView(framingSites, vp);
     if (view.source !== "sites") return;   // nothing located yet — stay on the continental-US open
     map.setView(view.center, view.zoom, { animate: false });
     // Only LATCH on a real measurement. While the planner is the visible mode this container
     // has no size, so the fit ran against the fallback viewport; showing the market straight
     // away is right, but the next run with real dimensions may refine the zoom by a step.
     if (vp.measured) landedRef.current = true;
-  }, [sites, visible, isActive]);
+  }, [sites, visible, isActive, activeSiteId]);
 
   /* aerial imagery layer (swappable source) */
   useEffect(() => {
