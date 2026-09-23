@@ -166,6 +166,17 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1335248 — B1870352: Wetlands screening loads cleanly on the real Goose Creek site; a future real failure is captured in telemetry, not just a console line `Blocker: real-data`
+
+**Why this needs a live pass, and what it is NOT.** This is not asking anyone to re-diagnose whether the endpoint works — it was re-measured live this session (a direct query against the real production endpoint, at Goose Creek's own real coordinates, on both sublayers, returned real data in under a second) and no code defect was found. What this session genuinely could not do: load the real, signed-in Goose Creek site through the app itself (no signed-in account reachable from this sandbox), and it cannot force a genuine future network blip to prove the new telemetry fires on it.
+
+**What was verified here (live, this session, from outside the app):** `curl` against `https://fwsprimary.wim.usgs.gov/server/rest/services/Test/Wetlands_gdb_split/MapServer` — `?f=json` → HTTP 200 in 0.4s; `/1/query` and `/2/query` at Goose Creek's real coordinates (29.8122/-95.0026) → both HTTP 200, sublayer 2 (CONUS West) returning a real wetland feature; CORS headers correct for a `planyr.io` origin, including a real OPTIONS preflight.
+
+**Steps, each with a named expected result:**
+1. Open the real Goose Creek site's Site Analysis tab (signed in, on `planyr.io`). **Expect:** the Wetlands row shows a normal present/absent finding, not "couldn't reach the GIS source."
+2. If the Wetlands row (or any other GIS source) ever shows an error again, query `client_errors` for the new event: `select * from client_errors where message like '%wetlands%' or (source='event:gis-query-failed' and message like '%wetlands%') order by at desc limit 20` (Supabase SQL editor). **Expect:** a row naming the real http status / arcgis code / url from the moment of the failure — proof the new instrumentation (B1870352) actually captured it, and the information needed to diagnose it for real rather than re-guessing.
+- **Stopping rule:** closes when step 1 confirms a clean load on the real site — or step 2 captures a genuine recurrence, which is filed as a recurrence against B1870352 with the real cause now visible, per STANDING RULE #2 (a null result is a FINDING, never a silent close).
+
 ### V1310672 — B1393 (×5): the Notes page is a pure double-click placement surface, and an old flow-body page migrates into one box `Blocker: real-data`
 
 **Why this needs a live pass, and not just another sandbox round.** This item's own prior rounds (×1–×4) each shipped a real, headless-proven fix to "is this press beside a line of flow text" and the owner kept reporting the symptom live on production. Re-running the OLD `verify-notes-in-sheet-placement.mjs` against a clean build of `origin/main` (before this fix) came back fully green — it does not reproduce his fresh production report (a double-click at three specific points on his real page adding nothing, build `4681016`). That gap between a green sandbox and a red production page is exactly what a sandbox pass cannot settle; only his own browser on his own page can.

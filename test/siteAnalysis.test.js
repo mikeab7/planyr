@@ -199,15 +199,28 @@ describe("analyzeSource — rides the cache, honest on failure", () => {
     expect(call.opts && call.opts.timeoutMs).toBe(20000);
   });
   it("NEW-2/B789: a source WITHOUT a timeoutMs passes no override (the 9 s default applies)", async () => {
+    // NEW-1 (2026-09-23) — wetlands now carries its own timeoutMs override (see below), so
+    // this "no override" example moved to oilgas, which still has none.
+    const oil = ANALYSIS_SOURCES.find((s) => s.id === "oilgas");
+    expect(oil.timeoutMs).toBeUndefined();
+    const cache = freshCache();
+    const seen = [];
+    const fetchJson = async (url, opts) => { seen.push({ url, opts }); return { features: [] }; };
+    await analyzeSource(oil, [SQUARE], { cache, fetchJson });
+    const call = seen.find((c) => c.url.includes("RRC_Public_Viewer_Srvs"));
+    expect(call).toBeTruthy();
+    expect(call.opts == null || call.opts.timeoutMs == null).toBe(true);
+  });
+  it("NEW-1 (2026-09-23): wetlands carries a per-source timeoutMs override — a `/Test/` staging host with no production mirror, so it gets FEMA's generous cap rather than the 9 s default", async () => {
     const wet = ANALYSIS_SOURCES.find((s) => s.id === "wetlands");
-    expect(wet.timeoutMs).toBeUndefined();
+    expect(wet.timeoutMs).toBe(20000);
     const cache = freshCache();
     const seen = [];
     const fetchJson = async (url, opts) => { seen.push({ url, opts }); return { features: [] }; };
     await analyzeSource(wet, [SQUARE], { cache, fetchJson });
     const call = seen.find((c) => /Wetlands_gdb_split/.test(c.url));
     expect(call).toBeTruthy();
-    expect(call.opts == null || call.opts.timeoutMs == null).toBe(true);
+    expect(call.opts && call.opts.timeoutMs).toBe(20000);
   });
   it("flood: an intersecting Zone X reads ABSENT, not present (B147 live false-positive)", async () => {
     const cache = freshCache();
@@ -525,7 +538,8 @@ describe("runSiteAnalysis — orchestration", () => {
     const identifyRoadAuthority = async () => ({ roads: [{ name: "IH 10", route: "h1", authority: { label: "State (TxDOT)" }, funcClass: 1 }], authorities: ["State (TxDOT)"], ageMs: 500, note: "ok" });
     const { findings } = await runSiteAnalysis([SQUARE], { cache, fetchJson, identifyJurisdiction, identifyRoadAuthority });
     const ids = findings.map((f) => f.id);
-    expect(ids).toEqual(["flood", "wetlands", "pipelines", "oilgas", "lpst", "epaCleanups", "growthFaults", "transmission", "substations", "jurisdiction", "road", "aadt", "rail", "airports", "zoning", "ccnWater", "ccnSewer"]);
+    // NEW-2 (2026-09-23, owner request): Jurisdiction and Road authority lead the panel.
+    expect(ids).toEqual(["jurisdiction", "road", "flood", "wetlands", "pipelines", "oilgas", "lpst", "epaCleanups", "growthFaults", "transmission", "substations", "aadt", "rail", "airports", "zoning", "ccnWater", "ccnSewer"]);
     expect(findings.find((f) => f.id === "flood").status).toBe("present");
     // PHASE 2 proximity: contamination near the site → present with count + nearest + names.
     const lpst = findings.find((f) => f.id === "lpst");
