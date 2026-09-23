@@ -166,6 +166,19 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1308368 — B1838704: a polygon crop made from the Site tab OVERLAYS panel survives a signed-in cloud save, a reload on a second device, and prints clipped `Blocker: auth`
+
+**What was verified here (sandbox, logged out).** `node ui-audit/verify-site-tab-overlay-crop.mjs` — 39/39 on the built app: poly + rect crop via the panel, pixels in/out, undo/redo, Rotate, Opacity, Bring in front of the plan, lock refusal, export-sheet raster parity, reload (on-device storage), DXF and PDF (+ Knock out white paper). Unit suites green; lint 0 errors; build green; `OverlayCropDialog` is its own lazy chunk.
+
+**Steps, each with a named expected result — on a THROWAWAY duplicate of a real plan (owner constraint 7), never the Goose Creek plan itself:**
+1. Signed in, duplicate a plan with a placed PDF overlay; on the duplicate open Site → Overlays → the overlay → **Crop…** → Polygon; trace around the plan drawing, excluding the logo band and title block; close on the first point; Done. **Expect:** only the traced area shows on the canvas.
+2. Wait for the save indicator to settle, then reload with a cache-busting query. **Expect:** the polygon crop is still applied (the crop came back from the cloud, not only local storage).
+3. Open the same duplicate in a second browser/profile. **Expect:** same crop.
+4. File → Print/PDF of the duplicate. **Expect:** the overlay on the sheet is clipped to the same polygon.
+5. Lock the overlay. **Expect:** Crop…, Reset crop and the trim fields are disabled.
+6. Read the served chunk hash in the same observation as each result; delete the duplicate afterwards and say what was created/removed.
+- **Stopping rule:** closes when steps 1–6 pass on a real signed-in account, dated — or a failing step is filed as a recurrence against B1838704 (STANDING RULE #2).
+
 ### V1303600 — B1832208/B1832209/B1832210: a road tee-ing into a truck court paints no pavement inside it, the endpoint lands on the face, and a junction arm's curb return stops at the neighbouring corner's own arc `Blocker: real-data`
 
 **Why this needs a live pass.** Two mandatory LIVE-VERIFY classes at once: **zoom-/data-density-dependent rendering** (curb-return geometry, arc tangent lengths, and Clipper polygon-difference results are exactly the class of thing a static code read can get wrong at one scale and right at another) and **real-project-data** (the reported defect cites the owner's actual Goose Creek Phase II - TAS R2 plan, with real drive-junction angles and radii the sandbox's synthetic fixtures can only approximate).
@@ -360,6 +373,8 @@ Full suite `npx vitest run` — 880 files / 17,927 tests, zero failures. `npm ru
 5. Lock the overlay. **Expect:** "Crop…" is disabled with a "Locked — unlock to crop" tooltip.
 6. Reload the page (cache-busting query, not a re-navigation of the same hash — this is a hash-route SPA). **Expect:** the polygon crop survives.
 7. Read the served chunk hash in the same observation as each result, per this repo's own live-measurement rule. Discard the throwaway plan afterward and say exactly what was created/removed.
+8. **(Added 2026-09-23, B1838704.)** At the end, read-only SQL: row `aa2d8163-7d45-4929-8a05-dad94ba2528d` is still `version = 208` with the rect crop `x 233.58 · y 525.82 · w 760.91 · h 850.06`, and the throwaway row(s) created in step 1 have `deleted_at` set. **Expect:** both true. (Baseline read 2026-09-23 by B1838704's session: version 208, locked, that crop; 0 poly crops live.)
+- **2026-09-23 attempt (B1838704's session): NOT RUN — `Blocker: auth` still holds.** Claude Code cannot sign in here; nothing above was exercised. Owner decision recorded the same day: keep-outside / hole punch is NOT wanted — keep-inside only — so no step here tests an inverse.
 - **Stopping rule:** closes when steps 1–7 confirm on a real signed-in account, dated — or a step fails and is filed as a recurrence against B1783328, per STANDING RULE #2.
 
 ### V1262193 — B1783329: the four committed sample sheets place, crop, and survive a reload correctly on a real signed-in account `Blocker: auth` `Blocker: real-data`

@@ -53,8 +53,20 @@ _Last updated: 2026-09-22._
 > there's no way to cut just that piece out and keep everything around it. If you want that too,
 > say so and it's a small follow-up — the crop tool would get a "keep outside" option alongside
 > the one it has now.
-> - [ ] **Do you want a "cut a hole in the middle" option added, or is trace-and-keep-the-inside
->       enough for now?** Either answer is fine — this isn't blocking anything.
+> - [x] **Do you want a "cut a hole in the middle" option added, or is trace-and-keep-the-inside
+>       enough for now?** **ANSWERED 2026-09-22: NO — keep-inside only.** The inverse ("keep
+>       outside" / hole punch) will not be built. Recorded on B1783328; closed by B1838704's session.
+
+## 🗂 Should your two kinds of map overlay become one? (B1838704)
+
+> **Short version: you can now crop an overlay right from the Site tab's Overlays panel — the
+> "Crop…" button opens the same rectangle/polygon tool as the Map's Comps panel.** While building
+> it, the underlying oddity is worth one decision from you: Planyr has **two separate overlay
+> features** that look alike — the drawings you place on a plan in the **Site tab** (Overlays
+> panel), and the site-plan pictures you pin to a comp on the **Map** (Comps → Adjust). They are
+> saved in different places and don't know about each other. Crop now works on both.
+> - [ ] **Should these two become ONE overlay feature, or stay separate with crop simply on both?**
+>       Nothing is blocked either way — crop already works in both places today.
 
 ## 🖼 Which page was that "Spreadsheet" screenshot? (B1756544)
 

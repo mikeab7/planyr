@@ -138,6 +138,8 @@ const SetLocationDialog = lazy(() => import("./components/SetLocationDialog.jsx"
 /* NEW-1 — the road cross-section designer. Lazy for the same reason: a modal a session opens rarely,
  * with its own live-preview SVG, has no business on the planner's boot chunk. */
 const RoadCrossSectionDialog = lazy(() => import("./components/RoadCrossSectionDialog.jsx"));
+// NEW-1 (B1838704) — the OVERLAYS panel's visual Crop… (rectangle + polygon). Opened rarely.
+const OverlayCropDialog = lazy(() => import("./components/OverlayCropDialog.jsx"));
 /* NEW-1 / NEW-3 — the Parcel panel's record body, lazily loaded for exactly the reason the appraisal
  * panels above are: it renders only inside the Parcel panel, only for a selected lot, and the Site
  * route's largest chunk has no headroom to spend on code most sessions never reach. */
@@ -345,7 +347,7 @@ import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { calloutStyle } from "./lib/calloutStyle.js";
 import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference } from "./lib/overlayOrder.js";
-import { hasCrop, cropClipRectScreen, cropTrimFeet, cropFromTrimFeet } from "./lib/overlayCrop.js";
+import { hasCrop, cropClipShapeScreen, cropTrimFeet, cropFromTrimFeet, cropKind, cropEditBlock, normalizeCropShape, recropForRaster } from "./lib/overlayCrop.js";
 import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerialVisibility.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, dockAxisOf, healDockAxes, withDockAxis, rotateDockAxisPatch, dockSideCompassLabel } from "./lib/dockZones.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors, gridLinesVisible } from "./lib/buildingGrid.js";
@@ -2449,6 +2451,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // the rehydrate effect re-attempts a transient failure.
   const [overlayLoadErr, setOverlayLoadErr] = useState({});
   const retryOverlay = (id) => setOverlayLoadErr((m) => { if (!(id in m)) return m; const n = { ...m }; delete n[id]; return n; });
+  const [ovCropId, setOvCropId] = useState(null);      // NEW-1 (B1838704) — the overlay whose Crop… dialog is open
   const [ovCalib, setOvCalib] = useState(null);         // {id, kind:'trace'|'align', pts:[]} — canvas calibration in progress
 
   // county parcel lookup — ⛔ B877440: no hard Harris/Houston seed. An unresolved county is
@@ -4915,7 +4918,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
     // B848736 — the aerial backdrop is now just a sheetOverlays record (bottom-pinned), so its
     // position/scale/lock ride the SAME per-item signature below; there is no second field to sign.
-    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${o.x},${o.y},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1},${o.aboveParcel === true ? 1 : 0}`).join(";") || "no") + // NEW-2: aboveParcel is in the signature so promoting a reference over the plan is its own undo frame (like `visible`). RC-8: no Math.round — a sub-foot overlay nudge must be a distinct undo frame
+    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${o.x},${o.y},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1},${o.aboveParcel === true ? 1 : 0},${o.crop ? JSON.stringify(o.crop) : ""}`).join(";") || "no") + // NEW-2: aboveParcel is in the signature so promoting a reference over the plan is its own undo frame (like `visible`). RC-8: no Math.round — a sub-foot overlay nudge must be a distinct undo frame. NEW-1 (B1838704): `crop` too — without it the history deduped every crop edit as a no-op, so neither the Crop… tool NOR the older B719779 trim fields were ever undoable (measured: Undo stayed disabled after a crop)
     "|O:" + (s.origin ? `${s.origin.lat.toFixed(9)},${s.origin.lon.toFixed(9)}` : "none") + // NEW-1 — the geo anchor, so "Set location" / a placement nudge is its own undo frame
     "|L:" + overridesSig(s.layerOverrides) + // NEW-1 — GIS Layers-panel visibility set, so a layer toggle is a distinct, undoable frame (matches sheetOverlays.visible)
     "|A:" + aboveSig(s.layerAbove); // NEW-1 — …and which layers are LIFTED above the plan, so "Show above plan" is its own undoable frame too
@@ -10273,6 +10276,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (hist) pushHistory();
     setSheetOverlays((arr) => arr.map((o) => (o.id === id ? { ...o, ...patch } : o)));
   };
+  // NEW-1 (B1838704) — THE crop write for the OVERLAYS panel (Crop… dialog, trim fields, Reset).
+  // The lock is enforced HERE, at the write, not only by greying the controls (B1154369): a locked
+  // overlay refuses the edit, loudly. One undo frame per commit, through patchOverlay — the same
+  // path Opacity/Rotate/visibility use, so it autosaves, syncs and undoes like every overlay edit.
+  const setOverlayCrop = (id, crop, hist = true) => {
+    const o = sheetOverlays.find((x) => x.id === id);
+    const why = cropEditBlock(o);
+    if (why) { flashWarn(`⚠ ${why}.`, 4500); return false; }
+    const next = crop ? normalizeCropShape(crop, o.imgW, o.imgH) : null;
+    if (crop && !next) { flashWarn("⚠ That crop leaves too little of the sheet — nothing was changed.", 5000); return false; }
+    patchOverlay(id, { crop: next }, hist);
+    return true;
+  };
   const removeOverlay = (id) => {
     const o = sheetOverlays.find((x) => x.id === id);
     if (!o) { flashWarn("⚠ Couldn't delete that drawing — it's no longer in the list.", 5000); return; } // count-check: never a phantom no-op delete (B461)
@@ -10418,7 +10434,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     touchOverlayDoc(id);
     try {
       const r = await rasterizePage(doc, page, { knockout: o ? o.knockout !== false : true });
-      patchOverlay(id, { src: r.src, imgW: r.imgW, imgH: r.imgH, page: r.page });
+      // NEW-1 (B1838704) — a crop is in THIS raster's pixels; re-fit it to the new page's box.
+      patchOverlay(id, { src: r.src, imgW: r.imgW, imgH: r.imgH, page: r.page, crop: recropForRaster(o && o.crop, r.imgW, r.imgH) });
     } catch (_) { /* ignore a bad page render */ }
   };
   // B654 — toggle the white-paper knockout on a PDF reference: re-rasterize the current
@@ -18245,6 +18262,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const w = o.imgW * o.ftPerPx * rppf;
     const h = o.imgH * sy * rppf;
     const cx = tl.x + w / 2, cy = tl.y + h / 2;
+    const ovClip = o.fromMap ? null : cropClipShapeScreen(o, tl, o.ftPerPx, sy, rppf);
     return (
       /* B548819 — a reference is a DRAWN FAMILY and carries the same census key as the other four,
          so "what sits on top of what" is answerable for every pair rather than five sixths of them.
@@ -18268,14 +18286,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 separate compositing code. A clipped-out region is never painted to the framebuffer,
                 so this is also a real (if modest — see overlayCrop.js's header) rasterisation-cost
                 reduction on every pan and zoom, not just a visual trim. */}
-            {hasCrop(o) && (() => {
-              const clip = cropClipRectScreen(o, tl, o.ftPerPx, rppf);
-              return (
-                <clipPath id={`ov-crop-${o.id}`}>
-                  <rect x={clip.x} y={clip.y} width={clip.width} height={clip.height} />
-                </clipPath>
-              );
-            })()}
+            {/* NEW-1 (B1838704) — either crop shape (rect, or a polygon drawn with the panel's
+                Crop… tool) projects through ONE pure function into this ONE <clipPath>; the rotation
+                lives on the parent <g>, so the clip stays welded to the sheet through Rotate/Align. */}
+            {ovClip && (
+              <clipPath id={`ov-crop-${o.id}`}>
+                {ovClip.kind === "poly"
+                  ? <polygon points={ovClip.points} clipRule="evenodd" />
+                  : <rect x={ovClip.x} y={ovClip.y} width={ovClip.width} height={ovClip.height} />}
+              </clipPath>
+            )}
             {/* data-overlay-image marks the printable raster so buildExportSvg can include/exclude it per the "Print overlay" toggle (B131).
                 B749 — a live hi-res object URL overrides the base raster while zoomed in (transient; the record's src is unchanged).
                 data-overlay-id lets the export swap a transient blob: hi-res back to the persisted base raster before inlining.
@@ -18285,7 +18305,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 lets the export's generic "drop any live aerial copy" sweep remove this clone so the
                 explicit synthesis is the only thing that draws it, exactly as when it was a separate field. */}
             <image data-overlay-image={o.fromMap ? undefined : "1"} data-overlay-id={o.id} href={hiresById[o.id] || o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none"
-              clipPath={hasCrop(o) ? `url(#ov-crop-${o.id})` : undefined}
+              clipPath={ovClip ? `url(#ov-crop-${o.id})` : undefined}
               onError={o.fromMap ? () => setOverlayLoadErr((m) => ({ ...m, [o.id]: "remote" })) : undefined}
               onLoad={o.fromMap ? () => setOverlayLoadErr((m) => (m[o.id] === "remote" ? Object.fromEntries(Object.entries(m).filter(([k]) => k !== o.id)) : m)) : undefined} />
           </>
@@ -21037,35 +21057,49 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               <span>Knock out white paper</span>
                             </label>
                           )}
-                          {/* B719779 — non-destructive crop: four edge trims in feet, held as `o.crop` (image
-                              px) and applied as an SVG clipPath — the persisted raster is never touched, so
-                              widening a trim or Reset recovers exactly what was cropped away, no re-import. */}
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                            <div style={{ display: "flex", alignItems: "center" }}>
-                              <span style={{ width: 48, fontSize: 11.5, color: PAL.muted }} title="Trim white space off any edge — reversible, the full image is kept">Crop</span>
-                              {hasCrop(o) && <button style={{ ...chip, marginLeft: "auto" }} title="Show the whole image again" onClick={() => patchOverlay(o.id, { crop: null })}>Reset crop</button>}
-                            </div>
-                            {(() => {
-                              const trim = cropTrimFeet(o);
-                              const editTrim = (edge, val) => {
-                                const next = { ...trim, [edge]: Math.max(0, +val || 0) };
-                                patchOverlay(o.id, { crop: cropFromTrimFeet(next, o) }, false);
-                              };
-                              const field = (label, edge, title) => (
-                                <label key={edge} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: PAL.muted }} title={title}>
-                                  <span style={{ width: 12 }}>{label}</span>
-                                  <input type="number" min={0} aria-label={`Crop ${title}`} style={{ ...numInput, width: 50 }}
-                                    value={f0(trim[edge])} onFocus={() => pushHistory()} onChange={(e) => editTrim(edge, e.target.value)} />
-                                </label>
-                              );
-                              return (
-                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, marginLeft: 54 }}>
-                                  {field("L", "left", "Left edge")}{field("T", "top", "Top edge")}
-                                  {field("R", "right", "Right edge")}{field("B", "bottom", "Bottom edge")}
+                          {/* NEW-1 (B1838704) — CROP, where the owner actually works. Before this the panel had
+                              only the four B719779 edge-trim number fields, which read as a faint label and never
+                              got found ("I cant see how to crop this overlay?"). "Crop…" opens the SAME visual tool
+                              the Comps surface uses (rectangle or polygon, ImageCropTool); the trim fields stay as
+                              the precise-entry path for a rectangle. Non-destructive: `o.crop` in IMAGE px clips
+                              what draws, the stored raster is never touched, Reset returns the full sheet. Every
+                              write goes through setOverlayCrop, which refuses on a locked overlay.
+                              Not offered on the pinned map capture — it prints through its own aerial path, so a
+                              crop there would draw on screen and not on the sheet (PDF-PARITY). */}
+                          {!isAerialRow && (() => {
+                            const cropWhy = cropEditBlock(o);
+                            const isPoly = cropKind(o.crop) === "poly";
+                            const trim = cropTrimFeet(o);
+                            const editTrim = (edge, val) => {
+                              const next = { ...trim, [edge]: Math.max(0, +val || 0) };
+                              setOverlayCrop(o.id, cropFromTrimFeet(next, o), false);
+                            };
+                            const field = (label, edge, title) => (
+                              <label key={edge} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: PAL.muted }} title={title}>
+                                <span style={{ width: 12 }}>{label}</span>
+                                <input type="number" min={0} aria-label={`Crop ${title}`} style={{ ...numInput, width: 50 }} disabled={!!cropWhy}
+                                  value={f0(trim[edge])} onFocus={() => pushHistory()} onChange={(e) => editTrim(edge, e.target.value)} />
+                              </label>
+                            );
+                            return (
+                              <div data-testid={`overlay-crop-${o.id}`} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                                <div style={{ display: "flex", gap: 6 }}>
+                                  <button style={{ ...chip, flex: 1, opacity: cropWhy ? 0.55 : 1 }} data-testid="overlay-crop-open" disabled={!!cropWhy}
+                                    title={cropWhy || "Trim the logo band, title block and margins with a rectangle or a polygon — reversible, the full sheet is kept"}
+                                    onClick={() => { setSelOverlay(o.id); setOvCropId(o.id); }}>{hasCrop(o) ? "Edit crop…" : "Crop…"}</button>
+                                  {hasCrop(o) && <button style={{ ...chip, flex: 1, opacity: cropWhy ? 0.55 : 1 }} data-testid="overlay-crop-reset" disabled={!!cropWhy} title={cropWhy || "Show the whole sheet again"} onClick={() => setOverlayCrop(o.id, null)}>Reset crop</button>}
                                 </div>
-                              );
-                            })()}
-                          </div>
+                                {isPoly ? (
+                                  <div style={{ fontSize: 11, color: PAL.muted }}>Cropped to a polygon — use Edit crop… to change it.</div>
+                                ) : (
+                                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }} title="Trim white space off any edge, in feet — reversible, the full image is kept">
+                                    {field("L", "left", "Left edge")}{field("T", "top", "Top edge")}
+                                    {field("R", "right", "Right edge")}{field("B", "bottom", "Bottom edge")}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                           {o.sheet && (() => {
                             // Bluebeam-style scale entry (B576): the page→real ratio is the single source of
                             // truth. A preset just fills page=1 + real=preset; "Custom…" reveals the editable
@@ -29077,6 +29111,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             onConfirm={(o) => { if (commitOrigin(o)) setSetLocOpen(false); }} />
         </Suspense>
       )}
+
+      {/* NEW-1 (B1838704) — the OVERLAYS panel's visual crop. Bound by id to the LIVE record, so
+          an undo/delete underneath the dialog simply closes it rather than committing to a ghost. */}
+      {ovCropId && (() => {
+        const o = sheetOverlays.find((x) => x.id === ovCropId);
+        if (!o || cropEditBlock(o)) return null;
+        return (
+          <Suspense fallback={null}>
+            <OverlayCropDialog overlay={o} onCancel={() => setOvCropId(null)}
+              onCommit={(crop) => { if (setOverlayCrop(o.id, crop)) setOvCropId(null); }} />
+          </Suspense>
+        );
+      })()}
 
       {/* NEW-1 — the road cross-section designer. Two entry points share one dialog instance:
           Properties' "Edit cross-section..." (mode "edit", bound to a live road) and the Road tool's
