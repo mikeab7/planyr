@@ -177,6 +177,21 @@ was never clicked" quietly ships broken.
 2. Re-run `src/workspaces/site-planner/db/test/security_definer_ownership_audit.test.sql` (paste into the SQL editor, or `execute_sql`) against the same project. **Expect:** all 14 cases PASS — specifically Case 13 now reports `plans=0 foreign=0` for a total stranger to the group, instead of the real counts.
 3. (Optional sanity check — confirms nothing else moved.) Re-run `db/test/sites_cas_ownership_independent.test.sql`. **Expect:** unaffected, still all PASS.
 - **Stopping rule:** closes when step 2 confirms Case 13 flips to PASS against the real deployed function — or it fails and is filed as a recurrence against B1853664, per STANDING RULE #2 (a null result is a FINDING, never a silent close).
+### V1320112 — B1850448: dragging a side-parking end grip past a corner bump-out lengthens it and the extension survives every relayout and a hard reload, on the real Goose Creek plan `Blocker: auth` `Blocker: real-data`
+
+**Why this needs a live pass.** Everything the sandbox can reach is proven — the pure engine (`test/hostRunHeal.test.js`, a synthetic Building-4-shaped fixture built with the real `dogEar.js` functions, driving the LIVE drag / an ordinary refit / the load-time heal and asserting they agree) and the real running app driven headless, logged out (`ui-audit/verify-side-park-end-grip.mjs`, 12/12, mutation-proven — reverting the fix turns 4 checks red, reproducing the reported snap-back exactly). What the sandbox cannot reach is the owner's REAL saved plan: this fix touches a load-time heal path (`normalizeBondedChildren`), and the item's own instruction is explicit that the live check must run on a throwaway duplicate of his actual Goose Creek "Phase II - TAS R2" geometry (real bump-out sizes, a real exploded stack he trimmed by hand), not a synthetic stand-in — and a signed-in session against his real Supabase-backed account is unreachable here (the proxy CORS-blocks the Supabase auth handshake).
+
+**What was verified here (sandbox, this session).** Full suite: 892 files / 18,198 tests, zero regressions. `npm run build`: clean. `npx eslint` on every touched file: 0 errors. `node ui-audit/doc-pointer-audit.mjs`: clean. The headless harness above, both the clean build (12/12) and the deliberate mutation (reverting `dogEar.js`'s fix — 8/12, the four over-length/`beyond` checks going red).
+
+**Steps, each with a named expected result — on a THROWAWAY duplicate of Goose Creek "Phase II - TAS R2" (owner constraint 7), never the real plan itself:**
+1. Signed in, duplicate the plan; on the duplicate, open Building 4 (west end) and select the drive-aisle piece of the exploded side-parking stack (type "paving", `sideParkSide`/`sideParkPiece` set).
+2. Grab its SOUTH end grip and drag it 50–100 ft past the SW bump-out. **Expect:** the piece visibly lengthens to where the pointer is, live, the whole time — never snapping back mid-drag.
+3. Release. **Expect:** it stays extended; the stall rows on either side of it are untouched.
+4. Add, then remove, a sidewalk on a DIFFERENT wall of the same building (any side). **Expect:** the aisle's extension is unaffected by that unrelated relayout.
+5. Hard reload the page (not just navigate away and back). **Expect:** the aisle is still extended past the bump-out — this is the bug's own reported symptom, and the one this step exists to catch.
+6. Repeat steps 1–3 on the NORTH end of a different row, and on a long-wall (top/bottom) field if one exists on this plan, to cover both directions.
+7. Read the served chunk hash in the same observation as each result; delete the duplicate afterwards and say what was created/removed.
+- **Stopping rule:** closes when steps 2–6 pass on a real signed-in account against his real plan geometry, dated — or a failing step is filed as a recurrence against B1850448 (STANDING RULE #2 — a null here is a finding, never a silent close).
 
 ### V1308368 — B1838704: a polygon crop made from the Site tab OVERLAYS panel survives a signed-in cloud save, a reload on a second device, and prints clipped `Blocker: auth`
 

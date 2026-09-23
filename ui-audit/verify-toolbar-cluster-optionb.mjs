@@ -15,6 +15,12 @@
  *      distinct from Redo's own resting (enabled-when-something-exists / disabled-when-not)
  *      styling baseline — proven by comparing Undo's disabled opacity against the button's own
  *      un-disabled opacity read off Zoom-to-fit (a same-class icon button that starts enabled).
+ *   5. ⛔ B1807200 AMENDMENT (2026-09-23) — each 30×30 control has REAL clearance from its row's
+ *      own edges (owner-reported "chips touch the header" after the box-treatment round above
+ *      shipped controls flush against a same-height row). Row 1 is bordered-free so it centers
+ *      exactly (5px/5px at the owner-approved HEADER_ROW_H=40); Row 2 carries a 1px divider
+ *      border on its own top edge, so its clearance is asymmetric by that one pixel — both sides
+ *      are asserted against the owner's own floor (>= ~4px), not against a bare zero.
  *
  * Run: npm run dev &  then  node ui-audit/verify-toolbar-cluster-optionb.mjs
  */
@@ -82,10 +88,35 @@ try {
       accountHeight: num(csOf(accountTrigger)?.height),
       accountText: accountTrigger ? accountTrigger.textContent.trim() : null,
       accountTestId: accountTrigger ? accountTrigger.getAttribute("data-testid") : null,
-      undoOpacity: num(csOf(undoBtn)?.opacity),
+      // ⛔ B1807200 AMENDMENT (2026-09-23) — the disabled fade moved from the BUTTON (which would
+      // now fade the new resting box too) to the button's direct-child glyph. So the button's own
+      // opacity must stay 1 (box undimmed) and the glyph is what carries the dimming.
+      undoBoxOpacity: num(csOf(undoBtn)?.opacity),
+      undoGlyphOpacity: num(csOf(undoBtn?.querySelector("svg"))?.opacity),
       undoDisabled: undoBtn?.disabled,
       fitOpacityBeforeAnyAction: num(csOf(fitBtn)?.opacity),
       fitDisabledBeforeAnyAction: fitBtn?.disabled,
+      // ⛔ B1807200 AMENDMENT (2026-09-23) — clearance between each 30×30 control and its OWN row's
+      // edges (walk up to the outermost flex+centered ancestor still inside <header>, since an
+      // inner zone div is also flex+alignItems:center but sizes to its own content, not the row).
+      clearance: (() => {
+        function findRow(el) {
+          let node = el, matches = [];
+          while (node && node.tagName !== "HEADER" && node !== document.body) {
+            const cs = getComputedStyle(node);
+            if (cs.display === "flex" && cs.alignItems === "center") matches.push(node);
+            node = node.parentElement;
+          }
+          return matches.length ? matches[matches.length - 1] : null;
+        }
+        function gaps(ctrl) {
+          const row = findRow(ctrl);
+          if (!ctrl || !row) return null;
+          const cr = rectOf(ctrl), rr = rectOf(row);
+          return { rowHeight: rr.height, gapTop: cr.top - rr.top, gapBottom: rr.bottom - cr.bottom };
+        }
+        return { row1: gaps(cloudBadge), row2: gaps(undoBtn) };
+      })(),
     };
   });
 
@@ -108,12 +139,31 @@ try {
     Math.abs(facts.accountHeight - 30) < 0.5, `accountHeight=${facts.accountHeight}`);
   console.log(`  (account trigger seen: testid=${facts.accountTestId} text=${JSON.stringify(facts.accountText)} — a real name-collapse check needs a signed-in account, VERIFICATION.md Blocker: auth)`);
 
-  // 4) Undo (disabled — nothing to undo on a blank canvas) is visually dimmer than a same-class
-  // icon button that starts enabled (Zoom-to-fit, before any parcel/element exists on the canvas
-  // it may itself be disabled too — report both so a reader can see the real baseline either way).
+  // 4) Undo (disabled — nothing to undo on a blank canvas) dims its GLYPH only; the box itself
+  // (background/border) stays at full strength, per the approved Option B mockup's own disabled
+  // state ("still a white box with a light-grey glyph, never an invisible one").
   ok("Undo reports disabled on a blank canvas", facts.undoDisabled === true);
-  ok("Undo's disabled opacity is measurably reduced (< 1)", facts.undoOpacity < 0.9, `undoOpacity=${facts.undoOpacity}`);
+  ok("Undo's own box stays at full opacity when disabled (only the glyph dims)",
+    Math.abs(facts.undoBoxOpacity - 1) < 0.01, `undoBoxOpacity=${facts.undoBoxOpacity}`);
+  ok("Undo's glyph opacity is measurably reduced (< 1)", facts.undoGlyphOpacity < 0.9, `undoGlyphOpacity=${facts.undoGlyphOpacity}`);
   console.log(`  (Zoom-to-fit baseline for comparison: opacity=${facts.fitOpacityBeforeAnyAction} disabled=${facts.fitDisabledBeforeAnyAction})`);
+
+  // 5) B1807200 AMENDMENT — real clearance between each 30×30 control and its own row's edges.
+  // Owner-set floor: >= ~4px, symmetric top/bottom on a border-free row (Row 1); Row 2 carries a
+  // 1px divider border on its own top edge so its two sides differ by that one pixel, which is
+  // expected, not a defect — both sides still individually clear the floor.
+  const CLEARANCE_FLOOR_PX = 3.9; // owner: "don't go below ~4px" — a hair of slack for sub-pixel rounding
+  for (const [label, g] of Object.entries(facts.clearance)) {
+    if (!g) { ok(`${label} clearance is measurable`, false); continue; }
+    ok(`${label} row renders at the owner-approved HEADER_ROW_H (40)`, Math.abs(g.rowHeight - 40) < 0.5, `rowHeight=${g.rowHeight}`);
+    ok(`${label} control clears its row's TOP edge by >= ~4px (was 0px pre-fix)`, g.gapTop >= CLEARANCE_FLOOR_PX, `gapTop=${g.gapTop}`);
+    ok(`${label} control clears its row's BOTTOM edge by >= ~4px (was 0px pre-fix)`, g.gapBottom >= CLEARANCE_FLOOR_PX, `gapBottom=${g.gapBottom}`);
+  }
+  if (facts.clearance.row1) {
+    ok("Row 1 (no divider border) centers its control exactly symmetric top/bottom",
+      Math.abs(facts.clearance.row1.gapTop - facts.clearance.row1.gapBottom) < 0.5,
+      `gapTop=${facts.clearance.row1.gapTop} gapBottom=${facts.clearance.row1.gapBottom}`);
+  }
 
   ok("no uncaught page errors", pageErrors === 0, `pageErrors=${pageErrors}`);
 
