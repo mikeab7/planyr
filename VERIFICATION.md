@@ -166,6 +166,31 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1338512 — B1874880: the new same-origin GIS pass-through relays a CORS-blocked county host, and Tift County GA selects a real parcel through it `Blocker: live-GIS`
+
+**Why this needs its own live pass.** GIS endpoint behaviour is a mandatory LIVE-VERIFY class. `www.sgrcmaps.com` (Southern Georgia Regional Commission, Tift County's own parcel host) is fully egress-blocked from this sandbox (`CONNECT tunnel failed`) — but, as this session discovered mid-verification, that block does NOT reach the proxy's own upstream fetch, which runs server-side inside Cloudflare once `functions/gis-proxy/[[path]].js` is deployed. So the network/data path end of this item was provable live from here after all, against the PR's own Cloudflare Pages preview build; only the on-screen Map Finder UI (does the React app render/select the parcel a signed-in user clicks) remains genuinely unprovable from this sandbox.
+
+**What was verified here (this session).**
+1. `test/gisProxy.test.js` (15 tests, new) drives the real `onRequest` handler with a mocked global `fetch` for the request/response CONTRACT: allow-list, 403/400/502 shapes, timeout, header stripping, cache-control.
+2. **Live, against the deployed PR preview (`https://claude-modest-shannon-q2aq6b.planyr.pages.dev`), curled directly from this sandbox:**
+   - `.../gis-proxy/www.sgrcmaps.com/alma/rest/services/Tift/Tift_Parcels/MapServer/0?f=json` → HTTP 200, real layer metadata: fields `OBJECTID`/`ParcelNum`/`OwnerName`/`Situs`/`QPLINK`, `esriGeometryPolygon`.
+   - `.../query?where=1=1&returnCountOnly=true&f=json` → `{"count":19194}` — matching Michael's own count exactly.
+   - `.../query?geometry=-83.5085,31.4504&geometryType=esriGeometryPoint&inSR=4326&...` (a point at Tifton) → a real parcel: `OBJECTID 18560`, `ParcelNum "T044  082"`, `OwnerName "TIFTON DREAM VISION PROPERTIES, LLC"`, `Situs "212 E 5TH ST"`.
+   - `.../gis-proxy/example.com/x` → HTTP 403 `{"error":"host not allowed"}` — the allow-list holds in the real deployed Function, not just the mocked unit test.
+   - `idField`/`addrField` on `ga_tift` were updated from these real measured field names (`ParcelNum`/`Situs`) — no longer left to detection.
+3. `test/arcgis.test.js` (3 new) proves the one client-side fix — `resolveGisUrl` — resolves a root-relative `/gis-proxy/…` layerUrl against a supplied origin, and leaves an absolute layerUrl untouched regardless of base.
+4. `test/counties.test.js` (7 new) proves `ga_tift` is registered in both registries with the exact relative proxy path and the real `idField`/`addrField`, its bbox (read from `public/geo/county-polygons.json`, not hand-typed) contains Tifton, `countyKeyForName("Tift County", "GA")` resolves it, a point at Tifton routes to it via `candidateCountiesForPoint`, it never leaks into a Texas/Houston lookup, and it adds no shared-URL conflict.
+5. `node ui-audit/gis-source-audit.mjs` — clean, 92 counties. `npx vitest run` — 900 files / 18,336 tests, all green. `npm run lint` / `npm run build` clean.
+
+**Steps, each with a named expected result. Only the UI half remains genuinely open — the data path above is confirmed live.**
+1. ~~`curl https://planyr.io/gis-proxy/www.sgrcmaps.com/.../MapServer/0?f=json`~~ — **CONFIRMED** against the deployed preview build this session (see above). Worth one quick re-confirmation on `planyr.io` itself once merged, as a sanity check that production deploys the same way — not a new unknown.
+2. ~~`curl https://planyr.io/gis-proxy/example.com/x` → 403~~ — **CONFIRMED**, same basis.
+3. On planyr.io, open (or start blank at) a real Tift County, GA address (Tifton), zoom to it on the Map, and click a lot. **Expect:** a parcel outline renders, and the selected-parcel card names **Tift County** with a real parcel ID — never a "statewide backup" label (Georgia has no statewide composite, so a wiring failure here would show as no parcel at all, not a fallback).
+4. At the same address, search by parcel ID. **Expect:** the parcel resolves the same way a direct-URL county's search does today — no visible difference from Chatham/Rockdale/etc.
+5. Regression: a lot in Chatham County, GA (an existing DIRECT-url GA county, unaffected by this item) and a lot in Houston, TX. **Expect:** both select exactly as before — the `resolveGisUrl` change is proven inert on an absolute URL by unit test, but a live click is the real proof.
+
+Stopping rule: this passes and moves to `docs/archive/VERIFICATION-DONE.md` once step 3 confirms a real Tift County parcel selects on production — or a genuine failure (the proxy 502s, the parcel never renders, or a regression on step 5) is captured and filed as a recurrence against **B1874880**, per STANDING RULE #2 (an owner-reported or cohort-observed symptom is never closed on a null).
+
 ### V1337408 — B1873776: 11 MORE newly-wired Georgia county parcel endpoints answer, Bryan's search fallback works live, and Rockdale's address search finds real lots `Blocker: live-GIS`
 
 **Why this needs its own live pass.** GIS endpoint behaviour is a mandatory LIVE-VERIFY class. Every one of these eleven hosts is blocked by this sandbox's own egress policy — the measurements behind this item come from Michael's own signed-in Chrome on `planyr.io` rather than a fresh probe from here — so a session working from this repo alone cannot independently re-confirm connectivity, only the code paths that consume it (which the sandbox tests below do cover). Same split as V1335600/B1870704's identical class, one door up.
