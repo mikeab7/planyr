@@ -1,6 +1,15 @@
 /* NoteToolbar — the formatting bar for one note page.
  *
- * TWO RULES SHAPE THIS FILE.
+ * ⛔ REBUILT AS ONE ROW, TEXT CONTROLS ONLY (NEW-1..NEW-9, owner-approved mockup "Notes Toolbar
+ * Redesign", 2026-09-24). The bar used to be a flat, frequency-grouped row with a trailing
+ * "More" drawer holding everything that didn't fit (fonts, sizes, alignment, page geometry,
+ * zoom, history, print, export). That drawer is GONE — every one of those either moved to the
+ * module tab row (NEW-2: Find/Page setup/History/Export ▾, wired in Notes.jsx's `AppHeader`
+ * `toolbarContent`), floats on the canvas (NEW-3: zoom), or is simply on the row now because the
+ * row no longer wraps (font/size/style/spacing, all four now lead it, Word's own order). This
+ * file is ONLY text-formatting controls, in the exact order the mockup specifies.
+ *
+ * TWO RULES CARRY OVER UNCHANGED FROM THE OLD BAR.
  *
  * 1. EVERY ACTIVE STATE IS READ FROM THE EDITOR (`editor.isActive(...)`), never mirrored
  *    into React state. A mirrored copy is a second source of truth that drifts the moment
@@ -20,21 +29,51 @@
  * cancels — never `window.prompt`. The table size is picked by sweeping a GRID for the same
  * reason (B1372), not by a box asking for two numbers.
  *
- * FOUR THINGS HERE ARE FIXES, NOT DECORATION, and each has its note at the code:
- *   • text colour and highlight draw DIFFERENT glyphs (B1370) — they were identical;
- *   • font size sits ON the row (B1371) — it existed, buried in "More", which reads to a
- *     user as "there is no font size";
- *   • the table button opens a drag-to-size grid (B1372) — it used to insert a fixed 3×3;
- *   • Block style and Font size are a `FormatMenu` LISTBOX, not a native `<select>` (B1139216)
- *     — a mixed selection now shows no value instead of lying with the first block's, and
- *     re-picking the value already shown is a real click, not a dead one. See FormatMenu's
- *     own note and lib/notesMixedSelection.js for the measured bug and why this is the fix.
+ * ⛔ NEW-7 — TOOLTIPS ARE A CUSTOM FLOATING LABEL, NOT THE NATIVE `title=` ATTRIBUTE. The
+ * reported bug ("Attach a file" tooltip clipped along its bottom edge) is fixed at the ROOT —
+ * `useHoverTooltip`/`Tip` below — rather than chased ancestor by ancestor: `position: fixed`,
+ * computed from the trigger's own `getBoundingClientRect()` at the moment it opens, so it can
+ * never be clipped by any scrolling/overflow ancestor and flips above the button on its own
+ * when there isn't room below. `TBButton` and `FormatMenu`'s trigger both use it, which is
+ * where nearly every control on this bar gets its tooltip from — a handful of call sites, not
+ * forty.
+ *
+ * ⛔ NEW-6 — A TOOLBAR ACTION COMMITS AN ARMED BLOCK-PLACEMENT FIRST. Double-clicking blank
+ * canvas arms a caret but creates nothing (NoteEditor.jsx's `pendingPlace` — see its own header,
+ * "a press arms a caret, it does not create anything"); only a real keystroke or paste commits
+ * it into a box. A toolbar click is neither, and because every button already cancels
+ * `mousedown` (rule 2 above) the editor's DOM focus never blurs, so the arm survives — and
+ * `chain().focus()` then resolves to whatever the document's LAST REAL selection was, not the
+ * still-uncommitted point, silently formatting the wrong place while the arm sits there waiting
+ * for the first keystroke. Measured live: double-click, press "Insert numbered list," type five
+ * items — the list forms around a phantom trailing paragraph and the five typed items land as
+ * plain, unlisted text in a brand-new box the button never touched. `onBeforeAction` (a thin
+ * wrapper around `commitPendingPlace()`) is called in MOUSEDOWN CAPTURE on the bar's own root —
+ * before any individual button's own `stop` runs — so an armed point becomes a real, empty,
+ * focused box first, and the button's own command then lands exactly where the caret is drawn.
+ * It is a no-op whenever nothing is armed (`commitPendingPlace` already guards that), so every
+ * other click on this bar is unaffected.
+ *
+ * ⛔ NEW-9 — THE ROW NEVER WRAPS, AT ANY WIDTH. Measured rather than guessed: `compact` is
+ * driven by a `ResizeObserver` on the bar's own rendered width against `COMPACT_BREAKPOINT_PX`,
+ * not a hard-coded window/media query — the number that matters is how much room the EDITOR
+ * PANE actually gives this row, not the browser window (a docked History/Outline panel eats
+ * into it identically). Below the breakpoint: the three alignment buttons collapse into one
+ * dropdown showing the current alignment, and Link/Table/Image/Attach fold into the "+" Insert
+ * menu, leaving only "+" — never both at once and never a third stage; Bold/Italic/Underline,
+ * the font/size chips and the list buttons are never touched by this. A PHONE is simply the
+ * far end of the same measurement (its available width is always under the breakpoint), so
+ * `narrow` no longer selects a different LAYOUT — only bigger tap targets (`big`, 44px WCAG
+ * 2.5.5 floor) and the pinned "‹ Notes" back control. There is no second, bottom-sheet UI any
+ * more; anything the compact fold still can't fit rides the bar's own `overflowX: auto`.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { HEADING_LEVELS } from "../lib/notesExtensions.js";
-import { BLOCK_SPACES, DEFAULT_DENSITY, DENSITIES, LINE_SPACINGS, spacingLabel, fontSizePx } from "../lib/notesSpacing.js";
+import {
+  SPACE_AFTER_DEFAULT, SPACE_BEFORE_DEFAULT, SPACING_LINE_OPTIONS, SPACING_PRESETS, fontSizePx,
+} from "../lib/notesSpacing.js";
 import { CALLOUT_TONES } from "../lib/notesCalloutNode.js";
-import { FONTS, HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.js";
+import { DEFAULT_SIZE, FONTS, HIGHLIGHT_COLORS, SIZE_MAX, SIZE_MIN, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.js";
 import {
   MIXED, formatDisplayValue, selectionAlignments, selectionBlockShapes, selectionFontFamilies,
   selectionFontSizes, selectionLineHeights, selectionListKinds, selectionMarkAttrs,
@@ -42,8 +81,6 @@ import {
 } from "../lib/notesMixedSelection.js";
 import { familyKey, firstFamily, fontDisplayLabel, matchFontOption } from "../lib/notesFontFamily.js";
 import { defaultFontLabel, resolvedColor, resolvedColorsAgree } from "../lib/notesResolvedValue.js";
-import { PAGE_WIDTH_PRESETS, pageWidthLabel } from "../lib/notesPageWidth.js";
-import { pageHeightLabel } from "../lib/notesPageHeight.js";
 
 /* Mirrored from src/shared/ui/controls.jsx rather than imported — deliberately, and there
  * is a test that fails if the copies drift (test/notesModule.test.js). Importing
@@ -52,40 +89,107 @@ import { pageHeightLabel } from "../lib/notesPageHeight.js";
  * duplicated with a guard beats a cross-route regression. */
 const RADIUS = { control: 8, pill: 999 };
 /* Shared by every popover/sheet on this bar (ColorPopover, TableGridPicker, LinkControl,
- * CalloutControl, OverflowMenu) — one named constant rather than the same literal repeated,
- * so B849633's phone-sheet branch of OverflowMenu's panel doesn't count as a second raw
- * colour literal against the design-drift ceiling for what is visually the same shadow. */
+ * CalloutControl, SizeMenu, SpacingPopover, InsertFlyout) — one named constant rather than
+ * the same literal repeated. */
 const POPOVER_SHADOW = "0 12px 32px rgba(0,0,0,0.20)";
-/* Min gap a clamped popover keeps from the window's own right edge (B1344627 / NEW-4). */
+/* Min gap a clamped popover keeps from the window's own right edge (B1344627). */
 const POPOVER_EDGE_MARGIN = 8;
+/* NEW-9 — see this file's own top-of-file note. Measured against the row's actual content: at
+ * this width every group in NEW-1's list fits on one line with room to spare; below it the two
+ * fold steps buy back exactly the room the mockup's own narrow-window screenshots show. */
+const COMPACT_BREAKPOINT_PX = 1000;
 
-/* ⛔ NEW-4 (B1344627, owner report 2026-09-15) — EVERY POPOVER ON THIS BAR HANGS OFF THE RIGHT
- * EDGE OF THE WINDOW INSTEAD OF STAYING INSIDE IT. Five of them (FormatMenu's own listbox,
- * ColorPopover, TableGridPicker, LinkControl, CalloutControl) share the identical anchoring bug:
- * `position:"absolute", left:0` inside a `position:"relative"` trigger span opens the popover
- * flush against its OWN trigger, never against the viewport — fine while the trigger sits near
- * the toolbar's left end, wrong once it doesn't. Insert Table sits at the row's right end at
- * almost every window width, so its popover (and any other near it) opened mostly or entirely
- * off-screen; measured live at a 1191px window, 18 of the table grid's 36 size cells sat past
- * `innerWidth`, making anything past a three-column table unreachable from the picker.
- *
- * `shared/ui/AnchoredMenu.jsx` already solves this the general way (a `position:"fixed"` portal
- * to `document.body`), but that component pulls in `controls.jsx`'s chunk — exactly what this
- * file's own `RADIUS` constant already avoids importing, so the Site route's four-chunk bundle
- * budget stays intact (see this file's own top-of-file note). So this reuses only the PURE
- * placement math AnchoredMenu itself is built on
- * (`shared/ui/anchoredMenuPlacement.js` — no React, no chunk cost) is the RIGHT shape to mirror,
- * but even that needs a trigger rect this file already has for free (`popRef.current.parentElement`
- * is always the wrapping `<span>` every one of the five popovers is anchored to) — so rather than
- * importing a second math module for one subtraction, the same clamp is inlined here directly,
- * mirroring `anchoredMenuPlacement.js`'s own "clamp the right edge into the viewport" step.
- *
- * Measured LIVE (`ResizeObserver` on the popover itself), not guessed once at open time — the
- * table grid's own width GROWS while it is open (the picker's own "keep dragging for a bigger
- * table" affordance), so a one-shot measurement taken at mount would already be stale by the
- * time a drag reached a wider column count. A plain `left: -shift` nudge, not a flip to `right:0`
- * — flipping would still need the SAME measured shift to avoid also overflowing the LEFT edge on
- * a narrow phone toolbar, so there is nothing a flip buys here that a clamp does not. */
+/* ⛔ NEW-4 — THE PALETTES MOVED TO `lib/notesFormatPalette.js` (NEW-MINI-TOOLBAR). The right-click
+ * mini-toolbar offers the same choices, and two copies of a palette is how this bar and that
+ * menu come to disagree about what "Teal" is — a difference nobody notices until two paragraphs
+ * of one note are subtly different colours. The reasoning for these being LITERAL colours rather
+ * than theme tokens moved with them; read it there. */
+const DEFAULT_TEXT_SWATCH = "var(--text-primary)";
+const DEFAULT_HIGHLIGHT_SWATCH = HIGHLIGHT_COLORS.find((c) => c.value)?.value || null;
+
+/* The table grid picker's shape (B1372). It OPENS at this size and GROWS as the pointer
+ * reaches its edge, up to the max — the Word/OneNote behaviour, where a big table is
+ * reachable by dragging further rather than by a dialog asking for two numbers. */
+const GRID_START = 6;
+const GRID_MAX = 12;
+
+/* ---- primitives (module scope — MODULE-SCOPE-COMPONENTS) --------------------------------- */
+
+const stop = (e) => e.preventDefault();
+
+function Icon({ children, size = 15 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor"
+      strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {children}
+    </svg>
+  );
+}
+
+/* ═══ NEW-7 — THE SHARED TOOLTIP, used by TBButton and FormatMenu's own trigger (between them,
+ * nearly every control on this bar). `position: fixed`, positioned from the trigger's own
+ * `getBoundingClientRect()` the instant it opens — never inherited from an ancestor's layout,
+ * so no ancestor's `overflow` can ever clip it, which is the actual fix for the reported bug
+ * (a clipping ancestor was suspected, never confirmed — this makes the question moot). Flips
+ * above the trigger when there isn't `TIP_HEIGHT_GUESS` of room below; the guess only decides
+ * WHICH side to render on; the label itself sizes to its own content either way. ═══ */
+const TIP_GAP = 8;
+const TIP_HEIGHT_GUESS = 40;
+
+function useHoverTooltip() {
+  const ref = useRef(null);
+  const [tip, setTip] = useState(null);
+  const show = () => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const above = r.bottom + TIP_GAP + TIP_HEIGHT_GUESS > window.innerHeight;
+    setTip({
+      left: Math.min(Math.max(r.left + r.width / 2, 60), window.innerWidth - 60),
+      y: above ? window.innerHeight - r.top + TIP_GAP : r.bottom + TIP_GAP,
+      above,
+    });
+  };
+  const hide = () => setTip(null);
+  return { ref, tip, show, hide };
+}
+
+function Tip({ tip, text }) {
+  if (!tip || !text) return null;
+  return (
+    <span
+      role="tooltip"
+      aria-hidden="true"
+      style={{
+        position: "fixed", left: tip.left, transform: "translateX(-50%)",
+        [tip.above ? "bottom" : "top"]: tip.y,
+        zIndex: 300, maxWidth: 240, padding: "5px 9px", borderRadius: RADIUS.control,
+        background: "var(--text-primary)", color: "var(--surface-page)",
+        fontSize: 11.5, fontWeight: 600, lineHeight: 1.35, textAlign: "center",
+        boxShadow: POPOVER_SHADOW, pointerEvents: "none", whiteSpace: "normal",
+      }}
+    >
+      {text}
+      <span style={{
+        position: "absolute", left: "50%", width: 7, height: 7, marginLeft: -3.5,
+        background: "var(--text-primary)", transform: "rotate(45deg)",
+        [tip.above ? "bottom" : "top"]: -3.5,
+      }} />
+    </span>
+  );
+}
+
+/* ⛔ ONE SHARED CLAMP HOOK, NOT EIGHT COPIES (B1344627's own mechanism, carried over from the
+ * pre-redesign bar). Every popover on this row (FormatMenu, ColorPopover, TableGridPicker,
+ * LinkControl, CalloutControl, SizeMenu, SpacingPopover, InsertMenu) opens `left: 0` against
+ * its OWN trigger, which is flush against the viewport's right edge wherever the trigger sits
+ * near the end of the row — the Insert Table picker's own report was 18 of its 36 size cells
+ * sitting past `innerWidth`. Measured LIVE (`ResizeObserver` on the popover itself, not a
+ * one-shot measurement at open time — the table grid's own width GROWS while dragging, so a
+ * stale reading would already be wrong before a drag reached a wider column count) and nudged
+ * left by exactly the overflow. This is the SOURCE of the toolbar's `useState` count staying
+ * sane: one hook, called from eight places, is one line in the count this file's own test
+ * (`test/notesModule.test.js`) takes, not eight. */
 function usePopoverClampLeft(open) {
   const popRef = useRef(null);
   const [shift, setShift] = useState(0);
@@ -109,134 +213,74 @@ function usePopoverClampLeft(open) {
   return { popRef, clampStyle: shift ? { left: -shift } : undefined };
 }
 
-/* ⛔ ICON-2: a colour control's swatch bar showing GREY communicates no colour at all, and it
- * made the two colour buttons a matched silhouette differing only by a small glyph on top.
- * The bar now always carries a real colour — the caret's actual one where there is one, else
- * the colour a first click would apply (Google Docs' own convention) — so the button also
- * shows what it will DO, not just what is currently true.
- * Highlight defaults to the palette's first real colour (Yellow) — a genuine "the next click
- * applies this" answer, safely legible on both themes. Text colour does NOT default to the
- * palette's literal "Black" swatch the same way: `TEXT_COLORS`' Black is the exact same value
- * as this app's own dark-theme `--surface-raised`, so the letter and the bar beneath it would vanish into
- * the toolbar on a dark screen — caught by screenshotting both themes, not by reading the
- * code, which looked identical to the highlight fix and was not. Unset text genuinely renders
- * in the theme's own ink colour, so `var(--text-primary)` is both the honest answer and the
- * one every theme can already show. */
-const DEFAULT_TEXT_SWATCH = "var(--text-primary)";
-/* The value behind DEFAULT_TEXT_SWATCH is read off the live document (see `defaultInk` below),
- * never written here as a second copy of the token: the swatch is PAINTED with var(--text-primary)
- * so it follows the theme, and deciding whether two runs AGREE needs a comparable value that
- * follows the theme with it. */
-const DEFAULT_HIGHLIGHT_SWATCH = HIGHLIGHT_COLORS.find((c) => c.value)?.value || null;
-
-/* ⛔ THE PALETTES MOVED TO `lib/notesFormatPalette.js` (NEW-MINI-TOOLBAR). The right-click
- * mini-toolbar offers the same choices, and two copies of a palette is how this bar and that
- * menu come to disagree about what "Teal" is — a difference nobody notices until two paragraphs
- * of one note are subtly different colours. The reasoning for these being LITERAL colours rather
- * than theme tokens moved with them; read it there. */
-
-/* The table grid picker's shape (B1372). It OPENS at this size and GROWS as the pointer
- * reaches its edge, up to the max — the Word/OneNote behaviour, where a big table is
- * reachable by dragging further rather than by a dialog asking for two numbers. */
-const GRID_START = 6;
-const GRID_MAX = 12;
-
-/* ---- primitives (module scope — MODULE-SCOPE-COMPONENTS) --------------------------------- */
-
-const stop = (e) => e.preventDefault();
-
-function Icon({ children, size = 15 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor"
-      strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      {children}
-    </svg>
-  );
-}
-
-/* `big` (NEW-2, B849633): every control on the phone-width bar and its More sheet asks for
- * this — a 44px tap target (WCAG 2.5.5), the same floor the food module's phone controls
- * already use. `false` (the default, every desktop call site) reproduces this file's
- * pre-existing output exactly. */
-/* ⛔ A TOGGLE HAS THREE STATES, AND `undefined` WAS BEING USED FOR ONE OF THEM
- * (NEW-TOOLBAR-STATE). This shipped as `aria-pressed={active ? "true" : undefined}`, which
- * means Bold / Italic / Underline / Strikethrough exposed **no state whatsoever** whenever they
- * were off — the owner measured exactly that on the live toolbar, absent in every case he could
- * sample. And `active` itself came from `editor.isActive(...)`, which on a RANGE answers "does
- * this mark cover the WHOLE range" — so half-bold text reported a confident **false**,
- * indistinguishable from text with no bold in it anywhere.
+/* `big` (B849633): every control on a narrow (phone-width) bar asks for this — a 44px tap
+ * target (WCAG 2.5.5). `false` (the default, every desktop call site) reproduces the
+ * pre-existing output exactly.
  *
- * `pressed` is the honest three-state answer ("true" / "false" / "mixed" — see
- * lib/notesMixedSelection.js's `togglePressed`) and it drives BOTH the accessible state and the
- * paint, so the two can never drift. `active` stays for the handful of buttons that are not
- * toggles at all and merely want the accent treatment (the More sheet's own trigger); a button
- * that is neither still emits no `aria-pressed`, which is correct — Undo is not a toggle.
- *
- * The MIXED paint is deliberately neither of the other two: an accent OUTLINE with no fill, so
- * "some of this is bold" cannot be misread at a glance as either "all of it is" or "none of it
- * is". Tokens only, per docs/DESIGN.md — no raw hex on a control. */
+ * ⛔ A TOGGLE HAS THREE STATES, AND `undefined` WAS BEING USED FOR ONE OF THEM. `pressed` is
+ * the honest three-state answer ("true" / "false" / "mixed" — see lib/notesMixedSelection.js's
+ * `togglePressed`) and it drives BOTH the accessible state and the paint. `active` stays for
+ * the handful of buttons that are not toggles at all and merely want the accent treatment; a
+ * button that is neither still emits no `aria-pressed`, which is correct — Undo is not a
+ * toggle. The MIXED paint is an accent OUTLINE with no fill, so "some of this is bold" cannot
+ * be misread as either "all of it is" or "none of it is". */
 function TBButton({ onClick, active, pressed, disabled, title, label, children, testid, wide, big }) {
   const mixed = pressed === "mixed";
   const on = pressed === "true" || (pressed === undefined && !!active);
+  const tt = useHoverTooltip();
+  const name = mixed ? `${title} — mixed` : title;
   return (
-    <button
-      type="button"
-      title={mixed ? `${title} — mixed` : title}
-      aria-label={mixed ? `${title} — mixed` : title}
-      aria-pressed={pressed !== undefined ? pressed : (active ? "true" : undefined)}
-      data-testid={testid}
-      disabled={disabled}
-      onMouseDown={stop}
-      onClick={onClick}
-      style={{
-        display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4,
-        minWidth: big ? 44 : (wide ? undefined : 28), height: big ? 44 : 28,
-        padding: big ? "0 12px" : (wide ? "0 9px" : "0 5px"),
-        flex: big ? "0 0 auto" : undefined,
-        border: "1px solid", borderColor: (on || mixed) ? "var(--accent-notes)" : "transparent",
-        borderRadius: RADIUS.control,
-        background: on ? "var(--accent-notes)" : "transparent",
-        color: on ? "var(--on-accent-notes)" : (mixed ? "var(--accent-notes-text)" : "var(--text-secondary)"),
-        opacity: disabled ? 0.4 : 1,
-        cursor: disabled ? "default" : "pointer",
-        font: "inherit", fontSize: big ? 15 : 13, fontWeight: (on || mixed) ? 650 : 500, lineHeight: 1,
-      }}
-    >
-      {children}{label ? <span>{label}</span> : null}
-    </button>
+    <span style={{ position: "relative", display: "inline-flex" }}>
+      <button
+        ref={tt.ref}
+        type="button"
+        aria-label={name}
+        aria-pressed={pressed !== undefined ? pressed : (active ? "true" : undefined)}
+        data-testid={testid}
+        disabled={disabled}
+        onMouseDown={stop}
+        onMouseEnter={tt.show}
+        onMouseLeave={tt.hide}
+        onFocus={tt.show}
+        onBlur={tt.hide}
+        onClick={onClick}
+        style={{
+          display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4,
+          minWidth: big ? 44 : (wide ? undefined : 28), height: big ? 44 : 28,
+          padding: big ? "0 12px" : (wide ? "0 9px" : "0 5px"),
+          flex: big ? "0 0 auto" : undefined,
+          border: "1px solid", borderColor: (on || mixed) ? "var(--accent-notes)" : "transparent",
+          borderRadius: RADIUS.control,
+          background: on ? "var(--accent-notes)" : "transparent",
+          color: on ? "var(--on-accent-notes)" : (mixed ? "var(--accent-notes-text)" : "var(--text-secondary)"),
+          opacity: disabled ? 0.4 : 1,
+          cursor: disabled ? "default" : "pointer",
+          font: "inherit", fontSize: big ? 15 : 13, fontWeight: (on || mixed) ? 650 : 500, lineHeight: 1,
+        }}
+      >
+        {children}{label ? <span>{label}</span> : null}
+      </button>
+      {!disabled && tt.tip ? <Tip tip={tt.tip} text={name} /> : null}
+    </span>
   );
 }
 
-
-/** A LISTBOX POPOVER, not a native `<select>` — the fix for B1139216's "dead click".
+/** A LISTBOX POPOVER, not a native `<select>` — the fix for B1139216's "dead click" (a native
+ *  `<select>`'s `change` event does not fire when the option picked is already the one
+ *  selected). A `<button onClick>` fires on every press, full stop — the only shape this
+ *  repo's own harnesses can drive and prove headless too (a native select's real popup cannot
+ *  be opened and clicked in headless Chromium).
  *
- * ⛔ A NATIVE `<select>`'s `change` event does not fire when the option picked is already the one
- * selected. Measured live: three blocks at 24/18/9px, all selected, the box wrongly read "24" (the
- * first block's size, not a real answer for a mixed selection — see notesMixedSelection.js), and
- * picking "24" again — a real, distinct value the user could see was already showing — did nothing
- * at all, silently. Blanking the box on a mixed selection (this file's other change) fixes the
- * REPORTED case, because the box then reads "" and any pick is a genuine value change. But a dead
- * click must be **structurally impossible**, not merely usually avoided: a UNIFORM selection sitting
- * at 12px, re-picked at 12px on purpose (to force it onto some inline run the readout does not
- * separately show — his second, unproven report), must also apply. A `<button onClick>` has no
- * "previous value" to compare against, so it fires on every press, full stop — which is also the
- * only shape this repo's own harnesses can drive and prove headless (a native select's real popup
- * cannot be opened and clicked in headless Chromium; ColorPopover/CalloutControl/TableGridPicker
- * already use exactly this shape for the same reason).
- *
- * `mixed` suppresses the "this option is the current one" highlight — showing a highlighted row
- * during a mixed selection would claim an answer the selection does not have. */
-/* `displayLabel` (NEW-SPACING-3): the CLOSED trigger normally just shows the matched option's
- * own label, which is right for Block style / Font size (short by construction — "H2", "18").
- * Line spacing's option labels are the long list-row text ("Lines: Double"), and this control
- * is deliberately kept narrow (PANEL-BREVITY — the row is full at a laptop width). An explicit
- * override lets the trigger show a SHORT current-state glyph while the dropdown keeps its own
- * full, readable option text — the one thing a native `<select>` cannot do, because it ties the
- * closed box to the exact string of whatever option is selected. */
-function FormatMenu({ title, testid, value, mixed, options, onPick, big, width = 116, displayLabel, prefix }) {
+ *  `iconTrigger` (NEW-1): the paragraph-style control is an ICON dropdown (a pilcrow, no word
+ *  on the bar at all) rather than the wide "STYLE Body text" chip the old bar used — when set,
+ *  the trigger renders just the icon + a small chevron, sized like `TBButton`, and `displayLabel`
+ *  no longer needs to fit inside a visible box (the popover's own rows still show full text). */
+function FormatMenu({ title, testid, value, mixed, options, onPick, big, width = 116, displayLabel, prefix, iconTrigger, disabled }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
   const { popRef, clampStyle } = usePopoverClampLeft(open);
+  const tt = useHoverTooltip();
+
   useEffect(() => {
     if (!open) return undefined;
     const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
@@ -248,39 +292,60 @@ function FormatMenu({ title, testid, value, mixed, options, onPick, big, width =
 
   const current = mixed ? null : options.find((o) => o.value === value);
   const label = mixed ? "" : (displayLabel != null ? displayLabel : (current ? current.label : ""));
+  const name = mixed ? `${title} — mixed` : title;
 
   return (
     <span ref={wrapRef} style={{ position: "relative", display: "inline-flex" }}>
       <button
+        ref={tt.ref}
         type="button"
-        title={mixed ? `${title} — mixed` : title}
-        aria-label={mixed ? `${title} — mixed` : title}
+        aria-label={name}
         aria-haspopup="listbox"
         aria-expanded={open}
         data-testid={testid}
+        disabled={disabled}
         onMouseDown={stop}
+        onMouseEnter={tt.show}
+        onMouseLeave={tt.hide}
+        onFocus={tt.show}
+        onBlur={tt.hide}
         onClick={() => setOpen((o) => !o)}
-        style={{
+        style={iconTrigger ? {
+          display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 1,
+          minWidth: big ? 44 : 28, height: big ? 44 : 28, padding: big ? "0 8px" : "0 3px",
+          flex: big ? "0 0 auto" : undefined,
+          border: "1px solid transparent", borderRadius: RADIUS.control,
+          background: "transparent", color: "var(--text-secondary)",
+          opacity: disabled ? 0.4 : 1, cursor: disabled ? "default" : "pointer",
+        } : {
           display: "inline-flex", alignItems: "center", justifyContent: "space-between", gap: 4,
           height: big ? 44 : 28, width: big ? Math.max(width, 132) : width, padding: "0 6px 0 8px",
           flex: big ? "0 0 auto" : undefined,
           border: "1px solid var(--border-default)", borderRadius: RADIUS.control,
           background: "var(--surface-raised)", color: "var(--text-primary)",
-          font: "inherit", fontSize: big ? 15 : 13, cursor: "pointer",
+          opacity: disabled ? 0.4 : 1,
+          font: "inherit", fontSize: big ? 15 : 13, cursor: disabled ? "default" : "pointer",
         }}
       >
-        {/* `prefix` is a standing caption that names WHAT KIND of thing the box holds, so two
-            adjacent dropdowns cannot be mistaken for each other (NEW-3 amendment). It is not a
-            value and never changes with the selection. */}
-        {prefix ? (
-          <span aria-hidden="true" style={{
-            flex: "0 0 auto", fontSize: big ? 11 : 9.5, fontWeight: 700, letterSpacing: "0.06em",
-            textTransform: "uppercase", color: "var(--text-tertiary)", marginRight: 4,
-          }}>{prefix}</span>
-        ) : null}
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "left", flex: "1 1 auto" }}>{label}</span>
-        <Icon size={11}><path d="M4 6.5L8 10.5l4-4" /></Icon>
+        {iconTrigger ? (
+          <>{iconTrigger}<Icon size={9}><path d="M4 6.5L8 10.5l4-4" /></Icon></>
+        ) : (
+          <>
+            {/* `prefix` is a standing caption that names WHAT KIND of thing the box holds, so two
+                adjacent dropdowns cannot be mistaken for each other. It is not a value and never
+                changes with the selection. */}
+            {prefix ? (
+              <span aria-hidden="true" style={{
+                flex: "0 0 auto", fontSize: big ? 11 : 9.5, fontWeight: 700, letterSpacing: "0.06em",
+                textTransform: "uppercase", color: "var(--text-tertiary)", marginRight: 4,
+              }}>{prefix}</span>
+            ) : null}
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "left", flex: "1 1 auto" }}>{label}</span>
+            <Icon size={11}><path d="M4 6.5L8 10.5l4-4" /></Icon>
+          </>
+        )}
       </button>
+      {!disabled && tt.tip && !open ? <Tip tip={tt.tip} text={name} /> : null}
       {open && (
         <div
           ref={popRef}
@@ -309,7 +374,7 @@ function FormatMenu({ title, testid, value, mixed, options, onPick, big, width =
                 onMouseDown={stop}
                 onClick={() => { onPick(o.value); setOpen(false); }}
                 style={{
-                  display: "flex", alignItems: "center", width: "100%", textAlign: "left",
+                  display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left",
                   padding: big ? "10px 10px" : "5px 8px", minHeight: big ? 44 : undefined,
                   borderRadius: RADIUS.control, cursor: "pointer", border: "none",
                   background: selected ? "var(--accent-notes)" : "transparent",
@@ -329,16 +394,9 @@ function Sep() {
   return <span aria-hidden="true" style={{ width: 1, height: 18, background: "var(--border-default)", margin: "0 3px", flex: "0 0 auto" }} />;
 }
 
-/* TEXT COLOUR vs HIGHLIGHT, TOLD APART WITHOUT HOVERING (B1370).
- *
- * These two controls sat side by side drawing the IDENTICAL glyph — a letter "A" over a
- * bar — so the only thing distinguishing "colour the letters" from "run a marker behind
- * them" was a tooltip you had to stop and wait for. Two different actions that look the
- * same are one control the user has to guess at every time.
- *
- * Now the glyph says which is which: text colour is a letter sitting ON its colour bar
- * (the bar is the ink), highlight is a MARKER PEN laying a band of colour down. Each one
- * still carries the colour it will apply, so the button also shows what it will DO. */
+/* TEXT COLOUR vs HIGHLIGHT, TOLD APART WITHOUT HOVERING (B1370). Text colour is a letter
+ * sitting ON its colour bar (the bar is the ink), highlight is a MARKER PEN laying a band of
+ * colour down. Each one still carries the colour it will apply. */
 const InkGlyph = ({ swatch }) => (
   <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
     <span style={{ fontSize: 12, fontWeight: 800, lineHeight: 1, color: swatch || "inherit" }}>A</span>
@@ -352,12 +410,6 @@ const InkGlyph = ({ swatch }) => (
 
 const MarkerGlyph = ({ swatch }) => (
   <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-    {/* ⛔ ICON-1: this used to be a pointed pen nib — the universal glyph for EDIT, not
-     * highlight — drawn one size smaller than every other icon on the bar (13px against the
-     * bar's own 15px, a population of one). A highlighter reads as a highlighter because of
-     * its TIP: broad and flat, never a point. The barrel is the same stroke outline every
-     * sibling icon uses; the tip is a small SOLID wedge, wide enough that it cannot be
-     * mistaken for a pencil's point at this size, held at the same read-as-a-pen angle. */}
     <Icon size={15}>
       <g transform="rotate(35 8 8)">
         <rect x="6" y="1.3" width="4" height="6.2" rx="0.9" />
@@ -374,8 +426,10 @@ const MarkerGlyph = ({ swatch }) => (
   </span>
 );
 
-/** A swatch popover. Closes on pick, on Escape, and on an outside pointer press. */
-function ColorPopover({ title, swatch, colors, onPick, testid, glyph = "ink", big, mixed }) {
+/** A swatch popover. Closes on pick, on Escape, and on an outside pointer press. NEW-1: the
+ *  trigger now carries its own tiny chevron beside the glyph ("icon + tiny chevron, opens
+ *  palette"), which it did not before — the glyph alone did not say "this opens something". */
+function ColorPopover({ title, swatch, colors, onPick, testid, glyph = "ink", big, mixed, disabled }) {
   const name = mixed ? `${title} — mixed` : title;
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
@@ -391,14 +445,10 @@ function ColorPopover({ title, swatch, colors, onPick, testid, glyph = "ink", bi
 
   return (
     <span ref={wrapRef} style={{ position: "relative", display: "inline-flex" }}>
-      {/* ⛔ A MIXED RANGE SHOWS NO SWATCH (NEW-TOOLBAR-STATE). The glyph's bar IS the readout —
-          it is how the button says what colour it will apply and what colour the text already
-          is — so painting the caret's colour there for a range holding three colours is the
-          same guess the Font box was making with "Default". `swatch: null` falls through to the
-          glyph's own neutral outline, and the accessible name says "mixed". */}
-      <TBButton title={name} testid={testid} big={big} pressed={undefined}
+      <TBButton title={name} testid={testid} big={big} pressed={undefined} disabled={disabled}
         onClick={() => setOpen((o) => !o)}>
         {glyph === "marker" ? <MarkerGlyph swatch={mixed ? null : swatch} /> : <InkGlyph swatch={mixed ? null : swatch} />}
+        <Icon size={8}><path d="M4 6.5L8 10.5l4-4" /></Icon>
       </TBButton>
       {open && (
         <div
@@ -409,7 +459,7 @@ function ColorPopover({ title, swatch, colors, onPick, testid, glyph = "ink", bi
             position: "absolute", top: big ? 48 : 32, left: 0, zIndex: 40, padding: 8,
             display: "grid", gridTemplateColumns: "repeat(5, 22px)", gap: 6,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
-            borderRadius: RADIUS.control, boxShadow: "0 12px 32px rgba(0,0,0,0.20)",
+            borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
             ...clampStyle,
           }}
         >
@@ -435,16 +485,7 @@ function ColorPopover({ title, swatch, colors, onPick, testid, glyph = "ink", bi
   );
 }
 
-/** INSERT A TABLE BY DRAGGING OVER A GRID (B1372) — the Word / Excel / OneNote gesture.
- *
- *  It replaces a one-shot button that always inserted the same 3×3 and left you to add the
- *  other rows one at a time. Sweeping the pointer across the grid previews the size, the
- *  running count is written out so you are never counting squares, and releasing inserts.
- *  The grid GROWS when the pointer reaches its edge, so a big table needs no dialog — which
- *  is the house rule, not a preference: `window.prompt` is banned in this module.
- *
- *  Keyboard-reachable on purpose: arrows resize the preview, Enter inserts, Esc closes. A
- *  gesture-only control is one a keyboard user simply cannot use. */
+/** INSERT A TABLE BY DRAGGING OVER A GRID (B1372) — the Word / Excel / OneNote gesture. */
 function TableGridPicker({ onInsert, big }) {
   const [open, setOpen] = useState(false);
   const [dim, setDim] = useState({ rows: 0, cols: 0 });
@@ -463,9 +504,6 @@ function TableGridPicker({ onInsert, big }) {
     return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); };
   }, [open]);
 
-  /* Reaching the last row/column pushes the grid one further, up to the cap — the same
-   * "keep dragging for a bigger table" affordance Word has. It never shrinks mid-gesture,
-   * because a grid collapsing under the pointer would move the cell you were aiming at. */
   const hover = (r, c) => {
     setDim({ rows: r, cols: c });
     setGrid((g) => ({
@@ -528,7 +566,7 @@ function TableGridPicker({ onInsert, big }) {
             position: "absolute", top: big ? 48 : 32, left: 0, zIndex: 40, padding: 8,
             display: "flex", flexDirection: "column", gap: 6,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
-            borderRadius: RADIUS.control, boxShadow: "0 12px 32px rgba(0,0,0,0.20)",
+            borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
             ...clampStyle,
           }}
         >
@@ -543,7 +581,6 @@ function TableGridPicker({ onInsert, big }) {
           >
             {cells}
           </div>
-          {/* The running size, written out — nobody should have to count squares. */}
           <span data-testid="nt-table-size" style={{ fontSize: 11.5, fontWeight: 700, textAlign: "center", color: "var(--text-secondary)" }}>
             {dim.rows && dim.cols ? `${dim.cols} × ${dim.rows} table` : "Drag to size"}
           </span>
@@ -559,6 +596,7 @@ function LinkControl({ editor, big }) {
   const [href, setHref] = useState("");
   const inputRef = useRef(null);
   const active = editor.isActive("link");
+  const wrapRef = useRef(null);
   const { popRef, clampStyle } = usePopoverClampLeft(open);
 
   useEffect(() => { if (open && inputRef.current) inputRef.current.focus(); }, [open]);
@@ -575,7 +613,7 @@ function LinkControl({ editor, big }) {
   };
 
   return (
-    <span style={{ position: "relative", display: "inline-flex" }}>
+    <span ref={wrapRef} style={{ position: "relative", display: "inline-flex" }}>
       <TBButton title={active ? "Remove link" : "Add link"} active={active} testid="nt-link" big={big} onClick={begin}>
         <Icon><path d="M6.5 9.5a2.5 2.5 0 0 1 0-3.5l2-2a2.5 2.5 0 0 1 3.5 3.5l-1 1" /><path d="M9.5 6.5a2.5 2.5 0 0 1 0 3.5l-2 2A2.5 2.5 0 0 1 4 8.5l1-1" /></Icon>
       </TBButton>
@@ -586,7 +624,7 @@ function LinkControl({ editor, big }) {
           style={{
             position: "absolute", top: big ? 48 : 32, left: 0, zIndex: 40, padding: 8, display: "flex", gap: 6,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
-            borderRadius: RADIUS.control, boxShadow: "0 12px 32px rgba(0,0,0,0.20)",
+            borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
             ...clampStyle,
           }}
         >
@@ -613,72 +651,10 @@ function LinkControl({ editor, big }) {
   );
 }
 
-/** The overflow drawer. Closes on Escape and on an outside press, like the colour popover.
- *
- *  ⛔ WHY THIS EXISTS (B1317). The bar was ONE flat row of ~35 controls, which wrapped onto
- *  a second row at an ordinary laptop width — so the least-used control cost the note a
- *  strip of writing space on every screen, permanently. Everything was equally loud, so
- *  nothing read as primary. The split is by FREQUENCY, not by category: what a person
- *  reaches for while writing stays on the row, and the long tail (fonts, sizes, alignment,
- *  quotes, rules) is one click away. PANEL-BREVITY's instinct applied to the writing
- *  surface: the scarcest space on this screen is the page, not the toolbar. */
-function OverflowMenu({ children, testid = "nt-more", big }) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef(null);
-  useEffect(() => {
-    if (!open) return undefined;
-    const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
-    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("pointerdown", onDown, true);
-    document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); };
-  }, [open]);
-
-  /* ⛔ ON PHONE THIS IS A SHEET, NOT A POPOVER (NEW-2, B849633). `position:absolute` anchored
-   * to the trigger runs the panel off a 390px-class screen the moment the trigger sits near
-   * the right/bottom edge of a scrolled toolbar row — a `position:fixed` sheet, pinned to the
-   * bottom and clear of the home indicator, cannot. `wrapRef` still contains it either way
-   * (fixed positioning doesn't change DOM containment), so the outside-tap-closes listener
-   * above is unaffected. `false` (every desktop call) is untouched. */
-  const panelStyle = big
-    ? {
-      position: "fixed", left: 8, right: 8, bottom: "max(8px, env(safe-area-inset-bottom))",
-      maxHeight: "min(70vh, 520px)", overflowY: "auto", zIndex: 60, padding: 10,
-      display: "flex", flexDirection: "column", gap: 12,
-      background: "var(--surface-raised)", border: "1px solid var(--border-default)",
-      borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
-    }
-    : {
-      position: "absolute", top: 32, right: 0, zIndex: 40, padding: 8, width: 268,
-      display: "flex", flexDirection: "column", gap: 7,
-      background: "var(--surface-raised)", border: "1px solid var(--border-default)",
-      borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
-    };
-
-  return (
-    <span ref={wrapRef} style={{ position: "relative", display: "inline-flex" }}>
-      <TBButton title="More formatting" testid={testid} active={open} wide label="More" big={big} onClick={() => setOpen((o) => !o)}>
-        <Icon><path d="M4 6.5L8 10.5l4-4" /></Icon>
-      </TBButton>
-      {open && (
-        <div data-testid={`${testid}-panel`} onMouseDown={stop} style={panelStyle}>
-          {children}
-        </div>
-      )}
-    </span>
-  );
-}
-
-/** ⛔ THE CALLOUT CONTROL PICKS A **TONE**, NOT A COLOUR (NEW-7).
- *
- *  The five are GitHub's five — Note / Tip / Important / Warning / Caution — because the
- *  Markdown export writes them as `> [!NOTE]` and friends, which is a real rendered
- *  construct there rather than an HTML approximation. A sixth would have no marker to map
- *  to; adding one means deciding its fallback first (lib/notesCalloutNode.js says the same).
- *
- *  Pressing it with the caret already inside a callout CHANGES that callout's tone rather
- *  than nesting a second one inside it. Not a dialog (house rule): an inline popover that
- *  closes on Escape and on an outside press, like every other popover on this bar. */
+/** ⛔ THE CALLOUT CONTROL PICKS A TONE, NOT A COLOUR. The five are GitHub's five — Note / Tip /
+ *  Important / Warning / Caution — because the Markdown export writes them as `> [!NOTE]` and
+ *  friends. Pressing it with the caret already inside a callout CHANGES that callout's tone
+ *  rather than nesting a second one inside it. */
 function CalloutControl({ editor, big }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
@@ -717,7 +693,7 @@ function CalloutControl({ editor, big }) {
             position: "absolute", top: big ? 48 : 32, left: 0, zIndex: 40, padding: 5, width: 168,
             display: "flex", flexDirection: "column", gap: 2,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
-            borderRadius: RADIUS.control, boxShadow: "0 12px 32px rgba(0,0,0,0.20)",
+            borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
             ...clampStyle,
           }}
         >
@@ -758,15 +734,6 @@ function CalloutControl({ editor, big }) {
   );
 }
 
-function MenuGroup({ label, children }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)" }}>{label}</span>
-      <span style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 3 }}>{children}</span>
-    </div>
-  );
-}
-
 /* ---- icon glyphs ------------------------------------------------------------------------ */
 
 const AlignIcon = ({ lines }) => (
@@ -776,7 +743,6 @@ const ALIGNS = [
   { id: "left", title: "Align left", lines: [[2.5, 13.5], [2.5, 9.5], [2.5, 13.5], [2.5, 9.5]] },
   { id: "center", title: "Align center", lines: [[2.5, 13.5], [4.5, 11.5], [2.5, 13.5], [4.5, 11.5]] },
   { id: "right", title: "Align right", lines: [[2.5, 13.5], [6.5, 13.5], [2.5, 13.5], [6.5, 13.5]] },
-  { id: "justify", title: "Justify", lines: [[2.5, 13.5], [2.5, 13.5], [2.5, 13.5], [2.5, 13.5]] },
 ];
 
 const BulletIcon = () => (
@@ -794,89 +760,358 @@ const IndentIcon = ({ out }) => (
   <Icon><line x1="6" y1="3" x2="14" y2="3" /><line x1="6" y1="8" x2="14" y2="8" /><line x1="6" y1="13" x2="14" y2="13" />
     <path d={out ? "M4 5.5L1.5 8L4 10.5" : "M1.5 5.5L4 8L1.5 10.5"} /></Icon>
 );
+const SpacingIcon = () => (
+  <Icon><line x1="3" y1="3.5" x2="13" y2="3.5" /><line x1="3" y1="8" x2="13" y2="8" /><line x1="3" y1="12.5" x2="13" y2="12.5" /></Icon>
+);
 const TableIcon = () => (
   <Icon><rect x="2" y="3" width="12" height="10" rx="1" /><line x1="2" y1="6.5" x2="14" y2="6.5" /><line x1="6" y1="3" x2="6" y2="13" /><line x1="10" y1="3" x2="10" y2="13" /></Icon>
 );
-
-
 const ImageIcon = () => (
   <Icon><rect x="2" y="3" width="12" height="10" rx="1.5" /><circle cx="5.75" cy="6.25" r="1.1" /><path d="M2.5 11.5l3.2-3 2.6 2.4 2-1.8 3.2 2.9" /></Icon>
 );
-/* Connect two boxes: two boxes and an arrow between them — the thing it makes, not a metaphor
- * (ICON-3, carried over unchanged from the retired sketch-mode "Box" button — NEW-2). Side-by-side
- * boxes with a straight horizontal arrow between them read at a glance at this bar's actual 15px;
- * the arrowhead is the same vertex-plus-two-wings chevron this file already draws for the
- * history-step icons at the start of the row, just pointing the other way. */
+/* Connect two boxes: two boxes and an arrow between them — the thing it makes, not a metaphor. */
 const ArrowConnectIcon = () => (
   <Icon><rect x="0.5" y="5.2" width="5.4" height="5.6" rx="1.2" /><rect x="10.1" y="5.2" width="5.4" height="5.6" rx="1.2" /><path d="M6.3 8H9.5M7.5 6.1L9.5 8L7.5 9.9" /></Icon>
 );
-const PrintIcon = () => (
-  <Icon><path d="M4.5 6V2.5h7V6" /><rect x="2" y="6" width="12" height="5" rx="1.2" /><path d="M4.5 9.5h7v4h-7z" /></Icon>
-);
+const PlusIcon = () => (<Icon><line x1="8" y1="3" x2="8" y2="13" /><line x1="3" y1="8" x2="13" y2="8" /></Icon>);
+const PilcrowIcon = () => (<Icon><path d="M6.5 3h5.5" /><path d="M12 3v10" /><path d="M8.5 3a2.75 2.75 0 0 0 0 5.5H9.5" /><path d="M8.5 8.5V13" /></Icon>);
 
-/* ---- the bar ----------------------------------------------------------------------------
- *
- * GROUPED BY FREQUENCY, NOT BY CATEGORY (B1317). The visible row is what a person reaches
- * for while writing — undo, block style, the four weights, colour, lists, link, table,
- * picture. Everything else lives one click away in "More": fonts, sizes, alignment, quotes,
- * code, rules, indent. The table row still appears only when the caret is genuinely inside
- * a table, which is the same principle applied a level down.
- */
+const SupText = () => <span style={{ fontSize: 12, fontWeight: 700 }}>X<span style={{ fontSize: 8, verticalAlign: "super" }}>2</span></span>;
+const SubText = () => <span style={{ fontSize: 12, fontWeight: 700 }}>X<span style={{ fontSize: 8, verticalAlign: "sub" }}>2</span></span>;
+
+/* ---- NEW-4: the size control — a typed stepper (4–400) plus a preset ladder ------------- */
+
+function SizeMenu({ testid, value, mixed, displayLabel, onPick, big }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const wrapRef = useRef(null);
+  const { popRef, clampStyle } = usePopoverClampLeft(open);
+
+  useEffect(() => { if (open) setText(value != null ? String(value) : ""); }, [open, value]);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+
+  /* ⛔ VALIDATE ON BLUR/ENTER, CLAMP, REJECT NON-NUMBERS (NEW-4). A non-numeric value simply
+   * reverts to the last real one — never applies NaN, never leaves the field silently wrong. */
+  const commitTyped = () => {
+    const n = Math.round(Number(text));
+    if (Number.isFinite(n)) onPick(Math.max(SIZE_MIN, Math.min(SIZE_MAX, n)));
+    setText(value != null ? String(value) : "");
+  };
+  const step = (delta) => {
+    const base = Number.isFinite(Number(text)) ? Number(text) : (value ?? DEFAULT_SIZE);
+    const n = Math.max(SIZE_MIN, Math.min(SIZE_MAX, Math.round(base) + delta));
+    setText(String(n));
+    onPick(n);
+  };
+
+  return (
+    <span ref={wrapRef} style={{ position: "relative", display: "inline-flex" }}>
+      <button
+        type="button"
+        aria-label="Font size"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        data-testid={testid}
+        onMouseDown={stop}
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: "inline-flex", alignItems: "center", justifyContent: "space-between", gap: 4,
+          height: big ? 44 : 28, width: big ? 76 : 56, padding: "0 4px 0 8px",
+          flex: big ? "0 0 auto" : undefined,
+          border: "1px solid var(--border-default)", borderRadius: RADIUS.control,
+          background: "var(--surface-raised)", color: "var(--text-primary)",
+          font: "inherit", fontSize: big ? 15 : 13, cursor: "pointer",
+        }}
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "left", flex: "1 1 auto" }}>
+          {mixed ? "" : displayLabel}
+        </span>
+        <Icon size={11}><path d="M4 6.5L8 10.5l4-4" /></Icon>
+      </button>
+      {open && (
+        <div
+          ref={popRef}
+          data-testid={`${testid}-menu`}
+          onMouseDown={stop}
+          style={{
+            position: "absolute", top: big ? 48 : 32, left: 0, zIndex: 40, padding: 8, width: 176,
+            display: "flex", flexDirection: "column", gap: 8,
+            background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+            borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
+            ...clampStyle,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <button type="button" aria-label="Decrease size" onMouseDown={stop} onClick={() => step(-1)}
+              style={{ width: 26, height: 26, borderRadius: RADIUS.control, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)", cursor: "pointer", font: "inherit", fontWeight: 700 }}>−</button>
+            <input
+              data-testid={`${testid}-input`}
+              value={text}
+              inputMode="numeric"
+              onChange={(e) => setText(e.target.value.replace(/[^0-9]/g, ""))}
+              onBlur={commitTyped}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); commitTyped(); }
+                if (e.key === "Escape") { e.preventDefault(); setOpen(false); }
+              }}
+              style={{
+                flex: 1, minWidth: 0, height: 26, textAlign: "center", borderRadius: RADIUS.control,
+                border: "1px solid var(--border-default)", background: "var(--surface-page)",
+                color: "var(--text-primary)", font: "inherit", fontSize: 13,
+              }}
+            />
+            <button type="button" aria-label="Increase size" onMouseDown={stop} onClick={() => step(1)}
+              style={{ width: 26, height: 26, borderRadius: RADIUS.control, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)", cursor: "pointer", font: "inherit", fontWeight: 700 }}>+</button>
+          </div>
+          <span style={{ fontSize: 10.5, color: "var(--text-tertiary)", textAlign: "center" }}>Type any size from {SIZE_MIN} to {SIZE_MAX}</span>
+          <div style={{ height: 1, background: "var(--border-default)" }} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 1, maxHeight: 220, overflowY: "auto" }}>
+            {SIZES.map((s) => {
+              const selected = !mixed && s === value;
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  data-testid={`${testid}-opt-${s}`}
+                  onMouseDown={stop}
+                  onClick={() => { onPick(s); setOpen(false); }}
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
+                    padding: "5px 8px", borderRadius: RADIUS.control, cursor: "pointer", border: "none",
+                    background: selected ? "var(--accent-notes)" : "transparent",
+                    color: selected ? "var(--on-accent-notes)" : "var(--text-primary)",
+                    font: "inherit", fontSize: 12.5, fontWeight: selected ? 650 : 500,
+                  }}
+                >
+                  <span>{s}</span>
+                  {s === DEFAULT_SIZE ? (
+                    <span style={{ fontSize: 9.5, fontWeight: 700, opacity: 0.75 }}>Default</span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </span>
+  );
+}
+
+/* ---- NEW-4: the spacing popover — line spacing, before/after steppers, presets ---------- */
+
+function Stepper({ testid, value, onChange, big }) {
+  const set = (n) => onChange(Math.max(0, Math.min(400, n)));
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <button type="button" aria-label="Decrease" onMouseDown={stop} onClick={() => set(value - 2)}
+        style={{ width: 22, height: 22, borderRadius: RADIUS.control, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)", cursor: "pointer", font: "inherit", fontWeight: 700 }}>−</button>
+      <input
+        data-testid={testid}
+        value={value}
+        inputMode="numeric"
+        onChange={(e) => { const n = Number(e.target.value.replace(/[^0-9]/g, "")); set(Number.isFinite(n) ? n : 0); }}
+        style={{ width: 40, height: 22, textAlign: "center", borderRadius: RADIUS.control, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)", font: "inherit", fontSize: 12.5 }}
+      />
+      <button type="button" aria-label="Increase" onMouseDown={stop} onClick={() => set(value + 2)}
+        style={{ width: 22, height: 22, borderRadius: RADIUS.control, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)", cursor: "pointer", font: "inherit", fontWeight: 700 }}>+</button>
+    </span>
+  );
+}
+
+function SpacingPopover({ lineHeight, spaceBefore, spaceAfter, onPick, onApplyWholePage, onReset, big, disabled }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+  const { popRef, clampStyle } = usePopoverClampLeft(open);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+
+  const before = spaceBefore ?? SPACE_BEFORE_DEFAULT;
+  const after = spaceAfter ?? SPACE_AFTER_DEFAULT;
+  const lh = lineHeight ?? SPACING_LINE_OPTIONS.find((o) => o.name === "Default")?.value;
+
+  return (
+    <span ref={wrapRef} style={{ position: "relative", display: "inline-flex" }}>
+      <TBButton title="Line and paragraph spacing" testid="nt-spacing" active={open} big={big} disabled={disabled}
+        onClick={() => setOpen((o) => !o)}>
+        <SpacingIcon /><Icon size={8}><path d="M4 6.5L8 10.5l4-4" /></Icon>
+      </TBButton>
+      {open && (
+        <div
+          ref={popRef}
+          data-testid="nt-spacing-panel"
+          onMouseDown={stop}
+          style={{
+            position: "absolute", top: big ? 48 : 32, left: 0, zIndex: 40, padding: 10, width: 236,
+            display: "flex", flexDirection: "column", gap: 10,
+            background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+            borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
+            ...clampStyle,
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)", marginBottom: 5 }}>Line spacing</div>
+            <div style={{ display: "flex", gap: 3 }}>
+              {SPACING_LINE_OPTIONS.map((o) => {
+                const selected = lh === o.value;
+                return (
+                  <button
+                    key={o.id}
+                    type="button"
+                    data-testid={`nt-spacing-line-${o.id}`}
+                    title={o.name}
+                    onMouseDown={stop}
+                    onClick={() => onPick({ lineHeight: o.value })}
+                    style={{
+                      flex: 1, padding: "5px 2px", borderRadius: RADIUS.control, cursor: "pointer",
+                      border: `1px solid ${selected ? "var(--accent-notes)" : "var(--border-default)"}`,
+                      background: selected ? "var(--accent-notes)" : "var(--surface-page)",
+                      color: selected ? "var(--on-accent-notes)" : "var(--text-primary)",
+                      font: "inherit", fontSize: 11.5, fontWeight: 650,
+                    }}
+                  >{o.value.toFixed(o.value % 1 ? 2 : 1)}</button>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)", marginBottom: 5 }}>Space between paragraphs</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>Before</span>
+                <Stepper testid="nt-spacing-before" value={before} big={big} onChange={(n) => onPick({ spaceBefore: n || null })} />
+              </span>
+              <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>After</span>
+                <Stepper testid="nt-spacing-after" value={after} big={big} onChange={(n) => onPick({ spaceAfter: n || null })} />
+              </span>
+            </div>
+          </div>
+          <div style={{ height: 1, background: "var(--border-default)" }} />
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)", marginBottom: 5 }}>Presets</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+              {SPACING_PRESETS.map((p) => {
+                const selected = lh === p.lineHeight && after === p.spaceAfter;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    data-testid={`nt-spacing-preset-${p.id}`}
+                    onMouseDown={stop}
+                    onClick={() => onPick({ lineHeight: p.lineHeight, spaceAfter: p.spaceAfter })}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
+                      padding: "6px 8px", borderRadius: RADIUS.control, cursor: "pointer",
+                      border: `1px solid ${selected ? "var(--accent-notes)" : "transparent"}`,
+                      background: selected ? "var(--accent-notes)" : "transparent",
+                      color: selected ? "var(--on-accent-notes)" : "var(--text-primary)",
+                      font: "inherit", fontSize: 12.5, fontWeight: 650, textAlign: "left",
+                    }}
+                  >
+                    <span>{selected ? "✓ " : ""}{p.label}</span>
+                    <span style={{ fontSize: 11, fontWeight: 500, opacity: 0.8 }}>{p.lineHeight.toFixed(p.lineHeight % 1 ? 2 : 1)} · {p.spaceAfter} after</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 2 }}>
+            <button type="button" data-testid="nt-spacing-whole-page" onMouseDown={stop} onClick={onApplyWholePage}
+              style={{ border: "none", background: "none", padding: 0, font: "inherit", fontSize: 11.5, fontWeight: 650, color: "var(--accent-notes-text)", cursor: "pointer", textDecoration: "underline" }}>
+              Apply to whole page
+            </button>
+            <button type="button" data-testid="nt-spacing-reset" onMouseDown={stop} onClick={onReset}
+              style={{ border: "none", background: "none", padding: 0, font: "inherit", fontSize: 11.5, fontWeight: 650, color: "var(--text-tertiary)", cursor: "pointer", textDecoration: "underline" }}>
+              Reset
+            </button>
+          </div>
+        </div>
+      )}
+    </span>
+  );
+}
+
+/* ---- NEW-9: the compact folds — one alignment dropdown, one "+" insert flyout ----------- */
+
+function AlignMenu({ value, mixed, onPick, big, disabled }) {
+  const current = ALIGNS.find((a) => a.id === value) || ALIGNS[0];
+  return (
+    <FormatMenu
+      title="Alignment" testid="nt-align-menu" big={big} width={120} disabled={disabled}
+      value={mixed ? "" : value} mixed={mixed}
+      iconTrigger={<AlignIcon lines={current.lines} />}
+      options={ALIGNS.map((a) => ({
+        label: <span style={{ display: "flex", alignItems: "center", gap: 6 }}><AlignIcon lines={a.lines} />{a.title}</span>,
+        value: a.id,
+      }))}
+      onPick={onPick}
+    />
+  );
+}
+
+/* ---- the bar ------------------------------------------------------------------------------ */
 
 const HEADING_OPTIONS = [
   { label: "Body text", value: "p" },
   ...HEADING_LEVELS.map((l) => ({ label: `Heading ${l}`, value: `h${l}` })),
 ];
-
-/* ⛔ THE PHONE BAR IS ONE SCROLLABLE ROW, NOT A COLUMN (NEW-2, B849633). Reported off the
- * owner's own screenshot: at phone width the bar's `flexWrap: "wrap"` stacked its ~35
- * controls into a column that ran the full height of the pane, leaving almost nothing for
- * the note itself once the keyboard was up. His decision, verbatim from the dispatch: ONE
- * compact row of the controls reached for constantly — undo/redo, bold, italic, bullet,
- * numbered, link — scrollable sideways like the shared header already does (B113/B485), with
- * everything else behind a More SHEET (a fixed bottom panel, not the desktop popover — see
- * OverflowMenu's own note on why). Every control below still carries its original `nt-*`
- * `data-testid`, moved or not, so `verify-phone-layout.mjs` can read the live DOM for the
- * row's contents rather than a hand-typed list that could drift from this file.
- *
- * ⛔ THE WAY BACK TO THE LIST IS PINNED AT THE LEFT OF THIS ROW, NOT ITS OWN BAND (B935968,
- * owner report: "the return to notes button takes up a whole header"). `Notes.jsx` used to
- * render "‹ Notes" as a full-width band above this bar — a whole row of chrome spent on one
- * small control. `onBack`, passed only while `narrow`, renders it here instead, as the FIRST
- * child of the row, `position: sticky; left: 0` so it stays put while the rest of the row
- * scrolls sideways underneath it (the same technique a frozen table column uses) — no second
- * scroll container needed, and the row's own `overflowX: auto` is untouched. It shares the
- * row's 44px `big` sizing so it never separately grows the bar's height. */
+const TITLE_OPTIONS = [{ label: "Title", value: "title" }];
 
 export default function NoteToolbar({
-  editor, onExport, onPrint, onAttach, onHistory, historyOpen, onBack, narrow = false,
-  zoomIndicator = null, onZoomReset,
-  /* ⛔ ARROWS BETWEEN BOXES (NEW-2) — click-to-connect. `arrowMode` is truthy while armed
-     (whether or not a source box has been picked yet — NoteEditor.jsx owns that distinction);
-     the toolbar only needs to know whether to show the button as "on". */
+  editor, onAttach, narrow = false, onBack,
+  /* ⛔ NEW-6 — see this file's own top-of-file note. */
+  onBeforeAction,
+  /* ⛔ NEW-5 — whether DOM focus is currently in the page title `<input>` (a sibling of this
+     editor, outside its document — NoteEditor.jsx owns the focus tracking and hands the bar
+     just the one boolean it needs) and the title's own default size when nothing is set yet. */
+  titleActive = false, titleDefaultSize = null,
   arrowMode = false, onToggleArrow,
 }) {
   const fileRef = useRef(null);
-  /* ⛔ WHAT AN UNSTYLED RUN IS ACTUALLY RENDERED IN (NEW-7). "Default" is not a font, and the
-   * owner is right that there is always a name: a run with no font mark is drawn in the note's
-   * own typeface, and only the BROWSER knows which that is. So it is read off the real element
-   * at the caret rather than hard-coded — which also keeps a heading or a code block honest,
-   * and means the app's font can change without a second copy of its name going stale here.
+  const rootRef = useRef(null);
+
+  /* ⛔ NEW-9 — measured against the bar's own rendered width, never the window.
    *
-   * ⛔ IN A LAYOUT EFFECT, AND ONLY ON A REAL CHANGE. Reading `getComputedStyle` during render
-   * would measure DOM that has not committed the current transaction yet (the toolbar re-renders
-   * on the new state while the document still shows the old one), which is this repo's
-   * FOREGROUND-OR-VOID trap in miniature: an internally consistent reading of a view the app has
-   * already left. A layout effect runs after the commit and before paint, and the state is only
-   * set when the NAME differs, so an ordinary keystroke costs no extra render. */
+   * ⛔ `editor` IS A REAL DEPENDENCY, NOT AN OVERSIGHT — this component returns `null` (below)
+   * on every render until Tiptap's `useEditor` resolves, so on a component's very FIRST mount
+   * `rootRef.current` is still null the instant this effect body runs. An empty `[]` deps array
+   * means the effect NEVER RUNS AGAIN once that first, do-nothing pass is done — the ResizeObserver
+   * is never attached at all, and `compact` sits permanently at its `false` default no matter how
+   * narrow the bar actually renders. Measured live: 756px of real rendered width, a 1000px
+   * breakpoint, `data-compact` stuck at "0". Re-running this effect once `editor` flips from
+   * null to a real instance (the same render that first returns real DOM instead of `null`)
+   * is what lets it find the node at all. */
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || typeof ResizeObserver !== "function") return undefined;
+    const check = () => setCompact(el.offsetWidth < COMPACT_BREAKPOINT_PX);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [editor]);
+
+  /* ⛔ WHAT AN UNSTYLED RUN IS ACTUALLY RENDERED IN. "Default" is not a font, and a run with no
+   * font mark is drawn in the note's own typeface, which only the BROWSER knows — read off the
+   * real element at the caret rather than hard-coded. IN A LAYOUT EFFECT, AND ONLY ON A REAL
+   * CHANGE: reading `getComputedStyle` during render would measure DOM the current transaction
+   * has not committed yet (FOREGROUND-OR-VOID's trap in miniature). */
   const [resolvedDefaults, setResolvedDefaults] = useState({ family: null, ink: null, size: null });
-  /* ⛔ NO DEP ARRAY, DELIBERATELY, AND IT CANNOT LOOP. The thing being tracked is where the CARET
-   * IS, which is not a prop and not a stable value — `editor.state` is a fresh object on every
-   * transaction, so any dep array here would either miss selection moves or fire on all of them
-   * anyway. Running after every render is the honest expression of "re-read wherever the caret
-   * now is". The setter returns the PREVIOUS object unless a name actually changed, and React
-   * bails out of a re-render on identical state, so the steady state costs one getComputedStyle
-   * and no render. */
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useLayoutEffect(() => {
     if (!editor || editor.isDestroyed) return;
@@ -891,11 +1126,6 @@ export default function NoteToolbar({
         const cs = getComputedStyle(target);
         family = firstFamily(cs.fontFamily);
         size = Math.round(parseFloat(cs.fontSize)) || null;
-        /* ⛔ THE NOTE'S OWN INK, NOT A SECOND COPY OF THE TOKEN. What a run with no colour mark
-         * paints as is a THEME value; hard-coding it here would be a duplicate that goes stale
-         * the moment the palette moves, and would be wrong in the other theme immediately. The
-         * editor root is read rather than the run itself, because the run may carry a real
-         * colour and it is the DEFAULT we need to compare against. */
         ink = getComputedStyle(editor.view.dom).color || null;
       }
     } catch { /* a torn-down view, or a position the DOM has not caught up to — keep the last read */ }
@@ -914,109 +1144,65 @@ export default function NoteToolbar({
   const DEFAULT_TEXT_INK = resolvedDefaults.ink;
 
   const chain = () => editor.chain().focus();
-  const inTable = editor.isActive("table");
+  const inTable = !titleActive && editor.isActive("table");
 
-  /* ⛔ MIXED-SELECTION AWARE (B1139216) — a RANGE asks whether every touched run/block agrees
-   * before showing a value; a collapsed caret still trusts the editor's own read directly, per
-   * this file's rule 1. See lib/notesMixedSelection.js for why: a native `getAttributes`/
-   * `isActive` read answers "what is at one position", which silently presented the FIRST
-   * block's size/style as the whole (mixed) selection's — his exact report. */
   const { selection } = editor.state;
-
-  const blockCaretValue = HEADING_LEVELS.find((l) => editor.isActive("heading", { level: l }));
-  const blockDisplay = formatDisplayValue({
-    selectionEmpty: selection.empty,
-    caretValue: blockCaretValue ? `h${blockCaretValue}` : "p",
-    rangeValues: selection.empty ? [] : selectionBlockShapes(editor.state.doc, selection.from, selection.to),
-  });
-  const blockMixed = blockDisplay === MIXED;
-  const setBlock = (v) => {
-    if (v === "p") chain().setParagraph().run();
-    else chain().setHeading({ level: Number(v.slice(1)) }).run();
-  };
-
-  /* ⛔ SIZES ARE COMPARED AND DISPLAYED IN ONE UNIT (NEW-4). The stored value carries whatever
-   * unit its source used — a Word paste stores `11.0pt` — and `parseInt` threw the unit away,
-   * so an 11pt run (14.67px on screen) and an 11px run both read "11", and picking the "11"
-   * already showing SHRANK the first by a quarter. `fontSizePx` resolves both sides to px
-   * before anything is compared or shown, so two different sizes can never read as one number.
-   * See lib/notesSpacing.js for the measured repro. */
-  const sizeDisplay = formatDisplayValue({
-    selectionEmpty: selection.empty,
-    caretValue: fontSizePx(editor.getAttributes("textStyle")?.fontSize || null),
-    rangeValues: selection.empty
-      ? []
-      : selectionFontSizes(editor.state.doc, selection.from, selection.to).map(fontSizePx),
-  });
-  const sizeMixed = sizeDisplay === MIXED;
-  const currentSizeNum = !sizeMixed && sizeDisplay ? Math.round(sizeDisplay) : null;
-  /* ⛔ THE SAME DEFECT THE FONT BOX HAD, FOUND BY THE NEW-9 SWEEP: a run with no size mark was
-   * reported as the word "Size", which is a category label, not a size — while the text is
-   * plainly being rendered at some real size. Named the same way the font is: the actual number,
-   * marked as the note's standard rather than a deliberate choice. */
-  const sizeLabel = sizeMixed
-    ? ""
-    : (currentSizeNum != null ? String(currentSizeNum)
-      : (defaultSize != null ? `${defaultSize} · std` : "Size"));
-  /* A size that is not one of the offered steps — which is what every pasted point size becomes
-   * — is still shown, and is still RE-PICKABLE, by joining the list rather than blanking the box
-   * (a blank box means "mixed" here, and this selection is not mixed). */
-  const sizeOptions = SIZES.includes(currentSizeNum) || currentSizeNum == null
-    ? SIZES
-    : [...SIZES, currentSizeNum].sort((a, b) => (a == null ? -1 : b == null ? 1 : a - b));
-
-  /* ⛔ THE LINE SPACING CONTROL USED TO BE WRITE-ONLY (NEW-SPACING-3) — it applied a spacing but
-   * never showed what the paragraph under the caret actually had, unlike Block style / Font size
-   * just above (same B1139216 fix, applied here). `lineHeight` lives on the block itself
-   * (paragraph OR heading — notesSpacing.js), so the caret read is the selection's own parent
-   * block, not a named-type `getAttributes` call (which would silently read `{}` on a heading). */
-  const spacingCaretValue = selection.$from.parent.attrs?.lineHeight ?? null;
-  const spacingDisplay = formatDisplayValue({
-    selectionEmpty: selection.empty,
-    caretValue: spacingCaretValue,
-    rangeValues: selection.empty ? [] : selectionLineHeights(editor.state.doc, selection.from, selection.to),
-  });
-  const spacingMixed = spacingDisplay === MIXED;
-  const spacingResolved = spacingMixed ? null : spacingDisplay;
-  /* ⛔ ICON-4: the trigger used to be a bare "↕" glyph with no word at all — the least labelled
-   * control on the row, sitting between "Body text" and "Size", which both show a word even in
-   * their own default/unset state. `spacingLabel(null)` already returns exactly that word
-   * ("Spacing") for the same reason those two do — so this reuses it rather than keeping the
-   * lone symbol now that the control shows real words for every other state too. */
-  /* ⛔ AND THE THIRD INSTANCE (NEW-9). `spacingLabel(null)` returns the word "Spacing" — again a
-   * category label for a block that is plainly being laid out at SOME spacing. With no override,
-   * the resolved answer is the note's own density, which the same menu already offers by name. */
-  const spacingGlyph = spacingMixed
-    ? ""
-    : (spacingResolved != null
-      ? spacingLabel(spacingResolved)
-      : `${DENSITIES.find((d) => d.id === (editor.state.doc.attrs?.density ?? DEFAULT_DENSITY))?.label || "Spacing"} · std`);
-  const pickSpacing = (v) => {
-    if (!v) return;
-    const [kind, raw] = v.split(":");
-    if (kind === "den") { chain().setNoteDensity(raw).run(); return; }
-    const n = raw === "" ? null : Number(raw);
-    const key = kind === "lh" ? "lineHeight" : (kind === "sb" ? "spaceBefore" : "spaceAfter");
-    chain().setNoteSpacing({ [key]: n }).run();
-  };
-
-
-  /* ═══ EVERY CONTROL REPORTS THE SELECTION, OR REPORTS NOTHING (NEW-TOOLBAR-STATE) ═══
-   * Owner rule, verbatim: *"If I select multiple text types and it's got different ones, then
-   * it shouldn't say a font. And then same thing for text size and bold and underlined and
-   * italic, whatever. Everything that you can think of that it does on Word, it should do
-   * here."* Uniform → the real value · caret → what the next character gets · mixed → nothing.
-   * ONE mechanism for all of them (lib/notesMixedSelection.js) — the whole point is that Font
-   * size was made correct in isolation and eleven other controls stayed wrong, so a bespoke
-   * mixed-check for one button is the defect, not the fix. */
   const doc = editor.state.doc;
   const { from, to, empty: selEmpty } = selection;
   const rangeOf = (read) => (selEmpty ? [] : read());
 
-  /* FONT FAMILY (NEW-1 / NEW-2). Agreement is decided on the TYPEFACE, not on the exact stack
-   * string: Word's `"Calibri",sans-serif` and the palette's `Calibri, Candara, sans-serif` are
-   * the same answer to "what font is this", and comparing them as strings is precisely why a
-   * genuinely-Calibri run read "Default". See lib/notesFontFamily.js. */
+  const titleStyle = doc.attrs?.titleStyle || {};
+  const setTitleStyle = (patch) => editor.commands.setNoteTitleStyle(patch);
+
+  /* ═══ BLOCK STYLE — "Title" while the title has focus, otherwise the ordinary Body/Heading
+   * picker (NEW-5). ═══ */
+  const blockCaretValue = HEADING_LEVELS.find((l) => editor.isActive("heading", { level: l }));
+  const blockDisplay = titleActive ? "title" : formatDisplayValue({
+    selectionEmpty: selection.empty,
+    caretValue: blockCaretValue ? `h${blockCaretValue}` : "p",
+    rangeValues: selection.empty ? [] : selectionBlockShapes(doc, selection.from, selection.to),
+  });
+  const blockMixed = blockDisplay === MIXED;
+  const setBlock = (v) => {
+    if (titleActive) return;
+    if (v === "p") chain().setParagraph().run();
+    else chain().setHeading({ level: Number(v.slice(1)) }).run();
+  };
+
+  /* ═══ SIZE — the title's own `titleStyle.fontSize` while focus is there, else the ordinary
+   * (mixed-selection-aware) editor read (NEW-4/NEW-5). ═══ */
+  const sizeDisplay = titleActive ? (titleStyle.fontSize ?? null) : formatDisplayValue({
+    selectionEmpty: selection.empty,
+    caretValue: fontSizePx(editor.getAttributes("textStyle")?.fontSize || null),
+    rangeValues: selection.empty ? [] : selectionFontSizes(doc, selection.from, selection.to).map(fontSizePx),
+  });
+  const sizeMixed = !titleActive && sizeDisplay === MIXED;
+  const currentSizeNum = titleActive
+    ? (titleStyle.fontSize != null ? Math.round(titleStyle.fontSize) : (titleDefaultSize ?? null))
+    : (!sizeMixed && sizeDisplay ? Math.round(sizeDisplay) : null);
+  const sizeFallback = titleActive ? titleDefaultSize : defaultSize;
+  const sizeLabel = sizeMixed ? "" : (currentSizeNum != null ? String(currentSizeNum) : String(sizeFallback ?? DEFAULT_SIZE));
+  const pickSize = (n) => {
+    if (titleActive) { setTitleStyle({ fontSize: n }); return; }
+    if (n == null) { chain().unsetFontSize().syncBlockFontSize().run(); return; }
+    chain().setFontSize(`${n}px`).syncBlockFontSize().run();
+  };
+
+  /* ═══ LINE SPACING (NEW-4) ═══ */
+  const spacingCaretValue = selection.$from.parent.attrs?.lineHeight ?? null;
+  const spacingDisplay = formatDisplayValue({
+    selectionEmpty: selection.empty,
+    caretValue: spacingCaretValue,
+    rangeValues: selection.empty ? [] : selectionLineHeights(doc, selection.from, selection.to),
+  });
+  const spacingResolved = spacingDisplay === MIXED ? null : spacingDisplay;
+  const spaceBeforeCaret = selection.$from.parent.attrs?.spaceBefore ?? null;
+  const spaceAfterCaret = selection.$from.parent.attrs?.spaceAfter ?? null;
+  const pickSpacing = (patch) => chain().setNoteSpacing(patch).run();
+  const applySpacingWholePage = () => chain().setNoteSpacingWholeDoc({ lineHeight: spacingResolved, spaceAfter: spaceAfterCaret }).run();
+  const resetSpacing = () => chain().setNoteSpacing({ lineHeight: null, spaceBefore: null, spaceAfter: null }).run();
+
+  /* ═══ EVERY CONTROL REPORTS THE SELECTION, OR REPORTS NOTHING ═══ */
   const caretFamily = editor.getAttributes("textStyle")?.fontFamily || null;
   const rawFamilies = selEmpty ? [caretFamily] : selectionFontFamilies(doc, from, to);
   const familyDisplay = formatDisplayValue({
@@ -1025,67 +1211,37 @@ export default function NoteToolbar({
     rangeValues: rangeOf(() => rawFamilies.map(familyKey)),
   });
   const fontMixed = familyDisplay === MIXED;
-  // The original stack string behind the agreed key — it is what carries the real display name.
   const currentFont = fontMixed ? null : (rawFamilies.find((f) => familyKey(f) === familyDisplay) ?? null);
   const currentFontOption = matchFontOption(currentFont, FONTS);
-  /* An off-palette family (any font a sender happened to use) is SHOWN BY NAME and offered as a
-   * pickable row, rather than silently reported as "Default" — his explicit ask. */
   const paletteOptions = FONTS.map((f) => (f.value == null
-    /* ⛔ THE FIRST ROW NAMES A TYPEFACE TOO (NEW-7): *"a list of five typefaces and a mystery is
-     * not a list of fonts."* It still MEANS "remove the override" — the value is unchanged — it
-     * just says which font that lands you in. */
     ? { ...f, label: defaultFontLabel(defaultFamily) }
     : f));
   const fontOptions = currentFont && !currentFontOption
     ? [...paletteOptions, { label: fontDisplayLabel(currentFont, FONTS), value: currentFont }]
     : paletteOptions;
-  /* A run with no font mark is not "Default" — it is the note's own typeface, named, and marked
-   * as the standard one so it is still distinguishable from having chosen that font deliberately. */
-  const fontLabel = fontMixed
-    ? ""
-    : (currentFont ? fontDisplayLabel(currentFont, FONTS) : defaultFontLabel(defaultFamily));
+  const fontLabel = fontMixed ? "" : (currentFont ? fontDisplayLabel(currentFont, FONTS) : defaultFontLabel(defaultFamily));
 
-  /* ⛔ THE RESOLVED COLOUR, NOT THE STORED MARK (NEW-8). His note holds ONE black spelled three
-   * ways — no mark, a `color: inherit` mark, and an explicit copy of the note's own ink — and it
-   * read them
-   * as three different states: the default swatch, NO swatch at all, and the colour. Two runs he
-   * could see were identical reported as a disagreement. `resolvedColorsAgree` folds all three
-   * into one answer: `inherit` is not a colour, and an explicit colour equal to the note's own
-   * text colour is, on screen, that colour. A genuinely different colour still disagrees.
-   * See lib/notesResolvedValue.js for the measured before/after. */
-  const currentColorRaw = resolvedColor(editor.getAttributes("textStyle")?.color);
-  const colorDisplay = formatDisplayValue({
+  const currentColorRaw = titleActive ? (titleStyle.color || null) : resolvedColor(editor.getAttributes("textStyle")?.color);
+  const colorDisplay = titleActive ? currentColorRaw : formatDisplayValue({
     selectionEmpty: selEmpty,
     caretValue: currentColorRaw ?? resolvedColor(DEFAULT_TEXT_INK),
     rangeValues: rangeOf(() => resolvedColorsAgree(
       selectionMarkAttrs(doc, from, to, "textStyle", "color"), DEFAULT_TEXT_INK)),
   });
-  const colorMixed = colorDisplay === MIXED;
-  /* Painted from the RAW mark, so a real colour keeps its exact spelling — but ONLY when the mark
-   * is really a colour. A mark reading `inherit` painted a swatch of `inherit`, which paints
-   * nothing at all: that is the missing black line under the A he reported, and folding the
-   * agreement question alone would have left it, because the swatch is drawn from a different
-   * value than the one being compared. `null` falls through to the default swatch, which is what
-   * the text is actually rendered in. */
-  const rawColor = editor.getAttributes("textStyle")?.color || null;
+  const colorMixed = !titleActive && colorDisplay === MIXED;
+  const rawColor = titleActive ? (titleStyle.color || null) : (editor.getAttributes("textStyle")?.color || null);
   const currentColor = colorMixed || !resolvedColor(rawColor) ? null : rawColor;
 
-  /* Highlight shares the mechanism exactly — a pasted `background-color: inherit` is the same
-   * non-value — and is folded the same way. Its default is "no highlight", so no default is
-   * passed: an unhighlighted run and an `inherit` one agree on having none. */
-  const hlDisplay = formatDisplayValue({
+  const hlDisplay = titleActive ? (titleStyle.highlight || null) : formatDisplayValue({
     selectionEmpty: selEmpty,
     caretValue: resolvedColor(editor.getAttributes("highlight")?.color),
     rangeValues: rangeOf(() => resolvedColorsAgree(
       selectionMarkAttrs(doc, from, to, "highlight", "color"))),
   });
-  const hlMixed = hlDisplay === MIXED;
-  const rawHl = editor.getAttributes("highlight")?.color || null;
+  const hlMixed = !titleActive && hlDisplay === MIXED;
+  const rawHl = titleActive ? (titleStyle.highlight || null) : (editor.getAttributes("highlight")?.color || null);
   const currentHl = hlMixed || !resolvedColor(rawHl) ? null : rawHl;
 
-  /* The boolean toggles. `editor.isActive` is kept for the CARET (it is exactly right for one
-   * position, and it also honours `storedMarks` — what the NEXT character will be, which no
-   * document walk can see); a RANGE is answered by the shared reader. */
   const markPressed = (name) => togglePressed({
     selectionEmpty: selEmpty,
     caretValue: editor.isActive(name),
@@ -1095,9 +1251,9 @@ export default function NoteToolbar({
   const italicPressed = markPressed("italic");
   const underlinePressed = markPressed("underline");
   const strikePressed = markPressed("strike");
-  const codePressed = markPressed("code");
+  const supPressed = titleActive ? (titleStyle.sup ? "true" : "false") : markPressed("superscript");
+  const subPressed = titleActive ? (titleStyle.sub ? "true" : "false") : markPressed("subscript");
 
-  /* Lists and alignment are BLOCK properties, so they walk textblocks rather than runs. */
   const listKinds = rangeOf(() => selectionListKinds(doc, from, to));
   const listPressed = (kind) => togglePressed({
     selectionEmpty: selEmpty,
@@ -1113,270 +1269,29 @@ export default function NoteToolbar({
   const alignMixed = alignDisplay === MIXED;
   const alignPressed = (id) => (alignMixed ? "mixed" : String((alignDisplay ?? "left") === id));
 
-  // Indent/outdent act on whichever list kind the caret is actually in. Real nesting first,
-  // the indent-attribute fallback second — the same order Tab itself uses (lib/notesListIndent.js)
-  // and MiniBar already mirrors below; without the fallback these buttons silently did nothing
-  // on a first/solo item, which sinkListItem/liftListItem alone always decline.
   const listItemType = editor.isActive("taskItem") ? "taskItem" : "listItem";
   const indent = () => chain().sinkListItem(listItemType).run() || chain().indentListItem().run();
   const outdent = () => chain().outdentListItem().run() || chain().liftListItem(listItemType).run();
 
   const pickImages = (e) => {
     const files = Array.from(e.target.files || []);
-    e.target.value = "";                       // so the same file can be picked twice running
+    e.target.value = "";
     if (files.length) editor.commands.insertNoteImages(files);
   };
 
   const barStyle = {
-    display: "flex", flexWrap: narrow ? "nowrap" : "wrap", alignItems: "center", gap: 2,
+    display: "flex", flexWrap: "nowrap", alignItems: "center", gap: 2,
     padding: "5px 8px", borderBottom: "1px solid var(--border-default)",
     background: "var(--surface-raised)", position: "sticky", top: 0, zIndex: 20,
-    ...(narrow ? { overflowX: "auto", WebkitOverflowScrolling: "touch" } : null),
+    overflowX: "auto", WebkitOverflowScrolling: "touch",
   };
 
-  /* ---- controls that MOVE between the row and the More sheet, defined once (NEW-2) --------
-   * Each is placed in exactly one of the two spots below via `{!narrow && x}` / `{narrow && x}`
-   * — never both — so there is one copy of every prop and handler, not two that can drift. */
-  /* ⛔ BLOCK STYLE IS NOT THE FONT BOX, AND IT USED TO BE SITTING WHERE ONE IS (NEW-3
-   * amendment). It held the LEADING slot on the row — the exact screen position Word gives the
-   * font NAME — while showing "Body text", so the owner read it as the font picker and then
-   * concluded the font could only be changed on body text: *"and body text should just say
-   * font, i should be able to change the font of headers if thats why it shows like that"*.
-   * That is a layout defect, not a misreading. Font now leads (below), and the two adjacent
-   * dropdowns are told apart on sight rather than by their contents: this one carries a
-   * standing "Style" caption, so a glance reads "Style: Body text" and never a font name. */
-  const blockStyleControl = (
-    <FormatMenu title="Block style" testid="nt-block" width={140} big={narrow}
-      value={blockDisplay} mixed={blockMixed} onPick={setBlock} options={HEADING_OPTIONS}
-      prefix="Style" />
+  const disabledWrap = (node) => (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 2, opacity: titleActive ? 0.35 : 1, pointerEvents: titleActive ? "none" : "auto" }}>
+      {node}
+    </span>
   );
-  /* ⛔ THE FONT NAME TAKES THE LEADING SLOT (NEW-3). It was two levels deep inside "More
-   * formatting" — which, as B1371 already recorded for Font size, reads to a user as "there is
-   * no font control" — while most of his real notes arrive pasted from Word and Outlook and are
-   * full of mixed fonts he could not see. It is a FormatMenu, not the native `<select>` it was:
-   * a select cannot show a blank mixed state, cannot show a family that is not one of its
-   * options, and cannot be driven in headless Chromium (this file's own note at FormatMenu). */
-  const fontControl = (
-    <FormatMenu title="Font" testid="nt-font" width={132} big={narrow}
-      value={currentFontOption ? currentFontOption.value : currentFont}
-      mixed={fontMixed}
-      displayLabel={fontLabel}
-      options={fontOptions.map((f) => ({ label: f.label, value: f.value }))}
-      onPick={(v) => (v ? chain().setFontFamily(v).run() : chain().unsetFontFamily().run())} />
-  );
-  /* FONT SIZE LIVES ON THE ROW ON DESKTOP (B1371) — moved into the More sheet on phone, where
-   * it stays reachable in two taps rather than crowding the six-control primary row. */
-  const fontSizeControl = (
-    <FormatMenu title="Font size" testid="nt-size" width={80} big={narrow}
-      value={currentSizeNum} mixed={sizeMixed} displayLabel={sizeLabel}
-      options={sizeOptions.map((s) => ({
-        label: s == null ? (defaultSize != null ? `${defaultSize} · standard` : "Size") : String(s),
-        value: s,
-      }))}
-      /* ⛔ THE INLINE MARK, THEN THE BLOCK (NEW-SPACING-2). Setting the size only on the runs
-       * leaves the paragraph's own strut at the default, so a whole line made smaller stayed
-       * exactly as tall — measured, 11px words in the 24.75px row a 15px paragraph uses.
-       * `syncBlockFontSize` reads the runs back and writes the size onto any block whose runs
-       * all agree, so the row scales with its text. It is one chain, so it is one undo step. */
-      onPick={(size) => (size
-        ? chain().setFontSize(`${size}px`).syncBlockFontSize().run()
-        : chain().unsetFontSize().syncBlockFontSize().run())} />
-  );
-  /* ⛔ A FormatMenu, NOT the native `<select>` this used to be (NEW-SPACING-3) — a DESIGN CHOICE
-   * made to fix the write-only report, not a cosmetic match to its neighbours for its own sake.
-   * A native select ties the closed box's text to the exact string of whatever option is
-   * selected, so making `value` honestly track state (the actual bug fix) would have forced the
-   * box to show the full row text — "Lines: Double" — the moment anything was set, blowing past
-   * the deliberately narrow width this control has always needed (PANEL-BREVITY: "the formatting
-   * row is full at a laptop width"). FormatMenu's `displayLabel` decouples the two: the dropdown
-   * still lists the full, readable rows, and the closed trigger shows a short current-state word
-   * instead. (The RULED-OUT dead-click question the earlier report raised does not apply to this
-   * shape either way — FormatMenu dispatches on every real click, same as Block style/Font size.) */
-  const spacingControl = (
-    <FormatMenu title="Line spacing" testid="nt-spacing" width={82} big={narrow}
-      value={spacingMixed ? "" : `lh:${spacingResolved ?? ""}`} mixed={spacingMixed}
-      displayLabel={spacingGlyph}
-      options={[
-        ...DENSITIES.map((d) => ({ label: `Whole note: ${d.label}`, value: `den:${d.id}` })),
-        ...LINE_SPACINGS.map((s) => ({ label: `Lines: ${s.label}`, value: `lh:${s.value ?? ""}` })),
-        ...BLOCK_SPACES.map((s) => ({ label: `Space before: ${s.label}`, value: `sb:${s.value ?? ""}` })),
-        ...BLOCK_SPACES.map((s) => ({ label: `Space after: ${s.label}`, value: `sa:${s.value ?? ""}` })),
-      ]}
-      onPick={pickSpacing} />
-  );
-  const underlineBtn = (
-    <TBButton title="Underline" testid="nt-underline" big={narrow} pressed={underlinePressed} onClick={() => chain().toggleUnderline().run()}>
-      <span style={{ textDecoration: "underline", fontSize: 13 }}>U</span>
-    </TBButton>
-  );
-  const strikeBtn = (
-    <TBButton title="Strikethrough" testid="nt-strike" big={narrow} pressed={strikePressed} onClick={() => chain().toggleStrike().run()}>
-      <span style={{ textDecoration: "line-through", fontSize: 13 }}>S</span>
-    </TBButton>
-  );
-  const textColorControl = (
-    <ColorPopover title="Text colour" testid="nt-color" glyph="ink" big={narrow} mixed={colorMixed} swatch={currentColor || DEFAULT_TEXT_SWATCH} colors={TEXT_COLORS}
-      onPick={(c) => (c ? chain().setColor(c).run() : chain().unsetColor().run())} />
-  );
-  const highlightColorControl = (
-    <ColorPopover title="Highlight colour" testid="nt-highlight" glyph="marker" big={narrow} mixed={hlMixed} swatch={currentHl || DEFAULT_HIGHLIGHT_SWATCH} colors={HIGHLIGHT_COLORS}
-      onPick={(c) => (c ? chain().setHighlight({ color: c }).run() : chain().unsetHighlight().run())} />
-  );
-  const checklistBtn = (
-    <TBButton title="Checklist" testid="nt-task" big={narrow} active={editor.isActive("taskList")} onClick={() => chain().toggleTaskList().run()}><TaskIcon /></TBButton>
-  );
-  const tableInsertControl = (
-    <TableGridPicker big={narrow} onInsert={(rows, cols) => chain().insertTable({ rows, cols, withHeaderRow: true }).run()} />
-  );
-  const imageBtn = (
-    <TBButton title="Insert a picture" testid="nt-image" big={narrow} onClick={() => fileRef.current?.click()}><ImageIcon /></TBButton>
-  );
-  /* ⛔ ARROWS BETWEEN BOXES (NEW-2, replacing sketch mode's own "Box" button). Click-to-connect:
-     press this, click the box the arrow starts from, click the box it points to — arrow drawn,
-     mode exits. The other way to draw one, drag-from-the-dot on a selected box, needs no button
-     at all (notesAnchorNode.js's own node view). */
-  const arrowBtn = (
-    <TBButton title="Connect two boxes with an arrow — click this, then click the box it starts from, then the box it points to"
-      testid="nt-arrow" active={arrowMode} big={narrow} onClick={onToggleArrow}><ArrowConnectIcon /></TBButton>
-  );
-  const attachBtn = (
-    <TBButton title="Attach a file — a PDF, a spreadsheet, a drawing" testid="nt-attach" big={narrow} onClick={onAttach}>
-      <Icon><path d="M11.5 5.5L6.2 10.8a2 2 0 0 0 2.8 2.8l5.3-5.3a3.4 3.4 0 0 0-4.8-4.8L4.2 8.8a4.8 4.8 0 0 0 6.8 6.8" /></Icon>
-    </TBButton>
-  );
-  /* VERSION HISTORY (NEW-3). On desktop it sits beside Print because both are things you do
-     TO the page rather than to the words in it; on phone both move into the sheet with
-     everything else that isn't a while-writing control. */
-  const historyBtn = (
-    <TBButton title="Earlier versions of this page, and the way back to one"
-      testid="nt-history" active={!!historyOpen} wide big={narrow} label="History" onClick={onHistory}>
-      <Icon><path d="M8 4.5V8l2.5 1.5" /><circle cx="8" cy="8" r="5.5" /></Icon>
-    </TBButton>
-  );
-  const printBtn = (
-    <TBButton title="Print this page, or save it as a PDF" testid="nt-print" wide big={narrow} label="Print" onClick={onPrint}>
-      <PrintIcon />
-    </TBButton>
-  );
-  /* ⛔ THE ZOOM LEVEL (NEW-2, owner report 2026-09-06: "the zoom shouldn't be shown on the
-     page"). It used to render as a real button ON the sheet — the document, not the chrome
-     around it — which reads as a control living on paper it is meant to control. It belongs
-     beside History because both are the same kind of thing: something you do TO the page, not
-     to the words in it. `zoomIndicator` is `null` at 100% (PANEL-BREVITY — a chip that always
-     reads "100%" is furniture), so nothing renders here most of the time. Same testid the
-     on-page control carried (`note-zoom-level`), so a check that only asks "is a level shown,
-     and does it say what it is" needed no change — only where this control is rooted did. */
-  const zoomBtn = zoomIndicator ? (
-    <TBButton title="Back to 100% (Ctrl+0)" testid="note-zoom-level" wide big={narrow} label={zoomIndicator} onClick={onZoomReset} />
-  ) : null;
-  /* ⛔ SET A PAGE'S OWN WIDTH BY HAND (NEW-1) — the menu's fast path; dragging either side edge
-   * of the sheet is the other entry point into this SAME stored value (NoteEditor.jsx). Sits
-   * beside Zoom/History/Print/Markdown for the identical reason those do — "things you do TO
-   * the page, not to the words in it." A dragged, off-preset width shows as "Custom" and
-   * highlights no row, which is correct: it is a real, persistent pin, just not one of the four
-   * named ones.
-   *
-   * ⛔ AND IT NEEDS THE SAME "Style" TREATMENT ITS OWN NEIGHBOUR BELOW GOT (NEW-2, B1605665,
-   * live-verify on PR #1681, 2026-09-12): once Page height shipped beside it, both controls could
-   * read "Fit to content" at once with nothing but a hover tooltip telling them apart — measured
-   * on the owner's own ~1191px window, where they sit flush against each other. `prefix="W"` is
-   * the SAME mechanism `blockStyleControl` already uses below for the identical reason (see its
-   * own comment), not a new one — a standing caption naming WHAT the box holds, never the value.
-   * ONE LETTER, not the full word: a wider caption ("Width"/"Height") left no room for "Fit to
-   * content" to render in full even after widening, ellipsing it to "Fit to co…" — worse than
-   * the ambiguity it fixed, and PANEL-BREVITY's own "less is better" already argues for the
-   * smallest mark that still reads. Widened from 124 to 140 (measured: "Fit to content" needs 6
-   * more px than the single letter left it once it was squeezed in) — cheap at the owner's own
-   * ~1191px window, which measured 367px of unused slack at the end of this same toolbar row
-   * before this change, so neither control wraps. */
-  const pageWidthAttr = editor.state.doc.attrs?.pageWidth ?? null;
-  const widthControl = (
-    <FormatMenu title="Page width" testid="nt-page-width" width={140} big={narrow} prefix="W"
-      value={pageWidthAttr == null ? "fit" : String(pageWidthAttr)}
-      displayLabel={pageWidthLabel(pageWidthAttr)}
-      options={[
-        { label: "Fit to content", value: "fit" },
-        ...PAGE_WIDTH_PRESETS.map((p) => ({ label: p.label, value: String(p.px) })),
-      ]}
-      onPick={(v) => {
-        if (v === "fit") { editor.commands.setNotePageWidth(null); return; }
-        if (v === "full") { editor.commands.setNotePageWidth("full"); return; }
-        editor.commands.setNotePageWidth(Number(v));
-      }} />
-  );
-  /* ⛔ SET A PAGE'S OWN HEIGHT BY HAND (NEW-1, 2026-09-12) — a page dragged tall by the top/bottom
-   * grips has no preset ladder (the owner did not ask for one), so the one thing this control
-   * needs to offer is the return trip to Fit to content. Sits beside Page width for the identical
-   * reason — see that control's own comment for the `prefix="H"` fix (NEW-2) telling the two
-   * apart without a hover.
-   *
-   * ⛔ CORRECTED (B1344628, owner report 2026-09-15) — THIS IS NO LONGER A `FormatMenu`. A
-   * listbox with exactly one row ("Fit to content") is a real defect, not a smaller version of
-   * the width menu: opening it always shows the SAME single option whether the page is already
-   * Fit to content (where it is a no-op) or pinned Custom (where it is the one thing you came
-   * for) — nothing in the menu itself tells those two situations apart, and a listbox that can
-   * only ever reset never needed the open/close ceremony a listbox implies. This module's own
-   * "no preset ladder" decision (NEW-1 above, restated by the owner at B1586784: "Fit to content
-   * plus Custom is enough") already settled that a real choice list is not wanted here — so the
-   * fix is not a second preset ladder, it is dropping the ceremony this control never earned: a
-   * PLAIN button, visually matching the width control's closed state (`prefix="H"`, the same
-   * box), that commits `setNotePageHeight(null)` on its own press and is disabled (inert, no
-   * click target) the moment the page is already Fit to content — so there is nothing to press
-   * when there is nothing to reset, and one press is the whole interaction when there is. */
-  const pageHeightAttr = editor.state.doc.attrs?.pageHeight ?? null;
-  const heightPinned = pageHeightAttr != null;
-  const heightControl = (
-    <button
-      type="button"
-      title={heightPinned ? "Reset the page's height to Fit to content" : "Page height — already Fit to content"}
-      aria-label={heightPinned ? "Reset the page's height to Fit to content" : "Page height — already Fit to content"}
-      data-testid="nt-page-height"
-      disabled={!heightPinned}
-      onMouseDown={stop}
-      onClick={() => editor.commands.setNotePageHeight(null)}
-      style={{
-        display: "inline-flex", alignItems: "center", gap: 4,
-        height: narrow ? 44 : 28, width: narrow ? Math.max(140, 132) : 140, padding: "0 6px 0 8px",
-        flex: narrow ? "0 0 auto" : undefined,
-        border: "1px solid var(--border-default)", borderRadius: RADIUS.control,
-        background: "var(--surface-raised)", color: "var(--text-primary)",
-        opacity: heightPinned ? 1 : 0.5, cursor: heightPinned ? "pointer" : "default",
-        font: "inherit", fontSize: narrow ? 15 : 13,
-      }}
-    >
-      <span aria-hidden="true" style={{
-        flex: "0 0 auto", fontSize: narrow ? 11 : 9.5, fontWeight: 700, letterSpacing: "0.06em",
-        textTransform: "uppercase", color: "var(--text-tertiary)", marginRight: 4,
-      }}>H</span>
-      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "left", flex: "1 1 auto" }}>
-        {pageHeightLabel(pageHeightAttr)}
-      </span>
-    </button>
-  );
-  const exportBtn = (
-    <TBButton title="Export this page to Markdown" testid="nt-export" wide big={narrow} label="Markdown" onClick={onExport}>
-      <Icon><path d="M8 2.5v8" /><path d="M5 7.5L8 10.5l3-3" /><path d="M2.5 12.5h11" /></Icon>
-    </TBButton>
-  );
-  /* TABLE GROUP — rendered only when the caret is genuinely inside a table, on the row on
-     desktop and inside the sheet on phone (same reasoning as everything above: a control
-     that's visible but inert most of the time trains people to ignore where it lives). */
-  const tableGroupControls = inTable ? (
-    <>
-      <TBButton title="Insert row above" testid="nt-row-before" wide big={narrow} label="Row ↑" onClick={() => chain().addRowBefore().run()} />
-      <TBButton title="Insert row below" testid="nt-row-after" wide big={narrow} label="Row ↓" onClick={() => chain().addRowAfter().run()} />
-      <TBButton title="Delete row" testid="nt-row-del" wide big={narrow} label="Row ✕" onClick={() => chain().deleteRow().run()} />
-      <TBButton title="Insert column left" testid="nt-col-before" wide big={narrow} label="Col ←" onClick={() => chain().addColumnBefore().run()} />
-      <TBButton title="Insert column right" testid="nt-col-after" wide big={narrow} label="Col →" onClick={() => chain().addColumnAfter().run()} />
-      <TBButton title="Delete column" testid="nt-col-del" wide big={narrow} label="Col ✕" onClick={() => chain().deleteColumn().run()} />
-      <TBButton title="Merge or split cells" testid="nt-merge" wide big={narrow} label="Merge/split" onClick={() => chain().mergeOrSplit().run()} />
-      <TBButton title="Toggle header row" testid="nt-header-row" wide big={narrow} label="Header" onClick={() => chain().toggleHeaderRow().run()} />
-      <TBButton title="Delete table" testid="nt-table-del" wide big={narrow} label="Delete table" onClick={() => chain().deleteTable().run()} />
-    </>
-  ) : null;
 
-  /* Pinned as ONE flex item (button + divider together) so the sticky offset and the
-     opaque backing that hides scrolled-under controls apply to both at once. */
   const backControl = narrow && onBack ? (
     <span
       data-testid="notes-toolbar-back-pinned"
@@ -1400,9 +1315,35 @@ export default function NoteToolbar({
     </span>
   ) : null;
 
+  const tableGroupControls = inTable ? (
+    <>
+      <TBButton title="Insert row above" testid="nt-row-before" wide big={narrow} label="Row ↑" onClick={() => chain().addRowBefore().run()} />
+      <TBButton title="Insert row below" testid="nt-row-after" wide big={narrow} label="Row ↓" onClick={() => chain().addRowAfter().run()} />
+      <TBButton title="Delete row" testid="nt-row-del" wide big={narrow} label="Row ✕" onClick={() => chain().deleteRow().run()} />
+      <TBButton title="Insert column left" testid="nt-col-before" wide big={narrow} label="Col ←" onClick={() => chain().addColumnBefore().run()} />
+      <TBButton title="Insert column right" testid="nt-col-after" wide big={narrow} label="Col →" onClick={() => chain().addColumnAfter().run()} />
+      <TBButton title="Delete column" testid="nt-col-del" wide big={narrow} label="Col ✕" onClick={() => chain().deleteColumn().run()} />
+      <TBButton title="Merge or split cells" testid="nt-merge" wide big={narrow} label="Merge/split" onClick={() => chain().mergeOrSplit().run()} />
+      <TBButton title="Toggle header row" testid="nt-header-row" wide big={narrow} label="Header" onClick={() => chain().toggleHeaderRow().run()} />
+      <TBButton title="Delete table" testid="nt-table-del" wide big={narrow} label="Delete table" onClick={() => chain().deleteTable().run()} />
+    </>
+  ) : null;
+
   return (
-    <div style={barStyle} data-testid="note-toolbar" data-narrow={narrow ? "1" : "0"} role="toolbar" aria-label="Formatting">
+    <div
+      ref={rootRef}
+      style={barStyle}
+      data-testid="note-toolbar"
+      data-narrow={narrow ? "1" : "0"}
+      data-compact={compact ? "1" : "0"}
+      role="toolbar"
+      aria-label="Formatting"
+      /* ⛔ NEW-6 — see this file's own top-of-file note. Capture, so it runs before any
+         individual button's own `stop` (mousedown preventDefault). */
+      onMouseDownCapture={() => onBeforeAction?.()}
+    >
       {backControl}
+
       <TBButton title="Undo" testid="nt-undo" big={narrow} disabled={!editor.can().undo()} onClick={() => chain().undo().run()}>
         <Icon><path d="M3 7h6.5a3 3 0 0 1 0 6H6" /><path d="M5.5 4.5L3 7l2.5 2.5" /></Icon>
       </TBButton>
@@ -1412,39 +1353,106 @@ export default function NoteToolbar({
 
       <Sep />
 
-      {/* ⛔ THE ORDER IS WORD'S, AND THAT IS THE FIX (NEW-3 amendment): FONT NAME first, size
-          immediately right of it, and the paragraph-style picker after them both. */}
-      {!narrow && fontControl}
-      {!narrow && fontSizeControl}
-      {!narrow && blockStyleControl}
-      {!narrow && spacingControl}
-      {!narrow && <Sep />}
+      <FormatMenu title="Paragraph style" testid="nt-block" big={narrow}
+        value={blockDisplay} mixed={blockMixed}
+        iconTrigger={<PilcrowIcon />}
+        onPick={setBlock} options={titleActive ? TITLE_OPTIONS : HEADING_OPTIONS} />
 
-      <TBButton title="Bold" testid="nt-bold" big={narrow} pressed={boldPressed} onClick={() => chain().toggleBold().run()}>
+      <FormatMenu title="Font" testid="nt-font" width={92} big={narrow} disabled={titleActive}
+        value={currentFontOption ? currentFontOption.value : currentFont}
+        mixed={fontMixed}
+        displayLabel={fontLabel}
+        options={fontOptions.map((f) => ({ label: f.label, value: f.value }))}
+        onPick={(v) => (v ? chain().setFontFamily(v).run() : chain().unsetFontFamily().run())} />
+
+      <SizeMenu testid="nt-size" big={narrow}
+        value={currentSizeNum} mixed={sizeMixed} displayLabel={sizeLabel}
+        onPick={pickSize} />
+
+      <Sep />
+
+      <TBButton title="Bold" testid="nt-bold" big={narrow} disabled={titleActive} pressed={boldPressed} onClick={() => chain().toggleBold().run()}>
         <span style={{ fontWeight: 800, fontSize: 13 }}>B</span>
       </TBButton>
-      <TBButton title="Italic" testid="nt-italic" big={narrow} pressed={italicPressed} onClick={() => chain().toggleItalic().run()}>
+      <TBButton title="Italic" testid="nt-italic" big={narrow} disabled={titleActive} pressed={italicPressed} onClick={() => chain().toggleItalic().run()}>
         <span style={{ fontStyle: "italic", fontFamily: "Georgia, serif", fontSize: 13 }}>I</span>
       </TBButton>
-      {!narrow && underlineBtn}
-      {!narrow && strikeBtn}
-      {!narrow && textColorControl}
-      {!narrow && highlightColorControl}
+      <TBButton title="Underline" testid="nt-underline" big={narrow} disabled={titleActive} pressed={underlinePressed} onClick={() => chain().toggleUnderline().run()}>
+        <span style={{ textDecoration: "underline", fontSize: 13 }}>U</span>
+      </TBButton>
+      <TBButton title="Strikethrough" testid="nt-strike" big={narrow} disabled={titleActive} pressed={strikePressed} onClick={() => chain().toggleStrike().run()}>
+        <span style={{ textDecoration: "line-through", fontSize: 13 }}>S</span>
+      </TBButton>
+      <TBButton title="Superscript" testid="nt-sup" big={narrow} pressed={supPressed}
+        onClick={() => (titleActive ? setTitleStyle({ sup: !titleStyle.sup, sub: false }) : chain().toggleSuperscript().run())}>
+        <SupText />
+      </TBButton>
+      <TBButton title="Subscript" testid="nt-sub" big={narrow} pressed={subPressed}
+        onClick={() => (titleActive ? setTitleStyle({ sub: !titleStyle.sub, sup: false }) : chain().toggleSubscript().run())}>
+        <SubText />
+      </TBButton>
+
+      <ColorPopover title="Text colour" testid="nt-color" glyph="ink" big={narrow} mixed={colorMixed}
+        swatch={currentColor || DEFAULT_TEXT_SWATCH} colors={TEXT_COLORS}
+        onPick={(c) => (titleActive ? setTitleStyle({ color: c }) : (c ? chain().setColor(c).run() : chain().unsetColor().run()))} />
+      <ColorPopover title="Highlight colour" testid="nt-highlight" glyph="marker" big={narrow} mixed={hlMixed}
+        swatch={currentHl || DEFAULT_HIGHLIGHT_SWATCH} colors={HIGHLIGHT_COLORS}
+        onPick={(c) => (titleActive ? setTitleStyle({ highlight: c }) : (c ? chain().setHighlight({ color: c }).run() : chain().unsetHighlight().run()))} />
 
       <Sep />
 
-      <TBButton title="Bulleted list" testid="nt-bullet" big={narrow} pressed={listPressed("bulletList")} onClick={() => chain().toggleBulletList().run()}><BulletIcon /></TBButton>
-      <TBButton title="Numbered list" testid="nt-ordered" big={narrow} pressed={listPressed("orderedList")} onClick={() => chain().toggleOrderedList().run()}><OrderedIcon /></TBButton>
-      {!narrow && checklistBtn}
+      {compact ? (
+        disabledWrap(<AlignMenu value={alignDisplay ?? "left"} mixed={alignMixed} big={narrow}
+          onPick={(id) => chain().setTextAlign(id).run()} />)
+      ) : disabledWrap(
+        <>
+          {ALIGNS.map((a) => (
+            <TBButton key={a.id} title={a.title} testid={`nt-align-${a.id}`} big={narrow}
+              pressed={alignPressed(a.id)}
+              onClick={() => chain().setTextAlign(a.id).run()}>
+              <AlignIcon lines={a.lines} />
+            </TBButton>
+          ))}
+        </>,
+      )}
 
       <Sep />
 
-      <LinkControl editor={editor} big={narrow} />
-      {!narrow && tableInsertControl}
-      {!narrow && imageBtn}
-      {/* The picker is the deliberate alternative to paste/drop, not a replacement: it is
-          how a picture gets in on a device where dragging a file is awkward. Always rendered
-          (hidden) regardless of where the visible button that opens it currently lives. */}
+      {disabledWrap(
+        <>
+          <TBButton title="Bulleted list" testid="nt-bullet" big={narrow} pressed={listPressed("bulletList")} onClick={() => chain().toggleBulletList().run()}><BulletIcon /></TBButton>
+          <TBButton title="Numbered list" testid="nt-ordered" big={narrow} pressed={listPressed("orderedList")} onClick={() => chain().toggleOrderedList().run()}><OrderedIcon /></TBButton>
+          <TBButton title="Checklist" testid="nt-task" big={narrow} pressed={listPressed("taskList")} onClick={() => chain().toggleTaskList().run()}><TaskIcon /></TBButton>
+          <TBButton title="Decrease indent" testid="nt-outdent" big={narrow} onClick={outdent}><IndentIcon out /></TBButton>
+          <TBButton title="Increase indent" testid="nt-indent" big={narrow} onClick={indent}><IndentIcon /></TBButton>
+          <SpacingPopover big={narrow} lineHeight={spacingResolved} spaceBefore={spaceBeforeCaret} spaceAfter={spaceAfterCaret}
+            onPick={pickSpacing} onApplyWholePage={applySpacingWholePage} onReset={resetSpacing} />
+        </>,
+      )}
+
+      <Sep />
+
+      {!compact && !titleActive && (
+        <>
+          <LinkControl editor={editor} big={narrow} />
+          <TableGridPicker big={narrow} onInsert={(rows, cols) => chain().insertTable({ rows, cols, withHeaderRow: true }).run()} />
+          <TBButton title="Insert a picture" testid="nt-image" big={narrow} onClick={() => fileRef.current?.click()}><ImageIcon /></TBButton>
+          <TBButton title="Attach a file — a PDF, a spreadsheet, a drawing" testid="nt-attach" big={narrow} onClick={onAttach}>
+            <Icon><path d="M11.5 5.5L6.2 10.8a2 2 0 0 0 2.8 2.8l5.3-5.3a3.4 3.4 0 0 0-4.8-4.8L4.2 8.8a4.8 4.8 0 0 0 6.8 6.8" /></Icon>
+          </TBButton>
+        </>
+      )}
+      {!titleActive && (
+        <InsertMenu editor={editor} big={narrow} compact={compact} fileRef={fileRef} onAttach={onAttach}
+          onInsertTable={(rows, cols) => chain().insertTable({ rows, cols, withHeaderRow: true }).run()} />
+      )}
+      {disabledWrap(
+        <TBButton title="Connect two boxes with an arrow — click this, then click the box it starts from, then the box it points to"
+          testid="nt-arrow" active={arrowMode} big={narrow} onClick={onToggleArrow}><ArrowConnectIcon /></TBButton>,
+      )}
+
+      {/* The picker is the deliberate alternative to paste/drop, not a replacement — it is how
+          a picture gets in on a device where dragging a file is awkward. */}
       <input
         ref={fileRef}
         data-testid="nt-image-input"
@@ -1454,105 +1462,100 @@ export default function NoteToolbar({
         onChange={pickImages}
         style={{ display: "none" }}
       />
-      {!narrow && arrowBtn}
-      {!narrow && attachBtn}
 
-      <Sep />
-
-      <OverflowMenu big={narrow}>
-        {narrow && (
-          <MenuGroup label="Text">
-            {fontControl}
-            {fontSizeControl}
-            {blockStyleControl}
-            {spacingControl}
-            {underlineBtn}
-            {strikeBtn}
-            {textColorControl}
-            {highlightColorControl}
-            {checklistBtn}
-          </MenuGroup>
-        )}
-
-        <MenuGroup label="Type">
-          <TBButton title="Inline code" testid="nt-code" big={narrow} pressed={codePressed} onClick={() => chain().toggleCode().run()}>
-            <Icon><path d="M6 4.5L3 8l3 3.5" /><path d="M10 4.5L13 8l-3 3.5" /></Icon>
-          </TBButton>
-          <TBButton title="Clear formatting" testid="nt-clear" big={narrow} onClick={() => chain().unsetAllMarks().clearNodes().run()}>
-            <Icon><path d="M4 12.5h8" /><path d="M6.5 3.5h5" /><path d="M9 3.5L7 10" /><line x1="2.5" y1="2.5" x2="13.5" y2="13.5" /></Icon>
-          </TBButton>
-        </MenuGroup>
-
-        <MenuGroup label="Alignment & indent">
-          {ALIGNS.map((a) => (
-            <TBButton key={a.id} title={a.title} testid={`nt-align-${a.id}`} big={narrow}
-              pressed={alignPressed(a.id)}
-              onClick={() => chain().setTextAlign(a.id).run()}>
-              <AlignIcon lines={a.lines} />
-            </TBButton>
-          ))}
-          <TBButton title="Decrease indent" testid="nt-outdent" big={narrow} onClick={outdent}><IndentIcon out /></TBButton>
-          <TBButton title="Increase indent" testid="nt-indent" big={narrow} onClick={indent}><IndentIcon /></TBButton>
-        </MenuGroup>
-
-        <MenuGroup label="Blocks">
-          <TBButton title="Quote" testid="nt-quote" big={narrow} active={editor.isActive("blockquote")} onClick={() => chain().toggleBlockquote().run()}>
-            <Icon><path d="M6 4.5C4 5 3 6.5 3 9v2.5h3.5V8H5c0-1.5.4-2.4 1-3z" fill="currentColor" stroke="none" /><path d="M13 4.5c-2 .5-3 2-3 4.5v2.5h3.5V8H12c0-1.5.4-2.4 1-3z" fill="currentColor" stroke="none" /></Icon>
-          </TBButton>
-          <TBButton title="Code block" testid="nt-codeblock" big={narrow} active={editor.isActive("codeBlock")} onClick={() => chain().toggleCodeBlock().run()}>
-            <Icon><rect x="2" y="3" width="12" height="10" rx="1.5" /><path d="M6 6.5L4.5 8L6 9.5" /><path d="M10 6.5L11.5 8L10 9.5" /></Icon>
-          </TBButton>
-          <TBButton title="Divider" testid="nt-hr" big={narrow} onClick={() => chain().setHorizontalRule().run()}>
-            <Icon><line x1="2" y1="8" x2="14" y2="8" /></Icon>
-          </TBButton>
-          <CalloutControl editor={editor} big={narrow} />
-          <TBButton title="Toggle — a section that folds away" testid="nt-toggle" big={narrow}
-            active={editor.isActive("noteToggle")} onClick={() => chain().setNoteToggle().run()}>
-            <Icon><path d="M3 5.5L5.5 8L3 10.5" /><line x1="7.5" y1="4.5" x2="13.5" y2="4.5" /><line x1="7.5" y1="8" x2="13.5" y2="8" /><line x1="7.5" y1="11.5" x2="13.5" y2="11.5" /></Icon>
-          </TBButton>
-        </MenuGroup>
-
-        {narrow && (
-          <MenuGroup label="Insert">
-            {tableInsertControl}
-            {imageBtn}
-            {arrowBtn}
-            {attachBtn}
-          </MenuGroup>
-        )}
-
-        {narrow && (
-          <MenuGroup label="Page">
-            {zoomBtn}
-            {widthControl}
-            {heightControl}
-            {historyBtn}
-            {printBtn}
-            {exportBtn}
-          </MenuGroup>
-        )}
-
-        {narrow && tableGroupControls && <MenuGroup label="Table">{tableGroupControls}</MenuGroup>}
-      </OverflowMenu>
-
-      {!narrow && zoomBtn}
-      {!narrow && widthControl}
-      {!narrow && heightControl}
-      {!narrow && historyBtn}
-      {!narrow && printBtn}
-      {!narrow && exportBtn}
-
-      {/* TABLE GROUP, DESKTOP — on phone the same controls render inside the sheet
-          (`tableGroupControls` above) instead, so the primary row stays one compact line. */}
-      {!narrow && tableGroupControls && (
+      {tableGroupControls && (
         <>
           <Sep />
-          <span data-testid="nt-table-group" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 2, padding: "2px 6px", borderRadius: RADIUS.pill, background: "var(--surface-page)", border: "1px solid var(--border-default)" }}>
+          <span data-testid="nt-table-group" style={{ display: "flex", flexWrap: "nowrap", alignItems: "center", gap: 2, padding: "2px 6px", borderRadius: RADIUS.pill, background: "var(--surface-page)", border: "1px solid var(--border-default)" }}>
             <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--accent-notes-text)", marginRight: 4 }}>Table</span>
             {tableGroupControls}
           </span>
         </>
       )}
     </div>
+  );
+}
+
+/** ⛔ THE ONE "+" INSERT MENU (NEW-1/NEW-9). Its content is TWO layers, always both present:
+ *  Divider/Quote/Code block/Toggle/Callout — the block-level constructs that have no other
+ *  toolbar home in this redesign — PLUS, ONLY while `compact` (NEW-9's fold), Link/Table/
+ *  Image/Attach on top of them, since those four already have their own dedicated buttons on
+ *  the row the rest of the time. One trigger either way — "leaving only +" is the acceptance
+ *  test's own wording, and two separate plus-icon buttons would fail it just as surely as a
+ *  second row would.
+ *
+ *  Named-in-brief: "Divider, Page break, Callout, Quote, Code block, Date, Mention, Table of
+ *  contents — include only the ones the editor already supports." This editor supports
+ *  Divider/Callout/Quote/Code block — Page break, Date, Mention and Table of contents do not
+ *  exist anywhere in this schema (AUDIT-FIRST: checked `lib/notesSlashMenu.js`'s own command
+ *  list, the one place every insertable construct is already enumerated) and are not invented
+ *  here. Toggle rides along too — a real, already-supported construct with no other home. */
+function InsertMenu({ editor, big, compact, fileRef, onAttach, onInsertTable }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+  const { popRef, clampStyle } = usePopoverClampLeft(open);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+
+  const chain = () => editor.chain().focus();
+
+  return (
+    <span ref={wrapRef} style={{ position: "relative", display: "inline-flex" }}>
+      <TBButton title="Insert" testid="nt-insert-plus" active={open} big={big} onClick={() => setOpen((o) => !o)}><PlusIcon /></TBButton>
+      {open && (
+        <div
+          ref={popRef}
+          data-testid="nt-insert-panel"
+          onMouseDown={stop}
+          style={{
+            position: "absolute", top: big ? 48 : 32, left: 0, zIndex: 40, padding: 4, width: 196,
+            display: "flex", flexDirection: "column", gap: 1,
+            background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+            borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
+            ...clampStyle,
+          }}
+        >
+          {compact ? (
+            <>
+              <span style={{ padding: "2px 2px" }}><LinkControl editor={editor} big={big} /></span>
+              <span style={{ padding: "2px 2px" }}><TableGridPicker big={big} onInsert={onInsertTable} /></span>
+              <button type="button" data-testid="nt-insert-image" onMouseDown={stop}
+                onClick={() => { setOpen(false); fileRef.current?.click(); }}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 8px", borderRadius: RADIUS.control, border: "none", background: "transparent", color: "var(--text-primary)", cursor: "pointer", font: "inherit", fontSize: 12.5, fontWeight: 550 }}>
+                <ImageIcon /> Picture
+              </button>
+              <button type="button" data-testid="nt-insert-attach" onMouseDown={stop}
+                onClick={() => { setOpen(false); onAttach?.(); }}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 8px", borderRadius: RADIUS.control, border: "none", background: "transparent", color: "var(--text-primary)", cursor: "pointer", font: "inherit", fontSize: 12.5, fontWeight: 550 }}>
+                <Icon><path d="M11.5 5.5L6.2 10.8a2 2 0 0 0 2.8 2.8l5.3-5.3a3.4 3.4 0 0 0-4.8-4.8L4.2 8.8a4.8 4.8 0 0 0 6.8 6.8" /></Icon> Attach file
+              </button>
+              <div style={{ height: 1, margin: "3px 2px", background: "var(--border-default)" }} />
+            </>
+          ) : null}
+          {[
+            { id: "hr", label: "Divider", run: () => chain().setHorizontalRule().run() },
+            { id: "quote", label: "Quote", run: () => chain().toggleBlockquote().run() },
+            { id: "codeblock", label: "Code block", run: () => chain().toggleCodeBlock().run() },
+            { id: "toggle", label: "Toggle", run: () => chain().setNoteToggle().run() },
+          ].map((row) => (
+            <button key={row.id} type="button" data-testid={`nt-insert-${row.id}`} onMouseDown={stop}
+              onClick={() => { setOpen(false); row.run(); }}
+              style={{ display: "flex", alignItems: "center", width: "100%", textAlign: "left", padding: "7px 8px", borderRadius: RADIUS.control, cursor: "pointer", border: "none", background: "transparent", color: "var(--text-primary)", font: "inherit", fontSize: 12.5, fontWeight: 550 }}>
+              {row.label}
+            </button>
+          ))}
+          <div style={{ padding: "2px 2px" }}>
+            <CalloutControl editor={editor} big={big} />
+          </div>
+        </div>
+      )}
+    </span>
   );
 }

@@ -34,6 +34,8 @@ import { PAGE_HEIGHT_MAX, PAGE_HEIGHT_MIN } from "./notesPageHeight.js";
 import { inheritedStyle } from "./notesPasteInherit.js";
 import { addArrow, removeArrow } from "./notesArrows.js";
 import { FontFamily, FontSize, TextStyleKit } from "@tiptap/extension-text-style";
+import Superscript from "@tiptap/extension-superscript";
+import Subscript from "@tiptap/extension-subscript";
 import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
 import { TaskList, TaskItem } from "@tiptap/extension-list";
 import { Highlight } from "@tiptap/extension-highlight";
@@ -334,6 +336,19 @@ export const NOTE_EXTENSIONS = [
             parseHTML: () => [],
             renderHTML: () => ({}),
           },
+          /* ⛔ THE TITLE'S OWN FORMATTING (NEW-5, toolbar rebuild, 2026-09-24). The title is a
+           * plain sibling `<input>` (NoteEditor.jsx), never a ProseMirror node — so it cannot
+           * carry a mark the way a run of body text does, and everything here applies to the
+           * WHOLE title, never a sub-range (an `<input>` has no way to render two different
+           * colours in one value anyway). One object rather than eight attributes for the same
+           * reason `arrows` is one attribute: a single `setDocAttribute` step per edit, one undo
+           * frame, no second migration if a ninth field turns up later. Never restored from
+           * pasted HTML — same reasoning as `density`/`pageWidth`. */
+          titleStyle: {
+            default: null,
+            parseHTML: () => null,
+            renderHTML: () => ({}),
+          },
         },
       }, {
         types: ["paragraph", "heading"],
@@ -471,12 +486,53 @@ export const NOTE_EXTENSIONS = [
           if (dispatch) dispatch(tr.setDocAttribute("arrows", next));
           return true;
         },
+
+        /* ⛔ THE TITLE'S FORMATTING, MERGED RATHER THAN REPLACED (NEW-5). `patch` carries only
+         * the field(s) a toolbar control just changed (e.g. `{fontSize: 28}`); every other field
+         * already set — bold, a colour — must survive, exactly like `setNoteSpacing`'s patch
+         * merges onto a paragraph's existing attrs rather than overwriting them. `null` in the
+         * merged result (every field cleared) collapses back to the doc attribute's own default
+         * so an untouched title never carries an empty `{}` into storage. */
+        setNoteTitleStyle: (patch) => ({ state, tr, dispatch }) => {
+          const merged = { ...(state.doc.attrs.titleStyle || {}), ...patch };
+          const cleaned = Object.fromEntries(Object.entries(merged).filter(([, v]) => v != null && v !== false));
+          const next = Object.keys(cleaned).length ? cleaned : null;
+          if (dispatch) dispatch(tr.setDocAttribute("titleStyle", next));
+          return true;
+        },
+
+        /* ⛔ "APPLY TO WHOLE PAGE" (NEW-4's spacing popover). `setNoteSpacing` above deliberately
+         * only ever touches the SELECTION — that is right for every other caller, and this is
+         * the one place the popover needs every paragraph/heading in the document instead. A
+         * second command rather than a flag on the first: the selection-scoped behaviour is
+         * load-bearing everywhere else and must not grow a mode that could be flipped by
+         * accident. */
+        setNoteSpacingWholeDoc: (patch) => ({ state, tr, dispatch }) => {
+          let touched = false;
+          state.doc.descendants((node, pos) => {
+            if (node.type.name !== "paragraph" && node.type.name !== "heading") return true;
+            tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...patch });
+            touched = true;
+            return true;
+          });
+          if (touched && dispatch) dispatch(tr);
+          return touched;
+        },
       };
     },
   }),
 
   TaskList,
   TaskItem.configure({ nested: true }),
+
+  // ⛔ SUPERSCRIPT / SUBSCRIPT (NEW-1/NEW-4, toolbar rebuild, 2026-09-24) — official Tiptap
+  // marks (`<sup>`/`<sub>`), pinned to the exact same version as the rest of the Tiptap family
+  // rather than hand-rolled — "we hand-roll the entire UI, we never hand-roll the engine" per
+  // this file's own header. Genuinely mutually exclusive the way Word's are (`excludes`, set
+  // by each extension's own default), so toggling one turns the other off rather than stacking
+  // both on the same run.
+  Superscript,
+  Subscript,
 
   // ⛔ TAB CHANGES THE LEVEL OF THE CURRENT ITEM; IT NEVER CREATES A NODE THE USER DID NOT
   // TYPE. Registered ABOVE the list keymap on purpose — real nesting still wins wherever it

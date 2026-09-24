@@ -84,6 +84,116 @@ const INTEGRITY_SCAN_MS = 2500;
 
 /* ---- module-scope pieces (MODULE-SCOPE-COMPONENTS) --------------------------------------- */
 
+/** ⛔ NEW-2 (toolbar rebuild, 2026-09-24) — THE MODULE TAB ROW'S OWN CLUSTER: Find, Page setup,
+ *  History, Export ▾. Right-aligned via `AppHeader`'s existing `toolbarContent` slot (already
+ *  precedented — Scheduler/Model/DocReview/Site Planner all supply one; Notes never did until
+ *  now), visible only while a page is open. `NoteToolbar.jsx`'s own top-of-file note explains
+ *  why these four moved out of the per-page toolbar: they act on the PAGE, not on selected
+ *  text, and the old bar's own row never had room for them at any width the mockup tested.
+ *
+ *  ⛔ HAND-ROLLED, NOT `shared/ui/controls.jsx`/`AnchoredMenu.jsx` — same reason every other
+ *  file in this module gives (see `NoteToolbar.jsx`'s own `RADIUS` note): that import hoists a
+ *  chunk onto the Site route. Chrome tokens (`--chrome-*`) match the row it renders in, the
+ *  same convention Scheduler/Model/DocReview's own header clusters already use.
+ *
+ *  Export exists on a DIFFERENT axis from the row-context-menu's export/print
+ *  (`handleExportPageTree`/`handlePrintPageTree`, further down this file): those read a page
+ *  back from STORAGE, which is right for exporting a whole branch a person is not currently
+ *  looking at. This toolbar reaches the OPEN page's LIVE, unsaved editor instance through
+ *  `noteEditorRef` when it is mounted (the same reasoning `NoteEditor.jsx`'s own
+ *  `exportPage`/`printPage` document — `verify-notes-page-growth.mjs` §6 specifically drives
+ *  this live path), falling back to the storage read only in the narrow window before the
+ *  lazy editor chunk has mounted. */
+const HEADER_ICON_SIZE = 15;
+function HeaderIcon({ children }) {
+  return (
+    <svg width={HEADER_ICON_SIZE} height={HEADER_ICON_SIZE} viewBox="0 0 16 16" fill="none" stroke="currentColor"
+      strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {children}
+    </svg>
+  );
+}
+const headerIconBtnStyle = (active) => ({
+  display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5,
+  height: 28, minWidth: 28, padding: "0 8px", borderRadius: RADIUS.control, cursor: "pointer",
+  border: `1px solid ${active ? "var(--accent-notes)" : "var(--chrome-divider)"}`,
+  background: active ? "var(--accent-notes)" : "var(--chrome-bg-elev)",
+  color: active ? "var(--on-accent-notes)" : "var(--chrome-text)",
+  font: "inherit", fontSize: 12, fontWeight: 650,
+});
+
+function NotesHeaderTools({
+  onToggleFind, findActive, onTogglePageSetup, pageSetupActive, onToggleHistory, historyActive,
+  onExportMarkdown, onPrint,
+}) {
+  const [exportOpen, setExportOpen] = useState(false);
+  const wrapRef = useRef(null);
+  useEffect(() => {
+    if (!exportOpen) return undefined;
+    const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setExportOpen(false); };
+    const onKey = (e) => { if (e.key === "Escape") setExportOpen(false); };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); };
+  }, [exportOpen]);
+
+  const soonRowStyle = {
+    display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
+    padding: "7px 10px", borderRadius: RADIUS.control, border: "none", background: "transparent",
+    color: "var(--text-tertiary)", font: "inherit", fontSize: 12.5, fontWeight: 550,
+    cursor: "default", opacity: 0.6,
+  };
+  const rowStyle = { ...soonRowStyle, color: "var(--text-primary)", opacity: 1, cursor: "pointer", textAlign: "left" };
+
+  return (
+    <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      <button type="button" data-testid="notes-header-find" title="Find and replace (Ctrl+H)" aria-label="Find and replace"
+        aria-pressed={findActive} onClick={onToggleFind} style={headerIconBtnStyle(findActive)}>
+        <HeaderIcon><circle cx="7" cy="7" r="4.5" /><line x1="10.3" y1="10.3" x2="14" y2="14" /></HeaderIcon>
+      </button>
+      <button type="button" data-testid="notes-header-page-setup" title="Page setup" aria-label="Page setup"
+        aria-pressed={pageSetupActive} onClick={onTogglePageSetup} style={headerIconBtnStyle(pageSetupActive)}>
+        <HeaderIcon><rect x="3" y="2" width="10" height="12" rx="1.2" /><line x1="5.5" y1="5.5" x2="10.5" y2="5.5" /><line x1="5.5" y1="8" x2="10.5" y2="8" /></HeaderIcon>
+      </button>
+      <button type="button" data-testid="notes-header-history" title="Earlier versions of this page" aria-label="Version history"
+        aria-pressed={historyActive} onClick={onToggleHistory} style={headerIconBtnStyle(historyActive)}>
+        <HeaderIcon><path d="M8 4.5V8l2.5 1.5" /><circle cx="8" cy="8" r="5.5" /></HeaderIcon>
+      </button>
+      <span ref={wrapRef} style={{ position: "relative", display: "inline-flex" }}>
+        <button type="button" data-testid="notes-header-export" title="Export this page" aria-haspopup="menu" aria-expanded={exportOpen}
+          onClick={() => setExportOpen((o) => !o)} style={{ ...headerIconBtnStyle(exportOpen), padding: "0 9px" }}>
+          <HeaderIcon><path d="M8 2.5v8" /><path d="M5 7.5L8 10.5l3-3" /><path d="M2.5 12.5h11" /></HeaderIcon>
+          Export<span aria-hidden="true" style={{ fontSize: 9 }}>▾</span>
+        </button>
+        {exportOpen && (
+          <div
+            data-testid="notes-header-export-menu"
+            role="menu"
+            style={{
+              position: "absolute", top: 32, right: 0, zIndex: 60, padding: 4, width: 176,
+              display: "flex", flexDirection: "column", gap: 1,
+              background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+              borderRadius: RADIUS.control, boxShadow: "0 12px 32px rgba(0,0,0,0.20)",
+            }}
+          >
+            <span style={soonRowStyle}>PDF<span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase" }}>Soon</span></span>
+            <span style={soonRowStyle}>Word (.docx)<span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase" }}>Soon</span></span>
+            <button type="button" data-testid="notes-header-export-markdown" style={rowStyle}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { setExportOpen(false); onExportMarkdown(); }}
+            >Markdown</button>
+            <div style={{ height: 1, margin: "3px 4px", background: "var(--border-default)" }} />
+            <button type="button" data-testid="notes-header-export-print" style={rowStyle}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { setExportOpen(false); onPrint(); }}
+            >Print…</button>
+          </div>
+        )}
+      </span>
+    </span>
+  );
+}
+
 /** LOUD-FAILURE: a storage failure is a NAMED banner, never a quiet no-op. A full or
  *  disabled browser store must not be able to look like a clean save. */
 function StorageBanner({ error, onDismiss }) {
@@ -278,6 +388,22 @@ export default function Notes({
    * as the tree. `templateManagerOpen` gates the lazy "Manage templates" panel. */
   const [templates, setTemplates] = useState([]);
   const [templateManagerOpen, setTemplateManagerOpen] = useState(false);
+  /* ⛔ NEW-2 (toolbar rebuild, 2026-09-24) — History/Page setup/Find & replace are now
+   * TRIGGERED from this header's own tab-row cluster rather than a button inside the editor's
+   * toolbar, so their open/closed state lives here and is handed down to `<NoteEditor>` as a
+   * controlled prop — see that component's own note on why (its `historyOpen` used to be
+   * internal `useState`). A page switch (the `key` on `<NoteEditor>` below already remounts it)
+   * should not leave a stale panel open over the NEW page, so all three reset whenever the open
+   * page changes. */
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [pageSetupOpen, setPageSetupOpen] = useState(false);
+  const [findReplaceOpen, setFindReplaceOpen] = useState(false);
+  /* The live editor instance for the OPEN page, reached through a ref rather than a prop —
+   * `exportPage`/`printPage` read the LIVE, unsaved document directly (see NoteEditor.jsx's own
+   * note on why that is a deliberately different path from the tree-wide export/print below,
+   * which reads storage). `React.lazy` + `Suspense` forward a ref exactly like any other
+   * component, so this needs nothing special beyond holding it. */
+  const noteEditorRef = useRef(null);
   const [status, setStatus] = useState("saved");
   const [storageError, setStorageError] = useState(null);
   const [exportNote, setExportNote] = useState(null);
@@ -315,6 +441,9 @@ export default function Notes({
   const goToPage = useCallback((id) => {
     setActivePageId(id);
     writeActivePageId(id);
+    setHistoryOpen(false);
+    setPageSetupOpen(false);
+    setFindReplaceOpen(false);
   }, []);
 
   /* B113/B485's existing phone breakpoint (760px, matchMedia), reused rather than a third one —
@@ -837,6 +966,24 @@ export default function Notes({
 
   // Leaving the workspace must not leave a palette floating over whatever replaced it.
   useEffect(() => { if (!isActive) closeQuickOpen(); }, [isActive, closeQuickOpen]);
+
+  /* ⛔ NEW-2 — Ctrl+H (⌘+H on a Mac reads as "hide window" to the OS everywhere else in this
+   * app; Find & replace still binds Ctrl+H uniformly, matching the printed hint on the
+   * control's own tooltip — a shortcut two different chords on two platforms is harder to
+   * teach than one that is simply Windows/Linux-standard and still reachable on a Mac). Gated
+   * on `isActive` and on a real page being open, same discipline the Quick Open chord above
+   * already follows for the identical reason (workspaces stay mounted-but-hidden). */
+  useEffect(() => {
+    if (!isActive) return undefined;
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "h") return;
+      if (!activePageId) return;
+      e.preventDefault();
+      setFindReplaceOpen((v) => !v);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isActive, activePageId]);
 
   const quickResults = useMemo(() => {
     if (!quickOpen) return [];
@@ -1472,6 +1619,18 @@ export default function Notes({
         // Notes are per-page documents with no single-active-editor lock, so two tabs can
         // both be open safely and the "read-only until you take over" banner would be false.
         multiEditOk
+        toolbarContent={activePage ? (
+          <NotesHeaderTools
+            findActive={findReplaceOpen}
+            onToggleFind={() => setFindReplaceOpen((v) => !v)}
+            pageSetupActive={pageSetupOpen}
+            onTogglePageSetup={() => setPageSetupOpen((v) => !v)}
+            historyActive={historyOpen}
+            onToggleHistory={() => setHistoryOpen((v) => !v)}
+            onExportMarkdown={() => (noteEditorRef.current ? noteEditorRef.current.exportPage() : handleExportPageTree(activePage.id))}
+            onPrint={() => (noteEditorRef.current ? noteEditorRef.current.printPage() : handlePrintPageTree(activePage.id))}
+          />
+        ) : undefined}
       />
 
       <StorageBanner error={storageError} onDismiss={() => { clearNotesStorageError(); setStorageError(null); }} />
@@ -1667,6 +1826,7 @@ export default function Notes({
               {/* key = page id + BODY EPOCH — the remount is the fix. See this file's
                   header for the page half, and `bodyEpoch` above for the second window's. */}
               <NoteEditor
+                ref={noteEditorRef}
                 key={`${activePage.id}:${bodyEpoch}`}
                 pageId={activePage.id}
                 title={activePage.title}
@@ -1695,6 +1855,12 @@ export default function Notes({
                 onPrintNotice={setExportNote}
                 narrow={narrow}
                 onBack={narrow ? backToList : undefined}
+                historyOpen={historyOpen}
+                onCloseHistory={() => setHistoryOpen(false)}
+                pageSetupOpen={pageSetupOpen}
+                onClosePageSetup={() => setPageSetupOpen(false)}
+                findReplaceOpen={findReplaceOpen}
+                onCloseFindReplace={() => setFindReplaceOpen(false)}
               />
             </Suspense>
           ) : (

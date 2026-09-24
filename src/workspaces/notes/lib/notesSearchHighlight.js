@@ -80,6 +80,38 @@ export const NoteSearchHighlight = Extension.create({
         }
         return true;
       },
+
+      /* ⛔ REPLACE (NEW-2, toolbar rebuild, 2026-09-24) — the CURRENT active match only, then
+       * steps to whatever is now the next one (the replaced text can shift every later match's
+       * position by a different amount than the term it replaced, so re-deriving from the fresh
+       * document — rather than assuming "the next index" — is what keeps this from landing on a
+       * stale position after the first replace). */
+      replaceNoteSearch: (replacement) => ({ state, tr, dispatch }) => {
+        const s = noteSearchKey.getState(state);
+        if (!s || !s.matches.length) return false;
+        const m = s.matches[s.active];
+        if (!dispatch) return true;
+        tr.insertText(String(replacement ?? ""), m.from, m.to);
+        dispatch(tr);
+        return true;
+      },
+
+      /* ⛔ REPLACE ALL, IN ONE UNDO STEP. Every match is replaced in a single transaction —
+       * walked in REVERSE document order so an earlier replacement's length change can never
+       * shift the position of a match still waiting its turn (the standard "always edit from
+       * the end" rule for applying several ranged edits against one set of positions). */
+      replaceAllNoteSearch: (replacement) => ({ state, tr, dispatch }) => {
+        const s = noteSearchKey.getState(state);
+        if (!s || !s.matches.length) return false;
+        if (!dispatch) return true;
+        const text = String(replacement ?? "");
+        for (let i = s.matches.length - 1; i >= 0; i -= 1) {
+          const m = s.matches[i];
+          tr.insertText(text, m.from, m.to);
+        }
+        dispatch(tr);
+        return true;
+      },
     };
   },
 
