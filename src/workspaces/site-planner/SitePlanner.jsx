@@ -118,7 +118,7 @@ import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
 import ViewMenu from "./components/ViewMenu.jsx";
 // NEW-4 (B366389 ×2) — the plan menu's icons, in the route-local stroke idiom. See components/icons.jsx.
-import { SaveIcon, HistoryIcon, StorageIcon, PadlockIcon, PlusIcon, DuplicateIcon, CloseXIcon, UndoIcon, RedoIcon, ZoomFitIcon, LayersIcon } from "./components/icons.jsx";
+import { SaveIcon, HistoryIcon, StorageIcon, PadlockIcon, PlusIcon, DuplicateIcon, CloseXIcon, UndoIcon, RedoIcon, LayersIcon } from "./components/icons.jsx";
 import PresenceChip from "./components/PresenceChip.jsx";
 /* LAZY (B1064 tranche a). Site Analysis mounts ONLY when the Analysis panel is the open one
  * (`_pid === "analysis"`, and `leftPanel` starts at null), so it is never on the first-paint
@@ -20730,52 +20730,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   const plannerToolbar = (
     <>
-      {/* File group — first, matching the File → Edit(history) → View convention.
-          B1042 — opening the File menu warms the lazy export chunk, so by the time a download is
-          clicked the code is already in hand (no perceptible fetch).
-          ⛔ TOOLBAR PASS (B727504) — a bare word with no boundary and no caret reads as a heading,
-          not a control (owner report: "I can't tell what's going on with it"). It carries a real
-          1px border and a disclosure caret, and stays visibly "pressed" (accent border + tinted
-          fill) for as long as its menu is open.
-          ⛔ B755808 — the border-radius and height now come from the shared `TB_R`/`TB_H` (see
-          above) instead of a one-off 3px/29px, so File sits on the same grid as the icon buttons
-          beside it; the caret is de-emphasized with the same muted chrome token + lighter weight
-          every other disclosure caret in this app uses (`railHint`, the plan-caret at the
-          breadcrumb) instead of full-ink text jammed against the word. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-        <div ref={exportAnchor} style={{ position: "relative" }}>
-          {/* No aria-label here on purpose — the visible "File ▾" text is already a complete
-              accessible name (an aria-label would SILENTLY OVERRIDE it instead of adding to it,
-              and several ui-audit harnesses match this button by that exact visible name). The
-              caret stays plain text, not aria-hidden, for the same reason. */}
-          <button className="dbtn" aria-haspopup="menu" aria-expanded={exportMenu}
-            title="File — export a PNG or print a PDF"
-            style={{ ...dGhost, fontWeight: 600, display: "flex", alignItems: "center", gap: 6, height: TB_H, borderRadius: TB_R,
-              // ⛔ B1807200 AMENDMENT — resting border/background now match dGhost's own new box
-              // (var(--border-default)/var(--surface-raised)) instead of hardcoding PAL.chromeLine
-              // over a transparent fill; the open-menu accent border + hover-chrome tint still
-              // layers ON TOP of that box rather than replacing it.
-              border: `1px solid ${exportMenu ? PAL.accent : "var(--border-default)"}`,
-              background: exportMenu ? "var(--hover-chrome)" : "var(--surface-raised)" }}
-            onClick={() => setExportMenu((o) => { if (!o) warmExportSheet(); return !o; })}>
-            File <span style={{ fontSize: 10.5, lineHeight: 1, fontWeight: 500, color: PAL.chromeMuted }}>▾</span>
-          </button>
-          {/* B765984 — the .json project-file export/import pair was removed (owner: "no one should
-              really be using that"). The import's own tooltip admitted it REPLACES THE CURRENT
-              CANVAS with no confirmation, one row below a harmless PNG download — a destructive
-              whole-plan overwrite sitting where a misclick could reach it. Cloud save/load is the
-              real persistence path; this was a redundant, riskier side door. */}
-          <AnchoredMenu open={exportMenu} onClose={() => setExportMenu(false)} anchorRef={exportAnchor} placement="below-right" gap={8} width={220} panelStyle={menuPanel}>
-            <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
-            <button style={menuItem(false)} title="Pick a print frame, then download a finished PDF (no browser print dialog)" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Download PDF / pick frame…</button>
-          </AnchoredMenu>
-        </div>
-      </div>
-      {vSep}
       {/* History group — Undo / Redo. B648352: both icons are drawn in the app's own stroke idiom
           (fill:none, round cap/join — matching ToolIcon/RailIcon) rather than filled Material
           glyphs; see components/icons.jsx's header for the measured reason and what's still
-          filled/reported (Zoom-to-fit, Layers — not fixed here, on purpose).
+          filled/reported (Layers — not fixed here, on purpose).
           B648353 — a caret beside each opens a dropdown of recent actions (the Excel Quick Access
           Toolbar shape Michael asked for): newest first, real names from lib/historyLabel.js's
           snapshot diff, hover highlights a contiguous run from the top, click undoes/redoes that
@@ -20784,9 +20742,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           `background: var(--hover-chrome)` pill, which is the exact token a disabled icon fades
           toward — so a disabled Undo/Redo read as one indistinct grey smear instead of two clearly
           off controls. The container never carries the disabled treatment; only the glyph does.
-          The pair now sits bare, exactly like the Zoom-to-fit button beside it, grouped only by
-          the `vSep` dividers on either side — one chrome language for the whole bar, not a fourth
-          invented for this one pair. */}
+          ⛔ NEW-1 (B1900672, 2026-09-24) — owner: move Undo/Redo to the LEFT of File, and drop
+          Zoom-to-fit from this row entirely (reachable via `fit()`'s other entry points — the
+          canvas's own empty-space right-click menu and the print-compose screen's own zoom-to-fit
+          button — neither of which this removal touches). Undo/Redo now leads the row; the pair
+          sits bare, grouped only by the `vSep` divider that follows it — one chrome language for
+          the whole bar, not a fourth invented for this one pair. */}
       <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
         {/* ⛔ NEW-5 — UNDO IS ASKED ABOUT THE LIVE STATE, not merely about the stack's depth: a
             plain selection click pushed a frame and armed this button while the plan was
@@ -20832,18 +20793,57 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </AnchoredMenu>
       </div>
       {vSep}
-      {/* View group — Zoom to fit: four arrows pointing OUTWARD to the corners. Deliberately not a
-          magnifier — a magnifier says "zoom", not "fit", and would be confused with the separate
-          zoom in/out controls. */}
+      {/* File group — after Undo/Redo (NEW-1, B1900672, 2026-09-24: moved right of Undo/Redo, see
+          the History group comment above for the full reorder).
+          B1042 — opening the File menu warms the lazy export chunk, so by the time a download is
+          clicked the code is already in hand (no perceptible fetch).
+          ⛔ TOOLBAR PASS (B727504) — a bare word with no boundary and no caret reads as a heading,
+          not a control (owner report: "I can't tell what's going on with it"). It carries a real
+          1px border and a disclosure caret, and stays visibly "pressed" (accent border + tinted
+          fill) for as long as its menu is open.
+          ⛔ B755808 — the border-radius and height now come from the shared `TB_R`/`TB_H` (see
+          above) instead of a one-off 3px/29px, so File sits on the same grid as the icon buttons
+          beside it; the caret is de-emphasized with the same muted chrome token + lighter weight
+          every other disclosure caret in this app uses (`railHint`, the plan-caret at the
+          breadcrumb) instead of full-ink text jammed against the word. */}
       <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-        <button className="dbtn tb-icon-btn" style={dIcon} onClick={fit} disabled={!parcels.length && !els.length && !markups.length && !callouts.length && !sheetOverlays.length} aria-label="Zoom to fit" title="Zoom to fit"><ZoomFitIcon size={20} /></button>
+        <div ref={exportAnchor} style={{ position: "relative" }}>
+          {/* No aria-label here on purpose — the visible "File ▾" text is already a complete
+              accessible name (an aria-label would SILENTLY OVERRIDE it instead of adding to it,
+              and several ui-audit harnesses match this button by that exact visible name). The
+              caret stays plain text, not aria-hidden, for the same reason. */}
+          <button className="dbtn" aria-haspopup="menu" aria-expanded={exportMenu}
+            title="File — export a PNG or print a PDF"
+            style={{ ...dGhost, fontWeight: 600, display: "flex", alignItems: "center", gap: 6, height: TB_H, borderRadius: TB_R,
+              // ⛔ B1807200 AMENDMENT — resting border/background now match dGhost's own new box
+              // (var(--border-default)/var(--surface-raised)) instead of hardcoding PAL.chromeLine
+              // over a transparent fill; the open-menu accent border + hover-chrome tint still
+              // layers ON TOP of that box rather than replacing it.
+              border: `1px solid ${exportMenu ? PAL.accent : "var(--border-default)"}`,
+              background: exportMenu ? "var(--hover-chrome)" : "var(--surface-raised)" }}
+            onClick={() => setExportMenu((o) => { if (!o) warmExportSheet(); return !o; })}>
+            File <span style={{ fontSize: 10.5, lineHeight: 1, fontWeight: 500, color: PAL.chromeMuted }}>▾</span>
+          </button>
+          {/* B765984 — the .json project-file export/import pair was removed (owner: "no one should
+              really be using that"). The import's own tooltip admitted it REPLACES THE CURRENT
+              CANVAS with no confirmation, one row below a harmless PNG download — a destructive
+              whole-plan overwrite sitting where a misclick could reach it. Cloud save/load is the
+              real persistence path; this was a redundant, riskier side door. */}
+          <AnchoredMenu open={exportMenu} onClose={() => setExportMenu(false)} anchorRef={exportAnchor} placement="below-right" gap={8} width={220} panelStyle={menuPanel}>
+            <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
+            <button style={menuItem(false)} title="Pick a print frame, then download a finished PDF (no browser print dialog)" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Download PDF / pick frame…</button>
+          </AnchoredMenu>
+        </div>
       </div>
+      {/* Zoom-to-fit's Row 2 button was removed (NEW-1, B1900672, 2026-09-24, owner request) — the
+          same `fit()` handler is still reachable from the canvas's empty-space right-click menu and
+          from the print-compose screen's own zoom-to-fit button, both untouched by this removal. */}
       {/* Snap's interactive toggle moved to the on-canvas View (eye) menu with the other
           view/drawing aids (B653) — the top-bar duplicate is gone. S still toggles it. */}
       {/* ⛔ TOOLBAR PASS (B727504) — "Select parcels" moved OFF this permanent bar. It's how a site
           gets its parcel basis (identify / draw / split / merge) and the only way to add a lot
           that was missed or swap the one you started from — genuinely not pointless — but it's
-          touched once per site, so it doesn't earn a permanent seat beside Undo/Redo/Fit. It now
+          touched once per site, so it doesn't earn a permanent seat beside Undo/Redo/File. It now
           lives in the Parcels panel (the site-setup context where choosing ground actually
           happens; see `_pid === "parcel"` below), with a route back from the canvas via
           right-click on any parcel (`onParcelContext` → the parcelMenu). */}
