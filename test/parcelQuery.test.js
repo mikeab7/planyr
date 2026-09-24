@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { buildParcelWhere, okField, isDefaultLookupUrl } from "../src/workspaces/site-planner/lib/parcelQuery.js";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { buildParcelWhere, okField, isDefaultLookupUrl, resolveSearchField, lookupParcels } from "../src/workspaces/site-planner/lib/parcelQuery.js";
 import { COUNTIES } from "../src/workspaces/site-planner/lib/counties.js";
 
 const COUNTIES_HARRIS_URL = COUNTIES.harris.layerUrl;
@@ -69,5 +69,104 @@ describe("okField / isDefaultLookupUrl", () => {
     expect(isDefaultLookupUrl("harris", COUNTIES_HARRIS_URL)).toBe(true);
     expect(isDefaultLookupUrl("harris", COUNTIES_HARRIS_URL + "/")).toBe(true);
     expect(isDefaultLookupUrl("harris", "https://example.com/Other/MapServer/0")).toBe(false); // a user override
+  });
+});
+
+/* resolveSearchField — detection wins by default; a pin (Jackson/Bibb's idField, Rockdale's
+ * addrField) wins ONLY while the hinted column still exists on the layer, else it degrades back
+ * to detection rather than failing the search (B1873776). */
+describe("resolveSearchField — pin wins only while the hinted column exists (B1873776)", () => {
+  const PIN_AHEAD_OF_FULL_ID = [
+    { name: "PIN", type: "esriFieldTypeString" },     // detectField's ID_RE would match this first
+    { name: "PARCEL_NO", type: "esriFieldTypeString" },
+  ];
+
+  it("with no pin, detection wins even when a hint names a different real column", () => {
+    expect(resolveSearchField(PIN_AHEAD_OF_FULL_ID, "id", "PARCEL_NO", false)).toBe("PIN");
+  });
+
+  it("with a pin, the hinted column wins over whatever detection would have picked", () => {
+    expect(resolveSearchField(PIN_AHEAD_OF_FULL_ID, "id", "PARCEL_NO", true)).toBe("PARCEL_NO");
+  });
+
+  it("a pin degrades to detection when the hinted column doesn't exist on this layer", () => {
+    const fields = [{ name: "PIN", type: "esriFieldTypeString" }]; // no PARCEL_NO here
+    expect(resolveSearchField(fields, "id", "PARCEL_NO", true)).toBe("PIN");
+  });
+
+  it("with no detectable field and no pin, falls back to the plain hint", () => {
+    const fields = [{ name: "SOME_OTHER_COL", type: "esriFieldTypeString" }];
+    expect(resolveSearchField(fields, "id", "PARCEL_NO", false)).toBe("PARCEL_NO");
+  });
+
+  it("an address pin behaves the same way (Rockdale's Address vs BOA_Addres)", () => {
+    const fields = [
+      { name: "Address", type: "esriFieldTypeString" },
+      { name: "BOA_Addres", type: "esriFieldTypeString" },
+    ];
+    // detectField's situs ladder may or may not prefer "Address" — the point is the PIN wins outright.
+    expect(resolveSearchField(fields, "address", "BOA_Addres", true)).toBe("BOA_Addres");
+  });
+});
+
+describe("only Jackson/Bibb pin an id field, and only Rockdale pins an address field (B1873776)", () => {
+  it("ga_jackson and ga_bibb pin idField; ga_rockdale does not", () => {
+    expect(COUNTIES.ga_jackson.pinIdField).toBe(true);
+    expect(COUNTIES.ga_bibb.pinIdField).toBe(true);
+    expect(COUNTIES.ga_rockdale.pinIdField).toBeFalsy();
+  });
+
+  it("ga_rockdale pins addrField to BOA_Addres; ga_jackson/ga_bibb do not pin an address", () => {
+    expect(COUNTIES.ga_rockdale.pinAddrField).toBe(true);
+    expect(COUNTIES.ga_rockdale.addrField).toBe("BOA_Addres");
+    expect(COUNTIES.ga_jackson.pinAddrField).toBeFalsy();
+    expect(COUNTIES.ga_bibb.pinAddrField).toBeFalsy();
+  });
+});
+
+/* End-to-end lookupParcels through a mocked ArcGIS server, proving the pin actually reaches the
+ * query — not just that resolveSearchField is correct in isolation. */
+describe("lookupParcels — end to end through the pin (B1873776)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const ok = (body) => ({ ok: true, status: 200, json: async () => body });
+
+  it("Jackson: an id search runs against the pinned PARCEL_NO, not the layer's PIN column", async () => {
+    const calls = [];
+    vi.stubGlobal("fetch", vi.fn(async (url) => {
+      const u = String(url);
+      calls.push(u);
+      if (u.includes("/query")) return ok({ features: [{ geometry: { rings: [] }, attributes: { PARCEL_NO: "08 123A" } }] });
+      // metadata probe (getLayerInfo)
+      return ok({ name: "Tax_Parcels", type: "Feature Layer", geometryType: "esriGeometryPolygon", fields: [
+        { name: "PIN", alias: "PIN", type: "esriFieldTypeString" },
+        { name: "PARCEL_NO", alias: "Parcel Number", type: "esriFieldTypeString" },
+      ] });
+    }));
+    const r = await lookupParcels({ county: "ga_jackson", lookupUrl: COUNTIES.ga_jackson.layerUrl, mode: "id", value: "08 123A" });
+    expect(r.idField).toBe("PARCEL_NO");
+    expect(r.feats).toHaveLength(1);
+    const queryCall = calls.find((u) => u.includes("/query"));
+    expect(queryCall).toBeTruthy();
+    expect(decodeURIComponent(queryCall)).toContain("PARCEL_NO");
+    expect(decodeURIComponent(queryCall)).not.toMatch(/where=UPPER\(PIN\)/);
+  });
+
+  it("Rockdale: an address search runs against BOA_Addres, not the house-number-only Address column", async () => {
+    const calls = [];
+    vi.stubGlobal("fetch", vi.fn(async (url) => {
+      const u = String(url);
+      calls.push(u);
+      if (u.includes("/query")) return ok({ features: [{ geometry: { rings: [] }, attributes: { BOA_Addres: "1620 WALNUT ST SE" } }] });
+      return ok({ name: "Rockdale_County_Parcels", type: "Feature Layer", geometryType: "esriGeometryPolygon", fields: [
+        { name: "PARCEL_NO", alias: "Parcel Number", type: "esriFieldTypeString" },
+        { name: "Address", alias: "Address", type: "esriFieldTypeString" },
+        { name: "BOA_Addres", alias: "BOA Address", type: "esriFieldTypeString" },
+      ] });
+    }));
+    const r = await lookupParcels({ county: "ga_rockdale", lookupUrl: COUNTIES.ga_rockdale.layerUrl, mode: "address", value: "WALNUT" });
+    expect(r.addrField).toBe("BOA_Addres");
+    expect(r.feats).toHaveLength(1);
+    const queryCall = calls.find((u) => u.includes("/query"));
+    expect(decodeURIComponent(queryCall)).toContain("BOA_Addres");
   });
 });

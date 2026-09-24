@@ -651,6 +651,11 @@ describe("NEW-1 (2026-09-24) — ga_tift is wired through the GIS pass-through, 
     );
   });
 
+  it("idField/addrField are the real measured field names (ParcelNum/Situs), not a guess — confirmed live through the deployed proxy against this PR's own preview build", () => {
+    expect(COUNTIES.ga_tift.idField).toBe("ParcelNum");
+    expect(COUNTIES.ga_tift.addrField).toBe("Situs");
+  });
+
   it("gives Tift County a bbox/center derived from public/geo/county-polygons.json (never a placeholder), and it contains Tifton", () => {
     const c = COUNTIES_MAP.ga_tift;
     const [south, west, north, east] = c.bbox;
@@ -686,5 +691,119 @@ describe("NEW-1 (2026-09-24) — ga_tift is wired through the GIS pass-through, 
 
   it("adds no shared-URL conflict with any other county's layer", () => {
     expect(sharedLayerUrlConflicts()).toEqual([]);
+  });
+});
+
+/* NEW-2 (2026-09-23) — 11 MORE Georgia counties, measured on Michael's own signed-in Chrome
+ * (this sandbox's egress policy blocks every one of these county-owned hosts) — amends B1870704/
+ * NEW-1 above. Also fixes two field-mapping defects (Jackson/Bibb id search, Rockdale address
+ * search) via `pinIdField`/`pinAddrField` — covered end to end in test/parcelQuery.test.js;
+ * this file only pins that the county rows themselves carry the pin. */
+describe("NEW-2 (2026-09-23) — 11 more Georgia counties (B1873776, amends B1870704)", () => {
+  const GA_SECOND_PASS_KEYS = [
+    "ga_forsyth", "ga_henry", "ga_clayton", "ga_cherokee", "ga_coweta", "ga_glynn",
+    "ga_screven", "ga_bryan", "ga_liberty", "ga_bartow", "ga_cobb",
+  ];
+
+  it("registers each county in both the search and map registries, state GA, with a real https URL", () => {
+    for (const k of GA_SECOND_PASS_KEYS) {
+      expect(COUNTIES[k], k).toBeTruthy();
+      expect(COUNTIES_MAP[k], k).toBeTruthy();
+      expect(COUNTIES[k].state, k).toBe("GA");
+      expect(COUNTIES_MAP[k].state, k).toBe("GA");
+      expect(COUNTIES[k].layerUrl, k).toMatch(/^https:\/\//);
+      expect(COUNTIES_MAP[k].layerUrl, k).toBe(COUNTIES[k].layerUrl);
+    }
+  });
+
+  it("gives every county a plausible Georgia bbox/center (never a 0,0 placeholder or a bbox outside the state)", () => {
+    for (const k of GA_SECOND_PASS_KEYS) {
+      const c = COUNTIES_MAP[k];
+      const [south, west, north, east] = c.bbox;
+      expect(south, k).toBeGreaterThan(29.5);
+      expect(north, k).toBeLessThan(35.5);
+      expect(west, k).toBeGreaterThan(-86.0);
+      expect(east, k).toBeLessThan(-80.0);
+      expect(c.center[0], k).toBeGreaterThan(south);
+      expect(c.center[0], k).toBeLessThan(north);
+      expect(c.center[1], k).toBeGreaterThan(west);
+      expect(c.center[1], k).toBeLessThan(east);
+    }
+  });
+
+  it("Georgia now has 26 county keys in both registries (14 from the first pass + these 11 + ga_tift, B1874880)", () => {
+    const gaInCounties = Object.entries(COUNTIES).filter(([, c]) => c.state === "GA").map(([k]) => k);
+    const gaInMap = Object.entries(COUNTIES_MAP).filter(([, c]) => c.state === "GA").map(([k]) => k);
+    expect(gaInCounties).toHaveLength(26);
+    expect(gaInMap).toHaveLength(26);
+  });
+
+  it("countyKeyForName resolves each county's real display name to its key, scoped to GA", () => {
+    expect(countyKeyForName("Forsyth", "GA")).toBe("ga_forsyth");
+    expect(countyKeyForName("Henry County", "GA")).toBe("ga_henry");
+    expect(countyKeyForName("Clayton", "GA")).toBe("ga_clayton");
+    expect(countyKeyForName("Cherokee County", "GA")).toBe("ga_cherokee");
+    expect(countyKeyForName("Coweta", "GA")).toBe("ga_coweta");
+    expect(countyKeyForName("Glynn County", "GA")).toBe("ga_glynn");
+    expect(countyKeyForName("Screven", "GA")).toBe("ga_screven");
+    expect(countyKeyForName("Bryan County", "GA")).toBe("ga_bryan");
+    expect(countyKeyForName("Liberty", "GA")).toBe("ga_liberty");
+    expect(countyKeyForName("Bartow County", "GA")).toBe("ga_bartow");
+    expect(countyKeyForName("Cobb", "GA")).toBe("ga_cobb");
+  });
+
+  it("routes each county seat to its own key via candidateCountiesForPoint", () => {
+    const SEATS = {
+      ga_forsyth: [34.2073, -84.1402],   // Cumming
+      ga_henry: [33.4473, -84.1469],     // McDonough
+      ga_clayton: [33.5212, -84.3552],   // Jonesboro
+      ga_cherokee: [34.2367, -84.4919],  // Canton
+      ga_coweta: [33.3809, -84.7997],    // Newnan
+      ga_glynn: [31.1495, -81.4912],     // Brunswick
+      ga_screven: [32.7529, -81.6365],   // Sylvania
+      ga_bryan: [31.9342, -81.3084],     // Richmond Hill
+      ga_liberty: [31.8468, -81.5960],   // Hinesville
+      ga_bartow: [34.1651, -84.7999],    // Cartersville
+      ga_cobb: [33.9526, -84.5499],      // Marietta
+    };
+    for (const [k, [lat, lng]] of Object.entries(SEATS)) {
+      expect(candidateCountiesForPoint(lat, lng), k).toContain(k);
+    }
+  });
+
+  // B1873776 — the Cherokee/Cobb bboxes overlap (a normal axis-aligned-rectangle artifact of two
+  // real, non-overlapping county polygons whose shared line isn't a straight east-west edge), so a
+  // point in the overlap band must still resolve to the RIGHT one of the two, not just "one of the
+  // candidates". countyForView's nearest-center tie-break (the polygon geometry asset isn't warmed
+  // in this unit-test process, so this exercises exactly the fallback path a cold click would use)
+  // is what decides it — never config order.
+  it("a Woodstock point resolves to Cherokee, not the overlapping Cobb rectangle", () => {
+    expect(countyForView(34.1015, -84.5195)).toBe("ga_cherokee"); // Woodstock, GA
+  });
+
+  it("a point toward Cobb's own northern edge (inside the Cherokee bbox overlap band) resolves to Cobb", () => {
+    expect(countyForView(34.085, -84.56)).toBe("ga_cobb");
+  });
+
+  it("adds no shared-URL conflict — each new county's layer is queried and health-checked once", () => {
+    expect(sharedLayerUrlConflicts()).toEqual([]);
+  });
+
+  it("Long and Walton stay unwired (no usable public parcel source, per this session's own record)", () => {
+    expect(COUNTIES_MAP.ga_long).toBeUndefined();
+    expect(COUNTIES_MAP.ga_walton).toBeUndefined();
+  });
+
+  it("a same-named Texas county (Liberty) still resolves to Texas, never to the new Georgia Liberty", () => {
+    const [lat, lng] = [30.19, -94.80]; // Liberty County, TX's own configured center
+    const cand = candidateCountiesForPoint(lat, lng);
+    expect(cand).toContain("liberty");
+    expect(cand).not.toContain("ga_liberty");
+    expect(countyForView(lat, lng)).toBe("liberty");
+  });
+
+  it("never returns a Georgia county for a point in another state", () => {
+    const houston = candidateCountiesForPoint(29.76, -95.37);
+    for (const k of GA_SECOND_PASS_KEYS) expect(houston, k).not.toContain(k);
   });
 });

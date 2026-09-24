@@ -172,11 +172,11 @@ export const COUNTY_VERIFICATION = {
   },
   ga_jackson: {
     verifiedOn: "2026-09-23",
-    verifiedNote: "VERIFIED LIVE from this sandbox: 45,046 parcel polygons, esriGeometryPolygon, extent -83.82..-83.35 / 33.97..34.30 (matches Jefferson, GA — Jackson County's own seat). Resolved via the ArcGIS Online item the dispatch's own Hub item id (cb6bbe781e324c3abf6e135ed1bc0a32) pointed at; the real polygon layer is id 9 on that service, not 0.",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 45,046 parcel polygons, esriGeometryPolygon, extent -83.82..-83.35 / 33.97..34.30 (matches Jefferson, GA — Jackson County's own seat). Resolved via the ArcGIS Online item the dispatch's own Hub item id (cb6bbe781e324c3abf6e135ed1bc0a32) pointed at; the real polygon layer is id 9 on that service, not 0. ⛔ SECOND PASS (2026-09-23, Michael's own browser): this layer's first ID-shaped column is PIN, a short partial (\"006A\") that matches several lots — an ID search through detectField's plain auto-detection returned 8 lots instead of one. Fixed by pinning PARCEL_NO (pinIdField: true, parcelQuery.js's resolveSearchField), which degrades back to detection if this layer ever drops PARCEL_NO.",
   },
   ga_bibb: {
     verifiedOn: "2026-09-23",
-    verifiedNote: "VERIFIED LIVE from this sandbox: 68,899 parcel polygons, esriGeometryPolygon, extent -83.89..-83.49 / 32.66..32.95 (matches Macon-Bibb). Resolved via the dispatch's own Hub item id (23ef5481f8f24e6aa6e22e7367a4cf32).",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 68,899 parcel polygons, esriGeometryPolygon, extent -83.89..-83.49 / 32.66..32.95 (matches Macon-Bibb). Resolved via the dispatch's own Hub item id (23ef5481f8f24e6aa6e22e7367a4cf32). ⛔ SECOND PASS (2026-09-23, Michael's own browser): detectField was picking LOWPARCELID ahead of PARCELID on this layer, misrouting id searches. Fixed by pinning PARCELID (pinIdField: true, same mechanism as ga_jackson).",
   },
   ga_dougherty: {
     verifiedOn: "2026-09-23",
@@ -184,7 +184,7 @@ export const COUNTY_VERIFICATION = {
   },
   ga_rockdale: {
     verifiedOn: "2026-09-23",
-    verifiedNote: "VERIFIED LIVE from this sandbox: 36,856 parcel polygons, esriGeometryPolygon, extent -84.18..-83.91 / 33.53..33.79 (matches Conyers). ⛔ Two near-identical Rockdale services exist on the same AGOL org — a commercial real-estate broker's personal mirror (rbell@nationalland.com_CCIM) and this one, the county's own GIS staff account (gary.morris_RockdaleGA); wired to the county's own copy, not the broker's.",
+    verifiedNote: "VERIFIED LIVE from this sandbox: 36,856 parcel polygons, esriGeometryPolygon, extent -84.18..-83.91 / 33.53..33.79 (matches Conyers). ⛔ Two near-identical Rockdale services exist on the same AGOL org — a commercial real-estate broker's personal mirror (rbell@nationalland.com_CCIM) and this one, the county's own GIS staff account (gary.morris_RockdaleGA); wired to the county's own copy, not the broker's. ⛔ SECOND PASS (2026-09-23, Michael's own browser): the wired Address column holds ONLY the house number (\"1620\") — a street-name search on it found 0 lots, a bare house number found 32. The same layer's BOA_Addres column holds the whole situs line (\"1620 WALNUT ST SE\") — a street-name search on it found 55 lots, a full address exactly 1. Rewired addrField to BOA_Addres with pinAddrField: true so it wins over whatever detectField would otherwise pick.",
   },
   ga_paulding: {
     verifiedOn: "2026-09-23",
@@ -200,7 +200,58 @@ export const COUNTY_VERIFICATION = {
   },
   ga_tift: {
     verifiedOn: "2026-09-24",
-    verifiedNote: "VERIFIED LIVE from Michael's own browser (planyr.io origin), 2026-09-24: the SGRC layer (www.sgrcmaps.com/alma/rest/services/Tift/Tift_Parcels/MapServer/0) holds 19,194 parcel polygons and opens fine when the service is fetched directly — but the identical fetch FROM planyr.io fails with no Access-Control-Allow-Origin header on the response at all, so this county is wired through the same-origin /gis-proxy/ pass-through (functions/gis-proxy/[[path]].js) rather than a direct URL. www.sgrcmaps.com is blocked by THIS build environment's egress policy (a sandbox limitation, not a sign the endpoint moved) — could not be independently re-probed from here. idField/addrField are left to field-name detection (detectField) rather than hand-guessed, since the layer's own field list was not read this session — a real value from the field list, or a well-known id-field name pattern.",
+    verifiedNote: "VERIFIED LIVE twice: first from Michael's own browser (planyr.io origin) — the SGRC layer (www.sgrcmaps.com/alma/rest/services/Tift/Tift_Parcels/MapServer/0) holds 19,194 parcel polygons and opens fine fetched directly, but the identical fetch FROM planyr.io fails with no Access-Control-Allow-Origin header on the response at all, which is why this county routes through the same-origin /gis-proxy/ pass-through (functions/gis-proxy/[[path]].js) instead of a direct URL. SECOND, independently, from THIS sandbox against the DEPLOYED proxy on this PR's Cloudflare preview build (sgrcmaps.com itself is still blocked by this sandbox's own egress policy, but the proxy's upstream fetch runs server-side in Cloudflare, which the block never reaches): /MapServer/0?f=json returned real layer metadata (fields OBJECTID/ParcelNum/OwnerName/Situs/QPLINK, esriGeometryPolygon); /query?returnCountOnly=true returned exactly 19,194, matching Michael's own count; a point query at Tifton (31.4504, -83.5085) returned a real parcel — OBJECTID 18560, ParcelNum \"T044  082\", OwnerName \"TIFTON DREAM VISION PROPERTIES, LLC\", Situs \"212 E 5TH ST\". idField (ParcelNum) / addrField (Situs) are this measurement, not a guess.",
+  },
+  /* ═══ NEW-2 (2026-09-23) — 11 more Georgia counties, MEASURED FROM MICHAEL'S OWN SIGNED-IN
+   * CHROME on planyr.io (this build environment's egress policy blocks every one of these
+   * county-owned hosts, so none could be re-probed from this sandbox) — amends B1870704/NEW-1
+   * above, whose "13 deliberately not wired" list this shrinks to two (Long, Walton — neither has
+   * a usable public parcel source). Each row was validated end to end through the app's own
+   * request shapes: queryAtPoint at a real parcel centroid, then an id search and an address
+   * search through the Map Finder search box. ═══ */
+  ga_forsyth: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 105,480 parcel polygons. queryAtPoint at a real parcel centroid near Cumming, plus an id search and a street-address search through the Map Finder search box, all returned real lots.",
+  },
+  ga_henry: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 103,537 parcel polygons. The slowest of the eleven to click-identify (about 1.5s), comfortably inside the 8s fetch timeout. queryAtPoint + both search modes confirmed near McDonough.",
+  },
+  ga_clayton: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 92,100 parcel polygons. Host is weba.co.clayton.ga.us on a non-standard port (5443) — blocked by this build environment's egress policy, answers cleanly from a real browser (queryAtPoint + both search modes confirmed near Jonesboro).",
+  },
+  ga_cherokee: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 116,022 parcel polygons. queryAtPoint + both search modes confirmed near Canton; the Woodstock overlap point against ga_cobb resolved to this county, not the neighbour.",
+  },
+  ga_coweta: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 64,060 parcel polygons. Host is the county's own cccjcgiswa GIS server — blocked by this build environment's egress policy, answers cleanly from a real browser (queryAtPoint + both search modes confirmed near Newnan).",
+  },
+  ga_glynn: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 46,503 parcel polygons. Host is a webadaptor path on the county's own GIS server — blocked by this build environment's egress policy, answers cleanly from a real browser. No address column on this layer at all — id search only, addrField deliberately left unset.",
+  },
+  ga_screven: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 10,979 parcel polygons — smallest of the eleven. Published on the Coastal Regional Commission's shared GIS host (maps.crc.ga.gov), same publisher convention as ga_liberty below. No address column — id search only.",
+  },
+  ga_bryan: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 23,200 parcel polygons. ⛔ This server answers HTTP 200 with {error:{code:400,message:\"Pagination is not supported.\"}} to ANY query carrying resultRecordCount — every ordinary search — so the search box could not have worked here without arcgis.js's queryFeatures pagination fallback (isPaginationUnsupportedError → ids-only, then by objectIds); both fallback calls were measured working on this server. The click path (queryAtPoint, no pagination params) always worked. Layer is PropertyDetails/0 — the dispatch's own Parcels/MapServer path does not exist on this host. Situs is decomposed (no combined column) — addrField is the street-name column.",
+  },
+  ga_liberty: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 28,170 parcel polygons. Published on the same Coastal Regional Commission shared GIS host as ga_screven — the dispatch's own gis.libertycountyga.com host did not connect at all from that Chrome; this is a genuinely different, working source.",
+  },
+  ga_bartow: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 63,688 parcel polygons. Situs is decomposed (no combined column), same shape as ga_bryan — addrField is the street-name column.",
+  },
+  ga_cobb: {
+    verifiedOn: "2026-09-23",
+    verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 279,635 parcel polygons — largest of the eleven. queryAtPoint + both search modes confirmed near Marietta; the north-Marietta overlap point against ga_cherokee resolved to this county, not the neighbour.",
   },
   mi_oakland: {
     verifiedOn: "2026-09-10",

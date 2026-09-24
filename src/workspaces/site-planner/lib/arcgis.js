@@ -116,19 +116,52 @@ export async function resolveLayerUrl(url) {
   return trim(url); // assume it's already a layer URL
 }
 
+/* Does an ArcGIS error mean the layer refuses the `resultRecordCount` parameter? Some servers
+ * (Bryan County GA, measured 2026-09-23) answer HTTP 200 with `{error:{code:400,message:
+ * "Pagination is not supported."}}` to ANY query carrying it — a server-side capability gap, not an
+ * outage — so the search box would come back empty for that county however good the query was. We
+ * match the wording exactly so a real timeout / network / other ArcGIS error is never retried as
+ * though it were this. */
+export function isPaginationUnsupportedError(e) {
+  return (
+    e instanceof ParcelFetchError &&
+    e.kind === "arcgis" &&
+    /pagination is not supported/i.test(e.message || "")
+  );
+}
+
 // Query features, returning geometry in Texas State Plane feet (EPSG:2278).
 export async function queryFeatures(
   layerUrl,
   { where = "1=1", outFields = "*", count = 8, outSR = FEET_WKID } = {}
 ) {
-  const j = await fetchJson(trim(layerUrl) + "/query", {
-    where,
-    outFields,
-    returnGeometry: "true",
-    outSR,
-    resultRecordCount: count,
-  });
-  return j.features || [];
+  const url = trim(layerUrl) + "/query";
+  try {
+    const j = await fetchJson(url, {
+      where,
+      outFields,
+      returnGeometry: "true",
+      outSR,
+      resultRecordCount: count,
+    });
+    return j.features || [];
+  } catch (e) {
+    if (!isPaginationUnsupportedError(e)) throw e;
+    // The server will not honour a record cap, so do the cap ourselves in two requests: ask for the
+    // matching ids only (no geometry, so it is cheap even when the id list is long), keep the first
+    // `count`, then fetch exactly those. Both calls were measured working against the server that
+    // needs this. A failure in either still surfaces as the typed error it is — never swallowed.
+    const idsJson = await fetchJson(url, { where, returnIdsOnly: "true" });
+    const ids = (idsJson.objectIds || []).slice(0, count);
+    if (!ids.length) return [];
+    const j = await fetchJson(url, {
+      objectIds: ids.join(","),
+      outFields,
+      returnGeometry: "true",
+      outSR,
+    });
+    return j.features || [];
+  }
 }
 
 function ringArea(r) {
