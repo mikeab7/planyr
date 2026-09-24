@@ -120,6 +120,8 @@ async function dropCompPin(page, fracX = 0.5) {
   await page.mouse.click(pt.x, pt.y);
   // The pin is ground, not yet a comp — the decide bar asks what it is. "Log a comp" is what
   // produces the anchor these assertions are about.
+  // B1892544 (2026-09-24) — "Log a comp" moved off the bar into "Record info ▾".
+  await page.locator('[data-testid="map-decide-record-info"]').first().click({ timeout: 15000 });
   await page.locator('[data-testid="map-decide-verb-comp"]').first().click({ timeout: 15000 });
   // ⛔ A pin drop resolves its county asynchronously before the row can carry it, so a fixed wait
   // is a coin toss — and a harness that reads too early reports a working pick as no pick at all

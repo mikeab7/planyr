@@ -7,8 +7,10 @@
  * are logged in VERIFICATION.md, not silently counted here. What IS Claude-doable logged out, and is
  * therefore driven here rather than deferred (ATTEMPT-BEFORE-YOU-PARK):
  *   · the Notes layer toggle exists beside Sites and Comps, with a count, and persists
- *   · the pin entry point — Drop a pin, then "Add a note" on the decide bar — opens the editor
- *   · the note verb sits in the SAME bar as Plan a site / Log a comp / Place a site plan
+ *   · the pin entry point — Drop a pin, then "Record info ▾" → "Add a note" — opens the editor
+ *   · the note verb sits in the SAME "Record info" menu as Log a comp / Place a site plan
+ *     (B1892544, 2026-09-24 — moved off the bar itself, which now shows only "Plan this site"
+ *     and "Record info ▾" as direct controls)
  *   · the editor refuses to save an empty note, in a sentence, and Escape / Cancel closes it
  *   · a placed-then-cancelled note writes NOTHING — no row, no marker, no residue
  *
@@ -89,10 +91,12 @@ const mapBox = await page.evaluate(() => {
   ok("1 · re-ticking it is remembered too", (await page.evaluate(() => localStorage.getItem("planarfit:mapShowNotes:v1"))) === "1");
 }
 
-// ── 2 · THE PIN ENTRY POINT (drop a pin → the decide bar → "Add a note") ─────────────────────
+// ── 2 · THE PIN ENTRY POINT (drop a pin → the decide bar → "Record info" → "Add a note") ─────
 // ⛔ TWO-PRESS SHAPE: the decide bar does not exist until a pin is dropped, so the question is
 // asked AFTER the interaction. Its absence beforehand is the known-good arm — a probe that cannot
 // tell "not mounted" from "mounted" proves nothing about either.
+// B1892544 (2026-09-24) — "Add a note" moved off the bar into the "Record info ▾" menu, so it is
+// now a THREE-press shape: drop the pin, open the menu, then press the row.
 const CLICK = { x: mapBox.x + mapBox.w * 0.42, y: mapBox.y + mapBox.h * 0.55 };
 {
   const before = await page.evaluate(() => document.querySelectorAll('[data-testid^="map-decide-verb-"]').length);
@@ -103,16 +107,29 @@ const CLICK = { x: mapBox.x + mapBox.w * 0.42, y: mapBox.y + mapBox.h * 0.55 };
   await page.mouse.click(CLICK.x, CLICK.y);
   await pacedWait(page, 700);
 
+  const direct = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="map-decide-verb-"], [data-testid="map-decide-record-info"]')]
+    .map((b) => ({ key: (b.dataset.testid || "").replace("map-decide-verb-", ""), text: (b.textContent || "").trim() })));
+  ok("2 · dropping a pin raises the decide bar", direct.length > 0, `${direct.length} direct controls`);
+  ok("2 · 'Plan this site' and 'Record info' are its two direct controls",
+     direct.some((v) => v.key === "site") && direct.some((v) => v.key === "map-decide-record-info"),
+     direct.map((v) => v.text).join(" · "));
+
+  await page.click('[data-testid="map-decide-record-info"]');
+  await pacedWait(page, 300);
+
   const verbs = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="map-decide-verb-"]')]
+    .filter((b) => b.dataset.testid !== "map-decide-verb-site")
     .map((b) => ({ key: b.dataset.testid.replace("map-decide-verb-", ""), text: (b.textContent || "").trim(),
                    w: b.getBoundingClientRect().width, h: b.getBoundingClientRect().height })));
-  ok("2 · dropping a pin raises the decide bar", verbs.length > 0, `${verbs.length} verbs`);
-  ok("2 · 'Add a note' is one of its verbs", verbs.some((v) => v.key === "note"),
+  ok("2 · opening 'Record info' reveals 'Add a note' among its rows", verbs.some((v) => v.key === "note"),
      verbs.map((v) => v.text).join(" · "));
-  ok("2 · it sits beside the other three, not on a surface of its own",
-     ["site", "comp", "siteplan"].every((k) => verbs.some((v) => v.key === k)));
+  ok("2 · it sits beside the other two record verbs in the same menu",
+     ["comp", "siteplan"].every((k) => verbs.some((v) => v.key === k)));
   const note = verbs.find((v) => v.key === "note");
-  ok("2 · it reads 'Add a note'", !!note && note.text === "Add a note", note ? note.text : "");
+  // B1892544 — the row's textContent concatenates its title AND subtitle spans with no
+  // separator ("Add a notePin a comment to the map"), so this checks the PREFIX rather than
+  // an exact match.
+  ok("2 · its title reads 'Add a note'", !!note && note.text.startsWith("Add a note"), note ? note.text : "");
   ok("2 · it is a real, clickable control", !!note && note.w > 40 && note.h > 8);
 
   const hits = await page.evaluate(() => {

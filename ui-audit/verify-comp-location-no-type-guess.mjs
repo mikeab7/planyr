@@ -81,6 +81,8 @@ console.log("\n=== Drop a pin, click the map, choose 'Log a comp' — the FIRST 
     await pacedWait(page, 400);
     // NEW-1 — and NOW say what the point is. This is the only added step; everything downstream
     // (the append-vs-fill branch, the Type cell) is the same code the old primary click reached.
+    // B1892544 (2026-09-24) — "Log a comp" moved off the bar into "Record info ▾".
+    await page.getByTestId("map-decide-record-info").click();
     await page.getByTestId("map-decide-verb-comp").click();
     await pacedWait(page, 3500); // resolveCompCounty races its own 3s offline timeout — no live GIS needed
   }

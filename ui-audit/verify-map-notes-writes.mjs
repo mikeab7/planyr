@@ -221,6 +221,9 @@ const markerCount = () => page.evaluate(() => document.querySelectorAll(".map-no
   await pacedWait(page, 300);
   await page.mouse.click(mapBox.x + mapBox.w * 0.35, mapBox.y + mapBox.h * 0.6);
   await pacedWait(page, 600);
+  // B1892544 (2026-09-24) — "Add a note" moved off the bar into "Record info ▾".
+  await page.click('[data-testid="map-decide-record-info"]');
+  await pacedWait(page, 300);
   await page.click('[data-testid="map-decide-verb-note"]');
   await pacedWait(page, 600);
   await page.click('[data-testid="map-note-body"]');

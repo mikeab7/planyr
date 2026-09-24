@@ -51,6 +51,8 @@ async function openCompCreateForm(page) {
   // The armed prompt is gone — the pin consumed it — and the decide bar is asking.
   await expect(page.getByText("Click the map to mark a point…")).toHaveCount(0);
   await expect(page.getByTestId("map-decide-summary")).toBeVisible();
+  // B1892544 (2026-09-24) — "Log a comp" moved off the bar into the "Record info ▾" menu.
+  await page.getByTestId("map-decide-record-info").click();
   await page.getByTestId("map-decide-verb-comp").click();
   // The comp create form opens, pre-filled from that click (the Type field is the tell — it's
   // unique to the form, unlike the list/detail views).

@@ -72,7 +72,10 @@ import { isTextControl, PICKER_TAGS } from "../../shared/keyboard/keyScope.js";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import FloatingNotice from "../../shared/ui/FloatingNotice.jsx";
-import { menuPanelStyle } from "../../shared/ui/controls.jsx";
+import { menuPanelStyle, MenuItem } from "../../shared/ui/controls.jsx";
+// NEW-1 (B1892544, 2026-09-24) — the "Record info" dropdown's three row icons — see that item's
+// note in icons.jsx for why each shape was picked.
+import { CompIcon, SitePlanIcon, NoteIcon } from "./components/icons.jsx";
 import DealDatesForm from "./components/DealDatesForm.jsx";
 import {
   resolveLayerUrl,
@@ -805,12 +808,14 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
    * Deliberately sessionStorage, not localStorage — the exact pattern B848304 established for
    * `planarfit:compAnchorKind:v1` (which this replaces): a sticky answer is a shortcut for the
    * task you are in the middle of, never a mode you can leave armed for tomorrow and be surprised
-   * by. A fresh tab starts over on "Plan a site" — `verbLabel`'s own singular wording, and the
+   * by. A fresh tab starts over on "Plan this site" — `verbLabel`'s own singular wording, and the
    * safest of the three (a plan is private scratch work; a comp is a standing market record).
    * ⚠ This sentence named "Track as site" until 2026-09-08: that label was replaced by the owner's
    * own amendment BEFORE the first commit and exists nowhere in the shipped product, so the
    * comment was asserting a default the code has never had. `lib/decideBar.js` owns the real
    * wording (`verbLabel`) — read it there rather than trusting a label quoted in prose here.
+   * (It named "Plan a site" here until B1892544, 2026-09-24 — see that item's own note in
+   * decideBar.js for why the singular changed.)
    * Bulk comp entry (Paste comps, Import KML) does not come through this toolbar at all and is
    * untouched by any of it. */
   const [lastVerb, setLastVerbRaw] = useState(() => {
@@ -3749,6 +3754,26 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     }
   };
 
+  /* NEW-1 (B1892544, 2026-09-24) — "Record info" is the decide bar's second (and last) direct
+   * control; the three verbs it used to show as separate bar buttons (Log a comp / Place a site
+   * plan / Add a note) now live in the menu it opens. `recordVerbs` is `orderedVerbs` — the SAME
+   * sticky ordering `verbsByKey`/Enter already use — with "site" (which stays its own direct
+   * button, below) filtered out; `orderVerbs` only ever moves its LEAD entry, so the other three
+   * keep their table order among themselves except when one of THEM is the lead. That is what
+   * "contextual reordering" now means here: whichever record verb was last chosen (e.g. "Log a
+   * comp", armed by a comps-panel row waiting on its location) still surfaces first — at the TOP
+   * of this menu instead of leading the old four-wide bar — and the bar's own accent now marks
+   * WHICH of the two buttons is carrying the lead, rather than which of four. */
+  const recordVerbs = orderedVerbs.filter((v) => v.key !== "site");
+  const recordLeads = orderedVerbs[0]?.key !== "site" && recordVerbs.length > 0;
+  const recordInfoAnchorRef = useRef(null);
+  const [recordMenuOpen, setRecordMenuOpen] = useState(false);
+  const RECORD_VERB_META = {
+    comp: { Icon: CompIcon, subtitle: "Sale, lease, or land comp" },
+    siteplan: { Icon: SitePlanIcon, subtitle: "Attach a drawing or concept" },
+    note: { Icon: NoteIcon, subtitle: "Pin a comment to the map" },
+  };
+
   /* ────────────────────────────────────────────────────────────────────────────────────────
    * NEW-1 (2026-09-08) — THE ACREAGE CHIP, ON THE SHAPE. Part of the owner's chosen design, not
    * a decoration: the decide bar is pinned centre-top and the parcels it is asking about can be
@@ -3762,8 +3787,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
    * `interactive: false` so it can never eat a press aimed at the parcel underneath it
    * (CHROME-NEVER-EATS-A-PRESS: chrome that paints over its own object's body must not claim the
    * press — the cheapest form of that rule is to not be a hit target at all).
-   * Anchored on the assembly's own bbox centre — the same point "Plan a site" would open the plan
-   * on, so the chip marks the spot the verb is about.
+   * Anchored on the assembly's own bbox centre — the same point "Plan this site" would open the
+   * plan on, so the chip marks the spot the verb is about.
    * (Also corrected 2026-09-08 from the retired "Track as site" label — see the block above.) */
   const acreChipRef = useRef(null);
   const acreChipKey = asm ? `${asm.totalAc.toFixed(2)}|${asm.origin.lat.toFixed(6)}|${asm.origin.lon.toFixed(6)}` : "";
@@ -4392,15 +4417,25 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           )}
           {/* ── THE DECIDE BAR — ground in hand, now say what it is ─────────────────────────
               NEW-1 (2026-09-08, owner-chosen design). The count + ✕ are B831776's, unchanged and
-              deliberately NOT rebuilt. What changed is the tail: one action chosen by a mode
-              became THREE VERBS LIVE AT ONCE, so the question is asked here, after the ground is
-              picked, instead of guessed by a toggle before it.
+              deliberately NOT rebuilt.
               The status dot is NEUTRAL on purpose — it used to take its colour from `mode`, which
               is precisely an answer shown before one has been given. It reports "there is a live
-              selection", nothing more. */}
+              selection", nothing more.
+              ⛔ B1892544 (2026-09-24) — the tail used to be FOUR verbs live at once; it is now TWO
+              controls: "Plan this site" (a direct press, unchanged handler) and "Record info ▾",
+              which opens a menu holding the other three (Log a comp / Place a site plan / Add a
+              note — see `recordVerbs` above). Four buttons wide was reported back as reading
+              cluttered next to the count it follows; two reads at a glance as "design it, or just
+              write something down about it" — the same choice, one fold deep for the second half. */}
           {decideTarget && (
             <>
               <span data-testid="map-decide-dot" style={{ width: 7, height: 7, borderRadius: RADIUS.pill, background: PAL.chromeMuted, flex: "none" }} />
+              {/* NEW-1 (B1892544) — a headless probe used to read the sticky order straight off the
+                  DOM order of four sibling `[data-testid^="map-decide-verb-"]` buttons; three of
+                  those now live inside a closed "Record info" menu and are unmounted until it
+                  opens. This publishes the same fact (the full `orderVerbs` result) without needing
+                  a click first — invisible, zero layout cost. */}
+              <span data-testid="map-decide-order" data-order={orderedVerbs.map((v) => v.key).join(",")} style={{ display: "none" }} />
               <span data-testid="map-decide-summary" style={{
                 flex: "1 1 auto", minWidth: 0, color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
                 padding: "0 8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
@@ -4424,28 +4459,81 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               </button>
               {/* B941152 — a two-plus-parcel selection (a normal industrial land comp assembled
                   from adjoining lots) once had NO action at all, so Enter had nothing to reach
-                  either. Every verb below takes any non-empty selection. */}
-              {orderedVerbs.map((v, i) => (
-                <Fragment key={v.key}>
-                  {i > 0 && <span style={{ width: 6, flex: "none" }} />}
+                  either. "Plan this site" takes any non-empty selection, same as before. */}
+              <Button
+                variant={recordLeads ? "ghost" : "primary"}
+                onClick={() => runDecideVerb(verbsByKey.site, decideTarget)}
+                disabled={decideBusy}
+                title={verbsByKey.site.title}
+                data-testid="map-decide-verb-site"
+                style={{
+                  ...NESTED_ACTION_SIZE, fontWeight: recordLeads ? 600 : 700,
+                  flex: "0 1 auto", minWidth: 40, overflow: "hidden", boxShadow: "none",
+                  ...(recordLeads
+                    ? { color: PAL.chromeInk, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)" }
+                    : { background: verbsByKey.site.accent, color: verbsByKey.site.onAccent, border: "none" }),
+                }}
+              >
+                <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {verbLabel("site", selected.length)}
+                </span>
+              </Button>
+              {recordVerbs.length > 0 && (
+                <>
+                  <span style={{ width: 6, flex: "none" }} />
                   <Button
-                    variant={i === 0 ? "primary" : "ghost"}
-                    onClick={() => runDecideVerb(v, decideTarget)}
+                    ref={recordInfoAnchorRef}
+                    variant={recordLeads ? "primary" : "ghost"}
+                    onClick={() => setRecordMenuOpen((o) => !o)}
                     disabled={decideBusy}
-                    title={v.title}
-                    data-testid={`map-decide-verb-${v.key}`}
+                    title="Log a comp, place a site plan, or add a note about this ground"
+                    aria-haspopup="menu"
+                    aria-expanded={recordMenuOpen}
+                    data-testid="map-decide-record-info"
                     style={{
-                      ...NESTED_ACTION_SIZE, fontWeight: i === 0 ? 700 : 600,
+                      ...NESTED_ACTION_SIZE, fontWeight: recordLeads ? 700 : 600,
                       flex: "0 1 auto", minWidth: 40, overflow: "hidden", boxShadow: "none",
-                      ...(i === 0
-                        ? { background: v.accent, color: v.onAccent, border: "none" }
+                      display: "flex", alignItems: "center", gap: 4,
+                      ...(recordLeads
+                        ? { background: recordVerbs[0].accent, color: recordVerbs[0].onAccent, border: "none" }
                         : { color: PAL.chromeInk, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)" }),
                     }}
                   >
-                    <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.label}</span>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Record info</span>
+                    <span aria-hidden="true" style={{ opacity: 0.7, fontSize: FONT_SIZE.label, flex: "none" }}>▾</span>
                   </Button>
-                </Fragment>
-              ))}
+                  <AnchoredMenu
+                    open={recordMenuOpen}
+                    onClose={() => setRecordMenuOpen(false)}
+                    anchorRef={recordInfoAnchorRef}
+                    placement="below-right"
+                    width={220}
+                  >
+                    {recordVerbs.map((v, i) => {
+                      const meta = RECORD_VERB_META[v.key];
+                      const Icon = meta?.Icon;
+                      return (
+                        <Fragment key={v.key}>
+                          {i > 0 && <div style={{ height: 1, background: "var(--chrome-divider)", margin: "0 14px" }} />}
+                          <MenuItem
+                            onClick={() => { setRecordMenuOpen(false); runDecideVerb(v, decideTarget); }}
+                            disabled={decideBusy}
+                            title={v.title}
+                            data-testid={`map-decide-verb-${v.key}`}
+                            style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px" }}
+                          >
+                            {Icon && <span style={{ flex: "none", display: "flex", color: PAL.chromeMuted }}><Icon size={16} /></span>}
+                            <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                              <span style={{ fontSize: FONT_SIZE.control, color: PAL.chromeInk, fontWeight: 500 }}>{v.label}</span>
+                              <span style={{ fontSize: FONT_SIZE.label, color: PAL.chromeMuted, fontWeight: 500 }}>{meta?.subtitle}</span>
+                            </span>
+                          </MenuItem>
+                        </Fragment>
+                      );
+                    })}
+                  </AnchoredMenu>
+                </>
+              )}
             </>
           )}
           <span style={{ width: 4 }} />
@@ -4456,7 +4544,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             "Place comp ▾" three-anchor caret (B848304). "Start blank" is now the first-class
             "Draw" button in the rest-state row above; the comp anchors are Drop a pin → Log a comp,
             Select parcels → Log a comp, and the site plan card's own "Pin comp here". Nothing was
-            made unreachable — the toolbar stopped hiding it. */}
+            made unreachable — the toolbar stopped hiding it.
+            (B1892544, 2026-09-24 — a THIRD AnchoredMenu exists again now, just above: "Record
+            info ▾"'s own dropdown. This note is about the two B831780/B848304 casts, not a claim
+            that none exists in this component.) */}
 
         {/* NEW-2 (B233): address-search parcel info card — drops in under the search pill
             after a "Go". The card itself lives in components/ParcelInfoCard.jsx (NEW-1),
