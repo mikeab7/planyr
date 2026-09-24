@@ -731,11 +731,11 @@ describe("NEW-2 (2026-09-23) — 11 more Georgia counties (B1873776, amends B187
     }
   });
 
-  it("Georgia now has 26 county keys in both registries (14 from the first pass + these 11 + ga_tift, B1874880)", () => {
+  it("Georgia now has 60 county keys in both registries (25 pre-existing (first + second pass) + ga_tift (B1874880) + 34 third pass, this batch)", () => {
     const gaInCounties = Object.entries(COUNTIES).filter(([, c]) => c.state === "GA").map(([k]) => k);
     const gaInMap = Object.entries(COUNTIES_MAP).filter(([, c]) => c.state === "GA").map(([k]) => k);
-    expect(gaInCounties).toHaveLength(26);
-    expect(gaInMap).toHaveLength(26);
+    expect(gaInCounties).toHaveLength(60);
+    expect(gaInMap).toHaveLength(60);
   });
 
   it("countyKeyForName resolves each county's real display name to its key, scoped to GA", () => {
@@ -805,5 +805,157 @@ describe("NEW-2 (2026-09-23) — 11 more Georgia counties (B1873776, amends B187
   it("never returns a Georgia county for a point in another state", () => {
     const houston = candidateCountiesForPoint(29.76, -95.37);
     for (const k of GA_SECOND_PASS_KEYS) expect(houston, k).not.toContain(k);
+  });
+});
+
+/* NEW-1 (2026-09-24, third pass) — 34 more Georgia counties, amending B1870704 a second time
+ * (the first amendment is the "NEW-1 (2026-09-23)" block above — ga_dekalb..ga_camden). These
+ * were MEASURED from Michael's own signed-in Chrome, not re-derived from this sandbox (every
+ * host here is egress-blocked) — see counties.js's own NEW-1 (2026-09-24) header. */
+describe("NEW-1 (2026-09-24, third pass) — 34 more Georgia counties are registered and shaped correctly", () => {
+  const GA_THIRD_PASS_KEYS = [
+    "ga_richmond", "ga_whitfield", "ga_hall", "ga_effingham", "ga_fayette", "ga_spalding",
+    "ga_newton", "ga_barrow", "ga_oconee", "ga_butts", "ga_monroe", "ga_troup",
+    "ga_peach", "ga_muscogee", "ga_morgan", "ga_baldwin", "ga_brantley", "ga_charlton",
+    "ga_clay", "ga_cook", "ga_crawford", "ga_crisp", "ga_dade", "ga_dooly",
+    "ga_echols", "ga_emanuel", "ga_evans", "ga_greene", "ga_lanier", "ga_meriwether",
+    "ga_sumter", "ga_turner", "ga_twiggs", "ga_ware",
+  ];
+
+  it("registers each county in both the search and map registries, state GA, with a real https URL", () => {
+    for (const k of GA_THIRD_PASS_KEYS) {
+      expect(COUNTIES[k], k).toBeTruthy();
+      expect(COUNTIES_MAP[k], k).toBeTruthy();
+      expect(COUNTIES[k].state, k).toBe("GA");
+      expect(COUNTIES_MAP[k].state, k).toBe("GA");
+      expect(COUNTIES[k].layerUrl, k).toMatch(/^https:\/\//);
+      expect(COUNTIES_MAP[k].layerUrl, k).toBe(COUNTIES[k].layerUrl);
+    }
+  });
+
+  it("gives every county a plausible Georgia bbox/center (never a 0,0 placeholder or a bbox outside the state)", () => {
+    for (const k of GA_THIRD_PASS_KEYS) {
+      const c = COUNTIES_MAP[k];
+      const [south, west, north, east] = c.bbox;
+      expect(south, k).toBeGreaterThan(29.5);
+      expect(north, k).toBeLessThan(35.5);
+      expect(west, k).toBeGreaterThan(-86.0);
+      expect(east, k).toBeLessThan(-80.0);
+      expect(c.center[0], k).toBeGreaterThan(south);
+      expect(c.center[0], k).toBeLessThan(north);
+      expect(c.center[1], k).toBeGreaterThan(west);
+      expect(c.center[1], k).toBeLessThan(east);
+    }
+  });
+
+  it("countyKeyForName resolves each county's real display name to its key, scoped to GA", () => {
+    expect(countyKeyForName("Richmond", "GA")).toBe("ga_richmond");
+    expect(countyKeyForName("Whitfield", "GA")).toBe("ga_whitfield");
+    expect(countyKeyForName("Hall", "GA")).toBe("ga_hall");
+    expect(countyKeyForName("Effingham", "GA")).toBe("ga_effingham");
+    expect(countyKeyForName("Fayette", "GA")).toBe("ga_fayette");
+    expect(countyKeyForName("Spalding", "GA")).toBe("ga_spalding");
+    expect(countyKeyForName("Newton", "GA")).toBe("ga_newton");
+    expect(countyKeyForName("Barrow", "GA")).toBe("ga_barrow");
+    expect(countyKeyForName("Oconee", "GA")).toBe("ga_oconee");
+    expect(countyKeyForName("Butts", "GA")).toBe("ga_butts");
+    expect(countyKeyForName("Monroe", "GA")).toBe("ga_monroe");
+    expect(countyKeyForName("Troup", "GA")).toBe("ga_troup");
+    expect(countyKeyForName("Peach", "GA")).toBe("ga_peach");
+    expect(countyKeyForName("Muscogee", "GA")).toBe("ga_muscogee");
+    expect(countyKeyForName("Morgan", "GA")).toBe("ga_morgan");
+    expect(countyKeyForName("Baldwin", "GA")).toBe("ga_baldwin");
+    expect(countyKeyForName("Brantley", "GA")).toBe("ga_brantley");
+    expect(countyKeyForName("Charlton", "GA")).toBe("ga_charlton");
+    expect(countyKeyForName("Clay", "GA")).toBe("ga_clay");
+    expect(countyKeyForName("Cook", "GA")).toBe("ga_cook");
+    expect(countyKeyForName("Crawford", "GA")).toBe("ga_crawford");
+    expect(countyKeyForName("Crisp", "GA")).toBe("ga_crisp");
+    expect(countyKeyForName("Dade", "GA")).toBe("ga_dade");
+    expect(countyKeyForName("Dooly", "GA")).toBe("ga_dooly");
+    expect(countyKeyForName("Echols", "GA")).toBe("ga_echols");
+    expect(countyKeyForName("Emanuel", "GA")).toBe("ga_emanuel");
+    expect(countyKeyForName("Evans", "GA")).toBe("ga_evans");
+    expect(countyKeyForName("Greene", "GA")).toBe("ga_greene");
+    expect(countyKeyForName("Lanier", "GA")).toBe("ga_lanier");
+    expect(countyKeyForName("Meriwether", "GA")).toBe("ga_meriwether");
+    expect(countyKeyForName("Sumter", "GA")).toBe("ga_sumter");
+    expect(countyKeyForName("Turner", "GA")).toBe("ga_turner");
+    expect(countyKeyForName("Twiggs", "GA")).toBe("ga_twiggs");
+    expect(countyKeyForName("Ware", "GA")).toBe("ga_ware");
+  });
+
+  it("resolves Georgia's hyphenated consolidated-government names to their real county key", () => {
+    expect(countyKeyForName("Augusta-Richmond", "GA")).toBe("ga_richmond");
+    expect(countyKeyForName("Athens-Clarke", "GA")).toBe("ga_clarke");
+    expect(countyKeyForName("Athens-Clarke County", "GA")).toBe("ga_clarke");
+  });
+
+  it("a point at each county seat routes to it via candidateCountiesForPoint", () => {
+    const SEATS = {
+      ga_richmond: [33.4735, -82.0105],       // Augusta
+      ga_whitfield: [34.7698, -84.9702],       // Dalton
+      ga_hall: [34.2979, -83.8241],       // Gainesville
+      ga_effingham: [32.3735, -81.3099],       // Springfield
+      ga_fayette: [33.4487, -84.455],       // Fayetteville
+      ga_spalding: [33.2465, -84.2641],       // Griffin
+      ga_newton: [33.5966, -83.8602],       // Covington
+      ga_barrow: [33.9926, -83.7201],       // Winder
+      ga_oconee: [33.8607, -83.4102],       // Watkinsville
+      ga_butts: [33.2946, -83.9694],       // Jackson, GA
+      ga_monroe: [33.0357, -83.9313],       // Forsyth, GA
+      ga_troup: [33.0362, -85.0322],       // LaGrange
+      ga_peach: [32.5531, -83.8894],       // Fort Valley
+      ga_muscogee: [32.461, -84.9877],       // Columbus
+      ga_morgan: [33.597, -83.4685],       // Madison
+      ga_baldwin: [33.0801, -83.2321],       // Milledgeville
+      ga_brantley: [31.2035, -81.9848],       // Nahunta
+      ga_charlton: [30.836, -82.0068],       // Folkston
+      ga_clay: [31.6099, -85.053],       // Fort Gaines
+      ga_cook: [31.1455, -83.4238],       // Adel
+      ga_crawford: [32.7357, -83.9944],       // Knoxville
+      ga_crisp: [31.9635, -83.7826],       // Cordele
+      ga_dade: [34.8, -85.5],       // Trenton
+      ga_dooly: [32.0918, -83.7955],       // Vienna
+      ga_echols: [30.7016, -82.9979],       // Statenville
+      ga_emanuel: [32.5954, -82.3335],       // Swainsboro
+      ga_evans: [32.1613, -81.9057],       // Claxton
+      ga_greene: [33.5754, -83.1832],       // Greensboro
+      ga_lanier: [31.0421, -83.0738],       // Lakeland
+      ga_meriwether: [33.021, -84.7144],       // Greenville, GA
+      ga_sumter: [32.0723, -84.2327],       // Americus
+      ga_turner: [31.7099, -83.6535],       // Ashburn
+      ga_twiggs: [32.6979, -83.3474],       // Jeffersonville
+      ga_ware: [31.2136, -82.354],       // Waycross
+    };
+    for (const [k, [lat, lng]] of Object.entries(SEATS)) {
+      expect(candidateCountiesForPoint(lat, lng), k).toContain(k);
+    }
+  });
+
+  it("resolves the right county where two bboxes overlap (Peachtree City/Fayette, Griffin/Spalding-Butts, Winder/Barrow-Jackson-Gwinnett, Watkinsville/Oconee-Clarke)", () => {
+    expect(candidateCountiesForPoint(33.3968, -84.5964)).toContain("ga_fayette"); // Peachtree City
+    expect(candidateCountiesForPoint(33.2465, -84.2641)).toContain("ga_spalding"); // Griffin, not ga_butts
+    expect(candidateCountiesForPoint(33.9926, -83.7201)).toContain("ga_barrow"); // Winder, not ga_jackson/ga_gwinnett
+    expect(candidateCountiesForPoint(33.8607, -83.4102)).toContain("ga_oconee"); // Watkinsville, not ga_clarke
+  });
+
+  it("adds no shared-URL conflict (Barrow and Oconee deliberately share one FeatureServer at different layer ids, which is fine)", () => {
+    expect(sharedLayerUrlConflicts()).toEqual([]);
+  });
+
+  it("no Texas cross-over — a same-named place in Texas must still resolve to Texas, never a Georgia key", () => {
+    const TX_POINTS = {
+      "Edna (Jackson, TX)": [28.9781, -96.6455],
+      "Newton, TX": [30.8493, -93.7461],
+      "Crockett (Houston, TX)": [31.3174, -95.4561],
+      "Morgan, TX": [32.0201, -97.6339],
+      "Huntsville (Walker, TX)": [30.7235, -95.5508],
+    };
+    for (const [label, [lat, lng]] of Object.entries(TX_POINTS)) {
+      const cand = candidateCountiesForPoint(lat, lng);
+      expect(cand, label).toContain("txgio_statewide");
+      for (const k of GA_THIRD_PASS_KEYS) expect(cand, `${label} vs ${k}`).not.toContain(k);
+    }
   });
 });

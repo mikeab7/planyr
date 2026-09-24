@@ -1030,6 +1030,304 @@ const COUNTIES_RAW = {
     help: "Cobb County tax assessor parcels (county GIS). Search by parcel ID or a site address.",
   },
 
+  /* ═══ NEW-1 (2026-09-24, third pass) — 34 MORE GEORGIA COUNTIES WIRED, via regional-commission
+   * and county-run ArcGIS Online layers. This dispatch amends B1870704, the same item the
+   * 2026-09-23 first and second passes (ga_dekalb..ga_camden above) amended. Assessors here mostly
+   * sit behind qPublic (Schneider's viewer, Cloudflare-bot-walled, no public API) — the real data
+   * is republished by the Georgia Association of Regional Commissions (org Ug5xGQbHsD8zuZzM),
+   * Southern Georgia RC (org HA2thkMWRBDb77XN), VALOR (org fYt1jp3hqamxgSvI), or the county's own
+   * GIS shop, as the same WinGAP parcel export the assessor's own site draws from. ⛔ EVERY ROW
+   * BELOW COULD NOT BE RE-VERIFIED FROM THIS SANDBOX — every host is blocked by this build
+   * environment's egress policy, same wall as every self-hosted county server in this file. They
+   * were instead MEASURED from Michael's own signed-in Chrome at the planyr.io origin on
+   * 2026-09-24 (service JSON, returnCountOnly, returnExtentOnly with outSR=4326, extent checked
+   * inside the county) and are recorded here as reported, not independently re-derived — the
+   * live-verify item on this batch is the check that closes that gap. Full session record,
+   * including the six counties with no usable public parcel source found (Walton, Douglas,
+   * Houston, Floyd, Carroll, Gordon) and the Walker/Dade mislabeling, is in
+   * docs/STATEWIDE-PARCELS.md's dated 2026-09-24 section. ═══ */
+  ga_richmond: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 84,925 parcel polygons, last edited live county server.
+    // Augusta-Richmond consolidated government; MapServer, county-run host, CORS measured OK from his browser.
+    state: "GA", label: "Richmond County (Augusta), GA",
+    layerUrl: "https://gismap.augustaga.gov/arcgis/rest/services/Map_LayersTS/MapServer/316",
+    help: "Richmond County (Augusta) parcels (Esri-hosted). Search by parcel number or a site address.",
+  },
+  ga_whitfield: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 46,673 parcel polygons, last edited live county server.
+    // County-run host, CORS OK.
+    state: "GA", label: "Whitfield County (Dalton), GA",
+    layerUrl: "https://gis.whitfieldcountyga.com/server/rest/services/Parcels_and_Development/MapServer/4",
+    idField: "PARCEL_FUL", addrField: "address1",
+    help: "Whitfield County (Dalton) parcels (Esri-hosted). Search by parcel number or a site address.",
+  },
+  ga_hall: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 91,921 parcel polygons, last edited live county server.
+    // Layer 1 "Parcel Boundary" on the county's own GeneralTab service; CORS OK.
+    state: "GA", label: "Hall County (Gainesville), GA",
+    layerUrl: "https://hallgis.hallcounty.org/arcgis/rest/services/GeneralTab/MapServer/1",
+    idField: "PIN",
+    help: "Hall County (Gainesville) parcels (Esri-hosted). Search by PIN.",
+  },
+  ga_effingham: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 32,941 parcel polygons, last edited 2024-10.
+    state: "GA", label: "Effingham County, GA",
+    layerUrl: "https://services5.arcgis.com/9Z9r3rLUCq0SjsRb/arcgis/rest/services/Effingham_County_GA_Parcels/FeatureServer/0",
+    idField: "PARCEL_NO", addrField: "address1",
+    help: "Effingham County parcels (Esri-hosted). Search by parcel number or a site address.",
+  },
+  ga_fayette: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 49,104 parcel polygons, last edited daily.
+    state: "GA", label: "Fayette County, GA",
+    layerUrl: "https://services5.arcgis.com/Hg5aLg4LtSINzVWa/arcgis/rest/services/Parcels_Data_SAGES/FeatureServer/0",
+    idField: "PARCEL_NO", addrField: "single_line_address",
+    help: "Fayette County parcels (Esri-hosted). Search by parcel number or a site address.",
+  },
+  ga_spalding: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 33,700 parcel polygons, last edited daily.
+    state: "GA", label: "Spalding County (Griffin), GA",
+    layerUrl: "https://services5.arcgis.com/IBG8fFojdkoiHAvQ/arcgis/rest/services/Parcels_Public_View/FeatureServer/1",
+    idField: "PARCEL_ID",
+    help: "Spalding County (Griffin) parcels (Esri-hosted). Search by parcel number.",
+  },
+  ga_newton: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 45,755 parcel polygons, last edited 2022-02.
+    state: "GA", label: "Newton County (Covington), GA",
+    layerUrl: "https://services1.arcgis.com/qTQ6qYkHpxlu0G82/arcgis/rest/services/Newton_Parcels/FeatureServer/0",
+    idField: "PARCEL_NO", addrField: "ParcelAddr",
+    help: "Newton County (Covington) parcels (Esri-hosted). Search by parcel number or a site address.",
+  },
+  ga_barrow: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 35,234 parcel polygons, last edited 2022-03.
+    // Layer 30 of the Greater Athens regional commission's shared service — see ga_oconee below, which shares this same FeatureServer at a different layer id (not a URL conflict; each layer has its own id).
+    state: "GA", label: "Barrow County (Winder), GA",
+    layerUrl: "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Greater_Athens_All_WFL1/FeatureServer/30",
+    idField: "Parcel_no", addrField: "address1",
+    help: "Barrow County (Winder) parcels (Esri-hosted). Search by parcel number or a site address.",
+  },
+  ga_oconee: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 19,068 parcel polygons, last edited 2022-03.
+    // Layer 32 of the same Greater Athens regional-commission service ga_barrow rides at layer 30.
+    state: "GA", label: "Oconee County (Watkinsville), GA",
+    layerUrl: "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Greater_Athens_All_WFL1/FeatureServer/32",
+    idField: "PARCELID",
+    help: "Oconee County (Watkinsville) parcels (Esri-hosted). Search by parcel number.",
+  },
+  ga_butts: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 13,065 parcel polygons, last edited 2024-09.
+    state: "GA", label: "Butts County (Jackson, GA), GA",
+    layerUrl: "https://services6.arcgis.com/NJH5XZkcw7MLsnAI/arcgis/rest/services/Parcels_Butts_County_GA/FeatureServer/0",
+    idField: "GSI_PIN",
+    help: "Butts County (Jackson, GA) parcels (Esri-hosted). Search by PIN.",
+  },
+  ga_monroe: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 16,707 parcel polygons, last edited 2025-08.
+    state: "GA", label: "Monroe County (Forsyth, GA), GA",
+    layerUrl: "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Monroe_County_Tax_Parcels/FeatureServer/0",
+    idField: "PARCELID",
+    help: "Monroe County (Forsyth, GA) parcels (Esri-hosted). Search by parcel number.",
+  },
+  ga_troup: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 35,511 parcel polygons, last edited 2026-02.
+    state: "GA", label: "Troup County (LaGrange), GA",
+    layerUrl: "https://services6.arcgis.com/WjqAE1SlQxuk7dsk/arcgis/rest/services/Troup_County_GA_Parcel_Feature_Layer/FeatureServer/0",
+    idField: "parcelnumb",
+    help: "Troup County (LaGrange) parcels (Esri-hosted). Search by parcel number.",
+  },
+  ga_peach: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 14,431 parcel polygons, last edited 2026-09.
+    state: "GA", label: "Peach County (Fort Valley), GA",
+    layerUrl: "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Peach_County_Parcels/FeatureServer/5",
+    idField: "PARCELS",
+    help: "Peach County (Fort Valley) parcels (Esri-hosted). Search by parcel number.",
+  },
+  ga_muscogee: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 70,625 parcel polygons, last edited 2019-01.
+    // 2019 snapshot — old, but within this repo's 5-year staleness bar; say so in the help text.
+    state: "GA", label: "Muscogee County (Columbus), GA",
+    layerUrl: "https://services2.arcgis.com/hKwZvjnqryeqGRIt/arcgis/rest/services/Layers/FeatureServer/2",
+    idField: "TaxPIN",
+    help: "Muscogee County (Columbus) parcels (Esri-hosted). Search by PIN.",
+  },
+  ga_morgan: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 12,190 parcel polygons, last edited 2018-11.
+    // 2018 snapshot — old, but within this repo's 5-year staleness bar; say so in the help text.
+    state: "GA", label: "Morgan County (Madison, GA), GA",
+    layerUrl: "https://services9.arcgis.com/mr2xH531NAL4tt7e/arcgis/rest/services/Parcels/FeatureServer/0",
+    idField: "Parcel_No",
+    help: "Morgan County (Madison, GA) parcels (Esri-hosted). Search by parcel number.",
+  },
+  ga_baldwin: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 21,411 parcel polygons, last edited 2021-03.
+    state: "GA", label: "Baldwin County (Milledgeville), GA",
+    layerUrl: "https://services7.arcgis.com/Da8HZMsU25Hzzob3/arcgis/rest/services/Parcel_Layer/FeatureServer/1",
+    help: "Baldwin County (Milledgeville) parcels (Esri-hosted). Search by parcel number or a site address.",
+  },
+  ga_brantley: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 13,301 parcel polygons, last edited 2025-10.
+    state: "GA", label: "Brantley County, GA",
+    layerUrl: "https://services3.arcgis.com/86pyA5PND5NdokIc/arcgis/rest/services/Brantley_Parcels_view/FeatureServer/0",
+    idField: "Parcel_No",
+    help: "Brantley County parcels (Esri-hosted). Search by parcel number.",
+  },
+  ga_charlton: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 7,357 parcel polygons, last edited 2023-07.
+    state: "GA", label: "Charlton County, GA",
+    layerUrl: "https://services3.arcgis.com/fYt1jp3hqamxgSvI/arcgis/rest/services/Parcels_Charlton_County/FeatureServer/7",
+    idField: "PARCEL_NO",
+    help: "Charlton County parcels (Esri-hosted). Search by parcel number.",
+  },
+  ga_clay: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 3,063 parcel polygons, last edited 2024-05.
+    state: "GA", label: "Clay County (Fort Gaines), GA",
+    layerUrl: "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Clay_County_Parcels_10_23/FeatureServer/0",
+    idField: "Parcel_No",
+    help: "Clay County (Fort Gaines) parcels (Esri-hosted). Search by parcel number.",
+  },
+  ga_cook: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 5,103 parcel polygons, last edited 2023-11.
+    // ⚠ measured extent (about -83.49..-83.37) is narrower than the whole county — possibly city-of-Adel-only coverage. Wired anyway; the live-verify pass on this item must click a lot well outside Adel to confirm county-wide coverage, and a miss there is filed as a recurrence, not silently accepted.
+    state: "GA", label: "Cook County (Adel), GA",
+    layerUrl: "https://services1.arcgis.com/TSNNo8H51qYl31gq/arcgis/rest/services/Map__Adel_Overview_WFL1/FeatureServer/2",
+    idField: "Parcel_No",
+    help: "Cook County (Adel) parcels (Esri-hosted). Search by parcel number.",
+  },
+  ga_crawford: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 8,186 parcel polygons, last edited 2026-09.
+    state: "GA", label: "Crawford County (Knoxville), GA",
+    layerUrl: "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/CrawfordCountyParcels_Jan2026/FeatureServer/0",
+    idField: "PARCELNO",
+    help: "Crawford County (Knoxville) parcels (Esri-hosted). Search by parcel number.",
+  },
+  ga_crisp: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 12,351 parcel polygons, last edited 2022-03.
+    state: "GA", label: "Crisp County (Cordele), GA",
+    layerUrl: "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/CrispParcels/FeatureServer/0",
+    idField: "Parcel_No",
+    help: "Crisp County (Cordele) parcels (Esri-hosted). Search by parcel number.",
+  },
+  ga_dade: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 7,811 parcel polygons, last edited 2026-07.
+    // ⛔ Do not confuse with `Walker_Parcels_2026LLLT/4` on a different AGOL org — same 7,811-feature count and Dade's own extent under a Walker-County-sounding name; that layer is Dade's data mislabeled, not a real Walker County source, and is deliberately not wired anywhere.
+    state: "GA", label: "Dade County (Trenton), GA",
+    layerUrl: "https://services.arcgis.com/UnTXoPXBYERF0OH6/arcgis/rest/services/Dade_Parcels_2020LLLT/FeatureServer/5",
+    idField: "PARCEL_NO", addrField: "parcelAddress",
+    help: "Dade County (Trenton) parcels (Esri-hosted). Search by parcel number or a site address.",
+  },
+  ga_dooly: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 7,277 parcel polygons, last edited 2022-03.
+    state: "GA", label: "Dooly County (Vienna), GA",
+    layerUrl: "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Dooly_County_Parcels/FeatureServer/14",
+    idField: "Parcel_No",
+    help: "Dooly County (Vienna) parcels (Esri-hosted). Search by parcel number.",
+  },
+  ga_echols: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 2,206 parcel polygons, last edited 2026-06.
+    state: "GA", label: "Echols County (Statenville), GA",
+    layerUrl: "https://services5.arcgis.com/HA2thkMWRBDb77XN/arcgis/rest/services/Echols_Tax_Parcels/FeatureServer/11",
+    idField: "PARCEL_NO",
+    help: "Echols County (Statenville) parcels (Esri-hosted). Search by parcel number.",
+  },
+  ga_emanuel: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 15,107 parcel polygons, last edited 2026-08.
+    state: "GA", label: "Emanuel County (Swainsboro), GA",
+    layerUrl: "https://services8.arcgis.com/oi3j4zWzPc3hzTpc/arcgis/rest/services/Emanuel_Parcels_view/FeatureServer/0",
+    idField: "Parcel_No",
+    help: "Emanuel County (Swainsboro) parcels (Esri-hosted). Search by parcel number.",
+  },
+  ga_evans: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 6,672 parcel polygons, last edited 2023-01.
+    state: "GA", label: "Evans County (Claxton), GA",
+    layerUrl: "https://services6.arcgis.com/vgwS5Le2XfU2EPjI/arcgis/rest/services/EvansBasemap/FeatureServer/0",
+    idField: "PARCEL_NO",
+    help: "Evans County (Claxton) parcels (Esri-hosted). Search by parcel number.",
+  },
+  ga_greene: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 17,735 parcel polygons, last edited 2025-09.
+    state: "GA", label: "Greene County (Greensboro), GA",
+    layerUrl: "https://services7.arcgis.com/QbbsWI5nIfBp4cMB/arcgis/rest/services/Parcel_Regions_w_WinGAP_view/FeatureServer/0",
+    idField: "Parcel_No",
+    help: "Greene County (Greensboro) parcels (Esri-hosted). Search by parcel number.",
+  },
+  ga_lanier: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 5,968 parcel polygons, last edited 2025-12.
+    state: "GA", label: "Lanier County (Lakeland), GA",
+    layerUrl: "https://services5.arcgis.com/HA2thkMWRBDb77XN/arcgis/rest/services/Lanier_Parcels/FeatureServer/23",
+    idField: "PARCEL_NO",
+    help: "Lanier County (Lakeland) parcels (Esri-hosted). Search by parcel number.",
+  },
+  ga_meriwether: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 16,511 parcel polygons, last edited 2023-06.
+    state: "GA", label: "Meriwether County (Greenville, GA), GA",
+    layerUrl: "https://services9.arcgis.com/Xv8vRekQ4FVHSSIe/arcgis/rest/services/MeriwetherParcels/FeatureServer/0",
+    idField: "Parcel_No",
+    help: "Meriwether County (Greenville, GA) parcels (Esri-hosted). Search by parcel number.",
+  },
+  ga_sumter: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 16,415 parcel polygons, last edited 2026-07.
+    // Layer 9 of a regional-commission service whose title is about trails, not parcels — same B1551616 "title is never the measurement" trap other GA rows have already hit; the layer itself is the county's real parcel fabric.
+    state: "GA", label: "Sumter County (Americus), GA",
+    layerUrl: "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Trails_and_Bike_Routes_in_Sumter_County_WFL1/FeatureServer/9",
+    idField: "PARCELID", addrField: "SITEADDRES",
+    help: "Sumter County (Americus) parcels (Esri-hosted). Search by parcel number or a site address.",
+  },
+  ga_turner: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 5,714 parcel polygons, last edited 2026-01.
+    // Service name really is "TunerParcels" (sic) — not a typo introduced here.
+    state: "GA", label: "Turner County (Ashburn), GA",
+    layerUrl: "https://services5.arcgis.com/HA2thkMWRBDb77XN/arcgis/rest/services/TunerParcels/FeatureServer/4",
+    idField: "Parcel_No",
+    help: "Turner County (Ashburn) parcels (Esri-hosted). Search by parcel number.",
+  },
+  ga_twiggs: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 6,832 parcel polygons, last edited 2026-01.
+    state: "GA", label: "Twiggs County (Jeffersonville), GA",
+    layerUrl: "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/TwiggsParcels_Jan2026/FeatureServer/16",
+    idField: "PARCELID",
+    help: "Twiggs County (Jeffersonville) parcels (Esri-hosted). Search by parcel number.",
+  },
+  ga_ware: {
+    // MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24 (this sandbox's egress
+    // policy blocks this host): 23,119 parcel polygons, last edited 2026-09-22.
+    state: "GA", label: "Ware County (Waycross), GA",
+    layerUrl: "https://services9.arcgis.com/XAyIBOsw3fLfDjTY/arcgis/rest/services/WareCounty_Base_gdb/FeatureServer/38",
+    idField: "PARCEL_NO",
+    help: "Ware County (Waycross) parcels (Esri-hosted). Search by parcel number.",
+  },
+
   /* ⛔ B1339920 (2026-09-12) — THIS ENTRY WAS PREVIOUSLY THE ONLY AZ ROW, AND ITS BBOX REACHES
    * PHOENIX. `az_pinal`'s bbox is Pinal's own measured data extent (32.5–33.47 lat), which overlaps
    * the southern edge of Maricopa County — Phoenix (33.4484, -112.0740) falls inside it, so with no
@@ -2066,6 +2364,42 @@ const COUNTIES_MAP_RAW = {
   ga_bartow: { state: "GA", center: [34.2455, -84.8427], zoom: 11, bbox: [34.08, -85.04, 34.41, -84.64], mapServer: null, layerUrl: COUNTIES.ga_bartow.layerUrl },
   ga_cobb: { state: "GA", center: [33.9300, -84.5558], zoom: 11, bbox: [33.75, -84.74, 34.11, -84.38], mapServer: null, layerUrl: COUNTIES.ga_cobb.layerUrl },
   ga_cherokee: { state: "GA", center: [34.2475, -84.4595], zoom: 11, bbox: [34.08, -84.66, 34.41, -84.26], mapServer: null, layerUrl: COUNTIES.ga_cherokee.layerUrl },
+  // NEW-1 (2026-09-24, third pass) — center/bbox derived from public/geo/county-polygons.json
+  // exactly as the earlier GA rows above do, never hand-typed.
+  ga_richmond: { state: "GA", center: [33.3893, -82.0882], zoom: 10, bbox: [33.23, -82.35, 33.55, -81.83], mapServer: null, layerUrl: COUNTIES.ga_richmond.layerUrl },
+  ga_whitfield: { state: "GA", center: [34.802, -84.982], zoom: 10, bbox: [34.61, -85.16, 34.99, -84.8], mapServer: null, layerUrl: COUNTIES.ga_whitfield.layerUrl },
+  ga_hall: { state: "GA", center: [34.305, -83.841], zoom: 10, bbox: [34.1, -84.06, 34.51, -83.62], mapServer: null, layerUrl: COUNTIES.ga_hall.layerUrl },
+  ga_effingham: { state: "GA", center: [32.348, -81.3352], zoom: 10, bbox: [32.1, -81.55, 32.6, -81.12], mapServer: null, layerUrl: COUNTIES.ga_effingham.layerUrl },
+  ga_fayette: { state: "GA", center: [33.4095, -84.4967], zoom: 10, bbox: [33.26, -84.62, 33.55, -84.38], mapServer: null, layerUrl: COUNTIES.ga_fayette.layerUrl },
+  ga_spalding: { state: "GA", center: [33.2668, -84.295], zoom: 10, bbox: [33.18, -84.5, 33.36, -84.09], mapServer: null, layerUrl: COUNTIES.ga_spalding.layerUrl },
+  ga_newton: { state: "GA", center: [33.5578, -83.8607], zoom: 10, bbox: [33.37, -84.05, 33.74, -83.67], mapServer: null, layerUrl: COUNTIES.ga_newton.layerUrl },
+  ga_barrow: { state: "GA", center: [34.0115, -83.697], zoom: 10, bbox: [33.89, -83.86, 34.13, -83.53], mapServer: null, layerUrl: COUNTIES.ga_barrow.layerUrl },
+  ga_oconee: { state: "GA", center: [33.8315, -83.4627], zoom: 10, bbox: [33.69, -83.65, 33.97, -83.28], mapServer: null, layerUrl: COUNTIES.ga_oconee.layerUrl },
+  ga_butts: { state: "GA", center: [33.3173, -83.969], zoom: 10, bbox: [33.19, -84.12, 33.45, -83.81], mapServer: null, layerUrl: COUNTIES.ga_butts.layerUrl },
+  ga_monroe: { state: "GA", center: [33.0235, -83.9162], zoom: 10, bbox: [32.84, -84.12, 33.21, -83.71], mapServer: null, layerUrl: COUNTIES.ga_monroe.layerUrl },
+  ga_troup: { state: "GA", center: [33.0438, -85.0432], zoom: 10, bbox: [32.87, -85.23, 33.22, -84.85], mapServer: null, layerUrl: COUNTIES.ga_troup.layerUrl },
+  ga_peach: { state: "GA", center: [32.5628, -83.8582], zoom: 10, bbox: [32.44, -84.01, 32.69, -83.71], mapServer: null, layerUrl: COUNTIES.ga_peach.layerUrl },
+  ga_muscogee: { state: "GA", center: [32.487, -84.8742], zoom: 10, bbox: [32.37, -85.08, 32.6, -84.66], mapServer: null, layerUrl: COUNTIES.ga_muscogee.layerUrl },
+  ga_morgan: { state: "GA", center: [33.6243, -83.477], zoom: 10, bbox: [33.44, -83.69, 33.81, -83.27], mapServer: null, layerUrl: COUNTIES.ga_morgan.layerUrl },
+  ga_baldwin: { state: "GA", center: [33.0525, -83.2353], zoom: 10, bbox: [32.92, -83.43, 33.19, -83.04], mapServer: null, layerUrl: COUNTIES.ga_baldwin.layerUrl },
+  ga_brantley: { state: "GA", center: [31.192, -81.9995], zoom: 10, bbox: [31.02, -82.28, 31.37, -81.72], mapServer: null, layerUrl: COUNTIES.ga_brantley.layerUrl },
+  ga_charlton: { state: "GA", center: [30.7158, -82.1495], zoom: 10, bbox: [30.36, -82.41, 31.07, -81.89], mapServer: null, layerUrl: COUNTIES.ga_charlton.layerUrl },
+  ga_clay: { state: "GA", center: [31.6368, -84.962], zoom: 10, bbox: [31.49, -85.13, 31.78, -84.79], mapServer: null, layerUrl: COUNTIES.ga_clay.layerUrl },
+  ga_cook: { state: "GA", center: [31.188, -83.4267], zoom: 10, bbox: [31.03, -83.57, 31.35, -83.28], mapServer: null, layerUrl: COUNTIES.ga_cook.layerUrl },
+  ga_crawford: { state: "GA", center: [32.687, -83.9662], zoom: 10, bbox: [32.52, -84.2, 32.85, -83.73], mapServer: null, layerUrl: COUNTIES.ga_crawford.layerUrl },
+  ga_crisp: { state: "GA", center: [31.9108, -83.7822], zoom: 10, bbox: [31.79, -83.96, 32.03, -83.61], mapServer: null, layerUrl: COUNTIES.ga_crisp.layerUrl },
+  ga_dade: { state: "GA", center: [34.8063, -85.4845], zoom: 10, bbox: [34.62, -85.61, 34.99, -85.36], mapServer: null, layerUrl: COUNTIES.ga_dade.layerUrl },
+  ga_dooly: { state: "GA", center: [32.158, -83.8195], zoom: 10, bbox: [32.03, -84.04, 32.29, -83.6], mapServer: null, layerUrl: COUNTIES.ga_dooly.layerUrl },
+  ga_echols: { state: "GA", center: [30.7278, -82.8567], zoom: 10, bbox: [30.59, -83.14, 30.87, -82.58], mapServer: null, layerUrl: COUNTIES.ga_echols.layerUrl },
+  ga_emanuel: { state: "GA", center: [32.5613, -82.3235], zoom: 10, bbox: [32.29, -82.65, 32.84, -82], mapServer: null, layerUrl: COUNTIES.ga_emanuel.layerUrl },
+  ga_evans: { state: "GA", center: [32.16, -81.866], zoom: 10, bbox: [32.05, -82.02, 32.27, -81.71], mapServer: null, layerUrl: COUNTIES.ga_evans.layerUrl },
+  ga_greene: { state: "GA", center: [33.5578, -83.179], zoom: 10, bbox: [33.35, -83.4, 33.76, -82.96], mapServer: null, layerUrl: COUNTIES.ga_greene.layerUrl },
+  ga_lanier: { state: "GA", center: [31.022, -83.082], zoom: 10, bbox: [30.85, -83.2, 31.19, -82.97], mapServer: null, layerUrl: COUNTIES.ga_lanier.layerUrl },
+  ga_meriwether: { state: "GA", center: [33.03, -84.673], zoom: 10, bbox: [32.83, -84.86, 33.23, -84.49], mapServer: null, layerUrl: COUNTIES.ga_meriwether.layerUrl },
+  ga_sumter: { state: "GA", center: [32.0495, -84.1835], zoom: 10, bbox: [31.88, -84.44, 32.22, -83.93], mapServer: null, layerUrl: COUNTIES.ga_sumter.layerUrl },
+  ga_turner: { state: "GA", center: [31.7093, -83.626], zoom: 10, bbox: [31.57, -83.8, 31.85, -83.45], mapServer: null, layerUrl: COUNTIES.ga_turner.layerUrl },
+  ga_twiggs: { state: "GA", center: [32.6698, -83.4143], zoom: 10, bbox: [32.45, -83.6, 32.89, -83.23], mapServer: null, layerUrl: COUNTIES.ga_twiggs.layerUrl },
+  ga_ware: { state: "GA", center: [31.0175, -82.4137], zoom: 10, bbox: [30.57, -82.7, 31.47, -82.13], mapServer: null, layerUrl: COUNTIES.ga_ware.layerUrl },
   az_pinal: { state: "AZ", center: [32.9940, -111.3275], zoom: 9, bbox: [32.51, -112.21, 33.48, -110.45], mapServer: null, layerUrl: COUNTIES.az_pinal.layerUrl },
   // B1339920 — bbox/center read directly from public/geo/county-polygons.json (same convention as
   // the B1551617 Tier 1 rows above), never hand-typed: [-226663,65023,-222085,68098] / scale 2000.
@@ -2691,17 +3025,27 @@ export const STATEWIDE_PARCEL_LAYER = TXGIO_STATEWIDE_LAYER;
  * against the real asset so a future widening cannot quietly introduce one. */
 const COUNTY_DESIGNATION_RE = /\b(county|parish|borough|census area|municipality)\b/g;
 
+/* NEW-1 (2026-09-24) — Georgia's consolidated city-county governments are commonly called by their
+ * hyphenated joint name ("Augusta-Richmond", "Athens-Clarke") rather than the bare county name this
+ * registry keys on. The slug above already strips the hyphen, so "Augusta-Richmond" slugs to
+ * "augustarichmond" and never matches `ga_richmond` — one small alias table, the general-state
+ * analogue of `TX_COUNTY_KEY_ALIAS` below, fixes exactly that without touching the slug rule. */
+const CONSOLIDATED_GOV_ALIAS = {
+  GA: { augustarichmond: "richmond", athensclarke: "clarke" },
+};
+
 export function countyKeyForName(name, state = null) {
   if (!name) return null;
   const slug = String(name).toLowerCase().replace(COUNTY_DESIGNATION_RE, "").replace(/\b(city|and|of)\b/g, "").replace(/[^a-z]/g, "");
   const st = state ? String(state).toUpperCase() : null;
+  const generalSlug = (st && CONSOLIDATED_GOV_ALIAS[st] && CONSOLIDATED_GOV_ALIAS[st][slug]) || slug;
   /* B209503 — the one Texas county whose key is not its slug. Austin COUNTY (Bellville / Sealy)
    * keeps the key `austintx` so the far more common string "Austin" — the city, its ETJ, a TxDOT
    * district — can never resolve to it by accident. The alias is applied here, in the one place
    * a display name becomes a key, rather than at each call site — the SAME alias the statewide
    * derivation above uses, so the two can never disagree about what "Austin" means. */
   const txSlug = TX_COUNTY_KEY_ALIAS[slug] || slug;
-  const candidates = st === "CO" ? [`co_${slug}`] : st && st !== "TX" ? [`${st.toLowerCase()}_${slug}`] : [txSlug];
+  const candidates = st === "CO" ? [`co_${slug}`] : st && st !== "TX" ? [`${st.toLowerCase()}_${generalSlug}`] : [txSlug];
   for (const key of candidates) {
     const entry = COUNTIES_MAP[key];
     if (!entry || entry.statewide) continue;

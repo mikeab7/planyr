@@ -720,6 +720,72 @@ remain unwired; see the annotated table above for what was checked for each of t
 wired** — nothing in this pass found evidence any of them are wrong, only that Bibb's id field
 needed the same pin fix described above (its endpoint itself is untouched).
 
+### Georgia third pass — 34-county dispatch, 2026-09-24 (B1875248, amends B1870704 a second time)
+
+An owner chat block named 34 more Georgia counties (a third pass, following the 2026-09-23 first
+pass above — `ga_dekalb`..`ga_camden`, 11 counties — and the second pass immediately above this
+section, B1873776, 11 more — Forsyth/Henry/Clayton/Cherokee/Coweta/Glynn/Screven/Bryan/Liberty/
+Bartow/Cobb — dispatched the same night in a different session and merged, PR #1832, just before
+this pass started). **⛔ Unlike the first two passes, none of this batch's sources could be
+re-verified from this sandbox — every host is blocked by this build environment's egress
+policy.** All counts, edit dates and quirks below come from Michael's own signed-in Chrome at the
+`planyr.io` origin, measured 2026-09-24 (service JSON, `returnCountOnly`, `returnExtentOnly` with
+`outSR=4326`, extent checked inside the county), and are recorded here and in `counties.js` /
+`countiesProvenance.js` as reported — the live-verify item on this batch is what closes that gap.
+
+**The finding that explains why so many of these exist at all: Georgia's county assessors
+overwhelmingly sit behind qPublic (Schneider Geospatial's viewer), which has no public API and is
+Cloudflare-bot-walled. The real parcel data underneath it is still published — just by a different
+publisher.** Three regional bodies republish the same WinGAP parcel export their member counties'
+assessors use, each as its own ArcGIS Online organization: the Georgia Association of Regional
+Commissions (org `Ug5xGQbHsD8zuZzM`), the Southern Georgia Regional Commission (org
+`HA2thkMWRBDb77XN`), and VALOR (org `fYt1jp3hqamxgSvI` — the same CAMA vendor name `ga_lowndes`
+above already resolved through). A handful of counties instead publish from their own county-run
+GIS host (Richmond, Whitfield, Hall) or from a third-party republication (Muscogee, on a University
+of Georgia research org — not this batch's own oldest source; see the vintage note below).
+
+**34 wired** (key → county, real seat): `ga_richmond` (Richmond/Augusta), `ga_whitfield`
+(Whitfield/Dalton), `ga_hall` (Hall/Gainesville), `ga_effingham` (Effingham/Springfield),
+`ga_fayette` (Fayette/Fayetteville), `ga_spalding` (Spalding/Griffin), `ga_newton`
+(Newton/Covington), `ga_barrow` (Barrow/Winder), `ga_oconee` (Oconee/Watkinsville), `ga_butts`
+(Butts/Jackson GA), `ga_monroe` (Monroe/Forsyth GA), `ga_troup` (Troup/LaGrange), `ga_peach`
+(Peach/Fort Valley), `ga_muscogee` (Muscogee/Columbus), `ga_morgan` (Morgan/Madison GA),
+`ga_baldwin` (Baldwin/Milledgeville), `ga_brantley` (Brantley/Nahunta), `ga_charlton`
+(Charlton/Folkston), `ga_clay` (Clay/Fort Gaines), `ga_cook` (Cook/Adel), `ga_crawford`
+(Crawford/Knoxville), `ga_crisp` (Crisp/Cordele), `ga_dade` (Dade/Trenton), `ga_dooly`
+(Dooly/Vienna), `ga_echols` (Echols/Statenville), `ga_emanuel` (Emanuel/Swainsboro), `ga_evans`
+(Evans/Claxton), `ga_greene` (Greene/Greensboro), `ga_lanier` (Lanier/Lakeland), `ga_meriwether`
+(Meriwether/Greenville GA), `ga_sumter` (Sumter/Americus), `ga_turner` (Turner/Ashburn),
+`ga_twiggs` (Twiggs/Jeffersonville), `ga_ware` (Ware/Waycross).
+
+Notable quirks recorded on the individual rows (`counties.js`/`countiesProvenance.js`), not
+repeated in full here: **Barrow and Oconee deliberately share one FeatureServer** (the Greater
+Athens regional-commission service) at different layer ids — not a URL conflict, the same shape
+`sharedLayerUrlConflicts()` already allows elsewhere in this file. **Cook**'s measured extent
+(`-83.49..-83.37`) reads narrower than the whole county — possibly city-of-Adel-only coverage —
+wired anyway per this dispatch's own instruction, with the live-verify pass required to click a lot
+outside Adel before this is treated as full-county coverage. **Dade**'s real source
+(`Dade_Parcels_2020LLLT/FeatureServer/5`) must not be confused with a same-org, same-count,
+differently-named `Walker_Parcels_2026LLLT/4` layer — that is Dade's own data under a
+Walker-County-sounding name, not a real Walker County source, and stays unwired anywhere in this
+registry. **Muscogee (2019-01) and Morgan (2018-11) are the two oldest sources in this batch** —
+both still inside this repo's 5-year staleness bar, and the help text on both rows says so plainly
+rather than presenting them as current.
+
+**Six counties named in the dispatch had no usable public parcel source found and are NOT wired,
+filed instead as an Open follow-up item:**
+
+| County | What was checked | Why it was ruled out |
+|---|---|---|
+| Walton | `walton_parcels_view` (per the dispatch) | Answers `499 Token Required` — checked twice the same night; not a public, key-free endpoint. |
+| Douglas | — | No public parcel endpoint found. |
+| Houston | — | No public parcel endpoint found. |
+| Floyd | `romefloyd.agdmaps.com` portal | Did not answer. |
+| Carroll | ArcGIS Online "Carroll County Parcel Viewer" | Is Carroll County, **MISSISSIPPI** (extent near -90°) — a same-name-different-state trap, same species as the first pass's Walton/FL and Paulding/OH catches. |
+| Gordon | Warner Robins city polygon layer | Not a parcel layer — a municipal boundary, not parcel geometry (and Warner Robins is in Houston County, not Gordon, in any case). |
+
+qPublic direct access was also tried and ruled out generally for this whole pass: Schneider's own
+API sits behind a Cloudflare bot wall and answers nothing scriptable.
 ### GIS pass-through — a same-origin relay for a county host with NO CORS support at all (NEW-1, 2026-09-24)
 
 Every county row above assumes the county's own GIS server will answer a browser's cross-origin
@@ -757,6 +823,12 @@ once wired: Atkinson, Ben Hill, Berrien, Brooks, Coffee, Cook, Echols, Irwin, La
 Turner, each under its own `/alma/rest/services/<County>/<County>_Parcels/MapServer/0`-shaped
 path on the same host (not independently confirmed this session — a real follow-up, not a
 guess: the SGRC host itself is real and reachable, only the per-county path needs confirming).
+**⛔ Four of these eleven — Cook, Echols, Lanier and Turner — are ALREADY wired as of the same-day
+third pass above, through a DIFFERENT, working source** (ArcGIS Online-hosted layers on the
+`HA2thkMWRBDb77XN`/`TSNNo8H51qYl31gq` orgs, which send a normal CORS header — no proxy needed).
+A future session picking up this follow-up should confirm those four are covered before spending
+effort re-wiring them through SGRC's own host; the remaining seven (Atkinson, Ben Hill, Berrien,
+Brooks, Coffee, Irwin, Pierce) are still genuinely open.
 **Middle Georgia Regional Commission** (`mgrcmaps.org`) is allow-listed too and is the same shape
 of fix once a specific county layer on it is confirmed and wired. **The Coastal Regional
 Commission** (`maps.crc.ga.gov`) is ALSO allow-listed, per the dispatch's own explicit list — but
