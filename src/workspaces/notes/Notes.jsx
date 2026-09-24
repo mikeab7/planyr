@@ -44,10 +44,10 @@ import { listProjects, warmProjects, onProjectsChanged, ensureProjectExists } fr
 import {
   clearNotesStorageError, collectOpenTasks, createPage, duplicatePageTree, knownBinnedPages, markPagesBinned, markPagesRestored, notesConflictFor, notesConflictLine,
   notesScopeLabel, notesStorageLine, onNotesConflict, onNotesStorageError, onNotesSyncState,
-  collectBinFacts, ignoreDuplicate, onNotesPagesChanged, purgePages, readIgnoredDuplicates, readNoteFiles,
+  collectBinFacts, ignoreDuplicate, onNotesPagesChanged, purgePages, readActivePageId, readIgnoredDuplicates, readNoteFiles,
   readNoteImages, readNoteTemplates, readPage, readTreeRaw,
   resolveNotesConflict, searchNotes, setNotesScope, snapshotPage, startNotesSync, stopNotesSync,
-  sweepEmptyAnchors, sweepImagesOfMissingPages, sweepOrphans, toggleNoteTask, writeNoteTemplates, writePage, writeTree,
+  sweepEmptyAnchors, sweepImagesOfMissingPages, sweepOrphans, toggleNoteTask, writeActivePageId, writeNoteTemplates, writePage, writeTree,
 } from "./lib/notesStore.js";
 import {
   attachmentIdsInDocs, imageIdsInDocs, pageToMarkdown, safeFileName, MD_INLINE_ATTACHMENT_MAX,
@@ -307,6 +307,16 @@ export default function Notes({
   const templatesRef = useRef([]);   // the LIVE template list — same reasoning as treeRef, see persistTemplates/templatesNow
   const undoTimer = useRef(0);
 
+  /* NEW-1 — every navigation to a page writes through to storage
+   * (readActivePageId/writeActivePageId, lib/notesStore.js), so a reload restores the page
+   * the user actually had open instead of always landing on the tree's first page. An effect
+   * that resolves its own fallback id (the visibility guard, the cloud seed) writes through
+   * itself inline, since it needs the resolved value before this wrapper ever sees it. */
+  const goToPage = useCallback((id) => {
+    setActivePageId(id);
+    writeActivePageId(id);
+  }, []);
+
   /* B113/B485's existing phone breakpoint (760px, matchMedia), reused rather than a third one —
    * see the drill-in note just below. */
   const narrow = useNarrow();
@@ -400,7 +410,14 @@ export default function Notes({
 
     treeRef.current = loaded;   // seed the ref with what was just read, so a flush before
     setTree(loaded);            // the first edit cannot write a null over real notebooks
-    setActivePageId(firstPageId(loaded));
+    /* NEW-1 — resume the page the user actually had open, not always the tree's first page.
+     * A stored id naming a page that no longer exists (deleted, or a stale cross-account
+     * leftover) falls back exactly as before. `noteIntent`, if present, wins over this — its
+     * own effect below runs after this one settles the tree and overrides unconditionally. */
+    const storedActive = readActivePageId();
+    const initialActive = storedActive && findPage(loaded, storedActive) ? storedActive : firstPageId(loaded);
+    setActivePageId(initialActive);
+    writeActivePageId(initialActive);
     setQuery("");
     setHighlight("");
     setDeleted(null);
@@ -418,7 +435,11 @@ export default function Notes({
         const next = migrate(readTreeRaw());
         treeRef.current = next;
         setTree(next);
-        setActivePageId((cur) => (cur && findPage(next, cur) ? cur : firstPageId(next)));
+        setActivePageId((cur) => {
+          const resolved = cur && findPage(next, cur) ? cur : firstPageId(next);
+          writeActivePageId(resolved);
+          return resolved;
+        });
       },
     });
     return () => { live = false; stopNotesSync(); };
@@ -611,8 +632,8 @@ export default function Notes({
   useEffect(() => {
     const roots = pagesInScope(tree, projectId, orgScope ? SCOPE_ORG : (projectId == null ? SCOPE_ALL : SCOPE_PROJECT));
     const visible = new Set(roots.flatMap((r) => subtreePageIds(r)));
-    if (!activePageId || !visible.has(activePageId)) setActivePageId(roots[0]?.id || null);
-  }, [projectId, orgScope, tree, activePageId]);
+    if (!activePageId || !visible.has(activePageId)) goToPage(roots[0]?.id || null);
+  }, [projectId, orgScope, tree, activePageId, goToPage]);
 
   /* B1366384 — honor a cross-workspace "open this exact page" request (Shell's `noteIntent`,
    * from the Dashboard's "Since you were last here" card). Runs after the visibility-guard effect
@@ -624,9 +645,10 @@ export default function Notes({
     if (!noteIntent?.pageId) return;
     if (!findPage(tree, noteIntent.pageId)) return;
     setPeek(null);   // NEW-1: opening a real page always exits bin mode
-    setActivePageId(noteIntent.pageId);
+    goToPage(noteIntent.pageId);   // takes priority over the stored page — this effect runs
+                                   // after the mount effect settles the tree, so it wins
     setMobileShowList(false);
-  }, [noteIntent, tree]);
+  }, [noteIntent, tree, goToPage]);
 
   const active = useMemo(() => (activePageId ? findPage(tree, activePageId) : null), [tree, activePageId]);
   const activePage = active?.page || null;
@@ -884,7 +906,7 @@ export default function Notes({
     if (!r.ok) return;
     persistTree(r.tree);
     setPeek(null);   // NEW-1: a new page is a real page, so any bin peek exits
-    setActivePageId(r.pageId);
+    goToPage(r.pageId);
     setQuery("");
     setMobileShowList(false);   // NEW-1: a new page opens straight into the editor, phone included
     // NEW-2 (B1202176 ×2 / B1160480) — a page filed under a project is real content with nothing
@@ -895,7 +917,7 @@ export default function Notes({
     // by its route — and Notes' whole architecture promises an instant, local-first write that
     // must never wait on a network round trip.
     if (projectId) ensureProjectExists(projectId).catch(() => {});
-  }, [projectId, orgScope, persistTree, treeNow, templatesNow]);
+  }, [projectId, orgScope, persistTree, treeNow, templatesNow, goToPage]);
 
   /* ---- templates (NEW-1) ----
    *
@@ -965,9 +987,9 @@ export default function Notes({
     if (!r.ok) return;
     persistTree(r.tree);
     setPeek(null);   // NEW-1: a new page is a real page, so any bin peek exits
-    setActivePageId(r.pageId);
+    goToPage(r.pageId);
     setMobileShowList(false);
-  }, [persistTree, treeNow]);
+  }, [persistTree, treeNow, goToPage]);
 
   /** COPY A NOTEBOOK (NEW-1) — the page AND every subpage under it, with their writing,
    *  pictures and files. The copy lands right under the original, in the ORIGINAL's project
@@ -979,13 +1001,13 @@ export default function Notes({
     if (!r.ok) { setExportNote(r.error); return; }
     persistTree(r.tree);
     setPeek(null);
-    setActivePageId(r.pageId);
+    goToPage(r.pageId);
     setMobileShowList(false);
     const what = r.pages > 1 ? `the page and its ${r.pages - 1} subpage${r.pages === 2 ? "" : "s"}` : "the page";
     setExportNote(r.missing
       ? `Copied ${what}. ${r.missing} picture${r.missing === 1 ? " was" : "s were"} already missing from the original, so ${r.missing === 1 ? "it shows" : "they show"} as missing in the copy too.`
       : `Copied ${what}.`);
-  }, [persistTree, treeNow]);
+  }, [persistTree, treeNow, goToPage]);
 
   /** Re-file a TOP-LEVEL page into a project, or out of every project (B1374, B1420). */
   const handleSetPageProject = useCallback((pageId, pid) => {
@@ -1014,11 +1036,11 @@ export default function Notes({
     // The cloud half of the same cascade: the bodies STAY (that is the bin), the rows are
     // stamped as binned, so the other computer can restore what this one deleted.
     markPagesBinned(entry.pageIds);
-    if (removedPageIds.includes(activePageId)) setActivePageId(firstPageId(next));
+    if (removedPageIds.includes(activePageId)) goToPage(firstPageId(next));
     setDeleted({ id: entry.id, title: entry.title, pageIds: entry.pageIds });
     if (undoTimer.current) clearTimeout(undoTimer.current);
     undoTimer.current = setTimeout(() => { undoTimer.current = 0; setDeleted(null); }, UNDO_MS);
-  }, [activePageId, persistTree, treeNow]);
+  }, [activePageId, persistTree, treeNow, goToPage]);
 
   const handleRestore = useCallback((entryId) => {
     const r = restoreNode(treeNow(), entryId);
@@ -1029,8 +1051,8 @@ export default function Notes({
     // the bin entirely, so the read-only peek has nothing left to show — close it rather than
     // leave it pointing at a page that is no longer binned.
     setPeek((p) => (p && p.entryId === entryId ? null : p));
-    if (r.restored && r.pageIds.length) setActivePageId(r.pageIds[0]);
-  }, [persistTree, treeNow]);
+    if (r.restored && r.pageIds.length) goToPage(r.pageIds[0]);
+  }, [persistTree, treeNow, goToPage]);
 
   /** DELETE FOREVER — the ONE place a note's bytes are destroyed. */
   const handlePurge = useCallback((entryId) => {
@@ -1222,10 +1244,10 @@ export default function Notes({
     }
     if ((target.projectId ?? null) !== (projectId ?? null)) onNavigate?.({ projectId: target.projectId ?? null, cross: false, org: false });
     setPeek(null);   // NEW-1: opening a real page always exits bin mode
-    setActivePageId(target.pageId);
+    goToPage(target.pageId);
     setQuery("");
     setMobileShowList(false);
-  }, [projectId, onNavigate]);
+  }, [projectId, onNavigate, goToPage]);
 
   /* ⛔ AUTO-ADOPTION: A BODY WITH NO NODE IS GIVEN ONE, ON SIGHT (NEW-1).
    *
@@ -1510,10 +1532,10 @@ export default function Notes({
           /* NEW-1: the bin is a mode, and a page click always exits it — a binned page's
              read-only peek must never survive a click on a real page, however it was
              clicked. See handlePeekBin/peek's header above for the full defect. */
-          onSelectPage={(id) => { setPeek(null); setActivePageId(id); setQuery(""); setHighlight(""); setMobileShowList(false); }}
+          onSelectPage={(id) => { setPeek(null); goToPage(id); setQuery(""); setHighlight(""); setMobileShowList(false); }}
           /* Opening a SEARCH HIT carries the phrase into the page, so the editor can mark
              where it actually is — the thing search used to abandon you without. */
-          onSelectHit={(id) => { setPeek(null); setActivePageId(id); setHighlight(query); setQuery(""); setMobileShowList(false); }}
+          onSelectHit={(id) => { setPeek(null); goToPage(id); setHighlight(query); setQuery(""); setMobileShowList(false); }}
           onAddPage={handleAddPage}
           onAddSubpage={handleAddSubpage}
           onCopyPage={handleCopyPage}
@@ -1541,7 +1563,7 @@ export default function Notes({
              new plumbing in the editor. */
           taskGroups={taskGroups}
           onToggleTask={handleToggleTask}
-          onOpenTask={(t) => { setPeek(null); setActivePageId(t.pageId); setHighlight(t.text); setQuery(""); setMobileShowList(false); }}
+          onOpenTask={(t) => { setPeek(null); goToPage(t.pageId); setHighlight(t.text); setQuery(""); setMobileShowList(false); }}
           /* Leaving the Bin tab for any other view is leaving bin mode — close whatever was
              being read from it (NEW-1), the same as a page click does. */
           onViewChange={(v) => { setTasksOpen(v === "tasks"); setBinOpen(v === "bin"); if (v !== "bin") setPeek(null); }}
@@ -1707,7 +1729,7 @@ export default function Notes({
             onPick={(hit) => {
               closeQuickOpen();
               setPeek(null);   // NEW-1: opening a real page always exits bin mode
-              setActivePageId(hit.pageId);
+              goToPage(hit.pageId);
               setQuery("");
               // A BODY hit carries the phrase into the page, exactly as the rail's own
               // search hits do — landing on the note without being shown where the words
