@@ -160,16 +160,16 @@ const CLICK = { x: mapBox.x + mapBox.w * 0.42, y: mapBox.y + mapBox.h * 0.55 };
       saveDisabled: save ? save.disabled : null,
       // a NEW note has no Delete — there is nothing to delete yet
       hasDelete: !!document.querySelector('[data-testid="map-note-delete"]'),
-      siteOptions: [...(document.querySelector('[data-testid="map-note-site"]')?.options || [])].map((o) => o.textContent),
     };
   });
   ok("3 · the editor opens on the clicked point", !!card);
   ok("3 · it fits entirely inside the owner's short window", !!card && card.inViewport,
      card ? `${card.w.toFixed(0)}×${card.h.toFixed(0)} at ${card.x.toFixed(0)},${card.y.toFixed(0)}` : "");
   ok("3 · it says which kind of anchor it is on", !!card && card.kind);
-  ok("3 · it offers a text area and an OPTIONAL site link", !!card && card.hasBody && card.hasSite);
-  ok("3 · 'No site' is the default and a real answer (a note never creates a site)",
-     !!card && card.siteOptions[0] === "No site");
+  ok("3 · it offers a text area", !!card && card.hasBody);
+  // NEW-2 (2026-09-24) — the site-picker step is GONE (it listed every site on the account,
+  // regardless of where they actually were): the editor must never grow one back.
+  ok("3 · it does NOT offer a site picker (removed, NEW-2)", !!card && card.hasSite === false);
   ok("3 · a brand-new note offers no Delete", !!card && card.hasDelete === false);
   ok("3 · Save is refused while the note is empty (never writes a findable-by-nobody pin)",
      !!card && card.saveDisabled === true);
