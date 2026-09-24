@@ -50,6 +50,29 @@ describe("buildParcelWhere — shared, scoped, injection-safe where builder", ()
       .toThrow(/field name/i);
   });
 
+  // NEW-1 (2026-09-24) — Florida's 17 shared-layer counties (fl_duval etc.) all scope via
+  // `CO_NO = <FDOR code>` — a bare numeric equality, not the `field='VALUE'` shape Texas/Idaho use.
+  // buildParcelWhere's scope-field extraction (`scopeWhere.split("=")[0]…`) has to keep working on
+  // this shape too: it ANDs the scope whenever the FDOR-named field exists on the layer, and skips
+  // it (self-heals) when the layer doesn't carry CO_NO at all.
+  it("ANDs a numeric FDOR-style scope ('CO_NO = 26') when the field exists on the layer", () => {
+    const flMeta = { fields: [
+      { name: "PARCEL_ID", type: "esriFieldTypeString" },
+      { name: "PHY_ADDR1", type: "esriFieldTypeString" },
+      { name: "CO_NO", type: "esriFieldTypeDouble" },
+    ] };
+    expect(buildParcelWhere({ meta: flMeta, mode: "id", value: "0744550000R", idField: "PARCEL_ID", scopeWhere: "CO_NO = 26" }))
+      .toBe("(CO_NO = 26) AND (UPPER(PARCEL_ID) LIKE UPPER('%0744550000R%'))");
+    expect(buildParcelWhere({ meta: flMeta, mode: "address", value: "LAKE MORTON", addrField: "PHY_ADDR1", scopeWhere: "CO_NO = 63" }))
+      .toBe("(CO_NO = 63) AND (UPPER(PHY_ADDR1) LIKE UPPER('%LAKE MORTON%'))");
+  });
+
+  it("skips the FDOR scope when CO_NO is absent from the layer's field list (self-healing, same as the county-name shape)", () => {
+    const noScopeMeta = { fields: [{ name: "PARCEL_ID", type: "esriFieldTypeString" }] };
+    expect(buildParcelWhere({ meta: noScopeMeta, mode: "id", value: "40594", idField: "PARCEL_ID", scopeWhere: "CO_NO = 26" }))
+      .toBe("UPPER(PARCEL_ID) LIKE UPPER('%40594%')");
+  });
+
   it("throws a plain (non-outage) error when the layer has no id field", () => {
     const e = (() => { try { buildParcelWhere({ meta: { fields: [] }, mode: "id", value: "1", idField: null, addrField: "a" }); } catch (err) { return err; } })();
     expect(e).toBeInstanceOf(Error);

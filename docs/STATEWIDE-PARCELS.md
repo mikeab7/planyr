@@ -836,3 +836,81 @@ turned out not to need the pass-through at all: the Georgia second-pass work bel
 sibling session) wired Screven and Liberty directly against `https://maps.crc.ga.gov/...` and
 found it answers a normal CORS header, unlike SGRC. Left allow-listed as a harmless, unused
 capability rather than removed, since a future CRC-hosted county could still turn out to need it.
+
+### Florida — 17 counties, Jacksonville + Polk/Lakeland markets (NEW-1, 2026-09-24)
+
+Unlike Georgia, **Florida needs no per-county discovery at all** — the state GIO (Geographic
+Information Office) publishes every one of Florida's 67 counties' parcels in ONE statewide layer,
+sourced from the Department of Revenue (FDOR) cadastral roll: `fl_statewide`'s own `layerUrl`
+(`services9.arcgis.com/Gh9awoU677aKree0/…/Florida_Statewide_Cadastral/FeatureServer/0`, "FDOR
+Cadastral 2025", owner FloridaGIO), already recorded above in the per-state notes. Wiring a
+Florida county is therefore a one-line addition — a new `scopeWhere` on the SAME shared layer,
+exactly the shape Idaho's 13 counties use — never a new endpoint to find.
+
+**MEASURED from Michael's own Chrome at the planyr.io origin, 2026-09-24:** 10,831,924 features,
+esriGeometryPolygon, last edited 2026-09-16, maxRecordCount 2000. A point query at downtown
+Jacksonville (-81.6579, 30.3255) answered in 369ms — CO_NO 26, PARCEL_ID "0744550000R", PHY_ADDR1
+"3 E INDEPENDENT DR", OWN_NAME "JACKSONVILLE AREA CHAMBER OF C". A point at Lakeland (-81.9498,
+28.0395) answered CO_NO 63, PARCEL_ID "242819000000031050", PHY_ADDR1 "72 LAKE MORTON DR".
+
+**⛔ ATTRIBUTE-ONLY QUERIES OVER THE WHOLE LAYER ARE SLOW — do not validate rows on this layer by
+count or extent.** `returnCountOnly`/`returnExtentOnly` with `where CO_NO=12` both exceeded a 40s
+timeout from this sandbox (consistent with the pre-existing per-state note above: a whole-layer
+`returnExtentOnly` probe timed out at 8002ms against the SAME layer during the original statewide
+discovery pass). Point/envelope spatial queries are fast (both test points above answered in well
+under a second) — that is the query shape the app actually sends, and the shape every future
+Florida county should be validated against.
+
+**The 17 counties wired** (Jacksonville and Polk/Lakeland markets, ~30-mile radius of each city —
+the Georgia side of this ask, Bartow County GA and its ring, was already wired or has no public
+source, so nothing further was built there):
+
+| County | FDOR `CO_NO` | Wired key | County seat |
+|---|---|---|---|
+| Duval | 26 | `fl_duval` | Jacksonville |
+| Nassau | 55 | `fl_nassau` | Fernandina Beach |
+| Clay | 20 | `fl_clay` | Green Cove Springs |
+| St. Johns | 65 | `fl_stjohns` | St. Augustine |
+| Baker | 12 | `fl_baker` | Macclenny |
+| Polk | 63 | `fl_polk` | Bartow, FL (a city — not Bartow County, GA) |
+| Hillsborough | 39 | `fl_hillsborough` | Tampa |
+| Pasco | 61 | `fl_pasco` | Dade City |
+| Hernando | 37 | `fl_hernando` | Brooksville |
+| Sumter | 70 | `fl_sumter` | Bushnell |
+| Lake | 45 | `fl_lake` | Tavares |
+| Orange | 58 | `fl_orange` | Orlando |
+| Osceola | 59 | `fl_osceola` | Kissimmee |
+| Highlands | 38 | `fl_highlands` | Sebring |
+| Hardee | 35 | `fl_hardee` | Wauchula |
+| Manatee | 51 | `fl_manatee` | Bradenton |
+| DeSoto | 24 | `fl_desoto` | Arcadia |
+
+`CO_NO` is FDOR's own county numbering, **not a FIPS code** — confirmed by both live test points
+above (Duval FIPS is 031, but `CO_NO` reads 26; Polk FIPS is 105, `CO_NO` reads 63).
+
+**Key spelling — a deliberate deviation from the dispatch's own suggested `fl_st_johns`.** This
+repo's established convention for a multi-word county name is to SQUISH it with no underscore
+(`la_eastbatonrouge`, `id_bearlake`, `id_nezperce` above) — never `fl_st_johns`. This is not
+stylistic: `countyKeyForName` derives the routing key as `${state}_${slug}`, where `slug` strips
+every character that isn't a letter, so "St. Johns County" can only ever resolve to `fl_stjohns`.
+An underscored key would be silently unreachable by name lookup while still working by direct
+key/bbox routing — exactly the kind of defect that hides behind a passing build. `fl_stjohns` is
+what's wired.
+
+**The Nassau/Camden (GA) state line, and the generalized-boundary trap it exposed.** The nationwide
+county-polygon asset (`public/geo/county-polygons.json`, an ArcGIS Online *generalized* boundaries
+service) does not extend Nassau County's own polygon all the way to the true tip of Amelia Island —
+downtown Fernandina Beach's real coordinates (-81.4626, 30.6697) resolve `status: "outside"` against
+it, confirmed by direct ray-cast probing of the committed asset, not assumed. This is a property of
+the *generalized* dataset (it is the U.S. Census's own simplified nationwide boundaries layer, not
+Nassau County's authoritative line), not a bug in this session's wiring, and it is not unique to
+Florida — it is the same simplification that already produces `nearEdge` uncertainty anywhere a
+boundary runs through a thin peninsula. The state-line test therefore uses Yulee, FL (Nassau County,
+squarely on the mainland side of I-95, close to the Georgia line) rather than Fernandina Beach
+itself; St. Marys, GA and Kingsland, GA both confirm cleanly on the Camden County side. Buildable
+takeaway: routing at real state lines is correct; a literal barrier-island point is the one shape
+this particular geometry asset cannot be trusted on, and the live click-to-select parcel query (a
+real point query against the FDOR layer, not the offline geometry) is authoritative regardless.
+
+**The other 50 Florida counties are one row away** — same shared layer, same `scopeWhere` shape,
+just a different `CO_NO` and a county seat to confirm — whenever a market needs one.

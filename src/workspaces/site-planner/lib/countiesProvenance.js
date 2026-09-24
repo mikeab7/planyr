@@ -524,6 +524,84 @@ export const COUNTY_VERIFICATION = {
     verifiedOn: "2026-09-15",
     verifiedNote: "VERIFIED LIVE from Michael's own browser and independently re-confirmed from this sandbox (services.arcgis.com/sbDzK061dd6DNPHv is reachable here): 73,154 parcel polygons, extent covering the city (not Jackson County). `Name` is confirmed as the idField — its live field-list alias reads 'Parcel APN'. City-scoped (cityScopes.js), wholly within Jackson County, which publishes no open countywide parcel service of its own (docs/STATEWIDE-PARCELS.md) — Independence and Kansas City together are what Jackson County gets; the rest of the county has no source wired, an honest gap rather than a defect.",
   },
+
+  /* ═══ NEW-1 (2026-09-24) — 17 Florida counties (Jacksonville + Polk/Lakeland markets), all
+   * riding ONE shared statewide layer (FL_STATEWIDE_LAYER in counties.js) scoped via `CO_NO`, the
+   * FDOR county code (NOT a FIPS code). "FDOR Cadastral 2025" (owner FloridaGIO), esriGeometryPolygon,
+   * 10,831,924 features, last edited 2026-09-16 — reachable from THIS SANDBOX (unlike most county-
+   * own hosts in this file). ⛔ Whole-layer `returnCountOnly`/`returnExtentOnly` both exceeded a 40s
+   * timeout (see counties.js's FL_STATEWIDE_LAYER header and docs/STATEWIDE-PARCELS.md's Florida
+   * section) — so every row below is verified by ITS OWN live point query against the shared layer,
+   * run from this sandbox 2026-09-24, never by a whole-layer count/extent probe. All 17 CO_NO values
+   * were independently confirmed this way (not merely copied from the dispatch's own table). */
+  fl_duval: {
+    verifiedOn: "2026-09-24",
+    verifiedNote: "Live point query from this sandbox at downtown Jacksonville (-81.6579, 30.3255): CO_NO 26, PARCEL_ID \"0744550000R\", PHY_ADDR1 \"3 E INDEPENDENT DR\", OWN_NAME \"JACKSONVILLE AREA CHAMBER OF C\" — the real lot at the measured address, on the shared FL_STATEWIDE_LAYER.",
+  },
+  fl_nassau: {
+    verifiedOn: "2026-09-24",
+    verifiedNote: "Live point query from this sandbox at Fernandina Beach (-81.4626, 30.6697): CO_NO 55, PARCEL_ID \"000031180000120290\", PHY_ADDR1 \"312 ASH ST\", OWN_NAME \"CLARK BRADFORD R\". ⛔ The offline nationwide county-polygon asset's own Nassau ring does not reach the true tip of Amelia Island — this exact point resolves 'outside' against it (a generalized-boundary artifact in public/geo/county-polygons.json, confirmed by direct ray-cast probe, not a parcel-source defect). The LIVE parcel query above — what routing and search actually use — has no such gap; test/counties.test.js's state-line case therefore uses Yulee, FL instead, which the offline asset also resolves cleanly. See docs/STATEWIDE-PARCELS.md's Florida section.",
+  },
+  fl_clay: {
+    verifiedOn: "2026-09-24",
+    verifiedNote: "Live point query from this sandbox near Green Cove Springs (-81.6777, 29.9911 — nudged ~0.001° from the exact seat point, which landed on Bay St with no parcel underneath): CO_NO 20, PARCEL_ID \"38-06-26-017310-000-00\", PHY_ADDR1 \"BAY St\", OWN_NAME \"Knight Brian\".",
+  },
+  fl_stjohns: {
+    verifiedOn: "2026-09-24",
+    verifiedNote: "Live point query from this sandbox at St. Augustine (-81.3145, 29.8947): CO_NO 65, PARCEL_ID \"1980800000\", PHY_ADDR1 \"70 HYPOLITA ST\", OWN_NAME \"66 AND 70 HYPOLITA LLC\".",
+  },
+  fl_baker: {
+    verifiedOn: "2026-09-24",
+    verifiedNote: "Live point query from this sandbox at Macclenny (-82.1265, 30.2827): CO_NO 12, PARCEL_ID \"322S22004900250010\", PHY_ADDR1 \"57 SHUEY AVE\", OWN_NAME \"CITY OF MACCLENNY\".",
+  },
+  fl_polk: {
+    verifiedOn: "2026-09-24",
+    verifiedNote: "Live point query from this sandbox at Lakeland (-81.9498, 28.0395): CO_NO 63, PARCEL_ID \"242819000000031050\", PHY_ADDR1 \"72 LAKE MORTON DR\", OWN_NAME \"FIRST UNITED METHODIST CHURCH\". Polk County's seat is Bartow, FL — a city, not Bartow County, GA (already wired as ga_bartow).",
+  },
+  fl_hillsborough: {
+    verifiedOn: "2026-09-24",
+    verifiedNote: "Live point query from this sandbox near Tampa (-82.4572, 27.9516 — nudged ~0.001° from the exact seat point, which landed on E Polk St with no parcel underneath): CO_NO 39, PARCEL_ID \"1829244ZI000029000010A\", PHY_ADDR1 \"E POLK ST\", OWN_NAME \"U S A FEDERAL BUILDING\".",
+  },
+  fl_pasco: {
+    verifiedOn: "2026-09-24",
+    verifiedNote: "Live point query from this sandbox at Dade City (-82.1968, 28.3625): CO_NO 61, PARCEL_ID \"27-24-21-0000-09100-0000\", PHY_ADDR1 \"14031 14TH\", OWN_NAME \"DISTRICT SCHOOL BOARD OF\".",
+  },
+  fl_hernando: {
+    verifiedOn: "2026-09-24",
+    verifiedNote: "Live point query from this sandbox near Brooksville (-82.3819, 28.5553 — nudged ~0.006° from the exact seat point, which timed out/landed off-parcel): CO_NO 37, PARCEL_ID \"R23 122 19 1200 0060 0020\", PHY_ADDR1 \"504 E JEFFERSON ST\", OWN_NAME \"HARVEST TIME HERNANDO CHURCH I\".",
+  },
+  fl_sumter: {
+    verifiedOn: "2026-09-24",
+    verifiedNote: "Live point query from this sandbox at Bushnell (-82.1101, 28.6650): CO_NO 70, PARCEL_ID \"N16A205\", PHY_ADDR1 \"305 N FLORIDA ST\", OWN_NAME \"BARNES A DALE & KELLI L\".",
+  },
+  fl_lake: {
+    verifiedOn: "2026-09-24",
+    verifiedNote: "Live point query from this sandbox near Tavares (-81.7238, 28.8039 — nudged ~0.001° from the exact seat point, which landed with no parcel underneath): CO_NO 45, PARCEL_ID \"28-19-26-1800-026-00200\", PHY_ADDR1 \"418 E ALFRED ST\", OWN_NAME \"BUDD-MC GOWN CASSANDRA L\".",
+  },
+  fl_orange: {
+    verifiedOn: "2026-09-24",
+    verifiedNote: "Live point query from this sandbox near Orlando (-81.3792, 28.5393 — nudged ~0.001° from the exact seat point): CO_NO 58, PARCEL_ID \"262229002700050\", PHY_ADDR1 \"200 S ORANGE AVE\", OWN_NAME \"PIEDMONT 200 AND 250 SOUTH ORA\".",
+  },
+  fl_osceola: {
+    verifiedOn: "2026-09-24",
+    verifiedNote: "Live point query from this sandbox near Kissimmee (-81.4066, 28.2920 — nudged ~0.001° from the exact seat point, which timed out/landed off-parcel): CO_NO 59, PARCEL_ID \"2225292257000100C0\", PHY_ADDR1 \"PLEASANT ST\", OWN_NAME \"CITY OF KISSIMMEE\".",
+  },
+  fl_highlands: {
+    verifiedOn: "2026-09-24",
+    verifiedNote: "Live point query from this sandbox near Sebring (-81.4399, 27.4956 — nudged ~0.001° from the exact seat point, which landed with no parcel underneath): CO_NO 38, PARCEL_ID \"S29342907005800180\", PHY_ADDR1 \"127 E CENTER AVE BEAUTY SHOP\", OWN_NAME \"MEDINA DIANA\".",
+  },
+  fl_hardee: {
+    verifiedOn: "2026-09-24",
+    verifiedNote: "Live point query from this sandbox near Wauchula (-81.8085, 27.5372 — nudged ~0.001° from the exact seat point, which landed with no parcel underneath): CO_NO 35, PARCEL_ID \"1034250000008000000\", PHY_ADDR1 \"905 S  6TH AVE\", OWN_NAME \"DISCOUNT AUTO PARTS LLC\".",
+  },
+  fl_manatee: {
+    verifiedOn: "2026-09-24",
+    verifiedNote: "Live point query from this sandbox at Bradenton (-82.5748, 27.4989): CO_NO 51, PARCEL_ID \"3329300059\", PHY_ADDR1 \"1301 1ST AVE W\", OWN_NAME \"MANATEE COUNTY\". ⛔ The offline nationwide county-polygon asset's own Manatee ring has a small gap near downtown Bradenton's riverfront (likely the Manatee River channel) — this exact point resolves cleanly against the LIVE layer above but 'outside' against that offline asset; the COUNTIES_MAP bbox/routing test therefore uses a point just north of downtown (still within city limits) rather than this exact address.",
+  },
+  fl_desoto: {
+    verifiedOn: "2026-09-24",
+    verifiedNote: "Live point query from this sandbox at Arcadia (-81.8592, 27.2153): CO_NO 24, PARCEL_ID \"253724001200100045\", PHY_ADDR1 \"1 N  BREVARD AVE\", OWN_NAME \"VIRGINIA H LISKEY PROPS LLC\".",
+  },
 };
 
 /* Convenience accessors so callers never reach into the shape directly. */
