@@ -267,59 +267,59 @@ export const COUNTY_VERIFICATION = {
   },
   ga_whitfield: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 46,673 parcel polygons, last edited live county server. The county's own GIS host (gis.whitfieldcountyga.com).",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 46,673 parcel polygons, last edited live county server. The county's own GIS host (gis.whitfieldcountyga.com). ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_FUL' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_hall: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 91,921 parcel polygons, last edited live county server. The county's own GIS host (hallgis.hallcounty.org), layer 1 \"Parcel Boundary\".",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 91,921 parcel polygons, last edited live county server. The county's own GIS host (hallgis.hallcounty.org), layer 1 \"Parcel Boundary\". ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PIN' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_effingham: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 32,941 parcel polygons, last edited 2024-10.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 32,941 parcel polygons, last edited 2024-10. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_NO' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_fayette: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 49,104 parcel polygons, last edited daily.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 49,104 parcel polygons, last edited daily. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_NO' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_spalding: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 33,700 parcel polygons, last edited daily.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 33,700 parcel polygons, last edited daily. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_ID' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_newton: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 45,755 parcel polygons, last edited 2022-02.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 45,755 parcel polygons, last edited 2022-02. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_NO' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_barrow: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 35,234 parcel polygons, last edited 2022-03. Layer 30 of the Greater Athens regional commission's shared FeatureServer (org Ug5xGQbHsD8zuZzM); ga_oconee shares the same service at layer 32 — same host, different layer id, not a URL conflict.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 35,234 parcel polygons, last edited 2022-03. Layer 30 of the Greater Athens regional commission's shared FeatureServer (org Ug5xGQbHsD8zuZzM); ga_oconee shares the same service at layer 32 — same host, different layer id, not a URL conflict. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_no' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_oconee: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 19,068 parcel polygons, last edited 2022-03. Layer 32 of the same Greater Athens regional-commission service ga_barrow rides at layer 30.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 19,068 parcel polygons, last edited 2022-03. Layer 32 of the same Greater Athens regional-commission service ga_barrow rides at layer 30. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCELID' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_butts: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 13,065 parcel polygons, last edited 2024-09.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 13,065 parcel polygons, last edited 2024-09. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'GSI_PIN' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_monroe: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 16,707 parcel polygons, last edited 2025-08.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 16,707 parcel polygons, last edited 2025-08. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCELID' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_troup: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 35,511 parcel polygons, last edited 2026-02.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 35,511 parcel polygons, last edited 2026-02. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'parcelnumb' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_peach: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 14,431 parcel polygons, last edited 2026-09.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 14,431 parcel polygons, last edited 2026-09. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCELS' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_muscogee: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 70,625 parcel polygons, last edited 2019-01. 2019 vintage — the oldest of this batch, still inside this repo's 5-year staleness bar; the help text says so.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 70,625 parcel polygons, last edited 2019-01. 2019 vintage — the oldest of this batch, still inside this repo's 5-year staleness bar; the help text says so. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'TaxPIN' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_morgan: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 12,190 parcel polygons, last edited 2018-11. 2018 vintage — the oldest county source in the whole registry, still inside this repo's 5-year staleness bar; the help text says so.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 12,190 parcel polygons, last edited 2018-11. 2018 vintage — the oldest county source in the whole registry, still inside this repo's 5-year staleness bar; the help text says so. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_baldwin: {
     verifiedOn: null,
@@ -327,75 +327,75 @@ export const COUNTY_VERIFICATION = {
   },
   ga_brantley: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 13,301 parcel polygons, last edited 2025-10.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 13,301 parcel polygons, last edited 2025-10. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_charlton: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 7,357 parcel polygons, last edited 2023-07.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 7,357 parcel polygons, last edited 2023-07. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_NO' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_clay: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 3,063 parcel polygons, last edited 2024-05.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 3,063 parcel polygons, last edited 2024-05. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_cook: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 5,103 parcel polygons, last edited 2023-11. ⚠ measured extent is narrower than the whole county (about -83.49..-83.37) — possibly city-of-Adel-only coverage. Wired anyway per this item's own instruction; the live-verify pass must click a lot outside Adel to confirm county-wide coverage.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 5,103 parcel polygons, last edited 2023-11. ⚠ measured extent is narrower than the whole county (about -83.49..-83.37) — possibly city-of-Adel-only coverage. Wired anyway per this item's own instruction; the live-verify pass must click a lot outside Adel to confirm county-wide coverage. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_crawford: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 8,186 parcel polygons, last edited 2026-09.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 8,186 parcel polygons, last edited 2026-09. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCELNO' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_crisp: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 12,351 parcel polygons, last edited 2022-03.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 12,351 parcel polygons, last edited 2022-03. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_dade: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 7,811 parcel polygons, last edited 2026-07. ⛔ Do not confuse with `Walker_Parcels_2026LLLT/4` on a different AGOL org — identical 7,811-feature count and Dade's own extent under a Walker-County-sounding name; that layer is Dade's data mislabeled, not a real Walker County source, and stays unwired.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 7,811 parcel polygons, last edited 2026-07. ⛔ Do not confuse with `Walker_Parcels_2026LLLT/4` on a different AGOL org — identical 7,811-feature count and Dade's own extent under a Walker-County-sounding name; that layer is Dade's data mislabeled, not a real Walker County source, and stays unwired. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_NO' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_dooly: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 7,277 parcel polygons, last edited 2022-03.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 7,277 parcel polygons, last edited 2022-03. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_echols: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 2,206 parcel polygons, last edited 2026-06.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 2,206 parcel polygons, last edited 2026-06. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_NO' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_emanuel: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 15,107 parcel polygons, last edited 2026-08.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 15,107 parcel polygons, last edited 2026-08. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_evans: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 6,672 parcel polygons, last edited 2023-01.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 6,672 parcel polygons, last edited 2023-01. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_NO' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_greene: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 17,735 parcel polygons, last edited 2025-09.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 17,735 parcel polygons, last edited 2025-09. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_lanier: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 5,968 parcel polygons, last edited 2025-12.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 5,968 parcel polygons, last edited 2025-12. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_NO' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_meriwether: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 16,511 parcel polygons, last edited 2023-06.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 16,511 parcel polygons, last edited 2023-06. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_sumter: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 16,415 parcel polygons, last edited 2026-07. Layer 9 of a regional-commission service named for trails, not parcels — same B1551616 \"title is never the measurement\" trap other GA rows in this file have already hit; the layer itself is the county's real parcel fabric.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 16,415 parcel polygons, last edited 2026-07. Layer 9 of a regional-commission service named for trails, not parcels — same B1551616 \"title is never the measurement\" trap other GA rows in this file have already hit; the layer itself is the county's real parcel fabric. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCELID' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_turner: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 5,714 parcel polygons, last edited 2026-01. Service name really is \"TunerParcels\" (sic).",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 5,714 parcel polygons, last edited 2026-01. Service name really is \"TunerParcels\" (sic). ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_twiggs: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 6,832 parcel polygons, last edited 2026-01.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 6,832 parcel polygons, last edited 2026-01. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCELID' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_ware: {
     verifiedOn: null,
-    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 23,119 parcel polygons, last edited 2026-09-22.",
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 23,119 parcel polygons, last edited 2026-09-22. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_NO' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   mi_oakland: {
     verifiedOn: "2026-09-10",

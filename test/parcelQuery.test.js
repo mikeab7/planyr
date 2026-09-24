@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { buildParcelWhere, okField, isDefaultLookupUrl, resolveSearchField, lookupParcels } from "../src/workspaces/site-planner/lib/parcelQuery.js";
+import { buildParcelWhere, okField, isDefaultLookupUrl, resolveSearchField, lookupParcels, idAttrFor } from "../src/workspaces/site-planner/lib/parcelQuery.js";
 import { COUNTIES } from "../src/workspaces/site-planner/lib/counties.js";
 
 const COUNTIES_HARRIS_URL = COUNTIES.harris.layerUrl;
@@ -168,5 +168,48 @@ describe("lookupParcels — end to end through the pin (B1873776)", () => {
     expect(r.feats).toHaveLength(1);
     const queryCall = calls.find((u) => u.includes("/query"));
     expect(decodeURIComponent(queryCall)).toContain("BOA_Addres");
+  });
+});
+
+/* ⛔ B1875248 — `idAttrFor` is the DISPLAYED "Account / ID" value (the map-search card, the plan
+ * hand-off's `acct`), and it must resolve the SAME column an ID search would run on. Before this
+ * fix, MapFinder.jsx kept its own separate id-shaped-column regex (which additionally matched a
+ * bare "objectid") purely to compute this value — so on the affected GA counties the card showed
+ * the WinGAP layer's own row number while a search on the same county already queried the right
+ * column. These are the exact attribute bags measured in the live repro. */
+describe("idAttrFor — the parcel card's Account/ID resolves the pinned column, not the layer's row id (B1875248)", () => {
+  it("Effingham: reads PARCEL_NO, not the OBJECTID_1 row number (was showing '0')", () => {
+    const attrs = { FID: 412, OBJECTID_1: 0, PARCEL_NO: "S1010010", PIN: "0101 001", WPIN: "W0101" };
+    expect(idAttrFor("ga_effingham", attrs)).toBe("S1010010");
+  });
+
+  it("Barrow: reads Parcel_no, not FID (was showing '-1')", () => {
+    const attrs = { FID: -1, Parcel_no: "WN12   217" };
+    expect(idAttrFor("ga_barrow", attrs)).toBe("WN12   217");
+  });
+
+  it("Hall: reads PIN, not OBJECTID (was showing the raw OBJECTID '64810')", () => {
+    const attrs = { OBJECTID: 64810, PIN: "08021 001131", ADDR_ID: 552 };
+    expect(idAttrFor("ga_hall", attrs)).toBe("08021 001131");
+  });
+
+  it("degrades to the pinned field's absence gracefully when the layer genuinely lacks it (self-healing, same as resolveSearchField)", () => {
+    // No PARCEL_NO on this bag at all — falls back to whatever else looks id-shaped.
+    const attrs = { FID: 3, PIN: "006A" };
+    expect(idAttrFor("ga_effingham", attrs)).toBe("006A");
+  });
+
+  it("returns null (never a placeholder string) when the resolved field's value is a placeholder", () => {
+    const attrs = { PARCEL_NO: "Null" };
+    expect(idAttrFor("ga_effingham", attrs)).toBeNull();
+  });
+
+  it("returns null for a county with no idField and nothing else id-shaped in the bag", () => {
+    expect(idAttrFor("ga_baldwin", { Shape_Area: 4200 })).toBeNull();
+  });
+
+  it("returns null for null/undefined attrs without throwing", () => {
+    expect(idAttrFor("ga_effingham", null)).toBeNull();
+    expect(idAttrFor("ga_effingham", undefined)).toBeNull();
   });
 });

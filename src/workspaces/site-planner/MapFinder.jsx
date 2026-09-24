@@ -88,6 +88,7 @@ import { elStyle, elToRingFeet, byZ } from "./lib/planStyle.js";
 import { STATUSES, STATUS_META, statusOf, roleOf } from "./lib/siteModel.js";
 import { countyAtPoint } from "./lib/jurisdiction.js";
 import { findAttr, situsAddress, siteNameFromParcel, tidyAddressLabel } from "./lib/appraisal.js";
+import { idAttrFor } from "./lib/parcelQuery.js";
 /* LAZY (B1064 tranche). The address-search parcel card renders only AFTER a search resolves a
  * lot — an inherently async moment, so there is nothing on screen for its chunk to hold up and
  * no layout to reserve (the card is absolutely positioned over the map, which is also why the
@@ -452,9 +453,13 @@ function pointInPoly(lat, lng, ring) {
  * situs (`SITUS`) purely because the service lists it first — every plan started that way was named
  * after the owner's head office. Null means "this record has no situs", which the callers answer
  * with what the user searched, never with a mailing address. */
-const ID_RE = /(hcad_?num|^acct|account|parcel_?id|prop_?id|^pid$|quick_?ref|geo_?id|^pin$|^gid$|objectid)/i;
 // findAttr (imported from lib/appraisal.js) is the shared "first non-empty attr
 // matching this regex, as a string" helper — formerly a local findVal duplicate.
+// ⛔ B1875248 (third-pass recurrence) — the Account/ID VALUE used to be a second, local
+// id-shaped-column regex (`findAttr(attrs, ID_RE)`), which additionally matched a bare
+// "objectid" and so showed the layer's own row number instead of the real parcel number on
+// several GA WinGAP counties, disagreeing with what an ID search already queried. `idAttrFor`
+// (lib/parcelQuery.js) resolves the SAME column a search runs on — never a second copy.
 const shoelace = (pts) => {
   // B690 — a stored parcel can lack `points` (attr-only / legacy / a malformed row round-tripped
   // verbatim through site_elements). The map layer skips those (p.points?.length below); the
@@ -3094,7 +3099,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // Multipolygon nesting ([[part],[part]]) so each separate tract draws as its own
       // filled shape — not as a hole punched out of the first (Leaflet's 2-level form).
       hilitesRef.current[key] = L.polygon(latlngsList.map((ll) => [ll]), { color: PAL.accent, weight: 2.5, fillColor: PAL.accent, fillOpacity: 0.14, interactive: false }).addTo(map);
-      setSelected((s) => (s.some((x) => x.key === key) ? s : [...s, { key, rings, latlngsList, addr: situsAddress(attrs), acct: findAttr(attrs, ID_RE), attrs, county }])); // dedupe by key (B22)
+      setSelected((s) => (s.some((x) => x.key === key) ? s : [...s, { key, rings, latlngsList, addr: situsAddress(attrs), acct: idAttrFor(county, attrs), attrs, county }])); // dedupe by key (B22)
       // B36(a): the statewide TxGIO layer can answer for a Harris/FB lot — relabel via a
       // true point-in-county lookup (non-blocking). Keyed off STATEWIDE_KEYS, not a
       // hardcoded "chambers": B787 moved the statewide role from the `chambers` key to the
@@ -3336,7 +3341,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           const v = snapshotVintage(cached.county);
           setParcelInfo({
             status: "found", label, key: added.key, county: cached.county, attrs: added.attrs,
-            addr: situsAddress(added.attrs), acct: findAttr(added.attrs, ID_RE), acres: ringsAcres(added.rings),
+            addr: situsAddress(added.attrs), acct: idAttrFor(cached.county, added.attrs), acres: ringsAcres(added.rings),
             cached: { asOf: v ? v.asOf : null },
           });
           return;
@@ -3354,7 +3359,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     if (!added) { setParcelInfo({ status: "none", label }); return; }
     setParcelInfo({
       status: "found", label, key: added.key, county: hit.county, attrs: added.attrs,
-      addr: situsAddress(added.attrs), acct: findAttr(added.attrs, ID_RE), acres: ringsAcres(added.rings),
+      addr: situsAddress(added.attrs), acct: idAttrFor(hit.county, added.attrs), acres: ringsAcres(added.rings),
       backup: viaBackup ? backupCountyLabel(hit.feature.attributes || {}) : null,
     });
   };

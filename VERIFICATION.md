@@ -230,6 +230,26 @@ Stopping rule: this passes and moves to `docs/archive/VERIFICATION-DONE.md` once
 
 Stopping rule: this passes and moves to `docs/archive/VERIFICATION-DONE.md` once step 1 confirms all 34 counties select a real parcel on production — or a failing county is filed as a recurrence against **B1875248** with the real cause, per STANDING RULE #2 (a null result is a FINDING, never a disposition).
 
+### V1343984 — B1880352: the Account/ID card resolves the real parcel number, not the WinGAP layer's own row id, for the third-pass Georgia counties `Blocker: live-GIS`
+
+**Why this needs its own live pass.** GIS endpoint behaviour is a mandatory LIVE-VERIFY class, and this item's fix changes what a real identify response renders — a sandbox test can prove `idAttrFor` resolves the right column from a captured attribute bag, but not that the live service still shapes its response the way that bag assumes. Same split as V1338880/V1337408, one door up: every county here is blocked by this build environment's own egress policy.
+
+**What was verified here (this session, sandbox — code paths and data shape only, never connectivity).**
+1. `npx vitest run` — 900 files / 18,363 tests, all green, zero regressions: new `describe` blocks in `test/counties.test.js` (`detectField('id')` ranking against the exact five field lists measured in the repro — Effingham, Barrow, Cook, Twiggs, Hall — plus the OBJECTID/FID last-resort fallback and the pre-existing B1873776 PIN-vs-PARCEL_NO behavior, unchanged; every one of the 32 pinned third-pass rows carries `pinIdField: true`) and `test/parcelQuery.test.js` (`idAttrFor` against the ACTUAL attribute bags from the repro — Effingham's `OBJECTID_1: 0`, Barrow's `FID: -1`, Hall's `OBJECTID: 64810` — each now resolving to the real parcel number instead).
+2. `node ui-audit/gis-source-audit.mjs` — clean; all 32 touched rows carry a dated "THIRD-PASS ID PIN 2026-09-24" addendum in `countiesProvenance.js` naming the pinned column.
+3. `npm run lint` / `npm run build` clean.
+4. `npm run ci-parity` — the full 21-gate required-check run, reproduced locally.
+
+**Steps, each with a named expected result. Read the served chunk hash in the SAME observation as each result:**
+1. Search "901 Pine Ave, Springfield, GA" (Effingham). **Expect:** Account / ID reads a value shaped like `S1010010` — never `0`.
+2. Search "30 N Broad St, Winder, GA" (Barrow). **Expect:** a value shaped like `WN12   217` — never `-1`.
+3. Search "Sparks Elementary School, Sparks, GA" (Cook). **Expect:** the card carries an Account / ID row at all — it previously had none.
+4. Search "2875 Browns Bridge Rd, Gainesville, GA" (Hall). **Expect:** a value shaped like `08021 001131` — never a bare row number like `64810`.
+5. Paste that Hall PIN into the planner's own "Add parcel" ID search box. **Expect:** it returns exactly that one lot.
+6. Regression: Jackson GA and Rockdale (B1873776's own fixes) and a lot in Houston, TX. **Expect:** unchanged from before this item.
+
+Stopping rule: this passes and moves to `docs/archive/VERIFICATION-DONE.md` once steps 1–5 all confirm on the deployed build — or a failing county/case is filed as a recurrence against this item's `B#` with the real cause, per STANDING RULE #2 (a null result is a FINDING, never a disposition).
+
 ### V1335600 — B1870704: 11 newly-wired Georgia county parcel endpoints answer, and the app renders/selects a parcel from each `Blocker: live-GIS`
 
 **Why this needs its own live pass.** GIS endpoint behaviour is a mandatory LIVE-VERIFY class. All 11 counties sit on `*.arcgis.com`, which this sandbox's egress allowlist permits, and were queried live and directly from here through the exact shipped functions the app calls — but confirming the Map Finder UI itself renders and lets a user select a parcel needs a real browser, which this sandbox cannot drive against these specific hosts any further than it already has (the network path is open; what's missing is the on-screen click-and-render experience, not connectivity). Same split as V1055874/B1455634.

@@ -11,6 +11,7 @@
 import { resolveLayerUrl, getLayerInfo, queryFeatures } from "./arcgis.js";
 import { COUNTIES, detectField, statewideFallbackFor, STATEWIDE_PARCEL_LAYER } from "./counties.js";
 import { recordSourceResult } from "./sourceHealth.js";
+import { isPlaceholderValue } from "./appraisal.js";
 
 // A field name gets interpolated into the where-clause and may come from a live (or a
 // user-pasted) layer's metadata, so it must be a plain identifier — reject anything
@@ -62,6 +63,26 @@ export function buildParcelWhere({ meta, mode, value, idField, addrField, scopeW
 export function resolveSearchField(fields, kind, hint, pinned) {
   if (pinned && hint && (fields || []).some((f) => f && f.name === hint)) return hint;
   return detectField(fields, kind) || hint;
+}
+
+/* ⛔ B1875248 (third-pass recurrence, 2026-09-24) — the DISPLAYED "Account / ID" value for an
+ * identified parcel (the address-search card, the planner hand-off) must resolve the SAME column an
+ * ID search would run on — `resolveSearchField` above, honoring a county's `idField`/`pinIdField` —
+ * never a separate ad hoc regex. MapFinder.jsx used to keep its own local id-shaped-column regex
+ * (which additionally matched a bare "objectid") purely to pick the display value; on a WinGAP-export
+ * GA layer whose OBJECTID/OBJECTID_1/FID column sits ahead of the real parcel number in field order,
+ * that second regex showed the county's own internal row number (0, -1, 64810…) while the search path
+ * (a different function entirely) already queried the right column — the card and the search
+ * silently disagreed. `attrs` is a raw identify-hit attribute bag, keyed by field name; returns the
+ * resolved field's value as a string, or null when nothing id-shaped is present or the value is a
+ * placeholder ("Null", ""...). */
+export function idAttrFor(county, attrs) {
+  if (!attrs) return null;
+  const fields = Object.keys(attrs).map((name) => ({ name }));
+  const c = COUNTIES[county];
+  const field = resolveSearchField(fields, "id", c?.idField, !!c?.pinIdField);
+  if (!field || !(field in attrs) || isPlaceholderValue(attrs[field])) return null;
+  return String(attrs[field]);
 }
 
 // Run one ID/address query against a single layer; returns the matched features plus
