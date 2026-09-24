@@ -540,7 +540,7 @@ export const COUNTY_VERIFICATION = {
   },
   fl_nassau: {
     verifiedOn: "2026-09-24",
-    verifiedNote: "Live point query from this sandbox at Fernandina Beach (-81.4626, 30.6697): CO_NO 55, PARCEL_ID \"000031180000120290\", PHY_ADDR1 \"312 ASH ST\", OWN_NAME \"CLARK BRADFORD R\". ⛔ The offline nationwide county-polygon asset's own Nassau ring does not reach the true tip of Amelia Island — this exact point resolves 'outside' against it (a generalized-boundary artifact in public/geo/county-polygons.json, confirmed by direct ray-cast probe, not a parcel-source defect). The LIVE parcel query above — what routing and search actually use — has no such gap; test/counties.test.js's state-line case therefore uses Yulee, FL instead, which the offline asset also resolves cleanly. See docs/STATEWIDE-PARCELS.md's Florida section.",
+    verifiedNote: "Live point query from this sandbox at Fernandina Beach (-81.4626, 30.6697): CO_NO 55, PARCEL_ID \"000031180000120290\", PHY_ADDR1 \"312 ASH ST\", OWN_NAME \"CLARK BRADFORD R\". ⛔ RECURRENCE FIX (2026-09-24, B1885600 ×2): the offline nationwide county-polygon asset's own Nassau ring used to be built from the GENERALIZED USA_Counties_Generalized_Boundaries source and did not reach the true tip of Amelia Island — this exact point resolved 'outside' against it, so the click router never fired a parcel request at all for this town, on the deployed build. Fixed by giving Florida its own dedicated FDEP shoreline source in build-county-polygons.mjs (the TX/CO treatment), rather than routing test coverage around the gap — this point now resolves 'ok'/Nassau against the rebuilt asset too. See docs/STATEWIDE-PARCELS.md's Florida section.",
   },
   fl_clay: {
     verifiedOn: "2026-09-24",

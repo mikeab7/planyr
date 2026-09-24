@@ -897,20 +897,34 @@ An underscored key would be silently unreachable by name lookup while still work
 key/bbox routing — exactly the kind of defect that hides behind a passing build. `fl_stjohns` is
 what's wired.
 
-**The Nassau/Camden (GA) state line, and the generalized-boundary trap it exposed.** The nationwide
-county-polygon asset (`public/geo/county-polygons.json`, an ArcGIS Online *generalized* boundaries
-service) does not extend Nassau County's own polygon all the way to the true tip of Amelia Island —
-downtown Fernandina Beach's real coordinates (-81.4626, 30.6697) resolve `status: "outside"` against
-it, confirmed by direct ray-cast probing of the committed asset, not assumed. This is a property of
-the *generalized* dataset (it is the U.S. Census's own simplified nationwide boundaries layer, not
-Nassau County's authoritative line), not a bug in this session's wiring, and it is not unique to
-Florida — it is the same simplification that already produces `nearEdge` uncertainty anywhere a
-boundary runs through a thin peninsula. The state-line test therefore uses Yulee, FL (Nassau County,
-squarely on the mainland side of I-95, close to the Georgia line) rather than Fernandina Beach
-itself; St. Marys, GA and Kingsland, GA both confirm cleanly on the Camden County side. Buildable
-takeaway: routing at real state lines is correct; a literal barrier-island point is the one shape
-this particular geometry asset cannot be trusted on, and the live click-to-select parcel query (a
-real point query against the FDOR layer, not the offline geometry) is authoritative regardless.
+**⛔ RECURRENCE (2026-09-24, B1885600 ×2) — the generalized-boundary trap this section used to
+document as "not a bug in this session's wiring" turned out to be a real, user-facing outage, and
+the fix is a source swap, not a workaround.** The claim above — that a literal barrier-island point
+was merely a shape the offline geometry couldn't be trusted on while the live click-to-select query
+stayed authoritative regardless — was measured WRONG on the deployed build (b9722c7): with no
+parcel-source geometry able to name a county for Fernandina Beach's own coordinates, the click
+router never fired a parcel request there AT ALL (the network log showed only the geocoder call),
+and the card read "the county parcel service couldn't be reached for this area right now." A
+`status: "outside"` answer from `resolveCounty` isn't a cosmetic gap in a screening asset — it is
+the input `candidateCountiesForPoint` uses to decide which parcel service to query, so an offline
+geometry that clips the coast produces a real, live routing failure, not just an imprecise fallback.
 
-**The other 50 Florida counties are one row away** — same shared layer, same `scopeWhere` shape,
-just a different `CO_NO` and a county seat to confirm — whenever a market needs one.
+**The fix:** `build-county-polygons.mjs` now has a dedicated `FL` source (the FDEP "Florida County
+Boundaries" shoreline layer — see its own header for the live-verified provenance), the same
+TX/CO-style treatment as every other state riding the generalized nationwide layer should eventually
+get. Fernandina Beach's real coordinates now resolve `status: "ok"` / Nassau against the rebuilt
+asset, and `fl_nassau`'s bbox/center were re-derived from it. `test/counties.test.js` asserts this
+directly (Fernandina Beach → `fl_nassau`, plus Anna Maria → `fl_manatee`, Ponte Vedra Beach →
+`fl_stjohns`, Jacksonville Beach → `fl_duval`, all newly-wired barrier-island/coastal seats) rather
+than routing test coverage around the gap with a mainland stand-in. St. Marys, GA and Kingsland, GA
+still confirm cleanly on the Camden County side, unaffected by the Florida-side fix.
+
+**The trade-off, stated rather than hidden:** the FDEP shoreline layer is genuinely higher-detail
+than the generalized one (~700 polygon parts for Nassau County alone before simplification), so all
+67 Florida counties together cost roughly 485 KB of the (public/, not-bundle-budgeted) geometry
+asset — a real increase, and the price of routing barrier islands correctly instead of clipping them.
+
+**The other 50 Florida counties are one row away** — same shared parcel layer, same `scopeWhere`
+shape, just a different `CO_NO` and a county seat to confirm — whenever a market needs one; their
+boundary geometry is already correct in the rebuilt asset regardless of whether a parcel source is
+wired for them yet.
