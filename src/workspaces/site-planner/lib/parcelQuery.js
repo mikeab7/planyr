@@ -51,13 +51,26 @@ export function buildParcelWhere({ meta, mode, value, idField, addrField, scopeW
   return where;
 }
 
+/* Which field a search runs on. DETECTION WINS by default — the layer's own live field names beat a
+ * hand-typed hint, so a hint can never send a query to a column the service no longer has. A county
+ * row may PIN its id hint (`pinIdField: true`) for the rare layer whose detected id column is the
+ * wrong one: Jackson County GA's first ID-shaped column is `PIN`, a short partial ("006A") that
+ * matches several lots, while the full number is `PARCEL_NO`; and Rockdale County GA's `Address` holds
+ * only the house number ("1620"), while `BOA_Addres` holds the whole situs line (`pinAddrField: true`,
+ * the same pin for the address search). A pin is honoured ONLY when the hinted
+ * column actually exists on the layer, so it degrades to detection instead of failing the search. */
+export function resolveSearchField(fields, kind, hint, pinned) {
+  if (pinned && hint && (fields || []).some((f) => f && f.name === hint)) return hint;
+  return detectField(fields, kind) || hint;
+}
+
 // Run one ID/address query against a single layer; returns the matched features plus
 // the resolved layer + detected field names (so the caller can import a result).
-async function queryOneLayer(rawUrl, { mode, value, idHint, addrHint, scopeWhere }) {
+async function queryOneLayer(rawUrl, { mode, value, idHint, addrHint, scopeWhere, pinId, pinAddr }) {
   const layerUrl = await resolveLayerUrl(rawUrl);
   const meta = await getLayerInfo(layerUrl);
-  const idField = detectField(meta.fields, "id") || idHint;
-  const addrField = detectField(meta.fields, "address") || addrHint;
+  const idField = resolveSearchField(meta.fields, "id", idHint, pinId);
+  const addrField = resolveSearchField(meta.fields, "address", addrHint, pinAddr);
   const where = buildParcelWhere({ meta, mode, value, idField, addrField, scopeWhere });
   const feats = await queryFeatures(layerUrl, { where, count: 10, outSR: 4326 }); // lon/lat → importFeature projects via the shared 365223 model (B57c)
   return { feats, layerUrl, idField, addrField };
@@ -76,6 +89,8 @@ export async function lookupParcels({ county, lookupUrl, mode, value }) {
       idHint: COUNTIES[county]?.idField,
       addrHint: COUNTIES[county]?.addrField,
       scopeWhere: COUNTIES[county]?.scopeWhere,
+      pinId: !!COUNTIES[county]?.pinIdField,
+      pinAddr: !!COUNTIES[county]?.pinAddrField,
     });
     recordSourceResult(county, true);
     return { ...r, backup: false, backupCounty: null };
