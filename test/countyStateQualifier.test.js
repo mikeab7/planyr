@@ -100,14 +100,36 @@ describe("countyKeyForName is never called without a state (the sweep)", () => {
 
 describe("a county name outside the configured states resolves to nothing, never a same-named key", () => {
   // The four names the probe caught, each a real county in another state AND a real Texas county.
+  // ⛔ B1873776 (2026-09-23) — `["Liberty County", "GA"]` used to belong here: at the time this
+  // fixture was written, Liberty County GA had no configured `ga_liberty` key, so this case was
+  // proving "an unconfigured county name resolves to null, never the same-named Texas key." That
+  // stopped being true the moment `ga_liberty` was wired — the row below now asserts the NEW
+  // correct answer instead, and this fixture moved to a still-genuinely-unconfigured Florida
+  // county (Florida is wired statewide-only, no per-county Florida keys exist) so this describe
+  // keeps testing what it was written to test.
   it.each([
     ["Montgomery County", "PA"],
-    ["Liberty County", "GA"],
+    ["Liberty County", "FL"],
     ["Chambers County", "AL"],
     ["Harris County", "GA"],
     ["Montgomery County", "AL"],
   ])("%s, %s → null", (name, state) => {
     expect(countyKeyForName(name, state)).toBeNull();
+  });
+
+  // KNOWN-GOOD ARM — Liberty County GA is now configured (B1873776), so a GA-qualified call must
+  // reach it, while a TX-qualified call for the same name must still reach the Texas county, never
+  // either one bleeding into the other's answer.
+  it("Liberty County now resolves per state — GA reaches the new Georgia county, TX still reaches Texas's own", () => {
+    expect(countyKeyForName("Liberty County", "GA")).toBe("ga_liberty");
+    expect(countyKeyForName("Liberty County", "TX")).toBe("liberty");
+  });
+
+  // KNOWN-GOOD ARM — Jackson County GA (also wired this session, with a pinned id field —
+  // test/parcelQuery.test.js covers the pin itself) resolves distinctly from any other state's
+  // same-named county.
+  it("Jackson County resolves to the Georgia key when GA-qualified", () => {
+    expect(countyKeyForName("Jackson County", "GA")).toBe("ga_jackson");
   });
 
   // KNOWN-GOOD ARMS — the states Planyr actually configures must keep resolving, or the fix above

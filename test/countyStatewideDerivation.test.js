@@ -163,8 +163,13 @@ describe("the derivation changes nothing about enumeration or the statewide pseu
     // ~18 dialed-in TX+CO rows + 32 statewide pseudo-keys + 13 Idaho counties (B1344721) + 19
     // other-state counties (B1344722) + 9 Tier-1 counties (B1551617) + 8 more (2026-09-15: SD
     // Pennington/Minnehaha/Sioux Falls, PA Luzerne/Lackawanna, MI Macomb, MO Kansas
-    // City/Independence), not 254 or 3,143.
-    expect(keys.length).toBeLessThan(120);
+    // City/Independence) + 22 Georgia counties added across two 2026-09-23 passes (B1870704's 11,
+    // B1873776's 11 more), not 254 or 3,143. ⛔ B1873776 — bumped 120 → 160: the count crossed 120
+    // (123 measured the day this bump landed) purely from continuing to wire real counties one at a
+    // time, not from any change in what this test guards against (a blind nationwide expansion —
+    // see B1457152's own history two describe blocks below). Raise again the same way if a future
+    // county-wiring session needs the room; the number is a generous ceiling, not a target.
+    expect(keys.length).toBeLessThan(160);
   });
 
   it("candidateCountiesForPoint still answers via the existing txgio_statewide fallback for a derived county — unchanged, not doubled", () => {

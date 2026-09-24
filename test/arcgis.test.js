@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
-  outerRingsLngLat, queryAtPoint, identifyParcelDetailed, identifyParcelEager,
+  outerRingsLngLat, queryAtPoint, queryFeatures, isPaginationUnsupportedError,
+  identifyParcelDetailed, identifyParcelEager,
   BACKUP_GRACE_MS,
   ParcelFetchError, PARCEL_FETCH_TIMEOUT_MS, humanizeError, geoJsonToEsriFeature,
   identifyAtPoint, isQueryCapabilityError,
@@ -449,6 +450,87 @@ describe("identifyParcelEager — the SOLE candidate hanging still resolves with
       { county: "nv_statewide", url: "https://x.test/nv/MapServer/0", statewide: true },
     ], -115.157, 36.1167);
     expect(res.hits.map((h) => h.county)).toEqual(["nv_statewide"]);
+  });
+});
+
+/* Bryan County GA (measured 2026-09-23) answers HTTP 200 with `{error:{code:400,message:
+ * "Pagination is not supported."}}` to ANY query carrying `resultRecordCount` — which every
+ * ordinary search sends (queryOneLayer → queryFeatures) — so its search box could never have
+ * worked without this fallback. The click path (queryAtPoint) sends no pagination params and was
+ * already fine; this closes the search path. */
+describe("queryFeatures — pagination-unsupported fallback (Bryan County GA, B1873776)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const PAG_ERR = { error: { code: 400, message: "Pagination is not supported." } };
+  const feat = (id) => ({ geometry: { rings: [] }, attributes: { OBJECTID: id } });
+
+  it("classifies the exact Bryan County error body", () => {
+    expect(isPaginationUnsupportedError(new ParcelFetchError("arcgis", "Pagination is not supported.", 400))).toBe(true);
+    expect(isPaginationUnsupportedError(new ParcelFetchError("arcgis", "Token Required", 499))).toBe(false);
+    expect(isPaginationUnsupportedError(new ParcelFetchError("timeout", "no response"))).toBe(false);
+  });
+
+  it("an unaffected server still gets ONE plain request, unchanged", async () => {
+    const fetchMock = vi.fn(async () => ok({ features: [feat(1), feat(2)] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const feats = await queryFeatures(LAYER, { where: "1=1", count: 8 });
+    expect(feats).toHaveLength(2);
+    expect(fetchMock.mock.calls).toHaveLength(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("resultRecordCount");
+  });
+
+  it("on the pagination error, falls back to ids-only then objectIds, sliced to count", async () => {
+    const calls = [];
+    vi.stubGlobal("fetch", vi.fn(async (url) => {
+      const u = String(url);
+      calls.push(u);
+      if (u.includes("resultRecordCount")) return ok(PAG_ERR);
+      if (u.includes("returnIdsOnly")) return ok({ objectIds: [10, 11, 12, 13, 14] });
+      if (u.includes("objectIds=")) return ok({ features: [feat(10), feat(11), feat(12)] });
+      return ok({});
+    }));
+    const feats = await queryFeatures(LAYER, { where: "1=1", count: 3 });
+    expect(feats.map((f) => f.attributes.OBJECTID)).toEqual([10, 11, 12]);
+    expect(calls).toHaveLength(3); // the original attempt + the two fallback calls
+    const idsCall = calls.find((u) => u.includes("objectIds="));
+    expect(idsCall).toMatch(/objectIds=10%2C11%2C12/); // sliced to `count`, comma-joined
+  });
+
+  it("an empty id list on the fallback returns [] rather than a third request", async () => {
+    const calls = [];
+    vi.stubGlobal("fetch", vi.fn(async (url) => {
+      const u = String(url);
+      calls.push(u);
+      if (u.includes("resultRecordCount")) return ok(PAG_ERR);
+      if (u.includes("returnIdsOnly")) return ok({ objectIds: [] });
+      return ok({});
+    }));
+    const feats = await queryFeatures(LAYER, { where: "1=1 AND 1=0", count: 8 });
+    expect(feats).toEqual([]);
+    expect(calls.some((u) => u.includes("objectIds="))).toBe(false); // no wasted third call
+  });
+
+  it("a DIFFERENT ArcGIS error is never retried as though it were the pagination gap", async () => {
+    const fetchMock = vi.fn(async () => ok({ error: { code: 499, message: "Token Required" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(queryFeatures(LAYER)).rejects.toMatchObject({ kind: "arcgis", status: 499 });
+    expect(fetchMock.mock.calls).toHaveLength(1); // never tried the ids-only fallback
+  });
+
+  it("a timeout/network error is never retried either — only the exact pagination wording triggers it", async () => {
+    const fetchMock = vi.fn(async () => { throw new TypeError("Failed to fetch"); });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(queryFeatures(LAYER)).rejects.toMatchObject({ kind: "network" });
+    expect(fetchMock.mock.calls).toHaveLength(1);
+  });
+
+  it("a failure INSIDE the fallback still surfaces as its own typed error, never swallowed", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url) => {
+      const u = String(url);
+      if (u.includes("resultRecordCount")) return ok(PAG_ERR);
+      if (u.includes("returnIdsOnly")) return { ok: false, status: 503, json: async () => ({}) };
+      return ok({});
+    }));
+    await expect(queryFeatures(LAYER)).rejects.toMatchObject({ kind: "http", status: 503 });
   });
 });
 

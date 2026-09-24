@@ -582,6 +582,15 @@ An owner chat block named 24 GA counties, most with a "confirmed" URL to probe a
 own NEW-1 comment block (right after `ga_chatham`) and the matching `COUNTY_VERIFICATION` rows in
 `countiesProvenance.js` for the per-county evidence. This section is the fuller record.
 
+**⛔ CORRECTED (B1873776, same day) — "13 not" was a REACHABILITY statement about THIS SANDBOX,
+never a finding about the counties, and it is now known to be wrong for eleven of the thirteen.**
+Every host this section calls blocked below was reachable — and answered real parcel data — from
+Michael's own signed-in Chrome; see **"Georgia second pass, 2026-09-23"** at the end of this
+section for the eleven that are now wired, the two mechanisms that fixing them needed
+(`arcgis.js`'s pagination-unsupported fallback for Bryan County; `parcelQuery.js`'s field pin for
+Jackson/Bibb/Rockdale), and what remains genuinely unwired (only Long and Walton — neither has a
+usable public parcel source).
+
 **Two of the dispatch's own "confirmed" answers were a WRONG SOURCE, caught only by checking real
 sampled attribute values against Georgia's own geography rather than trusting a title, a field
 name, or a plausible-looking hostname:**
@@ -622,30 +631,33 @@ Paulding, Bulloch (Statesboro), Camden. Two extra corrections beyond the wrong-s
   `/query` call 400s "Invalid URL"); the identical dataset is also published as a FeatureServer at
   the same path with Query enabled, wired to that instead.
 
-**13 NOT wired — every one resolves to a real, county-owned host that this build environment's
-egress policy blocks, with no live response from THIS sandbox to confirm the schema (unlike
-`il_cook`/`pa_allegheny`/etc. elsewhere in this file, which carry a PRIOR live-browser measurement
-to lean on).** Georgia has no statewide composite to park an unpromoted county on (unlike
-Colorado's `CO_STATEWIDE_LAYER`), so — per this dispatch's own explicit validation rule ("if an
-endpoint is unreachable... do NOT wire broken endpoints") — none of these are in `COUNTIES_MAP` at
-all, not even as a `candidateUrl` row (there is nothing to promote FROM at that granularity without
-a fallback). Recorded here so a future session with open egress does not have to re-derive the URL:
+**13 NOT wired AS OF THIS SANDBOX'S OWN REACH — every one resolves to a real, county-owned host
+that this build environment's egress policy blocks, with no live response from THIS sandbox to
+confirm the schema (unlike `il_cook`/`pa_allegheny`/etc. elsewhere in this file, which carry a
+PRIOR live-browser measurement to lean on).** Georgia has no statewide composite to park an
+unpromoted county on (unlike Colorado's `CO_STATEWIDE_LAYER`), so — per this dispatch's own
+explicit validation rule ("if an endpoint is unreachable... do NOT wire broken endpoints") — none
+of these were in `COUNTIES_MAP` at that time. **⛔ ELEVEN OF THE THIRTEEN ARE NOW WIRED — see
+"Georgia second pass, 2026-09-23" below.** The unreachability was this sandbox's own egress
+policy, never a property of the counties, and every host below except Long and Walton answered
+real parcel data the moment it was asked from a real browser instead. Table left as originally
+recorded, with a ✅ marking exactly what changed:
 
 | County | Best-known host (found this session, not the dispatch's guess where they differ) | Note |
 |---|---|---|
-| Forsyth | `geo.forsythco.com/gis2/rest/services/Public/Tax_Parcel/FeatureServer/0` | ArcGIS-registry-confirmed path is `/gis2/`, not the dispatch's `/gis/` — likely a server migration since the dispatch's own info was gathered. |
-| Henry | `arcgis.co.henry.ga.us/server/rest/services/Parcels/MapServer/12` | Dispatch's own URL; no better candidate found. Also unreached from Michael's own browser 2026-09-11 (B1583297, as `gis.co.henry.ga.us`). |
-| Cherokee | `gis.cherokeecountyga.gov/arcgis/rest/services/MainLayers/MapServer/1` | "Cherokee County Parcels Live Layer", published by the City of Canton, GA's own GIS org — a more specific, higher-confidence source than the dispatch's own guess. |
-| Clayton | `weba.co.clayton.ga.us:5443/server/rest/services/TaxAssessor/Parcels/MapServer/0` | ArcGIS-registry-confirmed (differs from the dispatch's `gis.claytoncountyga.gov` guess). ⛔ A reachable AGOL candidate, "Find Locations in Clayton County Public Schools Owned Tax Parcels", was REJECTED — only 99 features, a schools-owned subset, not the county's fabric. |
-| Coweta | `cccjcgiswa.coweta.ga.us/arcgis/rest/services/Parcels/FeatureServer/0` | ArcGIS-registry-confirmed (differs from the dispatch's `coweta-gis-web.coweta.ga.us` guess). |
-| Glynn | `webadaptor.glynncounty-ga.gov/webadaptor/rest/services/Parcels/Parcels/FeatureServer/0` | ArcGIS-registry-confirmed (differs from the dispatch's `gis-web.glynncounty-ga.gov` guess — a different hostname). |
-| Liberty | `gis.libertycountyga.com/arcgis/rest/services/ParcelsCache/MapServer/0` | ArcGIS-registry-confirmed path is `ParcelsCache`, not the dispatch's guessed `Parcels`. |
-| Bryan | `bryangis.bryan-county.org/arcgis/rest/services/PropertyDetails/MapServer/0` | ArcGIS-registry-confirmed path is `PropertyDetails`, not the dispatch's guessed `Parcels`. |
-| Long | `maps.crc.ga.gov/crcarcgis/rest/services/Long/LongParcels/MapServer/0` | Matches the dispatch's own URL exactly; independently confirmed via the ArcGIS registry (Coastal Regional Commission). |
-| Screven | `maps.crc.ga.gov/crcarcgis/rest/services/Screven/ScrevenParcels/MapServer/0` | Matches the dispatch's own URL. A reachable AGOL alternate ("Parcels - GA - Screven County", `services.arcgis.com/ISpzx3B5ZsVA6e1Z/...`) exists but its own service root 400s "Invalid URL" — dead, not usable. |
-| Cobb | `gis.cobbcounty.gov/gisserver/rest/services/tax/taxassessorsdaily/mapserver/0` | Resolved by walking the county's own public "Cobb County Parcel Viewer" Web AppBuilder app (item `e22d8c597b4e4762bcd2caa6127696e4`) → its webmap (`b4fc89d1ace44027b37036d874a1f727`) → its "Parcels" operational layer. Also unreached from Michael's own browser 2026-09-11 (B1583297). A reachable AGOL candidate, "Cobb_Parcels" (owner `Smyrna_GA`), was REJECTED — its extent covers only the Smyrna area, not the whole county (17,572 features against a county with several hundred thousand). |
-| Bartow | `www.bartowgis.org/arcgis/rest/services/AGOServices/BartowLand/FeatureServer/2` | Resolved by walking the dispatch's own web-app id (`baef84e2cf524176aee5491f187b2b5a`, "BartowPublicMap") → its webmap (`0a183eb91a47498dbbb5b6eb5d24e320`) → its "Tax Parcels" operational layer. |
-| Walton | *(none found — see the wrong-state correction above)* | The dispatch's own URL is Florida's Walton County; the one AGOL hit for the real Georgia county is a dead, stale (2019) service. |
+| Forsyth | `geo.forsythco.com/gis2/rest/services/Public/Tax_Parcel/FeatureServer/0` | ArcGIS-registry-confirmed path is `/gis2/`, not the dispatch's `/gis/` — likely a server migration since the dispatch's own info was gathered. **✅ WIRED 2026-09-23 second pass** — this exact host answered 105,480 parcels from Michael's own Chrome. |
+| Henry | `arcgis.co.henry.ga.us/server/rest/services/Parcels/MapServer/12` | Dispatch's own URL; no better candidate found. Also unreached from Michael's own browser 2026-09-11 (B1583297, as `gis.co.henry.ga.us`). **✅ WIRED 2026-09-23 second pass** — this same URL answered 103,537 parcels on the second try, from Michael's own signed-in Chrome rather than this sandbox; the "strong lead" this row named was correct all along. |
+| Cherokee | `gis.cherokeecountyga.gov/arcgis/rest/services/MainLayers/MapServer/1` | "Cherokee County Parcels Live Layer", published by the City of Canton, GA's own GIS org — a more specific, higher-confidence source than the dispatch's own guess. **✅ WIRED 2026-09-23 second pass** — 116,022 parcels. |
+| Clayton | `weba.co.clayton.ga.us:5443/server/rest/services/TaxAssessor/Parcels/MapServer/0` | ArcGIS-registry-confirmed (differs from the dispatch's `gis.claytoncountyga.gov` guess). ⛔ A reachable AGOL candidate, "Find Locations in Clayton County Public Schools Owned Tax Parcels", was REJECTED — only 99 features, a schools-owned subset, not the county's fabric. **✅ WIRED 2026-09-23 second pass** — 92,100 parcels, this exact host (including the non-standard port). |
+| Coweta | `cccjcgiswa.coweta.ga.us/arcgis/rest/services/Parcels/FeatureServer/0` | ArcGIS-registry-confirmed (differs from the dispatch's `coweta-gis-web.coweta.ga.us` guess). **✅ WIRED 2026-09-23 second pass** — 64,060 parcels, from the county's own `coweta-gis-web.coweta.ga.us` host (the dispatch's original guess, not the registry-confirmed alternate this row recorded — both may be live; the dispatch's own host is what answered from Michael's own browser). |
+| Glynn | `webadaptor.glynncounty-ga.gov/webadaptor/rest/services/Parcels/Parcels/FeatureServer/0` | ArcGIS-registry-confirmed (differs from the dispatch's `gis-web.glynncounty-ga.gov` guess — a different hostname). **✅ WIRED 2026-09-23 second pass** — 46,503 parcels, from the dispatch's original `gis-web.glynncounty-ga.gov` host. No address column on this layer — id search only. |
+| Liberty | `gis.libertycountyga.com/arcgis/rest/services/ParcelsCache/MapServer/0` | ArcGIS-registry-confirmed path is `ParcelsCache`, not the dispatch's guessed `Parcels`. **✅ WIRED 2026-09-23 second pass** — but NOT at this host: `gis.libertycountyga.com` did not connect at all from Michael's own Chrome either. Wired instead to the Coastal Regional Commission's shared host (`maps.crc.ga.gov/crcarcgis/.../Liberty/Parcels/MapServer/0`, the same publisher as Screven below) — 28,170 parcels. |
+| Bryan | `bryangis.bryan-county.org/arcgis/rest/services/PropertyDetails/MapServer/0` | ArcGIS-registry-confirmed path is `PropertyDetails`, not the dispatch's guessed `Parcels`. **✅ WIRED 2026-09-23 second pass** — 23,200 parcels, this exact host and path. ⛔ This server answers HTTP 200 with a `"Pagination is not supported."` error to any query carrying `resultRecordCount` — see the second-pass section below for the fallback this needed. |
+| Long | `maps.crc.ga.gov/crcarcgis/rest/services/Long/LongParcels/MapServer/0` | Matches the dispatch's own URL exactly; independently confirmed via the ArcGIS registry (Coastal Regional Commission). **Still NOT wired** — checked from Michael's own Chrome: this service holds only a subdivisions layer, not parcels, and none of the 14 services in the county's Coastal Regional Commission folder carries parcels either. |
+| Screven | `maps.crc.ga.gov/crcarcgis/rest/services/Screven/ScrevenParcels/MapServer/0` | Matches the dispatch's own URL. A reachable AGOL alternate ("Parcels - GA - Screven County", `services.arcgis.com/ISpzx3B5ZsVA6e1Z/...`) exists but its own service root 400s "Invalid URL" — dead, not usable. **✅ WIRED 2026-09-23 second pass** — 10,979 parcels, this exact host and path. No address column — id search only. |
+| Cobb | `gis.cobbcounty.gov/gisserver/rest/services/tax/taxassessorsdaily/mapserver/0` | Resolved by walking the county's own public "Cobb County Parcel Viewer" Web AppBuilder app (item `e22d8c597b4e4762bcd2caa6127696e4`) → its webmap (`b4fc89d1ace44027b37036d874a1f727`) → its "Parcels" operational layer. Also unreached from Michael's own browser 2026-09-11 (B1583297). A reachable AGOL candidate, "Cobb_Parcels" (owner `Smyrna_GA`), was REJECTED — its extent covers only the Smyrna area, not the whole county (17,572 features against a county with several hundred thousand). **✅ WIRED 2026-09-23 second pass** — this exact host resolved cleanly this time: 279,635 parcels, the largest of the eleven. |
+| Bartow | `www.bartowgis.org/arcgis/rest/services/AGOServices/BartowLand/FeatureServer/2` | Resolved by walking the dispatch's own web-app id (`baef84e2cf524176aee5491f187b2b5a`, "BartowPublicMap") → its webmap (`0a183eb91a47498dbbb5b6eb5d24e320`) → its "Tax Parcels" operational layer. **✅ WIRED 2026-09-23 second pass** — this same "strong lead" host answered 63,688 parcels from Michael's own signed-in Chrome. |
+| Walton | *(none found — see the wrong-state correction above)* | The dispatch's own URL is Florida's Walton County; the one AGOL hit for the real Georgia county is a dead, stale (2019) service. **Still NOT wired** — re-checked from Michael's own Chrome: the state-catalog item no longer resolves, the county's own account publishes `walton_parcels_view` but it requires a token, and the Hub hit is Walton County, FLORIDA (the same wrong-state trap this row already recorded). |
 
 Every host above returned `CONNECT tunnel failed, response 403` when probed directly from this
 sandbox (confirmed live while compiling this table, 2026-09-23) — the same egress-allowlist wall
@@ -654,3 +666,56 @@ this file documents everywhere else. None of the four hostname-discovery correct
 independently re-verified for the same reason; they are recorded because the ArcGIS Online item
 registry that names them is itself a more current, checkable source than the dispatch's own guess,
 not because either was fetched and read.
+
+### Georgia second pass, 2026-09-23 (B1873776, amends B1870704/NEW-1 above)
+
+The "13 not wired" list two sections up recorded a REACHABILITY finding about this sandbox's own
+egress policy, never a finding about the counties. Re-run from Michael's own signed-in Chrome on
+`planyr.io` (so CORS was measured too, not just host reachability), eleven of the thirteen answered
+real parcel data through the app's own request shapes — `queryAtPoint` at a real parcel centroid,
+then an id search and an address search through the Map Finder search box. Only Long and Walton
+remain unwired; see the annotated table above for what was checked for each of those two.
+
+| County | Key | Parcels | What was measured |
+|---|---|---|---|
+| Forsyth | `ga_forsyth` | 105,480 | `geo.forsythco.com/gis2/...` — the registry-corrected host from the first pass. queryAtPoint + both search modes confirmed near Cumming. |
+| Henry | `ga_henry` | 103,537 | `arcgis.co.henry.ga.us` — the dispatch's own original URL, unreachable only because of sandbox egress. Slowest of the eleven to click-identify (~1.5s), well inside the 8s fetch budget. Confirmed near McDonough. |
+| Clayton | `ga_clayton` | 92,100 | `weba.co.clayton.ga.us:5443` — a non-standard port, which is very likely why the first pass could not reach it even in principle. Confirmed near Jonesboro. |
+| Cherokee | `ga_cherokee` | 116,022 | `gis.cherokeecountyga.gov` — the City of Canton-published "Cherokee County Parcels Live Layer" the first pass had already identified as the higher-confidence source. Confirmed near Canton, plus the Woodstock overlap point against Cobb (below). |
+| Coweta | `ga_coweta` | 64,060 | `coweta-gis-web.coweta.ga.us` — the dispatch's own original host (not the registry-alternate `cccjcgiswa` host the first pass recorded as a candidate). Confirmed near Newnan. |
+| Glynn | `ga_glynn` | 46,503 | `gis-web.glynncounty-ga.gov` — the dispatch's own original host. No address column on this layer — id search only. |
+| Screven | `ga_screven` | 10,979 | `maps.crc.ga.gov` (Coastal Regional Commission) — matches the dispatch's own URL exactly. Smallest of the eleven. No address column — id search only. |
+| Bryan | `ga_bryan` | 23,200 | `bryangis.bryan-county.org/.../PropertyDetails/MapServer/0`. **Needed a real code fix, not just reachability** — see "Bryan County's pagination gap" below. |
+| Liberty | `ga_liberty` | 28,170 | `maps.crc.ga.gov` (Coastal Regional Commission) — **not** the dispatch's own `gis.libertycountyga.com`, which did not connect at all even from a real browser. A genuinely different, working source. |
+| Bartow | `ga_bartow` | 63,688 | `www.bartowgis.org/.../BartowLand/FeatureServer/2` — the first pass's own "strong lead," confirmed correct. |
+| Cobb | `ga_cobb` | 279,635 | `gis.cobbcounty.gov` — the first pass's own "strong lead," confirmed correct. Largest of the eleven. Confirmed near Marietta, plus the north-Marietta overlap point against Cherokee (below). |
+
+**Two mechanisms this pass needed, beyond just reachability:**
+
+1. **Bryan County's pagination gap (`arcgis.js`).** This server answers HTTP 200 with
+   `{error:{code:400,message:"Pagination is not supported."}}` to *any* query carrying
+   `resultRecordCount` — which every ordinary search sends — so Bryan's search box could never
+   have worked, however good the query was, however reachable the host. The click path
+   (`queryAtPoint`, which sends no pagination params) always worked; only search was broken.
+   `queryFeatures` now catches exactly this error (`isPaginationUnsupportedError`, matched on the
+   wording so a real timeout/network/other error is never retried as though it were this) and
+   falls back to two requests it does control the size of: ask for the matching object ids only
+   (cheap even for a long list, since it carries no geometry), keep the first `count`, then fetch
+   exactly those objects. Both fallback calls were measured working on this server; any other
+   error still throws, per LOUD-FAILURE.
+2. **Jackson/Bibb id search and Rockdale address search (`parcelQuery.js`, `counties.js`) — fixing
+   defects in the FIRST pass's own rows, not this pass's new ones.** `detectField`'s auto-detection
+   picks the first plausible-shaped column, and on three of the first pass's rows that was the
+   wrong one: Jackson's `PIN` (a short partial like "006A" that matched several lots) ahead of the
+   full `PARCEL_NO`; Bibb's `LOWPARCELID` ahead of `PARCELID`; and Rockdale's `Address` column,
+   which holds ONLY the house number ("1620") — a street-name search on it found 0 lots, a bare
+   house number found 32 — while the same layer's `BOA_Addres` column holds the whole situs line
+   ("1620 WALNUT ST SE") and a street-name search on it found 55 lots. `resolveSearchField` adds an
+   opt-in pin (`pinIdField`/`pinAddrField` on a county row): the pinned column wins over detection
+   *only* while it still exists on the layer, so it degrades back to plain detection rather than
+   failing the search if a county ever drops the pinned column. Jackson and Bibb now pin their id
+   field; Rockdale now pins `BOA_Addres` as its address field.
+
+**`ga_dekalb`, `ga_bibb`, `ga_bulloch` and `ga_camden` (all first-pass rows) were left exactly as
+wired** — nothing in this pass found evidence any of them are wrong, only that Bibb's id field
+needed the same pin fix described above (its endpoint itself is untouched).

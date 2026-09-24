@@ -799,17 +799,23 @@ const COUNTIES_RAW = {
     // extent -83.82..-83.35 / 33.97..34.30 (Jefferson, GA). Note the layer ID is 9, not 0 — this
     // service's only polygon layer is at that index. Situs is split across HOUSE_NO/STREET_NAM
     // with no combined column — addrField left unset.
+    // ⛔ SECOND PASS (2026-09-23, Michael's own browser): this layer's first ID-shaped column is
+    // `PIN`, a short partial ("006A") that matches several lots — `detectField` was picking that
+    // ahead of the full parcel number, so an ID search returned the wrong lots. `pinIdField: true`
+    // makes PARCEL_NO win explicitly (parcelQuery.js's `resolveSearchField`).
     state: "GA", label: "Jackson County, GA",
     layerUrl: "https://services8.arcgis.com/bcbi4lYRFOsss0F5/arcgis/rest/services/Tax_Parcels/FeatureServer/9",
-    idField: "PARCEL_NO",
+    idField: "PARCEL_NO", pinIdField: true,
     help: "Jackson County tax parcels (Esri-hosted). Search by parcel number or a site address.",
   },
   ga_bibb: {
     // VERIFIED LIVE 2026-09-23 from this sandbox: 68,899 parcel polygons, esriGeometryPolygon,
     // extent -83.89..-83.49 / 32.66..32.95 (Macon-Bibb).
+    // ⛔ SECOND PASS (2026-09-23, Michael's own browser): `detectField` was picking `LOWPARCELID`
+    // ahead of `PARCELID` on this layer. `pinIdField: true` makes PARCELID win explicitly.
     state: "GA", label: "Bibb County (Macon), GA",
     layerUrl: "https://services2.arcgis.com/zPFLSOZ5HzUzzTQb/arcgis/rest/services/TaxParcels/FeatureServer/0",
-    idField: "PARCELID", addrField: "SITEADDRESS",
+    idField: "PARCELID", addrField: "SITEADDRESS", pinIdField: true,
     help: "Macon-Bibb County tax parcels (Esri-hosted). Search by parcel ID or a site address.",
   },
   ga_dougherty: {
@@ -828,9 +834,14 @@ const COUNTIES_RAW = {
     // (owner rbell@nationalland.com_CCIM, a commercial real-estate broker's personal account) and
     // THIS one, `Rockdale_County_Parcels` (owner gary.morris_RockdaleGA — the county's own GIS
     // staff account). Deliberately wired to the county's own copy, not the broker's mirror.
+    // ⛔ SECOND PASS (2026-09-23, Michael's own browser): this layer's `Address` column holds ONLY
+    // the house number ("1620") — a street-name search on it found 0 lots, a bare house number
+    // found 32. `BOA_Addres` on the SAME layer holds the whole situs line ("1620 WALNUT ST SE") —
+    // a street-name search on it found 55 lots, a full address exactly 1. Rewired addrField to
+    // `BOA_Addres` with `pinAddrField: true` so it wins over whatever `detectField` would pick.
     state: "GA", label: "Rockdale County, GA",
     layerUrl: "https://services.arcgis.com/Tbke9ca9DhtF4VIx/arcgis/rest/services/Rockdale_County_Parcels/FeatureServer/38",
-    idField: "PARCEL_NO", addrField: "Address",
+    idField: "PARCEL_NO", addrField: "BOA_Addres", pinAddrField: true,
     help: "Rockdale County parcels (county GIS, Esri-hosted). Search by parcel number or a site address.",
   },
   ga_paulding: {
@@ -869,6 +880,129 @@ const COUNTIES_RAW = {
     layerUrl: "https://services2.arcgis.com/PYn6bWCjT6bhw1z3/arcgis/rest/services/Camden_County_Parcels/FeatureServer/0",
     idField: "PARCEL_NO",
     help: "Camden County parcels (Esri-hosted). Search by parcel number or a site address.",
+  },
+
+  /* ═══ NEW-2 (2026-09-23) — ELEVEN MORE GEORGIA COUNTIES, from Michael's own signed-in Chrome on
+   * planyr.io (so CORS was measured, not just reachability) — amends B1870704/NEW-1 above, whose
+   * "13 deliberately not wired" list this SHRINKS to two (Long, Walton — neither has a usable public
+   * parcel source; see the header note attached to this session's B# in BACKLOG.md). Four of
+   * NEW-1's "county-owned host this build environment blocks" reads were themselves incomplete —
+   * Forsyth's real host is `/gis2/`, Clayton's is `weba.co.clayton.ga.us:5443`, Coweta's is
+   * `cccjcgiswa`, Glynn's is a `webadaptor` path — all four answer live from a real browser. Every
+   * row below was validated end to end from that browser: `queryAtPoint` at a real parcel centroid,
+   * then an id search AND an address search through the app's own Map Finder search box — not just
+   * a metadata/count probe. Two field-mapping quirks that are NOT bugs: Glynn and Screven publish no
+   * address column at all (id search only, addrField left unset); Bryan and Bartow publish a
+   * DECOMPOSED situs (house number in one column, street name in another, no combined column) — the
+   * street-name column is wired as addrField so a street search still works, a full "123 Main St"
+   * search will not. `ga_dekalb`/`ga_bibb`/`ga_bulloch`/`ga_camden` (NEW-1's own rows) were
+   * RE-MEASURED live and left untouched — this pass's rows are strong but not proven stronger. ═══ */
+  ga_forsyth: {
+    // MEASURED on Michael's own Chrome, planyr.io origin, 2026-09-23: 105,480 parcel polygons.
+    // queryAtPoint at a real parcel centroid near Cumming resolved correctly; an id search and a
+    // street-address search through the Map Finder search box both returned real lots.
+    state: "GA", label: "Forsyth County, GA",
+    layerUrl: "https://geo.forsythco.com/gis/rest/services/Public/Tax_Parcel/FeatureServer/0",
+    idField: "PARCELID", addrField: "SITEADDRESS",
+    help: "Forsyth County tax parcels (county GIS). Search by parcel ID or a site address.",
+  },
+  ga_henry: {
+    // MEASURED on Michael's own Chrome, planyr.io origin, 2026-09-23: 103,537 parcel polygons.
+    // The slowest of the eleven to click-identify (about 1.5s), still comfortably inside the 8s
+    // fetch timeout. queryAtPoint + id/address search all confirmed near McDonough.
+    state: "GA", label: "Henry County, GA",
+    layerUrl: "https://arcgis.co.henry.ga.us/server/rest/services/Parcels/MapServer/12",
+    idField: "PARCEL_NO", addrField: "FULLADDRES",
+    help: "Henry County tax parcels (county GIS). Search by parcel ID or a site address.",
+  },
+  ga_clayton: {
+    // MEASURED on Michael's own Chrome, planyr.io origin, 2026-09-23: 92,100 parcel polygons. Host
+    // is `weba.co.clayton.ga.us` on a non-standard port (5443) — this sandbox's egress policy
+    // blocks it, but it answers cleanly from a real browser (queryAtPoint + both search modes
+    // confirmed near Jonesboro).
+    state: "GA", label: "Clayton County, GA",
+    layerUrl: "https://weba.co.clayton.ga.us:5443/server/rest/services/TaxAssessor/Parcels/MapServer/0",
+    idField: "PARCELID", addrField: "SITEADDRES",
+    help: "Clayton County tax parcels (county GIS). Search by parcel ID or a site address.",
+  },
+  ga_cherokee: {
+    // MEASURED on Michael's own Chrome, planyr.io origin, 2026-09-23: 116,022 parcel polygons.
+    // queryAtPoint + id/address search confirmed near Canton, plus the Woodstock overlap point
+    // against `ga_cobb` (both rectangles' bboxes reach it — this county's own query answers there).
+    state: "GA", label: "Cherokee County, GA",
+    layerUrl: "https://gis.cherokeecountyga.gov/arcgis/rest/services/MainLayers/MapServer/1",
+    idField: "PIN", addrField: "Property_Address",
+    help: "Cherokee County tax parcels (county GIS). Search by parcel ID or a site address.",
+  },
+  ga_coweta: {
+    // MEASURED on Michael's own Chrome, planyr.io origin, 2026-09-23: 64,060 parcel polygons. Host
+    // is the county's `cccjcgiswa` GIS server — blocked from this sandbox, answers cleanly from a
+    // real browser (queryAtPoint + both search modes confirmed near Newnan).
+    state: "GA", label: "Coweta County, GA",
+    layerUrl: "https://coweta-gis-web.coweta.ga.us/arcgis/rest/services/Hosted/ParcelPropertyValues/FeatureServer/0",
+    idField: "parcel_id", addrField: "streetaddress",
+    help: "Coweta County property & tax parcels (county GIS). Search by parcel ID or a site address.",
+  },
+  ga_glynn: {
+    // MEASURED on Michael's own Chrome, planyr.io origin, 2026-09-23: 46,503 parcel polygons. Host
+    // is a `webadaptor` path on the county's own GIS server — blocked from this sandbox, answers
+    // cleanly from a real browser. No address column on this layer at all — id search only.
+    state: "GA", label: "Glynn County, GA",
+    layerUrl: "https://gis-web.glynncounty-ga.gov/gis-server/rest/services/Parcels/Parcels/FeatureServer/0",
+    idField: "PARCEL_ID",
+    help: "Glynn County tax parcels (county GIS). Search by parcel ID — this layer has no address column.",
+  },
+  ga_screven: {
+    // MEASURED on Michael's own Chrome, planyr.io origin, 2026-09-23: 10,979 parcel polygons —
+    // smallest of the eleven. Published on the Coastal Regional Commission's shared GIS host
+    // (maps.crc.ga.gov), same convention `ga_liberty` below uses. No address column — id only.
+    state: "GA", label: "Screven County, GA",
+    layerUrl: "https://maps.crc.ga.gov/crcarcgis/rest/services/Screven/ScrevenParcels/MapServer/0",
+    idField: "parcel_no",
+    help: "Screven County tax parcels (county GIS via the Coastal Regional Commission). Search by parcel number — this layer has no address column.",
+  },
+  ga_bryan: {
+    // MEASURED on Michael's own Chrome, planyr.io origin, 2026-09-23: 23,200 parcel polygons.
+    // ⛔ This server answers HTTP 200 with `{error:{code:400,message:"Pagination is not
+    // supported."}}` to ANY query carrying `resultRecordCount` — every ordinary search — so the
+    // search box could not have worked here without arcgis.js's queryFeatures pagination
+    // fallback (see that module). The click path (queryAtPoint, no pagination params) always
+    // worked; both fallback calls (ids-only, then by objectIds) were measured working on this
+    // server. Layer is PropertyDetails/0 — the dispatch's own Parcels/MapServer path does not
+    // exist on this host. addrField is the decomposed street-name column (no combined situs).
+    state: "GA", label: "Bryan County, GA",
+    layerUrl: "https://bryangis.bryan-county.org/arcgis/rest/services/PropertyDetails/MapServer/0",
+    idField: "PARCEL_NO", addrField: "STREET_NAM",
+    help: "Bryan County tax parcels (county GIS). Search by parcel ID or a street name.",
+  },
+  ga_liberty: {
+    // MEASURED on Michael's own Chrome, planyr.io origin, 2026-09-23: 28,170 parcel polygons.
+    // Published on the same Coastal Regional Commission shared GIS host as `ga_screven` — the
+    // dispatch's own `gis.libertycountyga.com` host did not connect at all from that Chrome; this
+    // is a genuinely different, working source.
+    state: "GA", label: "Liberty County, GA",
+    layerUrl: "https://maps.crc.ga.gov/crcarcgis/rest/services/Liberty/Parcels/MapServer/0",
+    idField: "Parcel_Number", addrField: "Property_Address",
+    help: "Liberty County tax parcels (county GIS via the Coastal Regional Commission). Search by parcel number or a site address.",
+  },
+  ga_bartow: {
+    // MEASURED on Michael's own Chrome, planyr.io origin, 2026-09-23: 63,688 parcel polygons.
+    // Decomposed situs (no combined column) — addrField is the street-name column, same shape as
+    // `ga_bryan`.
+    state: "GA", label: "Bartow County, GA",
+    layerUrl: "https://www.bartowgis.org/arcgis/rest/services/AGOServices/BartowLand/FeatureServer/2",
+    idField: "PARCELID", addrField: "STREET_NAM",
+    help: "Bartow County tax parcels (county GIS). Search by parcel ID or a street name.",
+  },
+  ga_cobb: {
+    // MEASURED on Michael's own Chrome, planyr.io origin, 2026-09-23: 279,635 parcel polygons —
+    // largest of the eleven. queryAtPoint + id/address search confirmed near Marietta, plus the
+    // north-Marietta overlap point against `ga_cherokee` (this county's own query answers there,
+    // not the neighbouring one).
+    state: "GA", label: "Cobb County, GA",
+    layerUrl: "https://gis.cobbcounty.gov/gisserver/rest/services/tax/taxassessorsdaily/MapServer/0",
+    idField: "PIN", addrField: "SITUS_ADDR",
+    help: "Cobb County tax assessor parcels (county GIS). Search by parcel ID or a site address.",
   },
 
   /* ⛔ B1339920 (2026-09-12) — THIS ENTRY WAS PREVIOUSLY THE ONLY AZ ROW, AND ITS BBOX REACHES
@@ -1890,6 +2024,19 @@ const COUNTIES_MAP_RAW = {
   ga_paulding: { state: "GA", center: [33.93, -84.89], zoom: 10, bbox: [33.76, -85.07, 34.10, -84.71], mapServer: null, layerUrl: COUNTIES.ga_paulding.layerUrl },
   ga_bulloch: { state: "GA", center: [32.40, -81.73], zoom: 10, bbox: [32.13, -82.05, 32.67, -81.41], mapServer: null, layerUrl: COUNTIES.ga_bulloch.layerUrl },
   ga_camden: { state: "GA", center: [30.94, -81.67], zoom: 10, bbox: [30.69, -81.96, 31.19, -81.38], mapServer: null, layerUrl: COUNTIES.ga_camden.layerUrl },
+  // NEW-2 (2026-09-23) — center/bbox read directly from public/geo/county-polygons.json (the same
+  // nationwide asset resolveCounty uses, same convention as every prior GA batch), never hand-typed.
+  ga_forsyth: { state: "GA", center: [34.1925, -84.0920], zoom: 11, bbox: [34.05, -84.26, 34.33, -83.92], mapServer: null, layerUrl: COUNTIES.ga_forsyth.layerUrl },
+  ga_henry: { state: "GA", center: [33.4760, -84.1380], zoom: 11, bbox: [33.30, -84.35, 33.65, -83.93], mapServer: null, layerUrl: COUNTIES.ga_henry.layerUrl },
+  ga_clayton: { state: "GA", center: [33.5023, -84.3468], zoom: 11, bbox: [33.35, -84.46, 33.65, -84.24], mapServer: null, layerUrl: COUNTIES.ga_clayton.layerUrl },
+  ga_coweta: { state: "GA", center: [33.3485, -84.7482], zoom: 10, bbox: [33.18, -85.01, 33.51, -84.49], mapServer: null, layerUrl: COUNTIES.ga_coweta.layerUrl },
+  ga_glynn: { state: "GA", center: [31.2492, -81.5352], zoom: 10, bbox: [31.04, -81.77, 31.45, -81.30], mapServer: null, layerUrl: COUNTIES.ga_glynn.layerUrl },
+  ga_screven: { state: "GA", center: [32.7657, -81.6262], zoom: 10, bbox: [32.49, -81.87, 33.04, -81.39], mapServer: null, layerUrl: COUNTIES.ga_screven.layerUrl },
+  ga_bryan: { state: "GA", center: [31.9845, -81.4585], zoom: 10, bbox: [31.74, -81.78, 32.23, -81.14], mapServer: null, layerUrl: COUNTIES.ga_bryan.layerUrl },
+  ga_liberty: { state: "GA", center: [31.8460, -81.4783], zoom: 10, bbox: [31.60, -81.82, 32.09, -81.14], mapServer: null, layerUrl: COUNTIES.ga_liberty.layerUrl },
+  ga_bartow: { state: "GA", center: [34.2455, -84.8427], zoom: 11, bbox: [34.08, -85.04, 34.41, -84.64], mapServer: null, layerUrl: COUNTIES.ga_bartow.layerUrl },
+  ga_cobb: { state: "GA", center: [33.9300, -84.5558], zoom: 11, bbox: [33.75, -84.74, 34.11, -84.38], mapServer: null, layerUrl: COUNTIES.ga_cobb.layerUrl },
+  ga_cherokee: { state: "GA", center: [34.2475, -84.4595], zoom: 11, bbox: [34.08, -84.66, 34.41, -84.26], mapServer: null, layerUrl: COUNTIES.ga_cherokee.layerUrl },
   az_pinal: { state: "AZ", center: [32.9940, -111.3275], zoom: 9, bbox: [32.51, -112.21, 33.48, -110.45], mapServer: null, layerUrl: COUNTIES.az_pinal.layerUrl },
   // B1339920 — bbox/center read directly from public/geo/county-polygons.json (same convention as
   // the B1551617 Tier 1 rows above), never hand-typed: [-226663,65023,-222085,68098] / scale 2000.
