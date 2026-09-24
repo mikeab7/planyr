@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import {
   candidateCountiesForPoint, COUNTIES, COUNTIES_MAP, countyKeyForName, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote,
   STATEWIDE_PARCEL_LAYER, statewideFallbackFor, countyForView, countyBboxIntersectsView,
-  isIdentifyOnlyLayerUrl, isStatewideLayerUrl, sharedLayerUrlConflicts,
+  isIdentifyOnlyLayerUrl, isStatewideLayerUrl, sharedLayerUrlConflicts, detectField,
 } from "../src/workspaces/site-planner/lib/counties.js";
 
 // candidateCountiesForPoint routes a map click to the CAD service(s) that could
@@ -957,5 +957,78 @@ describe("NEW-1 (2026-09-24, third pass) — 34 more Georgia counties are regist
       expect(cand, label).toContain("txgio_statewide");
       for (const k of GA_THIRD_PASS_KEYS) expect(cand, `${label} vs ${k}`).not.toContain(k);
     }
+  });
+});
+
+/* ⛔ B1875248 recurrence (2026-09-24) — the parcel card showed the WinGAP layer's own row number
+ * (FID/OBJECTID/OBJECTID_1) instead of the county's real parcel number, because `detectField`'s
+ * plain alternation never ranked candidates against each other: whichever id-shaped column came
+ * first in field order won, and a layer's row-identity column usually comes first. These field
+ * lists are the ones actually measured on the affected counties (see B1875248's repro); every one
+ * must resolve to the real parcel/account column, never the row-index column. */
+describe("detectField('id') ranking (B1875248) — never OBJECTID/FID over a real parcel column", () => {
+  const fieldsOf = (names) => names.map((name) => ({ name }));
+
+  it("Effingham: PARCEL_NO beats FID/OBJECTID_1 and the shorter PIN/PIN400/WPIN columns", () => {
+    expect(detectField(fieldsOf(["FID", "OBJECTID_1", "PARCEL_NO", "PIN", "PIN400", "WPIN", "L_PARCEL"]), "id"))
+      .toBe("PARCEL_NO");
+  });
+
+  it("Barrow: Parcel_no beats FID and its own truncated duplicates (parcel_n_1, parcel_no2)", () => {
+    expect(detectField(fieldsOf(["FID", "Parcel_no", "parcel_n_1", "parcel_no2"]), "id")).toBe("Parcel_no");
+  });
+
+  it("Cook: Parcel_No beats FID AND beats the bare, too-generic 'Parcel' column", () => {
+    expect(detectField(fieldsOf(["FID", "Parcel", "Parcel_No"]), "id")).toBe("Parcel_No");
+  });
+
+  it("Twiggs: PARCELID beats OBJECTID and the bare 'PARCEL' column", () => {
+    expect(detectField(fieldsOf(["OBJECTID", "PARCELID", "PARCEL"]), "id")).toBe("PARCELID");
+  });
+
+  it("Hall: PIN beats OBJECTID (and isn't fooled by ADDR_ID's trailing 'ID')", () => {
+    expect(detectField(fieldsOf(["OBJECTID", "PIN", "ADDR_ID"]), "id")).toBe("PIN");
+  });
+
+  it("still falls back to the layer's own row id when nothing else is id-shaped, so a search never dies outright (ga_baldwin/ga_tift)", () => {
+    expect(detectField(fieldsOf(["OBJECTID", "Shape_Area", "Shape_Length"]), "id")).toBe("OBJECTID");
+    expect(detectField(fieldsOf(["FID", "Shape_Area"]), "id")).toBe("FID");
+  });
+
+  it("returns null when the layer has nothing id-shaped at all, not even a row id", () => {
+    expect(detectField(fieldsOf(["Shape_Area", "Shape_Length"]), "id")).toBeNull();
+  });
+
+  it("keeps the pre-existing B1873776 behavior: a short PIN still wins over a real full id when both are equally 'strong' and PIN comes first (pinIdField is what fixes that, not ranking)", () => {
+    expect(detectField(fieldsOf(["PIN", "PARCEL_NO"]), "id")).toBe("PIN");
+  });
+});
+
+describe("NEW-1 (2026-09-24, third-pass ID pin) — every third-pass row with an idField also pins it (B1875248)", () => {
+  const GA_THIRD_PASS_PINNED_KEYS = [
+    "ga_hall", "ga_effingham", "ga_fayette", "ga_spalding", "ga_newton", "ga_barrow", "ga_oconee",
+    "ga_butts", "ga_monroe", "ga_troup", "ga_peach", "ga_muscogee", "ga_morgan", "ga_brantley",
+    "ga_charlton", "ga_clay", "ga_cook", "ga_crawford", "ga_crisp", "ga_dade", "ga_dooly",
+    "ga_echols", "ga_emanuel", "ga_evans", "ga_greene", "ga_lanier", "ga_meriwether", "ga_sumter",
+    "ga_turner", "ga_twiggs", "ga_ware", "ga_whitfield",
+  ];
+
+  it("pins idField: true on every measured third-pass row", () => {
+    for (const k of GA_THIRD_PASS_PINNED_KEYS) {
+      expect(COUNTIES[k].idField, k).toBeTruthy();
+      expect(COUNTIES[k].pinIdField, k).toBe(true);
+    }
+  });
+
+  it("ga_baldwin has no measured column and is left unpinned — hardened detection covers it instead", () => {
+    expect(COUNTIES.ga_baldwin.idField).toBeUndefined();
+    expect(COUNTIES.ga_baldwin.pinIdField).toBeFalsy();
+  });
+
+  it("the pinned field name is the one actually reported in B1875248's live repro", () => {
+    expect(COUNTIES.ga_effingham.idField).toBe("PARCEL_NO");
+    expect(COUNTIES.ga_barrow.idField).toBe("Parcel_no");
+    expect(COUNTIES.ga_cook.idField).toBe("Parcel_No");
+    expect(COUNTIES.ga_hall.idField).toBe("PIN");
   });
 });

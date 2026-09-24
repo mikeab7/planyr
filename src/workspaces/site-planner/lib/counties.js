@@ -1060,7 +1060,7 @@ const COUNTIES_RAW = {
     // County-run host, CORS OK.
     state: "GA", label: "Whitfield County (Dalton), GA",
     layerUrl: "https://gis.whitfieldcountyga.com/server/rest/services/Parcels_and_Development/MapServer/4",
-    idField: "PARCEL_FUL", addrField: "address1",
+    idField: "PARCEL_FUL", pinIdField: true, addrField: "address1",
     help: "Whitfield County (Dalton) parcels (Esri-hosted). Search by parcel number or a site address.",
   },
   ga_hall: {
@@ -1069,7 +1069,7 @@ const COUNTIES_RAW = {
     // Layer 1 "Parcel Boundary" on the county's own GeneralTab service; CORS OK.
     state: "GA", label: "Hall County (Gainesville), GA",
     layerUrl: "https://hallgis.hallcounty.org/arcgis/rest/services/GeneralTab/MapServer/1",
-    idField: "PIN",
+    idField: "PIN", pinIdField: true,
     help: "Hall County (Gainesville) parcels (Esri-hosted). Search by PIN.",
   },
   ga_effingham: {
@@ -1077,7 +1077,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 32,941 parcel polygons, last edited 2024-10.
     state: "GA", label: "Effingham County, GA",
     layerUrl: "https://services5.arcgis.com/9Z9r3rLUCq0SjsRb/arcgis/rest/services/Effingham_County_GA_Parcels/FeatureServer/0",
-    idField: "PARCEL_NO", addrField: "address1",
+    idField: "PARCEL_NO", pinIdField: true, addrField: "address1",
     help: "Effingham County parcels (Esri-hosted). Search by parcel number or a site address.",
   },
   ga_fayette: {
@@ -1085,7 +1085,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 49,104 parcel polygons, last edited daily.
     state: "GA", label: "Fayette County, GA",
     layerUrl: "https://services5.arcgis.com/Hg5aLg4LtSINzVWa/arcgis/rest/services/Parcels_Data_SAGES/FeatureServer/0",
-    idField: "PARCEL_NO", addrField: "single_line_address",
+    idField: "PARCEL_NO", pinIdField: true, addrField: "single_line_address",
     help: "Fayette County parcels (Esri-hosted). Search by parcel number or a site address.",
   },
   ga_spalding: {
@@ -1093,7 +1093,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 33,700 parcel polygons, last edited daily.
     state: "GA", label: "Spalding County (Griffin), GA",
     layerUrl: "https://services5.arcgis.com/IBG8fFojdkoiHAvQ/arcgis/rest/services/Parcels_Public_View/FeatureServer/1",
-    idField: "PARCEL_ID",
+    idField: "PARCEL_ID", pinIdField: true,
     help: "Spalding County (Griffin) parcels (Esri-hosted). Search by parcel number.",
   },
   ga_newton: {
@@ -1101,7 +1101,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 45,755 parcel polygons, last edited 2022-02.
     state: "GA", label: "Newton County (Covington), GA",
     layerUrl: "https://services1.arcgis.com/qTQ6qYkHpxlu0G82/arcgis/rest/services/Newton_Parcels/FeatureServer/0",
-    idField: "PARCEL_NO", addrField: "ParcelAddr",
+    idField: "PARCEL_NO", pinIdField: true, addrField: "ParcelAddr",
     help: "Newton County (Covington) parcels (Esri-hosted). Search by parcel number or a site address.",
   },
   ga_barrow: {
@@ -1110,7 +1110,7 @@ const COUNTIES_RAW = {
     // Layer 30 of the Greater Athens regional commission's shared service — see ga_oconee below, which shares this same FeatureServer at a different layer id (not a URL conflict; each layer has its own id).
     state: "GA", label: "Barrow County (Winder), GA",
     layerUrl: "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Greater_Athens_All_WFL1/FeatureServer/30",
-    idField: "Parcel_no", addrField: "address1",
+    idField: "Parcel_no", pinIdField: true, addrField: "address1",
     help: "Barrow County (Winder) parcels (Esri-hosted). Search by parcel number or a site address.",
   },
   ga_oconee: {
@@ -1119,7 +1119,7 @@ const COUNTIES_RAW = {
     // Layer 32 of the same Greater Athens regional-commission service ga_barrow rides at layer 30.
     state: "GA", label: "Oconee County (Watkinsville), GA",
     layerUrl: "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Greater_Athens_All_WFL1/FeatureServer/32",
-    idField: "PARCELID",
+    idField: "PARCELID", pinIdField: true,
     help: "Oconee County (Watkinsville) parcels (Esri-hosted). Search by parcel number.",
   },
   ga_butts: {
@@ -1127,7 +1127,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 13,065 parcel polygons, last edited 2024-09.
     state: "GA", label: "Butts County (Jackson, GA), GA",
     layerUrl: "https://services6.arcgis.com/NJH5XZkcw7MLsnAI/arcgis/rest/services/Parcels_Butts_County_GA/FeatureServer/0",
-    idField: "GSI_PIN",
+    idField: "GSI_PIN", pinIdField: true,
     help: "Butts County (Jackson, GA) parcels (Esri-hosted). Search by PIN.",
   },
   ga_monroe: {
@@ -1135,7 +1135,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 16,707 parcel polygons, last edited 2025-08.
     state: "GA", label: "Monroe County (Forsyth, GA), GA",
     layerUrl: "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Monroe_County_Tax_Parcels/FeatureServer/0",
-    idField: "PARCELID",
+    idField: "PARCELID", pinIdField: true,
     help: "Monroe County (Forsyth, GA) parcels (Esri-hosted). Search by parcel number.",
   },
   ga_troup: {
@@ -1143,7 +1143,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 35,511 parcel polygons, last edited 2026-02.
     state: "GA", label: "Troup County (LaGrange), GA",
     layerUrl: "https://services6.arcgis.com/WjqAE1SlQxuk7dsk/arcgis/rest/services/Troup_County_GA_Parcel_Feature_Layer/FeatureServer/0",
-    idField: "parcelnumb",
+    idField: "parcelnumb", pinIdField: true,
     help: "Troup County (LaGrange) parcels (Esri-hosted). Search by parcel number.",
   },
   ga_peach: {
@@ -1151,7 +1151,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 14,431 parcel polygons, last edited 2026-09.
     state: "GA", label: "Peach County (Fort Valley), GA",
     layerUrl: "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Peach_County_Parcels/FeatureServer/5",
-    idField: "PARCELS",
+    idField: "PARCELS", pinIdField: true,
     help: "Peach County (Fort Valley) parcels (Esri-hosted). Search by parcel number.",
   },
   ga_muscogee: {
@@ -1160,7 +1160,7 @@ const COUNTIES_RAW = {
     // 2019 snapshot — old, but within this repo's 5-year staleness bar; say so in the help text.
     state: "GA", label: "Muscogee County (Columbus), GA",
     layerUrl: "https://services2.arcgis.com/hKwZvjnqryeqGRIt/arcgis/rest/services/Layers/FeatureServer/2",
-    idField: "TaxPIN",
+    idField: "TaxPIN", pinIdField: true,
     help: "Muscogee County (Columbus) parcels (Esri-hosted). Search by PIN.",
   },
   ga_morgan: {
@@ -1169,7 +1169,7 @@ const COUNTIES_RAW = {
     // 2018 snapshot — old, but within this repo's 5-year staleness bar; say so in the help text.
     state: "GA", label: "Morgan County (Madison, GA), GA",
     layerUrl: "https://services9.arcgis.com/mr2xH531NAL4tt7e/arcgis/rest/services/Parcels/FeatureServer/0",
-    idField: "Parcel_No",
+    idField: "Parcel_No", pinIdField: true,
     help: "Morgan County (Madison, GA) parcels (Esri-hosted). Search by parcel number.",
   },
   ga_baldwin: {
@@ -1184,7 +1184,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 13,301 parcel polygons, last edited 2025-10.
     state: "GA", label: "Brantley County, GA",
     layerUrl: "https://services3.arcgis.com/86pyA5PND5NdokIc/arcgis/rest/services/Brantley_Parcels_view/FeatureServer/0",
-    idField: "Parcel_No",
+    idField: "Parcel_No", pinIdField: true,
     help: "Brantley County parcels (Esri-hosted). Search by parcel number.",
   },
   ga_charlton: {
@@ -1192,7 +1192,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 7,357 parcel polygons, last edited 2023-07.
     state: "GA", label: "Charlton County, GA",
     layerUrl: "https://services3.arcgis.com/fYt1jp3hqamxgSvI/arcgis/rest/services/Parcels_Charlton_County/FeatureServer/7",
-    idField: "PARCEL_NO",
+    idField: "PARCEL_NO", pinIdField: true,
     help: "Charlton County parcels (Esri-hosted). Search by parcel number.",
   },
   ga_clay: {
@@ -1200,7 +1200,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 3,063 parcel polygons, last edited 2024-05.
     state: "GA", label: "Clay County (Fort Gaines), GA",
     layerUrl: "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Clay_County_Parcels_10_23/FeatureServer/0",
-    idField: "Parcel_No",
+    idField: "Parcel_No", pinIdField: true,
     help: "Clay County (Fort Gaines) parcels (Esri-hosted). Search by parcel number.",
   },
   ga_cook: {
@@ -1209,7 +1209,7 @@ const COUNTIES_RAW = {
     // ⚠ measured extent (about -83.49..-83.37) is narrower than the whole county — possibly city-of-Adel-only coverage. Wired anyway; the live-verify pass on this item must click a lot well outside Adel to confirm county-wide coverage, and a miss there is filed as a recurrence, not silently accepted.
     state: "GA", label: "Cook County (Adel), GA",
     layerUrl: "https://services1.arcgis.com/TSNNo8H51qYl31gq/arcgis/rest/services/Map__Adel_Overview_WFL1/FeatureServer/2",
-    idField: "Parcel_No",
+    idField: "Parcel_No", pinIdField: true,
     help: "Cook County (Adel) parcels (Esri-hosted). Search by parcel number.",
   },
   ga_crawford: {
@@ -1217,7 +1217,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 8,186 parcel polygons, last edited 2026-09.
     state: "GA", label: "Crawford County (Knoxville), GA",
     layerUrl: "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/CrawfordCountyParcels_Jan2026/FeatureServer/0",
-    idField: "PARCELNO",
+    idField: "PARCELNO", pinIdField: true,
     help: "Crawford County (Knoxville) parcels (Esri-hosted). Search by parcel number.",
   },
   ga_crisp: {
@@ -1225,7 +1225,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 12,351 parcel polygons, last edited 2022-03.
     state: "GA", label: "Crisp County (Cordele), GA",
     layerUrl: "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/CrispParcels/FeatureServer/0",
-    idField: "Parcel_No",
+    idField: "Parcel_No", pinIdField: true,
     help: "Crisp County (Cordele) parcels (Esri-hosted). Search by parcel number.",
   },
   ga_dade: {
@@ -1234,7 +1234,7 @@ const COUNTIES_RAW = {
     // ⛔ Do not confuse with `Walker_Parcels_2026LLLT/4` on a different AGOL org — same 7,811-feature count and Dade's own extent under a Walker-County-sounding name; that layer is Dade's data mislabeled, not a real Walker County source, and is deliberately not wired anywhere.
     state: "GA", label: "Dade County (Trenton), GA",
     layerUrl: "https://services.arcgis.com/UnTXoPXBYERF0OH6/arcgis/rest/services/Dade_Parcels_2020LLLT/FeatureServer/5",
-    idField: "PARCEL_NO", addrField: "parcelAddress",
+    idField: "PARCEL_NO", pinIdField: true, addrField: "parcelAddress",
     help: "Dade County (Trenton) parcels (Esri-hosted). Search by parcel number or a site address.",
   },
   ga_dooly: {
@@ -1242,7 +1242,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 7,277 parcel polygons, last edited 2022-03.
     state: "GA", label: "Dooly County (Vienna), GA",
     layerUrl: "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Dooly_County_Parcels/FeatureServer/14",
-    idField: "Parcel_No",
+    idField: "Parcel_No", pinIdField: true,
     help: "Dooly County (Vienna) parcels (Esri-hosted). Search by parcel number.",
   },
   ga_echols: {
@@ -1250,7 +1250,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 2,206 parcel polygons, last edited 2026-06.
     state: "GA", label: "Echols County (Statenville), GA",
     layerUrl: "https://services5.arcgis.com/HA2thkMWRBDb77XN/arcgis/rest/services/Echols_Tax_Parcels/FeatureServer/11",
-    idField: "PARCEL_NO",
+    idField: "PARCEL_NO", pinIdField: true,
     help: "Echols County (Statenville) parcels (Esri-hosted). Search by parcel number.",
   },
   ga_emanuel: {
@@ -1258,7 +1258,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 15,107 parcel polygons, last edited 2026-08.
     state: "GA", label: "Emanuel County (Swainsboro), GA",
     layerUrl: "https://services8.arcgis.com/oi3j4zWzPc3hzTpc/arcgis/rest/services/Emanuel_Parcels_view/FeatureServer/0",
-    idField: "Parcel_No",
+    idField: "Parcel_No", pinIdField: true,
     help: "Emanuel County (Swainsboro) parcels (Esri-hosted). Search by parcel number.",
   },
   ga_evans: {
@@ -1266,7 +1266,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 6,672 parcel polygons, last edited 2023-01.
     state: "GA", label: "Evans County (Claxton), GA",
     layerUrl: "https://services6.arcgis.com/vgwS5Le2XfU2EPjI/arcgis/rest/services/EvansBasemap/FeatureServer/0",
-    idField: "PARCEL_NO",
+    idField: "PARCEL_NO", pinIdField: true,
     help: "Evans County (Claxton) parcels (Esri-hosted). Search by parcel number.",
   },
   ga_greene: {
@@ -1274,7 +1274,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 17,735 parcel polygons, last edited 2025-09.
     state: "GA", label: "Greene County (Greensboro), GA",
     layerUrl: "https://services7.arcgis.com/QbbsWI5nIfBp4cMB/arcgis/rest/services/Parcel_Regions_w_WinGAP_view/FeatureServer/0",
-    idField: "Parcel_No",
+    idField: "Parcel_No", pinIdField: true,
     help: "Greene County (Greensboro) parcels (Esri-hosted). Search by parcel number.",
   },
   ga_lanier: {
@@ -1282,7 +1282,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 5,968 parcel polygons, last edited 2025-12.
     state: "GA", label: "Lanier County (Lakeland), GA",
     layerUrl: "https://services5.arcgis.com/HA2thkMWRBDb77XN/arcgis/rest/services/Lanier_Parcels/FeatureServer/23",
-    idField: "PARCEL_NO",
+    idField: "PARCEL_NO", pinIdField: true,
     help: "Lanier County (Lakeland) parcels (Esri-hosted). Search by parcel number.",
   },
   ga_meriwether: {
@@ -1290,7 +1290,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 16,511 parcel polygons, last edited 2023-06.
     state: "GA", label: "Meriwether County (Greenville, GA), GA",
     layerUrl: "https://services9.arcgis.com/Xv8vRekQ4FVHSSIe/arcgis/rest/services/MeriwetherParcels/FeatureServer/0",
-    idField: "Parcel_No",
+    idField: "Parcel_No", pinIdField: true,
     help: "Meriwether County (Greenville, GA) parcels (Esri-hosted). Search by parcel number.",
   },
   ga_sumter: {
@@ -1299,7 +1299,7 @@ const COUNTIES_RAW = {
     // Layer 9 of a regional-commission service whose title is about trails, not parcels — same B1551616 "title is never the measurement" trap other GA rows have already hit; the layer itself is the county's real parcel fabric.
     state: "GA", label: "Sumter County (Americus), GA",
     layerUrl: "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/Trails_and_Bike_Routes_in_Sumter_County_WFL1/FeatureServer/9",
-    idField: "PARCELID", addrField: "SITEADDRES",
+    idField: "PARCELID", pinIdField: true, addrField: "SITEADDRES",
     help: "Sumter County (Americus) parcels (Esri-hosted). Search by parcel number or a site address.",
   },
   ga_turner: {
@@ -1308,7 +1308,7 @@ const COUNTIES_RAW = {
     // Service name really is "TunerParcels" (sic) — not a typo introduced here.
     state: "GA", label: "Turner County (Ashburn), GA",
     layerUrl: "https://services5.arcgis.com/HA2thkMWRBDb77XN/arcgis/rest/services/TunerParcels/FeatureServer/4",
-    idField: "Parcel_No",
+    idField: "Parcel_No", pinIdField: true,
     help: "Turner County (Ashburn) parcels (Esri-hosted). Search by parcel number.",
   },
   ga_twiggs: {
@@ -1316,7 +1316,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 6,832 parcel polygons, last edited 2026-01.
     state: "GA", label: "Twiggs County (Jeffersonville), GA",
     layerUrl: "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/TwiggsParcels_Jan2026/FeatureServer/16",
-    idField: "PARCELID",
+    idField: "PARCELID", pinIdField: true,
     help: "Twiggs County (Jeffersonville) parcels (Esri-hosted). Search by parcel number.",
   },
   ga_ware: {
@@ -1324,7 +1324,7 @@ const COUNTIES_RAW = {
     // policy blocks this host): 23,119 parcel polygons, last edited 2026-09-22.
     state: "GA", label: "Ware County (Waycross), GA",
     layerUrl: "https://services9.arcgis.com/XAyIBOsw3fLfDjTY/arcgis/rest/services/WareCounty_Base_gdb/FeatureServer/38",
-    idField: "PARCEL_NO",
+    idField: "PARCEL_NO", pinIdField: true,
     help: "Ware County (Waycross) parcels (Esri-hosted). Search by parcel number.",
   },
 
@@ -1552,11 +1552,29 @@ const COUNTIES_RAW = {
  * parcel-cache Function's allowlist (functions/api/parcel-cache/_handler.js). */
 export const SNAPSHOT_COUNTIES = countyKeySet(["chambers", "waller", "fortbend"]);
 
-const ID_RE =
-  /(hcad_?num|^acct|account|parcel_?id|prop_?id|^pid$|quick_?ref|geo_?id|^pin$|^gid$)/i;
 /* NEW-2 — the field an address SEARCH runs against is picked by the shared situs LADDER
  * (lib/appraisal.js), not by a flat alternation: searching "4050 County Road 50" must query the
  * column that holds the land's address, never the one that holds the owner's mailing address. */
+
+/* ⛔ B1875248 (third-pass recurrence, 2026-09-24) — ID detection is now RANKED, not one flat
+ * alternation, because a plain "first field that looks id-shaped" reliably lost to a WinGAP-export
+ * layer's own row-number column. Every GA WinGAP county publishes FID/OBJECTID/OBJECTID_1 (Esri's
+ * own row identity, values like 0/-1/64810 that mean nothing to the county) ALONGSIDE the real
+ * parcel number (PARCEL_NO / PIN / GSI_PIN / parcelnumb / …) — and the row-number column routinely
+ * comes first in field order, so it used to win outright. Three tiers, tried in order:
+ *   1. ID_RE_STRONG — a column that actually looks like a parcel/account identifier.
+ *   2. ID_RE_WEAK   — a bare "Parcel" column (real, but too generic to trust over a real number —
+ *      Cook County GA carries both a bare "Parcel" AND a "Parcel_No"; the number wins).
+ *   3. ID_RE_OBJECTID — the layer's own row identity, used ONLY when nothing else qualifies, so a
+ *      county with no better column still gets an ID search rather than "No account/parcel-id field
+ *      on this layer" (ga_baldwin / ga_tift have no measured parcel column yet).
+ * A `pinIdField: true` row still short-circuits all of this (resolveSearchField in parcelQuery.js) —
+ * this ranking is what happens when nothing is pinned, and it is also what the display-side
+ * `idAttrFor` (parcelQuery.js) falls back to for the same reason. */
+const ID_RE_STRONG =
+  /(hcad_?num|^acct|account|parcel_?id|parcel_?no\d*|parcel_?num(ber)?|parcel_?nbr|parcelnumb|^parcels$|prop_?id|^pid$|quick_?ref|geo_?id|pin\d*$|^apn$|^gid$)/i;
+const ID_RE_WEAK = /^parcel$/i;
+const ID_RE_OBJECTID = /(^objectid|^fid$)/i;
 
 /* Taxing-jurisdiction + rate resolver — ONE place to wire each county's tax-unit /
  * rate source as endpoints are confirmed. No public per-parcel rate endpoint is
@@ -1796,7 +1814,12 @@ const JURISDICTION_LAYERS_RAW = {
 // rung 2 — so a service that lists its mailing column first can no longer win the search field.
 export function detectField(fields, kind) {
   const names = (fields || []).map((x) => x && x.name).filter(Boolean);
-  if (kind === "id") { const f = names.find((n) => ID_RE.test(n)); return f || null; }
+  if (kind === "id") {
+    return names.find((n) => ID_RE_STRONG.test(n))
+      || names.find((n) => ID_RE_WEAK.test(n))
+      || names.find((n) => ID_RE_OBJECTID.test(n))
+      || null;
+  }
   // situsKey resolves over an attribute BAG, so present the field names as one (value = the name,
   // which is non-empty by construction — this asks "which key wins", not "what does it hold").
   return situsKey(Object.fromEntries(names.map((n) => [n, n])));
