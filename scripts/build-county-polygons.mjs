@@ -91,13 +91,38 @@ const SOURCES = {
     nameField: "NAME20",
     fipsField: "GEOID20",
   },
+  /* NEW-1 (2026-09-24, recurrence of B1885600) — FLORIDA gets the same dedicated, higher-fidelity
+   * treatment as TX/CO instead of riding the nationwide GENERALIZED source below. That generalized
+   * layer (Esri's `USA_Counties_Generalized_Boundaries`, built from Census TIGER and simplified for
+   * national-scale drawing) CLIPS Florida's own coastline — its Nassau County row has bbox east edge
+   * -81.50, while Amelia Island / Fernandina Beach runs to about -81.40, so a real address on the
+   * county's own main town fell outside the served polygon entirely (measured live on deployed build
+   * b9722c7: no parcel query ever fired for "204 Ash St, Fernandina Beach, FL"). This is the FDEP
+   * (Florida Dept. of Environmental Protection) MapDirect "Florida County Boundaries" layer — the
+   * state's own shoreline-following county boundary product (same underlying geometry as their public
+   * "Florida Counties w/ Shoreline (12k)" layer), verified live 2026-09-24 from this sandbox: exactly
+   * 67 features (one row per county, `NAME` a plain title-cased county name e.g. "Nassau", "St.
+   * Johns"), and a point query at Fernandina Beach (30.67, -81.46) correctly returns NAME="Nassau" —
+   * plus Anna Maria (27.53,-82.73)→Manatee, Ponte Vedra Beach (30.24,-81.39)→"St. Johns" and
+   * Jacksonville Beach (30.29,-81.39)→Duval, all confirmed live. The tradeoff, stated rather than
+   * discovered later: this is TRUE 1:12,000-scale shoreline detail, so a single county (Nassau) has
+   * ~700 polygon parts and ~23k raw vertices before this file's own Douglas–Peucker pass and
+   * MIN_RING_DEG filter run — heavier than TX/CO's inland-heavy geometry, and by design (a barrier
+   * island's real shape is the whole point of using this source over the clipped generalized one). */
+  FL: {
+    file: "fl-counties.geojson",
+    url: "https://services1.arcgis.com/nRHtyn3uE1kyzoYc/arcgis/rest/services/Florida_Counties_Boundary/FeatureServer/1",
+    nameField: "NAME",
+    fipsField: "OBJECTID", // this layer carries no FIPS column; OBJECTID is a harmless placeholder,
+    // never read as a real FIPS code (nothing in this codebase keys FL routing off `fips`).
+  },
   US: {
     file: "us-counties-generalized.geojson",
     url: "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_Counties_Generalized_Boundaries/FeatureServer/0",
     nameField: "NAME",       // already carries the correct designation: "Orleans Parish", "Denali Borough", "Fairfax city"
     fipsField: "FIPS",       // 5-digit combined state+county code, same shape as the other two sources
     stateField: "STATE_ABBR",
-    skipStates: ["TX", "CO"], // keep the two dedicated, higher-fidelity sources above; never override them
+    skipStates: ["TX", "CO", "FL"], // keep the three dedicated, higher-fidelity sources above; never override them
   },
 };
 

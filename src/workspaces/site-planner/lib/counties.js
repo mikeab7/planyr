@@ -2587,27 +2587,31 @@ const COUNTIES_MAP_RAW = {
   ga_twiggs: { state: "GA", center: [32.6698, -83.4143], zoom: 10, bbox: [32.45, -83.6, 32.89, -83.23], mapServer: null, layerUrl: COUNTIES.ga_twiggs.layerUrl },
   ga_ware: { state: "GA", center: [31.0175, -82.4137], zoom: 10, bbox: [30.57, -82.7, 31.47, -82.13], mapServer: null, layerUrl: COUNTIES.ga_ware.layerUrl },
 
-  // NEW-1 (2026-09-24) — 17 Florida counties (Jacksonville + Polk/Lakeland markets); center/bbox
-  // read directly from public/geo/county-polygons.json (the same nationwide asset resolveCounty
-  // uses), never hand-typed, same convention as the GA rows above. See the matching COUNTIES_RAW
-  // block above (and FL_STATEWIDE_LAYER's own header) for the shared-layer provenance.
-  fl_duval: { state: "FL", center: [30.34, -81.74], zoom: 10, bbox: [30.11, -82.05, 30.58, -81.43], mapServer: null, layerUrl: COUNTIES.fl_duval.layerUrl },
-  fl_nassau: { state: "FL", center: [30.55, -81.78], zoom: 10, bbox: [30.27, -82.05, 30.83, -81.5], mapServer: null, layerUrl: COUNTIES.fl_nassau.layerUrl },
-  fl_clay: { state: "FL", center: [29.96, -81.82], zoom: 10, bbox: [29.72, -82.05, 30.19, -81.58], mapServer: null, layerUrl: COUNTIES.fl_clay.layerUrl },
-  fl_stjohns: { state: "FL", center: [29.94, -81.46], zoom: 10, bbox: [29.63, -81.69, 30.25, -81.23], mapServer: null, layerUrl: COUNTIES.fl_stjohns.layerUrl },
-  fl_baker: { state: "FL", center: [30.36, -82.25], zoom: 10, bbox: [30.14, -82.46, 30.58, -82.05], mapServer: null, layerUrl: COUNTIES.fl_baker.layerUrl },
-  fl_polk: { state: "FL", center: [28.0, -81.62], zoom: 10, bbox: [27.64, -82.11, 28.36, -81.13], mapServer: null, layerUrl: COUNTIES.fl_polk.layerUrl },
-  fl_hillsborough: { state: "FL", center: [27.91, -82.35], zoom: 10, bbox: [27.64, -82.65, 28.17, -82.06], mapServer: null, layerUrl: COUNTIES.fl_hillsborough.layerUrl },
-  fl_pasco: { state: "FL", center: [28.32, -82.42], zoom: 10, bbox: [28.17, -82.78, 28.48, -82.05], mapServer: null, layerUrl: COUNTIES.fl_pasco.layerUrl },
-  fl_hernando: { state: "FL", center: [28.56, -82.36], zoom: 10, bbox: [28.43, -82.67, 28.69, -82.05], mapServer: null, layerUrl: COUNTIES.fl_hernando.layerUrl },
-  fl_sumter: { state: "FL", center: [28.63, -82.13], zoom: 10, bbox: [28.3, -82.31, 28.96, -81.95], mapServer: null, layerUrl: COUNTIES.fl_sumter.layerUrl },
-  fl_lake: { state: "FL", center: [28.81, -81.65], zoom: 10, bbox: [28.34, -81.95, 29.28, -81.34], mapServer: null, layerUrl: COUNTIES.fl_lake.layerUrl },
-  fl_orange: { state: "FL", center: [28.56, -81.26], zoom: 10, bbox: [28.34, -81.66, 28.79, -80.87], mapServer: null, layerUrl: COUNTIES.fl_orange.layerUrl },
-  fl_osceola: { state: "FL", center: [27.99, -81.26], zoom: 10, bbox: [27.64, -81.66, 28.34, -80.86], mapServer: null, layerUrl: COUNTIES.fl_osceola.layerUrl },
-  fl_highlands: { state: "FL", center: [27.34, -81.26], zoom: 10, bbox: [27.03, -81.56, 27.64, -80.95], mapServer: null, layerUrl: COUNTIES.fl_highlands.layerUrl },
-  fl_hardee: { state: "FL", center: [27.49, -81.81], zoom: 10, bbox: [27.33, -82.06, 27.64, -81.56], mapServer: null, layerUrl: COUNTIES.fl_hardee.layerUrl },
-  fl_manatee: { state: "FL", center: [27.43, -82.37], zoom: 10, bbox: [27.21, -82.69, 27.64, -82.06], mapServer: null, layerUrl: COUNTIES.fl_manatee.layerUrl },
-  fl_desoto: { state: "FL", center: [27.19, -81.81], zoom: 10, bbox: [27.03, -82.06, 27.34, -81.56], mapServer: null, layerUrl: COUNTIES.fl_desoto.layerUrl },
+  // NEW-1 (2026-09-24, recurrence of B1885600) — 17 Florida counties (Jacksonville + Polk/Lakeland
+  // markets); center/bbox re-derived from the REBUILT public/geo/county-polygons.json — now FL's own
+  // dedicated FDEP shoreline source (see build-county-polygons.mjs's FL entry), never the nationwide
+  // GENERALIZED layer the first pass used. The generalized layer's Nassau row clipped the coast short
+  // of Amelia Island / Fernandina Beach (fl_nassau's old east edge was -81.5; the town runs to about
+  // -81.40), so a real address on the county's own main town resolved no county at all. Never
+  // hand-typed, same convention as the GA rows above. See the matching COUNTIES_RAW block above (and
+  // FL_STATEWIDE_LAYER's own header) for the shared-layer provenance.
+  fl_duval: { state: "FL", center: [30.34, -81.71], zoom: 10, bbox: [30.08, -82.07, 30.61, -81.36], mapServer: null, layerUrl: COUNTIES.fl_duval.layerUrl },
+  fl_nassau: { state: "FL", center: [30.55, -81.74], zoom: 10, bbox: [30.25, -82.07, 30.85, -81.41], mapServer: null, layerUrl: COUNTIES.fl_nassau.layerUrl },
+  fl_clay: { state: "FL", center: [29.96, -81.83], zoom: 10, bbox: [29.7, -82.07, 30.21, -81.58], mapServer: null, layerUrl: COUNTIES.fl_clay.layerUrl },
+  fl_stjohns: { state: "FL", center: [29.94, -81.44], zoom: 10, bbox: [29.6, -81.69, 30.27, -81.19], mapServer: null, layerUrl: COUNTIES.fl_stjohns.layerUrl },
+  fl_baker: { state: "FL", center: [30.36, -82.25], zoom: 10, bbox: [30.12, -82.48, 30.6, -82.03], mapServer: null, layerUrl: COUNTIES.fl_baker.layerUrl },
+  fl_polk: { state: "FL", center: [28, -81.62], zoom: 10, bbox: [27.62, -82.13, 28.38, -81.11], mapServer: null, layerUrl: COUNTIES.fl_polk.layerUrl },
+  fl_hillsborough: { state: "FL", center: [27.88, -82.41], zoom: 10, bbox: [27.56, -82.79, 28.19, -82.03], mapServer: null, layerUrl: COUNTIES.fl_hillsborough.layerUrl },
+  fl_pasco: { state: "FL", center: [28.33, -82.45], zoom: 10, bbox: [28.15, -82.87, 28.5, -82.04], mapServer: null, layerUrl: COUNTIES.fl_pasco.layerUrl },
+  fl_hernando: { state: "FL", center: [28.56, -82.37], zoom: 10, bbox: [28.41, -82.71, 28.72, -82.03], mapServer: null, layerUrl: COUNTIES.fl_hernando.layerUrl },
+  fl_sumter: { state: "FL", center: [28.63, -82.13], zoom: 10, bbox: [28.29, -82.33, 28.98, -81.93], mapServer: null, layerUrl: COUNTIES.fl_sumter.layerUrl },
+  fl_lake: { state: "FL", center: [28.81, -81.65], zoom: 10, bbox: [28.33, -81.98, 29.3, -81.32], mapServer: null, layerUrl: COUNTIES.fl_lake.layerUrl },
+  fl_orange: { state: "FL", center: [28.57, -81.26], zoom: 10, bbox: [28.33, -81.68, 28.81, -80.84], mapServer: null, layerUrl: COUNTIES.fl_orange.layerUrl },
+  fl_osceola: { state: "FL", center: [28, -81.26], zoom: 10, bbox: [27.62, -81.68, 28.37, -80.84], mapServer: null, layerUrl: COUNTIES.fl_osceola.layerUrl },
+  fl_highlands: { state: "FL", center: [27.34, -81.25], zoom: 10, bbox: [27.01, -81.58, 27.67, -80.92], mapServer: null, layerUrl: COUNTIES.fl_highlands.layerUrl },
+  fl_hardee: { state: "FL", center: [27.49, -81.81], zoom: 10, bbox: [27.32, -82.08, 27.67, -81.54], mapServer: null, layerUrl: COUNTIES.fl_hardee.layerUrl },
+  fl_manatee: { state: "FL", center: [27.43, -82.4], zoom: 10, bbox: [27.19, -82.77, 27.67, -82.03], mapServer: null, layerUrl: COUNTIES.fl_manatee.layerUrl },
+  fl_desoto: { state: "FL", center: [27.19, -81.81], zoom: 10, bbox: [27.01, -82.08, 27.36, -81.54], mapServer: null, layerUrl: COUNTIES.fl_desoto.layerUrl },
 
   az_pinal: { state: "AZ", center: [32.9940, -111.3275], zoom: 9, bbox: [32.51, -112.21, 33.48, -110.45], mapServer: null, layerUrl: COUNTIES.az_pinal.layerUrl },
   // B1339920 — bbox/center read directly from public/geo/county-polygons.json (same convention as

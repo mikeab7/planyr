@@ -967,16 +967,14 @@ describe("NEW-1 (2026-09-24, third pass) — 34 more Georgia counties are regist
  * against the real service from this sandbox 2026-09-24 (services9.arcgis.com is reachable here,
  * unlike most county-own hosts this repo wires) — see countiesProvenance.js for the full record.
  *
- * ⛔ Fernandina Beach's real coordinates (Nassau County's own seat) are deliberately NOT used as
- * fl_nassau's routing/bbox test point. Both the live FDOR layer's own boundary work fine there, but
- * the OFFLINE nationwide county-polygon asset (public/geo/county-polygons.json) — and therefore
- * this app's own computed COUNTIES_MAP bbox for Nassau, which is read directly from that same
- * asset — does not reach the true tip of Amelia Island; confirmed by direct ray-cast probe against
- * the committed asset. Yulee, FL (also Nassau County, on the mainland near I-95 and the Georgia
- * line) is used instead for both the seat/bbox test and the state-line test — see
- * docs/STATEWIDE-PARCELS.md's Florida section for the full write-up. This is a property of the
- * offline geometry asset, not of the live parcel source; the dedicated test below documents the
- * gap explicitly rather than silently routing around it. */
+ * ⛔ RECURRENCE (2026-09-24, B1885600 ×2) — Fernandina Beach's real coordinates used to be kept OUT
+ * of this suite (Yulee, FL stood in for the seat/bbox and state-line tests) because the offline
+ * nationwide county-polygon asset — built at the time from a GENERALIZED nationwide layer — clipped
+ * Nassau County's own ring short of Amelia Island. That gap was live-measured to break real click
+ * routing on the deployed build (b9722c7): no parcel query fired at all for a real Fernandina Beach
+ * address. `build-county-polygons.mjs` now has FL's own dedicated FDEP shoreline source (the TX/CO
+ * treatment), so Fernandina Beach's real coordinates are now the primary routing/bbox point for
+ * fl_nassau below, and the "gap" test that used to document the clip is replaced with its inverse. */
 describe("NEW-1 (2026-09-24) — 17 Florida counties are registered and shaped correctly (B1885600)", () => {
   const FL_KEYS = [
     "fl_duval", "fl_nassau", "fl_clay", "fl_stjohns", "fl_baker", "fl_polk", "fl_hillsborough",
@@ -988,11 +986,11 @@ describe("NEW-1 (2026-09-24) — 17 Florida counties are registered and shaped c
     fl_hillsborough: 39, fl_pasco: 61, fl_hernando: 37, fl_sumter: 70, fl_lake: 45, fl_orange: 58,
     fl_osceola: 59, fl_highlands: 38, fl_hardee: 35, fl_manatee: 51, fl_desoto: 24,
   };
-  // The routing/bbox test point for each county — its real seat, EXCEPT fl_nassau (see the
-  // block comment above for why Yulee stands in for Fernandina Beach).
+  // The routing/bbox test point for each county — its real seat. fl_nassau now uses Fernandina
+  // Beach itself (was Yulee, before the FDEP-source fix made the county's own seat resolve).
   const SEATS = {
     fl_duval: [30.3255, -81.6579],       // Jacksonville
-    fl_nassau: [30.6322, -81.5854],      // Yulee (Fernandina Beach's own bbox is measurably short of the city itself — see above)
+    fl_nassau: [30.6697, -81.4626],      // Fernandina Beach (Nassau County's own seat)
     fl_clay: [29.9911, -81.6787],        // Green Cove Springs
     fl_stjohns: [29.8947, -81.3145],     // St. Augustine
     fl_baker: [30.2827, -82.1265],       // Macclenny
@@ -1066,12 +1064,29 @@ describe("NEW-1 (2026-09-24) — 17 Florida counties are registered and shaped c
     }
   });
 
-  it("⛔ documents the gap this test suite works around: Fernandina Beach's own coordinates fall OUTSIDE fl_nassau's computed bbox", () => {
+  it("⛔ recurrence fix (B1885600 ×2): Fernandina Beach's own coordinates now fall INSIDE fl_nassau's computed bbox — this used to be a documented gap (the generalized-boundary clip) and is the exact live routing failure this fix closes", () => {
     const FERNANDINA_BEACH = [30.6697, -81.4626];
     const [south, west, north, east] = COUNTIES_MAP.fl_nassau.bbox;
     const inside = FERNANDINA_BEACH[0] > south && FERNANDINA_BEACH[0] < north
       && FERNANDINA_BEACH[1] > west && FERNANDINA_BEACH[1] < east;
-    expect(inside, "if this ever flips true, Fernandina Beach can replace Yulee as fl_nassau's seat point above").toBe(false);
+    expect(inside, "Fernandina Beach must resolve inside fl_nassau's bbox now that FL rides its own dedicated FDEP source").toBe(true);
+  });
+
+  it("⛔ B1885600 (×2 recurrence) — barrier-island / coastal seats across the wired counties are real CLICK-ROUTING candidates against the rebuilt FDEP-sourced bbox, not just their inland seats (candidateCountiesForPoint is the click-routing contract; countyForView's nearest-CENTER fallback is a different, geometry-free approximation not exercised by this fix — see the sibling state-line test above for why bbox overlap near a border is by design)", () => {
+    const FERNANDINA_BEACH = [30.67, -81.46];
+    const ANNA_MARIA = [27.5301, -82.7407]; // Anna Maria city hall — the narrow barrier island itself
+    const PONTE_VEDRA_BEACH = [30.24, -81.39];
+    const JACKSONVILLE_BEACH = [30.29, -81.39];
+    expect(candidateCountiesForPoint(...FERNANDINA_BEACH)).toContain("fl_nassau");
+    expect(candidateCountiesForPoint(...ANNA_MARIA)).toContain("fl_manatee");
+    expect(candidateCountiesForPoint(...PONTE_VEDRA_BEACH)).toContain("fl_stjohns");
+    expect(candidateCountiesForPoint(...JACKSONVILLE_BEACH)).toContain("fl_duval");
+  });
+
+  it("⛔ B1885600 (×2 recurrence) — St. Marys, GA (the seat/state-line control) still returns ga_camden, unaffected by the Florida-side source swap", () => {
+    const ST_MARYS_GA = [30.73, -81.55];
+    expect(candidateCountiesForPoint(...ST_MARYS_GA)).toContain("ga_camden");
+    expect(countyForView(...ST_MARYS_GA)).toBe("ga_camden");
   });
 
   it("countyKeyForName resolves each county's real display name to its key, scoped to FL — incl. the multi-word 'St. Johns' case", () => {
@@ -1120,12 +1135,18 @@ describe("NEW-1 (2026-09-24) — 17 Florida counties are registered and shaped c
     expect(countyForView(...KINGSLAND)).toBe("ga_camden");
   });
 
-  it("Baker/Nassau, FL vs. Charlton, GA never cross (both touch the state line) — Folkston, GA decides ga_charlton, never a Florida key", () => {
+  it("Baker/Nassau, FL vs. Charlton, GA never cross (both touch the state line) — Folkston, GA DECIDES ga_charlton, never a Florida key", () => {
+    // ⛔ B1885600 (×2 recurrence) — fl_nassau's padded bbox now legitimately reaches this point
+    // (Folkston sits 30.836°N, and Nassau's own FDEP-sourced ring genuinely extends to 30.83°N
+    // along the St. Marys River before the standard 0.02° border pad — a real, more accurate
+    // extent than the old generalized source's 30.81°N, not a padding regression). That is exactly
+    // the "candidateCountiesForPoint may legitimately list both as bbox-overlap candidates near a
+    // border" contract the sibling state-line test above documents — the DECIDING answer is
+    // countyForView, asserted below, never bbox membership alone.
     const FOLKSTON_GA = [30.836, -82.0068]; // ga_charlton seat
     const cand = candidateCountiesForPoint(...FOLKSTON_GA);
     expect(cand).toContain("ga_charlton");
     expect(cand).not.toContain("fl_baker");
-    expect(cand).not.toContain("fl_nassau");
     expect(countyForView(...FOLKSTON_GA)).toBe("ga_charlton");
   });
 
