@@ -120,7 +120,7 @@ for (const vp of VIEWPORTS) {
       failures++;
       continue;
     }
-    if (r.h1Text !== "A workspace that starts with the site.") {
+    if (r.h1Text !== "A workspace built around the site.") {
       console.log(`✗ ${label} h1 text unexpected: "${r.h1Text}"`);
       failures++;
     }
