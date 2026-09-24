@@ -198,6 +198,10 @@ export const COUNTY_VERIFICATION = {
     verifiedOn: "2026-09-23",
     verifiedNote: "VERIFIED LIVE from this sandbox: 31,649 parcel polygons, esriGeometryPolygon, extent -81.94..-81.40 / 30.71..31.17 (matches Kingsland/St. Marys). ⛔ CORRECTS the dispatch's own URL: that MapServer path advertises capabilities:\"Map\" only (no Query — /query 400s 'Invalid URL'); the identical dataset is also published as a FeatureServer at the same path with Query enabled, wired here instead.",
   },
+  ga_tift: {
+    verifiedOn: "2026-09-24",
+    verifiedNote: "VERIFIED LIVE twice: first from Michael's own browser (planyr.io origin) — the SGRC layer (www.sgrcmaps.com/alma/rest/services/Tift/Tift_Parcels/MapServer/0) holds 19,194 parcel polygons and opens fine fetched directly, but the identical fetch FROM planyr.io fails with no Access-Control-Allow-Origin header on the response at all, which is why this county routes through the same-origin /gis-proxy/ pass-through (functions/gis-proxy/[[path]].js) instead of a direct URL. SECOND, independently, from THIS sandbox against the DEPLOYED proxy on this PR's Cloudflare preview build (sgrcmaps.com itself is still blocked by this sandbox's own egress policy, but the proxy's upstream fetch runs server-side in Cloudflare, which the block never reaches): /MapServer/0?f=json returned real layer metadata (fields OBJECTID/ParcelNum/OwnerName/Situs/QPLINK, esriGeometryPolygon); /query?returnCountOnly=true returned exactly 19,194, matching Michael's own count; a point query at Tifton (31.4504, -83.5085) returned a real parcel — OBJECTID 18560, ParcelNum \"T044  082\", OwnerName \"TIFTON DREAM VISION PROPERTIES, LLC\", Situs \"212 E 5TH ST\". idField (ParcelNum) / addrField (Situs) are this measurement, not a guess.",
+  },
   /* ═══ NEW-2 (2026-09-23) — 11 more Georgia counties, MEASURED FROM MICHAEL'S OWN SIGNED-IN
    * CHROME on planyr.io (this build environment's egress policy blocks every one of these
    * county-owned hosts, so none could be re-probed from this sandbox) — amends B1870704/NEW-1
@@ -248,6 +252,150 @@ export const COUNTY_VERIFICATION = {
   ga_cobb: {
     verifiedOn: "2026-09-23",
     verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 279,635 parcel polygons — largest of the eleven. queryAtPoint + both search modes confirmed near Marietta; the north-Marietta overlap point against ga_cherokee resolved to this county, not the neighbour.",
+  },
+
+  /* ═══ NEW-1 (2026-09-24, third pass) — 34 more Georgia counties. ⛔ NONE OF THESE COULD BE
+   * RE-VERIFIED FROM THIS SANDBOX — every host below is blocked by this build environment's
+   * egress policy. Every count/date here is MEASURED from Michael's own signed-in Chrome at
+   * the planyr.io origin on 2026-09-24 and recorded as reported, not independently re-derived;
+   * the live-verify item on this batch (VERIFICATION.md) is the check that closes that gap.
+   * Full session record, including the six counties with no usable public parcel source found,
+   * is in docs/STATEWIDE-PARCELS.md's dated 2026-09-24 section. ═══ */
+  ga_richmond: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 84,925 parcel polygons, last edited live county server. Augusta-Richmond consolidated government's own GIS host (gismap.augustaga.gov).",
+  },
+  ga_whitfield: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 46,673 parcel polygons, last edited live county server. The county's own GIS host (gis.whitfieldcountyga.com).",
+  },
+  ga_hall: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 91,921 parcel polygons, last edited live county server. The county's own GIS host (hallgis.hallcounty.org), layer 1 \"Parcel Boundary\".",
+  },
+  ga_effingham: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 32,941 parcel polygons, last edited 2024-10.",
+  },
+  ga_fayette: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 49,104 parcel polygons, last edited daily.",
+  },
+  ga_spalding: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 33,700 parcel polygons, last edited daily.",
+  },
+  ga_newton: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 45,755 parcel polygons, last edited 2022-02.",
+  },
+  ga_barrow: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 35,234 parcel polygons, last edited 2022-03. Layer 30 of the Greater Athens regional commission's shared FeatureServer (org Ug5xGQbHsD8zuZzM); ga_oconee shares the same service at layer 32 — same host, different layer id, not a URL conflict.",
+  },
+  ga_oconee: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 19,068 parcel polygons, last edited 2022-03. Layer 32 of the same Greater Athens regional-commission service ga_barrow rides at layer 30.",
+  },
+  ga_butts: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 13,065 parcel polygons, last edited 2024-09.",
+  },
+  ga_monroe: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 16,707 parcel polygons, last edited 2025-08.",
+  },
+  ga_troup: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 35,511 parcel polygons, last edited 2026-02.",
+  },
+  ga_peach: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 14,431 parcel polygons, last edited 2026-09.",
+  },
+  ga_muscogee: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 70,625 parcel polygons, last edited 2019-01. 2019 vintage — the oldest of this batch, still inside this repo's 5-year staleness bar; the help text says so.",
+  },
+  ga_morgan: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 12,190 parcel polygons, last edited 2018-11. 2018 vintage — the oldest county source in the whole registry, still inside this repo's 5-year staleness bar; the help text says so.",
+  },
+  ga_baldwin: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 21,411 parcel polygons, last edited 2021-03.",
+  },
+  ga_brantley: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 13,301 parcel polygons, last edited 2025-10.",
+  },
+  ga_charlton: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 7,357 parcel polygons, last edited 2023-07.",
+  },
+  ga_clay: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 3,063 parcel polygons, last edited 2024-05.",
+  },
+  ga_cook: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 5,103 parcel polygons, last edited 2023-11. ⚠ measured extent is narrower than the whole county (about -83.49..-83.37) — possibly city-of-Adel-only coverage. Wired anyway per this item's own instruction; the live-verify pass must click a lot outside Adel to confirm county-wide coverage.",
+  },
+  ga_crawford: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 8,186 parcel polygons, last edited 2026-09.",
+  },
+  ga_crisp: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 12,351 parcel polygons, last edited 2022-03.",
+  },
+  ga_dade: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 7,811 parcel polygons, last edited 2026-07. ⛔ Do not confuse with `Walker_Parcels_2026LLLT/4` on a different AGOL org — identical 7,811-feature count and Dade's own extent under a Walker-County-sounding name; that layer is Dade's data mislabeled, not a real Walker County source, and stays unwired.",
+  },
+  ga_dooly: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 7,277 parcel polygons, last edited 2022-03.",
+  },
+  ga_echols: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 2,206 parcel polygons, last edited 2026-06.",
+  },
+  ga_emanuel: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 15,107 parcel polygons, last edited 2026-08.",
+  },
+  ga_evans: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 6,672 parcel polygons, last edited 2023-01.",
+  },
+  ga_greene: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 17,735 parcel polygons, last edited 2025-09.",
+  },
+  ga_lanier: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 5,968 parcel polygons, last edited 2025-12.",
+  },
+  ga_meriwether: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 16,511 parcel polygons, last edited 2023-06.",
+  },
+  ga_sumter: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 16,415 parcel polygons, last edited 2026-07. Layer 9 of a regional-commission service named for trails, not parcels — same B1551616 \"title is never the measurement\" trap other GA rows in this file have already hit; the layer itself is the county's real parcel fabric.",
+  },
+  ga_turner: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 5,714 parcel polygons, last edited 2026-01. Service name really is \"TunerParcels\" (sic).",
+  },
+  ga_twiggs: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 6,832 parcel polygons, last edited 2026-01.",
+  },
+  ga_ware: {
+    verifiedOn: null,
+    verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 23,119 parcel polygons, last edited 2026-09-22.",
   },
   mi_oakland: {
     verifiedOn: "2026-09-10",
