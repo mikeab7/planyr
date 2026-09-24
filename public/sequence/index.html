@@ -2927,11 +2927,19 @@ function suggestScheduleName(projects, ownerKind, siteId, siteName) {
 // to close. (Lives OUTSIDE the SCHEDULE-OWNERSHIP sync block above — it's a notice-copy helper
 // built ON TOP of that model, not part of the canonical ownership contract src/shared/schedule/
 // scheduleOwnership.js mirrors, so it has no reason to be duplicated there.)
-function crossScheduleLabel(schedule) {
+// B1873360 — the two halves crossScheduleLabel joins, exposed separately for anything that needs
+// to SORT or GROUP on the owner and the schedule name independently (e.g. MasterView's "Group by
+// project" ordering) without re-parsing the joined "<owner> / <name>" string — a project or
+// schedule name that itself contains " / " would otherwise make that parse ambiguous.
+function scheduleLabelParts(schedule) {
   const name = (schedule && schedule.name) || "Untitled schedule";
   const owner = ownerOf(schedule);
-  const left = owner.kind === OWNER_KIND_ORG ? ORG_OWNER_LABEL : (owner.siteName || "an unnamed project");
-  return `${left} / ${name}`;
+  const ownerLabel = owner.kind === OWNER_KIND_ORG ? ORG_OWNER_LABEL : (owner.siteName || "an unnamed project");
+  return { ownerLabel, name };
+}
+function crossScheduleLabel(schedule) {
+  const { ownerLabel, name } = scheduleLabelParts(schedule);
+  return `${ownerLabel} / ${name}`;
 }
 
 // NEW-1 — the prefix a notice should print in front of "#<id> "<name>"" for a row belonging to
@@ -3573,9 +3581,14 @@ const importMeetingBodies = (targetBodies, sourceBodies) => {
 // otherScheduleMeetingBodies — every meeting body on every OTHER schedule on the account, grouped
 // by schedule, for the import pickers (the modal's "Import from another schedule…" and the task
 // right-click "From other schedules" group). Read-only — never mutates a source schedule.
+// B1873361 — `schedName` is the full crossScheduleLabel ("<Project> / <Schedule>"), not the bare
+// schedule name: two different schedules can share a name, and every caller here names a schedule
+// to the person without also showing the row it belongs to, so a bare name would be exactly the
+// ambiguity NEW-1 closed elsewhere. The separate `projName` field this used to also carry is gone —
+// it's now folded into schedName, and its one caller (MeetingImportPicker) read it back out again.
 const otherScheduleMeetingBodies = (data, excludePid) => Object.values((data && data.projects) || {})
   .filter(p => p && p.id !== excludePid && Array.isArray(p.meetingBodies) && p.meetingBodies.length)
-  .map(p => ({ pid: p.id, schedName: p.name || `Project ${p.id}`, projName: p.linkedSiteName || null, bodies: p.meetingBodies }))
+  .map(p => ({ pid: p.id, schedName: crossScheduleLabel(p), bodies: p.meetingBodies }))
   .sort((a, b) => a.schedName.localeCompare(b.schedName));
 // findMeetingBodyElsewhere (NEW-1, 2026-09-23) — a task can be bound to a body that lives on a
 // DIFFERENT schedule (the id is globally unique, B816 — cascadeDates/meetingBoundInfo already
@@ -3589,7 +3602,7 @@ const findMeetingBodyElsewhere = (data, excludePid, bodyId) => {
   for (const p of Object.values((data && data.projects) || {})) {
     if (!p || p.id === excludePid || !Array.isArray(p.meetingBodies)) continue;
     const b = p.meetingBodies.find(b => b.id === bodyId);
-    if (b) return { body: b, schedName: p.name || `Project ${p.id}`, pid: p.id };
+    if (b) return { body: b, schedName: crossScheduleLabel(p), pid: p.id };
   }
   return null;
 };
@@ -6951,7 +6964,10 @@ function HistoryPanel({ data, setData, onClose, exportJSON, importJSON, applyLoa
                   <tbody>
                     {Object.entries(previewData.projects || {}).map(([pid, p]) => (
                       <tr key={pid} style={{borderBottom:"1px solid var(--bd)"}}>
-                        <td style={{padding:"6px 8px"}}>{p.name || `Project ${pid}`}</td>
+                        {/* B1873361 — a version-history snapshot can hold two same-named schedules
+                            same as the live document does, so this row names the schedule via
+                            crossScheduleLabel, never the bare (possibly ambiguous) name. */}
+                        <td style={{padding:"6px 8px"}}>{crossScheduleLabel(p)}</td>
                         <td style={{padding:"6px 8px",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{p.tasks?.length || 0}</td>
                       </tr>
                     ))}
@@ -7056,7 +7072,10 @@ function sgqCrumbOf(data, pid, path) {
   const byId = new Map(proj.tasks.map(t => [t.id, t]));
   const names = path.map(id => byId.get(id) && byId.get(id).name).filter(Boolean);
   if (names.length === 0) return null;
-  return { project: proj.name, names };
+  // B1873361 — this can name a task on ANY schedule on the account (a review suggestion can
+  // match to a different project entirely), so the crumb's project half is the qualified label,
+  // never the bare schedule name.
+  return { project: crossScheduleLabel(proj), names };
 }
 
 function SgqCrumb({data, pid, path}) {
@@ -7100,7 +7119,9 @@ function SgqCascadePicker({data, pid, path, ready, onChange}) {
         value={pid == null ? "" : pid}
         onChange={e => onChange(e.target.value === "" ? null : +e.target.value, [])}>
         <option value="" disabled>Project…</option>
-        {projects.map(([k, p]) => <option key={k} value={k}>{p.name}</option>)}
+        {/* B1873361 — every schedule on the account, so the qualified label (never a bare,
+            possibly-duplicate schedule name) is what tells two "Master Schedule"s apart here. */}
+        {projects.map(([k, p]) => <option key={k} value={k}>{crossScheduleLabel(p)}</option>)}
       </select>
       {selects.map(sel => (
         <React.Fragment key={sel.k}>
@@ -9305,7 +9326,9 @@ function App() {
               // NEW-1 — queued, not set directly: see the queue-drain effect near successorPrompt's
               // declaration. A batch completion (the modal's own "Mark Complete") can fire this twice
               // in close succession; queueing keeps both prompts instead of the second clobbering the first.
-              setSuccessorPromptQueue(q => [...q, { completedTask, projId: pid2, projName: p.name, successors }]);
+              // B1873361 — projName is the qualified crossScheduleLabel, not the bare schedule name:
+              // two schedules can share a name, so context shown here must say which one.
+              setSuccessorPromptQueue(q => [...q, { completedTask, projId: pid2, projName: crossScheduleLabel(p), successors }]);
             }
           }, 80);
         }
@@ -10224,7 +10247,10 @@ function App() {
       if (!d || Object.keys(d.projects || {}).length <= 1) return d; // B644 — null-safe pre-load
       const proj = d.projects[id];
       const taskCount = proj?.tasks?.length || 0;
-      const name = proj?.name || `Project ${id}`;
+      // B1873361 — a destructive confirm names the qualified label, not the bare name: deleting
+      // the WRONG one of two identically-named schedules is exactly the costly mistake this
+      // disambiguation exists to prevent.
+      const name = crossScheduleLabel(proj);
       // Guardrail: confirm + write a labeled snapshot BEFORE applying the deletion
       // so the user can restore via the History panel if they regret it. The shell
       // breadcrumb (B440) already confirms inline, so it passes skipConfirm to avoid a
@@ -10696,8 +10722,12 @@ function App() {
     e.target.value = "";
   };
   const exportHTML = () => {
+    // B1873361 (PDF-PARITY) — this always exports EVERY schedule on the account together (no
+    // per-project selection, unlike buildPDFHtml's Web Snapshot), so two same-named schedules
+    // (the owner's own two "Master Schedule"s) are guaranteed to appear side by side; the
+    // section header is the qualified crossScheduleLabel, never the bare name.
     const rows = Object.values(data.projects).map(p =>
-      `<h2>${escapeHtml(p.name)}</h2><table><tr><th>ID</th><th>Task</th><th>Start</th><th>End</th><th>Dur</th><th>Status</th><th>%</th><th>Owner</th></tr>` +
+      `<h2>${escapeHtml(crossScheduleLabel(p))}</h2><table><tr><th>ID</th><th>Task</th><th>Start</th><th>End</th><th>Dur</th><th>Status</th><th>%</th><th>Owner</th></tr>` +
       p.tasks.map(t => { const h = HEALTH[t.health] || HEALTH.gray; const pct = t.health==="green" ? 100 : (t.percentComplete||0); return `<tr><td>${escapeHtml(t.id)}</td><td>${escapeHtml(t.name)}</td><td>${escapeHtml(fmtD(t.start))}</td><td>${escapeHtml(fmtD(t.end))}</td><td>${Number(t.duration)||0}d</td><td style="color:${escapeHtml(h.dot)}">${escapeHtml(h.label)}</td><td>${pct}%</td><td>${escapeHtml(ownerJoin(ownerListOf(t))||"—")}</td></tr>`; }).join("") +
       `</table>`).join("");
     // Title from the real data, not a hardcoded legacy project name / old brand:
@@ -11514,6 +11544,10 @@ function ProjDropdown({data, setData, addProject, setProjCtx, breadcrumb=false})
                 onMouseEnter={e=>{ if(!isActive&&!isEditing) e.currentTarget.style.background="var(--surf)"; }}
                 onMouseLeave={e=>{ if(!isActive&&!isEditing) e.currentTarget.style.background="transparent"; }}>
                 <span style={{width:7,height:7,borderRadius:"50%",background:HEALTH[h].dot,flexShrink:0}} />
+                {/* B1873361 — the switcher lists EVERY schedule on the account flat, so a bare
+                    name is exactly the ambiguity NEW-1 closed in the reports table: two schedules
+                    named "Master Schedule" under different projects would be indistinguishable
+                    here otherwise. The rename INPUT still edits the raw name (below), unaffected. */}
                 {isEditing
                   ? <input {...NO_AUTOFILL} ref={editRef} value={editVal} onChange={e=>setEditVal(e.target.value)}
                       onClick={e=>e.stopPropagation()}
@@ -11521,7 +11555,7 @@ function ProjDropdown({data, setData, addProject, setProjCtx, breadcrumb=false})
                       onBlur={confirmRename}
                       style={{flex:1,border:"1px solid var(--blue)",borderRadius:3,padding:"2px 5px",fontSize:12,
                         fontFamily:"inherit",outline:"none",background:"#fff",color:"var(--txt)"}} />
-                  : <span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</span>
+                  : <span title={crossScheduleLabel(p)} style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{crossScheduleLabel(p)}</span>
                 }
                 {!isEditing && (
                   <span
@@ -15436,8 +15470,11 @@ function MeetingImportPicker({ otherSchedules, existingBodies, onImport, onCance
         )}
         {otherSchedules.map(g => (
           <div key={g.pid} style={{marginBottom:16}}>
+            {/* B1873361 — g.schedName is now the full "<Project> / <Schedule>" label (house order),
+                so the old reversed "<Schedule> · <Project>" tacked on here is retired, not just
+                reordered — schedName already carries both halves. */}
             <div style={{fontSize:10,fontWeight:700,color:"var(--mut)",textTransform:"uppercase",letterSpacing:".06em",marginBottom:6}}>
-              {g.schedName}{g.projName ? ` · ${g.projName}` : ""}
+              {g.schedName}
             </div>
             {g.bodies.map(b => {
               const key = `${g.pid}:${b.id}`;
@@ -16596,10 +16633,47 @@ const MASTER_COL_DEFS = [
 ];
 const DEFAULT_MASTER_COLS = ["project","id","name","parent","start","end","duration","health","responsibleParty","notes"];
 const DEFAULT_MASTER_WIDTHS = {
-  project:140, id:36, parent:140, name:220, start:72, end:72,
+  // B1873360 — 140 sized for a bare schedule name ("Master Schedule"); the Project column and the
+  // "Group by project" header now show the qualified crossScheduleLabel ("Goose Creek / Master
+  // Schedule"), which needs more room. Only the DEFAULT changes — a saved masterColWidths.project
+  // still wins (see colWidths' init below), so nobody who already sized this column gets clobbered.
+  project:200, id:36, parent:140, name:220, start:72, end:72,
   duration:52, health:110, percentComplete:60, responsibleParty:100,
   predecessors:180, successors:180, notes:80,
 };
+
+// B1873360 — MasterView's "Group by project" sections, keyed and ordered so two schedules that
+// happen to share a bare name (the owner's live account has two schedules both named "Master
+// Schedule", one under Goose Creek and one under Grand Port) can never merge into one section.
+// Pure and standalone (no React) so it's unit-testable without rendering the table: mirrored in
+// ui-audit/stress/scheduler-engine.mjs as groupRowsByProject.
+//
+// Keys by `projId`, never by the bare schedule name — the old `groups[t.projName]` keying is
+// exactly what let two differently-owned, identically-named schedules collapse into one bucket
+// with a summed count badge. A schedule that filters/sorts down to zero rows here never gets a
+// key at all (rows only arrives already filtered), so it renders no header — never an empty one.
+//
+// Groups are ordered by owner label, then schedule name, then `projId` as a stable tiebreak (two
+// schedules can share BOTH a name and an owner before either is renamed) — never insertion order,
+// which scattered one project's several schedules across the table instead of keeping them together.
+function groupRowsByProject(rows) {
+  const groups = new Map();
+  rows.forEach(t => {
+    if (!groups.has(t.projId)) groups.set(t.projId, []);
+    groups.get(t.projId).push(t);
+  });
+  return [...groups.entries()]
+    .map(([projId, gRows]) => ({
+      projId, gRows,
+      ownerLabel: gRows[0].projOwnerLabel || "",
+      name: gRows[0].projName || "",
+      label: gRows[0].projLabel || "",
+    }))
+    .sort((a, b) =>
+      a.ownerLabel.localeCompare(b.ownerLabel) ||
+      a.name.localeCompare(b.name) ||
+      String(a.projId).localeCompare(String(b.projId)));
+}
 
 function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
   const [localEdit, setLocalEdit] = useState(null);
@@ -16670,6 +16744,11 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
       const childIds = new Set(p.tasks.filter(t => t.parentId !== null).map(t => t.parentId));
       const rolled = computeRolledHealth(p.tasks, data.settings);
       const byId = {}; p.tasks.forEach(t => byId[t.id] = t);   // predecessorLate lookup, one per project
+      // B1873360 — computed once per schedule, not per cell: the bare name AND the qualified
+      // "<Project> / <Schedule>" label a row's owner needs are both derived from the same
+      // schedule object `p`, so every row of this schedule shares one (cheap) computation.
+      const { ownerLabel } = scheduleLabelParts(p);
+      const projLabel = crossScheduleLabel(p);
       return p.tasks
         .filter(t => !masterHealthFilter || (h => h==="red" || h==="yellow")(dispOf(t, childIds.has(t.id), rolled, byId)))
         .map(t => {
@@ -16679,7 +16758,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
             cur = p.tasks.find(x => x.id === cur.parentId) || null;
           }
           const isLeaf = !childIds.has(t.id);
-          return {...t, projName: p.name, projId: p.id, depth, isLeaf, _disp: dispOf(t, !isLeaf, rolled, byId)};
+          return {...t, projName: p.name, projId: p.id, projOwnerLabel: ownerLabel, projLabel, depth, isLeaf, _disp: dispOf(t, !isLeaf, rolled, byId)};
         });
     });
   }, [data.projects, masterHealthFilter, data.settings, NOW]);
@@ -16772,7 +16851,10 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
         case "percentComplete": av = a.percentComplete||0;       bv = b.percentComplete||0;         break;
         case "start":       av = a.start;                        bv = b.start;                      break;
         case "end":         av = a.end;                          bv = b.end;                        break;
-        case "project":     av = (a.projName||"").toLowerCase(); bv = (b.projName||"").toLowerCase(); break;
+        // B1873360 — sorts on the qualified label (two schedules can share a bare name), with
+        // projId appended as a stable tiebreak so two identically-labelled schedules' rows can
+        // never interleave nondeterministically when the labels alone tie.
+        case "project":     av = `${(a.projLabel||"").toLowerCase()}\u0000${String(a.projId)}`; bv = `${(b.projLabel||"").toLowerCase()}\u0000${String(b.projId)}`; break;
         case "name":        av = (a.name||"").toLowerCase();     bv = (b.name||"").toLowerCase();   break;
         case "responsibleParty": av=(ownerListOf(a)[0]||"").toLowerCase(); bv=(ownerListOf(b)[0]||"").toLowerCase(); break;   // NEW-1 — sort/group read the FIRST (accountable) owner only
         case "notes":       av = (a.notes||[]).length;           bv = (b.notes||[]).length;         break;
@@ -16811,7 +16893,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
     const values = sortedRows.map(t => {
       let val = '';
       switch(colKey) {
-        case 'project': val = t.projName||''; break;
+        case 'project': val = t.projLabel||''; break;
         case 'id': val = String(t.id); break;
         case 'name': val = t.name||''; break;
         case 'start': val = fmtD(t.start); break;
@@ -16846,7 +16928,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
   const renderJumpCell = (t) => (
     <td key="__jump" style={{width:30,minWidth:30,maxWidth:30,padding:0,textAlign:"center",
       borderBottom:"1px solid var(--bd)",borderRight:"1px solid var(--bd)"}}>
-      <button title={`Open row in ${t.projName}`}
+      <button title={`Open row in ${t.projLabel}`}
         onClick={e => { e.stopPropagation(); if (goToTask) goToTask(t.projId, t.id); }}
         onMouseEnter={e => { e.currentTarget.style.color = "var(--blue)"; e.currentTarget.style.background = "rgba(9,105,218,0.08)"; }}
         onMouseLeave={e => { e.currentTarget.style.color = "var(--mut)";  e.currentTarget.style.background = "transparent"; }}
@@ -16933,7 +17015,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
       width:colWidths[col.k], minWidth:colWidths[col.k], maxWidth:colWidths[col.k], ...selStyle};
     switch(col.k) {
       case "project":
-        return <td key={col.k} onClick={onCellClick} style={{...tdBase,color:"#1d4ed8",fontSize:11}}>{t.projName}</td>;
+        return <td key={col.k} onClick={onCellClick} title={t.projLabel} style={{...tdBase,color:"#1d4ed8",fontSize:11}}>{t.projLabel}</td>;
       case "id":
         return <td key={col.k} onClick={onCellClick} style={{...tdBase,color:"var(--mut)",fontSize:11}}>{t.id}</td>;
       case "parent":
@@ -17239,14 +17321,16 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
         </thead>
         <tbody>
           {masterGroupBy === "project" ? (() => {
-            const groups = {};
-            sortedRows.forEach(t => { (groups[t.projName] = groups[t.projName]||[]).push(t); });
-            return Object.entries(groups).flatMap(([projName, gRows]) => [
-              <tr key={`grp-${projName}`}>
+            // B1873360 — keyed by projId (never the bare schedule name) and ordered by owner
+            // label / schedule name / projId, so two schedules sharing a name (e.g. two accounts'
+            // "Master Schedule") get their own section instead of merging into one with a summed
+            // count badge. See groupRowsByProject's own header for the full reasoning.
+            return groupRowsByProject(sortedRows).flatMap(({projId, gRows, label}) => [
+              <tr key={`grp-${projId}`}>
                 <td colSpan={displayCols.length + 2} style={{
                   padding:"10px 12px 8px", borderBottom:"1px solid var(--bd)",
                   background:"#f0f0f5", borderLeft:"4px solid var(--amber)"}}>
-                  <span style={{fontSize:15,fontWeight:700,color:"var(--txt)",letterSpacing:"-.01em"}}>{projName}</span>
+                  <span style={{fontSize:15,fontWeight:700,color:"var(--txt)",letterSpacing:"-.01em"}}>{label}</span>
                   <span style={{marginLeft:8,fontSize:10,color:"var(--mut)",background:"#dbeafe",color:"#1d4ed8",borderRadius:8,padding:"1px 7px",verticalAlign:"middle"}}>{gRows.length}</span>
                 </td>
               </tr>,
@@ -17671,6 +17755,10 @@ function layoutExhibitCols(specs, opts){
   return { widths, tableW, ganttW: Math.max(EXHIBIT_MIN_GANTT, opts.budget-tableW) };
 }
 
+// B1873361 (PDF-PARITY) — the per-project section header this prints when more than one schedule
+// is exported together (".proj-name", below) uses crossScheduleLabel, not the bare schedule name,
+// for the same reason MasterView's "Group by project" does: exporting two same-named schedules
+// (the owner's own two "Master Schedule"s) together must not print two identical headers.
 function buildPDFHtml(cfg, data, forPreview) {
   const projs = Object.values(data.projects);
   const selProjs = projs.filter(p => cfg.selProjects.includes(String(p.id)));
@@ -17824,7 +17912,7 @@ function buildPDFHtml(cfg, data, forPreview) {
       }).join("");
       const ganttProj={...proj, tasks}; // Gantt task list matches the table
       const ganttSvg=buildGanttSVG([ganttProj], fit.ganttW, cfg.orientation, {noLabels:true, showToday:cfg.showToday!==false, showArrows:cfg.showArrows!==false, barLabels:data.settings?.barLabels, barNames:cfg.barNames!==false, labelAlign:cfg.labelAlign, timeUnit:cfg.timeUnit, zoomMul:cfg.zoomMul, panFrac:cfg.panFrac});
-      bodyHtml+=`<div class="proj-block">${selProjs.length>1?`<div class="proj-name">${escapeHtml(proj.name)}</div>`:""}
+      bodyHtml+=`<div class="proj-block">${selProjs.length>1?`<div class="proj-name">${escapeHtml(crossScheduleLabel(proj))}</div>`:""}
         <div class="split-view">
           <div class="split-table" style="width:${fit.tableW}px;flex-shrink:0">
             <table class="aligned"><thead><tr>${thCols}</tr></thead><tbody>${rows}</tbody></table>
@@ -17877,7 +17965,7 @@ function buildPDFHtml(cfg, data, forPreview) {
         const cells=colDefs.map(c=>`<td class="c-${c.k}">${cellVal(t,c.k,proj.tasks,proj.id)}</td>`).join("");
         return `<tr class="${i%2?"alt":""}">${cells}</tr>`;
       }).join("");
-      bodyHtml+=`<div class="proj-block">${selProjs.length>1?`<div class="proj-name">${escapeHtml(proj.name)}</div>`:""}<table><thead><tr>${thCols}</tr></thead><tbody>${rows}</tbody></table></div>`;
+      bodyHtml+=`<div class="proj-block">${selProjs.length>1?`<div class="proj-name">${escapeHtml(crossScheduleLabel(proj))}</div>`:""}<table><thead><tr>${thCols}</tr></thead><tbody>${rows}</tbody></table></div>`;
     });
   }
   return `<!DOCTYPE html><html><head><meta charset="UTF-8">
@@ -18489,7 +18577,10 @@ function PDFExportModal({data, activePid, onClose, setData}) {
                   <input type="checkbox" checked={cfg.selProjects.includes(String(p.id))}
                     onChange={e=>upd({selProjects:e.target.checked?[...cfg.selProjects,String(p.id)]:cfg.selProjects.filter(x=>x!==String(p.id))})}
                     style={{accentColor:"#4f46e5",width:12,height:12,flexShrink:0}} />
-                  <span style={{fontSize:11,color:"var(--txt)"}}>{p.name}</span>
+                  {/* B1873361 — picking WHICH schedules to export, so the qualified label
+                      disambiguates two same-named schedules the same way the export's own
+                      per-project header (crossScheduleLabel, buildPDFHtml) now does. */}
+                  <span title={crossScheduleLabel(p)} style={{fontSize:11,color:"var(--txt)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{crossScheduleLabel(p)}</span>
                 </label>
               ))}
             </div>

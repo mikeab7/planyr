@@ -157,9 +157,13 @@ describe("otherScheduleMeetingBodies — the account-wide source list for the im
     const groups = E.otherScheduleMeetingBodies(data, 1);
     expect(groups.map(g => g.pid)).toEqual([3]);
   });
-  it("carries the schedule name and, when set, its linked project name", () => {
+  it("B1873361 — schedName is the full qualified crossScheduleLabel, never a bare (possibly ambiguous) name; there is no separate projName field any more (folded into schedName)", () => {
     const groups = E.otherScheduleMeetingBodies(data, 1);
-    expect(groups[0]).toMatchObject({ pid: 3, schedName: "Sched C", projName: "Bain Tract" });
+    // Fixture 3 sets only linkedSiteName, not linkedSiteId, so ownerOf resolves it to the
+    // Organization (invariant 1's own precedence — a real linkedSiteId is what makes a schedule
+    // site-owned), matching crossScheduleLabel's ordinary behavior on this exact shape.
+    expect(groups[0]).toEqual({ pid: 3, schedName: "Organization / Sched C", bodies: data.projects[3].meetingBodies });
+    expect(groups[0]).not.toHaveProperty("projName");
   });
   it("a schedule with no other schedules on the account returns an empty list, not an error", () => {
     const solo = { projects: { 9: { id: 9, name: "Only one", meetingBodies: [] } } };
