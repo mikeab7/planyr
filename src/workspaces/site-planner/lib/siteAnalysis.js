@@ -175,7 +175,7 @@ export const ANALYSIS_SOURCES = [
     // or near the parcel, by PROXIMITY to the LINES. onSiteLabel makes a 0-ft nearest read
     // "crosses the site"; classifyProx (powerScreen.js) flags a crossing as a likely easement.
     id: "transmission", category: "Electric transmission", label: "Transmission lines (HIFLD)", kind: "line",
-    mapLayer: "hifld_tx", // the existing HIFLD transmission overlay (EVIDENCE block) gets the "◍ Map" toggle
+    mapLayer: "hifld_tx", // the existing HIFLD transmission overlay (EVIDENCE block) gets the "◍ Activate layer" toggle
     ...reg("transmission"),
     screenMode: "proximity", bufferMi: 0.25, ttl: 30 * DAY, verified: true,
     plural: "transmission line(s)", onSiteLabel: "crosses the site",
@@ -244,7 +244,7 @@ export const ANALYSIS_SOURCES = [
     // Statewide authoritative source (TWDB-hosted PUCT CCN) via the registry. CCN is a
     // FACT not a good/bad constraint, so classifyCcn returns `info` for both outcomes.
     id: "ccnWater", category: "Water service (CCN)", label: "Water CCN service area", kind: "polygon",
-    mapLayer: "ccn_service", // both CCN cards drive the one Water/sewer CCN overlay (B190 "◍ Map")
+    mapLayer: "ccn_service", // both CCN cards drive the one Water/sewer CCN overlay (B190 "◍ Activate layer")
     ...reg("ccnWater"),
     ttl: 30 * DAY, verified: true,
     classify: (rows) => classifyCcn(rows, { service: "water" }),
@@ -814,7 +814,7 @@ const roadRowName = (r) => r.name || (r.route ? `Route ${r.route}` : "Unnamed ro
  * Rows arrive already ordered longest-frontage-first from identifyRoadAuthority. Any
  * road that can't be classified shows an explicit "Unknown" (never a guess). With no
  * roads matched it reads the honest zero-match note, not a blank. Carries `mapLayer` so
- * the card gets a "◍ Map" toggle (B190) → the color-coded road overlay (NEW-2/B571). */
+ * the card gets a "◍ Activate layer" toggle (B190) → the color-coded road overlay (NEW-2/B571). */
 export function buildRoadFinding(road) {
   const roads = Array.isArray(road.roads) ? road.roads : [];
   const haveRoads = roads.length > 0;
@@ -835,7 +835,7 @@ export function buildRoadFinding(road) {
     status: haveRoads ? "info" : "unknown",
     summary: haveRoads ? null : (road.error || road.note || "No roads matched — screening only."),
     detail, rows,
-    mapLayer: "jur_road_authority", // NEW-2/B571: lifts the B190 suppression — the card gets a "◍ Map" toggle
+    mapLayer: "jur_road_authority", // NEW-2/B571: lifts the B190 suppression — the card gets a "◍ Activate layer" toggle
     sourceName: "TxDOT Roadway Inventory", ageMs: road.ageMs ?? null, ts: road.ts ?? null,
     error: road.error || null, caveat: road.note || "Local-road coverage is patchy — an honest \"unknown\" beats a wrong guess.", verified: true,
   };

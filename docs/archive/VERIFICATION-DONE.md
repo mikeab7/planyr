@@ -1,3 +1,17 @@
+### V1339792 — B1874896: Site Analysis "Activate layer" toggle relabel — GIS overlay wiring re-verified live ✅ **PASSED 2026-09-24 — self-verified headless Chromium against real GIS endpoints**
+
+**Added** 2026-09-24 · **Cadence** once (feature acceptance) · **Method:** `node ui-audit/verify-analysis.mjs` + `node ui-audit/verify-road-authority.mjs` against a local `vite preview` build, headless Chromium.
+
+**What was checked.** The Site Analysis panel's per-finding "Map"/"◉ On map" toggle was relabeled to "◍ Activate layer"/"◉ Deactivate layer" (B1874896) and needed re-confirmation that the underlying toggle still writes the same shared `overlays` state the Overlays rail tab reads (it always did — `toggleAnalysisLayer` in `SitePlanner.jsx` was untouched), and that a real GIS overlay still paints on click under the new label.
+
+**Result:**
+- `verify-analysis.mjs`, real live GIS endpoints (USFWS NWI wetlands, FEMA floodplain, TxRRC pipelines/wells — unshimmed, real network calls from this sandbox): Floodplain **PRESENT (Zone AE)**, Wetlands **PRESENT**, Pipelines **NONE FOUND**, Oil & gas **PRESENT** — B189 query-resolution class still holds. Clicking the Wetlands card's **"◍ Activate layer"** button flipped it to **"◉ Deactivate layer"** and the NWI overlay painted onto the Leaflet map (`leaflet-image-layer` count 0→2), framed to the parcel. Screenshot: `ui-audit/screens/analysis-verify.png`.
+- `verify-road-authority.mjs` (TxDOT query response shimmed per that file's own documented sandbox-egress limitation; the toggle/overlay-paint mechanics are real): the Road authority card's **"◍ Activate layer"** toggle flipped to **"◉ Deactivate layer"** and painted 221 vector features into the Leaflet overlay pane.
+- Both harnesses required a routing fix unrelated to the relabel itself — B1213312's Dashboard-default landing (shipped after these two harnesses were last touched) meant a bare `#/` no longer opens the seeded plan; updated `BASE` in both files to `#/project/<id>/site`, matching the pattern already used by 36 other `ui-audit/verify-*` harnesses.
+- `npx vitest run` — 902 files / 18,390 tests, all green. `npm run build` clean. `node ui-audit/design-drift-audit.mjs` clean (exit 0).
+
+**Observed result: the overlay is genuinely toggled by the button in both the on and off direction, under the new label, against live GIS data — no residual pending.** Moved straight to Done (nothing left owed).
+
 ### V1348544 — B1885600 (×2): the barrier-island/coastal-seat parcel routing fix (Florida's own FDEP county-boundary source) resolves real parcels on production ✅ **PASSED 2026-09-24 — self-verified via WebKit against the Cloudflare Pages preview build `7b9258e` of PR #1844 (`Blocker: live-GIS`, closed from this sandbox)**
 
 **Why this needed its own live pass, distinct from V1345744.** V1345744 verified the ORIGINAL 17-county FDOR-layer wiring and, in doing so, itself found the failure this item fixes (Nassau/Fernandina Beach, Anna Maria and Jacksonville Beach all failing "Parcel info unavailable" on production build b9722c7 — Hernando/Brooksville read the same on that first pass but turned out to be transient, see step 2 below). This item's own PRE-FIX baseline and POST-FIX re-check are both self-verified from this sandbox via WebKit against the real `planyr.io` / its Cloudflare Pages preview (Chromium's TLS handshake fails against these hosts from this sandbox; WebKit's does not).
