@@ -240,3 +240,37 @@ export const LayersIcon = ({ size = 20 }) => (
     <path d="M4 13 12 19 20 13" />
   </svg>
 );
+
+/* NEW-1 (2026-09-24) — the three rows of the map toolbar's "Record info" dropdown (the decide
+ * bar's three non-site verbs, collapsed off the bar into a menu — see MapFinder.jsx). An open
+ * shipping box: the closest plain shape for "a market record", distinct from LayersIcon's
+ * diamond-over-chevron and from anything already in this file. */
+export const CompIcon = ({ size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    style={{ flex: "none", display: "block" }}>
+    <path d="M3 18V9l9-6 9 6v9l-9 4.5Z" />
+    <path d="M3 9l9 3 9-3M12 12v10.5" />
+  </svg>
+);
+
+// A ruled sheet with a divider — "a layout", distinct from CompIcon's box and from a plain
+// document (NoteIcon below has no internal divider, this does).
+export const SitePlanIcon = ({ size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    style={{ flex: "none", display: "block" }}>
+    <rect x="3" y="4.5" width="18" height="15" rx="1.5" />
+    <path d="M3 10.5h18M9 10.5v9" />
+  </svg>
+);
+
+// A ruled note — two text lines on a plain page, distinct from SitePlanIcon's divided rect.
+export const NoteIcon = ({ size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    style={{ flex: "none", display: "block" }}>
+    <path d="M4.5 4.5h15v15h-15Z" />
+    <path d="M7.5 9h9M7.5 12.75h6" />
+  </svg>
+);

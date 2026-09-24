@@ -3,7 +3,7 @@
  * The toolbar stopped asking "what are you making?" before the user had pointed at any ground; it
  * asks afterwards, on a bar carrying three verbs at once. Three pure decisions drive that bar, and
  * they are tested here because a regression in ANY of them still renders a perfectly good-looking
- * toolbar — the sticky answer silently reverting to "Plan a site" every time, an unavailable verb
+ * toolbar — the sticky answer silently reverting to "Plan this site" every time, an unavailable verb
  * leading a bar that cannot run it, a bar that thinks it is about parcels when it is about a pin.
  * No screenshot, pixel diff or e2e path in this repo can tell those apart from correct behaviour.
  */
@@ -37,7 +37,7 @@ describe("decideTargetOf — which ground the bar is about", () => {
 });
 
 describe("orderVerbs — the sticky answer", () => {
-  it("leads with Plan a site on a fresh session (no stored verb)", () => {
+  it("leads with Plan this site on a fresh session (no stored verb)", () => {
     expect(orderVerbs(ALL, null)[0]).toBe("site");
   });
 
@@ -80,9 +80,10 @@ describe("orderVerbs — the sticky answer", () => {
 });
 
 describe("verbLabel — how each verb reads", () => {
-  it("says Plan a site in the singular, the owner's own wording (2026-09-08)", () => {
-    expect(verbLabel("site", 0)).toBe("Plan a site");
-    expect(verbLabel("site", 1)).toBe("Plan a site");
+  it("says Plan this site in the singular (B1892544, 2026-09-24 — was \"Plan a site\" until the "
+    + "Record info dropdown gave it a direct, always-visible neighbor)", () => {
+    expect(verbLabel("site", 0)).toBe("Plan this site");
+    expect(verbLabel("site", 1)).toBe("Plan this site");
   });
 
   it("counts the lots in the plural, the wording this button already carried", () => {

@@ -428,6 +428,8 @@ console.log("\n=== NEW-5 — Executed date optional: Today button, save not bloc
     if (mapBox) {
       await page.mouse.click(mapBox.x + mapBox.width / 2, mapBox.y + 150);
       await pacedWait(page, 400);
+      // B1892544 (2026-09-24) — "Log a comp" moved off the bar into "Record info ▾".
+      await page.getByTestId("map-decide-record-info").click();
       await page.getByTestId("map-decide-verb-comp").click();
       await pacedWait(page, 3500);
     }

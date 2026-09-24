@@ -49,9 +49,15 @@ export function orderVerbs(all, lastVerb, isAvailable = () => true) {
  * The plural keeps the wording this button already carried before the redesign — "Plan N parcels"
  * — because a user assembling adjoining lots is checking exactly that count before committing.
  * Every other verb reads the same however much ground is selected: "a comp" and "a site plan" are
- * single things whatever they are anchored to. */
+ * single things whatever they are anchored to.
+ * NEW-1 (B1892544, 2026-09-24) — the singular reads "Plan this site", not "Plan a site". The
+ * other three verbs collapsed off the bar into MapFinder.jsx's "Record info" dropdown (this
+ * button stayed a direct, always-visible press), and "this site" reads correctly beside the
+ * dropdown trigger where "a site" — grammatically fine on its own — implied a fourth, unnamed
+ * site next to the one already picked. The plural is untouched: "Plan N parcels" already names
+ * the ground, so it never had that ambiguity. */
 export function verbLabel(key, selectedCount = 0) {
-  if (key === "site") return selectedCount > 1 ? `Plan ${selectedCount} parcels` : "Plan a site";
+  if (key === "site") return selectedCount > 1 ? `Plan ${selectedCount} parcels` : "Plan this site";
   if (key === "comp") return "Log a comp";
   if (key === "siteplan") return "Place a site plan";
   // B1372144 — the fourth verb. Reads the same however much ground is selected, like "a comp" and

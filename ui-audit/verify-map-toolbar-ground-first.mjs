@@ -14,10 +14,13 @@
  * WHAT IT PROVES, and each one is a thing a screenshot cannot tell from correct:
  *   A. AT REST — three ways to point at ground (Select parcels · Draw · Drop a pin), nothing
  *      preselected, and NO mode control anywhere on the toolbar.
- *   B. THE DECIDE BAR — a dropped pin produces the summary, its ✕, and all THREE verbs at once.
- *   C. THE STICKY ANSWER — choosing a verb makes it the primary on the next selection, within the
- *      session only. This is the one behaviour with no visual tell at all: a bar that silently
- *      stopped being sticky renders identically.
+ *   B. THE DECIDE BAR — a dropped pin produces the summary, its ✕, "Plan this site", and a
+ *      "Record info ▾" that opens Log a comp / Place a site plan / Add a note (B1892544,
+ *      2026-09-24 — collapsed off the bar into a dropdown; was four live sibling buttons).
+ *   C. THE STICKY ANSWER — choosing a verb makes it lead on the next selection (the outer bar's
+ *      accent AND the dropdown's own row order), within the session only. This is the one
+ *      behaviour with no visual tell at all: a bar that silently stopped being sticky renders
+ *      identically.
  *   D. LAYOUT — at 1600×465 AND 1191×465 (both named in the brief) the bar does not wrap, does
  *      not overflow its own pill, and does not intersect the left rail or the Imagery-and-layers
  *      panel. MEASURED as rects, never eyeballed.
@@ -49,7 +52,10 @@ const check = (name, ok, detail = "") => {
 const overlaps = (a, b) => !!a && !!b && a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 const r1 = (n) => Math.round(n * 10) / 10;
 
-const browser = await chromium.launch();
+// If the managed Chromium revision differs, set PW_CHROME to the chrome binary (docs/REFERENCE.md
+// "Playwright / ui-audit in the sandbox" — the same fallback every other harness here uses).
+const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
 try {
   if (SHOTS) mkdirSync(OUT, { recursive: true });
 
@@ -98,15 +104,34 @@ try {
     check("B1 · the decide bar appears", await page.getByTestId("map-decide-summary").count() === 1);
     check("B2 · the pin is drawn on the map", await page.getByTestId("map-decide-pin").count() === 1);
     check("B3 · its ✕ is there", await page.getByTestId("map-decide-clear").count() === 1);
+    /* B1892544 (2026-09-24) — the bar itself now carries only TWO direct controls: "Plan this
+     * site" and "Record info ▾". The other three verbs (Log a comp / Place a site plan / Add a
+     * note) live inside the menu the second one opens, so proving they are all reachable needs
+     * opening it — this replaces the old "all four are live sibling buttons at once" check with
+     * the design's own new claim: one direct action, one menu holding the rest. */
+    check("B4a · 'Plan this site' renders as a direct button", await page.getByTestId("map-decide-verb-site").count() === 1);
+    const recordInfoBtn = page.getByTestId("map-decide-record-info");
+    check("B4b · 'Record info ▾' renders as the bar's only other direct control",
+      await recordInfoBtn.count() === 1);
+    check("B4c · nothing behind it is in the DOM until it is opened",
+      await page.getByTestId("map-decide-verb-comp").count() === 0
+      && await page.getByTestId("map-decide-verb-siteplan").count() === 0
+      && await page.getByTestId("map-decide-verb-note").count() === 0);
+    await recordInfoBtn.click();
+    await pacedWait(page, 250);
     const verbCounts = {};
-    for (const k of ["site", "comp", "siteplan"]) verbCounts[k] = await page.getByTestId(`map-decide-verb-${k}`).count();
-    check("B4 · all three verbs are live at once, never one chosen by a mode",
-      verbCounts.site === 1 && verbCounts.comp === 1 && verbCounts.siteplan === 1, JSON.stringify(verbCounts));
+    for (const k of ["site", "comp", "siteplan", "note"]) verbCounts[k] = await page.getByTestId(`map-decide-verb-${k}`).count();
+    check("B4d · Log a comp / Place a site plan / Add a note all render inside the open menu",
+      verbCounts.comp === 1 && verbCounts.siteplan === 1 && verbCounts.note === 1, JSON.stringify(verbCounts));
+    await page.keyboard.press("Escape");
+    await pacedWait(page, 200);
+    check("B4e · Escape closes the menu again, taking its rows back out of the DOM",
+      await page.getByTestId("map-decide-verb-comp").count() === 0);
     const verbText = await page.getByTestId("map-decide-verb-site").innerText();
-    check("B5 · the first verb reads 'Plan a site' (owner wording, 2026-09-08)", verbText.trim() === "Plan a site", verbText.trim());
+    check("B5 · the direct verb reads 'Plan this site' (B1892544, 2026-09-24 — was 'Plan a site')", verbText.trim() === "Plan this site", verbText.trim());
     const dotBg = await page.getByTestId("map-decide-dot").evaluate((el) => getComputedStyle(el).backgroundColor);
     // Neutral means: not the site accent and not the comp accent — it must not imply an answer.
-    check("B6 · the status dot is neutral, not an accent that names one of the three verbs",
+    check("B6 · the status dot is neutral, not an accent that names one of the four verbs",
       !/rgb\(47,\s*111,\s*176\)/.test(dotBg), dotBg);
 
     // ── D. LAYOUT, measured ────────────────────────────────────────────────────────────────
@@ -144,14 +169,23 @@ try {
     if (SHOTS) await page.screenshot({ path: `${OUT}/decide-bar-${width}.png` });
 
     // ── C. THE STICKY ANSWER ───────────────────────────────────────────────────────────────
-    // Read the ORDER, not just presence: primary is the first verb button in the bar.
-    const orderNow = await page.evaluate(() =>
-      [...document.querySelectorAll('[data-testid^="map-decide-verb-"]')].map((b) => b.dataset.testid.replace("map-decide-verb-", "")));
+    /* B1892544 — the old probe read the sticky order off the DOM order of four sibling
+     * `[data-testid^="map-decide-verb-"]` buttons; three of those are now unmounted until "Record
+     * info" is opened, so a bare querySelectorAll can no longer see them. MapFinder.jsx now
+     * publishes the same `orderVerbs` result on a small hidden span for exactly this reason —
+     * read that instead of the DOM order. */
+    const readOrder = async () => {
+      const attr = await page.getByTestId("map-decide-order").getAttribute("data-order");
+      return (attr || "").split(",").filter(Boolean);
+    };
+    const orderNow = await readOrder();
     check("C1 · a fresh session leads with 'site' (nothing stored yet)", orderNow[0] === "site", orderNow.join(" · "));
 
     // Choose "Log a comp". Logged out there is nowhere for a comp to go, so `onPlaceComp` may be
     // absent and the verb may not render at all — say so honestly rather than silently pass.
     if (verbCounts.comp === 1) {
+      await recordInfoBtn.click();
+      await pacedWait(page, 200);
       await page.getByTestId("map-decide-verb-comp").click();
       await pacedWait(page, 400);
       const stored = await page.evaluate(() => { try { return sessionStorage.getItem("planarfit:mapDecideVerb:v1"); } catch (_) { return "unreadable"; } });
@@ -162,12 +196,37 @@ try {
       // Point at ground again; the remembered verb must now LEAD.
       await page.getByTestId("map-toolbar-drop-pin").click();
       await pacedWait(page, 200);
-      await page.mouse.click(mapBox.x + mapBox.width * 0.45, mapBox.y + mapBox.height * 0.55);
+      /* Picking "Log a comp" above opened the comp entry sheet, which DOCKS over the bottom of the
+       * map (B986096-HARDENING-10) WITHOUT shrinking `.leaflet-container`'s own measured box — a
+       * pre-existing shape, unrelated to this item, that `mapBox` (captured once, before that
+       * panel existed) cannot see. Clicking at `mapBox.height * 0.55` lands ON the docked panel,
+       * not on the map, so no new pin is ever placed and the decide bar never reappears — caught
+       * live while proving this item, not assumed. Aim inside whatever of the map is STILL visible
+       * above the panel instead. */
+      const panelBox = await page.locator("[data-comp-entry-panel]").boundingBox().catch(() => null);
+      const clickY = panelBox
+        ? Math.max(mapBox.y + 10, Math.min(mapBox.y + mapBox.height * 0.55, panelBox.y - 20))
+        : mapBox.y + mapBox.height * 0.55;
+      await page.mouse.click(mapBox.x + mapBox.width * 0.45, clickY);
       await pacedWait(page, 450);
-      const orderAfter = await page.evaluate(() =>
-        [...document.querySelectorAll('[data-testid^="map-decide-verb-"]')].map((b) => b.dataset.testid.replace("map-decide-verb-", "")));
+      const orderAfter = await readOrder();
       check("C4 · the next decide bar leads with the remembered verb", orderAfter[0] === "comp", orderAfter.join(" · "));
-      check("C5 · and still offers all three", orderAfter.length === 3, orderAfter.join(" · "));
+      check("C4b · and 'Record info' — not 'Plan this site' — now carries the lead accent, since a record verb leads",
+        await page.getByTestId("map-decide-record-info").evaluate((el) => getComputedStyle(el).backgroundColor)
+          !== await page.getByTestId("map-decide-verb-site").evaluate((el) => getComputedStyle(el).backgroundColor));
+      check("C5 · and still offers all four", orderAfter.length === 4, orderAfter.join(" · "));
+      await recordInfoBtn.click();
+      await pacedWait(page, 200);
+      // "site" is excluded — its own button is always mounted beside the menu's trigger, so a
+      // bare selector sweep would catch it too and report the wrong element as row 0.
+      const rowOrder = await page.evaluate(() =>
+        [...document.querySelectorAll('[data-testid^="map-decide-verb-"]')]
+          .map((b) => b.dataset.testid.replace("map-decide-verb-", ""))
+          .filter((k) => k !== "site"));
+      check("C5b · and the remembered verb leads the OPEN MENU'S rows too (top of the dropdown, not just the bar accent)",
+        rowOrder[0] === "comp", rowOrder.join(" · "));
+      await page.keyboard.press("Escape");
+      await pacedWait(page, 200);
 
       // ✕ leaves the bar without answering it, and marks no ground.
       await page.getByTestId("map-decide-clear").click();
