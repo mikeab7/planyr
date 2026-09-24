@@ -654,3 +654,45 @@ this file documents everywhere else. None of the four hostname-discovery correct
 independently re-verified for the same reason; they are recorded because the ArcGIS Online item
 registry that names them is itself a more current, checkable source than the dispatch's own guess,
 not because either was fetched and read.
+
+### GIS pass-through — a same-origin relay for a county host with NO CORS support at all (NEW-1, 2026-09-24)
+
+Every county row above assumes the county's own GIS server will answer a browser's cross-origin
+fetch — most do (Esri's ArcGIS Online sends `Access-Control-Allow-Origin` by default, and most
+self-hosted county servers do too). **Southern Georgia Regional Commission (SGRC) does not.**
+Measured live from Michael's own Chrome, 2026-09-24: `www.sgrcmaps.com`'s Tift County parcel
+layer (`/alma/rest/services/Tift/Tift_Parcels/MapServer/0`, 19,194 parcel polygons) opens fine
+when fetched directly, but the identical fetch from the `planyr.io` origin fails with no ACAO
+header on the response at all — not a slow server, not a wrong URL, a server that simply never
+sends the header a browser needs to let the page read the response.
+
+**The fix is a plain relay, not a workaround per county.** `functions/gis-proxy/[[path]].js` is a
+Cloudflare Pages Function — it deploys automatically with the site build, no `wrangler.toml`, no
+environment variable — that fetches an allow-listed host **server-side**, where CORS does not
+apply, and hands the response back same-origin. A county's `layerUrl` in `counties.js` can be
+either a normal `https://…` address (the common case) or a root-relative path of the form
+`/gis-proxy/<host>/<rest of the county's own path>` (Tift County's case) — every parcel-fetch call
+site (`arcgis.js`'s `queryFeatures`/`queryAtPoint`/`getLayerInfo`/`resolveLayerUrl`, all via one
+`resolveGisUrl` helper) resolves either shape correctly, and the on-screen parcel layer (Leaflet /
+esri-leaflet, pointed straight at the same relative path) never needs to know a proxy is involved.
+
+**To add a new host:** add its exact hostname to `ALLOWED_HOSTS` in
+`functions/gis-proxy/[[path]].js` (a hard-coded set — never a wildcard/pattern, so this can never
+become an open relay to an arbitrary host), then wire the county's `layerUrl` as
+`/gis-proxy/<that host>/<the county's own REST path>`, exactly as if you were building the normal
+`https://` URL but swapping the scheme+host for the proxy's own path. GET and POST both work (the
+function forwards a POST body + its Content-Type, so the `fetchArcgisJson` GET→POST fallback for
+an over-long query still works through it); nothing is cached beyond a short response-lifetime
+`Cache-Control` on a genuine 200 — this is a pass-through, not a copy, unlike the separate B445
+`/api/gis-cache/` proxy (a Drive-backed cache for raster **imagery**; see that module's own header
+— the two proxies solve different problems and are not the same mechanism).
+
+**SGRC's one host already covers eleven more Georgia counties**, all reachable the identical way
+once wired: Atkinson, Ben Hill, Berrien, Brooks, Coffee, Cook, Echols, Irwin, Lanier, Pierce and
+Turner, each under its own `/alma/rest/services/<County>/<County>_Parcels/MapServer/0`-shaped
+path on the same host (not independently confirmed this session — a real follow-up, not a
+guess: the SGRC host itself is real and reachable, only the per-county path needs confirming).
+**Middle Georgia Regional Commission** (`mgrcmaps.org`) and the **Coastal Regional Commission**
+(`maps.crc.ga.gov`, already named above as the host behind Long and Screven counties' own
+unwired candidate URLs) are both allow-listed too and are the same shape of fix once a specific
+county layer on either is confirmed and wired.

@@ -870,6 +870,21 @@ const COUNTIES_RAW = {
     idField: "PARCEL_NO",
     help: "Camden County parcels (Esri-hosted). Search by parcel number or a site address.",
   },
+  ga_tift: {
+    // NEW-1 (2026-09-24) — Southern Georgia Regional Commission (SGRC), a real, current county
+    // parcel service (measured live from Michael's Chrome at the planyr.io origin: 19,194 parcel
+    // polygons opening fine when fetched directly at sgrcmaps.com) that sends NO
+    // Access-Control-Allow-Origin header at all — the fetch fails only from planyr.io, with no
+    // ACAO header on the response. So this is the first county wired through the same-origin
+    // /gis-proxy/ pass-through (functions/gis-proxy/[[path]].js) rather than a direct https:// URL
+    // — the browser talks to planyr.io, which relays server-side, where CORS does not apply.
+    // SGRC's same host also carries Atkinson, Ben Hill, Berrien, Brooks, Coffee, Cook, Echols,
+    // Irwin, Lanier, Pierce and Turner under sibling `/alma/rest/services/<County>/` paths — see
+    // docs/STATEWIDE-PARCELS.md's "GIS pass-through" section; only Tift is wired this session.
+    state: "GA", label: "Tift County, GA",
+    layerUrl: "/gis-proxy/www.sgrcmaps.com/alma/rest/services/Tift/Tift_Parcels/MapServer/0",
+    help: "Tift County parcels (Southern Georgia Regional Commission, reached through Planyr's own same-origin relay — the county's server sends no cross-origin header). Search by parcel number or a site address.",
+  },
 
   /* ⛔ B1339920 (2026-09-12) — THIS ENTRY WAS PREVIOUSLY THE ONLY AZ ROW, AND ITS BBOX REACHES
    * PHOENIX. `az_pinal`'s bbox is Pinal's own measured data extent (32.5–33.47 lat), which overlaps
@@ -1890,6 +1905,10 @@ const COUNTIES_MAP_RAW = {
   ga_paulding: { state: "GA", center: [33.93, -84.89], zoom: 10, bbox: [33.76, -85.07, 34.10, -84.71], mapServer: null, layerUrl: COUNTIES.ga_paulding.layerUrl },
   ga_bulloch: { state: "GA", center: [32.40, -81.73], zoom: 10, bbox: [32.13, -82.05, 32.67, -81.41], mapServer: null, layerUrl: COUNTIES.ga_bulloch.layerUrl },
   ga_camden: { state: "GA", center: [30.94, -81.67], zoom: 10, bbox: [30.69, -81.96, 31.19, -81.38], mapServer: null, layerUrl: COUNTIES.ga_camden.layerUrl },
+  // NEW-1 (2026-09-24) — center/bbox read directly from public/geo/county-polygons.json (the same
+  // nationwide asset resolveCounty uses, same convention as the B1551617/B1339920 rows above),
+  // never hand-typed: raw extent [-167326,62654,-166663,63195] at scale 2000.
+  ga_tift: { state: "GA", center: [31.4623, -83.4973], zoom: 10, bbox: [31.33, -83.66, 31.60, -83.33], mapServer: null, layerUrl: COUNTIES.ga_tift.layerUrl },
   az_pinal: { state: "AZ", center: [32.9940, -111.3275], zoom: 9, bbox: [32.51, -112.21, 33.48, -110.45], mapServer: null, layerUrl: COUNTIES.az_pinal.layerUrl },
   // B1339920 — bbox/center read directly from public/geo/county-polygons.json (same convention as
   // the B1551617 Tier 1 rows above), never hand-typed: [-226663,65023,-222085,68098] / scale 2000.

@@ -3,7 +3,7 @@ import {
   outerRingsLngLat, queryAtPoint, identifyParcelDetailed, identifyParcelEager,
   BACKUP_GRACE_MS,
   ParcelFetchError, PARCEL_FETCH_TIMEOUT_MS, humanizeError, geoJsonToEsriFeature,
-  identifyAtPoint, isQueryCapabilityError,
+  identifyAtPoint, isQueryCapabilityError, resolveGisUrl,
 } from "../src/workspaces/site-planner/lib/arcgis.js";
 import { STATEWIDE_PARCEL_LAYER } from "../src/workspaces/site-planner/lib/counties.js";
 
@@ -458,5 +458,28 @@ describe("humanizeError — plain wording per failure kind", () => {
   });
   it("an arcgis body error surfaces the server's own message", () => {
     expect(humanizeError(new ParcelFetchError("arcgis", "Token Required", 499))).toBe("Token Required");
+  });
+});
+
+// NEW-1 (2026-09-24) — a county layerUrl may now be root-relative (routed through the
+// same-origin /gis-proxy/ pass-through for a host with no CORS support) instead of an absolute
+// https:// URL. `resolveGisUrl` is what every parcel-fetch call site (queryFeatures/queryAtPoint/
+// getLayerInfo/resolveLayerUrl, all via fetchJson) resolves through, so this is the one place a
+// regression here would show up.
+describe("resolveGisUrl — a relative proxy path resolves against the app's own origin", () => {
+  it("resolves a root-relative layerUrl (the /gis-proxy/ pass-through) against a supplied base", () => {
+    const u = resolveGisUrl("/gis-proxy/www.sgrcmaps.com/alma/rest/services/Tift/Tift_Parcels/MapServer/0", "https://planyr.io");
+    expect(u.origin).toBe("https://planyr.io");
+    expect(u.pathname).toBe("/gis-proxy/www.sgrcmaps.com/alma/rest/services/Tift/Tift_Parcels/MapServer/0");
+  });
+
+  it("leaves an absolute layerUrl untouched, even when a base is supplied", () => {
+    const u = resolveGisUrl("https://example.test/MapServer/0", "https://planyr.io");
+    expect(u.href).toBe("https://example.test/MapServer/0");
+  });
+
+  it("with no base (the Node test environment has no window), an absolute URL still resolves", () => {
+    const u = resolveGisUrl("https://example.test/MapServer/0");
+    expect(u.href).toBe("https://example.test/MapServer/0");
   });
 });

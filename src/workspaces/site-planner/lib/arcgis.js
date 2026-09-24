@@ -29,8 +29,18 @@ export class ParcelFetchError extends Error {
  * chain can take over instead of locking the UI (B244). */
 export const PARCEL_FETCH_TIMEOUT_MS = 8000;
 
+/* NEW-1 (2026-09-24) — a county `layerUrl` may now be ROOT-RELATIVE (routed through the
+ * same-origin GIS pass-through, e.g. "/gis-proxy/www.sgrcmaps.com/…", for a county host that
+ * sends no CORS header at all) instead of a full https:// URL. `new URL(url)` with no base throws
+ * on a relative string, so every caller resolves through this instead — it supplies the app's own
+ * origin as the base; an absolute URL is returned untouched (the base is ignored whenever the
+ * string already has a scheme). The base is injectable so this is unit-testable without a DOM. */
+export function resolveGisUrl(url, base = typeof window !== "undefined" ? window.location.origin : undefined) {
+  return new URL(url, base);
+}
+
 async function fetchJson(url, params) {
-  const u = new URL(url);
+  const u = resolveGisUrl(url);
   u.searchParams.set("f", "json");
   if (params)
     for (const [k, v] of Object.entries(params))
