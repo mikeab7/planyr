@@ -186,6 +186,8 @@ console.log("\n=== BLOCKER 2 — the toolbar pin fills the open row, never appen
   if (mapBox) {
     await page.mouse.click(mapBox.x + mapBox.width / 2, mapBox.y + 150);
     await pacedWait(page, 400);
+    // B1892544 (2026-09-24) — "Log a comp" moved off the bar into "Record info ▾".
+    await page.getByTestId("map-decide-record-info").click();
     await page.getByTestId("map-decide-verb-comp").click();
     // resolveCompCounty races a 3s timeout when GIS is unreachable (this fixture is offline).
     await pacedWait(page, 3500);
