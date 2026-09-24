@@ -3292,3 +3292,15 @@ Full suite `npx vitest run` — 881 files / 17,979 tests, zero failures. `npm ru
 - **Stopping rule:** closes when steps 1–3 confirm on Michael's real account (or a deployed preview build) on a real georeferenced project, dated — or a step fails and is filed as a recurrence against B1795456, per STANDING RULE #2 (a null result is a FINDING, never a silent close).
 
 **Result:** ✅ PASSED — verified 2026-09-22 by Michael (the owner), signed in on live planyr.io, on one of his own real georeferenced plans with real aerial imagery underneath — the one check the shipping session could not do from the sandbox. Reported: the badge matches the scale-bar and compass chrome, one green dot, two-tone label. "All good." `Cadence: once` — closed.
+
+### V688 — B1403 (a truncated parcel draw says so) — SUPERSEDED 2026-09-24, never reached a live pass
+
+**Disposition: superseded, not passed.** Owner decision 2026-09-24 (B1876624) retired the "capped this
+view at N lots" banner this item was written to verify, along with the vector-only display behind it
+— see B1403 (`docs/archive/BACKLOG-DONE.md`) and B1876624's own `⏳ Verify` entry (`V1340256`). The banner
+no longer exists to check, so there is nothing left for a live pass to confirm; this closes the item
+rather than leaving an unpassable check sitting in the live file. STANDING RULE #2 does not apply here
+— this is not an owner-reported symptom being closed on a null, it is the checked BEHAVIOR being
+retired by an explicit, later owner decision.
+
+*(never verified live while it was open; superseded rather than passed)*

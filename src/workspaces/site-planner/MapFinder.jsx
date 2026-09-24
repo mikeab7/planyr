@@ -96,7 +96,6 @@ import { findAttr, situsAddress, siteNameFromParcel, tidyAddressLabel } from "./
 const ParcelInfoCard = lazy(() => import("./components/ParcelInfoCard.jsx"));
 import { PanelErrorBoundary } from "./components/LazyPanel.jsx";
 import { makeParcelDisplayLayer, makeSnapshotLayer, parcelDisplayIsImageOnly, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
-import { responseWasTruncated, featureCountOf, parcelTruncationNotice } from "./lib/parcelTruncation.js";
 import { siteBoundaryInfo, siteDrawParcels } from "./lib/siteBoundary.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { compAnchorFromSelection, parcelAnchorFromSelection } from "./lib/compParcelAnchor.js";
@@ -2775,9 +2774,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
 
     // The statewide TxGIO source has its /query disabled upstream, so its vector layer
     // draws nothing; makeParcelDisplayLayer renders it as a server /export image overlay
-    // instead (real, queryable CADs stay vector — which also backs the instant click
-    // highlight). What you SEE stays == what you can SELECT (the B137 rule): the click
-    // path (queryAtPoint) has the matching /query→/identify fallback.
+    // instead. A real, queryable CAD gets the three-regime adaptive layer (NEW-1: vector
+    // close-in, the same /export image wide, nothing far out — see parcelDisplay.js), which
+    // also backs the instant click highlight while close-in. What you SEE stays == what you
+    // can SELECT (the B137 rule) in every regime: the click path (queryAtPoint) always
+    // identifies via a live point query, never against what happened to be drawn.
     const fl = makeParcelDisplayLayer(url);
     // B1427664 — NEW-3: `fl.addTo(map)` is deferred to the END of this function, after every
     // listener below is wired. `onAdd` (fired synchronously inside `addTo`) is what actually
@@ -2791,15 +2792,6 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // the reported case (fly to a site, turn on Select, do nothing else).
     displaysRef.current[key] = fl;
     displaySrcRef.current[key] = { url: src, owner: key };
-    /* NEW-3 — a truncated parcel draw must never look like a complete one. ArcGIS answers a
-       view-sized bbox with at most `maxRecordCount` features and sets `exceededTransferLimit`
-       when it had more to give; esri-leaflet does not page, so the map draws an authoritative-
-       looking parcel layer with an unknown number of lots silently missing. Measured against the
-       Colorado composite: exactly 2000 features, flag true, 1,466 ms. Say so. */
-    fl.on("requestsuccess", (e) => {
-      if (!responseWasTruncated(e && e.response)) return;
-      setErr(parcelTruncationNotice(featureCountOf(e.response)));
-    });
     // The statewide TxGIO layer is the UNIVERSAL fallback — let it load even when it's
     // slow, and NEVER pull it on a hiccup. A slow statewide outline still beats no
     // outline (that "took a while to load but worked" wait IS this layer); removing it
@@ -2889,19 +2881,31 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // Arm the hang-timer only once a request to the host is actually in flight, so we
     // never false-flag a county just because we're zoomed out below the outline zoom
     // (no request made). A live host fires 'load' well within the window.
-    fl.on("requeststart", () => {
-      if (!settled && !timer) timer = setTimeout(markDown, DISPLAY_LOAD_TIMEOUT_MS);
-      // B1427664 — a much shorter "still loading" notice, well inside the 8s hang-guard: a real
-      // CAD host that's merely slow (not yet hung) drew nothing and said nothing for up to 8s.
-      if (!settled && !slowTimer) {
-        slowTimer = setTimeout(() => {
-          slowTimer = null;
-          if (displaysRef.current[key] === fl && sourceNoticeStillPlausible(displayNoticeShape(key))) markDisplaySlow(key, true);
-        }, SLOW_DISPLAY_NOTICE_MS);
-      }
-    });
-    fl.on("load", () => { if (!settled) { settled = true; stopTimer(); clearSlowTimer(); markDisplaySlow(key, false); } }); // drew fine — healthy
-    fl.on("requesterror", markDown);
+    // NEW-1 — `fl` is either the plain vector layer (a FeatureServer CAD with no /export,
+    // e.g. Fort Bend) or the adaptive composite (vector + image sublayers, `parcelDisplay.js`).
+    // Either sublayer's request can hang depending on the live zoom band, and esri-leaflet's
+    // vector FeatureLayer and image-mode RasterLayer use DIFFERENT event names for the same
+    // lifecycle (see the statewide branch above) — wire both vocabularies onto whichever
+    // sublayer(s) actually exist, sharing this ONE county's health state either way.
+    const wireDisplayHealth = (target, kind) => {
+      const startEvt = kind === "image" ? "loading" : "requeststart";
+      const errEvt = kind === "image" ? "error" : "requesterror";
+      target.on(startEvt, () => {
+        if (!settled && !timer) timer = setTimeout(markDown, DISPLAY_LOAD_TIMEOUT_MS);
+        // B1427664 — a much shorter "still loading" notice, well inside the 8s hang-guard: a real
+        // CAD host that's merely slow (not yet hung) drew nothing and said nothing for up to 8s.
+        if (!settled && !slowTimer) {
+          slowTimer = setTimeout(() => {
+            slowTimer = null;
+            if (displaysRef.current[key] === fl && sourceNoticeStillPlausible(displayNoticeShape(key))) markDisplaySlow(key, true);
+          }, SLOW_DISPLAY_NOTICE_MS);
+        }
+      });
+      target.on("load", () => { if (!settled) { settled = true; stopTimer(); clearSlowTimer(); markDisplaySlow(key, false); } }); // drew fine — healthy
+      target.on(errEvt, markDown);
+    };
+    if (fl._isAdaptive) { wireDisplayHealth(fl._vectorLayer, "vector"); wireDisplayHealth(fl._imageLayer, "image"); }
+    else wireDisplayHealth(fl, "vector");
     fl.addTo(map); // NEW-3 — listeners are wired above; only now does the first request fire
   };
   const clearDisplays = () => {

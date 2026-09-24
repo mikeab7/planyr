@@ -1,29 +1,27 @@
-/* NEW-2 / NEW-3 — ONE URL, ONE POLICY; AND A TRUNCATED DRAW MUST NEVER LOOK COMPLETE.
+/* NEW-2 — ONE URL, ONE POLICY.
  *
- * The owner's Colorado report turned out to be two structural defects hiding behind one banner:
+ * The owner's Colorado report's root cause: `co_larimer.layerUrl` was byte-identical to
+ * `co_statewide.layerUrl`. `MapFinder.addDisplay` keys its display map by COUNTY, so it added
+ * two identical Leaflet layers over the same ground and doubled every request to the slowest
+ * host in the app. Worse, the 8s display hang-guard exempts the statewide composite by testing
+ * `STATEWIDE_KEYS` — a property of the KEY — so the county-keyed copy of the SAME endpoint got
+ * the opposite policy: the guard fired, the breaker opened, and the banner told the owner his
+ * county server was slow while pointing him at that very host.
  *
- *  NEW-2  `co_larimer.layerUrl` was byte-identical to `co_statewide.layerUrl`. `MapFinder.addDisplay`
- *         keys its display map by COUNTY, so it added two identical Leaflet layers over the same
- *         ground and doubled every request to the slowest host in the app. Worse, the 8s display
- *         hang-guard exempts the statewide composite by testing `STATEWIDE_KEYS` — a property of the
- *         KEY — so the county-keyed copy of the SAME endpoint got the opposite policy: the guard
- *         fired, the breaker opened, and the banner told the owner his county server was slow while
- *         pointing him at that very host.
+ * This is the pure half of the fix. The Leaflet wiring that consumes it lives in MapFinder;
+ * what is asserted here is the DECISION it makes.
  *
- *  NEW-3  One view-sized bbox against that composite returned exactly 2000 features with
- *         `exceededTransferLimit = true`, in 1.5 s, and the app drew them and said nothing.
- *
- * These are the pure halves of both fixes. The Leaflet wiring that consumes them lives in
- * MapFinder; what is asserted here is the DECISION each one makes.
+ * (The sibling "a truncated draw must never look like a complete one" defect this file used to
+ * cover here — `parcelTruncation.js`'s NEW-3 — was retired 2026-09-24, NEW-1: the vector display
+ * that could be cut short by a real CAD's own record cap now steps aside for a server-rendered
+ * image layer with no such cap before that ever happens. See `parcelDisplayZoom.test.js` and
+ * `parcelDisplay.js`.)
  */
 import { describe, it, expect } from "vitest";
 import {
   COUNTIES, COUNTIES_MAP, STATEWIDE_KEYS, STATEWIDE_LAYER_URLS,
   isStatewideLayerUrl, trimLayerUrl, sharedLayerUrlConflicts,
 } from "../src/workspaces/site-planner/lib/counties.js";
-import {
-  responseWasTruncated, featureCountOf, parcelTruncationNotice,
-} from "../src/workspaces/site-planner/lib/parcelTruncation.js";
 
 describe("NEW-2 — the statewide policy follows the URL, not the key", () => {
   it("recognises every state's composite by URL (NEW-1 raised this from 2 to 21 — the derivation, not the count, is what's asserted)", () => {
@@ -95,40 +93,5 @@ describe("NEW-2 — the dev-time assertion that stops the next county reintroduc
 
   it("ignores entries with no endpoint at all rather than grouping them together", () => {
     expect(sharedLayerUrlConflicts({ a: {}, b: { layerUrl: null }, c: { layerUrl: "" } })).toEqual([]);
-  });
-});
-
-describe("NEW-3 — a truncated parcel draw must never look like a complete one", () => {
-  it("reads the flag in every shape a real ArcGIS service returns it", () => {
-    expect(responseWasTruncated({ features: [], exceededTransferLimit: true })).toBe(true);
-    // GeoJSON output has carried it under `properties` across versions — the same both-shapes check
-    // the nightly snapshot builder already makes (and the Waller undercount that taught us).
-    expect(responseWasTruncated({ type: "FeatureCollection", features: [], properties: { exceededTransferLimit: true } })).toBe(true);
-    expect(responseWasTruncated({ features: [], transferLimitExceeded: true })).toBe(true);
-  });
-
-  it("a COMPLETE answer is never reported as truncated", () => {
-    expect(responseWasTruncated({ features: [1, 2, 3] })).toBe(false);
-    expect(responseWasTruncated({ features: [], exceededTransferLimit: false })).toBe(false);
-    expect(responseWasTruncated({ features: [], properties: {} })).toBe(false);
-    for (const junk of [null, undefined, "", 0, []]) expect(responseWasTruncated(junk)).toBe(false);
-  });
-
-  it("counts what actually arrived, and degrades rather than throwing", () => {
-    expect(featureCountOf({ features: new Array(2000).fill(0) })).toBe(2000);
-    expect(featureCountOf({})).toBe(0);
-    expect(featureCountOf(null)).toBe(0);
-  });
-
-  it("the notice NAMES what happened and what to do — never a silent truncation", () => {
-    const msg = parcelTruncationNotice(2000);
-    expect(msg).toMatch(/2,000/);
-    expect(msg).toMatch(/missing/i);
-    expect(msg).toMatch(/zoom in/i);
-    // Non-blocking: it still tells the owner that clicking a lot works.
-    expect(msg).toMatch(/clicking a lot still adds it/i);
-    // An unreadable count still produces an honest sentence rather than "undefined lots".
-    expect(parcelTruncationNotice(0)).not.toMatch(/undefined|NaN/);
-    expect(parcelTruncationNotice(null)).not.toMatch(/undefined|NaN/);
   });
 });

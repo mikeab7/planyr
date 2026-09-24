@@ -986,13 +986,25 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   and the e2e spec **measure-export-lod** (which builds the REAL sheet through
   `window.__plannerExportSvg` — the defect is invisible to any source reading, it exists only in the
   clone; mutation-checked both ways).
-- **`parcelTruncation.js` (NEW-3)** — did a parcel query come back CUT SHORT? ArcGIS answers any query
-  with at most `maxRecordCount` features and sets `exceededTransferLimit`; esri-leaflet does NOT page,
-  so a truncated answer draws an authoritative-looking parcel layer with an unknown number of lots
-  missing. Measured: one view-sized bbox against the Colorado composite returned exactly 2000 features
-  with the flag true, and nothing said so. Split out of `parcelDisplay.js` (which imports Leaflet and
-  so cannot be unit-tested). The two paths that PAGE — `vectorLayers.js` and the nightly snapshot
-  builder — already handled the flag and are untouched.
+- **⛔ `parcelDisplayZoom.js` (NEW-1, 2026-09-24) — retires the old "capped this view at N lots" banner
+  (the pure module that raised it is deleted) with a THREE-REGIME zoom-gated display instead of a
+  warning about ONE regime's limit.** ArcGIS answers any query with at most a layer's own `maxRecordCount` features
+  (1,000 on some sources, 2,000 on others) and sets `exceededTransferLimit` when it had more to give;
+  esri-leaflet's vector `featureLayer` does not page, so a wide-enough view used to draw an
+  authoritative-looking parcel layer with an unknown number of lots silently missing. Now: below
+  `PARCEL_MINZOOM` nothing draws (unchanged floor); from there up to `PARCEL_VECTOR_MINZOOM` a
+  server-rendered `/export` IMAGE layer draws every lot in view with no record cap and no per-lot cost
+  (`makeParcelImageLayer` — the same path the statewide/TxGIO fallback already used); at
+  `PARCEL_VECTOR_MINZOOM` and above the styleable VECTOR layer (`makeParcelLayer`) takes over for
+  per-lot hover. `makeParcelAdaptiveLayer` (`parcelDisplay.js`) mounts BOTH sublayers at once behind a
+  `L.layerGroup`, relying on esri-leaflet's own `FeatureManager`/`RasterLayer` zoom-range checks
+  (already re-run on every zoomend) rather than a rebuild or a listener of ours — a source with no
+  `/export` capability (a FeatureServer CAD, e.g. Fort Bend) is unaffected, still one plain vector
+  layer. Clicking a lot was ALREADY independent of the display (`MapFinder.handleClick` always
+  identifies via a live point query) — B1427664/PR #1602 ruled out making clicks wait on a display
+  layer, and this reuses that invariant rather than revisiting it. The pure regime decision
+  (`parcelDisplayRegimeForZoom`, `parcelUrlSupportsImageExport`) is split out for the same reason
+  `parcelOpacityGuard.js` is: `parcelDisplay.js` imports Leaflet and so cannot be unit-tested.
 - **`counties.js` — ONE URL MUST NOT CARRY TWO HEALTH POLICIES (NEW-2).** `STATEWIDE_KEYS` answers "is
   this KEY the statewide pseudo-county"; for the display hang-guard that is the wrong question. The
   composite is exempt because pulling it leaves nothing to see or click — a property of the ENDPOINT.
