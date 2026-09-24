@@ -780,6 +780,17 @@ Runtime deps are kept few and deliberate. New client dependency added 2026-07-10
   inside it. (The old GitHub Pages deploy was retired — see "Retire the old GitHub Pages
   deploy pipeline — ✅ DONE" near the end of this file; GitHub Actions now only runs the
   build status check, it doesn't publish.)
+- **`functions/` (repo root) is the Cloudflare Pages Functions directory — it deploys
+  automatically with every build, no `wrangler.toml` and no env-var change needed.** Any file
+  under it becomes a server-side route at the matching path (`functions/api/files.js` →
+  `/api/files`, `functions/gis-proxy/[[path]].js` → `/gis-proxy/*`), and it's where a request
+  that needs to run somewhere CORS doesn't apply — a county GIS host with no
+  `Access-Control-Allow-Origin` header, a Drive upload — belongs. `functions/gis-proxy/`
+  (NEW-1, 2026-09-24) is a plain same-origin relay for a hard-coded allow-list of hosts
+  (`ALLOWED_HOSTS` in that file) — a new host must be added there before a
+  county can be wired through it; see `docs/STATEWIDE-PARCELS.md`'s "GIS pass-through" section.
+  This is a **different** mechanism from the B445 `/api/gis-cache/` proxy (Drive-backed raster
+  imagery caching, its own regex allow-list) — don't conflate the two.
 - **⛔ A LIVE MEASUREMENT ON planyr.io IS ONLY VALID IF THE DEPLOYED CHUNK HASH IS READ IN THE SAME
   CALL AS THE ASSERTION (owner correction, 2026-09-03, B1112449/B1112450 false-alarm recurrence).**
   A browser tab can silently keep serving a pre-deploy cached bundle — content-hashed chunk

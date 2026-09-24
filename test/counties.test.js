@@ -629,6 +629,71 @@ describe("NEW-1 (2026-09-23) — 11 more Georgia counties are registered and sha
   });
 });
 
+/* NEW-1 (2026-09-24) — Tift County, GA, the first county wired through the same-origin
+ * /gis-proxy/ pass-through (functions/gis-proxy/[[path]].js) rather than a direct https:// URL,
+ * proving out CORS-blocked county hosts can be reached at all. See countiesProvenance.js for the
+ * measured facts (19,194 parcels, no ACAO header from www.sgrcmaps.com) and
+ * docs/STATEWIDE-PARCELS.md's "GIS pass-through" section for the mechanism. */
+describe("NEW-1 (2026-09-24) — ga_tift is wired through the GIS pass-through, not a direct URL", () => {
+  it("registers in both registries, state GA, with a root-relative /gis-proxy/ layerUrl (not https)", () => {
+    expect(COUNTIES.ga_tift).toBeTruthy();
+    expect(COUNTIES_MAP.ga_tift).toBeTruthy();
+    expect(COUNTIES.ga_tift.state).toBe("GA");
+    expect(COUNTIES_MAP.ga_tift.state).toBe("GA");
+    expect(COUNTIES.ga_tift.layerUrl).toMatch(/^\/gis-proxy\/www\.sgrcmaps\.com\//);
+    expect(COUNTIES.ga_tift.layerUrl).not.toMatch(/^https?:\/\//);
+    expect(COUNTIES_MAP.ga_tift.layerUrl).toBe(COUNTIES.ga_tift.layerUrl);
+  });
+
+  it("the proxy path names the real upstream host + the county's own layer path", () => {
+    expect(COUNTIES.ga_tift.layerUrl).toBe(
+      "/gis-proxy/www.sgrcmaps.com/alma/rest/services/Tift/Tift_Parcels/MapServer/0"
+    );
+  });
+
+  it("idField/addrField are the real measured field names (ParcelNum/Situs), not a guess — confirmed live through the deployed proxy against this PR's own preview build", () => {
+    expect(COUNTIES.ga_tift.idField).toBe("ParcelNum");
+    expect(COUNTIES.ga_tift.addrField).toBe("Situs");
+  });
+
+  it("gives Tift County a bbox/center derived from public/geo/county-polygons.json (never a placeholder), and it contains Tifton", () => {
+    const c = COUNTIES_MAP.ga_tift;
+    const [south, west, north, east] = c.bbox;
+    // Georgia's own generous bbox floor, same convention as the sibling GA-county suite above.
+    expect(south).toBeGreaterThan(29.5);
+    expect(north).toBeLessThan(35.5);
+    expect(west).toBeGreaterThan(-86.0);
+    expect(east).toBeLessThan(-80.0);
+    // Tifton, GA (the county seat) sits inside the county's own bbox.
+    const TIFTON = [31.4504, -83.5085];
+    expect(TIFTON[0]).toBeGreaterThan(south);
+    expect(TIFTON[0]).toBeLessThan(north);
+    expect(TIFTON[1]).toBeGreaterThan(west);
+    expect(TIFTON[1]).toBeLessThan(east);
+    expect(c.center[0]).toBeGreaterThan(south);
+    expect(c.center[0]).toBeLessThan(north);
+  });
+
+  it("countyKeyForName resolves 'Tift County' scoped to GA", () => {
+    expect(countyKeyForName("Tift County", "GA")).toBe("ga_tift");
+    expect(countyKeyForName("Tift", "GA")).toBe("ga_tift");
+  });
+
+  it("a point at Tifton routes to ga_tift via candidateCountiesForPoint", () => {
+    expect(candidateCountiesForPoint(31.4504, -83.5085)).toContain("ga_tift");
+  });
+
+  it("never resolves for a point outside Georgia (no Texas/Houston cross-over)", () => {
+    expect(candidateCountiesForPoint(29.76, -95.37)).not.toContain("ga_tift"); // downtown Houston, TX
+    const houstonCounty = countyForView(29.76, -95.37);
+    expect(houstonCounty).not.toBe("ga_tift");
+  });
+
+  it("adds no shared-URL conflict with any other county's layer", () => {
+    expect(sharedLayerUrlConflicts()).toEqual([]);
+  });
+});
+
 /* NEW-2 (2026-09-23) — 11 MORE Georgia counties, measured on Michael's own signed-in Chrome
  * (this sandbox's egress policy blocks every one of these county-owned hosts) — amends B1870704/
  * NEW-1 above. Also fixes two field-mapping defects (Jackson/Bibb id search, Rockdale address
@@ -666,11 +731,11 @@ describe("NEW-2 (2026-09-23) — 11 more Georgia counties (B1873776, amends B187
     }
   });
 
-  it("Georgia now has 59 county keys in both registries (14 pre-existing + 11 first pass + 11 second pass + 34 third pass, this batch)", () => {
+  it("Georgia now has 60 county keys in both registries (25 pre-existing (first + second pass) + ga_tift (B1874880) + 34 third pass, this batch)", () => {
     const gaInCounties = Object.entries(COUNTIES).filter(([, c]) => c.state === "GA").map(([k]) => k);
     const gaInMap = Object.entries(COUNTIES_MAP).filter(([, c]) => c.state === "GA").map(([k]) => k);
-    expect(gaInCounties).toHaveLength(59);
-    expect(gaInMap).toHaveLength(59);
+    expect(gaInCounties).toHaveLength(60);
+    expect(gaInMap).toHaveLength(60);
   });
 
   it("countyKeyForName resolves each county's real display name to its key, scoped to GA", () => {

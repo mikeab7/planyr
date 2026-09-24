@@ -881,6 +881,31 @@ const COUNTIES_RAW = {
     idField: "PARCEL_NO",
     help: "Camden County parcels (Esri-hosted). Search by parcel number or a site address.",
   },
+  ga_tift: {
+    // NEW-1 (2026-09-24) — Southern Georgia Regional Commission (SGRC), a real, current county
+    // parcel service (measured live from Michael's Chrome at the planyr.io origin: 19,194 parcel
+    // polygons opening fine when fetched directly at sgrcmaps.com) that sends NO
+    // Access-Control-Allow-Origin header at all — the fetch fails only from planyr.io, with no
+    // ACAO header on the response. So this is the first county wired through the same-origin
+    // /gis-proxy/ pass-through (functions/gis-proxy/[[path]].js) rather than a direct https:// URL
+    // — the browser talks to planyr.io, which relays server-side, where CORS does not apply.
+    // SGRC's same host also carries Atkinson, Ben Hill, Berrien, Brooks, Coffee, Cook, Echols,
+    // Irwin, Lanier, Pierce and Turner under sibling `/alma/rest/services/<County>/` paths — see
+    // docs/STATEWIDE-PARCELS.md's "GIS pass-through" section; only Tift is wired this session.
+    // ⛔ VERIFIED LIVE THROUGH THE DEPLOYED PROXY on this PR's Cloudflare preview build (this
+    // sandbox reaches the Pages Function fine; the upstream fetch happens server-side in
+    // Cloudflare, so sgrcmaps.com's own egress block on this sandbox never applies to it):
+    // /MapServer/0?f=json returns real layer metadata (fields OBJECTID/ParcelNum/OwnerName/
+    // Situs/QPLINK, esriGeometryPolygon); /query?returnCountOnly=true returns exactly 19,194,
+    // matching the dispatch's own count; a point query at Tifton (31.4504, -83.5085) returns a
+    // real parcel (OBJECTID 18560, ParcelNum "T044  082", OwnerName "TIFTON DREAM VISION
+    // PROPERTIES, LLC", Situs "212 E 5TH ST"). idField/addrField below are this measurement, not
+    // a guess.
+    state: "GA", label: "Tift County, GA",
+    layerUrl: "/gis-proxy/www.sgrcmaps.com/alma/rest/services/Tift/Tift_Parcels/MapServer/0",
+    idField: "ParcelNum", addrField: "Situs",
+    help: "Tift County parcels (Southern Georgia Regional Commission, reached through Planyr's own same-origin relay — the county's server sends no cross-origin header). Search by parcel number or a site address.",
+  },
 
   /* ═══ NEW-2 (2026-09-23) — ELEVEN MORE GEORGIA COUNTIES, from Michael's own signed-in Chrome on
    * planyr.io (so CORS was measured, not just reachability) — amends B1870704/NEW-1 above, whose
@@ -2322,6 +2347,10 @@ const COUNTIES_MAP_RAW = {
   ga_paulding: { state: "GA", center: [33.93, -84.89], zoom: 10, bbox: [33.76, -85.07, 34.10, -84.71], mapServer: null, layerUrl: COUNTIES.ga_paulding.layerUrl },
   ga_bulloch: { state: "GA", center: [32.40, -81.73], zoom: 10, bbox: [32.13, -82.05, 32.67, -81.41], mapServer: null, layerUrl: COUNTIES.ga_bulloch.layerUrl },
   ga_camden: { state: "GA", center: [30.94, -81.67], zoom: 10, bbox: [30.69, -81.96, 31.19, -81.38], mapServer: null, layerUrl: COUNTIES.ga_camden.layerUrl },
+  // NEW-1 (2026-09-24) — center/bbox read directly from public/geo/county-polygons.json (the same
+  // nationwide asset resolveCounty uses, same convention as the B1551617/B1339920 rows above),
+  // never hand-typed: raw extent [-167326,62654,-166663,63195] at scale 2000.
+  ga_tift: { state: "GA", center: [31.4623, -83.4973], zoom: 10, bbox: [31.33, -83.66, 31.60, -83.33], mapServer: null, layerUrl: COUNTIES.ga_tift.layerUrl },
   // NEW-2 (2026-09-23) — center/bbox read directly from public/geo/county-polygons.json (the same
   // nationwide asset resolveCounty uses, same convention as every prior GA batch), never hand-typed.
   ga_forsyth: { state: "GA", center: [34.1925, -84.0920], zoom: 11, bbox: [34.05, -84.26, 34.33, -83.92], mapServer: null, layerUrl: COUNTIES.ga_forsyth.layerUrl },

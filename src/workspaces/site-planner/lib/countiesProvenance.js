@@ -198,6 +198,10 @@ export const COUNTY_VERIFICATION = {
     verifiedOn: "2026-09-23",
     verifiedNote: "VERIFIED LIVE from this sandbox: 31,649 parcel polygons, esriGeometryPolygon, extent -81.94..-81.40 / 30.71..31.17 (matches Kingsland/St. Marys). ⛔ CORRECTS the dispatch's own URL: that MapServer path advertises capabilities:\"Map\" only (no Query — /query 400s 'Invalid URL'); the identical dataset is also published as a FeatureServer at the same path with Query enabled, wired here instead.",
   },
+  ga_tift: {
+    verifiedOn: "2026-09-24",
+    verifiedNote: "VERIFIED LIVE twice: first from Michael's own browser (planyr.io origin) — the SGRC layer (www.sgrcmaps.com/alma/rest/services/Tift/Tift_Parcels/MapServer/0) holds 19,194 parcel polygons and opens fine fetched directly, but the identical fetch FROM planyr.io fails with no Access-Control-Allow-Origin header on the response at all, which is why this county routes through the same-origin /gis-proxy/ pass-through (functions/gis-proxy/[[path]].js) instead of a direct URL. SECOND, independently, from THIS sandbox against the DEPLOYED proxy on this PR's Cloudflare preview build (sgrcmaps.com itself is still blocked by this sandbox's own egress policy, but the proxy's upstream fetch runs server-side in Cloudflare, which the block never reaches): /MapServer/0?f=json returned real layer metadata (fields OBJECTID/ParcelNum/OwnerName/Situs/QPLINK, esriGeometryPolygon); /query?returnCountOnly=true returned exactly 19,194, matching Michael's own count; a point query at Tifton (31.4504, -83.5085) returned a real parcel — OBJECTID 18560, ParcelNum \"T044  082\", OwnerName \"TIFTON DREAM VISION PROPERTIES, LLC\", Situs \"212 E 5TH ST\". idField (ParcelNum) / addrField (Situs) are this measurement, not a guess.",
+  },
   /* ═══ NEW-2 (2026-09-23) — 11 more Georgia counties, MEASURED FROM MICHAEL'S OWN SIGNED-IN
    * CHROME on planyr.io (this build environment's egress policy blocks every one of these
    * county-owned hosts, so none could be re-probed from this sandbox) — amends B1870704/NEW-1
