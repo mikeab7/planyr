@@ -86,6 +86,70 @@ describe("query building", () => {
   });
 });
 
+// B1871968 — a real multi-parcel assemblage (Goose Creek: 4 parcels, 289 acres) built a GET
+// /query URL landing in the 2000–3500 char range, which the OLD GIS_MAX_GET_URL (3500) let
+// ride out as a GET — and ArcGIS Online (services*.arcgis.com, which every one of
+// growthFaults/transmission/substations/epaCleanups/aadt/rail/ccnWater is hosted on) 404s a
+// GET past its own ~2K URL cap (measured live: 200 OK at 2105 chars, 404 at 2153). Every
+// source in this registry rides the same queryLayer/countLayer/queryProximity/countProximity
+// length check, so growthFaults (a `screenMode:"proximity"` source, exercising
+// analyzeProximitySource → queryProximity, the same shape the polygon sources' queryLayer
+// uses) stands for the whole affected set.
+describe("GET→POST fallback for oversized geometry queries (B1871968)", () => {
+  // 4 rings @ 20 vertices each ≈ a real multi-parcel site's decimated footprint. Chosen so
+  // the FULL GET url lands at ~2900 chars: comfortably inside the danger zone this bug used
+  // to leave on GET (under the old 3500 cap) but that 404s for real on ArcGIS Online.
+  function denseRing(nVerts, cx, cy, r) {
+    const pts = [];
+    for (let i = 0; i < nVerts; i++) {
+      const a = (i / nVerts) * Math.PI * 2;
+      pts.push([+(cx + r * (1 + 0.15 * Math.sin(i * 7)) * Math.cos(a)).toFixed(6), +(cy + r * (1 + 0.15 * Math.sin(i * 7)) * Math.sin(a)).toFixed(6)]);
+    }
+    pts.push(pts[0]);
+    return pts;
+  }
+  const gooseCreekScaleRings = [
+    denseRing(20, -95.0026, 29.8122, 0.004),
+    denseRing(20, -94.998, 29.815, 0.003),
+    denseRing(20, -95.006, 29.809, 0.0025),
+    denseRing(20, -95.001, 29.806, 0.002),
+  ];
+
+  it("a Goose-Creek-scale query for growthFaults now POSTs instead of sending a >2000-char GET", async () => {
+    const growthFaults = ANALYSIS_SOURCES.find((s) => s.id === "growthFaults");
+    // Confirm the fixture is genuinely in the old "safe" (GET) / new "must POST" gap —
+    // otherwise this test would pass for the wrong reason.
+    const fullGetUrl = buildQueryUrl(growthFaults.url, growthFaults.layer, buildProximityParams(growthFaults, gooseCreekScaleRings, 1320));
+    expect(fullGetUrl.length).toBeGreaterThan(2000);
+    expect(fullGetUrl.length).toBeLessThan(3500);
+
+    const cache = freshCache();
+    const seen = [];
+    const fetchJson = async (url, opts) => { seen.push({ url, opts }); return { features: [] }; };
+    await analyzeSource(growthFaults, gooseCreekScaleRings, { cache, fetchJson });
+
+    const call = seen.find((c) => c.url.includes("Fault_Houston"));
+    expect(call).toBeTruthy();
+    // POSTed: the url is trimmed back to the bare /query base (no querystring), and the
+    // full params object — geometry included — rides in opts.body instead.
+    expect(call.url.endsWith("/query")).toBe(true);
+    expect(call.url).not.toContain("?");
+    expect(call.opts && call.opts.body).toBeTruthy();
+    expect(typeof call.opts.body.geometry).toBe("string");
+  });
+
+  it("a small single-parcel query for growthFaults still rides a plain GET (no needless POST)", async () => {
+    const growthFaults = ANALYSIS_SOURCES.find((s) => s.id === "growthFaults");
+    const cache = freshCache();
+    const seen = [];
+    const fetchJson = async (url, opts) => { seen.push({ url, opts }); return { features: [] }; };
+    await analyzeSource(growthFaults, [SQUARE], { cache, fetchJson });
+    const call = seen.find((c) => c.url.includes("Fault_Houston"));
+    expect(call).toBeTruthy();
+    expect(call.opts == null || call.opts.body == null).toBe(true);
+  });
+});
+
 describe("summarizers", () => {
   it("zoneSummary lists distinct FEMA zones", () => {
     expect(zoneSummary([{ FLD_ZONE: "AE" }, { FLD_ZONE: "AE" }, { FLD_ZONE: "X" }])).toBe("Zone AE, X");
