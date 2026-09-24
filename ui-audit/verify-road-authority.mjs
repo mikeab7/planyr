@@ -5,8 +5,8 @@
  * site and checks, against the LIVE TxDOT Roadway Inventory:
  *   1. the Site Analysis "Road authority" card renders a PER-ROAD list (a header
  *      roll-up + one row per fronting road, name → authority) — not one collapsed value;
- *   2. the card's "◍ Map" toggle flips to "◉ On map" (B190 suppression lifted) and the
- *      color-coded road overlay paints vector <path>s into the env overlay pane.
+ *   2. the card's "◍ Activate layer" toggle flips to "◉ Deactivate layer" (B190 suppression
+ *      lifted) and the color-coded road overlay paints vector <path>s into the env overlay pane.
  *
  * Live-data caveat: the road query hits services.arcgis.com from the browser. If that
  * host isn't reachable from this sandbox's browser egress, the card reads "unavailable"
@@ -16,7 +16,10 @@
 import { chromium } from "playwright";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 
-const BASE = process.env.BASE_URL || "http://localhost:4173/";
+// "#/project/<groupId>/site" — bare "#/" now lands on the Dashboard (B1213312), and "#/site"
+// alone lands on the project-picker MapFinder rather than opening the seeded plan; the
+// project-scoped hash is what actually opens the Site Planner canvas for this seeded site.
+const BASE = process.env.BASE_URL || "http://localhost:4173/#/project/road-auth-demo/site";
 
 // A georeferenced NE-Houston site (Greenspoint / IH-45 area — a dense road grid). A big
 // ~2400 ft parcel box so its 40 m frontage buffer abuts several distinct roads (city
@@ -111,15 +114,15 @@ if (liveOk) {
   await roadCard.click({ timeout: 4000 }).catch(() => {});
   await page.waitForTimeout(300);
 
-  // Flip the "◍ Map" toggle and confirm it arms + the overlay paints.
-  const mapBtn = page.locator('button:has-text("◍ Map")').first();
+  // Flip the "◍ Activate layer" toggle and confirm it arms + the overlay paints.
+  const mapBtn = page.locator('button:has-text("Activate layer")').first();
   const hadToggle = await mapBtn.count() > 0;
-  ok(hadToggle, "card exposes a '◍ Map' toggle (B190 suppression lifted)");
+  ok(hadToggle, "card exposes a '◍ Activate layer' toggle (B190 suppression lifted)");
   if (hadToggle) {
     await mapBtn.click({ timeout: 5000 });
     await page.waitForTimeout(2500);
-    const onMap = await page.locator('button:has-text("◉ On map")').count() > 0;
-    ok(onMap, "toggle armed to '◉ On map' (overlay turned on)");
+    const onMap = await page.locator('button:has-text("Deactivate layer")').count() > 0;
+    ok(onMap, "toggle armed to '◉ Deactivate layer' (overlay turned on)");
     // The overlay draws into the env pane as vector paths — but esri-leaflet queries the
     // FeatureServer via its OWN XHR to services.arcgis.com, which this sandbox's browser
     // can't reach (only basemap tiles are allowlisted). So paint is NOT a hard gate here;
