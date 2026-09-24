@@ -100,6 +100,32 @@ const TXGIO_STATEWIDE_LAYER =
 const CO_STATEWIDE_LAYER =
   "https://gis.colorado.gov/public/rest/services/Address_and_Parcel/Colorado_Public_Parcels/FeatureServer/0";
 
+/* NEW-1 (2026-09-24) — FLORIDA'S TxGIO/Idaho ANALOGUE. Unlike Georgia, Florida publishes every
+ * county's parcels in ONE statewide layer maintained by the state GIO from the Department of
+ * Revenue (FDOR) cadastral roll. MEASURED from this sandbox 2026-09-24: "FDOR Cadastral 2025",
+ * owner FloridaGIO, ArcGIS Online (CORS-clean), esriGeometryPolygon, 10,831,924 features, last
+ * edited 2026-09-16, maxRecordCount 2000. A point query at downtown Jacksonville (-81.6579,
+ * 30.3255) answered in 369 ms with CO_NO 26, PARCEL_ID "0744550000R", PHY_ADDR1 "3 E INDEPENDENT
+ * DR", OWN_NAME "JACKSONVILLE AREA CHAMBER OF C"; a point at Lakeland (-81.9498, 28.0395) answered
+ * CO_NO 63, PARCEL_ID "242819000000031050", PHY_ADDR1 "72 LAKE MORTON DR". Fields of note: CO_NO
+ * (numeric FDOR county code — NOT a FIPS code), PARCEL_ID / PARCELNO (string), PHY_ADDR1/PHY_ADDR2/
+ * PHY_CITY/PHY_ZIPCD (situs), OWN_NAME, LND_SQFOOT, JV, DOR_UC, SALE_PRC1/SALE_YR1.
+ * ⛔ ATTRIBUTE-ONLY QUERIES OVER THE WHOLE 10.8M-ROW LAYER ARE SLOW: `returnCountOnly`/
+ * `returnExtentOnly` with `where CO_NO=12` both exceeded a 40s timeout from this sandbox. Point/
+ * envelope spatial queries are fast (both test points above answered in well under a second).
+ * NEVER validate rows on this layer by count or extent, in tests or in gis-source-audit; every
+ * county row below carries a `scopeWhere` so search/where clauses stay county-scoped rather than
+ * scanning the whole roster. Also referenced by the `fl_statewide` COUNTIES_MAP entry (the
+ * whole-state display/click fallback) so the two can never diverge — the same
+ * TXGIO_STATEWIDE_LAYER/CO_STATEWIDE_LAYER convention. The 17 counties wired below (Jacksonville
+ * and Polk/Lakeland markets, ~30mi radius) all ride this ONE layer via `scopeWhere` on `CO_NO`,
+ * exactly the way Idaho's 13 (id_ada etc., above) ride Public_Idaho_Parcels — `sharedLayerUrlConflicts()`
+ * exempts this URL from the double-add guard the moment `fl_statewide` marks it `statewide:true`
+ * (see that function's header), so no per-row scope-uniqueness dance is needed the way Idaho's is
+ * (though every row still carries its own distinct scope for real query correctness). */
+const FL_STATEWIDE_LAYER =
+  "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Cadastral/FeatureServer/0";
+
 /* Four of the nine Colorado counties ride the statewide composite until their own endpoint is
  * probed (V511), and each was repeating the same ~130-character help string verbatim. One builder
  * instead of five literals — the same words, a fraction of the bytes on the Site route's bundle.
@@ -512,6 +538,140 @@ const COUNTIES_RAW = {
     layerUrl: "https://services1.arcgis.com/CNPdEkvnGl65jCX8/arcgis/rest/services/Public_Idaho_Parcels_/FeatureServer/7",
     idField: "PARCEL_ID", addrField: "SITE_ADD", scopeWhere: "County='Washington'",
     help: "Idaho statewide parcel service (State of Idaho OITS) — searches are limited to Washington County (Weiser, ID — not Washington County, TX). Search by parcel ID or a site address.",
+  },
+
+  /* ═══ NEW-1 (2026-09-24) — 17 FLORIDA COUNTIES, the Jacksonville and Polk/Lakeland markets
+   * (~30mi radius of each), Michael's own ask. All 17 ride the ONE FL_STATEWIDE_LAYER (see its own
+   * header above for the measured facts and the slow-attribute-query trap) via `scopeWhere` on
+   * `CO_NO`, the FDOR county code (NOT a FIPS code) — the same shared-layer shape Idaho's 13
+   * counties use above. `idField`/`addrField` are PINNED (`pinIdField`/`pinAddrField`) rather than
+   * left to detection: PARCEL_ID is the real parcel number (PARCELNO is a duplicate on the sampled
+   * rows, but PARCEL_ID is what both measured test points confirmed), and PHY_ADDR1 is the full
+   * situs line (PHY_ADDR2/PHY_CITY/PHY_ZIPCD are separate columns a plain detector could pick
+   * instead and get only part of the address). Keys use the repo's established multi-word-county
+   * convention — squished, no underscore (`la_eastbatonrouge`, `id_bearlake`, `id_nezperce`
+   * above) — NOT the underscored `fl_st_johns` a first read of the dispatch might suggest:
+   * `countyKeyForName` derives the routing key as `${state}_${slug}` where `slug` strips every
+   * non-letter character, so "St. Johns County" only ever resolves to `fl_stjohns`; an underscored
+   * key would be silently unreachable by name. */
+  fl_duval: {
+    state: "FL", label: "Duval County, FL",
+    layerUrl: FL_STATEWIDE_LAYER,
+    idField: "PARCEL_ID", pinIdField: true, addrField: "PHY_ADDR1", pinAddrField: true,
+    scopeWhere: "CO_NO = 26",
+    help: "Duval County parcels (Florida statewide FDOR cadastral roll, 2025). Search by parcel ID or a site address.",
+  },
+  fl_nassau: {
+    state: "FL", label: "Nassau County, FL",
+    layerUrl: FL_STATEWIDE_LAYER,
+    idField: "PARCEL_ID", pinIdField: true, addrField: "PHY_ADDR1", pinAddrField: true,
+    scopeWhere: "CO_NO = 55",
+    help: "Nassau County parcels (Florida statewide FDOR cadastral roll, 2025). Search by parcel ID or a site address.",
+  },
+  fl_clay: {
+    state: "FL", label: "Clay County, FL",
+    layerUrl: FL_STATEWIDE_LAYER,
+    idField: "PARCEL_ID", pinIdField: true, addrField: "PHY_ADDR1", pinAddrField: true,
+    scopeWhere: "CO_NO = 20",
+    help: "Clay County parcels (Florida statewide FDOR cadastral roll, 2025). Search by parcel ID or a site address.",
+  },
+  fl_stjohns: {
+    state: "FL", label: "St. Johns County, FL",
+    layerUrl: FL_STATEWIDE_LAYER,
+    idField: "PARCEL_ID", pinIdField: true, addrField: "PHY_ADDR1", pinAddrField: true,
+    scopeWhere: "CO_NO = 65",
+    help: "St. Johns County parcels (Florida statewide FDOR cadastral roll, 2025). Search by parcel ID or a site address.",
+  },
+  fl_baker: {
+    state: "FL", label: "Baker County, FL",
+    layerUrl: FL_STATEWIDE_LAYER,
+    idField: "PARCEL_ID", pinIdField: true, addrField: "PHY_ADDR1", pinAddrField: true,
+    scopeWhere: "CO_NO = 12",
+    help: "Baker County parcels (Florida statewide FDOR cadastral roll, 2025). Search by parcel ID or a site address.",
+  },
+  fl_polk: {
+    state: "FL", label: "Polk County, FL",
+    layerUrl: FL_STATEWIDE_LAYER,
+    idField: "PARCEL_ID", pinIdField: true, addrField: "PHY_ADDR1", pinAddrField: true,
+    scopeWhere: "CO_NO = 63",
+    help: "Polk County parcels (Florida statewide FDOR cadastral roll, 2025). Search by parcel ID or a site address.",
+  },
+  fl_hillsborough: {
+    state: "FL", label: "Hillsborough County, FL",
+    layerUrl: FL_STATEWIDE_LAYER,
+    idField: "PARCEL_ID", pinIdField: true, addrField: "PHY_ADDR1", pinAddrField: true,
+    scopeWhere: "CO_NO = 39",
+    help: "Hillsborough County parcels (Florida statewide FDOR cadastral roll, 2025). Search by parcel ID or a site address.",
+  },
+  fl_pasco: {
+    state: "FL", label: "Pasco County, FL",
+    layerUrl: FL_STATEWIDE_LAYER,
+    idField: "PARCEL_ID", pinIdField: true, addrField: "PHY_ADDR1", pinAddrField: true,
+    scopeWhere: "CO_NO = 61",
+    help: "Pasco County parcels (Florida statewide FDOR cadastral roll, 2025). Search by parcel ID or a site address.",
+  },
+  fl_hernando: {
+    state: "FL", label: "Hernando County, FL",
+    layerUrl: FL_STATEWIDE_LAYER,
+    idField: "PARCEL_ID", pinIdField: true, addrField: "PHY_ADDR1", pinAddrField: true,
+    scopeWhere: "CO_NO = 37",
+    help: "Hernando County parcels (Florida statewide FDOR cadastral roll, 2025). Search by parcel ID or a site address.",
+  },
+  fl_sumter: {
+    state: "FL", label: "Sumter County, FL",
+    layerUrl: FL_STATEWIDE_LAYER,
+    idField: "PARCEL_ID", pinIdField: true, addrField: "PHY_ADDR1", pinAddrField: true,
+    scopeWhere: "CO_NO = 70",
+    help: "Sumter County parcels (Florida statewide FDOR cadastral roll, 2025). Search by parcel ID or a site address.",
+  },
+  fl_lake: {
+    state: "FL", label: "Lake County, FL",
+    layerUrl: FL_STATEWIDE_LAYER,
+    idField: "PARCEL_ID", pinIdField: true, addrField: "PHY_ADDR1", pinAddrField: true,
+    scopeWhere: "CO_NO = 45",
+    help: "Lake County parcels (Florida statewide FDOR cadastral roll, 2025). Search by parcel ID or a site address.",
+  },
+  fl_orange: {
+    state: "FL", label: "Orange County, FL",
+    layerUrl: FL_STATEWIDE_LAYER,
+    idField: "PARCEL_ID", pinIdField: true, addrField: "PHY_ADDR1", pinAddrField: true,
+    scopeWhere: "CO_NO = 58",
+    help: "Orange County parcels (Florida statewide FDOR cadastral roll, 2025). Search by parcel ID or a site address.",
+  },
+  fl_osceola: {
+    state: "FL", label: "Osceola County, FL",
+    layerUrl: FL_STATEWIDE_LAYER,
+    idField: "PARCEL_ID", pinIdField: true, addrField: "PHY_ADDR1", pinAddrField: true,
+    scopeWhere: "CO_NO = 59",
+    help: "Osceola County parcels (Florida statewide FDOR cadastral roll, 2025). Search by parcel ID or a site address.",
+  },
+  fl_highlands: {
+    state: "FL", label: "Highlands County, FL",
+    layerUrl: FL_STATEWIDE_LAYER,
+    idField: "PARCEL_ID", pinIdField: true, addrField: "PHY_ADDR1", pinAddrField: true,
+    scopeWhere: "CO_NO = 38",
+    help: "Highlands County parcels (Florida statewide FDOR cadastral roll, 2025). Search by parcel ID or a site address.",
+  },
+  fl_hardee: {
+    state: "FL", label: "Hardee County, FL",
+    layerUrl: FL_STATEWIDE_LAYER,
+    idField: "PARCEL_ID", pinIdField: true, addrField: "PHY_ADDR1", pinAddrField: true,
+    scopeWhere: "CO_NO = 35",
+    help: "Hardee County parcels (Florida statewide FDOR cadastral roll, 2025). Search by parcel ID or a site address.",
+  },
+  fl_manatee: {
+    state: "FL", label: "Manatee County, FL",
+    layerUrl: FL_STATEWIDE_LAYER,
+    idField: "PARCEL_ID", pinIdField: true, addrField: "PHY_ADDR1", pinAddrField: true,
+    scopeWhere: "CO_NO = 51",
+    help: "Manatee County parcels (Florida statewide FDOR cadastral roll, 2025). Search by parcel ID or a site address.",
+  },
+  fl_desoto: {
+    state: "FL", label: "DeSoto County, FL",
+    layerUrl: FL_STATEWIDE_LAYER,
+    idField: "PARCEL_ID", pinIdField: true, addrField: "PHY_ADDR1", pinAddrField: true,
+    scopeWhere: "CO_NO = 24",
+    help: "DeSoto County parcels (Florida statewide FDOR cadastral roll, 2025). Search by parcel ID or a site address.",
   },
 
   /* ═══ B1455634 — 21 MEASURED COUNTY ENDPOINTS ACROSS 12 STATES (one, Hinds MS, excluded — see
@@ -2075,8 +2235,11 @@ const COUNTIES_MAP_RAW = {
     layerUrl: "https://enterprise.firstmap.delaware.gov/arcgis/rest/services/PlanningCadastre/DE_StateParcels/FeatureServer/0",
   },
   fl_statewide: {
+    // NEW-1 (2026-09-24) — repointed to the shared FL_STATEWIDE_LAYER const (defined above,
+    // alongside TXGIO_STATEWIDE_LAYER/CO_STATEWIDE_LAYER) so this entry and the 17 scoped FL
+    // county rows above can never diverge on the URL. Byte-identical to the prior inline literal.
     state: "FL", center: [27.8, -81.7], zoom: 6, mapServer: null, statewide: true,
-    layerUrl: "https://services9.arcgis.com/Gh9awoU677aKree0/arcgis/rest/services/Florida_Statewide_Cadastral/FeatureServer/0",
+    layerUrl: FL_STATEWIDE_LAYER,
   },
   /* NEW-1 (2026-09-08, continuing B1332016) — Hawaii, Maryland, Nebraska and New Hampshire were
    * measured live from the OWNER'S OWN BROWSER, not this sandbox (every host below 403s here —
@@ -2423,6 +2586,29 @@ const COUNTIES_MAP_RAW = {
   ga_turner: { state: "GA", center: [31.7093, -83.626], zoom: 10, bbox: [31.57, -83.8, 31.85, -83.45], mapServer: null, layerUrl: COUNTIES.ga_turner.layerUrl },
   ga_twiggs: { state: "GA", center: [32.6698, -83.4143], zoom: 10, bbox: [32.45, -83.6, 32.89, -83.23], mapServer: null, layerUrl: COUNTIES.ga_twiggs.layerUrl },
   ga_ware: { state: "GA", center: [31.0175, -82.4137], zoom: 10, bbox: [30.57, -82.7, 31.47, -82.13], mapServer: null, layerUrl: COUNTIES.ga_ware.layerUrl },
+
+  // NEW-1 (2026-09-24) — 17 Florida counties (Jacksonville + Polk/Lakeland markets); center/bbox
+  // read directly from public/geo/county-polygons.json (the same nationwide asset resolveCounty
+  // uses), never hand-typed, same convention as the GA rows above. See the matching COUNTIES_RAW
+  // block above (and FL_STATEWIDE_LAYER's own header) for the shared-layer provenance.
+  fl_duval: { state: "FL", center: [30.34, -81.74], zoom: 10, bbox: [30.11, -82.05, 30.58, -81.43], mapServer: null, layerUrl: COUNTIES.fl_duval.layerUrl },
+  fl_nassau: { state: "FL", center: [30.55, -81.78], zoom: 10, bbox: [30.27, -82.05, 30.83, -81.5], mapServer: null, layerUrl: COUNTIES.fl_nassau.layerUrl },
+  fl_clay: { state: "FL", center: [29.96, -81.82], zoom: 10, bbox: [29.72, -82.05, 30.19, -81.58], mapServer: null, layerUrl: COUNTIES.fl_clay.layerUrl },
+  fl_stjohns: { state: "FL", center: [29.94, -81.46], zoom: 10, bbox: [29.63, -81.69, 30.25, -81.23], mapServer: null, layerUrl: COUNTIES.fl_stjohns.layerUrl },
+  fl_baker: { state: "FL", center: [30.36, -82.25], zoom: 10, bbox: [30.14, -82.46, 30.58, -82.05], mapServer: null, layerUrl: COUNTIES.fl_baker.layerUrl },
+  fl_polk: { state: "FL", center: [28.0, -81.62], zoom: 10, bbox: [27.64, -82.11, 28.36, -81.13], mapServer: null, layerUrl: COUNTIES.fl_polk.layerUrl },
+  fl_hillsborough: { state: "FL", center: [27.91, -82.35], zoom: 10, bbox: [27.64, -82.65, 28.17, -82.06], mapServer: null, layerUrl: COUNTIES.fl_hillsborough.layerUrl },
+  fl_pasco: { state: "FL", center: [28.32, -82.42], zoom: 10, bbox: [28.17, -82.78, 28.48, -82.05], mapServer: null, layerUrl: COUNTIES.fl_pasco.layerUrl },
+  fl_hernando: { state: "FL", center: [28.56, -82.36], zoom: 10, bbox: [28.43, -82.67, 28.69, -82.05], mapServer: null, layerUrl: COUNTIES.fl_hernando.layerUrl },
+  fl_sumter: { state: "FL", center: [28.63, -82.13], zoom: 10, bbox: [28.3, -82.31, 28.96, -81.95], mapServer: null, layerUrl: COUNTIES.fl_sumter.layerUrl },
+  fl_lake: { state: "FL", center: [28.81, -81.65], zoom: 10, bbox: [28.34, -81.95, 29.28, -81.34], mapServer: null, layerUrl: COUNTIES.fl_lake.layerUrl },
+  fl_orange: { state: "FL", center: [28.56, -81.26], zoom: 10, bbox: [28.34, -81.66, 28.79, -80.87], mapServer: null, layerUrl: COUNTIES.fl_orange.layerUrl },
+  fl_osceola: { state: "FL", center: [27.99, -81.26], zoom: 10, bbox: [27.64, -81.66, 28.34, -80.86], mapServer: null, layerUrl: COUNTIES.fl_osceola.layerUrl },
+  fl_highlands: { state: "FL", center: [27.34, -81.26], zoom: 10, bbox: [27.03, -81.56, 27.64, -80.95], mapServer: null, layerUrl: COUNTIES.fl_highlands.layerUrl },
+  fl_hardee: { state: "FL", center: [27.49, -81.81], zoom: 10, bbox: [27.33, -82.06, 27.64, -81.56], mapServer: null, layerUrl: COUNTIES.fl_hardee.layerUrl },
+  fl_manatee: { state: "FL", center: [27.43, -82.37], zoom: 10, bbox: [27.21, -82.69, 27.64, -82.06], mapServer: null, layerUrl: COUNTIES.fl_manatee.layerUrl },
+  fl_desoto: { state: "FL", center: [27.19, -81.81], zoom: 10, bbox: [27.03, -82.06, 27.34, -81.56], mapServer: null, layerUrl: COUNTIES.fl_desoto.layerUrl },
+
   az_pinal: { state: "AZ", center: [32.9940, -111.3275], zoom: 9, bbox: [32.51, -112.21, 33.48, -110.45], mapServer: null, layerUrl: COUNTIES.az_pinal.layerUrl },
   // B1339920 — bbox/center read directly from public/geo/county-polygons.json (same convention as
   // the B1551617 Tier 1 rows above), never hand-typed: [-226663,65023,-222085,68098] / scale 2000.

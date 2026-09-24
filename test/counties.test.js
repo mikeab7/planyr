@@ -960,6 +960,223 @@ describe("NEW-1 (2026-09-24, third pass) — 34 more Georgia counties are regist
   });
 });
 
+/* NEW-1 (2026-09-24) — 17 Florida counties (Jacksonville + Polk/Lakeland markets, ~30mi radius of
+ * each), all sharing ONE FDOR statewide layer (FL_STATEWIDE_LAYER in counties.js) via `scopeWhere`
+ * on `CO_NO` — the Idaho shared-layer shape, not the per-county-CAD Georgia shape. Every CO_NO
+ * value and every returned parcel below was independently confirmed with a LIVE point query
+ * against the real service from this sandbox 2026-09-24 (services9.arcgis.com is reachable here,
+ * unlike most county-own hosts this repo wires) — see countiesProvenance.js for the full record.
+ *
+ * ⛔ Fernandina Beach's real coordinates (Nassau County's own seat) are deliberately NOT used as
+ * fl_nassau's routing/bbox test point. Both the live FDOR layer's own boundary work fine there, but
+ * the OFFLINE nationwide county-polygon asset (public/geo/county-polygons.json) — and therefore
+ * this app's own computed COUNTIES_MAP bbox for Nassau, which is read directly from that same
+ * asset — does not reach the true tip of Amelia Island; confirmed by direct ray-cast probe against
+ * the committed asset. Yulee, FL (also Nassau County, on the mainland near I-95 and the Georgia
+ * line) is used instead for both the seat/bbox test and the state-line test — see
+ * docs/STATEWIDE-PARCELS.md's Florida section for the full write-up. This is a property of the
+ * offline geometry asset, not of the live parcel source; the dedicated test below documents the
+ * gap explicitly rather than silently routing around it. */
+describe("NEW-1 (2026-09-24) — 17 Florida counties are registered and shaped correctly (B1885600)", () => {
+  const FL_KEYS = [
+    "fl_duval", "fl_nassau", "fl_clay", "fl_stjohns", "fl_baker", "fl_polk", "fl_hillsborough",
+    "fl_pasco", "fl_hernando", "fl_sumter", "fl_lake", "fl_orange", "fl_osceola", "fl_highlands",
+    "fl_hardee", "fl_manatee", "fl_desoto",
+  ];
+  const FL_CO_NO = {
+    fl_duval: 26, fl_nassau: 55, fl_clay: 20, fl_stjohns: 65, fl_baker: 12, fl_polk: 63,
+    fl_hillsborough: 39, fl_pasco: 61, fl_hernando: 37, fl_sumter: 70, fl_lake: 45, fl_orange: 58,
+    fl_osceola: 59, fl_highlands: 38, fl_hardee: 35, fl_manatee: 51, fl_desoto: 24,
+  };
+  // The routing/bbox test point for each county — its real seat, EXCEPT fl_nassau (see the
+  // block comment above for why Yulee stands in for Fernandina Beach).
+  const SEATS = {
+    fl_duval: [30.3255, -81.6579],       // Jacksonville
+    fl_nassau: [30.6322, -81.5854],      // Yulee (Fernandina Beach's own bbox is measurably short of the city itself — see above)
+    fl_clay: [29.9911, -81.6787],        // Green Cove Springs
+    fl_stjohns: [29.8947, -81.3145],     // St. Augustine
+    fl_baker: [30.2827, -82.1265],       // Macclenny
+    fl_polk: [27.8964, -81.8431],        // Bartow, FL (a city — not Bartow County, GA)
+    fl_hillsborough: [27.9506, -82.4572],// Tampa
+    fl_pasco: [28.3625, -82.1968],       // Dade City
+    fl_hernando: [28.5553, -82.3879],    // Brooksville
+    fl_sumter: [28.6650, -82.1101],      // Bushnell
+    fl_lake: [28.8039, -81.7248],        // Tavares
+    fl_orange: [28.5383, -81.3792],      // Orlando
+    fl_osceola: [28.2920, -81.4076],     // Kissimmee
+    fl_highlands: [27.4956, -81.4409],   // Sebring
+    fl_hardee: [27.5372, -81.8095],      // Wauchula
+    fl_manatee: [27.4989, -82.5748],     // Bradenton
+    fl_desoto: [27.2153, -81.8592],      // Arcadia
+  };
+
+  it("registers each county in both the search and map registries, state FL, sharing the ONE FDOR layer", () => {
+    for (const k of FL_KEYS) {
+      expect(COUNTIES[k], k).toBeTruthy();
+      expect(COUNTIES_MAP[k], k).toBeTruthy();
+      expect(COUNTIES[k].state, k).toBe("FL");
+      expect(COUNTIES_MAP[k].state, k).toBe("FL");
+      expect(COUNTIES[k].layerUrl, k).toMatch(/^https:\/\//);
+      expect(COUNTIES[k].layerUrl, k).toBe(COUNTIES.fl_duval.layerUrl); // ONE shared statewide layer
+      expect(COUNTIES_MAP[k].layerUrl, k).toBe(COUNTIES[k].layerUrl);
+    }
+  });
+
+  it("every row carries its own distinct, correct CO_NO scopeWhere — never a bare shared URL", () => {
+    for (const k of FL_KEYS) {
+      expect(COUNTIES[k].scopeWhere, k).toBe(`CO_NO = ${FL_CO_NO[k]}`);
+    }
+    const scopes = FL_KEYS.map((k) => COUNTIES[k].scopeWhere);
+    expect(new Set(scopes).size, "every FL scopeWhere must be distinct").toBe(FL_KEYS.length);
+  });
+
+  it("every row pins idField (PARCEL_ID) and addrField (PHY_ADDR1) rather than trusting bare detection", () => {
+    for (const k of FL_KEYS) {
+      expect(COUNTIES[k].idField, k).toBe("PARCEL_ID");
+      expect(COUNTIES[k].pinIdField, k).toBe(true);
+      expect(COUNTIES[k].addrField, k).toBe("PHY_ADDR1");
+      expect(COUNTIES[k].pinAddrField, k).toBe(true);
+    }
+  });
+
+  it("gives every county a plausible Florida bbox/center (never a 0,0 placeholder or a bbox outside the state)", () => {
+    // Florida's own generous bbox floor.
+    for (const k of FL_KEYS) {
+      const c = COUNTIES_MAP[k];
+      const [south, west, north, east] = c.bbox;
+      expect(south, k).toBeGreaterThan(24.3);
+      expect(north, k).toBeLessThan(31.1);
+      expect(west, k).toBeGreaterThan(-87.7);
+      expect(east, k).toBeLessThan(-79.9);
+      expect(c.center[0], k).toBeGreaterThan(south);
+      expect(c.center[0], k).toBeLessThan(north);
+      expect(c.center[1], k).toBeGreaterThan(west);
+      expect(c.center[1], k).toBeLessThan(east);
+    }
+  });
+
+  it("each bbox contains its own routing/seat point", () => {
+    for (const k of FL_KEYS) {
+      const [lat, lng] = SEATS[k];
+      const [south, west, north, east] = COUNTIES_MAP[k].bbox;
+      expect(lat, k).toBeGreaterThan(south);
+      expect(lat, k).toBeLessThan(north);
+      expect(lng, k).toBeGreaterThan(west);
+      expect(lng, k).toBeLessThan(east);
+    }
+  });
+
+  it("⛔ documents the gap this test suite works around: Fernandina Beach's own coordinates fall OUTSIDE fl_nassau's computed bbox", () => {
+    const FERNANDINA_BEACH = [30.6697, -81.4626];
+    const [south, west, north, east] = COUNTIES_MAP.fl_nassau.bbox;
+    const inside = FERNANDINA_BEACH[0] > south && FERNANDINA_BEACH[0] < north
+      && FERNANDINA_BEACH[1] > west && FERNANDINA_BEACH[1] < east;
+    expect(inside, "if this ever flips true, Fernandina Beach can replace Yulee as fl_nassau's seat point above").toBe(false);
+  });
+
+  it("countyKeyForName resolves each county's real display name to its key, scoped to FL — incl. the multi-word 'St. Johns' case", () => {
+    expect(countyKeyForName("Duval", "FL")).toBe("fl_duval");
+    expect(countyKeyForName("Nassau County", "FL")).toBe("fl_nassau");
+    expect(countyKeyForName("Clay", "FL")).toBe("fl_clay");
+    expect(countyKeyForName("St. Johns County", "FL")).toBe("fl_stjohns");
+    expect(countyKeyForName("St. Johns", "FL")).toBe("fl_stjohns");
+    // "Saint Johns" (spelled out) is NOT aliased — the nationwide county-polygon asset that feeds
+    // real display names always spells it "St. Johns County" (confirmed against the committed
+    // asset), so this never actually reaches countyKeyForName from a real caller. Documented here
+    // rather than silently assumed to work.
+    expect(countyKeyForName("Saint Johns", "FL")).toBeNull();
+    expect(countyKeyForName("Baker", "FL")).toBe("fl_baker");
+    expect(countyKeyForName("Polk", "FL")).toBe("fl_polk");
+    expect(countyKeyForName("Hillsborough County", "FL")).toBe("fl_hillsborough");
+    expect(countyKeyForName("Pasco", "FL")).toBe("fl_pasco");
+    expect(countyKeyForName("Hernando", "FL")).toBe("fl_hernando");
+    expect(countyKeyForName("Sumter", "FL")).toBe("fl_sumter");
+    expect(countyKeyForName("Lake", "FL")).toBe("fl_lake");
+    expect(countyKeyForName("Orange", "FL")).toBe("fl_orange");
+    expect(countyKeyForName("Osceola", "FL")).toBe("fl_osceola");
+    expect(countyKeyForName("Highlands", "FL")).toBe("fl_highlands");
+    expect(countyKeyForName("Hardee", "FL")).toBe("fl_hardee");
+    expect(countyKeyForName("Manatee", "FL")).toBe("fl_manatee");
+    expect(countyKeyForName("DeSoto County", "FL")).toBe("fl_desoto");
+  });
+
+  it("a point at each county's routing point routes to it via candidateCountiesForPoint", () => {
+    for (const [k, [lat, lng]] of Object.entries(SEATS)) {
+      expect(candidateCountiesForPoint(lat, lng), k).toContain(k);
+    }
+  });
+
+  it("state line — Yulee (Nassau, FL) and St. Marys/Kingsland (Camden, GA) each DECIDE to the right state's county via countyForView (candidateCountiesForPoint may legitimately list both as bbox-overlap candidates near a border — that's by design, same as the GA/TX overlap cases above)", () => {
+    const YULEE = [30.6322, -81.5854];
+    const ST_MARYS = [30.7305, -81.5495];
+    const KINGSLAND = [30.8021, -81.6898];
+    expect(candidateCountiesForPoint(...YULEE)).toContain("fl_nassau");
+    expect(candidateCountiesForPoint(...YULEE)).not.toContain("ga_camden");
+    expect(candidateCountiesForPoint(...YULEE)).not.toContain("ga_charlton");
+    expect(candidateCountiesForPoint(...ST_MARYS)).toContain("ga_camden");
+    expect(candidateCountiesForPoint(...KINGSLAND)).toContain("ga_camden");
+    expect(countyForView(...YULEE)).toBe("fl_nassau");
+    expect(countyForView(...ST_MARYS)).toBe("ga_camden");
+    expect(countyForView(...KINGSLAND)).toBe("ga_camden");
+  });
+
+  it("Baker/Nassau, FL vs. Charlton, GA never cross (both touch the state line) — Folkston, GA decides ga_charlton, never a Florida key", () => {
+    const FOLKSTON_GA = [30.836, -82.0068]; // ga_charlton seat
+    const cand = candidateCountiesForPoint(...FOLKSTON_GA);
+    expect(cand).toContain("ga_charlton");
+    expect(cand).not.toContain("fl_baker");
+    expect(cand).not.toContain("fl_nassau");
+    expect(countyForView(...FOLKSTON_GA)).toBe("ga_charlton");
+  });
+
+  it("Bartow, FL (Polk County's seat, a CITY) never resolves to Bartow County, GA, and vice versa", () => {
+    const BARTOW_FL = [27.8964, -81.8431];
+    const BARTOW_COUNTY_GA_SEAT = [34.2455, -84.8427]; // Cartersville, the real Bartow County GA seat
+    const candFl = candidateCountiesForPoint(...BARTOW_FL);
+    expect(candFl).toContain("fl_polk");
+    expect(candFl).not.toContain("ga_bartow");
+    const candGa = candidateCountiesForPoint(...BARTOW_COUNTY_GA_SEAT);
+    expect(candGa).toContain("ga_bartow");
+    expect(candGa).not.toContain("fl_polk");
+    expect(countyForView(...BARTOW_COUNTY_GA_SEAT)).toBe("ga_bartow");
+  });
+
+  it("no Texas cross-over — Polk, Lake, Orange and Clay all exist as Texas counties too, and a Texas point must never pick up the Florida key", () => {
+    const TX_POINTS = {
+      "Livingston (Polk, TX)": [30.7108, -94.9327],
+      "Lake, TX (unincorporated bbox center)": [29.55, -94.85],
+      "Orange, TX": [30.0930, -93.7366],
+      "Henderson (Rusk, TX; near Clay-adjacent naming)": [32.1532, -94.7996],
+      "Jacksboro (Jack, TX — near-miss for 'Jacksonville')": [33.2187, -98.1595],
+      "Jacksonville, TX (Cherokee County — the same city name as fl_duval's own seat)": [31.9646, -95.2702],
+    };
+    for (const [label, [lat, lng]] of Object.entries(TX_POINTS)) {
+      const cand = candidateCountiesForPoint(lat, lng);
+      for (const k of FL_KEYS) expect(cand, `${label} vs ${k}`).not.toContain(k);
+    }
+  });
+
+  it("regression — a lot in Atlanta (Fulton, GA) and one in Houston (Harris, TX) are unaffected", () => {
+    const ATLANTA = [33.7490, -84.3880];
+    const HOUSTON = [29.76, -95.37];
+    const candAtl = candidateCountiesForPoint(...ATLANTA);
+    expect(candAtl).toContain("ga_fulton");
+    for (const k of FL_KEYS) expect(candAtl, `Atlanta vs ${k}`).not.toContain(k);
+    const candHou = candidateCountiesForPoint(...HOUSTON);
+    expect(candHou).toContain("harris");
+    for (const k of FL_KEYS) expect(candHou, `Houston vs ${k}`).not.toContain(k);
+  });
+
+  it("adds no shared-URL conflict — the FDOR layer is exempt as Florida's statewide composite (fl_statewide), so 17 rows sharing it is by design, not a defect", () => {
+    expect(sharedLayerUrlConflicts()).toEqual([]);
+  });
+
+  it("fl_statewide itself stays the honest all-Florida fallback: statewide:true, no bbox, same URL as every scoped county row", () => {
+    expect(COUNTIES_MAP.fl_statewide.statewide).toBe(true);
+    expect(COUNTIES_MAP.fl_statewide.layerUrl).toBe(COUNTIES.fl_duval.layerUrl);
+  });
+});
+
 /* ⛔ B1875248 recurrence (2026-09-24) — the parcel card showed the WinGAP layer's own row number
  * (FID/OBJECTID/OBJECTID_1) instead of the county's real parcel number, because `detectField`'s
  * plain alternation never ranked candidates against each other: whichever id-shaped column came
