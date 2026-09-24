@@ -117,9 +117,9 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
           const isOpen = open[f.id];
           const hasDetail = (f.detail && f.detail.length) || (f.rows && f.rows.length) || f.caveat || f.sourceName;
           const toggle = () => hasDetail && setOpen((o) => ({ ...o, [f.id]: !o[f.id] }));
-          // "Show on map" (B190): only for a category whose query RESOLVED (present/absent)
-          // AND that maps to a drawable shared overlay. UNKNOWN / failed / no-source
-          // categories have nothing to draw — no blank toggle; their error stays surfaced.
+          // "Activate layer" (B190, relabeled NEW-1): only for a category whose query RESOLVED
+          // (present/absent) AND that maps to a drawable shared overlay. UNKNOWN / failed /
+          // no-source categories have nothing to draw — no blank toggle; their error stays surfaced.
           const canMap = !!f.mapLayer && !!onToggleLayer && (f.status === "present" || f.status === "absent" || f.status === "info");
           const layerOn = canMap && !!isLayerOn && isLayerOn(f.mapLayer);
           const mapFailed = layerOn && layerStatus?.[f.mapLayer]?.state === "failed";
@@ -151,9 +151,10 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); onToggleLayer(f.mapLayer, !layerOn); }}
-                          title={layerOn ? "Hide this layer on the map" : "Show this layer on the map (frames to the site)"}
+                          title={layerOn ? "Deactivate this layer on the map" : "Activate this layer on the map (frames to the site)"}
+                          aria-pressed={layerOn}
                           style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, letterSpacing: "0.02em", padding: "2px 7px", borderRadius: RADIUS.pill, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3, border: `1px solid ${layerOn ? "#1d4ed8" : line}`, background: layerOn ? "#1d4ed8" : "transparent", color: layerOn ? "#fff" : muted }}>
-                          {layerOn ? "◉ On map" : "◍ Map"}
+                          {layerOn ? "◉ Deactivate layer" : "◍ Activate layer"}
                         </button>
                       )}
                       <span style={{ fontSize: 10, fontWeight: 700, color: st.dot, textTransform: "uppercase", letterSpacing: "0.05em" }}>{st.label}</span>
@@ -209,7 +210,7 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
       </div>
 
       <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${line}`, fontSize: 10.5, color: muted, lineHeight: 1.5 }}>
-        Screening only — desktop GIS sources, not a survey or a legal determination. Each finding carries its own source, age, and caveat (tap to expand). Tap <b style={{ color: "var(--info-text)" }}>◍ Map</b> on a finding to see that layer on the map, framed to the site. An <b>unknown</b> is never an all-clear.
+        Screening only — desktop GIS sources, not a survey or a legal determination. Each finding carries its own source, age, and caveat (tap to expand). Tap <b style={{ color: "var(--info-text)" }}>◍ Activate layer</b> on a finding to show that layer on the map, framed to the site. An <b>unknown</b> is never an all-clear.
       </div>
     </div>
   );

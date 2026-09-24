@@ -3423,6 +3423,17 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
 
   const clearSel = () => { clearHilites(); setSelected([]); setParcelInfo(null); setBackupNotice(null); setCachedNotice(null); };
 
+  /* NEW-1 (2026-09-24) — a decide-bar verb that finishes WITHOUT leaving the map (Log a comp, Add a
+   * note) must exit select mode ITSELF, not just empty the selection. "Plan this site" gets that for
+   * free because planning a site flips `mode` away from the map, and the return-to-map effect above
+   * resets `selectMode` on the way out; a verb that stays on the map has no such effect to ride, so
+   * `clearSel()` alone left `selectMode` stuck true — which re-armed the "Selecting…" bar instead of
+   * returning the toolbar to its AT-REST row (the reported "Add a note doesn't dismiss the parcel
+   * selection bar" defect). Deliberately NOT folded into `clearSel()` itself: the decide bar's own
+   * ✕ "Clear selection" button calls `clearSel()` to let the user pick different parcels WITHOUT
+   * leaving select mode, and that stays correct. */
+  const finishGroundAction = () => { clearSel(); setSelectMode(false); };
+
   /* NEW-1 (2026-09-08) — GROUND FIRST. A raw point the user pointed at, with the question of what
    * it IS deliberately not yet asked; the decide bar asks it. Clears any parcel selection, so the
    * bar always has exactly ONE target and can never present three verbs whose meaning depends on
@@ -3512,7 +3523,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     const anchor = compAnchorFromSelection(selected, asm);
     if (!anchor) return;
     onPlaceComp && onPlaceComp(anchor);
-    clearSel();
+    // NEW-1 (2026-09-24) — `finishGroundAction`, not a bare `clearSel()`: this verb finishes without
+    // leaving the map, so it must exit select mode itself or the toolbar falls back to "Selecting…"
+    // with nothing selected instead of its normal AT-REST row. See that helper's own comment.
+    finishGroundAction();
   };
 
   /* ⛔ NEW-1 (2026-09-08) — `armCompAnchor` (B848304's one-arming-function behind the "Place
@@ -3711,7 +3725,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
           const anchor = parcelAnchorFromSelection(selected, asm);
           if (!anchor) return;
           beginNoteAt(anchor);
-          clearSel();
+          // NEW-1 (2026-09-24) — `finishGroundAction`, not a bare `clearSel()`: this verb finishes
+          // without leaving the map, so it must exit select mode itself or the toolbar falls back
+          // to "Selecting…" with nothing selected instead of its normal AT-REST row (the reported
+          // "Add a note doesn't dismiss the parcel selection bar" defect). See that helper's own
+          // comment, beside `clearSel`.
+          finishGroundAction();
           return;
         }
         const pin = droppedPin;
@@ -4185,7 +4204,6 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             <Suspense fallback={null}>
               <MapNoteEditor
                 note={editingNote}
-                sites={sites}
                 onSave={saveMapNote}
                 onDelete={removeMapNote}
                 onClose={() => setEditingNote(null)}

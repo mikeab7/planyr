@@ -498,7 +498,7 @@ describe("derived jurisdiction findings", () => {
       { name: "Greens Rd", route: "g1", authority: { label: "City" }, funcClass: 4 },
     ] });
     expect(f.status).toBe("info");
-    expect(f.mapLayer).toBe("jur_road_authority"); // lifts B190 suppression → the card gets a "◍ Map" toggle
+    expect(f.mapLayer).toBe("jur_road_authority"); // lifts B190 suppression → the card gets a "◍ Activate layer" toggle
     expect(f.rows[0]).toEqual(["Maintained by", "Mixed — 2 roads", 500]);
     expect(f.rows[1][0]).toBe("IH 45");
     expect(f.rows[1][1]).toBe("State (TxDOT)");

@@ -4,15 +4,18 @@
  * floodplain), opens the ⚐ Analysis left-rail tab, and checks:
  *   B189 — flood / wetlands / pipelines / oil&gas RESOLVE (Present / None found),
  *          NOT "UNKNOWN / Failed to execute query" (the bug).
- *   B190 — a resolved card shows "◍ Map"; clicking it flips to "◉ On map" and adds
- *          the GIS overlay layer to the planner's Leaflet map.
+ *   B190 — a resolved card shows "◍ Activate layer"; clicking it flips to "◉ Deactivate
+ *          layer" and adds the GIS overlay layer to the planner's Leaflet map.
  *
  * Run: node ui-audit/verify-analysis.mjs   (vite preview must be on :4173)
  */
 import { chromium } from "playwright";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 
-const BASE = process.env.BASE_URL || "http://localhost:4173/";
+// "#/project/<groupId>/site" — bare "#/" now lands on the Dashboard (B1213312), and "#/site"
+// alone lands on the project-picker MapFinder rather than opening the seeded plan; the
+// project-scoped hash is what actually opens the Site Planner canvas for this seeded site.
+const BASE = process.env.BASE_URL || "http://localhost:4173/#/project/analysis-demo/site";
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 
 // Origin over Sheldon Lake (wetlands) with a ~1000 ft parcel — guarantees a PRESENT
@@ -91,7 +94,7 @@ for (const cat of mustResolve) {
 }
 console.log(`\nB189 (queries resolve, no "Failed to execute query"): ${b184ok ? "✅ PASS" : "❌ FAIL"}`);
 
-// --- B190: click a resolved card's "◍ Map" toggle ---
+// --- B190: click a resolved card's "◍ Activate layer" toggle ---
 const before = await overlayImgs();
 // Prefer Wetlands (PRESENT over the lake) for a visible layer.
 let b185ok = false, toggleCat = null;
@@ -99,7 +102,7 @@ for (const cat of ["Wetlands", "Floodplain", "Pipelines", "Oil & gas wells"]) {
   if (cards[cat] && cards[cat].hasMapBtn) { toggleCat = cat; break; }
 }
 if (toggleCat) {
-  // Click the Map button inside that category's card.
+  // Click the Activate-layer button inside that category's card.
   const clicked = await page.evaluate((cat) => {
     const spans = [...document.querySelectorAll("span")];
     const lab = spans.find((s) => s.textContent.trim() === cat && s.style.fontWeight === "700");
@@ -121,10 +124,10 @@ if (toggleCat) {
     return btn ? btn.innerText.trim() : "(no btn)";
   }, toggleCat);
   console.log(`\nB190 toggle on "${toggleCat}": clicked=${clicked} button="${onState}" overlayImgs ${before}→${after}`);
-  b185ok = clicked && /on map/i.test(onState) && after > before;
+  b185ok = clicked && /deactivate layer/i.test(onState) && after > before;
   console.log(`B190 (card toggles the map overlay on): ${b185ok ? "✅ PASS" : "❌ FAIL"}`);
 } else {
-  console.log("\nB190: no resolved card offered a Map toggle (depends on B189 resolving) ❌");
+  console.log("\nB190: no resolved card offered an Activate-layer toggle (depends on B189 resolving) ❌");
 }
 
 if (qFails.length) { console.log("\n[siteAnalysis] diagnostics logged (expected only on a real failure):"); qFails.forEach((l) => console.log("  " + l.split("\n")[0])); }
