@@ -12,9 +12,13 @@
  *     Actions"; clicking undoes/redoes that whole run as one gesture.
  *
  * Logged out, no external GIS, geometry seeded from localStorage — Claude-verifiable HERE
- * (ATTEMPT-BEFORE-YOU-PARK). Zoom-to-fit is asserted UNCHANGED (still filled MDI, 20px) — a
- * deliberate scope check: B648352 fixed Undo/Redo only and reported the same mismatch on
- * Zoom-to-fit/Layers rather than silently widening the fix.
+ * (ATTEMPT-BEFORE-YOU-PARK).
+ *
+ * ⛔ NEW-1 (B1900672, 2026-09-24) — Row 2's Zoom-to-fit button (previously asserted here as a
+ * deliberate "unchanged, still filled MDI" scope check against B648352) was removed from this row
+ * entirely (owner request; the same `fit()` handler is still reachable elsewhere in the app). That
+ * scope-check assertion is gone with it — there is no longer a Row 2 Zoom-to-fit button to assert
+ * against.
  *
  * Run:  npm run dev -- --port 5183   (separate shell)
  *       BASE_URL=http://localhost:5183/ node ui-audit/verify-undo-redo-history.mjs
@@ -101,12 +105,15 @@ for (const theme of ["light", "dark"]) {
       return cs.borderWidth !== "0px" && cs.backgroundColor !== "rgba(0, 0, 0, 0)" && cs.backgroundColor !== "transparent";
     }));
 
-  const zf = await page.locator('button[aria-label="Zoom to fit"]').first().evaluate((btn) => {
-    const svg = btn.querySelector("svg");
-    return { fill: svg.getAttribute("fill"), w: svg.getAttribute("width") };
-  });
-  ok(`[${theme}] Zoom-to-fit is deliberately UNCHANGED (still filled MDI, 20px) — scope stayed to Undo/Redo`,
-    zf.fill === "currentColor" && zf.w === "20", JSON.stringify(zf));
+  // NEW-1 (B1900672) — Zoom-to-fit no longer has a Row 2 button to assert against; also assert
+  // Undo now renders to the LEFT of File (the reorder this item shipped).
+  const fileBtnLoc = page.locator('button:has-text("File")').first();
+  const undoX = (await undoBtn.boundingBox())?.x;
+  const fileX = (await fileBtnLoc.boundingBox())?.x;
+  ok(`[${theme}] Undo renders to the LEFT of File (Row 2 reorder)`, undoX != null && fileX != null && undoX < fileX, `undoX=${undoX} fileX=${fileX}`);
+  // Scoped to <header> — the canvas's own separate floating bottom-right zoom stack (+/−/fit)
+  // still carries this same aria-label and is untouched by this change.
+  ok(`[${theme}] no Row 2 Zoom-to-fit button remains in the header`, (await page.locator('header button[aria-label="Zoom to fit"]').count()) === 0);
 
   const toolbarBox = await undoBtn.boundingBox();
   await page.screenshot({ path: `${OUT}toolbar-${theme}.png`, clip: { x: Math.max(0, toolbarBox.x - 60), y: Math.max(0, toolbarBox.y - 10), width: 320, height: 50 } });

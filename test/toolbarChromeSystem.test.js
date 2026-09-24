@@ -1,10 +1,14 @@
-/* B654240 — ONE CHROME SYSTEM for the top-right planner toolbar (File / History / View).
+/* B654240 — ONE CHROME SYSTEM for the top-right planner toolbar (History / File).
  *
  * Owner report: "this is horrendous UI" — File, the Undo/Redo pair, and Zoom-to-fit each used a
  * different container language (a 3px-radius outlined pill, a filled grey slab with its own 10px
  * radius, and a bare glyph with no container at all), so the group read as three unrelated
  * control systems rather than one toolbar. Read the full report on the shipped docs/archive/BACKLOG-DONE.md
  * entry for this id.
+ *
+ * ⛔ NEW-1 (B1900672, 2026-09-24) — Row 2's order is now Undo/Redo, then File; Zoom-to-fit was
+ * removed from this row entirely (owner request — still reachable via the canvas's own
+ * empty-space right-click menu and the print-compose screen's own zoom-to-fit button).
  *
  * This is a SOURCE GUARD, not a live-DOM check (that lives in
  * ui-audit/verify-toolbar-chrome-system.mjs) — it pins the SHAPE of the fix so a future edit can't
@@ -79,7 +83,8 @@ describe("B654240 — the top-right planner toolbar shares one chrome system", (
   });
 
   it("disabled toolbar icon buttons keep their resting box and dim only the glyph, never a container fade", () => {
-    // .tb-icon-btn is the shared Undo/Redo/Zoom-to-fit icon-button class. B1807200 AMENDMENT:
+    // .tb-icon-btn is the shared Undo/Redo icon-button class (also used by other icon-only
+    // toolbar buttons on the canvas). B1807200 AMENDMENT:
     // now that dGhost/dIcon carry a real background+border, the disabled rule must CANCEL the
     // app-wide button:disabled fade on the button itself (opacity:1) and dim only its direct-child
     // glyph — never fade the button (which would fade its box along with the glyph) and never swap
@@ -94,13 +99,23 @@ describe("B654240 — the top-right planner toolbar shares one chrome system", (
     expect(glyphRule[0]).toMatch(/opacity:\s*\.45\b/);
   });
 
-  it("File, Undo, Redo and Zoom-to-fit are still grouped only by the shared vSep divider", () => {
-    // Between the File group and the closing of the Zoom-to-fit group there must be exactly two
-    // {vSep} dividers (File | History | View) — proves the fix didn't reintroduce a fourth
-    // grouping mechanism (a border, a background band) alongside the divider.
-    const zoomFitIdx = TOOLBAR.indexOf('aria-label="Zoom to fit"');
-    const span = TOOLBAR.slice(0, zoomFitIdx);
+  it("Undo, Redo and File are still grouped only by the shared vSep divider", () => {
+    // Between the start of the History (Undo/Redo) group and the end of the File group there must
+    // be exactly one {vSep} divider — proves the fix didn't reintroduce a second grouping
+    // mechanism (a border, a background band) alongside the divider.
+    const undoIdx = TOOLBAR.indexOf('aria-label="Undo"');
+    const fileBtnEnd = TOOLBAR.indexOf("</button>", TOOLBAR.indexOf('title="File'));
+    const span = TOOLBAR.slice(undoIdx, fileBtnEnd);
     const vSepCount = (span.match(/\{vSep\}/g) || []).length;
-    expect(vSepCount).toBe(2);
+    expect(vSepCount).toBe(1);
+  });
+
+  it("NEW-1 (B1900672) — Undo/Redo render before File, and Zoom-to-fit is not in the row-2 toolbar", () => {
+    const undoIdx = TOOLBAR.indexOf('aria-label="Undo"');
+    const fileIdx = TOOLBAR.indexOf('title="File');
+    expect(undoIdx).toBeGreaterThan(-1);
+    expect(fileIdx).toBeGreaterThan(-1);
+    expect(undoIdx).toBeLessThan(fileIdx);
+    expect(TOOLBAR).not.toMatch(/aria-label="Zoom to fit"/);
   });
 });

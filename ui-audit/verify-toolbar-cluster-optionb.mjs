@@ -1,6 +1,12 @@
 /* NEW-1 — verify the top-right toolbar cluster's Option B unification (row 1: sync badge / open
- * tabs / Full screen / account; row 2: File / Undo / Redo / Zoom-to-fit), driven headless against
+ * tabs / Full screen / account; row 2: Undo / Redo / File), driven headless against
  * the REAL running app (logged out — no auth/GIS needed, per ATTEMPT-BEFORE-YOU-PARK).
+ *
+ * ⛔ NEW-1 (B1900672, 2026-09-24) — Row 2's order changed from File/Undo/Redo/Zoom-to-fit to
+ * Undo/Redo/File, and Zoom-to-fit was removed from this row entirely (owner request; the same
+ * `fit()` handler is still reachable from the canvas's own empty-space right-click menu and the
+ * print-compose screen's own zoom-to-fit button). This harness no longer asserts anything about
+ * a Row 2 Zoom-to-fit button, and asserts Undo/Redo render LEFT of File instead.
  *
  * Checks, all read from `getComputedStyle`/`getBoundingClientRect` on the real rendered controls:
  *   1. Every icon-only control across BOTH rows renders at 30×30 (CONTROL_H.lg/SIZE.md — the height already established across the rest of the app; a literal 32 was tried and reverted, see controls.jsx's SIZE header).
@@ -12,15 +18,17 @@
  *      neighbours (the fully signed-in collapsed-name case needs a real account — VERIFICATION.md
  *      Blocker: auth).
  *   4. Undo (disabled, nothing to undo on a blank canvas) reports a computed opacity/color
- *      distinct from Redo's own resting (enabled-when-something-exists / disabled-when-not)
- *      styling baseline — proven by comparing Undo's disabled opacity against the button's own
- *      un-disabled opacity read off Zoom-to-fit (a same-class icon button that starts enabled).
+ *      distinct from its own un-disabled baseline — the box stays full-opacity while the glyph
+ *      dims measurably.
  *   5. ⛔ B1807200 AMENDMENT (2026-09-23) — each 30×30 control has REAL clearance from its row's
  *      own edges (owner-reported "chips touch the header" after the box-treatment round above
  *      shipped controls flush against a same-height row). Row 1 is bordered-free so it centers
  *      exactly (5px/5px at the owner-approved HEADER_ROW_H=40); Row 2 carries a 1px divider
  *      border on its own top edge, so its clearance is asymmetric by that one pixel — both sides
  *      are asserted against the owner's own floor (>= ~4px), not against a bare zero.
+ *   6. NEW-1 (B1900672) — Row 2's DOM order is Undo, then Redo, then File (left to right), and no
+ *      element carrying aria-label="Zoom to fit" remains inside <header> (the canvas's own
+ *      separate floating bottom-right zoom stack still carries that label and is untouched).
  *
  * Run: npm run dev &  then  node ui-audit/verify-toolbar-cluster-optionb.mjs
  */
@@ -72,18 +80,27 @@ try {
     const fileBtn = [...document.querySelectorAll("button")].find((b) => b.getClientRects().length > 0 && b.textContent.trim().startsWith("File"));
     const undoBtn = visible('button[aria-label="Undo"]');
     const redoBtn = visible('button[aria-label="Redo"]');
-    const fitBtn = visible('button[aria-label="Zoom to fit"]');
+    // NEW-1 (B1900672) — Zoom-to-fit no longer lives in Row 2 (the <header>), but the canvas's own
+    // separate floating bottom-right zoom stack (+/−/fit) still carries the same aria-label and is
+    // untouched by this change — so the "gone" check is scoped to <header>, not the whole page.
+    const zoomFitInHeader = visible('header button[aria-label="Zoom to fit"]');
 
-    const iconButtons = { fullscreenBtn, cloudBadge, undoBtn, redoBtn, fitBtn };
+    const iconButtons = { fullscreenBtn, cloudBadge, undoBtn, redoBtn };
     const iconRects = {};
     for (const [k, el] of Object.entries(iconButtons)) iconRects[k] = el ? rectOf(el) : null;
+
+    // NEW-1 (B1900672) — Row 2's left-to-right DOM order, compared by horizontal position.
+    const row2Order = [
+      undoBtn && { name: "undoBtn", x: rectOf(undoBtn).left },
+      redoBtn && { name: "redoBtn", x: rectOf(redoBtn).left },
+      fileBtn && { name: "fileBtn", x: rectOf(fileBtn).left },
+    ].filter(Boolean).sort((a, b) => a.x - b.x).map((e) => e.name);
 
     return {
       iconRects,
       fullscreenRadius: csOf(fullscreenBtn)?.borderRadius,
       cloudRadius: csOf(cloudBadge)?.borderRadius,
       fileRadius: csOf(fileBtn)?.borderRadius,
-      fitRadius: csOf(fitBtn)?.borderRadius,
       accountRect: rectOf(accountTrigger),
       accountHeight: num(csOf(accountTrigger)?.height),
       accountText: accountTrigger ? accountTrigger.textContent.trim() : null,
@@ -94,8 +111,8 @@ try {
       undoBoxOpacity: num(csOf(undoBtn)?.opacity),
       undoGlyphOpacity: num(csOf(undoBtn?.querySelector("svg"))?.opacity),
       undoDisabled: undoBtn?.disabled,
-      fitOpacityBeforeAnyAction: num(csOf(fitBtn)?.opacity),
-      fitDisabledBeforeAnyAction: fitBtn?.disabled,
+      zoomFitPresentInHeader: !!zoomFitInHeader,
+      row2Order,
       // ⛔ B1807200 AMENDMENT (2026-09-23) — clearance between each 30×30 control and its OWN row's
       // edges (walk up to the outermost flex+centered ancestor still inside <header>, since an
       // inner zone div is also flex+alignItems:center but sizes to its own content, not the row).
@@ -130,8 +147,8 @@ try {
 
   // 2) shared 8px radius (full-corner controls only — Undo/Redo's own main button is a merged
   // split-button half and is exempted, same as the pre-existing row-2 harness).
-  const radii = [facts.fullscreenRadius, facts.cloudRadius, facts.fileRadius, facts.fitRadius];
-  ok("Full screen / cloud-sync badge / File / Zoom-to-fit share one border-radius (8px)",
+  const radii = [facts.fullscreenRadius, facts.cloudRadius, facts.fileRadius];
+  ok("Full screen / cloud-sync badge / File share one border-radius (8px)",
     radii.every((r) => r === "8px"), `radii=${JSON.stringify(radii)}`);
 
   // 3) the account trigger renders at the same 30px height as its row-1 neighbours.
@@ -146,7 +163,6 @@ try {
   ok("Undo's own box stays at full opacity when disabled (only the glyph dims)",
     Math.abs(facts.undoBoxOpacity - 1) < 0.01, `undoBoxOpacity=${facts.undoBoxOpacity}`);
   ok("Undo's glyph opacity is measurably reduced (< 1)", facts.undoGlyphOpacity < 0.9, `undoGlyphOpacity=${facts.undoGlyphOpacity}`);
-  console.log(`  (Zoom-to-fit baseline for comparison: opacity=${facts.fitOpacityBeforeAnyAction} disabled=${facts.fitDisabledBeforeAnyAction})`);
 
   // 5) B1807200 AMENDMENT — real clearance between each 30×30 control and its own row's edges.
   // Owner-set floor: >= ~4px, symmetric top/bottom on a border-free row (Row 1); Row 2 carries a
@@ -164,6 +180,15 @@ try {
       Math.abs(facts.clearance.row1.gapTop - facts.clearance.row1.gapBottom) < 0.5,
       `gapTop=${facts.clearance.row1.gapTop} gapBottom=${facts.clearance.row1.gapBottom}`);
   }
+
+  // 6) NEW-1 (B1900672) — Undo, then Redo, then File, left to right; no Zoom-to-fit button
+  // anywhere in the default canvas view (it still exists via the empty-canvas right-click menu
+  // and the print-compose screen, neither of which this harness drives).
+  ok("Row 2 renders Undo, Redo, File in that left-to-right order",
+    JSON.stringify(facts.row2Order) === JSON.stringify(["undoBtn", "redoBtn", "fileBtn"]),
+    `row2Order=${JSON.stringify(facts.row2Order)}`);
+  ok("No Zoom-to-fit button remains in the header (Row 2) — the canvas's own floating zoom stack is untouched",
+    facts.zoomFitPresentInHeader === false);
 
   ok("no uncaught page errors", pageErrors === 0, `pageErrors=${pageErrors}`);
 

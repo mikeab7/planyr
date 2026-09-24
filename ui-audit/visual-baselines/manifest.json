@@ -6,90 +6,90 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-09-23",
-        "approvedCommit": "787fb33e",
-        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
+        "approvedAt": "2026-09-24",
+        "approvedCommit": "218568ea",
+        "note": "B1900672: Site Planner Row 2 reorder — Undo/Redo moved left of File, Zoom-to-fit button removed from Row 2 [CI-authored by run 36046470528 on 218568ea50e68e75b67ad6bac949b40b73e636a6]"
       },
       "dark": {
-        "approvedAt": "2026-09-23",
-        "approvedCommit": "787fb33e",
-        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
+        "approvedAt": "2026-09-24",
+        "approvedCommit": "218568ea",
+        "note": "B1900672: Site Planner Row 2 reorder — Undo/Redo moved left of File, Zoom-to-fit button removed from Row 2 [CI-authored by run 36046470528 on 218568ea50e68e75b67ad6bac949b40b73e636a6]"
       },
       "light--phone": {
-        "approvedAt": "2026-09-23",
-        "approvedCommit": "787fb33e",
-        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
+        "approvedAt": "2026-09-24",
+        "approvedCommit": "218568ea",
+        "note": "B1900672: Site Planner Row 2 reorder — Undo/Redo moved left of File, Zoom-to-fit button removed from Row 2 [CI-authored by run 36046470528 on 218568ea50e68e75b67ad6bac949b40b73e636a6]"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-23",
-        "approvedCommit": "787fb33e",
-        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
+        "approvedAt": "2026-09-24",
+        "approvedCommit": "218568ea",
+        "note": "B1900672: Site Planner Row 2 reorder — Undo/Redo moved left of File, Zoom-to-fit button removed from Row 2 [CI-authored by run 36046470528 on 218568ea50e68e75b67ad6bac949b40b73e636a6]"
       }
     },
     "site-planner-header": {
       "light": {
-        "approvedAt": "2026-09-23",
-        "approvedCommit": "787fb33e",
-        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
+        "approvedAt": "2026-09-24",
+        "approvedCommit": "218568ea",
+        "note": "B1900672: Site Planner Row 2 reorder — Undo/Redo moved left of File, Zoom-to-fit button removed from Row 2 [CI-authored by run 36046470528 on 218568ea50e68e75b67ad6bac949b40b73e636a6]"
       },
       "dark": {
-        "approvedAt": "2026-09-23",
-        "approvedCommit": "787fb33e",
-        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
+        "approvedAt": "2026-09-24",
+        "approvedCommit": "218568ea",
+        "note": "B1900672: Site Planner Row 2 reorder — Undo/Redo moved left of File, Zoom-to-fit button removed from Row 2 [CI-authored by run 36046470528 on 218568ea50e68e75b67ad6bac949b40b73e636a6]"
       },
       "light--phone": {
-        "approvedAt": "2026-09-23",
-        "approvedCommit": "787fb33e",
-        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
+        "approvedAt": "2026-09-24",
+        "approvedCommit": "218568ea",
+        "note": "B1900672: Site Planner Row 2 reorder — Undo/Redo moved left of File, Zoom-to-fit button removed from Row 2 [CI-authored by run 36046470528 on 218568ea50e68e75b67ad6bac949b40b73e636a6]"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-23",
-        "approvedCommit": "787fb33e",
-        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
+        "approvedAt": "2026-09-24",
+        "approvedCommit": "218568ea",
+        "note": "B1900672: Site Planner Row 2 reorder — Undo/Redo moved left of File, Zoom-to-fit button removed from Row 2 [CI-authored by run 36046470528 on 218568ea50e68e75b67ad6bac949b40b73e636a6]"
       }
     },
     "site-planner-left-rail": {
       "light": {
-        "approvedAt": "2026-09-23",
-        "approvedCommit": "787fb33e",
-        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
+        "approvedAt": "2026-09-24",
+        "approvedCommit": "218568ea",
+        "note": "B1900672: Site Planner Row 2 reorder — Undo/Redo moved left of File, Zoom-to-fit button removed from Row 2 [CI-authored by run 36046470528 on 218568ea50e68e75b67ad6bac949b40b73e636a6]"
       },
       "dark": {
-        "approvedAt": "2026-09-23",
-        "approvedCommit": "787fb33e",
-        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
+        "approvedAt": "2026-09-24",
+        "approvedCommit": "218568ea",
+        "note": "B1900672: Site Planner Row 2 reorder — Undo/Redo moved left of File, Zoom-to-fit button removed from Row 2 [CI-authored by run 36046470528 on 218568ea50e68e75b67ad6bac949b40b73e636a6]"
       },
       "light--phone": {
-        "approvedAt": "2026-09-23",
-        "approvedCommit": "787fb33e",
-        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
+        "approvedAt": "2026-09-24",
+        "approvedCommit": "218568ea",
+        "note": "B1900672: Site Planner Row 2 reorder — Undo/Redo moved left of File, Zoom-to-fit button removed from Row 2 [CI-authored by run 36046470528 on 218568ea50e68e75b67ad6bac949b40b73e636a6]"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-23",
-        "approvedCommit": "787fb33e",
-        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
+        "approvedAt": "2026-09-24",
+        "approvedCommit": "218568ea",
+        "note": "B1900672: Site Planner Row 2 reorder — Undo/Redo moved left of File, Zoom-to-fit button removed from Row 2 [CI-authored by run 36046470528 on 218568ea50e68e75b67ad6bac949b40b73e636a6]"
       }
     },
     "library": {
       "light": {
-        "approvedAt": "2026-09-23",
-        "approvedCommit": "787fb33e",
-        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
+        "approvedAt": "2026-09-24",
+        "approvedCommit": "218568ea",
+        "note": "B1900672: Site Planner Row 2 reorder — Undo/Redo moved left of File, Zoom-to-fit button removed from Row 2 [CI-authored by run 36046470528 on 218568ea50e68e75b67ad6bac949b40b73e636a6]"
       },
       "dark": {
-        "approvedAt": "2026-09-23",
-        "approvedCommit": "787fb33e",
-        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
+        "approvedAt": "2026-09-24",
+        "approvedCommit": "218568ea",
+        "note": "B1900672: Site Planner Row 2 reorder — Undo/Redo moved left of File, Zoom-to-fit button removed from Row 2 [CI-authored by run 36046470528 on 218568ea50e68e75b67ad6bac949b40b73e636a6]"
       },
       "light--phone": {
-        "approvedAt": "2026-09-23",
-        "approvedCommit": "787fb33e",
-        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
+        "approvedAt": "2026-09-24",
+        "approvedCommit": "218568ea",
+        "note": "B1900672: Site Planner Row 2 reorder — Undo/Redo moved left of File, Zoom-to-fit button removed from Row 2 [CI-authored by run 36046470528 on 218568ea50e68e75b67ad6bac949b40b73e636a6]"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-23",
-        "approvedCommit": "787fb33e",
-        "note": "B1807200 (x2) amendment: dGhost/dIcon resting box treatment reaches Row 2 (File/Undo/Redo/Zoom-to-fit), CloudSyncBadge corner dot removed, header rows grown 30->40px for real clearance around unchanged 30x30 controls (owner-approved mockup)"
+        "approvedAt": "2026-09-24",
+        "approvedCommit": "218568ea",
+        "note": "B1900672: Site Planner Row 2 reorder — Undo/Redo moved left of File, Zoom-to-fit button removed from Row 2 [CI-authored by run 36046470528 on 218568ea50e68e75b67ad6bac949b40b73e636a6]"
       }
     }
   }
