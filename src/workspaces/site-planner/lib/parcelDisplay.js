@@ -10,20 +10,33 @@
  * as a server /export image overlay instead (and the click path has a matching
  * /query→/identify fallback, so what you SEE stays what you can SELECT). `interactive:
  * false` keeps outlines purely visual; clicks fall through to the map/canvas for
- * add/remove. They load once zoomed in past PARCEL_MINZOOM (too many to draw across a
- * whole county at once); click-to-add still works at any zoom because that's a point
- * query, not a draw. */
+ * add/remove.
+ *
+ * ⛔ NEW-1 (owner decision 2026-09-24) — a real CAD's OWN outline layer now draws in
+ * THREE zoom-gated regimes, not one, and there is no more "capped this view at N lots"
+ * banner. `parcelDisplayZoom.js` (a plain-Node-testable sibling — this file imports
+ * Leaflet + esri-leaflet and so cannot be) is the whole decision; `makeParcelAdaptiveLayer`
+ * below is the Leaflet wiring for it. See that module's header for the full rationale —
+ * in short: below PARCEL_MINZOOM nothing draws (unchanged from before this item), the
+ * server-rendered /export IMAGE layer draws every lot in view from there up to
+ * PARCEL_VECTOR_MINZOOM (no record cap, no per-lot cost — what used to trigger the
+ * retired banner), and the styleable VECTOR layer takes over above that for per-lot hover.
+ * Clicking a lot was ALREADY independent of what's drawn (MapFinder's `handleClick`
+ * always identifies via a live point query, never against the display layer) — B1427664
+ * already ruled out making clicks wait on a display layer, and nothing here revisits
+ * that. */
 import * as EL from "esri-leaflet";
 import L from "leaflet";
 import { STATEWIDE_PARCEL_LAYER } from "./counties.js";
 import { getSnapshot, featuresForView, onSnapshotChange } from "./parcelSnapshot.js";
 import { guardRasterOpacity } from "./parcelOpacityGuard.js";
+import { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parcelUrlSupportsImageExport, MAPSERVER_LAYER_RE } from "./parcelDisplayZoom.js";
 
-// Low enough to outline big rural/industrial tracts from further out, high enough to
-// avoid drawing a whole dense-urban county at once.
-export const PARCEL_MINZOOM = 14;
+export { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parcelUrlSupportsImageExport };
 
-export function makeParcelLayer(url) {
+// `opts` overrides the defaults below (e.g. a tighter `minZoom` for the "close" regime of
+// `makeParcelAdaptiveLayer`); every existing single-argument caller is unaffected.
+export function makeParcelLayer(url, opts) {
   return EL.featureLayer({
     url,
     minZoom: PARCEL_MINZOOM,
@@ -32,6 +45,7 @@ export function makeParcelLayer(url) {
     fields: ["OBJECTID"],
     interactive: false, // purely visual; clicks go to the map/canvas for add/remove
     style: () => ({ color: "#a21caf", weight: 1.3, opacity: 0.95, fillOpacity: 0 }),
+    ...opts,
   });
 }
 
@@ -52,8 +66,8 @@ export function parcelDisplayIsImageOnly(url) {
  * the same /MapServer/<id> layer URL and targets that one sublayer; keeps the
  * PARCEL_MINZOOM gate so a statewide layer never paints at metro scale. Falls back to the
  * vector layer if the URL isn't a MapServer layer (a FeatureServer can't /export). */
-export function makeParcelImageLayer(url) {
-  const m = /^(.*\/MapServer)\/(\d+)\/?$/i.exec(trimUrl(url));
+export function makeParcelImageLayer(url, opts) {
+  const m = MAPSERVER_LAYER_RE.exec(trimUrl(url));
   if (!m) return makeParcelLayer(url);
   const [, service, id] = m;
   return guardRasterOpacity(EL.dynamicMapLayer({
@@ -62,15 +76,48 @@ export function makeParcelImageLayer(url) {
     minZoom: PARCEL_MINZOOM,
     opacity: 1,
     f: "image",
+    ...opts,
   }));
+}
+
+/* NEW-1 — a real, queryable CAD's outline display: the vector layer above from
+ * PARCEL_VECTOR_MINZOOM up (close), the server-rendered image layer from PARCEL_MINZOOM up
+ * to there (wide), nothing below PARCEL_MINZOOM (far). Both sublayers are mounted at once —
+ * esri-leaflet's own FeatureManager/RasterLayer already re-check `options.minZoom`/`maxZoom`
+ * against the live map zoom on every zoomend and add/clear themselves accordingly, so the
+ * regime tracks the view with no listener or rebuild of ours. `eachFeature` — the one thing
+ * `MapFinder.optimisticHitAt` needs off a parcel display, for the instant highlight-before-
+ * the-authoritative-identify — delegates to the vector sublayer, which esri-leaflet already
+ * empties out whenever it's outside its own zoom range, so an optimistic hit is naturally
+ * only ever offered in the "close" regime; "wide" and "far" fall through to the ordinary
+ * (still fully working) identify query, same as a statewide-image view always has.
+ *
+ * A source with no /export capability (a FeatureServer CAD, e.g. Fort Bend) has no image
+ * regime to switch to, so it stays exactly what it was before this item: one vector layer,
+ * gated at PARCEL_MINZOOM. */
+export function makeParcelAdaptiveLayer(url) {
+  if (!parcelUrlSupportsImageExport(url)) return makeParcelLayer(url);
+  // The two bands MEET (vector's floor equals the image's ceiling) rather than merely
+  // abut, so there is no zoom gap where neither draws — Leaflet zoom can be fractional
+  // mid-gesture (B1449 smooth zoom), and a strict `image <17, vector >=17` split would
+  // leave e.g. zoom 16.5 with nothing visible at all.
+  const vectorLayer = makeParcelLayer(url, { minZoom: PARCEL_VECTOR_MINZOOM });
+  const imageLayer = makeParcelImageLayer(url, { maxZoom: PARCEL_VECTOR_MINZOOM });
+  const group = L.layerGroup([vectorLayer, imageLayer]);
+  group._isAdaptive = true;
+  group._vectorLayer = vectorLayer;
+  group._imageLayer = imageLayer;
+  group.eachFeature = (fn, context) => vectorLayer.eachFeature(fn, context);
+  return group;
 }
 
 /* The one entry point both parcel-display surfaces (the map's Select-parcels tool and
  * the in-planner Add-parcel outline) use, so they stay identical: a query-disabled
- * statewide source renders as an image overlay, every queryable CAD as the styleable
- * vector layer (which also backs the instant client-side click highlight). */
+ * statewide source renders as an image overlay (unchanged — its /query is disabled at
+ * every zoom, not just a wide one), every queryable CAD as the three-regime adaptive
+ * layer above (which also backs the instant client-side click highlight while close-in). */
 export function makeParcelDisplayLayer(url) {
-  return parcelDisplayIsImageOnly(url) ? makeParcelImageLayer(url) : makeParcelLayer(url);
+  return parcelDisplayIsImageOnly(url) ? makeParcelImageLayer(url) : makeParcelAdaptiveLayer(url);
 }
 
 /* Draw a county's outlines from its Drive PARCEL SNAPSHOT (B629) as a styleable vector layer —
