@@ -168,7 +168,7 @@ import {
   trashEntries, walkPages, withTombstones, SCOPE_ALL, SCOPE_PROJECT, SCOPE_ORG,
 } from "./notesModel.js";
 import { parseView, serializeView, viewKey } from "./notesViewport.js";
-import { IGNORED_DUPES_KEY_BASE, TEMPLATES_KEY_BASE } from "./notesKeys.js";
+import { ACTIVE_PAGE_KEY_BASE, IGNORED_DUPES_KEY_BASE, TEMPLATES_KEY_BASE } from "./notesKeys.js";
 import { seedTemplateRecords } from "./notesTemplates.js";
 import { countEmptyAnchors, pruneEmptyAnchors } from "./notesAnchorPrune.js";
 import { relativeTime } from "./notesTime.js";
@@ -314,6 +314,32 @@ export function writeNoteView(pageId, view, s = scope) {
   const st = store();
   if (!st) return false;
   try { st.setItem(viewKey(s, pageId), JSON.stringify(serializeView(view))); return true; } catch (_) { return false; /* a view is not data — it simply does not persist */ }
+}
+
+/* ---- which page was open (NEW-1) --------------------------------------------------------
+ *
+ * A reload used to always land on the tree's first page — `Notes.jsx`'s mount effect called
+ * `setActivePageId(firstPageId(loaded))` unconditionally, with nothing anywhere recording
+ * which page the user actually had open. One blob per scope, like the templates library:
+ * which page is open is a property of the ACCOUNT (or the signed-out device), not of any one
+ * page, so there is no per-page key to hang it on. A failure to read or write is a no-op at
+ * the old first-page default, never a banner — same reasoning as `readNoteView`/`writeNoteView`. */
+const activePageKey = (s = scope) => `${ACTIVE_PAGE_KEY_BASE}:${s}`;
+
+export function readActivePageId(s = scope) {
+  const st = store();
+  if (!st) return null;
+  try { return st.getItem(activePageKey(s)) || null; } catch (_) { return null; }
+}
+
+export function writeActivePageId(pageId, s = scope) {
+  const st = store();
+  if (!st) return false;
+  try {
+    if (pageId) st.setItem(activePageKey(s), pageId);
+    else st.removeItem(activePageKey(s));
+    return true;
+  } catch (_) { return false; }
 }
 
 /* ---- findings the person has settled (NEW-4) --------------------------------------------

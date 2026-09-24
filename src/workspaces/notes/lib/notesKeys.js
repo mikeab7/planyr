@@ -24,6 +24,10 @@ export const IGNORED_DUPES_KEY_BASE = "planyr:notes:dupes-ignored:v1";
  *  only for now (like notesVersions.js's history), never mirrored to the cloud tree/pages
  *  tables — a stated limit, not an oversight; see notesTemplates.js's header. */
 export const TEMPLATES_KEY_BASE = "planyr:notes:templates:v1";
+/** Which page was open (NEW-1) — one per scope, like the templates library: which page a
+ *  reload should resume is a property of the account (or the signed-out device), never of
+ *  any one page, so there is no per-page key to hang it on. */
+export const ACTIVE_PAGE_KEY_BASE = "planyr:notes:activePage:v1";
 
 /** Signed in, a user's notes live under their id; signed out, under `local`. Two accounts on
  *  one machine therefore never read each other's notes. */
