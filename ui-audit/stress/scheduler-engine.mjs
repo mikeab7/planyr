@@ -335,9 +335,11 @@ export const importMeetingBodies = (targetBodies, sourceBodies) => {
   });
   return { bodies, ids };
 };
+// B1873361 — schedName is the full crossScheduleLabel, never the bare schedule name (see the
+// real function's own header). VERBATIM mirror of public/sequence/index.html.
 export const otherScheduleMeetingBodies = (data, excludePid) => Object.values((data && data.projects) || {})
   .filter(p => p && p.id !== excludePid && Array.isArray(p.meetingBodies) && p.meetingBodies.length)
-  .map(p => ({ pid: p.id, schedName: p.name || `Project ${p.id}`, projName: p.linkedSiteName || null, bodies: p.meetingBodies }))
+  .map(p => ({ pid: p.id, schedName: crossScheduleLabel(p), bodies: p.meetingBodies }))
   .sort((a, b) => a.schedName.localeCompare(b.schedName));
 // NEW-1 (VERBATIM copy of public/sequence/index.html).
 export const findMeetingBodyElsewhere = (data, excludePid, bodyId) => {
@@ -345,7 +347,7 @@ export const findMeetingBodyElsewhere = (data, excludePid, bodyId) => {
   for (const p of Object.values((data && data.projects) || {})) {
     if (!p || p.id === excludePid || !Array.isArray(p.meetingBodies)) continue;
     const b = p.meetingBodies.find(b => b.id === bodyId);
-    if (b) return { body: b, schedName: p.name || `Project ${p.id}`, pid: p.id };
+    if (b) return { body: b, schedName: crossScheduleLabel(p), pid: p.id };
   }
   return null;
 };
@@ -1207,13 +1209,42 @@ export function ownerOf(schedule) {
   return { kind: OWNER_KIND_ORG, siteId: null, siteName: null, key: ORG_OWNER_KEY };
 }
 
+// B1873360 — the two halves crossScheduleLabel joins, exposed separately for SORT/GROUP use
+// (e.g. MasterView's "Group by project" ordering). VERBATIM mirror of public/sequence/index.html.
+export function scheduleLabelParts(schedule) {
+  const name = (schedule && schedule.name) || "Untitled schedule";
+  const owner = ownerOf(schedule);
+  const ownerLabel = owner.kind === OWNER_KIND_ORG ? ORG_OWNER_LABEL : (owner.siteName || "an unnamed project");
+  return { ownerLabel, name };
+}
 // "<Project> / <Schedule>" — the disambiguating label for a notice naming a row possibly outside
 // the schedule on screen (two Planyr projects can each hold a schedule named "Master Schedule").
 export function crossScheduleLabel(schedule) {
-  const name = (schedule && schedule.name) || "Untitled schedule";
-  const owner = ownerOf(schedule);
-  const left = owner.kind === OWNER_KIND_ORG ? ORG_OWNER_LABEL : (owner.siteName || "an unnamed project");
-  return `${left} / ${name}`;
+  const { ownerLabel, name } = scheduleLabelParts(schedule);
+  return `${ownerLabel} / ${name}`;
+}
+
+// B1873360 — MasterView's "Group by project" sections: keyed by projId (never the bare schedule
+// name — two schedules can share one), ordered by owner label / schedule name / projId as a
+// stable tiebreak. VERBATIM mirror of public/sequence/index.html. `rows` are MasterView row
+// objects carrying `projId`, `projOwnerLabel`, `projName` (bare) and `projLabel` (qualified).
+export function groupRowsByProject(rows) {
+  const groups = new Map();
+  rows.forEach(t => {
+    if (!groups.has(t.projId)) groups.set(t.projId, []);
+    groups.get(t.projId).push(t);
+  });
+  return [...groups.entries()]
+    .map(([projId, gRows]) => ({
+      projId, gRows,
+      ownerLabel: gRows[0].projOwnerLabel || "",
+      name: gRows[0].projName || "",
+      label: gRows[0].projLabel || "",
+    }))
+    .sort((a, b) =>
+      a.ownerLabel.localeCompare(b.ownerLabel) ||
+      a.name.localeCompare(b.name) ||
+      String(a.projId).localeCompare(String(b.projId)));
 }
 
 // The prefix a notice prints before "#<id> "<name>"": nothing for a row already on screen, else

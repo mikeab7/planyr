@@ -3765,8 +3765,11 @@ describe("NEW-1: the successor prompt's Complete option and its own accept path"
     // first, silently losing a follow-up prompt. Proven live (and proven load-bearing by mutation)
     // in ui-audit/verify-successor-complete.mjs section B/C2.
     expect(src).toMatch(/const \[successorPromptQueue, setSuccessorPromptQueue\] = useState\(\[\]\);/);
-    expect(src).toMatch(/setSuccessorPromptQueue\(q => \[\.\.\.q, \{ completedTask, projId: pid2, projName: p\.name, successors \}\]\);/);
-    expect(src).not.toMatch(/setSuccessorPrompt\(\{ completedTask, projId: pid2, projName: p\.name, successors \}\);/);
+    // B1873361 — projName is the qualified crossScheduleLabel, not the bare schedule name (was
+    // `projName: p.name`): two schedules can share a name, so the modal's context line must say
+    // which one.
+    expect(src).toMatch(/setSuccessorPromptQueue\(q => \[\.\.\.q, \{ completedTask, projId: pid2, projName: crossScheduleLabel\(p\), successors \}\]\);/);
+    expect(src).not.toMatch(/setSuccessorPrompt\(\{ completedTask, projId: pid2, projName: crossScheduleLabel\(p\), successors \}\);/);
   });
 
   it("an already-complete task is excluded from the successors list at the source (never reaches the modal)", () => {
@@ -4298,6 +4301,117 @@ describe("scheduleRowPrefix — drops the prefix ONLY for the schedule already o
   });
 });
 
+describe("scheduleLabelParts — the two halves crossScheduleLabel joins, for sorting/grouping", () => {
+  it("a site-owned schedule splits into its site name and its own name", () => {
+    expect(E.scheduleLabelParts({ name: "Master Schedule", ownerKind: "site", linkedSiteId: "s1", linkedSiteName: "Goose Creek" }))
+      .toEqual({ ownerLabel: "Goose Creek", name: "Master Schedule" });
+  });
+  it("an org-owned schedule's owner half is the fixed Organization label", () => {
+    expect(E.scheduleLabelParts({ name: "Land Sale", ownerKind: "org" })).toEqual({ ownerLabel: "Organization", name: "Land Sale" });
+  });
+  it("crossScheduleLabel is exactly the two parts joined with ' / '", () => {
+    const schedule = { name: "MUD v PID", ownerKind: "site", linkedSiteId: "s1", linkedSiteName: "Goose Creek" };
+    const { ownerLabel, name } = E.scheduleLabelParts(schedule);
+    expect(E.crossScheduleLabel(schedule)).toBe(`${ownerLabel} / ${name}`);
+  });
+});
+
+// B1873360 — the owner's OWN account has two schedules both named "Master Schedule" (one under
+// Goose Creek, one under Grand Port) and MasterView's "Group by project" merged them into one
+// section with a summed count, because it grouped by the bare `projName` instead of `projId`.
+// groupRowsByProject is the extracted, pure fix — mirrored verbatim in
+// ui-audit/stress/scheduler-engine.mjs. See ui-audit/verify-master-group-by-project.mjs for the
+// live-browser proof (this drives the same fixture shape headlessly against the real page).
+describe("groupRowsByProject — MasterView's 'Group by project' sections, never merged by a shared bare name", () => {
+  // Row shape mirrors what MasterView's `rows` useMemo actually attaches to every task row.
+  const row = (id, projId, projOwnerLabel, projName) => ({ id, projId, projOwnerLabel, projName, projLabel: `${projOwnerLabel} / ${projName}` });
+
+  it("RED-PROOF shape — two DIFFERENT schedules sharing a bare name get TWO sections, each with its own count", () => {
+    const rows = [
+      row(1, 1, "Goose Creek", "Master Schedule"),
+      row(1, 2, "Grand Port", "Master Schedule"),
+      row(2, 2, "Grand Port", "Master Schedule"),
+      row(3, 2, "Grand Port", "Master Schedule"),
+    ];
+    const groups = E.groupRowsByProject(rows);
+    expect(groups).toHaveLength(2);
+    expect(groups.map(g => g.label)).toEqual(["Goose Creek / Master Schedule", "Grand Port / Master Schedule"]);
+    expect(groups.map(g => g.gRows.length)).toEqual([1, 3]);
+    // On unfixed main (grouping by the bare name) this collapses to ONE group, "Master Schedule",
+    // with a summed count of 4 — reproduced by hand against the pre-fix source before this test
+    // was written (see the harness's own RED-PROOF note).
+  });
+
+  it("groups by projId, not by name — two schedules with the SAME owner AND name still get separate sections", () => {
+    const rows = [row(1, 10, "Goose Creek", "Master Schedule"), row(1, 11, "Goose Creek", "Master Schedule")];
+    const groups = E.groupRowsByProject(rows);
+    expect(groups).toHaveLength(2);
+    expect(groups.map(g => g.projId)).toEqual([10, 11]);
+  });
+
+  it("three schedules under one project are ADJACENT and ordered by name after grouping by owner", () => {
+    const rows = [
+      row(1, 30, "Goose Creek", "MUD v PID"),
+      row(1, 1, "Goose Creek", "Master Schedule"),
+      row(1, 2, "Grand Port", "Master Schedule"),
+      row(1, 22, "Goose Creek", "TAS Land Sale"),
+    ];
+    const groups = E.groupRowsByProject(rows);
+    expect(groups.map(g => g.label)).toEqual([
+      "Goose Creek / Master Schedule", "Goose Creek / MUD v PID", "Goose Creek / TAS Land Sale",
+      "Grand Port / Master Schedule",
+    ]);
+  });
+
+  it("an org-owned schedule's section is labelled 'Organization / <name>'", () => {
+    const groups = E.groupRowsByProject([row(1, 5, "Organization", "Pursuits")]);
+    expect(groups[0].label).toBe("Organization / Pursuits");
+  });
+
+  it("a site-owned schedule with a stale/null linkedSiteName still gets its OWN section, never merged with another unnamed one", () => {
+    const rows = [row(1, 24, "an unnamed project", "Untitled site"), row(1, 25, "an unnamed project", "Untitled site 2")];
+    const groups = E.groupRowsByProject(rows);
+    expect(groups).toHaveLength(2); // keyed by projId — sharing "an unnamed project" never merges them
+  });
+
+  it("a schedule with zero rows never appears — no key is minted for it, so no empty header renders", () => {
+    // groupRowsByProject only ever sees rows that already passed the level/health filters, so a
+    // schedule filtered down to nothing simply contributes no entries — nothing to assert beyond
+    // "it never appears" (there is no rowless invocation to make, by construction).
+    const groups = E.groupRowsByProject([row(1, 1, "Goose Creek", "Master Schedule")]);
+    expect(groups.every(g => g.gRows.length > 0)).toBe(true);
+  });
+
+  it("group order is deterministic when owner label AND name tie — projId is the stable tiebreak", () => {
+    const rows = [row(1, 9, "Goose Creek", "Master Schedule"), row(1, 3, "Goose Creek", "Master Schedule")];
+    const groups = E.groupRowsByProject(rows);
+    expect(groups.map(g => g.projId)).toEqual([3, 9]); // "3" < "9" lexically
+  });
+
+  it("never throws on an empty row list", () => {
+    expect(() => E.groupRowsByProject([])).not.toThrow();
+    expect(E.groupRowsByProject([])).toEqual([]);
+  });
+});
+
+describe("otherScheduleMeetingBodies — schedName is the qualified label, never a bare (possibly ambiguous) name", () => {
+  it("a site-owned schedule's schedName is crossScheduleLabel, not the bare name", () => {
+    const data = { projects: { 1: { id: 1, name: "Master Schedule", ownerKind: "site", linkedSiteId: "s1", linkedSiteName: "Goose Creek", meetingBodies: [{ id: "b1", name: "X", recurrence: [] }] } } };
+    const out = E.otherScheduleMeetingBodies(data, 999);
+    expect(out).toHaveLength(1);
+    expect(out[0].schedName).toBe("Goose Creek / Master Schedule");
+    expect(out[0]).not.toHaveProperty("projName"); // folded into schedName — no longer a separate field
+  });
+  it("excludes the current schedule and any schedule with no meeting bodies", () => {
+    const data = { projects: {
+      1: { id: 1, name: "A", meetingBodies: [{ id: "b1", name: "X", recurrence: [] }] },
+      2: { id: 2, name: "B", meetingBodies: [] },
+    } };
+    expect(E.otherScheduleMeetingBodies(data, 1)).toEqual([]);
+    expect(E.otherScheduleMeetingBodies(data, 999)).toHaveLength(1);
+  });
+});
+
 describe("changedProjectIds — which schedules a merge actually touched", () => {
   const doc = (projects) => ({ projects });
   it("no changes → empty", () => {
@@ -4351,6 +4465,11 @@ describe("NEW-1 — the cross-schedule label helpers are wired into every notice
       expect(mjs, `${fn} missing from the engine mirror`).toContain("export " + (fn === "crossScheduleLabel" || fn === "scheduleRowPrefix" || fn === "mergeLocationPhrase" ? "function " : "const ") + fn);
     }
   });
+  it("scheduleLabelParts is defined in both, and is what crossScheduleLabel is built from (B1873360)", () => {
+    expect(src, "scheduleLabelParts missing from public/sequence/index.html").toMatch(/function scheduleLabelParts/);
+    expect(mjs, "scheduleLabelParts missing from the engine mirror").toContain("export function scheduleLabelParts");
+    expect(src).toMatch(/function crossScheduleLabel\(schedule\) \{\n\s*const \{ ownerLabel, name \} = scheduleLabelParts\(schedule\);/);
+  });
   it("the ancestor-predecessor notice prints the disambiguating prefix in front of every named row, not just the schedule's own name", () => {
     expect(src).toMatch(/\{scheduleRowPrefix\(data\.projects, t\.pid, data\.aPid\)\}#\{t\.id\} "\{t\.name\}"/);
   });
@@ -4368,6 +4487,74 @@ describe("NEW-1 — the cross-schedule label helpers are wired into every notice
   it("the 'newer version saved elsewhere' banner names the CURRENT tab's own schedule (never dropped — it's a standalone banner, not a per-row notice)", () => {
     expect(src).toMatch(/Reload to load the latest version of \$\{crossScheduleLabel\(data\.projects\?\.\[data\.aPid\]\)\}\./);
     expect(src).toMatch(/You have unsaved changes in \$\{crossScheduleLabel\(data\.projects\?\.\[data\.aPid\]\)\} -- reloading replaces them/);
+  });
+});
+
+// B1873360/B1873361 — owner report: the Reports/Dashboard "Group by project" view merged two
+// differently-owned schedules that share a bare name ("Master Schedule" under both Goose Creek
+// and Grand Port) into one section with a summed count, because the grouping keyed off the bare
+// projName. Fixed by keying/ordering on projId via groupRowsByProject (tested above) and by
+// routing every other place in this file that names a schedule to a human through
+// crossScheduleLabel/scheduleLabelParts. These are structural source-pattern checks — the
+// behavior itself is unit-tested (groupRowsByProject, otherScheduleMeetingBodies) and
+// live-browser-verified (ui-audit/verify-master-group-by-project.mjs).
+describe("B1873360/B1873361 — every cross-schedule display in MasterView/the switcher/exports is qualified, never bare", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+
+  it("MasterView's rows carry projOwnerLabel/projLabel computed once per schedule (not per cell)", () => {
+    expect(src).toMatch(/const \{ ownerLabel \} = scheduleLabelParts\(p\);/);
+    expect(src).toMatch(/const projLabel = crossScheduleLabel\(p\);/);
+    expect(src).toMatch(/projOwnerLabel: ownerLabel, projLabel, depth, isLeaf/);
+  });
+  it("'Group by project' groups via groupRowsByProject, keyed by projId", () => {
+    expect(src).toMatch(/return groupRowsByProject\(sortedRows\)\.flatMap\(\(\{projId, gRows, label\}\) => \[/);
+    expect(src).toMatch(/<tr key=\{`grp-\$\{projId\}`\}>/);
+    // The old buggy shape keyed a plain object by the bare name (`groups[t.projName]`) — that
+    // exact code construct is gone from the render path (it still appears once, in this fix's
+    // own explanatory comment, which is why this isn't a blanket file-wide `not.toMatch`).
+    const renderBlock = src.slice(src.indexOf('{masterGroupBy === "project" ? (() => {'), src.indexOf('{masterGroupBy === "project" ? (() => {') + 800);
+    expect(renderBlock).not.toMatch(/groups\[t\.projName\]/);
+  });
+  it("the Project column, its sort, its autosize, and the jump tooltip all read projLabel — never the bare projName", () => {
+    expect(src).toMatch(/case "project":\s*\n\s*return <td key=\{col\.k\} onClick=\{onCellClick\} title=\{t\.projLabel\} style=\{\{\.\.\.tdBase,color:"#1d4ed8",fontSize:11\}\}>\{t\.projLabel\}<\/td>;/);
+    expect(src).toMatch(/case "project":\s+av = `\$\{\(a\.projLabel\|\|""\)\.toLowerCase\(\)\}/);
+    expect(src).toMatch(/case 'project': val = t\.projLabel\|\|''; break;/);
+    expect(src).toMatch(/<button title=\{`Open row in \$\{t\.projLabel\}`\}/);
+  });
+  it("the default Project column width was widened for the longer qualified label — a saved masterColWidths.project still wins", () => {
+    expect(src).toMatch(/project:200, id:36, parent:140, name:220/);
+    expect(src).toMatch(/return Object\.fromEntries\(Object\.entries\(DEFAULT_MASTER_WIDTHS\)\.map\(\(\[k,v\]\) => \[k, saved\[k\] \?\? v\]\)\);/);
+  });
+  it("the schedule switcher (ProjDropdown) lists every OTHER schedule via crossScheduleLabel, never the bare name — the current schedule's rename input is untouched", () => {
+    expect(src).toMatch(/<span title=\{crossScheduleLabel\(p\)\} style=\{\{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"\}\}>\{crossScheduleLabel\(p\)\}<\/span>/);
+    expect(src).toMatch(/onClick=\{e=>\{ e\.stopPropagation\(\); setEditVal\(p\.name\); setEditingId\(p\.id\); \}\}/);
+  });
+  it("the automation/review cross-schedule task picker (SgqCrumb + SgqCascadePicker) names the schedule via crossScheduleLabel", () => {
+    expect(src).toMatch(/return \{ project: crossScheduleLabel\(proj\), names \};/);
+    expect(src).toMatch(/\{projects\.map\(\(\[k, p\]\) => <option key=\{k\} value=\{k\}>\{crossScheduleLabel\(p\)\}<\/option>\)\}/);
+  });
+  it("the destructive delete-schedule confirm names the qualified label, not the bare name", () => {
+    expect(src).toMatch(/const name = crossScheduleLabel\(proj\);/);
+  });
+  it("both export paths' per-project section headers use crossScheduleLabel (PDF-PARITY: buildPDFHtml's Web Snapshot AND the standalone exportHTML)", () => {
+    const literal = '<div class="proj-name">${escapeHtml(crossScheduleLabel(proj))}</div>';
+    const count = src.split(literal).length - 1;
+    expect(count, "buildPDFHtml's two branches (split-view and tables-only) must both use crossScheduleLabel").toBeGreaterThanOrEqual(2);
+    expect(src).not.toContain('<div class="proj-name">${escapeHtml(proj.name)}</div>'); // the old bare form is gone
+    expect(src).toMatch(/`<h2>\$\{escapeHtml\(crossScheduleLabel\(p\)\)\}<\/h2>/);
+  });
+  it("the version-history snapshot preview names each schedule via crossScheduleLabel too", () => {
+    expect(src).toMatch(/<td style=\{\{padding:"6px 8px"\}\}>\{crossScheduleLabel\(p\)\}<\/td>/);
+  });
+  it("the meeting-import picker's header is schedName ALONE — the old reversed '<Schedule> · <Project>' tack-on is retired, not reordered", () => {
+    expect(src).toMatch(/<div style=\{\{fontSize:10,fontWeight:700,color:"var\(--mut\)",textTransform:"uppercase",letterSpacing:"\.06em",marginBottom:6\}\}>\s*\n\s*\{g\.schedName\}\s*\n\s*<\/div>/);
+    expect(src).not.toMatch(/\{g\.schedName\}\{g\.projName/);
+  });
+  it("deliberately left BARE, documented: the current schedule's own name (header button, meeting-calendars title, rename input) — matches scheduleRowPrefix's own 'nothing for what is already on screen' rule", () => {
+    // ProjDropdown's own header button shows the ACTIVE schedule's bare name.
+    expect(src).toMatch(/fontSize:16,fontWeight:700,letterSpacing:"-\.015em",color:"var\(--txt\)",lineHeight:1\.1\}\}>\{cur\?\.name\}<\/span>/);
+    // MeetingCalendarsModal's header names the CURRENT schedule's own meeting calendars.
+    expect(src).toMatch(/\{projName \|\| "Project"\}/);
   });
 });
 
@@ -4535,9 +4722,9 @@ describe("NEW-1 — findMeetingBodyElsewhere: naming a bound body that lives on 
       7: { id: 7, name: "Another District", meetingBodies: [tceq], tasks: [] },
     },
   };
-  it("a body that lives on another schedule is found and named, with its schedule", () => {
+  it("a body that lives on another schedule is found and named, with its QUALIFIED schedule label (B1873361 — schedName is crossScheduleLabel, never the bare name)", () => {
     const r = E.findMeetingBodyElsewhere(data, 30, "mb_mrmdy43mlhjr");
-    expect(r).toEqual({ body: tceq, schedName: "Master Schedule", pid: 1 });
+    expect(r).toEqual({ body: tceq, schedName: "Organization / Master Schedule", pid: 1 });
   });
   it("a body genuinely absent from every schedule resolves to null (task.meetingBodyMissing covers this case)", () => {
     expect(E.findMeetingBodyElsewhere(data, 30, "mb_does_not_exist_anywhere")).toBeNull();
