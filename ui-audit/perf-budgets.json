@@ -74,7 +74,7 @@
       "minBytes": 32768
     },
     "siteRouteJsBytes": {
-      "baseline": 2689002,
+      "baseline": 2963409,
       "target": 1600000,
       "unit": "bytes",
       "what": "Total JS a plain Site route must download: the entry chunk plus SitePlannerApp and its static-import closure.",
@@ -901,6 +901,17 @@
           "commit": "7ea4942b2bf2299b188cbb8107b85a882ce5a834",
           "sourceHash": "25ba6bb76a15f79e",
           "reason": "Phone header fixes (B1343200-B1343203: 44px touch targets, scroll chevrons, breadcrumb compaction) landed on AppHeader/ProjectBreadcrumb in the shared entry chunk every route pays for; the band was already down to a few hundred bytes of slack from unrelated prior merges before this branch added anything, and the feature was measured and trimmed twice already."
+        },
+        {
+          "metric": "bundle.siteRouteJsBytes",
+          "from": 2689002,
+          "to": 2963409,
+          "direction": "raise",
+          "item": "B1870704",
+          "date": "2026-09-24",
+          "commit": "02107353e4eeda596bd88519f28d14975bd403c5",
+          "sourceHash": "48db8bf3ce4a9695",
+          "reason": "Third pass wiring 34 more Georgia county parcel endpoints (real idField/addrField/label/layerUrl/help strings) -- legitimate, unavoidable growth from real product data, not bloat. This branch's own attributable cost is +18.4 KB (ci-parity base-ref attribution); the rest of the ceiling breach is pre-existing drift on main from the second Georgia pass (B1873776), which never ratcheted."
         }
       ]
     }
