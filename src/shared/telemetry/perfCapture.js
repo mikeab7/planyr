@@ -368,7 +368,15 @@ export function decodeFrames(track, spikes) {
  * OLDEST-FIRST into whatever room is left, exactly the direction the frame track already trims in
  * (dropping the earliest evidence, keeping the most recent). Only once the long-task table is
  * completely empty does the frame reserve itself give way, down toward zero. Counters are still shed
- * first of all, unchanged, because a scene snapshot is the least time-critical fact in the row. */
+ * first of all, unchanged, because a scene snapshot is the least time-critical fact in the row.
+ *
+ * ⛔ B1892128 (2026-09-24) — "OLDEST-FIRST" ABOVE WAS NEVER TRUE OF THE TASK TABLE, ONLY OF THE
+ * FRAME TRACK. `tasks` arrives from the recorder already sorted WORST-FIRST (duration descending —
+ * "the biggest blocks are the ones worth the characters", perfRecorder.js's `taskOrder`), so
+ * shedding from the FRONT of that array discarded the LARGEST tasks first, not the oldest ones —
+ * the opposite of what this paragraph claims and the opposite of what the table exists to protect.
+ * See `shedTasks` below for the fix (shed the TAIL, where the smallest durations sit once the array
+ * is worst-first) and its own header for the real production row that caught it. */
 export function encodeCapture(cap, { maxChars = CAPTURE_MAX_CHARS } = {}) {
   const base = { ...cap };
   const deltas = Array.isArray(base.f) ? base.f.slice() : [];
@@ -434,16 +442,33 @@ export function encodeCapture(cap, { maxChars = CAPTURE_MAX_CHARS } = {}) {
   /* ⛔ NEW-1 (B1317824) — TASKS NOW TRIM OLDEST-FIRST, THE SAME DIRECTION THE FRAME TRACK ALREADY
    * TRIMS IN, so a reader can say "the most recent N tasks" the same way it already says "the most
    * recent N frames." The FLOOR (4) is the smallest set still worth naming — this is unchanged from
-   * the old code, only the direction of what gets dropped first has changed (oldest, not shortest). */
+   * the old code, only the direction of what gets dropped first has changed (oldest, not shortest).
+   *
+   * ⛔ B1892128 (2026-09-24) — THAT "OLDEST-FIRST" DIRECTION WAS WRONG, BECAUSE `tasks` IS NOT
+   * CHRONOLOGICAL. It arrives from `perfRecorder.js`'s `capture()` already sorted WORST-FIRST
+   * (duration descending — "the biggest blocks are the ones worth the characters"), so index 0
+   * holds the LONGEST task, not the oldest one. Shedding `tasks[0]` therefore discarded the most
+   * diagnostic rows first — exactly backwards, since a long-task row is the only place a script
+   * gets a NAME (`ltNames`) and the biggest blocks are the ones worth naming.
+   *
+   * Measured on a real Sylvestri capture (client_errors row `0f5ceb12-e62f-4b36-8a31-c3e5764ccf51`,
+   * 2026-09-23 16:23:36Z): 54 long tasks recorded, only 17 survived trim — all in the 51-94 ms
+   * band — while the 1,216 ms worst task, the one that would have named the slow code path, was
+   * the very first one dropped.
+   *
+   * The array is already worst-first, so the smallest durations sit at the TAIL — shed from there
+   * instead, and the kept set is always the biggest N tasks, which is the whole reason the
+   * producer sorted them that way to begin with. */
   const TASK_FLOOR = 4;
   const shedTasks = (floor) => {
     while (s.length > maxChars && tasks.length > floor) {
-      tasks = tasks.slice(1);
+      tasks = tasks.slice(0, -1);
       trimmedTasks++;
       s = build(frames, tasks, counters);
     }
   };
-  // Stage 3 — shed the long-task table oldest-first into whatever room the frame reserve left.
+  // Stage 3 — shed the long-task table smallest-first (the tail of the worst-first order the
+  // recorder produced) into whatever room the frame reserve left, so the biggest blocks survive.
   shedTasks(TASK_FLOOR);
 
   const stampFrames = () => { base.framesKept = frames.length; base.framesDropped = trimmedFrames; };

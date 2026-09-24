@@ -772,6 +772,144 @@ describe("encoding — a capture must FIT the telemetry column, and say what it 
     expect(parsed.ltNames).toContain("module9.js:1009");
   });
 
+  /* ⛔ B1892128 (2026-09-24) — TASK TRIM USED TO SHED FROM THE FRONT OF THE ARRAY ON THE ASSUMPTION
+   * IT WAS CHRONOLOGICAL ("oldest-first"). It never was: the recorder (`perfRecorder.js`'s
+   * `capture()`) hands `tasks` to `buildCapture` already sorted WORST-FIRST, duration descending.
+   * Shedding index 0 therefore dropped the BIGGEST, most diagnostic tasks first and kept whatever
+   * small ones were left — reproduced live on a real Sylvestri capture: 54 long tasks recorded, 17
+   * survived (51-94 ms band), and the 1,216 ms worst task — the one that would name the slow code
+   * path — was the first one discarded.
+   *
+   * `preFixShedTasksEncodeCapture` below is the shipped-before-this-fix algorithm, copied verbatim
+   * except for the one line this fix changes (`tasks.slice(1)` → `tasks.slice(0, -1)`), so this
+   * test proves the regression is real on a reproducing fixture rather than trusting a description
+   * of it: the old direction goes RED on a worst-first fixture, the shipped `encodeCapture` goes
+   * GREEN. */
+  function preFixShedTasksEncodeCapture(cap, { maxChars = CAPTURE_MAX_CHARS } = {}) {
+    const FRAME_FLOORS_FOR_TEST = [60, 30, 16, 8];
+    const base = { ...cap };
+    const deltas = Array.isArray(base.f) ? base.f.slice() : [];
+    delete base.f;
+    const namesFull = Array.isArray(base.ltNames) ? base.ltNames : [];
+    const build = (frames, tasks, counters) => {
+      const { track, spikes } = encodeFrames(frames);
+      const remap = new Map();
+      const names = [];
+      const lt = tasks.map((t) => {
+        const label = namesFull[t[3] | 0] || "";
+        let idx = remap.get(label);
+        if (idx == null) { idx = names.length; names.push(label); remap.set(label, idx); }
+        return [t[0], t[1], t[2], idx];
+      });
+      const row = { ...base, ft: track, fx: spikes, lt, ltNames: names, c: counters };
+      if (!row.fx.length) delete row.fx;
+      if (!row.lt.length) { delete row.lt; delete row.ltNames; }
+      if (!row.c.length) { delete row.c; delete row.cCols; }
+      return JSON.stringify(row);
+    };
+    let frames = deltas;
+    let tasks = Array.isArray(base.lt) ? base.lt.slice() : [];
+    let counters = Array.isArray(base.c) ? base.c.slice() : [];
+    let s = build(frames, tasks, counters);
+    let trimmedFrames = 0, trimmedTasks = 0, trimmedCounters = 0;
+    while (s.length > maxChars && counters.length > 6) { counters.shift(); trimmedCounters++; s = build(frames, tasks, counters); }
+    const shedFrames = (floor) => {
+      while (s.length > maxChars && frames.length > floor) {
+        const drop = Math.max(1, Math.min(frames.length - floor, Math.ceil((s.length - maxChars) / 1.2)));
+        frames = frames.slice(drop); trimmedFrames += drop; s = build(frames, tasks, counters);
+      }
+    };
+    const shedFramesToFit = (floors) => { for (const floor of floors) { shedFrames(floor); if (s.length <= maxChars) return; } };
+    shedFramesToFit(FRAME_FLOORS_FOR_TEST);
+    const TASK_FLOOR = 4;
+    // The one line this test exists to indict: the pre-fix direction sheds the FRONT of a
+    // worst-first array, discarding the biggest tasks first.
+    const shedTasks = (floor) => {
+      while (s.length > maxChars && tasks.length > floor) {
+        tasks = tasks.slice(1);
+        trimmedTasks++;
+        s = build(frames, tasks, counters);
+      }
+    };
+    shedTasks(TASK_FLOOR);
+    const stampFrames = () => { base.framesKept = frames.length; base.framesDropped = trimmedFrames; };
+    const stampTasksCounters = () => {
+      if (trimmedTasks) base.tasksDropped = trimmedTasks;
+      if (trimmedCounters) base.countersDropped = trimmedCounters;
+    };
+    const stampNote = () => {
+      if (trimmedFrames && trimmedTasks) base.note = "trimmed-both";
+      else if (trimmedTasks) base.note = "trimmed-tasks";
+      else if (trimmedFrames) base.note = "trimmed-frames";
+      else if (trimmedCounters) base.note = "trimmed-counters";
+    };
+    if (trimmedFrames || trimmedTasks || trimmedCounters) {
+      stampFrames(); stampTasksCounters(); stampNote();
+      s = build(frames, tasks, counters);
+      shedFramesToFit(FRAME_FLOORS_FOR_TEST);
+      shedTasks(TASK_FLOOR);
+      stampFrames(); stampTasksCounters(); stampNote();
+      s = build(frames, tasks, counters);
+    }
+    if (s.length > maxChars && tasks.length > 0) {
+      shedTasks(0);
+      stampFrames(); stampTasksCounters(); stampNote();
+      s = build(frames, tasks, counters);
+    }
+    if (s.length > maxChars && frames.length > 0) {
+      trimmedFrames += frames.length; frames = [];
+      stampFrames(); stampTasksCounters(); stampNote();
+      s = build(frames, tasks, counters);
+    }
+    if (s.length > maxChars && counters.length) {
+      trimmedCounters += counters.length; counters = [];
+      stampFrames(); stampTasksCounters(); stampNote();
+      s = build(frames, tasks, counters);
+    }
+    if (s.length > maxChars) { base.note = "trimmed-hard"; s = build(frames, tasks, counters); }
+    if (s.length > maxChars) {
+      const bare = { ...base, note: "trimmed-hard", framesKept: 0, framesDropped: deltas.length };
+      delete bare.lt; delete bare.ltNames; delete bare.c; delete bare.cCols;
+      s = JSON.stringify(bare);
+    }
+    return { text: s, chars: s.length, trimmedFrames, trimmedTasks, trimmedCounters, fits: s.length <= maxChars };
+  }
+
+  it("a severe episode with worst-first tasks (the recorder's real order) keeps the BIGGEST tasks on trim — the pre-fix front-shed direction kept the smallest", () => {
+    const names = Array.from({ length: 24 }, (_, i) => `siteplanner/lib/reallyLongModuleNameXXXXXXXXXX${i}.js:8${i}12`);
+    const taskNames = ["(unknown)", "(other)", ...names];
+    // Worst-first, duration descending — exactly what perfRecorder.js's
+    // `.sort((a, b) => _tasks.dur[b] - _tasks.dur[a])` produces, never chronological.
+    const tasks = Array.from({ length: 24 }, (_, i) => [i * 1000, 60 + (23 - i) * 90, 10 + i, 2 + i])
+      .sort((a, b) => b[1] - a[1]);
+    const maxDuration = Math.max(...tasks.map((t) => t[1]));
+    const buildArgs = {
+      kind: "auto", atMs: 1_462_568, atWall: 1_788_283_501_338, activeMs: 1_235_651, route: "site", build: "c5da2c1",
+      baselineMs: 16.7, multiplier: 2, sustainMs: 2000, floorMs: 33,
+      frameDeltas: Array.from({ length: 4096 }, (_, i) => 70 + (i % 90)),
+      counters: Array.from({ length: 96 }, (_, i) => [i * 2000, 130, 2200, 4100, 62, 9, 3, 291, 0.4, 27, 2, i]),
+      counterColumns: ["t", ...COUNTER_COLUMNS],
+      tasks, taskNames,
+    };
+
+    const preFix = preFixShedTasksEncodeCapture(buildCapture(buildArgs), { maxChars: CAPTURE_MAX_CHARS });
+    const preFixParsed = JSON.parse(preFix.text);
+    expect(preFixParsed.tasksDropped).toBeGreaterThan(0);
+    // Mutation proof: the pre-fix direction really does lose the worst task on this fixture.
+    expect((preFixParsed.lt || []).some((t) => t[1] === maxDuration)).toBe(false);
+
+    const fixed = encodeCapture(buildCapture(buildArgs), { maxChars: CAPTURE_MAX_CHARS });
+    const parsed = JSON.parse(fixed.text);
+    expect(parsed.tasksDropped).toBeGreaterThan(0);
+    // The shipped fix keeps the worst task — the one attribution actually matters for.
+    expect(parsed.lt.some((t) => t[1] === maxDuration)).toBe(true);
+    // And the surviving set is exactly the top N by duration (a prefix of the worst-first input) —
+    // never an arbitrary subset — since shedding always takes from the tail of that order.
+    const kept = tasks.length - parsed.tasksDropped;
+    const expectedSurviving = tasks.slice(0, kept).map((t) => t[1]);
+    expect(parsed.lt.map((t) => t[1])).toEqual(expectedSurviving);
+  });
+
   it("frameStats counts jank against the same bar the trigger fired on", () => {
     const fs = frameStats([16, 16, 40, 80, 16], 33);
     expect(fs.frames).toBe(5);
