@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import { DENSITIES, DEFAULT_DENSITY, SINGLE, COMFORTABLE_LINE, densityFor, densityStyle, blockFontSize,
   BLOCK_SPACES, LINE_SPACINGS, spacingFromElement, spacingLabel, spacingStyle,
+  SPACING_LINE_OPTIONS, SPACE_BEFORE_DEFAULT, SPACE_AFTER_DEFAULT, SPACING_PRESETS, spacingGlyphFor,
 } from "../src/workspaces/notes/lib/notesSpacing.js";
 
 describe("spacingStyle", () => {
@@ -182,5 +183,84 @@ describe("the note's density", () => {
 
   it("densityStyle hands out both numbers together, so one control moves both", () => {
     expect(densityStyle("compact")).toEqual({ lineHeight: densityFor("compact").line, listGap: 2 });
+  });
+});
+
+/* ⛔ THE NEW SPACING POPOVER'S OWN LADDER (NEW-4, toolbar redesign, 2026-09-24) — a SEPARATE,
+ * simpler set of numbers from `LINE_SPACINGS` above, on purpose: the old control's "Single" means
+ * 1.15 (the redesign's own history), so reusing that name for a genuine 1.0 would silently change
+ * what "Single" has always meant. The two ladders coexist; this one backs only the new popover. */
+describe("SPACING_LINE_OPTIONS — the new popover's 4-segment control", () => {
+  it("is Word's four, in Word's order, with real numeric values", () => {
+    expect(SPACING_LINE_OPTIONS.map((o) => o.name)).toEqual(["Single", "Default", "1.5", "Double"]);
+    expect(SPACING_LINE_OPTIONS.map((o) => o.value)).toEqual([1, 1.15, 1.5, 2]);
+  });
+
+  it("every option carries a stable id distinct from its display name", () => {
+    const ids = SPACING_LINE_OPTIONS.map((o) => o.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("⛔ genuinely means 1.0 for Single — NOT the old ladder's 1.15", () => {
+    const single = SPACING_LINE_OPTIONS.find((o) => o.name === "Single");
+    expect(single.value).toBe(1);
+    expect(single.value).not.toBe(SINGLE);
+  });
+});
+
+describe("SPACE_BEFORE_DEFAULT / SPACE_AFTER_DEFAULT — the steppers' starting point", () => {
+  it("matches the Standard preset, so leaving the steppers alone equals picking Standard", () => {
+    const standard = SPACING_PRESETS.find((p) => p.id === "standard");
+    expect(SPACE_AFTER_DEFAULT).toBe(standard.spaceAfter);
+  });
+
+  it("space-before defaults to none", () => {
+    expect(SPACE_BEFORE_DEFAULT).toBe(0);
+  });
+
+  it("space-after defaults to 8", () => {
+    expect(SPACE_AFTER_DEFAULT).toBe(8);
+  });
+});
+
+describe("SPACING_PRESETS — the three named shortcuts", () => {
+  it("offers exactly Compact / Standard / Relaxed, each looser than the last", () => {
+    expect(SPACING_PRESETS.map((p) => p.label)).toEqual(["Compact", "Standard", "Relaxed"]);
+    for (let i = 1; i < SPACING_PRESETS.length; i++) {
+      expect(SPACING_PRESETS[i].lineHeight).toBeGreaterThan(SPACING_PRESETS[i - 1].lineHeight);
+    }
+  });
+
+  it("never touches space-before — a preset is about density, not indentation from above", () => {
+    for (const p of SPACING_PRESETS) expect(p).not.toHaveProperty("spaceBefore");
+  });
+
+  it("each preset's numbers round-trip through spacingStyle cleanly", () => {
+    // Compact's spaceAfter is 0 — spacingStyle correctly omits a zero margin (its own rule:
+    // "refuses a value that is not a positive number"), so only the non-zero presets emit both.
+    expect(spacingStyle({ lineHeight: 1, spaceAfter: 0 })).toBe("line-height:1");
+    for (const p of SPACING_PRESETS.filter((p) => p.spaceAfter > 0)) {
+      expect(spacingStyle({ lineHeight: p.lineHeight, spaceAfter: p.spaceAfter }))
+        .toBe(`line-height:${p.lineHeight};margin-bottom:${p.spaceAfter}px`);
+    }
+  });
+});
+
+describe("spacingGlyphFor — what the closed trigger shows", () => {
+  it("shows the bare number for a real line height", () => {
+    expect(spacingGlyphFor(1.5)).toBe("1.5");
+    expect(spacingGlyphFor(2)).toBe("2");
+  });
+
+  it("accepts a numeric string, same as a value read off the DOM", () => {
+    expect(spacingGlyphFor("1.5")).toBe("1.5");
+  });
+
+  it("says 'Spacing' when there is nothing to report", () => {
+    expect(spacingGlyphFor(null)).toBe("Spacing");
+    expect(spacingGlyphFor(undefined)).toBe("Spacing");
+    expect(spacingGlyphFor(0)).toBe("Spacing");
+    expect(spacingGlyphFor(-1)).toBe("Spacing");
+    expect(spacingGlyphFor("wide")).toBe("Spacing");
   });
 });

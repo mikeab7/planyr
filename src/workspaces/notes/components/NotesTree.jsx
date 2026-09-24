@@ -102,10 +102,12 @@ const rowBase = {
  * them apart. This is TWO segments again, but for a different reason than B36050: Bin was
  * never re-sorting the same pages by a fact nobody navigates by, it was a whole other
  * destination competing for the same three slots. */
-const VIEWS = [
-  { id: "tree", label: "Pages" },
-  { id: "tasks", label: "Tasks" },
-];
+/* ⛔ NEW-8 (toolbar rebuild, 2026-09-24) — the `VIEWS` list that used to drive the Pages/Tasks
+ * segmented control (`ViewTabs`, below this file's own history) is GONE along with that
+ * control — see the sidebar header's own note near `changeView`. `"tasks"` stays a legal
+ * `view` value (the render branch and the task rollup underneath it are untouched, on purpose
+ * — a real feature is not deleted on the strength of one control losing its trigger), it is
+ * simply not reachable from this rail any more. */
 
 /* ---- primitives ------------------------------------------------------------------------ */
 
@@ -850,34 +852,6 @@ function TaskList({ groups, onToggle, onOpen }) {
   );
 }
 
-function ViewTabs({ view, onView, narrow = false }) {
-  return (
-    <div role="tablist" aria-label="Notes view" style={{ display: "flex", gap: 3 }}>
-      {VIEWS.map((v) => {
-        const on = view === v.id;
-        return (
-          <button
-            key={v.id}
-            type="button"
-            role="tab"
-            aria-selected={on}
-            data-testid={`notes-view-${v.id}`}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onView(v.id)}
-            style={{
-              flex: 1, height: narrow ? 44 : 24, borderRadius: RADIUS.control, cursor: "pointer",
-              border: `1px solid ${on ? "var(--accent-notes)" : "var(--border-default)"}`,
-              background: on ? "var(--accent-notes)" : "transparent",
-              color: on ? "var(--on-accent-notes)" : "var(--text-secondary)",
-              font: "inherit", fontSize: 11.5, fontWeight: 650,
-            }}
-          >{v.label}</button>
-        );
-      })}
-    </div>
-  );
-}
-
 /** ⛔ THE FOOTER RAIL (NEW-3, owner decision 2026-09-09) — where Bin went when it left the
  *  segmented control above, and where Unfiled lives from the day it exists at all.
  *
@@ -1258,62 +1232,79 @@ export default function NotesTree({
               color: "var(--text-primary)", font: "inherit", fontSize: 13,
             }}
           />
-          <button
-            type="button"
-            data-testid="notes-new-page"
-            title="New page"
-            onClick={() => { setView("tree"); onViewChange?.("tree"); onAddPage(); }}
-            style={{
-              flex: "0 0 auto", height: narrow ? 44 : 28, minWidth: narrow ? 44 : undefined, padding: "0 10px", borderRadius: RADIUS.control,
-              border: "1px solid var(--border-default)", background: "var(--surface-page)",
-              color: "var(--text-secondary)", font: "inherit", fontSize: 12.5, fontWeight: 650,
-              cursor: "pointer", whiteSpace: "nowrap",
-            }}
-          >＋ Page</button>
-          {/* B1020931, reworked NEW-1 — a template picker, additive beside the blank-page
-              button above rather than replacing its one-click behavior: the common case (a
-              blank page) stays exactly as fast as it was. Reuses RowMenu, this file's own
-              existing small-menu idiom (below), rather than the shared controls.jsx menu
-              primitives — this file may not import controls.jsx at all (see the source-guard
-              test in notesModule.test.js: that import hoists a third shared chunk onto the
-              Site route, the same measured constraint NoteToolbar.jsx documents for the same
-              reason). Same locked height/radius as the button it sits beside — no new control
-              signature on this surface.
-              ⛔ ALWAYS RENDERED NOW, even with zero templates — "Manage templates…" (which
-              creates the first one) must stay reachable, not vanish along with the list it
-              would otherwise have nothing to show. */}
-          <button
-            ref={templateTriggerRef}
-            type="button"
-            data-testid="notes-new-from-template"
-            title="New page from template"
-            aria-haspopup="menu"
-            aria-expanded={!!menu}
-            onClick={() => {
-              const r = templateTriggerRef.current?.getBoundingClientRect();
-              setMenu({
-                x: r ? r.left : 0, y: r ? r.bottom + 4 : 0,
-                items: [
-                  ...templates.map((t) => ({
-                    id: `tpl-${t.id}`, label: t.label,
-                    onPick: () => { setView("tree"); onViewChange?.("tree"); onAddPage(t.id); },
-                  })),
-                  SEP,
-                  { id: "manage-templates", label: "Manage templates…", onPick: () => onManageTemplates?.() },
-                ],
-              });
-            }}
-            style={{
-              flex: "0 0 auto", height: narrow ? 44 : 28, width: narrow ? 44 : 22, padding: 0, borderRadius: RADIUS.control,
-              border: "1px solid var(--border-default)", background: "var(--surface-page)",
-              color: "var(--text-secondary)", font: "inherit", fontSize: 10.5, fontWeight: 650,
-              cursor: "pointer",
-            }}
-          >▾</button>
+          {/* ⛔ NEW-8 (toolbar rebuild, 2026-09-24) — ONE SPLIT BUTTON, not two separate ones.
+              The main (left) half creates a blank page in one click, exactly as the standalone
+              "＋ Page" button always did; the narrow chevron half — divided from it by a single
+              1px hairline, never a visible gap — opens the SAME templates menu the old "▾"
+              button opened. Same height as the search field beside it, whichever that field is
+              at this width (`narrow ? 44 : 28`, unchanged); B1020931's own reasoning for hand-
+              rolling this rather than importing `shared/ui/controls.jsx` is unchanged too — see
+              that file's note, still true of `RowMenu` below. */}
+          <span style={{ display: "flex", flex: "0 0 auto" }}>
+            <button
+              type="button"
+              data-testid="notes-new-page"
+              title="New page"
+              onClick={() => { setView("tree"); onViewChange?.("tree"); onAddPage(); }}
+              style={{
+                height: narrow ? 44 : 28, padding: "0 10px",
+                borderTopLeftRadius: RADIUS.control, borderBottomLeftRadius: RADIUS.control,
+                borderTopRightRadius: 0, borderBottomRightRadius: 0,
+                border: "1px solid var(--border-default)", borderRight: "none",
+                background: "var(--surface-page)",
+                color: "var(--text-secondary)", font: "inherit", fontSize: 12.5, fontWeight: 650,
+                cursor: "pointer", whiteSpace: "nowrap",
+              }}
+            >＋ Page</button>
+            {/* B1020931, reworked NEW-1, reworked NEW-8 — a template picker, additive beside the
+                blank-page half rather than replacing its one-click behavior: the common case (a
+                blank page) stays exactly as fast as it was. Reuses RowMenu, this file's own
+                existing small-menu idiom (below), rather than the shared controls.jsx menu
+                primitives — this file may not import controls.jsx at all (see the source-guard
+                test in notesModule.test.js: that import hoists a third shared chunk onto the
+                Site route, the same measured constraint NoteToolbar.jsx documents for the same
+                reason).
+                ⛔ ALWAYS RENDERED NOW, even with zero templates — "Manage templates…" (which
+                creates the first one) must stay reachable, not vanish along with the list it
+                would otherwise have nothing to show. */}
+            <button
+              ref={templateTriggerRef}
+              type="button"
+              data-testid="notes-new-from-template"
+              title="New page from template"
+              aria-haspopup="menu"
+              aria-expanded={!!menu}
+              onClick={() => {
+                const r = templateTriggerRef.current?.getBoundingClientRect();
+                setMenu({
+                  x: r ? r.left : 0, y: r ? r.bottom + 4 : 0,
+                  items: [
+                    ...templates.map((t) => ({
+                      id: `tpl-${t.id}`, label: t.label,
+                      onPick: () => { setView("tree"); onViewChange?.("tree"); onAddPage(t.id); },
+                    })),
+                    SEP,
+                    { id: "manage-templates", label: "Manage templates…", onPick: () => onManageTemplates?.() },
+                  ],
+                });
+              }}
+              style={{
+                height: narrow ? 44 : 28, width: narrow ? 44 : 22, padding: 0,
+                borderTopRightRadius: RADIUS.control, borderBottomRightRadius: RADIUS.control,
+                borderTopLeftRadius: 0, borderBottomLeftRadius: 0,
+                border: "1px solid var(--border-default)", background: "var(--surface-page)",
+                color: "var(--text-secondary)", font: "inherit", fontSize: 10.5, fontWeight: 650,
+                cursor: "pointer",
+              }}
+            >▾</button>
+          </span>
         </div>
-        {/* The workspace root is told which view is showing, so the task rollup — which has
-            to read every page BODY in scope — is computed only while it is on screen. */}
-        <ViewTabs view={view} narrow={narrow} onView={changeView} />
+        {/* ⛔ NEW-8 — THE PAGES / TASKS SEGMENTED TOGGLE IS GONE. Owner-approved mockup, verbatim:
+            "the sidebar shows search, the page button, and the page list." `view` stays wired
+            to `"tree"` for everything below (Bin is unaffected — it never lived in this toggle;
+            see the footer rail bullet in this file's own module pointer) rather than deleting the
+            `"tasks"` branch outright, so the task rollup this file already computes is not thrown
+            away — it simply has no on-screen trigger in the rail any more. */}
         <ProjectListBanner
           state={projectsState}
           error={projectsError}

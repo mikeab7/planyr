@@ -40,5 +40,19 @@ export const FONTS = [
   { label: "Calibri", value: "Calibri, Candara, sans-serif" }, { label: "Courier New", value: "'Courier New', Courier, monospace" },
 ];
 
-/** Point sizes, with `null` meaning "whatever the block already is". */
-export const SIZES = [null, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48, 64];
+/** ⛔ THE PRESET LADDER (NEW-4, toolbar redesign, 2026-09-24) — no leading `null`/floor any more.
+ *  A size box that shows "Default" or bottoms out at 9 both read as "there is no real answer
+ *  below this" — the toolbar's size control now carries its own typed stepper (4–400, any
+ *  integer) beside this list, so `null` is never needed as a pickable row; the caret's real,
+ *  resolved size is what the closed box shows instead (see notesResolvedValue.js). */
+export const SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 24, 30, 36, 48, 72];
+
+/** The size a brand-new note (or any run with no explicit size) renders at. Matches
+ *  `NOTE_BODY_FONT_PX` in NoteEditor.jsx — the two cannot drift, since both are read at the
+ *  same 2026-09-24 redesign that moved the body default down from 15px. */
+export const DEFAULT_SIZE = 11;
+
+/** A typed size must land somewhere real: not so small it disappears, not so large a single
+ *  run could blow out a page's layout beyond recovery. */
+export const SIZE_MIN = 4;
+export const SIZE_MAX = 400;

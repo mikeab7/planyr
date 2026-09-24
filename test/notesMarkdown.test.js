@@ -119,6 +119,16 @@ describe("inline marks", () => {
     expect(lossy(doc(p(t("word", [{ type: "underline" }]))))).toEqual(["underlined text"]);
   });
 
+  it("SUPERSCRIPT falls back to <sup> — Markdown has no superscript — and says so", () => {
+    expect(one([{ type: "superscript" }])).toBe("<sup>word</sup>\n");
+    expect(lossy(doc(p(t("word", [{ type: "superscript" }]))))).toEqual(["superscript text"]);
+  });
+
+  it("SUBSCRIPT falls back to <sub> — Markdown has no subscript — and says so", () => {
+    expect(one([{ type: "subscript" }])).toBe("<sub>word</sub>\n");
+    expect(lossy(doc(p(t("word", [{ type: "subscript" }]))))).toEqual(["subscript text"]);
+  });
+
   it("HIGHLIGHT falls back to <mark>, keeping the chosen colour", () => {
     expect(one([{ type: "highlight" }])).toBe("<mark>word</mark>\n");
     expect(one([{ type: "highlight", attrs: { color: "#FEF08A" } }])).toBe('<mark style="background-color:#FEF08A">word</mark>\n');

@@ -229,3 +229,51 @@ export function densityStyle(id) {
   const d = densityFor(id);
   return { lineHeight: d.line, listGap: d.listGap };
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+ * ⛔ THE SPACING POPOVER REDESIGN (NEW-4, toolbar rebuild, 2026-09-24) — a NEW, additive
+ * vocabulary for the toolbar's spacing control. `LINE_SPACINGS`/`BLOCK_SPACES` above are
+ * UNCHANGED (test/notesSpacing.test.js pins them) and still the two values every stored
+ * paragraph attribute round-trips through — `setNoteSpacing({lineHeight, spaceAfter, ...})`
+ * writes the SAME two attributes either way. What changed is only which options the POPOVER
+ * offers and how it labels them: the old menu's rows read "Whole note: Comfortable" / "Lines:
+ * 1.15" / "Space before: Small" — none of them a real, sayable name. These are.
+ * ═══════════════════════════════════════════════════════════════════════════════════════ */
+
+/** The four per-paragraph line-spacing choices the new popover's segmented control offers,
+ *  in the Word/Google Docs convention: 1.0 is genuinely "Single" (not `SINGLE` above, which is
+ *  1.15 — the OLD control's idea of single. This is intentionally a different, simpler ladder
+ *  for the new UI; the underlying `lineHeight` attribute accepts any of these numbers same as
+ *  it always has). */
+export const SPACING_LINE_OPTIONS = [
+  { id: "1", name: "Single", value: 1 },
+  { id: "1.15", name: "Default", value: 1.15 },
+  { id: "1.5", name: "1.5", value: 1.5 },
+  { id: "2", name: "Double", value: 2 },
+];
+
+/** The space-before/space-after steppers' starting point for a paragraph with no explicit
+ *  value — matches the "Standard" preset below, so picking Standard and leaving the steppers
+ *  alone are the same thing. */
+export const SPACE_BEFORE_DEFAULT = 0;
+export const SPACE_AFTER_DEFAULT = 8;
+
+/** Three named combinations of {line spacing, space after} — a one-click shortcut for the
+ *  two numbers together, never stored as a preset id of its own: picking one just writes the
+ *  same `lineHeight`/`spaceAfter` attributes a person could set by hand with the controls
+ *  above. Space-before is deliberately left alone by every preset (a preset changes density,
+ *  not indentation-from-the-block-above). */
+export const SPACING_PRESETS = [
+  { id: "compact", label: "Compact", lineHeight: 1, spaceAfter: 0 },
+  { id: "standard", label: "Standard", lineHeight: 1.15, spaceAfter: 8 },
+  { id: "relaxed", label: "Relaxed", lineHeight: 1.5, spaceAfter: 12 },
+];
+
+/** The short glyph the closed spacing trigger shows — just the number, "Spacing" when there is
+ *  nothing to say (mirrors `spacingLabel` above but against the new ladder's plain numbers
+ *  rather than the old ladder's named rows). */
+export function spacingGlyphFor(lineHeight) {
+  const lh = typeof lineHeight === "number" ? lineHeight : parseFloat(lineHeight);
+  if (!Number.isFinite(lh) || lh <= 0) return "Spacing";
+  return String(lh);
+}

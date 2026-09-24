@@ -481,40 +481,40 @@ describe("no dialog boxes anywhere in the module (owner rule)", () => {
      * once and then drifting every time the caret moves by a route the toolbar didn't
      * originate. A `useState` that never reads the editor cannot drift. */
     expect(bar).not.toMatch(/useState\([^)]*editor\s*\./);
-    /* The count stays capped as a second, blunter net. The bar's useStates are: the two
-     * colour popovers' open flags, the link editor's open + href, the overflow drawer's
-     * open flag, the table grid picker's open + hovered size + grown grid (B1372), the
-     * callout tone picker's open flag (NEW-7), and `FormatMenu`'s own open flag (B1139216,
-     * shared by the Block style AND Font size controls — one source-level `useState`, two
-     * runtime instances) — every one of them a transient control-chrome flag, none of them a
-     * formatting state. The callout control reads its CURRENT TONE from
-     * `editor.getAttributes("noteCallout")` on every render, and FormatMenu reads its current
-     * VALUE from the `value`/`mixed` props its caller computes off the editor's own selection
-     * (lib/notesMixedSelection.js) — never off its own `open` state — which is the sharper
-     * assertion above and the reason raising this blunt cap by one is not a weakening.
+    /* The count stays capped as a second, blunter net — every entry below is a transient
+     * control-chrome flag (open/closed, a typed-but-uncommitted value, a measured pixel
+     * offset), never a formatting state read from the editor at init. The sharp assertion
+     * above is what actually enforces that; this cap just keeps the inventory honest.
      *
-     * ⛔ RAISED 9 → 10 (NEW-7/NEW-9), and here is the justification rather than a silent bump.
-     * The tenth is `resolvedDefaults` — the typeface, size and ink an UNSTYLED run is actually
-     * rendered in, which is the one question in this file the editor cannot answer, because the
-     * answer lives in CSS and only the browser knows it ("Default" is not a font). It is
-     * therefore not a mirror of anything the editor holds: it is seeded from `getComputedStyle`
-     * (never from `editor.`, so the sharp assertion above still covers it), it is re-read in a
-     * layout effect after EVERY render, and the setter returns the previous object unless the
-     * value genuinely changed — so it cannot drift as the caret moves, which is the failure
-     * this cap exists to catch. If a future change makes it read `editor.` at init, the sharp
-     * assertion fails first and this comment is not what saves it.
-     *
-     * ⛔ RAISED 10 → 11 (B1344627, owner report 2026-09-15). The eleventh is `usePopoverClampLeft`'s
-     * `shift` — one shared source-level `useState` call, instantiated per popover trigger
-     * (FormatMenu, ColorPopover, TableGridPicker, LinkControl, CalloutControl all call the same
-     * hook), that nudges an already-open popover's `left` inward when it would otherwise hang off
-     * the viewport's right edge (the Insert Table picker's own report: 18 of its 36 size cells sat
-     * past `innerWidth` at the owner's own ~1191px window). It is not a mirror either: it is
-     * measured off `getBoundingClientRect()`/`offsetWidth` in a `useLayoutEffect`, reset to 0 on
-     * close, and never seeded from `editor.` — the sharp assertion above still covers it, same as
-     * `resolvedDefaults`. */
+     * ⛔ REBUILT 11 → 16 (toolbar rebuild, NEW-1..NEW-9, 2026-09-24) — full inventory, not a
+     * silent bump:
+     *   `useHoverTooltip`'s `tip` (NEW-7) — the custom floating tooltip's position, computed
+     *     from `getBoundingClientRect()` on hover/focus, cleared on leave/blur; one shared
+     *     hook called from every `TBButton` and `FormatMenu` trigger.
+     *   `usePopoverClampLeft`'s `shift` (B1344627, carried over unchanged) — one shared hook,
+     *     called from FormatMenu/ColorPopover/TableGridPicker/LinkControl/CalloutControl/
+     *     SizeMenu/SpacingPopover/InsertMenu, nudges an open popover clear of the viewport's
+     *     right edge; measured off `getBoundingClientRect()`, never seeded from `editor.`.
+     *   `FormatMenu`'s `open` — shared by Paragraph style, Font, and (compact-width) Alignment.
+     *   `ColorPopover`'s `open` — shared by Text colour and Highlight.
+     *   `TableGridPicker`'s `open` + `dim` + `grid` (B1372, unchanged) — the drag-to-size grid.
+     *   `LinkControl`'s `open` + `href` (unchanged).
+     *   `CalloutControl`'s `open` (unchanged).
+     *   `SizeMenu`'s `open` + `text` (NEW-4) — the size popover's typed-stepper input; `text`
+     *     is a local draft string validated on blur/Enter (`SIZE_MIN`–`SIZE_MAX`), never
+     *     committed until then, so it cannot be a mirror of the editor's resolved size.
+     *   `SpacingPopover`'s `open` (NEW-4).
+     *   `compact` (NEW-9) — the bar's own rendered-width fold state, from a `ResizeObserver` on
+     *     its own root, never from `editor.` or the window.
+     *   `resolvedDefaults` (unchanged) — the typeface/size/ink an UNSTYLED run actually renders
+     *     in, which only `getComputedStyle` can answer ("Default" is not a font); re-read in a
+     *     layout effect every render, setter returns the previous object unless the value
+     *     genuinely changed, so it cannot drift as the caret moves.
+     *   `InsertMenu`'s `open` (NEW-1/NEW-9) — replaces the retired `OverflowMenu`'s own flag.
+     * If a future change makes any of these read `editor.` at init, the sharp assertion above
+     * fails first and this inventory is not what saves it. */
     const states = [...bar.matchAll(/useState\(/g)].length;
-    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(11);
+    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(16);
   });
 });
 

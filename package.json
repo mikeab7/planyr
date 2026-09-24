@@ -70,6 +70,8 @@
     "@supabase/supabase-js": "^2.108.1",
     "@tiptap/extension-highlight": "^3.29.2",
     "@tiptap/extension-list": "^3.29.2",
+    "@tiptap/extension-subscript": "^3.29.2",
+    "@tiptap/extension-superscript": "^3.29.2",
     "@tiptap/extension-table": "^3.29.2",
     "@tiptap/extension-text-align": "^3.29.2",
     "@tiptap/extension-text-style": "^3.29.2",

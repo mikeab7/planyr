@@ -37,12 +37,15 @@ export const NOTE_MD_HANDLED = {
     "taskList", "taskItem", "blockquote", "codeBlock", "horizontalRule", "hardBreak",
     "table", "tableRow", "tableHeader", "tableCell", "noteImage",
     "noteAttachment", "noteCallout", "noteToggle", "noteToggleTitle", "noteAnchor"],
-  marks: ["bold", "italic", "strike", "code", "underline", "link", "textStyle", "highlight"],
+  marks: ["bold", "italic", "strike", "code", "underline", "link", "textStyle", "highlight",
+    "superscript", "subscript"],
 };
 
 /* Human-readable names for the lossiness report — what the user sees, not node names. */
 const LOSSY = {
   underline: "underlined text",
+  superscript: "superscript text",
+  subscript: "subscript text",
   highlight: "highlighted text",
   color: "text colour",
   fontSize: "font size",
@@ -203,6 +206,13 @@ function applyMarks(text, marks, lossy) {
   if (has("strike")) out = `~~${out}~~`;
 
   if (has("underline")) { out = `<u>${out}</u>`; lossy.add(LOSSY.underline); }
+
+  /* ⛔ SUPERSCRIPT/SUBSCRIPT (NEW-4, toolbar rebuild, 2026-09-24) — the same HTML-fallback
+   * shape `underline` already uses: Markdown has no native syntax for either, so `<sup>`/
+   * `<sub>` is the honest export (readable as-is on GitHub and most renderers) and the
+   * lossiness report names it, same as every other HTML-fallback construct here. */
+  if (has("superscript")) { out = `<sup>${out}</sup>`; lossy.add(LOSSY.superscript); }
+  if (has("subscript")) { out = `<sub>${out}</sub>`; lossy.add(LOSSY.subscript); }
 
   const hl = has("highlight");
   if (hl) {
