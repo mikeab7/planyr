@@ -481,7 +481,7 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
 .planyr-note .planyr-note-image img { max-width: 100%; height: auto; display: block; border-radius: ${RADIUS.control}px; border: 1px solid var(--border-default); }
 .planyr-note .planyr-note-image.ProseMirror-selectednode img { outline: 2px solid var(--accent-notes); outline-offset: 1px; }
 .planyr-note .planyr-note-image[data-missing] { border: 1px dashed var(--danger-text); border-radius: ${RADIUS.control}px; padding: 14px; background: var(--surface-page); }
-.planyr-note .planyr-note-image-missing { color: var(--danger-text); font-size: 12.5px; font-weight: 600; }
+.planyr-note .planyr-note-image-missing { color: var(--danger-text); font-size: 12px; font-weight: 600; }
 
 /* A CALLOUT (NEW-7). The node stores a NAME — info / tip / important / warning / danger —
    and never a colour, so the ink is entirely here and the same block prints black-on-white
@@ -514,7 +514,7 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
 .planyr-note .planyr-toggle > * + * { margin-top: 0.5em; }
 .planyr-note .planyr-toggle-title { cursor: text; font-weight: 650; color: var(--text-primary); list-style: none; }
 .planyr-note .planyr-toggle-title::-webkit-details-marker { display: none; }
-.planyr-note .planyr-toggle-title::before { display: inline-block; width: 14px; margin-left: -3px; content: "▶"; font-size: 9px; color: var(--text-tertiary); cursor: pointer; }
+.planyr-note .planyr-toggle-title::before { display: inline-block; width: 14px; margin-left: -3px; content: "▶"; font-size: 10px; color: var(--text-tertiary); cursor: pointer; }
 .planyr-note .planyr-toggle[open] > .planyr-toggle-title::before { content: "▼"; }
 
 /* AN ATTACHED FILE (NEW-5). Same discipline as a picture: the document holds an id, the
@@ -523,10 +523,10 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
 .planyr-note .planyr-note-file { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--border-default); border-radius: ${RADIUS.control}px; background: var(--surface-page); text-decoration: none; }
 .planyr-note .planyr-note-file.ProseMirror-selectednode { outline: 2px solid var(--accent-notes); outline-offset: 1px; }
 .planyr-note .planyr-note-file[data-missing] { border: 1px dashed var(--danger-text); }
-.planyr-note .planyr-note-file-badge { flex: 0 0 auto; font-size: 9.5px; font-weight: 800; letter-spacing: 0.06em; padding: 2px 6px; border-radius: ${RADIUS.pill}px; border: 1px solid var(--border-strong); color: var(--text-secondary); }
+.planyr-note .planyr-note-file-badge { flex: 0 0 auto; font-size: 10px; font-weight: 800; letter-spacing: 0.06em; padding: 2px 6px; border-radius: ${RADIUS.pill}px; border: 1px solid var(--border-strong); color: var(--text-secondary); }
 .planyr-note .planyr-note-file-name { flex: 1 1 auto; min-width: 0; font-size: 13px; font-weight: 650; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.planyr-note .planyr-note-file-size { flex: 0 0 auto; font-size: 11.5px; font-weight: 600; color: var(--text-tertiary); }
-.planyr-note .planyr-note-file-get { flex: 0 0 auto; height: 22px; padding: 0 10px; border-radius: ${RADIUS.pill}px; border: 1px solid var(--accent-notes); background: transparent; color: var(--accent-notes-text); font: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer; }
+.planyr-note .planyr-note-file-size { flex: 0 0 auto; font-size: 12px; font-weight: 600; color: var(--text-tertiary); }
+.planyr-note .planyr-note-file-get { flex: 0 0 auto; height: 22px; padding: 0 10px; border-radius: ${RADIUS.pill}px; border: 1px solid var(--accent-notes); background: transparent; color: var(--accent-notes-text); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
 .planyr-note .planyr-note-file-get:disabled { border-color: var(--danger-text); color: var(--danger-text); cursor: default; }
 
 /* Search marking is a decoration, never a mark — it is not in the document. */
@@ -591,7 +591,7 @@ function FindBar({ term, count, index, onStep, onClear }) {
       style={{
         flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "5px 14px",
         borderBottom: "1px solid var(--border-default)", background: "var(--surface-page)",
-        color: "var(--text-secondary)", fontSize: 12.5, fontWeight: 600,
+        color: "var(--text-secondary)", fontSize: 12, fontWeight: 600,
       }}
     >
       <span data-testid="note-find-count" style={{ flex: 1, minWidth: 0 }}>
@@ -607,7 +607,7 @@ function FindBar({ term, count, index, onStep, onClear }) {
       >›</button>
       <button type="button" data-testid="note-find-clear" title="Clear the search (Esc)"
         onMouseDown={(e) => e.preventDefault()} onClick={onClear}
-        style={{ height: 22, padding: "0 9px", borderRadius: RADIUS.pill, border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)", font: "inherit", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}
+        style={{ height: 22, padding: "0 9px", borderRadius: RADIUS.pill, border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)", font: "inherit", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
       >Clear</button>
     </div>
   );
@@ -637,7 +637,7 @@ function ZoomPill({ pct, onZoomOut, onZoomIn, onPick, onReset, onFitWidth }) {
   const btnStyle = {
     width: 26, height: 26, display: "inline-flex", alignItems: "center", justifyContent: "center",
     border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer",
-    font: "inherit", fontSize: 15, fontWeight: 700, borderRadius: RADIUS.control,
+    font: "inherit", fontSize: 14, fontWeight: 700, borderRadius: RADIUS.control,
   };
   const LEVELS = [0.5, 0.75, 1, 1.25, 1.5];
   return (
@@ -666,7 +666,7 @@ function ZoomPill({ pct, onZoomOut, onZoomIn, onPick, onReset, onFitWidth }) {
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        style={{ ...btnStyle, width: "auto", padding: "0 8px", fontSize: 12.5, fontWeight: 700 }}
+        style={{ ...btnStyle, width: "auto", padding: "0 8px", fontSize: 12, fontWeight: 700 }}
       >{zoomLabel(pct)}</button>
       <button type="button" data-testid="note-zoom-in" aria-label="Zoom in" onClick={onZoomIn} style={btnStyle}>+</button>
       {open && (
@@ -683,12 +683,12 @@ function ZoomPill({ pct, onZoomOut, onZoomIn, onPick, onReset, onFitWidth }) {
           {LEVELS.map((z) => (
             <button key={z} type="button" data-testid={`note-zoom-opt-${Math.round(z * 100)}`}
               onClick={() => { setOpen(false); if (z === 1) onReset(); else onPick(z); }}
-              style={{ textAlign: "left", padding: "6px 8px", borderRadius: RADIUS.control, border: "none", background: "transparent", color: "var(--text-primary)", font: "inherit", fontSize: 12.5, fontWeight: 550, cursor: "pointer" }}
+              style={{ textAlign: "left", padding: "6px 8px", borderRadius: RADIUS.control, border: "none", background: "transparent", color: "var(--text-primary)", font: "inherit", fontSize: 12, fontWeight: 550, cursor: "pointer" }}
             >{Math.round(z * 100)}%</button>
           ))}
           <button type="button" data-testid="note-zoom-opt-fit-width"
             onClick={() => { setOpen(false); onFitWidth(); }}
-            style={{ textAlign: "left", padding: "6px 8px", borderRadius: RADIUS.control, border: "none", background: "transparent", color: "var(--text-primary)", font: "inherit", fontSize: 12.5, fontWeight: 550, cursor: "pointer" }}
+            style={{ textAlign: "left", padding: "6px 8px", borderRadius: RADIUS.control, border: "none", background: "transparent", color: "var(--text-primary)", font: "inherit", fontSize: 12, fontWeight: 550, cursor: "pointer" }}
           >Fit width</button>
         </div>
       )}
@@ -713,7 +713,7 @@ function PageSetupPopover({ editor, onClose }) {
   if (!editor || editor.isDestroyed) return null;
   const pageWidth = editor.state.doc.attrs?.pageWidth ?? null;
   const pageHeight = editor.state.doc.attrs?.pageHeight ?? null;
-  const rowStyle = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 8px", borderRadius: RADIUS.control, cursor: "pointer", border: "none", font: "inherit", fontSize: 12.5, fontWeight: 550, textAlign: "left", width: "100%" };
+  const rowStyle = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 8px", borderRadius: RADIUS.control, cursor: "pointer", border: "none", font: "inherit", fontSize: 12, fontWeight: 550, textAlign: "left", width: "100%" };
   return (
     <div
       ref={ref}
@@ -728,9 +728,9 @@ function PageSetupPopover({ editor, onClose }) {
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text-primary)" }}>Page setup</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>Page setup</span>
         <button type="button" data-testid="note-page-setup-close" aria-label="Close" onClick={onClose}
-          style={{ border: "none", background: "transparent", color: "var(--text-tertiary)", cursor: "pointer", fontSize: 15, lineHeight: 1 }}>✕</button>
+          style={{ border: "none", background: "transparent", color: "var(--text-tertiary)", cursor: "pointer", fontSize: 14, lineHeight: 1 }}>✕</button>
       </div>
       <div>
         <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)", marginBottom: 3 }}>Width</div>
@@ -791,9 +791,9 @@ function FindReplaceBar({ editor, find, onClose }) {
 
   const inputStyle = {
     height: 26, padding: "0 8px", borderRadius: RADIUS.control, border: "1px solid var(--border-default)",
-    background: "var(--surface-page)", color: "var(--text-primary)", font: "inherit", fontSize: 12.5, width: 150,
+    background: "var(--surface-page)", color: "var(--text-primary)", font: "inherit", fontSize: 12, width: 150,
   };
-  const btnStyle = { height: 26, padding: "0 9px", borderRadius: RADIUS.control, border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)", font: "inherit", fontSize: 11.5, fontWeight: 700, cursor: "pointer" };
+  const btnStyle = { height: 26, padding: "0 9px", borderRadius: RADIUS.control, border: "1px solid var(--border-default)", background: "transparent", color: "var(--text-secondary)", font: "inherit", fontSize: 12, fontWeight: 700, cursor: "pointer" };
 
   return (
     <div
@@ -810,7 +810,7 @@ function FindReplaceBar({ editor, find, onClose }) {
         onChange={(e) => setTerm(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); step(e.shiftKey ? -1 : 1); } }}
         style={inputStyle} />
-      <span data-testid="note-find-replace-count" style={{ fontSize: 11.5, color: "var(--text-tertiary)", minWidth: 60 }}>
+      <span data-testid="note-find-replace-count" style={{ fontSize: 12, color: "var(--text-tertiary)", minWidth: 60 }}>
         {term ? (count ? `${index + 1} of ${count}` : "No matches") : ""}
       </span>
       <button type="button" data-testid="note-find-replace-prev" title="Previous match" disabled={!count} onClick={() => step(-1)} style={{ ...btnStyle, opacity: count ? 1 : 0.45 }}>‹</button>
@@ -822,7 +822,7 @@ function FindReplaceBar({ editor, find, onClose }) {
       <button type="button" data-testid="note-replace-one" disabled={!count} onClick={replaceOne} style={{ ...btnStyle, opacity: count ? 1 : 0.45 }}>Replace</button>
       <button type="button" data-testid="note-replace-all" disabled={!count} onClick={replaceAll} style={{ ...btnStyle, opacity: count ? 1 : 0.45 }}>Replace all</button>
       <button type="button" data-testid="note-find-replace-close" aria-label="Close find and replace" onClick={onClose}
-        style={{ marginLeft: "auto", border: "none", background: "transparent", color: "var(--text-tertiary)", cursor: "pointer", fontSize: 15, lineHeight: 1 }}>✕</button>
+        style={{ marginLeft: "auto", border: "none", background: "transparent", color: "var(--text-tertiary)", cursor: "pointer", fontSize: 14, lineHeight: 1 }}>✕</button>
     </div>
   );
 }
@@ -922,7 +922,7 @@ function PasteOptions({ offer, expanded, onExpand, onPick, onDismiss }) {
           style={{
             display: "flex", alignItems: "center", gap: 4, padding: "2px 6px",
             border: "none", borderRadius: RADIUS.control, background: "transparent",
-            color: "var(--text-secondary)", font: "inherit", fontSize: 11, fontWeight: 700, cursor: "pointer",
+            color: "var(--text-secondary)", font: "inherit", fontSize: 10.5, fontWeight: 700, cursor: "pointer",
           }}
         >
           <PasteIcon mode="source" />
@@ -1065,7 +1065,7 @@ function MiniColor({ id, title, colors, current, onPick }) {
     <span style={{ position: "relative", flex: "0 0 auto" }}>
       <MiniButton id={id} title={title} active={open} onRun={() => setOpen((v) => !v)}>
         <span style={{ display: "grid", placeItems: "center", width: 16, height: 16 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1 }}>{id === "color" ? "A" : "▨"}</span>
+          <span style={{ fontSize: 10.5, fontWeight: 700, lineHeight: 1 }}>{id === "color" ? "A" : "▨"}</span>
           <span style={{ width: 13, height: 3, borderRadius: 1, background: current || "var(--border-strong)", marginTop: 1 }} />
         </span>
       </MiniButton>
@@ -4891,7 +4891,7 @@ const NoteEditor = forwardRef(function NoteEditor({
                     title={projectLabel.projectId == null && !projectLabel.org ? "This note has no project" : `This note is filed in ${projectLabel.name}`}
                     style={{
                       flex: "0 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis",
-                      whiteSpace: "nowrap", fontSize: 11, fontWeight: 700, letterSpacing: "0.04em",
+                      whiteSpace: "nowrap", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.04em",
                       color: projectLabel.resolved ? "var(--text-secondary)" : "var(--warn-text)",
                       border: `1px solid ${projectLabel.resolved ? "var(--border-default)" : "var(--warn-text)"}`,
                       borderRadius: RADIUS.pill, padding: "3px 9px",
@@ -4902,7 +4902,7 @@ const NoteEditor = forwardRef(function NoteEditor({
                   <span
                     data-testid="note-edited"
                     title={absoluteStamp(updatedAt)}
-                    style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 600, color: "var(--text-tertiary)" }}
+                    style={{ flex: "0 0 auto", fontSize: 12, fontWeight: 600, color: "var(--text-tertiary)" }}
                   >{edited}</span>
                 ) : null}
               </div>

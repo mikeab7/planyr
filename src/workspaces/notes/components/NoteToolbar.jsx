@@ -165,7 +165,7 @@ function Tip({ tip, text }) {
         [tip.above ? "bottom" : "top"]: tip.y,
         zIndex: 300, maxWidth: 240, padding: "5px 9px", borderRadius: RADIUS.control,
         background: "var(--text-primary)", color: "var(--surface-page)",
-        fontSize: 11.5, fontWeight: 600, lineHeight: 1.35, textAlign: "center",
+        fontSize: 12, fontWeight: 600, lineHeight: 1.35, textAlign: "center",
         boxShadow: POPOVER_SHADOW, pointerEvents: "none", whiteSpace: "normal",
       }}
     >
@@ -475,7 +475,7 @@ function ColorPopover({ title, swatch, colors, onPick, testid, glyph = "ink", bi
                 width: 22, height: 22, borderRadius: RADIUS.control, cursor: "pointer",
                 border: "1px solid var(--border-strong)",
                 background: c.value || "var(--surface-page)",
-                color: "var(--text-tertiary)", font: "inherit", fontSize: 11, lineHeight: 1, padding: 0,
+                color: "var(--text-tertiary)", font: "inherit", fontSize: 10.5, lineHeight: 1, padding: 0,
               }}
             >{c.value ? "" : "✕"}</button>
           ))}
@@ -581,7 +581,7 @@ function TableGridPicker({ onInsert, big }) {
           >
             {cells}
           </div>
-          <span data-testid="nt-table-size" style={{ fontSize: 11.5, fontWeight: 700, textAlign: "center", color: "var(--text-secondary)" }}>
+          <span data-testid="nt-table-size" style={{ fontSize: 12, fontWeight: 700, textAlign: "center", color: "var(--text-secondary)" }}>
             {dim.rows && dim.cols ? `${dim.cols} × ${dim.rows} table` : "Drag to size"}
           </span>
         </div>
@@ -710,7 +710,7 @@ function CalloutControl({ editor, big }) {
                 borderRadius: RADIUS.control, cursor: "pointer",
                 border: `1px solid ${tone === t.id ? "var(--accent-notes)" : "transparent"}`,
                 background: "transparent", color: "var(--text-primary)",
-                font: "inherit", fontSize: 12.5, fontWeight: 650, textAlign: "left",
+                font: "inherit", fontSize: 12, fontWeight: 650, textAlign: "left",
               }}
             >{t.label}</button>
           ))}
@@ -776,8 +776,8 @@ const ArrowConnectIcon = () => (
 const PlusIcon = () => (<Icon><line x1="8" y1="3" x2="8" y2="13" /><line x1="3" y1="8" x2="13" y2="8" /></Icon>);
 const PilcrowIcon = () => (<Icon><path d="M6.5 3h5.5" /><path d="M12 3v10" /><path d="M8.5 3a2.75 2.75 0 0 0 0 5.5H9.5" /><path d="M8.5 8.5V13" /></Icon>);
 
-const SupText = () => <span style={{ fontSize: 12, fontWeight: 700 }}>X<span style={{ fontSize: 8, verticalAlign: "super" }}>2</span></span>;
-const SubText = () => <span style={{ fontSize: 12, fontWeight: 700 }}>X<span style={{ fontSize: 8, verticalAlign: "sub" }}>2</span></span>;
+const SupText = () => <span style={{ fontSize: 12, fontWeight: 700 }}>X<span style={{ fontSize: 10, verticalAlign: "super" }}>2</span></span>;
+const SubText = () => <span style={{ fontSize: 12, fontWeight: 700 }}>X<span style={{ fontSize: 10, verticalAlign: "sub" }}>2</span></span>;
 
 /* ---- NEW-4: the size control — a typed stepper (4–400) plus a preset ladder ------------- */
 
@@ -887,12 +887,12 @@ function SizeMenu({ testid, value, mixed, displayLabel, onPick, big }) {
                     padding: "5px 8px", borderRadius: RADIUS.control, cursor: "pointer", border: "none",
                     background: selected ? "var(--accent-notes)" : "transparent",
                     color: selected ? "var(--on-accent-notes)" : "var(--text-primary)",
-                    font: "inherit", fontSize: 12.5, fontWeight: selected ? 650 : 500,
+                    font: "inherit", fontSize: 12, fontWeight: selected ? 650 : 500,
                   }}
                 >
                   <span>{s}</span>
                   {s === DEFAULT_SIZE ? (
-                    <span style={{ fontSize: 9.5, fontWeight: 700, opacity: 0.75 }}>Default</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, opacity: 0.75 }}>Default</span>
                   ) : null}
                 </button>
               );
@@ -917,7 +917,7 @@ function Stepper({ testid, value, onChange, big }) {
         value={value}
         inputMode="numeric"
         onChange={(e) => { const n = Number(e.target.value.replace(/[^0-9]/g, "")); set(Number.isFinite(n) ? n : 0); }}
-        style={{ width: 40, height: 22, textAlign: "center", borderRadius: RADIUS.control, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)", font: "inherit", fontSize: 12.5 }}
+        style={{ width: 40, height: 22, textAlign: "center", borderRadius: RADIUS.control, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)", font: "inherit", fontSize: 12 }}
       />
       <button type="button" aria-label="Increase" onMouseDown={stop} onClick={() => set(value + 2)}
         style={{ width: 22, height: 22, borderRadius: RADIUS.control, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)", cursor: "pointer", font: "inherit", fontWeight: 700 }}>+</button>
@@ -980,7 +980,7 @@ function SpacingPopover({ lineHeight, spaceBefore, spaceAfter, onPick, onApplyWh
                       border: `1px solid ${selected ? "var(--accent-notes)" : "var(--border-default)"}`,
                       background: selected ? "var(--accent-notes)" : "var(--surface-page)",
                       color: selected ? "var(--on-accent-notes)" : "var(--text-primary)",
-                      font: "inherit", fontSize: 11.5, fontWeight: 650,
+                      font: "inherit", fontSize: 12, fontWeight: 650,
                     }}
                   >{o.value.toFixed(o.value % 1 ? 2 : 1)}</button>
                 );
@@ -991,11 +991,11 @@ function SpacingPopover({ lineHeight, spaceBefore, spaceAfter, onPick, onApplyWh
             <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)", marginBottom: 5 }}>Space between paragraphs</div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
               <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>Before</span>
+                <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>Before</span>
                 <Stepper testid="nt-spacing-before" value={before} big={big} onChange={(n) => onPick({ spaceBefore: n || null })} />
               </span>
               <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>After</span>
+                <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>After</span>
                 <Stepper testid="nt-spacing-after" value={after} big={big} onChange={(n) => onPick({ spaceAfter: n || null })} />
               </span>
             </div>
@@ -1019,11 +1019,11 @@ function SpacingPopover({ lineHeight, spaceBefore, spaceAfter, onPick, onApplyWh
                       border: `1px solid ${selected ? "var(--accent-notes)" : "transparent"}`,
                       background: selected ? "var(--accent-notes)" : "transparent",
                       color: selected ? "var(--on-accent-notes)" : "var(--text-primary)",
-                      font: "inherit", fontSize: 12.5, fontWeight: 650, textAlign: "left",
+                      font: "inherit", fontSize: 12, fontWeight: 650, textAlign: "left",
                     }}
                   >
                     <span>{selected ? "✓ " : ""}{p.label}</span>
-                    <span style={{ fontSize: 11, fontWeight: 500, opacity: 0.8 }}>{p.lineHeight.toFixed(p.lineHeight % 1 ? 2 : 1)} · {p.spaceAfter} after</span>
+                    <span style={{ fontSize: 10.5, fontWeight: 500, opacity: 0.8 }}>{p.lineHeight.toFixed(p.lineHeight % 1 ? 2 : 1)} · {p.spaceAfter} after</span>
                   </button>
                 );
               })}
@@ -1031,11 +1031,11 @@ function SpacingPopover({ lineHeight, spaceBefore, spaceAfter, onPick, onApplyWh
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 2 }}>
             <button type="button" data-testid="nt-spacing-whole-page" onMouseDown={stop} onClick={onApplyWholePage}
-              style={{ border: "none", background: "none", padding: 0, font: "inherit", fontSize: 11.5, fontWeight: 650, color: "var(--accent-notes-text)", cursor: "pointer", textDecoration: "underline" }}>
+              style={{ border: "none", background: "none", padding: 0, font: "inherit", fontSize: 12, fontWeight: 650, color: "var(--accent-notes-text)", cursor: "pointer", textDecoration: "underline" }}>
               Apply to whole page
             </button>
             <button type="button" data-testid="nt-spacing-reset" onMouseDown={stop} onClick={onReset}
-              style={{ border: "none", background: "none", padding: 0, font: "inherit", fontSize: 11.5, fontWeight: 650, color: "var(--text-tertiary)", cursor: "pointer", textDecoration: "underline" }}>
+              style={{ border: "none", background: "none", padding: 0, font: "inherit", fontSize: 12, fontWeight: 650, color: "var(--text-tertiary)", cursor: "pointer", textDecoration: "underline" }}>
               Reset
             </button>
           </div>
@@ -1308,7 +1308,7 @@ export default function NoteToolbar({
         style={{
           flex: "0 0 auto", minWidth: 44, minHeight: 44, display: "inline-flex", alignItems: "center", gap: 4,
           border: "none", background: "transparent", color: "var(--accent-notes-text)",
-          font: "inherit", fontSize: 15, fontWeight: 650, cursor: "pointer", padding: "0 10px 0 4px",
+          font: "inherit", fontSize: 14, fontWeight: 650, cursor: "pointer", padding: "0 10px 0 4px",
         }}
       >‹ Notes</button>
       <Sep />
@@ -1467,7 +1467,7 @@ export default function NoteToolbar({
         <>
           <Sep />
           <span data-testid="nt-table-group" style={{ display: "flex", flexWrap: "nowrap", alignItems: "center", gap: 2, padding: "2px 6px", borderRadius: RADIUS.pill, background: "var(--surface-page)", border: "1px solid var(--border-default)" }}>
-            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--accent-notes-text)", marginRight: 4 }}>Table</span>
+            <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--accent-notes-text)", marginRight: 4 }}>Table</span>
             {tableGroupControls}
           </span>
         </>
@@ -1528,12 +1528,12 @@ function InsertMenu({ editor, big, compact, fileRef, onAttach, onInsertTable }) 
               <span style={{ padding: "2px 2px" }}><TableGridPicker big={big} onInsert={onInsertTable} /></span>
               <button type="button" data-testid="nt-insert-image" onMouseDown={stop}
                 onClick={() => { setOpen(false); fileRef.current?.click(); }}
-                style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 8px", borderRadius: RADIUS.control, border: "none", background: "transparent", color: "var(--text-primary)", cursor: "pointer", font: "inherit", fontSize: 12.5, fontWeight: 550 }}>
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 8px", borderRadius: RADIUS.control, border: "none", background: "transparent", color: "var(--text-primary)", cursor: "pointer", font: "inherit", fontSize: 12, fontWeight: 550 }}>
                 <ImageIcon /> Picture
               </button>
               <button type="button" data-testid="nt-insert-attach" onMouseDown={stop}
                 onClick={() => { setOpen(false); onAttach?.(); }}
-                style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 8px", borderRadius: RADIUS.control, border: "none", background: "transparent", color: "var(--text-primary)", cursor: "pointer", font: "inherit", fontSize: 12.5, fontWeight: 550 }}>
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 8px", borderRadius: RADIUS.control, border: "none", background: "transparent", color: "var(--text-primary)", cursor: "pointer", font: "inherit", fontSize: 12, fontWeight: 550 }}>
                 <Icon><path d="M11.5 5.5L6.2 10.8a2 2 0 0 0 2.8 2.8l5.3-5.3a3.4 3.4 0 0 0-4.8-4.8L4.2 8.8a4.8 4.8 0 0 0 6.8 6.8" /></Icon> Attach file
               </button>
               <div style={{ height: 1, margin: "3px 2px", background: "var(--border-default)" }} />
@@ -1547,7 +1547,7 @@ function InsertMenu({ editor, big, compact, fileRef, onAttach, onInsertTable }) 
           ].map((row) => (
             <button key={row.id} type="button" data-testid={`nt-insert-${row.id}`} onMouseDown={stop}
               onClick={() => { setOpen(false); row.run(); }}
-              style={{ display: "flex", alignItems: "center", width: "100%", textAlign: "left", padding: "7px 8px", borderRadius: RADIUS.control, cursor: "pointer", border: "none", background: "transparent", color: "var(--text-primary)", font: "inherit", fontSize: 12.5, fontWeight: 550 }}>
+              style={{ display: "flex", alignItems: "center", width: "100%", textAlign: "left", padding: "7px 8px", borderRadius: RADIUS.control, cursor: "pointer", border: "none", background: "transparent", color: "var(--text-primary)", font: "inherit", fontSize: 12, fontWeight: 550 }}>
               {row.label}
             </button>
           ))}
