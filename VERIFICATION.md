@@ -10947,6 +10947,19 @@ records its own live verify" mechanism) or a future sandbox with different egres
 
 *(minted **V1340256** alongside **B1876624**; `Cadence: once`)*
 
+### V1351376 — B1895376: selecting parcels → Record info → Add a note (and → Log a comp) actually dismisses the parcel-selection bar `Blocker: live-GIS`
+
+**Why this needs a real pass.** The reported defect only reproduces via a real parcel selection — clicking real lots off a live county GIS service, then choosing a verb from the "Record info" menu — and this sandbox's egress cannot reach any county parcel service, so the exact reported gesture cannot be driven end-to-end here. **What sandbox verification DID prove, driven rather than assumed:** the fix (`finishGroundAction` — clears the selection AND turns off select mode, where the prior code only cleared the selection) is proven by a mutation-checked unit test (`test/decideBarDismiss.test.js`): reverting the fix in a scratch copy of `MapFinder.jsx` reproduces the exact failure this test catches, then the fix was restored and re-confirmed. The fix was also extended to `placeCompOnSelectedParcel` ("Log a comp" from a parcel selection), which shares the identical code shape and the identical latent defect — reading the source found `clearSel()` alone left `selectMode` stuck true there too, so a parcel-anchored "Log a comp" would show the same "Selecting…" bar the report describes for notes; this was not separately reported, but is the same root cause and the same fix. A full real-browser re-run of `ui-audit/verify-map-notes.mjs` against a fresh build confirms 28/28 checks still pass with zero regressions on the PIN-anchored path (which never had this defect — `markDecidePin` already turns off select mode when a pin drops). **What only a real parcel click against a live county service can still show:** the exact reported gesture, end to end, on `planyr.io`.
+
+**Steps, each with a named expected result.**
+1. On `planyr.io`, turn on "Select parcels" and click one or more real lots so the decide bar reads "N parcel(s) · X.XX AC".
+2. Click "Record info ▾", then "Add a note". **Expect:** the note editor opens on the parcel's anchor, AND the map toolbar immediately returns to its normal AT-REST row (Select parcels / Draw / Drop a pin) — the "Selecting… Drop a pin Cancel" bar must NOT reappear.
+3. Repeat steps 1–2 but click "Log a comp" instead of "Add a note" at step 2. **Expect:** the same AT-REST return (this leg was not in the original report, but shares the identical fix and the identical prior defect — see above).
+4. From step 2's state, cancel the note editor without saving, and separately (a fresh repeat) save it. **Expect:** the map toolbar state reached at step 2 is unaffected either way — the dismiss happens when the verb is chosen, not when the editor closes.
+- **Stopping rule:** closes when steps 2–3 both read as expected on `planyr.io` over a real parcel selection, or a specific residual is filed as a recurrence against B1895376, per STANDING RULE #2.
+
+*(minted **V1351376** alongside **B1895376**; `Cadence: once`)*
+
 ## ✅ Verified / ❌ Failed — history
 
 > Passed/failed items are archived to **`VERIFICATION-DONE.md`** to keep this file fast.

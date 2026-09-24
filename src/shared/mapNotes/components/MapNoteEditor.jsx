@@ -13,10 +13,14 @@
  * back, and the card STAYS OPEN with the user's text intact. Nothing here reports a success it did
  * not get: the parent's `onSaved` only ever runs on a row the server actually returned.
  *
- * ⛔ THE SITE DROPDOWN IS OPTIONAL AND CREATES NOTHING. It links a note to an ALREADY-EXISTING
- * site, and "No site" is both the default and a real, permanent answer — a note is an annotation
- * on the ground, not a record about a property. Do not add a "create a site from this note" path
- * here; that is exactly what B843792 does for comps and exactly what this feature must not do.
+ * ⛔ THERE IS NO SITE PICKER HERE, AND NONE SHOULD BE ADDED (NEW-2, 2026-09-24 — reversing the
+ * dropdown this card used to carry). A note is pinned to a map location, not to a site, and the
+ * dropdown offered every one of the account's sites regardless of where they actually were — "pick
+ * a site" from a list of unrelated ones the owner reported as pointless. `projectId` stays on the
+ * data model (db/map_notes.sql) purely so an already-linked note keeps whatever it was linked to;
+ * this editor neither sets it on a new note nor offers a way to change it on an existing one. Do
+ * not add a "create a site from this note" path either — that is exactly what B843792 does for
+ * comps and exactly what this feature must not do.
  */
 import React, { useEffect, useRef, useState } from "react";
 import { Button } from "../../ui/controls.jsx";
@@ -34,16 +38,14 @@ const INPUT_STYLE = {
 /**
  * props:
  *  - note            the note being edited: a saved row, or a fresh one from emptyMapNote(anchor)
- *  - sites           [{id,name}] for the optional link dropdown — EXISTING sites only
  *  - saving/busy     handled internally; the parent only supplies the async actions
  *  - onSave(note)    → { data, error }  (parent calls insertMapNote/updateMapNote)
  *  - onDelete(id)    → { error }        (parent calls deleteMapNote — SOFT)
  *  - onClose()
  */
-export default function MapNoteEditor({ note, sites = [], onSave, onDelete, onClose }) {
+export default function MapNoteEditor({ note, onSave, onDelete, onClose }) {
   const [title, setTitle] = useState(note?.title || "");
   const [body, setBody] = useState(note?.body || "");
-  const [projectId, setProjectId] = useState(note?.projectId || "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [confirmDel, setConfirmDel] = useState(false);
@@ -54,12 +56,14 @@ export default function MapNoteEditor({ note, sites = [], onSave, onDelete, onCl
   // open) — keyed on id so a re-render of the same note never stomps what the user is typing.
   useEffect(() => {
     setTitle(note?.title || ""); setBody(note?.body || "");
-    setProjectId(note?.projectId || ""); setErr(""); setConfirmDel(false);
+    setErr(""); setConfirmDel(false);
   }, [note?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (isNew && bodyRef.current) bodyRef.current.focus(); }, [isNew]);
 
-  const draft = { ...(note || {}), title, body, projectId: projectId || null };
+  // NEW-2 (2026-09-24) — `projectId` rides straight through from whatever the note already had
+  // (null for a brand-new one); there is no control here that can change it. See the file header.
+  const draft = { ...(note || {}), title, body, projectId: note?.projectId || null };
   const problems = validateMapNote(draft);
 
   const save = async () => {
@@ -127,18 +131,6 @@ export default function MapNoteEditor({ note, sites = [], onSave, onDelete, onCl
         data-testid="map-note-body"
         style={{ ...INPUT_STYLE, resize: "vertical", minHeight: 84, lineHeight: 1.45 }}
       />
-
-      {/* Optional link to an EXISTING site — never creates one. "No site" is a real answer. */}
-      <select
-        value={projectId}
-        onChange={(e) => setProjectId(e.target.value)}
-        aria-label="Link this note to a site"
-        data-testid="map-note-site"
-        style={{ ...INPUT_STYLE, padding: `${SPACE.xs}px ${SPACE.sm}px` }}
-      >
-        <option value="">No site</option>
-        {sites.map((s) => <option key={s.id} value={s.id}>{s.name || s.id}</option>)}
-      </select>
 
       {err && (
         <div role="alert" data-testid="map-note-error" style={{ fontSize: FONT_SIZE.control, color: "var(--danger-text)" }}>{err}</div>
