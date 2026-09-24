@@ -9,7 +9,6 @@
  *   • quick open    → the OTHER NOTE is the one open, by title and by stored page id;
  *   • history       → the restored tree equals the snapshot AND the pre-restore state is
  *                     still listed, which is the "restore never destroys history" rule;
- *   • the rollup    → the checkbox in the NOTE flips, in the stored document and on screen;
  *   • attachments   → the file round-trips (chip → stored node → Markdown export text);
  *   • the outline   → the caret moves into the heading the row named;
  *   • callout/toggle→ the nodes are in the stored document and the PRINT SHEET carries the
@@ -298,49 +297,11 @@ console.log("\n4 · Version history with restore (NEW-3)");
   ok("the panel closes", await tb("note-history").count() === 0);
 }
 
-/* ════ 5. THE TASK ROLLUP — ticking it there flips it in the note ════════════════════ */
-console.log("\n5 · One view of every open checklist item (NEW-4)");
-{
-  const id = await newPage("Water district");
-  await caretInDoc();
-  await tb("nt-task").click();
-  await page.keyboard.type("Call the district about the 12-inch line", { delay: 8 });
-  await page.keyboard.press("Enter");
-  await page.keyboard.type("Send the LOI comment back", { delay: 8 });
-  await settle();
-
-  const before = nodesOf(await readBody(id), "taskItem");
-  ok("the note has two open items", before.length === 2 && before.every((t) => !t.attrs.checked));
-
-  await tb("notes-view-tasks").click();
-  await page.waitForTimeout(400);
-  const listed = await page.locator('[data-testid^="notes-task-open-"]').allInnerTexts();
-  ok("both items appear in the rollup, naming the note they came from",
-    listed.length === 2 && listed.join(" ").includes("Water district"), listed.join(" | ").slice(0, 140));
-
-  // ⛔ TICK IT IN THE LIST — and assert the NOTE, not the list.
-  await page.locator('[data-testid^="notes-task-check-"]').first().click();
-  await page.waitForTimeout(400);
-  await settle();
-
-  const after = nodesOf(await readBody(id), "taskItem");
-  ok("⛔ THE CHECKBOX IN THE NOTE IS NOW TICKED", after.filter((t) => t.attrs.checked).length === 1,
-    JSON.stringify(after.map((t) => t.attrs.checked)));
-  ok("…and exactly one item was touched", after.length === 2);
-  ok("the ticked item leaves the list", (await page.locator('[data-testid^="notes-task-open-"]').count()) === 1);
-
-  // It is ticked ON SCREEN too, in the open editor, not only in storage.
-  const onScreen = await page.locator('[data-testid="note-body"] input[type="checkbox"]:checked').count();
-  ok("the checkbox on the page is drawn ticked", onScreen === 1, `${onScreen} ticked`);
-
-  // Clicking the words opens that note at the line.
-  await page.locator('[data-testid^="notes-task-open-"]').first().click();
-  await page.waitForTimeout(500);
-  ok("clicking an item opens the note it lives in", (await tb("note-title").inputValue()) === "Water district");
-  ok("…and marks where the line is", await tb("note-find-bar").count() === 1);
-  await tb("notes-view-tree").click();
-  await page.waitForTimeout(200);
-}
+/* ⛔ SECTION 5 (THE TASK ROLLUP) IS REMOVED — the Notes Tasks roll-up view it drove
+ * (`nt-task`/`notes-view-tasks`/`notes-task-*`) no longer exists (toolbar-rebuild follow-up
+ * NEW-4, owner decision: delete the roll-up outright rather than leave it wired up with no
+ * on-screen trigger). The in-note checklist itself (typing a checklist, ticking a box while
+ * writing) is exercised elsewhere and is untouched. */
 
 /* ════ 6. ATTACHMENTS — a real file, round-tripped ══════════════════════════════════ */
 console.log("\n6 · Attachments of any file type (NEW-5)");

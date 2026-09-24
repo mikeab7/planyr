@@ -75,7 +75,7 @@ const ALL_NOTES_FILES = [
   // retired sketch canvas's own boxes-and-arrows model.
   "lib/notesArrows.js",
   "lib/notesPastePlain.js", "lib/notesBlockKeys.js",
-  "lib/notesSlashMenu.js", "lib/notesQuickOpen.js", "lib/notesVersions.js", "lib/notesTasks.js",
+  "lib/notesSlashMenu.js", "lib/notesQuickOpen.js", "lib/notesVersions.js",
   "lib/notesOutline.js", "lib/notesFileMeta.js", "lib/notesAttachNode.js", "lib/notesCalloutNode.js",
   "lib/notesToggleNode.js",
   // NEW-1/NEW-4 — a copy never changes project, and the machine that notices when one did.
@@ -491,10 +491,13 @@ describe("no dialog boxes anywhere in the module (owner rule)", () => {
      *   `useHoverTooltip`'s `tip` (NEW-7) — the custom floating tooltip's position, computed
      *     from `getBoundingClientRect()` on hover/focus, cleared on leave/blur; one shared
      *     hook called from every `TBButton` and `FormatMenu` trigger.
-     *   `usePopoverClampLeft`'s `shift` (B1344627, carried over unchanged) — one shared hook,
+     *   `usePopoverAnchor`'s `anchor` (B1344627, REBUILT under the toolbar-rebuild follow-up's
+     *     NEW-1 from `usePopoverClampLeft` — same one-hook-eight-callers shape, now computing a
+     *     `position: fixed` point instead of an `absolute` left-clamp so the bar's own
+     *     unconditional `overflowX: auto` can no longer crop an open popover) — one shared hook,
      *     called from FormatMenu/ColorPopover/TableGridPicker/LinkControl/CalloutControl/
-     *     SizeMenu/SpacingPopover/InsertMenu, nudges an open popover clear of the viewport's
-     *     right edge; measured off `getBoundingClientRect()`, never seeded from `editor.`.
+     *     SizeMenu/SpacingPopover/InsertMenu; measured off `getBoundingClientRect()`, never
+     *     seeded from `editor.`.
      *   `FormatMenu`'s `open` — shared by Paragraph style, Font, and (compact-width) Alignment.
      *   `ColorPopover`'s `open` — shared by Text colour and Highlight.
      *   `TableGridPicker`'s `open` + `dim` + `grid` (B1372, unchanged) — the drag-to-size grid.

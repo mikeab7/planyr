@@ -120,15 +120,11 @@ ok("the clicked page is genuinely highlighted as selected", (await tb("notes-row
 const titleVal = await page.locator('[data-testid="note-title"]').inputValue().catch(() => null);
 ok("...and the editor genuinely loaded Platting's content, not stale bin content", titleVal === "Platting", `title field reads "${titleVal}"`);
 
-/* ---- §5 NEW-1: leaving the Bin tab (without clicking a page) also exits bin mode -------- */
-await tb("notes-view-bin").click();
-await pacedWait(page, 300);
-await tb("notes-bin-peek-e-short").click();
-await pacedWait(page, 300);
-ok("peeking again for §5", await tb("notes-peek").count() === 1);
-await tb("notes-view-tasks").click();
-await pacedWait(page, 300);
-ok("⛔ switching to Tasks (no page click) still closes the peek — the bin is a MODE", await tb("notes-peek").count() === 0);
+/* ---- §5 NEW-1: leaving the Bin tab (without clicking a page) also exits bin mode --------
+ * ⛔ This used to switch to the Tasks tab as its "some other tab" case — the Pages/Tasks
+ * segmented control (and the Tasks roll-up behind it) is gone (NEW-8, then the toolbar-rebuild
+ * follow-up's NEW-4), so the sidebar's own "Back to pages" control is now the only in-sidebar
+ * way to leave Bin without clicking a page; that path is already covered by §6 below. */
 
 /* ---- §6 the sidebar cluster's own "Back to pages" / Restore / Delete forever work ------- */
 await tb("notes-view-bin").click();

@@ -160,7 +160,6 @@
  * there is no state in which the footer claims a sync that did not happen.
  */
 import { assetIdsInDoc, docToText, imageIdsInDoc, remapAssetIds } from "./notesMarkdown.js";
-import { openTasksInDoc, rollUpOpenTasks, setTaskCheckedInDoc } from "./notesTasks.js";
 import { MAX_VERSIONS_PER_PAGE, planRestore, planRetention, shouldSnapshot } from "./notesVersions.js";
 import { safeAttachmentName } from "./notesFileMeta.js";
 import {
@@ -1259,23 +1258,21 @@ function emitPagesChanged(pageIds) {
   for (const fn of pageListeners) { try { fn(ids); } catch (_) { /* a bad listener must not mute the rest */ } }
 }
 
-/** ⛔ THE SAME ANNOUNCEMENT WITHOUT THE DIRTY GUARD — TWO legitimate caller shapes now.
- *  `emitPagesChanged` skips a page this window has unflushed edits on, because a remount
- *  would discard them: correct for a change arriving from OUTSIDE (a sibling window, the
- *  cloud seed) where the write is a WHOLESALE REPLACEMENT and we cannot know what the
- *  editor holds.
- *   (NEW-4) a change THIS module just made itself, to a page it has already established
- *     no open editor is holding (`openDoc` is checked first).
- *   (NEW-1) `resolveDivergence`'s per-paragraph merge. Its write is NOT a wholesale
- *     replacement — it is built FROM this window's own last-read storage (`readPage`), so it
- *     already carries everything local had, plus whatever the other side added that local
- *     never touched. A remount here cannot lose local content the way adopting a raw remote
- *     copy could; the residual risk is only the narrow async gap between reading that
- *     snapshot and writing the merge result, and `resolveDivergence` snapshots the pre-merge
- *     state to Version History before writing specifically so that gap is recoverable rather
- *     than silent. The page staying `dirty` afterward (it is still owed to the cloud) is
- *     exactly why `emitPagesChanged`'s guard would wrongly swallow this announcement — the
- *     guard is testing the wrong fact for a merge that already accounts for local's content. */
+/** ⛔ THE SAME ANNOUNCEMENT WITHOUT THE DIRTY GUARD. `emitPagesChanged` skips a page this
+ *  window has unflushed edits on, because a remount would discard them: correct for a change
+ *  arriving from OUTSIDE (a sibling window, the cloud seed) where the write is a WHOLESALE
+ *  REPLACEMENT and we cannot know what the editor holds.
+ *   (NEW-1) `resolveDivergence`'s per-paragraph merge, its one caller. Its write is NOT a
+ *     wholesale replacement — it is built FROM this window's own last-read storage
+ *     (`readPage`), so it already carries everything local had, plus whatever the other side
+ *     added that local never touched. A remount here cannot lose local content the way
+ *     adopting a raw remote copy could; the residual risk is only the narrow async gap between
+ *     reading that snapshot and writing the merge result, and `resolveDivergence` snapshots
+ *     the pre-merge state to Version History before writing specifically so that gap is
+ *     recoverable rather than silent. The page staying `dirty` afterward (it is still owed to
+ *     the cloud) is exactly why `emitPagesChanged`'s guard would wrongly swallow this
+ *     announcement — the guard is testing the wrong fact for a merge that already accounts for
+ *     local's content. */
 function announcePages(pageIds) {
   const ids = (pageIds || []).filter(Boolean);
   if (!ids.length) return;
@@ -2081,11 +2078,10 @@ export async function restorePageVersion(pageId, key, { now = Date.now() } = {})
   }
 
   /* ⛔ WHEN THE PAGE IS OPEN, THE RESTORE IS AN **EDIT**, NOT A WRITE BEHIND THE EDITOR'S
-   * BACK. Writing the JSON straight to storage while an editor holds the old document is
-   * the same silent-loss shape the task rollup guards against, only worse: the editor's
-   * own unmount flush would write its stale copy back over the restored one a moment
-   * later. Handed to the editor it becomes one ordinary transaction — undoable, saved
-   * through the one save path, and visible immediately. */
+   * BACK. Writing the JSON straight to storage while an editor holds the old document risks
+   * a silent loss: the editor's own unmount flush would write its stale copy back over the
+   * restored one a moment later. Handed to the editor it becomes one ordinary transaction —
+   * undoable, saved through the one save path, and visible immediately. */
   if (openDoc && openDoc.pageId === pageId && typeof openDoc.applyDocument === "function") {
     const applied = openDoc.applyDocument(plan.apply.doc);
     if (!applied?.ok) return { ok: false, error: applied?.error || "the restored version could not be applied" };
@@ -2107,65 +2103,20 @@ export async function deletePageVersions(pageIds) {
   return db.idbDeleteVersions(keys);
 }
 
-/* ---- the task rollup (NEW-4) -------------------------------------------------------------
- *
- * ⛔ TICKING AN ITEM IN THE ROLLUP GOES THROUGH THE OPEN EDITOR WHEN THERE IS ONE.
- * The obvious implementation — read the page's JSON, flip the flag, write it back — is a
- * silent data-loss bug whenever the page being ticked is the page on screen: the editor
- * holds its document in memory, has up to a debounce of unflushed typing, and would write
- * the whole of its stale copy back over the change a moment later. So an editor REGISTERS
- * itself here while it is mounted, and a toggle for that page is handed to it as a real
- * editor transaction — which lands in the same document, in the same undo history, and
- * flushes through the same save path as any other edit. Every OTHER page takes the JSON
- * route and the store announces the change so nothing else is holding a stale copy either.
- */
+/* ⛔ THE TASK ROLLUP THAT USED TO LIVE HERE (NEW-4) IS REMOVED (toolbar-rebuild follow-up,
+ * owner decision) — `collectOpenTasks`/`toggleNoteTask`/`openTaskCount` and `openDoc`'s own
+ * `applyTaskToggle` slot are gone with it, along with `lib/notesTasks.js`. `registerOpenNoteDoc`
+ * stays: the version-history restore path below still needs to hand a whole-document replace to
+ * the open editor rather than write behind its back. */
 let openDoc = null;
 
-/** The mounted editor claims its page, handing over the two operations that must go
- *  through it rather than round the back of it: ticking one checklist item (NEW-4) and
- *  replacing the whole document on a restore (NEW-3). Returns the un-register, so a page
- *  switch cannot leave a dead claim behind (which would send an edit into a torn-down
- *  editor). */
-export function registerOpenNoteDoc(pageId, { applyTaskToggle, applyDocument } = {}) {
-  openDoc = { pageId, applyTaskToggle, applyDocument };
+/** The mounted editor claims its page, handing over the one operation that must go through
+ *  it rather than round the back of it: replacing the whole document on a version restore
+ *  (NEW-3). Returns the un-register, so a page switch cannot leave a dead claim behind
+ *  (which would send an edit into a torn-down editor). */
+export function registerOpenNoteDoc(pageId, { applyDocument } = {}) {
+  openDoc = { pageId, applyDocument };
   return () => { if (openDoc && openDoc.pageId === pageId) openDoc = null; };
-}
-
-/** Every UNCHECKED checklist item across a scope, in the rail's own page order. Reads
- *  bodies, so it lives here rather than in the pure model — the roll-up itself is pure
- *  (lib/notesTasks.js) and is unit-tested there. */
-export function collectOpenTasks(tree, { projectId = null, scope: sc = SCOPE_PROJECT } = {}) {
-  const org = sc === SCOPE_ORG;
-  const pid = sc === SCOPE_ALL || org ? null : projectId;
-  const pages = [];
-  const scoped = { pages: pagesInScope(tree, pid, org ? SCOPE_ORG : (pid == null ? SCOPE_ALL : SCOPE_PROJECT)) };
-  walkPages(scoped, (pg, { root, trail }) => {
-    pages.push({ pageId: pg.id, pageTitle: pg.title, projectId: root.projectId ?? null, trail: trail || [] });
-  });
-  const bodies = {};
-  for (const p of pages) bodies[p.pageId] = readPage(p.pageId);
-  return rollUpOpenTasks(pages, bodies);
-}
-
-/** Tick (or un-tick) one checklist item from the rollup. Returns `{ ok, changed }`. */
-export function toggleNoteTask(pageId, { index, text }, checked) {
-  if (!pageId) return { ok: false, changed: false };
-  if (openDoc && openDoc.pageId === pageId && typeof openDoc.applyTaskToggle === "function") {
-    return openDoc.applyTaskToggle({ index, text }, checked);
-  }
-  const doc = readPage(pageId);
-  if (!doc) return { ok: false, changed: false };
-  const r = setTaskCheckedInDoc(doc, { index, text }, checked);
-  if (!r.changed) return { ok: true, changed: false };
-  if (!writePage(pageId, r.doc)) return { ok: false, changed: false };
-  announcePages([pageId]);
-  return { ok: true, changed: true };
-}
-
-/** How many open items one page has — used nowhere but the tests and any future badge;
- *  exported so the rollup's definition of "open" has exactly one home. */
-export function openTaskCount(pageId) {
-  return openTasksInDoc(readPage(pageId)).length;
 }
 
 /* ---- what is actually IN the bin (NEW-3) ------------------------------------------------

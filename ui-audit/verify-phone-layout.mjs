@@ -367,8 +367,12 @@ check("Notes: Back returns to the full-width page list", afterBack.treeFullWidth
 // 17a) the LIST's own tap targets, measured while the list is actually the visible pane —
 // a target hidden behind the OTHER pane reports a 0px rect, which is a harness bug wearing a
 // product bug's clothes (DRIVER-SCROLL-IS-NOT-APP-SCROLL's sibling: measure what's on screen).
+// ⛔ "notes-view-tree"/"notes-view-tasks" are GONE — the Pages/Tasks segmented control they
+// belonged to was removed by the toolbar rebuild (NEW-8) and the Tasks roll-up behind it was
+// then deleted outright (toolbar-rebuild follow-up NEW-4); the sidebar now shows search, the
+// "+ Page" split button, and the page list, with Bin moved to the footer rail.
 const listTargets = await page.evaluate(() => {
-  const ids = ["notes-new-page", "notes-view-tree", "notes-view-tasks", "notes-view-bin"];
+  const ids = ["notes-new-page", "notes-view-bin"];
   return ids.map((id) => {
     const el = document.querySelector(`[data-testid="${id}"]`);
     if (!el) return { id, present: false };
