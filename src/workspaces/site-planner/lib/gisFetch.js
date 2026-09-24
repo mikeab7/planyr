@@ -27,7 +27,25 @@ export const GIS_FETCH_TIMEOUT_MS = 9000;
 export const GIS_FETCH_RETRIES = 2; // retries AFTER the first try (so 3 attempts total)
 // Above this GET-URL length we POST the query instead (some ArcGIS servers cap the URL
 // well below the browser's ~64k, and a 48-vertex parcel polygon can get long).
-export const GIS_MAX_GET_URL = 3500;
+//
+// ⛔ B1871968 (2026-09-24) — WAS 3500, MEASURED WRONG. ArcGIS Online (services*.arcgis.com)
+// 404s a GET past its own web-server URL-length cap, which this repo already had ONE
+// measurement of (jurisdiction.js's `MAX_QUERY_URL = 1900`: "Will Clayton 2325 chars →
+// 404; Bain 1512 → 200, same service") — but this constant, guarding a DIFFERENT query
+// path (the Site Analysis screen), was never checked against the same fact and sat at
+// 3500, comfortably ABOVE the real failure point. Live-probed against the real growthFaults
+// endpoint (services1.arcgis.com) from this session: 200 OK at 2105 chars, 404 (HTML body)
+// at 2153 — so ANY multi-parcel screening query landing in the 2000–3500 gap (a single
+// parcel decimated to `simplifyRing`'s 60-vertex cap already reaches ~2200) went out as a
+// 404ing GET. Reported live on Goose Creek (4 parcels, 289 acres): growthFaults,
+// transmission, substations, epaCleanups, aadt, rail and ccnWater all read "unavailable" —
+// every one hosted on services*.arcgis.com. ArcGIS Enterprise hosts (TX RRC, TCEQ, Harris
+// County) carry a much higher server-side limit and were unaffected. 2000 sits below both
+// measured failure points with margin; do not raise it back toward 3500 without a fresh
+// live measurement, and do not lower it enough to force short queries onto POST for no
+// reason (POST costs an extra round trip's worth of header parsing on some hosts and
+// bypasses any GET-keyed edge cache in front of a service).
+export const GIS_MAX_GET_URL = 2000;
 
 /* A typed GIS fetch failure. `kind`:
  *   'timeout'  — the request was aborted at the timeout cap (retryable)

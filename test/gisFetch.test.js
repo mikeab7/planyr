@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   classifyGisError, gisErrorMessage, backoffMs, fetchArcgisJson, pLimit, GisFetchError,
+  GIS_MAX_GET_URL,
 } from "../src/workspaces/site-planner/lib/gisFetch.js";
 
 const noSleep = async () => {};
@@ -110,6 +111,32 @@ describe("fetchArcgisJson — timeout + transient retry + GET→POST (B366)", ()
     await fetchArcgisJson("https://x/MapServer/0/query", { body: { f: "json", where: "1=1" }, fetchImpl, sleepImpl: noSleep });
     expect(seen.init.method).toBe("POST");
     expect(seen.init.body).toMatch(/where=1/);
+  });
+
+  // B1871968 — ArcGIS Online (services*.arcgis.com) 404s a GET past its own web-server URL
+  // cap, MEASURED live from this session at 2105 chars OK / 2153 chars 404 against the real
+  // growthFaults endpoint. GIS_MAX_GET_URL must stay comfortably below that, and a URL in the
+  // old 2000–3500 "safe" zone (which used to ride out as a 404ing GET) must now POST.
+  it("GIS_MAX_GET_URL is calibrated to ArcGIS Online's real ~2K URL cap, not the old 3500", () => {
+    expect(GIS_MAX_GET_URL).toBeLessThanOrEqual(2100);
+    expect(GIS_MAX_GET_URL).toBeGreaterThan(1000); // still leaves short queries on GET
+  });
+
+  it("POSTs a URL in the old 2000–3500 'safe' zone that 404s for real on ArcGIS Online (B1871968)", async () => {
+    let seen = null;
+    const fetchImpl = async (target, init) => { seen = { target, init }; return ok({ features: [] }); };
+    // 2214 chars — measured live to 404 on services*.arcgis.com, but under the pre-fix 3500 cap.
+    const goldilocksUrl = "https://x/MapServer/0/query?f=json&geometry=" + "x".repeat(2170);
+    await fetchArcgisJson(goldilocksUrl, { fetchImpl, sleepImpl: noSleep });
+    expect(seen.init.method).toBe("POST");
+    expect(seen.target).toBe("https://x/MapServer/0/query");
+  });
+
+  it("still GETs a short URL well under the cap (no needless POST)", async () => {
+    let seen = null;
+    const fetchImpl = async (target, init) => { seen = { target, init }; return ok({ features: [] }); };
+    await fetchArcgisJson(url, { fetchImpl, sleepImpl: noSleep });
+    expect(seen.init.method).toBe("GET");
   });
 });
 
