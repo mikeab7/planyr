@@ -75,7 +75,7 @@ async function run() {
       };
     });
     report.viewports[vp.name] = diag;
-    if (diag.h1Text !== "A workspace that starts with the site." || !diag.hasOpenButton || !diag.noHorizontalScroll) ok = false;
+    if (diag.h1Text !== "A workspace built around the site." || !diag.hasOpenButton || !diag.noHorizontalScroll) ok = false;
 
     await page.screenshot({ path: `${OUT}${vp.name}.png` });
     await ctx.close();

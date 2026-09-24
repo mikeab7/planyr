@@ -97,7 +97,7 @@ describe("landing page copy is legible without JavaScript (B1384, rebuilt B13156
     // bootRenderBlocking.test.js's stripComments exists for).
     const noComments = HTML.replace(/<!--[\s\S]*?-->/g, "");
     const bodyHtml = noComments.slice(noComments.indexOf("<body>"), noComments.lastIndexOf("<script>"));
-    expect(bodyHtml).toContain("A workspace that starts with the site.");
+    expect(bodyHtml).toContain("A workspace built around the site.");
     expect(bodyHtml).toContain("Open Planyr");
     expect(bodyHtml).toContain("Create an account");
   });
