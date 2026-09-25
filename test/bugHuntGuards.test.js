@@ -856,10 +856,14 @@ describe("B850 (2026-07-15, owner: \"i dont need this large pop up\" then \"shou
   it("the embedded scheduler's own live-refresh + version guard actually exist (the safety B850's suppression relies on)", () => {
     const src = read("../public/sequence/index.html");
     // poll every 20s + on focus/reconnect/tab-switch for a newer cloud version
-    const checkRemote = src.match(/const check = async \(\) => \{[\s\S]{0,400}/)[0];
+    const checkRemote = src.match(/const check = async \(\) => \{[\s\S]{0,1800}/)[0];
     expect(checkRemote).toMatch(/window\.storage\.checkRemote\("hs-v1"\)/);
-    expect(checkRemote).toMatch(/document\.hidden\) window\.location\.reload\(\)/); // silent reload when backgrounded + clean
-    expect(checkRemote).toMatch(/else setStaleNotice\(true\)/);                     // one-click prompt when visible / unsaved
+    expect(checkRemote).toMatch(/document\.hidden\) \{ window\.location\.reload\(\); return; \}/); // silent reload when backgrounded + clean
+    // NEW-1 (2026-09-25) — a clean, VISIBLE tab no longer falls straight to the banner: it first
+    // tries a silent catch-up (window.storage.silentRefresh), and only nags with the banner
+    // (setStaleNotice(true), unconditional fallthrough) once that doesn't apply/succeed.
+    expect(checkRemote).toMatch(/window\.storage\.silentRefresh/);
+    expect(checkRemote).toMatch(/setStaleNotice\(true\);/);                        // one-click prompt when visible / unsaved
     // Layer 0: a stale auto-save is BLOCKED, never allowed to silently overwrite a newer cloud rev
     expect(src).toMatch(/cloudRev != null && cloudRev > \(knownRev\[k\] \|\| 0\)\) \{/);
     expect(src).toMatch(/_snapshot\(k, parsed, "stale-block", v\.length\)/); // the blocked copy is recoverable, not lost

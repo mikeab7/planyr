@@ -4245,7 +4245,9 @@ describe("NEW-1 — false-conflict fixes are wired into the real source (anti-dr
   it("a successful merge clears the stale-reload banner instead of leaving it to contradict the toast", () => {
     // Both places that can set staleNotice(true) now have a corresponding clear: the merge handler
     // clears it unconditionally on success, and the poll clears it the moment it's no longer true.
-    expect(src).toMatch(/setStaleNotice\(false\);\s*\n\s*if \(typeof showToast/);
+    // NEW-1 (2026-09-25) — the toast itself is now conditional on `!trulyEmpty` (an empty merge never
+    // toasts), but the CLEAR stays unconditional on every successful merge, empty or not.
+    expect(src).toMatch(/setStaleNotice\(false\);\s*\n\s*if \(!trulyEmpty && typeof showToast/);
     expect(src).toMatch(/if \(!r\.newer\) \{ setStaleNotice\(false\); return; \}/);
   });
   it("the Reload button flushes unsaved edits through the real save/merge path before reloading", () => {
