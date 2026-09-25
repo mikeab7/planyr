@@ -166,25 +166,6 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
-### V1358288 — B1907584: the false "A newer version was saved elsewhere" banner + empty merge toast are gone on a real flipped (rows_authoritative) account with two open tabs `Blocker: auth`
-
-**Why this needs its own live pass.** This is a mandatory **timing/race + concurrency/multi-writer** LIVE-VERIFY class. The whole defect only exists on a real, signed-in account whose `schedule_account_index.rows_authoritative` flag is true (the B1777120 authority-flip machinery) with more than one live instance of the app open at once (two tabs, or two windows) — this sandbox cannot sign in at all (the proxy CORS-blocks the Supabase auth handshake), so nothing here can reach or simulate the real condition. Per `## Owner product constraints` #7, this pass runs on a **throwaway duplicate** schedule (`duplicateProject`), never directly on a real Master Schedule — the race is per-account/per-CAS-row, not content-dependent, so a duplicate reproduces it exactly as well as a real schedule would, with nothing real touched.
-
-**What was verified here (this session, sandbox — code paths only, never the real account/race).**
-1. `npx vitest run test/scheduleRowsBaseline.test.js` — 17/17 green, extracted from the real shipped `public/sequence/index.html` (never a reimplementation): the raw-row-vs-normalized baseline mismatch reproduced directly, `writeOneScheduleRow`'s identical-content adoption (incl. the no-baseline-yet case that only Fix B's first check can save), a genuine conflict still performing a real second write, and the full two-instance `writeScheduleRowsPrimary` acceptance scenario (editor writes one row, the idle instance's own autosave then writes ZERO rows and raises no stale event).
-2. **Mutation-proven for all five fixes** — each was temporarily disabled in turn (`if (false && …)`) and the corresponding test(s) confirmed to fail, then restored and diffed byte-identical to the shipped file.
-3. `npm run lint` / `node scripts/build-sequence-compiled.mjs --check` / `npm run build` all clean.
-4. Full suite `npx vitest run` — 905 files / 18,462 tests, all green, no regressions.
-
-**Steps, each with a named expected result. Read the served chunk hash in the SAME observation as each result:**
-1. On planyr.io, signed in on the real flipped account, open the Schedule tab and use its project-duplicate action (`duplicateProject`, from the schedule picker) to create a THROWAWAY copy of any real schedule — name it something obviously disposable, e.g. "DELETE ME — B1907584 verify". **Expect:** the duplicate opens cleanly with its own new schedule id.
-2. Open a SECOND tab (or window) on the same account, also on the Schedule tab, with the throwaway schedule active in both. In tab 1, edit one task's name in the throwaway schedule and let it autosave (watch the save indicator go saving → saved). **Expect:** tab 1 shows no "A newer version was saved elsewhere" banner for its own save.
-3. Leave tab 2 untouched for at least 25 seconds (past the 20s live-refresh poll interval) without editing anything in it. **Expect:** tab 2 either shows nothing at all, or briefly nothing followed by silence — **never** the red "A newer version was saved elsewhere" banner, and **never** a "Merged in changes saved elsewhere" toast with no visible task count (a toast naming the real 1-task change, if it appears at all before the poll catches tab 2 up silently, is acceptable — an EMPTY one is not).
-4. In Supabase, `select id, rev from schedules where id = <the throwaway schedule's id> order by rev desc` (or via the Supabase MCP tools) immediately after step 2. **Expect:** the rev advanced by exactly 1 from tab 1's single real edit — no extra bump from tab 2's idle poll.
-5. Clean up: delete the throwaway duplicate schedule (or leave it named "DELETE ME…" and note it on `OWNER-TODO.md` for Michael to remove) so nothing disposable is left cluttering the real account. State exactly what was created/touched/removed in the result note.
-
-Stopping rule: closes when steps 2–4 all confirm no false banner/empty toast and the rev delta is exactly 1, and the throwaway schedule from step 1 is confirmed removed — or a genuine recurrence is filed against **B1907584** with its own `client_errors` evidence, per STANDING RULE #2 (a null result is a FINDING, never a disposition).
-
 ### V1345744 — B1885600: 17 newly-wired Florida county parcel endpoints (Jacksonville + Polk/Lakeland markets) select real parcels on production, and the FL/GA state line holds `Blocker: live-GIS`
 
 **⛔ DATED LIVE RESULTS, recorded 2026-09-24, self-verified against `planyr.io` (build b9722c7) from THIS sandbox using WebKit** (not Chromium — see the "🤖 Self-verification" note above on why WebKit reaches `planyr.io` and real ArcGIS Online hosts from here when Chromium's TLS handshake cannot; `proxy:{server:process.env.HTTPS_PROXY}`, `ignoreHTTPSErrors:true`, logged-out). This SUPERSEDES relying on the dispatch's own pre-supplied numbers — every result below was independently driven through the real Map Finder search box on the real production site, this session:
