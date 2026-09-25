@@ -1741,11 +1741,15 @@ describe("the save indicator", () => {
   it("the normaliser never dresses a failed write as success (LOUD-FAILURE)", async () => {
     const { notesSaveState } = await import("../src/workspaces/notes/lib/notesSaveState.js");
     expect(notesSaveState("error")).toBe("error");
-    expect(notesSaveState("unsaved")).toBe("error");
     expect(notesSaveState("saving")).toBe("saving");
     expect(notesSaveState("saved", { signedIn: true })).toBe("synced");
     expect(notesSaveState("saved")).toBe("local");
     // Nothing open yet: say nothing rather than claim a save that never happened.
     expect(notesSaveState("saved", { idle: true })).toBe(null);
+  });
+
+  it("⛔ NEW-5 — 'unsaved' is a PENDING write (a keystroke just landed), not a failure: it must not read as the cloud-unreachable error state", async () => {
+    const { notesSaveState } = await import("../src/workspaces/notes/lib/notesSaveState.js");
+    expect(notesSaveState("unsaved")).toBe("saving");
   });
 });
