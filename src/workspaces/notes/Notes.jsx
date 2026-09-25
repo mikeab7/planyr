@@ -759,6 +759,14 @@ export default function Notes({
    * — with a page open from a notebook the rail can no longer see would otherwise leave the
    * rail and the document disagreeing about what is open. */
   useEffect(() => {
+    /* ⛔ B1883840 (×2), 2026-09-25 — a tree not yet loaded is not evidence the active page is
+     * invisible. This effect and the mount effect above (`readActivePageId`/`setActivePageId`)
+     * both fire in the same passive-effect pass off render 1's stale closure (tree=emptyTree(),
+     * activePageId=null); without this guard, this effect ran first against that empty tree,
+     * concluded "nothing is visible" and wrote `writeActivePageId(null)` — destroying the stored
+     * page id before the mount effect's own resolved value ever committed. A reload then always
+     * lands on the tree's first page. See docs/NOTES-CARRY-FORWARD.md before editing this again. */
+    if (!tree.pages.length) return;
     const roots = pagesInScope(tree, projectId, orgScope ? SCOPE_ORG : (projectId == null ? SCOPE_ALL : SCOPE_PROJECT));
     const visible = new Set(roots.flatMap((r) => subtreePageIds(r)));
     if (!activePageId || !visible.has(activePageId)) goToPage(roots[0]?.id || null);
