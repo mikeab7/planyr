@@ -88,11 +88,11 @@ const rowBase = {
  * still reads them. Nothing has to be migrated to bring a Recent view back if he ever wants
  * one — it is a component, not a schema.
  *
- * ⛔ AND **TASKS** WAS BACK TO THREE (NEW-4), which was not a reversal of the above. Recent
- * was removed because it re-sorted the SAME pages by a fact the owner does not navigate by;
- * this shows something no other surface in the module can show at all — every unticked
- * checklist line in every note, which is otherwise trapped one note at a time. It earns a
- * segment because without it the information does not exist anywhere.
+ * ⛔ AND **TASKS** WAS BACK TO THREE (NEW-4), which was not a reversal of the above — history
+ * only, see the removal note below. Recent was removed because it re-sorted the SAME pages by
+ * a fact the owner does not navigate by; Tasks showed something no other surface in the module
+ * could show at all — every unticked checklist line in every note, which is otherwise trapped
+ * one note at a time.
  *
  * ⛔ AND **BIN LEAVES THE SEGMENTED CONTROL** (NEW-3, owner decision 2026-09-09). Pages and
  * Tasks are places you WORK; the Bin is a STATE, so it was permanently squeezing the two
@@ -102,12 +102,18 @@ const rowBase = {
  * them apart. This is TWO segments again, but for a different reason than B36050: Bin was
  * never re-sorting the same pages by a fact nobody navigates by, it was a whole other
  * destination competing for the same three slots. */
-/* ⛔ NEW-8 (toolbar rebuild, 2026-09-24) — the `VIEWS` list that used to drive the Pages/Tasks
- * segmented control (`ViewTabs`, below this file's own history) is GONE along with that
- * control — see the sidebar header's own note near `changeView`. `"tasks"` stays a legal
- * `view` value (the render branch and the task rollup underneath it are untouched, on purpose
- * — a real feature is not deleted on the strength of one control losing its trigger), it is
- * simply not reachable from this rail any more. */
+/* ⛔ THE TASKS ROLL-UP IS GONE ENTIRELY (toolbar-rebuild follow-up NEW-4, owner decision).
+ * NEW-8 above (toolbar rebuild, 2026-09-24) removed the `VIEWS` list and the Pages/Tasks
+ * segmented control (`ViewTabs`) that used to drive it, leaving the "tasks" `view` value, its
+ * render branch and the whole cross-page rollup underneath it wired up with no on-screen
+ * trigger. Michael's call once that was pointed out: delete the roll-up outright rather than
+ * leave dead code waiting for a trigger that is never coming back. `TaskGroup`/`TaskList`
+ * (this file), `collectOpenTasks`/`toggleNoteTask`/`openTaskCount` (`lib/notesStore.js`) and the
+ * whole of `lib/notesTasks.js` are gone with it. `view === "tasks"` is simply not a case any
+ * ternary here branches on any more — it falls through to the ordinary pages list below, so an
+ * old in-memory `view` of "tasks" (nothing persists it) opens the page list, not a blank pane.
+ * The IN-NOTE checklist (the ☑ toolbar button, `taskItem`/`taskList` in the schema, ticking a
+ * box while writing) is untouched — this removal is the cross-page roll-up only. */
 
 /* ---- primitives ------------------------------------------------------------------------ */
 
@@ -779,79 +785,6 @@ function BinList({ entries, onRestore, onPurge, onPurgeAll, onPeek, onPurgeEmpti
   );
 }
 
-/** ⛔ EVERY UNTICKED LINE IN EVERY NOTE, IN ONE PLACE (NEW-4).
- *
- *  Ticking a row here flips the checkbox IN THE NOTE — through the store, which hands the
- *  change to the open editor when the note is the one on screen (see `toggleNoteTask`).
- *  Clicking the words opens that note. The row shows the item and the note it came from and
- *  NOTHING else: no owner, no due date, no project badge inside a project (PANEL-BREVITY,
- *  and the rail's standing rule that everything on screen belongs to where you are
- *  standing). From the Dashboard the project's name is the group heading, exactly as the
- *  Pages view already does it.
- *
- *  A ticked item LEAVES the list, because "one view of every OPEN item" is what was asked
- *  for; the note keeps it, ticked, where it was written. */
-function TaskGroup({ group, onToggle, onOpen }) {
-  return (
-    <div style={{ marginBottom: 6 }}>
-      {group.name !== undefined && group.name !== null ? (
-        <div style={{ padding: "3px 8px 2px", fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)" }}>
-          {group.name}
-        </div>
-      ) : null}
-      {group.tasks.map((t) => (
-        <div key={t.key} data-testid={`notes-task-${t.key}`} style={{ ...rowBase, alignItems: "flex-start", cursor: "default", gap: 7 }}>
-          <input
-            type="checkbox"
-            checked={false}
-            data-testid={`notes-task-check-${t.key}`}
-            aria-label={`Tick “${t.text}”`}
-            onChange={() => onToggle(t)}
-            style={{ flex: "0 0 auto", marginTop: 2, width: 14, height: 14, accentColor: "var(--accent-notes)", cursor: "pointer" }}
-          />
-          <button
-            type="button"
-            data-testid={`notes-task-open-${t.key}`}
-            title={`Open “${t.pageTitle}” at this line`}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onOpen(t)}
-            style={{
-              flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 1,
-              border: "none", background: "transparent", font: "inherit", textAlign: "left",
-              color: "var(--text-primary)", cursor: "pointer", padding: 0,
-            }}
-          >
-            <span style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.35 }}>{t.text}</span>
-            <span style={{ fontSize: 11, color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {t.pageTitle || "Untitled page"}
-            </span>
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function TaskList({ groups, onToggle, onOpen }) {
-  const total = groups.reduce((n, g) => n + g.tasks.length, 0);
-  if (!total) {
-    return (
-      <p data-testid="notes-tasks-empty" style={{ margin: "8px 10px", fontSize: 12, lineHeight: 1.5, color: "var(--text-tertiary)" }}>
-        Nothing outstanding. Checklist lines you write in any note show up here until they are ticked.
-      </p>
-    );
-  }
-  return (
-    <div data-testid="notes-tasks" style={{ padding: "2px 2px 10px" }}>
-      {/* The count answers the question opening this view asked. One line (PANEL-BREVITY). */}
-      <p style={{ margin: "2px 8px 5px", fontSize: 11, fontWeight: 600, color: "var(--text-tertiary)" }}>
-        {total === 1 ? "1 open item" : `${total} open items`}
-      </p>
-      {groups.map((g) => <TaskGroup key={g.projectId ?? "none"} group={g} onToggle={onToggle} onOpen={onOpen} />)}
-    </div>
-  );
-}
-
 /** ⛔ THE FOOTER RAIL (NEW-3, owner decision 2026-09-09) — where Bin went when it left the
  *  segmented control above, and where Unfiled lives from the day it exists at all.
  *
@@ -937,7 +870,7 @@ export default function NotesTree({
    * forever/Back to pages actions in one fixed spot below the list. `null` when nothing is
    * being read. */
   peekEntryId = null,
-  taskGroups = [], onToggleTask, onOpenTask, onViewChange,
+  onViewChange,
   /* NEW-1 — templates are stored records now (Notes.jsx owns the storage), never a static
    * import here: this component only renders whatever list it is handed. `onManageTemplates`
    * opens the full management panel; `onSaveAsTemplate` is the row menu's own entry. */
@@ -1302,9 +1235,9 @@ export default function NotesTree({
         {/* ⛔ NEW-8 — THE PAGES / TASKS SEGMENTED TOGGLE IS GONE. Owner-approved mockup, verbatim:
             "the sidebar shows search, the page button, and the page list." `view` stays wired
             to `"tree"` for everything below (Bin is unaffected — it never lived in this toggle;
-            see the footer rail bullet in this file's own module pointer) rather than deleting the
-            `"tasks"` branch outright, so the task rollup this file already computes is not thrown
-            away — it simply has no on-screen trigger in the rail any more. */}
+            see the footer rail bullet in this file's own module pointer). The Tasks roll-up
+            itself is gone too now (this file's own module-pointer comment above, "THE TASKS
+            ROLL-UP IS GONE ENTIRELY") — not just its trigger. */}
         <ProjectListBanner
           state={projectsState}
           error={projectsError}
@@ -1316,8 +1249,6 @@ export default function NotesTree({
       <div role="tree" aria-label="Notes" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "6px 6px 14px" }}>
         {query ? (
           <SearchResults results={results} query={query} onSelectHit={onSelectHit} />
-        ) : view === "tasks" ? (
-          <TaskList groups={taskGroups} onToggle={onToggleTask} onOpen={onOpenTask} />
         ) : view === "bin" ? (
           <BinList
             entries={bin}

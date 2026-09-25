@@ -4,15 +4,14 @@
  * process rule this module is under after three rounds: a check that asserts "the function
  * was called" or "the element took focus" passes on a broken build, and this module has
  * already shipped features whose checks were green while the owner reported the failure.
- * So: the slash trigger is asserted on the STRING that must and must not open a menu; the
- * task toggle on the RESULTING DOCUMENT; retention on WHICH ROWS SURVIVE; the outline's
- * positions against the REAL schema, by resolving each one and demanding the heading it
- * named is the node actually there.
+ * So: the slash trigger is asserted on the STRING that must and must not open a menu;
+ * retention on WHICH ROWS SURVIVE; the outline's positions against the REAL schema, by
+ * resolving each one and demanding the heading it named is the node actually there.
  *
  * The half that genuinely needs a browser — the block actually becoming a heading, the other
- * note actually opening, the restored tree matching the snapshot, ticking in the rollup
- * flipping the checkbox on screen, an attachment round-tripping — is driven against the real
- * built app in ui-audit/verify-notes-tier1.mjs. Neither half is a substitute for the other.
+ * note actually opening, the restored tree matching the snapshot, an attachment
+ * round-tripping — is driven against the real built app in ui-audit/verify-notes-tier1.mjs.
+ * Neither half is a substitute for the other.
  */
 import { describe, it, expect } from "vitest";
 import { getSchema } from "@tiptap/core";
@@ -24,9 +23,6 @@ import {
 import {
   LEAF_NODES, activeOutlineIndex, nodeSize, outlineFromDoc, outlineHasChildren, visibleOutline,
 } from "../src/workspaces/notes/lib/notesOutline.js";
-import {
-  groupTasksByProject, openTasksInDoc, rollUpOpenTasks, setTaskCheckedInDoc, tasksInDoc,
-} from "../src/workspaces/notes/lib/notesTasks.js";
 import {
   MAX_VERSIONS_PER_PAGE, RETENTION_TIERS, planRestore, planRetention, shouldSnapshot, versionReasonLabel,
 } from "../src/workspaces/notes/lib/notesVersions.js";
@@ -244,139 +240,15 @@ describe("NEW-6 · the outline is derived from the document", () => {
   });
 });
 
-/* ════════════════════════════════════════════════════════════════════════════════════════
- * NEW-4 — THE TASK ROLLUP: ticking it in the list changes the DOCUMENT
- * ═══════════════════════════════════════════════════════════════════════════════════════ */
+/* The Notes Tasks roll-up (cross-page unticked-checklist view) is removed entirely
+ * (toolbar-rebuild follow-up NEW-4, owner decision) — `lib/notesTasks.js` and its whole test
+ * coverage above went with it. `task`/`taskList` stay as plain doc-builder helpers: the
+ * IN-NOTE checklist itself (the schema nodes, ticking a box while writing) is untouched, and
+ * "the schema and the exporter still cannot drift" below still needs to build one. */
 const task = (text, checked = false, extra = []) => ({
   type: "taskItem", attrs: { checked }, content: [p(text), ...extra],
 });
 const taskList = (...items) => ({ type: "taskList", content: items });
-
-describe("NEW-4 · reading checklist items out of a note", () => {
-  const sample = doc(
-    p("Water district"),
-    taskList(
-      task("Call the district about the 12-inch line"),
-      task("Send the LOI comment back", true),
-      task("Walk the site Thursday", false, [taskList(task("Bring the plat"))]),
-    ),
-  );
-
-  it("finds every item at every depth, with its state", () => {
-    expect(tasksInDoc(sample).map((t) => [t.text, t.checked])).toEqual([
-      ["Call the district about the 12-inch line", false],
-      ["Send the LOI comment back", true],
-      ["Walk the site Thursday", false],
-      ["Bring the plat", false],
-    ]);
-  });
-
-  it("a parent's text is its OWN words, not its whole subtree", () => {
-    expect(tasksInDoc(sample).find((t) => t.text.startsWith("Walk")).text).toBe("Walk the site Thursday");
-  });
-
-  it("the rollup lists only what is still OPEN", () => {
-    expect(openTasksInDoc(sample).map((t) => t.text)).toEqual([
-      "Call the district about the 12-inch line", "Walk the site Thursday", "Bring the plat",
-    ]);
-  });
-
-  it("a note with no checklist contributes nothing", () => {
-    expect(openTasksInDoc(doc(p("nothing here")))).toEqual([]);
-    expect(tasksInDoc(null)).toEqual([]);
-  });
-});
-
-describe("NEW-4 · ticking it in the list flips the checkbox IN THE NOTE", () => {
-  const sample = doc(taskList(task("one"), task("two"), task("three")));
-
-  it("the RESULTING DOCUMENT has that one item checked and nothing else touched", () => {
-    const { doc: next, changed } = setTaskCheckedInDoc(sample, { index: 1, text: "two" }, true);
-    expect(changed).toBe(true);
-    expect(tasksInDoc(next).map((t) => [t.text, t.checked])).toEqual([
-      ["one", false], ["two", true], ["three", false],
-    ]);
-    // …and the input is untouched: the caller keeps a clean copy to compare against.
-    expect(tasksInDoc(sample).every((t) => !t.checked)).toBe(true);
-  });
-
-  it("it works on a NESTED item too", () => {
-    const nested = doc(taskList(task("parent", false, [taskList(task("child"))])));
-    const { doc: next, changed } = setTaskCheckedInDoc(nested, { index: 1, text: "child" }, true);
-    expect(changed).toBe(true);
-    expect(tasksInDoc(next).map((t) => [t.text, t.checked])).toEqual([["parent", false], ["child", true]]);
-  });
-
-  it("⛔ a MOVED item is found by its words, not by a stale position", () => {
-    // The note gained a line above the list since the rollup was built, so index 1 is now
-    // "one". Ticking by (index 1, text "two") must still tick "two".
-    const moved = doc(taskList(task("zero"), task("one"), task("two"), task("three")));
-    const { doc: next, changed } = setTaskCheckedInDoc(moved, { index: 1, text: "two" }, true);
-    expect(changed).toBe(true);
-    expect(tasksInDoc(next).find((t) => t.text === "two").checked).toBe(true);
-    expect(tasksInDoc(next).find((t) => t.text === "one").checked).toBe(false);
-  });
-
-  it("⛔ TWO IDENTICAL LINES: it ticks the OPEN one, never one already done", () => {
-    /* The rollup only ever offered the OPEN one, so an index pointing at the ticked twin is
-     * a stale index and must not be trusted just because the words agree. */
-    const dupes = doc(taskList(task("Follow up", true), task("Follow up", false)));
-    const { doc: next, changed } = setTaskCheckedInDoc(dupes, { index: 0, text: "Follow up" }, true);
-    expect(changed).toBe(true);
-    expect(tasksInDoc(next).map((t) => t.checked)).toEqual([true, true]);
-  });
-
-  it("⛔ ticking one that is ALREADY ticked changes nothing rather than moving a neighbour", () => {
-    const done = doc(taskList(task("one", true), task("two", false)));
-    const r = setTaskCheckedInDoc(done, { index: 0, text: "one" }, true);
-    expect(r.changed).toBe(false);
-    expect(tasksInDoc(r.doc).map((t) => t.checked)).toEqual([true, false]);
-  });
-
-  it("⛔ an item that is GONE changes nothing, and says so", () => {
-    const r = setTaskCheckedInDoc(sample, { index: 9, text: "vanished" }, true);
-    expect(r.changed).toBe(false);
-    expect(r.doc).toBe(sample);
-  });
-});
-
-describe("NEW-4 · the roll-up across notes", () => {
-  const pages = [
-    { pageId: "p1", pageTitle: "Water district", projectId: "proj_a", trail: [] },
-    { pageId: "p2", pageTitle: "Site walk", projectId: "proj_a", trail: ["Grand Port"] },
-    { pageId: "p3", pageTitle: "Loose thoughts", projectId: null, trail: [] },
-  ];
-  const bodies = {
-    p1: doc(taskList(task("Call the district"), task("Done thing", true))),
-    p2: doc(taskList(task("Thursday walk"))),
-    p3: doc(taskList(task("Read the LOI"))),
-  };
-
-  it("names the note each item came from, and carries only open ones", () => {
-    const rows = rollUpOpenTasks(pages, bodies);
-    expect(rows.map((r) => [r.text, r.pageTitle])).toEqual([
-      ["Call the district", "Water district"],
-      ["Thursday walk", "Site walk"],
-      ["Read the LOI", "Loose thoughts"],
-    ]);
-    expect(rows.every((r) => r.key.startsWith(r.pageId))).toBe(true);
-  });
-
-  it("a page with no body is skipped rather than crashing the list", () => {
-    expect(rollUpOpenTasks(pages, { p2: bodies.p2 })).toHaveLength(1);
-  });
-
-  it("groups by project, no-project last, keeping order within each group", () => {
-    const groups = groupTasksByProject(rollUpOpenTasks(pages, bodies), [{ id: "proj_a", name: "Grand Port" }]);
-    expect(groups.map((g) => [g.name, g.tasks.length])).toEqual([["Grand Port", 2], [null, 1]]);
-  });
-
-  it("a project whose name has not loaded is still a group, not a disappearance", () => {
-    const groups = groupTasksByProject(rollUpOpenTasks(pages, bodies), []);
-    expect(groups[0].name).toBe("Project");
-    expect(groups[0].tasks).toHaveLength(2);
-  });
-});
 
 /* ════════════════════════════════════════════════════════════════════════════════════════
  * NEW-3 — VERSION HISTORY: what survives, and that a restore never destroys anything
@@ -736,6 +608,5 @@ describe("the schema and the exporter still cannot drift", () => {
     expect(node.childCount).toBe(5);
     node.check();                                   // throws if the content model is violated
     expect(outlineFromDoc(everything)).toHaveLength(1);
-    expect(openTasksInDoc(everything).map((t) => t.text)).toEqual(["still open"]);
   });
 });

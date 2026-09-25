@@ -71,7 +71,6 @@ import { docToHtml } from "../lib/notesDocHtml.js";
 import { buildPrintDocument, printHtmlDocument } from "../lib/notesPrint.js";
 import { absoluteStamp, editedLabel } from "../lib/notesTime.js";
 import { activeOutlineIndex, outlineFromDoc } from "../lib/notesOutline.js";
-import { setTaskCheckedInDoc } from "../lib/notesTasks.js";
 import { applySlashCommand } from "../lib/notesSlashMenu.js";
 import { isToolbarDiagArmed, latchToolbarDiag, recordToolbarDiag } from "../lib/notesToolbarDiag.js";
 import NoteToolbar from "./NoteToolbar.jsx";
@@ -1909,29 +1908,21 @@ const NoteEditor = forwardRef(function NoteEditor({
     setHistoryBusy(false);
   }, [pageId, refreshVersions, onPrintNotice]);
 
-  /* ---- WHAT THE ROLLUP AND THE RESTORE ARE ALLOWED TO DO TO THIS DOCUMENT (NEW-3 / NEW-4)
+  /* ---- WHAT A VERSION RESTORE IS ALLOWED TO DO TO THIS DOCUMENT (NEW-3)
    *
-   * ⛔ BOTH GO THROUGH THE EDITOR, NEVER ROUND THE BACK OF IT. Writing this page's JSON to
+   * ⛔ IT GOES THROUGH THE EDITOR, NEVER ROUND THE BACK OF IT. Writing this page's JSON to
    * storage while this instance holds the document is a silent-loss bug by construction:
    * the editor's own next save — or its unmount flush — writes its stale copy back over the
-   * change. Registered as real editor operations they become ordinary transactions: in the
+   * change. Registered as a real editor operation it becomes an ordinary transaction: in the
    * document, in the undo history, saved by the one save path. */
   useEffect(() => {
     if (!editor || editor.isDestroyed) return undefined;
-    /* ⛔ A READ-ONLY VIEW NEVER CLAIMS THE PAGE. The claim exists so a task tick or a version
-     * restore goes THROUGH the open editor rather than round the back of it — and a bin peek
-     * can accept neither, so claiming would only let one of several peeked pages take a write
-     * meant for the live note. */
+    /* ⛔ A READ-ONLY VIEW NEVER CLAIMS THE PAGE. The claim exists so a version restore goes
+     * THROUGH the open editor rather than round the back of it — and a bin peek can accept
+     * neither, so claiming would only let one of several peeked pages take a write meant for
+     * the live note. */
     if (readOnly) return undefined;
     return registerOpenNoteDoc(pageId, {
-      applyTaskToggle: (ref, checked) => {
-        if (editor.isDestroyed) return { ok: false, changed: false };
-        const r = setTaskCheckedInDoc(editor.getJSON(), ref, checked);
-        if (!r.changed) return { ok: true, changed: false };
-        const node = editor.schema.nodeFromJSON(r.doc);
-        editor.view.dispatch(editor.state.tr.replaceWith(0, editor.state.doc.content.size, node.content).setMeta("addToHistory", true));
-        return { ok: true, changed: true };
-      },
       applyDocument: (doc) => {
         if (editor.isDestroyed) return { ok: false, error: "the editor closed before the version could be applied" };
         try {

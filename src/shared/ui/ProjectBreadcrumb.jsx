@@ -1210,15 +1210,13 @@ export default function ProjectBreadcrumb({
             {cross ? "All projects" : org ? "Organization" : (currentName || "Select a project")}
           </span>
         )}
-        {/* NEW-3 — the at-risk marker on the crumb itself. Two fixes in one: the `⚠` text glyph
-            becomes a drawn triangle (most platforms resolve U+26A0 to a colour emoji), and the
-            HARDCODED `#f59e0b` becomes `--warn-text`. The raw hex was the B341 trap exactly — a
-            chrome-region component pinning a colour instead of a token, which reads fine until the
-            chrome flips theme, and which the contrast audit cannot check. */}
-        {!crumbCompact && atRisk(saveState) && (
-          <span title="Saved on this device: the cloud is unreachable" aria-hidden
-            style={{ flex: "none", color: "var(--warn-text)", display: "grid", placeItems: "center" }}><WarnIcon size={12} /></span>
-        )}
+        {/* ⛔ NEW-5 (owner report 2026-09-25) — the crumb's own at-risk triangle is REMOVED. It
+            duplicated the shared CloudSyncBadge (AppHeader Row-1), which already carries an
+            "offline" state with the identical title text ("Saved on this device" / "the cloud is
+            unreachable"), and the two could visibly disagree during a save-status transition — the
+            root cause was in the save-status mapping itself (see notesSaveState.js's NEW-5 note),
+            not in this crumb, but the badge is the ONE sync indicator now, so this second copy is
+            gone rather than fixed in place. */}
         {!crumbCompact && <span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>}
       </button>
 
@@ -1232,7 +1230,6 @@ export default function ProjectBreadcrumb({
         style={{ position: "absolute", visibility: "hidden", pointerEvents: "none", ...crumbBtn({ maxWidth: 240, minWidth: CRUMB_MIN_W }) }}
       >
         <span>{projectLabel}</span>
-        {atRisk(saveState) && <WarnIcon size={12} />}
         <span style={{ fontSize: 11 }}>▾</span>
       </span>
 

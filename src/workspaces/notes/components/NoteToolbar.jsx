@@ -80,7 +80,7 @@ import {
   selectionMarkPresence, togglePressed,
 } from "../lib/notesMixedSelection.js";
 import { familyKey, firstFamily, fontDisplayLabel, matchFontOption } from "../lib/notesFontFamily.js";
-import { defaultFontLabel, resolvedColor, resolvedColorsAgree } from "../lib/notesResolvedValue.js";
+import { resolvedColor, resolvedColorsAgree } from "../lib/notesResolvedValue.js";
 
 /* Mirrored from src/shared/ui/controls.jsx rather than imported — deliberately, and there
  * is a test that fails if the copies drift (test/notesModule.test.js). Importing
@@ -179,38 +179,57 @@ function Tip({ tip, text }) {
   );
 }
 
-/* ⛔ ONE SHARED CLAMP HOOK, NOT EIGHT COPIES (B1344627's own mechanism, carried over from the
- * pre-redesign bar). Every popover on this row (FormatMenu, ColorPopover, TableGridPicker,
- * LinkControl, CalloutControl, SizeMenu, SpacingPopover, InsertMenu) opens `left: 0` against
- * its OWN trigger, which is flush against the viewport's right edge wherever the trigger sits
- * near the end of the row — the Insert Table picker's own report was 18 of its 36 size cells
- * sitting past `innerWidth`. Measured LIVE (`ResizeObserver` on the popover itself, not a
- * one-shot measurement at open time — the table grid's own width GROWS while dragging, so a
- * stale reading would already be wrong before a drag reached a wider column count) and nudged
- * left by exactly the overflow. This is the SOURCE of the toolbar's `useState` count staying
- * sane: one hook, called from eight places, is one line in the count this file's own test
- * (`test/notesModule.test.js`) takes, not eight. */
-function usePopoverClampLeft(open) {
+/* ⛔ ONE SHARED ANCHOR HOOK, NOT EIGHT COPIES (B1344627's own mechanism, carried over from the
+ * pre-redesign bar as `usePopoverClampLeft`, REBUILT under NEW-1 of the toolbar-rebuild
+ * follow-up). Every popover on this row (FormatMenu, ColorPopover, TableGridPicker,
+ * LinkControl, CalloutControl, SizeMenu, SpacingPopover, InsertMenu) used to open
+ * `position: absolute` against its own `position: relative` trigger span. That trigger span
+ * lives INSIDE the bar's own scrolling row, and the toolbar rebuild made the row's own
+ * `overflowX: auto` UNCONDITIONAL (it used to apply only on `narrow` — see `barStyle` below) so
+ * the compact fold could scroll at any width. An `overflow: auto` ancestor clips EVERY
+ * descendant's painted pixels to its own box, `position: absolute` included, so every one of
+ * these menus was cropped to whatever sliver overlapped the bar's own row height — reported as
+ * the menu opening "under the grey canvas and the white note page", which is what a hard crop
+ * looks like once the rest of the page paints where the menu used to be.
+ *
+ * The fix is the same escape the toolbar's own tooltip (`useHoverTooltip`/`Tip` above) already
+ * uses and which the owner confirmed keeps working: `position: fixed`, computed from the
+ * TRIGGER's own `getBoundingClientRect()` rather than inherited from a scrolling ancestor's
+ * layout. A fixed-position box lays out against the viewport, not the row it happens to sit in
+ * the DOM, so no ancestor's `overflow` can crop it and no ancestor's `z-index` can bury it under
+ * a later sibling. Still ONE hook, called from eight places (`test/notesModule.test.js`'s
+ * `useState` budget stays at one line, not eight), and still re-measured live against a
+ * `ResizeObserver` on the popover's own content — the table grid's width still grows while
+ * dragging, so a one-shot measurement at open time would still go stale mid-drag. A `scroll`
+ * listener (capture, so it catches the row's own horizontal scroll too — nothing else on this
+ * bar scrolls) keeps a still-open menu glued to its trigger rather than drifting from it. */
+function usePopoverAnchor(open, wrapRef) {
   const popRef = useRef(null);
-  const [shift, setShift] = useState(0);
+  const [anchor, setAnchor] = useState(null);
   useLayoutEffect(() => {
-    if (!open) { setShift(0); return undefined; }
+    if (!open) { setAnchor(null); return undefined; }
     const measure = () => {
+      const wrap = wrapRef.current;
       const pop = popRef.current;
-      const wrap = pop?.parentElement;
-      if (!pop || !wrap) return;
-      const wrapLeft = wrap.getBoundingClientRect().left;
-      const need = Math.max(0, wrapLeft + pop.offsetWidth - (window.innerWidth - POPOVER_EDGE_MARGIN));
-      setShift(need);
+      if (!wrap || !pop) return;
+      const r = wrap.getBoundingClientRect();
+      const left = Math.max(POPOVER_EDGE_MARGIN, Math.min(r.left, window.innerWidth - pop.offsetWidth - POPOVER_EDGE_MARGIN));
+      setAnchor({ top: r.bottom + 4, left });
     };
     measure();
     const pop = popRef.current;
     const ro = pop && typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
     if (ro && pop) ro.observe(pop);
     window.addEventListener("resize", measure);
-    return () => { ro?.disconnect(); window.removeEventListener("resize", measure); };
-  }, [open]);
-  return { popRef, clampStyle: shift ? { left: -shift } : undefined };
+    window.addEventListener("scroll", measure, true);
+    return () => { ro?.disconnect(); window.removeEventListener("resize", measure); window.removeEventListener("scroll", measure, true); };
+  }, [open, wrapRef]);
+  /* Hidden rather than at the trigger's own flow position until the first measurement lands —
+     a fixed box with no coordinates yet would otherwise paint at (0,0) for one frame. */
+  const anchorStyle = anchor
+    ? { position: "fixed", top: anchor.top, left: anchor.left, zIndex: 300 }
+    : { position: "fixed", top: 0, left: 0, zIndex: 300, visibility: "hidden" };
+  return { popRef, anchorStyle };
 }
 
 /* `big` (B849633): every control on a narrow (phone-width) bar asks for this — a 44px tap
@@ -278,7 +297,7 @@ function TBButton({ onClick, active, pressed, disabled, title, label, children, 
 function FormatMenu({ title, testid, value, mixed, options, onPick, big, width = 116, displayLabel, prefix, iconTrigger, disabled }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
-  const { popRef, clampStyle } = usePopoverClampLeft(open);
+  const { popRef, anchorStyle } = usePopoverAnchor(open, wrapRef);
   const tt = useHoverTooltip();
 
   useEffect(() => {
@@ -354,12 +373,12 @@ function FormatMenu({ title, testid, value, mixed, options, onPick, big, width =
           aria-label={title}
           onMouseDown={stop}
           style={{
-            position: "absolute", top: big ? 48 : 32, left: 0, zIndex: 40, padding: 4,
+            padding: 4,
             minWidth: big ? 160 : width, maxHeight: 280, overflowY: "auto",
             display: "flex", flexDirection: "column", gap: 1,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
             borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
-            ...clampStyle,
+            ...anchorStyle,
           }}
         >
           {options.map((o) => {
@@ -433,7 +452,7 @@ function ColorPopover({ title, swatch, colors, onPick, testid, glyph = "ink", bi
   const name = mixed ? `${title} — mixed` : title;
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
-  const { popRef, clampStyle } = usePopoverClampLeft(open);
+  const { popRef, anchorStyle } = usePopoverAnchor(open, wrapRef);
   useEffect(() => {
     if (!open) return undefined;
     const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
@@ -456,11 +475,11 @@ function ColorPopover({ title, swatch, colors, onPick, testid, glyph = "ink", bi
           data-testid={`${testid}-popover`}
           onMouseDown={stop}
           style={{
-            position: "absolute", top: big ? 48 : 32, left: 0, zIndex: 40, padding: 8,
+            padding: 8,
             display: "grid", gridTemplateColumns: "repeat(5, 22px)", gap: 6,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
             borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
-            ...clampStyle,
+            ...anchorStyle,
           }}
         >
           {colors.map((c) => (
@@ -492,7 +511,7 @@ function TableGridPicker({ onInsert, big }) {
   const [grid, setGrid] = useState({ rows: GRID_START, cols: GRID_START });
   const wrapRef = useRef(null);
   const gridRef = useRef(null);
-  const { popRef, clampStyle } = usePopoverClampLeft(open);
+  const { popRef, anchorStyle } = usePopoverAnchor(open, wrapRef);
 
   useEffect(() => {
     if (!open) { setDim({ rows: 0, cols: 0 }); setGrid({ rows: GRID_START, cols: GRID_START }); return undefined; }
@@ -563,11 +582,11 @@ function TableGridPicker({ onInsert, big }) {
           data-testid="nt-table-grid"
           onMouseDown={stop}
           style={{
-            position: "absolute", top: big ? 48 : 32, left: 0, zIndex: 40, padding: 8,
+            padding: 8,
             display: "flex", flexDirection: "column", gap: 6,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
             borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
-            ...clampStyle,
+            ...anchorStyle,
           }}
         >
           <div
@@ -597,7 +616,7 @@ function LinkControl({ editor, big }) {
   const inputRef = useRef(null);
   const active = editor.isActive("link");
   const wrapRef = useRef(null);
-  const { popRef, clampStyle } = usePopoverClampLeft(open);
+  const { popRef, anchorStyle } = usePopoverAnchor(open, wrapRef);
 
   useEffect(() => { if (open && inputRef.current) inputRef.current.focus(); }, [open]);
 
@@ -622,10 +641,10 @@ function LinkControl({ editor, big }) {
           ref={popRef}
           onMouseDown={stop}
           style={{
-            position: "absolute", top: big ? 48 : 32, left: 0, zIndex: 40, padding: 8, display: "flex", gap: 6,
+            padding: 8, display: "flex", gap: 6,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
             borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
-            ...clampStyle,
+            ...anchorStyle,
           }}
         >
           <input
@@ -658,7 +677,7 @@ function LinkControl({ editor, big }) {
 function CalloutControl({ editor, big }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
-  const { popRef, clampStyle } = usePopoverClampLeft(open);
+  const { popRef, anchorStyle } = usePopoverAnchor(open, wrapRef);
   const inside = editor.isActive("noteCallout");
   const tone = inside ? editor.getAttributes("noteCallout")?.tone : null;
 
@@ -690,11 +709,11 @@ function CalloutControl({ editor, big }) {
           data-testid="nt-callout-panel"
           onMouseDown={stop}
           style={{
-            position: "absolute", top: big ? 48 : 32, left: 0, zIndex: 40, padding: 5, width: 168,
+            padding: 5, width: 168,
             display: "flex", flexDirection: "column", gap: 2,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
             borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
-            ...clampStyle,
+            ...anchorStyle,
           }}
         >
           {CALLOUT_TONES.map((t) => (
@@ -776,8 +795,27 @@ const ArrowConnectIcon = () => (
 const PlusIcon = () => (<Icon><line x1="8" y1="3" x2="8" y2="13" /><line x1="3" y1="8" x2="13" y2="8" /></Icon>);
 const PilcrowIcon = () => (<Icon><path d="M6.5 3h5.5" /><path d="M12 3v10" /><path d="M8.5 3a2.75 2.75 0 0 0 0 5.5H9.5" /><path d="M8.5 8.5V13" /></Icon>);
 
-const SupText = () => <span style={{ fontSize: 12, fontWeight: 700 }}>X<span style={{ fontSize: 10, verticalAlign: "super" }}>2</span></span>;
-const SubText = () => <span style={{ fontSize: 12, fontWeight: 700 }}>X<span style={{ fontSize: 10, verticalAlign: "sub" }}>2</span></span>;
+/* ⛔ NEW-3 (toolbar-rebuild follow-up) — INLINE SVG, LIKE EVERY OTHER GLYPH ON THIS ROW, not
+ * text with `vertical-align: super`/`sub`. That property shifts the WHOLE inline box (the "X"
+ * included) relative to the surrounding line, so the two buttons' own baselines disagreed with
+ * each other as much as their "2"s did — measured, not merely suspected: superscript's box rides
+ * above the line, subscript's rides below it, so the "X" itself sat at two different heights next
+ * to the plain-text B/I/U/S glyphs beside them. Both icons now place their "X" at the IDENTICAL
+ * `x`/`y`/`fontSize` inside the shared 16×16 `Icon` viewBox — only the small "2"'s own position
+ * differs, top-right for superscript and bottom-right for subscript — so the two buttons read as
+ * one glyph family with a single varying mark, the way B/I/U/S already do. */
+const SupIcon = () => (
+  <Icon>
+    <text x="1" y="12" fontSize="10" fontWeight="700" fill="currentColor" stroke="none">X</text>
+    <text x="9.5" y="6.5" fontSize="6" fontWeight="700" fill="currentColor" stroke="none">2</text>
+  </Icon>
+);
+const SubIcon = () => (
+  <Icon>
+    <text x="1" y="12" fontSize="10" fontWeight="700" fill="currentColor" stroke="none">X</text>
+    <text x="9.5" y="15" fontSize="6" fontWeight="700" fill="currentColor" stroke="none">2</text>
+  </Icon>
+);
 
 /* ---- NEW-4: the size control — a typed stepper (4–400) plus a preset ladder ------------- */
 
@@ -785,7 +823,7 @@ function SizeMenu({ testid, value, mixed, displayLabel, onPick, big }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const wrapRef = useRef(null);
-  const { popRef, clampStyle } = usePopoverClampLeft(open);
+  const { popRef, anchorStyle } = usePopoverAnchor(open, wrapRef);
 
   useEffect(() => { if (open) setText(value != null ? String(value) : ""); }, [open, value]);
   useEffect(() => {
@@ -841,11 +879,11 @@ function SizeMenu({ testid, value, mixed, displayLabel, onPick, big }) {
           data-testid={`${testid}-menu`}
           onMouseDown={stop}
           style={{
-            position: "absolute", top: big ? 48 : 32, left: 0, zIndex: 40, padding: 8, width: 176,
+            padding: 8, width: 176,
             display: "flex", flexDirection: "column", gap: 8,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
             borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
-            ...clampStyle,
+            ...anchorStyle,
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -928,7 +966,7 @@ function Stepper({ testid, value, onChange, big }) {
 function SpacingPopover({ lineHeight, spaceBefore, spaceAfter, onPick, onApplyWholePage, onReset, big, disabled }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
-  const { popRef, clampStyle } = usePopoverClampLeft(open);
+  const { popRef, anchorStyle } = usePopoverAnchor(open, wrapRef);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -955,11 +993,11 @@ function SpacingPopover({ lineHeight, spaceBefore, spaceAfter, onPick, onApplyWh
           data-testid="nt-spacing-panel"
           onMouseDown={stop}
           style={{
-            position: "absolute", top: big ? 48 : 32, left: 0, zIndex: 40, padding: 10, width: 236,
+            padding: 10, width: 236,
             display: "flex", flexDirection: "column", gap: 10,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
             borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
-            ...clampStyle,
+            ...anchorStyle,
           }}
         >
           <div>
@@ -1213,13 +1251,30 @@ export default function NoteToolbar({
   const fontMixed = familyDisplay === MIXED;
   const currentFont = fontMixed ? null : (rawFamilies.find((f) => familyKey(f) === familyDisplay) ?? null);
   const currentFontOption = matchFontOption(currentFont, FONTS);
+  /* ⛔ NEW-2 (toolbar-rebuild follow-up) — THE CHIP SHOWS THE NAME AND NOTHING ELSE. The old
+   * `defaultFontLabel` baked a " · standard" suffix straight into the label string, which is
+   * right for a MENU ROW (where "Inter · standard" reads as a sentence) and wrong for a fixed-
+   * width CHIP (where it truncates to "Inter · st…", unreadable). The default marker moves into
+   * the palette's own default row instead — a check when it's the active resolution, plus a
+   * small "Default" tag matching `SizeMenu`'s own default-row convention below — never onto the
+   * chip's own text. */
+  const fontResolvedName = defaultFamily || "Standard";
+  const fontDefaultSelected = !fontMixed && !currentFont;
   const paletteOptions = FONTS.map((f) => (f.value == null
-    ? { ...f, label: defaultFontLabel(defaultFamily) }
+    ? {
+        ...f,
+        label: (
+          <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", gap: 6 }}>
+            <span>{fontDefaultSelected ? "✓ " : ""}{fontResolvedName}</span>
+            <span style={{ fontSize: 10, fontWeight: 700, opacity: 0.75 }}>Default</span>
+          </span>
+        ),
+      }
     : f));
   const fontOptions = currentFont && !currentFontOption
     ? [...paletteOptions, { label: fontDisplayLabel(currentFont, FONTS), value: currentFont }]
     : paletteOptions;
-  const fontLabel = fontMixed ? "" : (currentFont ? fontDisplayLabel(currentFont, FONTS) : defaultFontLabel(defaultFamily));
+  const fontLabel = fontMixed ? "" : (currentFont ? fontDisplayLabel(currentFont, FONTS) : fontResolvedName);
 
   const currentColorRaw = titleActive ? (titleStyle.color || null) : resolvedColor(editor.getAttributes("textStyle")?.color);
   const colorDisplay = titleActive ? currentColorRaw : formatDisplayValue({
@@ -1385,11 +1440,11 @@ export default function NoteToolbar({
       </TBButton>
       <TBButton title="Superscript" testid="nt-sup" big={narrow} pressed={supPressed}
         onClick={() => (titleActive ? setTitleStyle({ sup: !titleStyle.sup, sub: false }) : chain().toggleSuperscript().run())}>
-        <SupText />
+        <SupIcon />
       </TBButton>
       <TBButton title="Subscript" testid="nt-sub" big={narrow} pressed={subPressed}
         onClick={() => (titleActive ? setTitleStyle({ sub: !titleStyle.sub, sup: false }) : chain().toggleSubscript().run())}>
-        <SubText />
+        <SubIcon />
       </TBButton>
 
       <ColorPopover title="Text colour" testid="nt-color" glyph="ink" big={narrow} mixed={colorMixed}
@@ -1493,7 +1548,7 @@ export default function NoteToolbar({
 function InsertMenu({ editor, big, compact, fileRef, onAttach, onInsertTable }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
-  const { popRef, clampStyle } = usePopoverClampLeft(open);
+  const { popRef, anchorStyle } = usePopoverAnchor(open, wrapRef);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -1515,11 +1570,11 @@ function InsertMenu({ editor, big, compact, fileRef, onAttach, onInsertTable }) 
           data-testid="nt-insert-panel"
           onMouseDown={stop}
           style={{
-            position: "absolute", top: big ? 48 : 32, left: 0, zIndex: 40, padding: 4, width: 196,
+            padding: 4, width: 196,
             display: "flex", flexDirection: "column", gap: 1,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
             borderRadius: RADIUS.control, boxShadow: POPOVER_SHADOW,
-            ...clampStyle,
+            ...anchorStyle,
           }}
         >
           {compact ? (

@@ -1448,11 +1448,19 @@ landed together. What each one is, and the ONE decision inside it that is not ob
   already the open/close control on every width. The combined harness that found and proved both
   fixes — **verify-notes-outline-history-phone**, under `ui-audit/` — is the one to extend if a
   THIRD panel ever joins this row.
-- `lib/notesTasks.js` — **every unticked checklist line, across every note** (NEW-4), shown in the
-  rail's third view. ⛔ Ticking one goes **through the open editor** when that note is on screen
-  (`registerOpenNoteDoc` on the store) — writing its JSON round the back of the editor is a
-  silent-loss bug by construction. The key is index **and** text, and the index is trusted only
-  while it still describes the row the rollup showed.
+- **⛔ THE TASKS ROLL-UP (formerly the `notesTasks` library, its own file under `lib/`) IS
+  REMOVED (toolbar-rebuild follow-up NEW-4, owner decision).** It used to show every unticked
+  checklist line across every note in the rail's third view; the toolbar rebuild (NEW-8)
+  removed its Pages/Tasks toggle first, leaving it wired up with no on-screen trigger, and
+  Michael's call once that was pointed out was to delete the whole roll-up rather than leave it
+  waiting for a trigger that was never coming back. Gone with it: that library, `NotesTree.jsx`'s
+  `TaskGroup`/`TaskList`, and `notesStore.js`'s `collectOpenTasks`/`toggleNoteTask`/
+  `openTaskCount`. **The IN-NOTE checklist is untouched** — the ☑ toolbar button, the
+  `taskItem`/`taskList` schema nodes, ticking a box while writing, and Markdown export of a
+  checklist all still work exactly as before; only the cross-page rollup is gone.
+  `registerOpenNoteDoc` (on the store) survives for a different reason — Version History's
+  restore still needs to hand a whole-document replace through the open editor rather than
+  write behind its back.
 - `lib/notesAttachNode.js` + `lib/notesFileMeta.js` — **any file, not just pictures** (NEW-5).
   ⛔ It rides the PICTURE tier — same IndexedDB store, same cloud table, same bucket, same purge
   cascade — rather than a second blob tier. The account-side change is one migration,

@@ -22,7 +22,7 @@
  * `purgePages`. TOMBSTONE-DELETES is unchanged in substance: the cascade is still computed
  * at delete time and every id in it is still cleared, just later and only once.
  */
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AppHeader, { useNarrow } from "../../shared/ui/AppHeader.jsx";
 import { notesSaveState } from "./lib/notesSaveState.js";
 import NotesTree from "./components/NotesTree.jsx";
@@ -39,15 +39,14 @@ import {
 } from "./lib/notesTemplates.js";
 import { absoluteStamp } from "./lib/notesTime.js";
 import { isQuickOpenChord, quickOpenResults, rankQuickOpen } from "./lib/notesQuickOpen.js";
-import { groupTasksByProject } from "./lib/notesTasks.js";
 import { listProjects, warmProjects, onProjectsChanged, ensureProjectExists } from "../../shared/projects/projects.js";
 import {
-  clearNotesStorageError, collectOpenTasks, createPage, duplicatePageTree, knownBinnedPages, markPagesBinned, markPagesRestored, notesConflictFor, notesConflictLine,
+  clearNotesStorageError, createPage, duplicatePageTree, knownBinnedPages, markPagesBinned, markPagesRestored, notesConflictFor, notesConflictLine,
   notesScopeLabel, notesStorageLine, onNotesConflict, onNotesStorageError, onNotesSyncState,
   collectBinFacts, ignoreDuplicate, onNotesPagesChanged, purgePages, readActivePageId, readIgnoredDuplicates, readNoteFiles,
   readNoteImages, readNoteTemplates, readPage, readTreeRaw,
   resolveNotesConflict, searchNotes, setNotesScope, snapshotPage, startNotesSync, stopNotesSync,
-  sweepEmptyAnchors, sweepImagesOfMissingPages, sweepOrphans, toggleNoteTask, writeActivePageId, writeNoteTemplates, writePage, writeTree,
+  sweepEmptyAnchors, sweepImagesOfMissingPages, sweepOrphans, writeActivePageId, writeNoteTemplates, writePage, writeTree,
 } from "./lib/notesStore.js";
 import {
   attachmentIdsInDocs, imageIdsInDocs, pageToMarkdown, safeFileName, MD_INLINE_ATTACHMENT_MAX,
@@ -137,6 +136,33 @@ function NotesHeaderTools({
     return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); };
   }, [exportOpen]);
 
+  /* ⛔ NEW-1 (toolbar-rebuild follow-up) — `AppHeader`'s own toolbar zone clips this menu on
+   * desktop: the div `toolbarContent` renders into is `overflow: hidden` there (it always has
+   * been — see `AppHeader.jsx`'s own comments on that zone), and this menu is this zone's FIRST
+   * ever popover (per this component's own header note, "Notes never did until now"), so the
+   * clip never had anything to bite until now. Same escape as the per-page toolbar's own
+   * dropdowns (`NoteToolbar.jsx`'s `usePopoverAnchor`): `position: fixed`, computed from the
+   * trigger's own `getBoundingClientRect()` rather than the clipping ancestor's layout. Not
+   * imported from `NoteToolbar.jsx` — that file is part of the lazily-loaded editor chunk, and
+   * this header cluster renders eagerly with the rest of `Notes.jsx`. */
+  const [menuAnchor, setMenuAnchor] = useState(null);
+  useLayoutEffect(() => {
+    if (!exportOpen) { setMenuAnchor(null); return undefined; }
+    const measure = () => {
+      const wrap = wrapRef.current;
+      if (!wrap) return;
+      const r = wrap.getBoundingClientRect();
+      setMenuAnchor({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => { window.removeEventListener("resize", measure); window.removeEventListener("scroll", measure, true); };
+  }, [exportOpen]);
+  const menuStyle = menuAnchor
+    ? { position: "fixed", top: menuAnchor.top, right: menuAnchor.right, zIndex: 300 }
+    : { position: "fixed", top: 0, right: 0, zIndex: 300, visibility: "hidden" };
+
   const soonRowStyle = {
     display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
     padding: "7px 10px", borderRadius: RADIUS.control, border: "none", background: "transparent",
@@ -170,10 +196,11 @@ function NotesHeaderTools({
             data-testid="notes-header-export-menu"
             role="menu"
             style={{
-              position: "absolute", top: 32, right: 0, zIndex: 60, padding: 4, width: 176,
+              padding: 4, width: 176,
               display: "flex", flexDirection: "column", gap: 1,
               background: "var(--surface-raised)", border: "1px solid var(--border-default)",
               borderRadius: RADIUS.control, boxShadow: "0 12px 32px rgba(0,0,0,0.20)",
+              ...menuStyle,
             }}
           >
             <span style={soonRowStyle}>PDF<span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase" }}>Soon</span></span>
@@ -1006,32 +1033,6 @@ export default function Notes({
     return quickOpenResults({ titleHits, bodyHits });
   }, [quickOpen, quickQuery, tree, projectId, orgScope]);
 
-  /* ---- THE TASK ROLLUP (NEW-4) ------------------------------------------------------------
-   *
-   * Recomputed from the tree and the page bodies. It reads every page in scope, which is why
-   * it is computed only while the Tasks view is actually open (`tasksOpen`) — a rollup nobody
-   * is looking at must not read every note on every keystroke. */
-  const [tasksOpen, setTasksOpen] = useState(false);
-  const [taskTick, setTaskTick] = useState(0);
-  const taskGroups = useMemo(() => {
-    if (!tasksOpen) return [];
-    const scope = orgScope ? SCOPE_ORG : (projectId == null ? SCOPE_ALL : SCOPE_PROJECT);
-    return groupTasksByProject(collectOpenTasks(tree, { projectId, scope }), projects);
-    // `taskTick` is a deliberate dependency: ticking an item rewrites a page BODY, which the
-    // tree does not change, so nothing else here would tell this memo to look again. The
-    // linter cannot see that — this memo reads page bodies through the store, which is not a
-    // value in its own dependency list — so the suppression is the honest form of it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tasksOpen, tree, projectId, orgScope, projects, taskTick]);
-
-  const handleToggleTask = useCallback((t) => {
-    const r = toggleNoteTask(t.pageId, { index: t.index, text: t.text }, true);
-    // LOUD-FAILURE: a tick that did not land must not simply vanish off the list.
-    if (!r.ok) setExportNote("That item could not be ticked off — the note it lives in could not be saved.");
-    else if (!r.changed) setExportNote("That item has already moved or changed in its note, so nothing was ticked. Open the note to check.");
-    setTaskTick((n) => n + 1);
-  }, []);
-
   /* ---- tree actions ---- */
 
   /* ⛔ A PAGE MADE INSIDE A PROJECT IS FILED THERE, WITH NO EXTRA STEP (B1374, kept through
@@ -1724,16 +1725,9 @@ export default function Notes({
           binFacts={binFacts}
           onPeekBin={handlePeekBin}
           onPurgeEmpties={handlePurgeEmpties}
-          /* THE TASK ROLLUP (NEW-4). Opening the item carries its own words in as the
-             search term, so the editor marks the line and steps to it — the same mechanism
-             a search hit already uses, which is why "jump straight to that line" needed no
-             new plumbing in the editor. */
-          taskGroups={taskGroups}
-          onToggleTask={handleToggleTask}
-          onOpenTask={(t) => { setPeek(null); goToPage(t.pageId); setHighlight(t.text); setQuery(""); setMobileShowList(false); }}
           /* Leaving the Bin tab for any other view is leaving bin mode — close whatever was
              being read from it (NEW-1), the same as a page click does. */
-          onViewChange={(v) => { setTasksOpen(v === "tasks"); setBinOpen(v === "bin"); if (v !== "bin") setPeek(null); }}
+          onViewChange={(v) => { setBinOpen(v === "bin"); if (v !== "bin") setPeek(null); }}
           peekEntryId={peek?.entryId || null}
           templates={templates}
           onManageTemplates={() => setTemplateManagerOpen(true)}
