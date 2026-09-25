@@ -8572,6 +8572,7 @@ function App() {
         });
         if (driftFound.length) { setDriftNotice(driftFound); console.warn("[planar cascade-drift] imported/restored data had saved starts out of sync with predecessors (auto-recalculated, B835/B836):", driftFound); }
         if (ancestorFound.length) { setAncestorPredNotice(ancestorFound); console.warn("[planar ancestor-pred] imported/restored data had a task naming its own parent/ancestor as a predecessor (dropped, NEW-1):", ancestorFound); }
+        try { window.storage.reseedScheduleBaseline && window.storage.reseedScheduleBaseline(d); } catch {}   // NEW-1 (2026-09-25) — see reseedScheduleBaseline's own header
         setData(resolveViewState(d));   // B1107680 — never let an import/restore's snapshot-time aPid/view yank this tab elsewhere
         // NEW-1 (B1696640) — this path runs well after the initial mount, so the normal
         // coreChanged-driven autosave effect (below) picks up the repair on its own; no explicit
@@ -8615,6 +8616,7 @@ function App() {
             // (stripViewState), so it doesn't need the resolved `d` resolveViewState below produces.
             attemptCloudSave(d);
           }
+          try { window.storage.reseedScheduleBaseline && window.storage.reseedScheduleBaseline(d); } catch {}   // NEW-1 (2026-09-25) — see reseedScheduleBaseline's own header; THE fix for the reported false "saved elsewhere" banner
           setData(resolveViewState(d)); return;   // B1107680 — migrate the 13 view-state keys off the cloud doc on first read
         }
         // First load (Supabase empty) — seed from inline data or SEED constant
@@ -8639,10 +8641,12 @@ function App() {
           }
         if (window.__planarCloudError) setOfflineFallback(true);
         else if (window.__planarAuthRequired) setAuthRequired(true);
+        try { window.storage.reseedScheduleBaseline && window.storage.reseedScheduleBaseline(d); } catch {}   // NEW-1 (2026-09-25) — see reseedScheduleBaseline's own header
         setData(resolveViewState(d));
       } catch {
         const d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(normalizeMeetingCadence(window.__PLANAR_DATA__ || SEED)))))))));
         setOfflineFallback(true);
+        try { window.storage.reseedScheduleBaseline && window.storage.reseedScheduleBaseline(d); } catch {}   // NEW-1 (2026-09-25) — no-op unless this account was already flipped before the error
         setData(resolveViewState(d));
       }
     })();
@@ -8777,8 +8781,18 @@ function App() {
         const r = await window.storage.checkRemote("hs-v1");
         if (!r || !r.ok) return;
         if (!r.newer) { setStaleNotice(false); return; }
-        if (saveStatusRef.current === "saved" && document.hidden) window.location.reload();
-        else setStaleNotice(true);
+        if (saveStatusRef.current === "saved" && document.hidden) { window.location.reload(); return; }
+        // NEW-1 (false "newer version" banner on a flipped account, owner report 2026-09-25) — a
+        // CLEAN (nothing unsaved), VISIBLE tab reporting "newer" almost always means some OTHER
+        // instance of this same account (another keep-alive Scheduler iframe, another open tab) just
+        // wrote — there is nothing of THIS tab's own to lose, so silently catch up instead of
+        // nagging for a manual reload. A DIRTY tab (unsaved edits) still gets the banner below — it
+        // has something to protect and a silent overwrite would be the wrong failure mode.
+        if (saveStatusRef.current === "saved" && !document.hidden && window.storage.silentRefresh) {
+          const fresh = await window.storage.silentRefresh("hs-v1");
+          if (fresh && applyLoadedDataRef.current) { applyLoadedDataRef.current(fresh); setStaleNotice(false); return; }
+        }
+        setStaleNotice(true);
       } catch (e) {}
     };
     const iv = setInterval(check, 20000);
@@ -8816,6 +8830,14 @@ function App() {
       const changedRows = countChangedTaskRows(anc, merged);
       const changedPids = changedProjectIds(anc, merged);
       const where = mergeLocationPhrase(merged.projects, changedPids, dataRef.current?.aPid);
+      // NEW-1 (false "newer version"/empty merge toast on a flipped account, owner report
+      // 2026-09-25) — a "merge" whose result is byte-identical to what this tab already had is not
+      // news: it's the per-schedule write path (writeScheduleRowsPrimary) reconciling a rev this tab
+      // was simply a save behind on, with no actual content difference (see reseedScheduleBaseline
+      // and writeOneScheduleRow's identical-content adoption). countChangedTaskRows alone only
+      // checks TASK content; also require the merged doc's whole `projects` tree to be byte-equal to
+      // the ancestor's, so a real non-task change (a schedule's name/linkedSiteId) still toasts.
+      const trulyEmpty = changedRows === 0 && _mEq(merged.projects, anc && anc.projects);
       setData(cur => {
         if (!cur) return merged;
         try { return mergeCloudDoc(anc, cur, merged); } catch { return merged; }
@@ -8825,7 +8847,7 @@ function App() {
       // rather than let a toast saying "merged" and a banner saying "reload" sit on screen together
       // (the owner's report, verbatim: a banner "keeps appearing" alongside a green merge toast).
       setStaleNotice(false);
-      if (typeof showToast === "function") {
+      if (!trulyEmpty && typeof showToast === "function") {
         const msg = changedRows > 0
           ? `Merged in changes saved elsewhere — ${changedRows} task${changedRows===1?"":"s"} updated${where ? " " + where : ""}.`
           : "Merged in changes saved elsewhere.";
@@ -19167,6 +19189,38 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
     }
   };
 
+  // NEW-1 (false "A newer version was saved elsewhere" banner + empty "Merged in changes saved
+  // elsewhere" toast on a flipped/rows_authoritative account, owner report 2026-09-25) —
+  // readFromScheduleRows above necessarily seeds scheduleBase from the RAW stored row.data (it runs
+  // before the App's normalize pipeline exists at all), but the in-app document is NEVER byte-equal
+  // to that raw row: normalizeToV8/normalizeIds/ensureContacts/normalizeOwnerLists/
+  // recascadeWithDrift rebuild every task object, and stripViewState strips the 13 top-level
+  // view-state keys plus each task's own `focused`. So writeScheduleRowsPrimary's
+  // `_mEq(s.data, base)` no-op check (below) was comparing apples to oranges on the FIRST save of
+  // every load -- every schedule read as "changed" and got rewritten even with zero user edits,
+  // which is exactly what made concurrent instances of the same idle account refuse each other's
+  // writes (measured: three identical-rev refusals on one schedule inside one second) and raise the
+  // banner over content that was never actually in conflict.
+  //
+  // Called once, right after the App finishes normalizing a freshly loaded/restored/seeded doc (the
+  // load effect below, every path that produces a `d` it is about to hand to setData), so storage
+  // holds the SAME shape it will actually diff against on the very next save -- making that save a
+  // genuine no-op instead of a full rewrite. `doc` is handed in BEFORE stripViewState (same as
+  // attemptCloudSave's own caller does) -- this applies the identical strip itself so the baseline
+  // matches exactly what a real save would send. Deliberately leaves scheduleKnownRev untouched:
+  // revs came from the real rows in readFromScheduleRows, and normalizing the DOCUMENT never moves
+  // which rev the DATABASE is at. A no-op (silent return) for an account that isn't flipped, or
+  // before readFromScheduleRows has run at all this session.
+  const reseedScheduleBaseline = (doc) => {
+    try {
+      if (!scheduleRowsAuthoritative || !doc || typeof doc !== "object" || !doc.projects) return;
+      const decomposed = decomposeForDualWrite(stripViewState(doc));
+      if (!decomposed) return;
+      decomposed.schedules.forEach(s => { scheduleBase[String(s.id)] = _deepClone(s.data); });
+      indexBase = _deepClone(decomposed.index);
+    } catch {}
+  };
+
   const countTasks = (parsed) => {
     try {
       if (!parsed || !parsed.projects) return 0;
@@ -19374,6 +19428,21 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
         console.error("[schedule guard] Write refused for schedule " + id + " and the current row could not be re-read afterward.");
         return null;
       }
+      // NEW-1 (false "newer version"/empty-merge-toast on a flipped account, owner report
+      // 2026-09-25) — a refusal whose cloud content is BYTE-IDENTICAL to what this tab tried to
+      // write is not a conflict: some OTHER instance of this same account (another keep-alive
+      // Scheduler iframe, another open tab) already wrote the identical data and bumped rev first.
+      // Adopt its rev/data and stop here — no second CAS write, no stale-block snapshot, no
+      // premerge-ours snapshot, no merge dance. Without this, every such race (measured live: three
+      // identical-rev refusals on one schedule id inside one second) fell through to a real 3-way
+      // merge attempt that could itself lose the race and raise the "saved elsewhere" banner over
+      // content that was never actually in conflict.
+      if (_mEq(row2.data, newData)) {
+        scheduleKnownRev[key] = row2.rev;
+        scheduleBase[key] = _deepClone(row2.data);
+        scheduleStaleSnapped[key] = false;
+        return { merged: null };
+      }
       const base = scheduleBase[key];
       let merged = null;
       if (base !== undefined) { try { merged = mergeCloudDoc(base, newData, row2.data); } catch (e) { merged = null; } }
@@ -19381,6 +19450,15 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
         if (!scheduleStaleSnapped[key]) { scheduleStaleSnapped[key] = true; writeScheduleHistorySnapshot(id, newData, "stale-block"); }
         console.error("[schedule guard] Save blocked for schedule " + id + " (merge unavailable): cloud rev " + row2.rev + " is ahead of this tab.");
         return null;
+      }
+      // NEW-1 (same item) — the 3-way merge can itself resolve to exactly what the cloud row
+      // already holds (this tab's own intended change was already fully present there via someone
+      // else's write). Adopt without a second write rather than re-sending an identical payload.
+      if (_mEq(merged, row2.data)) {
+        scheduleKnownRev[key] = row2.rev;
+        scheduleBase[key] = _deepClone(row2.data);
+        scheduleStaleSnapped[key] = false;
+        return { merged: null };
       }
       writeScheduleHistorySnapshot(id, newData, "premerge-ours");
       attempt = await attemptScheduleWrite(id, merged, row2.rev);
@@ -19501,6 +19579,21 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
 
   window.storage = {
     scheduleRowsAuthoritative: false,   // B1777120 — live-updated by setScheduleRowsAuthoritative; read by addProject/duplicateProject
+    // NEW-1 (2026-09-25) — see reseedScheduleBaseline's own header above.
+    reseedScheduleBaseline,
+    // NEW-1 (2026-09-25) — re-reads the real schedule rows + index row and reseeds every baseline
+    // from them (readFromScheduleRows already does the reseeding as a side effect; this just gives
+    // the App a way to trigger that read on demand). Used by the live-refresh poll below to catch a
+    // clean, visible tab up SILENTLY when another instance of the same account wrote first, instead
+    // of nagging it with the "reload for the latest" banner over content it has nothing of its own
+    // to lose. Returns the recomposed doc (same shape `get` returns) or null for an account that
+    // isn't flipped / has no rows yet / hit a read error.
+    silentRefresh: async (k) => {
+      try {
+        if (k !== "hs-v1" || !scheduleRowsAuthoritative) return null;
+        return await readFromScheduleRows(k);
+      } catch { return null; }
+    },
     get: async (k) => {
       try {
         // B1777120 — THE AUTHORITY FLIP: readFromScheduleRows itself decides whether this
