@@ -1402,6 +1402,44 @@ position**.
     survives a fix the user agrees worked, look for the mechanism the previous one was MASKING, not for a
     mistake in the previous fix.
 
+23. **⛔ TWO EFFECTS THAT FIRE IN THE SAME PASSIVE-EFFECT PASS CAN RACE EACH OTHER OFF ONE STALE RENDER,
+    AND A UNIT TEST OF THE STORAGE FUNCTIONS ALONE CANNOT SEE IT (B1883840 ×2, 2026-09-25).** The
+    read/write storage seam for "which page was open" (`readActivePageId`/`writeActivePageId`) shipped
+    correct and unit-tested (5/5, `test/notesActivePage.test.js`) — and the fix still didn't stick,
+    because the bug was never in that seam. `Notes.jsx`'s MOUNT effect (reads the stored id, calls
+    `setTree`/`setActivePageId`) and the separate "keep the open page inside the visible set" effect
+    (below it in the file) both declare a `useEffect` that fires on the FIRST render. React runs every
+    passive effect for one commit in DECLARATION ORDER, off that SAME render's closure, and does **not**
+    re-render between them — so the second effect, reading the render-1 values (`tree = emptyTree()`,
+    `activePageId = null`), ran before the first effect's queued `setTree`/`setActivePageId` calls had
+    committed. It saw an empty tree, concluded "nothing is visible", and called `goToPage(null)` —
+    which **wrote `null` over the just-read stored id before the mount effect's own resolved value ever
+    reached the screen.** The next render (now carrying the real tree) found `activePageId` reset to
+    `null` and landed on the tree's FIRST page — reproducing "reload always bounces to the first page"
+    from the very code that was supposed to fix it.
+    **WHY THE ORIGINAL VERIFICATION MISSED IT:** every test exercised `readActivePageId`/
+    `writeActivePageId` directly against a fake `localStorage` — correct, and completely blind to
+    component mount order, because the race lives entirely in WHEN `Notes.jsx`'s own effects run
+    relative to each other, not in what the storage functions return. **The general lesson: a fix to an
+    effect's BEHAVIOUR is not verified by unit-testing the pure function it calls — it has to be driven
+    through an actual mount (and here, an actual reload) of the real component**, the same discipline
+    DRIVER-SCROLL-IS-NOT-APP-SCROLL and SYNTHETIC-KEYS-DONT-EDIT already demand of a gesture; this is
+    the identical demand applied to React's OWN effect scheduling instead of to a browser event.
+    **THE FIX, and the general shape for any future effect that might read another effect's not-yet-
+    committed state:** a consumer effect that DERIVES a decision from `tree` must refuse to act while
+    `tree` has not finished loading (`if (!tree.pages.length) return;`) — a not-yet-hydrated tree is
+    never legitimate evidence that "nothing is visible"; the effect's own dependency array already
+    re-runs it the instant the real values commit, so nothing is lost by standing down on the empty
+    pass. **A ref-based "skip the first run" guard does NOT work here** — refs update synchronously but
+    a `setState` call inside another effect does not, so a ref would still read stale on the very render
+    where it mattered, reproducing the exact bug it was meant to prevent. Guard:
+    `ui-audit/verify-notes-reload-active-page.mjs` — red-proven against the untouched pre-fix code (a
+    real mount, click, and TWO real reloads, not a synthetic re-render), green with the fix.
+    **Worth checking wherever `Notes.jsx` gains a new effect that both READS `tree`/`activePageId` and
+    WRITES through `goToPage`/`writeActivePageId`** — the `noteIntent` effect just below this one
+    already depends on the guard effect having settled first; a third such effect would need the same
+    "tree not yet hydrated" refusal, not just a later position in the file.
+
 ---
 
 ## 6 · Where the rest lives
