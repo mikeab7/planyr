@@ -43,7 +43,13 @@ import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { pacedWait } from "./lib/tabTiming.mjs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173";
-const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+/* ⛔ `undefined` BY DEFAULT, NEVER A HARDCODED SANDBOX PATH — CI's runner installs its own
+ * Chromium revision at its own path (`npx playwright install --with-deps chromium`, the CI gate's
+ * own step just above this one in `.github/ci-gates.yml`), and a fallback pinned to this sandbox's
+ * revision (`/opt/pw-browsers/chromium-1194/...`) does not exist there. Leaving `executablePath`
+ * unset resolves the SAME browser this run's other Playwright gates (visual-regression.mjs,
+ * verify-notes-in-sheet-placement.mjs) already use; `PW_CHROME` still overrides for local runs. */
+const EXEC = process.env.PW_CHROME || undefined;
 const TREE_KEY = "planyr:notes:tree:v1:local";
 const pageKey = (id) => `planyr:notes:page:v1:local:${id}`;
 
@@ -53,7 +59,7 @@ const ok = (label, cond, detail = "") => {
   else { fail += 1; console.log(`  ✗ ${label}${detail ? ` — ${detail}` : ""}`); }
 };
 
-const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
+const browser = await chromium.launch({ ...(EXEC ? { executablePath: EXEC } : {}), args: ["--no-sandbox"] });
 
 async function seedTree(page, pages) {
   await page.evaluate(([tk, ps]) => {
@@ -78,7 +84,6 @@ async function openNote(pages) {
   await seedTree(page, pages);
   for (const p of pages) {
     if (p.doc) {
-      // eslint-disable-next-line no-await-in-loop
       await page.evaluate(([k, d]) => localStorage.setItem(k, JSON.stringify(d)), [pageKey(p.id), p.doc]);
     }
   }
@@ -101,10 +106,8 @@ async function waitForStored(page, id, pred, timeoutMs = 4000) {
   const start = Date.now();
   let last = null;
   while (Date.now() - start < timeoutMs) {
-    // eslint-disable-next-line no-await-in-loop
     last = await storedDoc(page, id);
     if (last && pred(last)) return last;
-    // eslint-disable-next-line no-await-in-loop
     await pacedWait(page, 150);
   }
   return last;
