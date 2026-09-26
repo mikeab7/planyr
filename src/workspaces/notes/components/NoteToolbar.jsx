@@ -81,6 +81,7 @@ import {
 } from "../lib/notesMixedSelection.js";
 import { familyKey, firstFamily, fontDisplayLabel, matchFontOption } from "../lib/notesFontFamily.js";
 import { resolvedColor, resolvedColorsAgree } from "../lib/notesResolvedValue.js";
+import { nextAnchorSpot, selectionInsideAnchor } from "../lib/notesAnchorNode.js";
 
 /* Mirrored from src/shared/ui/controls.jsx rather than imported — deliberately, and there
  * is a test that fails if the copies drift (test/notesModule.test.js). Importing
@@ -1184,6 +1185,25 @@ export default function NoteToolbar({
   const chain = () => editor.chain().focus();
   const inTable = !titleActive && editor.isActive("table");
 
+  /* ⛔ A TABLE NEVER LANDS OUTSIDE A BOX (NEW-1, 2026-09-26, owner report: a table placed on a
+   * Notes page took every click as the blank-canvas double-click tool instead). Typing always
+   * reaches the document through an armed or already-open box, and `onBeforeAction` above
+   * commits any armed one before this runs — but a button pressed with nothing armed and no box
+   * focused (a blank page, "Insert Table" reached first) still targets whatever `state.selection`
+   * currently resolves to, which can be the document's own top-level trailing paragraph. That
+   * position is real to ProseMirror and invisible to the box model — no page-growth accounting,
+   * no PDF export, and no click guard (see `selectionInsideAnchor`'s own header). So: if the
+   * selection is not already inside a box, make one first, at a sensible spot, and insert the
+   * table into it — exactly what dropping a picture on blank paper already does. */
+  const TABLE_BOX_WIDTH = 560;   // the page's ordinary writing column (matches the flow-migration default)
+  const insertTableSmart = (rows, cols) => {
+    if (!selectionInsideAnchor(editor.state)) {
+      const { x, y } = nextAnchorSpot(editor.state.doc);
+      editor.commands.addNoteAnchorAt({ x, y, w: TABLE_BOX_WIDTH });
+    }
+    chain().insertTable({ rows, cols, withHeaderRow: true }).run();
+  };
+
   const { selection } = editor.state;
   const doc = editor.state.doc;
   const { from, to, empty: selEmpty } = selection;
@@ -1490,7 +1510,7 @@ export default function NoteToolbar({
       {!compact && !titleActive && (
         <>
           <LinkControl editor={editor} big={narrow} />
-          <TableGridPicker big={narrow} onInsert={(rows, cols) => chain().insertTable({ rows, cols, withHeaderRow: true }).run()} />
+          <TableGridPicker big={narrow} onInsert={insertTableSmart} />
           <TBButton title="Insert a picture" testid="nt-image" big={narrow} onClick={() => fileRef.current?.click()}><ImageIcon /></TBButton>
           <TBButton title="Attach a file — a PDF, a spreadsheet, a drawing" testid="nt-attach" big={narrow} onClick={onAttach}>
             <Icon><path d="M11.5 5.5L6.2 10.8a2 2 0 0 0 2.8 2.8l5.3-5.3a3.4 3.4 0 0 0-4.8-4.8L4.2 8.8a4.8 4.8 0 0 0 6.8 6.8" /></Icon>
@@ -1499,7 +1519,7 @@ export default function NoteToolbar({
       )}
       {!titleActive && (
         <InsertMenu editor={editor} big={narrow} compact={compact} fileRef={fileRef} onAttach={onAttach}
-          onInsertTable={(rows, cols) => chain().insertTable({ rows, cols, withHeaderRow: true }).run()} />
+          onInsertTable={insertTableSmart} />
       )}
       {disabledWrap(
         <TBButton title="Connect two boxes with an arrow — click this, then click the box it starts from, then the box it points to"

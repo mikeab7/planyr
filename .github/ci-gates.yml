@@ -175,3 +175,10 @@ jobs:
         env:
           BASE_URL: "http://localhost:4173/"
         run: node ui-audit/verify-notes-in-sheet-placement.mjs
+      # Notes table click gate (NEW-1, 2026-09-26). Owner report: a table placed on a Notes page
+      # took every click as the blank-canvas double-click tool instead of its own cells. Reuses
+      # the same preview server and Chromium install the gates above already paid for.
+      - name: Notes table click (a table is always content, never blank canvas — NEW-1, 2026-09-26)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-table-click.mjs
