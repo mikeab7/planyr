@@ -2840,7 +2840,15 @@ const NoteEditor = forwardRef(function NoteEditor({
      * this feature said it worked. What said otherwise was eight rows of "400×200 → 400×200".
      * This is CHROME-NEVER-EATS-A-PRESS's mirror image: not chrome swallowing a press, but a
      * guard clause swallowing it before the chrome could ever be armed. */
-    if (!inBlock && el.closest(".planyr-note-image, .planyr-note-file")) return;
+    /* ⛔ AND A TABLE IS ANOTHER SUCH NODE (NEW-1, 2026-09-26, owner report: *"it seems like it's
+     * only taking my double clicks to be like the double click canvas tool... a double click
+     * should hit the table, not the other canvas tool."*). `NoteToolbar.jsx`'s insert paths now
+     * keep a NEW table inside a box, but a table can still reach the top level some other way —
+     * a legacy document not yet reopened (`notesFlowMigration.js` only rewrites it on load, never
+     * live), a future insertion path this guard did not anticipate. Whatever put it there, a
+     * table owns its own clicks exactly like a picture or a file does: a press on it is content,
+     * never blank canvas. */
+    if (!inBlock && el.closest(".planyr-note-image, .planyr-note-file, table, .tableWrapper")) return;
 
     if (inBlock) {
       /* ⛔ CLICK-TO-CONNECT TAKES THE PRESS FIRST, BEFORE ANY OF THE ORDINARY BOX LOGIC BELOW

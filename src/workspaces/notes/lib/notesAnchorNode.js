@@ -160,6 +160,39 @@ export function fitAnchorBox({ x, w, hostWidth, pad = ANCHOR_EDGE_PAD, minWidth 
 /** The width alone, for callers that only need that. */
 export const fitAnchorWidth = (args) => fitAnchorBox(args).w;
 
+/** ⛔ IS THE SELECTION INSIDE A BOX? A table (or anything else with its own editing surface)
+ *  inserted from a toolbar button or menu — as opposed to typed, which always goes through an
+ *  armed/committed box first — lands wherever `state.selection` currently resolves, and that
+ *  can be the document's TOP LEVEL: `EMPTY_DOC`'s one trailing structural paragraph is real
+ *  content ProseMirror will happily put a selection in, it is just never reachable by a click
+ *  (`NoteEditor.jsx`'s `focusFromMat` never focuses it). A node inserted there is out of the
+ *  box model entirely — no page-growth accounting, no PDF-PARITY export path, and (NEW-1,
+ *  2026-09-26) invisible to the click guard, so a press on it reads as blank canvas. Callers
+ *  that create content programmatically must ask this FIRST. */
+export function selectionInsideAnchor(state) {
+  const { $from } = state.selection;
+  for (let d = $from.depth; d > 0; d -= 1) {
+    if ($from.node(d).type.name === "noteAnchor") return true;
+  }
+  return false;
+}
+
+/** ⛔ WHERE A BOX LANDS WHEN NOTHING ON SCREEN SAID WHERE. A click/double-click always carries a
+ *  point (`placeBlockAt`); a toolbar button or menu item does not, so a table inserted that way
+ *  needs a sensible default rather than the sheet's origin every time. Below the lowest existing
+ *  top-level box, so it does not start life stacked on top of something already there — a
+ *  heuristic gap, not a measurement (a text box's real height is its words, `h: null`, so there
+ *  is nothing exact to stack against), and good enough for a starting spot the person can still
+ *  drag. */
+const NEXT_SPOT_GAP = 220;
+export function nextAnchorSpot(doc) {
+  let maxY = -NEXT_SPOT_GAP;
+  doc.forEach((node) => {
+    if (node.type.name === "noteAnchor") maxY = Math.max(maxY, num(node.attrs?.y));
+  });
+  return { x: 0, y: Math.max(0, Math.round(maxY + NEXT_SPOT_GAP)) };
+}
+
 export const NoteAnchor = Node.create({
   name: "noteAnchor",
   group: "block",
