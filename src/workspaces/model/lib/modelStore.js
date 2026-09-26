@@ -150,3 +150,112 @@ export function saveCloudSheet({ uid, projectId, sheet, expected }) {
   if (!supabaseConfigured() || !uid || !projectId) return Promise.resolve({ ok: false, reason: "unavailable" });
   return serializeWrite(projectId, () => upsertCore({ uid, projectId, sheet, expected }));
 }
+
+/* ---------------------------------------------------------------------------------------------
+ * ORGANIZATION-scoped workbooks (NEW-1, B1912209) — org scope in this app is not a multi-tenant
+ * team entity (see org_model_sheets.sql's own header): it is the SAME per-account ownership every
+ * table here already uses, just not tied to one project. Unlike the one-workbook-per-project
+ * shape above, an account can hold SEVERAL org workbooks, so this half of the file additionally
+ * tracks a real per-workbook id + name and a LIST of them — everything else (local write-through,
+ * the guarded cloud upsert, the "move bytes, never understand them" rule for `data`) is the exact
+ * same shape as the project-scoped functions above, just against `org_model_sheets`.
+ * --------------------------------------------------------------------------------------------- */
+const ORG_TABLE = "org_model_sheets";
+const ORG_CONFLICT_TARGET = "user_id,id"; // org_model_sheets' PK is composite too — see its own db/*.sql header
+const serializeOrgWrite = makeWriteSerializer();
+
+const orgIndexKey = (scope) => `planyr:model:orgIndex:v1:${scope}`;
+
+/** The local CACHE of "which org workbooks exist" (id/name/updatedAt only, never the workbook
+ *  bytes — those still live under `localKey`, keyed by workbook id exactly like a project's).
+ *  This is what makes the workbook LIST usable signed out or offline: the cloud list (below) is
+ *  the source of truth when reachable, but this cache is what a fresh mount shows instantly and
+ *  what a signed-out account has at all. Never throws. */
+export function readLocalOrgIndex(userId) {
+  try {
+    const raw = localStorage.getItem(orgIndexKey(userId || "local"));
+    const v = raw ? JSON.parse(raw) : [];
+    return Array.isArray(v) ? v.filter((w) => w && typeof w.id === "string" && w.id) : [];
+  } catch (_) { return []; }
+}
+
+export function writeLocalOrgIndex(userId, list) {
+  try { localStorage.setItem(orgIndexKey(userId || "local"), JSON.stringify(list || [])); return true; }
+  catch (_) { return false; }
+}
+
+/** Add or update one entry (by id) in the local index, newest-first. Returns the new list so a
+ *  caller can set state from it directly without a second read. */
+export function touchLocalOrgIndex(userId, entry) {
+  const list = readLocalOrgIndex(userId).filter((w) => w.id !== entry.id);
+  list.push(entry);
+  list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  writeLocalOrgIndex(userId, list);
+  return list;
+}
+
+export function removeLocalOrgIndexEntry(userId, id) {
+  const list = readLocalOrgIndex(userId).filter((w) => w.id !== id);
+  writeLocalOrgIndex(userId, list);
+  return list;
+}
+
+/** List this account's org workbooks from the cloud — id/name/updatedAt only, never the bytes
+ *  (those load lazily on open, same as a project's). Mirrors loadCloudSheet's result shape. */
+export async function listOrgWorkbooksCloud() {
+  if (!supabaseConfigured()) return { ok: false, reason: "unavailable" };
+  const { data, error } = await supabase.from(ORG_TABLE).select("id, name, updated_at").is("deleted_at", null).order("updated_at", { ascending: false });
+  if (error) return isMissingRelation(error) ? { ok: false, reason: "not-provisioned" } : { ok: false, reason: "error", error: error.message };
+  return { ok: true, rows: (data || []).map((r) => ({ id: r.id, name: r.name || "Untitled workbook", updatedAt: r.updated_at ? Date.parse(r.updated_at) : 0 })) };
+}
+
+export async function loadOrgWorkbookCloud(id) {
+  if (!supabaseConfigured() || !id) return { ok: false, reason: "unavailable" };
+  const { data, error } = await supabase.from(ORG_TABLE).select("data, version, name").eq("id", id).is("deleted_at", null).maybeSingle();
+  if (error) return isMissingRelation(error) ? { ok: false, reason: "not-provisioned" } : { ok: false, reason: "error", error: error.message };
+  if (!data) return { ok: true, sheet: null, version: null, name: null };
+  return { ok: true, sheet: data.data, version: data.version ?? null, name: data.name || null };
+}
+
+async function upsertOrgCore({ uid, id, name, sheet, expected }) {
+  // Same shape as upsertCore above, minus the ensureProjectExists guard — an org workbook has no
+  // project row to confirm against, so there's nothing to block a first save on.
+  const r = await casUpsert(supabase, ORG_TABLE, { uid, id, row: { id, name, data: sheet }, expected, conflictTarget: ORG_CONFLICT_TARGET });
+  if (r.degrade) {
+    const res = await degradeUpsert(supabase, ORG_TABLE, { row: { id, user_id: uid, name, data: sheet }, conflictTarget: ORG_CONFLICT_TARGET });
+    return res.ok
+      ? { ok: true, version: null }
+      : (isMissingRelation({ message: res.error }) ? { ok: false, reason: "not-provisioned" } : { ok: false, reason: "error", error: res.error });
+  }
+  if (!r.ok) {
+    if (r.conflict) return { ok: false, reason: "conflict" };
+    return isMissingRelation({ message: r.error }) ? { ok: false, reason: "not-provisioned" } : { ok: false, reason: "error", error: r.error };
+  }
+  return { ok: true, version: r.version };
+}
+
+/** Guarded cloud save for one org workbook — same CAS contract as saveCloudSheet, keyed by
+ *  workbook id (never a project id) so two different workbooks' writes can never serialize
+ *  against each other. */
+export function saveOrgWorkbookCloud({ uid, id, name, sheet, expected }) {
+  if (!supabaseConfigured() || !uid || !id) return Promise.resolve({ ok: false, reason: "unavailable" });
+  return serializeOrgWrite(id, () => upsertOrgCore({ uid, id, name, sheet, expected }));
+}
+
+/** Rename is metadata-only — never touches `data` or bumps the CAS `version`, so it can't
+ *  conflict with (or be conflicted by) a concurrent content save for the same workbook. */
+export async function renameOrgWorkbookCloud(uid, id, name) {
+  if (!supabaseConfigured() || !uid || !id) return { ok: false, reason: "unavailable" };
+  const { error } = await supabase.from(ORG_TABLE).update({ name }).eq("id", id).eq("user_id", uid);
+  if (error) return isMissingRelation(error) ? { ok: false, reason: "not-provisioned" } : { ok: false, reason: "error", error: error.message };
+  return { ok: true };
+}
+
+/** Soft-delete (TOMBSTONE-DELETES / docs/DATA.md §13 — a tombstone UPDATE, never a row DELETE),
+ *  matching doc_reviews' own convention. */
+export async function deleteOrgWorkbookCloud(uid, id) {
+  if (!supabaseConfigured() || !uid || !id) return { ok: false, reason: "unavailable" };
+  const { error } = await supabase.from(ORG_TABLE).update({ deleted_at: new Date().toISOString() }).eq("id", id).eq("user_id", uid);
+  if (error) return isMissingRelation(error) ? { ok: false, reason: "not-provisioned" } : { ok: false, reason: "error", error: error.message };
+  return { ok: true };
+}

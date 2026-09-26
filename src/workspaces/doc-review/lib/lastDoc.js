@@ -16,8 +16,13 @@ const KEY = "planyr:docreview:lastDoc:v1";
 const LEGACY_MODE = "planyr:docreview:lastMode";
 const LEGACY_SINGLE = "planyr:docreview:lastSingleId";
 const LEGACY_STITCH = "planyr:docreview:lastStitchId";
+// ORG SCOPE (NEW-1) — a distinct bucket, never conflated with "" (unfiled). A doc filed to the
+// Organization is a deliberate destination, same as any one project's own bucket — not the "no
+// one has said yet" state "" already means (docs/DATA.md invariant §14). No real project id can
+// ever equal this literal string, so there is nothing to collide with.
+const ORG_BUCKET = "__org__";
 
-const bucket = (projectId) => (typeof projectId === "string" && projectId ? projectId : "");
+const bucket = (projectId, org) => (org ? ORG_BUCKET : (typeof projectId === "string" && projectId ? projectId : ""));
 const normMode = (m) => (m === "stitch" ? "stitch" : "review");
 
 /* The whole map { [projectId|""]: { id, mode } }. Corrupt storage reads as empty AND clears
@@ -39,15 +44,15 @@ export function readLastDocMap() {
   }
 }
 
-export function writeLastDoc(projectId, entry) {
+export function writeLastDoc(projectId, entry, org = false) {
   if (!entry || typeof entry.id !== "string" || !entry.id) return;
   const map = readLastDocMap();
-  map[bucket(projectId)] = { id: entry.id, mode: normMode(entry.mode) };
+  map[bucket(projectId, org)] = { id: entry.id, mode: normMode(entry.mode) };
   try { localStorage.setItem(KEY, JSON.stringify(map)); } catch (_) { /* quota — resume is a convenience */ }
 }
 
-export function readLastDoc(projectId) {
-  return readLastDocMap()[bucket(projectId)] || null;
+export function readLastDoc(projectId, org = false) {
+  return readLastDocMap()[bucket(projectId, org)] || null;
 }
 
 /* Snapshot of the legacy global pointers (also the boot-capture shape). */
@@ -64,19 +69,24 @@ export function readLegacyPointers() {
 /* Ordered, deduped resume candidates for boot. The caller tries each in turn (load →
  * wrong-project guard → open), so a stale first entry degrades to the next, never to a
  * silent empty state when a valid fallback exists.
+ *   • Organization scope → ONLY the org bucket. Never the legacy globals or the unfiled ("")
+ *     bucket — those are a different scope's pointers (a project-less/unfiled doc is not an
+ *     Organization doc, and mixing them in is exactly the "URL is a hint, not an address"
+ *     conflation this repo's org-scope work already guards against elsewhere).
  *   • URL names a project → that project's map entry first, then the legacy globals
  *     (still guarded downstream: a legacy doc from another project won't resume).
- *   • No URL project → the legacy globals ("whatever was last, anywhere" — today's
+ *   • No URL project, not org → the legacy globals ("whatever was last, anywhere" — today's
  *     semantics), then the unfiled ("") bucket.
  * Legacy ordering preserves the old boot rule: try the stitch pointer only when the last
  * mode was stitch, then the single pointer. */
-export function resolveResume({ routeProjectId, map, legacy }) {
+export function resolveResume({ routeProjectId, map, legacy, org = false }) {
   const out = [];
   const push = (c) => {
     if (c && typeof c.id === "string" && c.id && !out.some((x) => x.id === c.id)) {
       out.push({ id: c.id, mode: normMode(c.mode) });
     }
   };
+  if (org) { push(map && map[ORG_BUCKET]); return out; }
   const pushLegacy = () => {
     if (!legacy) return;
     if (legacy.mode === "stitch" && legacy.stitchId) push({ id: legacy.stitchId, mode: "stitch" });
@@ -95,7 +105,12 @@ export function resolveResume({ routeProjectId, map, legacy }) {
 /* May a resume candidate whose LOADED record belongs to project `recProjectId` (null =
  * unfiled / loose PDF) open under the current route?
  *
- *   • No route project (falsy) → resume freely (today's "whatever was last, anywhere").
+ *   • Organization scope (`routeOrg`) → resume ONLY a record whose OWN `orgScope` flag is
+ *     true — never a project-filed or unfiled doc, whatever candidate resolveResume handed in
+ *     (the org bucket's own contents are already scoped, but a record can be re-filed after
+ *     its pointer was written, so this re-checks the record itself, not just where its id was
+ *     found — the same defense-in-depth resolveResume's caller already relies on below).
+ *   • No route project (falsy), not org → resume freely (today's "whatever was last, anywhere").
  *   • A NAMED route → resume ONLY that project's own review: require an EXACT match.
  *
  * The exact-match rule is the B914 fix. The old downstream guard was
@@ -107,7 +122,8 @@ export function resolveResume({ routeProjectId, map, legacy }) {
  * named route must reject it (null !== routeProjectId → false). A project's OWN map entry
  * always carries that project's id (writeLastDoc keys by the doc's meta.projectId), so this
  * never blocks a legitimate per-project resume. */
-export function resumeAllowedForRoute(routeProjectId, recProjectId) {
+export function resumeAllowedForRoute(routeProjectId, recProjectId, routeOrg = false, recOrgScope = false) {
+  if (routeOrg) return recOrgScope === true;
   if (!routeProjectId) return true;
   return recProjectId === routeProjectId;
 }

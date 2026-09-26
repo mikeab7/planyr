@@ -51,7 +51,18 @@ export default function ReviewsBar({ signedIn = false, meta = {}, onMeta, onOpen
   const fld = { width: "100%", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.line}`, borderRadius: 6, color: PAL.ink, marginTop: 4, boxSizing: "border-box", background: "var(--surface-raised)" };
   const lbl = { fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" };
 
-  const onProject = (id) => { const p = projects.find((x) => x.id === id); onMeta?.("projectId", id || null); onMeta?.("project", p ? p.name : ""); };
+  // ORG SCOPE (NEW-1) — "Organization" is one more destination in this same list, mutually
+  // exclusive with a project (docs/DATA.md invariant §14) — the same "promote to standard"
+  // shape Notes' own "Belongs to…" panel already uses, reachable from ANY review regardless of
+  // where it's currently filed. `refileReview`/`fileNewReview` (reviewStore.js) already support
+  // `orgScope`; this closes the one gap B1020928's own Tier-A note named ("no UI path... but no
+  // button calls it that way yet").
+  const ORG_VALUE = "__org__";
+  const onProject = (v) => {
+    if (v === ORG_VALUE) { onMeta?.("orgScope", true); onMeta?.("projectId", null); onMeta?.("project", ""); return; }
+    const p = projects.find((x) => x.id === v);
+    onMeta?.("orgScope", false); onMeta?.("projectId", v || null); onMeta?.("project", p ? p.name : "");
+  };
   // Inline two-step delete (NEW-F3): first click arms the row, second confirms — the
   // window.confirm dialog is gone (owner rule: no dialog-box edits/confirms). The delete
   // itself is SOFT (Recently deleted, ~30-day restore in the Library), so the light inline
@@ -80,8 +91,9 @@ export default function ReviewsBar({ signedIn = false, meta = {}, onMeta, onOpen
           )}
 
           <div style={lbl}>File this review</div>
-          <select value={meta.projectId || ""} onChange={(e) => onProject(e.target.value)} style={fld}>
+          <select value={meta.orgScope ? ORG_VALUE : (meta.projectId || "")} onChange={(e) => onProject(e.target.value)} style={fld}>
             <option value="">Unfiled (no project)</option>
+            <option value={ORG_VALUE}>🏢 Organization</option>
             {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
           <select value={meta.discipline || ""} onChange={(e) => onMeta?.("discipline", e.target.value)} style={fld}>

@@ -138,3 +138,48 @@ describe("resumeAllowedForRoute — the B914 cross-project leak guard", () => {
     expect(resumeAllowedForRoute("pMesa", undefined)).toBe(false);
   });
 });
+
+// ORG SCOPE (NEW-1, B1912209) — Organization is a real, distinct bucket/destination, never
+// conflated with "" (unfiled) or a named project, mirroring the same invariant this file's
+// project-vs-unfiled tests above already prove for the non-org case.
+describe("lastDoc — the Organization bucket, never conflated with unfiled or a project", () => {
+  it("keeps its own bucket, isolated from a project and from unfiled", () => {
+    writeLastDoc(null, { id: "rvOrg", mode: "review" }, true);
+    writeLastDoc(null, { id: "rvUnfiled", mode: "review" }); // "" bucket, org defaults false
+    writeLastDoc("pA", { id: "rvProj", mode: "review" });
+    expect(readLastDoc(null, true)).toEqual({ id: "rvOrg", mode: "review" });
+    expect(readLastDoc(null)).toEqual({ id: "rvUnfiled", mode: "review" });
+    expect(readLastDoc("pA")).toEqual({ id: "rvProj", mode: "review" });
+    expect(readLastDocMap()).toEqual({
+      __org__: { id: "rvOrg", mode: "review" },
+      "": { id: "rvUnfiled", mode: "review" },
+      pA: { id: "rvProj", mode: "review" },
+    });
+  });
+
+  it("resolveResume at org scope reads ONLY the org bucket — never the legacy globals or unfiled", () => {
+    const legacy = { mode: "review", singleId: "leg-s", stitchId: "leg-t" };
+    const map = { __org__: { id: "org-doc", mode: "review" }, "": { id: "unfiled", mode: "review" } };
+    expect(resolveResume({ routeProjectId: null, map, legacy, org: true }))
+      .toEqual([{ id: "org-doc", mode: "review" }]);
+  });
+
+  it("resolveResume at org scope with nothing filed there yet → no candidates (never falls to legacy/unfiled)", () => {
+    const legacy = { mode: "review", singleId: "leg-s", stitchId: "leg-t" };
+    const map = { "": { id: "unfiled", mode: "review" } };
+    expect(resolveResume({ routeProjectId: null, map, legacy, org: true })).toEqual([]);
+  });
+
+  it("resumeAllowedForRoute at org scope requires the RECORD's own orgScope flag — never a projectId fallback", () => {
+    expect(resumeAllowedForRoute(null, null, true, true)).toBe(true);
+    expect(resumeAllowedForRoute(null, null, true, false)).toBe(false); // an unfiled doc must not resume into Organization
+    expect(resumeAllowedForRoute("pA", "pA", true, false)).toBe(false); // a project-filed doc must not resume into Organization either
+    expect(resumeAllowedForRoute(null, null, true)).toBe(false); // default recOrgScope=false — never resumes on a maybe
+  });
+
+  it("resumeAllowedForRoute off org scope is completely unchanged (routeOrg defaults false)", () => {
+    expect(resumeAllowedForRoute("pA", "pA")).toBe(true);
+    expect(resumeAllowedForRoute("pA", "pB")).toBe(false);
+    expect(resumeAllowedForRoute(null, "pA")).toBe(true);
+  });
+});
